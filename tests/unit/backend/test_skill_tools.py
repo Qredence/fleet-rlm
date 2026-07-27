@@ -1,5 +1,7 @@
 """Progressive catalog-bound Skill tools."""
 
+from uuid import uuid4
+
 from fleet_rlm.skills.catalog import build_bundled_skill_catalog, stable_skill_id
 from fleet_rlm.skills.tools import SkillToolHost
 
@@ -27,6 +29,40 @@ def test_tools_are_exactly_two_and_resources_require_load() -> None:
         host.read_skill_resource(str(skill.card.id), path, skill.card.version)["content"]
         == skill.resources[path].content
     )
+    assert host.read_skill_resource(str(skill.card.id), "references/missing.md") == {
+        "ok": False,
+        "error": "resource_not_found",
+    }
+
+
+def test_load_is_idempotent_and_emits_lifecycle_once() -> None:
+    catalog = build_bundled_skill_catalog()
+    skill = catalog.require(stable_skill_id("long-context"))
+    host = SkillToolHost(catalog)
+
+    first = host.load_skill(str(skill.card.id), skill.card.version)
+    second = host.load_skill(str(skill.card.id), skill.card.version)
+
+    assert first == second
+    assert host.loaded_skill_ids == frozenset({skill.card.id})
+    assert [event["kind"] for event in host.drain_public_events()] == ["skill.activated", "skill.loaded"]
+    assert host.drain_public_events() == []
+
+
+def test_load_rejects_closed_identity_and_capacity_errors() -> None:
+    catalog = build_bundled_skill_catalog()
+    host = SkillToolHost(catalog)
+    cards = catalog.cards()
+
+    assert host.load_skill("not-a-uuid") == {"ok": False, "error": "skill_not_found"}
+    assert host.load_skill(str(uuid4())) == {"ok": False, "error": "skill_not_found"}
+    assert host.load_skill(str(cards[0].id), "0.0.0") == {"ok": False, "error": "version_mismatch"}
+
+    assert all(host.load_skill(str(card.id), card.version)["ok"] is True for card in cards[:4])
+    assert host.load_skill(str(cards[4].id), cards[4].version) == {
+        "ok": False,
+        "error": "skill_limit_exceeded",
+    }
 
 
 def test_preload_restricts_catalog_and_events_are_metadata_only() -> None:

@@ -7,6 +7,7 @@ type FleetTurnPage = components["schemas"]["SessionTurnPageResponse"];
 export type FleetSkillCard = components["schemas"]["SkillCardResponse"];
 export type FleetSettingsPolicy = components["schemas"]["SettingsPolicyResponse"];
 export type FleetSettingsPatch = components["schemas"]["SettingsPolicyPatchRequest"];
+export type FleetVolumeTree = components["schemas"]["VolumeTreeResponse"];
 
 export type FleetSkillSelection = {
   id: string;
@@ -101,6 +102,17 @@ export class FleetApiClient {
       method: "PATCH",
       body: JSON.stringify(patch),
     });
+  }
+
+  async listVolumeTree(
+    params: { root?: string; maxDepth?: number; maxFiles?: number } = {},
+  ): Promise<FleetVolumeTree> {
+    const query = new URLSearchParams();
+    if (params.root) query.set("root", params.root);
+    if (params.maxDepth !== undefined) query.set("max_depth", String(params.maxDepth));
+    if (params.maxFiles !== undefined) query.set("max_files", String(params.maxFiles));
+    const suffix = query.toString();
+    return this.requestJson<FleetVolumeTree>(`/api/volume/tree${suffix ? `?${suffix}` : ""}`);
   }
 
   async streamTurn({

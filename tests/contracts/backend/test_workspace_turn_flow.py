@@ -5,12 +5,17 @@ from __future__ import annotations
 import asyncio
 import contextlib
 from types import SimpleNamespace
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import dspy
 import pytest
 
 from fleet_rlm.chat.session_context import SessionContextManifest
+from fleet_rlm.files.memory_models import (
+    WorkspaceMemoryAppendResult,
+    WorkspaceMemoryReadResult,
+)
+from fleet_rlm.files.memory_tools import WorkspaceMemoryToolHost
 from fleet_rlm.files.workspace_models import (
     DAYTONA_WORKSPACE_CAPABILITY,
     WorkspaceEntry,
@@ -21,13 +26,53 @@ from fleet_rlm.files.workspace_tools import WorkspaceToolError, WorkspaceToolHos
 from fleet_rlm.rlm.context import RLMExecutionContext, RLMExecutionSpec
 from fleet_rlm.rlm.dspy_contract import RLMOptions
 from fleet_rlm.rlm.errors import TurnCancelledError
+from fleet_rlm.rlm.events import RuntimeEvent
 from fleet_rlm.rlm.runner import RLMRunner
 from fleet_rlm.sessions.models import TurnAccess
 
 
-class MemoryWorkspace:
+class MemoryStore:
     def __init__(self) -> None:
+        self.content = ""
+
+    def read_tail(self, *, byte_budget: int) -> WorkspaceMemoryReadResult:
+        data = self.content.encode("utf-8")
+        assert len(data) <= byte_budget
+        return WorkspaceMemoryReadResult(
+            content=self.content,
+            truncated=False,
+            bytes_returned=len(data),
+            byte_budget=byte_budget,
+            total_bytes=len(data),
+        )
+
+    def append_record(self, record: str) -> WorkspaceMemoryAppendResult:
+        self.content += record
+        total_bytes = len(self.content.encode("utf-8"))
+        return WorkspaceMemoryAppendResult(
+            entry_bytes=len(record.encode("utf-8")),
+            total_bytes=total_bytes,
+        )
+
+
+class MemoryStoreRegistry:
+    def __init__(self) -> None:
+        self._stores: dict[UUID, MemoryStore] = {}
+
+    def resolve(self, workspace_id: UUID) -> MemoryStore:
+        return self._stores.setdefault(workspace_id, MemoryStore())
+
+
+class MemoryWorkspace:
+    def __init__(
+        self,
+        *,
+        memory_registry: MemoryStoreRegistry | None = None,
+        access: TurnAccess | None = None,
+    ) -> None:
         self.session_id = uuid4()
+        self.memory_registry = memory_registry or MemoryStoreRegistry()
+        self.access = access or TurnAccess(uuid4(), uuid4())
         self.files: dict[str, str] = {}
 
     def list_entries(self, path: str, *, limit: int = 100, after: str | None = None) -> WorkspaceListResult:
@@ -73,9 +118,13 @@ class MemoryWorkspace:
 class Capabilities:
     def __init__(self, workspace: MemoryWorkspace) -> None:
         workspace_host = WorkspaceToolHost(workspace, max_file_bytes=1024)
+        memory_host = WorkspaceMemoryToolHost(workspace.memory_registry.resolve(workspace.access.workspace_id))
         self.spec = RLMExecutionSpec(
-            tools=workspace_host.as_tools(),
-            tool_event_views=workspace_host.event_views(),
+            tools=(*workspace_host.as_tools(), *memory_host.as_tools()),
+            tool_event_views={
+                **workspace_host.event_views(),
+                **memory_host.event_views(),
+            },
             workspace=DAYTONA_WORKSPACE_CAPABILITY,
         )
 
@@ -117,6 +166,25 @@ class WorkspaceFlowFactory:
                     assert interpreter.variables == {}
                     result = tools["read_workspace_text"](path="notes/decision.md", max_chars=100)
                     return dspy.Prediction(answer=result["content"], trajectory=[])
+                if request.startswith("remember"):
+                    learning = {
+                        "remember": "Keep release notes concise.",
+                        "remember_failed": "Failed-turn memory remains durable.",
+                        "remember_cancelled": "Cancelled-turn memory remains durable.",
+                    }[request]
+                    result = tools["update_workspace_memory"](
+                        key_learning=learning,
+                        category="Preference",
+                    )
+                    assert result["ok"] is True
+                    if request == "remember_failed":
+                        raise RuntimeError("turn failed after memory append")
+                    if request == "remember_cancelled":
+                        raise TurnCancelledError
+                    return dspy.Prediction(answer="remembered", trajectory=[])
+                if request == "recall":
+                    result = tools["read_workspace_memory"]()
+                    return dspy.Prediction(answer=result["content"] or "NO_MEMORY", trajectory=[])
                 if request.startswith("roundtrip"):
                     today = "2026-07-21"
                     tools["write_workspace_text"](
@@ -164,6 +232,8 @@ async def _run(
     factory: WorkspaceFlowFactory,
     workspace: MemoryWorkspace,
     request: str,
+    *,
+    events: list[RuntimeEvent] | None = None,
 ):
     async def not_cancelled() -> bool:
         return False
@@ -177,9 +247,9 @@ async def _run(
     context = RLMExecutionContext(
         run_id=uuid4(),
         session_id=workspace.session_id,
-        access=TurnAccess(uuid4(), uuid4()),
+        access=workspace.access,
         request=task_request,
-        session_context=SessionContextManifest(uuid4(), 0, 0, ()),
+        session_context=SessionContextManifest(workspace.session_id, 0, 0, ()),
         models=SimpleNamespace(root_lm=object(), sub_lm=object()),
         options=RLMOptions(),
         deadline=asyncio.get_running_loop().time() + 10,
@@ -190,7 +260,9 @@ async def _run(
         preparation_notices=(),
     )
     stream = RLMRunner(factory=factory).stream(context)
-    _ = [event async for event in stream]
+    observed = [event async for event in stream]
+    if events is not None:
+        events.extend(observed)
     return stream.outcome
 
 
@@ -254,3 +326,87 @@ async def test_workspace_date_roundtrip_allows_repeated_reads_and_overwrite() ->
     assert outcome is not None and outcome.succeeded
     assert outcome.prediction is not None
     assert outcome.prediction.display_text == "verified"
+
+
+@pytest.mark.asyncio
+async def test_workspace_memory_is_shared_across_sessions_without_exposing_its_body_in_tool_events() -> None:
+    registry = MemoryStoreRegistry()
+    workspace_id = uuid4()
+    first_session = MemoryWorkspace(
+        memory_registry=registry,
+        access=TurnAccess(uuid4(), workspace_id),
+    )
+    second_session = MemoryWorkspace(
+        memory_registry=registry,
+        access=TurnAccess(uuid4(), workspace_id),
+    )
+    events: list[RuntimeEvent] = []
+
+    written = await _run(WorkspaceFlowFactory(), first_session, "remember", events=events)
+    recalled = await _run(WorkspaceFlowFactory(), second_session, "recall", events=events)
+
+    assert first_session.session_id != second_session.session_id
+    assert first_session.access.user_id != second_session.access.user_id
+    assert first_session.access.workspace_id == second_session.access.workspace_id
+    assert written is not None and written.succeeded
+    assert recalled is not None and recalled.prediction is not None
+    assert "Keep release notes concise." in recalled.prediction.display_text
+    memory_details = [
+        event.detail
+        for event in events
+        if getattr(event.detail, "tool_name", None) in {"read_workspace_memory", "update_workspace_memory"}
+    ]
+    assert {detail.kind for detail in memory_details} == {"tool.started", "tool.completed"}
+    assert "Keep release notes concise." not in repr(memory_details)
+
+
+@pytest.mark.asyncio
+async def test_workspace_memory_is_isolated_between_workspace_ids() -> None:
+    registry = MemoryStoreRegistry()
+    first_workspace = MemoryWorkspace(memory_registry=registry)
+    second_workspace = MemoryWorkspace(memory_registry=registry)
+
+    written = await _run(WorkspaceFlowFactory(), first_workspace, "remember")
+    isolated_read = await _run(WorkspaceFlowFactory(), second_workspace, "recall")
+
+    assert first_workspace.access.workspace_id != second_workspace.access.workspace_id
+    assert written is not None and written.succeeded
+    assert isolated_read is not None and isolated_read.prediction is not None
+    assert isolated_read.prediction.display_text == "NO_MEMORY"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("turn_request", "terminal", "learning"),
+    [
+        ("remember_failed", "failed", "Failed-turn memory remains durable."),
+        ("remember_cancelled", "cancelled", "Cancelled-turn memory remains durable."),
+    ],
+)
+async def test_successful_memory_append_survives_failed_or_cancelled_turn(
+    turn_request: str,
+    terminal: str,
+    learning: str,
+) -> None:
+    registry = MemoryStoreRegistry()
+    workspace_id = uuid4()
+    writing_session = MemoryWorkspace(
+        memory_registry=registry,
+        access=TurnAccess(uuid4(), workspace_id),
+    )
+    reading_session = MemoryWorkspace(
+        memory_registry=registry,
+        access=TurnAccess(uuid4(), workspace_id),
+    )
+    events: list[RuntimeEvent] = []
+
+    outcome = await _run(WorkspaceFlowFactory(), writing_session, turn_request, events=events)
+    recalled = await _run(WorkspaceFlowFactory(), reading_session, "recall")
+
+    assert outcome is not None and outcome.terminal_status == terminal
+    assert any(
+        event.kind == "tool.completed" and getattr(event.detail, "tool_name", None) == "update_workspace_memory"
+        for event in events
+    )
+    assert recalled is not None and recalled.prediction is not None
+    assert learning in recalled.prediction.display_text

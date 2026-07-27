@@ -24,7 +24,7 @@ def _parser() -> argparse.ArgumentParser:
     subcommands = parser.add_subparsers(dest="command", required=True)
     for command in ("create", "check"):
         sub = subcommands.add_parser(command)
-        sub.add_argument("--name", required=True, help="Immutable snapshot name, for example fleet-rlm-python313-v3")
+        sub.add_argument("--name", required=True, help="Immutable snapshot name, for example fleet-rlm-python313-v4")
     return parser
 
 

@@ -12,8 +12,10 @@ Fleet ships five runtime Skills:
 
 The catalog follows three disclosure levels:
 
-1. A Turn starts with bounded system Skill Cards.
-2. `load_skill` returns the selected `SKILL.md` only when invoked.
+1. A Turn starts with bounded system Skill Cards as its discovery surface.
+2. With no explicit selection, `load_skill` may progressively load up to four
+   advertised Skills. Exact version-pinned selections preload and restrict the
+   Turn to that set.
 3. `read_skill_resource` returns one explicitly manifested UTF-8 resource only
    after that Skill is loaded.
 

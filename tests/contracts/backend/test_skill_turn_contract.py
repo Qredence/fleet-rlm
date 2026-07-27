@@ -202,16 +202,39 @@ async def test_progressive_resource_requires_load_and_daytona_preparation_is_pro
         models=RLMModelBundle(MagicMock(), MagicMock()),
     )
     environment = SimpleNamespace(attachment_sink=SimpleNamespace(volume_fs=SimpleNamespace(sandbox=object())))
+    turn = _turn()
     prepared = await _LiveCapabilityPreparer(resources, catalog).prepare(
-        _turn(),
+        turn,
         environment,
         PreparedAttachments((), ()),
         deadline=float("inf"),
     )
 
-    tool_names = {str(tool.name) for tool in prepared.spec.tools}
-    assert {"load_skill", "read_skill_resource"} <= tool_names
+    assert prepared.spec.skill_cards == catalog.cards()
+    tools = {str(tool.name): tool for tool in prepared.spec.tools}
+    assert {"load_skill", "read_skill_resource"} <= tools.keys()
     assert prepared.spec.workspace.available is True
+    loaded = tools["load_skill"](skill_id=str(selected.card.id), expected_version=selected.card.version)
+    assert loaded["ok"] is True
+    resource = tools["read_skill_resource"](
+        skill_id=str(selected.card.id),
+        resource_path=resource_path,
+        expected_version=selected.card.version,
+    )
+    assert resource["ok"] is True
+
+    details = prepared.drain_public_details()
+    assert [detail.kind for detail in details] == ["skill.activated", "skill.loaded"]
+    from fleet_rlm.api.sse import AISDKUIProjector
+
+    recorder = EventRecorder(turn.run_id, turn.session_id)
+    serialized = json.dumps(
+        [chunk for detail in details for chunk in AISDKUIProjector().project(recorder.record(detail))]
+    )
+    assert selected.instructions not in serialized
+    assert resource["content"] not in serialized
+    assert "skill_markdown" not in serialized
+    assert "content" not in serialized
 
 
 @pytest.mark.asyncio

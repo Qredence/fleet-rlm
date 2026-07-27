@@ -36,7 +36,7 @@ database_url_env = "FLEET_DATABASE_URL"
 
 [defaults.daytona]
 api_key_env = "FLEET_DAYTONA_API_KEY"
-volume_name = "rlm-volume-dspy"
+volume_name = "fleet-volume"
 volume_mount_path = "/home/daytona/fleet"
 
 [defaults.logging]
@@ -49,7 +49,7 @@ environment = "deno"
 environment = "daytona"
 
 [profiles.daytona.daytona]
-snapshot = "fleet-rlm-python313-v3"
+snapshot = "fleet-rlm-python313-v4"
 
 [profiles.daytona.llm.root]
 model = "uscentral.default.deepseek-v4-flash"
@@ -80,7 +80,7 @@ tracing_sql_warehouse_id_env = "FLEET_MLFLOW_TRACING_SQL_WAREHOUSE_ID"
 environment = "daytona"
 
 [profiles.databricks-daytona.daytona]
-snapshot = "fleet-rlm-python313-v3"
+snapshot = "fleet-rlm-python313-v4"
 
 # DeepSeek is used for both live RLM roles because it supports Fleet's native
 # structured action contract. Frontier models remain offline-GEPA only.

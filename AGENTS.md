@@ -31,6 +31,7 @@ For the current Codex Cloud delivery sequence, use `dev-0.7` as the base branch 
 
 - Auth, DB, SSE, runtime, and deploy details live in `src/fleet_rlm/AGENTS.md` or matching docs.
 - Local Codex actions, ports, terminal-client checks, and tool preferences live in `.codex/` and loop docs.
+- Workspace source scanning declares five roots: `src/` and `tests/` are accessible; optional `scripts/` may be reported missing; `tools/` and `docs/` are intentionally disabled to avoid non-code noise.
 
 ## Agent skills
 
@@ -54,8 +55,7 @@ For ordinary local development:
 uv sync --all-extras --dev
 ```
 
-Codex Cloud workspaces use `zsh .codex/workspace-bootstrap.zsh`; the script
-installs locked dependencies and enforces the Cloud branch guard.
+Codex Cloud workspaces use `zsh .codex/workspace-bootstrap.zsh`; the script installs locked dependencies and enforces the Cloud branch guard.
 
 ## Run
 

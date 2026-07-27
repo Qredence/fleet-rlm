@@ -19,6 +19,7 @@ from fleet_rlm.files.models import (
     PreparedAttachments,
     RunAttachmentSink,
 )
+from fleet_rlm.files.volume_storage import WorkspaceVolumeGateway
 from fleet_rlm.files.workspace_access import WorkspaceFileService
 from fleet_rlm.sessions.catalog import SessionCatalog
 
@@ -98,6 +99,13 @@ def get_workspace_file_service(request: Request) -> WorkspaceFileService:
     return service
 
 
+def get_workspace_volume_gateway(request: Request) -> WorkspaceVolumeGateway:
+    gateway = getattr(request.app.state, "workspace_volume_gateway", None)
+    if gateway is None:
+        raise HTTPException(status_code=503, detail="application composition is not ready")
+    return gateway
+
+
 TurnCoordinatorDep = Annotated[TurnCoordinator, Depends(get_turn_coordinator)]
 ArtifactReaderDep = Annotated[ArtifactReaderPort, Depends(get_artifact_reader)]
 AttachmentLifecycleDep = Annotated[AttachmentLifecyclePort, Depends(get_attachment_lifecycle)]
@@ -106,6 +114,7 @@ TurnLifecycleDep = Annotated[TurnLifecycle, Depends(get_turn_lifecycle)]
 SettingsDep = Annotated[Settings, Depends(get_settings)]
 ConfigPolicyDep = Annotated[ConfigPolicyService, Depends(get_config_policy)]
 WorkspaceFileServiceDep = Annotated[WorkspaceFileService, Depends(get_workspace_file_service)]
+WorkspaceVolumeGatewayDep = Annotated[WorkspaceVolumeGateway, Depends(get_workspace_volume_gateway)]
 
 __all__ = [
     "ArtifactReaderDep",
@@ -116,4 +125,5 @@ __all__ = [
     "TurnCoordinatorDep",
     "TurnLifecycleDep",
     "WorkspaceFileServiceDep",
+    "WorkspaceVolumeGatewayDep",
 ]

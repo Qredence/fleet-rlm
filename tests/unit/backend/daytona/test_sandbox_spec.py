@@ -46,9 +46,9 @@ def test_spec_builds_minimal_non_root_pinned_image_with_declared_dependencies() 
 def test_default_snapshot_envelope_stays_minimal_and_fixed() -> None:
     spec = DaytonaSandboxSpec(DEFAULT_SNAPSHOT_NAME)
 
-    assert spec.snapshot == "fleet-rlm-python313-v3"
+    assert spec.snapshot == "fleet-rlm-python313-v4"
     assert spec.python_version == PYTHON_VERSION == "3.13.13"
-    assert (spec.cpu, spec.memory_gib, spec.disk_gib) == (1, 1, 3)
+    assert (spec.cpu, spec.memory_gib, spec.disk_gib) == (2, 4, 8)
 
 
 def test_settings_require_snapshot_only_when_converted_to_daytona_spec() -> None:

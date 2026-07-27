@@ -235,18 +235,16 @@ def supervise(
             latest_log_path.unlink(missing_ok=True)
             latest_log_path.symlink_to(log_path.name)
             tui: subprocess.Popen[bytes] | None = None
+            popen_bytes = cast("Callable[..., subprocess.Popen[bytes]]", subprocess.Popen)
             try:
-                backend = cast(
-                    "subprocess.Popen[bytes]",
-                    subprocess.Popen(
-                        backend_command,
-                        cwd=root,
-                        env=backend_env,
-                        stdout=backend_log,
-                        stderr=subprocess.STDOUT,
-                        start_new_session=True,
-                        text=False,
-                    ),
+                backend = popen_bytes(
+                    backend_command,
+                    cwd=root,
+                    env=backend_env,
+                    stdout=backend_log,
+                    stderr=subprocess.STDOUT,
+                    start_new_session=True,
+                    text=False,
                 )
             except OSError as exc:
                 raise SupervisorError(f"Could not start the Fleet backend; see {log_path}") from exc

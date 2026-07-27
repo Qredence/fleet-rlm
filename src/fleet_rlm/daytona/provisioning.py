@@ -13,7 +13,7 @@ from fleet_rlm.daytona.errors import DaytonaAdapterError, map_provider_error
 from fleet_rlm.files.volume_paths import DEFAULT_VOLUME_MOUNT_PATH, VolumePaths, validate_mount_path
 from fleet_rlm.snapshot_contract import validate_snapshot_name
 
-DEFAULT_SNAPSHOT_NAME = "fleet-rlm-python313-v3"
+DEFAULT_SNAPSHOT_NAME = "fleet-rlm-python313-v4"
 DEFAULT_VOLUME_NAME = "rlm-volume-dspy"
 PYTHON_VERSION = "3.13.13"
 BASE_IMAGE = "python:3.13.13-slim-bookworm@sha256:f576b530293e74140ea91d262232648d5c4f45640a95ec447757701bfcacf034"
@@ -53,14 +53,14 @@ class DaytonaSandboxSpec:
     snapshot: str
     python_version: str = PYTHON_VERSION
     base_image: str = BASE_IMAGE
-    cpu: int = 1
-    memory_gib: int = 1
-    disk_gib: int = 3
+    cpu: int = 2
+    memory_gib: int = 4
+    disk_gib: int = 8
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "snapshot", validate_snapshot_name(self.snapshot))
-        if (self.cpu, self.memory_gib, self.disk_gib) != (1, 1, 3):
-            raise ValueError("Fleet Daytona snapshot resources must be 1 CPU, 1 GiB memory, and 3 GiB disk")
+        if (self.cpu, self.memory_gib, self.disk_gib) != (2, 4, 8):
+            raise ValueError("Fleet Daytona snapshot resources must be 2 CPU, 4 GiB memory, and 8 GiB disk")
 
     @classmethod
     def from_settings(cls, settings: Any) -> DaytonaSandboxSpec:

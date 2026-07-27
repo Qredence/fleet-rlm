@@ -342,6 +342,29 @@ registerCommand({
 });
 
 registerCommand({
+  name: "volume",
+  description: "Show the Workspace Volume file tree",
+  usage: "/volume [root]",
+  handler: async (args, ctx) => {
+    if (args.length > 1) {
+      appendSystem(ctx.store, "Usage: /volume [root]");
+      return;
+    }
+    const root = args[0] ?? ".";
+    try {
+      const tree = await ctx.client.listVolumeTree({ root });
+      const rendered = formatVolumeTree([...tree.directories, ...tree.paths]);
+      appendSystem(
+        ctx.store,
+        `Workspace Volume${root === "." ? "" : ` (${root})`}\n\n${rendered}${tree.truncated ? "\n\n…tree truncated; narrow the root or use a deeper command." : ""}`,
+      );
+    } catch (error) {
+      appendSystem(ctx.store, `Failed to list Workspace Volume: ${errorMessage(error)}`);
+    }
+  },
+});
+
+registerCommand({
   name: "status",
   description: "Show session, run, and token usage",
   usage: "/status",
@@ -435,6 +458,35 @@ function formatPendingSkills(selections: readonly PendingSkillSelection[]): stri
 
 function formatSettingValue(value: unknown): string {
   return JSON.stringify(value);
+}
+
+export function formatVolumeTree(paths: readonly string[]): string {
+  if (paths.length === 0) return "(empty)";
+  const root = new Map<string, Map<string, unknown>>();
+  for (const raw of paths) {
+    const parts = raw.replace(/^\.\//, "").split("/").filter(Boolean);
+    let node = root;
+    for (const part of parts) {
+      let child = node.get(part);
+      if (!child) {
+        child = new Map<string, unknown>();
+        node.set(part, child);
+      }
+      node = child as Map<string, Map<string, unknown>>;
+    }
+  }
+  const lines: string[] = [];
+  const visit = (node: Map<string, unknown>, prefix: string): void => {
+    const entries = [...node.entries()].sort(([a], [b]) => a.localeCompare(b));
+    entries.forEach(([name, child], index) => {
+      const last = index === entries.length - 1;
+      lines.push(`${prefix}${last ? "└── " : "├── "}${name}`);
+      if ((child as Map<string, unknown>).size > 0)
+        visit(child as Map<string, unknown>, `${prefix}${last ? "    " : "│   "}`);
+    });
+  };
+  visit(root, "");
+  return lines.join("\n");
 }
 
 function formatObservedTokens(value: number | null): string {

@@ -125,14 +125,14 @@ class FooterComponent implements Component {
     const metricsParts: string[] = [];
     if (execution.iterations !== null) metricsParts.push(`${execution.iterations} iter`);
     if (execution.subLmCalls !== null) metricsParts.push(`${execution.subLmCalls} sub-LM`);
-    if (execution.hostCapabilityCalls !== null) metricsParts.push(`${execution.hostCapabilityCalls} host`);
-    if (execution.interpreterErrors !== null) metricsParts.push(`${execution.interpreterErrors} errors`);
+    if (execution.hostCapabilityCalls !== null)
+      metricsParts.push(`${execution.hostCapabilityCalls} host`);
+    if (execution.interpreterErrors !== null)
+      metricsParts.push(`${execution.interpreterErrors} errors`);
     if (execution.durationMs !== null) metricsParts.push(formatDuration(execution.durationMs));
 
     const metrics = metricsParts.length > 0 ? ` · ${metricsParts.join(" · ")}` : "";
-    const outcome = run.outcome
-      ? ` · ${theme.fg(outcomeColor(run.outcome), run.outcome)}`
-      : "";
+    const outcome = run.outcome ? ` · ${theme.fg(outcomeColor(run.outcome), run.outcome)}` : "";
     const replay = run.delivery === "replay" ? " · replay" : "";
     lines.push(
       truncateToWidth(

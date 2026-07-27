@@ -200,6 +200,14 @@ class WorkspaceFileListResponse(BaseModel):
     next_cursor: str | None = None
 
 
+class VolumeTreeResponse(BaseModel):
+    """Logical files visible in the LocalScope Workspace Volume."""
+
+    paths: list[str]
+    directories: list[str] = Field(default_factory=list)
+    truncated: bool = False
+
+
 class WorkspaceFileReadResponse(BaseModel):
     path: str
     content: str

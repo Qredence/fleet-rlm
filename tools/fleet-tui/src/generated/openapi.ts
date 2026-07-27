@@ -270,6 +270,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/volume/tree": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Volume Tree */
+        get: operations["list_volume_tree_api"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -572,6 +589,24 @@ export interface components {
             metadata?: {
                 [key: string]: components["schemas"]["JsonValue"];
             } | null;
+        };
+        /**
+         * VolumeTreeResponse
+         * @description Logical files visible in the LocalScope Workspace Volume.
+         */
+        VolumeTreeResponse: {
+            /** Paths */
+            paths: string[];
+            /**
+             * Directories
+             * @default []
+             */
+            directories: string[];
+            /**
+             * Truncated
+             * @default false
+             */
+            truncated: boolean;
         };
         /** WorkspaceFileAppendRequest */
         WorkspaceFileAppendRequest: {
@@ -1450,6 +1485,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["WorkspaceFileEntryResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    list_volume_tree_api: {
+        parameters: {
+            query?: {
+                root?: string;
+                max_depth?: number;
+                max_files?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VolumeTreeResponse"];
                 };
             };
             /** @description Validation Error */

@@ -23,6 +23,7 @@ EXPECTED_DAYTONA_MODULES = {
     "workspace_agent.py",
     "workspace_fs.py",
     "workspace_gateway.py",
+    "workspace_memory.py",
 }
 
 

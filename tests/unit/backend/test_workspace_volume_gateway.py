@@ -78,6 +78,25 @@ async def test_gateway_uses_one_shared_mounted_scope_for_grouped_byte_operations
 
 
 @pytest.mark.asyncio
+async def test_gateway_can_list_the_mount_root() -> None:
+    mounted = _MountedGateway()
+    mounted.sandbox.fs.data["/home/daytona/fleet/files/notes.md"] = b"notes"
+    gateway = DaytonaWorkspaceVolumeGateway(
+        mounted,  # ty: ignore[invalid-argument-type]
+        mount_path="/home/daytona/fleet",
+    )
+
+    files = await gateway.list_files(
+        uuid4(),
+        "/home/daytona/fleet",
+        max_depth=8,
+        max_files=10,
+    )
+
+    assert [file.path for file in files] == ["/home/daytona/fleet/files/notes.md"]
+
+
+@pytest.mark.asyncio
 async def test_gateway_releases_mounted_scope_when_operation_fails() -> None:
     mounted = _MountedGateway(fail_upload=True)
     gateway = DaytonaWorkspaceVolumeGateway(

@@ -208,6 +208,7 @@ def install_testing_composition(
             max_file_bytes=settings.max_upload_bytes,
         )
     )
+    app.state.workspace_volume_gateway = volume_gateway
     return handles
 
 

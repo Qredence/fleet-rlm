@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { FleetApiClient } from "../../fleet-api-client.js";
 import { ConversationStore } from "../store.js";
-import { listCommands, parseInput, type CommandContext } from "../commands.js";
+import { formatVolumeTree, listCommands, parseInput, type CommandContext } from "../commands.js";
 
 function makeContext(): { ctx: CommandContext; exits: { count: number } } {
   const store = new ConversationStore();
@@ -101,6 +101,24 @@ describe("command handlers", () => {
     if (sys?.kind === "text") {
       expect(sys.text).toContain("abc-123");
     }
+  });
+
+  it("/volume renders the logical Workspace Volume tree", async () => {
+    const { ctx } = makeContext();
+    ctx.client.listVolumeTree = vi.fn().mockResolvedValue({
+      paths: ["files/notes.md", "sessions/abc/turn.json"],
+      directories: ["files", "sessions"],
+      truncated: false,
+    });
+    const volume = listCommands().find((command) => command.name === "volume");
+    if (volume) await volume.handler([], ctx);
+    const sys = ctx.store.getState().messages.find((m) => m.kind === "text" && m.role === "system");
+    expect(sys?.kind).toBe("text");
+    if (sys?.kind === "text") expect(sys.text).toContain("sessions");
+  });
+
+  it("formats nested volume paths as a tree", () => {
+    expect(formatVolumeTree(["files/notes.md", "files/sub/todo.md"])).toContain("sub");
   });
 
   it("/rename updates the durable and local Session title", async () => {

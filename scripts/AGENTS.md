@@ -11,6 +11,8 @@ scripts import the installed `fleet_rlm` package; the backend never imports scri
 - Prefer `main(argv=None) -> int` with `argparse` for new executable entry
   points and invoke it via `raise SystemExit(main())`; reusable scorer/helper
   modules need no CLI entry point.
+- Always run scripts via `uv run` (e.g., `uv run python scripts/check_docs_quality.py`).
+  Never use bare `python3` or `python`.
 - Resolve the repo root from `Path(__file__)`, preserving the local module's
   established constant name.
 - Credentialed scripts that load `.env` use

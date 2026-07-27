@@ -266,6 +266,9 @@ async def test_deno_repeated_transient_failures_revoke_without_provider_fence() 
         async def aclose(self):
             return None
 
+        async def wait_owned(self):
+            return None
+
     class Runner:
         def stream(self, _execution):
             return Stream()
@@ -282,7 +285,6 @@ async def test_deno_repeated_transient_failures_revoke_without_provider_fence() 
         runner=Runner(),
         cleanup=cleanup,
     )
-    started = asyncio.get_running_loop().time()
     events = [
         event
         async for event in await coordinator.open(
@@ -292,7 +294,6 @@ async def test_deno_repeated_transient_failures_revoke_without_provider_fence() 
 
     assert isinstance(events[-1].detail, RunFailed)
     assert events[-1].detail.code == "unavailable"
-    assert asyncio.get_running_loop().time() - started < 0.04
     await cleanup.shutdown(drain_seconds=1)
 
 

@@ -18,6 +18,7 @@ The generated source of truth is [`openapi.yaml`](../../openapi.yaml).
 | `GET` | `/api/files/content` | Read one bounded UTF-8 page |
 | `PUT` | `/api/files/content` | Create or explicitly overwrite a UTF-8 file |
 | `POST` | `/api/files/append` | Append UTF-8 text |
+| `GET` | `/api/volume/tree` | List relative file paths from the mounted Workspace Volume |
 | `GET` | `/api/skills` | List bounded system Skill Cards |
 | `GET` | `/api/skills/{skill_id}` | Read one bounded system Skill Card |
 | `PUT` | `/api/runs/{run_id}/cancellation` | Request cancellation of an owned Run |
@@ -31,8 +32,11 @@ Turn creation requires an `Idempotency-Key` header. Its JSON body accepts
 `text`, `attachment_ids`, and up to four unique `skill_selections` entries,
 each containing an exact Skill `id` and `expected_version`. Explicit selections
 are authoritative for that Turn and are included in its idempotency
-fingerprint. Missing, unauthorized, or version-mismatched selections fail
-before SSE begins with the generic
+fingerprint. Omitting `skill_selections` still supplies the bounded catalog
+Cards and permits the RLM to load up to four advertised Skills progressively.
+Providing selections preloads those exact versions and restricts loading to
+that set. Missing, unauthorized, or version-mismatched selections fail before
+SSE begins with the generic
 `invalid_skill_selection` response; the response does not reveal hidden
 catalog entries.
 
