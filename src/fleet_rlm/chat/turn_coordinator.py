@@ -319,6 +319,10 @@ class TurnCoordinator:
                     )
                     heartbeat = None
                     settled = True
+                    annotate_trace_io(
+                        request=prepared.execution.request,
+                        response_text="Turn failed",
+                    )
                     yield recorder.record(RunFailed(code="unavailable", message="Turn failed"))
                     return
                 if heartbeat_lost is not None:
@@ -403,6 +407,10 @@ class TurnCoordinator:
                     )
                     heartbeat = None
                     settled = True
+                    annotate_trace_io(
+                        request=prepared.execution.request,
+                        response_text="Turn failed",
+                    )
                     yield recorder.record(RunFailed(code="unavailable", message="Turn failed"))
                     return
                 else:
