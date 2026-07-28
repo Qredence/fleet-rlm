@@ -1,0 +1,196 @@
+# Fleet RLM - Turn Execution Flow
+
+digraph FleetRLM_TurnExecutionFlow {
+    label="Turn Execution Flow";
+    labelloc="t";
+    fontsize=16;
+    
+    // Styling
+    node [shape=box, style=filled];
+    edge [fontsize=12];
+    
+    // Color definitions
+    define(http, lightblue, steelblue);
+    define(orchestration, salmon, coral);
+    define(runtime, palegreen, green4);
+    define(sandbox, lightyellow, darkkhaki);
+    define(persistence, lavender, mediumpurple);
+    define(events, white, steelblue);
+    
+    // HTTP Entry Point
+    subgraph cluster_http {
+        color=steelblue;
+        label="HTTP Layer";
+        labeljust=l;
+        
+        http_request [label="POST /api/sessions/{id}/turns\nwith Idempotency-Key", fillcolor=cyan3, style=filled];
+        api_validation [label="Validate:\n- Session exists\n- Idempotency key valid\n- Skill selection valid", fillcolor=springgreen2, style=filled];
+        error_handling [label="Closed Error Response\n{code, message}", fillcolor=lightcoral, style=filled];
+    }
+    
+    // Turn Orchestration
+    subgraph cluster_orchestration {
+        color=coral;
+        label="Orchestration Layer";
+        labeljust=l;
+        
+        coordinator_open [label="TurnCoordinator.open()", fillcolor=lightgoldenrod1, style=filled];
+        lifecycle_begin [label="TurnLifecycle.begin()\nReplay or claim Turn", fillcolor=thistle, style=filled];
+        preparation [label="DefaultTurnPreparer.prepare()\n- Resolve skills\n- Stage attachments\n- Prepare context", fillcolor=blanchedalmond, style=filled];
+        
+        skill_resolve [label="SkillResolver\nResolve selected skills\n(version-pinned)", fillcolor=lemonchiffon, style=filled];
+        attachment_stage [label="AttachmentLifecycle\nStage attachments to workspace", fillcolor=wheat, style=filled];
+        
+        lifecycle_finish [label="TurnLifecycle.finish()\n- Validate result\n- Private snapshot\n- Promote artifacts\n- Atomic commit", fillcolor=violet, style=filled];
+        cleanup [label="TurnCoordinator.cleanup()\nRelease interpreter lease\ncleanup resources", fillcolor=rosybrown, style=filled];
+    }
+    
+    // Runtime Execution
+    subgraph cluster_runtime {
+        color=darkgreen;
+        label="Runtime Layer";
+        labeljust=l;
+        
+        rlm_runner [label="RLMRunner.execute()\nCreate fresh dspy.RLM\nWorker thread execution", fillcolor=palegreen1, style=filled];
+        rlm_execute [label="dspy.RLM.acall()\nRecursive execution\nMax iterations loop", fillcolor=honeydew, style=filled];
+        tool_observer [label="ToolObserver\nObserve tool calls\nTrack metrics", fillcolor=mintcream, style=filled];
+        tool_guards [label="ToolGuards\nPre-execution validation", fillcolor=gainsboro, style=filled];
+        final_output [label="FleetFinalOutput\nWrap SUBMIT response", fillcolor=azure, style=filled];
+    }
+    
+    // Sandbox Layer (Daytona)
+    subgraph cluster_sandbox {
+        color=darkkhaki;
+        label="Sandbox Layer (Daytona)";
+        labeljust=l;
+        
+        interpreter_lease [label="InterpreterLease.acquire()\nAdmission control\nSemaphore permit", fillcolor=navajowhite, style=filled];
+        sandbox_check [label="Verify/Sanity check\nSandbox running?", fillcolor=papayawhip, style=filled];
+        code_interpreter [label="DaytonaCodeInterpreter\nDSPy CodeInterpreter protocol", fillcolor=ivory, style=filled];
+        http_broker [label="HttpToolBroker\nHost-tool mediation HTTP server", fillcolor=oldlace, style=filled];
+        workspace_ops [label="Workspace FS ops\nread/write/list/stat", fillcolor=linen, style=filled];
+        admission_control [label="DaytonaAdmission\nMax 8 concurrent leases\nasyncio.BoundedSemaphore", fillcolor=floralwhite, style=filled];
+    }
+    
+    // Persistence
+    subgraph cluster_persistence {
+        color=mediumpurple;
+        label="Persistence Layer";
+        labeljust=l;
+        
+        turn_claim [label="TurnClaim Transition\nInProgress → Running", fillcolor=mistyrose, style=filled];
+        checkpoint_save [label="Save Checkpoint\nAtomic save", fillcolor=palevioletred, style=filled];
+        artifact_promote [label="Artifact Promotion\nCandidate → Committed", fillcolor=plum, style=filled];
+        atomic_commit [label="Atomic Commit\nTurn + Run + Checkpoint + Artifacts", fillcolor=purple, style=filled];
+        turn_repo [label="TurnRepository.apply()\nApply claim transitions", fillcolor=violet, style=filled];
+    }
+    
+    // Event Streaming
+    subgraph cluster_events {
+        color=steelblue;
+        label="Event Streaming";
+        labeljust=l;
+        
+        event_record [label="EventRecorder.stream()\nRecord all events", fillcolor=aliceblue, style=filled];
+        sse_project [label="AISDKUIProjector\nProject to AI SDK UI v1", fillcolor=ghostwhite, style=filled];
+        sse_stream [label="SSE Stream\nText/event-stream", fillcolor=white, style.filled=true, peripheries=2];
+        
+        event_reasoning [label="reasoning\ntext chunk", fillcolor=white, style=filled];
+        event_tool_call [label="tool_call\nname, args, call_id", fillcolor=white, style=filled];
+        event_tool_result [label="tool_result\ncall_id, content, isError", fillcolor=white, style=filled];
+        event_code [label="code\nlanguage, source", fillcolor=white, style=filled];
+        event_submit [label="submit\ntext output", fillcolor=white, style=filled];
+        event_artifact [label="artifact_created\nartifact_id, name, kind", fillcolor=white, style=filled];
+        event_done [label="done\ndata: null", fillcolor=white, style=filled];
+    }
+    
+    // Main Flow
+    http_request -> api_validation
+    
+    api_validation -> coordinator_open
+    api_validation -> error_handling [label="validation failed", color=red]
+    
+    coordinator_open -> lifecycle_begin
+    lifecycle_begin -> preparation
+    preparation -> skill_resolve
+    preparation -> attachment_stage
+    preparation -> rlm_runner
+    
+    skill_resolve -> preparation [label="provides tools"]
+    attachment_stage -> preparation [label="provides files"]
+    
+    rlm_runner -> rlm_execute
+    rlm_execute -> tool_observer
+    tool_observer -> tool_guards
+    tool_guards -> rlm_execute [label="passes validation"]
+    tool_observer -> rlm_execute [label="tools available"]
+    
+    rlm_execute -> final_output [label="SUBMIT detected"]
+    final_output -> lifecycle_finish [label="result"]
+    rlm_execute -> rlm_execute [label="recursive loop", constraint=false]
+    
+    lifecycle_finish -> artifact_promote
+    lifecycle_finish -> atomic_commit
+    atomic_commit -> turn_repo
+    
+    lifecycle_begin -> turn_claim [label="transition"]
+    checkpoint_save -> turn_claim [label="update"]
+    
+    coordinator_open -> interpreter_lease
+    interpreter_lease -> admission_control
+    interpreter_lease -> sandbox_check
+    sandbox_check -> code_interpreter
+    code_interpreter -> http_broker
+    code_interpreter -> workspace_ops
+    
+    rlm_runner -> code_interpreter
+    http_broker -> code_interpreter [label="provides host tools"]
+    
+    lifecycle_finish -> cleanup
+    cleanup -> interpreter_lease [label="release lease"]
+    cleanup -> [label="stop idle sandbox after 5 min", style=dashed]
+    
+    // Event streaming at multiple points
+    rlm_runner -.-> event_record [label="streaming events"]
+    event_record -> sse_project
+    sse_project -> sse_stream
+    sse_stream -> http_request [label="response body", style=dashed, penwidth=3]
+    
+    event_record -> event_reasoning
+    event_record -> event_tool_call
+    event_record -> event_tool_result
+    event_record -> event_code
+    event_record -> event_submit
+    event_record -> event_artifact
+    event_record -> event_done
+    
+    // Parallel flow visualization
+    subgraph cluster_parallel {
+        label="Concurrent Operations";
+        bgcolor=transparent;
+        
+        parallel_obs [label="MLflow Tracing\n(fail-soft)\nobservability/", fillcolor=lightyellow, style=filled];
+        parallel_monitor [label="Sandbox Monitor\nHealth checks", fillcolor=beige, style=filled];
+    }
+    
+    lifecycle_begin -.-> parallel_obs [style=dashed]
+    rlm_runner -.-> parallel_monitor [style=dashed]
+    
+    // Legend
+    subgraph cluster_legend {
+        label="Legend";
+        bgcolor=transparent;
+        
+        legend_inline [label="Normal flow"];
+        legend_async [label="Async/concurrent"];
+        legend_response [label="Response stream"];
+    }
+    
+    // Styling connections
+    http_request -> coordinator_open [penwidth=2]
+    lifecycle_begin -> preparation [penwidth=2]
+    preparation -> rlm_runner [penwidth=2]
+    rlm_execute -> lifecycle_finish [penwidth=2]
+    lifecycle_finish -> atomic_commit [penwidth=2]
+    atomic_commit -> cleanup [penwidth=2]
+}

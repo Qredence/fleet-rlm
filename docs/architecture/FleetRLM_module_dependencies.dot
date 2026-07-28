@@ -1,0 +1,226 @@
+# Fleet RLM Backend Architecture - Module Dependencies
+
+digraph FleetRLM_ModuleDependencies {
+    label="Fleet RLM Module Dependency Graph";
+    labelloc="t";
+    fontsize=16;
+    
+    // Styling
+    node [shape=box, style="rounded,filled", fillcolor=lightblue];
+    edge [fontsize=12];
+    
+    // Subgraphs for logical grouping
+    subgraph cluster_api {
+        color=steelblue;
+        label="api/ - HTTP Layer";
+        labeljust=l;
+        
+        api_dependencies [label="dependencies.py\nDI aliases", fillcolor=cyan];
+        api_routes_turns [label="turns.py\nPOST /turns", fillcolor=cyan];
+        api_routes_sessions [label="sessions.py\nCRUD", fillcolor=cyan];
+        api_routes_attachments [label="attachments.py\nUpload", fillcolor=cyan];
+        api_schemas [label="schemas.py\nPydantic models", fillcolor=cyan];
+        api_sse [label="sse.py\nAI SDK UI v1 projection", fillcolor=cyan];
+        api_errors [label="errors.py\nClosed errors", fillcolor=cyan];
+        api_openapi [label="openapi.py\nSpec generation", fillcolor=cyan];
+    }
+    
+    subgraph cluster_chat {
+        color=coral;
+        label="chat/ - Turn Orchestration";
+        labeljust=l;
+        
+        chat_coordinator [label="turn_coordinator.py\nOrchestrator", fillcolor=salmon];
+        chat_lifecycle [label="turn_lifecycle.py\nLifecycle mgmt", fillcolor=salmon];
+        chat_cleanup [label="turn_cleanup.py\nResource release", fillcolor=salmon];
+        chat_preparation [label="turn_preparation.py\nContext prep", fillcolor=salmon];
+        chat_context [label="session_context.py\nSession context", fillcolor=salmon];
+        chat_claims [label="turn_claim.py\nClaim policy", fillcolor=salmon];
+        chat_deno [label="deno_run_environment.py\nDeno runtime", fillcolor=salmon];
+    }
+    
+    subgraph cluster_rlm {
+        color=lightgreen;
+        label="rlm/ - DSPy RLM Runtime";
+        labeljust=l;
+        
+        rlm_runner [label="runner.py\nRLMRunner", fillcolor=palegreen];
+        rlm_factory [label="factory.py\nRLMFactory", fillcolor=palegreen];
+        rlm_events [label="events.py\nRuntimeEvent types", fillcolor=palegreen];
+        rlm_observer [label="tool_observer.py\nTool tracking", fillcolor=palegreen];
+        rlm_guards [label="tool_guards.py\nValidation guards", fillcolor=palegreen];
+        rlm_contract [label="dspy_contract.py\nSignature interface", fillcolor=palegreen];
+        rlm_lm_factory [label="lm_factory.py\nModel factory", fillcolor=palegreen];
+        rlm_sanitization [label="sanitize.py\nOutput sanitization", fillcolor=palegreen];
+    }
+    
+    subgraph cluster_daytona {
+        color=pink;
+        label="daytona/ - Sandbox Layer";
+        labeljust=l;
+        
+        daytona_session [label="session_manager.py\nLease mgmt", fillcolor=ffb6c1];
+        daytona_interpreter [label="interpreter.py\nCodeInterpreter", fillcolor=ffb6c1];
+        daytona_provisioning [label="provisioning.py\nSandbox create/start", fillcolor=ffb6c1];
+        daytona_broker [label="http_broker.py\nHost-tool mediation", fillcolor=ffb6c1];
+        daytona_workspace_fs [label="workspace_fs.py\nFile operations", fillcolor=ffb6c1];
+        daytona_gateway [label="workspace_gateway.py\nWorkspace API", fillcolor=ffb6c1];
+        daytona_diagnostic [label="diagnostics.py\nHealth monitoring", fillcolor=ffb6c1];
+        daytona_bindings [label="bindings.py\nBinding store", fillcolor=ffb6c1];
+    }
+    
+    subgraph cluster_files {
+        color=mistyrose;
+        label="files/ - Files & Workspace";
+        labeljust=l;
+        
+        files_lifecycle [label="lifecycle.py\nAttachment lifecycle", fillcolor=fanta];
+        files_tools [label="tools.py\nFile tools", fillcolor=fanta];
+        files_workspace_tools [label="workspace_tools.py\nWorkspace ops", fillcolor=fanta];
+        files_volume_storage [label="volume_storage.py\nBlob storage", fillcolor=fanta];
+        files_host_volume [label="host_volume.py\nVolume access", fillcolor=fanta];
+        files_paths [label="paths.py\nPath utilities", fillcolor=fanta];
+        files_safety [label="safety.py\nSafety checks", fillcolor=fanta];
+    }
+    
+    subgraph cluster_skills {
+        color=turquoise;
+        label="skills/ - Skill System";
+        labeljust=l;
+        
+        skills_catalog [label="catalog.py\nSkill definitions", fillcolor=mediumturquoise];
+        skills_resolver [label="resolver.py\nSelection resolver", fillcolor=mediumturquoise];
+        skills_tools [label="tools.py\nSkill tool host", fillcolor=mediumturquoise];
+        skills_signatures [label="signatures.py\nDataAnalysis signature", fillcolor=mediumturquoise];
+        skills_models [label="models.py\nType definitions", fillcolor=mediumturquoise];
+    }
+    
+    subgraph cluster_persistence {
+        color=khaki;
+        label="persistence/ - Data Layer";
+        labeljust=l;
+        
+        persistence_db [label="database.py\nSQLAlchemy setup", fillcolor=lightgoldenrodyellow];
+        persistence_models [label="models.py\nORM models", fillcolor=lightgoldenrodyellow];
+        persistence_repo_sessions [label="session_catalog.py\nSession repo", fillcolor=lightgoldenrodyellow];
+        persistence_repo_turns [label="turns.py\nTurn repo", fillcolor=lightgoldenrodyellow];
+        persistence_repo_artifacts [label="artifacts.py\nArtifact repo", fillcolor=lightgoldenrodyellow];
+        persistence_repo_attachments [label="attachments.py\nAttachment repo", fillcolor=lightgoldenrodyellow];
+    }
+    
+    subgraph cluster_obs {
+        color=lightyellow;
+        label="observability/";
+        labeljust=l;
+        
+        obs_tracing [label="tracing.py\nMLflow integration", fillcolor=lightyellow];
+        obs_turn_tracing [label="turn_tracing.py\nTurn spans", fillcolor=lightyellow];
+        obs_diagnostics [label="failure_diagnostics.py\nSanitized errors", fillcolor=lightyellow];
+    }
+    
+    subgraph cluster_composition {
+        color=lightgray;
+        label="composition/ - Runtime Wiring";
+        labeljust=l;
+        
+        comp_common [label="common.py\nShared wiring", fillcolor=lightgray];
+        comp_daytona [label="daytona.py\nDaytona config", fillcolor=lightgray];
+        comp_deno [label="deno.py\nDeno config", fillcolor=lightgray];
+        comp_testing [label="testing.py\nTest fixtures", fillcolor=lightgray];
+    }
+    
+    subgraph cluster_support {
+        color=silver;
+        label="Support modules";
+        labeljust=l;
+        
+        app_main [label="app.py\nFastAPI factory", fillcolor=lightgray];
+        artifacts_promotion [label="promotion.py\nArtifact promotion", fillcolor=lightgray];
+        artifacts_models [label="models.py\nArtifact types", fillcolor=lightgray];
+        result_snapshot [label="result_snapshot.py\nPrivate snapshot", fillcolor=lightgray];
+        snapshot_contract [label="snapshot_contract.py\nSnapshot interface", fillcolor=lightgray];
+    }
+    
+    // Dependencies from code evidence
+    // api dependencies
+    api_routes_turns -> api_schemas
+    api_routes_turns -> api_sse
+    api_routes_turns -> api_dependencies
+    api_sse -> api_schemas
+    
+    // chat dependencies
+    chat_coordinator -> chat_lifecycle
+    chat_coordinator -> chat_cleanup
+    chat_coordinator -> chat_preparation
+    chat_coordinator -> chat_context
+    chat_coordinator -> chat_claims
+    chat_lifecycle -> chat_lifecycle  # internal usage
+    chat_preparation -> chat_deno
+    
+    // rlm dependencies
+    rlm_runner -> rlm_factory
+    rlm_runner -> rlm_events
+    rlm_runner -> rlm_observer
+    rlm_runner -> rlm_guards
+    rlm_runner -> rlm_contract
+    rlm_runner -> rlm_lm_factory
+    rlm_runner -> rlm_sanitization
+    rlm_observer -> rlm_guards
+    rlm_events -> rlm_runner
+    
+    // daytona dependencies
+    daytona_session -> daytona_provisioning
+    daytona_session -> daytona_interpreter
+    daytona_session -> daytona_broker
+    daytona_interpreter -> daytona_workspace_fs
+    daytona_interpreter -> daytona_broker
+    daytona_workspace_fs -> daytona_gateway
+    daytona_session -> daytona_diagnostic
+    daytona_session -> daytona_bindings
+    
+    // files dependencies
+    files_lifecycle -> files_tools
+    files_workspace_tools -> files_host_volume
+    files_workspace_tools -> files_volume_storage
+    files_lifecycle -> files_safety
+    files_tools -> files_paths
+    
+    // skills dependencies
+    skills_resolver -> skills_catalog
+    skills_tools -> skills_catalog
+    skills_resolver -> skills_models
+    skills_signatures -> skills_models
+    
+    // persistence dependencies
+    persistence_db -> persistence_models
+    persistence_repo_sessions -> persistence_models
+    persistence_repo_turns -> persistence_models
+    persistence_repo_artifacts -> persistence_models
+    persistence_repo_attachments -> persistence_models
+    
+    // composition dependencies
+    comp_daytona -> daytona  # uses daytona package
+    comp_deno -> chat_deno  # uses Deno environment
+    comp_common -> comp_daytona
+    comp_common -> comp_deno
+    
+    // Cross-package dependencies (key flows)
+    app_main -> api_routes_turns
+    app_main -> api_routes_sessions
+    app_main -> comp_daytona
+    app_main -> comp_deno
+    
+    chat_coordinator -> rlm_runner  # executes RLM
+    chat_coordinator -> daytona_session  # acquires interpreter
+    chat_coordinator -> files_lifecycle  # manages attachments
+    chat_coordinator -> skills_tools  # provides skill tools
+    
+    rlm_runner -> daytona_interpreter  # uses Daytona interpreter
+    rlm_runner -> chat_deno  # or Deno interpreter
+    
+    chat_lifecycle -> artifacts_promotion  # promotes artifacts
+    chat_lifecycle -> result_snapshot  # creates snapshot
+    
+    // Evidence sources
+    // Source: src/fleet_rlm/**/*.py imports and direct instantiations
+}
