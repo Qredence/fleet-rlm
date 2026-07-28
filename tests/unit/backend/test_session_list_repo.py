@@ -11,6 +11,7 @@ from fleet_rlm.persistence.database import (
     create_session_factory,
     create_tables,
 )
+from fleet_rlm.persistence.models import UserRow, WorkspaceRow
 from fleet_rlm.persistence.repositories import SqlAlchemySessionCatalog
 from fleet_rlm.sessions.errors import SessionNotFoundError
 
@@ -55,4 +56,21 @@ async def test_get_owned_hides_foreign_workspace() -> None:
         await repo.get(created.id, user_id=user, workspace_id=ws_b)
     got = await repo.get(created.id, user_id=user, workspace_id=ws_a)
     assert got.id == created.id
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_create_seeds_parents_and_persists_session() -> None:
+    repo, engine = await _repo()
+    user, ws = uuid4(), uuid4()
+    created = await repo.create(user_id=user, workspace_id=ws, title="seeded")
+
+    factory = create_session_factory(engine)
+    async with factory() as db:
+        assert (await db.get(UserRow, user)) is not None
+        assert (await db.get(WorkspaceRow, ws)) is not None
+
+    got = await repo.get(created.id, user_id=user, workspace_id=ws)
+    assert got.id == created.id
+    assert got.title == "seeded"
     await engine.dispose()

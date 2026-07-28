@@ -20,7 +20,7 @@ from types import FrameType
 from typing import cast
 
 from fleet_rlm.config import load_runtime_settings
-from fleet_rlm.persistence.database import DatabaseCompatibilityError, check_database_compatibility
+from fleet_rlm.persistence.database import ensure_database_compatible
 
 SignalHandler = int | Callable[[int, FrameType | None], object] | None
 
@@ -125,11 +125,9 @@ def _validate_daytona_database(repo_root: Path) -> None:
     if not database_url:
         raise SupervisorError("Fleet database preflight failed; verify FLEET_DATABASE_URL")
     try:
-        asyncio.run(check_database_compatibility(database_url, repo_root=repo_root))
-    except DatabaseCompatibilityError as exc:
-        raise SupervisorError("Fleet database is not at Alembic head; run uv run python scripts/db_init.py") from exc
+        asyncio.run(ensure_database_compatible(database_url, repo_root=repo_root))
     except Exception as exc:
-        raise SupervisorError("Fleet database preflight failed; verify FLEET_DATABASE_URL") from exc
+        raise SupervisorError(str(exc)) from exc
 
 
 def _wait_until_ready(

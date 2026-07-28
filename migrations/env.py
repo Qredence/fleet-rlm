@@ -28,9 +28,14 @@ target_metadata = Base.metadata
 
 
 def _to_sync_url(url: str) -> str:
+    # Map driver-less Postgres URLs to the installed psycopg3 driver.
+    # ``postgresql://`` (no driver suffix) would otherwise resolve to
+    # SQLAlchemy's default psycopg2 driver, which is not a project dependency.
+    # Explicit drivers (``+psycopg2``, ``+pg8000``) are left untouched.
     return (
         url.replace("postgresql+asyncpg://", "postgresql+psycopg://", 1)
         .replace("postgres://", "postgresql+psycopg://", 1)
+        .replace("postgresql://", "postgresql+psycopg://", 1)
         .replace("sqlite+aiosqlite://", "sqlite://", 1)
     )
 

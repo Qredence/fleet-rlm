@@ -35,6 +35,10 @@ class DatabaseConnectionError(RuntimeError):
     """Raised when database connectivity cannot be validated safely."""
 
 
+# Single remediation path surfaced wherever migrations drift.
+REMEDIATION = "run `uv run python scripts/db_init.py`"
+
+
 def is_sqlite_url(url: str) -> bool:
     """Return True when the URL targets SQLite (offline/test helper path)."""
     cleaned = url.strip()
@@ -77,9 +81,28 @@ def normalize_database_url(url: str) -> str:
     return cleaned
 
 
+# Lakebase Postgres endpoints suspend when idle (scale-to-zero) and enforce a
+# 24h idle / 3-day max connection lifetime. Pre-ping detects connections closed
+# during suspension; recycle retires pooled connections well before the idle
+# bound so long-lived processes never reuse a server-closed connection.
+_POSTGRES_POOL_PRE_PING = True
+_POSTGRES_POOL_RECYCLE_SECONDS = 1800
+
+
+def _pool_kwargs_for_url(normalized_url: str) -> dict[str, object]:
+    """Pool kwargs for a normalized URL; Postgres only, SQLite keeps defaults."""
+    if normalized_url.startswith("postgresql+asyncpg://"):
+        return {
+            "pool_pre_ping": _POSTGRES_POOL_PRE_PING,
+            "pool_recycle": _POSTGRES_POOL_RECYCLE_SECONDS,
+        }
+    return {}
+
+
 def create_async_engine_from_url(url: str, *, echo: bool = False) -> AsyncEngine:
     """Build an async engine. Does not open connections until first use."""
-    return create_async_engine(normalize_database_url(url), echo=echo)
+    normalized = normalize_database_url(url)
+    return create_async_engine(normalized, echo=echo, **_pool_kwargs_for_url(normalized))
 
 
 def create_session_factory(engine: AsyncEngine) -> async_sessionmaker[AsyncSession]:
@@ -118,6 +141,24 @@ async def check_database_compatibility(
             raise DatabaseCompatibilityError("database revision does not match Alembic head")
     finally:
         await engine.dispose()
+
+
+async def ensure_database_compatible(database_url: str, *, repo_root: Path | None = None) -> None:
+    """Fail closed on unreachable DB or non-head schema, with sanitized cause.
+
+    Used by the supervisor preflight, composition startup, and the doctor
+    diagnostic so the failure policy and remediation message stay in one
+    place. Chains the original error for logs while exposing only closed
+    public messages.
+    """
+    try:
+        await check_database_compatibility(database_url, repo_root=repo_root)
+    except DatabaseCompatibilityError as exc:
+        raise DatabaseCompatibilityError(f"Fleet database is not at Alembic head; {REMEDIATION}") from exc
+    except DatabaseConnectionError:
+        raise
+    except Exception as exc:  # OSError, alembic CommandError, SQLAlchemyError
+        raise DatabaseConnectionError("Fleet database compatibility could not be verified") from exc
 
 
 async def create_tables(engine: AsyncEngine) -> None:
