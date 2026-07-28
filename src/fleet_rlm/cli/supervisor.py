@@ -20,7 +20,7 @@ from types import FrameType
 from typing import cast
 
 from fleet_rlm.config import load_runtime_settings
-from fleet_rlm.persistence.database import DatabaseCompatibilityError, check_database_compatibility
+from fleet_rlm.persistence.database import ensure_database_compatible
 
 SignalHandler = int | Callable[[int, FrameType | None], object] | None
 
@@ -125,11 +125,9 @@ def _validate_daytona_database(repo_root: Path) -> None:
     if not database_url:
         raise SupervisorError("Fleet database preflight failed; verify FLEET_DATABASE_URL")
     try:
-        asyncio.run(check_database_compatibility(database_url, repo_root=repo_root))
-    except DatabaseCompatibilityError as exc:
-        raise SupervisorError("Fleet database is not at Alembic head; run uv run python scripts/db_init.py") from exc
+        asyncio.run(ensure_database_compatible(database_url, repo_root=repo_root))
     except Exception as exc:
-        raise SupervisorError("Fleet database preflight failed; verify FLEET_DATABASE_URL") from exc
+        raise SupervisorError(str(exc)) from exc
 
 
 def _wait_until_ready(
@@ -212,10 +210,12 @@ def supervise(
     ]
     if reload:
         backend_command.append("--reload")
-    backend_env = {
-        **os.environ,
-        "FLEET_CONFIG_PROFILE": profile,
-    }
+    backend_env = {**os.environ}
+    # Explicit FLEET_CONFIG_PROFILE (e.g. from .env) is honored by
+    # _selected_runtime_profile during preflight, but the supervised backend
+    # must run the profile mapped to the requested run environment — the
+    # ambient value may be a CI/tooling override, not the user's intent.
+    backend_env["FLEET_CONFIG_PROFILE"] = profile
     backend_env.pop("FLEET_RUN_ENVIRONMENT", None)
     previous_handlers: dict[int, SignalHandler] = {}
     received_signal: int | None = None

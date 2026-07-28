@@ -170,3 +170,5 @@ transcript-vvqo_92l.jsonl
 # Factory-installed local skills and generated lock state
 skills-lock.json
 .factory/skills/
+
+plans

@@ -166,9 +166,9 @@ def test_daytona_database_preflight_maps_revision_mismatch(
     )
 
     async def reject_database(*_args: object, **_kwargs: object) -> None:
-        raise DatabaseCompatibilityError("database revision does not match Alembic head")
+        raise DatabaseCompatibilityError("Fleet database is not at Alembic head; run uv run python scripts/db_init.py")
 
-    monkeypatch.setattr(supervisor, "check_database_compatibility", reject_database)
+    monkeypatch.setattr(supervisor, "ensure_database_compatible", reject_database)
 
     with pytest.raises(
         supervisor.SupervisorError,
@@ -181,18 +181,21 @@ def test_daytona_database_preflight_sanitizes_connectivity_failure(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
+    # Sanitization lives in the shared ensure_database_compatible helper; the
+    # supervisor surfaces its already-sanitized message. Here the helper has
+    # already scrubbed the secret-bearing cause.
     secret_url = "postgresql+asyncpg://user:top-secret@private-db/fleet"
     monkeypatch.setattr(supervisor, "load_runtime_settings", lambda: SimpleNamespace(database_url=secret_url))
 
     async def reject_database(*_args: object, **_kwargs: object) -> None:
-        raise DatabaseConnectionError(f"could not connect to {secret_url}")
+        raise DatabaseConnectionError("Fleet database compatibility could not be verified")
 
-    monkeypatch.setattr(supervisor, "check_database_compatibility", reject_database)
+    monkeypatch.setattr(supervisor, "ensure_database_compatible", reject_database)
 
     with pytest.raises(supervisor.SupervisorError) as error:
         _VALIDATE_DAYTONA_DATABASE(tmp_path)
 
-    assert str(error.value) == "Fleet database preflight failed; verify FLEET_DATABASE_URL"
+    assert str(error.value) == "Fleet database compatibility could not be verified"
     assert "top-secret" not in str(error.value)
 
 

@@ -26,7 +26,7 @@ from fleet_rlm.daytona.provisioning import (
     volume_config_from_settings,
     workspace_volume_subpath,
 )
-from fleet_rlm.persistence.database import check_database_compatibility
+from fleet_rlm.persistence.database import ensure_database_compatible
 
 DoctorStepName = Literal["settings", "database", "provider", "sandbox", "interpreter", "cleanup"]
 DoctorFailureCategory = Literal[
@@ -99,7 +99,7 @@ class _ProductionDaytonaDoctorDependencies:
 
     async def check_database(self, settings: Settings) -> None:
         database_url = (settings.database_url or "").strip()
-        await check_database_compatibility(database_url)
+        await ensure_database_compatible(database_url)
 
     async def resolve_volume(self, settings: Settings) -> str:
         del settings

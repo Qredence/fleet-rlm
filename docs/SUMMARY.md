@@ -14,6 +14,7 @@
   * [Database](reference/database.md)
   * [Source Layout](reference/source-layout.md)
   * [Codebase Map](reference/codebase-map.md)
+* [Lakebase Postgres](how-to-guides/lakebase-postgres.md)
 * [Agent Harness](agent-harness/README.md)
   * [Feedback Loop](agent-harness/feedback-loop.md)
   * [Architecture Invariants](agent-harness/architecture-invariants.md)

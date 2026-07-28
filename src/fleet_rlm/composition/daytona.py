@@ -5,12 +5,14 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 from datetime import timedelta
+from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI
 
 from fleet_rlm.composition.common import CompositionError, clear_composition_state
 from fleet_rlm.config import Settings
+from fleet_rlm.persistence.database import ensure_database_compatible
 from fleet_rlm.skills.catalog import build_bundled_skill_catalog
 
 
@@ -114,6 +116,12 @@ async def build_daytona_composition(settings: Settings) -> DaytonaCompositionHan
     resources: Any | None = None
     gateway: Any | None = None
     try:
+        # Fail closed on an unreachable or non-head database, inside the
+        # cleanup scope so the engine above is always disposed on failure.
+        await ensure_database_compatible(
+            resolved.database_url or "",
+            repo_root=Path(__file__).resolve().parents[3],
+        )
         session_factory = create_session_factory(engine)
         cleanup = TurnCleanupSupervisor(max_jobs=8)
         resources = LiveKernelResources(

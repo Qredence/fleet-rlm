@@ -24,10 +24,68 @@ from typing import TYPE_CHECKING, cast
 if TYPE_CHECKING:
     from fleet_rlm.config import Settings
 
+from fleet_rlm.config import FleetConfigurationError
+
 logger = logging.getLogger(__name__)
 
 _TRACING_CONFIGURED = False
 _DEFAULT_TRACKING_URI = "databricks"
+_TRACE_DESTINATION_TAG = "mlflow.experiment.databricksTraceDestinationPath"
+
+
+def _validate_experiment_trace_location(settings: Settings) -> None:
+    """Verify the experiment's trace location matches Fleet configuration.
+
+    When the experiment already exists and is linked to a Unity Catalog trace
+    location, compare the stored destination path with the Fleet config. A
+    mismatch will cause ``mlflow.set_experiment`` to raise ``MlflowException``
+    (silently caught by ``configure_tracing``), so this preflight check catches
+    the mismatch early with a clear, actionable error.
+
+    Best-effort: if mlflow is unavailable or the Databricks call fails, it
+    returns silently — the normal code path will handle the mismatch later.
+
+    Raises:
+        FleetConfigurationError: If the existing experiment's trace destination
+            path differs from the configured Unity Catalog settings.
+    """
+    import mlflow
+
+    experiment_name = settings.mlflow_experiment_name
+    if experiment_name is None:
+        return
+
+    try:
+        from mlflow.exceptions import MlflowException
+    except ImportError:
+        return
+
+    try:
+        mlflow.set_tracking_uri(_DEFAULT_TRACKING_URI)
+        experiment = mlflow.get_experiment_by_name(experiment_name)
+    except (MlflowException, AttributeError):
+        return  # Unavailable — will fail at set_experiment time if mismatch
+
+    if experiment is None:
+        return
+
+    existing_destination = experiment.tags.get(_TRACE_DESTINATION_TAG)
+    if existing_destination is None:
+        return
+
+    expected_destination = (
+        f"{settings.mlflow_trace_catalog}.{settings.mlflow_trace_schema}.{settings.mlflow_trace_table_prefix}"
+    )
+
+    if existing_destination != expected_destination:
+        raise FleetConfigurationError(
+            f"MLflow experiment {settings.mlflow_experiment_name!r} is already "
+            f"linked to trace location {existing_destination!r}, but Fleet config "
+            f"specifies {expected_destination!r}. "
+            "Update FLEET_MLFLOW_TRACE_CATALOG, FLEET_MLFLOW_TRACE_SCHEMA, and "
+            "FLEET_MLFLOW_TRACE_TABLE_PREFIX in .env to match the existing experiment, "
+            "or set FLEET_MLFLOW_EXPERIMENT_NAME to create a new experiment."
+        )
 
 
 def configure_tracing(settings: Settings) -> None:
@@ -38,7 +96,9 @@ def configure_tracing(settings: Settings) -> None:
     settings are required only when the URI is ``databricks``.
 
     Safe to call multiple times; only the first invocation takes effect.
-    Never raises — logs warnings on failure.
+    Raises ``FleetConfigurationError`` when the experiment's Unity Catalog trace
+    location doesn't match the configured destination; otherwise logs warnings
+    on failure and continues.
     """
     global _TRACING_CONFIGURED
     if _TRACING_CONFIGURED:
@@ -82,6 +142,12 @@ def configure_tracing(settings: Settings) -> None:
         import mlflow.dspy
 
         mlflow.set_tracking_uri(tracking_uri)
+
+        # Preflight: catch trace-location mismatch before set_experiment.
+        # FleetConfigurationError propagates — all other failures are soft.
+        if tracking_uri == _DEFAULT_TRACKING_URI:
+            _validate_experiment_trace_location(settings)
+
         if tracking_uri == _DEFAULT_TRACKING_URI:
             from mlflow.entities.trace_location import UnityCatalog
 
@@ -102,5 +168,7 @@ def configure_tracing(settings: Settings) -> None:
             tracking_uri,
             settings.mlflow_experiment_name,
         )
+    except FleetConfigurationError:
+        raise  # Configuration errors propagate clearly
     except Exception:
         logger.warning("MLflow tracing setup failed; continuing without traces", exc_info=True)
