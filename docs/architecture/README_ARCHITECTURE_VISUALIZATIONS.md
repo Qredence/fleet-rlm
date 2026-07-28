@@ -203,11 +203,8 @@ All visualizations are grounded in actual source code:
 
 ## Related Documentation
 
-- [QoderWiki System](/QoderWiki) — Knowledge base overview
-- [Fleet RLM Backend](/FleetRLMBackend) — Backend subsystem deep dive
-- [Fleet Terminal Client](/FleetTerminalClient) — TUI application docs
-- [System Architecture](../overview/architecture.md) — High-level architecture
-- [Codebase Map](../docs/reference/codebase-map.md) — Module ownership mapping
+- [System Architecture](../architecture.md) — High-level architecture
+- [Codebase Map](../reference/codebase-map.md) — Module ownership mapping
 
 ---
 
