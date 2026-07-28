@@ -85,12 +85,11 @@ async def test_lakebase_pooled_dml_round_trip() -> None:
         async with factory() as session:
             assert (await session.execute(text("SELECT 1"))).scalar() == 1
 
-        async with factory() as session:
-            await session.execute(
+        async with engine.begin() as conn:
+            await conn.execute(
                 text("INSERT INTO fleet_users (id, external_subject) VALUES (:id, :subject)"),
                 {"id": user_id, "subject": subject},
             )
-            await session.commit()
             inserted = True
 
         async with factory() as session:
@@ -102,9 +101,8 @@ async def test_lakebase_pooled_dml_round_trip() -> None:
             ).scalar()
             assert fetched == subject
 
-        async with factory() as session:
-            await session.execute(text("DELETE FROM fleet_users WHERE id = :id"), {"id": user_id})
-            await session.commit()
+        async with engine.begin() as conn:
+            await conn.execute(text("DELETE FROM fleet_users WHERE id = :id"), {"id": user_id})
             inserted = False
 
         async with factory() as session:
@@ -117,11 +115,11 @@ async def test_lakebase_pooled_dml_round_trip() -> None:
             assert remaining == 0
     finally:
         # Remove the fixture row even if an assertion or the network failed
-        # mid-test so the shared dev instance does not accumulate orphans.
+        # mid-test so the shared dev instance does not accumulate orphans; a
+        # single PK-scoped DELETE in one transaction keeps cleanup atomic.
         if inserted:
-            async with factory() as session:
-                await session.execute(text("DELETE FROM fleet_users WHERE id = :id"), {"id": user_id})
-                await session.commit()
+            async with engine.begin() as conn:
+                await conn.execute(text("DELETE FROM fleet_users WHERE id = :id"), {"id": user_id})
         await engine.dispose()
 
 

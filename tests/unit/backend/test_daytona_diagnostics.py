@@ -8,6 +8,7 @@ from daytona import DaytonaError
 
 from fleet_rlm.config import Settings
 from fleet_rlm.daytona.errors import DaytonaAdapterError
+from fleet_rlm.persistence.database import DatabaseCompatibilityError
 
 
 class FakeDoctorDependencies:
@@ -207,6 +208,28 @@ async def test_daytona_doctor_categorizes_safe_failures_and_cleans_up(
     assert "/home/" not in failed.message
     assert ("delete" in dependencies.calls) is deleted
     assert dependencies.calls[-1] == "close"
+
+
+@pytest.mark.asyncio
+async def test_daytona_doctor_database_step_surfaces_sanitized_remediation() -> None:
+    from fleet_rlm.daytona.diagnostics import run_daytona_doctor
+
+    dependencies = FakeDoctorDependencies(
+        fail_at="database",
+        error=DatabaseCompatibilityError(
+            "Fleet database is not at Alembic head; run `uv run python scripts/db_init.py`"
+        ),
+    )
+
+    result = await run_daytona_doctor(doctor_settings(), dependencies=dependencies)
+
+    failed = next(step for step in result.steps if not step.ok)
+    assert failed.name == "database"
+    assert failed.category == "database"
+    assert failed.message == (
+        "Database connection or Alembic revision validation failed. "
+        "Fleet database is not at Alembic head; run `uv run python scripts/db_init.py`"
+    )
 
 
 @pytest.mark.asyncio

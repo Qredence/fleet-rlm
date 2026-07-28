@@ -26,7 +26,11 @@ from fleet_rlm.daytona.provisioning import (
     volume_config_from_settings,
     workspace_volume_subpath,
 )
-from fleet_rlm.persistence.database import ensure_database_compatible
+from fleet_rlm.persistence.database import (
+    DatabaseCompatibilityError,
+    DatabaseConnectionError,
+    ensure_database_compatible,
+)
 
 DoctorStepName = Literal["settings", "database", "provider", "sandbox", "interpreter", "cleanup"]
 DoctorFailureCategory = Literal[
@@ -256,7 +260,16 @@ def _failure_category(exc: BaseException, step: DoctorStepName) -> DoctorFailure
 
 def _failed_step(name: DoctorStepName, exc: BaseException) -> DaytonaDoctorStep:
     category = _failure_category(exc, name)
-    return DaytonaDoctorStep(name, False, _FAILURE_MESSAGES[category], category)
+    message = _FAILURE_MESSAGES[category]
+    if category == "database" and isinstance(exc, (DatabaseCompatibilityError, DatabaseConnectionError)):
+        # ensure_database_compatible raises these with closed, sanitized
+        # messages carrying the shared remediation hint; surface the top-level
+        # message only and never the chained cause, which may hold
+        # paths/SQLAlchemy internals.
+        sanitized = str(exc)
+        if sanitized:
+            message = f"{message} {sanitized}"
+    return DaytonaDoctorStep(name, False, message, category)
 
 
 def _settings_failure(settings: Settings) -> Exception | None:

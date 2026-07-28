@@ -195,7 +195,7 @@ def test_daytona_database_preflight_sanitizes_connectivity_failure(
     with pytest.raises(supervisor.SupervisorError) as error:
         _VALIDATE_DAYTONA_DATABASE(tmp_path)
 
-    assert str(error.value) == "Fleet database compatibility could not be verified"
+    assert str(error.value) == "Fleet database compatibility could not be verified; verify FLEET_DATABASE_URL"
     assert "top-secret" not in str(error.value)
 
 

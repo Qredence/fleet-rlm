@@ -53,10 +53,11 @@ class SqlAlchemySessionCatalog:
                 db.add(UserRow(id=user_id))
             if await db.get(WorkspaceRow, workspace_id) is None:
                 db.add(WorkspaceRow(id=workspace_id))
-            # Two-phase flush: parents first, then the dependent session row,
-            # all in one transaction. Defensive against Lakebase re-ping /
-            # scale-to-zero reconnection — guarantees parents are durable
-            # before the child INSERT observes the fleet_sessions FK.
+            # Two-phase flush: pre-flush parents so the child INSERT
+            # referencing the user/workspace FKs is emitted after the parent
+            # INSERTs within the same transaction (dependency-ordered UOW
+            # flush). Defensive against Lakebase re-ping / scale-to-zero
+            # reconnection.
             await db.flush()
             row = SessionRow(
                 id=uuid4(),

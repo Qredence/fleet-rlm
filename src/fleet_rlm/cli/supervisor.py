@@ -20,7 +20,7 @@ from types import FrameType
 from typing import cast
 
 from fleet_rlm.config import load_runtime_settings
-from fleet_rlm.persistence.database import ensure_database_compatible
+from fleet_rlm.persistence.database import DatabaseCompatibilityError, ensure_database_compatible
 
 SignalHandler = int | Callable[[int, FrameType | None], object] | None
 
@@ -126,8 +126,10 @@ def _validate_daytona_database(repo_root: Path) -> None:
         raise SupervisorError("Fleet database preflight failed; verify FLEET_DATABASE_URL")
     try:
         asyncio.run(ensure_database_compatible(database_url, repo_root=repo_root))
-    except Exception as exc:
+    except DatabaseCompatibilityError as exc:
         raise SupervisorError(str(exc)) from exc
+    except Exception as exc:
+        raise SupervisorError(f"{exc}; verify FLEET_DATABASE_URL") from exc
 
 
 def _wait_until_ready(
