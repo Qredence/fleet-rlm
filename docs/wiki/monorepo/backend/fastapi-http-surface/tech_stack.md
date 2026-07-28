@@ -1,0 +1,1 @@
+FastAPI with native `EventSourceResponse` for Server-Sent Events, Pydantic v2 models (`model_validator`, `ConfigDict(extra='forbid')`) for request/response validation, Python `Protocol` types for port abstractions (`AttachmentLifecyclePort`, `ArtifactReaderPort`), and an OpenAPI custom hook that injects a `FleetUIMessageChunk` oneOf schema for SSE event types.

@@ -1,0 +1,12 @@
+The module is organized as a layered adapter over the external `daytona` SDK with strict inward dependency direction:
+- `platform.py` builds the `AsyncDaytona` client via `build_daytona_client(settings)` and exposes `LiveDaytonaPlatform` / `LiveDaytonaVolumeClient` implementations of the `SandboxPlatform` / `VolumeClient` protocols plus state normalization (`normalize_state`, `sandbox_state`).
+- `provisioning.py` defines immutable specs (`DaytonaSandboxSpec`, `VolumeConfig`, `ExpectedWorkspaceMount`) and the `SandboxProvisioner` policy boundary for creation, mount verification, and volume layout enforcement; it also computes snapshot dependency digests from `snapshot-requirements.txt`.
+- `session_manager.py` owns the full lease lifecycle: admission control via `DaytonaAdmission` (bounded semaphore), per-session active-lease registry (`ActiveLeaseRegistry`), acquire/release/replace/quarantine/fencing, idle-stop scheduling, and persistence through the `BindingStoreLike` protocol.
+- `bindings.py` provides the `SandboxBinding` dataclass plus a SQLAlchemy-backed `BindingStore` and an in-memory `InMemoryBindingStore` test double.
+- `interpreter.py` implements `InterpreterBackend` adapters: an in-process `InProcessInterpreterBackend` and a `_SandboxCodeInterpreterBackend` over `sandbox.code_interpreter`, both wrapped by `DaytonaCodeInterpreter` which handles tool injection, observation, progress detection, and SUBMIT final-output mediation.
+- `http_broker.py` runs a small Python `http.server` threaded HTTP server inside each sandbox on port 3000 to bridge host tools across process boundaries using preview links and HMAC secrets.
+- `workspace_fs.py` exposes sync/async byte and text I/O over the mounted volume (`AsyncDaytonaVolumeFS`, `DaytonaSandboxVolumeFs`, `DaytonaSessionWorkspaceFS`, `AsyncDaytonaSessionWorkspaceFS`) backed by an agent script executed via `workspace_agent.py`.
+- `workspace_gateway.py` composes ephemeral sandboxes for one-off file operations and provides orphan cleanup utilities.
+- `run_environment.py` wires everything into Fleet's Turn preparation pipeline via `LiveKernelResources`, `DefaultTurnPreparer`, and capability preparation.
+- `errors.py` centralizes error classification, sanitization, and mapping so all provider exceptions surface as `DaytonaAdapterError` / `ProviderRequestError`.
+Dependency direction is strictly inward: session_manager → provisioning/platform/bindings → interpreter/http_broker/workspace_fs; nothing imports back into higher layers except through the explicit `__init__.py` re-exports.

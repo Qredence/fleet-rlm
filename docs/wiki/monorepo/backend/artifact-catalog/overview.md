@@ -1,0 +1,1 @@
+Stores, validates, and promotes text/markdown/json artifacts with SHA-256 integrity checks, exposing a local catalog plus async reader/gateway abstractions backed by Volume storage.

@@ -1,0 +1,5 @@
+- Every script defines a top-level `main(argv=None)` returning an integer exit code and exposes it through `argparse`, invoked via `raise SystemExit(main())` at module bottom.
+- Repository root resolution follows the pattern `ROOT = Path(__file__).resolve().parents[1]` so scripts remain relocatable within the workspace tree.
+- CLI commands are registered as subparsers with `parser.add_subparsers(dest="command", required=True)` and each command handler is attached via `set_defaults(func=...)`.
+- Environment configuration is loaded through `dotenv.load_dotenv(..., override=False)` before reading `os.getenv(...)`, allowing explicit CLI flags to override env vars.
+- Validation scripts print human-readable messages to `sys.stderr` on errors and return non-zero exit codes to signal failure to callers.

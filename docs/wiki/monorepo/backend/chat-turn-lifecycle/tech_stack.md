@@ -1,0 +1,1 @@
+Pure Python asyncio with `asyncio.timeout_at`, `asyncio.shield`, and `asyncio.wait(..., return_when=FIRST_COMPLETED)` for cooperative cancellation and heartbeat-lost detection. Uses `dspy` for model execution, `uuid.UUID` for identifiers, and dataclasses with `slots=True` for memory-efficient value objects. No external framework — protocols define all interfaces.

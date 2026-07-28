@@ -1,0 +1,1 @@
+Runtime behavior is selected via the `FLEET_CONFIG_PROFILE` environment variable pointing to a profile in `config/fleet.toml`; the CLI subcommands `fleet` and `fleet-rlm` launch the FastAPI app via uvicorn and can optionally supervise a Node.js pi-tui client alongside it.

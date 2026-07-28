@@ -1,0 +1,1 @@
+Python dataclasses with `frozen=True, slots=True` for immutable value objects; SHA-256 fingerprinting via `hashlib.sha256` for idempotent Turn input binding; DSPy `Tool` and `ToolEventView` for host-side tool exposure; strict JSON schema versioning (v1/v2 for TurnInput, v1 for CommittedTurn) with explicit codec classes.

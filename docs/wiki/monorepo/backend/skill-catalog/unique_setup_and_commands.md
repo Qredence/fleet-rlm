@@ -1,0 +1,1 @@
+No build step is required — Skills are loaded at runtime from the `fleet_rlm.skills.bundled` package via `importlib.resources`. Adding a new bundled Skill means adding a `_BUNDLED_SPECS` entry in `catalog.py` and placing a `SKILL.md` (plus optional `references/` and `scripts/`) under `bundled/<skill_name>/`.

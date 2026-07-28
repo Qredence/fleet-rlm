@@ -1,0 +1,1 @@
+pytest with `pytest-asyncio` for async tests, FastAPI `TestClient` for API contracts, Alembic for live database migration, and subprocess-based CLI smoke testing. JUnit XML reporting is post-processed for Smarter Testing compatibility.

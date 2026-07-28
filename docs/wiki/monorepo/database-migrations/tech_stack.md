@@ -1,0 +1,1 @@
+Alembic for migration orchestration, SQLAlchemy ORM models (via `fleet_rlm.persistence.models.Base`) for metadata-driven diffing, psycopg2-compatible sync driver for Postgres, and python-dotenv for configuration. Conditional index definitions use `sqlite_where` / `postgresql_where` clauses to support both SQLite and PostgreSQL dialects.

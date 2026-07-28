@@ -1,0 +1,6 @@
+- Every endpoint declares its dependencies via `Annotated[..., Depends(...)]` parameters, with reusable `*Dep` aliases defined in `dependencies.py` (e.g. `SessionCatalogDep`, `TurnCoordinatorDep`).
+- Request bodies use Pydantic models with `model_config = ConfigDict(extra="forbid")` and explicit `Field` constraints (length, pattern, min/max) plus optional `@model_validator(mode="after")` blocks for cross-field rules.
+- HTTP errors are raised as `HTTPException(status_code=..., detail={"code": "...", "message": "..."})` using the canonical codes from `_STATUS_DEFAULTS` and `_DETAIL_CODES` in `errors.py`, so the global exception handler can normalize them into `ErrorResponse`.
+- Each route file creates a dedicated `APIRouter(tags=["..."])` and exports it, keeping endpoints scoped to a single resource namespace under `/api/...`.
+- Internal identity is always obtained through the `LocalScope` dependency (`identity: Annotated[LocalScope, Depends(get_local_scope)]`) rather than direct user parsing, enforcing the single-user BYOK model.
+- Domain exceptions are caught and re-raised as typed `HTTPException`s with specific error codes (e.g. `session_not_found`, `turn_in_progress`, `invalid_skill_selection`) instead of leaking stack traces.

@@ -1,0 +1,6 @@
+- Domain types are declared as frozen dataclasses with `slots=True` and never expose raw host paths — only logical sandbox/Volume paths and opaque storage refs.
+- All user-facing exceptions inherit from `ArtifactError` and are raised through the three subclasses `ArtifactNotFoundError`, `ArtifactValidationError`, and `ArtifactStorageError`.
+- Validation logic is centralized in `safety.py` functions (`parse_kind`, `sanitize_title`, `validate_content_size`, `encode_content`) rather than inline checks at call sites.
+- Async read interfaces are expressed via `Protocol` classes (`ArtifactCatalog`, `ArtifactBlobGateway`, `RunArtifactSink`) so implementations can be swapped without changing callers.
+- Atomic persistence uses a temp file written under the catalog root followed by `os.replace` to avoid partial metadata/blob states.
+- Authorization is enforced per operation by passing `user_id` and `workspace_id` and comparing them against stored record fields in `_authorize`.

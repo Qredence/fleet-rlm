@@ -1,0 +1,1 @@
+FastAPI for HTTP/SSE, SQLAlchemy async ORM for persistence, DSPy for RLM turn execution, MLflow for optional tracing, Pydantic v2 + pydantic-settings for typed configuration, dotenv/TOML for policy profiles, and uvicorn as the ASGI server invoked by the CLI.

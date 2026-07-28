@@ -1,0 +1,5 @@
+- All external dependencies (MLflow, Databricks SDK) are imported lazily inside functions and wrapped in try/except blocks so missing imports produce warnings and no-op behavior rather than crashes.
+- Public-facing surfaces return frozen dataclasses with `slots=True` (`FailureDiagnostic`, `TraceHandle`) to keep diagnostic payloads immutable and memory-efficient.
+- State shared across async/sync boundaries uses `contextvars.ContextVar` (e.g. `_current_trace_id`) instead of globals, with explicit reset in finally blocks.
+- Configuration is fail-soft: every setup path logs a warning and returns early when required settings are missing or external services are unavailable, never raising.
+- Module-level configuration functions use a guard flag (`_TRACING_CONFIGURED`) to make repeated calls idempotent.

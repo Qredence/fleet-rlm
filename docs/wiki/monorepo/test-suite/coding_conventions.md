@@ -1,0 +1,6 @@
+- Each test file uses `from __future__ import annotations` for PEP 563-style type hints.
+- Environment isolation is done via `monkeypatch.setenv` / `monkeypatch.delenv` rather than direct `os.environ` mutation.
+- Async tests are decorated with `@pytest.mark.asyncio`, often combined with `@pytest.mark.parametrize` for scenario coverage.
+- Contract tests construct a minimal `Settings` object and build the app via `create_testing_app(settings=...)`, then exercise endpoints through `TestClient`.
+- Live integration tests that need a database call `upgrade_to_head(database_url)` from `tests.live.backend._database` to apply Alembic migrations against a fresh connection.
+- Tests that depend on optional external tools (e.g., Deno) use `@pytest.mark.skipif(shutil.which(...) is None, reason=...)` to skip gracefully.

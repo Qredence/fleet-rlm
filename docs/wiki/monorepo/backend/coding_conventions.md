@@ -1,0 +1,4 @@
+- All cross-cutting services are attached to `app.state` during the FastAPI lifespan so child layers access them through dependency injection rather than global imports.
+- Configuration flows exclusively through the `Settings` Pydantic model loaded from `.env` plus the TOML policy file, with no direct `os.environ` reads in business logic.
+- Each domain layer (`api`, `rlm`, `chat`, `artifacts`, `files`, `sessions`, `skills`, `daytona`, `persistence`, `observability`) is an independent package exposing only its public protocol surface to other layers.
+- Startup-time side effects (DB engines, sandbox interpreters, tracing clients) are deferred inside `@asynccontextmanager` blocks so they are created per-process and torn down cleanly.
