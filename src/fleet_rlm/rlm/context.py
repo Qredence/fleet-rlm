@@ -89,3 +89,4 @@ class RLMExecutionContext:
     cancellation_requested: AsyncCancellationProbe
     preparation_notices: tuple[PreparationNotice, ...]
     authority: RunAuthority = field(default_factory=RunAuthority)
+    selected_skill_count: int = 0

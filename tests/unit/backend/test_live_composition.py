@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+import asyncio
 from pathlib import Path
 from types import SimpleNamespace
 from uuid import uuid4
@@ -22,6 +23,32 @@ def test_composition_module_imports_without_credentials() -> None:
 
     assert composition.require_daytona_settings is not None
     assert composition.build_daytona_composition is not None
+
+
+@pytest.mark.asyncio
+async def test_daytona_startup_recovery_bounds_provider_fence() -> None:
+    from fleet_rlm.composition.daytona import _reconcile_daytona_settling
+
+    session_id = uuid4()
+    fence_calls: list[object] = []
+
+    class TurnState:
+        async def reconcile_settling(self, fence):
+            with pytest.raises(asyncio.TimeoutError):
+                await fence(session_id)
+
+    class SessionManager:
+        async def fence_session(self, value):
+            fence_calls.append(value)
+            await asyncio.sleep(60)
+
+    await _reconcile_daytona_settling(
+        TurnState(),
+        SessionManager(),
+        fence_timeout=0.01,
+    )
+
+    assert fence_calls == [session_id]
 
 
 @pytest.mark.parametrize("session_factory", [None, object()], ids=["local", "sql"])

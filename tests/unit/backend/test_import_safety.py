@@ -60,7 +60,7 @@ def test_create_app_returns_fastapi_without_side_effects(monkeypatch) -> None:
 
     from fleet_rlm.app import create_app
 
-    monkeypatch.setenv("FLEET_CONFIG_PROFILE", "daytona")
+    monkeypatch.setenv("FLEET_CONFIG_PROFILE", "daytona-bench")
     monkeypatch.setenv("FLEET_RUN_ENVIRONMENT", "daytona")
     app = create_app()
     assert isinstance(app, FastAPI)

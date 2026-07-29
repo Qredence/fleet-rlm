@@ -7,7 +7,7 @@ import logging
 from collections.abc import Awaitable
 from dataclasses import dataclass, field
 from hashlib import sha256
-from typing import Literal, Protocol, TypeAlias, TypeVar
+from typing import Any, Literal, Protocol, TypeAlias, TypeVar
 from uuid import UUID
 
 from fleet_rlm.artifacts.models import ArtifactAccess, ArtifactCandidate, ArtifactRef
@@ -22,7 +22,9 @@ from fleet_rlm.chat.turn_claim import (
     HeartbeatClaim,
     RevokeClaim,
 )
+from fleet_rlm.chat.turn_cleanup import TurnCleanupSupervisor, TurnCleanupUnavailableError
 from fleet_rlm.chat.turn_detail_policy import commit_success
+from fleet_rlm.observability.turn_tracing import turn_phase_span
 from fleet_rlm.result_snapshot import ResultSnapshotSink, encode_result_snapshot
 from fleet_rlm.rlm.context import AsyncCancellationProbe
 from fleet_rlm.rlm.dspy_contract import RLMUsage
@@ -229,12 +231,14 @@ class TurnLifecycleService:
         max_artifact_bytes: int,
         heartbeat_seconds: int = 10,
         stale_after_seconds: int = 60,
+        cleanup: TurnCleanupSupervisor | None = None,
     ) -> None:
         self._store = store
         self._promotion = ArtifactPromotion(max_bytes=max_artifact_bytes)
         self._max_artifact_bytes = max_artifact_bytes
         self.heartbeat_seconds = heartbeat_seconds
         self.stale_after_seconds = stale_after_seconds
+        self._cleanup = cleanup
 
     async def begin(self, request: BeginTurn) -> TurnStart:
         return await self._store.begin(request)
@@ -278,6 +282,7 @@ class TurnLifecycleService:
 
         written: list[str] = []
         snapshot_path: str | None = None
+        snapshot_task: asyncio.Task[Any] | None = None
         stage = "read_candidates"
         try:
             validated = await self._read_candidates(candidates, artifact_sink)
@@ -298,12 +303,10 @@ class TurnLifecycleService:
                     resolution.usage,
                 )
                 stage = "write_result_snapshot"
-                snapshot_write, write_cancelled = await _settle_owned(
-                    result_snapshot_sink.write(snapshot_path, snapshot)
-                )
-                snapshot_write.result()
-                if write_cancelled:
-                    raise asyncio.CancelledError
+                # Start the snapshot write before the commit so the volume
+                # round-trip overlaps with the DB transaction; reconciled after
+                # the commit is durable (see _reconcile_snapshot_after_commit).
+                snapshot_task = asyncio.ensure_future(result_snapshot_sink.write(snapshot_path, snapshot))
             stage = "commit_turn"
             commit_task, commit_cancelled = await _settle_owned(self._store.commit(turn, committed, promoted))
             try:
@@ -313,6 +316,9 @@ class TurnLifecycleService:
                     raise asyncio.CancelledError from None
                 raise
         except BaseException as exc:
+            if snapshot_task is not None:
+                # Never let an in-flight snapshot write race rollback removals.
+                await _settle_owned(snapshot_task)
             cleanup_cancelled = False
             if snapshot_path is not None:
                 cleanup_cancelled |= await self._rollback(result_snapshot_sink, (snapshot_path,))
@@ -339,7 +345,8 @@ class TurnLifecycleService:
             )
             return await self._transition_receipt(turn, FailClaim(_claim_failure(failure), failure.usage))
 
-        await self._rollback(artifact_sink, (candidate.staging_path for candidate in candidates))
+        await self._reconcile_snapshot_after_commit(snapshot_task, result_snapshot_sink, snapshot_path)
+        await self._settle_staging(artifact_sink, candidates)
         return receipt
 
     async def request_cancel(self, access: TurnAccess, run_id: UUID) -> CancelResult:
@@ -364,7 +371,8 @@ class TurnLifecycleService:
         return await self._store.transition_claim(turn, command)
 
     async def _transition_receipt(self, turn: ExecuteTurn, command: ClaimCommand) -> FailedRunReceipt:
-        receipt = await self._transition(turn, command)
+        with turn_phase_span("Turn.claim_transition", inputs={"command": type(command).__name__}):
+            receipt = await self._transition(turn, command)
         if receipt is None:
             raise TurnStateError("claim transition did not return a receipt")
         return receipt
@@ -376,12 +384,28 @@ class TurnLifecycleService:
     ) -> tuple[bytes, ...]:
         if sink is None:
             return ()
+        # Independent volume reads run concurrently; integrity validation stays
+        # sequential and ordered so the first bad candidate still fails fast.
+        reads = [
+            asyncio.ensure_future(sink.read(candidate.staging_path, max_bytes=self._max_artifact_bytes))
+            for candidate in candidates
+        ]
+        settled = [await _settle_owned(read) for read in reads]
         values: list[bytes] = []
-        for candidate in candidates:
-            data = await sink.read(candidate.staging_path, max_bytes=self._max_artifact_bytes)
+        cancellation_requested = False
+        for candidate, (read_task, read_cancelled) in zip(candidates, settled, strict=True):
+            cancellation_requested |= read_cancelled
+            try:
+                data = read_task.result()
+            except BaseException:
+                if read_cancelled:
+                    raise asyncio.CancelledError from None
+                raise
             if len(data) != candidate.byte_size or sha256(data).hexdigest() != candidate.checksum_sha256.lower():
                 raise TurnIntegrityError("Artifact Candidate bytes failed integrity validation")
             values.append(data)
+        if cancellation_requested:
+            raise asyncio.CancelledError
         return tuple(values)
 
     @staticmethod
@@ -416,6 +440,52 @@ class TurnLifecycleService:
                 )
             )
         return tuple(artifacts)
+
+    @staticmethod
+    async def _reconcile_snapshot_after_commit(
+        snapshot_task: asyncio.Task[Any] | None,
+        sink: ResultSnapshotSink | None,
+        snapshot_path: str | None,
+    ) -> None:
+        """Settle the overlapped result-snapshot write after the commit is durable.
+
+        The snapshot is a read cache, never referenced by the committed state:
+        its failure must not roll back a committed Turn. Post-commit errors are
+        logged and any partial snapshot bytes are removed best-effort.
+        """
+        if snapshot_task is None:
+            return
+        settled, cancelled = await _settle_owned(snapshot_task)
+        try:
+            settled.result()
+        except asyncio.CancelledError:
+            logger.warning("result snapshot write cancelled after commit; Turn remains committed")
+        except Exception:
+            logger.warning("result snapshot write failed after commit; Turn remains committed", exc_info=True)
+            if sink is not None and snapshot_path is not None:
+                await TurnLifecycleService._rollback(sink, (snapshot_path,))
+        else:
+            if cancelled:
+                logger.warning("result snapshot write saw cancellation after commit; Turn remains committed")
+
+    async def _settle_staging(
+        self,
+        sink: RunArtifactSink | None,
+        candidates: tuple[ArtifactCandidate, ...],
+    ) -> None:
+        """Remove staging candidates, detached when a cleanup supervisor is available."""
+        if self._cleanup is not None and sink is not None and candidates:
+            staging_paths = tuple(candidate.staging_path for candidate in candidates)
+
+            async def _remove_staging() -> None:
+                await self._rollback(sink, staging_paths)
+
+            try:
+                self._cleanup.submit(_remove_staging())
+                return
+            except TurnCleanupUnavailableError:
+                logger.warning("Turn cleanup capacity unavailable; settling staging inline")
+        await self._rollback(sink, (candidate.staging_path for candidate in candidates))
 
     @staticmethod
     async def _rollback(

@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-import os
+import asyncio
+import logging
 from dataclasses import dataclass
 from datetime import timedelta
 from pathlib import Path
@@ -14,6 +15,10 @@ from fleet_rlm.composition.common import CompositionError, clear_composition_sta
 from fleet_rlm.config import Settings
 from fleet_rlm.persistence.database import ensure_database_compatible
 from fleet_rlm.skills.catalog import build_bundled_skill_catalog
+
+logger = logging.getLogger(__name__)
+_ORPHAN_CLEANUP_TIMEOUT_SECONDS = 60
+_STARTUP_RECOVERY_FENCE_TIMEOUT_SECONDS = 15
 
 
 def require_daytona_settings(settings: Settings) -> None:
@@ -72,6 +77,20 @@ async def _dispose_components(
                 first_error = exc
     if first_error is not None and not suppress_errors:
         raise first_error
+
+
+async def _reconcile_daytona_settling(
+    turn_state: Any,
+    session_manager: Any,
+    *,
+    fence_timeout: float = _STARTUP_RECOVERY_FENCE_TIMEOUT_SECONDS,
+) -> None:
+    """Recover stale Turns without letting one provider fence block startup."""
+
+    async def bounded_fence(session_id: Any) -> None:
+        await asyncio.wait_for(session_manager.fence_session(session_id), timeout=fence_timeout)
+
+    await turn_state.reconcile_settling(bounded_fence)
 
 
 async def build_daytona_composition(settings: Settings) -> DaytonaCompositionHandles:
@@ -156,15 +175,21 @@ async def build_daytona_composition(settings: Settings) -> DaytonaCompositionHan
         )
         workspace_file_service = WorkspaceFileService(mounted_workspace_gateway)
         local_scope = LocalScope()
-        await cleanup_orphan_bytes(
-            gateway,
-            workspace_id=local_scope.workspace_id,
-            paths=volume_paths,
-            committed_storage_refs=await artifact_catalog.list_storage_refs(workspace_id=local_scope.workspace_id),
-            completed_runs=await artifact_catalog.list_completed_runs(workspace_id=local_scope.workspace_id),
-            active_runs=await artifact_catalog.list_active_runs(workspace_id=local_scope.workspace_id),
-            grace_period=timedelta(hours=1),
-        )
+        try:
+            async with asyncio.timeout(_ORPHAN_CLEANUP_TIMEOUT_SECONDS):
+                await cleanup_orphan_bytes(
+                    gateway,
+                    workspace_id=local_scope.workspace_id,
+                    paths=volume_paths,
+                    committed_storage_refs=await artifact_catalog.list_storage_refs(
+                        workspace_id=local_scope.workspace_id
+                    ),
+                    completed_runs=await artifact_catalog.list_completed_runs(workspace_id=local_scope.workspace_id),
+                    active_runs=await artifact_catalog.list_active_runs(workspace_id=local_scope.workspace_id),
+                    grace_period=timedelta(hours=1),
+                )
+        except TimeoutError:
+            logger.warning("Daytona orphan cleanup timed out; continuing startup")
         turn_preparation = build_turn_preparation(
             resources,
             attachment_lifecycle=attachment_lifecycle,
@@ -180,8 +205,9 @@ async def build_daytona_composition(settings: Settings) -> DaytonaCompositionHan
             max_artifact_bytes=resolved.max_artifact_bytes,
             heartbeat_seconds=resolved.run_heartbeat_seconds,
             stale_after_seconds=resolved.run_stale_after_seconds,
+            cleanup=cleanup,
         )
-        await turn_state.reconcile_settling(resources.session_manager.fence_session)
+        await _reconcile_daytona_settling(turn_state, resources.session_manager)
         coordinator = TurnCoordinator(
             lifecycle=lifecycle,
             preparation=turn_preparation,
@@ -219,13 +245,13 @@ async def install_daytona_composition(
     """Attach an already-migrated Daytona inventory to app state."""
     handles = await build_daytona_composition(settings)
     try:
-        from fleet_rlm.config import _CONFIG_PATH, _PROFILE_ENVIRONMENT
+        from fleet_rlm.config import _CONFIG_PATH, active_profile
         from fleet_rlm.config_policy import ConfigPolicyService
 
         app.state.composition_ready = True
         app.state.config_policy = ConfigPolicyService(
             _CONFIG_PATH,
-            active_profile=(os.environ.get(_PROFILE_ENVIRONMENT) or settings._dotenv_values.get(_PROFILE_ENVIRONMENT)),
+            active_profile=active_profile(settings),
         )
         app.state.run_environment_resources = handles.resources
         app.state.db_engine = handles.resources.engine

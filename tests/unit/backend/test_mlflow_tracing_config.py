@@ -79,6 +79,10 @@ def _install_fake_mlflow(
     monkeypatch.setitem(sys.modules, "mlflow", mlflow)
     monkeypatch.setitem(sys.modules, "mlflow.dspy", dspy_mod)
     monkeypatch.setitem(sys.modules, "mlflow.entities.trace_location", trace_location)
+    # A previously imported real ``mlflow.exceptions`` would otherwise survive
+    # this fake and change _validate_experiment_trace_location's control flow;
+    # ``None`` makes the submodule import raise ImportError deterministically.
+    monkeypatch.setitem(sys.modules, "mlflow.exceptions", None)
     return calls
 
 
