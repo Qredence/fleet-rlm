@@ -187,10 +187,10 @@ def test_sandbox_backend_uses_one_explicit_context_per_run_and_fails_closed() ->
             self.created.append(context)
             return context
 
-        def run_code(self, code: str, *, context: object):
-            del code
+        def run_code(self, code: str, *, context: object, timeout: int | None = None):
+            del code, timeout
             assert context is self.created[-1]
-            return type("Result", (), {"stdout": "ok", "error": None})()
+            return type("Result", (), {"stdout": "ok", "stderr": "", "error": None})()
 
         def delete_context(self, context: object) -> None:
             self.deleted.append(context)

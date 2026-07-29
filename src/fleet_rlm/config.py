@@ -21,7 +21,7 @@ from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, SecretStr, field
 from fleet_rlm.snapshot_contract import validate_snapshot_name
 
 _CONFIG_PATH = Path(__file__).resolve().parents[2] / "config" / "fleet.toml"
-_PROFILE_ENVIRONMENT = "FLEET_CONFIG_PROFILE"
+_PROFILE_ENVIRONMENT = "FLEET_CONFIG_PROFILE"  # deprecated; not used to select the active profile
 _ENVIRONMENT_NAME = re.compile(r"^[A-Z][A-Z0-9_]*$")
 
 
@@ -39,6 +39,7 @@ class LLMRoleSettings(BaseModel):
     base_url: str | None = None
     max_tokens: int | None = Field(default=None, ge=1)
     temperature: float | None = None
+    reasoning_effort: Literal["none", "low", "medium", "high"] | None = None
     cache: bool = True
     num_retries: int = Field(default=3, ge=0)
 
@@ -119,6 +120,8 @@ class Settings(BaseModel):
     rlm_max_iterations: int = Field(default=20, gt=0)
     rlm_max_llm_calls: int = Field(default=50, gt=0)
     rlm_max_output_chars: int = Field(default=10_000, gt=0)
+    rlm_max_execution_output_chars: int = Field(default=4_000, gt=0)
+    rlm_execution_timeout_s: int = Field(default=120, gt=0)
     run_heartbeat_seconds: int = Field(default=10, gt=0)
     run_stale_after_seconds: int = Field(default=60, gt=0)
     rlm_verbose: bool = True
@@ -127,12 +130,14 @@ class Settings(BaseModel):
     root_llm_base_url: str | None = None
     root_llm_max_tokens: int | None = Field(default=None, ge=1)
     root_llm_temperature: float | None = None
+    root_llm_reasoning_effort: Literal["none", "low", "medium", "high"] | None = None
     root_llm_cache: bool = True
     root_llm_num_retries: int = Field(default=3, ge=0)
     sub_llm_api_key_env: str = "FLEET_LLM_API_KEY"
     sub_llm_base_url: str | None = None
     sub_llm_max_tokens: int | None = Field(default=None, ge=1)
     sub_llm_temperature: float | None = None
+    sub_llm_reasoning_effort: Literal["none", "low", "medium", "high"] | None = None
     sub_llm_cache: bool = True
     sub_llm_num_retries: int = Field(default=3, ge=0)
     mlflow_tracing_enabled: bool = Field(
@@ -156,6 +161,7 @@ class Settings(BaseModel):
     mlflow_trace_table_prefix: str | None = Field(default=None)
     mlflow_tracing_sql_warehouse_id: str | None = Field(default=None)
     _dotenv_values: dict[str, str] = PrivateAttr(default_factory=dict)
+    _active_profile: str | None = PrivateAttr(default=None)
 
     @model_validator(mode="after")
     def _validate_run_liveness(self) -> Settings:
@@ -198,6 +204,7 @@ class Settings(BaseModel):
             base_url=getattr(self, f"{prefix}_base_url"),
             max_tokens=getattr(self, f"{prefix}_max_tokens"),
             temperature=getattr(self, f"{prefix}_temperature"),
+            reasoning_effort=getattr(self, f"{prefix}_reasoning_effort"),
             cache=getattr(self, f"{prefix}_cache"),
             num_retries=getattr(self, f"{prefix}_num_retries"),
         )
@@ -215,7 +222,16 @@ _TABLE_KEYS: dict[str, frozenset[str]] = {
         }
     ),
     "llm": frozenset({"root", "sub"}),
-    "rlm": frozenset({"max_iterations", "max_llm_calls", "max_output_chars", "verbose"}),
+    "rlm": frozenset(
+        {
+            "max_iterations",
+            "max_llm_calls",
+            "max_output_chars",
+            "max_execution_output_chars",
+            "execution_timeout_s",
+            "verbose",
+        }
+    ),
     "storage": frozenset({"data_root", "max_upload_bytes", "max_artifact_bytes", "database_url_env"}),
     "daytona": frozenset({"api_key_env", "snapshot", "org_id", "volume_name", "volume_mount_path"}),
     "logging": frozenset({"level"}),
@@ -238,7 +254,17 @@ _TABLE_KEYS: dict[str, frozenset[str]] = {
     ),
 }
 _ROLE_KEYS = frozenset(
-    {"model", "api_key_env", "base_url", "base_url_env", "max_tokens", "temperature", "cache", "num_retries"}
+    {
+        "model",
+        "api_key_env",
+        "base_url",
+        "base_url_env",
+        "max_tokens",
+        "temperature",
+        "reasoning_effort",
+        "cache",
+        "num_retries",
+    }
 )
 
 
@@ -353,6 +379,8 @@ def _flatten_policy(policy: Mapping[str, Any]) -> dict[str, Any]:
         "rlm_max_iterations": rlm.get("max_iterations"),
         "rlm_max_llm_calls": rlm.get("max_llm_calls"),
         "rlm_max_output_chars": rlm.get("max_output_chars"),
+        "rlm_max_execution_output_chars": rlm.get("max_execution_output_chars"),
+        "rlm_execution_timeout_s": rlm.get("execution_timeout_s"),
         "rlm_verbose": rlm.get("verbose"),
         "data_root": storage.get("data_root"),
         "max_upload_bytes": storage.get("max_upload_bytes"),
@@ -390,6 +418,7 @@ def _flatten_policy(policy: Mapping[str, Any]) -> dict[str, Any]:
         values[f"{role}_llm_base_url_env"] = role_values.get("base_url_env")
         values[f"{role}_llm_max_tokens"] = role_values.get("max_tokens")
         values[f"{role}_llm_temperature"] = role_values.get("temperature")
+        values[f"{role}_llm_reasoning_effort"] = role_values.get("reasoning_effort")
         values[f"{role}_llm_cache"] = role_values.get("cache")
         values[f"{role}_llm_num_retries"] = role_values.get("num_retries")
     optional = {
@@ -410,6 +439,8 @@ def _flatten_policy(policy: Mapping[str, Any]) -> dict[str, Any]:
         "sub_llm_max_tokens",
         "root_llm_temperature",
         "sub_llm_temperature",
+        "root_llm_reasoning_effort",
+        "sub_llm_reasoning_effort",
     }
     missing = sorted(key for key, value in values.items() if value is None and key not in optional)
     if missing:
@@ -431,9 +462,6 @@ def _resolve_environment_value(name: str | None, dotenv: Mapping[str, str | None
 def load_runtime_settings() -> Settings:
     """Load the one required, restart-only Fleet policy profile for production."""
     dotenv = dotenv_values(".env")
-    profile = (os.environ.get(_PROFILE_ENVIRONMENT) or dotenv.get(_PROFILE_ENVIRONMENT) or "").strip()
-    if not profile:
-        raise FleetConfigurationError(f"{_PROFILE_ENVIRONMENT} is required")
     if not _CONFIG_PATH.is_file():
         raise FleetConfigurationError(f"required Fleet configuration file is missing: {_CONFIG_PATH}")
     try:
@@ -446,11 +474,25 @@ def load_runtime_settings() -> Settings:
     if unknown:
         raise FleetConfigurationError(f"unknown configuration key(s): {', '.join(sorted(unknown))}")
     config = _require_mapping(root.get("config", {}), "config")
-    if config != {"schema_version": 1}:
+    if config.get("schema_version") != 1:
         raise FleetConfigurationError("config.schema_version must be 1")
+    unknown_config = set(config).difference({"schema_version", "default_profile"})
+    if unknown_config:
+        raise FleetConfigurationError(f"unknown configuration key(s) at config: {', '.join(sorted(unknown_config))}")
+    default_profile = config.get("default_profile")
+    if default_profile is not None and not isinstance(default_profile, str):
+        raise FleetConfigurationError("config.default_profile must be a string")
     defaults = _require_mapping(root.get("defaults", {}), "defaults")
     profiles = _require_mapping(root.get("profiles", {}), "profiles")
     _validate_policy_table(defaults, "defaults")
+    if not profiles:
+        raise FleetConfigurationError("config.profiles must declare at least one profile")
+    profile = config.get("default_profile")
+    if profile is None:
+        if len(profiles) == 1:
+            profile = next(iter(profiles))
+        else:
+            raise FleetConfigurationError("config.default_profile is required when multiple profiles exist")
     if profile not in profiles:
         raise FleetConfigurationError(f"configured profile does not exist: {profile}")
     selected = _require_mapping(profiles[profile], f"profiles.{profile}")
@@ -476,7 +518,13 @@ def load_runtime_settings() -> Settings:
             values[settings_field] = _resolve_environment_value(reference, dotenv)
     settings = Settings(**values)
     settings._dotenv_values = {key: value for key, value in dotenv.items() if value is not None}
+    settings._active_profile = profile
     return settings
+
+
+def active_profile(settings: Settings) -> str | None:
+    """Return the TOML-selected active profile for the resolved settings."""
+    return settings._active_profile
 
 
 def configure_logging(settings: Settings) -> None:

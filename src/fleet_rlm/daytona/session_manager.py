@@ -24,7 +24,12 @@ from fleet_rlm.daytona.errors import (
     is_safe_pre_creation_retry,
     map_provider_error,
 )
-from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, sandbox_backend
+from fleet_rlm.daytona.interpreter import (
+    DEFAULT_EXECUTION_OUTPUT_CHARS,
+    DEFAULT_EXECUTION_TIMEOUT_S,
+    DaytonaCodeInterpreter,
+    sandbox_backend,
+)
 from fleet_rlm.daytona.platform import sandbox_state
 from fleet_rlm.daytona.provisioning import (
     DaytonaSandboxSpec,
@@ -185,15 +190,23 @@ def _build_interpreter(
     sandbox: Any,
     *,
     loop: asyncio.AbstractEventLoop,
+    execution_output_cap: int = DEFAULT_EXECUTION_OUTPUT_CHARS,
+    execution_timeout_s: int = DEFAULT_EXECUTION_TIMEOUT_S,
 ) -> DaytonaCodeInterpreter:
     """Attach a code-interpreter backend when the sandbox exposes one."""
     if hasattr(sandbox, "code_interpreter"):
-        return DaytonaCodeInterpreter(backend=sandbox_backend(sandbox, loop=loop))
+        return DaytonaCodeInterpreter(
+            backend=sandbox_backend(sandbox, loop=loop, timeout_s=execution_timeout_s),
+            execution_output_cap=execution_output_cap,
+        )
     # Fake/test sandboxes may already carry an interpreter attribute.
     existing = getattr(sandbox, "interpreter", None)
     if isinstance(existing, DaytonaCodeInterpreter):
         return existing
-    return DaytonaCodeInterpreter(backend=getattr(sandbox, "backend", None))
+    return DaytonaCodeInterpreter(
+        backend=getattr(sandbox, "backend", None),
+        execution_output_cap=execution_output_cap,
+    )
 
 
 def binding_matches_expected(binding: SandboxBinding, expected: ExpectedWorkspaceMount) -> bool:
@@ -224,6 +237,8 @@ class DaytonaSessionManager:
         sandbox_spec: DaytonaSandboxSpec,
         cleanup: TurnCleanupSupervisor | None = None,
         idle_stop_seconds: float | None = None,
+        execution_output_cap: int = DEFAULT_EXECUTION_OUTPUT_CHARS,
+        execution_timeout_s: int = DEFAULT_EXECUTION_TIMEOUT_S,
     ) -> None:
         self._platform = platform
         self._volume_client = volume_client
@@ -232,6 +247,8 @@ class DaytonaSessionManager:
         self._admission = admission or DaytonaAdmission()
         self._sandbox_spec = sandbox_spec
         self._cleanup = cleanup or TurnCleanupSupervisor()
+        self._execution_output_cap = execution_output_cap
+        self._execution_timeout_s = execution_timeout_s
         if idle_stop_seconds is not None and idle_stop_seconds <= 0:
             raise ValueError("idle_stop_seconds must be positive")
         self._idle_stop_seconds = idle_stop_seconds
@@ -503,7 +520,12 @@ class DaytonaSessionManager:
             )
         )
 
-        interpreter = _build_interpreter(sandbox, loop=asyncio.get_running_loop())
+        interpreter = _build_interpreter(
+            sandbox,
+            loop=asyncio.get_running_loop(),
+            execution_output_cap=self._execution_output_cap,
+            execution_timeout_s=self._execution_timeout_s,
+        )
         interpreter_id = f"interp-{sid}-{uuid4().hex[:8]}"
         return InterpreterLease(
             sandbox_id=sid,

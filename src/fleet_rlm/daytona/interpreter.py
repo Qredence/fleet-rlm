@@ -28,6 +28,7 @@ from fleet_rlm.daytona.errors import (
 )
 from fleet_rlm.daytona.http_broker import FleetFinalOutputError, build_submit_setup_code, extract_final_payload
 from fleet_rlm.files.workspace_tools import WorkspaceToolError
+from fleet_rlm.observability.turn_tracing import turn_phase_span
 from fleet_rlm.rlm.dspy_interpreter_contract import (
     PUBLIC_FINAL_OUTPUT_LABEL,
     copy_output_fields,
@@ -39,11 +40,14 @@ from fleet_rlm.rlm.dspy_interpreter_contract import (
 )
 from fleet_rlm.rlm.errors import TurnNoProgressError, TurnTerminalError
 from fleet_rlm.rlm.events import ObservationObserver, RLMCode, RLMOutput, StepFinished, StepStarted
-from fleet_rlm.rlm.sanitize import truncate_public_text
+from fleet_rlm.rlm.sanitize import truncate_head_tail, truncate_public_text
 from fleet_rlm.rlm.tool_observer import ToolEventView, ToolObserver, observe_tool
 
 if TYPE_CHECKING:
     from fleet_rlm.daytona.http_broker import DaytonaHttpToolBroker
+
+DEFAULT_EXECUTION_OUTPUT_CHARS = 4_000
+DEFAULT_EXECUTION_TIMEOUT_S = 120
 
 
 @dataclass(frozen=True, slots=True)
@@ -53,6 +57,7 @@ class BackendExecutionResult:
     stdout: str = ""
     final: dict[str, Any] | None = None
     error: str | None = None
+    stderr: str = ""
 
 
 class InProcessInterpreterBackend:
@@ -140,6 +145,15 @@ class InterpreterBackend(Protocol):
 
 class _RepairFeedback(str):
     """Detailed interpreter feedback returned to RLM but not public projection."""
+
+
+def _result_kind(result: Any) -> str:
+    """Bounded outcome classification for span metadata (never content)."""
+    if is_final_output(result):
+        return "final"
+    if isinstance(result, _RepairFeedback):
+        return "repair_error"
+    return "output"
 
 
 def _sync_await(awaitable: Any, loop: asyncio.AbstractEventLoop) -> Any:
@@ -246,9 +260,15 @@ def _assignments_preamble(variables: dict[str, object] | None) -> str:
 class _SandboxCodeInterpreterBackend:
     """Adapter over Daytona ``sandbox.code_interpreter`` (persistent context)."""
 
-    def __init__(self, sandbox: Any) -> None:
+    def __init__(self, sandbox: Any, *, timeout_s: int | None = None) -> None:
         self._sandbox = sandbox
         self._context: Any | None = None
+        if timeout_s is not None and int(timeout_s) <= 0:
+            raise DaytonaAdapterError(
+                message="execution timeout must be positive",
+                cause_type="InterpreterConfigurationError",
+            )
+        self._timeout_s: int | None = int(timeout_s) if timeout_s is not None else None
 
     @property
     def sandbox(self) -> Any:
@@ -264,29 +284,33 @@ class _SandboxCodeInterpreterBackend:
 
     def run(self, code: str, variables: dict[str, object] | None = None) -> BackendExecutionResult:
         context = self._ensure_context()
+        run_kwargs: dict[str, Any] = {"context": context}
+        if self._timeout_s is not None:
+            run_kwargs["timeout"] = self._timeout_s
         try:
             result = self._sandbox.code_interpreter.run_code(
                 _assignments_preamble(variables) + code,
-                context=context,
+                **run_kwargs,
             )
         except Exception as exc:
             raise map_provider_error(exc) from exc
 
         stdout = str(getattr(result, "stdout", None) or "")
+        stderr = str(getattr(result, "stderr", None) or "")
         final = extract_final_payload(stdout)
         error = getattr(result, "error", None)
         if error is not None:
             error_name = str(getattr(error, "name", "") or "")
             if error_name in {"FleetFinalOutputError", "_FleetFinalOutput"} and final is not None:
-                return BackendExecutionResult(stdout=stdout, final=final)
+                return BackendExecutionResult(stdout=stdout, final=final, stderr=stderr)
             raw = f"{getattr(error, 'name', 'Error')}: {getattr(error, 'value', error)}"
             # User-generated Python errors are part of the RLM feedback loop:
             # return them to DSPy so the next iteration can repair the code.
             # Provider/transport failures still raise above from run_code().
-            return BackendExecutionResult(stdout=stdout, error=sanitize_provider_message(raw))
+            return BackendExecutionResult(stdout=stdout, error=sanitize_provider_message(raw), stderr=stderr)
         if final is not None:
-            return BackendExecutionResult(stdout=stdout, final=final)
-        return BackendExecutionResult(stdout=stdout)
+            return BackendExecutionResult(stdout=stdout, final=final, stderr=stderr)
+        return BackendExecutionResult(stdout=stdout, stderr=stderr)
 
     def close(self) -> None:
         # Delete only the lease-owned context. Never delete the Sandbox here.
@@ -309,6 +333,7 @@ class DaytonaCodeInterpreter:
         backend: InterpreterBackend | None = None,
         tools: Mapping[str, Callable[..., Any]] | None = None,
         output_fields: list[dict[str, Any]] | None = None,
+        execution_output_cap: int = DEFAULT_EXECUTION_OUTPUT_CHARS,
     ) -> None:
         self._backend = backend
         self._tools: dict[str, Callable[..., Any]] = dict(tools or {})
@@ -320,6 +345,7 @@ class DaytonaCodeInterpreter:
         self._http_broker: DaytonaHttpToolBroker | None = None
         self._observer: ObservationObserver | None = None
         self._observation_max_chars = 10_000
+        self._execution_output_cap = max(1, int(execution_output_cap))
         self._observation_step = 0
         self._last_execution: tuple[str, str] | None = None
 
@@ -396,34 +422,56 @@ class DaytonaCodeInterpreter:
         step_started = time.perf_counter()
         self._observe(StepStarted(step))
         self._observe(RLMCode(truncate_public_text(code, max_len=self._observation_max_chars), step))
-        try:
-            self._ensure_bindings()
-            normalized_code = self._normalize_code(code)
-            if not normalized_code:
-                result = _RepairFeedback(
-                    "[Error] No executable code was provided; execute useful Python or call SUBMIT."
-                )
-            elif self._http_broker is not None:
-                result = self._execute_with_http_broker(code, variables)
-            else:
-                raw = self._backend.run(code, variables)
-                result = self._finalize(raw)
-            self._reject_repeated_no_progress(normalized_code, result)
-            self._observe(RLMOutput(self._public_output(result), step))
-            return result
-        except TurnTerminalError:
-            self._observe(RLMOutput("Execution failed", step))
-            raise
-        except DaytonaAdapterError:
-            self._observe(RLMOutput("Execution failed", step))
-            raise
-        except Exception as exc:
-            mapped = map_provider_error(exc)
-            self._observe(RLMOutput("Execution failed", step))
-            raise mapped from exc
-        finally:
-            duration_ms = int((time.perf_counter() - step_started) * 1_000)
-            self._observe(StepFinished(step, duration_ms))
+        with turn_phase_span(
+            "sandbox.execute",
+            inputs={
+                "iteration": step,
+                "code_chars": len(code or ""),
+                "variable_count": len(variables or {}),
+            },
+        ) as phase:
+            try:
+                bindings_started = time.perf_counter()
+                self._ensure_bindings()
+                ensure_bindings_ms = int((time.perf_counter() - bindings_started) * 1_000)
+                normalized_code = self._normalize_code(code)
+                execute_started = time.perf_counter()
+                if not normalized_code:
+                    result = _RepairFeedback(
+                        "[Error] No executable code was provided; execute useful Python or call SUBMIT."
+                    )
+                elif self._http_broker is not None:
+                    result = self._execute_with_http_broker(code, variables)
+                else:
+                    raw = self._backend.run(code, variables)
+                    result = self._finalize(raw)
+                execute_ms = int((time.perf_counter() - execute_started) * 1_000)
+                self._reject_repeated_no_progress(normalized_code, result)
+                self._observe(RLMOutput(self._public_output(result), step))
+                outputs: dict[str, Any] = {
+                    "path": "http_broker" if self._http_broker is not None else type(self._backend).__name__,
+                    "result_kind": _result_kind(result),
+                    "stdout_chars": len(str(result)),
+                }
+                if self._http_broker is not None:
+                    outputs["ensure_bindings_ms"] = ensure_bindings_ms
+                    outputs["execute_ms"] = execute_ms
+                    outputs.update(self._http_broker.last_execution_stats)
+                phase.set_outputs(outputs)
+                return result
+            except TurnTerminalError:
+                self._observe(RLMOutput("Execution failed", step))
+                raise
+            except DaytonaAdapterError:
+                self._observe(RLMOutput("Execution failed", step))
+                raise
+            except Exception as exc:
+                mapped = map_provider_error(exc)
+                self._observe(RLMOutput("Execution failed", step))
+                raise mapped from exc
+            finally:
+                duration_ms = int((time.perf_counter() - step_started) * 1_000)
+                self._observe(StepFinished(step, duration_ms))
 
     def shutdown(self) -> None:
         if self._shutdown:
@@ -509,14 +557,18 @@ class DaytonaCodeInterpreter:
                         f"{error}. Build the escaped fragment before the f-string expression, "
                         "then interpolate the variable."
                     )
-                return _RepairFeedback(f"[Error] {error}")
+                feedback = f"[Error] {error}"
+                stderr = truncate_head_tail(raw.stderr, max_chars=self._execution_output_cap).strip()
+                if stderr:
+                    feedback = f"{feedback}\nstderr: {stderr}"
+                return _RepairFeedback(feedback)
             if raw.final is not None:
                 return wrap_final_output(raw.final)
-            return raw.stdout
+            return truncate_head_tail(raw.stdout, max_chars=self._execution_output_cap)
         final = extract_final_payload(str(raw))
         if final is not None:
             return wrap_final_output(final)
-        return raw
+        return truncate_head_tail(str(raw), max_chars=self._execution_output_cap)
 
     @staticmethod
     def _normalize_code(code: str) -> str:
@@ -536,8 +588,13 @@ def sandbox_backend(
     sandbox: Any,
     *,
     loop: asyncio.AbstractEventLoop | None = None,
+    timeout_s: int | None = DEFAULT_EXECUTION_TIMEOUT_S,
 ) -> InterpreterBackend:
-    """Build a stateful backend from a live Daytona sandbox (daytona package only)."""
+    """Build a stateful backend from a live Daytona sandbox (daytona package only).
+
+    ``timeout_s`` bounds each ``run_code`` call (Daytona's SDK default is ten
+    minutes when unset); pass ``None`` to keep the SDK default.
+    """
     if loop is not None:
         sandbox = sync_sandbox(sandbox, loop)
-    return _SandboxCodeInterpreterBackend(sandbox)
+    return _SandboxCodeInterpreterBackend(sandbox, timeout_s=timeout_s)

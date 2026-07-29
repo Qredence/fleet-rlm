@@ -336,6 +336,8 @@ class LiveKernelResources:
             sandbox_spec=self.sandbox_spec,
             cleanup=cleanup,
             idle_stop_seconds=DEFAULT_IDLE_STOP_SECONDS,
+            execution_output_cap=self.settings.rlm_max_execution_output_chars,
+            execution_timeout_s=self.settings.rlm_execution_timeout_s,
         )
         self.models = build_model_bundle(self.settings)
         self._sandbox_ids: list[str] = []

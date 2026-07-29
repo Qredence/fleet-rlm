@@ -12,35 +12,134 @@ from pydantic import SecretStr, ValidationError
 from fleet_rlm.config import Settings
 
 
-def test_daytona_profiles_use_deepseek_for_both_model_roles() -> None:
+def test_daytona_profile_uses_specialized_bounded_model_roles() -> None:
     policy_path = Path(__file__).resolve().parents[3] / "config" / "fleet.toml"
     document = tomllib.loads(policy_path.read_text(encoding="utf-8"))
 
-    for profile in ("daytona", "databricks-daytona"):
-        llm = document["profiles"][profile]["llm"]
-        assert llm["root"]["model"] == "uscentral.default.deepseek-v4-flash"
-        assert llm["sub"]["model"] == "uscentral.default.deepseek-v4-flash"
-        assert llm["root"]["base_url_env"] == "FLEET_DATABRICKS_AI_GATEWAY_BASE_URL"
-        assert llm["sub"]["base_url_env"] == "FLEET_DATABRICKS_AI_GATEWAY_BASE_URL"
-        assert "base_url" not in llm["root"]
-        assert "base_url" not in llm["sub"]
+    assert set(document["profiles"]) == {
+        "local-deno",
+        "daytona",
+        "daytona-bench",
+        "daytona-bench-40",
+    }
+    assert document["defaults"]["daytona"]["snapshot"] == "fleet-rlm-python313-v4"
+    llm = document["profiles"]["daytona"]["llm"]
+    assert llm["root"] == {
+        "model": "uscentral.default.inkling",
+        "api_key_env": "DATABRICKS_TOKEN",
+        "base_url_env": "FLEET_DATABRICKS_AI_GATEWAY_BASE_URL",
+        "max_tokens": 8000,
+        "reasoning_effort": "none",
+    }
+    assert llm["sub"] == {
+        "model": "uscentral.ai_gateway.databricks-qwen35-122b-a10b",
+        "api_key_env": "DATABRICKS_TOKEN",
+        "base_url_env": "FLEET_DATABRICKS_AI_GATEWAY_BASE_URL",
+        "max_tokens": 8000,
+        "temperature": 0,
+        "reasoning_effort": "none",
+    }
 
 
-def test_daytona_profiles_route_tracing_to_managed_databricks_mlflow() -> None:
+def test_daytona_profile_routes_tracing_to_supervised_local_mlflow() -> None:
     policy_path = Path(__file__).resolve().parents[3] / "config" / "fleet.toml"
     document = tomllib.loads(policy_path.read_text(encoding="utf-8"))
 
-    for profile in ("daytona", "databricks-daytona"):
-        mlflow = document["profiles"][profile]["mlflow"]
-        assert mlflow == {
-            "tracing_enabled": True,
-            "tracking_uri": "databricks",
-            "experiment_name_env": "FLEET_MLFLOW_EXPERIMENT_NAME",
-            "trace_catalog_env": "FLEET_MLFLOW_TRACE_CATALOG",
-            "trace_schema_env": "FLEET_MLFLOW_TRACE_SCHEMA",
-            "trace_table_prefix_env": "FLEET_MLFLOW_TRACE_TABLE_PREFIX",
-            "tracing_sql_warehouse_id_env": "FLEET_MLFLOW_TRACING_SQL_WAREHOUSE_ID",
-        }
+    assert document["profiles"]["daytona"]["mlflow"] == {
+        "tracing_enabled": True,
+        "tracking_uri": "http://127.0.0.1:5001",
+        "experiment_name": "fleet-rlm",
+    }
+
+
+def test_daytona_profile_resolves_inkling_root_and_qwen_sub_with_gateway_params(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import fleet_rlm.config as config
+
+    monkeypatch.setenv("FLEET_DAYTONA_API_KEY", "test-daytona-key")
+    monkeypatch.setenv("DATABRICKS_TOKEN", "test-databricks-token")
+    monkeypatch.setenv("FLEET_DATABRICKS_AI_GATEWAY_BASE_URL", "https://gateway.example.test/v1")
+
+    settings = config.load_runtime_settings()
+
+    assert settings.root_model == "uscentral.default.inkling"
+    assert settings.sub_model == "uscentral.ai_gateway.databricks-qwen35-122b-a10b"
+    assert settings.root_llm_reasoning_effort == "none"
+    assert settings.sub_llm_reasoning_effort == "none"
+    assert settings.sub_llm_temperature == 0
+    assert settings.root_llm_max_tokens == settings.sub_llm_max_tokens == 8000
+    assert settings.mlflow_tracing_enabled is True
+    assert settings.mlflow_tracking_uri == "http://127.0.0.1:5001"
+
+
+def test_daytona_benchmark_profiles_use_qwen_without_cache_or_mlflow() -> None:
+    policy_path = Path(__file__).resolve().parents[3] / "config" / "fleet.toml"
+    document = tomllib.loads(policy_path.read_text(encoding="utf-8"))
+
+    for profile in ("daytona-bench", "daytona-bench-40"):
+        policy = document["profiles"][profile]
+        assert policy["runtime"]["environment"] == "daytona"
+        assert "mlflow" not in policy
+        for role in ("root", "sub"):
+            llm = policy["llm"][role]
+            assert llm["model"] == "databricks-qwen35-122b-a10b"
+            assert llm["api_key_env"] == "DATABRICKS_TOKEN"
+            assert llm["base_url_env"] == "FLEET_DATABRICKS_AI_GATEWAY_BASE_URL"
+            assert llm["cache"] is False
+            assert llm["max_tokens"] == 8000
+            assert "reasoning_effort" not in llm
+
+    assert "rlm" not in document["profiles"]["daytona-bench"]
+    assert document["profiles"]["daytona-bench-40"]["rlm"] == {"max_iterations": 40}
+
+
+def _select_profile(tmp_path: Path, *, profile: str, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Write a minimal TOML policy with the requested default_profile."""
+    source = Path("config/fleet.toml")
+    policy = tmp_path / "fleet.toml"
+    content = source.read_text(encoding="utf-8")
+    updated = content.replace('default_profile = "daytona"', f'default_profile = "{profile}"')
+    policy.write_text(updated, encoding="utf-8")
+    monkeypatch.setattr("fleet_rlm.config._CONFIG_PATH", policy)
+    return policy
+
+
+@pytest.mark.parametrize(("profile", "iterations"), [("daytona-bench", 20), ("daytona-bench-40", 40)])
+def test_daytona_benchmark_profiles_resolve_without_mlflow(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    profile: str,
+    iterations: int,
+) -> None:
+    import fleet_rlm.config as config
+
+    _select_profile(tmp_path, profile=profile, monkeypatch=monkeypatch)
+    monkeypatch.setenv("FLEET_DAYTONA_API_KEY", "test-daytona-key")
+    monkeypatch.setenv("DATABRICKS_TOKEN", "test-databricks-token")
+    monkeypatch.setenv("FLEET_DATABRICKS_AI_GATEWAY_BASE_URL", "https://gateway.example.test/v1")
+
+    settings = config.load_runtime_settings()
+
+    assert settings.run_environment == "daytona"
+    assert settings.root_model == "databricks-qwen35-122b-a10b"
+    assert settings.sub_model == settings.root_model
+    assert settings.daytona_snapshot == "fleet-rlm-python313-v4"
+    assert settings.root_llm_cache is False
+    assert settings.sub_llm_cache is False
+    assert settings.rlm_max_iterations == iterations
+    assert settings.mlflow_tracing_enabled is False
+
+
+def test_removed_databricks_daytona_profile_is_rejected(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    import fleet_rlm.config as config
+
+    # unknown default_profile in the committed policy is rejected even when it
+    # names a previously existing profile
+    _select_profile(tmp_path, profile="databricks-daytona", monkeypatch=monkeypatch)
+
+    with pytest.raises(config.FleetConfigurationError, match="configured profile does not exist"):
+        config.load_runtime_settings()
 
 
 def _policy(path: Path) -> None:
@@ -48,6 +147,7 @@ def _policy(path: Path) -> None:
         """
 [config]
 schema_version = 1
+default_profile = "local-deno"
 [defaults.application]
 name = "fleet-test"
 [defaults.runtime]
@@ -70,6 +170,8 @@ temperature = 0.2
 max_iterations = 3
 max_llm_calls = 4
 max_output_chars = 500
+max_execution_output_chars = 250
+execution_timeout_s = 90
 verbose = true
 [defaults.storage]
 data_root = ".fleet-test"
@@ -100,7 +202,6 @@ def test_runtime_settings_deep_merge_profile_and_keep_role_policy(
     _policy(policy)
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(config, "_CONFIG_PATH", policy)
-    monkeypatch.setenv("FLEET_CONFIG_PROFILE", "local-deno")
     monkeypatch.delenv("FLEET_RUN_ENVIRONMENT", raising=False)
 
     settings = config.load_runtime_settings()
@@ -120,7 +221,6 @@ def test_runtime_settings_ignores_stale_environment_policy_overrides(
     _policy(policy)
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(config, "_CONFIG_PATH", policy)
-    monkeypatch.setenv("FLEET_CONFIG_PROFILE", "local-deno")
     monkeypatch.delenv("FLEET_RUN_ENVIRONMENT", raising=False)
     monkeypatch.setenv("FLEET_ROOT_MODEL", "openai/override")
     monkeypatch.setenv("FLEET_RLM_MAX_ITERATIONS", "99")
@@ -141,6 +241,7 @@ def test_runtime_settings_resolves_only_toml_declared_environment_values(
     _policy(policy)
     policy.write_text(
         policy.read_text(encoding="utf-8")
+        .replace('default_profile = "local-deno"', 'default_profile = "daytona"')
         .replace(
             "max_artifact_bytes = 20",
             'max_artifact_bytes = 20\ndatabase_url_env = "DATABASE_URL"',
@@ -168,12 +269,11 @@ tracing_sql_warehouse_id_env = "TRACE_WAREHOUSE"
         encoding="utf-8",
     )
     (tmp_path / ".env").write_text(
-        "FLEET_CONFIG_PROFILE=daytona\nROOT_KEY=dotenv-root\nDATABASE_URL=sqlite+aiosqlite:///dotenv.sqlite3\nDAYTONA_KEY=dotenv-daytona\nAI_GATEWAY_URL=https://dotenv.example/ai-gateway/openai/v1\nEXPERIMENT_NAME=/Users/example/fleet\nTRACE_CATALOG=dotenv_catalog\nTRACE_SCHEMA=dotenv_schema\nTRACE_TABLE_PREFIX=dotenv_prefix\nTRACE_WAREHOUSE=dotenv-warehouse\n",
+        "ROOT_KEY=dotenv-root\nDATABASE_URL=sqlite+aiosqlite:///dotenv.sqlite3\nDAYTONA_KEY=dotenv-daytona\nAI_GATEWAY_URL=https://dotenv.example/ai-gateway/openai/v1\nEXPERIMENT_NAME=/Users/example/fleet\nTRACE_CATALOG=dotenv_catalog\nTRACE_SCHEMA=dotenv_schema\nTRACE_TABLE_PREFIX=dotenv_prefix\nTRACE_WAREHOUSE=dotenv-warehouse\n",
         encoding="utf-8",
     )
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(config, "_CONFIG_PATH", policy)
-    monkeypatch.delenv("FLEET_CONFIG_PROFILE", raising=False)
     monkeypatch.setenv("DATABASE_URL", "sqlite+aiosqlite:///process.sqlite3")
     monkeypatch.setenv("DAYTONA_KEY", "process-daytona")
     monkeypatch.setenv("AI_GATEWAY_URL", "https://process.example/ai-gateway/openai/v1")
@@ -202,10 +302,9 @@ def test_runtime_settings_loads_custom_role_keys_from_repository_dotenv(
 
     policy = tmp_path / "fleet.toml"
     _policy(policy)
-    (tmp_path / ".env").write_text("FLEET_CONFIG_PROFILE=local-deno\nROOT_KEY=dotenv-secret\n", encoding="utf-8")
+    (tmp_path / ".env").write_text("ROOT_KEY=dotenv-secret\n", encoding="utf-8")
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(config, "_CONFIG_PATH", policy)
-    monkeypatch.delenv("FLEET_CONFIG_PROFILE", raising=False)
     monkeypatch.delenv("FLEET_RUN_ENVIRONMENT", raising=False)
     monkeypatch.delenv("ROOT_KEY", raising=False)
 
@@ -226,7 +325,6 @@ def test_runtime_settings_reject_unknown_toml_key(monkeypatch: pytest.MonkeyPatc
         encoding="utf-8",
     )
     monkeypatch.setattr(config, "_CONFIG_PATH", policy)
-    monkeypatch.setenv("FLEET_CONFIG_PROFILE", "local-deno")
 
     with pytest.raises(config.FleetConfigurationError, match="unknown configuration key"):
         config.load_runtime_settings()

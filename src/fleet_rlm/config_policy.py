@@ -107,6 +107,20 @@ _FIELDS: tuple[PolicyField, ...] = (
     PolicyField(
         "rlm.max_output_chars", "RLM", "Maximum output characters", "number", settings_field="rlm_max_output_chars"
     ),
+    PolicyField(
+        "rlm.max_execution_output_chars",
+        "RLM",
+        "Maximum execution output characters",
+        "number",
+        settings_field="rlm_max_execution_output_chars",
+    ),
+    PolicyField(
+        "rlm.execution_timeout_s",
+        "RLM",
+        "Sandbox execution timeout (seconds)",
+        "number",
+        settings_field="rlm_execution_timeout_s",
+    ),
     PolicyField("rlm.verbose", "RLM", "DSPy host verbose logging", "boolean", settings_field="rlm_verbose"),
     PolicyField("storage.data_root", "Storage", "Data root", "text", settings_field="data_root"),
     PolicyField(
@@ -169,6 +183,8 @@ _FIELD_BY_PATH = {field.path: field for field in _FIELDS}
 class PolicySnapshot:
     revision: str
     active_profile: str | None
+    default_profile: str | None
+    available_profiles: tuple[str, ...]
     scopes: tuple[dict[str, Any], ...]
 
 
@@ -203,6 +219,28 @@ class ConfigPolicyService:
             updated, updated_raw = self._read_document()
             return self._snapshot(updated, updated_raw)
 
+    def set_default_profile(self, name: str, *, revision: str) -> PolicySnapshot:
+        if not isinstance(name, str) or not name.strip():
+            raise FleetConfigurationError("profile name must be a non-empty string")
+        target = name.strip()
+        with self._lock:
+            document, raw = self._read_document()
+            if revision != self._revision(raw):
+                raise PolicyConflictError("settings changed; reload before saving")
+            profiles = document.get("profiles")
+            if not isinstance(profiles, dict) or target not in profiles:
+                raise FleetConfigurationError(f"configured profile does not exist: {target}")
+            config = document.get("config")
+            if not isinstance(config, dict):
+                config = tomlkit.table()
+                document["config"] = config
+            config["default_profile"] = target
+            rendered = tomlkit.dumps(document)
+            self._validate(rendered)
+            self._atomic_write(rendered)
+            updated, updated_raw = self._read_document()
+            return self._snapshot(updated, updated_raw)
+
     def _read_document(self) -> tuple[TOMLDocument, str]:
         if self._path.is_symlink() or not self._path.is_file():
             raise PolicyAccessError("Fleet configuration file is unavailable")
@@ -218,11 +256,21 @@ class ConfigPolicyService:
         if isinstance(defaults, dict):
             scopes.append(self._scope("defaults", defaults))
         profiles = document.get("profiles")
+        available: list[str] = []
         if isinstance(profiles, dict):
             for name, profile in profiles.items():
                 if isinstance(name, str) and isinstance(profile, dict):
+                    available.append(name)
                     scopes.append(self._scope(name, profile, inherited=defaults))
-        return PolicySnapshot(self._revision(raw), self._active_profile, tuple(scopes))
+        config = document.get("config")
+        default_profile = config.get("default_profile") if isinstance(config, dict) else None
+        return PolicySnapshot(
+            self._revision(raw),
+            self._active_profile,
+            default_profile if isinstance(default_profile, str) else None,
+            tuple(available),
+            tuple(scopes),
+        )
 
     def _scope(
         self,
@@ -317,8 +365,14 @@ class ConfigPolicyService:
             raise FleetConfigurationError("invalid Fleet configuration TOML") from exc
         if set(root).difference({"config", "defaults", "profiles"}):
             raise FleetConfigurationError("unknown configuration key")
-        if _require_mapping(root.get("config", {}), "config") != {"schema_version": 1}:
+        config_table = _require_mapping(root.get("config", {}), "config")
+        if set(config_table).difference({"schema_version", "default_profile"}):
+            raise FleetConfigurationError("unknown configuration key")
+        if config_table.get("schema_version") != 1:
             raise FleetConfigurationError("config.schema_version must be 1")
+        default_profile = config_table.get("default_profile")
+        if default_profile is not None and not isinstance(default_profile, str):
+            raise FleetConfigurationError("config.default_profile must be a string")
         defaults = _require_mapping(root.get("defaults", {}), "defaults")
         profiles = _require_mapping(root.get("profiles", {}), "profiles")
         _validate_policy_table(defaults, "defaults")
