@@ -1,0 +1,1 @@
+Pure Python with `dataclass(frozen=True, slots=True)` for immutable records, `uuid.UUID` identifiers, `hashlib.sha256` for integrity, `tempfile.mkstemp` + `os.replace` for atomic writes, and `threading.Lock` for concurrent create serialization.

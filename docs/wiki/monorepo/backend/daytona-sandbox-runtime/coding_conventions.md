@@ -1,0 +1,6 @@
+- All provider SDK exceptions are funneled through `map_provider_error(exc)` and surfaced as `DaytonaAdapterError` or `ProviderRequestError` with a `cause_type` string, never leaking raw SDK types.
+- Immutable configuration and spec objects use `@dataclass(frozen=True, slots=True)` with validation in `__post_init__`, constructed via `from_settings(settings)` classmethods that read from a `Settings` object.
+- External protocol boundaries are declared as `typing.Protocol` classes (`SandboxPlatform`, `VolumeClient`, `BindingStoreLike`, `InterpreterBackend`) so implementations can be swapped for tests or alternative providers.
+- Workspace volume subpaths are always validated through `require_scoped_volume_subpath(...)` enforcing the `workspaces/<workspace_id>` prefix with no traversal, and workspace IDs go through `require_non_zero_workspace_id`.
+- Asynchronous work that may be cancelled by callers uses `asyncio.shield` plus a settle loop (`_settle_owned_thread`, `_settle_provider_acquisition`) so long-running provider calls are not aborted mid-flight.
+- Public APIs expose both sync and async variants of filesystem operations (e.g. `DaytonaSandboxVolumeFs` vs `AsyncDaytonaVolumeFS`, `DaytonaSessionWorkspaceFS` vs `AsyncDaytonaSessionWorkspaceFS`) sharing the same underlying sandbox handle.

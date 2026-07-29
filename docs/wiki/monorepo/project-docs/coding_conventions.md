@@ -1,0 +1,5 @@
+- Architecture Decisions are recorded as numbered ADR files under `adr/` with a fixed template containing Status, Context, Decision, and Consequences sections.
+- Each major documentation area has a top-level README that defines a prescribed reading path ordering for new contributors (e.g., agent-harness README lists steps 1–7 in order).
+- Reference documents consistently cite `openapi.yaml` as the authoritative HTTP contract and point to generated TypeScript types under `tools/fleet-tui/src/generated/` as the derived client surface.
+- Implementation plans and evidence are kept separate from canonical docs: active plans go under `superpowers/plans/`, historical/noncanonical artifacts under ignored `.scratch/archive/`, and legacy backend docs under `internal/legacy-backend/`.
+- Configuration is referenced via canonical `FLEET_*` environment variables throughout all guides and harness contracts rather than ad-hoc config file paths.

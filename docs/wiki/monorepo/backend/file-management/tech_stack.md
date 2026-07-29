@@ -1,0 +1,1 @@
+Python dataclasses with `frozen=True, slots=True` for immutable domain objects; `typing.Protocol` for backend abstraction; `dspy.Tool` for LLM tool exposure; SHA-256 checksums for integrity; `PurePosixPath` for logical path handling; default volume mount at `/home/daytona/fleet`.

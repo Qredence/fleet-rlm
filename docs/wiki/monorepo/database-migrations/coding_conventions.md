@@ -1,0 +1,5 @@
+- Each migration file follows the Alembic template with `revision`, `down_revision`, `branch_labels`, `depends_on` identifiers followed by `upgrade()` and `downgrade()` functions using `alembic.op` operations.
+- All table columns use UUID primary keys, timezone-aware `DateTime` timestamps with `server_default=sa.text("(CURRENT_TIMESTAMP)")`, and `ondelete="CASCADE"` foreign key constraints.
+- Data integrity is enforced through named `CheckConstraint` objects (e.g., `ck_fleet_attachments_byte_size`, `ck_fleet_runs_status`) alongside unique and indexed constraints.
+- Dialect-specific index definitions use parallel `sqlite_where` and `postgresql_where` clauses to keep a single migration script compatible with both SQLite and PostgreSQL.
+- Migration filenames use an Alembic-style short hash prefix followed by a descriptive snake_case name (e.g., `019f8c1d2e3f_add_run_recovery_scan_index.py`).

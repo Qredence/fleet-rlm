@@ -1,0 +1,6 @@
+Three focused modules under a single package:
+- `tracing.py` is the entry point that configures MLflow DSPy autolog against Databricks Unity Catalog. It reads Fleet settings (`FLEET_MLFLOW_*`) and bridges `DATABRICKS_HOST`/`DATABRICKS_TOKEN` from Pydantic's dotenv into the process environment before importing `mlflow` and `mlflow.dspy`. Configuration is idempotent via a module-level `_TRACING_CONFIGURED` flag.
+- `turn_tracing.py` provides per-Turn root spans through the `turn_trace` context manager, which yields a `TraceHandle` with an optional `trace_id` exposed via a `ContextVar` (`_current_trace_id`). All MLflow calls are wrapped in try/except so import or runtime failures fall back to no-op handles.
+- `failure_diagnostics.py` defines the frozen `FailureDiagnostic` dataclass and `normalize_turn_failure`, which walks exception chains to find a `DaytonaAdapterError` and classifies it via `daytona.errors` helpers, sanitizing messages for safe exposure.
+
+Dependency direction: `failure_diagnostics` depends on `fleet_rlm.daytona.errors`; `tracing` and `turn_tracing` depend only on MLflow/Databricks SDKs; the package `__init__.py` re-exports only the diagnostic surface (`FailureDiagnostic`, `normalize_turn_failure`), keeping tracing internals private.

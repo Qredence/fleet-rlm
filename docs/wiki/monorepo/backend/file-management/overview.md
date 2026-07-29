@@ -1,0 +1,1 @@
+Provides attachment upload/staging, durable Session Workspace file I/O, and dspy.Tool bindings for Fleet's RLM runs, backed by a validated mounted volume layout.

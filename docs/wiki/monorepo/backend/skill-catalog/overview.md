@@ -1,0 +1,1 @@
+Defines immutable bundled Skill metadata, validates and resolves version-pinned Skill selections, and exposes a thread-safe progressive tool host that lazily loads SKILL.md instructions and declared resources on demand.

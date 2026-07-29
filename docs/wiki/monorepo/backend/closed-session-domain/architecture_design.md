@@ -1,0 +1,7 @@
+The module is organized into four cohesive layers exposed through `__init__.py`:
+- `models.py` holds frozen dataclasses (`TurnAccess`, `TurnInput`, `SessionHistory`, `UserTurnRecord`, `AssistantTurnRecord`, `SessionRecord`) plus a versioned `TurnInputCodec` that supports schema v1→v2 migration and produces stable canonical JSON fingerprints for idempotency.
+- `committed_turn.py` defines the core `CommittedTurn` aggregate as a tuple of strictly ordered `CommittedPart` variants (Step/Reasoning/Code/Output/ToolCall/Skill/Attachment/Warning/Artifact/Usage/StructuredResult/Text) with invariants enforced in `__post_init__` (canonical band ordering, exactly one usage, at most one structured result, final text). A paired `CommittedTurnCodec` provides strict encode/decode with `_freeze_json`/`_thaw_json` for deterministic serialization.
+- `catalog.py` exposes only read-oriented domain values (`SequenceCursor`, `SessionPage`, `SessionTurnPage`) and a `SessionCatalog` Protocol that abstracts persistence — implementations live outside this module.
+- `history_tools.py` binds an immutable `SessionHistory` to a single DSPy `read_session_history` tool with a 256 KiB byte budget and `ToolEventView` projections.
+- `errors.py` defines public-safe exceptions (`SessionError`, `SessionNotFoundError`, `SessionAccessDenied`).
+Dependency direction is one-way: models → committed_turn (for `CommittedTurn` reference), catalog depends on models, history_tools depends on models; nothing imports back into these layers from higher-level code.

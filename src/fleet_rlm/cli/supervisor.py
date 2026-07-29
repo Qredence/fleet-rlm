@@ -213,9 +213,11 @@ def supervise(
     if reload:
         backend_command.append("--reload")
     backend_env = {**os.environ}
-    # Respect explicit FLEET_CONFIG_PROFILE (e.g. from .env) if already
-    # set; otherwise fall back to the runtime profile mapping.
-    backend_env.setdefault("FLEET_CONFIG_PROFILE", profile)
+    # Explicit FLEET_CONFIG_PROFILE (e.g. from .env) is honored by
+    # _selected_runtime_profile during preflight, but the supervised backend
+    # must run the profile mapped to the requested run environment — the
+    # ambient value may be a CI/tooling override, not the user's intent.
+    backend_env["FLEET_CONFIG_PROFILE"] = profile
     backend_env.pop("FLEET_RUN_ENVIRONMENT", None)
     previous_handlers: dict[int, SignalHandler] = {}
     received_signal: int | None = None

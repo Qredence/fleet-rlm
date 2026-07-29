@@ -1,0 +1,1 @@
+Run specific suites via pytest markers: `pytest -m unit`, `pytest -m contracts`, `pytest -m e2e`. Live/integration tests require an external database and are gated by the `db` marker. The `LITELLM_LOCAL_MODEL_COST_MAP=true` environment variable is required in all test runs. E2E tests expect `fleet` and `fleet-rlm` commands to be available in `.venv/bin` or on PATH.

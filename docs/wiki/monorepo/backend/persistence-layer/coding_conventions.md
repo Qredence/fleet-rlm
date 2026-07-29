@@ -1,0 +1,6 @@
+- Every row model inherits from `Base` (a `DeclarativeBase` subclass) and uses `uuid.uuid4` as the default for `Uuid(as_uuid=True)` primary key columns.
+- Repository classes accept an `async_sessionmaker[AsyncSession]` in `__init__` and acquire sessions via `async with self._session_factory() as db:` blocks, never holding engines directly.
+- All async DB methods wrap their work in `async with self._sessions() as db, db.begin():` to ensure explicit transaction boundaries per operation.
+- Foreign keys use `ondelete='CASCADE'` and indexed columns follow the naming convention `ix_<tablename>_<column>` for secondary indexes.
+- Domain-specific validation is encoded as SQLAlchemy `CheckConstraint` and `UniqueConstraint` declarations on `__table_args__` rather than Python-side checks.
+- Each repository file exposes its public types through a module-level `__all__` list and re-exports them from `repositories/__init__.py`.

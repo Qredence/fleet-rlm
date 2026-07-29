@@ -1,0 +1,1 @@
+Default volume mount path is `/home/daytona/fleet` (defined in `volume_paths.py`); callers construct `VolumePaths.from_mount()` or use `volume_paths_from_settings(settings)` to bind a configured mount. The `DEFAULT_VOLUME_MOUNT_PATH` must not resolve under prohibited system prefixes (`/proc`, `/sys`, `/dev`, etc.).

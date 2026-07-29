@@ -1,0 +1,1 @@
+Node.js terminal UI built on pi-tui that lets users interact with a Fleet AI session through an editor, slash commands, SSE turn streaming, and skill selection.

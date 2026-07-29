@@ -1,0 +1,1 @@
+TypeScript 5.9 with ESM modules, run via `tsx` (`pnpm start`). Terminal UI framework is `@earendil-works/pi-tui` v0.82.0 (Editor, TUI, ProcessTerminal). Streaming uses native Web Streams + SSE; OpenAPI types are generated with `openapi-typescript`. Linting/formatting via Biome 2.5, tests via Vitest 4, benchmarks via a custom `transcript.bench.ts` runner.

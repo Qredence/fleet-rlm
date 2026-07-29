@@ -1,0 +1,1 @@
+Python 3.11–3.13 managed by uv; FastAPI 0.139.0 + Uvicorn as the ASGI server; DSPy 3.3.0b1 with Daytona 0.200.0 for sandboxed execution; SQLAlchemy async + Alembic for Postgres/SQLite persistence; Pydantic v2 for models; MLflow 3 for tracing; pre-commit + ruff + ty + deptry + pytest for quality; Node.js/pnpm for the TUI client.

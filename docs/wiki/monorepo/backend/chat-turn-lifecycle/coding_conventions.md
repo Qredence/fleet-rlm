@@ -1,0 +1,5 @@
+- All domain value objects are declared as `@dataclass(frozen=True, slots=True)` with typed `Literal` fields for status codes and failure codes, never mutable classes.
+- External dependencies are expressed as `Protocol` types (`TurnLifecycle`, `TurnPreparation`, `TurnRunner`, `RunEnvironmentProvider`, `CapabilityPreparer`) and injected via constructor parameters rather than imported singletons.
+- Asynchronous resource lifetimes are managed through paired acquire/release patterns where `aclose()` methods reverse staged work in strict reverse order, and failures are wrapped in dedicated exception hierarchies (`TurnLifecycleError`, `TurnPreparationError`, `TurnCleanupUnavailable`).
+- Timeouts and cancellations are handled uniformly with `asyncio.timeout_at(deadline)` checks at each preparation step, raising `TurnPreparationTimeout` or `TurnPreparationCancelled` instead of propagating raw `TimeoutError`/`CancelledError`.
+- Durable state transitions are modeled as pure functions over frozen `ClaimState`/`ClaimCommand` dataclasses (`decide_claim_transition`) that return `ClaimDecision` without performing I/O, keeping persistence logic separate from business rules.

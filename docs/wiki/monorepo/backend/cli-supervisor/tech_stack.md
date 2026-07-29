@@ -1,0 +1,1 @@
+Python `argparse` for CLI parsing, `uvicorn` for ASGI server hosting, `subprocess` + `signal` for process supervision, and Node.js/pnpm for launching the pi-tui frontend. Uses `urllib.request` for HTTP readiness probes and `ipaddress` for loopback detection.

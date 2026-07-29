@@ -1,0 +1,1 @@
+MLflow with DSPy autolog and UnityCatalog trace storage backed by Databricks; authentication via `DATABRICKS_HOST`/`DATABRICKS_TOKEN` environment variables resolved from Pydantic Settings dotenv values.

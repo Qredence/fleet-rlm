@@ -1,0 +1,1 @@
+Single uv-managed Python monorepo that wires a FastAPI/RLM backend, a Node.js TUI client, Alembic migrations, pytest suites, maintenance scripts, and docs under one quality-gated Makefile-driven workspace.
