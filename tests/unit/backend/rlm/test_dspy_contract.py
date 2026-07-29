@@ -245,6 +245,7 @@ async def test_native_json_action_contract_parses_first_and_followup_iterations(
 
     assert (first.reasoning, first.code) == ("Inspect the request.", "print(request)")
     assert (second.reasoning, second.code) == ("Use the observed value.", "SUBMIT(answer='ok')")
+    assert len(lm.history) == 2
 
 
 @pytest.mark.asyncio

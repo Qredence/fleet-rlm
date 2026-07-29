@@ -73,6 +73,7 @@ def test_pinned_json_adapter_formats_typed_inputs_and_native_rlm_action_outputs(
     assert messages[0]["role"] == "system"
     assert "session_context" in messages[-1]["content"]
     assert "report-builder" in messages[-1]["content"]
+    assert adapter.use_native_function_calling is True
 
     rlm = dspy.RLM(FleetRLMSignature)
     assert set(rlm.generate_action.signature.output_fields) == {"reasoning", "code"}
@@ -95,6 +96,70 @@ def test_pinned_json_adapter_keeps_protocol_markers_outside_action_code() -> Non
     assert prediction.reasoning == "submit the verified result"
     assert prediction.code == 'SUBMIT(answer="1")'
     assert "[[ ##" not in prediction.code
+
+
+@pytest.mark.asyncio
+async def test_native_json_rlm_computes_and_submits_verified_pi_digit_without_retry() -> None:
+    from dspy.utils import DummyLM
+
+    compute_digit = inspect.cleandoc(
+        """
+        from decimal import Decimal, localcontext
+
+        digit_index = 14952
+        with localcontext() as decimal_context:
+            decimal_context.prec = digit_index + 100
+            constant = Decimal(426880) * Decimal(10005).sqrt()
+            multiplier = 1
+            linear = 13591409
+            exponential = 1
+            factor = 6
+            series = Decimal(linear)
+            for iteration_index in range(1, digit_index // 14 + 12):
+                multiplier = (factor**3 - 16 * factor) * multiplier // iteration_index**3
+                linear += 545140134
+                exponential *= -262537412640768000
+                series += Decimal(multiplier * linear) / Decimal(exponential)
+                factor += 12
+            pi_text = format(constant / series, "f")
+        digit = pi_text[digit_index + 1]
+        window = pi_text[digit_index - 9:digit_index + 12]
+        _out = window
+        """
+    )
+    adapter = dspy.JSONAdapter(use_native_function_calling=True)
+    lm = DummyLM(
+        [
+            {
+                "reasoning": "Compute the requested digit with the standard library.",
+                "code": compute_digit,
+            },
+            {
+                "reasoning": "Verify the computed window against the known reference prefix.",
+                "code": (
+                    'assert window == "049449650117321313895"\nverified = digit == "1"\n_out = f"{window}:{verified}"'
+                ),
+            },
+            {
+                "reasoning": "Submit the verified digit from the persistent interpreter.",
+                "code": "SUBMIT(answer=digit)",
+            },
+        ],
+        adapter=adapter,
+    )
+    rlm = dspy.RLM(
+        "request -> answer: str",
+        max_iterations=3,
+        interpreter=DaytonaCodeInterpreter(backend=InProcessInterpreterBackend()),
+    )
+
+    with dspy.context(lm=lm, adapter=adapter):
+        prediction = await rlm.acall(request="Tell me the 14952th digit after the decimal point of Pi")
+
+    assert prediction.answer == "1"
+    assert prediction.trajectory[0]["output"] == "049449650117321313895"
+    assert prediction.trajectory[1]["output"] == "049449650117321313895:True"
+    assert len(lm.history) == 3
 
 
 @pytest.mark.asyncio

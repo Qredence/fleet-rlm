@@ -45,11 +45,21 @@ Fleet maps these via `FLEET_RLM_MAX_ITERATIONS`, `FLEET_RLM_MAX_LLM_CALLS`, and 
 
 ## Fleet mapping
 
-- Every primary Turn builds a fresh native `dspy.RLM` with the active Fleet Signature. The default is
+- Normal primary Turns build a fresh native `dspy.RLM` with the active Fleet Signature. A standalone
+  greeting without Attachments or explicitly selected Skills uses a deterministic host response and
+  performs zero RLM iterations. The default for RLM Turns is
   `FleetRLMSignature` (`answer: str`), but a selected Skill may supply additional required output fields.
-- Fleet scopes DSPy's stock native `JSONAdapter` to each Turn. RLM action output
+- Fleet scopes a portable DSPy JSON adapter to each Turn. It keeps DSPy's JSON
+  prompt/parser but removes provider-specific response-schema parameters. Native
+  structured output is intentionally disabled for the Databricks
+  OpenAI-compatible gateway because it intermittently produces responses DSPy
+  cannot parse. RLM action output
   contains `reasoning` and `code`; `completed` is internal loop state, not a
-  Signature output field.
+  Signature output field. Production Daytona model roles cap each response at
+  8,000 tokens. The configured Inkling Root Model and Qwen Sub Model use the
+  compatible Chat Completions path without a reasoning-effort override. This is
+  separate from `max_output_chars`, which bounds REPL output
+  retained in recursive history.
 - **Daytona** (primary durable path): custom interpreter, Session Workspace tools, Artifact candidates promoted on Turn Commit.
 - **Deno**: vanilla local interpreter path without durable Artifact promotion; do not invent Deno-specific workflows here.
 - Declared `answer` JSON must fit the Turn commit budget. Oversized SUBMIT fails with public message `Turn output is too large`. Prefer writing long reports to Session Workspace, then SUBMIT a short summary.

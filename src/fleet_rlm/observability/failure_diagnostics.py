@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from dspy.utils.exceptions import AdapterParseError
+
 from fleet_rlm.daytona.errors import (
     DaytonaAdapterError,
     classify_provider_error,
@@ -22,6 +24,9 @@ class FailureDiagnostic:
 def normalize_turn_failure(exc: BaseException) -> FailureDiagnostic:
     """Describe a Turn preparation failure without exposing exception text."""
     cause = _diagnostic_cause(exc)
+    if isinstance(cause, AdapterParseError):
+        adapter = str(getattr(cause, "adapter_name", "") or "adapter")
+        return FailureDiagnostic("adapter_parse_error", "none", f"LM response unparseable by {adapter}")
     if not isinstance(cause, DaytonaAdapterError):
         return FailureDiagnostic("unknown", "none", type(cause).__name__)
     cause_type = classify_provider_error(cause)
@@ -41,7 +46,7 @@ def _diagnostic_cause(exc: BaseException) -> BaseException:
         nested = current.__cause__ or current.__context__
         if nested is None:
             break
-        if isinstance(nested, DaytonaAdapterError):
+        if isinstance(nested, (DaytonaAdapterError, AdapterParseError)):
             return nested
         current = nested
     return current
