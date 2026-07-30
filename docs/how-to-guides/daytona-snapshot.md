@@ -16,13 +16,14 @@ mounts only `workspaces/<workspace_id>` at `/home/daytona/fleet`.
 ## Provision and check
 
 ```bash
-export FLEET_CONFIG_PROFILE=daytona
 export FLEET_DAYTONA_API_KEY='...'
 make daytona-snapshot-create
 make daytona-snapshot-check
-export FLEET_DAYTONA_SNAPSHOT=fleet-rlm-python313-v4
 uv run fleet doctor daytona
 ```
+
+Select `default_profile = "daytona"` in `config/fleet.toml` first. The Snapshot
+name comes from the selected profile's `daytona.snapshot` policy.
 
 `create` never deletes or overwrites a Snapshot. Re-running it checks a
 pre-existing Snapshot's public name, state, and resource contract. The doctor
@@ -33,8 +34,8 @@ disposable Sandbox without user-site repair.
 ## Upgrade and rollback
 
 For a future upgrade, create a new immutable name such as
-`fleet-rlm-python313-v5`, verify it, and
-change only `FLEET_DAYTONA_SNAPSHOT`. Existing Session Sandboxes with the old
+`fleet-rlm-python313-v5`, verify it, and change only `daytona.snapshot` in the
+committed TOML policy. Existing Session Sandboxes with the old
 identity are replaced lazily while retaining their Workspace Volume ID and
 `workspaces/<workspace_id>` scope. During the v4 rollout, roll back by restoring
 `fleet-rlm-python313-v3`; for later upgrades, restore the preceding immutable

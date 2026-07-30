@@ -11,20 +11,24 @@ LLM/Daytona keys and an upgraded database. The
 supervisor verifies Alembic head and never migrates automatically:
 
 ```bash
-export FLEET_CONFIG_PROFILE=daytona
 uv run python scripts/db_init.py
 uv run fleet cli --port 8000
 ```
+
+Set `[config] default_profile = "daytona"` in `config/fleet.toml` first, or
+select `daytona` with `/profiles` and restart Fleet.
 
 For the reduced local Deno/Pyodide runtime, select `local-deno`, configure the LLM key and ensure
 Deno is on `PATH`. Add a SQLite database URL when Sessions must survive a
 backend restart:
 
 ```bash
-export FLEET_CONFIG_PROFILE=local-deno
 export FLEET_DATABASE_URL='sqlite+aiosqlite:///./.fleet_rlm/local.sqlite3'
 uv run fleet deno --port 8000
 ```
+
+Set `[config] default_profile = "local-deno"` first. Supervised launchers fail
+closed when the selected profile uses the other Run Environment.
 
 See [configuration](../reference/configuration.md) for all settings. Supervised
 backend output is stored under `.fleet_rlm/logs/`; `latest.log` identifies the

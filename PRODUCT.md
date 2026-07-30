@@ -34,9 +34,10 @@ SSE; it is separate from engineering-only MLflow tracing.
 
 ## Operating model
 
-Select `FLEET_CONFIG_PROFILE` before startup. The committed policy defines the
-runtime, model roles, and the names of external configuration values. Deno is
-the reduced local environment; Daytona is the full durable environment and
+Select `[config] default_profile` in `config/fleet.toml`, directly or through
+the TUI `/profiles` command, then restart Fleet. The committed policy defines
+the runtime, model roles, and the names of external configuration values. Deno
+is the reduced local environment; Daytona is the full durable environment and
 requires a migrated database, a Daytona credential, Databricks AI Gateway
 credentials, and its configured gateway URL.
 

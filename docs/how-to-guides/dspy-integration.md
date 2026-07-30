@@ -2,13 +2,23 @@
 
 Fleet executes every primary Turn through a fresh native `dspy.RLM`. The Root
 Model generates iterative Python, while the Sub Model answers `llm_query()` and
-ordered `llm_query_batched()` calls. Both model roles are host-configured; API
+ordered `llm_query_batched()` calls. The Root may also call `rlm_query(prompt)`
+to solve one bounded semantic subproblem with a fresh child `dspy.RLM`. Both model roles are host-configured; API
 clients cannot provide models, Signatures, or executable capabilities.
 
 ## Execution contract
 
 - One Run owns one Code-Interpreter Context. Variables, imports, and functions
   persist across RLM iterations in that Run only.
+- `rlm_query(prompt)` is the only recursive primitive. The Root should keep large
+  input-specific data in REPL variables, select the smallest sufficient slice,
+  and pass only that slice to the child. The child returns one concise typed
+  `answer`; the parent retains authority over the public Signature and final
+  `SUBMIT`.
+- Child RLMs use fresh interpreter contexts in the same leased Daytona Sandbox,
+  have no Fleet history/Workspace/Attachment/Artifact/Lakebase host Tools, and
+  are bounded by `rlm.recursion_*` policy. A retained Sandbox and its mounted
+  Volume are compute state, not a cross-Turn Python state store.
 - A later Run receives a fresh context, even when it reuses the same Sandbox.
 - Host capabilities enter the Turn blueprint as explicit `dspy.Tool` objects.
   Fleet preserves schema validation at the callable boundary used by DSPy's
@@ -37,10 +47,19 @@ clients cannot provide models, Signatures, or executable capabilities.
   deletion, or repair. Generic Tool events expose metadata only, never the
   learning body, provider path, or raw error; there is no dedicated memory
   event.
-- Fleet scopes `dspy.JSONAdapter(use_native_function_calling=True)` to each Turn
-  alongside the Root Model. Native structured output applies to the RLM action
-  (`reasoning` and `code`) and final extraction without changing process-global
-  DSPy settings.
+- Fleet scopes the stock `dspy.JSONAdapter()` to each Turn alongside the Root
+  Model. Provider-native token streams and sectioned text are not reinterpreted
+  as RLM actions: malformed responses remain bounded `adapter_parse_error`
+  failures, which keeps the pinned DSPy protocol authoritative without changing
+  process-global DSPy settings.
+- The production Daytona profile uses the Databricks DeepSeek v4-free service
+  `uscentral.default.deepseek-v4-flash` for Root actions
+  (without a `reasoning_effort` override) and
+  `uscentral.ai_gateway.databricks-qwen35-122b-a10b` for bounded Sub Model queries
+  (`reasoning_effort = "none"`, `temperature = 0`). Both responses are capped at
+  8,000 tokens. This LM response limit is distinct
+  from `dspy.RLM.max_output_chars`, which bounds REPL output retained in
+  recursive history.
 - Fleet remains on DSPy's public program and LM call surfaces: `rlm.acall()`
   delegates request and response normalization to stock DSPy. Application code
   does not call LM `forward()` methods, construct provider-shaped requests, or
@@ -50,6 +69,16 @@ clients cannot provide models, Signatures, or executable capabilities.
 - Do not replace the Turn-scoped adapter with global `dspy.configure()`.
   Composition may execute independent Turns with different scoped models, and
   Fleet must not mutate shared DSPy defaults.
+
+## Recursive harness limits
+
+The default policy allows two recursive levels, four child calls per Turn, a
+50,000-character delegated prompt bound, eight child iterations, twelve child
+LM calls, and 4,000 child output characters. The depth cap falls back to one
+plain Sub Model query so recursion cannot grow without bound. Child prompts and
+answers are never copied into public Runtime Events or MLflow; traces retain
+only depth, counts, character bounds, duration, termination mode, and failure
+category.
 
 ## Typed startup inputs
 
@@ -73,25 +102,21 @@ repository or pass them through Fleet API requests.
 
 ```bash
 export FLEET_LIVE=1
-export FLEET_CONFIG_PROFILE=daytona
-export FLEET_DAYTONA_SNAPSHOT=fleet-rlm-python313-v4
 # Credentials may come from the process environment or repo `.env`
 # (loaded via python-dotenv; existing exports win).
 uv run python scripts/live_daytona_verify.py \
-  --output .scratch/release-ready-mvp/assets/daytona-mvp-proof.json \
-  --root-model deepseek-v4-flash-free \
-  --sub-model deepseek-v4-flash-free
+  --output .scratch/release-ready-mvp/assets/daytona-mvp-proof.json
 ```
 
-Provision the immutable Snapshot first with the [Daytona Snapshot guide](daytona-snapshot.md).
+Select `[config] default_profile = "daytona"` and restart Fleet first. Provision
+the immutable Snapshot named by that profile with the
+[Daytona Snapshot guide](daytona-snapshot.md).
 
 The verifier requires a clean tracked tree on a non-`main` branch, invokes the
-single live pytest scenario once, and performs no automatic retry. The model
-options override only the child proof process and must be supplied together;
-they do not modify `.env`. When omitted, the proof defaults to the gateway-local
-bare id `deepseek-v4-flash-free`; `normalize_model_id` turns that into
-`openai/deepseek-v4-flash-free` for `dspy.LM`. Its `--help` path requires no
-credentials.
+single live pytest scenario once, and performs no automatic retry. It resolves
+the production DeepSeek v4-free Root and Qwen Sub roles from the selected TOML profile;
+ambient model variables are ignored, and swapped or obsolete model pairs fail
+the precondition. Its `--help` path requires no credentials.
 
 The proof exercises a typed host Signature, state across RLM iterations,
 single and batched recursive calls, a host Tool, a durable workspace write,

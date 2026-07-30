@@ -10,9 +10,6 @@ under `tools/fleet-tui/`.
 ```bash
 uv sync --all-extras --dev
 
-# Select the required non-secret runtime policy profile.
-export FLEET_CONFIG_PROFILE=daytona
-
 # supervised backend + pi-tui
 uv run fleet cli   # Daytona
 uv run fleet deno  # Deno/Pyodide
@@ -21,6 +18,11 @@ uv run fleet deno  # Deno/Pyodide
 uv run fleet web
 uv run fleet-rlm serve-api --port 8000
 ```
+
+Select the non-secret runtime policy with `[config] default_profile` in
+`config/fleet.toml` or the TUI `/profiles` command, then restart Fleet.
+`fleet cli` requires a selected Daytona profile; `fleet deno` requires a
+selected Deno profile. A mismatch fails before runtime services start.
 
 `fleet cli` and `fleet deno` require Node 22.19+ and pnpm. They wait for backend
 readiness, write backend output under `.fleet_rlm/logs/`, and stop the backend
@@ -40,11 +42,12 @@ Deno is the canonical reduced local runtime. It needs an LLM key and Deno on
 `PATH`; SQLite is the normal local persistence choice.
 
 ```bash
-export FLEET_CONFIG_PROFILE=local-deno
 export FLEET_DATABASE_URL='sqlite+aiosqlite:///./.fleet_rlm/local.sqlite3'
 export FLEET_LLM_API_KEY='...'
 uv run fleet-rlm serve-api --port 8000
 ```
+
+Set `default_profile = "local-deno"` before starting this backend.
 
 Deno uses a real LM and DSPy's default Deno/Pyodide interpreter. It supports
 Attachment reads and Skills but not Daytona resources or durable Artifact
@@ -58,7 +61,6 @@ Daytona Snapshot. Initialize the configured database explicitly; startup never
 applies migrations automatically.
 
 ```bash
-export FLEET_CONFIG_PROFILE=daytona
 export FLEET_DATABASE_URL='postgresql+asyncpg://...'
 export FLEET_DAYTONA_API_KEY='...'
 export DATABRICKS_TOKEN='...'
@@ -67,6 +69,8 @@ make daytona-snapshot-check
 uv run python scripts/db_init.py
 uv run fleet-rlm serve-api --port 8000
 ```
+
+Set `default_profile = "daytona"` before running the Daytona checks or backend.
 
 Use `uv run fleet doctor daytona` for an opt-in disposable provider, database,
 mount, and interpreter probe before diagnosing a Turn.

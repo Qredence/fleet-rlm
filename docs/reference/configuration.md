@@ -1,25 +1,30 @@
 # Configuration Reference
 
 Fleet starts from the required, committed [`config/fleet.toml`](../../config/fleet.toml)
-policy file. Set `FLEET_CONFIG_PROFILE` to one of its named profiles (`local-deno`,
-`daytona`, or `databricks-daytona`) before starting any backend or running
-`fleet doctor`. Policy is
-strict, resolved once at process startup, and takes effect only after restart.
+policy file. The active profile is selected by the `[config] default_profile` key
+inside that file (or, when only one profile exists, that single profile). Set
+`default_profile` to one of the named profiles (`local-deno`, `daytona`,
+`daytona-managed`, `daytona-bench`, or `daytona-bench-40`) before starting any
+backend or running `fleet doctor`. Policy is strict, resolved once at process
+startup, and takes effect only after restart.
 
 The TOML file contains no secret values. It declares the environment-variable
-names for Root/Sub API keys, the database URL, and the Daytona API key. Only
-those named values and `FLEET_CONFIG_PROFILE` are read from the process or
-repository `.env` (process values win). Other `FLEET_*` variables, including
-model, RLM, endpoint, runtime, and MLflow settings, are ignored unless the
-selected TOML profile explicitly names them as references. Unknown TOML keys,
-absent profiles, missing TOML, and invalid variable references fail startup.
+names for Root/Sub API keys, the database URL, the Daytona API key, and managed
+MLflow destinations when that profile is selected. Only those named values are
+read from the process or repository `.env` (process values win).
+`FLEET_CONFIG_PROFILE` is not consulted; other `FLEET_*`
+variables, including model, RLM, endpoint, runtime, and MLflow settings, are
+ignored unless the selected TOML profile explicitly names them as references.
+Unknown TOML keys, absent profiles, missing TOML, and invalid variable
+references fail startup.
 
 ## Runtime prerequisites
 
 | Profile | Required | Optional persistence |
 | --- | --- | --- |
 | `deno` | `FLEET_LLM_API_KEY`; Deno executable on `PATH` | `FLEET_DATABASE_URL`; SQLite is the normal local choice |
-| `daytona` / `databricks-daytona` | `DATABRICKS_TOKEN`, `FLEET_DAYTONA_API_KEY`, `FLEET_DATABRICKS_AI_GATEWAY_BASE_URL`, `FLEET_DATABASE_URL` at Alembic head | none |
+| `daytona` / benchmark profiles | `DATABRICKS_TOKEN`, `FLEET_DAYTONA_API_KEY`, `FLEET_DATABRICKS_AI_GATEWAY_BASE_URL`, `FLEET_DATABASE_URL` at Alembic head | none |
+| `daytona-managed` | Daytona requirements plus managed MLflow variables listed below; `FLEET_DATABASE_URL` must point to Lakebase at Alembic head | none |
 
 Profiles are explicit and do not fall back to each other. Daytona startup never
 applies migrations; use `uv run python scripts/db_init.py` or Alembic directly.
@@ -36,9 +41,31 @@ policy; MLflow tracking policy; and Fleet/DSPy logger level.
 `rlm.verbose` controls native DSPy host logs only. It does not control the
 typed Runtime Events projected through SSE or the terminal client.
 
-Both Daytona profiles route traces to Managed Databricks MLflow. Their committed
-policy names the AI Gateway endpoint and trace-destination variables, while
-`DATABRICKS_HOST` and `DATABRICKS_TOKEN` authenticate the connection.
+The `[rlm]` recursion settings bound the native `rlm_query(prompt)` child
+harness: `recursion_max_depth`, `recursion_max_calls`,
+`recursion_max_prompt_chars`, `recursion_child_max_iterations`,
+`recursion_child_max_llm_calls`, and `recursion_child_max_output_chars`.
+These are non-secret policy values; `.env` and ambient process variables do not
+override them. Children use fresh interpreter contexts but share the leased
+Daytona Sandbox and its workspace-scoped Volume, while durable Fleet Tools stay
+owned by the Root Turn.
+
+The standard `daytona` profile uses the Databricks DeepSeek v4-free service
+`uscentral.default.deepseek-v4-flash` for Root and
+`uscentral.ai_gateway.databricks-qwen35-122b-a10b` for Sub
+(`reasoning_effort = "none"`, `temperature = 0` for Sub), with an 8,000-output-token
+cap per call. It routes traces to
+the local `fleet-rlm` experiment at `http://127.0.0.1:5001`. The supervised
+`fleet cli` command starts or reuses that server; benchmark profiles disable
+tracing and model caching.
+
+Custom policies may still target Managed Databricks MLflow with
+`tracking_uri = "databricks"` and the existing experiment, Unity Catalog,
+table-prefix, and SQL-warehouse environment references. `DATABRICKS_HOST` and
+`DATABRICKS_TOKEN` authenticate that managed path; the committed default does
+not depend on those MLflow-specific references. The committed
+`daytona-managed` profile declares those references explicitly; select it by
+setting `default_profile = "daytona-managed"` in `config/fleet.toml`.
 
 ## Local terminal editing
 
@@ -55,20 +82,25 @@ environment-variable names. A saved policy applies only after Fleet is
 restarted; existing runtime composition and active Turns are never changed in
 place.
 
+The companion `/profiles` command opens a dropdown of the declared profiles and
+writes the chosen name to `config.default_profile` through the same loopback
+policy. It labels the active profile as running and a different
+`default_profile` as selected for restart; when they match, that profile is
+current. Switching persists to `config/fleet.toml` and takes effect on the next
+Fleet restart.
+
 ## Environment inputs
 
 | Variable | Policy reference | Meaning |
 | --- | --- | --- |
-| `FLEET_CONFIG_PROFILE` | required | Named profile in `config/fleet.toml` |
 | `FLEET_DATABASE_URL` | `storage.database_url_env` | Async SQLAlchemy URL |
 | `FLEET_DAYTONA_API_KEY` | `daytona.api_key_env` | Daytona provider credential |
 | `FLEET_LLM_API_KEY` | Root/Sub `api_key_env` in `local-deno` | Local-model credential |
 | `DATABRICKS_TOKEN` | Root/Sub `api_key_env` in Daytona profiles | Databricks AI Gateway credential |
 | `FLEET_DATABRICKS_AI_GATEWAY_BASE_URL` | Root/Sub `base_url_env` in Daytona profiles | Databricks AI Gateway endpoint |
-| `FLEET_MLFLOW_EXPERIMENT_NAME` | `mlflow.experiment_name_env` | Managed MLflow experiment |
-| `FLEET_MLFLOW_TRACE_CATALOG` / `FLEET_MLFLOW_TRACE_SCHEMA` | Managed MLflow trace references | Unity Catalog destination |
-| `FLEET_MLFLOW_TRACE_TABLE_PREFIX` / `FLEET_MLFLOW_TRACING_SQL_WAREHOUSE_ID` | Managed MLflow trace references | Trace table prefix and SQL warehouse |
-
+| `FLEET_MLFLOW_EXPERIMENT_NAME` | `daytona-managed.mlflow.experiment_name_env` | Managed MLflow experiment |
+| `FLEET_MLFLOW_TRACE_CATALOG` / `FLEET_MLFLOW_TRACE_SCHEMA` | `daytona-managed.mlflow.*_env` | Unity Catalog destination |
+| `FLEET_MLFLOW_TRACE_TABLE_PREFIX` / `FLEET_MLFLOW_TRACING_SQL_WAREHOUSE_ID` | `daytona-managed.mlflow.*_env` | Trace table prefix and SQL warehouse |
 Model ids may use an explicit `provider/model` prefix. For an OpenAI-compatible
 base URL, bare ids are normalized with the `openai/` prefix before constructing
 `dspy.LM`.
@@ -81,7 +113,7 @@ when the supervised command supplies the local API URL.
 
 ## Example
 
-Copy `.env.example`, set `FLEET_CONFIG_PROFILE`, and fill only variables named
-by that selected policy. Process exports override `.env` for those named values
-and in the live MVP verifier. Never commit `.env`, credentials, raw provider
-failures, or evidence containing secrets.
+Copy `.env.example`, confirm the desired `default_profile` in `config/fleet.toml`,
+and fill only variables named by that selected policy. Process exports override
+`.env` for those named values and in the live MVP verifier. Never commit `.env`,
+credentials, raw provider failures, or evidence containing secrets.

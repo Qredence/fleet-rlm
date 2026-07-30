@@ -116,15 +116,15 @@ existing process exports win:
 
 ```bash
 FLEET_LIVE=1 uv run python scripts/live_daytona_verify.py \
-  --output .scratch/release-ready-mvp/assets/daytona-mvp-proof.json \
-  --root-model <approved-root-model> \
-  --sub-model <approved-sub-model>
+  --output .scratch/release-ready-mvp/assets/daytona-mvp-proof.json
 ```
 
-It must record a passing receipt at the exact candidate SHA, verify provider
-cleanup and secret isolation, and be paired with same-SHA CI, local release, and
-human attestations before promotion. Historical receipts do not prove a later
-tip.
+Select the production `daytona` profile through `[config] default_profile`
+before this gate. The verifier requires the committed Databricks DeepSeek v4-free Root and Qwen Sub
+roles, records a passing receipt at the exact candidate SHA, verifies provider
+cleanup and secret isolation, and must be paired with same-SHA CI, local
+release, and human attestations before promotion. Historical receipts do not
+prove a later tip.
 
 ## Security, packaging, and release
 

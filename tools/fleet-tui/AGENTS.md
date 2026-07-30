@@ -34,4 +34,7 @@ Individual lanes: `pnpm test`, `pnpm typecheck`, `pnpm lint`, `pnpm format:check
   `src/tui/tests/`; shared behavior may be covered through its owning feature.
 - `/settings` reads and edits non-secret `config/fleet.toml` policy only; it
   never displays `.env` values and saved changes require a Fleet restart.
+- `/profiles` switches the active Fleet profile by PATCHing
+  `config.default_profile` to the same loopback policy; it opens a dropdown of
+  available profiles and requires a Fleet restart to take effect.
 - Requires Node ≥ 22.19.0 and pnpm.
