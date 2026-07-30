@@ -49,6 +49,10 @@ dependencies = [
     "fastapi[standard]==0.139.0",
     "uvicorn>=0.47.0,<1",
     "httpx2>=2.5.0",
+    # Pooled HTTP client for the Daytona tool broker poll/fulfill loop:
+    # connection reuse through the preview proxy. Transitive via the Daytona
+    # SDK; declared direct because http_broker imports it.
+    "httpx>=0.28,<1",
     # MLflow 3 tracing: DSPy autolog + Databricks tracking backend.
     "mlflow>=3.14,<4",
     "tomlkit>=0.13,<1",
@@ -82,7 +86,12 @@ server = [
     "uvicorn[standard]>=0.47.0,<1",
 ]
 benchmark = [
-    "datasets>=2.14.0",
+    "datasets>=5.0.0",
+    "jsonlines>=4.0.0",
+    "litellm>=1.88.1",
+    "python-dateutil>=2.9.0.post0",
+    "tiktoken>=0.13.0",
+    "transformers>=5.14.1",
 ]
 
 [build-system]

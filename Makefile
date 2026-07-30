@@ -2,10 +2,7 @@ PYTHON_SOURCES = src/fleet_rlm tests/unit/backend tests/unit/scripts tests/contr
 PYTEST_FAST_MARKERS = not deno and not live_llm and not live_daytona and not benchmark and not db
 PYTEST := uv run --no-sync pytest
 PYTEST_ISOLATED := env \
-	FLEET_CONFIG_PROFILE=daytona \
-	FLEET_RUN_ENVIRONMENT=daytona \
 	FLEET_DAYTONA_API_KEY= \
-	FLEET_DAYTONA_SNAPSHOT= \
 	FLEET_LLM_API_KEY= \
 	FLEET_LLM_BASE_URL= \
 	FLEET_DATABASE_URL= \
@@ -45,7 +42,7 @@ help:
 	@echo "  make test-contract    - Run backend contracts and CLI smoke tests"
 	@echo "  make test-deno        - Run deterministic contracts against the Deno runtime"
 	@echo "  make test-daytona-cov - Run canonical non-live tests with Daytona branch coverage"
-	@echo "  make benchmark-oolong - Run OOLONG benchmark (requires FLEET_LIVE=1, CONTEXT_LEN, MAX_TASKS, OUTPUT)"
+	@echo "  make benchmark-oolong - Run official Oolong smoke (requires FLEET_LIVE=1; configure OOLONG_* variables)"
 	@echo ""
 	@echo "Quality:"
 	@echo "  make check            - Run the primary repo quality gate"
@@ -119,13 +116,18 @@ test-daytona-cov:
 test-db:
 	$(PYTEST) -q -m "db" -n 0
 
-CONTEXT_LEN ?= 1024
-MAX_TASKS ?= 50
-OUTPUT ?= .scratch/benchmark-reports/oolong-$(shell date +%Y-%m-%d).json
+OOLONG_SPLIT ?= real
+OOLONG_MIN_LEN ?= 32000
+OOLONG_MAX_LEN ?= 64000
+OOLONG_LIMIT ?= 3
+OOLONG_OUTPUT ?= .scratch/benchmark-reports/oolong-$(shell date +%Y-%m-%d).json
+OOLONG_API_URL ?= http://127.0.0.1:8000
+OOLONG_ROOT ?= ../oolong
+OOLONG_PROFILE ?= daytona-bench
 
 benchmark-oolong:
 	@test -n "$(FLEET_LIVE)" || { echo "FLEET_LIVE=1 is required for live OOLONG benchmark"; exit 1; }
-	uv run python scripts/benchmarks/evaluate_oolong.py --context-len $(CONTEXT_LEN) --max-tasks $(MAX_TASKS) --output $(OUTPUT)
+	uv run python scripts/benchmarks/run_official_oolong.py --split $(OOLONG_SPLIT) --min-len $(OOLONG_MIN_LEN) --max-len $(OOLONG_MAX_LEN) --limit $(OOLONG_LIMIT) --api-url $(OOLONG_API_URL) --oolong-root $(OOLONG_ROOT) --expected-profile $(OOLONG_PROFILE) --output $(OOLONG_OUTPUT)
 
 DAYTONA_SNAPSHOT_NAME ?= fleet-rlm-python313-v4
 
@@ -172,10 +174,10 @@ check-codebase-tree:
 	uv run python scripts/check_codebase_tree.py
 
 api-check:
-	env FLEET_CONFIG_PROFILE=daytona FLEET_RUN_ENVIRONMENT=daytona uv run python scripts/openapi_tools.py check
+	uv run python scripts/openapi_tools.py check
 
 api-sync:
-	env FLEET_CONFIG_PROFILE=daytona FLEET_RUN_ENVIRONMENT=daytona uv run python scripts/openapi_tools.py generate
+	uv run python scripts/openapi_tools.py generate
 
 build:
 	rm -rf dist build
