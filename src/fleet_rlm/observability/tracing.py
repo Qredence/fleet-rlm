@@ -19,7 +19,9 @@ from __future__ import annotations
 
 import logging
 import os
+import socket
 from typing import TYPE_CHECKING, cast
+from urllib.parse import urlparse
 
 if TYPE_CHECKING:
     from fleet_rlm.config import Settings
@@ -31,6 +33,19 @@ logger = logging.getLogger(__name__)
 _TRACING_CONFIGURED = False
 _DEFAULT_TRACKING_URI = "databricks"
 _TRACE_DESTINATION_TAG = "mlflow.experiment.databricksTraceDestinationPath"
+
+
+def _local_tracking_server_available(tracking_uri: str) -> bool:
+    """Bound local MLflow startup probing so tracing cannot stall app import."""
+    parsed = urlparse(tracking_uri)
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        return True
+    port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    try:
+        with socket.create_connection((parsed.hostname, port), timeout=0.5):
+            return True
+    except OSError:
+        return False
 
 
 def _validate_experiment_trace_location(settings: Settings) -> None:
@@ -143,6 +158,18 @@ def configure_tracing(settings: Settings) -> None:
 
         mlflow.set_tracking_uri(tracking_uri)
 
+        # A local MLflow server is optional engineering observability. Avoid
+        # entering MLflow's retry loop when the configured local endpoint is
+        # absent; this keeps FastAPI app construction and OpenAPI generation
+        # bounded while preserving tracing when the server is available.
+        if (
+            tracking_uri.startswith(("http://", "https://"))
+            and getattr(mlflow, "__file__", None)
+            and not _local_tracking_server_available(tracking_uri)
+        ):
+            logger.warning("MLflow tracking server is unavailable; continuing without traces")
+            return
+
         # Preflight: catch trace-location mismatch before set_experiment.
         # FleetConfigurationError propagates — all other failures are soft.
         if tracking_uri == _DEFAULT_TRACKING_URI:
@@ -162,7 +189,10 @@ def configure_tracing(settings: Settings) -> None:
             )
         else:
             mlflow.set_experiment(experiment_name=settings.mlflow_experiment_name)
-        mlflow.dspy.autolog()
+        # Fleet owns the bounded redacted spans in ``turn_tracing``. DSPy's
+        # callback otherwise records full prompts, generated code, tool args,
+        # and provider responses, which is unsuitable for live traces.
+        mlflow.dspy.autolog(log_traces=False, log_traces_from_eval=False, silent=True)
         logger.info(
             "MLflow DSPy autolog enabled (tracking_uri=%s experiment=%s)",
             tracking_uri,

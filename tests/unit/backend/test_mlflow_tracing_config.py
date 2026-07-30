@@ -53,7 +53,7 @@ def _install_fake_mlflow(
         calls.experiment_args.append(args)
         calls.experiment_kwargs.append(kwargs)
 
-    def _autolog() -> None:
+    def _autolog(**_kwargs: Any) -> None:
         calls.autolog_calls += 1
 
     calls.set_tracking_uri = _set_uri if set_tracking_uri is None else set_tracking_uri

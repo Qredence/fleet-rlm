@@ -23,8 +23,10 @@ EVIDENCE_ENV = "FLEET_LIVE_EVIDENCE_PATH"
 _LIVE_TEST = "tests/live/backend/test_fleet_rlm_daytona_mvp.py::test_complete_daytona_mvp_through_fastapi"
 _REQUIRED_ENV = ("FLEET_DAYTONA_API_KEY", "DATABRICKS_TOKEN")
 _REPO_ROOT = Path(__file__).resolve().parents[1]
-_LIVE_MODEL = "uscentral.default.deepseek-v4-flash"
-_APPROVED_MODELS = frozenset({_LIVE_MODEL, f"openai/{_LIVE_MODEL}"})
+_LIVE_ROOT_MODEL = "uscentral.default.deepseek-v4-flash"
+_LIVE_SUB_MODEL = "uscentral.ai_gateway.databricks-qwen35-122b-a10b"
+_APPROVED_ROOT_MODELS = frozenset({_LIVE_ROOT_MODEL, f"openai/{_LIVE_ROOT_MODEL}"})
+_APPROVED_SUB_MODELS = frozenset({_LIVE_SUB_MODEL, f"openai/{_LIVE_SUB_MODEL}"})
 _DURABILITY_TEST = "tests/live/backend/test_attachment_artifact_durability.py"
 _SUCCESS_FIELDS = frozenset(
     {
@@ -532,11 +534,7 @@ def _validate_success_receipt_extended(
     if candidate.get("branch") != branch or candidate.get("lockfile_sha256") != lockfile_sha256:
         raise ReceiptError("candidate_fingerprint")
     models = payload.get("models")
-    if (
-        not isinstance(models, dict)
-        or set(models) != {"root", "sub"}
-        or any(not isinstance(value, str) or value not in _APPROVED_MODELS for value in models.values())
-    ):
+    if not _models_are_approved(models):
         raise ReceiptError("receipt_models")
     lanes = payload.get("lanes")
     if not isinstance(lanes, dict) or set(lanes) != {
@@ -627,6 +625,18 @@ def _configured_models() -> dict[str, str]:
     return {"root": settings.root_model, "sub": settings.sub_model}
 
 
+def _models_are_approved(models: object) -> bool:
+    """Require the production Root/Sub pair while allowing DSPy normalization."""
+    return bool(
+        isinstance(models, dict)
+        and set(models) == {"root", "sub"}
+        and isinstance(models.get("root"), str)
+        and models["root"] in _APPROVED_ROOT_MODELS
+        and isinstance(models.get("sub"), str)
+        and models["sub"] in _APPROVED_SUB_MODELS
+    )
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     output = args.output.expanduser().resolve()
@@ -660,7 +670,7 @@ def main(argv: list[str] | None = None) -> int:
     child_env = os.environ.copy()
     child_env.pop("FLEET_ROOT_MODEL", None)
     child_env.pop("FLEET_SUB_MODEL", None)
-    if any(model not in _APPROVED_MODELS for model in models.values()):
+    if not _models_are_approved(models):
         _write_failure(
             output,
             category="precondition_failed",

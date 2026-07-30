@@ -29,6 +29,12 @@ max_llm_calls = 50
 max_output_chars = 10000
 max_execution_output_chars = 4000
 execution_timeout_s = 120
+recursion_max_depth = 2
+recursion_max_calls = 4
+recursion_max_prompt_chars = 50000
+recursion_child_max_iterations = 8
+recursion_child_max_llm_calls = 12
+recursion_child_max_output_chars = 4000
 verbose = true
 
 [defaults.storage]
@@ -53,11 +59,10 @@ environment = "deno"
 environment = "daytona"
 
 [profiles.daytona.llm.root]
-model = "uscentral.default.inkling"
+model = "uscentral.default.deepseek-v4-flash"
 api_key_env = "DATABRICKS_TOKEN"
 base_url_env = "FLEET_DATABRICKS_AI_GATEWAY_BASE_URL"
 max_tokens = 8000
-reasoning_effort = "none"
 
 [profiles.daytona.llm.sub]
 model = "uscentral.ai_gateway.databricks-qwen35-122b-a10b"
@@ -71,6 +76,36 @@ reasoning_effort = "none"
 tracing_enabled = true
 tracking_uri = "http://127.0.0.1:5001"
 experiment_name = "fleet-rlm"
+
+# Managed Lakebase/MLflow policy. Select with
+# [config] default_profile = "daytona-managed" after populating the
+# environment variables named below. The database URL continues to come from
+# defaults.storage.database_url_env = "FLEET_DATABASE_URL".
+[profiles.daytona-managed.runtime]
+environment = "daytona"
+
+[profiles.daytona-managed.llm.root]
+model = "uscentral.default.deepseek-v4-flash"
+api_key_env = "DATABRICKS_TOKEN"
+base_url_env = "FLEET_DATABRICKS_AI_GATEWAY_BASE_URL"
+max_tokens = 8000
+
+[profiles.daytona-managed.llm.sub]
+model = "uscentral.ai_gateway.databricks-qwen35-122b-a10b"
+api_key_env = "DATABRICKS_TOKEN"
+base_url_env = "FLEET_DATABRICKS_AI_GATEWAY_BASE_URL"
+max_tokens = 8000
+temperature = 0
+reasoning_effort = "none"
+
+[profiles.daytona-managed.mlflow]
+tracing_enabled = true
+tracking_uri = "databricks"
+experiment_name_env = "FLEET_MLFLOW_EXPERIMENT_NAME"
+trace_catalog_env = "FLEET_MLFLOW_TRACE_CATALOG"
+trace_schema_env = "FLEET_MLFLOW_TRACE_SCHEMA"
+trace_table_prefix_env = "FLEET_MLFLOW_TRACE_TABLE_PREFIX"
+tracing_sql_warehouse_id_env = "FLEET_MLFLOW_TRACING_SQL_WAREHOUSE_ID"
 
 # Official Oolong benchmark profiles: cache must be disabled because multiple
 # questions reuse one context window.  MLflow is intentionally omitted.

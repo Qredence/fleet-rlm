@@ -121,6 +121,40 @@ _FIELDS: tuple[PolicyField, ...] = (
         "number",
         settings_field="rlm_execution_timeout_s",
     ),
+    PolicyField(
+        "rlm.recursion_max_depth", "RLM", "Recursive maximum depth", "number", settings_field="rlm_recursion_max_depth"
+    ),
+    PolicyField(
+        "rlm.recursion_max_calls", "RLM", "Recursive maximum calls", "number", settings_field="rlm_recursion_max_calls"
+    ),
+    PolicyField(
+        "rlm.recursion_max_prompt_chars",
+        "RLM",
+        "Recursive prompt character bound",
+        "number",
+        settings_field="rlm_recursion_max_prompt_chars",
+    ),
+    PolicyField(
+        "rlm.recursion_child_max_iterations",
+        "RLM",
+        "Child maximum iterations",
+        "number",
+        settings_field="rlm_recursion_child_max_iterations",
+    ),
+    PolicyField(
+        "rlm.recursion_child_max_llm_calls",
+        "RLM",
+        "Child maximum LLM calls",
+        "number",
+        settings_field="rlm_recursion_child_max_llm_calls",
+    ),
+    PolicyField(
+        "rlm.recursion_child_max_output_chars",
+        "RLM",
+        "Child maximum output characters",
+        "number",
+        settings_field="rlm_recursion_child_max_output_chars",
+    ),
     PolicyField("rlm.verbose", "RLM", "DSPy host verbose logging", "boolean", settings_field="rlm_verbose"),
     PolicyField("storage.data_root", "Storage", "Data root", "text", settings_field="data_root"),
     PolicyField(

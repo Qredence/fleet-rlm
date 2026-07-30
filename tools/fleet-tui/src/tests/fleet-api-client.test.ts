@@ -198,6 +198,34 @@ describe("FleetApiClient", () => {
     );
   });
 
+  it("switches the active Fleet profile through the settings policy", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          revision: "b".repeat(64),
+          active_profile: "daytona",
+          default_profile: "local-deno",
+          available_profiles: ["daytona", "local-deno"],
+          scopes: [],
+        }),
+        { headers: { "content-type": "application/json" } },
+      ),
+    );
+    globalThis.fetch = fetchMock;
+    const client = new FleetApiClient({ baseUrl: "http://fleet.test" });
+
+    const result = await client.setProfile("local-deno", "a".repeat(64));
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://fleet.test/api/settings",
+      expect.objectContaining({
+        method: "PATCH",
+        body: JSON.stringify({ profile: "local-deno", revision: "a".repeat(64) }),
+      }),
+    );
+    expect(result.default_profile).toBe("local-deno");
+  });
+
   it("lists discoverable Skill cards", async () => {
     globalThis.fetch = vi.fn().mockResolvedValue(
       new Response(JSON.stringify([{ id: "skill-1", name: "long-context" }]), {

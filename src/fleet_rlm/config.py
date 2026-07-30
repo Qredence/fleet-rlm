@@ -122,6 +122,12 @@ class Settings(BaseModel):
     rlm_max_output_chars: int = Field(default=10_000, gt=0)
     rlm_max_execution_output_chars: int = Field(default=4_000, gt=0)
     rlm_execution_timeout_s: int = Field(default=120, gt=0)
+    rlm_recursion_max_depth: Literal[2] = 2
+    rlm_recursion_max_calls: int = Field(default=4, gt=0)
+    rlm_recursion_max_prompt_chars: int = Field(default=50_000, gt=0)
+    rlm_recursion_child_max_iterations: int = Field(default=8, gt=0)
+    rlm_recursion_child_max_llm_calls: int = Field(default=12, gt=0)
+    rlm_recursion_child_max_output_chars: int = Field(default=4_000, gt=0)
     run_heartbeat_seconds: int = Field(default=10, gt=0)
     run_stale_after_seconds: int = Field(default=60, gt=0)
     rlm_verbose: bool = True
@@ -229,6 +235,12 @@ _TABLE_KEYS: dict[str, frozenset[str]] = {
             "max_output_chars",
             "max_execution_output_chars",
             "execution_timeout_s",
+            "recursion_max_depth",
+            "recursion_max_calls",
+            "recursion_max_prompt_chars",
+            "recursion_child_max_iterations",
+            "recursion_child_max_llm_calls",
+            "recursion_child_max_output_chars",
             "verbose",
         }
     ),
@@ -381,6 +393,12 @@ def _flatten_policy(policy: Mapping[str, Any]) -> dict[str, Any]:
         "rlm_max_output_chars": rlm.get("max_output_chars"),
         "rlm_max_execution_output_chars": rlm.get("max_execution_output_chars"),
         "rlm_execution_timeout_s": rlm.get("execution_timeout_s"),
+        "rlm_recursion_max_depth": rlm.get("recursion_max_depth", 2),
+        "rlm_recursion_max_calls": rlm.get("recursion_max_calls", 4),
+        "rlm_recursion_max_prompt_chars": rlm.get("recursion_max_prompt_chars", 50_000),
+        "rlm_recursion_child_max_iterations": rlm.get("recursion_child_max_iterations", 8),
+        "rlm_recursion_child_max_llm_calls": rlm.get("recursion_child_max_llm_calls", 12),
+        "rlm_recursion_child_max_output_chars": rlm.get("recursion_child_max_output_chars", 4_000),
         "rlm_verbose": rlm.get("verbose"),
         "data_root": storage.get("data_root"),
         "max_upload_bytes": storage.get("max_upload_bytes"),
@@ -459,6 +477,36 @@ def _resolve_environment_value(name: str | None, dotenv: Mapping[str, str | None
     return value or None
 
 
+def _require_managed_profile_environment_values(
+    profile: str,
+    values: Mapping[str, Any],
+    dotenv: Mapping[str, str | None],
+) -> None:
+    """Fail early when the explicit managed Lakebase/MLflow policy is incomplete."""
+    if profile != "daytona-managed":
+        return
+    references = (
+        "database_url_env",
+        "daytona_api_key_env",
+        "root_llm_api_key_env",
+        "root_llm_base_url_env",
+        "mlflow_experiment_name_env",
+        "mlflow_trace_catalog_env",
+        "mlflow_trace_schema_env",
+        "mlflow_trace_table_prefix_env",
+        "mlflow_tracing_sql_warehouse_id_env",
+    )
+    missing: set[str] = set()
+    for field_name in references:
+        environment_name = values.get(field_name)
+        if not isinstance(environment_name, str) or not _resolve_environment_value(environment_name, dotenv):
+            missing.add(environment_name if isinstance(environment_name, str) else field_name)
+    if missing:
+        raise FleetConfigurationError(
+            f"selected profile {profile!r} is missing required environment value(s): {', '.join(missing)}"
+        )
+
+
 def load_runtime_settings() -> Settings:
     """Load the one required, restart-only Fleet policy profile for production."""
     dotenv = dotenv_values(".env")
@@ -498,6 +546,7 @@ def load_runtime_settings() -> Settings:
     selected = _require_mapping(profiles[profile], f"profiles.{profile}")
     _validate_policy_table(selected, f"profiles.{profile}")
     values = _flatten_policy(_deep_merge(defaults, selected))
+    _require_managed_profile_environment_values(profile, values, dotenv)
 
     database_url_env = values.pop("database_url_env", None)
     daytona_api_key_env = values.pop("daytona_api_key_env", None)

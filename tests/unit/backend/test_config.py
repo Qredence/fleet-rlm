@@ -19,17 +19,17 @@ def test_daytona_profile_uses_specialized_bounded_model_roles() -> None:
     assert set(document["profiles"]) == {
         "local-deno",
         "daytona",
+        "daytona-managed",
         "daytona-bench",
         "daytona-bench-40",
     }
     assert document["defaults"]["daytona"]["snapshot"] == "fleet-rlm-python313-v4"
     llm = document["profiles"]["daytona"]["llm"]
     assert llm["root"] == {
-        "model": "uscentral.default.inkling",
+        "model": "uscentral.default.deepseek-v4-flash",
         "api_key_env": "DATABRICKS_TOKEN",
         "base_url_env": "FLEET_DATABRICKS_AI_GATEWAY_BASE_URL",
         "max_tokens": 8000,
-        "reasoning_effort": "none",
     }
     assert llm["sub"] == {
         "model": "uscentral.ai_gateway.databricks-qwen35-122b-a10b",
@@ -52,7 +52,90 @@ def test_daytona_profile_routes_tracing_to_supervised_local_mlflow() -> None:
     }
 
 
-def test_daytona_profile_resolves_inkling_root_and_qwen_sub_with_gateway_params(
+def test_daytona_managed_profile_declares_lakebase_and_mlflow_environment_references() -> None:
+    policy_path = Path(__file__).resolve().parents[3] / "config" / "fleet.toml"
+    document = tomllib.loads(policy_path.read_text(encoding="utf-8"))
+
+    managed = document["profiles"]["daytona-managed"]
+    assert managed["runtime"] == {"environment": "daytona"}
+    assert managed["mlflow"] == {
+        "tracing_enabled": True,
+        "tracking_uri": "databricks",
+        "experiment_name_env": "FLEET_MLFLOW_EXPERIMENT_NAME",
+        "trace_catalog_env": "FLEET_MLFLOW_TRACE_CATALOG",
+        "trace_schema_env": "FLEET_MLFLOW_TRACE_SCHEMA",
+        "trace_table_prefix_env": "FLEET_MLFLOW_TRACE_TABLE_PREFIX",
+        "tracing_sql_warehouse_id_env": "FLEET_MLFLOW_TRACING_SQL_WAREHOUSE_ID",
+    }
+    assert document["defaults"]["storage"]["database_url_env"] == "FLEET_DATABASE_URL"
+
+
+def test_daytona_managed_profile_resolves_lakebase_and_managed_mlflow_values(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    import fleet_rlm.config as config
+
+    _select_profile(tmp_path, profile="daytona-managed", monkeypatch=monkeypatch)
+    (tmp_path / ".env").write_text(
+        "FLEET_DATABASE_URL=postgresql://dotenv-user:dotenv-password@lakebase.example/fleet_rlm?sslmode=require\n"
+        "FLEET_MLFLOW_EXPERIMENT_NAME=dotenv-fleet\n"
+        "FLEET_MLFLOW_TRACE_CATALOG=dotenv_catalog\n"
+        "FLEET_MLFLOW_TRACE_SCHEMA=dotenv_schema\n"
+        "FLEET_MLFLOW_TRACE_TABLE_PREFIX=dotenv_prefix\n"
+        "FLEET_MLFLOW_TRACING_SQL_WAREHOUSE_ID=dotenv-warehouse\n",
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("FLEET_DAYTONA_API_KEY", "process-daytona-key")
+    monkeypatch.setenv("DATABRICKS_TOKEN", "process-databricks-token")
+    monkeypatch.setenv("FLEET_DATABRICKS_AI_GATEWAY_BASE_URL", "https://gateway.example.test/v1")
+    monkeypatch.setenv(
+        "FLEET_DATABASE_URL",
+        "postgresql://process-user:process-password@lakebase.example/fleet_rlm?sslmode=require",
+    )
+    monkeypatch.setenv("FLEET_MLFLOW_TRACE_CATALOG", "process_catalog")
+
+    settings = config.load_runtime_settings()
+
+    assert settings.run_environment == "daytona"
+    assert settings.database_url == (
+        "postgresql://process-user:process-password@lakebase.example/fleet_rlm?sslmode=require"
+    )
+    assert settings.mlflow_tracking_uri == "databricks"
+    assert settings.mlflow_experiment_name == "dotenv-fleet"
+    assert settings.mlflow_trace_catalog == "process_catalog"
+    assert settings.mlflow_trace_schema == "dotenv_schema"
+    assert settings.mlflow_trace_table_prefix == "dotenv_prefix"
+    assert settings.mlflow_tracing_sql_warehouse_id == "dotenv-warehouse"
+
+
+def test_daytona_managed_profile_requires_declared_database_and_mlflow_values(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    import fleet_rlm.config as config
+
+    _select_profile(tmp_path, profile="daytona-managed", monkeypatch=monkeypatch)
+    monkeypatch.chdir(tmp_path)
+    for name in (
+        "FLEET_DATABASE_URL",
+        "FLEET_DAYTONA_API_KEY",
+        "DATABRICKS_TOKEN",
+        "FLEET_DATABRICKS_AI_GATEWAY_BASE_URL",
+        "FLEET_MLFLOW_EXPERIMENT_NAME",
+        "FLEET_MLFLOW_TRACE_CATALOG",
+        "FLEET_MLFLOW_TRACE_SCHEMA",
+        "FLEET_MLFLOW_TRACE_TABLE_PREFIX",
+        "FLEET_MLFLOW_TRACING_SQL_WAREHOUSE_ID",
+    ):
+        monkeypatch.delenv(name, raising=False)
+
+    with pytest.raises(config.FleetConfigurationError, match="required environment value"):
+        config.load_runtime_settings()
+
+
+def test_daytona_profile_resolves_deepseek_root_and_qwen_sub_with_gateway_params(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     import fleet_rlm.config as config
@@ -63,14 +146,39 @@ def test_daytona_profile_resolves_inkling_root_and_qwen_sub_with_gateway_params(
 
     settings = config.load_runtime_settings()
 
-    assert settings.root_model == "uscentral.default.inkling"
+    assert settings.root_model == "uscentral.default.deepseek-v4-flash"
     assert settings.sub_model == "uscentral.ai_gateway.databricks-qwen35-122b-a10b"
-    assert settings.root_llm_reasoning_effort == "none"
+    assert settings.root_llm_reasoning_effort is None
     assert settings.sub_llm_reasoning_effort == "none"
     assert settings.sub_llm_temperature == 0
     assert settings.root_llm_max_tokens == settings.sub_llm_max_tokens == 8000
     assert settings.mlflow_tracing_enabled is True
     assert settings.mlflow_tracking_uri == "http://127.0.0.1:5001"
+
+
+def test_daytona_ignores_managed_mlflow_environment_values_when_not_selected(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import fleet_rlm.config as config
+
+    monkeypatch.setenv("FLEET_DAYTONA_API_KEY", "test-daytona-key")
+    monkeypatch.setenv("DATABRICKS_TOKEN", "test-databricks-token")
+    monkeypatch.setenv("FLEET_DATABRICKS_AI_GATEWAY_BASE_URL", "https://gateway.example.test/v1")
+    monkeypatch.setenv("FLEET_MLFLOW_EXPERIMENT_NAME", "managed-experiment")
+    monkeypatch.setenv("FLEET_MLFLOW_TRACE_CATALOG", "managed_catalog")
+
+    settings = config.load_runtime_settings()
+
+    assert settings.mlflow_tracking_uri == "http://127.0.0.1:5001"
+    assert settings.mlflow_experiment_name == "fleet-rlm"
+    assert settings.mlflow_trace_catalog is None
+
+
+def test_recursive_depth_is_fixed_at_two_for_this_milestone() -> None:
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None, rlm_recursion_max_depth=1)
+
+    assert Settings(_env_file=None).rlm_recursion_max_depth == 2
 
 
 def test_daytona_benchmark_profiles_use_qwen_without_cache_or_mlflow() -> None:

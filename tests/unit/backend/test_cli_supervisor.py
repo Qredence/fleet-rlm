@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import socket
+from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -10,11 +11,29 @@ from fleet_rlm.cli import supervisor
 from fleet_rlm.persistence.database import DatabaseCompatibilityError, DatabaseConnectionError
 
 _VALIDATE_DAYTONA_DATABASE = supervisor._validate_daytona_database
+_LOCAL_MLFLOW_SERVER = supervisor._local_mlflow_server
+_SELECTED_RUNTIME_POLICY = supervisor._selected_runtime_policy
 
 
 @pytest.fixture(autouse=True)
 def _compatible_daytona_database(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(supervisor, "_validate_daytona_database", lambda _repo_root: None)
+    monkeypatch.setattr(supervisor, "_validate_daytona_database", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        supervisor,
+        "_selected_runtime_policy",
+        lambda run_environment: SimpleNamespace(
+            run_environment=run_environment,
+            mlflow_tracing_enabled=False,
+            mlflow_tracking_uri="",
+            data_root=".fleet_rlm",
+        ),
+    )
+
+    @contextmanager
+    def disabled_local_mlflow(*_args: object, **_kwargs: object):
+        yield None
+
+    monkeypatch.setattr(supervisor, "_local_mlflow_server", disabled_local_mlflow)
 
 
 class _ReadyResponse:
@@ -25,6 +44,14 @@ class _ReadyResponse:
 
     def __exit__(self, *_args: object) -> None:
         return None
+
+
+class _VersionResponse(_ReadyResponse):
+    def __init__(self, version: str) -> None:
+        self._version = version
+
+    def read(self) -> bytes:
+        return self._version.encode()
 
 
 class _Process:
@@ -121,6 +148,378 @@ def test_supervisor_rejects_ephemeral_port() -> None:
         supervisor._require_available_port("127.0.0.1", 0)
 
 
+def _local_mlflow_settings(**overrides: object) -> SimpleNamespace:
+    values = {
+        "mlflow_tracing_enabled": True,
+        "mlflow_tracking_uri": "http://127.0.0.1:5001",
+        "data_root": ".fleet_rlm",
+    }
+    values.update(overrides)
+    return SimpleNamespace(**values)
+
+
+def test_local_mlflow_server_starts_with_durable_storage_and_stops_owned_process(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    logs = tmp_path / ".fleet_rlm" / "logs"
+    logs.mkdir(parents=True)
+    versions = iter((None, "3.14.0"))
+    monkeypatch.setattr(supervisor, "_mlflow_server_version", lambda *_args, **_kwargs: next(versions))
+    monkeypatch.setattr(supervisor.importlib.metadata, "version", lambda _name: "3.14.0")
+    monkeypatch.setattr(supervisor, "_require_available_port", lambda *_args: None)
+    process = _Process(pid=5001)
+    calls: list[tuple[list[str], dict[str, object]]] = []
+
+    def popen(command: list[str], **kwargs: object) -> _Process:
+        calls.append((command, kwargs))
+        return process
+
+    monkeypatch.setattr(supervisor.subprocess, "Popen", popen)
+    signals: list[tuple[int, int]] = []
+    monkeypatch.setattr(supervisor.os, "killpg", lambda pid, sig: signals.append((pid, sig)))
+
+    with _LOCAL_MLFLOW_SERVER(
+        _local_mlflow_settings(),
+        repo_root=tmp_path,
+        logs=logs,
+        timestamp="stamp",
+    ) as owned:
+        assert owned is process
+        assert signals == []
+
+    command, options = calls[0]
+    assert command[:4] == [supervisor.sys.executable, "-m", "mlflow", "server"]
+    assert command[command.index("--host") + 1] == "127.0.0.1"
+    assert command[command.index("--port") + 1] == "5001"
+    assert command[command.index("--workers") + 1] == "1"
+    assert command[command.index("--backend-store-uri") + 1].endswith("/.fleet_rlm/mlflow/mlflow.db")
+    assert command[command.index("--artifacts-destination") + 1].endswith("/.fleet_rlm/mlflow/artifacts")
+    assert options["cwd"] == tmp_path
+    assert options["start_new_session"] is True
+    assert signals == [(5001, supervisor.signal.SIGTERM)]
+    assert (logs / "mlflow-stamp.log").is_file()
+    assert (logs / "mlflow-latest.log").resolve() == (logs / "mlflow-stamp.log").resolve()
+
+
+def test_local_mlflow_server_reuses_compatible_external_process(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(supervisor, "_mlflow_server_version", lambda *_args, **_kwargs: "3.14.0")
+    monkeypatch.setattr(supervisor.importlib.metadata, "version", lambda _name: "3.14.0")
+    monkeypatch.setattr(
+        supervisor.subprocess,
+        "Popen",
+        lambda *_args, **_kwargs: pytest.fail("compatible external MLflow must be reused"),
+    )
+    monkeypatch.setattr(
+        supervisor,
+        "_stop_process_group",
+        lambda *_args: pytest.fail("reused external MLflow must not be stopped"),
+    )
+
+    with _LOCAL_MLFLOW_SERVER(
+        _local_mlflow_settings(),
+        repo_root=tmp_path,
+        logs=tmp_path,
+        timestamp="stamp",
+    ) as owned:
+        assert owned is None
+
+
+def test_local_mlflow_server_rejects_incompatible_external_version(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(supervisor, "_mlflow_server_version", lambda *_args, **_kwargs: "3.13.0")
+    monkeypatch.setattr(supervisor.importlib.metadata, "version", lambda _name: "3.14.0")
+
+    with (
+        pytest.raises(supervisor.SupervisorError, match=r"reports version 3\.13\.0.*requires 3\.14\.0"),
+        _LOCAL_MLFLOW_SERVER(
+            _local_mlflow_settings(),
+            repo_root=tmp_path,
+            logs=tmp_path,
+            timestamp="stamp",
+        ),
+    ):
+        pass
+
+
+def test_local_mlflow_server_rejects_non_mlflow_port_owner(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(supervisor, "_mlflow_server_version", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(supervisor.importlib.metadata, "version", lambda _name: "3.14.0")
+    monkeypatch.setattr(
+        supervisor,
+        "_require_available_port",
+        lambda *_args: (_ for _ in ()).throw(supervisor.SupervisorError("occupied")),
+    )
+
+    with (
+        pytest.raises(supervisor.SupervisorError, match="not compatible MLflow"),
+        _LOCAL_MLFLOW_SERVER(
+            _local_mlflow_settings(),
+            repo_root=tmp_path,
+            logs=tmp_path,
+            timestamp="stamp",
+        ),
+    ):
+        pass
+
+
+def test_local_mlflow_readiness_reports_early_exit(tmp_path: Path) -> None:
+    log_path = tmp_path / "mlflow.log"
+
+    with pytest.raises(supervisor.SupervisorError, match=r"MLflow exited with status 3.*mlflow\.log"):
+        supervisor._wait_until_mlflow_ready(
+            _ExitedProcess(pid=5001, returncode=3),
+            tracking_uri="http://127.0.0.1:5001",
+            expected_version="3.14.0",
+            log_path=log_path,
+        )
+
+
+def test_local_mlflow_readiness_reports_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    clock = iter((100.0, 131.0))
+    monkeypatch.setattr(supervisor.time, "monotonic", lambda: next(clock))
+    monkeypatch.setattr(supervisor, "_mlflow_server_version", lambda *_args, **_kwargs: None)
+
+    with pytest.raises(supervisor.SupervisorError, match=r"MLflow was not ready within 30s.*mlflow\.log"):
+        supervisor._wait_until_mlflow_ready(
+            _Process(pid=5001),
+            tracking_uri="http://127.0.0.1:5001",
+            expected_version="3.14.0",
+            log_path=tmp_path / "mlflow.log",
+        )
+
+
+@pytest.mark.parametrize(
+    "settings",
+    (
+        None,
+        _local_mlflow_settings(mlflow_tracing_enabled=False),
+        _local_mlflow_settings(mlflow_tracking_uri="databricks"),
+    ),
+)
+def test_local_mlflow_server_skips_unmanaged_policies(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    settings: SimpleNamespace | None,
+) -> None:
+    monkeypatch.setattr(
+        supervisor.subprocess,
+        "Popen",
+        lambda *_args, **_kwargs: pytest.fail("unmanaged policy must not start MLflow"),
+    )
+
+    with _LOCAL_MLFLOW_SERVER(settings, repo_root=tmp_path, logs=tmp_path, timestamp="stamp") as owned:
+        assert owned is None
+
+
+def test_daytona_orphan_cleanup_leaves_readiness_margin() -> None:
+    from fleet_rlm.composition.daytona import _ORPHAN_CLEANUP_TIMEOUT_SECONDS
+
+    assert supervisor._READY_TIMEOUT_SECONDS["daytona"] - 30 >= _ORPHAN_CLEANUP_TIMEOUT_SECONDS
+
+
+@pytest.mark.parametrize("profile", ("daytona", "daytona-bench"))
+def test_selected_runtime_policy_accepts_any_compatible_daytona_profile(
+    monkeypatch: pytest.MonkeyPatch,
+    profile: str,
+) -> None:
+    settings = SimpleNamespace(
+        run_environment="daytona",
+        _active_profile=profile,
+    )
+    monkeypatch.setattr(supervisor, "active_profile", lambda _settings: profile)
+    monkeypatch.setattr(
+        supervisor,
+        "load_runtime_settings",
+        lambda: settings,
+    )
+
+    assert _SELECTED_RUNTIME_POLICY("daytona") is settings
+
+
+def test_selected_runtime_policy_accepts_compatible_deno_profile(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = SimpleNamespace(run_environment="deno", _active_profile="local-deno")
+    monkeypatch.setattr(supervisor, "active_profile", lambda _settings: "local-deno")
+    monkeypatch.setattr(supervisor, "load_runtime_settings", lambda: settings)
+
+    assert _SELECTED_RUNTIME_POLICY("deno") is settings
+
+
+@pytest.mark.parametrize(
+    ("requested", "selected_environment", "selected_profile", "recommended"),
+    (
+        ("deno", "daytona", "daytona", "local-deno"),
+        ("daytona", "deno", "local-deno", "daytona"),
+    ),
+)
+def test_selected_runtime_policy_rejects_launcher_mismatch(
+    monkeypatch: pytest.MonkeyPatch,
+    requested: str,
+    selected_environment: str,
+    selected_profile: str,
+    recommended: str,
+) -> None:
+    settings = SimpleNamespace(run_environment=selected_environment, _active_profile=selected_profile)
+    monkeypatch.setattr(supervisor, "active_profile", lambda _settings: selected_profile)
+    monkeypatch.setattr(supervisor, "load_runtime_settings", lambda: settings)
+
+    with pytest.raises(supervisor.SupervisorError) as raised:
+        _SELECTED_RUNTIME_POLICY(requested)
+
+    message = str(raised.value)
+    assert repr(selected_profile) in message
+    assert f"default_profile = {recommended!r}" in message
+    assert "/profiles" in message
+
+
+def test_profile_for_run_environment_uses_stable_deno_default() -> None:
+    assert supervisor._profile_for_run_environment("deno") == "local-deno"
+
+
+def test_selected_runtime_policy_reports_removed_profile(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        supervisor,
+        "load_runtime_settings",
+        lambda: (_ for _ in ()).throw(RuntimeError("configured profile does not exist: databricks-daytona")),
+    )
+
+    with pytest.raises(
+        supervisor.SupervisorError,
+        match="configured profile does not exist: databricks-daytona",
+    ):
+        _SELECTED_RUNTIME_POLICY("daytona")
+
+
+@pytest.mark.parametrize(
+    ("requested", "selected_environment", "selected_profile"),
+    (
+        ("deno", "daytona", "daytona"),
+        ("daytona", "deno", "local-deno"),
+    ),
+)
+def test_supervisor_rejects_profile_mismatch_before_runtime_side_effects(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    requested: str,
+    selected_environment: str,
+    selected_profile: str,
+) -> None:
+    _tui_workspace(tmp_path)
+    monkeypatch.setattr(supervisor.shutil, "which", lambda command: f"/usr/bin/{command}")
+    monkeypatch.setattr(
+        supervisor.subprocess,
+        "run",
+        lambda *_args, **_kwargs: SimpleNamespace(returncode=0, stdout="v22.19.0", stderr=""),
+    )
+    settings = SimpleNamespace(run_environment=selected_environment, _active_profile=selected_profile)
+    monkeypatch.setattr(supervisor, "active_profile", lambda _settings: selected_profile)
+    monkeypatch.setattr(supervisor, "load_runtime_settings", lambda: settings)
+    monkeypatch.setattr(supervisor, "_selected_runtime_policy", _SELECTED_RUNTIME_POLICY)
+    monkeypatch.setattr(
+        supervisor,
+        "_validate_daytona_database",
+        lambda *_args, **_kwargs: pytest.fail("profile mismatch must precede database preflight"),
+    )
+
+    @contextmanager
+    def forbidden_mlflow(*_args: object, **_kwargs: object):
+        pytest.fail("profile mismatch must precede MLflow startup")
+        yield None
+
+    monkeypatch.setattr(supervisor, "_local_mlflow_server", forbidden_mlflow)
+    monkeypatch.setattr(
+        supervisor.subprocess,
+        "Popen",
+        lambda *_args, **_kwargs: pytest.fail("profile mismatch must precede child spawning"),
+    )
+
+    with pytest.raises(supervisor.SupervisorError, match="default_profile"):
+        supervisor.supervise(
+            host="127.0.0.1",
+            port=8123,
+            reload=False,
+            run_environment=requested,
+            repo_root=tmp_path,
+        )
+
+
+def test_supervisor_reuses_one_daytona_settings_object_and_stops_mlflow_last(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _tui_workspace(tmp_path)
+    monkeypatch.setattr(supervisor.shutil, "which", lambda command: f"/usr/bin/{command}")
+    monkeypatch.setattr(
+        supervisor.subprocess,
+        "run",
+        lambda *_args, **_kwargs: SimpleNamespace(returncode=0, stdout="v22.19.0", stderr=""),
+    )
+    settings = SimpleNamespace(
+        run_environment="daytona",
+        _active_profile="daytona",
+    )
+    load_calls = 0
+
+    def load_settings() -> SimpleNamespace:
+        nonlocal load_calls
+        load_calls += 1
+        return settings
+
+    monkeypatch.setattr(supervisor, "active_profile", lambda _settings: "daytona")
+    monkeypatch.setattr(supervisor, "load_runtime_settings", load_settings)
+    monkeypatch.setattr(supervisor, "_selected_runtime_policy", _SELECTED_RUNTIME_POLICY)
+    database_settings: list[object] = []
+    monkeypatch.setattr(
+        supervisor,
+        "_validate_daytona_database",
+        lambda _root, *, settings: database_settings.append(settings),
+    )
+    order: list[str] = []
+
+    @contextmanager
+    def local_mlflow(selected: object, **_kwargs: object):
+        assert selected is settings
+        order.append("mlflow-started")
+        yield None
+        order.append("mlflow-stopped")
+
+    monkeypatch.setattr(supervisor, "_local_mlflow_server", local_mlflow)
+
+    def run_backend_and_tui(**options: object) -> None:
+        assert "FLEET_CONFIG_PROFILE" not in options["backend_env"]  # type: ignore[index]
+        order.append("backend-and-tui-stopped")
+        return None
+
+    monkeypatch.setattr(supervisor, "_run_backend_and_tui", run_backend_and_tui)
+
+    supervisor.supervise(
+        host="127.0.0.1",
+        port=8123,
+        reload=False,
+        run_environment="daytona",
+        repo_root=tmp_path,
+    )
+
+    assert load_calls == 1
+    assert database_settings == [settings]
+    assert order == ["mlflow-started", "backend-and-tui-stopped", "mlflow-stopped"]
+
+
 def test_supervisor_rejects_incompatible_daytona_database_before_spawn(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -133,7 +532,7 @@ def test_supervisor_rejects_incompatible_daytona_database_before_spawn(
         lambda *_args, **_kwargs: SimpleNamespace(returncode=0, stdout="v22.19.0", stderr=""),
     )
 
-    def reject_database(_repo_root: Path) -> None:
+    def reject_database(_repo_root: Path, **_kwargs: object) -> None:
         raise supervisor.SupervisorError("Fleet database is not at Alembic head; run uv run python scripts/db_init.py")
 
     monkeypatch.setattr(supervisor, "_validate_daytona_database", reject_database)
@@ -249,7 +648,7 @@ def test_supervisor_runs_pi_tui_against_ready_backend_and_terminates_backend_gro
         "--reload",
     ]
     assert backend_options["start_new_session"] is True
-    assert backend_options["env"]["FLEET_CONFIG_PROFILE"] == "local-deno"  # type: ignore[index]
+    assert "FLEET_CONFIG_PROFILE" not in backend_options["env"]  # type: ignore[index]
     assert "FLEET_RUN_ENVIRONMENT" not in backend_options["env"]  # type: ignore[index]
     assert Path(backend_options["stdout"].name).parent == tmp_path / ".fleet_rlm" / "logs"  # type: ignore[union-attr]
     latest_log = tmp_path / ".fleet_rlm" / "logs" / "latest.log"

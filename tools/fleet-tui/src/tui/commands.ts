@@ -39,6 +39,11 @@ export interface CommandPresenter {
     current: PendingSkillSelection[],
   ): Promise<PendingSkillSelection[] | null>;
   chooseSetting(settings: FleetSettingsPolicy): Promise<SettingsUpdate | null>;
+  chooseProfile(
+    profiles: string[],
+    active: string | undefined,
+    selected: string | undefined,
+  ): Promise<string | null>;
 }
 
 export type CommandHandler = (args: string[], ctx: CommandContext) => Promise<void> | void;
@@ -342,6 +347,50 @@ registerCommand({
 });
 
 registerCommand({
+  name: "profiles",
+  description: "Switch the active Fleet profile (restart required)",
+  usage: "/profiles",
+  handler: async (_args, ctx) => {
+    try {
+      const settings = await ctx.client.getSettings();
+      const profiles =
+        settings.available_profiles ??
+        settings.scopes.map((scope) => scope.name).filter((name) => name !== "defaults");
+      const active = settings.active_profile ?? undefined;
+      const selectedForRestart = settings.default_profile ?? active;
+      if (ctx.presenter) {
+        const selected = await ctx.presenter.chooseProfile(profiles, active, selectedForRestart);
+        if (!selected || selected === selectedForRestart) return;
+        await ctx.client.setProfile(selected, settings.revision);
+        appendSystem(ctx.store, `Profile set to '${selected}'. Restart Fleet to apply.`);
+        return;
+      }
+      const lines = profiles.map((name) => {
+        let suffix = "";
+        if (name === active && name === selectedForRestart) suffix = " (current)";
+        else if (name === active) suffix = " (running)";
+        else if (name === selectedForRestart) suffix = " (selected)";
+        return `  ${name}${suffix}`;
+      });
+      const state =
+        active && selectedForRestart && active !== selectedForRestart
+          ? ` (running: ${active}; selected: ${selectedForRestart})`
+          : active
+            ? ` (current: ${active})`
+            : selectedForRestart
+              ? ` (selected: ${selectedForRestart})`
+              : "";
+      appendSystem(
+        ctx.store,
+        `Fleet profiles${state} (restart to apply)\n\n${lines.join("\n")}\n\nSwitch with /profiles in the interactive TUI, or /settings to edit policy values.`,
+      );
+    } catch (error) {
+      appendSystem(ctx.store, `Failed to access profiles: ${errorMessage(error)}`);
+    }
+  },
+});
+
+registerCommand({
   name: "volume",
   description: "Show the Workspace Volume file tree",
   usage: "/volume [root]",
@@ -353,7 +402,7 @@ registerCommand({
     const root = args[0] ?? ".";
     try {
       const tree = await ctx.client.listVolumeTree({ root });
-      const rendered = formatVolumeTree([...tree.directories, ...tree.paths]);
+      const rendered = formatVolumeTree([...(tree.directories ?? []), ...tree.paths]);
       appendSystem(
         ctx.store,
         `Workspace Volume${root === "." ? "" : ` (${root})`}\n\n${rendered}${tree.truncated ? "\n\n…tree truncated; narrow the root or use a deeper command." : ""}`,
