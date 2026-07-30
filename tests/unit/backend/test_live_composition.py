@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+import asyncio
 from pathlib import Path
 from types import SimpleNamespace
 from uuid import uuid4
@@ -22,6 +23,32 @@ def test_composition_module_imports_without_credentials() -> None:
 
     assert composition.require_daytona_settings is not None
     assert composition.build_daytona_composition is not None
+
+
+@pytest.mark.asyncio
+async def test_daytona_startup_recovery_bounds_provider_fence() -> None:
+    from fleet_rlm.composition.daytona import _reconcile_daytona_settling
+
+    session_id = uuid4()
+    fence_calls: list[object] = []
+
+    class TurnState:
+        async def reconcile_settling(self, fence):
+            with pytest.raises(asyncio.TimeoutError):
+                await fence(session_id)
+
+    class SessionManager:
+        async def fence_session(self, value):
+            fence_calls.append(value)
+            await asyncio.sleep(60)
+
+    await _reconcile_daytona_settling(
+        TurnState(),
+        SessionManager(),
+        fence_timeout=0.01,
+    )
+
+    assert fence_calls == [session_id]
 
 
 @pytest.mark.parametrize("session_factory", [None, object()], ids=["local", "sql"])
@@ -55,6 +82,63 @@ def test_common_storage_adapter_builder_owns_local_and_sql_catalog_branches(tmp_
         assert adapters.attachment_lifecycle._paths is sql_attachment_paths
         assert isinstance(adapters.artifact_reader._catalog, SqlAlchemyArtifactCatalog)
         assert adapters.artifact_reader._blobs is sql_artifact_blobs
+
+
+def test_deno_composition_passes_configured_recursive_options(monkeypatch, tmp_path) -> None:
+    import fleet_rlm.chat.deno_run_environment as deno_environment
+    import fleet_rlm.composition.deno as deno_composition
+    import fleet_rlm.rlm.factory as rlm_factory
+    import fleet_rlm.rlm.lm_factory as lm_factory
+    from fleet_rlm.rlm.recursive_calls import RecursiveRLMOptions
+
+    settings = Settings(
+        _env_file=None,
+        run_environment="deno",
+        data_root=str(tmp_path),
+        rlm_recursion_max_calls=9,
+        rlm_recursion_max_prompt_chars=123,
+        rlm_recursion_child_max_iterations=7,
+        rlm_recursion_child_max_llm_calls=11,
+        rlm_recursion_child_max_output_chars=222,
+    )
+    models = SimpleNamespace(root_lm=object(), sub_lm=object())
+    captured: dict[str, object] = {}
+
+    class FakePreparation:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+    monkeypatch.setattr(deno_environment, "DenoTurnPreparation", FakePreparation)
+    monkeypatch.setattr(lm_factory, "build_model_bundle", lambda _settings: models)
+    monkeypatch.setattr(rlm_factory, "RLMFactory", lambda *, verbose: ("factory", verbose))
+    monkeypatch.setattr(
+        deno_composition,
+        "host_roots",
+        lambda _settings: (tmp_path / "uploads", tmp_path / "artifacts"),
+    )
+    monkeypatch.setattr(
+        deno_composition,
+        "build_local_storage_adapters",
+        lambda *_args, **_kwargs: SimpleNamespace(attachment_lifecycle="attachments", artifact_reader="artifacts"),
+    )
+    monkeypatch.setattr(
+        deno_composition,
+        "install_local_inventory",
+        lambda _app, _settings, **kwargs: kwargs["preparation"],
+    )
+
+    app = SimpleNamespace(state=SimpleNamespace(skill_catalog="skills"))
+    preparation = deno_composition.install_deno_composition(app, settings)
+
+    assert preparation is not None
+    assert captured["recursive_options"] == RecursiveRLMOptions(
+        max_depth=2,
+        max_calls=9,
+        max_prompt_chars=123,
+        child_max_iterations=7,
+        child_max_llm_calls=11,
+        child_max_output_chars=222,
+    )
 
 
 def test_require_daytona_settings_fails_closed_without_deps(monkeypatch: pytest.MonkeyPatch) -> None:

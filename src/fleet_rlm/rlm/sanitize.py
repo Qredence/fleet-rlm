@@ -163,6 +163,22 @@ def truncate_public_text(text: str, *, max_len: int = 10_000) -> str:
     return text[: limit - 3] + "..."
 
 
+def truncate_head_tail(text: str, *, max_chars: int = 4_000) -> str:
+    """Bound large sandbox execution output, keeping head and tail with an omission marker.
+
+    Mirrors DSPy's ``REPLHistory`` truncation semantics so the model sees that
+    output was cut and how much. Deliberately does not redact: this text feeds
+    the RLM code-repair loop and must stay semantically intact.
+    """
+    limit = max(1, int(max_chars))
+    raw_len = len(text)
+    if raw_len <= limit:
+        return text
+    half = limit // 2
+    omitted = raw_len - limit
+    return text[:half] + f"\n\n... ({omitted:,} characters omitted) ...\n\n" + text[-half:]
+
+
 def sanitize_public_value(value: Any, *, max_len: int = 2_000, depth: int = 0) -> Any:
     """Recursively bound and redact JSON-like public detail values."""
     if depth >= 8:

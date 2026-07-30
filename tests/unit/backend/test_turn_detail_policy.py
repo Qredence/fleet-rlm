@@ -78,7 +78,7 @@ def test_commit_success_rejects_failed_outcomes_or_unmatched_tool_calls() -> Non
 
     with pytest.raises(TurnDetailPolicyError):
         commit_success(RLMOutcome(terminal_status="failed"), ())
-    with pytest.raises(TurnDetailPolicyError):
+    with pytest.raises(TurnDetailPolicyError, match="tool call start has no terminal observation"):
         commit_success(
             RLMOutcome(
                 terminal_status="completed",

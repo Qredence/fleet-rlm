@@ -39,6 +39,8 @@ def _response(snapshot) -> SettingsPolicyResponse:
     return SettingsPolicyResponse(
         revision=snapshot.revision,
         active_profile=snapshot.active_profile,
+        default_profile=snapshot.default_profile,
+        available_profiles=list(snapshot.available_profiles),
         scopes=list(snapshot.scopes),
     )
 
@@ -67,6 +69,10 @@ def get_settings_policy(policy: ConfigPolicyDep) -> SettingsPolicyResponse:
 )
 def patch_settings_policy(body: SettingsPolicyPatchRequest, policy: ConfigPolicyDep) -> SettingsPolicyResponse:
     try:
+        if body.profile is not None:
+            return _response(policy.set_default_profile(body.profile, revision=body.revision))
+        if body.scope is None or body.path is None or body.value is None:
+            raise FleetConfigurationError("settings policy patch requires either profile or scope/path/value")
         return _response(policy.update(scope=body.scope, path=body.path, value=body.value, revision=body.revision))
     except PolicyConflictError as exc:
         raise HTTPException(

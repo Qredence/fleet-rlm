@@ -4,11 +4,89 @@ from __future__ import annotations
 
 import asyncio
 import threading
+from collections.abc import Iterator
+from contextlib import contextmanager
 from types import SimpleNamespace
 from uuid import uuid4
 
 import dspy
 import pytest
+
+
+@pytest.mark.asyncio
+async def test_runner_uses_native_path_for_plain_greeting() -> None:
+    from fleet_rlm.chat.session_context import SessionContextManifest
+    from fleet_rlm.rlm.context import RLMExecutionContext, RLMExecutionSpec
+    from fleet_rlm.rlm.dspy_contract import RLMOptions
+    from fleet_rlm.rlm.runner import RLMRunner
+    from fleet_rlm.sessions.models import TurnAccess
+
+    class Capabilities:
+        spec = RLMExecutionSpec()
+
+        def drain_public_details(self):
+            return ()
+
+        def drain_artifact_candidates(self):
+            return ()
+
+    class Program:
+        async def acall(self, **_kwargs):
+            return dspy.Prediction(
+                answer="Hi! How can I help you today?",
+                trajectory=[
+                    {
+                        "reasoning": "Answer the greeting.",
+                        "code": "SUBMIT(answer='Hi! How can I help you today?')",
+                        "output": "FINAL: {'answer': 'Hi! How can I help you today?'}",
+                    }
+                ],
+            )
+
+    class Factory:
+        created = False
+
+        def create(self, **_kwargs):
+            self.created = True
+            return Program()
+
+    async def not_cancelled() -> bool:
+        return False
+
+    context = RLMExecutionContext(
+        uuid4(),
+        uuid4(),
+        TurnAccess(uuid4(), uuid4()),
+        "  Hi!  ",
+        SessionContextManifest(uuid4(), 0, 0, ()),
+        SimpleNamespace(root_lm=object(), sub_lm=object()),
+        RLMOptions(),
+        asyncio.get_running_loop().time() + 10,
+        None,
+        (),
+        Capabilities(),
+        not_cancelled,
+        (),
+    )
+
+    factory = Factory()
+    stream = RLMRunner(factory=factory).stream(context)
+    events = [event async for event in stream]
+
+    assert [event.kind for event in events] == [
+        "run.started",
+        "status",
+        "step.started",
+        "rlm.reasoning",
+        "rlm.code",
+        "rlm.output",
+        "step.finished",
+    ]
+    assert factory.created
+    assert stream.outcome is not None and stream.outcome.succeeded
+    assert stream.outcome.prediction is not None
+    assert stream.outcome.prediction.display_text == "Hi! How can I help you today?"
+    assert stream.outcome.usage["iterations"] == 1
 
 
 @pytest.mark.asyncio
@@ -107,6 +185,7 @@ async def test_runner_uses_supported_async_call_and_returns_typed_outcome(
     skill_id = uuid4()
     main_thread = threading.get_ident()
     contexts: list[dict[str, object]] = []
+    phase_spans: list[tuple[str, dict[str, object]]] = []
     original_context = dspy.context
     global_adapter = dspy.settings.adapter
 
@@ -114,7 +193,13 @@ async def test_runner_uses_supported_async_call_and_returns_typed_outcome(
         contexts.append(kwargs)
         return original_context(**kwargs)
 
+    @contextmanager
+    def tracked_phase_span(name: str, *, inputs: dict[str, object]) -> Iterator[SimpleNamespace]:
+        phase_spans.append((name, inputs))
+        yield SimpleNamespace(set_outputs=lambda _outputs: None)
+
     monkeypatch.setattr(dspy, "context", tracked_context)
+    monkeypatch.setattr("fleet_rlm.rlm.runner.turn_phase_span", tracked_phase_span)
     context = RLMExecutionContext(
         uuid4(),
         uuid4(),
@@ -171,9 +256,26 @@ async def test_runner_uses_supported_async_call_and_returns_typed_outcome(
     assert contexts[0]["lm"] is context.models.root_lm
     assert contexts[0]["track_usage"] is True
     adapter = contexts[0]["adapter"]
-    assert type(adapter) is dspy.JSONAdapter
+    assert isinstance(adapter, dspy.JSONAdapter)
     assert adapter.use_native_function_calling is True
     assert dspy.settings.adapter is global_adapter
+    assert phase_spans == [
+        (
+            "RLM.execute",
+            {
+                "max_iterations": context.options.max_iterations,
+                "max_llm_calls": context.options.max_llm_calls,
+                "max_output_chars": context.options.max_output_chars,
+            },
+        )
+    ]
+
+
+def test_runner_uses_stock_json_adapter_without_protocol_salvage() -> None:
+    adapter = dspy.JSONAdapter()
+
+    assert type(adapter) is dspy.JSONAdapter
+    assert adapter.use_native_function_calling is True
 
 
 @pytest.mark.asyncio

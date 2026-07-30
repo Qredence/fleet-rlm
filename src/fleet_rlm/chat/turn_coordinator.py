@@ -29,7 +29,7 @@ from fleet_rlm.chat.turn_preparation import (
     TurnPreparationCancelledError,
     TurnPreparationTimeoutError,
 )
-from fleet_rlm.observability.turn_tracing import annotate_trace_io, turn_trace
+from fleet_rlm.observability.turn_tracing import annotate_trace_io, turn_phase_span, turn_trace
 from fleet_rlm.rlm.context import RLMExecutionContext
 from fleet_rlm.rlm.dspy_contract import empty_rlm_usage
 from fleet_rlm.rlm.events import (
@@ -172,6 +172,55 @@ class TurnCoordinator:
         self._mlflow_tracing_enabled = mlflow_tracing_enabled
         self._mlflow_expose_trace_id = mlflow_expose_trace_id
 
+    async def _finish_with_trace(
+        self,
+        turn: ExecuteTurn,
+        resolution: RLMOutcome | TurnFailure,
+        prepared: PreparedTurn,
+    ) -> CommittedTurnReceipt | FailedRunReceipt:
+        """Settle one executed Turn and expose only its terminal status to MLflow."""
+        terminal_status = resolution.terminal_status
+        with turn_phase_span(
+            "Turn.settlement",
+            inputs={
+                "terminal_status": terminal_status,
+                "has_prediction": isinstance(resolution, RLMOutcome) and resolution.prediction is not None,
+            },
+        ):
+            return await self._lifecycle.finish(
+                turn,
+                resolution,
+                artifact_sink=prepared.artifact_sink,
+                result_snapshot_sink=prepared.result_snapshot_sink,
+            )
+
+    async def _prepare_with_trace(self, start: ExecuteTurn, *, deadline: float) -> PreparedTurn:
+        """Trace preparation separately because SSE begins only after it succeeds."""
+        with turn_trace(
+            start.session_id,
+            start.run_id,
+            enabled=self._mlflow_tracing_enabled,
+            expose_trace_id=False,
+        ):
+            try:
+                with turn_phase_span(
+                    "Turn.prepare",
+                    inputs={
+                        "attachment_count": len(start.input.attachment_ids),
+                        "skill_selection_count": len(start.input.skill_selections),
+                    },
+                ):
+                    prepared = await self._preparation.prepare(start, deadline=deadline)
+            except BaseException:
+                annotate_trace_io(
+                    request=start.input.text,
+                    response_text="Turn preparation failed",
+                    failed=True,
+                )
+                raise
+            annotate_trace_io(request=start.input.text, response_text="Turn prepared")
+            return prepared
+
     async def open(self, command: OpenTurnCommand) -> OpenedTurnStream:
         """Complete claim and preparation before a transport sends headers."""
         try:
@@ -198,7 +247,7 @@ class TurnCoordinator:
         heartbeat = self._start_heartbeat(start)
 
         try:
-            preparation = self._preparation.prepare(start, deadline=deadline)
+            preparation = self._prepare_with_trace(start, deadline=deadline)
             preparation_task = asyncio.create_task(preparation)
             heartbeat_lost = asyncio.create_task(heartbeat.lost.wait()) if heartbeat is not None else None
             waiters = {preparation_task}
@@ -292,6 +341,9 @@ class TurnCoordinator:
         recorder = EventRecorder(turn.run_id, turn.session_id)
         cleanup_handed_off = False
         finalization_task: asyncio.Task[CommittedTurnReceipt | FailedRunReceipt] | None = None
+        trace_request = getattr(prepared.execution, "request", "")
+        if not isinstance(trace_request, str):
+            trace_request = ""
         try:
             stream = self._runner.stream(prepared.execution)
             last_sequence = 0
@@ -320,8 +372,9 @@ class TurnCoordinator:
                     heartbeat = None
                     settled = True
                     annotate_trace_io(
-                        request=prepared.execution.request,
+                        request=trace_request,
                         response_text="Turn failed",
+                        failed=True,
                     )
                     yield recorder.record(RunFailed(code="unavailable", message="Turn failed"))
                     return
@@ -343,9 +396,10 @@ class TurnCoordinator:
             )
             # Propagate request/response to root trace span for MLflow judges
             annotate_trace_io(
-                request=prepared.execution.request,
+                request=trace_request,
                 response_text=(outcome.prediction.display_text if outcome.prediction else outcome.public_error_message),
                 response_outputs=(dict(outcome.prediction.outputs) if outcome.prediction else None),
+                failed=not outcome.succeeded,
             )
             if outcome.terminal_status in {"timeout", "cancelled"}:
                 status = "timeout" if outcome.terminal_status == "timeout" else "cancelled"
@@ -364,11 +418,10 @@ class TurnCoordinator:
                 await asyncio.sleep(0)
             else:
                 finalization_task = asyncio.create_task(
-                    self._lifecycle.finish(
+                    self._finish_with_trace(
                         turn,
                         outcome,
-                        artifact_sink=prepared.artifact_sink,
-                        result_snapshot_sink=prepared.result_snapshot_sink,
+                        prepared,
                     )
                 )
                 execution_deadline = float(
@@ -404,8 +457,9 @@ class TurnCoordinator:
                     heartbeat = None
                     settled = True
                     annotate_trace_io(
-                        request=prepared.execution.request,
+                        request=trace_request,
                         response_text="Turn failed",
+                        failed=True,
                     )
                     yield recorder.record(RunFailed(code="unavailable", message="Turn failed"))
                     return
@@ -448,13 +502,17 @@ class TurnCoordinator:
             raise
         except Exception:
             if not settled:
+                annotate_trace_io(
+                    request=trace_request,
+                    response_text="Turn failed",
+                    failed=True,
+                )
                 try:
                     receipt = await asyncio.shield(
-                        self._lifecycle.finish(
+                        self._finish_with_trace(
                             turn,
                             TurnFailure("failed", "execution_failed", "Turn failed", empty_rlm_usage()),
-                            artifact_sink=prepared.artifact_sink,
-                            result_snapshot_sink=prepared.result_snapshot_sink,
+                            prepared,
                         )
                     )
                     settled = True
@@ -462,9 +520,10 @@ class TurnCoordinator:
                 except Exception:
                     yield recorder.record(RunFailed(code="unavailable", message="Turn failed"))
         finally:
-            await self._stop_heartbeat(heartbeat)
-            if not cleanup_handed_off:
-                await _shield_cleanup(prepared.aclose())
+            with turn_phase_span("Turn.cleanup", inputs={"cleanup_owned": not cleanup_handed_off}):
+                await self._stop_heartbeat(heartbeat)
+                if not cleanup_handed_off:
+                    await _shield_cleanup(prepared.aclose())
 
     def _submit_cleanup(
         self,

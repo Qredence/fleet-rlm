@@ -45,8 +45,8 @@ _RECEIPT_SCHEMA = "fleet.daytona-mvp-proof/v1"
 _EVIDENCE_ENV = "FLEET_LIVE_EVIDENCE_PATH"
 _SECRET_NAMES = ("FLEET_DAYTONA_API_KEY", "DATABRICKS_TOKEN")
 _CLEANUP_RETRY_DELAYS = (0.5, 1.0, 2.0, 4.0)
-# Gateway-local bare id; normalize_model_id adds openai/ for dspy.LM.
-_LIVE_MODEL = "uscentral.default.deepseek-v4-flash"
+_LIVE_ROOT_MODEL = "uscentral.default.deepseek-v4-flash"
+_LIVE_SUB_MODEL = "uscentral.ai_gateway.databricks-qwen35-122b-a10b"
 
 
 class LiveDaytonaMVPResult(dspy.Signature):
@@ -188,6 +188,8 @@ def _live_settings(tmp_path: Path) -> Settings:
     if missing:
         pytest.fail("Live Daytona MVP proof missing required credentials: " + ", ".join(missing))
     policy = load_runtime_settings()
+    if (policy.root_model, policy.sub_model) != (_LIVE_ROOT_MODEL, _LIVE_SUB_MODEL):
+        pytest.fail("Live Daytona MVP proof requires the production DeepSeek v4-free Root and Qwen Sub policy")
     database_url = f"sqlite+aiosqlite:///{(tmp_path / 'live-mvp.db').resolve()}"
     upgrade_to_head(database_url)
     return policy.model_copy(
@@ -552,8 +554,8 @@ def test_direct_pi_digit_uses_deterministic_repl_without_optional_capabilities(t
             assert text == "1"
 
             usage = usage_chunks[0]["data"].get("usage", usage_chunks[0]["data"])
-            assert 1 <= int(usage["iterations"]) <= 3
-            assert len(code_chunks) <= 3
+            assert 2 <= int(usage["iterations"]) <= 3
+            assert 2 <= len(code_chunks) <= 3
 
             tool_names = [
                 str(chunk.get("toolName", "")) for chunk in chunks if chunk.get("type") == "tool-input-available"

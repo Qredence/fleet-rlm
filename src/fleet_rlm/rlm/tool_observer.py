@@ -100,23 +100,57 @@ def observe_tool(
     @wraps(source.func)
     def wrapped(*args: Any, **kwargs: Any) -> Any:
         call_id = str(uuid4())
+        tool_span: Any | None = None
+
+        def finish_trace(*, status: str, output: Mapping[str, Any] | None = None) -> None:
+            if tool_span is None:
+                return
+            try:
+                tool_span.finish(phase_status=status, outputs=output)
+            except Exception:
+                return
+
+        def start_trace(input_value: JsonValue) -> None:
+            nonlocal tool_span
+            try:
+                from fleet_rlm.observability.turn_tracing import start_turn_span
+
+                tool_span = start_turn_span(
+                    f"tool.{source.name}",
+                    span_type="TOOL",
+                    inputs={
+                        "tool_name": str(source.name),
+                        "tool_call_id": call_id,
+                        "input": input_value,
+                    },
+                )
+            except Exception:
+                tool_span = None
+
         if is_authorized is not None and not is_authorized():
+            start_trace({})
             observer(ToolFailed(call_id, str(source.name), event_view.error(validation=False)))
+            finish_trace(status="failed", output={"tool_status": "failed", "failure_category": "unauthorized"})
             raise RuntimeError("Turn is no longer authorized")
         try:
             bound = signature.bind(*args, **kwargs)
             bound.apply_defaults()
         except TypeError:
+            start_trace({})
             observer(ToolStarted(call_id, str(source.name), {}))
             observer(ToolFailed(call_id, str(source.name), event_view.error(validation=True)))
+            finish_trace(status="failed", output={"tool_status": "failed", "failure_category": "invalid_arguments"})
             raise
 
         arguments = dict(bound.arguments)
-        observer(ToolStarted(call_id, str(source.name), event_view.input(arguments)))
+        projected_input = event_view.input(arguments)
+        start_trace(projected_input)
+        observer(ToolStarted(call_id, str(source.name), projected_input))
         try:
             validated = validator(**arguments)
         except Exception:
             observer(ToolFailed(call_id, str(source.name), event_view.error(validation=True)))
+            finish_trace(status="failed", output={"tool_status": "failed", "failure_category": "invalid_arguments"})
             raise
 
         try:
@@ -131,14 +165,18 @@ def observe_tool(
             if guards is not None:
                 guards.failed(str(source.name), arguments)
             observer(ToolFailed(call_id, str(source.name), event_view.error(validation=False, exception=exc)))
+            finish_trace(status="failed", output={"tool_status": "failed", "failure_category": "tool_error"})
             raise
         if guards is not None:
             warning = guards.completed(str(source.name), arguments, result)
             if warning is not None:
                 observer(WarningEvent(warning, "tool_no_progress"))
                 if not event_view.allow_repeated_identical:
+                    finish_trace(status="failed", output={"tool_status": "failed", "failure_category": "no_progress"})
                     raise TurnNoProgressError
-        observer(ToolCompleted(call_id, str(source.name), event_view.output(result)))
+        projected_output = event_view.output(result)
+        observer(ToolCompleted(call_id, str(source.name), projected_output))
+        finish_trace(status="completed", output={"tool_status": "completed", "output": projected_output})
         return result
 
     return dspy.Tool(

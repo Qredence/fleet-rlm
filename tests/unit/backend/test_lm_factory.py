@@ -36,6 +36,7 @@ def test_model_bundle_applies_independent_role_policy(monkeypatch: pytest.Monkey
         root_llm_num_retries=1,
         sub_llm_num_retries=4,
         sub_llm_temperature=0.3,
+        root_llm_reasoning_effort="none",
     )
 
     bundle = factory.build_model_bundle(settings)
@@ -44,9 +45,27 @@ def test_model_bundle_applies_independent_role_policy(monkeypatch: pytest.Monkey
     assert bundle.sub_lm == "sub-lm"
     assert build.call_args_list[0].kwargs["max_tokens"] == 101
     assert build.call_args_list[0].kwargs["cache"] is True
+    assert build.call_args_list[0].kwargs["reasoning_effort"] == "none"
     assert build.call_args_list[1].kwargs["max_tokens"] == 202
     assert build.call_args_list[1].kwargs["cache"] is False
     assert build.call_args_list[1].kwargs["temperature"] == 0.3
+
+
+def test_build_lm_allows_reasoning_effort_only_when_configured(monkeypatch: pytest.MonkeyPatch) -> None:
+    import fleet_rlm.rlm.lm_factory as factory
+
+    lm = MagicMock(side_effect=("default-lm", "bounded-lm"))
+    monkeypatch.setattr(factory.dspy, "LM", lm)
+
+    default = factory.build_lm("openai/default", api_key=None)
+    bounded = factory.build_lm("openai/bounded", api_key=None, reasoning_effort="none")
+
+    assert default == "default-lm"
+    assert bounded == "bounded-lm"
+    assert "reasoning_effort" not in lm.call_args_list[0].kwargs
+    assert "allowed_openai_params" not in lm.call_args_list[0].kwargs
+    assert lm.call_args_list[1].kwargs["reasoning_effort"] == "none"
+    assert lm.call_args_list[1].kwargs["allowed_openai_params"] == ["reasoning_effort"]
 
 
 def test_sanitize_base_url_accepts_https_and_strips_comments() -> None:

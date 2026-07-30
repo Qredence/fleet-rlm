@@ -1039,26 +1039,35 @@ components:
           pattern: ^[0-9a-f]{64}$
           title: Revision
         scope:
-          type: string
-          maxLength: 128
-          minLength: 1
-          pattern: ^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$
+          anyOf:
+          - type: string
+            maxLength: 128
+            minLength: 1
+            pattern: ^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$
+          - type: 'null'
           title: Scope
         path:
-          type: string
-          maxLength: 128
-          minLength: 1
-          pattern: ^[a-z][a-z0-9_.]*$
+          anyOf:
+          - type: string
+            maxLength: 128
+            minLength: 1
+            pattern: ^[a-z][a-z0-9_.]*$
+          - type: 'null'
           title: Path
         value:
           $ref: '#/components/schemas/JsonValue'
+        profile:
+          anyOf:
+          - type: string
+            maxLength: 128
+            minLength: 1
+            pattern: ^[A-Za-z0-9][A-Za-z0-9._-]*$
+          - type: 'null'
+          title: Profile
       additionalProperties: false
       type: object
       required:
       - revision
-      - scope
-      - path
-      - value
       title: SettingsPolicyPatchRequest
     SettingsPolicyResponse:
       properties:
@@ -1070,6 +1079,16 @@ components:
           - type: string
           - type: 'null'
           title: Active Profile
+        default_profile:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Default Profile
+        available_profiles:
+          items:
+            type: string
+          type: array
+          title: Available Profiles
         restart_required:
           type: boolean
           title: Restart Required
@@ -1275,7 +1294,6 @@ components:
             type: string
           type: array
           title: Directories
-          default: []
         truncated:
           type: boolean
           title: Truncated

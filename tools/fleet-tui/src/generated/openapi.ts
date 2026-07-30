@@ -476,10 +476,12 @@ export interface components {
             /** Revision */
             revision: string;
             /** Scope */
-            scope: string;
+            scope?: string | null;
             /** Path */
-            path: string;
-            value: components["schemas"]["JsonValue"];
+            path?: string | null;
+            value?: components["schemas"]["JsonValue"];
+            /** Profile */
+            profile?: string | null;
         };
         /** SettingsPolicyResponse */
         SettingsPolicyResponse: {
@@ -487,6 +489,10 @@ export interface components {
             revision: string;
             /** Active Profile */
             active_profile?: string | null;
+            /** Default Profile */
+            default_profile?: string | null;
+            /** Available Profiles */
+            available_profiles?: string[];
             /**
              * Restart Required
              * @default true
@@ -597,11 +603,8 @@ export interface components {
         VolumeTreeResponse: {
             /** Paths */
             paths: string[];
-            /**
-             * Directories
-             * @default []
-             */
-            directories: string[];
+            /** Directories */
+            directories?: string[];
             /**
              * Truncated
              * @default false

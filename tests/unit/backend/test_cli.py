@@ -42,7 +42,7 @@ def test_fleet_doctor_daytona_prints_safe_steps_and_succeeds(
     assert output.endswith("[ok] settings: Settings valid.\n[ok] cleanup: Sandbox deleted.\n")
 
 
-def test_fleet_doctor_reads_profile_from_dotenv_when_not_exported(
+def test_fleet_doctor_reads_profile_from_toml_default_profile(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     tmp_path: pytest.TempPathFactory,
@@ -50,7 +50,6 @@ def test_fleet_doctor_reads_profile_from_dotenv_when_not_exported(
     from fleet_rlm.daytona import diagnostics
 
     monkeypatch.delenv("FLEET_CONFIG_PROFILE", raising=False)
-    (tmp_path / ".env").write_text("FLEET_CONFIG_PROFILE=databricks-daytona\n")
     monkeypatch.chdir(tmp_path)
     result = diagnostics.DaytonaDoctorResult(
         ok=True,
@@ -64,7 +63,8 @@ def test_fleet_doctor_reads_profile_from_dotenv_when_not_exported(
 
     fleet_main(["doctor", "daytona"])
 
-    assert "[ok] policy: profile=databricks-daytona" in capsys.readouterr().out
+    # committed config/fleet.toml has default_profile = "daytona"
+    assert "[ok] policy: profile=daytona" in capsys.readouterr().out
 
 
 def test_fleet_doctor_daytona_returns_nonzero_with_provider_action(

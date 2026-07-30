@@ -53,7 +53,7 @@ def _install_fake_mlflow(
         calls.experiment_args.append(args)
         calls.experiment_kwargs.append(kwargs)
 
-    def _autolog() -> None:
+    def _autolog(**_kwargs: Any) -> None:
         calls.autolog_calls += 1
 
     calls.set_tracking_uri = _set_uri if set_tracking_uri is None else set_tracking_uri
@@ -79,6 +79,10 @@ def _install_fake_mlflow(
     monkeypatch.setitem(sys.modules, "mlflow", mlflow)
     monkeypatch.setitem(sys.modules, "mlflow.dspy", dspy_mod)
     monkeypatch.setitem(sys.modules, "mlflow.entities.trace_location", trace_location)
+    # A previously imported real ``mlflow.exceptions`` would otherwise survive
+    # this fake and change _validate_experiment_trace_location's control flow;
+    # ``None`` makes the submodule import raise ImportError deterministically.
+    monkeypatch.setitem(sys.modules, "mlflow.exceptions", None)
     return calls
 
 

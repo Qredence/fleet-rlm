@@ -11,27 +11,42 @@ import hashlib
 import inspect
 import json
 import keyword
+import re
 import secrets
 import time
-import urllib.error
-import urllib.request
 import uuid
 from collections.abc import Callable, Mapping
 from concurrent.futures import ThreadPoolExecutor
 from threading import Thread
 from typing import TYPE_CHECKING, Any
 
+import httpx
 from daytona import SessionExecuteRequest
 
-from fleet_rlm.daytona.errors import DaytonaAdapterError, sanitize_provider_message
+from fleet_rlm.daytona.errors import (
+    DaytonaAdapterError,
+    ProviderRequestError,
+    is_safe_pre_creation_retry,
+    map_provider_error,
+    provider_status_code,
+    sanitize_provider_message,
+)
 
 if TYPE_CHECKING:
     from fleet_rlm.daytona.interpreter import BackendExecutionResult
 
-_BROKER_PORT = 3000
+DEFAULT_BROKER_PORT = 3000
+_PREVIEW_LINK_RETRY_DELAYS = (0.25, 0.5)
 _BROKER_SERVER_PATH = "/home/daytona/fleet_rlm_broker_server.py"
 _BROKER_SESSION_COMMAND = f"cd /home/daytona && python {_BROKER_SERVER_PATH.rsplit('/', 1)[-1]}"
 _FINAL_OUTPUT_MARKER = "__FLEET_FINAL_OUTPUT__"
+
+
+def _is_retryable_preview_link_error(exc: DaytonaAdapterError) -> bool:
+    """Retry only transient provider failures while resolving the preview URL."""
+    if is_safe_pre_creation_retry(exc):
+        return True
+    return re.search(r"\b5\d{2}\b", sanitize_provider_message(str(exc))) is not None
 
 
 class FleetFinalOutputError(Exception):
@@ -231,7 +246,7 @@ class _ThreadedHTTPServer(ThreadingMixIn, HTTPServer):
 
 
 if __name__ == "__main__":
-    server = _ThreadedHTTPServer(("0.0.0.0", 3000), _BrokerHandler)
+    server = _ThreadedHTTPServer(("0.0.0.0", __BROKER_PORT__), _BrokerHandler)
     server.serve_forever()
 """.strip()
 
@@ -267,8 +282,17 @@ def {tool_name}({signature}):
 class DaytonaHttpToolBroker:
     """Start/register/poll host-tool mediation against a Daytona sandbox."""
 
-    def __init__(self, *, sandbox: Any, poll_interval_s: float = 0.05) -> None:
+    def __init__(
+        self,
+        *,
+        sandbox: Any,
+        broker_port: int = DEFAULT_BROKER_PORT,
+        poll_interval_s: float = 0.05,
+    ) -> None:
         self._sandbox = sandbox
+        if not isinstance(broker_port, int) or isinstance(broker_port, bool) or not 0 < broker_port <= 65_535:
+            raise ValueError(f"broker_port must be between 1 and 65535, got {broker_port!r}")
+        self._broker_port = broker_port
         self._poll_interval_s = poll_interval_s
         self._broker_secret = secrets.token_urlsafe(32)
         self._broker_url: str | None = None
@@ -277,11 +301,32 @@ class DaytonaHttpToolBroker:
         self._injected_tools: set[str] = set()
         self._pending_wrappers: list[str] = []
         self._stopped = False
+        # One pooled client for the whole broker lifetime: the preview proxy
+        # sits behind TLS, so per-request urllib connections paid a handshake
+        # on every 50 ms poll tick. Stats are per execute_with_callbacks call.
+        self._client: httpx.Client | None = None
+        self._poll_count = 0
+        self._fulfilled_count = 0
+        self.last_execution_stats: dict[str, int] = {}
+
+    def _http(self) -> httpx.Client:
+        if self._client is None:
+            # Every call site runs after ensure_started set the broker URL;
+            # fail loudly rather than building a client with no base URL.
+            assert self._broker_url is not None
+            self._client = httpx.Client(
+                base_url=self._broker_url,
+                headers=self._preview_headers(),
+                timeout=httpx.Timeout(10.0, connect=5.0),
+            )
+        return self._client
 
     def ensure_started(self) -> None:
         if self._broker_url is not None or self._stopped:
             return
-        server_code = _BROKER_SERVER_CODE.replace("__BROKER_SECRET__", repr(self._broker_secret))
+        server_code = _BROKER_SERVER_CODE.replace("__BROKER_SECRET__", repr(self._broker_secret)).replace(
+            "__BROKER_PORT__", str(self._broker_port)
+        )
         self._sandbox.fs.upload_file(server_code.encode("utf-8"), _BROKER_SERVER_PATH)
         expected_sha = hashlib.sha256(server_code.encode("utf-8")).hexdigest()
         verify = self._sandbox.process.code_run(
@@ -299,11 +344,38 @@ class DaytonaHttpToolBroker:
             session_id,
             SessionExecuteRequest(command=_BROKER_SESSION_COMMAND, run_async=True),
         )
-        preview = self._sandbox.get_preview_link(_BROKER_PORT)
+        # Retain the session before contacting the preview proxy so a failed
+        # preview lookup can still be cleaned up by ``stop``.
         self._broker_session_id = session_id
+        preview = self._get_preview_link_with_retry()
         self._broker_url = str(preview.url).rstrip("/")
         self._broker_token = str(getattr(preview, "token", "") or "")
         self._wait_health(timeout_s=60.0)
+
+    def _get_preview_link_with_retry(self) -> Any:
+        last_error: DaytonaAdapterError | None = None
+        attempts = 0
+        for retry_delay in (0.0, *_PREVIEW_LINK_RETRY_DELAYS):
+            if retry_delay:
+                time.sleep(retry_delay)
+            attempts += 1
+            try:
+                return self._sandbox.get_preview_link(self._broker_port)
+            except Exception as exc:
+                mapped = map_provider_error(exc)
+                last_error = mapped
+                if not _is_retryable_preview_link_error(mapped):
+                    break
+
+        assert last_error is not None
+        raise ProviderRequestError(
+            message=sanitize_provider_message(
+                f"Daytona preview link request for port {self._broker_port} failed after "
+                f"{attempts} attempts: {last_error}"
+            ),
+            cause_type="PreviewLinkError",
+            status_code=provider_status_code(last_error),
+        ) from last_error
 
     def register_tools(self, tools: Mapping[str, Callable[..., Any]]) -> None:
         self.ensure_started()
@@ -349,6 +421,8 @@ class DaytonaHttpToolBroker:
             except BaseException as exc:
                 bucket.append(exc)
 
+        poll_start = self._poll_count
+        fulfilled_start = self._fulfilled_count
         thread = Thread(target=_runner, daemon=True)
         thread.start()
         while thread.is_alive():
@@ -361,6 +435,10 @@ class DaytonaHttpToolBroker:
             if not self._poll_once(tool_executor):
                 break
             time.sleep(self._poll_interval_s)
+        self.last_execution_stats = {
+            "poll_count": self._poll_count - poll_start,
+            "tool_call_count": self._fulfilled_count - fulfilled_start,
+        }
 
         if not bucket:
             msg = "sandbox execution produced no result"
@@ -384,6 +462,14 @@ class DaytonaHttpToolBroker:
         self._broker_session_id = None
         self._broker_url = None
         self._broker_token = None
+        # Swap before closing so a concurrent late _http() caller never
+        # observes the client mid-close; in-flight requests on the detached
+        # client fail into the suppressed httpx error paths.
+        client = self._client
+        self._client = None
+        if client is not None:
+            with contextlib.suppress(Exception):
+                client.close()
         if session_id is None:
             return
         with contextlib.suppress(Exception):
@@ -392,17 +478,26 @@ class DaytonaHttpToolBroker:
     def _wait_health(self, *, timeout_s: float) -> None:
         deadline = time.monotonic() + timeout_s
         last_error = "unreachable"
+        client = self._http()
         while time.monotonic() < deadline:
             try:
-                req = urllib.request.Request(
-                    f"{self._broker_url}/health",
-                    headers=self._preview_headers(),
-                    method="GET",
-                )
-                with urllib.request.urlopen(req, timeout=5) as resp:
-                    if resp.status == 200:
-                        return
-            except (urllib.error.URLError, TimeoutError, OSError) as exc:
+                resp = client.get("/health", timeout=5)
+                if resp.status_code == 200:
+                    return
+                last_error = f"HTTP {resp.status_code}"
+                # Preview-proxy auth failures are not transient; do not burn the
+                # full health timeout retrying a credential/token rejection.
+                if resp.status_code in {401, 403}:
+                    detail = last_error
+                    if not self._broker_token:
+                        detail = f"{detail} (preview token missing)"
+                    raise DaytonaAdapterError(
+                        message=sanitize_provider_message(f"broker health check failed: {detail}"),
+                        cause_type="BrokerHealthAuthError",
+                    )
+            except DaytonaAdapterError:
+                raise
+            except (httpx.HTTPError, TimeoutError, OSError) as exc:
                 last_error = str(exc)
             time.sleep(0.25)
         raise DaytonaAdapterError(
@@ -412,19 +507,15 @@ class DaytonaHttpToolBroker:
 
     def _poll_once(self, tool_executor: Callable[[str, list[Any], dict[str, Any]], Any]) -> bool:
         assert self._broker_url is not None
-        req = urllib.request.Request(
-            f"{self._broker_url}/pending?max=8",
-            headers=self._preview_headers(),
-            method="GET",
-        )
+        self._poll_count += 1
         try:
-            with urllib.request.urlopen(req, timeout=5) as resp:
-                payload = json.loads(resp.read().decode("utf-8"))
-        except (urllib.error.URLError, TimeoutError, OSError, json.JSONDecodeError):
+            payload = self._http().get("/pending", params={"max": "8"}, timeout=5).json()
+        except (httpx.HTTPError, TimeoutError, OSError, ValueError):
             return False
         requests_out = payload.get("requests") or []
         if not requests_out:
             return False
+        self._fulfilled_count += len(requests_out)
         with ThreadPoolExecutor(max_workers=min(8, len(requests_out))) as pool:
             list(pool.map(lambda item: self._fulfill(item, tool_executor), requests_out))
         return True
@@ -448,26 +539,19 @@ class DaytonaHttpToolBroker:
                 "lease_token": lease,
                 "error": sanitize_provider_message(str(exc)),
             }
-        data = json.dumps(body).encode("utf-8")
-        req = urllib.request.Request(
-            f"{self._broker_url}/result",
-            data=data,
-            headers={
-                **self._preview_headers(),
-                "Content-Type": "application/json",
-                "X-Broker-Secret": self._broker_secret,
-            },
-            method="POST",
-        )
         try:
-            urllib.request.urlopen(req, timeout=10).read()
-        except (urllib.error.URLError, TimeoutError, OSError):
+            self._http().post(
+                "/result",
+                content=json.dumps(body).encode("utf-8"),
+                headers={"Content-Type": "application/json"},
+                timeout=10,
+            )
+        except (httpx.HTTPError, TimeoutError, OSError):
             return
 
     def _preview_headers(self) -> dict[str, str]:
         headers = {"X-Broker-Secret": self._broker_secret}
         if self._broker_token:
-            headers["Authorization"] = f"Bearer {self._broker_token}"
             headers["X-Daytona-Preview-Token"] = self._broker_token
         return headers
 
@@ -499,6 +583,6 @@ class DaytonaHttpToolBroker:
             signature=", ".join(sig_parts),
             args_list=", ".join(args_list),
             kwargs_dict=", ".join(kwargs_parts),
-            broker_port=_BROKER_PORT,
+            broker_port=self._broker_port,
             broker_secret=self._broker_secret,
         )

@@ -5,15 +5,15 @@ Canonical Run Environment set: `deno`, `daytona`.
 Local compatibility development can use Deno with SQLite:
 
 ```bash
-export FLEET_CONFIG_PROFILE=local-deno
 export FLEET_DATABASE_URL='sqlite+aiosqlite:///./.fleet_rlm/local.sqlite3'
 ```
 
-`FLEET_CONFIG_PROFILE` selects the committed Run policy at startup:
+Set `[config] default_profile = "local-deno"` in `config/fleet.toml` before
+starting this backend. The committed profiles provide these Run policies:
 
-| Value | Code execution | LLM calls | Durable volume | Auth/scope |
+| Profile | Code execution | LLM calls | Durable volume | Auth/scope |
 | --- | --- | --- | --- | --- |
-| `deno` | DSPy default `PythonInterpreter` (Deno + Pyodide WASM) | real `dspy.LM` | none | local scope |
+| `local-deno` | DSPy default `PythonInterpreter` (Deno + Pyodide WASM) | real `dspy.LM` | none | local scope |
 | `daytona` (default) | Daytona Sandbox Code Interpreter | real `dspy.LM` | Workspace Volume | local scope |
 
 `deno` is intentional vanilla local `dspy.RLM`: real LLM calls and in-process

@@ -38,8 +38,8 @@ def _success_receipt(sha: str) -> dict[str, object]:
             "duration_ms": 1000,
         },
         "models": {
-            "root": verifier._LIVE_MODEL,
-            "sub": verifier._LIVE_MODEL,
+            "root": verifier._LIVE_ROOT_MODEL,
+            "sub": verifier._LIVE_SUB_MODEL,
         },
         "resources": {
             "session_id": "00000000-0000-0000-0000-000000000001",
@@ -205,9 +205,36 @@ def test_configured_models_ignore_stale_environment_model_variables(
     monkeypatch.setenv("FLEET_SUB_MODEL", "provider/private-model")
 
     assert verifier._configured_models() == {
-        "root": verifier._LIVE_MODEL,
-        "sub": verifier._LIVE_MODEL,
+        "root": verifier._LIVE_ROOT_MODEL,
+        "sub": verifier._LIVE_SUB_MODEL,
     }
+
+
+@pytest.mark.parametrize(
+    "models",
+    (
+        {
+            "root": "openai/obsolete-model",
+            "sub": "uscentral.default.deepseek-v4-flash-free",
+        },
+        {
+            "root": verifier._LIVE_SUB_MODEL,
+            "sub": verifier._LIVE_ROOT_MODEL,
+        },
+    ),
+    ids=("obsolete-root", "swapped-root-sub"),
+)
+def test_model_precondition_rejects_obsolete_or_swapped_roles(models: dict[str, str]) -> None:
+    assert verifier._models_are_approved(models) is False
+
+
+def test_model_precondition_accepts_role_specific_normalized_variants() -> None:
+    assert verifier._models_are_approved(
+        {
+            "root": verifier._LIVE_ROOT_MODEL,
+            "sub": f"openai/{verifier._LIVE_SUB_MODEL}",
+        }
+    )
 
 
 def test_first_lane_failure_skips_second_and_preserves_untracked_sentinel(
@@ -222,8 +249,8 @@ def test_first_lane_failure_skips_second_and_preserves_untracked_sentinel(
     monkeypatch.setenv("FLEET_LIVE", "1")
     monkeypatch.setenv("FLEET_DAYTONA_API_KEY", "secret-daytona")
     monkeypatch.setenv("DATABRICKS_TOKEN", "secret-databricks")
-    monkeypatch.setenv("FLEET_ROOT_MODEL", verifier._LIVE_MODEL)
-    monkeypatch.setenv("FLEET_SUB_MODEL", verifier._LIVE_MODEL)
+    monkeypatch.setenv("FLEET_ROOT_MODEL", verifier._LIVE_ROOT_MODEL)
+    monkeypatch.setenv("FLEET_SUB_MODEL", verifier._LIVE_SUB_MODEL)
     monkeypatch.setattr(verifier, "_path_is_allowed", lambda _path: True)
     monkeypatch.setattr(verifier, "_candidate", lambda: ("b" * 40, "dev-0.7"))
     monkeypatch.setattr(verifier, "_git", lambda *_args, **_kwargs: str(tmp_path))
@@ -254,8 +281,8 @@ def test_lane_timeout_cleans_owned_worktree(
     monkeypatch.setenv("FLEET_LIVE", "1")
     monkeypatch.setenv("FLEET_DAYTONA_API_KEY", "secret-daytona")
     monkeypatch.setenv("DATABRICKS_TOKEN", "secret-databricks")
-    monkeypatch.setenv("FLEET_ROOT_MODEL", verifier._LIVE_MODEL)
-    monkeypatch.setenv("FLEET_SUB_MODEL", verifier._LIVE_MODEL)
+    monkeypatch.setenv("FLEET_ROOT_MODEL", verifier._LIVE_ROOT_MODEL)
+    monkeypatch.setenv("FLEET_SUB_MODEL", verifier._LIVE_SUB_MODEL)
     monkeypatch.setattr(verifier, "_path_is_allowed", lambda _path: True)
     monkeypatch.setattr(verifier, "_candidate", lambda: ("c" * 40, "dev-0.7"))
     monkeypatch.setattr(verifier, "_git", lambda *_args, **_kwargs: str(tmp_path))
@@ -289,8 +316,8 @@ def test_main_invokes_pytest_once_and_accepts_valid_receipt(
     monkeypatch.setenv("FLEET_LIVE", "1")
     monkeypatch.setenv("FLEET_DAYTONA_API_KEY", "secret-daytona")
     monkeypatch.setenv("DATABRICKS_TOKEN", "secret-databricks")
-    monkeypatch.setenv("FLEET_ROOT_MODEL", verifier._LIVE_MODEL)
-    monkeypatch.setenv("FLEET_SUB_MODEL", verifier._LIVE_MODEL)
+    monkeypatch.setenv("FLEET_ROOT_MODEL", verifier._LIVE_ROOT_MODEL)
+    monkeypatch.setenv("FLEET_SUB_MODEL", verifier._LIVE_SUB_MODEL)
     monkeypatch.setattr(verifier, "_path_is_allowed", lambda _path: True)
     monkeypatch.setattr(verifier, "_candidate", lambda: (sha, "dev-0.7"))
     monkeypatch.setattr(verifier, "_git", lambda *_args, **_kwargs: str(tmp_path))

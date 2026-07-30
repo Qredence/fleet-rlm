@@ -11,16 +11,21 @@ from fastapi.testclient import TestClient
 
 from fleet_rlm.api.errors import install_error_handlers
 from fleet_rlm.api.routes.turns import router
-from fleet_rlm.chat.turn_preparation import TurnPreparationUnavailableError
+from fleet_rlm.chat.turn_lifecycle import TurnLifecycleUnavailableError
+from fleet_rlm.chat.turn_preparation import TurnPreparationTimeoutError, TurnPreparationUnavailableError
 from fleet_rlm.config import Settings
 from fleet_rlm.daytona.errors import ProviderRequestError
 
 
-class _UnavailableCoordinator:
+class _FailingCoordinator:
     def __init__(self, cause: BaseException) -> None:
         self._cause = cause
 
     async def open(self, _command):
+        if isinstance(self._cause, TurnPreparationTimeoutError):
+            raise self._cause
+        if isinstance(self._cause, TurnLifecycleUnavailableError):
+            raise self._cause
         try:
             raise self._cause
         except BaseException as cause:
@@ -31,7 +36,7 @@ def _client(cause: BaseException) -> TestClient:
     app = FastAPI()
     app.state.settings = Settings()
     app.state.composition_ready = True
-    app.state.turn_coordinator = _UnavailableCoordinator(cause)
+    app.state.turn_coordinator = _FailingCoordinator(cause)
     install_error_handlers(app)
     app.include_router(router)
     return TestClient(app)
@@ -64,6 +69,32 @@ def test_preparation_503_returns_incoming_request_id_and_logs_safe_metadata(
     assert "cause_type=provider_5xx" in message
     assert "provider_status_category=5xx" in message
     assert "message=provider failed for [redacted] at [redacted]" in message
+
+
+def test_preparation_timeout_remains_typed_and_sanitized_before_stream() -> None:
+    private_detail = "private provider timeout api_key=never-return"
+
+    response = _post(_client(TurnPreparationTimeoutError(private_detail)))
+
+    assert response.status_code == 504
+    assert response.json() == {
+        "code": "turn_preparation_timeout",
+        "message": "Turn preparation timed out",
+    }
+    assert private_detail not in response.text
+    assert "never-return" not in response.text
+
+
+def test_lifecycle_unavailable_returns_sanitized_503_with_correlation_headers() -> None:
+    response = _post(
+        _client(TurnLifecycleUnavailableError("database session setup failed")),
+        headers={"X-Request-Id": "lifecycle-corr"},
+    )
+
+    assert response.status_code == 503
+    assert response.json() == {"code": "turn_unavailable", "message": "Turn is unavailable"}
+    assert response.headers["x-request-id"] == "lifecycle-corr"
+    assert response.headers["x-correlation-id"] == "lifecycle-corr"
 
 
 def test_preparation_503_generates_uuid_correlation_id() -> None:

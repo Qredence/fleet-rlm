@@ -64,6 +64,12 @@ class FakeDoctorDependencies:
         self._record("close")
 
 
+class ReadyFakeDoctorDependencies(FakeDoctorDependencies):
+    async def check_rlm_readiness(self, settings: Settings) -> None:
+        del settings
+        self._record("rlm")
+
+
 def doctor_settings() -> Settings:
     return Settings(
         daytona_api_key="test-daytona-key",
@@ -122,6 +128,52 @@ async def test_daytona_doctor_fails_settings_without_provider_operations() -> No
     assert result.failure_category == "settings"
     assert [(step.name, step.ok) for step in result.steps] == [("settings", False)]
     assert dependencies.calls == []
+
+
+@pytest.mark.asyncio
+async def test_daytona_doctor_can_gate_sandbox_readiness_on_the_root_rlm_contract() -> None:
+    from fleet_rlm.daytona.diagnostics import run_daytona_doctor
+
+    dependencies = ReadyFakeDoctorDependencies()
+    result = await run_daytona_doctor(doctor_settings(), dependencies=dependencies)
+
+    assert result.ok is True
+    assert [step.name for step in result.steps] == [
+        "settings",
+        "database",
+        "provider",
+        "rlm",
+        "sandbox",
+        "interpreter",
+        "cleanup",
+    ]
+    assert dependencies.calls[2:] == ["rlm", "create", "mount", "interpreter", "delete", "close"]
+
+
+@pytest.mark.asyncio
+async def test_daytona_doctor_refuses_rlm_readiness_when_root_protocol_probe_fails() -> None:
+    from fleet_rlm.daytona.diagnostics import run_daytona_doctor
+
+    class FailingReadyDependencies(ReadyFakeDoctorDependencies):
+        async def check_rlm_readiness(self, settings: Settings) -> None:
+            del settings
+            self._record("rlm")
+            raise RuntimeError("provider returned native tokens api_key=private")
+
+    dependencies = FailingReadyDependencies()
+    result = await run_daytona_doctor(doctor_settings(), dependencies=dependencies)
+
+    assert result.ok is False
+    assert result.failure_category == "rlm_provider"
+    assert [(step.name, step.ok) for step in result.steps] == [
+        ("settings", True),
+        ("database", True),
+        ("provider", True),
+        ("rlm", False),
+    ]
+    assert "native tokens" not in result.steps[3].message
+    assert "private" not in result.steps[3].message
+    assert dependencies.calls == ["database", "provider", "rlm", "close"]
 
 
 @pytest.mark.asyncio

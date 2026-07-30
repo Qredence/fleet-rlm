@@ -94,6 +94,39 @@ export class PiCommandPresenter implements CommandPresenter {
     });
   }
 
+  async chooseProfile(
+    profiles: string[],
+    active: string | undefined,
+    selected: string | undefined,
+  ): Promise<string | null> {
+    return this.choose(
+      profiles.map((profile) => {
+        const isActive = profile === active;
+        const isSelected = profile === selected;
+        const state =
+          isActive && isSelected
+            ? "current"
+            : isActive
+              ? "running"
+              : isSelected
+                ? "selected"
+                : null;
+        return {
+          value: profile,
+          label: state ? `${profile} (${state})` : profile,
+          description:
+            state === "current"
+              ? "active and selected"
+              : state === "running"
+                ? "select to keep on restart"
+                : state === "selected"
+                  ? "restart to apply"
+                  : "select for next restart",
+        };
+      }),
+    );
+  }
+
   private choose(
     items: { value: string; label: string; description?: string }[],
   ): Promise<string | null> {

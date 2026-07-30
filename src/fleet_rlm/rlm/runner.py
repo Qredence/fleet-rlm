@@ -10,11 +10,15 @@ from collections.abc import AsyncIterator, Callable, Sequence
 from typing import Any, Protocol, Self, cast
 
 import dspy
+from dspy.utils.exceptions import AdapterParseError
 
+from fleet_rlm.observability.failure_diagnostics import normalize_turn_failure, trace_failure_category
+from fleet_rlm.observability.turn_tracing import turn_phase_span
 from fleet_rlm.rlm.context import RLMExecutionContext, RLMExecutionSpec
 from fleet_rlm.rlm.dspy_contract import (
     PredictionOutputError,
     TrajectoryStep,
+    _RLMTraceCallback,
     bind_native_rlm_observer,
     normalize_prediction_trajectory,
     observed_usage,
@@ -44,6 +48,7 @@ from fleet_rlm.rlm.events import (
 from fleet_rlm.rlm.factory import RLMFactory
 from fleet_rlm.rlm.inputs import build_rlm_input_kwargs
 from fleet_rlm.rlm.outcome import ExecutionDetail, RLMOutcome, TerminalStatus
+from fleet_rlm.rlm.recursive_calls import RecursiveRLMExecutor
 from fleet_rlm.rlm.sanitize import truncate_public_text
 from fleet_rlm.rlm.tool_guards import TurnToolGuards, workspace_obligations
 from fleet_rlm.rlm.tool_observer import ToolEventView, observe_tool
@@ -301,6 +306,8 @@ def _public_failure_message(exc: BaseException) -> str:
         return str(type(exc).public_message)
     if isinstance(exc, TurnTerminalError):
         return str(type(exc).public_message)
+    if isinstance(exc, AdapterParseError):
+        return "The model produced a response that could not be parsed into the expected fields."
     return "Turn failed"
 
 
@@ -427,7 +434,14 @@ class RLMRunner:
             raise
         except Exception as exc:
             duration_ms = int((time.perf_counter() - started) * 1000)
-            logger.warning("RLM execution failed (%s)", type(exc).__name__)
+            diagnostic = normalize_turn_failure(exc)
+            logger.warning(
+                "RLM execution failed (%s) cause_type=%s provider_status_category=%s message=%s",
+                type(exc).__name__,
+                diagnostic.cause_type,
+                diagnostic.provider_status_category,
+                diagnostic.message,
+            )
             outcome.append(
                 RLMOutcome(
                     terminal_status=_terminal_status(exc),
@@ -451,6 +465,7 @@ class RLMRunner:
         observations = _ObservationBuffer(EventRecorder(context.run_id, context.session_id))
         async for event in self._initial_events(context, observations):
             yield event
+        spec = context.capabilities.spec
         spec, relay, guards, task = self._start_worker(context)
         ownership.task = task
         monitor = _WorkerMonitor(task, relay, context, lambda: self._drain_capability_details(context))
@@ -501,6 +516,13 @@ class RLMRunner:
         relay = _DetailRelay()
         guards = TurnToolGuards(required_targets=workspace_obligations(context.request))
         self._bind_observer(context.interpreter, relay, context.options.max_output_chars)
+        recursive_executor = RecursiveRLMExecutor(
+            models=context.models,
+            options=context.recursive_options,
+            child_interpreter_factory=context.child_interpreter_factory,
+            deadline=context.deadline,
+            observer=relay.publish,
+        )
 
         def relay_capability_details(_result: Any) -> None:
             for detail in self._drain_capability_details(context):
@@ -517,15 +539,21 @@ class RLMRunner:
             )
             for tool in spec.tools
         )
+        all_tools = (*observed_tools, recursive_executor.tool)
         rlm = self._factory.create(
             models=context.models,
             options=context.options,
             interpreter=context.interpreter,
-            tools=observed_tools or None,
+            tools=all_tools or None,
             signature=spec.signature,
         )
         self._bind_observer(rlm, relay, context.options.max_output_chars)
-        return spec, relay, guards, asyncio.create_task(self._execute_rlm_in_worker(rlm, context, spec))
+        return (
+            spec,
+            relay,
+            guards,
+            asyncio.create_task(self._execute_rlm_in_worker(rlm, context, spec, recursive_executor)),
+        )
 
     async def _worker_events(
         self,
@@ -582,6 +610,7 @@ class RLMRunner:
         rlm: Any,
         context: RLMExecutionContext,
         spec: RLMExecutionSpec,
+        recursive_executor: RecursiveRLMExecutor,
     ) -> Any:
         kwargs = build_rlm_input_kwargs(
             request=context.request,
@@ -590,21 +619,71 @@ class RLMRunner:
             attachments=context.attachments,
             workspace=spec.workspace,
         )
-        with dspy.context(
-            lm=context.models.root_lm,
-            adapter=dspy.JSONAdapter(use_native_function_calling=True),
-            track_usage=True,
+        started = time.perf_counter()
+        with (
+            turn_phase_span(
+                "RLM.execute",
+                inputs={
+                    "max_iterations": context.options.max_iterations,
+                    "max_llm_calls": context.options.max_llm_calls,
+                    "max_output_chars": context.options.max_output_chars,
+                },
+            ) as phase,
+            dspy.context(
+                lm=context.models.root_lm,
+                # DSPy 3.3.0b1 combines context callbacks with instance
+                # callbacks around LM requests (dspy/utils/callback.py:258-288).
+                callbacks=[_RLMTraceCallback(root_lm=context.models.root_lm, sub_lm=context.models.sub_lm)],
+                # Keep the pinned DSPy JSON action protocol authoritative. A
+                # provider-native token stream is an adapter failure, not a
+                # second grammar that Fleet should reinterpret.
+                adapter=dspy.JSONAdapter(),
+                track_usage=True,
+            ),
         ):
-            return await rlm.acall(**kwargs)
+            try:
+                prediction = await rlm.acall(**kwargs)
+            except BaseException as exc:
+                recursive_summary = recursive_executor.summary()
+                phase.set_outputs(
+                    {
+                        "elapsed_ms": int((time.perf_counter() - started) * 1000),
+                        "request_status": "failed",
+                        "failure_category": trace_failure_category(exc),
+                        "recursive_call_count": recursive_summary.call_count,
+                        "recursive_prompt_chars": recursive_summary.delegated_prompt_chars,
+                        "recursive_depth_fallback_count": recursive_summary.depth_fallback_count,
+                    }
+                )
+                raise
+            final_reasoning = getattr(prediction, "final_reasoning", None)
+            termination_mode = (
+                "native_extraction_fallback" if final_reasoning == "Extract forced final output" else "typed_submit"
+            )
+            usage = observed_usage(prediction, duration_ms=int((time.perf_counter() - started) * 1000))
+            phase.set_outputs(
+                {
+                    "iterations": usage["iterations"],
+                    "observed_lm_usage": usage["observed_lm_usage"],
+                    "termination_mode": termination_mode,
+                    "elapsed_ms": usage["duration_ms"],
+                    "request_status": "completed",
+                    "recursive_call_count": recursive_executor.summary().call_count,
+                    "recursive_prompt_chars": recursive_executor.summary().delegated_prompt_chars,
+                    "recursive_depth_fallback_count": recursive_executor.summary().depth_fallback_count,
+                }
+            )
+            return prediction
 
     async def _execute_rlm_in_worker(
         self,
         rlm: Any,
         context: RLMExecutionContext,
         spec: RLMExecutionSpec,
+        recursive_executor: RecursiveRLMExecutor,
     ) -> Any:
         def run() -> Any:
-            return asyncio.run(self._execute_rlm(rlm, context, spec))
+            return asyncio.run(self._execute_rlm(rlm, context, spec, recursive_executor))
 
         return await asyncio.to_thread(run)
 

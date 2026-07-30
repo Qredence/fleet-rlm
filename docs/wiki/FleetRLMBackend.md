@@ -327,32 +327,36 @@ compatibility runtime or dual-serve path.
 
 ## Configuration
 
-Runtime policy is required from `config/fleet.toml`; `FLEET_CONFIG_PROFILE` selects a
-profile, and only environment variables explicitly referenced by that policy supply secrets
-or endpoints. Pydantic `BaseSettings` (`config.py`) loads `.env` + process env with the
-`FLEET_` prefix as higher-precedence overrides. `config_policy.py` (loopback-only
-`/api/settings`) edits only non-secret TOML policy for the next restart.
+Runtime policy is required from `config/fleet.toml`; `[config] default_profile`
+selects a profile (or, when only one profile exists, that single profile), and
+only environment variables explicitly referenced by that policy supply secrets
+or endpoints. Pydantic `BaseSettings` (`config.py`) loads `.env` + process env
+with the `FLEET_` prefix as higher-precedence overrides. `config_policy.py`
+(loopback-only `/api/settings`) edits only non-secret TOML policy for the next
+restart, including the `default_profile` selector via the TUI `/profiles`
+command.
 
 ### Committed profiles (`config/fleet.toml`)
 
 | Profile | `runtime.environment` | Notes |
 |---------|----------------------|-------|
 | `local-deno` | `deno` | Local Deno development |
-| `daytona` | `daytona` | Daytona + Databricks AI Gateway LLM + MLflow tracing |
-| `databricks-daytona` | `daytona` | Databricks-hosted; both LLM roles via unified `/ai-gateway/openai/v1` |
+| `daytona` | `daytona` | Databricks DeepSeek v4-free Root + Qwen Sub through AI Gateway; supervised local MLflow |
+| `daytona-bench` | `daytona` | Cache-free Qwen benchmark policy |
+| `daytona-bench-40` | `daytona` | Cache-free Qwen benchmark policy with 40 iterations |
 
 ### Key environment variables
 
 | Variable | Description |
 |----------|-------------|
-| `FLEET_CONFIG_PROFILE` | **Required.** TOML profile name (e.g. `local-deno`, `daytona`) |
-| `FLEET_RUN_ENVIRONMENT` | Optional override; conflicts with the profile's `runtime.environment` are rejected |
+| `FLEET_CONFIG_PROFILE` / `FLEET_RUN_ENVIRONMENT` | Deprecated ambient selectors; ignored in favor of `[config] default_profile` |
 | `FLEET_LLM_API_KEY` | LLM provider key (referenced by `defaults.llm.*.api_key_env`) |
 | `FLEET_LLM_BASE_URL` | Optional LLM base endpoint |
 | `FLEET_DATABASE_URL` | SQLAlchemy URL; SQLite for local, asyncpg for Postgres/Lakebase |
 | `FLEET_DAYTONA_API_KEY` | Daytona provider key (Daytona profile) |
 | `FLEET_LOG_LEVEL` | Backend + DSPy log level |
-| `DATABRICKS_HOST` / `DATABRICKS_TOKEN` | Databricks MLflow tracking auth (Databricks profiles) |
+| `DATABRICKS_TOKEN` | Databricks AI Gateway authentication for Daytona profiles |
+| `DATABRICKS_HOST` | Authentication endpoint for an optional custom Managed MLflow policy |
 | `FLEET_LIVE` | Explicit opt-in for live/credentialed test runs |
 
 Secrets live only in `.env`/process env referenced by the TOML policy; `config/fleet.toml`

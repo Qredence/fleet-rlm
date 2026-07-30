@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
-from types import SimpleNamespace
+import sys
+from collections.abc import Iterator
+from contextlib import contextmanager
+from types import ModuleType, SimpleNamespace
+from typing import Any
 from uuid import uuid4
 
 import pytest
@@ -215,13 +219,43 @@ async def test_open_preparation_failure_is_durable_before_stream_and_releases_cl
 
 
 @pytest.mark.asyncio
-async def test_open_preparation_timeout_finishes_as_typed_timeout_before_stream() -> None:
+async def test_open_preparation_timeout_finishes_as_typed_timeout_before_stream(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from fleet_rlm.chat.commands import OpenTurnCommand
     from fleet_rlm.chat.turn_coordinator import TurnCoordinator
     from fleet_rlm.chat.turn_lifecycle import TurnLifecycleService
     from fleet_rlm.chat.turn_preparation import TurnPreparationTimeoutError
     from fleet_rlm.persistence.repositories import InMemorySessionCatalog, InMemoryTurnStateStore
     from fleet_rlm.sessions.models import TurnAccess, TurnInput
+
+    class Span:
+        request_id = "tr-preparation-timeout"
+
+        def set_inputs(self, _payload):
+            return None
+
+        def set_outputs(self, _payload):
+            return None
+
+        def set_status(self, _status):
+            return None
+
+    span = Span()
+
+    @contextmanager
+    def start_span(**_kwargs: Any) -> Iterator[Span]:
+        yield span
+
+    mlflow = ModuleType("mlflow")
+    mlflow.start_span = start_span  # type: ignore[attr-defined]
+    mlflow.update_current_trace = lambda **_kwargs: None  # type: ignore[attr-defined]
+    mlflow.get_last_active_trace_id = lambda: span.request_id  # type: ignore[attr-defined]
+    mlflow.get_current_active_span = lambda: span  # type: ignore[attr-defined]
+    entities = ModuleType("mlflow.entities")
+    entities.SpanType = SimpleNamespace(CHAIN="CHAIN")  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "mlflow", mlflow)
+    monkeypatch.setitem(sys.modules, "mlflow.entities", entities)
 
     access = TurnAccess(uuid4(), uuid4())
     store = InMemoryTurnStateStore()
@@ -270,6 +304,7 @@ async def test_open_preparation_timeout_finishes_as_typed_timeout_before_stream(
             lifecycle=Lifecycle(),
             preparation=Preparation(),
             runner=Runner(),
+            mlflow_tracing_enabled=True,
         ).open(OpenTurnCommand(access, session.id, TurnInput("prepare"), "prepare-timeout", uuid4()))
 
     assert len(finishes) == 1
@@ -447,3 +482,123 @@ async def test_open_commit_failure_projects_commit_failure_terminal() -> None:
     assert events[-1].detail.message == "Turn could not be committed"
     assert closes == 1
     assert await authoritative.turn_records(session.id, access) == ()
+
+
+@pytest.mark.asyncio
+async def test_failed_turn_emits_settlement_claim_and_cleanup_spans(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from fleet_rlm.chat.commands import OpenTurnCommand
+    from fleet_rlm.chat.turn_cleanup import TurnCleanupSupervisor
+    from fleet_rlm.chat.turn_coordinator import TurnCoordinator
+    from fleet_rlm.chat.turn_lifecycle import TurnLifecycleService
+    from fleet_rlm.observability import turn_tracing
+    from fleet_rlm.persistence.repositories import InMemorySessionCatalog, InMemoryTurnStateStore
+    from fleet_rlm.rlm.events import EventRecorder, RunFailed, RunStarted, Status
+    from fleet_rlm.rlm.outcome import RLMOutcome
+    from fleet_rlm.sessions.models import TurnAccess, TurnInput
+
+    token = turn_tracing._fleet_trace_active.set(True)
+    try:
+        names: list[str] = []
+
+        class Span:
+            request_id = "tr-failed-spans"
+
+            def set_inputs(self, _payload):
+                return None
+
+            def set_outputs(self, _payload):
+                return None
+
+            def set_status(self, _status):
+                return None
+
+        span = Span()
+
+        @contextmanager
+        def start_span(*, name: str = "span", **_kwargs: Any) -> Iterator[Span]:
+            names.append(name)
+            yield span
+
+        mlflow = ModuleType("mlflow")
+        mlflow.start_span = start_span  # type: ignore[attr-defined]
+        mlflow.update_current_trace = lambda **_kwargs: None  # type: ignore[attr-defined]
+        mlflow.get_last_active_trace_id = lambda: span.request_id  # type: ignore[attr-defined]
+        mlflow.get_current_active_span = lambda: span  # type: ignore[attr-defined]
+        entities = ModuleType("mlflow.entities")
+        entities.SpanType = SimpleNamespace(CHAIN="CHAIN")  # type: ignore[attr-defined]
+        monkeypatch.setitem(sys.modules, "mlflow", mlflow)
+        monkeypatch.setitem(sys.modules, "mlflow.entities", entities)
+
+        access = TurnAccess(uuid4(), uuid4())
+        store = InMemoryTurnStateStore()
+        session = await InMemorySessionCatalog(store).create(
+            user_id=access.user_id, workspace_id=access.workspace_id, title="failed spans"
+        )
+        run_id = uuid4()
+
+        class Sink:
+            async def remove(self, location):
+                del location
+                return None
+
+        class Prepared:
+            execution = SimpleNamespace(run_id=run_id, session_id=session.id, request="fail")
+            artifact_sink = Sink()
+            result_snapshot_sink = None
+
+            async def aclose(self):
+                return None
+
+        class Preparation:
+            async def prepare(self, turn, *, deadline):
+                del turn, deadline
+                return Prepared()
+
+        class Stream:
+            def __init__(self):
+                recorder = EventRecorder(run_id, session.id)
+                self._events = iter(
+                    (recorder.record(RunStarted(delivery="live")), recorder.record(Status("execution", "running")))
+                )
+                self.outcome = RLMOutcome("failed", public_error_message="Turn failed")
+
+            def __aiter__(self):
+                return self
+
+            async def __anext__(self):
+                try:
+                    return next(self._events)
+                except StopIteration:
+                    raise StopAsyncIteration from None
+
+            async def aclose(self):
+                return None
+
+            async def wait_owned(self):
+                return None
+
+        class Runner:
+            def stream(self, _execution):
+                return Stream()
+
+        cleanup = TurnCleanupSupervisor()
+        coordinator = TurnCoordinator(
+            lifecycle=TurnLifecycleService(store, max_artifact_bytes=100),
+            preparation=Preparation(),
+            runner=Runner(),
+            cleanup=cleanup,
+        )
+        events = [
+            event
+            async for event in await coordinator.open(
+                OpenTurnCommand(access, session.id, TurnInput("fail"), "fail", run_id)
+            )
+        ]
+        await cleanup.shutdown(drain_seconds=1)
+
+        assert isinstance(events[-1].detail, RunFailed)
+        assert names == ["Turn.prepare", "Turn.settlement", "Turn.claim_transition", "Turn.cleanup"]
+    finally:
+        turn_tracing._fleet_trace_active.reset(token)

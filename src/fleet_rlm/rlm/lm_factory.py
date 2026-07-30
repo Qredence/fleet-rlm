@@ -78,6 +78,7 @@ def build_lm(
     base_url: str | None = None,
     max_tokens: int | None = None,
     temperature: float | None = None,
+    reasoning_effort: str | None = None,
     model_type: str = "chat",
     cache: bool = True,
     num_retries: int = 3,
@@ -97,6 +98,11 @@ def build_lm(
         kwargs["max_tokens"] = max_tokens
     if temperature is not None:
         kwargs["temperature"] = temperature
+    if reasoning_effort is not None:
+        kwargs["reasoning_effort"] = reasoning_effort
+        # The Databricks AI Gateway accepts this OpenAI-compatible parameter,
+        # while LiteLLM's generic OpenAI provider otherwise rejects it.
+        kwargs["allowed_openai_params"] = ["reasoning_effort"]
     return dspy.LM(model_id, **kwargs)
 
 
@@ -114,6 +120,7 @@ def build_model_bundle(settings: Settings) -> RLMModelBundle:
             base_url=sanitize_base_url(policy.base_url),
             max_tokens=policy.max_tokens,
             temperature=policy.temperature,
+            reasoning_effort=policy.reasoning_effort,
             cache=policy.cache,
             num_retries=policy.num_retries,
         )

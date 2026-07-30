@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -11,6 +10,7 @@ from fastapi import FastAPI
 
 from fleet_rlm.config import Settings
 from fleet_rlm.rlm.dspy_contract import RLMOptions, assert_dspy_version
+from fleet_rlm.rlm.recursive_calls import RecursiveRLMOptions
 
 
 class CompositionError(RuntimeError):
@@ -126,6 +126,18 @@ def rlm_options(settings: Settings) -> RLMOptions:
     )
 
 
+def recursive_rlm_options(settings: Settings) -> RecursiveRLMOptions:
+    """Project policy onto the bounded recursive child-RLM contract."""
+    return RecursiveRLMOptions(
+        max_depth=settings.rlm_recursion_max_depth,
+        max_calls=settings.rlm_recursion_max_calls,
+        max_prompt_chars=settings.rlm_recursion_max_prompt_chars,
+        child_max_iterations=settings.rlm_recursion_child_max_iterations,
+        child_max_llm_calls=settings.rlm_recursion_child_max_llm_calls,
+        child_max_output_chars=settings.rlm_recursion_child_max_output_chars,
+    )
+
+
 def clear_composition_state(app: FastAPI) -> None:
     """Make every process-owned adapter unavailable after shutdown or rollback."""
     app.state.composition_ready = False
@@ -149,7 +161,7 @@ def install_local_inventory(
     from fleet_rlm.chat.turn_cleanup import TurnCleanupSupervisor
     from fleet_rlm.chat.turn_coordinator import TurnCoordinator
     from fleet_rlm.chat.turn_lifecycle import TurnLifecycleService
-    from fleet_rlm.config import _CONFIG_PATH, _PROFILE_ENVIRONMENT
+    from fleet_rlm.config import _CONFIG_PATH, active_profile
     from fleet_rlm.config_policy import ConfigPolicyService
     from fleet_rlm.persistence.repositories import (
         InMemorySessionCatalog,
@@ -168,13 +180,14 @@ def install_local_inventory(
             stale_after_seconds=settings.run_stale_after_seconds,
         )
         session_catalog = SqlAlchemySessionCatalog(session_factory)
+    cleanup = TurnCleanupSupervisor(max_jobs=8)
     lifecycle = TurnLifecycleService(
         turn_state,
         max_artifact_bytes=settings.max_artifact_bytes,
         heartbeat_seconds=settings.run_heartbeat_seconds,
         stale_after_seconds=settings.run_stale_after_seconds,
+        cleanup=cleanup,
     )
-    cleanup = TurnCleanupSupervisor(max_jobs=8)
     coordinator = TurnCoordinator(
         lifecycle=lifecycle,
         preparation=preparation,
@@ -196,7 +209,7 @@ def install_local_inventory(
     )
     app.state.config_policy = ConfigPolicyService(
         _CONFIG_PATH,
-        active_profile=(os.environ.get(_PROFILE_ENVIRONMENT) or settings._dotenv_values.get(_PROFILE_ENVIRONMENT)),
+        active_profile=active_profile(settings),
     )
     app.state.turn_coordinator = coordinator
     app.state.turn_preparation = preparation

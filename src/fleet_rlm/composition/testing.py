@@ -29,6 +29,7 @@ from fleet_rlm.files.lifecycle import AttachmentLifecycle
 from fleet_rlm.files.models import PreparedAttachments
 from fleet_rlm.rlm.dspy_contract import RLMOptions
 from fleet_rlm.rlm.model_bundle import RLMModelBundle
+from fleet_rlm.rlm.recursive_calls import RecursiveRLMOptions
 from fleet_rlm.rlm.signature import FleetRLMSignature
 from fleet_rlm.skills.catalog import SkillCatalog, build_bundled_skill_catalog
 
@@ -140,6 +141,7 @@ class DeterministicTurnPreparation:
         self._module = DefaultTurnPreparer(
             models=models,
             options=resolved_options,
+            recursive_options=RecursiveRLMOptions(),
             attachments=attachments,
             environments=TestingRunEnvironmentProvider(),
             capabilities=TestingCapabilityPreparer(

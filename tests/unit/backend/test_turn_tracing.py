@@ -11,26 +11,54 @@ from uuid import uuid4
 
 import pytest
 
-from fleet_rlm.observability.turn_tracing import annotate_trace_io, current_turn_trace_id, turn_trace
+from fleet_rlm.observability import turn_tracing
+from fleet_rlm.observability.turn_tracing import (
+    annotate_trace_io,
+    current_turn_trace_id,
+    start_turn_span,
+    turn_phase_span,
+    turn_trace,
+)
 
 
-def _install_fake_mlflow(monkeypatch: pytest.MonkeyPatch, *, explode: bool = False) -> SimpleNamespace:
+@pytest.fixture(autouse=True)
+def _activate_fleet_trace_context() -> Iterator[None]:
+    """Phase spans gate on an active fleet_turn trace; tests exercise span logic directly."""
+    token = turn_tracing._fleet_trace_active.set(True)
+    yield
+    turn_tracing._fleet_trace_active.reset(token)
+
+
+def _install_fake_mlflow(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    explode: bool = False,
+    teardown_explode: bool = False,
+) -> SimpleNamespace:
     calls = SimpleNamespace(
         start_span_names=[],
         update_kwargs=[],
         get_trace_calls=0,
         span_inputs=[],
         span_outputs=[],
+        span_statuses=[],
     )
 
     class _FakeSpan:
         request_id = "tr-from-span"
+
+        def __init__(self) -> None:
+            self.status: str | None = None
 
         def set_inputs(self, payload: dict[str, object]) -> None:
             calls.span_inputs.append(payload)
 
         def set_outputs(self, payload: dict[str, object]) -> None:
             calls.span_outputs.append(payload)
+
+        def set_status(self, status: str) -> None:
+            self.status = status
+            calls.span_statuses.append(status)
 
     active_span = _FakeSpan()
 
@@ -41,6 +69,8 @@ def _install_fake_mlflow(monkeypatch: pytest.MonkeyPatch, *, explode: bool = Fal
             raise RuntimeError("span boom")
         calls.start_span_names.append(name)
         yield active_span
+        if teardown_explode:
+            raise RuntimeError("span teardown boom")
 
     def update_current_trace(**kwargs: Any) -> None:
         calls.update_kwargs.append(kwargs)
@@ -108,6 +138,37 @@ def test_turn_trace_span_failure_is_soft(monkeypatch: pytest.MonkeyPatch) -> Non
         assert handle.trace_id is None
 
 
+def test_turn_trace_preserves_managed_body_exception(monkeypatch: pytest.MonkeyPatch) -> None:
+    _install_fake_mlflow(monkeypatch)
+    expected = ValueError("original turn failure")
+
+    with pytest.raises(ValueError) as raised, turn_trace(uuid4(), uuid4(), enabled=True):
+        raise expected
+
+    assert raised.value is expected
+    assert current_turn_trace_id() is None
+
+
+def test_turn_trace_teardown_failure_does_not_change_success(monkeypatch: pytest.MonkeyPatch) -> None:
+    _install_fake_mlflow(monkeypatch, teardown_explode=True)
+
+    with turn_trace(uuid4(), uuid4(), enabled=True) as handle:
+        assert handle.trace_id == "tr-active-123"
+
+    assert current_turn_trace_id() is None
+
+
+def test_turn_trace_teardown_failure_preserves_body_exception(monkeypatch: pytest.MonkeyPatch) -> None:
+    _install_fake_mlflow(monkeypatch, teardown_explode=True)
+    expected = LookupError("turn body failed")
+
+    with pytest.raises(LookupError) as raised, turn_trace(uuid4(), uuid4(), enabled=True):
+        raise expected
+
+    assert raised.value is expected
+    assert current_turn_trace_id() is None
+
+
 def test_turn_trace_respects_expose_flag(monkeypatch: pytest.MonkeyPatch) -> None:
     _install_fake_mlflow(monkeypatch)
     with turn_trace(uuid4(), uuid4(), enabled=True, expose_trace_id=False) as handle:
@@ -143,3 +204,103 @@ def test_annotate_trace_io_falls_back_to_empty_answer(monkeypatch: pytest.Monkey
 
     assert calls.span_inputs[-1] == {"request": "hello"}
     assert calls.span_outputs[-1] == {"answer": ""}
+    assert calls.span_statuses == []
+
+
+def test_annotate_trace_io_marks_root_span_error_when_failed(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = _install_fake_mlflow(monkeypatch)
+
+    annotate_trace_io(request="q", response_text="Turn failed", failed=True)
+
+    assert calls.span_outputs[-1] == {"answer": "Turn failed"}
+    assert calls.span_statuses == ["ERROR"]
+
+
+def test_turn_phase_span_records_bounded_metadata_when_a_turn_span_is_active(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = _install_fake_mlflow(monkeypatch)
+
+    with turn_phase_span("RLM.execute", inputs={"max_iterations": 20, "max_llm_calls": 50}):
+        pass
+
+    assert calls.start_span_names == ["RLM.execute"]
+    assert calls.span_inputs[-1] == {"max_iterations": 20, "max_llm_calls": 50}
+    assert calls.span_outputs[-1] == {"phase_status": "completed"}
+
+
+def test_start_turn_span_supports_callback_lifecycles_and_failure_status(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = _install_fake_mlflow(monkeypatch)
+
+    handle = start_turn_span("RLM.root_lm", inputs={"role": "root"}, span_type="LLM")
+    handle.finish(phase_status="failed", outputs={"failure_category": "timeout"})
+
+    assert calls.start_span_names == ["RLM.root_lm"]
+    assert calls.span_inputs[-1] == {"role": "root"}
+    assert calls.span_outputs[-1] == {
+        "failure_category": "timeout",
+        "phase_status": "failed",
+    }
+    assert calls.span_statuses == ["ERROR"]
+
+
+def test_turn_phase_span_records_failures_without_suppressing_them(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = _install_fake_mlflow(monkeypatch)
+
+    with (
+        pytest.raises(RuntimeError, match="expected"),
+        turn_phase_span("Turn.settlement", inputs={"terminal_status": "failed"}),
+    ):
+        raise RuntimeError("expected")
+
+    assert calls.span_outputs[-1] == {"phase_status": "failed"}
+
+
+def test_turn_phase_span_merges_handle_outputs_with_phase_status(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = _install_fake_mlflow(monkeypatch)
+
+    with turn_phase_span("sandbox.execute", inputs={"iteration": 1}) as phase:
+        phase.set_outputs({"stdout_chars": 5, "result_kind": "output"})
+
+    assert calls.span_outputs[-1] == {
+        "stdout_chars": 5,
+        "result_kind": "output",
+        "phase_status": "completed",
+    }
+
+
+def test_turn_phase_span_handle_outputs_survive_body_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = _install_fake_mlflow(monkeypatch)
+
+    with (
+        pytest.raises(RuntimeError, match="boom"),
+        turn_phase_span("sandbox.execute", inputs={"iteration": 2}) as phase,
+    ):
+        phase.set_outputs({"stdout_chars": 3})
+        raise RuntimeError("boom")
+
+    assert calls.span_outputs[-1] == {"stdout_chars": 3, "phase_status": "failed"}
+
+
+def test_turn_phase_span_setup_failure_is_soft(monkeypatch: pytest.MonkeyPatch) -> None:
+    _install_fake_mlflow(monkeypatch, explode=True)
+    executed = False
+
+    with turn_phase_span("RLM.execute", inputs={"max_iterations": 20}):
+        executed = True
+
+    assert executed
+
+
+def test_turn_phase_span_without_active_trace_preserves_body_exception(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _install_fake_mlflow(monkeypatch)
+    mlflow = sys.modules["mlflow"]
+    mlflow.get_current_active_span = lambda: None  # type: ignore[attr-defined]
+    expected = ValueError("phase body failed")
+
+    with pytest.raises(ValueError) as raised, turn_phase_span("Turn.prepare", inputs={}):
+        raise expected
+
+    assert raised.value is expected

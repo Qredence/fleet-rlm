@@ -14,7 +14,8 @@ FastAPI/SSE contract backed by DSPy, Daytona, and SQLAlchemy/Alembic.
 6. [Testing strategy](how-to-guides/testing-strategy.md)
 7. [DSPy RLM and Daytona integration](how-to-guides/dspy-integration.md)
 8. [Daytona Snapshot](how-to-guides/daytona-snapshot.md)
-9. [Agent harness](agent-harness/README.md)
+9. [Official Oolong benchmark](how-to-guides/official-oolong.md)
+10. [Agent harness](agent-harness/README.md)
 
 ## Reference
 
@@ -24,7 +25,6 @@ FastAPI/SSE contract backed by DSPy, Daytona, and SQLAlchemy/Alembic.
 - [Codebase map](reference/codebase-map.md)
 - [Source layout](reference/source-layout.md)
 - [Database](reference/database.md)
-- [Implementation-plan policy](plan-implementation/README.md)
 - [Repo Wiki](wiki/README.md) — generated long-form repo knowledge (Qoder mirror)
 
 ## Source of truth

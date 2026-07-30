@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
-"""Emit and validate one Databricks MLflow GenAI trace.
+"""Emit and validate one MLflow GenAI trace using the selected Fleet policy.
 
-The script uses the Databricks CLI profile/keyring for authentication and never
-prints credential values. It is intentionally independent of the Fleet app so
-MLflow transport and Unity Catalog trace storage can be verified first.
+Local tracking requires only a reachable server. Managed tracking uses the
+Databricks CLI profile/keyring and never prints credential values.
 """
 
 from __future__ import annotations
@@ -33,18 +32,20 @@ def _resolve_option(value: str | None, environment_name: str, *, required: bool 
     return resolved or None
 
 
-def _managed_settings() -> Settings:
-    """Load one selected Fleet policy that targets Managed Databricks MLflow."""
+def _tracing_settings() -> Settings:
+    """Load one selected Fleet policy with complete local or managed tracing."""
     settings = load_runtime_settings()
-    values = {
-        "mlflow.experiment_name": settings.mlflow_experiment_name,
-        "mlflow.trace_catalog": settings.mlflow_trace_catalog,
-        "mlflow.trace_schema": settings.mlflow_trace_schema,
-        "mlflow.trace_table_prefix": settings.mlflow_trace_table_prefix,
-        "mlflow.tracing_sql_warehouse_id": settings.mlflow_tracing_sql_warehouse_id,
-    }
-    if settings.mlflow_tracking_uri != "databricks" or any(not value for value in values.values()):
-        raise RuntimeError("selected Fleet TOML profile must declare Managed Databricks MLflow tracing")
+    if not settings.mlflow_tracing_enabled or not settings.mlflow_tracking_uri or not settings.mlflow_experiment_name:
+        raise RuntimeError("selected Fleet TOML profile must enable MLflow tracing with an experiment")
+    if settings.mlflow_tracking_uri == "databricks":
+        managed_values = {
+            "mlflow.trace_catalog": settings.mlflow_trace_catalog,
+            "mlflow.trace_schema": settings.mlflow_trace_schema,
+            "mlflow.trace_table_prefix": settings.mlflow_trace_table_prefix,
+            "mlflow.tracing_sql_warehouse_id": settings.mlflow_tracing_sql_warehouse_id,
+        }
+        if any(not value for value in managed_values.values()):
+            raise RuntimeError("selected Fleet TOML profile has incomplete Managed Databricks MLflow settings")
     return settings
 
 
@@ -87,35 +88,41 @@ def main() -> int:
     parser.add_argument("--profile")
     args = parser.parse_args()
 
-    settings = _managed_settings()
-    host = _resolve_option(None, "DATABRICKS_HOST")
+    settings = _tracing_settings()
+    managed = settings.mlflow_tracking_uri == "databricks"
     profile = _resolve_option(args.profile, "DATABRICKS_CONFIG_PROFILE", required=False)
 
-    assert host is not None
     assert settings.mlflow_experiment_name is not None
-    assert settings.mlflow_trace_catalog is not None
-    assert settings.mlflow_trace_schema is not None
-    assert settings.mlflow_trace_table_prefix is not None
-    assert settings.mlflow_tracing_sql_warehouse_id is not None
-    os.environ["DATABRICKS_HOST"] = host
-    if os.environ.get("DATABRICKS_TOKEN", "").strip():
-        profile = None
-    elif profile:
-        os.environ["DATABRICKS_CONFIG_PROFILE"] = profile
-    os.environ["MLFLOW_TRACING_SQL_WAREHOUSE_ID"] = settings.mlflow_tracing_sql_warehouse_id
+    if managed:
+        host = _resolve_option(None, "DATABRICKS_HOST")
+        assert host is not None
+        assert settings.mlflow_tracing_sql_warehouse_id is not None
+        os.environ["DATABRICKS_HOST"] = host
+        if os.environ.get("DATABRICKS_TOKEN", "").strip():
+            profile = None
+        elif profile:
+            os.environ["DATABRICKS_CONFIG_PROFILE"] = profile
+        os.environ["MLFLOW_TRACING_SQL_WAREHOUSE_ID"] = settings.mlflow_tracing_sql_warehouse_id
 
     import mlflow
-    from mlflow.entities.trace_location import UnityCatalog
 
-    mlflow.set_tracking_uri("databricks")
-    experiment = mlflow.set_experiment(
-        experiment_name=settings.mlflow_experiment_name,
-        trace_location=UnityCatalog(
-            catalog_name=settings.mlflow_trace_catalog,
-            schema_name=settings.mlflow_trace_schema,
-            table_prefix=settings.mlflow_trace_table_prefix,
-        ),
-    )
+    mlflow.set_tracking_uri(settings.mlflow_tracking_uri)
+    if managed:
+        from mlflow.entities.trace_location import UnityCatalog
+
+        assert settings.mlflow_trace_catalog is not None
+        assert settings.mlflow_trace_schema is not None
+        assert settings.mlflow_trace_table_prefix is not None
+        experiment = mlflow.set_experiment(
+            experiment_name=settings.mlflow_experiment_name,
+            trace_location=UnityCatalog(
+                catalog_name=settings.mlflow_trace_catalog,
+                schema_name=settings.mlflow_trace_schema,
+                table_prefix=settings.mlflow_trace_table_prefix,
+            ),
+        )
+    else:
+        experiment = mlflow.set_experiment(experiment_name=settings.mlflow_experiment_name)
 
     @mlflow.trace(name="fleet_mlflow_smoke")
     def smoke(input_text: str) -> dict[str, str]:
@@ -125,25 +132,30 @@ def main() -> int:
     trace_id = mlflow.get_last_active_trace_id()
     if not trace_id:
         raise RuntimeError("MLflow did not return a trace id")
-    trace = mlflow.get_trace(trace_id)
+    trace = mlflow.get_trace(trace_id, flush=True)
+    if trace is None:
+        raise RuntimeError(f"MLflow trace was not available after flushing: {trace_id}")
     verified_trace_id, spans = _trace_summary(trace)
 
-    expected_tables = {
-        f"{settings.mlflow_trace_catalog}.{settings.mlflow_trace_schema}.{settings.mlflow_trace_table_prefix}_{suffix}"
-        for suffix in ("otel_spans", "otel_annotations", "otel_logs", "otel_metrics")
-    }
-    actual_tables = _tables(profile, f"{settings.mlflow_trace_catalog}.{settings.mlflow_trace_schema}")
-    missing_tables = expected_tables.difference(actual_tables)
-    if missing_tables:
-        raise RuntimeError(f"missing Unity Catalog trace table(s): {', '.join(sorted(missing_tables))}")
+    trace_location = settings.mlflow_tracking_uri
+    if managed:
+        expected_tables = {
+            f"{settings.mlflow_trace_catalog}.{settings.mlflow_trace_schema}.{settings.mlflow_trace_table_prefix}_{suffix}"
+            for suffix in ("otel_spans", "otel_annotations", "otel_logs", "otel_metrics")
+        }
+        actual_tables = _tables(profile, f"{settings.mlflow_trace_catalog}.{settings.mlflow_trace_schema}")
+        missing_tables = expected_tables.difference(actual_tables)
+        if missing_tables:
+            raise RuntimeError(f"missing Unity Catalog trace table(s): {', '.join(sorted(missing_tables))}")
+        trace_location = (
+            f"{settings.mlflow_trace_catalog}.{settings.mlflow_trace_schema}.{settings.mlflow_trace_table_prefix}"
+        )
 
     print(f"experiment_id={experiment.experiment_id}")
     print(f"trace_id={verified_trace_id}")
     print(f"span_count={len(spans)}")
-    print(
-        "trace_location="
-        f"{settings.mlflow_trace_catalog}.{settings.mlflow_trace_schema}.{settings.mlflow_trace_table_prefix}"
-    )
+    print(f"tracking_uri={settings.mlflow_tracking_uri}")
+    print(f"trace_location={trace_location}")
     print("status=PASS")
     return 0
 

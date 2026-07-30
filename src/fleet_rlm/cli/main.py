@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import os
 import sys
 from collections.abc import Sequence
 from typing import Any
@@ -105,8 +104,6 @@ def _run(parser: argparse.ArgumentParser, argv: Sequence[str] | None = None) -> 
         except SupervisorError as exc:
             parser.exit(1, f"fleet: error: {exc}\n")
         return
-    if args.run_environment is not None:
-        os.environ["FLEET_RUN_ENVIRONMENT"] = args.run_environment
     import uvicorn
 
     uvicorn.run(
@@ -124,6 +121,7 @@ _DOCTOR_ACTIONS = {
     "provider_5xx": "retry after the Daytona service recovers.",
     "request_validation": "update the Fleet Daytona adapter to the pinned SDK contract.",
     "mount_mismatch": "correct the Fleet scoped Volume mount contract.",
+    "rlm_provider": "verify the configured Root LM follows the pinned DSPy RLM JSON action contract.",
     "database": "verify FLEET_DATABASE_URL and upgrade the database to Alembic head.",
     "settings": "configure the required FLEET_DAYTONA_API_KEY and FLEET_DATABASE_URL settings.",
     "interpreter": "inspect the disposable Sandbox interpreter capability.",
@@ -135,7 +133,7 @@ _DOCTOR_ACTIONS = {
 def _run_doctor(parser: argparse.ArgumentParser, provider: str) -> None:
     if provider != "daytona":
         parser.error(f"unsupported doctor provider: {provider}")
-    from fleet_rlm.config import _PROFILE_ENVIRONMENT, load_runtime_settings, redacted_policy_summary
+    from fleet_rlm.config import active_profile, load_runtime_settings, redacted_policy_summary
     from fleet_rlm.daytona.diagnostics import run_daytona_doctor
 
     try:
@@ -144,7 +142,7 @@ def _run_doctor(parser: argparse.ArgumentParser, provider: str) -> None:
         _emit("[failed] settings: Required Fleet Daytona settings are missing or invalid.")
         _emit(f"action: {_DOCTOR_ACTIONS['settings']}")
         raise SystemExit(1) from None
-    profile = os.environ.get(_PROFILE_ENVIRONMENT) or settings._dotenv_values.get(_PROFILE_ENVIRONMENT)
+    profile = active_profile(settings)
     _emit(f"[ok] policy: {redacted_policy_summary(settings, profile=profile or 'unknown')}")
     result = asyncio.run(run_daytona_doctor(settings))
     for step in result.steps:

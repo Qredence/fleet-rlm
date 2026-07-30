@@ -104,6 +104,13 @@ export class FleetApiClient {
     });
   }
 
+  async setProfile(name: string, revision: string): Promise<FleetSettingsPolicy> {
+    return this.requestJson<FleetSettingsPolicy>("/api/settings", {
+      method: "PATCH",
+      body: JSON.stringify({ profile: name, revision }),
+    });
+  }
+
   async listVolumeTree(
     params: { root?: string; maxDepth?: number; maxFiles?: number } = {},
   ): Promise<FleetVolumeTree> {

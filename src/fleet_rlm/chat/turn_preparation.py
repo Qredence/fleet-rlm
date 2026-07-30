@@ -8,6 +8,8 @@ from dataclasses import dataclass, field
 from typing import Protocol
 from uuid import UUID
 
+from sqlalchemy.exc import SQLAlchemyError
+
 from fleet_rlm.artifacts.promotion import RunArtifactSink
 from fleet_rlm.chat.session_context import build_session_context_manifest
 from fleet_rlm.chat.turn_lifecycle import ExecuteTurn
@@ -18,6 +20,8 @@ from fleet_rlm.files.models import (
     PreparedAttachments,
     RunAttachmentSink,
 )
+from fleet_rlm.observability.turn_tracing import turn_phase_span
+from fleet_rlm.persistence.database import DatabaseConnectionError
 from fleet_rlm.result_snapshot import ResultSnapshotSink
 from fleet_rlm.rlm.context import (
     PreparedCapabilities,
@@ -26,6 +30,7 @@ from fleet_rlm.rlm.context import (
 )
 from fleet_rlm.rlm.dspy_contract import RLMOptions
 from fleet_rlm.rlm.model_bundle import RLMModelBundle
+from fleet_rlm.rlm.recursive_calls import ChildInterpreterFactory, RecursiveRLMOptions
 
 AsyncCleanup = Callable[[], Awaitable[None]]
 
@@ -94,6 +99,7 @@ class RunEnvironment:
     artifact_sink: RunArtifactSink
     release: AsyncCleanup
     result_snapshot_sink: ResultSnapshotSink | None = None
+    child_interpreter_factory: ChildInterpreterFactory | None = None
 
 
 class RunEnvironmentProvider(Protocol):
@@ -132,41 +138,76 @@ class DefaultTurnPreparer:
         attachments: RunAttachmentPreparer,
         environments: RunEnvironmentProvider,
         capabilities: CapabilityPreparer,
+        recursive_options: RecursiveRLMOptions | None = None,
     ) -> None:
         self._models = models
         self._options = options
         self._attachments = attachments
         self._environments = environments
         self._capabilities = capabilities
+        self._recursive_options = recursive_options or RecursiveRLMOptions()
 
     async def prepare(self, turn: ExecuteTurn, *, deadline: float) -> PreparedTurn:
-        if await turn.cancellation_requested():
-            raise TurnPreparationCancelledError("Turn cancelled")
-
         try:
-            environment = await self._environments.acquire(turn, deadline=deadline)
-        except TurnPreparationError:
-            raise
-        except Exception as exc:
-            raise TurnPreparationUnavailableError("Turn environment is unavailable") from exc
+            if await turn.cancellation_requested():
+                raise TurnPreparationCancelledError("Turn cancelled")
+        except (DatabaseConnectionError, OSError, SQLAlchemyError) as exc:
+            raise TurnPreparationUnavailableError("Turn cancellation status is unavailable") from exc
+
+        with turn_phase_span("Turn.acquire_environment", inputs={}) as environment_phase:
+            try:
+                environment = await self._environments.acquire(turn, deadline=deadline)
+            except TurnPreparationError:
+                raise
+            except Exception as exc:
+                raise TurnPreparationUnavailableError("Turn environment is unavailable") from exc
+            environment_phase.set_outputs(
+                {
+                    "has_interpreter": environment.interpreter is not None,
+                    "has_snapshot_sink": environment.result_snapshot_sink is not None,
+                }
+            )
 
         staged = PreparedAttachments((), ())
         capabilities: PreparedCapabilities | None = None
         try:
             self._check_deadline(deadline)
-            staged = await self._attachments.prepare_run(
-                AttachmentAccess(turn.access.user_id, turn.access.workspace_id),
-                turn.input.attachment_ids,
-                AttachmentRun(turn.session_id, turn.run_id),
-                environment.attachment_sink,
-            )
+            with turn_phase_span(
+                "Turn.stage_attachments",
+                inputs={"attachment_count": len(turn.input.attachment_ids)},
+            ) as attachments_phase:
+                try:
+                    staged = await self._attachments.prepare_run(
+                        AttachmentAccess(turn.access.user_id, turn.access.workspace_id),
+                        turn.input.attachment_ids,
+                        AttachmentRun(turn.session_id, turn.run_id),
+                        environment.attachment_sink,
+                    )
+                except (DatabaseConnectionError, OSError, SQLAlchemyError) as exc:
+                    raise TurnPreparationUnavailableError("Turn attachments are unavailable") from exc
+                attachments_phase.set_outputs(
+                    {
+                        "staged_count": len(staged.refs),
+                        "staged_bytes": sum(ref.byte_size for ref in staged.refs),
+                    }
+                )
+            with turn_phase_span(
+                "Turn.prepare_capabilities",
+                inputs={"skill_selection_count": len(turn.input.skill_selections)},
+            ) as capabilities_phase:
+                try:
+                    async with asyncio.timeout_at(deadline):
+                        capabilities = await self._prepare_capabilities(turn, environment, staged, deadline)
+                except TimeoutError:
+                    raise TurnPreparationTimeoutError("Turn preparation timed out") from None
+                except (DatabaseConnectionError, OSError, SQLAlchemyError) as exc:
+                    raise TurnPreparationUnavailableError("Turn capabilities are unavailable") from exc
+                capabilities_phase.set_outputs({"notice_count": len(getattr(capabilities, "preparation_notices", ()))})
             try:
-                async with asyncio.timeout_at(deadline):
-                    capabilities = await self._prepare_capabilities(turn, environment, staged, deadline)
-            except TimeoutError:
-                raise TurnPreparationTimeoutError("Turn preparation timed out") from None
-            if await turn.cancellation_requested():
-                raise TurnPreparationCancelledError("Turn cancelled")
+                if await turn.cancellation_requested():
+                    raise TurnPreparationCancelledError("Turn cancelled")
+            except (DatabaseConnectionError, OSError, SQLAlchemyError) as exc:
+                raise TurnPreparationUnavailableError("Turn cancellation status is unavailable") from exc
             self._check_deadline(deadline)
         except BaseException:
 
@@ -214,6 +255,9 @@ class DefaultTurnPreparer:
             cancellation_requested=turn.cancellation_requested,
             preparation_notices=tuple(getattr(capabilities, "preparation_notices", ())),
             authority=turn.authority,
+            selected_skill_count=len(turn.input.skill_selections),
+            child_interpreter_factory=environment.child_interpreter_factory,
+            recursive_options=self._recursive_options,
         )
         return PreparedTurn(
             execution,
