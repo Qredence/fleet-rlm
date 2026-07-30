@@ -10,6 +10,7 @@ from fastapi import FastAPI
 
 from fleet_rlm.config import Settings
 from fleet_rlm.rlm.dspy_contract import RLMOptions, assert_dspy_version
+from fleet_rlm.rlm.recursive_calls import RecursiveRLMOptions
 
 
 class CompositionError(RuntimeError):
@@ -122,6 +123,18 @@ def rlm_options(settings: Settings) -> RLMOptions:
         max_iterations=settings.rlm_max_iterations,
         max_llm_calls=settings.rlm_max_llm_calls,
         max_output_chars=settings.rlm_max_output_chars,
+    )
+
+
+def recursive_rlm_options(settings: Settings) -> RecursiveRLMOptions:
+    """Project policy onto the bounded recursive child-RLM contract."""
+    return RecursiveRLMOptions(
+        max_depth=settings.rlm_recursion_max_depth,
+        max_calls=settings.rlm_recursion_max_calls,
+        max_prompt_chars=settings.rlm_recursion_max_prompt_chars,
+        child_max_iterations=settings.rlm_recursion_child_max_iterations,
+        child_max_llm_calls=settings.rlm_recursion_child_max_llm_calls,
+        child_max_output_chars=settings.rlm_recursion_child_max_output_chars,
     )
 
 

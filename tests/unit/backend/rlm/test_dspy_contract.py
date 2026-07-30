@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 from datetime import date
 from typing import Annotated, Any, ClassVar
 
@@ -364,6 +365,186 @@ def test_observed_usage_never_exposes_call_or_retry_counters(forbidden: str) -> 
                 "duration_ms": 1,
             }
         )
+
+
+def test_lm_trace_callback_records_role_and_failure_category(monkeypatch: pytest.MonkeyPatch) -> None:
+    from types import SimpleNamespace
+
+    from fleet_rlm.observability import turn_tracing
+    from fleet_rlm.rlm.dspy_contract import _RLMTraceCallback
+
+    calls = SimpleNamespace(outputs=[])
+
+    class Span:
+        def set_inputs(self, payload):
+            calls.inputs = payload
+
+        def set_outputs(self, payload):
+            calls.outputs.append(payload)
+
+        def set_status(self, status):
+            calls.status = status
+
+    class SpanContext:
+        def __enter__(self):
+            return Span()
+
+        def __exit__(self, *_args):
+            return None
+
+    fake_mlflow = SimpleNamespace(
+        get_current_active_span=lambda: Span(),
+        start_span=lambda **_kwargs: SpanContext(),
+    )
+    fake_entities = SimpleNamespace(SpanType=SimpleNamespace(CHAIN="CHAIN", LLM="LLM"))
+    monkeypatch.setitem(sys.modules, "mlflow", fake_mlflow)
+    monkeypatch.setitem(sys.modules, "mlflow.entities", fake_entities)
+    root = SimpleNamespace(model="root-model")
+    callback = _RLMTraceCallback(root_lm=root, sub_lm=SimpleNamespace(model="sub-model"))
+
+    token = turn_tracing._fleet_trace_active.set(True)
+    try:
+        callback.on_lm_start("call-1", root, {"prompt": "must not be traced"})
+        callback.on_lm_end("call-1", [], ValueError("provider response must not be traced"))
+    finally:
+        turn_tracing._fleet_trace_active.reset(token)
+
+    assert calls.inputs == {
+        "role": "root",
+        "model": "root-model",
+        "call_id": "call-1",
+        "call_index": 1,
+        "input_keys": ["prompt"],
+        "prompt_chars": 18,
+        "context_chars": 18,
+        "history_length_before": None,
+        "recursive_depth": 0,
+    }
+    assert calls.outputs[-1] == {
+        "request_status": "failed",
+        "failure_category": "unknown",
+        "response_keys": [],
+        "call_index": 1,
+        "phase_status": "failed",
+    }
+    assert calls.status == "ERROR"
+
+
+def test_lm_trace_callback_records_call_specific_usage_and_standard_attribute(monkeypatch: pytest.MonkeyPatch) -> None:
+    from types import SimpleNamespace
+
+    from fleet_rlm.observability import turn_tracing
+    from fleet_rlm.rlm.dspy_contract import _RLMTraceCallback
+
+    calls = SimpleNamespace(outputs=[], attributes=[])
+
+    class Span:
+        def set_inputs(self, payload):
+            calls.inputs = payload
+
+        def set_outputs(self, payload):
+            calls.outputs.append(payload)
+
+        def set_attributes(self, payload):
+            calls.attributes.append(payload)
+
+        def set_status(self, _status):
+            return None
+
+    class SpanContext:
+        def __enter__(self):
+            return Span()
+
+        def __exit__(self, *_args):
+            return None
+
+    fake_mlflow = SimpleNamespace(
+        get_current_active_span=lambda: Span(),
+        start_span=lambda **_kwargs: SpanContext(),
+    )
+    fake_entities = SimpleNamespace(SpanType=SimpleNamespace(CHAIN="CHAIN", LLM="LLM"))
+    monkeypatch.setitem(sys.modules, "mlflow", fake_mlflow)
+    monkeypatch.setitem(sys.modules, "mlflow.entities", fake_entities)
+    root = SimpleNamespace(model="root-model", history=[{"usage": {"prompt_tokens": 99}}])
+    callback = _RLMTraceCallback(root_lm=root, sub_lm=SimpleNamespace(model="sub-model"), recursive_depth=1)
+
+    token = turn_tracing._fleet_trace_active.set(True)
+    try:
+        callback.on_lm_start("call-2", root, {"prompt": "bounded"})
+        root.history.append({"usage": {"prompt_tokens": 7, "completion_tokens": 3, "total_tokens": 10}})
+        callback.on_lm_end("call-2", [])
+    finally:
+        turn_tracing._fleet_trace_active.reset(token)
+
+    assert calls.inputs["recursive_depth"] == 1
+    assert calls.inputs["call_index"] == 1
+    assert calls.inputs["prompt_chars"] == 7
+    assert calls.inputs["history_length_before"] == 1
+    assert calls.outputs[-1]["token_usage"] == {
+        "prompt_tokens": 7,
+        "completion_tokens": 3,
+        "total_tokens": 10,
+    }
+    assert calls.outputs[-1]["response_keys"] == []
+    assert calls.attributes == [
+        {"mlflow.chat.tokenUsage": '{"completion_tokens":3,"prompt_tokens":7,"total_tokens":10}'}
+    ]
+
+
+def test_reasoning_callback_spans_the_complete_root_action(monkeypatch: pytest.MonkeyPatch) -> None:
+    from types import SimpleNamespace
+
+    from fleet_rlm.observability import turn_tracing
+    from fleet_rlm.rlm.dspy_contract import _RLMReasoningCallback
+
+    outputs: list[dict[str, object]] = []
+
+    class Span:
+        def set_inputs(self, _payload):
+            return None
+
+        def set_outputs(self, payload):
+            outputs.append(payload)
+
+        def set_status(self, _status):
+            return None
+
+    class SpanContext:
+        def __enter__(self):
+            return Span()
+
+        def __exit__(self, *_args):
+            return None
+
+    monkeypatch.setitem(
+        sys.modules,
+        "mlflow",
+        SimpleNamespace(get_current_active_span=lambda: Span(), start_span=lambda **_kwargs: SpanContext()),
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "mlflow.entities",
+        SimpleNamespace(SpanType=SimpleNamespace(CHAIN="CHAIN", LLM="LLM")),
+    )
+    observed: list[object] = []
+    callback = _RLMReasoningCallback(observed.append, max_chars=100)
+
+    token = turn_tracing._fleet_trace_active.set(True)
+    try:
+        callback.on_module_start("module-1", object(), {})
+        callback.on_module_end("module-1", dspy.Prediction(reasoning="reason", code="answer = 1"))
+    finally:
+        turn_tracing._fleet_trace_active.reset(token)
+
+    assert outputs[-1] == {
+        "action_status": "parsed",
+        "reasoning_chars": 6,
+        "code_chars": 10,
+        "reasoning_preview": "reason",
+        "code_preview": "answer = 1",
+        "phase_status": "completed",
+    }
+    assert len(observed) == 1
 
 
 @pytest.mark.parametrize(

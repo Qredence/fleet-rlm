@@ -7,6 +7,24 @@ from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 import pytest
+from sqlalchemy.exc import SQLAlchemyError
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure_type", [OSError, SQLAlchemyError], ids=["os-error", "sqlalchemy-error"])
+async def test_sql_begin_translates_session_setup_failures(failure_type: type[BaseException]) -> None:
+    from fleet_rlm.chat.turn_lifecycle import BeginTurn, TurnLifecycleUnavailableError
+    from fleet_rlm.persistence.repositories.turns import SqlAlchemyTurnStateStore
+    from fleet_rlm.sessions.models import TurnAccess, TurnInput
+
+    def failing_factory():
+        raise failure_type("database unavailable")
+
+    store = SqlAlchemyTurnStateStore(failing_factory)  # type: ignore[arg-type]
+    request = BeginTurn(TurnAccess(uuid4(), uuid4()), uuid4(), TurnInput("hello"), "key", uuid4())
+
+    with pytest.raises(TurnLifecycleUnavailableError, match="lifecycle"):
+        await store.begin(request)
 
 
 def test_stale_claim_is_a_canonical_typed_failure_code() -> None:

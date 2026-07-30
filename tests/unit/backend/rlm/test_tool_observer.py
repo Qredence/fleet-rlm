@@ -13,6 +13,64 @@ from fleet_rlm.rlm.events import ToolCompleted, ToolFailed, ToolStarted
 from fleet_rlm.rlm.tool_observer import ToolEventView, observe_tool
 
 
+def test_observe_tool_creates_bounded_mlflow_tool_span(monkeypatch: pytest.MonkeyPatch) -> None:
+    from types import SimpleNamespace
+
+    from fleet_rlm.observability import turn_tracing
+
+    spans: list[dict[str, Any]] = []
+
+    class Span:
+        def set_inputs(self, payload):
+            spans[-1]["inputs"] = payload
+
+        def set_outputs(self, payload):
+            spans[-1]["outputs"] = payload
+
+        def set_status(self, status):
+            spans[-1]["status"] = status
+
+    class SpanContext:
+        def __enter__(self):
+            spans.append({})
+            return Span()
+
+        def __exit__(self, *_args):
+            return None
+
+    monkeypatch.setitem(
+        __import__("sys").modules,
+        "mlflow",
+        SimpleNamespace(get_current_active_span=lambda: Span(), start_span=lambda **_kwargs: SpanContext()),
+    )
+    monkeypatch.setitem(
+        __import__("sys").modules,
+        "mlflow.entities",
+        SimpleNamespace(SpanType=SimpleNamespace(CHAIN="CHAIN", TOOL="TOOL")),
+    )
+    token = turn_tracing._fleet_trace_active.set(True)
+    try:
+        wrapped = observe_tool(
+            dspy.Tool(lambda query: {"found": query == "alpha"}, name="lookup"),
+            lambda _event: None,
+            ToolEventView(
+                input_projection=lambda arguments: {"query": arguments["query"]},
+                output_projection=lambda result: result,
+            ),
+        )
+        assert wrapped.func("alpha") == {"found": True}
+    finally:
+        turn_tracing._fleet_trace_active.reset(token)
+
+    assert spans[0]["inputs"]["tool_name"] == "lookup"
+    assert spans[0]["inputs"]["input"] == {"query": "alpha"}
+    assert spans[0]["outputs"] == {
+        "tool_status": "completed",
+        "output": {"found": True},
+        "phase_status": "completed",
+    }
+
+
 def test_extracted_observer_func_binds_defaults_validates_and_enters_host_once() -> None:
     calls: list[tuple[int, str]] = []
 

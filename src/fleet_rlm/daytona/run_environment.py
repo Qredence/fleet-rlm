@@ -23,9 +23,10 @@ from fleet_rlm.chat.turn_preparation import (
     TurnPreparationTimeoutError,
     TurnPreparationUnavailableError,
 )
+from fleet_rlm.composition.common import recursive_rlm_options
 from fleet_rlm.config import Settings, load_runtime_settings
 from fleet_rlm.daytona.bindings import BindingStore, InMemoryBindingStore
-from fleet_rlm.daytona.interpreter import sync_sandbox
+from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, sandbox_backend, sync_sandbox
 from fleet_rlm.daytona.platform import (
     LiveDaytonaPlatform,
     LiveDaytonaVolumeClient,
@@ -193,7 +194,26 @@ class _DaytonaEnvironmentProvider:
             async def release() -> None:
                 await self.resources.session_manager.release(lease)
 
-            return RunEnvironment(lease.interpreter, sink, sink, release, sink)
+            main_loop = asyncio.get_running_loop()
+
+            def child_interpreter_factory() -> DaytonaCodeInterpreter:
+                return DaytonaCodeInterpreter(
+                    backend=sandbox_backend(
+                        sandbox,
+                        loop=main_loop,
+                        timeout_s=self.resources.settings.rlm_execution_timeout_s,
+                    ),
+                    execution_output_cap=self.resources.settings.rlm_max_execution_output_chars,
+                )
+
+            return RunEnvironment(
+                lease.interpreter,
+                sink,
+                sink,
+                release,
+                sink,
+                child_interpreter_factory,
+            )
         except BaseException:
             await asyncio.shield(self.resources.session_manager.release(lease))
             raise
@@ -421,6 +441,7 @@ def build_turn_preparation(
     return DefaultTurnPreparer(
         models=resources.models,
         options=options,
+        recursive_options=recursive_rlm_options(resources.settings),
         attachments=_LiveAttachmentLifecycle(attachment_lifecycle),
         environments=_DaytonaEnvironmentProvider(resources),
         capabilities=_LiveCapabilityPreparer(resources, skill_catalog),

@@ -12,7 +12,13 @@ from uuid import uuid4
 import pytest
 
 from fleet_rlm.observability import turn_tracing
-from fleet_rlm.observability.turn_tracing import annotate_trace_io, current_turn_trace_id, turn_phase_span, turn_trace
+from fleet_rlm.observability.turn_tracing import (
+    annotate_trace_io,
+    current_turn_trace_id,
+    start_turn_span,
+    turn_phase_span,
+    turn_trace,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -219,6 +225,23 @@ def test_turn_phase_span_records_bounded_metadata_when_a_turn_span_is_active(mon
     assert calls.start_span_names == ["RLM.execute"]
     assert calls.span_inputs[-1] == {"max_iterations": 20, "max_llm_calls": 50}
     assert calls.span_outputs[-1] == {"phase_status": "completed"}
+
+
+def test_start_turn_span_supports_callback_lifecycles_and_failure_status(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = _install_fake_mlflow(monkeypatch)
+
+    handle = start_turn_span("RLM.root_lm", inputs={"role": "root"}, span_type="LLM")
+    handle.finish(phase_status="failed", outputs={"failure_category": "timeout"})
+
+    assert calls.start_span_names == ["RLM.root_lm"]
+    assert calls.span_inputs[-1] == {"role": "root"}
+    assert calls.span_outputs[-1] == {
+        "failure_category": "timeout",
+        "phase_status": "failed",
+    }
+    assert calls.span_statuses == ["ERROR"]
 
 
 def test_turn_phase_span_records_failures_without_suppressing_them(monkeypatch: pytest.MonkeyPatch) -> None:

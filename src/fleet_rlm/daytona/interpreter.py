@@ -40,7 +40,7 @@ from fleet_rlm.rlm.dspy_interpreter_contract import (
 )
 from fleet_rlm.rlm.errors import TurnNoProgressError, TurnTerminalError
 from fleet_rlm.rlm.events import ObservationObserver, RLMCode, RLMOutput, StepFinished, StepStarted
-from fleet_rlm.rlm.sanitize import truncate_head_tail, truncate_public_text
+from fleet_rlm.rlm.sanitize import sanitize_public_text, truncate_head_tail, truncate_public_text
 from fleet_rlm.rlm.tool_observer import ToolEventView, ToolObserver, observe_tool
 
 if TYPE_CHECKING:
@@ -48,6 +48,7 @@ if TYPE_CHECKING:
 
 DEFAULT_EXECUTION_OUTPUT_CHARS = 4_000
 DEFAULT_EXECUTION_TIMEOUT_S = 120
+DEFAULT_INTERMEDIATE_CODE_CHARS = 12_000
 
 
 @dataclass(frozen=True, slots=True)
@@ -58,6 +59,7 @@ class BackendExecutionResult:
     final: dict[str, Any] | None = None
     error: str | None = None
     stderr: str = ""
+    error_category: str | None = None
 
 
 class InProcessInterpreterBackend:
@@ -100,6 +102,7 @@ class InProcessInterpreterBackend:
             return BackendExecutionResult(
                 stdout=str(self.namespace.get("_out", "")),
                 error=sanitize_provider_message(str(exc)),
+                error_category=type(exc).__name__,
             )
         return BackendExecutionResult(stdout=str(self.namespace.get("_out", "")))
 
@@ -146,6 +149,13 @@ class InterpreterBackend(Protocol):
 class _RepairFeedback(str):
     """Detailed interpreter feedback returned to RLM but not public projection."""
 
+    category: str
+
+    def __new__(cls, value: str, *, category: str = "execution_error") -> _RepairFeedback:
+        result = super().__new__(cls, value)
+        result.category = category
+        return result
+
 
 def _result_kind(result: Any) -> str:
     """Bounded outcome classification for span metadata (never content)."""
@@ -154,6 +164,24 @@ def _result_kind(result: Any) -> str:
     if isinstance(result, _RepairFeedback):
         return "repair_error"
     return "output"
+
+
+def _repair_category(error: str) -> str:
+    """Return a bounded runtime-error category without retaining generated details."""
+    prefix = error.split(":", 1)[0].strip()
+    allowed = {
+        "AttributeError",
+        "ImportError",
+        "IndexError",
+        "KeyError",
+        "ModuleNotFoundError",
+        "NameError",
+        "SyntaxError",
+        "TypeError",
+        "ValueError",
+        "ZeroDivisionError",
+    }
+    return prefix if prefix in allowed else "execution_error"
 
 
 def _sync_await(awaitable: Any, loop: asyncio.AbstractEventLoop) -> Any:
@@ -307,7 +335,12 @@ class _SandboxCodeInterpreterBackend:
             # User-generated Python errors are part of the RLM feedback loop:
             # return them to DSPy so the next iteration can repair the code.
             # Provider/transport failures still raise above from run_code().
-            return BackendExecutionResult(stdout=stdout, error=sanitize_provider_message(raw), stderr=stderr)
+            return BackendExecutionResult(
+                stdout=stdout,
+                error=sanitize_provider_message(raw),
+                stderr=stderr,
+                error_category=error_name or None,
+            )
         if final is not None:
             return BackendExecutionResult(stdout=stdout, final=final, stderr=stderr)
         return BackendExecutionResult(stdout=stdout, stderr=stderr)
@@ -334,6 +367,7 @@ class DaytonaCodeInterpreter:
         tools: Mapping[str, Callable[..., Any]] | None = None,
         output_fields: list[dict[str, Any]] | None = None,
         execution_output_cap: int = DEFAULT_EXECUTION_OUTPUT_CHARS,
+        max_code_chars: int = DEFAULT_INTERMEDIATE_CODE_CHARS,
     ) -> None:
         self._backend = backend
         self._tools: dict[str, Callable[..., Any]] = dict(tools or {})
@@ -346,6 +380,7 @@ class DaytonaCodeInterpreter:
         self._observer: ObservationObserver | None = None
         self._observation_max_chars = 10_000
         self._execution_output_cap = max(1, int(execution_output_cap))
+        self._max_code_chars = max(1, int(max_code_chars))
         self._observation_step = 0
         self._last_execution: tuple[str, str] | None = None
 
@@ -428,21 +463,36 @@ class DaytonaCodeInterpreter:
                 "iteration": step,
                 "code_chars": len(code or ""),
                 "variable_count": len(variables or {}),
+                "code_preview": sanitize_public_text(
+                    truncate_head_tail(code or "", max_chars=900),
+                    max_len=900,
+                ),
             },
         ) as phase:
             try:
-                bindings_started = time.perf_counter()
-                self._ensure_bindings()
-                ensure_bindings_ms = int((time.perf_counter() - bindings_started) * 1_000)
                 normalized_code = self._normalize_code(code)
+                ensure_bindings_ms = 0
+                execute_ms = 0
+                bindings_started = time.perf_counter()
                 execute_started = time.perf_counter()
                 if not normalized_code:
                     result = _RepairFeedback(
-                        "[Error] No executable code was provided; execute useful Python or call SUBMIT."
+                        "[Error] No executable code was provided; execute useful Python or call SUBMIT.",
+                        category="empty_code",
+                    )
+                elif len(normalized_code) > self._max_code_chars:
+                    result = _RepairFeedback(
+                        f"[Error] Intermediate code is too large ({len(normalized_code)} chars); "
+                        f"keep one action under {self._max_code_chars} chars, use variables, and submit promptly.",
+                        category="code_too_large",
                     )
                 elif self._http_broker is not None:
+                    self._ensure_bindings()
+                    ensure_bindings_ms = int((time.perf_counter() - bindings_started) * 1_000)
                     result = self._execute_with_http_broker(code, variables)
                 else:
+                    self._ensure_bindings()
+                    ensure_bindings_ms = int((time.perf_counter() - bindings_started) * 1_000)
                     raw = self._backend.run(code, variables)
                     result = self._finalize(raw)
                 execute_ms = int((time.perf_counter() - execute_started) * 1_000)
@@ -452,11 +502,14 @@ class DaytonaCodeInterpreter:
                     "path": "http_broker" if self._http_broker is not None else type(self._backend).__name__,
                     "result_kind": _result_kind(result),
                     "stdout_chars": len(str(result)),
+                    "output_preview": sanitize_public_text(str(result), max_len=900),
                 }
                 if self._http_broker is not None:
                     outputs["ensure_bindings_ms"] = ensure_bindings_ms
                     outputs["execute_ms"] = execute_ms
                     outputs.update(self._http_broker.last_execution_stats)
+                if isinstance(result, _RepairFeedback):
+                    outputs["repair_category"] = result.category
                 phase.set_outputs(outputs)
                 return result
             except TurnTerminalError:
@@ -561,7 +614,7 @@ class DaytonaCodeInterpreter:
                 stderr = truncate_head_tail(raw.stderr, max_chars=self._execution_output_cap).strip()
                 if stderr:
                     feedback = f"{feedback}\nstderr: {stderr}"
-                return _RepairFeedback(feedback)
+                return _RepairFeedback(feedback, category=raw.error_category or _repair_category(error))
             if raw.final is not None:
                 return wrap_final_output(raw.final)
             return truncate_head_tail(raw.stdout, max_chars=self._execution_output_cap)

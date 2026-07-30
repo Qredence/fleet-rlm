@@ -28,7 +28,7 @@ from fleet_rlm.daytona.provisioning import (
 )
 from fleet_rlm.persistence.database import ensure_database_compatible
 
-DoctorStepName = Literal["settings", "database", "provider", "sandbox", "interpreter", "cleanup"]
+DoctorStepName = Literal["settings", "database", "provider", "rlm", "sandbox", "interpreter", "cleanup"]
 DoctorFailureCategory = Literal[
     "settings",
     "database",
@@ -38,6 +38,7 @@ DoctorFailureCategory = Literal[
     "provider_5xx",
     "request_validation",
     "mount_mismatch",
+    "rlm_provider",
     "interpreter",
     "cleanup",
     "unknown",
@@ -69,6 +70,8 @@ class DaytonaDoctorDependencies(Protocol):
     async def check_database(self, settings: Settings) -> None: ...
 
     async def resolve_volume(self, settings: Settings) -> str: ...
+
+    async def check_rlm_readiness(self, settings: Settings) -> None: ...
 
     async def create_sandbox(
         self,
@@ -187,11 +190,17 @@ class _ProductionDaytonaDoctorDependencies:
     async def close(self) -> None:
         await self._client.close()
 
+    async def check_rlm_readiness(self, settings: Settings) -> None:
+        from fleet_rlm.rlm.provider_probe import probe_configured_root_lm
+
+        await probe_configured_root_lm(settings)
+
 
 _SUCCESS_MESSAGES: dict[DoctorStepName, str] = {
     "settings": "Fleet Daytona settings are valid.",
     "database": "Database connection and Alembic revision are compatible.",
     "provider": "Daytona authentication and Volume access succeeded.",
+    "rlm": "Configured Root LM satisfies the pinned DSPy RLM action contract.",
     "sandbox": "Disposable scoped Sandbox mount is valid.",
     "interpreter": "Daytona interpreter executed the diagnostic.",
     "cleanup": "Disposable Daytona Sandbox was deleted.",
@@ -206,6 +215,7 @@ _FAILURE_MESSAGES: dict[DoctorFailureCategory, str] = {
     "provider_5xx": "Daytona returned a provider service error.",
     "request_validation": "Daytona rejected the diagnostic request.",
     "mount_mismatch": "The disposable Sandbox Volume mount did not match the requested scope.",
+    "rlm_provider": "The configured Root LM is not compatible with the pinned DSPy RLM action protocol.",
     "interpreter": "The Daytona interpreter diagnostic failed.",
     "cleanup": "Disposable Daytona Sandbox cleanup failed.",
     "unknown": "The Daytona diagnostic failed safely.",
@@ -228,6 +238,8 @@ def _failure_category(exc: BaseException, step: DoctorStepName) -> DoctorFailure
     }
     if step in step_categories:
         return step_categories[step]
+    if step == "rlm":
+        return "rlm_provider"
     provider_kind = classify_provider_error(exc)
     if provider_kind == "mount_mismatch":
         return "mount_mismatch"
@@ -309,6 +321,11 @@ async def run_daytona_doctor(
         current_step = "provider"
         volume_id = await dependencies.resolve_volume(settings)
         steps.append(DaytonaDoctorStep("provider", True, _SUCCESS_MESSAGES["provider"]))
+        check_rlm_readiness = getattr(dependencies, "check_rlm_readiness", None)
+        if callable(check_rlm_readiness):
+            current_step = "rlm"
+            await check_rlm_readiness(settings)
+            steps.append(DaytonaDoctorStep("rlm", True, _SUCCESS_MESSAGES["rlm"]))
         expected = ExpectedWorkspaceMount(
             volume_id=volume_id,
             volume_subpath=workspace_volume_subpath(workspace_id),

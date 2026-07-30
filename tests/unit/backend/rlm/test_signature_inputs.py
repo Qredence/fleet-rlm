@@ -7,6 +7,7 @@ import json
 from pathlib import Path
 from uuid import UUID
 
+import dspy
 import pytest
 from pydantic import ValidationError
 
@@ -19,7 +20,7 @@ from fleet_rlm.rlm.input_models import (
     SessionContextInput,
     SkillCardInput,
 )
-from fleet_rlm.rlm.inputs import build_rlm_input_kwargs
+from fleet_rlm.rlm.inputs import AttachmentSandboxPayload, build_rlm_input_kwargs
 from fleet_rlm.skills.models import SkillCard
 
 SESSION_ID = UUID("00000000-0000-0000-0000-000000000001")
@@ -229,6 +230,35 @@ def test_invalid_request_fails_at_the_input_boundary() -> None:
             request="   ",
             session_context=SessionContextManifest(SESSION_ID, 0, 0, ()),
         )
+
+
+@pytest.mark.asyncio
+async def test_bounded_attachment_payload_round_trips_inside_the_interpreter() -> None:
+    from fleet_rlm.chat.session_context import SessionContextManifest
+    from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
+
+    payload = AttachmentSandboxPayload(ATTACHMENT_ID, "report.bin", "application/octet-stream", b"\x00Fleet")
+    kwargs = build_rlm_input_kwargs(
+        request="inspect the prepared payload",
+        session_context=SessionContextManifest(SESSION_ID, 0, 0, ()),
+        attachment_payloads=(payload,),
+    )
+    lm = dspy.utils.DummyLM(
+        [{"reasoning": "submit the bytes", "code": "SUBMIT(answer=str(attachments[0]['data']))"}],
+        adapter=dspy.JSONAdapter(),
+    )
+    rlm = dspy.RLM(
+        "request -> answer: str",
+        max_iterations=1,
+        interpreter=DaytonaCodeInterpreter(backend=InProcessInterpreterBackend()),
+    )
+
+    with dspy.context(lm=lm, adapter=dspy.JSONAdapter()):
+        prediction = await rlm.acall(**kwargs)
+
+    assert prediction.answer == "b'\\x00Fleet'"
+    assert payload.rlm_preview(10) == "prepared a"
+    assert "/home/daytona" not in payload.rlm_preview()
 
 
 def test_backend_module_suffix_is_reserved_for_dspy_modules() -> None:

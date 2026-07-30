@@ -10,6 +10,7 @@ from typing import Any, Literal, cast
 from uuid import UUID, uuid4
 
 from sqlalchemy import func, select, update
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from fleet_rlm.artifacts.models import ArtifactRef
@@ -41,12 +42,14 @@ from fleet_rlm.chat.turn_lifecycle import (
     TurnFailure,
     TurnIdempotencyMismatchError,
     TurnInProgressError,
+    TurnLifecycleUnavailableError,
     TurnNotFoundError,
     TurnStart,
     TurnStateError,
     _TurnClaimToken,
     failure_code_for_terminal_status,
 )
+from fleet_rlm.persistence.database import DatabaseConnectionError
 from fleet_rlm.persistence.models import ArtifactRow, RunRow, SessionRow, TurnRow
 from fleet_rlm.rlm.dspy_contract import RLMUsage
 from fleet_rlm.sessions.committed_turn import CommittedTurn, CommittedTurnCodec
@@ -417,6 +420,8 @@ class SqlAlchemyTurnStateStore:
     """Transaction-backed authoritative Turn lifecycle state."""
 
     _RECOVERY_BATCH_SIZE = 100
+    _CANCELLATION_PROBE_ATTEMPTS = 2
+    _CANCELLATION_PROBE_RETRY_DELAY_SECONDS = 0.05
 
     def __init__(
         self,
@@ -428,64 +433,74 @@ class SqlAlchemyTurnStateStore:
         self._stale_after = stale_after_seconds
 
     async def begin(self, request: BeginTurn) -> TurnStart:
-        async with self._sessions() as db, db.begin():
-            session = await db.scalar(
-                select(SessionRow)
-                .where(
-                    SessionRow.id == request.session_id,
-                    SessionRow.user_id == request.access.user_id,
-                    SessionRow.workspace_id == request.access.workspace_id,
+        try:
+            async with self._sessions() as db, db.begin():
+                session = await db.scalar(
+                    select(SessionRow)
+                    .where(
+                        SessionRow.id == request.session_id,
+                        SessionRow.user_id == request.access.user_id,
+                        SessionRow.workspace_id == request.access.workspace_id,
+                    )
+                    .with_for_update()
                 )
-                .with_for_update()
-            )
-            if session is None or session.status != "active":
-                raise TurnNotFoundError("Turn not found")
-            prior = await db.scalar(
-                select(RunRow)
-                .where(
-                    RunRow.session_id == request.session_id,
-                    RunRow.idempotency_key == request.idempotency_key,
-                    RunRow.status.in_(("running", "settling", "completed")),
+                if session is None or session.status != "active":
+                    raise TurnNotFoundError("Turn not found")
+                prior = await db.scalar(
+                    select(RunRow)
+                    .where(
+                        RunRow.session_id == request.session_id,
+                        RunRow.idempotency_key == request.idempotency_key,
+                        RunRow.status.in_(("running", "settling", "completed")),
+                    )
+                    .order_by(RunRow.created_at.desc())
+                    .limit(1)
                 )
-                .order_by(RunRow.created_at.desc())
-                .limit(1)
-            )
-            if prior is not None:
-                if prior.input_fingerprint not in request.input.acceptable_fingerprints:
-                    raise TurnIdempotencyMismatchError("idempotency key is bound to different input")
-                if prior.status in {"running", "settling"}:
-                    raise TurnInProgressError("Turn is already running")
-                return await self._replay(db, prior)
-            active = await db.scalar(
-                select(RunRow.id).where(
-                    RunRow.session_id == request.session_id,
-                    RunRow.status.in_(("running", "settling")),
+                if prior is not None:
+                    if prior.input_fingerprint not in request.input.acceptable_fingerprints:
+                        raise TurnIdempotencyMismatchError("idempotency key is bound to different input")
+                    if prior.status in {"running", "settling"}:
+                        raise TurnInProgressError("Turn is already running")
+                    return await self._replay(db, prior)
+                active = await db.scalar(
+                    select(RunRow.id).where(
+                        RunRow.session_id == request.session_id,
+                        RunRow.status.in_(("running", "settling")),
+                    )
                 )
-            )
-            if active is not None:
-                raise TurnInProgressError("Session already has a running Turn")
+                if active is not None:
+                    raise TurnInProgressError("Session already has a running Turn")
 
-            claim = _TurnClaimToken(uuid4(), session.checkpoint_version)
-            db.add(
-                RunRow(
-                    id=request.proposed_run_id,
-                    session_id=request.session_id,
-                    status="running",
-                    idempotency_key=request.idempotency_key,
-                    input_fingerprint=request.input.fingerprint,
-                    base_checkpoint_version=session.checkpoint_version,
-                    claim_owner=str(claim.value),
-                    claim_heartbeat_at=datetime.now(UTC),
+                claim = _TurnClaimToken(uuid4(), session.checkpoint_version)
+                db.add(
+                    RunRow(
+                        id=request.proposed_run_id,
+                        session_id=request.session_id,
+                        status="running",
+                        idempotency_key=request.idempotency_key,
+                        input_fingerprint=request.input.fingerprint,
+                        base_checkpoint_version=session.checkpoint_version,
+                        claim_owner=str(claim.value),
+                        claim_heartbeat_at=datetime.now(UTC),
+                    )
                 )
-            )
-            history = await self._history(db, request.session_id)
+                history = await self._history(db, request.session_id)
+        except (OSError, SQLAlchemyError) as exc:
+            raise TurnLifecycleUnavailableError("Turn lifecycle is unavailable") from exc
 
         async def cancelled() -> bool:
-            async with self._sessions() as probe_db:
-                value = await probe_db.scalar(
-                    select(RunRow.cancel_requested_at).where(RunRow.id == request.proposed_run_id)
-                )
-                return value is not None
+            for attempt in range(self._CANCELLATION_PROBE_ATTEMPTS):
+                try:
+                    async with self._sessions() as probe_db:
+                        value = await probe_db.scalar(
+                            select(RunRow.cancel_requested_at).where(RunRow.id == request.proposed_run_id)
+                        )
+                        return value is not None
+                except (OSError, SQLAlchemyError) as exc:
+                    if attempt + 1 >= self._CANCELLATION_PROBE_ATTEMPTS:
+                        raise DatabaseConnectionError("turn cancellation probe failed") from exc
+                    await asyncio.sleep(self._CANCELLATION_PROBE_RETRY_DELAY_SECONDS)
+            raise AssertionError("cancellation probe attempts exhausted")
 
         return ExecuteTurn(
             request.proposed_run_id,

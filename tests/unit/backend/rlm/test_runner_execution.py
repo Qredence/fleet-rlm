@@ -13,22 +13,8 @@ import dspy
 import pytest
 
 
-@pytest.mark.parametrize(
-    ("input_text", "expected"),
-    [
-        ("hi", "Hi! How can I help you today?"),
-        ("  HELLO there!!! ", "Hi! How can I help you today?"),
-        ("hi, can you help me", None),
-    ],
-)
-def test_direct_greeting_response_is_narrow(input_text: str, expected: str | None) -> None:
-    from fleet_rlm.rlm.direct_response import direct_greeting_response
-
-    assert direct_greeting_response(input_text) == expected
-
-
 @pytest.mark.asyncio
-async def test_runner_short_circuits_plain_greeting_without_starting_rlm() -> None:
+async def test_runner_uses_native_path_for_plain_greeting() -> None:
     from fleet_rlm.chat.session_context import SessionContextManifest
     from fleet_rlm.rlm.context import RLMExecutionContext, RLMExecutionSpec
     from fleet_rlm.rlm.dspy_contract import RLMOptions
@@ -44,9 +30,25 @@ async def test_runner_short_circuits_plain_greeting_without_starting_rlm() -> No
         def drain_artifact_candidates(self):
             return ()
 
+    class Program:
+        async def acall(self, **_kwargs):
+            return dspy.Prediction(
+                answer="Hi! How can I help you today?",
+                trajectory=[
+                    {
+                        "reasoning": "Answer the greeting.",
+                        "code": "SUBMIT(answer='Hi! How can I help you today?')",
+                        "output": "FINAL: {'answer': 'Hi! How can I help you today?'}",
+                    }
+                ],
+            )
+
     class Factory:
+        created = False
+
         def create(self, **_kwargs):
-            raise AssertionError("a plain greeting must not start an RLM")
+            self.created = True
+            return Program()
 
     async def not_cancelled() -> bool:
         return False
@@ -67,14 +69,24 @@ async def test_runner_short_circuits_plain_greeting_without_starting_rlm() -> No
         (),
     )
 
-    stream = RLMRunner(factory=Factory()).stream(context)
+    factory = Factory()
+    stream = RLMRunner(factory=factory).stream(context)
     events = [event async for event in stream]
 
-    assert [event.kind for event in events] == ["run.started", "status"]
+    assert [event.kind for event in events] == [
+        "run.started",
+        "status",
+        "step.started",
+        "rlm.reasoning",
+        "rlm.code",
+        "rlm.output",
+        "step.finished",
+    ]
+    assert factory.created
     assert stream.outcome is not None and stream.outcome.succeeded
     assert stream.outcome.prediction is not None
     assert stream.outcome.prediction.display_text == "Hi! How can I help you today?"
-    assert stream.outcome.usage["iterations"] == 0
+    assert stream.outcome.usage["iterations"] == 1
 
 
 @pytest.mark.asyncio
@@ -182,9 +194,9 @@ async def test_runner_uses_supported_async_call_and_returns_typed_outcome(
         return original_context(**kwargs)
 
     @contextmanager
-    def tracked_phase_span(name: str, *, inputs: dict[str, object]) -> Iterator[None]:
+    def tracked_phase_span(name: str, *, inputs: dict[str, object]) -> Iterator[SimpleNamespace]:
         phase_spans.append((name, inputs))
-        yield
+        yield SimpleNamespace(set_outputs=lambda _outputs: None)
 
     monkeypatch.setattr(dspy, "context", tracked_context)
     monkeypatch.setattr("fleet_rlm.rlm.runner.turn_phase_span", tracked_phase_span)
@@ -245,7 +257,7 @@ async def test_runner_uses_supported_async_call_and_returns_typed_outcome(
     assert contexts[0]["track_usage"] is True
     adapter = contexts[0]["adapter"]
     assert isinstance(adapter, dspy.JSONAdapter)
-    assert adapter.use_native_function_calling is False
+    assert adapter.use_native_function_calling is True
     assert dspy.settings.adapter is global_adapter
     assert phase_spans == [
         (
@@ -259,21 +271,11 @@ async def test_runner_uses_supported_async_call_and_returns_typed_outcome(
     ]
 
 
-def test_portable_json_adapter_removes_provider_response_schema(monkeypatch: pytest.MonkeyPatch) -> None:
-    from fleet_rlm.rlm.runner import _PortableJSONAdapter
+def test_runner_uses_stock_json_adapter_without_protocol_salvage() -> None:
+    adapter = dspy.JSONAdapter()
 
-    observed: dict[str, object] = {}
-
-    def fake_call(self, lm, lm_kwargs, signature, demos, inputs):
-        del self, lm, signature, demos, inputs
-        observed.update(lm_kwargs)
-        return []
-
-    monkeypatch.setattr(dspy.ChatAdapter, "__call__", fake_call)
-    adapter = _PortableJSONAdapter(use_native_function_calling=False)
-
-    assert adapter(object(), {"response_format": {"type": "json_schema"}}, object, [], {}) == []
-    assert "response_format" not in observed
+    assert type(adapter) is dspy.JSONAdapter
+    assert adapter.use_native_function_calling is True
 
 
 @pytest.mark.asyncio

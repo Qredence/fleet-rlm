@@ -5,21 +5,20 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
-import re
 import time
 from collections.abc import AsyncIterator, Callable, Sequence
 from typing import Any, Protocol, Self, cast
 
 import dspy
-from dspy.utils.exceptions import AdapterParseError, LMError
+from dspy.utils.exceptions import AdapterParseError
 
-from fleet_rlm.observability.failure_diagnostics import normalize_turn_failure
+from fleet_rlm.observability.failure_diagnostics import normalize_turn_failure, trace_failure_category
 from fleet_rlm.observability.turn_tracing import turn_phase_span
 from fleet_rlm.rlm.context import RLMExecutionContext, RLMExecutionSpec
-from fleet_rlm.rlm.direct_response import direct_greeting_response
 from fleet_rlm.rlm.dspy_contract import (
     PredictionOutputError,
     TrajectoryStep,
+    _RLMTraceCallback,
     bind_native_rlm_observer,
     normalize_prediction_trajectory,
     observed_usage,
@@ -28,7 +27,6 @@ from fleet_rlm.rlm.dspy_contract import (
 from fleet_rlm.rlm.errors import (
     TurnCancelledError,
     TurnIntegrityFailureError,
-    TurnParseExhaustedError,
     TurnTerminalError,
 )
 from fleet_rlm.rlm.events import (
@@ -50,8 +48,8 @@ from fleet_rlm.rlm.events import (
 from fleet_rlm.rlm.factory import RLMFactory
 from fleet_rlm.rlm.inputs import build_rlm_input_kwargs
 from fleet_rlm.rlm.outcome import ExecutionDetail, RLMOutcome, TerminalStatus
+from fleet_rlm.rlm.recursive_calls import RecursiveRLMExecutor
 from fleet_rlm.rlm.sanitize import truncate_public_text
-from fleet_rlm.rlm.signature import FleetRLMSignature
 from fleet_rlm.rlm.tool_guards import TurnToolGuards, workspace_obligations
 from fleet_rlm.rlm.tool_observer import ToolEventView, observe_tool
 
@@ -69,179 +67,6 @@ class RLMFactoryLike(Protocol):
         signature: Any = None,
         verbose: bool = True,
     ) -> Any: ...
-
-
-_MAX_CONSECUTIVE_PARSE_ERRORS = 3
-
-
-def _portable_chat_fallback() -> dspy.ChatAdapter:
-    """Sectioned-format retry adapter: no provider response schema, no nested fallback."""
-    return dspy.ChatAdapter(use_native_function_calling=False, use_json_adapter_fallback=False)
-
-
-_NATIVE_TOOL_PAYLOAD_MARKER = "<|content_invoke_tool_json|>"
-_SPECIAL_TOKEN_RE = re.compile(r"<\|[^|<>]*\|>")
-
-
-def _strip_native_tool_tokens(completion: str) -> str:
-    """Normalize model-native tool-invocation grammar into a parseable form.
-
-    Some chat models answer with native tool tokens instead of the requested
-    format, e.g. ``prose...<|message_model|>bash<|content_invoke_tool_json|>{"name": ...}``.
-    Neither the JSON nor the sectioned grammar matches that shape, so parsing
-    fails deterministically. When a tool payload marker is present, the
-    embedded payload is handed to the normal parse cascade; otherwise bare
-    ``<|...|>`` tokens are stripped so sectioned-prose salvage can run.
-    Responses without special tokens pass through unchanged.
-
-    This fixes grammar, not semantics: payloads whose fields do not match the
-    signature still fail cleanly with ``AdapterParseError``.
-    """
-    if "<|" not in completion:
-        return completion
-    marker_index = completion.find(_NATIVE_TOOL_PAYLOAD_MARKER)
-    if marker_index != -1:
-        payload = completion[marker_index + len(_NATIVE_TOOL_PAYLOAD_MARKER) :].strip()
-        if payload:
-            return payload
-        # Marker with an empty payload: fall through and treat the response
-        # as bare prose with stray tokens.
-    return _SPECIAL_TOKEN_RE.sub("", completion).strip()
-
-
-class _PortableJSONAdapter(dspy.JSONAdapter):
-    """JSON prompt/parser without provider response schemas, with bounded parse salvage.
-
-    The primary path keeps JSONAdapter prompting and parsing but strips
-    ``response_format`` (some providers accept the parameter yet mishandle it).
-    Because this class subclasses ``JSONAdapter``, DSPy's native ChatAdapter
-    fallback guard (``isinstance(self, JSONAdapter)``) would re-raise instead
-    of retrying, so salvage is implemented here:
-
-    1. ``parse`` retries a failed raw JSON parse with model-native tool
-       tokens (``<|...|>`` grammar) normalized away via
-       ``_strip_native_tool_tokens``, then with the ChatAdapter section
-       grammar (``[[ ## field ## ]]``) — zero extra LM calls. Already
-       parseable responses are never rewritten;
-    2. ``__call__``/``acall`` retry once with a sectioned-prompt ChatAdapter;
-    3. after ``max_consecutive_parse_errors`` consecutive unparseable responses
-       the turn terminates with ``TurnParseExhaustedError`` instead of burning
-       further LM calls.
-
-    Any successful parse resets the consecutive-failure counter.
-    """
-
-    def __init__(
-        self,
-        *,
-        max_consecutive_parse_errors: int = _MAX_CONSECUTIVE_PARSE_ERRORS,
-        **kwargs: Any,
-    ) -> None:
-        kwargs.setdefault("use_native_function_calling", False)
-        super().__init__(**kwargs)
-        self._max_consecutive_parse_errors = max(1, int(max_consecutive_parse_errors))
-        self._consecutive_parse_errors = 0
-
-    def parse(self, signature: type[dspy.Signature], completion: str) -> dict[str, Any]:
-        try:
-            return dspy.JSONAdapter.parse(self, signature, completion)
-        except AdapterParseError as json_error:
-            # Normalize only after the raw parse fails: responses that already
-            # parse must never be silently rewritten (e.g. a JSON answer that
-            # legitimately quotes a ``<|...|>`` token inside a string value).
-            normalized = _strip_native_tool_tokens(completion)
-            if normalized != completion:
-                try:
-                    return dspy.JSONAdapter.parse(self, signature, normalized)
-                except AdapterParseError:
-                    pass
-            try:
-                return dspy.ChatAdapter.parse(self, signature, normalized)
-            except AdapterParseError:
-                raise json_error from None
-
-    def __call__(
-        self,
-        lm: Any,
-        lm_kwargs: dict[str, Any],
-        signature: type[dspy.Signature],
-        demos: list[dict[str, Any]],
-        inputs: dict[str, Any],
-    ) -> list[dict[str, Any]]:
-        self._check_parse_budget()
-        lm_kwargs.pop("response_format", None)
-        try:
-            result = dspy.ChatAdapter.__call__(self, lm, lm_kwargs, signature, demos, inputs)
-        except LMError:
-            raise
-        except AdapterParseError as primary_error:
-            result = self._retry_with_chat_adapter(lm, lm_kwargs, signature, demos, inputs, primary_error)
-        self._consecutive_parse_errors = 0
-        return result
-
-    async def acall(
-        self,
-        lm: Any,
-        lm_kwargs: dict[str, Any],
-        signature: type[dspy.Signature],
-        demos: list[dict[str, Any]],
-        inputs: dict[str, Any],
-    ) -> list[dict[str, Any]]:
-        self._check_parse_budget()
-        lm_kwargs.pop("response_format", None)
-        try:
-            result = await dspy.ChatAdapter.acall(self, lm, lm_kwargs, signature, demos, inputs)
-        except LMError:
-            raise
-        except AdapterParseError as primary_error:
-            result = await self._aretry_with_chat_adapter(lm, lm_kwargs, signature, demos, inputs, primary_error)
-        self._consecutive_parse_errors = 0
-        return result
-
-    def _retry_with_chat_adapter(
-        self,
-        lm: Any,
-        lm_kwargs: dict[str, Any],
-        signature: type[dspy.Signature],
-        demos: list[dict[str, Any]],
-        inputs: dict[str, Any],
-        primary_error: AdapterParseError,
-    ) -> list[dict[str, Any]]:
-        self._note_parse_failure()
-        self._check_parse_budget()
-        try:
-            return _portable_chat_fallback()(lm, dict(lm_kwargs), signature, demos, inputs)
-        except LMError:
-            raise
-        except AdapterParseError:
-            self._note_parse_failure()
-            raise primary_error from None
-
-    async def _aretry_with_chat_adapter(
-        self,
-        lm: Any,
-        lm_kwargs: dict[str, Any],
-        signature: type[dspy.Signature],
-        demos: list[dict[str, Any]],
-        inputs: dict[str, Any],
-        primary_error: AdapterParseError,
-    ) -> list[dict[str, Any]]:
-        self._note_parse_failure()
-        self._check_parse_budget()
-        try:
-            return await _portable_chat_fallback().acall(lm, dict(lm_kwargs), signature, demos, inputs)
-        except LMError:
-            raise
-        except AdapterParseError:
-            self._note_parse_failure()
-            raise primary_error from None
-
-    def _check_parse_budget(self) -> None:
-        if self._consecutive_parse_errors >= self._max_consecutive_parse_errors:
-            raise TurnParseExhaustedError()
-
-    def _note_parse_failure(self) -> None:
-        self._consecutive_parse_errors += 1
 
 
 class _WorkerOwnership:
@@ -641,31 +466,6 @@ class RLMRunner:
         async for event in self._initial_events(context, observations):
             yield event
         spec = context.capabilities.spec
-        direct_answer = None
-        if context.selected_skill_count == 0 and not context.attachments and spec.signature is FleetRLMSignature:
-            direct_answer = direct_greeting_response(context.request)
-        if direct_answer is not None:
-            direct_prediction = dspy.Prediction(answer=direct_answer, trajectory=[])
-            prediction.append(direct_prediction)
-            duration_ms = int((time.perf_counter() - started) * 1000)
-            result = prediction_result(
-                direct_prediction,
-                spec.signature,
-                schema_id=spec.output_schema_id,
-                schema_version=spec.output_schema_version,
-                max_output_chars=context.options.max_output_chars,
-            )
-            outcome.append(
-                RLMOutcome(
-                    terminal_status="completed",
-                    prediction=result,
-                    usage=observed_usage(direct_prediction, duration_ms=duration_ms),
-                    artifact_candidates=context.capabilities.drain_artifact_candidates(),
-                    execution_details=tuple(observations.details),
-                    duration_ms=duration_ms,
-                )
-            )
-            return
         spec, relay, guards, task = self._start_worker(context)
         ownership.task = task
         monitor = _WorkerMonitor(task, relay, context, lambda: self._drain_capability_details(context))
@@ -716,6 +516,13 @@ class RLMRunner:
         relay = _DetailRelay()
         guards = TurnToolGuards(required_targets=workspace_obligations(context.request))
         self._bind_observer(context.interpreter, relay, context.options.max_output_chars)
+        recursive_executor = RecursiveRLMExecutor(
+            models=context.models,
+            options=context.recursive_options,
+            child_interpreter_factory=context.child_interpreter_factory,
+            deadline=context.deadline,
+            observer=relay.publish,
+        )
 
         def relay_capability_details(_result: Any) -> None:
             for detail in self._drain_capability_details(context):
@@ -732,15 +539,21 @@ class RLMRunner:
             )
             for tool in spec.tools
         )
+        all_tools = (*observed_tools, recursive_executor.tool)
         rlm = self._factory.create(
             models=context.models,
             options=context.options,
             interpreter=context.interpreter,
-            tools=observed_tools or None,
+            tools=all_tools or None,
             signature=spec.signature,
         )
         self._bind_observer(rlm, relay, context.options.max_output_chars)
-        return spec, relay, guards, asyncio.create_task(self._execute_rlm_in_worker(rlm, context, spec))
+        return (
+            spec,
+            relay,
+            guards,
+            asyncio.create_task(self._execute_rlm_in_worker(rlm, context, spec, recursive_executor)),
+        )
 
     async def _worker_events(
         self,
@@ -797,6 +610,7 @@ class RLMRunner:
         rlm: Any,
         context: RLMExecutionContext,
         spec: RLMExecutionSpec,
+        recursive_executor: RecursiveRLMExecutor,
     ) -> Any:
         kwargs = build_rlm_input_kwargs(
             request=context.request,
@@ -805,6 +619,7 @@ class RLMRunner:
             attachments=context.attachments,
             workspace=spec.workspace,
         )
+        started = time.perf_counter()
         with (
             turn_phase_span(
                 "RLM.execute",
@@ -813,26 +628,62 @@ class RLMRunner:
                     "max_llm_calls": context.options.max_llm_calls,
                     "max_output_chars": context.options.max_output_chars,
                 },
-            ),
+            ) as phase,
             dspy.context(
                 lm=context.models.root_lm,
-                # The Databricks OpenAI-compatible gateway intermittently returns
-                # native structured responses that DSPy cannot parse. Keep the
-                # public JSONAdapter contract, but use its portable JSON mode.
-                adapter=_PortableJSONAdapter(use_native_function_calling=False),
+                # DSPy 3.3.0b1 combines context callbacks with instance
+                # callbacks around LM requests (dspy/utils/callback.py:258-288).
+                callbacks=[_RLMTraceCallback(root_lm=context.models.root_lm, sub_lm=context.models.sub_lm)],
+                # Keep the pinned DSPy JSON action protocol authoritative. A
+                # provider-native token stream is an adapter failure, not a
+                # second grammar that Fleet should reinterpret.
+                adapter=dspy.JSONAdapter(),
                 track_usage=True,
             ),
         ):
-            return await rlm.acall(**kwargs)
+            try:
+                prediction = await rlm.acall(**kwargs)
+            except BaseException as exc:
+                recursive_summary = recursive_executor.summary()
+                phase.set_outputs(
+                    {
+                        "elapsed_ms": int((time.perf_counter() - started) * 1000),
+                        "request_status": "failed",
+                        "failure_category": trace_failure_category(exc),
+                        "recursive_call_count": recursive_summary.call_count,
+                        "recursive_prompt_chars": recursive_summary.delegated_prompt_chars,
+                        "recursive_depth_fallback_count": recursive_summary.depth_fallback_count,
+                    }
+                )
+                raise
+            final_reasoning = getattr(prediction, "final_reasoning", None)
+            termination_mode = (
+                "native_extraction_fallback" if final_reasoning == "Extract forced final output" else "typed_submit"
+            )
+            usage = observed_usage(prediction, duration_ms=int((time.perf_counter() - started) * 1000))
+            phase.set_outputs(
+                {
+                    "iterations": usage["iterations"],
+                    "observed_lm_usage": usage["observed_lm_usage"],
+                    "termination_mode": termination_mode,
+                    "elapsed_ms": usage["duration_ms"],
+                    "request_status": "completed",
+                    "recursive_call_count": recursive_executor.summary().call_count,
+                    "recursive_prompt_chars": recursive_executor.summary().delegated_prompt_chars,
+                    "recursive_depth_fallback_count": recursive_executor.summary().depth_fallback_count,
+                }
+            )
+            return prediction
 
     async def _execute_rlm_in_worker(
         self,
         rlm: Any,
         context: RLMExecutionContext,
         spec: RLMExecutionSpec,
+        recursive_executor: RecursiveRLMExecutor,
     ) -> Any:
         def run() -> Any:
-            return asyncio.run(self._execute_rlm(rlm, context, spec))
+            return asyncio.run(self._execute_rlm(rlm, context, spec, recursive_executor))
 
         return await asyncio.to_thread(run)
 

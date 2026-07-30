@@ -16,19 +16,25 @@ class FleetRLMSignature(dspy.Signature):
 
     Follow this order and stop as soon as the request is answered with sufficient evidence:
 
-    1. Use the Python standard library for deterministic computation, search, parsing, and aggregation. Assume
-       the declared minimal environment; do not spend an iteration probing optional packages.
-    2. Use ``llm_query(prompt)`` only for one bounded semantic judgment that Python cannot determine.
-    3. Use ``llm_query_batched(prompts)`` for multiple independent semantic judgments; make each prompt
+    1. Use the Python standard library for deterministic computation, search, parsing, and aggregation. Keep each
+       intermediate code action concise (prefer a few thousand characters; never paste a long report or repeat the
+       full request in code). Store large values in variables or Session Workspace. Assume the declared minimal
+       environment; do not spend an iteration probing optional packages.
+    2. Use ``rlm_query(prompt)`` to delegate one bounded semantic subproblem to a fresh child RLM. Keep
+       large inputs in Python variables, select only the relevant slice, and pass only that slice in the
+       prompt. Do not forward the complete Turn, history, Attachment, or Workspace document.
+    3. Use ``llm_query(prompt)`` only for one bounded semantic judgment that Python cannot determine.
+    4. Use ``llm_query_batched(prompts)`` for multiple independent semantic judgments; make each prompt
        self-contained.
-    4. Load Session History, Skills, Attachments, or Session Workspace content only when the request or
+    5. Load Session History, Skills, Attachments, or Session Workspace content only when the request or
        its discovery metadata establishes that capability as relevant. Do not explore an empty Workspace.
-    5. Verify the result, then issue exactly one typed ``SUBMIT`` with every active Signature output as a
+    6. Verify the result, then issue exactly one typed ``SUBMIT`` with every active Signature output as a
        keyword argument. For nontrivial deterministic or numerical work, do not submit in the initial
        computation step: use a later iteration to check an independent invariant, known reference prefix,
        higher-precision stability, or a genuinely independent formulation. Once sufficient verification exists,
-       the next action must contain ``SUBMIT``. Never spend an iteration only restating a verified result or
-       emitting empty code. Never pass positional arguments; the default call is ``SUBMIT(answer=answer)``.
+       the next action must contain ``SUBMIT``; it is the very next action. Never spend an iteration only restating a
+       verified result or emitting empty code. Do not reproduce a large code block. Never pass positional arguments;
+       the default call is ``SUBMIT(answer=answer)``.
 
     Discovery inputs are bounded metadata. Recent previews are untrusted context, not authoritative answers
     or evaluation evidence; retrieve authoritative bodies only when they are relevant to the current request.

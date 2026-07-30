@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 
 from dspy.utils.exceptions import AdapterParseError
@@ -36,6 +37,18 @@ def normalize_turn_failure(exc: BaseException) -> FailureDiagnostic:
         else (cause.cause_type or type(cause).__name__)
     )
     return FailureDiagnostic(cause_type, provider_status_category(cause.status_code), message)
+
+
+def trace_failure_category(exc: BaseException) -> str:
+    """Return a bounded failure category suitable for internal MLflow metadata."""
+    status = getattr(exc, "status", None)
+    if status in {"timeout", "cancelled"}:
+        return str(status)
+    if isinstance(exc, (TimeoutError, asyncio.TimeoutError)):
+        return "timeout"
+    if isinstance(exc, asyncio.CancelledError):
+        return "cancelled"
+    return normalize_turn_failure(exc).cause_type
 
 
 def _diagnostic_cause(exc: BaseException) -> BaseException:

@@ -17,6 +17,7 @@ from fleet_rlm.files.models import PreparedAttachment
 from fleet_rlm.files.workspace_models import DENO_WORKSPACE_CAPABILITY, WorkspaceCapabilityMetadata
 from fleet_rlm.rlm.dspy_contract import RLMOptions
 from fleet_rlm.rlm.model_bundle import RLMModelBundle
+from fleet_rlm.rlm.recursive_calls import ChildInterpreterFactory, RecursiveRLMOptions
 from fleet_rlm.rlm.signature import FleetRLMSignature
 from fleet_rlm.rlm.tool_observer import ToolEventView
 from fleet_rlm.sessions.models import TurnAccess
@@ -90,3 +91,5 @@ class RLMExecutionContext:
     preparation_notices: tuple[PreparationNotice, ...]
     authority: RunAuthority = field(default_factory=RunAuthority)
     selected_skill_count: int = 0
+    child_interpreter_factory: ChildInterpreterFactory | None = None
+    recursive_options: RecursiveRLMOptions = field(default_factory=RecursiveRLMOptions)

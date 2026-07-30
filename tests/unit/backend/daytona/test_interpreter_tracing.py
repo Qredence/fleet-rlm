@@ -62,11 +62,17 @@ def test_sandbox_execute_span_emits_bounded_metadata(monkeypatch: pytest.MonkeyP
 
     assert result == "hello"
     assert calls.start_span_names == ["sandbox.execute"]
-    assert calls.span_inputs[0] == {"iteration": 1, "code_chars": len("_out = 'hello'"), "variable_count": 0}
+    assert calls.span_inputs[0] == {
+        "iteration": 1,
+        "code_chars": len("_out = 'hello'"),
+        "variable_count": 0,
+        "code_preview": "_out = 'hello'",
+    }
     assert calls.span_outputs[0] == {
         "path": "InProcessInterpreterBackend",
         "result_kind": "output",
         "stdout_chars": 5,
+        "output_preview": "hello",
         "phase_status": "completed",
     }
 
@@ -84,7 +90,37 @@ def test_sandbox_execute_span_tracks_iteration_and_repair_kind(
     assert isinstance(repair, str) and repair.startswith("[Error]")
     assert calls.span_inputs[1]["iteration"] == 2
     assert calls.span_outputs[1]["result_kind"] == "repair_error"
+    assert calls.span_outputs[1]["repair_category"] == "NameError"
     assert calls.span_outputs[1]["phase_status"] == "completed"
+
+
+def test_sandbox_rejects_oversized_intermediate_code_before_backend_execution(
+    monkeypatch: pytest.MonkeyPatch, fleet_trace_active: None
+) -> None:
+    del fleet_trace_active
+    calls = _install_fake_mlflow(monkeypatch)
+
+    class Backend:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def run(self, code: str, variables: dict[str, object] | None = None) -> str:
+            del code, variables
+            self.calls += 1
+            return "unexpected"
+
+        def close(self) -> None:
+            return None
+
+    backend = Backend()
+    interpreter = DaytonaCodeInterpreter(backend=backend, max_code_chars=8)
+
+    result = interpreter.execute("value = 1\n_out = value")
+
+    assert isinstance(result, str) and result.startswith("[Error] Intermediate code is too large")
+    assert backend.calls == 0
+    assert calls.span_outputs[0]["result_kind"] == "repair_error"
+    assert calls.span_outputs[0]["repair_category"] == "code_too_large"
 
 
 def test_sandbox_execute_span_marks_failed_phase_without_suppressing(

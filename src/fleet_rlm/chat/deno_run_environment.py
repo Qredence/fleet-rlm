@@ -23,6 +23,7 @@ from fleet_rlm.files.workspace_models import DENO_WORKSPACE_CAPABILITY
 from fleet_rlm.rlm.context import RLMExecutionSpec
 from fleet_rlm.rlm.dspy_contract import RLMOptions
 from fleet_rlm.rlm.model_bundle import RLMModelBundle
+from fleet_rlm.rlm.recursive_calls import RecursiveRLMOptions
 from fleet_rlm.skills.catalog import SkillCatalog
 
 
@@ -200,12 +201,14 @@ class DenoTurnPreparation:
         sub_lm: dspy.LM,
         skill_catalog: SkillCatalog,
         max_artifact_bytes: int = 10 * 1024 * 1024,
+        recursive_options: RecursiveRLMOptions | None = None,
     ) -> None:
         selected_options = options or RLMOptions()
         models = RLMModelBundle(root_lm=root_lm, sub_lm=sub_lm)
         self._module = DefaultTurnPreparer(
             models=models,
             options=selected_options,
+            recursive_options=recursive_options,
             attachments=attachments,
             environments=DenoRunEnvironmentProvider(),
             capabilities=_DenoCapabilityPreparer(

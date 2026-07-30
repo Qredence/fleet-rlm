@@ -14,6 +14,7 @@ from fleet_rlm.composition.common import (
     build_local_storage_adapters,
     host_roots,
     install_local_inventory,
+    recursive_rlm_options,
     rlm_options,
 )
 from fleet_rlm.config import Settings
@@ -72,6 +73,7 @@ def install_deno_composition(
         preparation=DenoTurnPreparation(
             attachments=storage.attachment_lifecycle,
             options=rlm_options(settings),
+            recursive_options=recursive_rlm_options(settings),
             root_lm=models.root_lm,
             sub_lm=models.sub_lm,
             skill_catalog=app.state.skill_catalog,
