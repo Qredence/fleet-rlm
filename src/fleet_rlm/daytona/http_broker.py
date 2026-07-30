@@ -35,7 +35,7 @@ from fleet_rlm.daytona.errors import (
 if TYPE_CHECKING:
     from fleet_rlm.daytona.interpreter import BackendExecutionResult
 
-_BROKER_PORT = 3000
+DEFAULT_BROKER_PORT = 3000
 _PREVIEW_LINK_RETRY_DELAYS = (0.25, 0.5)
 _BROKER_SERVER_PATH = "/home/daytona/fleet_rlm_broker_server.py"
 _BROKER_SESSION_COMMAND = f"cd /home/daytona && python {_BROKER_SERVER_PATH.rsplit('/', 1)[-1]}"
@@ -246,7 +246,7 @@ class _ThreadedHTTPServer(ThreadingMixIn, HTTPServer):
 
 
 if __name__ == "__main__":
-    server = _ThreadedHTTPServer(("0.0.0.0", 3000), _BrokerHandler)
+    server = _ThreadedHTTPServer(("0.0.0.0", __BROKER_PORT__), _BrokerHandler)
     server.serve_forever()
 """.strip()
 
@@ -282,8 +282,17 @@ def {tool_name}({signature}):
 class DaytonaHttpToolBroker:
     """Start/register/poll host-tool mediation against a Daytona sandbox."""
 
-    def __init__(self, *, sandbox: Any, poll_interval_s: float = 0.05) -> None:
+    def __init__(
+        self,
+        *,
+        sandbox: Any,
+        broker_port: int = DEFAULT_BROKER_PORT,
+        poll_interval_s: float = 0.05,
+    ) -> None:
         self._sandbox = sandbox
+        if not isinstance(broker_port, int) or isinstance(broker_port, bool) or not 0 < broker_port <= 65_535:
+            raise ValueError(f"broker_port must be between 1 and 65535, got {broker_port!r}")
+        self._broker_port = broker_port
         self._poll_interval_s = poll_interval_s
         self._broker_secret = secrets.token_urlsafe(32)
         self._broker_url: str | None = None
@@ -315,7 +324,10 @@ class DaytonaHttpToolBroker:
     def ensure_started(self) -> None:
         if self._broker_url is not None or self._stopped:
             return
-        server_code = _BROKER_SERVER_CODE.replace("__BROKER_SECRET__", repr(self._broker_secret))
+        server_code = (
+            _BROKER_SERVER_CODE.replace("__BROKER_SECRET__", repr(self._broker_secret))
+            .replace("__BROKER_PORT__", str(self._broker_port))
+        )
         self._sandbox.fs.upload_file(server_code.encode("utf-8"), _BROKER_SERVER_PATH)
         expected_sha = hashlib.sha256(server_code.encode("utf-8")).hexdigest()
         verify = self._sandbox.process.code_run(
@@ -349,7 +361,7 @@ class DaytonaHttpToolBroker:
                 time.sleep(retry_delay)
             attempts += 1
             try:
-                return self._sandbox.get_preview_link(_BROKER_PORT)
+                return self._sandbox.get_preview_link(self._broker_port)
             except Exception as exc:
                 mapped = map_provider_error(exc)
                 last_error = mapped
@@ -359,7 +371,8 @@ class DaytonaHttpToolBroker:
         assert last_error is not None
         raise ProviderRequestError(
             message=sanitize_provider_message(
-                f"Daytona preview link request for port {_BROKER_PORT} failed after {attempts} attempts: {last_error}"
+                f"Daytona preview link request for port {self._broker_port} failed after "
+                f"{attempts} attempts: {last_error}"
             ),
             cause_type="PreviewLinkError",
             status_code=provider_status_code(last_error),
@@ -571,6 +584,6 @@ class DaytonaHttpToolBroker:
             signature=", ".join(sig_parts),
             args_list=", ".join(args_list),
             kwargs_dict=", ".join(kwargs_parts),
-            broker_port=_BROKER_PORT,
+            broker_port=self._broker_port,
             broker_secret=self._broker_secret,
         )

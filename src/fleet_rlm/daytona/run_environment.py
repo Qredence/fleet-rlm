@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import itertools
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -26,6 +27,7 @@ from fleet_rlm.chat.turn_preparation import (
 from fleet_rlm.composition.common import recursive_rlm_options
 from fleet_rlm.config import Settings, load_runtime_settings
 from fleet_rlm.daytona.bindings import BindingStore, InMemoryBindingStore
+from fleet_rlm.daytona.http_broker import DEFAULT_BROKER_PORT
 from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, sandbox_backend, sync_sandbox
 from fleet_rlm.daytona.platform import (
     LiveDaytonaPlatform,
@@ -195,6 +197,7 @@ class _DaytonaEnvironmentProvider:
                 await self.resources.session_manager.release(lease)
 
             main_loop = asyncio.get_running_loop()
+            next_child_broker_port = itertools.count(DEFAULT_BROKER_PORT + 1)
 
             def child_interpreter_factory() -> DaytonaCodeInterpreter:
                 return DaytonaCodeInterpreter(
@@ -203,6 +206,7 @@ class _DaytonaEnvironmentProvider:
                         loop=main_loop,
                         timeout_s=self.resources.settings.rlm_execution_timeout_s,
                     ),
+                    broker_port=next(next_child_broker_port),
                     execution_output_cap=self.resources.settings.rlm_max_execution_output_chars,
                 )
 

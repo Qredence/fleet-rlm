@@ -26,7 +26,12 @@ from fleet_rlm.daytona.errors import (
     map_provider_error,
     sanitize_provider_message,
 )
-from fleet_rlm.daytona.http_broker import FleetFinalOutputError, build_submit_setup_code, extract_final_payload
+from fleet_rlm.daytona.http_broker import (
+    DEFAULT_BROKER_PORT,
+    FleetFinalOutputError,
+    build_submit_setup_code,
+    extract_final_payload,
+)
 from fleet_rlm.files.workspace_tools import WorkspaceToolError
 from fleet_rlm.observability.turn_tracing import turn_phase_span
 from fleet_rlm.rlm.dspy_interpreter_contract import (
@@ -366,6 +371,7 @@ class DaytonaCodeInterpreter:
         backend: InterpreterBackend | None = None,
         tools: Mapping[str, Callable[..., Any]] | None = None,
         output_fields: list[dict[str, Any]] | None = None,
+        broker_port: int = DEFAULT_BROKER_PORT,
         execution_output_cap: int = DEFAULT_EXECUTION_OUTPUT_CHARS,
         max_code_chars: int = DEFAULT_INTERMEDIATE_CODE_CHARS,
     ) -> None:
@@ -376,6 +382,7 @@ class DaytonaCodeInterpreter:
         self._tools_registered = initial_tools_registered()
         self._started = False
         self._shutdown = False
+        self._broker_port = broker_port
         self._http_broker: DaytonaHttpToolBroker | None = None
         self._observer: ObservationObserver | None = None
         self._observation_max_chars = 10_000
@@ -559,7 +566,7 @@ class DaytonaCodeInterpreter:
         if self._http_broker is None:
             from fleet_rlm.daytona.http_broker import DaytonaHttpToolBroker
 
-            self._http_broker = DaytonaHttpToolBroker(sandbox=backend.sandbox)
+            self._http_broker = DaytonaHttpToolBroker(sandbox=backend.sandbox, broker_port=self._broker_port)
             self._http_broker.ensure_started()
         self._http_broker.register_tools(tools)
         backend.run(self._http_broker.submit_setup_code(self.output_fields))

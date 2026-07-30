@@ -146,6 +146,52 @@ def test_http_broker_wrapper_source_and_fulfill_sanitize() -> None:
     assert "/tmp/x" not in str(posted[0].get("error", ""))
 
 
+def test_http_broker_uses_isolated_port_for_server_and_wrappers() -> None:
+    import hashlib
+
+    from fleet_rlm.daytona.http_broker import DaytonaHttpToolBroker
+
+    class _Process:
+        def __init__(self, sandbox: Any) -> None:
+            self.sandbox = sandbox
+
+        def code_run(self, _code: str) -> object:
+            return type("Response", (), {"result": hashlib.sha256(self.sandbox.uploaded_content).hexdigest()})()
+
+        def create_session(self, session_id: str) -> None:
+            self.session_id = session_id
+
+        def execute_session_command(self, session_id: str, _request: object) -> None:
+            assert session_id == self.session_id
+
+    class _Fs:
+        def __init__(self, sandbox: Any) -> None:
+            self.sandbox = sandbox
+
+        def upload_file(self, content: bytes, _path: str) -> None:
+            self.sandbox.uploaded_content = content
+
+    class _Sandbox:
+        def __init__(self) -> None:
+            self.uploaded_content = b""
+            self.process = _Process(self)
+            self.fs = _Fs(self)
+
+        def get_preview_link(self, port: int) -> object:
+            assert port == 3001
+            return type("Preview", (), {"url": "http://preview.test", "token": "preview-token"})()
+
+    sandbox = _Sandbox()
+    broker = DaytonaHttpToolBroker(sandbox=sandbox, broker_port=3001)
+    broker._wait_health = lambda **_kwargs: None  # type: ignore[method-assign]
+    broker.ensure_started()
+    source = broker._tool_wrapper_source("load_skill", lambda name: name)
+
+    assert "localhost:3001/tool_call" in source
+    assert broker._broker_port == 3001
+    assert '("0.0.0.0", 3001)' in sandbox.uploaded_content.decode()
+
+
 def test_http_broker_health_fails_fast_on_http_401(monkeypatch: pytest.MonkeyPatch) -> None:
     from fleet_rlm.daytona.errors import DaytonaAdapterError
     from fleet_rlm.daytona.http_broker import DaytonaHttpToolBroker
