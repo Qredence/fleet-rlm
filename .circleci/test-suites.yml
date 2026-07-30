@@ -1,6 +1,6 @@
 ---
 name: pytest-unit
-discover: bash -c 'find tests/unit tests/contracts -type f -name "*.py" -print | sort'
+discover: bash -c 'find tests/unit tests/contracts -type f -name "*.py" ! -name "__init__.py" -print | sort'
 run: bash -c 'set -f; mkdir -p test-results; .venv/bin/pytest -p no:warnings -m "not deno and not live_llm and not live_daytona and not benchmark and not db" --junit-xml=<< outputs.junit >> << test.atoms >>'
 outputs:
   junit: test-results/pytest-unit.xml
@@ -8,7 +8,7 @@ options:
   dynamic-test-splitting: false
 ---
 name: pytest-e2e
-discover: bash -c 'find tests/e2e -type f -name "*.py" -print | sort'
+discover: bash -c 'find tests/e2e -type f -name "*.py" ! -name "__init__.py" -print | sort'
 run: bash -c 'set -f; mkdir -p test-results; .venv/bin/pytest -p no:warnings -m "not deno and not live_llm and not live_daytona and not benchmark and not db" --junit-xml=<< outputs.junit >> << test.atoms >>'
 outputs:
   junit: test-results/pytest-e2e.xml
