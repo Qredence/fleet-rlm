@@ -324,9 +324,8 @@ class DaytonaHttpToolBroker:
     def ensure_started(self) -> None:
         if self._broker_url is not None or self._stopped:
             return
-        server_code = (
-            _BROKER_SERVER_CODE.replace("__BROKER_SECRET__", repr(self._broker_secret))
-            .replace("__BROKER_PORT__", str(self._broker_port))
+        server_code = _BROKER_SERVER_CODE.replace("__BROKER_SECRET__", repr(self._broker_secret)).replace(
+            "__BROKER_PORT__", str(self._broker_port)
         )
         self._sandbox.fs.upload_file(server_code.encode("utf-8"), _BROKER_SERVER_PATH)
         expected_sha = hashlib.sha256(server_code.encode("utf-8")).hexdigest()

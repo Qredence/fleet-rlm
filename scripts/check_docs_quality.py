@@ -24,6 +24,7 @@ EXTERNAL_PREFIXES = (
 
 LEGACY_DOC_DIRS = ("artifacts", "plans", "references", "reviews")
 ARCHIVED_DOC_PREFIXES = (Path("internal/history"), Path("internal/legacy-backend"))
+GENERATED_DOC_PREFIXES = (Path("wiki"),)
 LEGACY_EXPLANATION_MARKERS = (
     Path("explanation/README.md"),
     Path("explanation/architecture.md"),
@@ -49,7 +50,7 @@ INLINE_CODE_VALUE = re.compile(r"`([a-z][a-z0-9_-]*)`")
 
 
 def iter_docs_files(docs_root: Path) -> list[Path]:
-    """Return every tracked Markdown document, including any future internal docs."""
+    """Return active tracked Markdown documents, excluding generated mirrors."""
     repo_root = docs_root.parent
     result = subprocess.run(
         ("git", "ls-files", "docs"),
@@ -62,9 +63,19 @@ def iter_docs_files(docs_root: Path) -> list[Path]:
         return sorted(
             repo_root / rel_path
             for rel_path in result.stdout.splitlines()
-            if rel_path.endswith(".md") and (repo_root / rel_path).is_file()
+            if rel_path.endswith(".md")
+            and (repo_root / rel_path).is_file()
+            and not any(
+                (repo_root / rel_path).relative_to(docs_root).is_relative_to(prefix)
+                for prefix in GENERATED_DOC_PREFIXES
+            )
         )
-    return sorted(path for path in docs_root.rglob("*.md") if path.is_file())
+    return sorted(
+        path
+        for path in docs_root.rglob("*.md")
+        if path.is_file()
+        and not any(path.relative_to(docs_root).is_relative_to(prefix) for prefix in GENERATED_DOC_PREFIXES)
+    )
 
 
 @functools.lru_cache(maxsize=None)
