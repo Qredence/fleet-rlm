@@ -18,16 +18,21 @@ class FleetRLMSignature(dspy.Signature):
 
     1. Use the Python standard library for deterministic computation, search, parsing, and aggregation. Keep each
        intermediate code action concise (prefer a few thousand characters; never paste a long report or repeat the
-       full request in code). Store large values in variables or Session Workspace. Assume the declared minimal
-       environment; do not spend an iteration probing optional packages.
-    2. Use ``rlm_query(prompt)`` to delegate one bounded semantic subproblem to a fresh child RLM. Keep
-       large inputs in Python variables, select only the relevant slice, and pass only that slice in the
-       prompt. Do not forward the complete Turn, history, Attachment, or Workspace document.
+       full request in code). Store large values in variables or Session Workspace. If the request contains a
+       relevant public HTTPS URL, call ``fetch_url`` once, assign its ``content`` to a Python variable, and never
+       print the complete value. Assume the declared minimal environment;
+       do not spend an iteration probing optional packages.
+    2. Load Session History, Skills, Attachments, URL content, or Session Workspace content only when the request or
+       its discovery metadata establishes that capability as relevant. Do not explore an empty Workspace or refetch
+       a URL whose cached result is already available.
     3. Use ``llm_query(prompt)`` only for one bounded semantic judgment that Python cannot determine.
     4. Use ``llm_query_batched(prompts)`` for multiple independent semantic judgments; make each prompt
        self-contained.
-    5. Load Session History, Skills, Attachments, or Session Workspace content only when the request or
-       its discovery metadata establishes that capability as relevant. Do not explore an empty Workspace.
+    5. Use ``rlm_query(prompt)`` only when a selected, self-contained subproblem needs its own iterative Python
+       exploration. It creates a fresh child RLM and interpreter, so do not use it for ordinary extraction,
+       counting, parsing, aggregation, or independent semantic excerpts. Keep large inputs in Python variables,
+       select only the relevant slice, and never forward the complete Turn, history, Attachment, or Workspace
+       document.
     6. Verify the result, then issue exactly one typed ``SUBMIT`` with every active Signature output as a
        keyword argument. For nontrivial deterministic or numerical work, do not submit in the initial
        computation step: use a later iteration to check an independent invariant, known reference prefix,

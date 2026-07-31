@@ -124,11 +124,16 @@ class _DenoCapabilityPreparer:
         models: RLMModelBundle,
         options: RLMOptions,
         max_artifact_bytes: int,
+        max_url_bytes: int = 10 * 1024 * 1024,
     ) -> None:
+        from fleet_rlm.files.url_tool import InMemoryUrlSourceStore
+
         self._skill_catalog = skill_catalog
         self._models = models
         self._options = options
         self._max_artifact_bytes = max_artifact_bytes
+        self._max_url_bytes = max(1, int(max_url_bytes))
+        self._url_store = InMemoryUrlSourceStore()
 
     async def prepare(
         self,
@@ -139,6 +144,7 @@ class _DenoCapabilityPreparer:
         deadline: float,
     ) -> DenoPreparedCapabilities:
         from fleet_rlm.files.tools import FileToolHost
+        from fleet_rlm.files.url_tool import UrlToolHost
 
         sink = environment.attachment_sink
         volume_fs: Any = (
@@ -168,12 +174,19 @@ class _DenoCapabilityPreparer:
             for name, view in file_host.event_views().items()
             if name not in {"create_artifact", "publish_workspace_artifact"}
         }
+        url_host = UrlToolHost(
+            session_id=turn.session_id,
+            store=self._url_store,
+            max_bytes=self._max_url_bytes,
+        )
+        url_tools = url_host.as_tools()
+        url_event_views = url_host.event_views()
         spec, skill_host, notices = await prepare_host_capabilities(
             turn=turn,
             skill_catalog=self._skill_catalog,
             files=file_host,
-            base_tools=file_tools,
-            base_event_views=file_event_views,
+            base_tools=(*file_tools, *url_tools),
+            base_event_views={**file_event_views, **url_event_views},
             workspace=DENO_WORKSPACE_CAPABILITY,
             deadline=deadline,
         )
@@ -201,6 +214,7 @@ class DenoTurnPreparation:
         sub_lm: dspy.LM,
         skill_catalog: SkillCatalog,
         max_artifact_bytes: int = 10 * 1024 * 1024,
+        max_url_bytes: int = 10 * 1024 * 1024,
         recursive_options: RecursiveRLMOptions | None = None,
     ) -> None:
         selected_options = options or RLMOptions()
@@ -216,6 +230,7 @@ class DenoTurnPreparation:
                 models=models,
                 options=selected_options,
                 max_artifact_bytes=max_artifact_bytes,
+                max_url_bytes=max_url_bytes,
             ),
         )
 

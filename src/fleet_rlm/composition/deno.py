@@ -27,7 +27,7 @@ def require_deno_settings(settings: Settings) -> None:
     from fleet_rlm.rlm.lm_factory import has_llm_credentials
 
     if not has_llm_credentials(settings):
-        raise CompositionError("FLEET_LLM_API_KEY or configured role API key is required in deno mode")
+        raise CompositionError("a configured provider API key is required in deno mode")
     if shutil.which("deno") is None:
         raise CompositionError("deno executable is required in deno mode")
 
@@ -78,6 +78,7 @@ def install_deno_composition(
             sub_lm=models.sub_lm,
             skill_catalog=app.state.skill_catalog,
             max_artifact_bytes=settings.max_artifact_bytes,
+            max_url_bytes=settings.max_upload_bytes,
         ),
         rlm_factory=RLMFactory(verbose=settings.rlm_verbose),
         workspace_volume_mirror=None,

@@ -91,6 +91,7 @@ class TestingCapabilityPreparer:
             models=models,
             options=options,
             max_artifact_bytes=max_artifact_bytes,
+            max_url_bytes=10 * 1024 * 1024,
         )
 
     async def prepare(

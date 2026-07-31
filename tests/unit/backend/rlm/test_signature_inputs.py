@@ -288,6 +288,7 @@ def test_dspy_imports_stay_out_of_deterministic_backend_layers() -> None:
     allowed_tool_adapters = {
         "sessions/history_tools.py",
         "files/tools.py",
+        "files/url_tool.py",
         "files/workspace_tools.py",
         "files/memory_tools.py",
     }
