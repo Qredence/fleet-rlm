@@ -89,8 +89,9 @@ strict Pydantic DTOs. Skill instructions, resource bodies, Attachment bytes,
 provider paths, and older history remain behind host-mediated Tools.
 
 Custom Skill Signatures keep their existing JSON-compatible common input
-annotations and continue to own only their declared output fields. A custom
-DSPy Module requires the evidence gate in [ADR 0003](../adr/0003-dspy-program-composition.md).
+annotations and continue to own only their declared output fields. Custom DSPy
+Modules are outside the supported Turn composition contract; use the native RLM
+with host-mediated Tools and typed inputs.
 
 See [backend architecture](../architecture.md) for ownership and Turn commit ordering.
 

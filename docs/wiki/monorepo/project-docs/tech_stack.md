@@ -1,1 +1,0 @@
-Pure Markdown documentation; authoring is driven by the project's Makefile targets (`make api-sync`, `make api-check`, `make check`) which regenerate OpenAPI types and run validation against `openapi.yaml` and Alembic schema migrations.

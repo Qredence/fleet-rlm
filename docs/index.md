@@ -25,7 +25,6 @@ FastAPI/SSE contract backed by DSPy, Daytona, and SQLAlchemy/Alembic.
 - [Codebase map](reference/codebase-map.md)
 - [Source layout](reference/source-layout.md)
 - [Database](reference/database.md)
-- [Repo Wiki](wiki/README.md) — generated long-form repo knowledge (Qoder mirror)
 
 ## Source of truth
 

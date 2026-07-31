@@ -1,1 +1,0 @@
-No build or test commands are required beyond standard Python import; `LocalArtifactCatalog.__init__` creates the root directory automatically and requires either a plain filesystem root or a `VolumePaths`/`VolumeBlobFs` pair for workspace-scoped durability.

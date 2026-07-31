@@ -1,1 +1,0 @@
-Defines the immutable domain model for closed sessions, including validated Turn inputs, durable CommittedTurn aggregates with strict part ordering, a read-only SessionCatalog protocol, and a DSPy tool for bounded history retrieval.

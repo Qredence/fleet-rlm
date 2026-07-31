@@ -1,6 +1,0 @@
-- Domain entities are defined as `@dataclass(frozen=True, slots=True)` with validation in `__post_init__` raising `ValueError` for malformed inputs.
-- Skill identifiers are derived deterministically via `uuid5(namespace_uuid, name.strip())` using a fixed module-level namespace UUID rather than random UUIDs.
-- Public APIs return typed dictionaries with an `ok` boolean plus either success fields or an `error` string code, never raising exceptions on client-facing paths.
-- Thread-shared mutable state inside `SkillToolHost` is guarded by a module-level `RLock` and exposed through properties/methods that acquire the lock before access.
-- Optional DSPy Signature extensions follow a fixed contract enforced by `validate_skill_signature`: required inputs `request`, `session_context`, `skill_cards`, `attachments`, and exactly one required `answer` output field.
-- Bundled Skill specs are declared as tuples of `_BundledSpec` namedtuples with `(name, description, version, resources_tuple, signature_or_None)` so catalog construction stays declarative.

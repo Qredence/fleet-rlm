@@ -1,5 +1,0 @@
-- CLI subcommands are registered through a shared `_add_serve_command` helper that sets default host/port/reload/allow-non-loopback arguments plus optional `run_environment` and `supervise_tui` flags.
-- Long-running or external dependencies (uvicorn, supervisor, diagnostics, config loading) are imported lazily inside the function that needs them to avoid circular imports at module load time.
-- User-facing failures raise domain-specific exceptions (`UnsafeBindError`, `SupervisorError`) rather than generic exceptions, and error messages are kept secret-free and actionable.
-- Process lifecycle uses `start_new_session=True` and `os.killpg` with SIGTERM followed by SIGKILL escalation to cleanly terminate child process groups on shutdown.
-- Readiness checks poll the `/openapi.json` endpoint with short timeouts instead of relying on process exit codes, and all I/O errors are caught and wrapped into user-friendly `SupervisorError` messages.

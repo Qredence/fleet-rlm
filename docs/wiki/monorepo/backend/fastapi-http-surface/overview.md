@@ -1,1 +1,0 @@
-FastAPI-based public HTTP API for Fleet RLM that exposes sessions, turns (SSE), artifacts, attachments, skills, workspace files and settings while projecting internal runtime events into the AI SDK UI v1 protocol.

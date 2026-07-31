@@ -81,12 +81,14 @@ mount, and interpreter probe before diagnosing a Turn.
 - `/api/sessions` — Session CRUD and ordered committed Turn history.
 - `/api/attachments` — durable Attachment upload and metadata lookup.
 - `/api/artifacts/{artifact_id}` — committed metadata and verified content.
-- `/api/skills` — bounded system Skill Card discovery for the four bundled
+- `/api/skills` — bounded system Skill Card discovery for the five bundled
   Skills.
 - `PUT /api/runs/{run_id}/cancellation` — durable Run cancellation.
 
 There is no `/api/v1`, WebSocket execution, optimization/evaluation API,
-runtime-admin API, Volume browser, BYOK profile API, or public Artifact creation.
+runtime-admin API, caller-selected BYOK profile API, or public Artifact creation.
+The Volume tree is a read-only, process-local view rather than a general-purpose
+Sandbox filesystem browser.
 See the [HTTP API](docs/reference/http-api.md) and generated
 [OpenAPI](openapi.yaml).
 

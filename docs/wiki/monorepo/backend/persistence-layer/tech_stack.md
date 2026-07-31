@@ -1,1 +1,0 @@
-SQLAlchemy 2.x with async drivers (`asyncpg` for PostgreSQL, `aiosqlite` for SQLite), Alembic for schema migrations, and declarative ORM using `Mapped`/`mapped_column`. Turn state machines are driven by `fleet_rlm.chat.turn_claim.decide_claim_transition` rather than ad-hoc logic.

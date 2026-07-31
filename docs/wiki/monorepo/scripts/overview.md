@@ -1,1 +1,0 @@
-Collection of standalone Python scripts for database initialization, OpenAPI contract generation/validation, release hygiene checks, codebase boundary enforcement, and synthetic RLM benchmarks (OOLONG, Daytona lifecycle).

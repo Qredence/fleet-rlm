@@ -1,6 +1,0 @@
-- Domain value objects are declared as `@dataclass(frozen=True, slots=True)` with validation logic inside `__post_init__`, raising typed `*ValidationError` exceptions for invalid state.
-- Versioned persistence formats are handled by dedicated `*Codec` classes with static `encode`/`decode` methods that branch on `schema_version` and raise `*ValidationError` for unknown schemas.
-- JSON payloads are normalized through `_freeze_json`/`_thaw_json` helpers that convert dicts to `MappingProxyType` and lists to tuples for deterministic hashing and immutability.
-- Public interfaces to persistence are expressed as `Protocol` classes (e.g. `SessionCatalog`) rather than concrete base classes, keeping the domain layer implementation-agnostic.
-- Each part type in `CommittedTurn.parts` carries a literal `type` discriminator and follows a uniform pattern of required fields validated by `_expect_exact` helper functions.
-- Errors are grouped under a common base (`SessionError`, `CommittedTurnValidationError`, `TurnInputValidationError`) so callers can catch domain failures uniformly.

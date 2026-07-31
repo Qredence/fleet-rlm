@@ -1,1 +1,0 @@
-Pure Python 3 with `argparse` CLIs; Alembic for DB migrations, PyYAML for OpenAPI schema handling, `tomllib` (with `tomli` fallback for older Python), `ast` for static import analysis, `zipfile` for wheel inspection, and a `pnpm exec openapi-typescript` subprocess call to generate TypeScript types from the OpenAPI spec.

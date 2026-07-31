@@ -1,1 +1,0 @@
-Migrations are run with `uv run alembic upgrade head`. The `FLEET_DATABASE_URL` environment variable must be set (or `sqlalchemy.url` configured in `alembic.ini`). The `src/` directory is injected into `sys.path` so that `fleet_rlm.persistence.models` can be imported from within `env.py`.

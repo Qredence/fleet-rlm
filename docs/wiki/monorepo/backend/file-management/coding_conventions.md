@@ -1,6 +1,0 @@
-- Domain values are declared as `@dataclass(frozen=True, slots=True)` to enforce immutability and memory efficiency.
-- External dependencies (catalog, blob storage, path policy, workspace FS) are injected through `Protocol` classes rather than concrete imports, enabling test doubles and alternate backends.
-- All user-supplied paths go through dedicated validators (`validate_mount_path`, `validate_path_id`, `normalize_workspace_path`, `sanitize_filename`) before any filesystem join, and violations raise typed errors (`UnsafePathError`, `WorkspacePathError`, `AttachmentValidationError`).
-- Tool-host classes expose both `as_tools() -> tuple[dspy.Tool, ...]` and `event_views() -> Mapping[str, ToolEventView]` to publish callable tools and bounded telemetry projections side by side.
-- Public tool methods return a dict with an `ok` boolean plus either result fields or an `error` code, never raising to the caller layer.
-- Long-running operations implement best-effort rollback: staged writes are tracked in a list and reversed on failure, with cleanup exceptions swallowed to preserve the primary error.

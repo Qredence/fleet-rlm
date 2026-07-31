@@ -29,18 +29,18 @@ The default pytest targets mask local live `FLEET_*` credentials so `.env`
 cannot silently select provider composition. They install deterministic private
 composition where required and run with at most two xdist workers by default.
 
-Daytona branch coverage is enforced separately over the same canonical
-non-live corpus:
+Package-wide coverage is enforced separately over the same canonical non-live
+corpus:
 
 ```bash
 make test-daytona-cov
 ```
 
-This target measures `src/fleet_rlm/daytona`, fails below 70%, prints missing
-lines, and writes `.scratch/coverage/daytona.xml`. CircleCI runs it as one
-aggregate job because the existing unit and E2E jobs execute independent test
-shards that cannot enforce a package-wide threshold individually. Coverage is
-not a substitute for the opt-in live Daytona durability checks below.
+This target measures `src/fleet_rlm`, fails below 75%, prints missing lines,
+and writes `.scratch/coverage/daytona.xml`. CircleCI runs it as one aggregate
+job because the existing unit and E2E jobs execute independent test shards that
+cannot enforce a package-wide threshold individually. Coverage is not a
+substitute for the opt-in live Daytona durability checks below.
 
 `make check` includes:
 

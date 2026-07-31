@@ -1,1 +1,0 @@
-Python with `dspy` 3.3.0b1 pinned via `assert_dspy_version`; Pydantic v2 for input/output validation; `asyncio` for non-cancellable worker tasks and streaming; LiteLLM-backed `dspy.LM` constructed through `dspy.LM(model_id, api_key, api_base, ...)`; optional Databricks AI Gateway tiered model routing.

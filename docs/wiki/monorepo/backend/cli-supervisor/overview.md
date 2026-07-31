@@ -1,1 +1,0 @@
-Provides the `fleet` and `fleet-rlm` CLI entry points that parse subcommands, enforce safe network binding, launch the FastAPI backend via uvicorn, and optionally supervise a Node.js pi-tui client alongside it.

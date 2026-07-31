@@ -1,1 +1,0 @@
-Fleet RLM adapter that provisions, leases, and executes code inside Daytona Sandboxes with workspace-scoped volumes, a persistent binding store, and an HTTP-in-sandbox tool broker.

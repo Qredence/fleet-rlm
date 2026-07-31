@@ -1,1 +1,0 @@
-Alembic-based schema migrations for the Fleet RLM Postgres database, managing tables for users, workspaces, sessions, runs, turns, artifacts, skills, and sandbox bindings with conditional SQLite/PostgreSQL indexes.

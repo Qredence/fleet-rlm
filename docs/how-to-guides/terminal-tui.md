@@ -93,8 +93,10 @@ operator state and are not inserted into durable transcript messages.
 ## Commands and Skills
 
 Use `/help` for the current slash-command list. Important commands include
-`/sessions`, `/resume`, `/status`, `/settings`, `/cancel`, `/clear`, `/skills`,
-`/skill`, and `/exit`. `/settings` is a local-only TOML policy editor; saved
+`/sessions`, `/rename`, `/resume`, `/status`, `/settings`, `/profiles`,
+`/volume`, `/cancel`, `/clear`, `/skills`, `/skill`, and `/exit`. `/settings`
+is a local-only TOML policy editor; `/profiles` switches the selected profile;
+`/volume [root]` shows the read-only Workspace Volume tree. Saved policy
 settings take effect after restarting Fleet.
 
 `/clear` resets only the current local presentation. It does not delete or

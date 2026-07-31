@@ -35,7 +35,6 @@ See [configuration](reference/configuration.md) for profile prerequisites.
 - [Database](reference/database.md)
 - [Testing strategy](how-to-guides/testing-strategy.md)
 - [Agent harness](agent-harness/README.md)
-- [Repo Wiki](wiki/README.md) — generated wiki mirror / long-form repo knowledge
 
 `openapi.yaml` and `tools/fleet-tui/src/generated/openapi.ts` are generated
 together. No tracked implementation plan is active; completed local evidence may

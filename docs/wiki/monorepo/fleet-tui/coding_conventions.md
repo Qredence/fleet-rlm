@@ -1,6 +1,0 @@
-- State mutations go exclusively through `store.dispatch({ type, ...payload })` and a pure `reduce(state, event)` function; no direct state mutation outside the reducer.
-- Slash commands are declared as `{ name, description, usage, handler }` objects passed to `registerCommand`, and parsed input is dispatched through `parseInput` returning a discriminated union (`command | message | unknown-command | empty`).
-- API errors are wrapped in a `FleetApiError` class carrying `status`, optional `correlationId`, and optional `code`, and thrown uniformly from `requestJson` and `fetch` wrappers.
-- SSE chunks are validated against the `FleetUIMessageChunk` union using a `chunkTypes` set plus per-type shape checks in `isFleetUIMessageChunk`, and stream ordering invariants (single start, single terminal, [DONE] placement) are enforced in `streamFleetTurn`.
-- Each TUI feature file exports a focused responsibility (store, commands, screen, runner, etc.) and is paired with a sibling `tests/<file>.test.ts` under `src/tui/tests/`.
-- Configuration values fall back to environment variables or defaults inside `parseArgs` (e.g. `process.env.FLEET_API_URL ?? 'http://127.0.0.1:8000'`), and unknown options throw descriptive errors.

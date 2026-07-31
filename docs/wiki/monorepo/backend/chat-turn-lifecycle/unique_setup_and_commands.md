@@ -1,1 +1,0 @@
-No build or test commands are defined in this module; it is consumed as part of the `fleet_rlm` package. Composition requires injecting a `TurnLifecycle` implementation backed by a `_TurnStateStore`, a `TurnPreparation` provider (e.g. `DenoTurnPreparation`), and optionally a `TurnCleanupSupervisor` with a bounded `max_jobs` capacity.

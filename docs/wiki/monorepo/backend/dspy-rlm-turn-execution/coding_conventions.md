@@ -1,6 +1,0 @@
-- All domain data classes use `@dataclass(frozen=True, slots=True)` to enforce immutability and memory efficiency across context, events, outcomes, and options.
-- Public-facing strings are always sanitized through `sanitize_public_text` / `truncate_public_text` before emission, and declared outputs are validated with `validate_declared_public_value` to reject secrets, DSNs, and private paths.
-- External dependencies are accessed through narrow Protocol interfaces or factory abstractions (`RLMFactoryLike`, `RLMInterpreter`, `PreparedCapabilities`) so the runner can be tested with fakes without importing real DSPy internals.
-- Async streams expose an `AsyncIterator` plus an `outcome` property populated after iteration completes, and callers must call `aclose()` or `wait_owned()` to settle worker tasks.
-- Error types subclass `TurnTerminalError` with a class-level `status` and `public_message` so the runner can map exceptions to stable terminal statuses without leaking raw messages.
-- Tool wrappers preserve the original `dspy.Tool` signature by binding arguments through `inspect.signature` and running a separate validation tool before invoking the real function.

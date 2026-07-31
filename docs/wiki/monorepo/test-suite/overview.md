@@ -1,1 +1,0 @@
-Pytest-based test suite covering unit tests, FastAPI contract tests, live integration tests with real databases, and process-level CLI smoke tests for the Fleet RLM backend.

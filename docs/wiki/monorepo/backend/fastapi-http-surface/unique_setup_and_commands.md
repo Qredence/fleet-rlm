@@ -1,1 +1,0 @@
-Error handlers and the OpenAPI contract are installed by calling `install_error_handlers(app)` and `install_openapi_contract(app)` on the FastAPI instance during application startup; route modules are mounted as sub-routers under `/api/*` paths.

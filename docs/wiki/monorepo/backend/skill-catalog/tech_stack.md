@@ -1,1 +1,0 @@
-Python dataclasses with `frozen=True` and `slots=True` for immutable domain objects; `importlib.resources.files` for packaging bundled assets; `uuid.uuid5` with a fixed namespace for stable Skill IDs; `dspy.Signature` for optional per-Skill input/output contracts; `threading.RLock` for thread-safe progressive loading; `types.MappingProxyType` for read-only resource mappings.

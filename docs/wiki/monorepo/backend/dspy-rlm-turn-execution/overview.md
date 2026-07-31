@@ -1,1 +1,0 @@
-Executes one Fleet turn as a DSPy Recursive Language Model (RLM) REPL, wiring models, tools, and observability into an async event stream with strict output sanitization and integrity guards.

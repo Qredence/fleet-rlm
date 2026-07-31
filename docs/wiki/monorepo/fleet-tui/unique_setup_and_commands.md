@@ -1,1 +1,0 @@
-Requires Node ≥ 22.19.0. Install deps with pnpm, then run the TUI via `pnpm start -- [--api-url <url>] [--session <uuid>]`. Artifact-only mode: `pnpm start -- artifact <uuid> --output <path>`. Tests: `pnpm test` (Vitest). Benchmarks: `pnpm bench:tui`. Typecheck: `pnpm typecheck`. Format/lint: `pnpm format` / `pnpm lint` / `pnpm format:check`.

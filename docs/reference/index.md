@@ -9,6 +9,3 @@
 
 `openapi.yaml` is authoritative for HTTP shapes; generated TUI HTTP types are
 checked alongside it by `make api-check`.
-
-For long-form, generated repo knowledge (a Qoder wiki mirror), see the
-[Repo Wiki](../wiki/README.md).

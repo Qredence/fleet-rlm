@@ -1,1 +1,0 @@
-Orchestrates the full lifecycle of a chat turn — claim, prepare, execute, settle, and cleanup — across Deno/Daytona run environments while enforcing durable state transitions and artifact promotion.
