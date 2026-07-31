@@ -53,8 +53,11 @@ dependencies = [
     # connection reuse through the preview proxy. Transitive via the Daytona
     # SDK; declared direct because http_broker imports it.
     "httpx>=0.28,<1",
+    # Host-side public URL Tools pin validated addresses and stream bounded
+    # responses without inheriting ambient proxy configuration.
+    "urllib3>=2.7,<3",
     # MLflow 3 tracing: DSPy autolog + Databricks tracking backend.
-    "mlflow>=3.14,<4",
+    "mlflow>=3.15,<4",
     "tomlkit>=0.13,<1",
 ]
 
