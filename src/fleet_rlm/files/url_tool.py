@@ -208,10 +208,10 @@ class UrllibPublicTextFetcher:
                     raise UrlToolError("invalid_text", "URL content is not valid text") from exc
                 if "\x00" in text:
                     raise UrlToolError("invalid_text", "URL content is not valid text")
-                normalized = text.encode("utf-8").decode("utf-8")
-                if len(normalized.encode("utf-8")) > max_bytes:
+                encoded = text.encode("utf-8")
+                if len(encoded) > max_bytes:
                     raise UrlToolError("too_large", "Normalized URL content exceeds the configured size limit")
-                return UrlFetchResult(current, content_type or "text/plain; charset=utf-8", normalized)
+                return UrlFetchResult(current, content_type or "text/plain; charset=utf-8", text)
             finally:
                 response.release_conn()
                 response.close()
@@ -258,6 +258,7 @@ class UrllibPublicTextFetcher:
                 redirect=False,
                 retries=False,
             )
+            return response, pool
         except urllib3.exceptions.HTTPError as exc:
             pool.close()
             raise UrlToolError("unreachable", "URL could not be fetched") from exc

@@ -19,6 +19,7 @@ from fleet_rlm.rlm.model_bundle import RLMModelBundle
 
 # Values that look like secrets/keys must never be treated as base URLs.
 _URL_RE = re.compile(r"^https?://", re.IGNORECASE)
+_LEGACY_LLM_API_KEY_ENV = "FLEET_OPENAI_API_KEY"
 
 
 def sanitize_base_url(value: str | None) -> str | None:
@@ -54,7 +55,7 @@ def normalize_model_id(model: str, *, base_url: str | None) -> str:
 
 
 def resolve_role_api_key(settings: Settings, role: LLMRoleSettings) -> str | None:
-    """Resolve a secret only from the role's configured environment reference."""
+    """Resolve the role secret, with the legacy generic key limited to OpenAI roles."""
     value = os.environ.get(role.api_key_env)
     if value is None:
         value = settings._dotenv_values.get(role.api_key_env)
@@ -63,7 +64,7 @@ def resolve_role_api_key(settings: Settings, role: LLMRoleSettings) -> str | Non
         return value
     # ``llm_api_key`` is retained for programmatic Settings construction in
     # tests and integrations; production policy always names a provider env.
-    if settings.llm_api_key is not None:
+    if role.api_key_env == _LEGACY_LLM_API_KEY_ENV and settings.llm_api_key is not None:
         return settings.llm_api_key.get_secret_value().strip() or None
     return None
 

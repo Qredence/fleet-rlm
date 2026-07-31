@@ -100,6 +100,20 @@ def test_termination_mode_requires_explicit_stream_evidence() -> None:
     assert _termination_mode_from_chunk({"type": "finish", "finishReason": "stop"}) is None
 
 
+def test_aggregate_excludes_failed_durations_from_latency_metrics() -> None:
+    aggregate = _aggregate(
+        [
+            {"sample_kind": "measured", "duration_ms": 100, "first_event_ms": 10},
+            {"sample_kind": "measured", "duration_ms": 10_000, "first_event_ms": -1, "error_category": "failed"},
+            {"sample_kind": "warmup", "duration_ms": 1_000, "first_event_ms": 1},
+        ]
+    )
+
+    assert aggregate["sample_count"] == 2
+    assert aggregate["end_to_end_ms"] == {"mean": 100.0, "p50": 100.0, "p95": 100.0}
+    assert aggregate["error_rate"] == 0.5
+
+
 def test_cli_writes_bounded_failure_receipt(tmp_path) -> None:
     output = tmp_path / "failed.json"
     assert main(["compare", "--output", str(output)]) == 1

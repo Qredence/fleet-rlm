@@ -12,6 +12,7 @@ from fleet_rlm.rlm.lm_factory import (
     build_model_bundle,
     has_llm_credentials,
     normalize_model_id,
+    resolve_role_api_key,
     sanitize_base_url,
 )
 
@@ -110,7 +111,20 @@ def test_runtime_does_not_accept_provider_environment_aliases(monkeypatch: pytes
         build_model_bundle(settings)
 
 
-def test_whitespace_legacy_key_is_not_a_credential() -> None:
+def test_whitespace_legacy_key_is_not_a_credential(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("FLEET_OPENAI_API_KEY", raising=False)
     settings = Settings(_env_file=None, llm_api_key=SecretStr("   "))
 
     assert has_llm_credentials(settings) is False
+
+
+def test_legacy_generic_key_does_not_cross_provider_role_boundaries(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("DATABRICKS_TOKEN", raising=False)
+    settings = Settings(
+        _env_file=None,
+        llm_api_key=SecretStr("legacy-key"),
+        root_llm_api_key_env="DATABRICKS_TOKEN",
+        sub_llm_api_key_env="DATABRICKS_TOKEN",
+    )
+
+    assert resolve_role_api_key(settings, settings.llm_role("root")) is None

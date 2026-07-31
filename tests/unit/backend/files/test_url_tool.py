@@ -294,6 +294,9 @@ def test_public_fetcher_streams_and_pins_validated_address(monkeypatch: pytest.M
             calls["host"] = host
             calls["pool_kwargs"] = kwargs
 
+        def close(self) -> None:
+            calls["pool_closed"] = True
+
         def urlopen(self, method: str, target: str, **kwargs: object) -> Response:
             calls["method"] = method
             calls["target"] = target
@@ -340,6 +343,9 @@ def test_public_fetcher_enforces_total_wall_clock_deadline(monkeypatch: pytest.M
 
     class Pool:
         def __init__(self, _host: str, **_kwargs: object) -> None:
+            pass
+
+        def close(self) -> None:
             pass
 
         def urlopen(self, _method: str, _target: str, **_kwargs: object) -> Response:
