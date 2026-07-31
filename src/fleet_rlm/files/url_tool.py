@@ -166,7 +166,7 @@ class UrllibPublicTextFetcher:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 raise UrlToolError("timeout", "URL fetch exceeded the configured time limit")
-            response = self._open(current, timeout_seconds=remaining)
+            response, pool = self._open(current, timeout_seconds=remaining)
             try:
                 if response.status in {301, 302, 303, 307, 308}:
                     location = response.headers.get("Location")
@@ -215,9 +215,15 @@ class UrllibPublicTextFetcher:
             finally:
                 response.release_conn()
                 response.close()
+                pool.close()
         raise UrlToolError("redirect_limit", "URL redirect limit exceeded")
 
-    def _open(self, url: str, *, timeout_seconds: float) -> urllib3.response.BaseHTTPResponse:
+    def _open(
+        self,
+        url: str,
+        *,
+        timeout_seconds: float,
+    ) -> tuple[urllib3.response.BaseHTTPResponse, urllib3.HTTPSConnectionPool]:
         parsed = urlsplit(url)
         host = parsed.hostname
         if host is None:
@@ -238,7 +244,7 @@ class UrllibPublicTextFetcher:
         )
         target = urlunsplit(("", "", parsed.path or "/", parsed.query, ""))
         try:
-            return pool.urlopen(
+            response = pool.urlopen(
                 "GET",
                 target,
                 headers={
@@ -255,6 +261,7 @@ class UrllibPublicTextFetcher:
         except urllib3.exceptions.HTTPError as exc:
             pool.close()
             raise UrlToolError("unreachable", "URL could not be fetched") from exc
+        return response, pool
 
 
 class InMemoryUrlSourceStore:
@@ -444,11 +451,14 @@ class UrlToolHost:
                 path = _source_path(source_id)
                 cached = self._store.read(self._session_id, path, max_bytes=self._max_bytes)
                 if cached is not None:
+                    # The store keeps only the normalized text; the origin
+                    # content type is unknown here, so omit it rather than
+                    # fabricate one that may differ from the first fetch.
                     return self._result(
                         source_id=source_id,
                         canonical_url=canonical,
                         path=path,
-                        content_type="text/plain; charset=utf-8",
+                        content_type=None,
                         text=cached,
                         cache_hit=True,
                     )
@@ -515,22 +525,24 @@ class UrlToolHost:
         source_id: str,
         canonical_url: str,
         path: str,
-        content_type: str,
+        content_type: str | None,
         text: str,
         cache_hit: bool,
     ) -> dict[str, object]:
         data = text.encode("utf-8")
-        return {
+        result: dict[str, object] = {
             "ok": True,
             "source_id": source_id,
             "canonical_url": canonical_url,
             "workspace_path": path,
-            "content_type": content_type,
             "content": text,
             "byte_size": len(data),
             "checksum_sha256": hashlib.sha256(data).hexdigest(),
             "cache_hit": cache_hit,
         }
+        if content_type is not None:
+            result["content_type"] = content_type
+        return result
 
 
 __all__ = [

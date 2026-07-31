@@ -367,8 +367,8 @@ def _tag_trace(mlflow_url: str, trace_id: str, *, workload_id: str, variant: str
 
 def _aggregate(rows: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     measured = [row for row in rows if row.get("sample_kind") == "measured"]
-    durations = [float(row["duration_ms"]) for row in measured]
     successes = [row for row in measured if not row.get("error_category")]
+    durations = [float(row["duration_ms"]) for row in successes]
     first_events = [float(row["first_event_ms"]) for row in successes if float(row["first_event_ms"]) >= 0]
     usage = {"prompt_tokens": 0, "completion_tokens": 0, "reasoning_tokens": 0, "cache_read_tokens": 0}
     for row in successes:

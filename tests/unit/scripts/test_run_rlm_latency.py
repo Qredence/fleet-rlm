@@ -6,6 +6,7 @@ import pytest
 
 from scripts.benchmarks.run_rlm_latency import (
     QUALITY_RECORDS,
+    _aggregate,
     _termination_mode_from_chunk,
     _usage_totals,
     latency_gate,
@@ -52,6 +53,27 @@ def test_quality_gate_requires_all_five_records_and_perfect_means() -> None:
     assert quality_gate(evaluation) is True
     evaluation["records"] = 3
     assert quality_gate(evaluation) is False
+
+
+def test_aggregate_excludes_failed_samples_from_latency_percentiles() -> None:
+    rows = [
+        {"sample_kind": "warmup", "duration_ms": 1.0, "first_event_ms": 1.0},
+        {"sample_kind": "measured", "duration_ms": 100.0, "first_event_ms": 10.0},
+        {"sample_kind": "measured", "duration_ms": 200.0, "first_event_ms": 20.0},
+        {
+            "sample_kind": "measured",
+            "duration_ms": 5.0,
+            "first_event_ms": -1.0,
+            "error_category": "BenchmarkError",
+        },
+    ]
+
+    summary = _aggregate(rows)
+
+    assert summary["sample_count"] == 3
+    assert summary["error_rate"] == pytest.approx(1 / 3)
+    assert summary["end_to_end_ms"] == {"mean": 150.0, "p50": 100.0, "p95": 200.0}
+    assert summary["first_runtime_event_ms"] == {"p50": 10.0, "p95": 20.0}
 
 
 def test_usage_totals_keep_only_approved_counters() -> None:

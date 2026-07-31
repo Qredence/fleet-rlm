@@ -178,6 +178,7 @@ def test_workspace_url_store_reuses_content_across_tool_hosts() -> None:
 
     assert cached["cache_hit"] is True
     assert cached["content"] == "needle: 42"
+    assert "content_type" not in cached
     assert fetcher.calls == ["https://example.com/report"]
 
 
@@ -299,6 +300,9 @@ def test_public_fetcher_streams_and_pins_validated_address(monkeypatch: pytest.M
             calls["request_kwargs"] = kwargs
             return Response()
 
+        def close(self) -> None:
+            calls["pool_closed"] = True
+
     monkeypatch.setattr("fleet_rlm.files.url_tool.urllib3.HTTPSConnectionPool", Pool)
 
     result = UrllibPublicTextFetcher().fetch("https://example.com/report", max_bytes=1_024)
@@ -309,6 +313,7 @@ def test_public_fetcher_streams_and_pins_validated_address(monkeypatch: pytest.M
     assert calls["target"] == "/report"
     assert calls["released"] is True
     assert calls["closed"] is True
+    assert calls["pool_closed"] is True
 
 
 def test_public_fetcher_enforces_total_wall_clock_deadline(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -339,6 +344,9 @@ def test_public_fetcher_enforces_total_wall_clock_deadline(monkeypatch: pytest.M
 
         def urlopen(self, _method: str, _target: str, **_kwargs: object) -> Response:
             return Response()
+
+        def close(self) -> None:
+            pass
 
     monkeypatch.setattr("fleet_rlm.files.url_tool.urllib3.HTTPSConnectionPool", Pool)
 
