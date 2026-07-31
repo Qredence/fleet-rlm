@@ -13,6 +13,7 @@ import hashlib
 import ipaddress
 import re
 import socket
+import time
 from collections import OrderedDict
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -24,7 +25,7 @@ from uuid import UUID
 import dspy
 import urllib3
 
-from fleet_rlm.files.workspace_models import SessionWorkspaceFS
+from fleet_rlm.files.workspace_models import SessionWorkspaceFS, WorkspaceListResult
 from fleet_rlm.rlm.events import JsonValue
 from fleet_rlm.rlm.tool_observer import ToolEventView, bound_event_text
 
@@ -44,6 +45,8 @@ _ALLOWED_MEDIA_TYPES = frozenset(
         "text/xml",
     }
 )
+_WORKSPACE_CACHE_INTEGRITY: OrderedDict[tuple[UUID, str], str] = OrderedDict()
+_WORKSPACE_CACHE_INTEGRITY_LOCK = RLock()
 
 
 class UrlToolError(RuntimeError):
@@ -151,15 +154,19 @@ class UrllibPublicTextFetcher:
     ) -> None:
         if timeout_seconds <= 0 or max_redirects < 0:
             raise ValueError("URL fetch limits must be positive")
-        self._timeout = urllib3.Timeout(connect=timeout_seconds, read=timeout_seconds)
+        self._timeout_seconds = float(timeout_seconds)
         self._max_redirects = max_redirects
 
     def fetch(self, url: str, *, max_bytes: int) -> UrlFetchResult:
         if max_bytes < 1:
             raise ValueError("URL fetch byte bound must be positive")
         current = _canonical_url(url)
+        deadline = time.monotonic() + self._timeout_seconds
         for redirect_count in range(self._max_redirects + 1):
-            response = self._open(current)
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise UrlToolError("timeout", "URL fetch exceeded the configured time limit")
+            response = self._open(current, timeout_seconds=remaining)
             try:
                 if response.status in {301, 302, 303, 307, 308}:
                     location = response.headers.get("Location")
@@ -183,10 +190,18 @@ class UrllibPublicTextFetcher:
                     except ValueError as exc:
                         raise UrlToolError("http_error", "URL response length is invalid") from exc
                 data = bytearray()
-                for chunk in response.stream(URL_FETCH_CHUNK_BYTES, decode_content=True):
-                    data.extend(chunk)
-                    if len(data) > max_bytes:
-                        raise UrlToolError("too_large", "URL content exceeds the configured size limit")
+                try:
+                    chunks = response.stream(URL_FETCH_CHUNK_BYTES, decode_content=True)
+                    for chunk in chunks:
+                        if time.monotonic() >= deadline:
+                            raise UrlToolError("timeout", "URL fetch exceeded the configured time limit")
+                        data.extend(chunk)
+                        if len(data) > max_bytes:
+                            raise UrlToolError("too_large", "URL content exceeds the configured size limit")
+                except urllib3.exceptions.ReadTimeoutError as exc:
+                    raise UrlToolError("timeout", "URL fetch exceeded the configured time limit") from exc
+                if time.monotonic() >= deadline:
+                    raise UrlToolError("timeout", "URL fetch exceeded the configured time limit")
                 try:
                     text = bytes(data).decode(_charset(content_type))
                 except (LookupError, UnicodeDecodeError) as exc:
@@ -202,7 +217,7 @@ class UrllibPublicTextFetcher:
                 response.close()
         raise UrlToolError("redirect_limit", "URL redirect limit exceeded")
 
-    def _open(self, url: str) -> urllib3.response.BaseHTTPResponse:
+    def _open(self, url: str, *, timeout_seconds: float) -> urllib3.response.BaseHTTPResponse:
         parsed = urlsplit(url)
         host = parsed.hostname
         if host is None:
@@ -211,7 +226,11 @@ class UrllibPublicTextFetcher:
         pool = urllib3.HTTPSConnectionPool(
             address,
             port=443,
-            timeout=self._timeout,
+            timeout=urllib3.Timeout(
+                total=timeout_seconds,
+                connect=timeout_seconds,
+                read=timeout_seconds,
+            ),
             maxsize=1,
             cert_reqs="CERT_REQUIRED",
             assert_hostname=host,
@@ -319,7 +338,6 @@ class WorkspaceUrlSourceStore:
         self._max_bytes_total = max_bytes_total
 
     def read(self, session_id: UUID, path: str, *, max_bytes: int) -> str | None:
-        del session_id
         try:
             entry = self._workspace.stat(path)
         except FileNotFoundError:
@@ -344,21 +362,32 @@ class WorkspaceUrlSourceStore:
             if total > max_bytes:
                 raise UrlToolError("too_large", "Cached URL content exceeds the configured size limit")
             if page.eof:
-                return "".join(chunks)
+                break
             if page.next_cursor is None:
                 raise UrlToolError("cache_unavailable", "Cached URL content could not be read")
             cursor = page.next_cursor
+        checksum = hashlib.sha256("".join(chunks).encode("utf-8")).hexdigest()
+        cache_key = (session_id, path)
+        with _WORKSPACE_CACHE_INTEGRITY_LOCK:
+            expected = _WORKSPACE_CACHE_INTEGRITY.get(cache_key)
+            if expected is None or expected != checksum:
+                _WORKSPACE_CACHE_INTEGRITY.pop(cache_key, None)
+                return None
+            _WORKSPACE_CACHE_INTEGRITY.move_to_end(cache_key)
+        return "".join(chunks)
 
     def write(self, session_id: UUID, path: str, content: str, *, max_bytes: int) -> None:
-        del session_id
         content_bytes = len(content.encode("utf-8"))
         if content_bytes > max_bytes:
             raise UrlToolError("too_large", "URL content exceeds the configured size limit")
         try:
-            listing = self._workspace.list_entries(
-                URL_WORKSPACE_PREFIX,
-                limit=min(100, self._max_entries_total + 1),
-            )
+            try:
+                listing = self._workspace.list_entries(
+                    URL_WORKSPACE_PREFIX,
+                    limit=min(100, self._max_entries_total + 1),
+                )
+            except FileNotFoundError:
+                listing = WorkspaceListResult(())
             cache_entries = tuple(
                 entry
                 for entry in listing.entries
@@ -378,6 +407,12 @@ class WorkspaceUrlSourceStore:
             if total_bytes - existing_bytes + content_bytes > self._max_bytes_total:
                 return
             self._workspace.write_text(path, content, overwrite=True)
+            cache_key = (session_id, path)
+            with _WORKSPACE_CACHE_INTEGRITY_LOCK:
+                _WORKSPACE_CACHE_INTEGRITY[cache_key] = hashlib.sha256(content.encode("utf-8")).hexdigest()
+                _WORKSPACE_CACHE_INTEGRITY.move_to_end(cache_key)
+                while len(_WORKSPACE_CACHE_INTEGRITY) > URL_CACHE_MAX_ENTRIES_TOTAL:
+                    _WORKSPACE_CACHE_INTEGRITY.popitem(last=False)
         except Exception as exc:
             raise UrlToolError("cache_unavailable", "Session Workspace is unavailable") from exc
 

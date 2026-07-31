@@ -232,6 +232,20 @@ def _structured_answer(chunk: Mapping[str, Any]) -> str | None:
     return None
 
 
+def _termination_mode_from_chunk(chunk: Mapping[str, Any]) -> str | None:
+    """Derive termination only from explicit stream evidence."""
+    chunk_type = chunk.get("type")
+    if (
+        chunk_type == "data-rlm-output"
+        and isinstance(chunk.get("data"), Mapping)
+        and chunk["data"].get("output") == "FINAL submitted"
+    ):
+        return "typed_submit"
+    if chunk_type == "reasoning-delta" and chunk.get("delta") == "Extract forced final output":
+        return "native_extraction_fallback"
+    return None
+
+
 def run_turn(client: httpx.Client, query: str, *, nonce: str) -> dict[str, Any]:
     """Execute one real Fleet Turn and return bounded operational results."""
     session = client.post("/api/sessions", json={"title": f"latency-{nonce}"})
@@ -247,6 +261,7 @@ def run_turn(client: httpx.Client, query: str, *, nonce: str) -> dict[str, Any]:
     batch_calls = 0
     recursive_calls = 0
     first_event_ms: float | None = None
+    termination_mode: str | None = None
     started = time.perf_counter()
     with client.stream(
         "POST",
@@ -265,6 +280,7 @@ def run_turn(client: httpx.Client, query: str, *, nonce: str) -> dict[str, Any]:
                 if isinstance(metadata.get("runId"), str):
                     run_id = str(metadata["runId"])
             chunk_type = chunk.get("type")
+            termination_mode = _termination_mode_from_chunk(chunk) or termination_mode
             if chunk_type == "text-delta" and isinstance(chunk.get("delta"), str):
                 answer_parts.append(str(chunk["delta"]))
             elif chunk_type == "data-structured-result":
@@ -292,7 +308,7 @@ def run_turn(client: httpx.Client, query: str, *, nonce: str) -> dict[str, Any]:
         "iterations": iterations,
         "batch_calls": batch_calls,
         "recursive_calls": recursive_calls,
-        "termination_mode": "typed_submit",
+        "termination_mode": termination_mode,
     }
 
 

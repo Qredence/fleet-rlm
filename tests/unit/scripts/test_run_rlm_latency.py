@@ -6,6 +6,7 @@ import pytest
 
 from scripts.benchmarks.run_rlm_latency import (
     QUALITY_RECORDS,
+    _termination_mode_from_chunk,
     _usage_totals,
     latency_gate,
     main,
@@ -65,6 +66,16 @@ def test_usage_totals_keep_only_approved_counters() -> None:
             }
         }
     ) == {"prompt_tokens": 10, "completion_tokens": 4, "reasoning_tokens": 3, "cache_read_tokens": 2}
+
+
+def test_termination_mode_requires_explicit_stream_evidence() -> None:
+    assert _termination_mode_from_chunk({"type": "data-rlm-output", "data": {"output": "FINAL submitted"}}) == (
+        "typed_submit"
+    )
+    assert _termination_mode_from_chunk({"type": "reasoning-delta", "delta": "Extract forced final output"}) == (
+        "native_extraction_fallback"
+    )
+    assert _termination_mode_from_chunk({"type": "finish", "finishReason": "stop"}) is None
 
 
 def test_cli_writes_bounded_failure_receipt(tmp_path) -> None:

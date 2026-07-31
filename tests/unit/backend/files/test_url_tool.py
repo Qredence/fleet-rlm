@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, ClassVar
 from uuid import uuid4
 
 import pytest
@@ -12,6 +12,7 @@ from fleet_rlm.files.url_tool import (
     InMemoryUrlSourceStore,
     UrlFetchResult,
     UrllibPublicTextFetcher,
+    UrlToolError,
     UrlToolHost,
     WorkspaceUrlSourceStore,
 )
@@ -81,6 +82,12 @@ class _FakeWorkspace:
 class _MissingParentWorkspace(_FakeWorkspace):
     def stat(self, path: str) -> WorkspaceEntry | None:
         del path
+        raise FileNotFoundError("sources/urls")
+
+
+class _MissingCacheDirectoryWorkspace(_FakeWorkspace):
+    def list_entries(self, path: str, *, limit: int = 100, after: str | None = None) -> WorkspaceListResult:
+        del path, limit, after
         raise FileNotFoundError("sources/urls")
 
 
@@ -174,11 +181,44 @@ def test_workspace_url_store_reuses_content_across_tool_hosts() -> None:
     assert fetcher.calls == ["https://example.com/report"]
 
 
+def test_workspace_url_store_refetches_when_workspace_content_was_overwritten() -> None:
+    session_id = uuid4()
+    workspace = _FakeWorkspace()
+    fetcher = _FakeFetcher([])
+    store = WorkspaceUrlSourceStore(workspace)
+    tool = UrlToolHost(session_id=session_id, store=store, max_bytes=1_024, fetcher=fetcher).as_tools()[0]
+
+    first = tool(url="https://example.com/report")
+    workspace.values[first["workspace_path"]] = "model-authored replacement"
+    second = tool(url="https://example.com/report")
+
+    assert first["cache_hit"] is False
+    assert second["cache_hit"] is False
+    assert second["content"] == "needle: 42"
+    assert fetcher.calls == ["https://example.com/report", "https://example.com/report"]
+
+
 def test_workspace_url_store_treats_a_missing_cache_parent_as_a_cache_miss() -> None:
     fetcher = _FakeFetcher([])
     tool = UrlToolHost(
         session_id=uuid4(),
         store=WorkspaceUrlSourceStore(_MissingParentWorkspace()),
+        max_bytes=1_024,
+        fetcher=fetcher,
+    ).as_tools()[0]
+
+    result = tool(url="https://example.com/report")
+
+    assert result["ok"] is True
+    assert result["cache_hit"] is False
+    assert fetcher.calls == ["https://example.com/report"]
+
+
+def test_workspace_url_store_creates_a_cache_when_directory_listing_is_missing() -> None:
+    fetcher = _FakeFetcher([])
+    tool = UrlToolHost(
+        session_id=uuid4(),
+        store=WorkspaceUrlSourceStore(_MissingCacheDirectoryWorkspace()),
         max_bytes=1_024,
         fetcher=fetcher,
     ).as_tools()[0]
@@ -269,3 +309,38 @@ def test_public_fetcher_streams_and_pins_validated_address(monkeypatch: pytest.M
     assert calls["target"] == "/report"
     assert calls["released"] is True
     assert calls["closed"] is True
+
+
+def test_public_fetcher_enforces_total_wall_clock_deadline(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "fleet_rlm.files.url_tool.socket.getaddrinfo",
+        lambda *_args, **_kwargs: [(0, 0, 0, "", ("93.184.216.34", 443))],
+    )
+    clock = iter((0.0, 0.0, 2.0))
+    monkeypatch.setattr("fleet_rlm.files.url_tool.time.monotonic", lambda: next(clock))
+
+    class Response:
+        status = 200
+        headers: ClassVar[dict[str, str]] = {"Content-Type": "text/plain"}
+
+        def stream(self, _size: int, *, decode_content: bool):
+            del decode_content
+            return iter((b"late",))
+
+        def release_conn(self) -> None:
+            pass
+
+        def close(self) -> None:
+            pass
+
+    class Pool:
+        def __init__(self, _host: str, **_kwargs: object) -> None:
+            pass
+
+        def urlopen(self, _method: str, _target: str, **_kwargs: object) -> Response:
+            return Response()
+
+    monkeypatch.setattr("fleet_rlm.files.url_tool.urllib3.HTTPSConnectionPool", Pool)
+
+    with pytest.raises(UrlToolError, match="time limit"):
+        UrllibPublicTextFetcher(timeout_seconds=1).fetch("https://example.com/report", max_bytes=1_024)
