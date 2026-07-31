@@ -81,6 +81,8 @@ mount, and interpreter probe before diagnosing a Turn.
 - `/api/sessions` — Session CRUD and ordered committed Turn history.
 - `/api/attachments` — durable Attachment upload and metadata lookup.
 - `/api/artifacts/{artifact_id}` — committed metadata and verified content.
+- `GET /api/volume/tree` — Daytona-only bounded read-only logical Workspace
+  Volume paths.
 - `/api/skills` — bounded system Skill Card discovery for the five bundled
   Skills.
 - `PUT /api/runs/{run_id}/cancellation` — durable Run cancellation.
@@ -101,8 +103,13 @@ result snapshot handling, Artifact publication, and atomic Turn Commit. The
 coordinator then projects the terminal suffix and cleans up Run resources.
 
 Daytona Turns acquire a fresh Interpreter Lease and use Workspace Volume Scope.
-Deno Turns use DSPy's local Deno/Pyodide interpreter and skip durable Artifact
-promotion. Full Session history stays host-side behind the bounded
+They can read the latest bounded Workspace Memory on demand with
+`read_workspace_memory` and append a record with `update_workspace_memory` only
+when the user explicitly asks to remember something. Memory is stored in the
+workspace root `MEMORIES.md`, is not injected at Turn start, and is not a
+Session-history or Turn-commit record. Deno Turns use DSPy's local
+Deno/Pyodide interpreter and skip Daytona Workspace, Memory tools, and durable
+Artifact promotion. Full Session history stays host-side behind the bounded
 `read_session_history` Tool.
 
 Read the [architecture](docs/architecture.md), [backend context](src/fleet_rlm/CONTEXT.md),

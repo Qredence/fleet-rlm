@@ -33,9 +33,11 @@ contracts, and tracked docs remain authoritative.
   input annotations and declared output schemas.
 - Runtime-specific Session Workspace availability is bounded inside context;
   Daytona registers list/stat/paged-read/write/append workspace Tools plus
-  direct Workspace Artifact Candidate publication, while Deno advertises the
-  feature as unavailable. Session Workspace is append/update-only; there is no
-  delete Tool.
+  direct Workspace Artifact Candidate publication and the on-demand
+  `read_workspace_memory`/`update_workspace_memory` Tools, while Deno advertises
+  these Daytona-only features as unavailable. Session Workspace is
+  append/update-only; there is no delete Tool. Workspace Memory is the fixed
+  root `MEMORIES.md` log, not Session History or a Turn-start prompt payload.
 - Resolve zero to four exact Skill selections against the immutable bundled
   catalog. Skill instructions and resources load progressively; bundled Skills
   never register executable tools. Runtime execution uses a typed
@@ -70,7 +72,10 @@ contracts, and tracked docs remain authoritative.
   `append_workspace_text` for incremental output, and
   `write_workspace_text(..., overwrite=True)` for replacement. Direct
   Workspace Artifact publication stages bytes privately; deletion is not
-  exposed as a Tool.
+  exposed as a Tool. Workspace Memory appends are immediate workspace-wide
+  state under the fixed `MEMORIES.md` root and are independent of Turn Commit;
+  the Daytona-only `/api/volume/tree` route exposes only a bounded read-only
+  logical path view, not a general-purpose filesystem browser.
 - Daytona composition owns one process-scoped `AsyncDaytona`. Provisioning,
   lifecycle, filesystem, and FastAPI-facing Workspace operations remain native
   async. Only DSPy's synchronous interpreter and host-tool execution receive

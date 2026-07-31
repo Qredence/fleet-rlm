@@ -3,10 +3,12 @@
 ## Contexts
 
 - [Shared Fleet RLM](./CONTEXT.md) — product-wide User, Workspace, Session,
-  Sandbox, Skill, Artifact, Attachment, Runtime Event, and Volume language.
+  Sandbox, Skill, Artifact, Attachment, Runtime Event, Workspace Memory, and
+  Volume language.
 - [Backend runtime](./src/fleet_rlm/CONTEXT.md) — the canonical RLM-native
   FastAPI backend: Turns, Runs, Interpreter Leases, Skill Cards, progressive
-  loading, staged Attachments, Artifact Candidates, and Turn Commit.
+  loading, staged Attachments, Workspace Memory, Artifact Candidates, and Turn
+  Commit.
 
 ## Relationships
 

@@ -1,8 +1,9 @@
 # Fleet RLM backend
 
 Canonical RLM-native backend glossary for conversation execution, isolation,
-progressive Skills, and host-mediated files. Shared product terms (Sandbox,
-Volume, Workspace, Skill) mean what root `CONTEXT.md` says unless narrowed here.
+progressive Skills, Workspace Memory, and host-mediated files. Shared product
+terms (Sandbox, Volume, Workspace, Skill) mean what root `CONTEXT.md` says unless
+narrowed here.
 
 ## Language
 
@@ -35,7 +36,7 @@ The bounded RLM input projection of one Session checkpoint: Session identity,
 committed message count, and short previews of at most the six most recent
 messages. Older canonical content remains in Session History and is read through
 the Session-scoped Host-Mediated Tool.
-_Avoid_: complete transcript, summary, durable Memory
+_Avoid_: complete transcript, summary, automatic durable Memory
 
 **Turn**:
 One user message processed to a terminal outcome for a Session.
@@ -154,6 +155,21 @@ Sandboxes. Another Workspace’s Sandbox must not list or read inside it. Sandbo
 Binding must be able to reattach this scope on acquire.
 _Avoid_: tenant Workspace alone, whole shared Volume root, Sandbox Workspace
 
+**Workspace Memory**:
+Daytona-only workspace-wide immediate state at the fixed `MEMORIES.md` root of
+the already workspace-scoped Volume mount. `read_workspace_memory` loads the
+newest bounded complete records only when the RLM calls it; `update_workspace_memory`
+appends one normalized record only for an explicit user request. Appends are
+durable independently of Turn Commit and survive failed or cancelled Runs and
+Sandbox replacement. Deno binds neither Tool.
+_Avoid_: Session History, automatic prompt injection, unbounded learned state
+
+**Workspace Volume Tree**:
+The Daytona-only bounded read-only HTTP/TUI projection of relative paths from
+the local Workspace Volume. It is not a file-content API, provider-path API,
+mutation surface, or general-purpose Sandbox browser.
+_Avoid_: Volume mount, Sandbox filesystem browser, public storage path
+
 ### Skills and files
 
 **Session Workspace**:
@@ -175,7 +191,7 @@ _Avoid_: full Skill, prompt dump
 Agent Skills-compatible directory containing `SKILL.md` plus optional bounded
 `scripts/`, `references/`, and `assets/`. The instruction body loads only when
 invoked; each supporting resource loads only after a subsequent explicit read.
-_Avoid_: Skill Card, Memory
+_Avoid_: Skill Card, automatic Memory recall
 
 **RLM Execution Spec**:
 Immutable host-composed inputs for one Turn: bounded Skill Cards, one validated
@@ -255,7 +271,8 @@ _Avoid_: Runtime Event, raw event-log persistence
 
 These shared or live terms are **not** clean product claims until promoted:
 
-- **Memory** as remember/recall runtime state
+- **Automatic or unbounded Memory** beyond the fixed Daytona Workspace Memory
+  Tool contract
 - **Child Session** / host delegation fan-out
 - **Execution Mode** client switch (`simple` vs `rlm`)
 - **Managed Target**, GEPA selection, and promotion artifacts

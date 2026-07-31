@@ -52,8 +52,25 @@ _Avoid_: Memory, Volume contents, cross-Run REPL
 
 **Workspace Volume Scope**:
 The Workspace-owned subtree of mounted Daytona storage used for durable
-Attachments, Artifacts, private Session files, and bounded Run derivatives.
+Attachments, Artifacts, Workspace Memory, private Session files, and bounded Run
+derivatives.
 _Avoid_: whole provider Volume, Sandbox filesystem
+
+**Workspace Memory**:
+Daytona-only workspace-wide immediate state stored in the fixed `MEMORIES.md`
+file at the root of the mounted Workspace Volume Scope. The RLM reads the
+bounded newest records on demand through a host-mediated Tool and appends one
+record only when the user explicitly asks to remember something. Appends are
+immediately durable, independent of Turn Commit, and survive failed or
+cancelled Runs and Sandbox replacement; Deno registers no Memory Tools.
+_Avoid_: Session History, automatic Turn-start recall, unbounded learned state
+
+**Workspace Volume Tree**:
+A Daytona-only bounded read-only logical listing of relative paths in the
+process-local Workspace Volume, available through the HTTP API and terminal
+client. It does not expose file contents, provider paths, mutation operations,
+or a general-purpose Sandbox filesystem browser.
+_Avoid_: Volume mount API, Sandbox browser, public storage paths
 
 **Session Workspace**:
 Immediate private text-file state under `sessions/{session_id}/workspace/` in
@@ -129,8 +146,9 @@ _Avoid_: Session-owned Sandbox, reusable global interpreter
 ## Reserved, not current product behavior
 
 The following terms describe possible future work and must not be presented as
-implemented: **Root Session**, **Child Session**, durable learned **Memory**,
-cross-Run interpreter state, caller-selectable **Execution Mode**, `RLMAgent`,
-large-input staging modes, **Chat Execution Context**, and public **Turn
-Controls**. Introduce any of them only through a separate product and
-architecture decision.
+implemented: **Root Session**, **Child Session**, automatic or unbounded learned
+**Memory** beyond the fixed Daytona Workspace Memory contract, cross-Run
+interpreter state, caller-selectable **Execution Mode**, `RLMAgent`, large-input
+staging modes, **Chat Execution Context**, and public **Turn Controls**.
+Introduce any of them only through a separate product and architecture
+decision.
