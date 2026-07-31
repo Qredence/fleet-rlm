@@ -182,6 +182,16 @@ _FIELDS: tuple[PolicyField, ...] = (
     PolicyField(
         "mlflow.tracing_enabled", "MLflow", "Tracing enabled", "boolean", settings_field="mlflow_tracing_enabled"
     ),
+    PolicyField(
+        "mlflow.async_logging", "MLflow", "Async trace logging", "boolean", settings_field="mlflow_async_logging"
+    ),
+    PolicyField(
+        "mlflow.trace_sampling_ratio",
+        "MLflow",
+        "Trace sampling ratio",
+        "number",
+        settings_field="mlflow_trace_sampling_ratio",
+    ),
     PolicyField("mlflow.experiment_name", "MLflow", "Experiment name", "text", settings_field="mlflow_experiment_name"),
     PolicyField("mlflow.experiment_name_env", "MLflow", "Experiment environment variable", "text"),
     PolicyField("mlflow.tracking_uri", "MLflow", "Tracking URI", "text", settings_field="mlflow_tracking_uri"),
@@ -409,7 +419,7 @@ class ConfigPolicyService:
             raise FleetConfigurationError("config.default_profile must be a string")
         defaults = _require_mapping(root.get("defaults", {}), "defaults")
         profiles = _require_mapping(root.get("profiles", {}), "profiles")
-        _validate_policy_table(defaults, "defaults")
+        _validate_policy_table(defaults, "defaults", allow_partial_llm=True)
         for profile, value in profiles.items():
             selected = _require_mapping(value, f"profiles.{profile}")
             _validate_policy_table(selected, f"profiles.{profile}")

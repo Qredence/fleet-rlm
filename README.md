@@ -43,7 +43,7 @@ Deno is the canonical reduced local runtime. It needs an LLM key and Deno on
 
 ```bash
 export FLEET_DATABASE_URL='sqlite+aiosqlite:///./.fleet_rlm/local.sqlite3'
-export FLEET_LLM_API_KEY='...'
+export FLEET_OPENAI_API_KEY='...'
 uv run fleet-rlm serve-api --port 8000
 ```
 

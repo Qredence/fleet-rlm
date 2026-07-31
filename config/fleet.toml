@@ -11,15 +11,13 @@ max_active_daytona_leases = 8
 heartbeat_seconds = 10
 stale_after_seconds = 60
 
+# Shared role tuning only. Model and credential references belong to each
+# provider-specific profile below.
 [defaults.llm.root]
-model = 'openai/deepseek-v4-flash-free'
-api_key_env = "FLEET_LLM_API_KEY"
 cache = true
 num_retries = 3
 
 [defaults.llm.sub]
-model = 'openai/deepseek-v4-flash-free'
-api_key_env = "FLEET_LLM_API_KEY"
 cache = true
 num_retries = 3
 
@@ -52,8 +50,27 @@ volume_mount_path = "/home/daytona/fleet"
 [defaults.logging]
 level = "INFO"
 
+[defaults.mlflow]
+# MLflow 3.15 keeps trace export off the Turn critical path. The sampler is
+# explicit policy so an ambient MLFLOW_TRACE_SAMPLING_RATIO cannot override it.
+tracing_enabled = false
+expose_trace_id = true
+async_logging = true
+trace_sampling_ratio = 1.0
+
 [profiles.local-deno.runtime]
 environment = "deno"
+
+# The local runtime uses the stock OpenAI provider contract. Keep its
+# credential reference on the provider-specific profile rather than in
+# [defaults], so every profile declares its own provider explicitly.
+[profiles.local-deno.llm.root]
+model = "openai/deepseek-v4-flash-free"
+api_key_env = "FLEET_OPENAI_API_KEY"
+
+[profiles.local-deno.llm.sub]
+model = "openai/deepseek-v4-flash-free"
+api_key_env = "FLEET_OPENAI_API_KEY"
 
 [profiles.daytona.runtime]
 environment = "daytona"
@@ -65,7 +82,7 @@ base_url_env = "FLEET_DATABRICKS_AI_GATEWAY_BASE_URL"
 max_tokens = 8000
 
 [profiles.daytona.llm.sub]
-model = "uscentral.ai_gateway.databricks-qwen35-122b-a10b"
+model = "system.ai.inkling"
 api_key_env = "DATABRICKS_TOKEN"
 base_url_env = "FLEET_DATABRICKS_AI_GATEWAY_BASE_URL"
 max_tokens = 8000
@@ -91,7 +108,7 @@ base_url_env = "FLEET_DATABRICKS_AI_GATEWAY_BASE_URL"
 max_tokens = 8000
 
 [profiles.daytona-managed.llm.sub]
-model = "uscentral.ai_gateway.databricks-qwen35-122b-a10b"
+model = "system.ai.inkling"
 api_key_env = "DATABRICKS_TOKEN"
 base_url_env = "FLEET_DATABRICKS_AI_GATEWAY_BASE_URL"
 max_tokens = 8000

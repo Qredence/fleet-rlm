@@ -120,7 +120,7 @@ FLEET_LIVE=1 uv run python scripts/live_daytona_verify.py \
 ```
 
 Select the production `daytona` profile through `[config] default_profile`
-before this gate. The verifier requires the committed Databricks DeepSeek v4-free Root and Qwen Sub
+before this gate. The verifier requires the committed Databricks DeepSeek v4-free Root and Inkling Sub
 roles, records a passing receipt at the exact candidate SHA, verifies provider
 cleanup and secret isolation, and must be paired with same-SHA CI, local
 release, and human attestations before promotion. Historical receipts do not

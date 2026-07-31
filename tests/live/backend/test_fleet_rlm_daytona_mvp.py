@@ -46,7 +46,7 @@ _EVIDENCE_ENV = "FLEET_LIVE_EVIDENCE_PATH"
 _SECRET_NAMES = ("FLEET_DAYTONA_API_KEY", "DATABRICKS_TOKEN")
 _CLEANUP_RETRY_DELAYS = (0.5, 1.0, 2.0, 4.0)
 _LIVE_ROOT_MODEL = "uscentral.default.deepseek-v4-flash"
-_LIVE_SUB_MODEL = "uscentral.ai_gateway.databricks-qwen35-122b-a10b"
+_LIVE_SUB_MODEL = "system.ai.inkling"
 
 
 class LiveDaytonaMVPResult(dspy.Signature):
@@ -189,7 +189,7 @@ def _live_settings(tmp_path: Path) -> Settings:
         pytest.fail("Live Daytona MVP proof missing required credentials: " + ", ".join(missing))
     policy = load_runtime_settings()
     if (policy.root_model, policy.sub_model) != (_LIVE_ROOT_MODEL, _LIVE_SUB_MODEL):
-        pytest.fail("Live Daytona MVP proof requires the production DeepSeek v4-free Root and Qwen Sub policy")
+        pytest.fail("Live Daytona MVP proof requires the production DeepSeek v4-free Root and Inkling Sub policy")
     database_url = f"sqlite+aiosqlite:///{(tmp_path / 'live-mvp.db').resolve()}"
     upgrade_to_head(database_url)
     return policy.model_copy(

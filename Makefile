@@ -3,7 +3,7 @@ PYTEST_FAST_MARKERS = not deno and not live_llm and not live_daytona and not ben
 PYTEST := uv run --no-sync pytest
 PYTEST_ISOLATED := env \
 	FLEET_DAYTONA_API_KEY= \
-	FLEET_LLM_API_KEY= \
+	FLEET_OPENAI_API_KEY= \
 	FLEET_LLM_BASE_URL= \
 	FLEET_DATABASE_URL= \
 	$(PYTEST)
@@ -21,7 +21,7 @@ PYTEST_PARALLEL := -n auto --maxprocesses=$(PYTEST_XDIST_MAX_WORKERS)
 	sync sync-dev sync-all metadata-check docs-check security-check dependency-check release-artifacts cli-help \
 	cloud-preflight \
 	daytona-snapshot-create daytona-snapshot-check \
-	benchmark-oolong
+	benchmark-oolong benchmark-native-long-context
 
 help:
 	@echo "Setup:"
@@ -43,6 +43,7 @@ help:
 	@echo "  make test-deno        - Run deterministic contracts against the Deno runtime"
 	@echo "  make test-daytona-cov - Run canonical non-live tests with Daytona branch coverage"
 	@echo "  make benchmark-oolong - Run official Oolong smoke (requires FLEET_LIVE=1; configure OOLONG_* variables)"
+	@echo "  make benchmark-native-long-context - Measure native whole-value URL context at 1/5/10 MiB"
 	@echo ""
 	@echo "Quality:"
 	@echo "  make check            - Run the primary repo quality gate"
@@ -128,6 +129,11 @@ OOLONG_PROFILE ?= daytona-bench
 benchmark-oolong:
 	@test -n "$(FLEET_LIVE)" || { echo "FLEET_LIVE=1 is required for live OOLONG benchmark"; exit 1; }
 	uv run python scripts/benchmarks/run_official_oolong.py --split $(OOLONG_SPLIT) --min-len $(OOLONG_MIN_LEN) --max-len $(OOLONG_MAX_LEN) --limit $(OOLONG_LIMIT) --api-url $(OOLONG_API_URL) --oolong-root $(OOLONG_ROOT) --expected-profile $(OOLONG_PROFILE) --output $(OOLONG_OUTPUT)
+
+NATIVE_LONG_CONTEXT_OUTPUT ?= .scratch/benchmark-reports/native-long-context-$(shell date +%Y-%m-%d).json
+
+benchmark-native-long-context:
+	uv run python scripts/benchmarks/run_native_long_context.py --output $(NATIVE_LONG_CONTEXT_OUTPUT)
 
 DAYTONA_SNAPSHOT_NAME ?= fleet-rlm-python313-v4
 

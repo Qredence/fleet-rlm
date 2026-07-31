@@ -55,7 +55,7 @@ clients cannot provide models, Signatures, or executable capabilities.
 - The production Daytona profile uses the Databricks DeepSeek v4-free service
   `uscentral.default.deepseek-v4-flash` for Root actions
   (without a `reasoning_effort` override) and
-  `uscentral.ai_gateway.databricks-qwen35-122b-a10b` for bounded Sub Model queries
+  `system.ai.inkling` for bounded Sub Model queries
   (`reasoning_effort = "none"`, `temperature = 0`). Both responses are capped at
   8,000 tokens. This LM response limit is distinct
   from `dspy.RLM.max_output_chars`, which bounds REPL output retained in
@@ -115,7 +115,7 @@ the immutable Snapshot named by that profile with the
 
 The verifier requires a clean tracked tree on a non-`main` branch, invokes the
 single live pytest scenario once, and performs no automatic retry. It resolves
-the production DeepSeek v4-free Root and Qwen Sub roles from the selected TOML profile;
+the production DeepSeek v4-free Root and Inkling Sub roles from the selected TOML profile;
 ambient model variables are ignored, and swapped or obsolete model pairs fail
 the precondition. Its `--help` path requires no credentials.
 

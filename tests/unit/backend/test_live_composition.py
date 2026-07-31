@@ -165,7 +165,7 @@ def test_require_daytona_settings_fails_closed_without_deps(monkeypatch: pytest.
                 llm_api_key=SecretStr("llm-key"),
             )
         )
-    with pytest.raises(CompositionError, match="LLM_API_KEY"):
+    with pytest.raises(CompositionError, match="provider API key"):
         require_daytona_settings(
             Settings(
                 run_environment="daytona",
@@ -206,7 +206,7 @@ def test_require_deno_settings_fails_closed_without_deps(monkeypatch) -> None:
     monkeypatch.setattr("shutil.which", lambda _name: "/usr/bin/deno")
     with pytest.raises(CompositionError, match="run_environment"):
         require_deno_settings(Settings(run_environment="daytona"))
-    with pytest.raises(CompositionError, match="LLM_API_KEY"):
+    with pytest.raises(CompositionError, match="provider API key"):
         require_deno_settings(
             Settings(
                 run_environment="deno",

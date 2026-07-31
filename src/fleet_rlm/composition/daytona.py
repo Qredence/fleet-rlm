@@ -33,7 +33,7 @@ def require_daytona_settings(settings: Settings) -> None:
     from fleet_rlm.rlm.lm_factory import has_llm_credentials, sanitize_base_url
 
     if not has_llm_credentials(settings):
-        missing.append("FLEET_LLM_API_KEY or configured role API key")
+        missing.append("configured provider API key")
     if any(
         role.api_key_env == "DATABRICKS_TOKEN" and not sanitize_base_url(role.base_url)
         for role in (settings.llm_role("root"), settings.llm_role("sub"))

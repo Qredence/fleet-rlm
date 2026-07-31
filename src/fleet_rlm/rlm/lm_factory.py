@@ -61,7 +61,9 @@ def resolve_role_api_key(settings: Settings, role: LLMRoleSettings) -> str | Non
     value = (value or "").strip()
     if value:
         return value
-    if role.api_key_env == "FLEET_LLM_API_KEY" and settings.llm_api_key is not None:
+    # ``llm_api_key`` is retained for programmatic Settings construction in
+    # tests and integrations; production policy always names a provider env.
+    if settings.llm_api_key is not None:
         return settings.llm_api_key.get_secret_value().strip() or None
     return None
 

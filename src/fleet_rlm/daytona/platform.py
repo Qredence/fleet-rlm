@@ -11,6 +11,7 @@ from fleet_rlm.daytona.provisioning import DaytonaSandboxSpec, require_scoped_vo
 
 _VOLUME_READY_RETRY_DELAYS = (0.25, 0.5, 1.0, 2.0, 4.0, 8.0)
 _VOLUME_FAILED_STATES = frozenset({"deleting", "deleted", "error"})
+_DAYTONA_CLOUD_API_URL = "https://app.daytona.io/api"
 ProviderState = Literal[
     "missing",
     "running",
@@ -34,7 +35,10 @@ def build_daytona_client(settings: Settings) -> Any:
         raw = settings.daytona_api_key
         api_key = raw.get_secret_value() if hasattr(raw, "get_secret_value") else str(raw)
         api_key = api_key or None
-    config_kwargs: dict[str, Any] = {}
+    # Pass the current SDK field explicitly.  Leaving this unset makes Daytona
+    # 0.202.0 evaluate the deprecated ``server_url`` fallback, and would also
+    # allow ambient SDK endpoint discovery to bypass Fleet's configuration.
+    config_kwargs: dict[str, Any] = {"api_url": _DAYTONA_CLOUD_API_URL}
     if api_key:
         config_kwargs["api_key"] = api_key
     if settings.daytona_org_id:

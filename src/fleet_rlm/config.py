@@ -132,14 +132,14 @@ class Settings(BaseModel):
     run_stale_after_seconds: int = Field(default=60, gt=0)
     rlm_verbose: bool = True
     log_level: Literal["CRITICAL", "ERROR", "WARNING", "INFO", "DEBUG"] = "INFO"
-    root_llm_api_key_env: str = "FLEET_LLM_API_KEY"
+    root_llm_api_key_env: str = "FLEET_OPENAI_API_KEY"
     root_llm_base_url: str | None = None
     root_llm_max_tokens: int | None = Field(default=None, ge=1)
     root_llm_temperature: float | None = None
     root_llm_reasoning_effort: Literal["none", "low", "medium", "high"] | None = None
     root_llm_cache: bool = True
     root_llm_num_retries: int = Field(default=3, ge=0)
-    sub_llm_api_key_env: str = "FLEET_LLM_API_KEY"
+    sub_llm_api_key_env: str = "FLEET_OPENAI_API_KEY"
     sub_llm_base_url: str | None = None
     sub_llm_max_tokens: int | None = Field(default=None, ge=1)
     sub_llm_temperature: float | None = None
@@ -161,6 +161,16 @@ class Settings(BaseModel):
     mlflow_expose_trace_id: bool = Field(
         default=True,
         description="When tracing is enabled, surface trace ids on Turn SSE metadata",
+    )
+    mlflow_async_logging: bool = Field(
+        default=True,
+        description="Upload MLflow trace data asynchronously when tracing is enabled",
+    )
+    mlflow_trace_sampling_ratio: float = Field(
+        default=1.0,
+        ge=0.0,
+        le=1.0,
+        description="Fraction of Turn traces to sample for MLflow",
     )
     mlflow_trace_catalog: str | None = Field(default=None)
     mlflow_trace_schema: str | None = Field(default=None)
@@ -254,6 +264,8 @@ _TABLE_KEYS: dict[str, frozenset[str]] = {
             "experiment_name_env",
             "tracking_uri",
             "expose_trace_id",
+            "async_logging",
+            "trace_sampling_ratio",
             "trace_catalog",
             "trace_catalog_env",
             "trace_schema",
@@ -286,7 +298,7 @@ def _require_mapping(value: object, location: str) -> Mapping[str, Any]:
     return cast(Mapping[str, Any], value)
 
 
-def _validate_policy_table(value: object, location: str) -> None:
+def _validate_policy_table(value: object, location: str, *, allow_partial_llm: bool = False) -> None:
     table = _require_mapping(value, location)
     unknown = set(table).difference(_TABLE_KEYS)
     if unknown:
@@ -316,7 +328,8 @@ def _validate_policy_table(value: object, location: str) -> None:
                 )
             if "base_url" in role_table and "base_url_env" in role_table:
                 raise FleetConfigurationError(f"{location}.llm.{role} cannot define both base_url and base_url_env")
-            _validate_environment_reference(role_table.get("api_key_env"), f"{location}.llm.{role}.api_key_env")
+            if "api_key_env" in role_table or not allow_partial_llm:
+                _validate_environment_reference(role_table.get("api_key_env"), f"{location}.llm.{role}.api_key_env")
             _validate_optional_environment_reference(
                 role_table.get("base_url_env"), f"{location}.llm.{role}.base_url_env"
             )
@@ -428,6 +441,10 @@ def _flatten_policy(policy: Mapping[str, Any]) -> dict[str, Any]:
         values["mlflow_tracking_uri"] = mlflow["tracking_uri"]
     if "expose_trace_id" in mlflow:
         values["mlflow_expose_trace_id"] = mlflow["expose_trace_id"]
+    if "async_logging" in mlflow:
+        values["mlflow_async_logging"] = mlflow["async_logging"]
+    if "trace_sampling_ratio" in mlflow:
+        values["mlflow_trace_sampling_ratio"] = mlflow["trace_sampling_ratio"]
     for role in ("root", "sub"):
         role_values = _require_mapping(llm.get(role, {}), f"llm.{role}")
         values[f"{role}_model"] = role_values.get("model")
@@ -532,7 +549,7 @@ def load_runtime_settings() -> Settings:
         raise FleetConfigurationError("config.default_profile must be a string")
     defaults = _require_mapping(root.get("defaults", {}), "defaults")
     profiles = _require_mapping(root.get("profiles", {}), "profiles")
-    _validate_policy_table(defaults, "defaults")
+    _validate_policy_table(defaults, "defaults", allow_partial_llm=True)
     if not profiles:
         raise FleetConfigurationError("config.profiles must declare at least one profile")
     profile = config.get("default_profile")

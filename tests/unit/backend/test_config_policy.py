@@ -25,9 +25,9 @@ def _field(snapshot, scope: str, path: str):
 def test_policy_read_exposes_toml_values_without_environment_secret_values(tmp_path: Path) -> None:
     service, _ = _service(tmp_path)
 
-    field = _field(service.read(), "defaults", "llm.root.api_key_env")
+    field = _field(service.read(), "local-deno", "llm.root.api_key_env")
 
-    assert field["value"] == "FLEET_LLM_API_KEY"
+    assert field["value"] == "FLEET_OPENAI_API_KEY"
     assert field["editor"] == "text"
     assert "secret" not in str(field).lower()
 
@@ -91,7 +91,7 @@ def test_policy_never_reports_environment_policy_overrides(monkeypatch: pytest.M
     monkeypatch.setenv("FLEET_ROOT_MODEL", "stale-model")
     service, _ = _service(tmp_path)
 
-    field = _field(service.read(), "defaults", "llm.root.model")
+    field = _field(service.read(), "local-deno", "llm.root.model")
 
     assert field["environment_overridden"] is False
 

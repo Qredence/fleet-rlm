@@ -93,7 +93,7 @@ def test_normalize_model_id_adds_openai_prefix_for_compatible_bases() -> None:
 
 def test_runtime_does_not_accept_provider_environment_aliases(monkeypatch: pytest.MonkeyPatch) -> None:
     for name in (
-        "FLEET_LLM_API_KEY",
+        "FLEET_OPENAI_API_KEY",
         "FLEET_LLM_BASE_URL",
         "FLEET_ROOT_MODEL",
         "FLEET_SUB_MODEL",
@@ -106,7 +106,7 @@ def test_runtime_does_not_accept_provider_environment_aliases(monkeypatch: pytes
 
     assert settings.llm_api_key is None
     assert settings.root_model == "openai/gpt-4o-mini"
-    with pytest.raises(RuntimeError, match="FLEET_LLM_API_KEY"):
+    with pytest.raises(RuntimeError, match="FLEET_OPENAI_API_KEY"):
         build_model_bundle(settings)
 
 
