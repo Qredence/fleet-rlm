@@ -93,7 +93,7 @@ class _SessionState:
 
 def _decode_failure_status(value: str) -> Literal["failed", "cancelled", "timeout"]:
     if value in {"failed", "cancelled", "timeout"}:
-        return cast(Literal["failed", "cancelled", "timeout"], value)
+        return value
     raise TurnStateError("persisted Run has an invalid failure status")
 
 
@@ -103,7 +103,7 @@ def _decode_failure_code(
     status: Literal["failed", "cancelled", "timeout"],
 ) -> FailureCode:
     if value in {"preparation_failed", "execution_failed", "commit_failed", "cancelled", "timeout", "stale_claim"}:
-        return cast(FailureCode, value)
+        return value
     if value in {None, "failed"}:
         return failure_code_for_terminal_status(status)
     raise TurnStateError("persisted Run has an invalid failure code")
@@ -111,7 +111,7 @@ def _decode_failure_code(
 
 def _decode_claim_status(value: str) -> ClaimStatus:
     if value in {"running", "settling", "completed", "failed", "cancelled", "timeout"}:
-        return cast(ClaimStatus, value)
+        return value
     raise TurnStateError("persisted Run has an invalid claim status")
 
 
@@ -119,7 +119,7 @@ def _decode_claim_code(value: str | None) -> ClaimFailureCode | None:
     if value is None:
         return None
     if value in {"preparation_failed", "execution_failed", "commit_failed", "cancelled", "timeout", "stale_claim"}:
-        return cast(ClaimFailureCode, value)
+        return value
     raise TurnStateError("persisted Run has an invalid failure code")
 
 

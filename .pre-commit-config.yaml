@@ -17,7 +17,7 @@ repos:
         stages: [pre-commit]
 
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.15.11
+    rev: v0.16.1
     hooks:
       - id: ruff-check
         args:
@@ -25,6 +25,7 @@ repos:
           - --exit-non-zero-on-fix
         stages: [pre-commit]
       - id: ruff-format
+        types_or: [python, pyi, jupyter, markdown]
         stages: [pre-commit]
 
   - repo: local

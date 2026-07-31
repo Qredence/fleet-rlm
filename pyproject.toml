@@ -31,7 +31,7 @@ dependencies = [
     # on RLM internals that are private API.
     "dspy==3.3.0b1",
     # Sandboxed execution.
-    "daytona==0.200.0",
+    "daytona==0.202.0",
     # Persistence and migrations.
     "aiosqlite>=0.20.0",
     "alembic>=1.18.5,<2",
@@ -43,10 +43,10 @@ dependencies = [
     "pyyaml>=6.0.3,<7",
     "sqlalchemy[asyncio]>=2.0.51,<3",
     "tomli>=2.4.1; python_version < '3.11'",
-    # Web API surface. Pinned exactly to 0.139.0 (latest PyPI release, Jul 1
+    # Web API surface. Pinned exactly to 0.141.1 (latest PyPI release, Jul 29
     # 2026) for reproducible installs; bump deliberately when a newer release is
     # validated against the runtime + test suite.
-    "fastapi[standard]==0.139.0",
+    "fastapi[standard]==0.141.1",
     "uvicorn>=0.47.0,<1",
     "httpx2>=2.5.0",
     # Pooled HTTP client for the Daytona tool broker poll/fulfill loop:
@@ -78,8 +78,8 @@ dev = [
     "pytest-cov>=7.1,<8",
     "pytest-timeout>=2.4.0",
     "pytest-xdist>=3.5.0",
-    "ruff>=0.15.20",
-    "ty>=0.0.57",
+    "ruff>=0.16.1",
+    "ty>=0.0.65",
 ]
 server = [
     "psycopg[binary]>=3.3.4,<4",
@@ -110,8 +110,8 @@ dev = [
     "pytest-cov>=7.1,<8",
     "pytest-timeout>=2.4.0",
     "pytest-xdist>=3.5.0",
-    "ruff>=0.15.20",
-    "ty>=0.0.50",
+    "ruff>=0.16.1",
+    "ty>=0.0.65",
 ]
 
 [tool.uv]

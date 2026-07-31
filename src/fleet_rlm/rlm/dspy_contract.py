@@ -15,12 +15,12 @@ from dspy.utils.callback import BaseCallback
 from pydantic import TypeAdapter
 from pydantic_core import PydanticSerializationError
 
+from fleet_rlm.json_types import JsonValue as JsonValue
 from fleet_rlm.rlm.errors import RLMConfigError
 from fleet_rlm.rlm.sanitize import truncate_public_text, validate_declared_public_value
 
 DSPY_VERSION = "3.3.0b1"
 
-JsonValue: TypeAlias = bool | int | float | str | tuple["JsonValue", ...] | Mapping[str, "JsonValue"] | None
 ObservedUsageValue: TypeAlias = bool | int | float | str | dict[str, JsonValue] | None
 ReasoningObserver: TypeAlias = Callable[[Any], None]
 

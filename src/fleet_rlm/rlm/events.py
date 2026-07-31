@@ -9,10 +9,10 @@ from types import MappingProxyType
 from typing import ClassVar, Literal, TypeAlias
 from uuid import UUID, uuid4
 
+from fleet_rlm.json_types import JsonScalar as JsonScalar
+from fleet_rlm.json_types import JsonValue as JsonValue
 from fleet_rlm.rlm.dspy_contract import RLMUsage, validate_rlm_usage
 
-JsonScalar: TypeAlias = None | bool | int | float | str
-JsonValue: TypeAlias = JsonScalar | tuple["JsonValue", ...] | Mapping[str, "JsonValue"]
 RunFailedMessage: TypeAlias = Literal[
     "Turn failed",
     "Turn output is invalid",
