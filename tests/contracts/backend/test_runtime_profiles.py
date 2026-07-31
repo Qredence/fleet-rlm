@@ -12,6 +12,9 @@ def test_public_runtime_profiles_are_exactly_daytona() -> None:
     assert Settings(run_environment="daytona").run_environment == "daytona"
 
     with pytest.raises(ValidationError):
+        Settings(run_environment="deno")  # type: ignore[arg-type]
+
+    with pytest.raises(ValidationError):
         Settings(run_environment="unsupported")  # type: ignore[arg-type]
 
 
