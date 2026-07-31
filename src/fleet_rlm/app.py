@@ -109,8 +109,13 @@ def create_app(
     async def lifespan(app: FastAPI):
         settings_obj: Settings = app.state.settings
         if _composition_installer is not None:
-            async with _local_db_lifespan(app, settings_obj, _composition_installer):
-                yield
+            try:
+                async with _local_db_lifespan(app, settings_obj, _composition_installer):
+                    yield
+            finally:
+                from fleet_rlm.observability.tracing import flush_tracing
+
+                flush_tracing()
             return
 
         if settings_obj.run_environment == "daytona":
@@ -127,16 +132,26 @@ def create_app(
                 installed = True
                 yield
             finally:
-                if installed:
-                    await dispose_daytona_composition(app)
+                try:
+                    if installed:
+                        await dispose_daytona_composition(app)
+                finally:
+                    from fleet_rlm.observability.tracing import flush_tracing
+
+                    flush_tracing()
             return
 
         if settings_obj.run_environment == "deno":
             from fleet_rlm.composition import install_deno_composition, require_deno_settings
 
             require_deno_settings(settings_obj)
-            async with _local_db_lifespan(app, settings_obj, install_deno_composition):
-                yield
+            try:
+                async with _local_db_lifespan(app, settings_obj, install_deno_composition):
+                    yield
+            finally:
+                from fleet_rlm.observability.tracing import flush_tracing
+
+                flush_tracing()
             return
 
     app = FastAPI(

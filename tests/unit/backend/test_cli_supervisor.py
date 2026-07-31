@@ -164,9 +164,9 @@ def test_local_mlflow_server_starts_with_durable_storage_and_stops_owned_process
 ) -> None:
     logs = tmp_path / ".fleet_rlm" / "logs"
     logs.mkdir(parents=True)
-    versions = iter((None, "3.14.0"))
+    versions = iter((None, "3.15.0"))
     monkeypatch.setattr(supervisor, "_mlflow_server_version", lambda *_args, **_kwargs: next(versions))
-    monkeypatch.setattr(supervisor.importlib.metadata, "version", lambda _name: "3.14.0")
+    monkeypatch.setattr(supervisor.importlib.metadata, "version", lambda _name: "3.15.0")
     monkeypatch.setattr(supervisor, "_require_available_port", lambda *_args: None)
     process = _Process(pid=5001)
     calls: list[tuple[list[str], dict[str, object]]] = []
@@ -206,8 +206,8 @@ def test_local_mlflow_server_reuses_compatible_external_process(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    monkeypatch.setattr(supervisor, "_mlflow_server_version", lambda *_args, **_kwargs: "3.14.0")
-    monkeypatch.setattr(supervisor.importlib.metadata, "version", lambda _name: "3.14.0")
+    monkeypatch.setattr(supervisor, "_mlflow_server_version", lambda *_args, **_kwargs: "3.15.0")
+    monkeypatch.setattr(supervisor.importlib.metadata, "version", lambda _name: "3.15.0")
     monkeypatch.setattr(
         supervisor.subprocess,
         "Popen",
@@ -233,10 +233,10 @@ def test_local_mlflow_server_rejects_incompatible_external_version(
     tmp_path: Path,
 ) -> None:
     monkeypatch.setattr(supervisor, "_mlflow_server_version", lambda *_args, **_kwargs: "3.13.0")
-    monkeypatch.setattr(supervisor.importlib.metadata, "version", lambda _name: "3.14.0")
+    monkeypatch.setattr(supervisor.importlib.metadata, "version", lambda _name: "3.15.0")
 
     with (
-        pytest.raises(supervisor.SupervisorError, match=r"reports version 3\.13\.0.*requires 3\.14\.0"),
+        pytest.raises(supervisor.SupervisorError, match=r"reports version 3\.13\.0.*requires 3\.15\.0"),
         _LOCAL_MLFLOW_SERVER(
             _local_mlflow_settings(),
             repo_root=tmp_path,
@@ -252,7 +252,7 @@ def test_local_mlflow_server_rejects_non_mlflow_port_owner(
     tmp_path: Path,
 ) -> None:
     monkeypatch.setattr(supervisor, "_mlflow_server_version", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(supervisor.importlib.metadata, "version", lambda _name: "3.14.0")
+    monkeypatch.setattr(supervisor.importlib.metadata, "version", lambda _name: "3.15.0")
     monkeypatch.setattr(
         supervisor,
         "_require_available_port",
@@ -278,7 +278,7 @@ def test_local_mlflow_readiness_reports_early_exit(tmp_path: Path) -> None:
         supervisor._wait_until_mlflow_ready(
             _ExitedProcess(pid=5001, returncode=3),
             tracking_uri="http://127.0.0.1:5001",
-            expected_version="3.14.0",
+            expected_version="3.15.0",
             log_path=log_path,
         )
 
@@ -295,7 +295,7 @@ def test_local_mlflow_readiness_reports_timeout(
         supervisor._wait_until_mlflow_ready(
             _Process(pid=5001),
             tracking_uri="http://127.0.0.1:5001",
-            expected_version="3.14.0",
+            expected_version="3.15.0",
             log_path=tmp_path / "mlflow.log",
         )
 

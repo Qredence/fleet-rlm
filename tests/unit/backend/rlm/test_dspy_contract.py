@@ -400,6 +400,8 @@ def test_lm_trace_callback_records_role_and_failure_category(monkeypatch: pytest
     monkeypatch.setitem(sys.modules, "mlflow", fake_mlflow)
     monkeypatch.setitem(sys.modules, "mlflow.entities", fake_entities)
     root = SimpleNamespace(model="root-model")
+    ticks = iter((10.0, 10.125))
+    monkeypatch.setattr("fleet_rlm.rlm.dspy_contract.time.perf_counter", lambda: next(ticks))
     callback = _RLMTraceCallback(root_lm=root, sub_lm=SimpleNamespace(model="sub-model"))
 
     token = turn_tracing._fleet_trace_active.set(True)
@@ -425,6 +427,7 @@ def test_lm_trace_callback_records_role_and_failure_category(monkeypatch: pytest
         "failure_category": "unknown",
         "response_keys": [],
         "call_index": 1,
+        "wall_time_ms": 125.0,
         "phase_status": "failed",
     }
     assert calls.status == "ERROR"
@@ -465,13 +468,45 @@ def test_lm_trace_callback_records_call_specific_usage_and_standard_attribute(mo
     fake_entities = SimpleNamespace(SpanType=SimpleNamespace(CHAIN="CHAIN", LLM="LLM"))
     monkeypatch.setitem(sys.modules, "mlflow", fake_mlflow)
     monkeypatch.setitem(sys.modules, "mlflow.entities", fake_entities)
+    response = SimpleNamespace(
+        _hidden_params={
+            "_response_ms": 401.25,
+            "litellm_overhead_time_ms": 12.5,
+            "callback_duration_ms": 3.75,
+            "litellm_call_id": "fallback-call-id",
+            "additional_headers": {
+                "llm_provider-x-request-id": "provider-request-7",
+                "authorization": "must-not-be-traced",
+            },
+            "provider_response": "must-not-be-traced",
+        }
+    )
     root = SimpleNamespace(model="root-model", history=[{"usage": {"prompt_tokens": 99}}])
+    ticks = iter((20.0, 20.5))
+    monkeypatch.setattr("fleet_rlm.rlm.dspy_contract.time.perf_counter", lambda: next(ticks))
     callback = _RLMTraceCallback(root_lm=root, sub_lm=SimpleNamespace(model="sub-model"), recursive_depth=1)
 
     token = turn_tracing._fleet_trace_active.set(True)
     try:
         callback.on_lm_start("call-2", root, {"prompt": "bounded"})
-        root.history.append({"usage": {"prompt_tokens": 7, "completion_tokens": 3, "total_tokens": 10}})
+        root.history.append(
+            {
+                "usage": {
+                    "prompt_tokens": 7,
+                    "completion_tokens": 3,
+                    "total_tokens": 10,
+                    "completion_tokens_details": SimpleNamespace(
+                        model_dump=lambda: {"reasoning_tokens": 2, "video_tokens": 9}
+                    ),
+                    "cache_read_input_tokens": 4,
+                    "prompt_cache_hit_tokens": 4,
+                    "unsafe_usage": "must-not-be-traced",
+                },
+                "response": response,
+                "prompt": "must-not-be-traced",
+                "outputs": "must-not-be-traced",
+            }
+        )
         callback.on_lm_end("call-2", [])
     finally:
         turn_tracing._fleet_trace_active.reset(token)
@@ -484,10 +519,27 @@ def test_lm_trace_callback_records_call_specific_usage_and_standard_attribute(mo
         "prompt_tokens": 7,
         "completion_tokens": 3,
         "total_tokens": 10,
+        "completion_tokens_details": {"reasoning_tokens": 2},
+        "cache_read_input_tokens": 4,
+        "prompt_cache_hit_tokens": 4,
     }
     assert calls.outputs[-1]["response_keys"] == []
+    assert calls.outputs[-1]["wall_time_ms"] == 500.0
+    assert calls.outputs[-1]["provider_response_ms"] == 401.25
+    assert calls.outputs[-1]["litellm_overhead_ms"] == 12.5
+    assert calls.outputs[-1]["callback_duration_ms"] == 3.75
+    assert calls.outputs[-1]["provider_request_id"] == "provider-request-7"
+    assert "authorization" not in str(calls.outputs[-1])
+    assert "must-not-be-traced" not in str(calls.outputs[-1])
     assert calls.attributes == [
-        {"mlflow.chat.tokenUsage": '{"completion_tokens":3,"prompt_tokens":7,"total_tokens":10}'}
+        {
+            "mlflow.chat.tokenUsage": {
+                "input_tokens": 7,
+                "output_tokens": 3,
+                "total_tokens": 10,
+                "cache_read_tokens": 4,
+            }
+        }
     ]
 
 

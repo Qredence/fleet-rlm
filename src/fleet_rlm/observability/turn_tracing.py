@@ -11,7 +11,9 @@ from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from contextvars import ContextVar, Token
 from dataclasses import dataclass, field
-from typing import Any
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as package_version
+from typing import Any, cast
 from uuid import UUID
 
 logger = logging.getLogger(__name__)
@@ -26,20 +28,37 @@ def _trace_value(value: object) -> object:
 
         return sanitize_public_text(value, max_len=_MAX_TRACE_TEXT_CHARS)
     if isinstance(value, Mapping):
-        return {str(key): _trace_value(item) for key, item in list(value.items())[:32]}
+        from fleet_rlm.rlm.sanitize import sanitize_public_value
+
+        sanitized = sanitize_public_value(dict(list(value.items())[:32]), max_len=_MAX_TRACE_TEXT_CHARS)
+        if isinstance(sanitized, Mapping):
+            return {str(key): _trace_value(item) for key, item in list(sanitized.items())[:32]}
+        return sanitized
     if isinstance(value, (list, tuple)):
-        return [_trace_value(item) for item in value[:32]]
+        from fleet_rlm.rlm.sanitize import sanitize_public_value
+
+        sanitized = sanitize_public_value(list(value[:32]), max_len=_MAX_TRACE_TEXT_CHARS)
+        if isinstance(sanitized, list):
+            return [_trace_value(item) for item in sanitized[:32]]
+        return sanitized
     if value is None or isinstance(value, (bool, int, float)):
         return value
     return type(value).__name__
 
 
 def _trace_mapping(values: Mapping[str, object]) -> dict[str, object]:
-    return {str(key): _trace_value(item) for key, item in list(values.items())[:32]}
+    sanitized = _trace_value(values)
+    if isinstance(sanitized, dict):
+        return cast(dict[str, object], sanitized)
+    return {}
 
 
 _LOCAL_BYOK_USER = "fleet-local"
 _SPAN_NAME = "fleet_turn"
+try:
+    _FLEET_APP_VERSION = package_version("fleet-rlm")
+except PackageNotFoundError:
+    _FLEET_APP_VERSION = "unknown"
 _current_trace_id: ContextVar[str | None] = ContextVar("fleet_mlflow_trace_id", default=None)
 # True only while a fleet_turn root span is open. Phase spans gate on this so
 # tracing-disabled turns never import or touch MLflow at all.
@@ -91,6 +110,14 @@ def annotate_trace_io(
                     response[key] = _trace_value(response_outputs[key])
 
         span.set_outputs(response or {"answer": response_text or ""})
+        trace_update = getattr(mlflow, "update_current_trace", None)
+        if callable(trace_update):
+            preview_kwargs: dict[str, object] = {
+                "request_preview": _trace_value(request),
+            }
+            if response_text is not None:
+                preview_kwargs["response_preview"] = _trace_value(response_text)
+            trace_update(**preview_kwargs)
         if failed:
             try:
                 span.set_status("ERROR")
@@ -254,7 +281,11 @@ def turn_trace(
             return
 
         try:
-            span_context = mlflow.start_span(name=_SPAN_NAME, span_type=SpanType.CHAIN)
+            span_context = mlflow.start_span(
+                name=_SPAN_NAME,
+                span_type=SpanType.CHAIN,
+                log_level="INFO",
+            )
             span = span_context.__enter__()
         except Exception:
             logger.warning("MLflow turn span setup failed; continuing without traces", exc_info=True)
@@ -269,6 +300,10 @@ def turn_trace(
                 tags={
                     "fleet.run_id": str(run_id),
                     "fleet.session_id": str(session_id),
+                },
+                metadata={
+                    "fleet.run_id": str(run_id),
+                    "fleet.app_version": _FLEET_APP_VERSION,
                 },
             )
         except Exception:

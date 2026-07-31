@@ -17,6 +17,7 @@ import time
 import uuid
 from collections.abc import Callable, Mapping
 from concurrent.futures import ThreadPoolExecutor
+from contextvars import copy_context
 from threading import Thread
 from typing import TYPE_CHECKING, Any
 
@@ -516,8 +517,12 @@ class DaytonaHttpToolBroker:
         if not requests_out:
             return False
         self._fulfilled_count += len(requests_out)
+        # The broker polls on the interpreter thread, then fulfills host Tools
+        # in worker threads. Copy the active Turn/MLflow context separately for
+        # each request so Tool spans stay nested without sharing a Context.
+        work = [(copy_context(), item) for item in requests_out]
         with ThreadPoolExecutor(max_workers=min(8, len(requests_out))) as pool:
-            list(pool.map(lambda item: self._fulfill(item, tool_executor), requests_out))
+            list(pool.map(lambda item: item[0].run(self._fulfill, item[1], tool_executor), work))
         return True
 
     def _fulfill(

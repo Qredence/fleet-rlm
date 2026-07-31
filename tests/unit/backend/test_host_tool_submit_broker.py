@@ -483,6 +483,52 @@ def test_http_broker_poll_and_fulfill_route_through_pooled_client() -> None:
     assert broker._http() is client
 
 
+def test_http_broker_copies_context_independently_into_parallel_fulfillment() -> None:
+    from contextvars import ContextVar
+
+    from fleet_rlm.daytona.http_broker import DaytonaHttpToolBroker
+
+    class _Sandbox:
+        pass
+
+    broker = DaytonaHttpToolBroker(sandbox=_Sandbox())
+    broker._broker_url = "http://example.test"
+    broker._broker_secret = "secret"
+    pending = [
+        {"id": "c1", "lease_token": "t1", "tool_name": "one", "args": [], "kwargs": {}},
+        {"id": "c2", "lease_token": "t2", "tool_name": "two", "args": [], "kwargs": {}},
+    ]
+
+    def _handler(request: httpx.Request) -> httpx.Response:
+        nonlocal pending
+        if request.url.path == "/pending":
+            result, pending = pending, []
+            return httpx.Response(200, json={"requests": result})
+        return httpx.Response(200, json={})
+
+    broker._client = httpx.Client(
+        transport=httpx.MockTransport(_handler),
+        base_url="http://example.test",
+        headers=broker._preview_headers(),
+    )
+    active_trace = ContextVar("active_trace", default="missing")
+    active_trace.set("fleet-turn")
+    observed: dict[str, tuple[str, str]] = {}
+
+    def _execute(name: str, _args: list[object], _kwargs: dict[str, object]) -> str:
+        inherited = active_trace.get()
+        active_trace.set(name)
+        observed[name] = (inherited, active_trace.get())
+        return name
+
+    assert broker._poll_once(_execute) is True
+    assert observed == {
+        "one": ("fleet-turn", "one"),
+        "two": ("fleet-turn", "two"),
+    }
+    assert active_trace.get() == "fleet-turn"
+
+
 def test_execute_with_callbacks_records_per_execution_stats(monkeypatch: pytest.MonkeyPatch) -> None:
     from fleet_rlm.daytona.http_broker import DaytonaHttpToolBroker
 
