@@ -12,8 +12,7 @@ Install Python dependencies, then select a configured profile:
 
 ```bash
 uv sync --all-extras --dev
-uv run fleet deno   # LLM key + Deno
-uv run fleet cli    # LLM key + Daytona key + upgraded database
+uv run fleet cli    # Daytona + pi-tui; requires an LLM key, a Daytona key, and an upgraded database
 ```
 
 Backend-only launch:

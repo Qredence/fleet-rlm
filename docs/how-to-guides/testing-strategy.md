@@ -14,7 +14,6 @@ database lanes remain explicit.
 | Backend contracts | `tests/contracts/backend/` | API, persistence, packaging, composition, boundary contracts |
 | End to end | `tests/e2e/` | canonical local process and request flows |
 | TUI | `tools/fleet-tui/src/tests/`, `tools/fleet-tui/src/tui/tests/` | transport, projection, store, commands, rendering, terminal lifecycle |
-| Deno | named unit/contract tests marked `deno` | real deterministic DSPy Deno/Pyodide contract |
 | Database | tests marked `db` | explicit configured database behavior |
 | Daytona MVP | `tests/live/backend/test_fleet_rlm_daytona_mvp.py` | complete real FastAPI/DSPy/Daytona flow, including Session Workspace durability across Sandbox replacement |
 | Attachment/Artifact durability | `tests/live/backend/test_attachment_artifact_durability.py` | Volume persistence and committed content |
@@ -46,7 +45,7 @@ substitute for the opt-in live Daytona durability checks below.
 
 - Ruff lint and format checks;
 - `ty` for `src/fleet_rlm`;
-- backend/script/LiteLLM/contract/end-to-end tests excluding `deno`, live,
+- backend/script/LiteLLM/contract/end-to-end tests excluding live,
   benchmark, and database markers;
 - `make api-check` for OpenAPI and generated TUI HTTP types;
 - pi-tui format, lint, type, and Vitest checks;
@@ -68,20 +67,6 @@ terminal. It covers strict stream state, live/durable ordering, atomic hydration
 commands and Skill selection, cancellation, complete static rendering,
 10,000-row native scrollback, absence of mouse-mode sequences, and cleanup.
 
-## Deno gate
-
-```bash
-make test-deno
-```
-
-This requires Deno on `PATH` and runs without provider network calls. It
-validates DSPy's actual default Deno/Pyodide interpreter, progressive Skill
-loading, bounded inputs, execution, `SUBMIT`, terminal projection, and failure,
-cancellation, and timeout handling.
-
-CircleCI installs the pinned Deno 2.9.2 runtime and runs this as a required
-workflow job. The normal fast split excludes `deno` markers.
-
 ## Database gate
 
 Alembic owns live schema creation. Against an explicitly configured empty
@@ -92,7 +77,7 @@ uv run alembic upgrade head
 uv run alembic check
 ```
 
-Tests and Deno local SQLite helpers may create ephemeral schemas explicitly.
+Private deterministic tests may create ephemeral schemas explicitly.
 
 ## Credentialed Daytona gates
 

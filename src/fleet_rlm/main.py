@@ -1,7 +1,7 @@
 """ASGI entrypoints for the canonical Fleet RLM backend.
 
 The default ``app`` uses ``[config] default_profile`` from ``config/fleet.toml``.
-Select ``local-deno`` there for the canonical reduced local runtime.
+The supported runtime profile is Daytona.
 """
 
 from __future__ import annotations

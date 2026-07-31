@@ -345,7 +345,7 @@ async def test_runner_validates_host_metadata_before_provider_execution() -> Non
 
 @pytest.mark.asyncio
 async def test_runner_loads_two_skills_reads_python_resource_and_completes_submit() -> None:
-    from fleet_rlm.chat.deno_run_environment import DenoPreparedCapabilities
+    from fleet_rlm.chat.capability_preparation import PreparedHostCapabilities
     from fleet_rlm.chat.session_context import SessionContextManifest
     from fleet_rlm.rlm.context import RLMExecutionContext, RLMExecutionSpec
     from fleet_rlm.rlm.dspy_contract import RLMOptions
@@ -381,7 +381,13 @@ async def test_runner_loads_two_skills_reads_python_resource_and_completes_submi
         def drain_public_events(self):
             return []
 
-    capabilities = DenoPreparedCapabilities(spec, files=Files(), skills=skill_host)
+    capabilities = PreparedHostCapabilities(
+        spec,
+        files=Files(),
+        skills=skill_host,
+        close_files=False,
+        artifact_candidates=False,
+    )
 
     class Factory:
         def create(self, **kwargs):

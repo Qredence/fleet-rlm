@@ -1,6 +1,6 @@
 # Repository Agent Map
 
-`fleet-rlm` is a backend-first adaptive recursive language model workspace with Deno and Daytona DSPy RLM runtimes. The prior Web frontend has been removed; the maintained development client is `tools/fleet-tui/`.
+`fleet-rlm` is a backend-first adaptive recursive language model workspace with a Daytona DSPy RLM runtime and a credential-free deterministic private-test composition. The prior Web frontend has been removed; the maintained development client is `tools/fleet-tui/`.
 
 ## Operating Model
 
@@ -61,7 +61,6 @@ Codex Cloud workspaces use `zsh .codex/workspace-bootstrap.zsh`; the script inst
 
 ```bash
 uv run fleet cli
-uv run fleet deno
 uv run fleet doctor daytona
 uv run fleet web
 uv run fleet-rlm serve-api --port 8000
@@ -93,7 +92,7 @@ Run `make check-docs` when docs, commands, Codex config, generated contracts, or
 - Always use the `zsh` terminal profile for CLI commands; prefer running Python scripts/commands using `uv run` over raw `python3` or `python`.
 - Secure production deployments strictly on Bring-Your-Own-Key (BYOK) model; never leak server-level secrets (like Gemini API keys or Daytona keys) to authenticated users.
 - Do not edit `.plan.md` or any attached implementation plans while executing a task, prioritizing marked-in-progress to-dos sequentially.
-- Run the full validation gate (`make check`, `make test-deno`,
+- Run the full validation gate (`make check`,
   `make check-security`, `make build-release`, `make check-release`, and
   `git diff --check`) before commits when the user or phase completion requires it.
 - Do not amend commits already pushed to remote; use narrow follow-up commits for fixes discovered after push.
@@ -108,15 +107,15 @@ Run `make check-docs` when docs, commands, Codex config, generated contracts, or
 ## Learned Workspace Facts
 
 - Local development runs on `:8000`. `fleet cli` supervises Daytona plus pi-tui,
-  `fleet deno` supervises Deno plus pi-tui, and `fleet web` or `fleet-rlm serve-api`
-  remains backend-only. Supervised backend logs live under `.fleet_rlm/logs/`;
+  and `fleet web` or `fleet-rlm serve-api` remains backend-only. Supervised
+  backend logs live under `.fleet_rlm/logs/`;
   `fleet doctor daytona` is the opt-in disposable provider/mount probe.
   `POST /api/sessions/{session_id}/turns`
   requires `Idempotency-Key` and projects typed `RuntimeEvent` values over SSE;
   the legacy top-level chat, `/api/v1`, and WebSocket surfaces are removed.
 - `src/fleet_rlm/` is the canonical RLM-native backend. The parallel foundation package was cut over after exit-bar evidence on `71e79271`; there is no compatibility runtime or dual-serve path.
-- The canonical public Run Environment set is `deno` and `daytona`. Private tests install a credential-free deterministic composition explicitly. Deno is intentional local vanilla `dspy.RLM` (real LM + DSPy default Deno/Pyodide) with Attachment reads and Skills but no durable Artifact promotion; Daytona is the full Fleet path (Sandbox, Workspace Volume Scope, Artifact promotion).
-- `create_app()` installs handlers, routers, and the static in-memory bundled Skill catalog (including `dspy-rlm`, which defines `dspy.RLM` as Recursive LM/REPL — never RAG/`dspy.Retrieve`). FastAPI lifespan installs one complete Deno or Daytona runtime inventory through `composition/`; routes retrieve composed runtime modules.
+- The canonical public Run Environment set is `daytona`. Private tests install a credential-free deterministic composition explicitly; it is not a public runtime profile.
+- `create_app()` installs handlers, routers, and the static in-memory bundled Skill catalog (including `dspy-rlm`, which defines `dspy.RLM` as Recursive LM/REPL — never RAG/`dspy.Retrieve`). FastAPI lifespan installs one complete Daytona inventory through `composition/`; private tests inject their own inventory and routes retrieve composed runtime modules.
 - The maintained terminal uses pi-tui only. `fleet-turn-stream.ts` owns strict stream lifecycle, `sse.ts` owns frame/chunk validation, `tui/projection.ts` owns live/reload projection, and `tui/store.ts` owns atomic hydration. The monochrome operator timeline renders all evidence statically expanded in native terminal scrollback; Fleet does not capture the mouse or maintain a transcript viewport. Live evidence includes DSPy callback reasoning, Tools, and Daytona interpreter code/output; the completed native trajectory reconciles gaps or corrections. `dspy.RLM(verbose=…)` remains host-logger-only.
 - Live Daytona MVP proof (`tests/live/backend/`, `scripts/live_daytona_verify.py`) loads repo `.env` via `python-dotenv` with `override=False`; existing process exports still win.
 - Daytona SDK imports are confined to `fleet_rlm.daytona`. Durable Attachments

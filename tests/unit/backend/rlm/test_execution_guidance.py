@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fleet_rlm.files.workspace_models import DAYTONA_WORKSPACE_CAPABILITY, DENO_WORKSPACE_CAPABILITY
+from fleet_rlm.files.workspace_models import DAYTONA_WORKSPACE_CAPABILITY, UNAVAILABLE_WORKSPACE_CAPABILITY
 from fleet_rlm.rlm.signature import FleetRLMSignature
 
 
@@ -47,9 +47,9 @@ def test_default_signature_marks_discovery_inputs_as_conditional_metadata() -> N
 
 def test_workspace_capability_declares_temporary_durable_and_commit_gated_state() -> None:
     daytona = DAYTONA_WORKSPACE_CAPABILITY.instructions
-    deno = DENO_WORKSPACE_CAPABILITY.instructions
+    unavailable = UNAVAILABLE_WORKSPACE_CAPABILITY.instructions
 
     for marker in ("REPL variables", "sandbox-local files", "immediately durable", "Turn Commit"):
         assert marker in daytona
-    assert "unavailable" in deno
-    assert "REPL variables" in deno
+    assert "unavailable" in unavailable
+    assert "REPL variables" in unavailable

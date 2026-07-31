@@ -1,7 +1,7 @@
 """HTTP-in-sandbox host-tool broker for Daytona RLM mediation.
 
 Transport choice for B1: Daytona-appropriate HTTP broker inside the sandbox
-with host-side poll (mirrors legacy Fleet bridge semantics; not Deno JSON-RPC).
+with host-side poll (mirrors legacy Fleet bridge semantics; it is not a JSON-RPC broker).
 """
 
 from __future__ import annotations

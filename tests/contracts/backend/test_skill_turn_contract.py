@@ -142,16 +142,16 @@ def test_invalid_exact_selection_is_generic_before_stream_headers() -> None:
 
 
 @pytest.mark.asyncio
-async def test_deno_progressive_tools_preload_exact_selection_and_keep_events_metadata_only() -> None:
+async def test_private_progressive_tools_preload_exact_selection_and_keep_events_metadata_only() -> None:
     from fleet_rlm.api.sse import AISDKUIProjector
-    from fleet_rlm.chat.deno_run_environment import DenoRunEnvironmentProvider, _DenoCapabilityPreparer
+    from fleet_rlm.composition.testing import TestingCapabilityPreparer, TestingRunEnvironmentProvider
 
     catalog = _catalog()
     selected = catalog.require(stable_skill_id("long-context"))
     other = catalog.require(stable_skill_id("workspace-files"))
     turn = _turn(selections=(SkillSelectionRef(selected.card.id, selected.card.version),))
-    environment = await DenoRunEnvironmentProvider().acquire(turn, deadline=float("inf"))
-    prepared = await _DenoCapabilityPreparer(
+    environment = await TestingRunEnvironmentProvider().acquire(turn, deadline=float("inf"))
+    prepared = await TestingCapabilityPreparer(
         skill_catalog=catalog,
         models=RLMModelBundle(MagicMock(), MagicMock()),
         options=RLMOptions(),
@@ -239,7 +239,7 @@ async def test_progressive_resource_requires_load_and_daytona_preparation_is_pro
 
 @pytest.mark.asyncio
 async def test_data_analysis_signature_and_report_builder_selection_use_host_tools_only() -> None:
-    from fleet_rlm.chat.deno_run_environment import DenoRunEnvironmentProvider, _DenoCapabilityPreparer
+    from fleet_rlm.composition.testing import TestingCapabilityPreparer, TestingRunEnvironmentProvider
 
     catalog = _catalog()
     csv = b"value,group\n1,a\n2,a\n"
@@ -255,9 +255,9 @@ async def test_data_analysis_signature_and_report_builder_selection_use_host_too
             SkillSelectionRef(report_builder.card.id, report_builder.card.version),
         ),
     )
-    environment = await DenoRunEnvironmentProvider().acquire(turn, deadline=float("inf"))
+    environment = await TestingRunEnvironmentProvider().acquire(turn, deadline=float("inf"))
     environment.attachment_sink.values[staged.sandbox_path] = csv
-    prepared = await _DenoCapabilityPreparer(
+    prepared = await TestingCapabilityPreparer(
         skill_catalog=catalog,
         models=RLMModelBundle(MagicMock(), MagicMock()),
         options=RLMOptions(),

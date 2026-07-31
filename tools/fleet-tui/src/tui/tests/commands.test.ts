@@ -312,7 +312,7 @@ describe("command handlers", () => {
       revision: "a".repeat(64),
       active_profile: "daytona",
       default_profile: "daytona",
-      available_profiles: ["daytona", "local-deno", "daytona-bench"],
+      available_profiles: ["daytona", "daytona-bench"],
       restart_required: true,
       scopes: [],
       ...overrides,
@@ -328,7 +328,7 @@ describe("command handlers", () => {
     const sys = ctx.store.getState().messages.find((m) => m.kind === "text" && m.role === "system");
     expect(sys?.kind).toBe("text");
     if (sys?.kind === "text") {
-      expect(sys.text).toContain("local-deno");
+      expect(sys.text).toContain("daytona-bench");
       expect(sys.text).toContain("current: daytona");
       expect(sys.text).toContain("daytona (current)");
     }
@@ -338,16 +338,18 @@ describe("command handlers", () => {
     const { ctx } = makeContext();
     ctx.client.getSettings = vi
       .fn()
-      .mockResolvedValue(makePolicy({ active_profile: "daytona", default_profile: "local-deno" }));
+      .mockResolvedValue(
+        makePolicy({ active_profile: "daytona", default_profile: "daytona-bench" }),
+      );
     const profiles = listCommands().find((c) => c.name === "profiles");
     if (profiles) await profiles.handler([], ctx);
 
     const message = ctx.store.getState().messages.at(-1);
     expect(message).toMatchObject({ kind: "text", role: "system" });
     if (message?.kind === "text") {
-      expect(message.text).toContain("running: daytona; selected: local-deno");
+      expect(message.text).toContain("running: daytona; selected: daytona-bench");
       expect(message.text).toContain("daytona (running)");
-      expect(message.text).toContain("local-deno (selected)");
+      expect(message.text).toContain("daytona-bench (selected)");
     }
   });
 
@@ -357,16 +359,16 @@ describe("command handlers", () => {
     ctx.client.getSettings = vi.fn().mockResolvedValue(policy);
     ctx.client.setProfile = vi
       .fn()
-      .mockResolvedValue(makePolicy({ default_profile: "local-deno" }));
-    const chooseProfile = vi.fn().mockResolvedValue("local-deno");
+      .mockResolvedValue(makePolicy({ default_profile: "daytona-bench" }));
+    const chooseProfile = vi.fn().mockResolvedValue("daytona-bench");
     const ctxWithPresenter: CommandContext = { ...ctx, presenter: { chooseProfile } as never };
     const profiles = listCommands().find((c) => c.name === "profiles");
     if (profiles) await profiles.handler([], ctxWithPresenter);
     expect(chooseProfile).toHaveBeenCalledWith(policy.available_profiles, "daytona", "daytona");
-    expect(ctx.client.setProfile).toHaveBeenCalledWith("local-deno", policy.revision);
+    expect(ctx.client.setProfile).toHaveBeenCalledWith("daytona-bench", policy.revision);
     const sys = ctx.store.getState().messages.find((m) => m.kind === "text" && m.role === "system");
     if (sys?.kind === "text") {
-      expect(sys.text).toContain("Profile set to 'local-deno'");
+      expect(sys.text).toContain("Profile set to 'daytona-bench'");
       expect(sys.text).toContain("Restart Fleet to apply");
     }
   });
@@ -393,7 +395,7 @@ describe("command handlers", () => {
 
   it("/profiles can revert a pending selection to the running profile", async () => {
     const { ctx } = makeContext();
-    const policy = makePolicy({ active_profile: "daytona", default_profile: "local-deno" });
+    const policy = makePolicy({ active_profile: "daytona", default_profile: "daytona-bench" });
     ctx.client.getSettings = vi.fn().mockResolvedValue(policy);
     ctx.client.setProfile = vi.fn().mockResolvedValue(makePolicy());
     const chooseProfile = vi.fn().mockResolvedValue("daytona");
@@ -406,13 +408,17 @@ describe("command handlers", () => {
       });
     }
 
-    expect(chooseProfile).toHaveBeenCalledWith(policy.available_profiles, "daytona", "local-deno");
+    expect(chooseProfile).toHaveBeenCalledWith(
+      policy.available_profiles,
+      "daytona",
+      "daytona-bench",
+    );
     expect(ctx.client.setProfile).toHaveBeenCalledWith("daytona", policy.revision);
   });
 
   it("/profiles treats cancellation and reselecting the pending default as no-ops", async () => {
     const { ctx } = makeContext();
-    const policy = makePolicy({ active_profile: "daytona", default_profile: "local-deno" });
+    const policy = makePolicy({ active_profile: "daytona", default_profile: "daytona-bench" });
     ctx.client.getSettings = vi.fn().mockResolvedValue(policy);
     ctx.client.setProfile = vi.fn();
     const profiles = listCommands().find((c) => c.name === "profiles");
@@ -420,7 +426,7 @@ describe("command handlers", () => {
     if (profiles) {
       await profiles.handler([], {
         ...ctx,
-        presenter: { chooseProfile: vi.fn().mockResolvedValue("local-deno") } as never,
+        presenter: { chooseProfile: vi.fn().mockResolvedValue("daytona-bench") } as never,
       });
       await profiles.handler([], {
         ...ctx,

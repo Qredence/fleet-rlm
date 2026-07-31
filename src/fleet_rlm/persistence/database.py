@@ -1,7 +1,7 @@
 """Async database primitives for Fleet RLM.
 
 Production schema evolution belongs to Alembic. ``create_tables`` remains an
-explicit helper for private SQLite tests and local Deno development only.
+explicit helper for private SQLite tests only.
 """
 
 from __future__ import annotations

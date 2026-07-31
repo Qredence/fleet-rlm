@@ -32,8 +32,8 @@ _Avoid_: Turn, Session, Sandbox
 ## Compute and storage
 
 **Run Environment**:
-The explicitly selected execution profile. The public set is `deno` and
-`daytona`; private deterministic test composition is not a third profile.
+The explicitly selected execution profile. The public set contains only
+`daytona`; private deterministic test composition is not a public profile.
 _Avoid_: fallback tier, compatibility mode
 
 **Sandbox**:
@@ -60,9 +60,9 @@ _Avoid_: whole provider Volume, Sandbox filesystem
 Daytona-only workspace-wide immediate state stored in the fixed `MEMORIES.md`
 file at the root of the mounted Workspace Volume Scope. The RLM reads the
 bounded newest records on demand through a host-mediated Tool and appends one
-record only when the user explicitly asks to remember something. Appends are
-immediately durable, independent of Turn Commit, and survive failed or
-cancelled Runs and Sandbox replacement; Deno registers no Memory Tools.
+  record only when the user explicitly asks to remember something. Appends are
+  immediately durable, independent of Turn Commit, and survive failed or
+  cancelled Runs and Sandbox replacement.
 _Avoid_: Session History, automatic Turn-start recall, unbounded learned state
 
 **Workspace Volume Tree**:

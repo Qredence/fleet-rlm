@@ -1,6 +1,6 @@
 # Fleet RLM backend architecture
 
-Canonical Run Environment set: `deno`, `daytona`.
+Canonical Run Environment set: `daytona`.
 
 ## Runtime flow
 
@@ -41,11 +41,11 @@ JSON-compatible common input annotations.
 
 - `app.create_app()` creates the FastAPI application, installs handlers and
   routers, and eagerly constructs the immutable bundled Skill catalog.
-- FastAPI lifespan validates settings and installs exactly one complete Deno,
-  Daytona, or explicitly injected private-test runtime inventory. It owns
+- FastAPI lifespan validates settings and installs exactly one complete Daytona
+  or explicitly injected private-test runtime inventory. It owns
   startup rollback and shutdown.
-- `composition/common.py`, `deno.py`, `daytona.py`, and `testing.py` own runtime
-  wiring. A locally owned database engine creates tables only for SQLite.
+- `composition/common.py`, `daytona.py`, and `testing.py` own runtime wiring. A
+  locally owned database engine creates tables only for SQLite.
   Import `fleet_rlm.composition.testing` directly in tests; it is not re-exported
   from `composition` and is never installed by lifespan.
 - Routes retrieve composed runtime modules through `api/dependencies.py`; the
@@ -101,10 +101,6 @@ exception text.
 
 ## Runtime profiles
 
-- Deno uses real `dspy.LM` roles and DSPy's default Deno/Pyodide interpreter.
-  It supports Attachment reads and Skills, but has no Daytona broker, Session
-  Workspace or Workspace Memory tools, `create_artifact`, or durable Artifact
-  promotion.
 - Daytona owns Sandbox/Interpreter Leases, Workspace Volume Scope, durable
   Attachment staging, Session Workspace files, Workspace Memory, private result
   snapshots, and Artifact Candidate promotion.
@@ -153,7 +149,8 @@ Daytona Workspace Memory is separate workspace-wide immediate state. Its fixed
 `workspaces/<workspace_id>` Volume subpath; Session and Run state retain their
 nested paths below that root. The RLM accesses memory only on demand through
 `read_workspace_memory` and `update_workspace_memory`; Fleet does not inject it
-at Turn start, and Deno registers neither Tool.
+at Turn start. Private deterministic tests use an unavailable Workspace
+capability unless they explicitly inject a host-owned test capability.
 
 Each update appends one complete UTC-timestamped record, limited to 4 KiB of
 formatted UTF-8, and becomes durable immediately, independently of Turn Commit.

@@ -4,12 +4,15 @@ from __future__ import annotations
 
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from fleet_rlm.files.url_tool import UrlFetchResult
 
 import dspy
 from fastapi import FastAPI
 
-from fleet_rlm.chat.deno_run_environment import DenoPreparedCapabilities, _DenoCapabilityPreparer
+from fleet_rlm.chat.capability_preparation import PreparedHostCapabilities, prepare_host_capabilities
 from fleet_rlm.chat.turn_lifecycle import ExecuteTurn
 from fleet_rlm.chat.turn_preparation import (
     DefaultTurnPreparer,
@@ -27,6 +30,7 @@ from fleet_rlm.composition.common import (
 from fleet_rlm.config import Settings
 from fleet_rlm.files.lifecycle import AttachmentLifecycle
 from fleet_rlm.files.models import PreparedAttachments
+from fleet_rlm.files.workspace_models import UNAVAILABLE_WORKSPACE_CAPABILITY
 from fleet_rlm.rlm.dspy_contract import RLMOptions
 from fleet_rlm.rlm.model_bundle import RLMModelBundle
 from fleet_rlm.rlm.recursive_calls import RecursiveRLMOptions
@@ -71,6 +75,25 @@ class TestingRunSink:
         await self.remove(logical_path)
 
 
+class _TestingVolumeFsAdapter:
+    """Synchronous volume adapter over the deterministic in-memory test sink."""
+
+    def __init__(self, sink: TestingRunSink) -> None:
+        self._sink = sink
+
+    def write_bytes(self, logical_path: str, data: bytes) -> None:
+        self._sink.values[logical_path] = bytes(data)
+
+    def read_bytes(self, logical_path: str) -> bytes:
+        return self._sink.values[logical_path]
+
+    def exists(self, logical_path: str) -> bool:
+        return logical_path in self._sink.values
+
+    def remove(self, logical_path: str) -> None:
+        self._sink.values.pop(logical_path, None)
+
+
 class TestingRunEnvironmentProvider(RunEnvironmentProvider):
     async def acquire(self, turn: ExecuteTurn, *, deadline: float) -> RunEnvironment:
         del turn, deadline
@@ -82,6 +105,19 @@ class TestingRunEnvironmentProvider(RunEnvironmentProvider):
         return RunEnvironment(TestingInterpreter(), sink, sink, release)
 
 
+class _TestingCacheOnlyUrlFetcher:
+    """Deterministic cache-only fetcher: private tests never open the network."""
+
+    def fetch(self, url: str, *, max_bytes: int) -> UrlFetchResult:
+        from fleet_rlm.files.url_tool import UrlToolError
+
+        del url, max_bytes
+        raise UrlToolError(
+            "unavailable",
+            "URL fetching is disabled in the deterministic test composition",
+        )
+
+
 class TestingCapabilityPreparer:
     def __init__(
         self,
@@ -89,8 +125,8 @@ class TestingCapabilityPreparer:
         skill_catalog: SkillCatalog,
         models: RLMModelBundle,
         options: RLMOptions,
-        max_artifact_bytes: int,
-        max_url_bytes: int,
+        max_artifact_bytes: int = 10_000_000,
+        max_url_bytes: int = 10 * 1024 * 1024,
     ) -> None:
         """Initialize a testing capability preparer with configured source limits.
 
@@ -101,13 +137,13 @@ class TestingCapabilityPreparer:
             max_artifact_bytes (int): Maximum permitted artifact size in bytes.
             max_url_bytes (int): Maximum permitted URL source size in bytes.
         """
-        self._delegate = _DenoCapabilityPreparer(
-            skill_catalog=skill_catalog,
-            models=models,
-            options=options,
-            max_artifact_bytes=max_artifact_bytes,
-            max_url_bytes=max_url_bytes,
-        )
+        from fleet_rlm.files.url_tool import InMemoryUrlSourceStore
+
+        del models, options
+        self._skill_catalog = skill_catalog
+        self._max_artifact_bytes = max_artifact_bytes
+        self._max_url_bytes = max(1, int(max_url_bytes))
+        self._url_store = InMemoryUrlSourceStore()
 
     async def prepare(
         self,
@@ -116,7 +152,7 @@ class TestingCapabilityPreparer:
         attachments: PreparedAttachments,
         *,
         deadline: float,
-    ) -> DenoPreparedCapabilities:
+    ) -> PreparedHostCapabilities:
         """Prepare capabilities for a turn within the specified execution environment and deadline.
 
         Parameters:
@@ -126,9 +162,61 @@ class TestingCapabilityPreparer:
             deadline (float): The time limit for preparation.
 
         Returns:
-            DenoPreparedCapabilities: The prepared capabilities.
+            PreparedHostCapabilities: The prepared capabilities.
         """
-        return await self._delegate.prepare(turn, environment, attachments, deadline=deadline)
+        from fleet_rlm.files.tools import FileToolHost
+        from fleet_rlm.files.url_tool import UrlToolHost
+
+        sink = environment.attachment_sink
+        if not isinstance(sink, TestingRunSink):
+            raise TypeError("testing capabilities require the testing run sink")
+        volume_fs = _TestingVolumeFsAdapter(sink)
+        file_host = FileToolHost(
+            attachments=attachments.refs,
+            staged_attachments=attachments.staged,
+            volume_fs=volume_fs,
+            user_id=turn.access.user_id,
+            workspace_id=turn.access.workspace_id,
+            session_id=turn.session_id,
+            run_id=turn.run_id,
+            max_artifact_bytes=self._max_artifact_bytes,
+            volume_paths=None,
+        )
+        file_tools = tuple(
+            tool
+            for tool in file_host.as_tools()
+            if str(tool.name) not in {"create_artifact", "publish_workspace_artifact"}
+        )
+        file_event_views = {
+            name: view
+            for name, view in file_host.event_views().items()
+            if name not in {"create_artifact", "publish_workspace_artifact"}
+        }
+        url_host = UrlToolHost(
+            session_id=turn.session_id,
+            store=self._url_store,
+            max_bytes=self._max_url_bytes,
+            fetcher=_TestingCacheOnlyUrlFetcher(),
+        )
+        url_tools = url_host.as_tools()
+        url_event_views = url_host.event_views()
+        spec, skill_host, notices = await prepare_host_capabilities(
+            turn=turn,
+            skill_catalog=self._skill_catalog,
+            files=file_host,
+            base_tools=(*file_tools, *url_tools),
+            base_event_views={**file_event_views, **url_event_views},
+            workspace=UNAVAILABLE_WORKSPACE_CAPABILITY,
+            deadline=deadline,
+        )
+        return PreparedHostCapabilities(
+            spec,
+            files=file_host,
+            skills=skill_host,
+            close_files=False,
+            artifact_candidates=False,
+            preparation_notices=notices,
+        )
 
 
 class _TestingRLM:

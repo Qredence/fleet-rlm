@@ -139,27 +139,6 @@ jobs:
           path: .scratch/coverage
           destination: coverage/daytona
 
-  test-deno:
-    executor: python
-    resource_class: small
-    steps:
-      - checkout
-      - install_python_dependencies
-      - save_uv_cache
-      - run:
-          name: Install Deno 2.9.2
-          command: |
-            export DENO_INSTALL="$HOME/.deno"
-            curl -fsSL https://deno.land/install.sh | sh -s v2.9.2
-            echo 'export DENO_INSTALL="$HOME/.deno"' >> "$BASH_ENV"
-            echo 'export PATH="$HOME/.deno/bin:$PATH"' >> "$BASH_ENV"
-            export PATH="$HOME/.deno/bin:$PATH"
-            deno --version
-      - run:
-          name: Run Deno contracts
-          no_output_timeout: 10m
-          command: make test-deno
-
 workflows:
   ci:
     jobs:
@@ -168,4 +147,3 @@ workflows:
       - test-unit
       - test-e2e
       - daytona-coverage
-      - test-deno

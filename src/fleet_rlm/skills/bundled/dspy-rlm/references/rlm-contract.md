@@ -80,7 +80,6 @@ Fleet maps these via `FLEET_RLM_MAX_ITERATIONS`, `FLEET_RLM_MAX_LLM_CALLS`, and 
   allowlisted input/output projections, while `sandbox.execute` records the step's
   bounded code/output previews and execution timings. Full prompts, credentials, and
   unbounded generated content are not retained in these spans.
-- **Deno**: vanilla local interpreter path without durable Artifact promotion; do not invent Deno-specific workflows here.
 - Declared `answer` JSON must fit the Turn commit budget. Oversized SUBMIT fails with public message `Turn output is too large`. Prefer writing long reports to Session Workspace, then SUBMIT a short summary.
 
 ## SUBMIT

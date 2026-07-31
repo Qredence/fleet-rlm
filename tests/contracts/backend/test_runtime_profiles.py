@@ -8,9 +8,11 @@ from pydantic import ValidationError
 from fleet_rlm.config import Settings
 
 
-def test_public_runtime_profiles_are_exactly_daytona_and_deno() -> None:
+def test_public_runtime_profiles_are_exactly_daytona() -> None:
     assert Settings(run_environment="daytona").run_environment == "daytona"
-    assert Settings(run_environment="deno").run_environment == "deno"
+
+    with pytest.raises(ValidationError):
+        Settings(run_environment="deno")  # type: ignore[arg-type]
 
     with pytest.raises(ValidationError):
         Settings(run_environment="unsupported")  # type: ignore[arg-type]

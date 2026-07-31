@@ -154,18 +154,7 @@ def create_app(
                     flush_tracing()
             return
 
-        if settings_obj.run_environment == "deno":
-            from fleet_rlm.composition import install_deno_composition, require_deno_settings
-
-            require_deno_settings(settings_obj)
-            try:
-                async with _local_db_lifespan(app, settings_obj, install_deno_composition):
-                    yield
-            finally:
-                from fleet_rlm.observability.tracing import flush_tracing
-
-                flush_tracing()
-            return
+        raise RuntimeError("Fleet only supports the Daytona runtime")
 
     app = FastAPI(
         title=resolved.app_name,

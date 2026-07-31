@@ -12,7 +12,6 @@ uv sync --all-extras --dev
 
 # supervised backend + pi-tui
 uv run fleet cli   # Daytona
-uv run fleet deno  # Deno/Pyodide
 
 # backend only
 uv run fleet web
@@ -21,37 +20,20 @@ uv run fleet-rlm serve-api --port 8000
 
 Select the non-secret runtime policy with `[config] default_profile` in
 `config/fleet.toml` or the TUI `/profiles` command, then restart Fleet.
-`fleet cli` requires a selected Daytona profile; `fleet deno` requires a
-selected Deno profile. A mismatch fails before runtime services start.
+`fleet cli` requires a selected Daytona profile. A mismatch fails before runtime
+services start.
 
-`fleet cli` and `fleet deno` require Node 22.19+ and pnpm. They wait for backend
-readiness, write backend output under `.fleet_rlm/logs/`, and stop the backend
-when pi-tui exits. Forward terminal arguments after `--`, for example:
+`fleet cli` requires Node 22.19+ and pnpm. It waits for backend readiness, writes
+backend output under `.fleet_rlm/logs/`, and stops the backend when pi-tui exits.
+Forward terminal arguments after `--`, for example:
 
 ```bash
-uv run fleet deno -- --session <uuid>
+uv run fleet cli -- --session <uuid>
 ```
 
 The terminal uses native scrollback and does not own a model, provider key, or
 Sandbox. See the [terminal guide](docs/how-to-guides/terminal-tui.md) and
 [configuration reference](docs/reference/configuration.md).
-
-### Deno
-
-Deno is the canonical reduced local runtime. It needs an LLM key and Deno on
-`PATH`; SQLite is the normal local persistence choice.
-
-```bash
-export FLEET_DATABASE_URL='sqlite+aiosqlite:///./.fleet_rlm/local.sqlite3'
-export FLEET_OPENAI_API_KEY='...'
-uv run fleet-rlm serve-api --port 8000
-```
-
-Set `default_profile = "local-deno"` before starting this backend.
-
-Deno uses a real LM and DSPy's default Deno/Pyodide interpreter. It supports
-Attachment reads and Skills but not Daytona resources or durable Artifact
-promotion.
 
 ### Daytona
 
@@ -107,18 +89,16 @@ They can read the latest bounded Workspace Memory on demand with
 `read_workspace_memory` and append a record with `update_workspace_memory` only
 when the user explicitly asks to remember something. Memory is stored in the
 workspace root `MEMORIES.md`, is not injected at Turn start, and is not a
-Session-history or Turn-commit record. Deno Turns use DSPy's local
-Deno/Pyodide interpreter and skip Daytona Workspace, Memory tools, and durable
-Artifact promotion. Full Session history stays host-side behind the bounded
-`read_session_history` Tool.
+Session-history or Turn-commit record. Full Session history stays host-side
+behind the bounded `read_session_history` Tool.
 
 Read the [architecture](docs/architecture.md), [backend context](src/fleet_rlm/CONTEXT.md),
 and [codebase map](docs/reference/codebase-map.md).
 
 ## Database
 
-Alembic owns live schema evolution through one canonical baseline. Deno SQLite
-may be initialized by the local app; for an explicit disposable/live database:
+Alembic owns live schema evolution through one canonical baseline. For an
+explicit disposable/live database:
 
 ```bash
 uv run alembic upgrade head
@@ -132,7 +112,6 @@ database.
 
 ```bash
 make check
-make test-deno
 make check-security
 make build-release
 make check-release

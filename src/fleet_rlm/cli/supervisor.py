@@ -37,7 +37,6 @@ class SupervisorError(RuntimeError):
 # cold provider create/delete routinely exceeds a 30s local readiness budget.
 _READY_TIMEOUT_SECONDS = {
     "daytona": 90.0,
-    "deno": 30.0,
 }
 _MLFLOW_READY_TIMEOUT_SECONDS = 30.0
 _LOCAL_MLFLOW_URI = "http://127.0.0.1:5001"
@@ -45,7 +44,6 @@ _LOCAL_MLFLOW_HOST = "127.0.0.1"
 _LOCAL_MLFLOW_PORT = 5001
 _RUNTIME_PROFILES = {
     "daytona": "daytona",
-    "deno": "local-deno",
 }
 
 

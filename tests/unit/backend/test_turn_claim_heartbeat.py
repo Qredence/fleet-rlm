@@ -206,7 +206,7 @@ async def test_transient_heartbeat_failure_recovers_without_ending_run() -> None
 
 
 @pytest.mark.asyncio
-async def test_deno_repeated_transient_failures_revoke_without_provider_fence() -> None:
+async def test_repeated_transient_failures_revoke_without_provider_fence() -> None:
     from fleet_rlm.chat.commands import OpenTurnCommand
     from fleet_rlm.chat.turn_cleanup import TurnCleanupSupervisor
     from fleet_rlm.chat.turn_coordinator import TurnCoordinator

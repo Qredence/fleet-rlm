@@ -204,8 +204,8 @@ describe("FleetApiClient", () => {
         JSON.stringify({
           revision: "b".repeat(64),
           active_profile: "daytona",
-          default_profile: "local-deno",
-          available_profiles: ["daytona", "local-deno"],
+          default_profile: "daytona-bench",
+          available_profiles: ["daytona", "daytona-bench"],
           scopes: [],
         }),
         { headers: { "content-type": "application/json" } },
@@ -214,16 +214,16 @@ describe("FleetApiClient", () => {
     globalThis.fetch = fetchMock;
     const client = new FleetApiClient({ baseUrl: "http://fleet.test" });
 
-    const result = await client.setProfile("local-deno", "a".repeat(64));
+    const result = await client.setProfile("daytona-bench", "a".repeat(64));
 
     expect(fetchMock).toHaveBeenCalledWith(
       "http://fleet.test/api/settings",
       expect.objectContaining({
         method: "PATCH",
-        body: JSON.stringify({ profile: "local-deno", revision: "a".repeat(64) }),
+        body: JSON.stringify({ profile: "daytona-bench", revision: "a".repeat(64) }),
       }),
     );
-    expect(result.default_profile).toBe("local-deno");
+    expect(result.default_profile).toBe("daytona-bench");
   });
 
   it("lists discoverable Skill cards", async () => {

@@ -38,7 +38,7 @@ COMPOSITION_STATE_FIELDS = (
 
 @dataclass(slots=True)
 class LocalCompositionHandles:
-    """Process-owned adapters for Deno and private tests."""
+    """Process-owned adapters for local/private test compositions."""
 
     turn_coordinator: Any
     attachment_lifecycle: Any

@@ -13,7 +13,7 @@ from fastapi.testclient import TestClient
 from pydantic import SecretStr
 
 from fleet_rlm.app import create_app
-from fleet_rlm.composition import CompositionError, require_daytona_settings, require_deno_settings
+from fleet_rlm.composition import CompositionError, require_daytona_settings
 from fleet_rlm.composition.testing import create_testing_app
 from fleet_rlm.config import Settings
 
@@ -84,68 +84,7 @@ def test_common_storage_adapter_builder_owns_local_and_sql_catalog_branches(tmp_
         assert adapters.artifact_reader._blobs is sql_artifact_blobs
 
 
-def test_deno_composition_passes_configured_recursive_options(monkeypatch, tmp_path) -> None:
-    import fleet_rlm.chat.deno_run_environment as deno_environment
-    import fleet_rlm.composition.deno as deno_composition
-    import fleet_rlm.rlm.factory as rlm_factory
-    import fleet_rlm.rlm.lm_factory as lm_factory
-    from fleet_rlm.rlm.recursive_calls import RecursiveRLMOptions
-
-    settings = Settings(
-        _env_file=None,
-        run_environment="deno",
-        data_root=str(tmp_path),
-        rlm_recursion_max_calls=9,
-        rlm_recursion_max_prompt_chars=123,
-        rlm_recursion_child_max_iterations=7,
-        rlm_recursion_child_max_llm_calls=11,
-        rlm_recursion_child_max_output_chars=222,
-        max_url_bytes=321,
-    )
-    models = SimpleNamespace(root_lm=object(), sub_lm=object())
-    captured: dict[str, object] = {}
-
-    class FakePreparation:
-        def __init__(self, **kwargs):
-            captured.update(kwargs)
-
-    monkeypatch.setattr(deno_environment, "DenoTurnPreparation", FakePreparation)
-    monkeypatch.setattr(lm_factory, "build_model_bundle", lambda _settings: models)
-    monkeypatch.setattr(rlm_factory, "RLMFactory", lambda *, verbose: ("factory", verbose))
-    monkeypatch.setattr(
-        deno_composition,
-        "host_roots",
-        lambda _settings: (tmp_path / "uploads", tmp_path / "artifacts"),
-    )
-    monkeypatch.setattr(
-        deno_composition,
-        "build_local_storage_adapters",
-        lambda *_args, **_kwargs: SimpleNamespace(attachment_lifecycle="attachments", artifact_reader="artifacts"),
-    )
-    monkeypatch.setattr(
-        deno_composition,
-        "install_local_inventory",
-        lambda _app, _settings, **kwargs: kwargs["preparation"],
-    )
-
-    app = SimpleNamespace(state=SimpleNamespace(skill_catalog="skills"))
-    preparation = deno_composition.install_deno_composition(app, settings)
-
-    assert preparation is not None
-    assert captured["recursive_options"] == RecursiveRLMOptions(
-        max_depth=2,
-        max_calls=9,
-        max_prompt_chars=123,
-        child_max_iterations=7,
-        child_max_llm_calls=11,
-        child_max_output_chars=222,
-    )
-    assert captured["max_url_bytes"] == 321
-
-
 def test_require_daytona_settings_fails_closed_without_deps(monkeypatch: pytest.MonkeyPatch) -> None:
-    with pytest.raises(CompositionError, match="run_environment"):
-        require_daytona_settings(Settings(run_environment="deno"))
     with pytest.raises(CompositionError, match="DAYTONA_API_KEY"):
         require_daytona_settings(
             Settings(
@@ -202,69 +141,6 @@ def test_require_daytona_settings_fails_closed_without_deps(monkeypatch: pytest.
                 llm_api_key=SecretStr("llm-key"),
             )
         )
-
-
-def test_require_deno_settings_fails_closed_without_deps(monkeypatch) -> None:
-    monkeypatch.setattr("shutil.which", lambda _name: "/usr/bin/deno")
-    with pytest.raises(CompositionError, match="run_environment"):
-        require_deno_settings(Settings(run_environment="daytona"))
-    with pytest.raises(CompositionError, match="provider API key"):
-        require_deno_settings(
-            Settings(
-                run_environment="deno",
-                llm_api_key=SecretStr(""),
-            )
-        )
-    monkeypatch.setattr("shutil.which", lambda _name: None)
-    with pytest.raises(CompositionError, match="deno executable"):
-        require_deno_settings(
-            Settings(
-                run_environment="deno",
-                llm_api_key=SecretStr("llm-key"),
-            )
-        )
-
-
-def test_deno_environment_fails_closed_without_secrets(monkeypatch) -> None:
-    monkeypatch.setattr("shutil.which", lambda _name: None)
-    app = create_app(
-        settings=Settings(
-            run_environment="deno",
-            llm_api_key=SecretStr("llm-key"),
-        )
-    )
-    with pytest.raises(CompositionError, match="deno executable"), TestClient(app):
-        pass
-
-
-def test_deno_lifespan_skips_create_tables_for_postgres(monkeypatch) -> None:
-    import fleet_rlm.persistence.database as database
-    from fleet_rlm.persistence.repositories.turns import SqlAlchemyTurnStateStore
-
-    called: list[str] = []
-
-    async def track_tables(_engine):
-        called.append("create_tables")
-
-    monkeypatch.setattr(database, "create_tables", track_tables)
-
-    async def skip_recovery(self, fence=None):
-        del self, fence
-
-    monkeypatch.setattr(SqlAlchemyTurnStateStore, "reconcile_settling", skip_recovery)
-    monkeypatch.setattr("shutil.which", lambda _name: "/usr/bin/deno")
-    app = create_app(
-        settings=Settings(
-            run_environment="deno",
-            llm_api_key=SecretStr("llm-key"),
-            database_url="postgresql+asyncpg://user:pass@localhost/fleet",
-        )
-    )
-
-    with TestClient(app):
-        pass
-
-    assert called == []
 
 
 def test_daytona_environment_fails_closed_without_secrets() -> None:

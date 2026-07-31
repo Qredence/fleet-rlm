@@ -13,7 +13,7 @@ contracts, and tracked docs remain authoritative.
   provider clients in routes.
 - `create_app()` installs routers, error/OpenAPI handlers, and the static
   in-memory bundled Skill catalog. Lifespan composition installs and disposes
-  one complete Deno, Daytona, or explicitly injected private-test inventory.
+  one complete Daytona or explicitly injected private-test inventory.
 - Production startup resolves one required profile from `config/fleet.toml`.
   `config.py` owns strict runtime resolution; `config_policy.py` and the
   loopback-only `/api/settings` routes edit only non-secret policy for restart.
@@ -21,8 +21,7 @@ contracts, and tracked docs remain authoritative.
 - Keep Daytona SDK imports inside `daytona/`.
 - Create a fresh native DSPy RLM per Turn through `rlm.dspy_contract`. Inject and
   `FinalOutput` protocol knowledge lives in `rlm.dspy_interpreter_contract`.
-  Daytona supplies a fresh custom interpreter; Deno passes `interpreter=None` so
-  DSPy creates its default Deno/Pyodide interpreter. Call only the supported
+  Daytona supplies a fresh custom interpreter. Call only the supported
   `await rlm.acall(**named_inputs)` surface.
 - Every Signature receives request text, bounded `session_context`, bounded
   `skill_cards`, and bounded Attachment metadata. Older committed messages
@@ -34,8 +33,7 @@ contracts, and tracked docs remain authoritative.
 - Runtime-specific Session Workspace availability is bounded inside context;
   Daytona registers list/stat/paged-read/write/append workspace Tools plus
   direct Workspace Artifact Candidate publication and the on-demand
-  `read_workspace_memory`/`update_workspace_memory` Tools, while Deno advertises
-  these Daytona-only features as unavailable. Session Workspace is
+  `read_workspace_memory`/`update_workspace_memory` Tools. Session Workspace is
   append/update-only; there is no delete Tool. Workspace Memory is the fixed
   root `MEMORIES.md` log, not Session History or a Turn-start prompt payload.
 - Resolve zero to four exact Skill selections against the immutable bundled
@@ -64,8 +62,8 @@ contracts, and tracked docs remain authoritative.
   in-memory and SQL Turn stores share one `transition_claim()` operation and
   pure policy, while successful commit and cancellation remain separate.
 - `CommittedTurn` is the only replay source. A successful Daytona Run may retain
-  one private commit-gated `result.json` derivative; Deno has no result-snapshot
-  sink, and the derivative is not an Artifact or API resource.
+  one private commit-gated `result.json` derivative; the derivative is not an
+  Artifact or API resource.
 - Session Workspace files are immediate private state under
   `sessions/{session_id}/workspace/`. They survive failed Runs and Sandbox
   replacement independently of Turn Commit. Use paged reads for large files,
@@ -89,7 +87,6 @@ contracts, and tracked docs remain authoritative.
 
 ```bash
 uv run fleet cli
-uv run fleet deno
 uv run fleet doctor daytona
 uv run fleet web
 uv run fleet-rlm serve-api

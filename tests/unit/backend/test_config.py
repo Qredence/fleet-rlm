@@ -17,7 +17,6 @@ def test_daytona_profile_uses_specialized_bounded_model_roles() -> None:
     document = tomllib.loads(policy_path.read_text(encoding="utf-8"))
 
     assert set(document["profiles"]) == {
-        "local-deno",
         "daytona",
         "daytona-managed",
         "daytona-bench",
@@ -62,23 +61,6 @@ def test_default_mlflow_policy_uses_async_full_fidelity_trace_delivery() -> None
         "async_logging": True,
         "trace_sampling_ratio": 1.0,
     }
-
-
-def test_local_deno_profile_uses_provider_specific_openai_credential(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    import fleet_rlm.config as config
-
-    _select_profile(tmp_path, profile="local-deno", monkeypatch=monkeypatch)
-    monkeypatch.chdir(tmp_path)
-    monkeypatch.setenv("FLEET_OPENAI_API_KEY", "test-openai-key")
-
-    settings = config.load_runtime_settings()
-
-    assert settings.run_environment == "deno"
-    assert settings.llm_role("root").api_key_env == "FLEET_OPENAI_API_KEY"
-    assert settings.llm_role("sub").api_key_env == "FLEET_OPENAI_API_KEY"
 
 
 def test_daytona_managed_profile_declares_lakebase_and_mlflow_environment_references() -> None:
@@ -284,7 +266,7 @@ def _policy(path: Path) -> None:
         """
 [config]
 schema_version = 1
-default_profile = "local-deno"
+default_profile = "daytona"
 [defaults.application]
 name = "fleet-test"
 [defaults.runtime]
@@ -320,8 +302,6 @@ volume_name = "fleet-volume"
 volume_mount_path = "/fleet"
 [defaults.logging]
 level = "DEBUG"
-[profiles.local-deno.runtime]
-environment = "deno"
 [profiles.daytona.runtime]
 environment = "daytona"
 [profiles.daytona.daytona]
@@ -344,7 +324,7 @@ def test_runtime_settings_deep_merge_profile_and_keep_role_policy(
 
     settings = config.load_runtime_settings()
 
-    assert settings.run_environment == "deno"
+    assert settings.run_environment == "daytona"
     assert settings.rlm_max_iterations == 3
     assert settings.max_url_bytes == 30
     assert settings.llm_role("root").model == "openai/root"
@@ -380,7 +360,6 @@ def test_runtime_settings_resolves_only_toml_declared_environment_values(
     _policy(policy)
     policy.write_text(
         policy.read_text(encoding="utf-8")
-        .replace('default_profile = "local-deno"', 'default_profile = "daytona"')
         .replace(
             "max_artifact_bytes = 20",
             'max_artifact_bytes = 20\ndatabase_url_env = "DATABASE_URL"',

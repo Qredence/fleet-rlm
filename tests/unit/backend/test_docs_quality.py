@@ -20,7 +20,7 @@ def _write_environment_docs(repo_root: Path, declaration: str) -> None:
 def test_canonical_environment_sets_accept_matching_durable_docs(tmp_path: Path) -> None:
     _write_environment_docs(
         tmp_path,
-        "Canonical Run Environment set: `deno`, `daytona`.",
+        "Canonical Run Environment set: `daytona`.",
     )
 
     assert check_canonical_environment_sets(tmp_path) == []
@@ -29,27 +29,27 @@ def test_canonical_environment_sets_accept_matching_durable_docs(tmp_path: Path)
 def test_canonical_environment_sets_report_a_mismatched_document(tmp_path: Path) -> None:
     _write_environment_docs(
         tmp_path,
-        "Canonical Run Environment set: `deno`, `daytona`.",
+        "Canonical Run Environment set: `daytona`.",
     )
     drifted_path = tmp_path / "docs/architecture.md"
     drifted_path.write_text(
-        "Canonical Run Environment set: `daytona`.\n",
+        "Canonical Run Environment set: `daytona`, `local`.\n",
         encoding="utf-8",
     )
 
     assert check_canonical_environment_sets(tmp_path) == [
-        "canonical Run Environment drift in docs/architecture.md: expected ['daytona', 'deno'], found ['daytona']"
+        "canonical Run Environment drift in docs/architecture.md: expected ['daytona'], found ['daytona', 'local']"
     ]
 
 
 def test_canonical_environment_sets_report_a_missing_declaration(tmp_path: Path) -> None:
     _write_environment_docs(
         tmp_path,
-        "Canonical Run Environment set: `deno`, `daytona`.",
+        "Canonical Run Environment set: `daytona`.",
     )
     product_path = tmp_path / "PRODUCT.md"
     product_path.write_text("# Product\n", encoding="utf-8")
 
     assert check_canonical_environment_sets(tmp_path) == [
-        "missing canonical Run Environment declaration in PRODUCT.md; expected ['daytona', 'deno']"
+        "missing canonical Run Environment declaration in PRODUCT.md; expected ['daytona']"
     ]
