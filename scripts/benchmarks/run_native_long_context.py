@@ -48,14 +48,14 @@ def _rss_bytes() -> int:
 def _source(size: int, markers: tuple[str, ...]) -> str:
     """
     Create a deterministic text source of the requested size with markers at fixed positions.
-    
+
     Parameters:
         size (int): The source size in bytes.
         markers (tuple[str, ...]): Three markers to place near the beginning, middle, and end of the source.
-    
+
     Returns:
         str: The generated text source containing the specified markers.
-    
+
     Raises:
         ValueError: If the source is too small or the markers overlap.
     """
@@ -83,13 +83,13 @@ class _SyntheticFetcher:
 
     def fetch(self, url: str, *, max_bytes: int) -> UrlFetchResult:
         """Fetch the synthetic source associated with a URL.
-        
+
         Parameters:
-        	url (str): The URL identifying the source.
-        	max_bytes (int): The maximum response size, which is ignored.
-        
+                url (str): The URL identifying the source.
+                max_bytes (int): The maximum response size, which is ignored.
+
         Returns:
-        	UrlFetchResult: The generated text source and its content type.
+                UrlFetchResult: The generated text source and its content type.
         """
         del max_bytes
         self.calls += 1
@@ -104,26 +104,26 @@ class _SyntheticWorkspace:
 
     def stat(self, path: str) -> WorkspaceEntry | None:
         """Return metadata for a stored workspace file.
-        
+
         Parameters:
-        	path (str): Workspace path to inspect.
-        
+                path (str): Workspace path to inspect.
+
         Returns:
-        	WorkspaceEntry | None: File metadata, or `None` if the path is not stored.
+                WorkspaceEntry | None: File metadata, or `None` if the path is not stored.
         """
         value = self.values.get(path)
         return None if value is None else WorkspaceEntry(path, "file", len(value.encode()), None)
 
     def list_entries(self, path: str, *, limit: int = 100, after: str | None = None) -> WorkspaceListResult:
         """List files under a workspace path.
-        
+
         Parameters:
-        	path (str): Directory path whose entries should be listed.
-        	limit (int): Maximum number of entries to return.
-        	after (str | None): Pagination cursor, ignored by this in-memory workspace.
-        
+                path (str): Directory path whose entries should be listed.
+                limit (int): Maximum number of entries to return.
+                after (str | None): Pagination cursor, ignored by this in-memory workspace.
+
         Returns:
-        	WorkspaceListResult: Matching entries, truncation status, and no continuation cursor.
+                WorkspaceListResult: Matching entries, truncation status, and no continuation cursor.
         """
         del after
         prefix = path.rstrip("/") + "/"
@@ -144,16 +144,17 @@ class _SyntheticWorkspace:
     ) -> WorkspaceTextPage:
         """
         Read a bounded page of text from a workspace value.
-        
+
         Parameters:
             path (str): Path identifying the workspace value.
             cursor (str | None): Character offset at which to begin reading, or `None` to start at the beginning.
             max_chars (int): Maximum number of characters to include in the page.
             max_bytes (int): Maximum allowed UTF-8 size of the complete value.
-        
+
         Returns:
-            WorkspaceTextPage: Page content, the cursor for the next page, total value size in bytes, and whether the end was reached.
-        
+        WorkspaceTextPage: Page content, the cursor for the next page, total value size in bytes,
+        and whether the end was reached.
+
         Raises:
             ValueError: If the complete value exceeds `max_bytes`.
         """
@@ -172,17 +173,17 @@ class _SyntheticWorkspace:
 
     def write_text(self, path: str, content: str, *, overwrite: bool) -> WorkspaceEntry:
         """Write text content to a workspace path.
-        
+
         Parameters:
-        	path (str): The workspace path to write.
-        	content (str): The text content to store.
-        	overwrite (bool): Whether to replace existing content at the path.
-        
+                path (str): The workspace path to write.
+                content (str): The text content to store.
+                overwrite (bool): Whether to replace existing content at the path.
+
         Returns:
-        	WorkspaceEntry: Metadata for the written file.
-        
+                WorkspaceEntry: Metadata for the written file.
+
         Raises:
-        	FileExistsError: If the path already exists and overwriting is disabled.
+                FileExistsError: If the path already exists and overwriting is disabled.
         """
         if path in self.values and not overwrite:
             raise FileExistsError(path)
@@ -196,12 +197,12 @@ class _SemanticLM:
 
     def __call__(self, prompt: str) -> str:
         """Record a prompt and return a deterministic response based on its length.
-        
+
         Parameters:
-        	prompt (str): The prompt to record.
-        
+                prompt (str): The prompt to record.
+
         Returns:
-        	str: A response containing the prompt length.
+                str: A response containing the prompt length.
         """
         self.prompts.append(prompt)
         return f"semantic:{len(prompt)}"
@@ -216,7 +217,7 @@ class _Action(dspy.Predict):
     async def aforward(self, **_kwargs: Any) -> dspy.Prediction:
         """
         Provide the next predetermined interpreter action.
-        
+
         Returns:
             dspy.Prediction: A prediction containing the action reasoning and selected code.
         """
@@ -242,15 +243,15 @@ def _rlm(
 ) -> dspy.RLM:
     """
     Create a configured RLM with deterministic action generation for the supplied interpreter code.
-    
+
     Parameters:
-    	tools: Tools available to the RLM.
-    	codes: Interpreter code returned across successive RLM iterations.
-    	interpreter: Code interpreter used by the RLM.
-    	sub_lm: Semantic language model used for subcalls.
-    
+        tools: Tools available to the RLM.
+        codes: Interpreter code returned across successive RLM iterations.
+        interpreter: Code interpreter used by the RLM.
+        sub_lm: Semantic language model used for subcalls.
+
     Returns:
-    	dspy.RLM: The configured RLM.
+        dspy.RLM: The configured RLM.
     """
     rlm = RLMFactory(verbose=False).create(
         models=RLMModelBundle(root_lm=_root_lm(), sub_lm=sub_lm),
@@ -266,13 +267,14 @@ def _rlm(
 async def _run_case(size: int, *, trace_enabled: bool) -> dict[str, object]:
     """
     Run a deterministic benchmark case for a synthetic source of the specified size.
-    
+
     Parameters:
-    	size (int): Source size in bytes.
-    	trace_enabled (bool): Whether tracing is enabled for the RLM turns.
-    
+        size (int): Source size in bytes.
+        trace_enabled (bool): Whether tracing is enabled for the RLM turns.
+
     Returns:
-    	dict[str, object]: Benchmark measurements covering correctness, caching, timing, model calls, interpreter payload limits, tracing, and peak resident memory.
+        dict[str, object]: Benchmark measurements covering correctness, caching, timing, model calls,
+        interpreter payload limits, tracing, and peak resident memory.
     """
     markers = (
         f"needle-{size}-boundary",
@@ -382,13 +384,13 @@ async def _run_case(size: int, *, trace_enabled: bool) -> dict[str, object]:
 def _parse_sizes(value: str) -> tuple[int, ...]:
     """
     Parse a comma-separated sequence of ascending positive byte sizes.
-    
+
     Parameters:
         value (str): Comma-separated size values.
-    
+
     Returns:
         tuple[int, ...]: The parsed sizes.
-    
+
     Raises:
         ValueError: If the input is empty, contains a non-positive size, or is not in ascending order.
     """
@@ -401,13 +403,13 @@ def _parse_sizes(value: str) -> tuple[int, ...]:
 def _gate(cases: list[dict[str, object]], *, deadline_seconds: float) -> dict[str, object]:
     """
     Evaluate benchmark cases against correctness, performance, memory, caching, and execution limits.
-    
+
     Parameters:
-    	cases (list[dict[str, object]]): Benchmark results, including the configured baseline and largest source cases.
-    	deadline_seconds (float): Maximum permitted completion time for the largest case.
-    
+        cases (list[dict[str, object]]): Benchmark results, including the configured baseline and largest source cases.
+        deadline_seconds (float): Maximum permitted completion time for the largest case.
+
     Returns:
-    	dict[str, object]: Gate decision, pass status, individual check results, and RSS limit measurements.
+        dict[str, object]: Gate decision, pass status, individual check results, and RSS limit measurements.
     """
     baseline = next((case for case in cases if case["source_bytes"] == DEFAULT_SIZES[0]), None)
     largest = max(cases, key=lambda case: int(case["source_bytes"]))
@@ -456,13 +458,13 @@ def build_parser() -> argparse.ArgumentParser:
 async def _run(args: argparse.Namespace) -> dict[str, object]:
     """
     Run the configured benchmark cases and assemble the results receipt.
-    
+
     Parameters:
         args (argparse.Namespace): Parsed benchmark options, including sizes, deadline, and tracing settings.
-    
+
     Returns:
         dict[str, object]: Receipt containing environment metadata, case results, and gate evaluation.
-    
+
     Raises:
         ValueError: If the deadline is not positive or the size specification is invalid.
     """
@@ -485,10 +487,10 @@ async def _run(args: argparse.Namespace) -> dict[str, object]:
 def main(argv: list[str] | None = None) -> int:
     """
     Run the benchmark, write its JSON receipt, and report the gate result.
-    
+
     Parameters:
         argv (list[str] | None): Optional command-line arguments to parse instead of the process arguments.
-    
+
     Returns:
         int: `0` if the benchmark completes successfully, `1` if it fails.
     """

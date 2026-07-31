@@ -25,20 +25,21 @@ from fleet_rlm.rlm.tool_observer import observe_tool
 class _FakeFetcher:
     calls: list[str]
     text: str = "needle: 42"
+    content_type: str = "text/plain; charset=utf-8"
 
     def fetch(self, url: str, *, max_bytes: int) -> UrlFetchResult:
         """Fetch fixed text for a URL and record the request.
-        
+
         Parameters:
-        	url (str): The URL to fetch.
-        	max_bytes (int): The maximum allowed response size.
-        
+                url (str): The URL to fetch.
+                max_bytes (int): The maximum allowed response size.
+
         Returns:
-        	UrlFetchResult: The fetched text and its content type.
+                UrlFetchResult: The fetched text and its content type.
         """
         assert max_bytes > 0
         self.calls.append(url)
-        return UrlFetchResult(url, "text/plain; charset=utf-8", self.text)
+        return UrlFetchResult(url, self.content_type, self.text)
 
 
 class _FakeWorkspace:
@@ -48,12 +49,12 @@ class _FakeWorkspace:
     def stat(self, path: str) -> WorkspaceEntry | None:
         """
         Retrieve metadata for a workspace path.
-        
+
         Parameters:
-        	path (str): The workspace path to inspect.
-        
+                path (str): The workspace path to inspect.
+
         Returns:
-        	WorkspaceEntry | None: File metadata when the path exists; otherwise, `None`.
+                WorkspaceEntry | None: File metadata when the path exists; otherwise, `None`.
         """
         value = self.values.get(path)
         return None if value is None else WorkspaceEntry(path, "file", len(value.encode()), None)
@@ -61,12 +62,12 @@ class _FakeWorkspace:
     def list_entries(self, path: str, *, limit: int = 100, after: str | None = None) -> WorkspaceListResult:
         """
         List file entries under a workspace path.
-        
+
         Parameters:
             path (str): Workspace path whose entries are listed.
             limit (int): Maximum number of entries to include.
             after (str | None): Pagination cursor, which is ignored.
-        
+
         Returns:
             WorkspaceListResult: Matching entries, truncation status, and no continuation cursor.
         """
@@ -89,18 +90,18 @@ class _FakeWorkspace:
     ) -> WorkspaceTextPage:
         """
         Read a bounded page of text from a workspace path.
-        
+
         Parameters:
-        	path (str): Workspace path containing the text.
-        	cursor (str | None): Character offset at which to begin reading.
-        	max_chars (int): Maximum number of characters to return.
-        	max_bytes (int): Maximum encoded byte size permitted for the full value.
-        
+                path (str): Workspace path containing the text.
+                cursor (str | None): Character offset at which to begin reading.
+                max_chars (int): Maximum number of characters to return.
+                max_bytes (int): Maximum encoded byte size permitted for the full value.
+
         Returns:
-        	WorkspaceTextPage: The requested text, continuation cursor, total byte size, and completion status.
-        
+                WorkspaceTextPage: The requested text, continuation cursor, total byte size, and completion status.
+
         Raises:
-        	ValueError: If the encoded value exceeds max_bytes.
+                ValueError: If the encoded value exceeds max_bytes.
         """
         value = self.values[path]
         data = value.encode()
@@ -119,17 +120,17 @@ class _FakeWorkspace:
     def write_text(self, path: str, content: str, *, overwrite: bool) -> WorkspaceEntry:
         """
         Write text content to a workspace path.
-        
+
         Parameters:
-        	path (str): Workspace path to write.
-        	content (str): Text content to store.
-        	overwrite (bool): Whether to replace existing content at the path.
-        
+                path (str): Workspace path to write.
+                content (str): Text content to store.
+                overwrite (bool): Whether to replace existing content at the path.
+
         Returns:
-        	WorkspaceEntry: Metadata for the written file.
-        
+                WorkspaceEntry: Metadata for the written file.
+
         Raises:
-        	FileExistsError: If the path already exists and overwrite is false.
+                FileExistsError: If the path already exists and overwrite is false.
         """
         if path in self.values and not overwrite:
             raise FileExistsError(path)
@@ -141,7 +142,7 @@ class _MissingParentWorkspace(_FakeWorkspace):
     def stat(self, path: str) -> WorkspaceEntry | None:
         """
         Simulate a workspace with a missing source directory.
-        
+
         Raises:
             FileNotFoundError: Always raised for the requested path.
         """
@@ -153,7 +154,7 @@ class _MissingCacheDirectoryWorkspace(_FakeWorkspace):
     def list_entries(self, path: str, *, limit: int = 100, after: str | None = None) -> WorkspaceListResult:
         """
         Simulate a missing URL cache directory when listing workspace entries.
-        
+
         Raises:
             FileNotFoundError: Always, indicating that the URL cache directory is missing.
         """
@@ -238,7 +239,7 @@ def test_url_tool_returns_content_to_repl_but_projects_metadata_only() -> None:
 def test_workspace_url_store_reuses_content_across_tool_hosts() -> None:
     session_id = uuid4()
     workspace = _FakeWorkspace()
-    fetcher = _FakeFetcher([])
+    fetcher = _FakeFetcher([], content_type="application/json")
     store = WorkspaceUrlSourceStore(workspace)
     first = UrlToolHost(session_id=session_id, store=store, max_bytes=1_024, fetcher=fetcher).as_tools()[0]
     second = UrlToolHost(session_id=session_id, store=store, max_bytes=1_024, fetcher=fetcher).as_tools()[0]
@@ -246,6 +247,7 @@ def test_workspace_url_store_reuses_content_across_tool_hosts() -> None:
     assert first(url="https://example.com/report")["cache_hit"] is False
     cached = second(url="https://example.com/report")
 
+    assert fetcher.content_type == "application/json"
     assert cached["cache_hit"] is True
     assert cached["content"] == "needle: 42"
     assert "content_type" not in cached
@@ -422,9 +424,9 @@ def test_public_fetcher_enforces_total_wall_clock_deadline(monkeypatch: pytest.M
         def urlopen(self, _method: str, _target: str, **_kwargs: object) -> Response:
             """
             Provide an empty HTTP response for the expected client interface.
-            
+
             Returns:
-            	Response: An empty response.
+                Response: An empty response.
             """
             return Response()
 
@@ -432,3 +434,42 @@ def test_public_fetcher_enforces_total_wall_clock_deadline(monkeypatch: pytest.M
 
     with pytest.raises(UrlToolError, match="time limit"):
         UrllibPublicTextFetcher(timeout_seconds=1).fetch("https://example.com/report", max_bytes=1_024)
+
+
+def test_public_fetcher_closes_pool_when_response_processing_fails(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "fleet_rlm.files.url_tool.socket.getaddrinfo",
+        lambda *_args, **_kwargs: [(0, 0, 0, "", ("93.184.216.34", 443))],
+    )
+    calls: dict[str, bool] = {}
+
+    class Response:
+        status = 500
+        headers: ClassVar[dict[str, str]] = {}
+
+        def stream(self, _size: int, *, decode_content: bool):
+            del decode_content
+            return iter(())
+
+        def release_conn(self) -> None:
+            calls["released"] = True
+
+        def close(self) -> None:
+            calls["response_closed"] = True
+
+    class Pool:
+        def __init__(self, _host: str, **_kwargs: object) -> None:
+            pass
+
+        def close(self) -> None:
+            calls["pool_closed"] = True
+
+        def urlopen(self, _method: str, _target: str, **_kwargs: object) -> Response:
+            return Response()
+
+    monkeypatch.setattr("fleet_rlm.files.url_tool.urllib3.HTTPSConnectionPool", Pool)
+
+    with pytest.raises(UrlToolError, match="unsuccessful"):
+        UrllibPublicTextFetcher().fetch("https://example.com/report", max_bytes=1_024)
+
+    assert calls == {"released": True, "response_closed": True, "pool_closed": True}
