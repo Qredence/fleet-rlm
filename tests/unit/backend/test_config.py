@@ -313,6 +313,7 @@ verbose = true
 [defaults.storage]
 data_root = ".fleet-test"
 max_upload_bytes = 10
+max_url_bytes = 30
 max_artifact_bytes = 20
 [defaults.daytona]
 volume_name = "fleet-volume"
@@ -345,6 +346,7 @@ def test_runtime_settings_deep_merge_profile_and_keep_role_policy(
 
     assert settings.run_environment == "deno"
     assert settings.rlm_max_iterations == 3
+    assert settings.max_url_bytes == 30
     assert settings.llm_role("root").model == "openai/root"
     assert settings.llm_role("sub").temperature == 0.2
 
@@ -497,6 +499,10 @@ def test_startup_rejects_retired_budget_environment(monkeypatch: pytest.MonkeyPa
 
 def test_turn_timeout_defaults_to_thirty_minutes() -> None:
     assert Settings(_env_file=None).turn_timeout_seconds == 1800
+
+
+def test_url_source_limit_defaults_to_ten_mebibytes() -> None:
+    assert Settings(_env_file=None).max_url_bytes == 10 * 1024 * 1024
 
 
 def test_mlflow_tracing_defaults_to_disabled() -> None:

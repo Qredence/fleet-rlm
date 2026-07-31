@@ -100,6 +100,7 @@ def test_deno_composition_passes_configured_recursive_options(monkeypatch, tmp_p
         rlm_recursion_child_max_iterations=7,
         rlm_recursion_child_max_llm_calls=11,
         rlm_recursion_child_max_output_chars=222,
+        max_url_bytes=321,
     )
     models = SimpleNamespace(root_lm=object(), sub_lm=object())
     captured: dict[str, object] = {}
@@ -139,6 +140,7 @@ def test_deno_composition_passes_configured_recursive_options(monkeypatch, tmp_p
         child_max_llm_calls=11,
         child_max_output_chars=222,
     )
+    assert captured["max_url_bytes"] == 321
 
 
 def test_require_daytona_settings_fails_closed_without_deps(monkeypatch: pytest.MonkeyPatch) -> None:

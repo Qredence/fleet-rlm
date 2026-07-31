@@ -38,6 +38,7 @@ verbose = true
 [defaults.storage]
 data_root = ".fleet_rlm"
 max_upload_bytes = 10485760
+max_url_bytes = 10485760
 max_artifact_bytes = 10485760
 database_url_env = "FLEET_DATABASE_URL"
 

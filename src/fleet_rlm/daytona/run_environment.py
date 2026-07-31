@@ -252,10 +252,10 @@ class _LiveCapabilityPreparer:
     ) -> LivePreparedCapabilities:
         """
         Prepare the file, workspace, URL, and memory capabilities for a turn.
-        
+
         Parameters:
             deadline (float): Deadline for capability preparation.
-        
+
         Returns:
             LivePreparedCapabilities: Prepared capabilities and any preparation notices.
         """
@@ -293,8 +293,15 @@ class _LiveCapabilityPreparer:
         )
         url_host = UrlToolHost(
             session_id=turn.session_id,
-            store=WorkspaceUrlSourceStore(session_workspace),
-            max_bytes=self.resources.settings.max_upload_bytes,
+            store=WorkspaceUrlSourceStore(
+                DaytonaSessionWorkspaceFS(
+                    volume_fs.sandbox,
+                    volume_root=str(paths.mount_path),
+                    root=str(paths.session_workspace_dir(turn.session_id)),
+                    max_file_bytes=self.resources.settings.max_url_bytes,
+                )
+            ),
+            max_bytes=self.resources.settings.max_url_bytes,
         )
         memory_host = WorkspaceMemoryToolHost(
             DaytonaWorkspaceMemoryStore(

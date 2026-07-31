@@ -84,22 +84,29 @@ class TestingRunEnvironmentProvider(RunEnvironmentProvider):
 
 class TestingCapabilityPreparer:
     def __init__(
-        self, *, skill_catalog: SkillCatalog, models: RLMModelBundle, options: RLMOptions, max_artifact_bytes: int
+        self,
+        *,
+        skill_catalog: SkillCatalog,
+        models: RLMModelBundle,
+        options: RLMOptions,
+        max_artifact_bytes: int,
+        max_url_bytes: int,
     ) -> None:
-        """Initialize a testing capability preparer with a fixed 10 MB URL size limit.
-        
+        """Initialize a testing capability preparer with configured source limits.
+
         Parameters:
             skill_catalog (SkillCatalog): Catalog of available skills.
             models (RLMModelBundle): Models used for capability preparation.
             options (RLMOptions): Runtime options for capability preparation.
             max_artifact_bytes (int): Maximum permitted artifact size in bytes.
+            max_url_bytes (int): Maximum permitted URL source size in bytes.
         """
         self._delegate = _DenoCapabilityPreparer(
             skill_catalog=skill_catalog,
             models=models,
             options=options,
             max_artifact_bytes=max_artifact_bytes,
-            max_url_bytes=10 * 1024 * 1024,
+            max_url_bytes=max_url_bytes,
         )
 
     async def prepare(
@@ -111,13 +118,13 @@ class TestingCapabilityPreparer:
         deadline: float,
     ) -> DenoPreparedCapabilities:
         """Prepare capabilities for a turn within the specified execution environment and deadline.
-        
+
         Parameters:
             turn (ExecuteTurn): The turn whose capabilities are being prepared.
             environment (RunEnvironment): The environment in which the turn will execute.
             attachments (PreparedAttachments): Attachments available to the turn.
             deadline (float): The time limit for preparation.
-        
+
         Returns:
             DenoPreparedCapabilities: The prepared capabilities.
         """
@@ -155,6 +162,7 @@ class DeterministicTurnPreparation:
         skill_catalog: SkillCatalog | None = None,
         options: RLMOptions | None = None,
         max_artifact_bytes: int = 10_000_000,
+        max_url_bytes: int = 10 * 1024 * 1024,
     ) -> None:
         resolved_options = options or RLMOptions()
         models = RLMModelBundle(TestingLM("testing/root"), TestingLM("testing/sub"))
@@ -169,6 +177,7 @@ class DeterministicTurnPreparation:
                 models=models,
                 options=resolved_options,
                 max_artifact_bytes=max_artifact_bytes,
+                max_url_bytes=max_url_bytes,
             ),
         )
 
@@ -220,6 +229,7 @@ def install_testing_composition(
             skill_catalog=app.state.skill_catalog,
             options=rlm_options(settings),
             max_artifact_bytes=settings.max_artifact_bytes,
+            max_url_bytes=settings.max_url_bytes,
         ),
         rlm_factory=TestingRLMFactory(),
         workspace_volume_mirror=mirror,

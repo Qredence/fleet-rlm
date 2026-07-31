@@ -36,7 +36,10 @@ applies migrations; use `uv run python scripts/db_init.py` or Alembic directly.
 leases, and liveness; Root/Sub model ids, endpoint, token limit, temperature,
 cache, retries, and secret-variable references; RLM limits and host verbosity;
 storage limits and database variable reference; Daytona API-key/Volume/Snapshot
-policy; MLflow tracking policy; and Fleet/DSPy logger level.
+policy; MLflow tracking policy; and Fleet/DSPy logger level. The storage limits
+are independent: `storage.max_upload_bytes` bounds uploads and workspace files,
+`storage.max_url_bytes` bounds fetched public URL sources, and
+`storage.max_artifact_bytes` bounds artifact bodies.
 
 When MLflow tracing is enabled, `mlflow.async_logging` keeps trace export off
 the Turn path and `mlflow.trace_sampling_ratio` controls the fraction of Turns

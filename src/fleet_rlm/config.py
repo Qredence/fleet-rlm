@@ -102,6 +102,10 @@ class Settings(BaseModel):
         default=10 * 1024 * 1024,
         description="Maximum upload size in bytes",
     )
+    max_url_bytes: int = Field(
+        default=10 * 1024 * 1024,
+        description="Maximum public URL source size in bytes",
+    )
     max_artifact_bytes: int = Field(
         default=10 * 1024 * 1024,
         description="Maximum artifact body size in bytes",
@@ -254,7 +258,7 @@ _TABLE_KEYS: dict[str, frozenset[str]] = {
             "verbose",
         }
     ),
-    "storage": frozenset({"data_root", "max_upload_bytes", "max_artifact_bytes", "database_url_env"}),
+    "storage": frozenset({"data_root", "max_upload_bytes", "max_url_bytes", "max_artifact_bytes", "database_url_env"}),
     "daytona": frozenset({"api_key_env", "snapshot", "org_id", "volume_name", "volume_mount_path"}),
     "logging": frozenset({"level"}),
     "mlflow": frozenset(
@@ -295,14 +299,14 @@ _ROLE_KEYS = frozenset(
 def _require_mapping(value: object, location: str) -> Mapping[str, Any]:
     """
     Require a TOML value to be a mapping.
-    
+
     Parameters:
         value (object): Value to validate.
         location (str): Configuration path used in the validation error.
-    
+
     Returns:
         Mapping[str, Any]: The validated mapping.
-    
+
     Raises:
         FleetConfigurationError: If the value is not a mapping.
     """
@@ -314,14 +318,15 @@ def _require_mapping(value: object, location: str) -> Mapping[str, Any]:
 def _validate_policy_table(value: object, location: str, *, allow_partial_llm: bool = False) -> None:
     """
     Validate the structure and environment references in a runtime policy table.
-    
+
     Parameters:
         value (object): Policy table to validate.
         location (str): Configuration path used in validation errors.
         allow_partial_llm (bool): Whether LLM roles may omit an API key environment reference.
-    
+
     Raises:
-        FleetConfigurationError: If the table contains unknown keys, conflicting values, or invalid environment references.
+        FleetConfigurationError: If the table contains unknown keys, conflicting values,
+            or invalid environment references.
     """
     table = _require_mapping(value, location)
     unknown = set(table).difference(_TABLE_KEYS)
@@ -409,16 +414,18 @@ def _deep_merge(base: Mapping[str, Any], override: Mapping[str, Any]) -> dict[st
 def _flatten_policy(policy: Mapping[str, Any]) -> dict[str, Any]:
     """
     Flatten validated nested policy sections into the field names required by `Settings`.
-    
+
     Parameters:
-        policy (Mapping[str, Any]): Validated policy configuration containing application, runtime, RLM, storage, Daytona, logging, LLM, and MLflow sections.
-    
+        policy (Mapping[str, Any]): Validated policy configuration containing application, runtime, RLM,
+            storage, Daytona, logging, LLM, and MLflow sections.
+
     Returns:
         dict[str, Any]: Settings field values with applicable defaults applied.
-    
+
     Raises:
         FleetConfigurationError: If required settings are missing.
     """
+
     def table(name: str) -> Mapping[str, Any]:
         return _require_mapping(policy.get(name, {}), name)
 
@@ -451,6 +458,7 @@ def _flatten_policy(policy: Mapping[str, Any]) -> dict[str, Any]:
         "rlm_verbose": rlm.get("verbose"),
         "data_root": storage.get("data_root"),
         "max_upload_bytes": storage.get("max_upload_bytes"),
+        "max_url_bytes": storage.get("max_url_bytes"),
         "max_artifact_bytes": storage.get("max_artifact_bytes"),
         "database_url_env": storage.get("database_url_env"),
         "daytona_api_key_env": daytona.get("api_key_env"),
@@ -563,12 +571,13 @@ def _require_managed_profile_environment_values(
 def load_runtime_settings() -> Settings:
     """
     Load and validate the active Fleet runtime configuration.
-    
+
     Returns:
         Settings: The resolved runtime settings for the selected profile.
-    
+
     Raises:
-        FleetConfigurationError: If the configuration file is missing or contains invalid, incomplete, or unsupported settings.
+        FleetConfigurationError: If the configuration file is missing or contains invalid, incomplete,
+            or unsupported settings.
     """
     dotenv = dotenv_values(".env")
     if not _CONFIG_PATH.is_file():

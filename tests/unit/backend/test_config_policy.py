@@ -35,6 +35,10 @@ def test_policy_read_exposes_toml_values_without_environment_secret_values(tmp_p
     assert tracking_uri["value"] == "http://127.0.0.1:5001"
     assert "secret" not in str(tracking_uri).lower()
 
+    url_limit = _field(service.read(), "local-deno", "storage.max_url_bytes")
+    assert url_limit["value"] == 10 * 1024 * 1024
+    assert url_limit["editor"] == "number"
+
 
 def test_policy_update_preserves_comments_and_validates_all_profiles(tmp_path: Path) -> None:
     service, policy = _service(tmp_path)
