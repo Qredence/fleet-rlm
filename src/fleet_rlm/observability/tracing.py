@@ -39,9 +39,9 @@ _TRACE_DESTINATION_TAG = "mlflow.experiment.databricksTraceDestinationPath"
 def _sanitize_mlflow_span(span: object) -> None:
     """
     Sanitize an MLflow span's inputs, outputs, and attributes before export.
-    
+
     Sanitization failures are suppressed so tracing does not affect the Turn outcome.
-    
+
     Parameters:
         span (object): MLflow span to sanitize.
     """
@@ -73,10 +73,10 @@ def _sanitize_mlflow_span(span: object) -> None:
 def _local_tracking_server_available(tracking_uri: str) -> bool:
     """
     Check whether an HTTP(S) tracking server is reachable within 0.5 seconds.
-    
+
     Parameters:
         tracking_uri (str): Tracking server URI to probe.
-    
+
     Returns:
         bool: `True` if the URI is not HTTP(S) or the server is reachable, `False` otherwise.
     """
@@ -149,7 +149,7 @@ def _validate_experiment_trace_location(settings: Settings) -> None:
 def configure_tracing(settings: Settings) -> None:
     """
     Configure fail-soft MLflow tracing and DSPy inference autologging according to Fleet settings.
-    
+
     The configuration is applied at most once. Tracing remains disabled when it is
     disabled by policy, required settings are missing, or setup fails. Raises
     `FleetConfigurationError` when an existing experiment's Unity Catalog trace
@@ -269,7 +269,7 @@ def configure_tracing(settings: Settings) -> None:
 def flush_tracing(*, terminate: bool = True) -> None:
     """
     Flush pending MLflow trace uploads during shutdown.
-    
+
     Parameters:
         terminate (bool): Whether to terminate MLflow's asynchronous trace logging.
     """

@@ -25,10 +25,10 @@ _LEGACY_LLM_API_KEY_ENV = "FLEET_OPENAI_API_KEY"
 def sanitize_base_url(value: str | None) -> str | None:
     """
     Normalize an HTTP or HTTPS base URL.
-    
+
     Parameters:
         value (str | None): The URL value to sanitize.
-    
+
     Returns:
         str | None: The normalized URL without trailing slashes, or `None` for an empty, invalid, or unsupported value.
     """
@@ -65,11 +65,11 @@ def normalize_model_id(model: str, *, base_url: str | None) -> str:
 def resolve_role_api_key(settings: Settings, role: LLMRoleSettings) -> str | None:
     """
     Resolve the API key configured for an LLM role.
-    
+
     Parameters:
         settings (Settings): Application settings containing dotenv values and a fallback API key.
         role (LLMRoleSettings): Role configuration identifying the API-key environment variable.
-    
+
     Returns:
         str | None: The resolved, stripped API key, or `None` when no key is configured.
     """

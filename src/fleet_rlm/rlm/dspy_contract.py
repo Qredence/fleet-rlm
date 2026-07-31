@@ -229,12 +229,12 @@ def _observed_scalar(value: object, *, path: str) -> JsonValue:
 def _safe_usage_entry(value: object, *, path: str, filter_unknown: bool) -> dict[str, JsonValue]:
     """
     Validate and normalize an observed usage mapping for safe telemetry.
-    
+
     Parameters:
         value (object): Usage data to validate.
         path (str): Location used in validation error messages.
         filter_unknown (bool): Whether to omit unrecognized usage fields instead of raising an error.
-    
+
     Returns:
         dict[str, JsonValue]: A validated usage mapping containing only allowed JSON-compatible values.
     """
@@ -459,7 +459,7 @@ class _RLMTraceCallback(BaseCallback):
     ) -> None:
         """
         Finalize an LM tracing span with response, timing, usage, and failure details.
-        
+
         Parameters:
             call_id (str): Identifier of the LM call being finalized.
             outputs (dict[str, Any] | None): LM response data used to create a safe output profile.
@@ -548,11 +548,11 @@ def _latest_lm_telemetry(
 ) -> tuple[dict[str, JsonValue], dict[str, JsonValue]]:
     """
     Retrieve sanitized usage and provider telemetry for the latest completed language-model call.
-    
+
     Parameters:
         instance (Any): Language-model instance whose call history is inspected.
         history_length (int | None): Starting history position for entries belonging to the current call.
-    
+
     Returns:
         tuple[dict[str, JsonValue], dict[str, JsonValue]]: Allowlisted usage data and provider response metadata.
     """
@@ -584,12 +584,12 @@ def _latest_lm_telemetry(
 def _provider_response_telemetry(response: object) -> dict[str, JsonValue]:
     """
     Extracts safe provider timing and request identifier metadata from an LM response.
-    
+
     Parameters:
-    	response (object): Provider response containing optional metadata.
-    
+        response (object): Provider response containing optional metadata.
+
     Returns:
-    	dict[str, JsonValue]: Allowlisted provider telemetry values, or an empty dictionary when unavailable.
+        dict[str, JsonValue]: Allowlisted provider telemetry values, or an empty dictionary when unavailable.
     """
     hidden = getattr(response, "_hidden_params", None)
     if not isinstance(hidden, Mapping) and isinstance(response, Mapping):
@@ -624,12 +624,12 @@ def _provider_response_telemetry(response: object) -> dict[str, JsonValue]:
 def _mlflow_token_usage(usage: Mapping[str, JsonValue]) -> dict[str, JsonValue]:
     """
     Map provider-specific token fields to standardized MLflow usage keys.
-    
+
     Parameters:
-    	usage (Mapping[str, JsonValue]): Provider-reported token usage values.
-    
+        usage (Mapping[str, JsonValue]): Provider-reported token usage values.
+
     Returns:
-    	dict[str, JsonValue]: Token usage values keyed by MLflow's standard aggregate names.
+        dict[str, JsonValue]: Token usage values keyed by MLflow's standard aggregate names.
     """
     aliases = {
         "input_tokens": ("input_tokens", "prompt_tokens"),

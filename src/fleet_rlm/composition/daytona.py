@@ -24,7 +24,7 @@ _STARTUP_RECOVERY_FENCE_TIMEOUT_SECONDS = 15
 def require_daytona_settings(settings: Settings) -> None:
     """
     Validate that all required Daytona runtime settings are configured.
-    
+
     Raises:
         CompositionError: If the runtime environment is not Daytona or one or more required settings are missing.
     """

@@ -128,7 +128,7 @@ class _DenoCapabilityPreparer:
     ) -> None:
         """
         Configure capability preparation for Deno execution.
-        
+
         Parameters:
             max_artifact_bytes (int): Maximum number of bytes allowed for artifact data.
             max_url_bytes (int): Maximum number of bytes allowed for URL data.
@@ -152,13 +152,13 @@ class _DenoCapabilityPreparer:
     ) -> DenoPreparedCapabilities:
         """
         Prepare the host capabilities available during a Deno turn.
-        
+
         Parameters:
             turn (ExecuteTurn): Turn context used to scope capabilities and identify the caller.
             environment (RunEnvironment): Runtime environment containing attachment storage.
             attachments (PreparedAttachments): Attachments made available to the turn.
             deadline (float): Time limit for capability preparation.
-        
+
         Returns:
             DenoPreparedCapabilities: Prepared file, skill, workspace, and URL capabilities for the turn.
         """
@@ -238,7 +238,7 @@ class DenoTurnPreparation:
     ) -> None:
         """
         Configure turn preparation for Deno execution.
-        
+
         Parameters:
             attachments: Attachment lifecycle manager used by the run environment.
             options: General RLM options. Defaults to standard options.

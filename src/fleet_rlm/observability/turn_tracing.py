@@ -24,10 +24,10 @@ _MAX_TRACE_TEXT_CHARS = 1_000
 def _trace_value(value: object) -> object:
     """
     Sanitize and bound a value for safe inclusion in engineering traces.
-    
+
     Parameters:
         value (object): The value to sanitize for tracing.
-    
+
     Returns:
         object: A bounded sanitized value, the original primitive value, or the value's type name.
     """
@@ -90,7 +90,7 @@ def annotate_trace_io(
 ) -> None:
     """
     Annotate the active trace with sanitized request and response data.
-    
+
     Parameters:
         request: The request content to record.
         response_text: Optional response text to record.
@@ -271,15 +271,16 @@ def turn_trace(
 ) -> Iterator[TraceHandle]:
     """
     Open a root ``fleet_turn`` span for a live Turn when tracing is enabled.
-    
+
     Parameters:
-    	session_id (UUID): Identifier for the session associated with the Turn.
-    	run_id (UUID): Identifier for the run associated with the Turn.
-    	enabled (bool): Whether to enable tracing.
-    	expose_trace_id (bool): Whether to expose the active trace identifier in the yielded handle.
-    
+        session_id (UUID): Identifier for the session associated with the Turn.
+        run_id (UUID): Identifier for the run associated with the Turn.
+        enabled (bool): Whether to enable tracing.
+        expose_trace_id (bool): Whether to expose the active trace identifier in the yielded handle.
+
     Yields:
-    	TraceHandle: Handle containing the trace identifier when available and exposure is enabled; otherwise, a no-op handle.
+        TraceHandle: Handle containing the trace identifier when available and exposure is enabled;
+            otherwise, a no-op handle.
     """
     if not enabled:
         yield TraceHandle(trace_id=None)
