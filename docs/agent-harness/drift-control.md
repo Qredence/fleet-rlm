@@ -4,7 +4,6 @@
 
 ```bash
 make check
-make test-deno
 make check-release
 make check-security
 make build-release
@@ -14,7 +13,6 @@ git diff --check
 - `make check` runs Python lint/format/type checks, the isolated non-live test
   suites, OpenAPI/TUI type drift, all pi-tui checks, codebase boundaries, and
   documentation/harness checks.
-- `make test-deno` runs the deterministic real Deno/Pyodide contracts.
 - `make check-release` validates hygiene, package metadata, and `AGENTS.md`.
 - `make check-security` runs the configured dependency audit and Bandit lane.
 - `make build-release` builds and validates the Python distributions.

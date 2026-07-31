@@ -51,9 +51,7 @@ class PolicyField:
 
 _FIELDS: tuple[PolicyField, ...] = (
     PolicyField("application.name", "Application", "Name", "text", settings_field="app_name"),
-    PolicyField(
-        "runtime.environment", "Runtime", "Environment", "single_choice", ("deno", "daytona"), "run_environment"
-    ),
+    PolicyField("runtime.environment", "Runtime", "Environment", "single_choice", ("daytona",), "run_environment"),
     PolicyField(
         "runtime.turn_timeout_seconds",
         "Runtime",

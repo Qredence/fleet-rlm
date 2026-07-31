@@ -128,7 +128,7 @@ describe("summarizeExecution", () => {
     ).toBeNull();
   });
 
-  it("keeps Deno built-in semantic calls unknown when no tool event is observable", () => {
+  it("keeps built-in semantic calls unknown when no tool event is observable", () => {
     expect(
       summarizeExecution(
         [

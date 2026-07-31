@@ -25,9 +25,9 @@ def _field(snapshot, scope: str, path: str):
 def test_policy_read_exposes_toml_values_without_environment_secret_values(tmp_path: Path) -> None:
     service, _ = _service(tmp_path)
 
-    field = _field(service.read(), "local-deno", "llm.root.api_key_env")
+    field = _field(service.read(), "daytona", "llm.root.api_key_env")
 
-    assert field["value"] == "FLEET_OPENAI_API_KEY"
+    assert field["value"] == "DATABRICKS_TOKEN"
     assert field["editor"] == "text"
     assert "secret" not in str(field).lower()
 
@@ -35,7 +35,7 @@ def test_policy_read_exposes_toml_values_without_environment_secret_values(tmp_p
     assert tracking_uri["value"] == "http://127.0.0.1:5001"
     assert "secret" not in str(tracking_uri).lower()
 
-    url_limit = _field(service.read(), "local-deno", "storage.max_url_bytes")
+    url_limit = _field(service.read(), "daytona", "storage.max_url_bytes")
     assert url_limit["value"] == 10 * 1024 * 1024
     assert url_limit["editor"] == "number"
 
@@ -55,7 +55,7 @@ def test_policy_update_preserves_comments_and_validates_all_profiles(tmp_path: P
     content = policy.read_text(encoding="utf-8")
     assert "# Official Oolong benchmark profiles" in content
     assert "max_iterations = 21" in content
-    assert _field(after, "local-deno", "rlm.max_iterations")["value"] == 21
+    assert _field(after, "daytona", "rlm.max_iterations")["value"] == 21
 
 
 def test_policy_can_add_a_profile_override_for_an_inherited_setting(tmp_path: Path) -> None:
@@ -63,14 +63,14 @@ def test_policy_can_add_a_profile_override_for_an_inherited_setting(tmp_path: Pa
     before = service.read()
 
     service.update(
-        scope="local-deno",
+        scope="daytona-bench",
         path="rlm.max_iterations",
         value=12,
         revision=before.revision,
     )
 
-    assert "[profiles.local-deno.rlm]" in policy.read_text(encoding="utf-8")
-    assert _field(service.read(), "local-deno", "rlm.max_iterations")["value"] == 12
+    assert "[profiles.daytona-bench.rlm]" in policy.read_text(encoding="utf-8")
+    assert _field(service.read(), "daytona-bench", "rlm.max_iterations")["value"] == 12
 
 
 def test_policy_rejects_stale_revision_and_invalid_database_environment_reference(tmp_path: Path) -> None:
@@ -95,7 +95,7 @@ def test_policy_never_reports_environment_policy_overrides(monkeypatch: pytest.M
     monkeypatch.setenv("FLEET_ROOT_MODEL", "stale-model")
     service, _ = _service(tmp_path)
 
-    field = _field(service.read(), "local-deno", "llm.root.model")
+    field = _field(service.read(), "daytona", "llm.root.model")
 
     assert field["environment_overridden"] is False
 
@@ -118,12 +118,12 @@ def test_set_default_profile_persists_and_surfaces_in_snapshot(tmp_path: Path) -
     before = service.read()
 
     assert before.default_profile == "daytona"
-    assert "local-deno" in before.available_profiles
+    assert set(before.available_profiles) == {"daytona", "daytona-managed", "daytona-bench", "daytona-bench-40"}
 
-    after = service.set_default_profile("local-deno", revision=before.revision)
+    after = service.set_default_profile("daytona-bench", revision=before.revision)
 
-    assert after.default_profile == "local-deno"
-    assert 'default_profile = "local-deno"' in policy.read_text(encoding="utf-8")
+    assert after.default_profile == "daytona-bench"
+    assert 'default_profile = "daytona-bench"' in policy.read_text(encoding="utf-8")
     assert after.revision != before.revision
 
 
@@ -134,7 +134,7 @@ def test_set_default_profile_rejects_unknown_profile_and_stale_revision(tmp_path
     with pytest.raises(FleetConfigurationError, match="configured profile does not exist"):
         service.set_default_profile("does-not-exist", revision=before.revision)
 
-    updated = service.set_default_profile("local-deno", revision=before.revision)
+    updated = service.set_default_profile("daytona-bench", revision=before.revision)
     with pytest.raises(PolicyConflictError):
         service.set_default_profile("daytona", revision=before.revision)
 

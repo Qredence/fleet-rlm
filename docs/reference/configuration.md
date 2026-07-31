@@ -3,8 +3,8 @@
 Fleet starts from the required, committed [`config/fleet.toml`](../../config/fleet.toml)
 policy file. The active profile is selected by the `[config] default_profile` key
 inside that file (or, when only one profile exists, that single profile). Set
-`default_profile` to one of the named profiles (`local-deno`, `daytona`,
-`daytona-managed`, `daytona-bench`, or `daytona-bench-40`) before starting any
+`default_profile` to one of the named profiles (`daytona`, `daytona-managed`,
+`daytona-bench`, or `daytona-bench-40`) before starting any
 backend or running `fleet doctor`. Policy is strict, resolved once at process
 startup, and takes effect only after restart.
 
@@ -22,7 +22,6 @@ references fail startup.
 
 | Profile | Required | Optional persistence |
 | --- | --- | --- |
-| `local-deno` | `FLEET_OPENAI_API_KEY`; Deno executable on `PATH` | `FLEET_DATABASE_URL`; SQLite is the normal local choice |
 | `daytona` / benchmark profiles | `DATABRICKS_TOKEN`, `FLEET_DAYTONA_API_KEY`, `FLEET_DATABRICKS_AI_GATEWAY_BASE_URL`, `FLEET_DATABASE_URL` at Alembic head | none |
 | `daytona-managed` | Daytona requirements plus managed MLflow variables listed below; `FLEET_DATABASE_URL` must point to Lakebase at Alembic head | none |
 
@@ -105,7 +104,7 @@ Fleet restart.
 | --- | --- | --- |
 | `FLEET_DATABASE_URL` | `storage.database_url_env` | Async SQLAlchemy URL |
 | `FLEET_DAYTONA_API_KEY` | `daytona.api_key_env` | Daytona provider credential |
-| `FLEET_OPENAI_API_KEY` | Root/Sub `api_key_env` in `local-deno` | OpenAI-compatible provider credential |
+| `FLEET_OPENAI_API_KEY` | A custom Root/Sub `api_key_env` reference | OpenAI-compatible provider credential |
 | `DATABRICKS_TOKEN` | Root/Sub `api_key_env` in Daytona profiles | Databricks AI Gateway credential |
 | `FLEET_DATABRICKS_AI_GATEWAY_BASE_URL` | Root/Sub `base_url_env` in Daytona profiles | Databricks AI Gateway endpoint |
 | `FLEET_MLFLOW_EXPERIMENT_NAME` | `daytona-managed.mlflow.experiment_name_env` | Managed MLflow experiment |

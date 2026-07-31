@@ -1,5 +1,5 @@
 PYTHON_SOURCES = src/fleet_rlm tests/unit/backend tests/unit/scripts tests/contracts/backend tests/e2e scripts/openapi_tools.py scripts/db_init.py scripts/live_daytona_verify.py scripts/daytona_snapshot.py scripts/benchmark_daytona_lifecycle.py scripts/benchmarks migrations
-PYTEST_FAST_MARKERS = not deno and not live_llm and not live_daytona and not benchmark and not db
+PYTEST_FAST_MARKERS = not live_llm and not live_daytona and not benchmark and not db
 PYTEST := uv run --no-sync pytest
 PYTEST_ISOLATED := env \
 	FLEET_DAYTONA_API_KEY= \
@@ -14,7 +14,7 @@ PYTEST_PARALLEL := -n auto --maxprocesses=$(PYTEST_XDIST_MAX_WORKERS)
 	help \
 	install install-dev install-all \
 	dev format format-check lint typecheck \
-	test test-fast test-unit test-contract test-deno test-daytona-cov \
+	test test-fast test-unit test-contract test-daytona-cov \
 	check quality-gate check-release check-docs check-security check-deps check-codebase-tree api-check api-sync tui-check \
 	build build-release release release-check \
 	clean cli precommit-install precommit-run precommit \
@@ -40,7 +40,6 @@ help:
 	@echo "  make test             - Run default non-live/non-benchmark tests"
 	@echo "  make test-unit        - Run unit tests (non-live/non-benchmark)"
 	@echo "  make test-contract    - Run backend contracts and CLI smoke tests"
-	@echo "  make test-deno        - Run deterministic contracts against the Deno runtime"
 	@echo "  make test-daytona-cov - Run canonical non-live tests with Daytona branch coverage"
 	@echo "  make benchmark-oolong - Run official Oolong smoke (requires FLEET_LIVE=1; configure OOLONG_* variables)"
 	@echo "  make benchmark-native-long-context - Measure native whole-value URL context at 1/5/10 MiB"
@@ -106,9 +105,6 @@ test-unit:
 
 test-contract:
 	$(PYTEST_ISOLATED) -q tests/contracts/backend tests/e2e -m "$(PYTEST_FAST_MARKERS)" -n 0
-
-test-deno:
-	$(PYTEST) -q tests/unit/backend/test_deno_run_environment.py tests/contracts/backend/test_deno_turn_flow.py -m "deno" -n 0 --timeout=120
 
 test-daytona-cov:
 	mkdir -p .scratch/coverage

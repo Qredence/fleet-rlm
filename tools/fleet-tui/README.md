@@ -9,8 +9,6 @@ contract; it does not run a model, Harness agent, or Sandbox.
 The simplest local path supervises backend and client together:
 
 ```bash
-FLEET_DATABASE_URL='sqlite+aiosqlite:///./.fleet_rlm/local.sqlite3' \
-  uv run fleet deno --port 8000 # LLM key + Deno required
 uv run fleet cli --port 8000    # LLM key + Daytona key + database required
 ```
 
@@ -26,8 +24,8 @@ pnpm --dir tools/fleet-tui install --frozen-lockfile
 pnpm --dir tools/fleet-tui start -- --api-url http://127.0.0.1:8000
 ```
 
-The database is optional for an ephemeral Deno process, but cross-process
-Session resume requires it. Resume a durable Session:
+Cross-process Session resume requires the configured database. Resume a durable
+Session:
 
 ```bash
 uv run fleet cli -- --session <session-uuid>

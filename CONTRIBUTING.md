@@ -70,7 +70,7 @@ make check-release
 git diff --check
 ```
 
-Run `make test-deno` for Deno behavior and `make api-check` whenever HTTP shapes
+Run the focused backend tests for changed behavior and `make api-check` whenever HTTP shapes
 may have moved. Credentialed Daytona tests require explicit `FLEET_LIVE=1`;
 report live lanes that were intentionally not run.
 

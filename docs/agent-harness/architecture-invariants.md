@@ -10,7 +10,7 @@ and its matching automated check in the same patch.
   provider clients.
 - `app.create_app()` installs the FastAPI shell and static bundled Skill
   catalog/authorizer/empty capability registry. Lifespan owns runtime inventory.
-- `composition/` owns complete common, Deno, Daytona, and private testing wiring.
+- `composition/` owns complete common, Daytona, and private testing wiring.
 - `chat/` owns preparation, coordination, Turn Lifecycle, terminal ordering, and
   cleanup. `TurnLifecycle.finish()` owns Artifact publication and atomic commit;
   `TurnCoordinator` owns stream settlement and resource release.
@@ -27,8 +27,8 @@ and its matching automated check in the same patch.
 ## Turn and async boundary
 
 - Construct a fresh `dspy.RLM` and host-tool list per Turn. Daytona constructs a
-  fresh custom interpreter; Deno passes `interpreter=None`. Interpreters are
-  never shared across Runs or concurrently.
+  fresh custom interpreter. Interpreters are never shared across Runs or
+  concurrently.
 - Pass request text, bounded `session_context`, authorized `skill_cards`, and
   bounded Attachment metadata to the default Fleet Signature. Custom Task
   Contracts receive only declared host-bounded inputs. Keep older history behind
@@ -71,11 +71,11 @@ routes or public events.
   `sessions/{session_id}/workspace/`. Paged reads, bounded immediate-child
   listings, append, and replacement writes are immediate private state, not
   Turn-commit candidates; direct Workspace Artifact publication only stages a
-  private candidate, and Deno registers no workspace tools.
+  private candidate.
 - Daytona Workspace Memory is distinct workspace-wide immediate state. Its only
   target is the root `MEMORIES.md` of the already mounted
   `workspaces/<workspace_id>` Volume subpath; Session and Run paths remain
-  nested below that root. Deno registers no memory tools.
+  nested below that root.
 - Memory updates are append-only, complete UTC-timestamped records of at most
   4 KiB formatted UTF-8. They become durable independently of Turn Commit and
   survive failed or cancelled Turns and Sandbox replacement. Reads return the
@@ -95,8 +95,8 @@ routes or public events.
 
 ## Configuration and compatibility
 
-- Runtime settings use only `FLEET_*`; canonical public environments are `deno`
-  and `daytona`.
+- Runtime settings use only `FLEET_*`; the canonical public environment is
+  `daytona`.
 - There is no `/api/v1`, WebSocket execution, dual serve, legacy migration,
   runtime-admin, optimization/evaluation API, or public Artifact creation.
 - The maintained client is pi-tui. A graphical/Web client is separate future

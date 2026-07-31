@@ -16,7 +16,7 @@ import dspy
 from pydantic import ValidationError
 
 from fleet_rlm.chat.session_context import SessionContextManifest
-from fleet_rlm.files.workspace_models import DENO_WORKSPACE_CAPABILITY, WorkspaceCapabilityMetadata
+from fleet_rlm.files.workspace_models import UNAVAILABLE_WORKSPACE_CAPABILITY, WorkspaceCapabilityMetadata
 from fleet_rlm.rlm.errors import RLMConfigError
 from fleet_rlm.rlm.input_models import (
     AttachmentInput,
@@ -126,7 +126,7 @@ def build_rlm_input_kwargs(
     skill_cards: tuple[Any, ...] | list[Any] = (),
     attachments: tuple[Any, ...] | list[Any] = (),
     attachment_payloads: Sequence[AttachmentSandboxPayload] = (),
-    workspace: WorkspaceCapabilityMetadata = DENO_WORKSPACE_CAPABILITY,
+    workspace: WorkspaceCapabilityMetadata = UNAVAILABLE_WORKSPACE_CAPABILITY,
 ) -> dict[str, Any]:
     """Kwargs for ``rlm.aforward`` / ``forward`` matching FleetRLMSignature."""
     if not isinstance(request, str) or not request.strip() or len(request) > _MAX_REQUEST_CHARS:

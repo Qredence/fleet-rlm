@@ -145,7 +145,7 @@ async def test_prepared_rlm_kwargs_bound_a_large_session_to_recent_previews() ->
             "available": False,
             "root": ".",
             "instructions": (
-                "Session Workspace is unavailable in Deno. REPL variables and sandbox-local files are "
+                "Session Workspace is unavailable. REPL variables and sandbox-local files are "
                 "temporary to the Run; no durable Workspace or Turn Commit artifact workflow is available."
             ),
         },

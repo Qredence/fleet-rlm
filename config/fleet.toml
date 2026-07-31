@@ -59,20 +59,6 @@ expose_trace_id = true
 async_logging = true
 trace_sampling_ratio = 1.0
 
-[profiles.local-deno.runtime]
-environment = "deno"
-
-# The local runtime uses the stock OpenAI provider contract. Keep its
-# credential reference on the provider-specific profile rather than in
-# [defaults], so every profile declares its own provider explicitly.
-[profiles.local-deno.llm.root]
-model = "openai/deepseek-v4-flash-free"
-api_key_env = "FLEET_OPENAI_API_KEY"
-
-[profiles.local-deno.llm.sub]
-model = "openai/deepseek-v4-flash-free"
-api_key_env = "FLEET_OPENAI_API_KEY"
-
 [profiles.daytona.runtime]
 environment = "daytona"
 

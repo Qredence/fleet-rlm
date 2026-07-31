@@ -113,7 +113,7 @@ def test_supervisor_rejects_node_older_than_22_19(
             host="127.0.0.1",
             port=8123,
             reload=False,
-            run_environment="deno",
+            run_environment="daytona",
             repo_root=tmp_path,
         )
 
@@ -348,47 +348,6 @@ def test_selected_runtime_policy_accepts_any_compatible_daytona_profile(
     assert _SELECTED_RUNTIME_POLICY("daytona") is settings
 
 
-def test_selected_runtime_policy_accepts_compatible_deno_profile(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    settings = SimpleNamespace(run_environment="deno", _active_profile="local-deno")
-    monkeypatch.setattr(supervisor, "active_profile", lambda _settings: "local-deno")
-    monkeypatch.setattr(supervisor, "load_runtime_settings", lambda: settings)
-
-    assert _SELECTED_RUNTIME_POLICY("deno") is settings
-
-
-@pytest.mark.parametrize(
-    ("requested", "selected_environment", "selected_profile", "recommended"),
-    (
-        ("deno", "daytona", "daytona", "local-deno"),
-        ("daytona", "deno", "local-deno", "daytona"),
-    ),
-)
-def test_selected_runtime_policy_rejects_launcher_mismatch(
-    monkeypatch: pytest.MonkeyPatch,
-    requested: str,
-    selected_environment: str,
-    selected_profile: str,
-    recommended: str,
-) -> None:
-    settings = SimpleNamespace(run_environment=selected_environment, _active_profile=selected_profile)
-    monkeypatch.setattr(supervisor, "active_profile", lambda _settings: selected_profile)
-    monkeypatch.setattr(supervisor, "load_runtime_settings", lambda: settings)
-
-    with pytest.raises(supervisor.SupervisorError) as raised:
-        _SELECTED_RUNTIME_POLICY(requested)
-
-    message = str(raised.value)
-    assert repr(selected_profile) in message
-    assert f"default_profile = {recommended!r}" in message
-    assert "/profiles" in message
-
-
-def test_profile_for_run_environment_uses_stable_deno_default() -> None:
-    assert supervisor._profile_for_run_environment("deno") == "local-deno"
-
-
 def test_selected_runtime_policy_reports_removed_profile(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -403,59 +362,6 @@ def test_selected_runtime_policy_reports_removed_profile(
         match="configured profile does not exist: databricks-daytona",
     ):
         _SELECTED_RUNTIME_POLICY("daytona")
-
-
-@pytest.mark.parametrize(
-    ("requested", "selected_environment", "selected_profile"),
-    (
-        ("deno", "daytona", "daytona"),
-        ("daytona", "deno", "local-deno"),
-    ),
-)
-def test_supervisor_rejects_profile_mismatch_before_runtime_side_effects(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-    requested: str,
-    selected_environment: str,
-    selected_profile: str,
-) -> None:
-    _tui_workspace(tmp_path)
-    monkeypatch.setattr(supervisor.shutil, "which", lambda command: f"/usr/bin/{command}")
-    monkeypatch.setattr(
-        supervisor.subprocess,
-        "run",
-        lambda *_args, **_kwargs: SimpleNamespace(returncode=0, stdout="v22.19.0", stderr=""),
-    )
-    settings = SimpleNamespace(run_environment=selected_environment, _active_profile=selected_profile)
-    monkeypatch.setattr(supervisor, "active_profile", lambda _settings: selected_profile)
-    monkeypatch.setattr(supervisor, "load_runtime_settings", lambda: settings)
-    monkeypatch.setattr(supervisor, "_selected_runtime_policy", _SELECTED_RUNTIME_POLICY)
-    monkeypatch.setattr(
-        supervisor,
-        "_validate_daytona_database",
-        lambda *_args, **_kwargs: pytest.fail("profile mismatch must precede database preflight"),
-    )
-
-    @contextmanager
-    def forbidden_mlflow(*_args: object, **_kwargs: object):
-        pytest.fail("profile mismatch must precede MLflow startup")
-        yield None
-
-    monkeypatch.setattr(supervisor, "_local_mlflow_server", forbidden_mlflow)
-    monkeypatch.setattr(
-        supervisor.subprocess,
-        "Popen",
-        lambda *_args, **_kwargs: pytest.fail("profile mismatch must precede child spawning"),
-    )
-
-    with pytest.raises(supervisor.SupervisorError, match="default_profile"):
-        supervisor.supervise(
-            host="127.0.0.1",
-            port=8123,
-            reload=False,
-            run_environment=requested,
-            repo_root=tmp_path,
-        )
 
 
 def test_supervisor_reuses_one_daytona_settings_object_and_stops_mlflow_last(
@@ -603,11 +509,13 @@ def test_supervisor_runs_pi_tui_against_ready_backend_and_terminates_backend_gro
     tmp_path: Path,
 ) -> None:
     workspace = _tui_workspace(tmp_path)
-    monkeypatch.setattr(
-        supervisor,
-        "_validate_daytona_database",
-        lambda _repo_root: pytest.fail("Deno must not run the Daytona database preflight"),
-    )
+    database_calls: list[Path] = []
+
+    def validate_daytona_database(root: Path, *, settings: object) -> None:
+        del settings
+        database_calls.append(root)
+
+    monkeypatch.setattr(supervisor, "_validate_daytona_database", validate_daytona_database)
     monkeypatch.setattr(supervisor.shutil, "which", lambda command: f"/usr/bin/{command}")
     monkeypatch.setattr(
         supervisor.subprocess,
@@ -633,12 +541,13 @@ def test_supervisor_runs_pi_tui_against_ready_backend_and_terminates_backend_gro
         host="127.0.0.1",
         port=8123,
         reload=True,
-        run_environment="deno",
+        run_environment="daytona",
         tui_args=("--session", "session-id"),
         repo_root=tmp_path,
     )
 
     backend_command, backend_options = popen_calls[0]
+    assert database_calls == [tmp_path]
     assert backend_command[-6:] == [
         "fleet_rlm.main:app",
         "--host",
@@ -724,7 +633,7 @@ def test_supervisor_reports_backend_exit_after_readiness_and_stops_tui_group(
             host="127.0.0.1",
             port=8123,
             reload=False,
-            run_environment="deno",
+            run_environment="daytona",
             repo_root=tmp_path,
         )
 
@@ -896,36 +805,6 @@ def test_supervisor_sigint_stops_both_groups_and_returns_cleanly(
 
     assert (41, supervisor.signal.SIGTERM) in signals
     assert (42, supervisor.signal.SIGTERM) in signals
-
-
-def test_supervisor_reports_readiness_timeout_with_log_path(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    _tui_workspace(tmp_path)
-    monkeypatch.setattr(supervisor.shutil, "which", lambda command: f"/usr/bin/{command}")
-    monkeypatch.setattr(
-        supervisor.subprocess,
-        "run",
-        lambda *_args, **_kwargs: SimpleNamespace(returncode=0, stdout="v22.19.0", stderr=""),
-    )
-    backend = _Process(pid=8)
-    monkeypatch.setattr(supervisor.subprocess, "Popen", lambda *_args, **_kwargs: backend)
-    clock = iter((100.0, 131.0))
-    monkeypatch.setattr(supervisor.time, "monotonic", lambda: next(clock))
-    monkeypatch.setattr(supervisor.os, "killpg", lambda *_args: None)
-
-    with pytest.raises(supervisor.SupervisorError, match="not ready within 30s") as error:
-        supervisor.supervise(
-            host="127.0.0.1",
-            port=8125,
-            reload=False,
-            run_environment="deno",
-            repo_root=tmp_path,
-        )
-
-    assert str(tmp_path / ".fleet_rlm" / "logs") in str(error.value)
-    assert backend.wait_timeouts == [5.0]
 
 
 def test_supervisor_uses_longer_daytona_readiness_timeout(

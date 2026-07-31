@@ -50,13 +50,6 @@ def _fleet_parser() -> argparse.ArgumentParser:
         run_environment="daytona",
         supervise_tui=True,
     )
-    _add_serve_command(
-        subcommands,
-        "deno",
-        help_text="start the Deno backend and pi-tui terminal",
-        run_environment="deno",
-        supervise_tui=True,
-    )
     doctor = subcommands.add_parser("doctor", help="run opt-in provider diagnostics")
     doctor_providers = doctor.add_subparsers(dest="doctor_provider", required=True)
     daytona = doctor_providers.add_parser(
@@ -164,7 +157,7 @@ def _emit(message: str) -> None:
 
 
 def fleet_main(argv: Sequence[str] | None = None) -> None:
-    """Run the configured, Daytona, or Deno Fleet backend."""
+    """Run the configured Daytona Fleet backend."""
     _run(_fleet_parser(), argv)
 
 

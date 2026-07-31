@@ -32,8 +32,8 @@ environment cache after changing setup, maintenance, or environment settings.
 
 ## API Smoke
 
-Configure the selected runtime first. Deno requires an LLM key and Deno on
-`PATH`; Daytona requires LLM and Daytona keys plus a database at Alembic head.
+Configure the selected Daytona profile first. It requires LLM and Daytona keys
+plus a database at Alembic head.
 See [configuration](../reference/configuration.md).
 
 ```bash

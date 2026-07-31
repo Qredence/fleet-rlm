@@ -2,8 +2,8 @@
 
 The Tool keeps URL retrieval behind the host boundary.  The RLM receives the
 text as a Python value, while RuntimeEvents and MLflow receive only bounded
-source metadata.  Daytona stores successful values in Session Workspace;
-Deno uses a bounded process-local Session cache because its documented
+source metadata. Daytona stores successful values in Session Workspace; private
+or local execution uses a bounded process-local Session cache when durable
 Workspace capability is unavailable.
 """
 
@@ -407,7 +407,7 @@ class UrllibPublicTextFetcher:
 
 
 class InMemoryUrlSourceStore:
-    """Bounded process-local URL cache for Deno's non-durable runtime."""
+    """Bounded process-local URL cache for runtimes without durable Workspace."""
 
     def __init__(
         self,

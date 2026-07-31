@@ -1,4 +1,4 @@
-"""Shared host-owned capability preparation for Deno and Daytona Turns."""
+"""Shared host-owned capability preparation for Daytona and private Turns."""
 
 from __future__ import annotations
 

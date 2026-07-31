@@ -5,7 +5,7 @@ operator tasks. It couples FastAPI HTTP/SSE orchestration with native
 `dspy.RLM` execution. The maintained interactive client is the pi-tui terminal
 workspace; this repository does not maintain a graphical Web frontend.
 
-Canonical Run Environment set: `deno`, `daytona`.
+Canonical Run Environment set: `daytona`.
 
 ## What operators can do
 
@@ -14,8 +14,6 @@ Canonical Run Environment set: `deno`, `daytona`.
   terminal timeline.
 - In the Daytona environment, inspect the bounded, read-only logical Workspace
   Volume tree from the API or terminal client.
-- Use a Deno profile for local, real-LM RLM execution with Attachment reads and
-  Skills, without Daytona Workspace or Memory tools.
 - Use a Daytona profile for Sandbox-backed execution with Workspace Volume
   storage, Session Workspace files, on-demand Workspace Memory, durable
   Attachments, and committed Artifacts.
@@ -47,12 +45,11 @@ engineering-only MLflow tracing.
 
 Select `[config] default_profile` in `config/fleet.toml`, directly or through
 the TUI `/profiles` command, then restart Fleet. The committed policy defines
-the runtime, model roles, and the names of external configuration values. Deno
-is the reduced local environment; Daytona is the full durable environment and
-requires a migrated database, a Daytona credential, Databricks AI Gateway
-credentials, and its configured gateway URL. The current live proof does not
-yet establish Workspace Memory across real provider-backed Sandbox replacement
-and separate Sessions.
+the runtime, model roles, and the names of external configuration values. Daytona
+is the supported durable environment and requires a migrated database, a Daytona
+credential, Databricks AI Gateway credentials, and its configured gateway URL.
+The current live proof does not yet establish Workspace Memory across real
+provider-backed Sandbox replacement and separate Sessions.
 
 See the [configuration reference](docs/reference/configuration.md),
 [architecture](docs/architecture.md), [HTTP API reference](docs/reference/http-api.md),

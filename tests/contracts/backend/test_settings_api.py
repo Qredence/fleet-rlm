@@ -25,7 +25,13 @@ def test_settings_policy_is_loopback_only_and_revision_checked(monkeypatch, tmp_
         body = read.json()
         assert body["restart_required"] is True
         assert body["revision"]
-        assert {scope["name"] for scope in body["scopes"]} >= {"defaults", "daytona", "local-deno"}
+        assert {scope["name"] for scope in body["scopes"]} == {
+            "defaults",
+            "daytona",
+            "daytona-managed",
+            "daytona-bench",
+            "daytona-bench-40",
+        }
 
         updated = client.patch(
             "/api/settings",

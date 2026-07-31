@@ -161,7 +161,7 @@ the already workspace-scoped Volume mount. `read_workspace_memory` loads the
 newest bounded complete records only when the RLM calls it; `update_workspace_memory`
 appends one normalized record only for an explicit user request. Appends are
 durable independently of Turn Commit and survive failed or cancelled Runs and
-Sandbox replacement. Deno binds neither Tool.
+Sandbox replacement.
 _Avoid_: Session History, automatic prompt injection, unbounded learned state
 
 **Workspace Volume Tree**:
@@ -243,8 +243,7 @@ _Avoid_: Artifact Candidate, Attachment, Staged Attachment, log, transcript
 
 **Result Snapshot**:
 Private commit-gated Daytona Volume derivative of one successful typed Turn
-result. It is never the replay source, a public Artifact, or an API resource;
-Deno does not write one.
+result. It is never the replay source, a public Artifact, or an API resource.
 _Avoid_: CommittedTurn, Artifact, checkpoint, Code-Interpreter Context
 
 ### Public progress

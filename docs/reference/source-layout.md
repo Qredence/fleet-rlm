@@ -14,7 +14,7 @@ src/fleet_rlm/
 ├── sessions/       # Session/Turn domain and repository interfaces
 ├── skills/         # immutable bundled catalog, Signatures, and host tools
 ├── app.py          # FastAPI factory and lifespan
-├── composition/    # Daytona, Deno, shared, and private testing inventories
+├── composition/    # Daytona, shared, and private testing inventories
 ├── config.py       # FLEET_* settings
 └── main.py         # ASGI entrypoint
 ```

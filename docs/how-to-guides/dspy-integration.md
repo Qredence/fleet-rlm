@@ -31,8 +31,7 @@ clients cannot provide models, Signatures, or executable capabilities.
 - Daytona Workspace Memory is separate workspace-wide immediate state at the
   fixed root `MEMORIES.md` of the already mounted
   `workspaces/<workspace_id>` Volume subpath. The RLM recalls it on demand with
-  `read_workspace_memory`; Fleet does not inject it at Turn start. Deno exposes
-  neither memory Tool.
+  `read_workspace_memory`; Fleet does not inject it at Turn start.
 - `update_workspace_memory` appends one complete UTC-timestamped record, limited
   to 4 KiB of formatted UTF-8, only when the user explicitly requests memory. A
   completed append is immediately durable outside Turn Commit, so it survives

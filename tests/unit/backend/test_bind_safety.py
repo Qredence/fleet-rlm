@@ -34,7 +34,6 @@ def test_non_loopback_hosts_require_explicit_opt_in(host: str) -> None:
         (fleet_main, ["web", "--host", "0.0.0.0"]),
         (fleet_rlm_main, ["serve-api", "--host", "0.0.0.0"]),
         (fleet_main, ["cli", "--host", "0.0.0.0"]),
-        (fleet_main, ["deno", "--host", "::"]),
     ],
 )
 def test_launchers_reject_non_loopback_without_opt_in(

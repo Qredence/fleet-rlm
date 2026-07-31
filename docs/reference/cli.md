@@ -4,7 +4,6 @@
 
 ```bash
 uv run fleet cli [--host 127.0.0.1] [--port 8000] [--reload] [--allow-non-loopback-bind] [-- <pi-tui args>]
-uv run fleet deno [--host 127.0.0.1] [--port 8000] [--reload] [--allow-non-loopback-bind] [-- <pi-tui args>]
 uv run fleet doctor daytona
 uv run fleet web [--host 127.0.0.1] [--port 8000] [--reload] [--allow-non-loopback-bind]
 uv run fleet-rlm serve-api [--host 127.0.0.1] [--port 8000] [--reload] [--allow-non-loopback-bind]
@@ -13,16 +12,13 @@ uv run fleet-rlm serve-api [--host 127.0.0.1] [--port 8000] [--reload] [--allow-
 Fleet has no caller authentication. Launchers default to `127.0.0.1` and reject
 non-loopback hosts (`0.0.0.0`, LAN addresses, hostnames other than `localhost`)
 unless `--allow-non-loopback-bind` is supplied deliberately.
-Set `[config] default_profile` in `config/fleet.toml` to `daytona` or
-`local-deno` before starting a backend. The TUI `/profiles` command edits that
-key interactively for the next restart. `fleet cli` accepts any selected
-Daytona profile and rejects a Deno profile; `fleet deno` accepts a selected
-Deno profile and rejects Daytona profiles. A mismatch fails before database
-preflight, MLflow startup, or backend spawning. Each command starts the backend in
-its own process group, waits up to 90 seconds for Daytona or 30 seconds for
-Deno readiness, and runs pi-tui in
-the foreground. Node 22.19+, pnpm, the installed TUI workspace, and an unused
-port are required.
+Set `[config] default_profile` in `config/fleet.toml` to a Daytona profile before
+starting a backend. The TUI `/profiles` command edits that key interactively for
+the next restart. `fleet cli` accepts any selected Daytona profile. A mismatch
+fails before database preflight, MLflow startup, or backend spawning. The
+launcher starts the backend in its own process group, waits up to 90 seconds for
+Daytona readiness, and runs pi-tui in the foreground. Node 22.19+, pnpm, the
+installed TUI workspace, and an unused port are required.
 
 For the standard `daytona` profile, `fleet cli` starts the installed MLflow
 server on
@@ -40,13 +36,12 @@ termination to forced stop after five seconds.
 
 Before starting Daytona, `fleet cli` verifies the configured database is at the
 canonical Alembic head. It never applies migrations. Recover with
-`uv run python scripts/db_init.py` and retry. `fleet deno` skips this preflight.
+`uv run python scripts/db_init.py` and retry.
 
 Forward terminal options after `--`:
 
 ```bash
 uv run fleet cli -- --session <session-uuid>
-uv run fleet deno -- --api-url http://127.0.0.1:8000
 uv run fleet cli -- artifact <artifact-uuid> --output ./result.bin
 ```
 

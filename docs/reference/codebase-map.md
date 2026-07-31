@@ -8,9 +8,9 @@ compatibility runtime and parallel foundation package no longer exist.
 | Module | Ownership | May depend on |
 | --- | --- | --- |
 | `app.py`, `main.py` | FastAPI factory, handlers/routers, static Skill catalog, lifespan selection, ASGI entrypoint | composition, API routers, Skill catalog |
-| `composition/` | common inventory plus explicit Daytona, Deno, and private testing wiring | domain modules and adapters |
+| `composition/` | common inventory plus explicit Daytona and private testing wiring | domain modules and adapters |
 | `api/` | HTTP translation, local scope, dependency aliases, OpenAPI/SSE projection, UIMessage reload | domain interfaces and composed modules |
-| `chat/` | Turn preparation, shared capability preparation, coordinator orchestration, lifecycle finalization, shared Turn Claim policy, Deno environment and sinks | RLM, Sessions, Skills, files |
+| `chat/` | Turn preparation, shared capability preparation, coordinator orchestration, lifecycle finalization, shared Turn Claim policy | RLM, Sessions, Skills, files |
 | `rlm/` | DSPy Signature, model roles, fresh RLM construction, options, events, runner | DSPy and domain values |
 | `daytona/` | exclusive SDK boundary: async platform/provisioning, Session ownership, DSPy-only sync interpreter seam, broker, diagnostics, Session Workspace gateways, and the mounted Workspace Memory adapter | Daytona SDK and domain values |
 | `sessions/` | Session catalog, Turn input/history, versioned Committed Turn | domain values |
@@ -18,7 +18,7 @@ compatibility runtime and parallel foundation package no longer exist.
 | `skills/` | bundled catalog, authorization, progressive loading, capability seam, Tool construction | domain values and package resources |
 | `persistence/` | SQLAlchemy models and repository adapters | Session/file/Artifact interfaces |
 | `observability/` | sanitized failure diagnostics; opt-in Databricks MLflow DSPy tracing | domain errors, Settings |
-| `cli/` | supervised Daytona/Deno plus pi-tui, backend launchers, doctor dispatch | ASGI entrypoint and Daytona diagnostics |
+| `cli/` | supervised Daytona plus pi-tui, backend launchers, doctor dispatch | ASGI entrypoint and Daytona diagnostics |
 
 ## Hard boundaries
 

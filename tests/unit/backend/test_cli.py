@@ -155,7 +155,7 @@ def test_fleet_doctor_prints_cleanup_action_after_primary_failure(
 
 @pytest.mark.parametrize(
     ("command", "expected_environment"),
-    [("cli", "daytona"), ("deno", "deno")],
+    [("cli", "daytona")],
 )
 def test_fleet_runtime_command_selects_environment_and_supervises_pi_tui(
     monkeypatch: pytest.MonkeyPatch,
@@ -163,7 +163,7 @@ def test_fleet_runtime_command_selects_environment_and_supervises_pi_tui(
     expected_environment: str,
 ) -> None:
     calls: list[dict[str, object]] = []
-    monkeypatch.setenv("FLEET_RUN_ENVIRONMENT", "deno")
+    monkeypatch.setenv("FLEET_RUN_ENVIRONMENT", "daytona")
     monkeypatch.setattr(
         supervisor,
         "supervise",
@@ -184,7 +184,7 @@ def test_fleet_runtime_command_selects_environment_and_supervises_pi_tui(
         ]
     )
 
-    assert os.environ["FLEET_RUN_ENVIRONMENT"] == "deno"
+    assert os.environ["FLEET_RUN_ENVIRONMENT"] == "daytona"
     assert calls == [
         {
             "host": "0.0.0.0",
@@ -197,12 +197,12 @@ def test_fleet_runtime_command_selects_environment_and_supervises_pi_tui(
 
 
 def test_fleet_web_preserves_explicit_environment(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("FLEET_RUN_ENVIRONMENT", "deno")
+    monkeypatch.setenv("FLEET_RUN_ENVIRONMENT", "daytona")
     monkeypatch.setitem(sys.modules, "uvicorn", SimpleNamespace(run=lambda *_args, **_kwargs: None))
 
     fleet_main(["web"])
 
-    assert os.environ["FLEET_RUN_ENVIRONMENT"] == "deno"
+    assert os.environ["FLEET_RUN_ENVIRONMENT"] == "daytona"
 
 
 @pytest.mark.parametrize(
