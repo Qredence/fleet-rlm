@@ -78,8 +78,8 @@ dev = [
     "pytest-cov>=7.1,<8",
     "pytest-timeout>=2.4.0",
     "pytest-xdist>=3.5.0",
-    "ruff>=0.15.20",
-    "ty>=0.0.57",
+    "ruff>=0.16.1",
+    "ty>=0.0.65",
 ]
 server = [
     "psycopg[binary]>=3.3.4,<4",
@@ -110,8 +110,8 @@ dev = [
     "pytest-cov>=7.1,<8",
     "pytest-timeout>=2.4.0",
     "pytest-xdist>=3.5.0",
-    "ruff>=0.15.20",
-    "ty>=0.0.50",
+    "ruff>=0.16.1",
+    "ty>=0.0.65",
 ]
 
 [tool.uv]

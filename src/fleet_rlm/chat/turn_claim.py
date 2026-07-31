@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import Literal, TypeAlias, assert_never, cast
+from typing import Literal, TypeAlias, assert_never
 
 ClaimStatus = Literal["running", "settling", "completed", "failed", "cancelled", "timeout"]
 ClaimTerminalStatus = Literal["failed", "cancelled", "timeout"]
@@ -170,7 +170,7 @@ def _complete(state: ClaimState) -> ClaimTransition:
 def _terminal_status(status: ClaimStatus) -> ClaimTerminalStatus:
     if status not in {"failed", "cancelled", "timeout"}:
         raise InvalidClaimTransitionError("persisted Run has an invalid failure status")
-    return cast(ClaimTerminalStatus, status)
+    return status
 
 
 def _failure_code(state: ClaimState) -> ClaimFailureCode:

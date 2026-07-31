@@ -11,7 +11,7 @@ from uuid import UUID, uuid4
 
 from fleet_rlm.rlm.dspy_contract import RLMUsage, validate_rlm_usage
 
-JsonScalar: TypeAlias = None | bool | int | float | str
+JsonScalar: TypeAlias = bool | int | float | str | None
 JsonValue: TypeAlias = JsonScalar | tuple["JsonValue", ...] | Mapping[str, "JsonValue"]
 RunFailedMessage: TypeAlias = Literal[
     "Turn failed",
