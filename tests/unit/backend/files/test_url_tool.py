@@ -303,9 +303,6 @@ def test_public_fetcher_streams_and_pins_validated_address(monkeypatch: pytest.M
             calls["request_kwargs"] = kwargs
             return Response()
 
-        def close(self) -> None:
-            calls["pool_closed"] = True
-
     monkeypatch.setattr("fleet_rlm.files.url_tool.urllib3.HTTPSConnectionPool", Pool)
 
     result = UrllibPublicTextFetcher().fetch("https://example.com/report", max_bytes=1_024)
@@ -350,9 +347,6 @@ def test_public_fetcher_enforces_total_wall_clock_deadline(monkeypatch: pytest.M
 
         def urlopen(self, _method: str, _target: str, **_kwargs: object) -> Response:
             return Response()
-
-        def close(self) -> None:
-            pass
 
     monkeypatch.setattr("fleet_rlm.files.url_tool.urllib3.HTTPSConnectionPool", Pool)
 
