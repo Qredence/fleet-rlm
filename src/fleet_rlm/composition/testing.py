@@ -86,6 +86,14 @@ class TestingCapabilityPreparer:
     def __init__(
         self, *, skill_catalog: SkillCatalog, models: RLMModelBundle, options: RLMOptions, max_artifact_bytes: int
     ) -> None:
+        """Initialize a testing capability preparer with a fixed 10 MB URL size limit.
+        
+        Parameters:
+            skill_catalog (SkillCatalog): Catalog of available skills.
+            models (RLMModelBundle): Models used for capability preparation.
+            options (RLMOptions): Runtime options for capability preparation.
+            max_artifact_bytes (int): Maximum permitted artifact size in bytes.
+        """
         self._delegate = _DenoCapabilityPreparer(
             skill_catalog=skill_catalog,
             models=models,
@@ -102,6 +110,17 @@ class TestingCapabilityPreparer:
         *,
         deadline: float,
     ) -> DenoPreparedCapabilities:
+        """Prepare capabilities for a turn within the specified execution environment and deadline.
+        
+        Parameters:
+            turn (ExecuteTurn): The turn whose capabilities are being prepared.
+            environment (RunEnvironment): The environment in which the turn will execute.
+            attachments (PreparedAttachments): Attachments available to the turn.
+            deadline (float): The time limit for preparation.
+        
+        Returns:
+            DenoPreparedCapabilities: The prepared capabilities.
+        """
         return await self._delegate.prepare(turn, environment, attachments, deadline=deadline)
 
 

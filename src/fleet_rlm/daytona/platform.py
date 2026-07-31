@@ -27,7 +27,14 @@ _ARCHIVED_STATES = frozenset({"archived", "archive"})
 
 
 def build_daytona_client(settings: Settings) -> Any:
-    """Construct the process-owned asynchronous Daytona SDK client."""
+    """Construct the asynchronous Daytona SDK client with the configured endpoint and credentials.
+    
+    Parameters:
+    	settings (Settings): Configuration containing the optional Daytona API key and organization ID.
+    
+    Returns:
+    	Any: The configured asynchronous Daytona client.
+    """
     from daytona import AsyncDaytona, DaytonaConfig
 
     api_key = None

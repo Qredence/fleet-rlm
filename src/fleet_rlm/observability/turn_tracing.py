@@ -22,7 +22,15 @@ _MAX_TRACE_TEXT_CHARS = 1_000
 
 
 def _trace_value(value: object) -> object:
-    """Return bounded, redacted values safe for engineering traces."""
+    """
+    Sanitize and bound a value for safe inclusion in engineering traces.
+    
+    Parameters:
+        value (object): The value to sanitize for tracing.
+    
+    Returns:
+        object: A bounded sanitized value, the original primitive value, or the value's type name.
+    """
     if isinstance(value, str):
         from fleet_rlm.rlm.sanitize import sanitize_public_text
 
@@ -47,6 +55,7 @@ def _trace_value(value: object) -> object:
 
 
 def _trace_mapping(values: Mapping[str, object]) -> dict[str, object]:
+    """Convert trace data to a sanitized dictionary, returning an empty dictionary if conversion fails."""
     sanitized = _trace_value(values)
     if isinstance(sanitized, dict):
         return cast(dict[str, object], sanitized)
@@ -79,18 +88,14 @@ def annotate_trace_io(
     response_outputs: dict[str, object] | None = None,
     failed: bool = False,
 ) -> None:
-    """Fail-soft: propagate request/response to the active root trace for MLflow judges.
-
-    MLflow LLM judges (Safety, Completeness, RelevanceToQuery) read from the
-    root span's inputs/outputs. Without this, judges either fail or fall back
-    to expensive trace-based parsing of all spans.
-
-    Uses span.set_inputs()/set_outputs() on the current active span (which is
-    the fleet_turn root span when called from TurnCoordinator._execute_traced).
-    When ``failed`` is true, also mark the root span ``ERROR`` so swallowed Turn
-    failures (outcome-based, not raised) are not reported as ``OK``.
-
-    Must never raise — trace annotation failures are not Turn failures.
+    """
+    Annotate the active trace with sanitized request and response data.
+    
+    Parameters:
+        request: The request content to record.
+        response_text: Optional response text to record.
+        response_outputs: Optional named response values to record.
+        failed: Whether to mark the active trace as failed.
     """
     try:
         import mlflow
@@ -264,7 +269,18 @@ def turn_trace(
     enabled: bool,
     expose_trace_id: bool = True,
 ) -> Iterator[TraceHandle]:
-    """Open a root ``fleet_turn`` span for one live Turn, or no-op when disabled."""
+    """
+    Open a root ``fleet_turn`` span for a live Turn when tracing is enabled.
+    
+    Parameters:
+    	session_id (UUID): Identifier for the session associated with the Turn.
+    	run_id (UUID): Identifier for the run associated with the Turn.
+    	enabled (bool): Whether to enable tracing.
+    	expose_trace_id (bool): Whether to expose the active trace identifier in the yielded handle.
+    
+    Yields:
+    	TraceHandle: Handle containing the trace identifier when available and exposure is enabled; otherwise, a no-op handle.
+    """
     if not enabled:
         yield TraceHandle(trace_id=None)
         return

@@ -181,6 +181,15 @@ def _load_repo_env() -> None:
 
 
 def _live_settings(tmp_path: Path) -> Settings:
+    """
+    Load and configure settings required for the live Daytona MVP proof.
+    
+    Parameters:
+        tmp_path (Path): Temporary directory in which to create the proof database.
+    
+    Returns:
+        Settings: Runtime settings configured with a temporary database and bounded proof resources.
+    """
     _load_repo_env()
     if os.environ.get("FLEET_LIVE", "").strip().lower() not in {"1", "true", "yes"}:
         pytest.skip("Set FLEET_LIVE=1 for the complete Daytona MVP proof")

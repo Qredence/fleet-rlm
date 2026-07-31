@@ -37,11 +37,13 @@ _TRACE_DESTINATION_TAG = "mlflow.experiment.databricksTraceDestinationPath"
 
 
 def _sanitize_mlflow_span(span: object) -> None:
-    """Apply Fleet's bounded trace contract before MLflow exports a span.
-
-    Fleet already projects bounded values into its manual spans. This MLflow
-    3.15 span processor is a defense-in-depth boundary for any integration or
-    future instrumentation that creates a span outside that projection.
+    """
+    Sanitize an MLflow span's inputs, outputs, and attributes before export.
+    
+    Sanitization failures are suppressed so tracing does not affect the Turn outcome.
+    
+    Parameters:
+        span (object): MLflow span to sanitize.
     """
     try:
         from fleet_rlm.observability.turn_tracing import _trace_mapping, _trace_value
@@ -69,7 +71,15 @@ def _sanitize_mlflow_span(span: object) -> None:
 
 
 def _local_tracking_server_available(tracking_uri: str) -> bool:
-    """Bound local MLflow startup probing so tracing cannot stall app import."""
+    """
+    Check whether an HTTP(S) tracking server is reachable within 0.5 seconds.
+    
+    Parameters:
+        tracking_uri (str): Tracking server URI to probe.
+    
+    Returns:
+        bool: `True` if the URI is not HTTP(S) or the server is reachable, `False` otherwise.
+    """
     parsed = urlparse(tracking_uri)
     if parsed.scheme not in {"http", "https"} or not parsed.hostname:
         return True
@@ -137,16 +147,14 @@ def _validate_experiment_trace_location(settings: Settings) -> None:
 
 
 def configure_tracing(settings: Settings) -> None:
-    """Enable MLflow DSPy autolog when Fleet policy enables it.
-
-    The TOML-selected tracking URI can point at a normal MLflow server (for
-    example ``http://localhost:5001``). Databricks Unity Catalog trace
-    settings are required only when the URI is ``databricks``.
-
-    Safe to call multiple times; only the first invocation takes effect.
-    Raises ``FleetConfigurationError`` when the experiment's Unity Catalog trace
-    location doesn't match the configured destination; otherwise logs warnings
-    on failure and continues.
+    """
+    Configure fail-soft MLflow tracing and DSPy inference autologging according to Fleet settings.
+    
+    The configuration is applied at most once. Tracing remains disabled when it is
+    disabled by policy, required settings are missing, or setup fails. Raises
+    `FleetConfigurationError` when an existing experiment's Unity Catalog trace
+    location conflicts with the configured destination; other setup failures are
+    logged and suppressed.
     """
     global _TRACING_ACTIVE, _TRACING_CONFIGURED
     if _TRACING_CONFIGURED:
@@ -259,7 +267,12 @@ def configure_tracing(settings: Settings) -> None:
 
 
 def flush_tracing(*, terminate: bool = True) -> None:
-    """Flush pending MLflow 3.15 async trace uploads during process shutdown."""
+    """
+    Flush pending MLflow trace uploads during shutdown.
+    
+    Parameters:
+        terminate (bool): Whether to terminate MLflow's asynchronous trace logging.
+    """
     if not _TRACING_ACTIVE:
         return
     try:

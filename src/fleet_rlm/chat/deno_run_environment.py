@@ -126,6 +126,13 @@ class _DenoCapabilityPreparer:
         max_artifact_bytes: int,
         max_url_bytes: int = 10 * 1024 * 1024,
     ) -> None:
+        """
+        Configure capability preparation for Deno execution.
+        
+        Parameters:
+            max_artifact_bytes (int): Maximum number of bytes allowed for artifact data.
+            max_url_bytes (int): Maximum number of bytes allowed for URL data.
+        """
         from fleet_rlm.files.url_tool import InMemoryUrlSourceStore
 
         self._skill_catalog = skill_catalog
@@ -143,6 +150,18 @@ class _DenoCapabilityPreparer:
         *,
         deadline: float,
     ) -> DenoPreparedCapabilities:
+        """
+        Prepare the host capabilities available during a Deno turn.
+        
+        Parameters:
+            turn (ExecuteTurn): Turn context used to scope capabilities and identify the caller.
+            environment (RunEnvironment): Runtime environment containing attachment storage.
+            attachments (PreparedAttachments): Attachments made available to the turn.
+            deadline (float): Time limit for capability preparation.
+        
+        Returns:
+            DenoPreparedCapabilities: Prepared file, skill, workspace, and URL capabilities for the turn.
+        """
         from fleet_rlm.files.tools import FileToolHost
         from fleet_rlm.files.url_tool import UrlToolHost
 
@@ -217,6 +236,19 @@ class DenoTurnPreparation:
         max_url_bytes: int = 10 * 1024 * 1024,
         recursive_options: RecursiveRLMOptions | None = None,
     ) -> None:
+        """
+        Configure turn preparation for Deno execution.
+        
+        Parameters:
+            attachments: Attachment lifecycle manager used by the run environment.
+            options: General RLM options. Defaults to standard options.
+            root_lm: Language model used for root execution.
+            sub_lm: Language model used for nested execution.
+            skill_catalog: Skills made available to prepared turns.
+            max_artifact_bytes: Maximum size of an artifact in bytes.
+            max_url_bytes: Maximum size of URL content in bytes.
+            recursive_options: Options for recursive execution.
+        """
         selected_options = options or RLMOptions()
         models = RLMModelBundle(root_lm=root_lm, sub_lm=sub_lm)
         self._module = DefaultTurnPreparer(

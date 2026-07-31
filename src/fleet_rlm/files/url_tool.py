@@ -53,6 +53,12 @@ class UrlToolError(RuntimeError):
     """Safe failure returned to generated URL-tool callers."""
 
     def __init__(self, code: str, message: str) -> None:
+        """Initialize a categorized tool error with a safe public message.
+        
+        Parameters:
+            code (str): Identifier for the error category.
+            message (str): Message exposed to callers and used as the exception message.
+        """
         super().__init__(message)
         self.code = code
         self.public_message = message
@@ -68,24 +74,74 @@ class UrlFetchResult:
 
     @property
     def data(self) -> bytes:
+        """
+        Encode the text content as UTF-8 bytes.
+        
+        Returns:
+        	bytes: The UTF-8 encoded text.
+        """
         return self.text.encode("utf-8")
 
 
 class UrlSourceStore(Protocol):
     """Read and write one Session-scoped normalized URL source."""
 
-    def read(self, session_id: UUID, path: str, *, max_bytes: int) -> str | None: ...
+    def read(self, session_id: UUID, path: str, *, max_bytes: int) -> str | None: """
+Read cached URL content for a session within the specified byte limit.
 
-    def write(self, session_id: UUID, path: str, content: str, *, max_bytes: int) -> None: ...
+Parameters:
+	session_id (UUID): Session whose cached source should be read.
+	path (str): Workspace-relative source path.
+	max_bytes (int): Maximum number of bytes to read.
+
+Returns:
+	str | None: Cached text, or `None` when the source is unavailable or exceeds the limit.
+"""
+...
+
+    def write(self, session_id: UUID, path: str, content: str, *, max_bytes: int) -> None: """
+Store URL source content for a session when it fits within the byte limit.
+
+Parameters:
+	session_id (UUID): Session whose source cache receives the content.
+	path (str): Workspace-relative path identifying the source.
+	content (str): Text content to store.
+	max_bytes (int): Maximum UTF-8 encoded size permitted for the content.
+"""
+...
 
 
 class UrlFetcher(Protocol):
     """Fetch one validated public URL without exposing an HTTP client to Tools."""
 
-    def fetch(self, url: str, *, max_bytes: int) -> UrlFetchResult: ...
+    def fetch(self, url: str, *, max_bytes: int) -> UrlFetchResult: """
+Fetch bounded text content from a public HTTPS URL.
+
+Parameters:
+	url (str): HTTPS URL to fetch.
+	max_bytes (int): Maximum allowed response size in bytes.
+
+Returns:
+	UrlFetchResult: Normalized fetched content, canonical URL, and media type.
+
+Raises:
+	UrlToolError: If the URL, redirect, response, content type, size, encoding, or network request is invalid.
+"""
+...
 
 
 def _canonical_url(url: str) -> str:
+    """Canonicalize an anonymous public HTTPS URL for fetching.
+    
+    Parameters:
+        url (str): URL to validate and normalize.
+    
+    Returns:
+        str: Canonical HTTPS URL with a normalized hostname, explicit path, and no fragment.
+    
+    Raises:
+        UrlToolError: If the URL is missing, malformed, uses unsupported credentials or a scheme, or specifies a port other than 443.
+    """
     if not isinstance(url, str) or not url.strip():
         raise UrlToolError("invalid_url", "URL is required")
     try:
@@ -110,14 +166,41 @@ def _canonical_url(url: str) -> str:
 
 
 def _source_id(canonical_url: str) -> str:
+    """Generate a stable SHA-256 identifier for a canonical URL.
+    
+    Parameters:
+    	canonical_url (str): The canonical URL to identify.
+    
+    Returns:
+    	str: The hexadecimal SHA-256 digest of the URL.
+    """
     return hashlib.sha256(canonical_url.encode("utf-8")).hexdigest()
 
 
 def _source_path(source_id: str) -> str:
+    """Map a URL source identifier to its workspace-relative text file path.
+    
+    Parameters:
+    	source_id (str): Identifier for the URL source.
+    
+    Returns:
+    	str: Workspace-relative path for the source text file.
+    """
     return f"{URL_WORKSPACE_PREFIX}/{source_id}.txt"
 
 
 def _public_address(host: str) -> str:
+    """Resolve a host to a public IP address.
+    
+    Parameters:
+    	host (str): Hostname to resolve.
+    
+    Returns:
+    	str: The lexicographically first resolved IP address.
+    
+    Raises:
+    	UrlToolError: If the host cannot be resolved, resolves to an invalid address, or resolves to any non-public address.
+    """
     try:
         infos = socket.getaddrinfo(host, 443, type=socket.SOCK_STREAM)
     except OSError as exc:
@@ -135,10 +218,26 @@ def _public_address(host: str) -> str:
 
 
 def _media_type(content_type: str) -> str:
+    """Extract the normalized media type from a Content-Type header value.
+    
+    Parameters:
+    	content_type (str): The Content-Type header value.
+    
+    Returns:
+    	str: The lowercase media type without parameters.
+    """
     return content_type.split(";", 1)[0].strip().lower()
 
 
 def _charset(content_type: str) -> str:
+    """Extract the declared character encoding from a content type.
+    
+    Parameters:
+        content_type (str): Content type header value to inspect.
+    
+    Returns:
+        str: Declared character encoding, or ``"utf-8"`` when none is specified.
+    """
     match = _CHARSET_RE.search(content_type)
     return match.group(1).strip() if match else "utf-8"
 
@@ -152,12 +251,32 @@ class UrllibPublicTextFetcher:
         timeout_seconds: float = URL_FETCH_TIMEOUT_SECONDS,
         max_redirects: int = MAX_URL_REDIRECTS,
     ) -> None:
+        """Initialize a public URL fetcher with timeout and redirect limits.
+        
+        Parameters:
+        	timeout_seconds (float): Maximum duration allowed for a fetch.
+        	max_redirects (int): Maximum number of redirects permitted.
+        """
         if timeout_seconds <= 0 or max_redirects < 0:
             raise ValueError("URL fetch limits must be positive")
         self._timeout_seconds = float(timeout_seconds)
         self._max_redirects = max_redirects
 
     def fetch(self, url: str, *, max_bytes: int) -> UrlFetchResult:
+        """
+        Fetch bounded text content from a public HTTPS URL.
+        
+        Parameters:
+        	url (str): The URL to fetch.
+        	max_bytes (int): Maximum permitted size of the response and its normalized UTF-8 text.
+        
+        Returns:
+        	UrlFetchResult: The canonical URL, content type, and decoded text.
+        
+        Raises:
+        	ValueError: If max_bytes is less than 1.
+        	UrlToolError: If the URL, redirect chain, response, content, encoding, or fetch duration violates the configured limits or requirements.
+        """
         if max_bytes < 1:
             raise ValueError("URL fetch byte bound must be positive")
         current = _canonical_url(url)
@@ -224,6 +343,19 @@ class UrllibPublicTextFetcher:
         *,
         timeout_seconds: float,
     ) -> tuple[urllib3.response.BaseHTTPResponse, urllib3.HTTPSConnectionPool]:
+        """
+        Open a bounded HTTPS connection for a validated public URL.
+        
+        Parameters:
+            url (str): The URL to fetch.
+            timeout_seconds (float): The total, connection, and read timeout in seconds.
+        
+        Returns:
+            tuple: The HTTP response and connection pool used for the request.
+        
+        Raises:
+            UrlToolError: If the URL has no hostname or the request cannot be completed.
+        """
         parsed = urlsplit(url)
         host = parsed.hostname
         if host is None:
@@ -275,6 +407,16 @@ class InMemoryUrlSourceStore:
         max_entries_total: int = URL_CACHE_MAX_ENTRIES_TOTAL,
         max_bytes_total: int = URL_CACHE_MAX_BYTES_TOTAL,
     ) -> None:
+        """Initialize an in-memory URL source store with entry and byte limits.
+        
+        Parameters:
+        	max_entries_per_session (int): Maximum number of cached entries per session.
+        	max_entries_total (int): Maximum number of cached entries across all sessions.
+        	max_bytes_total (int): Maximum total UTF-8 cache size in bytes.
+        
+        Raises:
+        	ValueError: If any cache limit is less than 1.
+        """
         if max_entries_per_session < 1 or max_entries_total < 1 or max_bytes_total < 1:
             raise ValueError("URL cache bounds must be positive")
         self._max_entries = max_entries_per_session
@@ -286,6 +428,15 @@ class InMemoryUrlSourceStore:
         self._lock = RLock()
 
     def read(self, session_id: UUID, path: str, *, max_bytes: int) -> str | None:
+        """Read cached URL source content for a session and path.
+        
+        Parameters:
+            session_id (UUID): Session whose cached source should be read.
+            path (str): Cache path identifying the source.
+        
+        Returns:
+            str | None: Cached source content, or None if no matching entry exists.
+        """
         del max_bytes
         with self._lock:
             values = self._values.get(session_id)
@@ -299,6 +450,17 @@ class InMemoryUrlSourceStore:
             return value
 
     def write(self, session_id: UUID, path: str, content: str, *, max_bytes: int) -> None:
+        """Store URL content in the session cache, evicting older entries as needed.
+        
+        Parameters:
+        	session_id (UUID): Session whose cache receives the content.
+        	path (str): Cache path for the URL content.
+        	content (str): Text content to store.
+        	max_bytes (int): Maximum UTF-8 size allowed for the content.
+        
+        Raises:
+        	UrlToolError: If the content exceeds the configured size limit.
+        """
         if len(content.encode("utf-8")) > max_bytes:
             raise UrlToolError("too_large", "URL content exceeds the configured size limit")
         with self._lock:
@@ -339,6 +501,16 @@ class WorkspaceUrlSourceStore:
         max_entries_total: int = URL_CACHE_MAX_ENTRIES_TOTAL,
         max_bytes_total: int = URL_CACHE_MAX_BYTES_TOTAL,
     ) -> None:
+        """Initialize a workspace-backed URL source store with global cache limits.
+        
+        Parameters:
+            workspace (SessionWorkspaceFS): Workspace filesystem used to store URL sources.
+            max_entries_total (int): Maximum number of cached URL sources.
+            max_bytes_total (int): Maximum total UTF-8 bytes stored across URL sources.
+        
+        Raises:
+            ValueError: If either cache limit is less than one.
+        """
         if max_entries_total < 1 or max_bytes_total < 1:
             raise ValueError("URL cache bounds must be positive")
         self._workspace = workspace
@@ -346,6 +518,20 @@ class WorkspaceUrlSourceStore:
         self._max_bytes_total = max_bytes_total
 
     def read(self, session_id: UUID, path: str, *, max_bytes: int) -> str | None:
+        """
+        Read verified cached URL content from the workspace.
+        
+        Parameters:
+            session_id (UUID): Session owning the cached content.
+            path (str): Workspace path of the cached content.
+            max_bytes (int): Maximum allowed UTF-8 content size.
+        
+        Returns:
+            str | None: Cached text when present and integrity-verified, or None when unavailable or changed.
+        
+        Raises:
+            UrlToolError: If the content exceeds the size limit or cannot be read completely.
+        """
         try:
             entry = self._workspace.stat(path)
         except FileNotFoundError:
@@ -385,6 +571,18 @@ class WorkspaceUrlSourceStore:
         return "".join(chunks)
 
     def write(self, session_id: UUID, path: str, content: str, *, max_bytes: int) -> None:
+        """
+        Store URL content in the session workspace when configured cache limits allow it.
+        
+        Parameters:
+            session_id (UUID): Session associated with the cached content.
+            path (str): Workspace path used to store the content.
+            content (str): Text content to cache.
+            max_bytes (int): Maximum UTF-8 encoded size permitted for this content.
+        
+        Raises:
+            UrlToolError: If the content exceeds `max_bytes` or the workspace is unavailable.
+        """
         content_bytes = len(content.encode("utf-8"))
         if content_bytes > max_bytes:
             raise UrlToolError("too_large", "URL content exceeds the configured size limit")
@@ -436,6 +634,18 @@ class UrlToolHost:
         max_bytes: int,
         fetcher: UrlFetcher | None = None,
     ) -> None:
+        """
+        Initialize a URL tool host for a session.
+        
+        Parameters:
+            session_id (UUID): Session identifier used for source storage.
+            store (UrlSourceStore): Session-scoped store for cached URL content.
+            max_bytes (int): Maximum number of UTF-8 bytes allowed for fetched content.
+            fetcher (UrlFetcher | None): Fetcher to use, or a default public HTTPS fetcher.
+        
+        Raises:
+            ValueError: If max_bytes is less than 1.
+        """
         if max_bytes < 1:
             raise ValueError("URL Tool byte bound must be positive")
         self._session_id = session_id
@@ -444,6 +654,12 @@ class UrlToolHost:
         self._fetcher = fetcher or UrllibPublicTextFetcher()
 
     def as_tools(self) -> tuple[dspy.Tool, ...]:
+        """
+        Create the session-bound public HTTPS text retrieval tool.
+        
+        Returns:
+            tuple[dspy.Tool, ...]: A tuple containing the configured ``fetch_url`` tool.
+        """
         def fetch_url(url: str) -> dict[str, object]:
             """Fetch one relevant public HTTPS text URL into a Python value and Session cache."""
             try:
@@ -491,6 +707,13 @@ class UrlToolHost:
         )
 
     def event_views(self) -> Mapping[str, ToolEventView]:
+        """
+        Expose redacted event projections for the URL-fetching tool.
+        
+        Returns:
+            Mapping[str, ToolEventView]: The ``fetch_url`` event view, exposing only
+            canonical source identifiers and bounded result metadata.
+        """
         def input_projection(arguments: Mapping[str, object]) -> JsonValue:
             raw_url = arguments.get("url")
             try:
@@ -500,6 +723,7 @@ class UrlToolHost:
                 return {}
 
         def output_projection(result: object) -> JsonValue:
+            """Create a bounded event-safe projection of a tool result."""
             if not isinstance(result, Mapping):
                 return {}
             allowed = (
@@ -530,6 +754,20 @@ class UrlToolHost:
         text: str,
         cache_hit: bool,
     ) -> dict[str, object]:
+        """
+        Build a successful URL retrieval result with content and source metadata.
+        
+        Parameters:
+            source_id (str): Identifier for the retrieved source.
+            canonical_url (str): Normalized URL associated with the source.
+            path (str): Workspace path used to store the source.
+            content_type (str | None): Retrieved media type, when available.
+            text (str): Retrieved text content.
+            cache_hit (bool): Whether the content came from the cache.
+        
+        Returns:
+            dict[str, object]: Result containing the content, source metadata, UTF-8 byte size, checksum, and cache status.
+        """
         data = text.encode("utf-8")
         result: dict[str, object] = {
             "ok": True,

@@ -141,7 +141,19 @@ class BenchmarkError(RuntimeError):
 
 
 def percentile(values: Sequence[float], percentile_value: int) -> float:
-    """Return a deterministic nearest-rank percentile."""
+    """
+    Calculate a deterministic nearest-rank percentile for a sequence of values.
+    
+    Parameters:
+        values (Sequence[float]): Values from which to calculate the percentile.
+        percentile_value (int): Percentile to calculate, from greater than 0 through 100.
+    
+    Returns:
+        float: The selected percentile value.
+    
+    Raises:
+        ValueError: If values is empty or percentile_value is outside the range (0, 100].
+    """
     if not values:
         raise ValueError("percentile requires at least one value")
     if not 0 < percentile_value <= 100:
@@ -152,7 +164,17 @@ def percentile(values: Sequence[float], percentile_value: int) -> float:
 
 
 def latency_gate(baseline: Mapping[str, Any], candidate: Mapping[str, Any]) -> dict[str, Any]:
-    """Apply the approved performance gate to two aggregate receipts."""
+    """
+    Apply performance and quality criteria to baseline and candidate aggregate receipts.
+    
+    Parameters:
+        baseline (Mapping[str, Any]): Aggregate receipt used as the performance reference.
+        candidate (Mapping[str, Any]): Aggregate receipt evaluated against the baseline.
+    
+    Returns:
+        dict[str, Any]: A result containing individual check outcomes and an overall
+            ``passed`` value.
+    """
     baseline_p50 = float(baseline["end_to_end_ms"]["p50"])
     candidate_p50 = float(candidate["end_to_end_ms"]["p50"])
     checks = {
@@ -165,7 +187,17 @@ def latency_gate(baseline: Mapping[str, Any], candidate: Mapping[str, Any]) -> d
 
 
 def quality_gate(evaluation: Mapping[str, Any]) -> bool:
-    """Accept only a complete five-record evaluation with perfect two-judge means."""
+    """
+    Determine whether an evaluation satisfies the complete quality requirements.
+    
+    Parameters:
+    	evaluation (Mapping[str, Any]): Evaluation results, including its run mode,
+    	record count, and judge metrics.
+    
+    Returns:
+    	bool: `True` if the evaluation is non-dry-run, contains all quality records,
+    	and has perfect correctness and evidence-coverage mean scores; `False` otherwise.
+    """
     if evaluation.get("dry_run") or int(evaluation.get("records", 0)) != len(QUALITY_RECORDS):
         return False
     metrics = evaluation.get("metrics")
@@ -173,6 +205,15 @@ def quality_gate(evaluation: Mapping[str, Any]) -> bool:
         return False
 
     def score(prefix: str) -> float | None:
+        """
+        Extract the first mean metric matching a key prefix.
+        
+        Parameters:
+            prefix: Prefix used to select metric keys.
+        
+        Returns:
+            The first matching metric converted to a float, or `None` when no matching metric exists.
+        """
         values = [
             float(value)
             for key, value in metrics.items()
@@ -184,16 +225,31 @@ def quality_gate(evaluation: Mapping[str, Any]) -> bool:
 
 
 def _require_live() -> None:
+    """
+    Require provider-backed execution to run in live mode.
+    
+    Raises:
+        BenchmarkError: If `FLEET_LIVE` is not set to an accepted live-mode value.
+    """
     if os.environ.get("FLEET_LIVE", "").strip().lower() not in _LIVE_VALUES:
         raise BenchmarkError("FLEET_LIVE=1 is required for provider-backed execution")
 
 
 def _load_repository_env() -> None:
+    """Load environment variables from the repository's `.env` file without overriding existing values."""
     load_dotenv(_REPO_ROOT / ".env", override=False)
 
 
 def _configure_judge_environment(judge_model: str) -> None:
-    """Bridge explicit Fleet Databricks policy to MLflow's OpenAI adapter."""
+    """
+    Configure OpenAI adapter credentials for a Databricks-hosted judge model.
+    
+    Parameters:
+        judge_model (str): Judge model URI whose `openai:/` prefix selects the Databricks credential mapping.
+    
+    Raises:
+        BenchmarkError: If the judge model uses the OpenAI adapter and required Databricks credentials are unavailable.
+    """
     if not judge_model.startswith("openai:/"):
         return
     token = os.environ.get("DATABRICKS_TOKEN", "").strip()
@@ -206,6 +262,15 @@ def _configure_judge_environment(judge_model: str) -> None:
 
 
 def _sse_chunks(response: httpx.Response) -> Iterator[dict[str, Any]]:
+    """
+    Parse valid JSON objects from Server-Sent Event data lines.
+    
+    Parameters:
+    	response (httpx.Response): The response containing Server-Sent Event lines.
+    
+    Yields:
+    	dict[str, Any]: JSON object payloads from valid, non-terminal data events.
+    """
     for line in response.iter_lines():
         if not line.startswith("data: "):
             continue
@@ -221,6 +286,14 @@ def _sse_chunks(response: httpx.Response) -> Iterator[dict[str, Any]]:
 
 
 def _structured_answer(chunk: Mapping[str, Any]) -> str | None:
+    """Extract answer text from a structured stream chunk.
+    
+    Parameters:
+    	chunk (Mapping[str, Any]): A stream chunk containing structured result data.
+    
+    Returns:
+    	str | None: The answer text when present in the chunk; otherwise, `None`.
+    """
     data = chunk.get("data")
     if not isinstance(data, Mapping):
         return None
@@ -233,7 +306,15 @@ def _structured_answer(chunk: Mapping[str, Any]) -> str | None:
 
 
 def _termination_mode_from_chunk(chunk: Mapping[str, Any]) -> str | None:
-    """Derive termination only from explicit stream evidence."""
+    """
+    Identify the termination mode signaled by a stream chunk.
+    
+    Parameters:
+        chunk (Mapping[str, Any]): A stream event payload.
+    
+    Returns:
+        str | None: The detected termination mode, or `None` when the chunk contains no recognized termination signal.
+    """
     chunk_type = chunk.get("type")
     if (
         chunk_type == "data-rlm-output"
@@ -247,7 +328,20 @@ def _termination_mode_from_chunk(chunk: Mapping[str, Any]) -> str | None:
 
 
 def run_turn(client: httpx.Client, query: str, *, nonce: str) -> dict[str, Any]:
-    """Execute one real Fleet Turn and return bounded operational results."""
+    """
+    Execute one Fleet Turn and collect its response, timing, usage, trace identifiers, and tool-call counts.
+    
+    Parameters:
+        client (httpx.Client): HTTP client configured for the Fleet API.
+        query (str): Prompt to submit for the Turn.
+        nonce (str): Unique value used to identify the benchmark request.
+    
+    Returns:
+        dict[str, Any]: Bounded operational results, including the answer, identifiers, latency measurements, usage data, iteration count, tool-call counts, and termination mode.
+    
+    Raises:
+        BenchmarkError: If the Turn reports an error, is aborted, or finishes for a reason other than `stop`.
+    """
     session = client.post("/api/sessions", json={"title": f"latency-{nonce}"})
     session.raise_for_status()
     session_id = str(session.json()["id"])
@@ -313,6 +407,18 @@ def run_turn(client: httpx.Client, query: str, *, nonce: str) -> dict[str, Any]:
 
 
 def _active_policy(client: httpx.Client) -> dict[str, Any]:
+    """
+    Retrieve the active Fleet policy and its root and sub-model settings.
+    
+    Parameters:
+    	client (httpx.Client): HTTP client configured for the Fleet API.
+    
+    Returns:
+    	dict[str, Any]: Active profile name and selected model, token-limit, and reasoning settings.
+    
+    Raises:
+    	BenchmarkError: If Fleet settings do not expose a valid active profile.
+    """
     response = client.get("/api/settings")
     response.raise_for_status()
     payload = response.json()
@@ -338,7 +444,17 @@ def _active_policy(client: httpx.Client) -> dict[str, Any]:
 
 
 def _execution_trace_id(mlflow_url: str, experiment_id: str, run_id: str) -> str | None:
-    """Resolve the execution trace when preparation is traced separately."""
+    """
+    Finds the MLflow trace for a Fleet run containing the execution span.
+    
+    Parameters:
+        mlflow_url (str): MLflow tracking server URL.
+        experiment_id (str): Experiment containing the trace.
+        run_id (str): Fleet run identifier used to locate the trace.
+    
+    Returns:
+        str | None: The trace ID when a matching execution trace is found, or `None` otherwise.
+    """
     import mlflow
 
     mlflow.set_tracking_uri(mlflow_url)
@@ -356,6 +472,15 @@ def _execution_trace_id(mlflow_url: str, experiment_id: str, run_id: str) -> str
 
 
 def _tag_trace(mlflow_url: str, trace_id: str, *, workload_id: str, variant: str, sample: str) -> None:
+    """Tag an MLflow trace with Fleet workload, performance variant, and sample metadata.
+    
+    Parameters:
+        mlflow_url (str): MLflow tracking server URL.
+        trace_id (str): Identifier of the trace to tag.
+        workload_id (str): Workload identifier associated with the trace.
+        variant (str): Performance variant associated with the trace.
+        sample (str): Sample category associated with the trace.
+    """
     import mlflow
 
     mlflow.set_tracking_uri(mlflow_url)
@@ -366,6 +491,14 @@ def _tag_trace(mlflow_url: str, trace_id: str, *, workload_id: str, variant: str
 
 
 def _aggregate(rows: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+    """Aggregate measured benchmark rows into latency, error, usage, execution, and trace metrics.
+    
+    Parameters:
+    	rows (Sequence[Mapping[str, Any]]): Benchmark sample records to aggregate.
+    
+    Returns:
+    	dict[str, Any]: Aggregate metrics for measured samples, excluding warmups and failed samples from success-based metrics. Quality evaluation is marked incomplete.
+    """
     measured = [row for row in rows if row.get("sample_kind") == "measured"]
     successes = [row for row in measured if not row.get("error_category")]
     durations = [float(row["duration_ms"]) for row in successes]
@@ -397,10 +530,23 @@ def _aggregate(rows: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
 
 
 def _usage_totals(value: object) -> dict[str, int]:
-    """Flatten only the four approved operational token counters."""
+    """
+    Aggregate approved token counters from nested mappings and sequences.
+    
+    Parameters:
+    	value (object): Nested token usage data to inspect.
+    
+    Returns:
+    	dict[str, int]: Totals for prompt, completion, reasoning, and cache-read tokens.
+    """
     result = {"prompt_tokens": 0, "completion_tokens": 0, "reasoning_tokens": 0, "cache_read_tokens": 0}
 
     def visit(item: object) -> None:
+        """Collect approved token counters from nested mappings and sequences.
+        
+        Parameters:
+            item (object): Nested usage data containing token counters.
+        """
         if isinstance(item, Mapping):
             for key, child in item.items():
                 if isinstance(child, int) and not isinstance(child, bool):
@@ -428,6 +574,17 @@ def _usage_totals(value: object) -> dict[str, int]:
 
 
 def _metrics_query(mlflow_url: str, experiment_id: str, *, variant: str) -> dict[str, Any]:
+    """
+    Query MLflow latency metrics for the configured Fleet workload and performance variant.
+    
+    Parameters:
+        mlflow_url (str): Base URL of the MLflow server.
+        experiment_id (str): MLflow experiment identifier.
+        variant (str): Performance variant used to filter traces.
+    
+    Returns:
+        dict[str, Any]: Latency metric results grouped by span name.
+    """
     common = {
         "experiment_ids": [experiment_id],
         "view_type": 2,
@@ -460,6 +617,15 @@ def _metrics_query(mlflow_url: str, experiment_id: str, *, variant: str) -> dict
 
 
 def run_benchmark(args: argparse.Namespace) -> dict[str, Any]:
+    """
+    Run live latency benchmark samples and return an aggregate performance receipt.
+    
+    Parameters:
+    	args (argparse.Namespace): Benchmark configuration, including API and MLflow endpoints, experiment ID, variant, warmup count, and measured run count.
+    
+    Returns:
+    	dict[str, Any]: Benchmark receipt containing the active policy, aggregate sample metrics, and MLflow span metrics.
+    """
     _require_live()
     rows: list[dict[str, Any]] = []
     with httpx.Client(base_url=args.api_url.rstrip("/"), timeout=httpx.Timeout(args.timeout)) as client:
@@ -512,7 +678,18 @@ def run_benchmark(args: argparse.Namespace) -> dict[str, Any]:
 
 
 def prepare_evaluation(args: argparse.Namespace) -> dict[str, Any]:
-    """Idempotently create the MLflow dataset and register its two judges."""
+    """
+    Create or reuse the MLflow quality-evaluation dataset and register its judges.
+    
+    Parameters:
+        args (argparse.Namespace): Configuration containing the MLflow tracking URL, experiment ID, and judge model URI.
+    
+    Returns:
+        dict[str, Any]: Dataset ID, dataset name, and record count.
+    
+    Raises:
+        BenchmarkError: If no judge model URI is provided.
+    """
     import mlflow
     from mlflow.genai import datasets
     from mlflow.genai.judges import make_judge
@@ -549,7 +726,18 @@ def prepare_evaluation(args: argparse.Namespace) -> dict[str, Any]:
 
 
 def run_evaluation(args: argparse.Namespace) -> dict[str, Any]:
-    """Run MLflow GenAI evaluation against three dry-run or all five records."""
+    """
+    Run MLflow GenAI evaluation on the quality dataset.
+    
+    Parameters:
+    	args (argparse.Namespace): Command-line options containing the judge model, MLflow and Fleet API settings, experiment ID, timeout, and dry-run flag.
+    
+    Returns:
+    	dict[str, Any]: Evaluation receipt containing the dataset name, evaluation mode, record count, metrics, and quality-gate result.
+    
+    Raises:
+    	BenchmarkError: If live execution is not enabled or no judge model is configured.
+    """
     _require_live()
     if not args.judge_model:
         raise BenchmarkError("evaluate requires --judge-model with an MLflow-supported model URI")
@@ -564,6 +752,15 @@ def run_evaluation(args: argparse.Namespace) -> dict[str, Any]:
     frame = dataset.to_df().head(3) if args.dry_run else dataset.to_df()
 
     def predict_fn(query: str) -> str:
+        """
+        Generate an answer for a quality-evaluation query.
+        
+        Parameters:
+            query (str): The query to submit for evaluation.
+        
+        Returns:
+            str: The answer produced for the query.
+        """
         with httpx.Client(base_url=args.api_url.rstrip("/"), timeout=httpx.Timeout(args.timeout)) as client:
             return str(run_turn(client, query, nonce=f"quality-{uuid4()}")["answer"])
 
@@ -582,6 +779,12 @@ def run_evaluation(args: argparse.Namespace) -> dict[str, Any]:
 
 
 def build_parser() -> argparse.ArgumentParser:
+    """
+    Create the command-line argument parser for benchmark, evaluation, and comparison workflows.
+    
+    Returns:
+    	argparse.ArgumentParser: Parser configured with command, endpoint, sampling, evaluation, input, and output options.
+    """
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("command", choices=("benchmark", "prepare-evaluation", "evaluate", "compare"))
     parser.add_argument("--api-url", default=DEFAULT_API_URL)
@@ -601,6 +804,15 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    """
+    Run the selected CLI command and write its result as a JSON receipt.
+    
+    Parameters:
+        argv (Sequence[str] | None): Optional command-line arguments; uses the process arguments when omitted.
+    
+    Returns:
+        int: `0` when the command succeeds, `1` when it fails.
+    """
     _load_repository_env()
     args = build_parser().parse_args(argv)
     try:

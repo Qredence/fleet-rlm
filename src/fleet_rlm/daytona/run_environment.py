@@ -250,6 +250,15 @@ class _LiveCapabilityPreparer:
         *,
         deadline: float,
     ) -> LivePreparedCapabilities:
+        """
+        Prepare the file, workspace, URL, and memory capabilities for a turn.
+        
+        Parameters:
+            deadline (float): Deadline for capability preparation.
+        
+        Returns:
+            LivePreparedCapabilities: Prepared capabilities and any preparation notices.
+        """
         from fleet_rlm.daytona.workspace_fs import DaytonaSessionWorkspaceFS
         from fleet_rlm.daytona.workspace_memory import DaytonaWorkspaceMemoryStore
         from fleet_rlm.files.memory_tools import WorkspaceMemoryToolHost

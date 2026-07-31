@@ -146,6 +146,14 @@ def test_observed_url_tool_is_nested_under_turn_root_with_bounded_metadata(
     observed: list[Any] = []
 
     def fetch_url(url: str) -> dict[str, object]:
+        """Return a simulated URL fetch result with private source content and cache status.
+        
+        Parameters:
+        	url (str): URL whose content would be fetched.
+        
+        Returns:
+        	dict[str, object]: A result containing the source content and cache-hit status.
+        """
         del url
         return {"content": "private source body", "cache_hit": False}
 
@@ -181,6 +189,14 @@ def test_daytona_broker_preserves_batched_tool_span_under_turn_root(
     observed: list[Any] = []
 
     def llm_query_batched(prompts: list[str]) -> list[str]:
+        """Generate a deterministic result string for each prompt.
+        
+        Parameters:
+            prompts (list[str]): Prompts to associate with generated results.
+        
+        Returns:
+            list[str]: Results labeled by the prompts' positions.
+        """
         return [f"result-{index}" for index, _prompt in enumerate(prompts)]
 
     wrapped = observe_tool(
@@ -208,6 +224,14 @@ def test_daytona_broker_preserves_batched_tool_span_under_turn_root(
     ]
 
     def handler(request: httpx.Request) -> httpx.Response:
+        """Return pending requests for the pending endpoint and an empty response for other paths.
+        
+        Parameters:
+        	request (httpx.Request): The incoming HTTP request.
+        
+        Returns:
+        	httpx.Response: A response containing pending requests for `/pending`, or an empty JSON object for other paths.
+        """
         nonlocal pending
         if request.url.path == "/pending":
             result, pending = pending, []
@@ -221,6 +245,16 @@ def test_daytona_broker_preserves_batched_tool_span_under_turn_root(
     )
 
     def execute(name: str, args: list[Any], kwargs: dict[str, Any]) -> Any:
+        """Execute the wrapped batched LLM query tool.
+        
+        Parameters:
+        	name (str): The tool name, which must be ``"llm_query_batched"``.
+        	args (list[Any]): Positional arguments for the wrapped function.
+        	kwargs (dict[str, Any]): Keyword arguments for the wrapped function.
+        
+        Returns:
+        	Any: The wrapped function's result.
+        """
         assert name == "llm_query_batched"
         return wrapped.func(*args, **kwargs)
 

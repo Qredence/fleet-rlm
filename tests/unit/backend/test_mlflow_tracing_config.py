@@ -15,6 +15,7 @@ from fleet_rlm.config import Settings
 
 @pytest.fixture(autouse=True)
 def _reset_tracing_latch(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Reset the tracing configuration and activation state for a test."""
     monkeypatch.setattr(tracing, "_TRACING_CONFIGURED", False)
     monkeypatch.setattr(tracing, "_TRACING_ACTIVE", False)
 
@@ -27,6 +28,18 @@ def _install_fake_mlflow(
     autolog: Any | None = None,
     raise_on_import: BaseException | None = None,
 ) -> SimpleNamespace:
+    """
+    Install fake MLflow modules for tracing tests and record their interactions.
+    
+    Parameters:
+        set_tracking_uri: Optional replacement for the fake tracking URI setter.
+        set_experiment: Optional replacement for the fake experiment setter.
+        autolog: Optional replacement for the fake DSPy autologging function.
+        raise_on_import: Exception raised when attributes are accessed on the fake MLflow modules.
+    
+    Returns:
+        A namespace containing recorded MLflow calls and configurable fake functions.
+    """
     if raise_on_import is not None:
 
         class _Boom(ModuleType):
@@ -59,6 +72,12 @@ def _install_fake_mlflow(
         calls.experiment_kwargs.append(kwargs)
 
     def _autolog(**kwargs: Any) -> None:
+        """
+        Record autologging configuration options for test assertions.
+        
+        Parameters:
+            kwargs (Any): Autologging options to record.
+        """
         calls.autolog_calls += 1
         calls.autolog_kwargs.append(kwargs)
 
@@ -76,12 +95,18 @@ def _install_fake_mlflow(
     config_mod = ModuleType("mlflow.config")
 
     def _enable_async_logging(enabled: bool) -> None:
+        """Record the configured asynchronous logging state."""
         calls.async_logging_args.append(enabled)
 
     config_mod.enable_async_logging = _enable_async_logging  # type: ignore[attr-defined]
     tracing_mod = ModuleType("mlflow.tracing")
 
     def _configure(*, span_processors: list[Any]) -> None:
+        """Record the span processors supplied for tracing configuration.
+        
+        Parameters:
+        	span_processors (list[Any]): Span processors to record.
+        """
         calls.processor_args.append(span_processors)
 
     tracing_mod.configure = _configure  # type: ignore[attr-defined]
@@ -190,12 +215,22 @@ def test_mlflow_315_span_processor_bounds_and_redacts_values() -> None:
             self.attributes: dict[str, object] = {"api_key": "real-secret", "kind": "tool"}
 
         def set_inputs(self, value: object) -> None:
+            """Set the span inputs to the specified value.
+            
+            Parameters:
+            	value (object): The inputs associated with the span.
+            """
             self.inputs = value
 
         def set_outputs(self, value: object) -> None:
             self.outputs = value
 
         def set_attributes(self, value: dict[str, object]) -> None:
+            """Set the span attributes to the provided mapping.
+            
+            Parameters:
+            	value (dict[str, object]): Attributes to associate with the span.
+            """
             self.attributes = value
 
     span = Span()

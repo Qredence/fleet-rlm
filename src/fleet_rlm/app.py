@@ -93,9 +93,15 @@ def create_app(
     settings: Settings | None = None,
     _composition_installer: Callable[..., Any] | None = None,
 ) -> FastAPI:
-    """Create a FastAPI app.
-
-    Daytona is the default public profile. Runtime inventory validates at startup.
+    """
+    Create and configure the Fleet RLM FastAPI application.
+    
+    Parameters:
+    	settings (Settings | None): Optional runtime settings. When omitted, settings are loaded from the environment.
+    	_composition_installer (Callable[..., Any] | None): Optional composition installer used for local database-backed application lifecycles.
+    
+    Returns:
+    	FastAPI: The configured application instance.
     """
     _reject_retired_environment_variables()
     resolved = settings if settings is not None else load_runtime_settings()
@@ -107,6 +113,12 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
+        """
+        Manage application startup and shutdown for the configured execution environment.
+        
+        Initializes the selected composition before yielding control to the application and
+        performs composition cleanup and tracing flushes during shutdown.
+        """
         settings_obj: Settings = app.state.settings
         if _composition_installer is not None:
             try:

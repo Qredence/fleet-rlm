@@ -27,6 +27,15 @@ class _FakeFetcher:
     text: str = "needle: 42"
 
     def fetch(self, url: str, *, max_bytes: int) -> UrlFetchResult:
+        """Fetch fixed text for a URL and record the request.
+        
+        Parameters:
+        	url (str): The URL to fetch.
+        	max_bytes (int): The maximum allowed response size.
+        
+        Returns:
+        	UrlFetchResult: The fetched text and its content type.
+        """
         assert max_bytes > 0
         self.calls.append(url)
         return UrlFetchResult(url, "text/plain; charset=utf-8", self.text)
@@ -37,10 +46,30 @@ class _FakeWorkspace:
         self.values: dict[str, str] = {}
 
     def stat(self, path: str) -> WorkspaceEntry | None:
+        """
+        Retrieve metadata for a workspace path.
+        
+        Parameters:
+        	path (str): The workspace path to inspect.
+        
+        Returns:
+        	WorkspaceEntry | None: File metadata when the path exists; otherwise, `None`.
+        """
         value = self.values.get(path)
         return None if value is None else WorkspaceEntry(path, "file", len(value.encode()), None)
 
     def list_entries(self, path: str, *, limit: int = 100, after: str | None = None) -> WorkspaceListResult:
+        """
+        List file entries under a workspace path.
+        
+        Parameters:
+            path (str): Workspace path whose entries are listed.
+            limit (int): Maximum number of entries to include.
+            after (str | None): Pagination cursor, which is ignored.
+        
+        Returns:
+            WorkspaceListResult: Matching entries, truncation status, and no continuation cursor.
+        """
         del after
         prefix = path.rstrip("/") + "/"
         entries = tuple(
@@ -58,6 +87,21 @@ class _FakeWorkspace:
         max_chars: int,
         max_bytes: int,
     ) -> WorkspaceTextPage:
+        """
+        Read a bounded page of text from a workspace path.
+        
+        Parameters:
+        	path (str): Workspace path containing the text.
+        	cursor (str | None): Character offset at which to begin reading.
+        	max_chars (int): Maximum number of characters to return.
+        	max_bytes (int): Maximum encoded byte size permitted for the full value.
+        
+        Returns:
+        	WorkspaceTextPage: The requested text, continuation cursor, total byte size, and completion status.
+        
+        Raises:
+        	ValueError: If the encoded value exceeds max_bytes.
+        """
         value = self.values[path]
         data = value.encode()
         if len(data) > max_bytes:
@@ -73,6 +117,20 @@ class _FakeWorkspace:
         )
 
     def write_text(self, path: str, content: str, *, overwrite: bool) -> WorkspaceEntry:
+        """
+        Write text content to a workspace path.
+        
+        Parameters:
+        	path (str): Workspace path to write.
+        	content (str): Text content to store.
+        	overwrite (bool): Whether to replace existing content at the path.
+        
+        Returns:
+        	WorkspaceEntry: Metadata for the written file.
+        
+        Raises:
+        	FileExistsError: If the path already exists and overwrite is false.
+        """
         if path in self.values and not overwrite:
             raise FileExistsError(path)
         self.values[path] = content
@@ -81,12 +139,24 @@ class _FakeWorkspace:
 
 class _MissingParentWorkspace(_FakeWorkspace):
     def stat(self, path: str) -> WorkspaceEntry | None:
+        """
+        Simulate a workspace with a missing source directory.
+        
+        Raises:
+            FileNotFoundError: Always raised for the requested path.
+        """
         del path
         raise FileNotFoundError("sources/urls")
 
 
 class _MissingCacheDirectoryWorkspace(_FakeWorkspace):
     def list_entries(self, path: str, *, limit: int = 100, after: str | None = None) -> WorkspaceListResult:
+        """
+        Simulate a missing URL cache directory when listing workspace entries.
+        
+        Raises:
+            FileNotFoundError: Always, indicating that the URL cache directory is missing.
+        """
         del path, limit, after
         raise FileNotFoundError("sources/urls")
 
@@ -280,6 +350,7 @@ def test_public_fetcher_streams_and_pins_validated_address(monkeypatch: pytest.M
             self.headers = {"Content-Type": "text/plain; charset=utf-8"}
 
         def stream(self, _size: int, *, decode_content: bool):
+            """Provide the fixed byte chunks used by the test fetcher."""
             assert decode_content is True
             return iter((b"hello ", b"world"))
 
@@ -298,6 +369,9 @@ def test_public_fetcher_streams_and_pins_validated_address(monkeypatch: pytest.M
             calls["pool_closed"] = True
 
         def urlopen(self, method: str, target: str, **kwargs: object) -> Response:
+            """
+            Record the requested method, target, and options, then return a response.
+            """
             calls["method"] = method
             calls["target"] = target
             calls["request_kwargs"] = kwargs
@@ -346,6 +420,12 @@ def test_public_fetcher_enforces_total_wall_clock_deadline(monkeypatch: pytest.M
             pass
 
         def urlopen(self, _method: str, _target: str, **_kwargs: object) -> Response:
+            """
+            Provide an empty HTTP response for the expected client interface.
+            
+            Returns:
+            	Response: An empty response.
+            """
             return Response()
 
     monkeypatch.setattr("fleet_rlm.files.url_tool.urllib3.HTTPSConnectionPool", Pool)

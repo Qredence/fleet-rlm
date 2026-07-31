@@ -227,6 +227,17 @@ def _observed_scalar(value: object, *, path: str) -> JsonValue:
 
 
 def _safe_usage_entry(value: object, *, path: str, filter_unknown: bool) -> dict[str, JsonValue]:
+    """
+    Validate and normalize an observed usage mapping for safe telemetry.
+    
+    Parameters:
+        value (object): Usage data to validate.
+        path (str): Location used in validation error messages.
+        filter_unknown (bool): Whether to omit unrecognized usage fields instead of raising an error.
+    
+    Returns:
+        dict[str, JsonValue]: A validated usage mapping containing only allowed JSON-compatible values.
+    """
     if not isinstance(value, Mapping) or any(not isinstance(key, str) for key in value):
         raise ValueError(f"{path} must be an object with string keys")
     usage = cast(Mapping[str, object], value)
@@ -410,6 +421,7 @@ class _RLMTraceCallback(BaseCallback):
         self._spans: dict[str, tuple[Any, Any, int | None, int, float]] = {}
 
     def on_lm_start(self, call_id: str, instance: Any, inputs: dict[str, Any]) -> None:
+        """Starts tracing for a recognized language-model call and records its input metadata."""
         role = self._roles.get(id(instance))
         if role is None:
             return
@@ -445,6 +457,14 @@ class _RLMTraceCallback(BaseCallback):
         outputs: dict[str, Any] | None,
         exception: Exception | None = None,
     ) -> None:
+        """
+        Finalize an LM tracing span with response, timing, usage, and failure details.
+        
+        Parameters:
+            call_id (str): Identifier of the LM call being finalized.
+            outputs (dict[str, Any] | None): LM response data used to create a safe output profile.
+            exception (Exception | None): Exception that caused the call to fail, if applicable.
+        """
         state = self._spans.pop(call_id, None)
         if state is None:
             return
@@ -526,12 +546,15 @@ def _latest_lm_telemetry(
     instance: Any,
     history_length: int | None,
 ) -> tuple[dict[str, JsonValue], dict[str, JsonValue]]:
-    """Read allowlisted telemetry for one completed call from DSPy history.
-
-    DSPy exposes the completed LM interaction on ``BaseLM.history`` after the
-    decorated ``__call__``/``acall`` returns (``dspy/clients/base_lm.py:225-256``).
-    ``Prediction.get_lm_usage`` is an aggregate surface, so the callback uses
-    the newly appended history entry to keep this span call-specific.
+    """
+    Retrieve sanitized usage and provider telemetry for the latest completed language-model call.
+    
+    Parameters:
+        instance (Any): Language-model instance whose call history is inspected.
+        history_length (int | None): Starting history position for entries belonging to the current call.
+    
+    Returns:
+        tuple[dict[str, JsonValue], dict[str, JsonValue]]: Allowlisted usage data and provider response metadata.
     """
     history = getattr(instance, "history", None)
     if not isinstance(history, Sequence) or isinstance(history, (str, bytes, bytearray)):
@@ -559,7 +582,15 @@ def _latest_lm_telemetry(
 
 
 def _provider_response_telemetry(response: object) -> dict[str, JsonValue]:
-    """Project a strict allowlist from LiteLLM's provider response metadata."""
+    """
+    Extracts safe provider timing and request identifier metadata from an LM response.
+    
+    Parameters:
+    	response (object): Provider response containing optional metadata.
+    
+    Returns:
+    	dict[str, JsonValue]: Allowlisted provider telemetry values, or an empty dictionary when unavailable.
+    """
     hidden = getattr(response, "_hidden_params", None)
     if not isinstance(hidden, Mapping) and isinstance(response, Mapping):
         hidden = response.get("_hidden_params")
@@ -591,7 +622,15 @@ def _provider_response_telemetry(response: object) -> dict[str, JsonValue]:
 
 
 def _mlflow_token_usage(usage: Mapping[str, JsonValue]) -> dict[str, JsonValue]:
-    """Map provider spelling to MLflow's standard aggregate token keys."""
+    """
+    Map provider-specific token fields to standardized MLflow usage keys.
+    
+    Parameters:
+    	usage (Mapping[str, JsonValue]): Provider-reported token usage values.
+    
+    Returns:
+    	dict[str, JsonValue]: Token usage values keyed by MLflow's standard aggregate names.
+    """
     aliases = {
         "input_tokens": ("input_tokens", "prompt_tokens"),
         "output_tokens": ("output_tokens", "completion_tokens"),

@@ -507,6 +507,14 @@ class DaytonaHttpToolBroker:
         )
 
     def _poll_once(self, tool_executor: Callable[[str, list[Any], dict[str, Any]], Any]) -> bool:
+        """Poll for pending broker requests and fulfill them concurrently.
+        
+        Parameters:
+            tool_executor (Callable[[str, list[Any], dict[str, Any]], Any]): Callback that executes each requested tool.
+            
+        Returns:
+            bool: `true` if pending requests were found and processed, `false` otherwise.
+        """
         assert self._broker_url is not None
         self._poll_count += 1
         try:
@@ -530,6 +538,13 @@ class DaytonaHttpToolBroker:
         item: dict[str, Any],
         tool_executor: Callable[[str, list[Any], dict[str, Any]], Any],
     ) -> None:
+        """
+        Fulfill a pending tool request and submit its result or sanitized error to the broker.
+        
+        Parameters:
+            item (dict[str, Any]): Pending tool request containing its identifier, lease token, tool name, arguments, and keyword arguments.
+            tool_executor (Callable[[str, list[Any], dict[str, Any]], Any]): Callback that executes the requested tool.
+        """
         call_id = str(item.get("id") or "")
         lease = item.get("lease_token")
         name = str(item.get("tool_name") or "")

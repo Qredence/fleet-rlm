@@ -34,12 +34,28 @@ class _Fetcher:
     calls: list[str]
 
     def fetch(self, url: str, *, max_bytes: int) -> UrlFetchResult:
+        """
+        Fetch a fixed response body for the requested URL.
+        
+        Parameters:
+            url (str): URL to record and fetch.
+            max_bytes (int): Maximum response size accepted by the caller.
+        
+        Returns:
+            UrlFetchResult: The requested URL with a plain-text response body.
+        """
         assert max_bytes >= len(_BODY.encode())
         self.calls.append(url)
         return UrlFetchResult(url, "text/plain; charset=utf-8", _BODY)
 
 
 def _skip_unless_live(settings: Settings) -> None:
+    """
+    Skip the test unless live Daytona testing is fully configured.
+    
+    Parameters:
+    	settings (Settings): Runtime settings used to determine whether a Daytona snapshot is configured.
+    """
     if os.environ.get("FLEET_LIVE", "").strip().lower() not in {"1", "true", "yes"}:
         pytest.skip("Set FLEET_LIVE=1 for live Daytona URL cache tests")
     if not os.environ.get("FLEET_DAYTONA_API_KEY"):
@@ -54,6 +70,18 @@ def _workspace(
     session_id: UUID,
     loop: asyncio.AbstractEventLoop,
 ) -> DaytonaSessionWorkspaceFS:
+    """
+    Build a Daytona session workspace filesystem for the specified session.
+    
+    Parameters:
+    	sandbox (object): The Daytona sandbox to synchronize with the workspace.
+    	settings (Settings): Runtime settings used to configure workspace paths and upload limits.
+    	session_id (UUID): Identifier of the session whose workspace should be used.
+    	loop (asyncio.AbstractEventLoop): Event loop used to synchronize the sandbox.
+    
+    Returns:
+    	DaytonaSessionWorkspaceFS: The configured session workspace filesystem.
+    """
     paths = volume_paths_from_settings(settings)
     return DaytonaSessionWorkspaceFS(
         sync_sandbox(sandbox, loop),

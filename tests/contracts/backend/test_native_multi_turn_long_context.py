@@ -39,10 +39,29 @@ class _Workspace:
         self.values: dict[str, str] = {}
 
     def stat(self, path: str) -> WorkspaceEntry | None:
+        """Return metadata for a stored workspace file.
+        
+        Parameters:
+            path (str): The workspace path to inspect.
+        
+        Returns:
+            WorkspaceEntry | None: The file metadata, or `None` when no value is stored at the path.
+        """
         value = self.values.get(path)
         return None if value is None else WorkspaceEntry(path, "file", len(value.encode()), None)
 
     def list_entries(self, path: str, *, limit: int = 100, after: str | None = None) -> WorkspaceListResult:
+        """
+        List files stored under a workspace path.
+        
+        Parameters:
+            path (str): Directory-like path whose entries are listed.
+            limit (int): Maximum number of entries to return.
+            after (str | None): Cursor parameter, currently ignored.
+        
+        Returns:
+            WorkspaceListResult: Matching file entries, truncation status, and no continuation cursor.
+        """
         del after
         prefix = path.rstrip("/") + "/"
         entries = tuple(
@@ -60,6 +79,22 @@ class _Workspace:
         max_chars: int,
         max_bytes: int,
     ) -> WorkspaceTextPage:
+        """
+        Read a bounded page of text from a workspace path.
+        
+        Parameters:
+            path (str): Path of the stored text.
+            cursor (str | None): Character offset from which to read.
+            max_chars (int): Maximum number of characters to return.
+            max_bytes (int): Maximum allowed encoded size of the stored text.
+        
+        Returns:
+            WorkspaceTextPage: The requested text, continuation cursor, total byte
+                size, and completion status.
+        
+        Raises:
+            ValueError: If the stored text exceeds the byte limit.
+        """
         value = self.values[path]
         if len(value.encode()) > max_bytes:
             raise ValueError("workspace read exceeded bound")
@@ -74,6 +109,20 @@ class _Workspace:
         )
 
     def write_text(self, path: str, content: str, *, overwrite: bool) -> WorkspaceEntry:
+        """
+        Write text content to a workspace path.
+        
+        Parameters:
+        	path (str): The destination path.
+        	content (str): The text to store.
+        	overwrite (bool): Whether to replace existing content at the path.
+        
+        Returns:
+        	WorkspaceEntry: Metadata for the stored file.
+        
+        Raises:
+        	FileExistsError: If the path already exists and overwriting is disabled.
+        """
         if path in self.values and not overwrite:
             raise FileExistsError(path)
         self.values[path] = content
@@ -85,18 +134,29 @@ class _SemanticLM:
         self.prompts: list[str] = []
 
     def __call__(self, prompt: str) -> str:
+        """Generate a deterministic semantic response for a prompt and record the prompt."""
         self.prompts.append(prompt)
         return f"semantic:{len(prompt)}"
 
 
 class _OneAction(dspy.Predict):
     def __init__(self, codes: list[str]) -> None:
+        """Initialize the action generator with REPL code and history tracking."""
         super().__init__("variables_info, repl_history, iteration -> reasoning, code")
         self.codes = codes
         self.history_lengths: list[int] = []
         self._index = 0
 
     async def aforward(self, **kwargs: Any) -> dspy.Prediction:
+        """
+        Generate the next configured REPL action and record the current history length.
+        
+        Parameters:
+        	repl_history (list): The current REPL history used to record its length.
+        
+        Returns:
+        	dspy.Prediction: A prediction containing the configured REPL code and reasoning.
+        """
         history = kwargs["repl_history"]
         self.history_lengths.append(len(history))
         code = self.codes[min(self._index, len(self.codes) - 1)]
@@ -105,6 +165,18 @@ class _OneAction(dspy.Predict):
 
 
 def _rlm(*, tools: tuple[dspy.Tool, ...], action: list[str], root_lm: Any, sub_lm: Any) -> dspy.RLM:
+    """
+    Create an RLM configured with the supplied tools, language models, and deterministic action sequence.
+    
+    Parameters:
+    	tools (tuple[dspy.Tool, ...]): Tools available to the RLM.
+    	action (list[str]): REPL actions generated sequentially during execution.
+    	root_lm (Any): Language model used for root-level reasoning.
+    	sub_lm (Any): Language model used for subqueries.
+    
+    Returns:
+    	dspy.RLM: The configured RLM instance.
+    """
     rlm = RLMFactory().create(
         models=RLMModelBundle(root_lm=root_lm, sub_lm=sub_lm),
         options=RLMOptions(max_iterations=len(action), max_llm_calls=4),
@@ -118,6 +190,9 @@ def _rlm(*, tools: tuple[dspy.Tool, ...], action: list[str], root_lm: Any, sub_l
 
 @pytest.mark.asyncio
 async def test_native_rlm_keeps_source_in_repl_and_reuses_session_cache_across_turns() -> None:
+    """
+    Verify multi-turn URL retrieval, caching, session-history access, REPL isolation, and bounded semantic queries.
+    """
     session_id = uuid4()
     history_detail = "Earlier turn established cobalt-orchid."
     fetcher = _FakeFetcher()

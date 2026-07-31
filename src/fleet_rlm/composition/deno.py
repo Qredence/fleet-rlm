@@ -21,7 +21,15 @@ from fleet_rlm.config import Settings
 
 
 def require_deno_settings(settings: Settings) -> None:
-    """Fail closed when Deno dependencies are missing."""
+    """
+    Validate that the settings and local dependencies required for Deno mode are available.
+    
+    Parameters:
+        settings (Settings): Runtime settings to validate.
+    
+    Raises:
+        CompositionError: If Deno mode is not selected, no provider API key is configured, or the `deno` executable is unavailable.
+    """
     if settings.run_environment != "deno":
         raise CompositionError("Deno composition requires run_environment='deno'")
     from fleet_rlm.rlm.lm_factory import has_llm_credentials
@@ -38,7 +46,15 @@ def install_deno_composition(
     *,
     session_factory: Any | None = None,
 ) -> LocalCompositionHandles:
-    """Build Deno adapters once during lifespan."""
+    """
+    Install the Deno runtime composition on the application.
+    
+    Parameters:
+        session_factory (Any | None): Optional database session factory used to enable SQL-backed artifact storage.
+    
+    Returns:
+        LocalCompositionHandles: Handles for the installed local composition.
+    """
     from fleet_rlm.artifacts.local_catalog import LocalArtifactBlobGateway, LocalArtifactCatalog
     from fleet_rlm.chat.deno_run_environment import DenoTurnPreparation
     from fleet_rlm.files.local_catalog import LocalAttachmentBlobGateway

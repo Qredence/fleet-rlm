@@ -293,12 +293,36 @@ _ROLE_KEYS = frozenset(
 
 
 def _require_mapping(value: object, location: str) -> Mapping[str, Any]:
+    """
+    Require a TOML value to be a mapping.
+    
+    Parameters:
+        value (object): Value to validate.
+        location (str): Configuration path used in the validation error.
+    
+    Returns:
+        Mapping[str, Any]: The validated mapping.
+    
+    Raises:
+        FleetConfigurationError: If the value is not a mapping.
+    """
     if not isinstance(value, Mapping):
         raise FleetConfigurationError(f"{location} must be a TOML table")
     return cast(Mapping[str, Any], value)
 
 
 def _validate_policy_table(value: object, location: str, *, allow_partial_llm: bool = False) -> None:
+    """
+    Validate the structure and environment references in a runtime policy table.
+    
+    Parameters:
+        value (object): Policy table to validate.
+        location (str): Configuration path used in validation errors.
+        allow_partial_llm (bool): Whether LLM roles may omit an API key environment reference.
+    
+    Raises:
+        FleetConfigurationError: If the table contains unknown keys, conflicting values, or invalid environment references.
+    """
     table = _require_mapping(value, location)
     unknown = set(table).difference(_TABLE_KEYS)
     if unknown:
@@ -383,6 +407,18 @@ def _deep_merge(base: Mapping[str, Any], override: Mapping[str, Any]) -> dict[st
 
 
 def _flatten_policy(policy: Mapping[str, Any]) -> dict[str, Any]:
+    """
+    Flatten validated nested policy sections into the field names required by `Settings`.
+    
+    Parameters:
+        policy (Mapping[str, Any]): Validated policy configuration containing application, runtime, RLM, storage, Daytona, logging, LLM, and MLflow sections.
+    
+    Returns:
+        dict[str, Any]: Settings field values with applicable defaults applied.
+    
+    Raises:
+        FleetConfigurationError: If required settings are missing.
+    """
     def table(name: str) -> Mapping[str, Any]:
         return _require_mapping(policy.get(name, {}), name)
 
@@ -525,7 +561,15 @@ def _require_managed_profile_environment_values(
 
 
 def load_runtime_settings() -> Settings:
-    """Load the one required, restart-only Fleet policy profile for production."""
+    """
+    Load and validate the active Fleet runtime configuration.
+    
+    Returns:
+        Settings: The resolved runtime settings for the selected profile.
+    
+    Raises:
+        FleetConfigurationError: If the configuration file is missing or contains invalid, incomplete, or unsupported settings.
+    """
     dotenv = dotenv_values(".env")
     if not _CONFIG_PATH.is_file():
         raise FleetConfigurationError(f"required Fleet configuration file is missing: {_CONFIG_PATH}")

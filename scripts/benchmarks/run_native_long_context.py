@@ -40,11 +40,25 @@ RSS_GATE_BYTES = 64 * 1024 * 1024
 
 
 def _rss_bytes() -> int:
+    """Return the process's peak resident set size in bytes."""
     value = int(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss)
     return value if sys.platform == "darwin" else value * 1024
 
 
 def _source(size: int, markers: tuple[str, ...]) -> str:
+    """
+    Create a deterministic text source of the requested size with markers at fixed positions.
+    
+    Parameters:
+        size (int): The source size in bytes.
+        markers (tuple[str, ...]): Three markers to place near the beginning, middle, and end of the source.
+    
+    Returns:
+        str: The generated text source containing the specified markers.
+    
+    Raises:
+        ValueError: If the source is too small or the markers overlap.
+    """
     data = bytearray(b"x" * size)
     positions = (64 * 1024 - len(markers[0]), size // 2, size - len(markers[2]) - 1)
     spans = tuple(zip(positions, markers, strict=True))
@@ -68,6 +82,15 @@ class _SyntheticFetcher:
         self.calls = 0
 
     def fetch(self, url: str, *, max_bytes: int) -> UrlFetchResult:
+        """Fetch the synthetic source associated with a URL.
+        
+        Parameters:
+        	url (str): The URL identifying the source.
+        	max_bytes (int): The maximum response size, which is ignored.
+        
+        Returns:
+        	UrlFetchResult: The generated text source and its content type.
+        """
         del max_bytes
         self.calls += 1
         return UrlFetchResult(url, "text/plain; charset=utf-8", _source(self.size, self.markers))
@@ -80,10 +103,28 @@ class _SyntheticWorkspace:
         self.values: dict[str, str] = {}
 
     def stat(self, path: str) -> WorkspaceEntry | None:
+        """Return metadata for a stored workspace file.
+        
+        Parameters:
+        	path (str): Workspace path to inspect.
+        
+        Returns:
+        	WorkspaceEntry | None: File metadata, or `None` if the path is not stored.
+        """
         value = self.values.get(path)
         return None if value is None else WorkspaceEntry(path, "file", len(value.encode()), None)
 
     def list_entries(self, path: str, *, limit: int = 100, after: str | None = None) -> WorkspaceListResult:
+        """List files under a workspace path.
+        
+        Parameters:
+        	path (str): Directory path whose entries should be listed.
+        	limit (int): Maximum number of entries to return.
+        	after (str | None): Pagination cursor, ignored by this in-memory workspace.
+        
+        Returns:
+        	WorkspaceListResult: Matching entries, truncation status, and no continuation cursor.
+        """
         del after
         prefix = path.rstrip("/") + "/"
         entries = tuple(
@@ -101,6 +142,21 @@ class _SyntheticWorkspace:
         max_chars: int,
         max_bytes: int,
     ) -> WorkspaceTextPage:
+        """
+        Read a bounded page of text from a workspace value.
+        
+        Parameters:
+            path (str): Path identifying the workspace value.
+            cursor (str | None): Character offset at which to begin reading, or `None` to start at the beginning.
+            max_chars (int): Maximum number of characters to include in the page.
+            max_bytes (int): Maximum allowed UTF-8 size of the complete value.
+        
+        Returns:
+            WorkspaceTextPage: Page content, the cursor for the next page, total value size in bytes, and whether the end was reached.
+        
+        Raises:
+            ValueError: If the complete value exceeds `max_bytes`.
+        """
         value = self.values[path]
         if len(value.encode()) > max_bytes:
             raise ValueError("workspace read exceeded bound")
@@ -115,6 +171,19 @@ class _SyntheticWorkspace:
         )
 
     def write_text(self, path: str, content: str, *, overwrite: bool) -> WorkspaceEntry:
+        """Write text content to a workspace path.
+        
+        Parameters:
+        	path (str): The workspace path to write.
+        	content (str): The text content to store.
+        	overwrite (bool): Whether to replace existing content at the path.
+        
+        Returns:
+        	WorkspaceEntry: Metadata for the written file.
+        
+        Raises:
+        	FileExistsError: If the path already exists and overwriting is disabled.
+        """
         if path in self.values and not overwrite:
             raise FileExistsError(path)
         self.values[path] = content
@@ -126,6 +195,14 @@ class _SemanticLM:
         self.prompts: list[str] = []
 
     def __call__(self, prompt: str) -> str:
+        """Record a prompt and return a deterministic response based on its length.
+        
+        Parameters:
+        	prompt (str): The prompt to record.
+        
+        Returns:
+        	str: A response containing the prompt length.
+        """
         self.prompts.append(prompt)
         return f"semantic:{len(prompt)}"
 
@@ -137,12 +214,19 @@ class _Action(dspy.Predict):
         self._index = 0
 
     async def aforward(self, **_kwargs: Any) -> dspy.Prediction:
+        """
+        Provide the next predetermined interpreter action.
+        
+        Returns:
+            dspy.Prediction: A prediction containing the action reasoning and selected code.
+        """
         code = self.codes[min(self._index, len(self.codes) - 1)]
         self._index += 1
         return dspy.Prediction(reasoning="Run bounded native long-context analysis.", code=code)
 
 
 def _root_lm() -> dspy.utils.DummyLM:
+    """Create a deterministic language model that submits the verified benchmark result."""
     return dspy.utils.DummyLM(
         [{"reasoning": "Submit the verified result.", "code": "SUBMIT(answer='ok')"}],
         adapter=dspy.JSONAdapter(),
@@ -156,6 +240,18 @@ def _rlm(
     interpreter: DaytonaCodeInterpreter,
     sub_lm: _SemanticLM,
 ) -> dspy.RLM:
+    """
+    Create a configured RLM with deterministic action generation for the supplied interpreter code.
+    
+    Parameters:
+    	tools: Tools available to the RLM.
+    	codes: Interpreter code returned across successive RLM iterations.
+    	interpreter: Code interpreter used by the RLM.
+    	sub_lm: Semantic language model used for subcalls.
+    
+    Returns:
+    	dspy.RLM: The configured RLM.
+    """
     rlm = RLMFactory(verbose=False).create(
         models=RLMModelBundle(root_lm=_root_lm(), sub_lm=sub_lm),
         options=RLMOptions(max_iterations=len(codes), max_llm_calls=4, max_output_chars=2_000),
@@ -168,6 +264,16 @@ def _rlm(
 
 
 async def _run_case(size: int, *, trace_enabled: bool) -> dict[str, object]:
+    """
+    Run a deterministic benchmark case for a synthetic source of the specified size.
+    
+    Parameters:
+    	size (int): Source size in bytes.
+    	trace_enabled (bool): Whether tracing is enabled for the RLM turns.
+    
+    Returns:
+    	dict[str, object]: Benchmark measurements covering correctness, caching, timing, model calls, interpreter payload limits, tracing, and peak resident memory.
+    """
     markers = (
         f"needle-{size}-boundary",
         f"needle-{size}-middle",
@@ -274,6 +380,18 @@ async def _run_case(size: int, *, trace_enabled: bool) -> dict[str, object]:
 
 
 def _parse_sizes(value: str) -> tuple[int, ...]:
+    """
+    Parse a comma-separated sequence of ascending positive byte sizes.
+    
+    Parameters:
+        value (str): Comma-separated size values.
+    
+    Returns:
+        tuple[int, ...]: The parsed sizes.
+    
+    Raises:
+        ValueError: If the input is empty, contains a non-positive size, or is not in ascending order.
+    """
     sizes = tuple(int(item.strip()) for item in value.split(",") if item.strip())
     if not sizes or any(size < 1 for size in sizes) or tuple(sorted(sizes)) != sizes:
         raise ValueError("sizes must be positive comma-separated values in ascending order")
@@ -281,6 +399,16 @@ def _parse_sizes(value: str) -> tuple[int, ...]:
 
 
 def _gate(cases: list[dict[str, object]], *, deadline_seconds: float) -> dict[str, object]:
+    """
+    Evaluate benchmark cases against correctness, performance, memory, caching, and execution limits.
+    
+    Parameters:
+    	cases (list[dict[str, object]]): Benchmark results, including the configured baseline and largest source cases.
+    	deadline_seconds (float): Maximum permitted completion time for the largest case.
+    
+    Returns:
+    	dict[str, object]: Gate decision, pass status, individual check results, and RSS limit measurements.
+    """
     baseline = next((case for case in cases if case["source_bytes"] == DEFAULT_SIZES[0]), None)
     largest = max(cases, key=lambda case: int(case["source_bytes"]))
     if baseline is None:
@@ -310,6 +438,9 @@ def _gate(cases: list[dict[str, object]], *, deadline_seconds: float) -> dict[st
 
 
 def build_parser() -> argparse.ArgumentParser:
+    """
+    Create the command-line argument parser for the benchmark.
+    """
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--sizes",
@@ -323,6 +454,18 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 async def _run(args: argparse.Namespace) -> dict[str, object]:
+    """
+    Run the configured benchmark cases and assemble the results receipt.
+    
+    Parameters:
+        args (argparse.Namespace): Parsed benchmark options, including sizes, deadline, and tracing settings.
+    
+    Returns:
+        dict[str, object]: Receipt containing environment metadata, case results, and gate evaluation.
+    
+    Raises:
+        ValueError: If the deadline is not positive or the size specification is invalid.
+    """
     sizes = _parse_sizes(args.sizes)
     if args.deadline_seconds <= 0:
         raise ValueError("deadline must be positive")
@@ -340,6 +483,15 @@ async def _run(args: argparse.Namespace) -> dict[str, object]:
 
 
 def main(argv: list[str] | None = None) -> int:
+    """
+    Run the benchmark, write its JSON receipt, and report the gate result.
+    
+    Parameters:
+        argv (list[str] | None): Optional command-line arguments to parse instead of the process arguments.
+    
+    Returns:
+        int: `0` if the benchmark completes successfully, `1` if it fails.
+    """
     args = build_parser().parse_args(argv)
     try:
         receipt = asyncio.run(_run(args))

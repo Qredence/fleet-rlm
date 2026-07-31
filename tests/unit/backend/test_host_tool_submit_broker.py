@@ -500,6 +500,15 @@ def test_http_broker_copies_context_independently_into_parallel_fulfillment() ->
     ]
 
     def _handler(request: httpx.Request) -> httpx.Response:
+        """
+        Handle HTTP requests by returning and clearing pending requests for the pending endpoint.
+        
+        Parameters:
+        	request (httpx.Request): The incoming HTTP request.
+        
+        Returns:
+        	httpx.Response: A response containing pending requests for the `/pending` path, or an empty JSON object for other paths.
+        """
         nonlocal pending
         if request.url.path == "/pending":
             result, pending = pending, []
@@ -516,6 +525,17 @@ def test_http_broker_copies_context_independently_into_parallel_fulfillment() ->
     observed: dict[str, tuple[str, str]] = {}
 
     def _execute(name: str, _args: list[object], _kwargs: dict[str, object]) -> str:
+        """
+        Record the inherited and active trace values for a tool invocation.
+        
+        Parameters:
+            name (str): Name associated with the invocation.
+            _args (list[object]): Positional arguments supplied to the invocation.
+            _kwargs (dict[str, object]): Keyword arguments supplied to the invocation.
+        
+        Returns:
+            str: The invocation name.
+        """
         inherited = active_trace.get()
         active_trace.set(name)
         observed[name] = (inherited, active_trace.get())

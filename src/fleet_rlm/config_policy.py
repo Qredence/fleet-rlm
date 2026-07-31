@@ -403,6 +403,15 @@ class ConfigPolicyService:
         raise AssertionError(f"unsupported editor {field.editor}")
 
     def _validate(self, raw: str) -> None:
+        """
+        Validate Fleet policy TOML and its profile configurations.
+        
+        Parameters:
+        	raw (str): TOML content containing the Fleet policy.
+        
+        Raises:
+        	FleetConfigurationError: If the TOML is malformed or contains unsupported or invalid configuration values.
+        """
         try:
             root = _require_mapping(tomllib.loads(raw), "root")
         except tomllib.TOMLDecodeError as exc:
