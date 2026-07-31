@@ -15,6 +15,21 @@ All notable changes to this project are documented in this file.
   enabled; operators can correlate Turns to traces without new SSE chunk types or
   Turn-path coupling. Default remains off and fail-soft.
 
+### Changed
+
+- **Change:** Bumped `fastapi[standard]` from `==0.139.0` to `==0.141.1`
+  (latest PyPI release, Jul 29 2026) along with `fastapi-cli` 0.0.24 -> 0.0.32,
+  taking the 0.140.x dependency-solver memory refactors and SSE/streaming
+  endpoint fixes.
+  **Outcome:** Schema generation is byte-identical for the routed API surface —
+  `openapi.yaml` and the TUI generated types needed no resync — and the SSE
+  contract suite passes unmodified.
+- **Change:** Bumped `daytona` from `==0.200.0` to `==0.202.0` and re-locked
+  `httpx2` at `2.9.1` (from 2.5.0; `httpcore2` moves in lockstep).
+  **Outcome:** Takes the Daytona event-subscription expiry-worker fix and the
+  0.201.0/0.202.0 SDK additions with no code changes; the declared
+  `httpx2>=2.5.0` floor now resolves to the current fork release.
+
 ## [0.7.0] - 2026-07-17
 
 ### Added

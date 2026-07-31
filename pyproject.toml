@@ -43,10 +43,10 @@ dependencies = [
     "pyyaml>=6.0.3,<7",
     "sqlalchemy[asyncio]>=2.0.51,<3",
     "tomli>=2.4.1; python_version < '3.11'",
-    # Web API surface. Pinned exactly to 0.139.0 (latest PyPI release, Jul 1
+    # Web API surface. Pinned exactly to 0.141.1 (latest PyPI release, Jul 29
     # 2026) for reproducible installs; bump deliberately when a newer release is
     # validated against the runtime + test suite.
-    "fastapi[standard]==0.139.0",
+    "fastapi[standard]==0.141.1",
     "uvicorn>=0.47.0,<1",
     "httpx2>=2.5.0",
     # Pooled HTTP client for the Daytona tool broker poll/fulfill loop:
