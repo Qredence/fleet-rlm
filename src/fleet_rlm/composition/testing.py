@@ -4,7 +4,10 @@ from __future__ import annotations
 
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from fleet_rlm.files.url_tool import UrlFetchResult
 
 import dspy
 from fastapi import FastAPI
@@ -102,6 +105,19 @@ class TestingRunEnvironmentProvider(RunEnvironmentProvider):
         return RunEnvironment(TestingInterpreter(), sink, sink, release)
 
 
+class _TestingCacheOnlyUrlFetcher:
+    """Deterministic cache-only fetcher: private tests never open the network."""
+
+    def fetch(self, url: str, *, max_bytes: int) -> UrlFetchResult:
+        from fleet_rlm.files.url_tool import UrlToolError
+
+        del url, max_bytes
+        raise UrlToolError(
+            "unavailable",
+            "URL fetching is disabled in the deterministic test composition",
+        )
+
+
 class TestingCapabilityPreparer:
     def __init__(
         self,
@@ -180,6 +196,7 @@ class TestingCapabilityPreparer:
             session_id=turn.session_id,
             store=self._url_store,
             max_bytes=self._max_url_bytes,
+            fetcher=_TestingCacheOnlyUrlFetcher(),
         )
         url_tools = url_host.as_tools()
         url_event_views = url_host.event_views()

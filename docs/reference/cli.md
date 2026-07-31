@@ -14,8 +14,9 @@ non-loopback hosts (`0.0.0.0`, LAN addresses, hostnames other than `localhost`)
 unless `--allow-non-loopback-bind` is supplied deliberately.
 Set `[config] default_profile` in `config/fleet.toml` to a Daytona profile before
 starting a backend. The TUI `/profiles` command edits that key interactively for
-the next restart. `fleet cli` accepts any selected Daytona profile. A mismatch
-fails before database preflight, MLflow startup, or backend spawning. The
+the next restart. `fleet cli` accepts only profiles whose run
+environment is `daytona`; any other selection fails before database preflight,
+MLflow startup, or backend spawning. The
 launcher starts the backend in its own process group, waits up to 90 seconds for
 Daytona readiness, and runs pi-tui in the foreground. Node 22.19+, pnpm, the
 installed TUI workspace, and an unused port are required.

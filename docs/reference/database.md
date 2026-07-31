@@ -26,5 +26,6 @@ The canonical tables are `fleet_users`, `fleet_workspaces`, `fleet_sessions`,
 `fleet_turns`, `fleet_runs`, `fleet_sandbox_bindings`, `fleet_attachments`, `fleet_artifacts`, and
 `fleet_skills`. SQLAlchemy models live in `fleet_rlm.persistence.models`.
 
-Production startup assumes migrations have already run. Private testing helpers
-may call `create_tables` explicitly.
+Production startup assumes migrations have already run. Explicit SQLite
+test/offline helpers may call `create_tables`; all other environments must use
+Alembic.
