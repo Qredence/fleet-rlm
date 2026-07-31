@@ -22,7 +22,12 @@ _STARTUP_RECOVERY_FENCE_TIMEOUT_SECONDS = 15
 
 
 def require_daytona_settings(settings: Settings) -> None:
-    """Fail closed when the Daytona runtime inventory is incomplete."""
+    """
+    Validate that all required Daytona runtime settings are configured.
+
+    Raises:
+        CompositionError: If the runtime environment is not Daytona or one or more required settings are missing.
+    """
     if settings.run_environment != "daytona":
         raise CompositionError("Daytona composition requires run_environment='daytona'")
     missing: list[str] = []
@@ -33,7 +38,7 @@ def require_daytona_settings(settings: Settings) -> None:
     from fleet_rlm.rlm.lm_factory import has_llm_credentials, sanitize_base_url
 
     if not has_llm_credentials(settings):
-        missing.append("FLEET_LLM_API_KEY or configured role API key")
+        missing.append("configured provider API key")
     if any(
         role.api_key_env == "DATABRICKS_TOKEN" and not sanitize_base_url(role.base_url)
         for role in (settings.llm_role("root"), settings.llm_role("sub"))

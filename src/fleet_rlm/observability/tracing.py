@@ -31,12 +31,55 @@ from fleet_rlm.config import FleetConfigurationError
 logger = logging.getLogger(__name__)
 
 _TRACING_CONFIGURED = False
+_TRACING_ACTIVE = False
 _DEFAULT_TRACKING_URI = "databricks"
 _TRACE_DESTINATION_TAG = "mlflow.experiment.databricksTraceDestinationPath"
 
 
+def _sanitize_mlflow_span(span: object) -> None:
+    """
+    Sanitize an MLflow span's inputs, outputs, and attributes before export.
+
+    Sanitization failures are suppressed so tracing does not affect the Turn outcome.
+
+    Parameters:
+        span (object): MLflow span to sanitize.
+    """
+    try:
+        from fleet_rlm.observability.turn_tracing import _trace_mapping, _trace_value
+
+        inputs = getattr(span, "inputs", None)
+        if inputs is not None:
+            setter = getattr(span, "set_inputs", None)
+            if callable(setter):
+                setter(_trace_value(inputs))
+
+        outputs = getattr(span, "outputs", None)
+        if outputs is not None:
+            setter = getattr(span, "set_outputs", None)
+            if callable(setter):
+                setter(_trace_value(outputs))
+
+        attributes = getattr(span, "attributes", None)
+        if isinstance(attributes, dict):
+            setter = getattr(span, "set_attributes", None)
+            if callable(setter):
+                setter(_trace_mapping(attributes))
+    except Exception:
+        # A processor must never change the Turn outcome or break trace export.
+        logger.debug("MLflow span sanitization failed; continuing", exc_info=True)
+
+
 def _local_tracking_server_available(tracking_uri: str) -> bool:
-    """Bound local MLflow startup probing so tracing cannot stall app import."""
+    """
+    Check whether an HTTP(S) tracking server is reachable within 0.5 seconds.
+
+    Parameters:
+        tracking_uri (str): Tracking server URI to probe.
+
+    Returns:
+        bool: `True` if the URI is not HTTP(S) or the server is reachable, `False` otherwise.
+    """
     parsed = urlparse(tracking_uri)
     if parsed.scheme not in {"http", "https"} or not parsed.hostname:
         return True
@@ -104,21 +147,20 @@ def _validate_experiment_trace_location(settings: Settings) -> None:
 
 
 def configure_tracing(settings: Settings) -> None:
-    """Enable MLflow DSPy autolog when Fleet policy enables it.
-
-    The TOML-selected tracking URI can point at a normal MLflow server (for
-    example ``http://localhost:5001``). Databricks Unity Catalog trace
-    settings are required only when the URI is ``databricks``.
-
-    Safe to call multiple times; only the first invocation takes effect.
-    Raises ``FleetConfigurationError`` when the experiment's Unity Catalog trace
-    location doesn't match the configured destination; otherwise logs warnings
-    on failure and continues.
     """
-    global _TRACING_CONFIGURED
+    Configure fail-soft MLflow tracing and DSPy inference autologging according to Fleet settings.
+
+    The configuration is applied at most once. Tracing remains disabled when it is
+    disabled by policy, required settings are missing, or setup fails. Raises
+    `FleetConfigurationError` when an existing experiment's Unity Catalog trace
+    location conflicts with the configured destination; other setup failures are
+    logged and suppressed.
+    """
+    global _TRACING_ACTIVE, _TRACING_CONFIGURED
     if _TRACING_CONFIGURED:
         return
     _TRACING_CONFIGURED = True
+    _TRACING_ACTIVE = False
 
     if not settings.mlflow_tracing_enabled:
         logger.debug("MLflow tracing is disabled by Fleet policy")
@@ -158,6 +200,11 @@ def configure_tracing(settings: Settings) -> None:
 
         mlflow.set_tracking_uri(tracking_uri)
 
+        # MLflow 3.15's sampler is process-global. Set it from the selected
+        # Fleet policy so an ambient environment variable cannot change the
+        # effective trace volume.
+        os.environ["MLFLOW_TRACE_SAMPLING_RATIO"] = str(settings.mlflow_trace_sampling_ratio)
+
         # A local MLflow server is optional engineering observability. Avoid
         # entering MLflow's retry loop when the configured local endpoint is
         # absent; this keeps FastAPI app construction and OpenAPI generation
@@ -189,16 +236,50 @@ def configure_tracing(settings: Settings) -> None:
             )
         else:
             mlflow.set_experiment(experiment_name=settings.mlflow_experiment_name)
-        # Fleet owns the bounded redacted spans in ``turn_tracing``. DSPy's
-        # callback otherwise records full prompts, generated code, tool args,
-        # and provider responses, which is unsuitable for live traces.
-        mlflow.dspy.autolog(log_traces=False, log_traces_from_eval=False, silent=True)
+
+        config = getattr(mlflow, "config", None)
+        enable_async_logging = getattr(config, "enable_async_logging", None)
+        if callable(enable_async_logging):
+            enable_async_logging(settings.mlflow_async_logging)
+
+        tracing_api = getattr(mlflow, "tracing", None)
+        configure_processors = getattr(tracing_api, "configure", None)
+        if callable(configure_processors):
+            configure_processors(span_processors=[_sanitize_mlflow_span])
+
+        # Enable MLflow's DSPy inference callback. The 3.15 span processor
+        # above is the export boundary that bounds and redacts its prompts,
+        # generated code, tool arguments, and provider responses. Keep compile
+        # and evaluator traces out of the live Turn experiment.
+        mlflow.dspy.autolog(log_traces=True, log_traces_from_eval=False, silent=True)
         logger.info(
-            "MLflow DSPy autolog enabled (tracking_uri=%s experiment=%s)",
+            "MLflow DSPy autolog enabled (inference=true tracking_uri=%s experiment=%s async=%s sampling=%s)",
             tracking_uri,
             settings.mlflow_experiment_name,
+            settings.mlflow_async_logging,
+            settings.mlflow_trace_sampling_ratio,
         )
+        _TRACING_ACTIVE = True
     except FleetConfigurationError:
         raise  # Configuration errors propagate clearly
     except Exception:
         logger.warning("MLflow tracing setup failed; continuing without traces", exc_info=True)
+
+
+def flush_tracing(*, terminate: bool = True) -> None:
+    """
+    Flush pending MLflow trace uploads during shutdown.
+
+    Parameters:
+        terminate (bool): Whether to terminate MLflow's asynchronous trace logging.
+    """
+    if not _TRACING_ACTIVE:
+        return
+    try:
+        import mlflow
+
+        flush = getattr(mlflow, "flush_trace_async_logging", None)
+        if callable(flush):
+            flush(terminate=terminate)
+    except Exception:
+        logger.warning("MLflow async trace flush failed; continuing shutdown", exc_info=True)

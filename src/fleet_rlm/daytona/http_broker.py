@@ -17,6 +17,7 @@ import time
 import uuid
 from collections.abc import Callable, Mapping
 from concurrent.futures import ThreadPoolExecutor
+from contextvars import copy_context
 from threading import Thread
 from typing import TYPE_CHECKING, Any
 
@@ -506,6 +507,14 @@ class DaytonaHttpToolBroker:
         )
 
     def _poll_once(self, tool_executor: Callable[[str, list[Any], dict[str, Any]], Any]) -> bool:
+        """Poll for pending broker requests and fulfill them concurrently.
+
+        Parameters:
+            tool_executor (Callable[[str, list[Any], dict[str, Any]], Any]): Callback that executes each requested tool.
+
+        Returns:
+            bool: `true` if pending requests were found and processed, `false` otherwise.
+        """
         assert self._broker_url is not None
         self._poll_count += 1
         try:
@@ -516,8 +525,12 @@ class DaytonaHttpToolBroker:
         if not requests_out:
             return False
         self._fulfilled_count += len(requests_out)
+        # The broker polls on the interpreter thread, then fulfills host Tools
+        # in worker threads. Copy the active Turn/MLflow context separately for
+        # each request so Tool spans stay nested without sharing a Context.
+        work = [(copy_context(), item) for item in requests_out]
         with ThreadPoolExecutor(max_workers=min(8, len(requests_out))) as pool:
-            list(pool.map(lambda item: self._fulfill(item, tool_executor), requests_out))
+            list(pool.map(lambda item: item[0].run(self._fulfill, item[1], tool_executor), work))
         return True
 
     def _fulfill(
@@ -525,6 +538,14 @@ class DaytonaHttpToolBroker:
         item: dict[str, Any],
         tool_executor: Callable[[str, list[Any], dict[str, Any]], Any],
     ) -> None:
+        """
+        Fulfill a pending tool request and submit its result or sanitized error to the broker.
+
+        Parameters:
+            item (dict[str, Any]): Pending tool request containing its identifier, lease token, tool name,
+                arguments, and keyword arguments.
+            tool_executor (Callable[[str, list[Any], dict[str, Any]], Any]): Callback that executes the requested tool.
+        """
         call_id = str(item.get("id") or "")
         lease = item.get("lease_token")
         name = str(item.get("tool_name") or "")

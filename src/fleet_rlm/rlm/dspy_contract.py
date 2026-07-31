@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from math import isfinite
@@ -188,6 +189,8 @@ _SAFE_USAGE_KEYS = frozenset(
         "cache_creation_input_tokens",
         "cache_read_tokens",
         "cache_creation_tokens",
+        "prompt_cache_hit_tokens",
+        "prompt_cache_miss_tokens",
         "cost",
         "input_cost",
         "output_cost",
@@ -224,6 +227,17 @@ def _observed_scalar(value: object, *, path: str) -> JsonValue:
 
 
 def _safe_usage_entry(value: object, *, path: str, filter_unknown: bool) -> dict[str, JsonValue]:
+    """
+    Validate and normalize an observed usage mapping for safe telemetry.
+
+    Parameters:
+        value (object): Usage data to validate.
+        path (str): Location used in validation error messages.
+        filter_unknown (bool): Whether to omit unrecognized usage fields instead of raising an error.
+
+    Returns:
+        dict[str, JsonValue]: A validated usage mapping containing only allowed JSON-compatible values.
+    """
     if not isinstance(value, Mapping) or any(not isinstance(key, str) for key in value):
         raise ValueError(f"{path} must be an object with string keys")
     usage = cast(Mapping[str, object], value)
@@ -234,6 +248,9 @@ def _safe_usage_entry(value: object, *, path: str, filter_unknown: bool) -> dict
                 continue
             raise ValueError(f"{path}.{key} is not safe observed usage telemetry")
         if key.endswith("_details"):
+            if not isinstance(item, Mapping):
+                dump = getattr(item, "model_dump", None)
+                item = dump() if callable(dump) else item
             if not isinstance(item, Mapping) or any(not isinstance(detail, str) for detail in item):
                 raise ValueError(f"{path}.{key} must be an object")
             detail_usage = cast(Mapping[str, object], item)
@@ -401,9 +418,10 @@ class _RLMTraceCallback(BaseCallback):
         self._roles = {id(root_lm): "root", id(sub_lm): "sub"}
         self._recursive_depth = max(0, int(recursive_depth))
         self._call_index = 0
-        self._spans: dict[str, tuple[Any, Any, int | None, int]] = {}
+        self._spans: dict[str, tuple[Any, Any, int | None, int, float]] = {}
 
     def on_lm_start(self, call_id: str, instance: Any, inputs: dict[str, Any]) -> None:
+        """Starts tracing for a recognized language-model call and records its input metadata."""
         role = self._roles.get(id(instance))
         if role is None:
             return
@@ -429,7 +447,7 @@ class _RLMTraceCallback(BaseCallback):
                     "recursive_depth": self._recursive_depth,
                 },
             )
-            self._spans[call_id] = (instance, span, history_length, call_index)
+            self._spans[call_id] = (instance, span, history_length, call_index, time.perf_counter())
         except Exception:
             return
 
@@ -439,16 +457,29 @@ class _RLMTraceCallback(BaseCallback):
         outputs: dict[str, Any] | None,
         exception: Exception | None = None,
     ) -> None:
+        """
+        Finalize an LM tracing span with response, timing, usage, and failure details.
+
+        Parameters:
+            call_id (str): Identifier of the LM call being finalized.
+            outputs (dict[str, Any] | None): LM response data used to create a safe output profile.
+            exception (Exception | None): Exception that caused the call to fail, if applicable.
+        """
         state = self._spans.pop(call_id, None)
         if state is None:
             return
-        instance, span, history_length, call_index = state
-        usage = _latest_lm_usage(instance, history_length)
-        attributes = (
-            {"mlflow.chat.tokenUsage": json.dumps(usage, separators=(",", ":"), sort_keys=True)} if usage else None
-        )
+        instance, span, history_length, call_index, started_at = state
+        usage, provider = _latest_lm_telemetry(instance, history_length)
+        standard_usage = _mlflow_token_usage(usage)
+        attributes = {"mlflow.chat.tokenUsage": standard_usage} if standard_usage else None
         response_details = _lm_output_profile(outputs)
-        response_details["call_index"] = call_index
+        response_details.update(
+            {
+                "call_index": call_index,
+                "wall_time_ms": round((time.perf_counter() - started_at) * 1000, 3),
+                **provider,
+            }
+        )
         if exception is None:
             span.finish(
                 phase_status="completed",
@@ -511,17 +542,23 @@ def _lm_output_profile(outputs: Mapping[str, Any] | None) -> dict[str, JsonValue
     return profile
 
 
-def _latest_lm_usage(instance: Any, history_length: int | None) -> dict[str, JsonValue]:
-    """Read one completed LM call's provider usage from DSPy's public history.
+def _latest_lm_telemetry(
+    instance: Any,
+    history_length: int | None,
+) -> tuple[dict[str, JsonValue], dict[str, JsonValue]]:
+    """
+    Retrieve sanitized usage and provider telemetry for the latest completed language-model call.
 
-    DSPy exposes the completed LM interaction on ``BaseLM.history`` after the
-    decorated ``__call__``/``acall`` returns (``dspy/clients/base_lm.py:225-256``).
-    ``Prediction.get_lm_usage`` is an aggregate surface, so the callback uses
-    the newly appended history entry to keep this span call-specific.
+    Parameters:
+        instance (Any): Language-model instance whose call history is inspected.
+        history_length (int | None): Starting history position for entries belonging to the current call.
+
+    Returns:
+        tuple[dict[str, JsonValue], dict[str, JsonValue]]: Allowlisted usage data and provider response metadata.
     """
     history = getattr(instance, "history", None)
     if not isinstance(history, Sequence) or isinstance(history, (str, bytes, bytearray)):
-        return {}
+        return {}, {}
     start = history_length if history_length is not None else max(0, len(history) - 1)
     for entry in reversed(history[start:]):
         if not isinstance(entry, Mapping):
@@ -530,11 +567,93 @@ def _latest_lm_usage(instance: Any, history_length: int | None) -> dict[str, Jso
         if not isinstance(usage, Mapping):
             dump = getattr(usage, "model_dump", None)
             usage = dump() if callable(dump) else None
-        if not isinstance(usage, Mapping):
-            continue
-        with contextlib.suppress(ValueError):
-            return cast(dict[str, JsonValue], _safe_usage_entry(usage, path="lm_usage", filter_unknown=True))
-    return {}
+        safe_usage: dict[str, JsonValue] = {}
+        if isinstance(usage, Mapping):
+            with contextlib.suppress(ValueError):
+                safe_usage = cast(
+                    dict[str, JsonValue],
+                    _safe_usage_entry(usage, path="lm_usage", filter_unknown=True),
+                )
+
+        provider = _provider_response_telemetry(entry.get("response"))
+        if safe_usage or provider:
+            return safe_usage, provider
+    return {}, {}
+
+
+def _provider_response_telemetry(response: object) -> dict[str, JsonValue]:
+    """
+    Extracts safe provider timing and request identifier metadata from an LM response.
+
+    Parameters:
+        response (object): Provider response containing optional metadata.
+
+    Returns:
+        dict[str, JsonValue]: Allowlisted provider telemetry values, or an empty dictionary when unavailable.
+    """
+    hidden = getattr(response, "_hidden_params", None)
+    if not isinstance(hidden, Mapping) and isinstance(response, Mapping):
+        hidden = response.get("_hidden_params")
+    if not isinstance(hidden, Mapping):
+        return {}
+
+    result: dict[str, JsonValue] = {}
+    numeric_fields = {
+        "_response_ms": "provider_response_ms",
+        "litellm_overhead_time_ms": "litellm_overhead_ms",
+        "callback_duration_ms": "callback_duration_ms",
+    }
+    for source, target in numeric_fields.items():
+        value = hidden.get(source)
+        if isinstance(value, (int, float)) and not isinstance(value, bool) and isfinite(float(value)) and value >= 0:
+            result[target] = round(float(value), 3)
+
+    request_id = hidden.get("litellm_call_id")
+    headers = hidden.get("additional_headers")
+    if isinstance(headers, Mapping):
+        for key in ("llm_provider-x-request-id", "x-request-id", "request-id"):
+            candidate = headers.get(key)
+            if isinstance(candidate, str) and candidate.strip():
+                request_id = candidate
+                break
+    if isinstance(request_id, str) and request_id.strip():
+        result["provider_request_id"] = request_id.strip()[:256]
+    return result
+
+
+def _mlflow_token_usage(usage: Mapping[str, JsonValue]) -> dict[str, JsonValue]:
+    """
+    Map provider-specific token fields to standardized MLflow usage keys.
+
+    Parameters:
+        usage (Mapping[str, JsonValue]): Provider-reported token usage values.
+
+    Returns:
+        dict[str, JsonValue]: Token usage values keyed by MLflow's standard aggregate names.
+    """
+    aliases = {
+        "input_tokens": ("input_tokens", "prompt_tokens"),
+        "output_tokens": ("output_tokens", "completion_tokens"),
+        "total_tokens": ("total_tokens",),
+        "cache_read_tokens": (
+            "cache_read_tokens",
+            "cache_read_input_tokens",
+            "prompt_cache_hit_tokens",
+        ),
+        "cache_creation_tokens": ("cache_creation_tokens", "cache_creation_input_tokens"),
+    }
+    result: dict[str, JsonValue] = {}
+    for target, sources in aliases.items():
+        value = next((usage.get(source) for source in sources if isinstance(usage.get(source), int)), None)
+        if isinstance(value, int) and not isinstance(value, bool):
+            result[target] = value
+    return result
+
+
+def _latest_lm_usage(instance: Any, history_length: int | None) -> dict[str, JsonValue]:
+    """Compatibility helper returning only safe call-specific token usage."""
+    usage, _provider = _latest_lm_telemetry(instance, history_length)
+    return usage
 
 
 def _trace_failure_category(exc: BaseException) -> str:

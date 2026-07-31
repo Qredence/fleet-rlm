@@ -100,6 +100,7 @@ def test_deno_composition_passes_configured_recursive_options(monkeypatch, tmp_p
         rlm_recursion_child_max_iterations=7,
         rlm_recursion_child_max_llm_calls=11,
         rlm_recursion_child_max_output_chars=222,
+        max_url_bytes=321,
     )
     models = SimpleNamespace(root_lm=object(), sub_lm=object())
     captured: dict[str, object] = {}
@@ -139,6 +140,7 @@ def test_deno_composition_passes_configured_recursive_options(monkeypatch, tmp_p
         child_max_llm_calls=11,
         child_max_output_chars=222,
     )
+    assert captured["max_url_bytes"] == 321
 
 
 def test_require_daytona_settings_fails_closed_without_deps(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -165,7 +167,7 @@ def test_require_daytona_settings_fails_closed_without_deps(monkeypatch: pytest.
                 llm_api_key=SecretStr("llm-key"),
             )
         )
-    with pytest.raises(CompositionError, match="LLM_API_KEY"):
+    with pytest.raises(CompositionError, match="provider API key"):
         require_daytona_settings(
             Settings(
                 run_environment="daytona",
@@ -206,7 +208,7 @@ def test_require_deno_settings_fails_closed_without_deps(monkeypatch) -> None:
     monkeypatch.setattr("shutil.which", lambda _name: "/usr/bin/deno")
     with pytest.raises(CompositionError, match="run_environment"):
         require_deno_settings(Settings(run_environment="daytona"))
-    with pytest.raises(CompositionError, match="LLM_API_KEY"):
+    with pytest.raises(CompositionError, match="provider API key"):
         require_deno_settings(
             Settings(
                 run_environment="deno",

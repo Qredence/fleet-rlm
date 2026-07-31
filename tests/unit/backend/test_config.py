@@ -32,7 +32,7 @@ def test_daytona_profile_uses_specialized_bounded_model_roles() -> None:
         "max_tokens": 8000,
     }
     assert llm["sub"] == {
-        "model": "uscentral.ai_gateway.databricks-qwen35-122b-a10b",
+        "model": "system.ai.inkling",
         "api_key_env": "DATABRICKS_TOKEN",
         "base_url_env": "FLEET_DATABRICKS_AI_GATEWAY_BASE_URL",
         "max_tokens": 8000,
@@ -50,6 +50,35 @@ def test_daytona_profile_routes_tracing_to_supervised_local_mlflow() -> None:
         "tracking_uri": "http://127.0.0.1:5001",
         "experiment_name": "fleet-rlm",
     }
+
+
+def test_default_mlflow_policy_uses_async_full_fidelity_trace_delivery() -> None:
+    policy_path = Path(__file__).resolve().parents[3] / "config" / "fleet.toml"
+    document = tomllib.loads(policy_path.read_text(encoding="utf-8"))
+
+    assert document["defaults"]["mlflow"] == {
+        "tracing_enabled": False,
+        "expose_trace_id": True,
+        "async_logging": True,
+        "trace_sampling_ratio": 1.0,
+    }
+
+
+def test_local_deno_profile_uses_provider_specific_openai_credential(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    import fleet_rlm.config as config
+
+    _select_profile(tmp_path, profile="local-deno", monkeypatch=monkeypatch)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("FLEET_OPENAI_API_KEY", "test-openai-key")
+
+    settings = config.load_runtime_settings()
+
+    assert settings.run_environment == "deno"
+    assert settings.llm_role("root").api_key_env == "FLEET_OPENAI_API_KEY"
+    assert settings.llm_role("sub").api_key_env == "FLEET_OPENAI_API_KEY"
 
 
 def test_daytona_managed_profile_declares_lakebase_and_mlflow_environment_references() -> None:
@@ -135,7 +164,7 @@ def test_daytona_managed_profile_requires_declared_database_and_mlflow_values(
         config.load_runtime_settings()
 
 
-def test_daytona_profile_resolves_deepseek_root_and_qwen_sub_with_gateway_params(
+def test_daytona_profile_resolves_deepseek_root_and_inkling_sub_with_gateway_params(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     import fleet_rlm.config as config
@@ -147,7 +176,7 @@ def test_daytona_profile_resolves_deepseek_root_and_qwen_sub_with_gateway_params
     settings = config.load_runtime_settings()
 
     assert settings.root_model == "uscentral.default.deepseek-v4-flash"
-    assert settings.sub_model == "uscentral.ai_gateway.databricks-qwen35-122b-a10b"
+    assert settings.sub_model == "system.ai.inkling"
     assert settings.root_llm_reasoning_effort is None
     assert settings.sub_llm_reasoning_effort == "none"
     assert settings.sub_llm_temperature == 0
@@ -284,6 +313,7 @@ verbose = true
 [defaults.storage]
 data_root = ".fleet-test"
 max_upload_bytes = 10
+max_url_bytes = 30
 max_artifact_bytes = 20
 [defaults.daytona]
 volume_name = "fleet-volume"
@@ -316,6 +346,7 @@ def test_runtime_settings_deep_merge_profile_and_keep_role_policy(
 
     assert settings.run_environment == "deno"
     assert settings.rlm_max_iterations == 3
+    assert settings.max_url_bytes == 30
     assert settings.llm_role("root").model == "openai/root"
     assert settings.llm_role("sub").temperature == 0.2
 
@@ -468,6 +499,10 @@ def test_startup_rejects_retired_budget_environment(monkeypatch: pytest.MonkeyPa
 
 def test_turn_timeout_defaults_to_thirty_minutes() -> None:
     assert Settings(_env_file=None).turn_timeout_seconds == 1800
+
+
+def test_url_source_limit_defaults_to_ten_mebibytes() -> None:
+    assert Settings(_env_file=None).max_url_bytes == 10 * 1024 * 1024
 
 
 def test_mlflow_tracing_defaults_to_disabled() -> None:

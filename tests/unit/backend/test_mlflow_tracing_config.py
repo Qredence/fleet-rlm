@@ -15,7 +15,9 @@ from fleet_rlm.config import Settings
 
 @pytest.fixture(autouse=True)
 def _reset_tracing_latch(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Reset the tracing configuration and activation state for a test."""
     monkeypatch.setattr(tracing, "_TRACING_CONFIGURED", False)
+    monkeypatch.setattr(tracing, "_TRACING_ACTIVE", False)
 
 
 def _install_fake_mlflow(
@@ -26,6 +28,18 @@ def _install_fake_mlflow(
     autolog: Any | None = None,
     raise_on_import: BaseException | None = None,
 ) -> SimpleNamespace:
+    """
+    Install fake MLflow modules for tracing tests and record their interactions.
+
+    Parameters:
+        set_tracking_uri: Optional replacement for the fake tracking URI setter.
+        set_experiment: Optional replacement for the fake experiment setter.
+        autolog: Optional replacement for the fake DSPy autologging function.
+        raise_on_import: Exception raised when attributes are accessed on the fake MLflow modules.
+
+    Returns:
+        A namespace containing recorded MLflow calls and configurable fake functions.
+    """
     if raise_on_import is not None:
 
         class _Boom(ModuleType):
@@ -44,6 +58,10 @@ def _install_fake_mlflow(
         experiment_args=[],
         experiment_kwargs=[],
         autolog_calls=0,
+        autolog_kwargs=[],
+        async_logging_args=[],
+        processor_args=[],
+        flush_args=[],
     )
 
     def _set_uri(uri: str) -> None:
@@ -53,8 +71,15 @@ def _install_fake_mlflow(
         calls.experiment_args.append(args)
         calls.experiment_kwargs.append(kwargs)
 
-    def _autolog(**_kwargs: Any) -> None:
+    def _autolog(**kwargs: Any) -> None:
+        """
+        Record autologging configuration options for test assertions.
+
+        Parameters:
+            kwargs (Any): Autologging options to record.
+        """
         calls.autolog_calls += 1
+        calls.autolog_kwargs.append(kwargs)
 
     calls.set_tracking_uri = _set_uri if set_tracking_uri is None else set_tracking_uri
     calls.set_experiment = _set_exp if set_experiment is None else set_experiment
@@ -66,6 +91,32 @@ def _install_fake_mlflow(
     dspy_mod = ModuleType("mlflow.dspy")
     dspy_mod.autolog = calls.autolog  # type: ignore[attr-defined]
     mlflow.dspy = dspy_mod  # type: ignore[attr-defined]
+
+    config_mod = ModuleType("mlflow.config")
+
+    def _enable_async_logging(enabled: bool) -> None:
+        """Record the configured asynchronous logging state."""
+        calls.async_logging_args.append(enabled)
+
+    config_mod.enable_async_logging = _enable_async_logging  # type: ignore[attr-defined]
+    tracing_mod = ModuleType("mlflow.tracing")
+
+    def _configure(*, span_processors: list[Any]) -> None:
+        """Record the span processors supplied for tracing configuration.
+
+        Parameters:
+                span_processors (list[Any]): Span processors to record.
+        """
+        calls.processor_args.append(span_processors)
+
+    tracing_mod.configure = _configure  # type: ignore[attr-defined]
+
+    def _flush(**kwargs: Any) -> None:
+        calls.flush_args.append(kwargs)
+
+    mlflow.config = config_mod  # type: ignore[attr-defined]
+    mlflow.tracing = tracing_mod  # type: ignore[attr-defined]
+    mlflow.flush_trace_async_logging = _flush  # type: ignore[attr-defined]
     trace_location = ModuleType("mlflow.entities.trace_location")
 
     class UnityCatalog:
@@ -141,6 +192,57 @@ def test_configure_tracing_enabled_sets_uri_experiment_and_autolog(
     assert location.table_prefix == "fleet_app"
     assert os.environ["MLFLOW_TRACING_SQL_WAREHOUSE_ID"] == "warehouse-123"
     assert calls.autolog_calls == 1
+    assert calls.autolog_kwargs == [{"log_traces": True, "log_traces_from_eval": False, "silent": True}]
+    assert calls.async_logging_args == [True]
+    assert len(calls.processor_args) == 1
+    assert calls.processor_args[0][0] is tracing._sanitize_mlflow_span
+
+
+def test_configure_tracing_applies_sampling_policy(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = _install_fake_mlflow(monkeypatch)
+
+    tracing.configure_tracing(_enabled_settings(mlflow_trace_sampling_ratio=0.25, mlflow_async_logging=False))
+
+    assert os.environ["MLFLOW_TRACE_SAMPLING_RATIO"] == "0.25"
+    assert calls.async_logging_args == [False]
+
+
+def test_mlflow_315_span_processor_bounds_and_redacts_values() -> None:
+    class Span:
+        def __init__(self) -> None:
+            self.inputs: dict[str, object] = {"token": "real-secret", "body": "x" * 2_000}
+            self.outputs: dict[str, object] = {"answer": "y" * 2_000}
+            self.attributes: dict[str, object] = {"api_key": "real-secret", "kind": "tool"}
+
+        def set_inputs(self, value: object) -> None:
+            """Set the span inputs to the specified value.
+
+            Parameters:
+                value (object): The inputs associated with the span.
+            """
+            self.inputs = value
+
+        def set_outputs(self, value: object) -> None:
+            self.outputs = value
+
+        def set_attributes(self, value: dict[str, object]) -> None:
+            """Set the span attributes to the provided mapping.
+
+            Parameters:
+                value (dict[str, object]): Attributes to associate with the span.
+            """
+            self.attributes = value
+
+    span = Span()
+
+    tracing._sanitize_mlflow_span(span)
+
+    assert span.inputs["token"] == "[redacted]"
+    assert isinstance(span.inputs["body"], str)
+    assert len(span.inputs["body"]) <= 1_000
+    assert isinstance(span.outputs["answer"], str)
+    assert len(span.outputs["answer"]) <= 1_000
+    assert span.attributes["api_key"] == "[redacted]"
 
 
 def test_configure_tracing_local_server_needs_only_experiment(
@@ -230,3 +332,12 @@ def test_configure_tracing_is_idempotent(monkeypatch: pytest.MonkeyPatch) -> Non
     tracing.configure_tracing(settings)
     assert calls.tracking_uri_args == ["databricks"]
     assert calls.autolog_calls == 1
+
+
+def test_flush_tracing_terminates_async_exporter(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = _install_fake_mlflow(monkeypatch)
+    tracing.configure_tracing(_enabled_settings())
+
+    tracing.flush_tracing()
+
+    assert calls.flush_args == [{"terminate": True}]

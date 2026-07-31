@@ -25,15 +25,19 @@ def _field(snapshot, scope: str, path: str):
 def test_policy_read_exposes_toml_values_without_environment_secret_values(tmp_path: Path) -> None:
     service, _ = _service(tmp_path)
 
-    field = _field(service.read(), "defaults", "llm.root.api_key_env")
+    field = _field(service.read(), "local-deno", "llm.root.api_key_env")
 
-    assert field["value"] == "FLEET_LLM_API_KEY"
+    assert field["value"] == "FLEET_OPENAI_API_KEY"
     assert field["editor"] == "text"
     assert "secret" not in str(field).lower()
 
     tracking_uri = _field(service.read(), "daytona", "mlflow.tracking_uri")
     assert tracking_uri["value"] == "http://127.0.0.1:5001"
     assert "secret" not in str(tracking_uri).lower()
+
+    url_limit = _field(service.read(), "local-deno", "storage.max_url_bytes")
+    assert url_limit["value"] == 10 * 1024 * 1024
+    assert url_limit["editor"] == "number"
 
 
 def test_policy_update_preserves_comments_and_validates_all_profiles(tmp_path: Path) -> None:
@@ -91,7 +95,7 @@ def test_policy_never_reports_environment_policy_overrides(monkeypatch: pytest.M
     monkeypatch.setenv("FLEET_ROOT_MODEL", "stale-model")
     service, _ = _service(tmp_path)
 
-    field = _field(service.read(), "defaults", "llm.root.model")
+    field = _field(service.read(), "local-deno", "llm.root.model")
 
     assert field["environment_overridden"] is False
 

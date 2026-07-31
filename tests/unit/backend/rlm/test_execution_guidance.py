@@ -6,15 +6,15 @@ from fleet_rlm.files.workspace_models import DAYTONA_WORKSPACE_CAPABILITY, DENO_
 from fleet_rlm.rlm.signature import FleetRLMSignature
 
 
-def test_default_signature_prioritizes_deterministic_execution_before_optional_capabilities() -> None:
+def test_default_signature_orders_capabilities_before_semantic_calls() -> None:
     instructions = FleetRLMSignature.instructions
     normalized_instructions = " ".join(instructions.split())
 
     ordered_markers = (
         "Python standard library",
+        "Load Session History, Skills, Attachments, URL content, or Session Workspace content only",
         "llm_query(prompt)",
         "llm_query_batched(prompts)",
-        "Load Session History, Skills, Attachments, or Session Workspace content only",
         "exactly one typed ``SUBMIT``",
     )
     positions = tuple(instructions.index(marker) for marker in ordered_markers)

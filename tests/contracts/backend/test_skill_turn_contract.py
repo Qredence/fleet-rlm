@@ -273,6 +273,7 @@ async def test_data_analysis_signature_and_report_builder_selection_use_host_too
         "read_session_history",
         "load_skill",
         "read_skill_resource",
+        "fetch_url",
     }
     attachment_result = next(tool for tool in prepared.spec.tools if str(tool.name) == "read_attachment")(
         attachment_id=str(attachment_id)

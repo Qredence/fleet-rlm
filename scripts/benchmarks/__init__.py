@@ -1,1 +1,1 @@
-"""Maintained live benchmark entry points."""
+"""Maintained benchmark entry points."""

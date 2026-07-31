@@ -124,11 +124,23 @@ class _DenoCapabilityPreparer:
         models: RLMModelBundle,
         options: RLMOptions,
         max_artifact_bytes: int,
+        max_url_bytes: int = 10 * 1024 * 1024,
     ) -> None:
+        """
+        Configure capability preparation for Deno execution.
+
+        Parameters:
+            max_artifact_bytes (int): Maximum number of bytes allowed for artifact data.
+            max_url_bytes (int): Maximum number of bytes allowed for URL data.
+        """
+        from fleet_rlm.files.url_tool import InMemoryUrlSourceStore
+
         self._skill_catalog = skill_catalog
         self._models = models
         self._options = options
         self._max_artifact_bytes = max_artifact_bytes
+        self._max_url_bytes = max(1, int(max_url_bytes))
+        self._url_store = InMemoryUrlSourceStore()
 
     async def prepare(
         self,
@@ -138,7 +150,20 @@ class _DenoCapabilityPreparer:
         *,
         deadline: float,
     ) -> DenoPreparedCapabilities:
+        """
+        Prepare the host capabilities available during a Deno turn.
+
+        Parameters:
+            turn (ExecuteTurn): Turn context used to scope capabilities and identify the caller.
+            environment (RunEnvironment): Runtime environment containing attachment storage.
+            attachments (PreparedAttachments): Attachments made available to the turn.
+            deadline (float): Time limit for capability preparation.
+
+        Returns:
+            DenoPreparedCapabilities: Prepared file, skill, workspace, and URL capabilities for the turn.
+        """
         from fleet_rlm.files.tools import FileToolHost
+        from fleet_rlm.files.url_tool import UrlToolHost
 
         sink = environment.attachment_sink
         volume_fs: Any = (
@@ -168,12 +193,19 @@ class _DenoCapabilityPreparer:
             for name, view in file_host.event_views().items()
             if name not in {"create_artifact", "publish_workspace_artifact"}
         }
+        url_host = UrlToolHost(
+            session_id=turn.session_id,
+            store=self._url_store,
+            max_bytes=self._max_url_bytes,
+        )
+        url_tools = url_host.as_tools()
+        url_event_views = url_host.event_views()
         spec, skill_host, notices = await prepare_host_capabilities(
             turn=turn,
             skill_catalog=self._skill_catalog,
             files=file_host,
-            base_tools=file_tools,
-            base_event_views=file_event_views,
+            base_tools=(*file_tools, *url_tools),
+            base_event_views={**file_event_views, **url_event_views},
             workspace=DENO_WORKSPACE_CAPABILITY,
             deadline=deadline,
         )
@@ -201,8 +233,22 @@ class DenoTurnPreparation:
         sub_lm: dspy.LM,
         skill_catalog: SkillCatalog,
         max_artifact_bytes: int = 10 * 1024 * 1024,
+        max_url_bytes: int = 10 * 1024 * 1024,
         recursive_options: RecursiveRLMOptions | None = None,
     ) -> None:
+        """
+        Configure turn preparation for Deno execution.
+
+        Parameters:
+            attachments: Attachment lifecycle manager used by the run environment.
+            options: General RLM options. Defaults to standard options.
+            root_lm: Language model used for root execution.
+            sub_lm: Language model used for nested execution.
+            skill_catalog: Skills made available to prepared turns.
+            max_artifact_bytes: Maximum size of an artifact in bytes.
+            max_url_bytes: Maximum size of URL content in bytes.
+            recursive_options: Options for recursive execution.
+        """
         selected_options = options or RLMOptions()
         models = RLMModelBundle(root_lm=root_lm, sub_lm=sub_lm)
         self._module = DefaultTurnPreparer(
@@ -216,6 +262,7 @@ class DenoTurnPreparation:
                 models=models,
                 options=selected_options,
                 max_artifact_bytes=max_artifact_bytes,
+                max_url_bytes=max_url_bytes,
             ),
         )
 

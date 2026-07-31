@@ -250,10 +250,20 @@ class _LiveCapabilityPreparer:
         *,
         deadline: float,
     ) -> LivePreparedCapabilities:
+        """
+        Prepare the file, workspace, URL, and memory capabilities for a turn.
+
+        Parameters:
+            deadline (float): Deadline for capability preparation.
+
+        Returns:
+            LivePreparedCapabilities: Prepared capabilities and any preparation notices.
+        """
         from fleet_rlm.daytona.workspace_fs import DaytonaSessionWorkspaceFS
         from fleet_rlm.daytona.workspace_memory import DaytonaWorkspaceMemoryStore
         from fleet_rlm.files.memory_tools import WorkspaceMemoryToolHost
         from fleet_rlm.files.tools import FileToolHost
+        from fleet_rlm.files.url_tool import UrlToolHost, WorkspaceUrlSourceStore
         from fleet_rlm.files.workspace_tools import WorkspaceToolHost
 
         sink = environment.attachment_sink
@@ -271,14 +281,27 @@ class _LiveCapabilityPreparer:
             max_artifact_bytes=self.resources.settings.max_artifact_bytes,
             volume_paths=paths,
         )
-        workspace_host = WorkspaceToolHost(
-            DaytonaSessionWorkspaceFS(
-                volume_fs.sandbox,
-                volume_root=str(paths.mount_path),
-                root=str(paths.session_workspace_dir(turn.session_id)),
-                max_file_bytes=self.resources.settings.max_upload_bytes,
-            ),
+        session_workspace = DaytonaSessionWorkspaceFS(
+            volume_fs.sandbox,
+            volume_root=str(paths.mount_path),
+            root=str(paths.session_workspace_dir(turn.session_id)),
             max_file_bytes=self.resources.settings.max_upload_bytes,
+        )
+        workspace_host = WorkspaceToolHost(
+            session_workspace,
+            max_file_bytes=self.resources.settings.max_upload_bytes,
+        )
+        url_host = UrlToolHost(
+            session_id=turn.session_id,
+            store=WorkspaceUrlSourceStore(
+                DaytonaSessionWorkspaceFS(
+                    volume_fs.sandbox,
+                    volume_root=str(paths.mount_path),
+                    root=str(paths.session_workspace_dir(turn.session_id)),
+                    max_file_bytes=self.resources.settings.max_url_bytes,
+                )
+            ),
+            max_bytes=self.resources.settings.max_url_bytes,
         )
         memory_host = WorkspaceMemoryToolHost(
             DaytonaWorkspaceMemoryStore(
@@ -290,16 +313,18 @@ class _LiveCapabilityPreparer:
         file_tools = file_host.as_tools()
         workspace_tools = workspace_host.as_tools()
         memory_tools = memory_host.as_tools()
+        url_tools = url_host.as_tools()
         base_views = {
             **file_host.event_views(),
             **workspace_host.event_views(),
             **memory_host.event_views(),
+            **url_host.event_views(),
         }
         spec, skill_host, notices = await prepare_host_capabilities(
             turn=turn,
             skill_catalog=self.skill_catalog,
             files=file_host,
-            base_tools=(*file_tools, *workspace_tools, *memory_tools),
+            base_tools=(*file_tools, *workspace_tools, *memory_tools, *url_tools),
             base_event_views=base_views,
             workspace=DAYTONA_WORKSPACE_CAPABILITY,
             deadline=deadline,

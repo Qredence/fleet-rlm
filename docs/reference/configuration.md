@@ -22,7 +22,7 @@ references fail startup.
 
 | Profile | Required | Optional persistence |
 | --- | --- | --- |
-| `deno` | `FLEET_LLM_API_KEY`; Deno executable on `PATH` | `FLEET_DATABASE_URL`; SQLite is the normal local choice |
+| `local-deno` | `FLEET_OPENAI_API_KEY`; Deno executable on `PATH` | `FLEET_DATABASE_URL`; SQLite is the normal local choice |
 | `daytona` / benchmark profiles | `DATABRICKS_TOKEN`, `FLEET_DAYTONA_API_KEY`, `FLEET_DATABRICKS_AI_GATEWAY_BASE_URL`, `FLEET_DATABASE_URL` at Alembic head | none |
 | `daytona-managed` | Daytona requirements plus managed MLflow variables listed below; `FLEET_DATABASE_URL` must point to Lakebase at Alembic head | none |
 
@@ -36,7 +36,17 @@ applies migrations; use `uv run python scripts/db_init.py` or Alembic directly.
 leases, and liveness; Root/Sub model ids, endpoint, token limit, temperature,
 cache, retries, and secret-variable references; RLM limits and host verbosity;
 storage limits and database variable reference; Daytona API-key/Volume/Snapshot
-policy; MLflow tracking policy; and Fleet/DSPy logger level.
+policy; MLflow tracking policy; and Fleet/DSPy logger level. The storage limits
+are independent: `storage.max_upload_bytes` bounds uploads and workspace files,
+`storage.max_url_bytes` bounds fetched public URL sources, and
+`storage.max_artifact_bytes` bounds artifact bodies.
+
+When MLflow tracing is enabled, `mlflow.async_logging` keeps trace export off
+the Turn path and `mlflow.trace_sampling_ratio` controls the fraction of Turns
+sent to MLflow. The committed default is asynchronous export with a `1.0`
+sampling ratio; both are non-secret TOML policy values. Fleet also enables
+MLflow DSPy inference autologging for the selected experiment, while compile
+and evaluator traces remain disabled for live Turn observability.
 
 `rlm.verbose` controls native DSPy host logs only. It does not control the
 typed Runtime Events projected through SSE or the terminal client.
@@ -52,7 +62,7 @@ owned by the Root Turn.
 
 The standard `daytona` profile uses the Databricks DeepSeek v4-free service
 `uscentral.default.deepseek-v4-flash` for Root and
-`uscentral.ai_gateway.databricks-qwen35-122b-a10b` for Sub
+`system.ai.inkling` for Sub
 (`reasoning_effort = "none"`, `temperature = 0` for Sub), with an 8,000-output-token
 cap per call. It routes traces to
 the local `fleet-rlm` experiment at `http://127.0.0.1:5001`. The supervised
@@ -95,7 +105,7 @@ Fleet restart.
 | --- | --- | --- |
 | `FLEET_DATABASE_URL` | `storage.database_url_env` | Async SQLAlchemy URL |
 | `FLEET_DAYTONA_API_KEY` | `daytona.api_key_env` | Daytona provider credential |
-| `FLEET_LLM_API_KEY` | Root/Sub `api_key_env` in `local-deno` | Local-model credential |
+| `FLEET_OPENAI_API_KEY` | Root/Sub `api_key_env` in `local-deno` | OpenAI-compatible provider credential |
 | `DATABRICKS_TOKEN` | Root/Sub `api_key_env` in Daytona profiles | Databricks AI Gateway credential |
 | `FLEET_DATABRICKS_AI_GATEWAY_BASE_URL` | Root/Sub `base_url_env` in Daytona profiles | Databricks AI Gateway endpoint |
 | `FLEET_MLFLOW_EXPERIMENT_NAME` | `daytona-managed.mlflow.experiment_name_env` | Managed MLflow experiment |

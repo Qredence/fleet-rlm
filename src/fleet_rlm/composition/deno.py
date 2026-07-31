@@ -21,13 +21,22 @@ from fleet_rlm.config import Settings
 
 
 def require_deno_settings(settings: Settings) -> None:
-    """Fail closed when Deno dependencies are missing."""
+    """
+    Validate that the settings and local dependencies required for Deno mode are available.
+
+    Parameters:
+        settings (Settings): Runtime settings to validate.
+
+    Raises:
+        CompositionError: If Deno mode is not selected, no provider API key is configured,
+            or the `deno` executable is unavailable.
+    """
     if settings.run_environment != "deno":
         raise CompositionError("Deno composition requires run_environment='deno'")
     from fleet_rlm.rlm.lm_factory import has_llm_credentials
 
     if not has_llm_credentials(settings):
-        raise CompositionError("FLEET_LLM_API_KEY or configured role API key is required in deno mode")
+        raise CompositionError("a configured provider API key is required in deno mode")
     if shutil.which("deno") is None:
         raise CompositionError("deno executable is required in deno mode")
 
@@ -38,7 +47,15 @@ def install_deno_composition(
     *,
     session_factory: Any | None = None,
 ) -> LocalCompositionHandles:
-    """Build Deno adapters once during lifespan."""
+    """
+    Install the Deno runtime composition on the application.
+
+    Parameters:
+        session_factory (Any | None): Optional database session factory used to enable SQL-backed artifact storage.
+
+    Returns:
+        LocalCompositionHandles: Handles for the installed local composition.
+    """
     from fleet_rlm.artifacts.local_catalog import LocalArtifactBlobGateway, LocalArtifactCatalog
     from fleet_rlm.chat.deno_run_environment import DenoTurnPreparation
     from fleet_rlm.files.local_catalog import LocalAttachmentBlobGateway
@@ -78,6 +95,7 @@ def install_deno_composition(
             sub_lm=models.sub_lm,
             skill_catalog=app.state.skill_catalog,
             max_artifact_bytes=settings.max_artifact_bytes,
+            max_url_bytes=settings.max_url_bytes,
         ),
         rlm_factory=RLMFactory(verbose=settings.rlm_verbose),
         workspace_volume_mirror=None,

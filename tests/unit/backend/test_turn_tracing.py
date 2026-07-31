@@ -9,6 +9,8 @@ from types import ModuleType, SimpleNamespace
 from typing import Any
 from uuid import uuid4
 
+import dspy
+import httpx
 import pytest
 
 from fleet_rlm.observability import turn_tracing
@@ -19,6 +21,7 @@ from fleet_rlm.observability.turn_tracing import (
     turn_phase_span,
     turn_trace,
 )
+from fleet_rlm.rlm.tool_observer import ToolEventView, observe_tool
 
 
 @pytest.fixture(autouse=True)
@@ -127,9 +130,142 @@ def test_turn_trace_enabled_sets_tags_and_trace_id(monkeypatch: pytest.MonkeyPat
                     "fleet.run_id": str(run_id),
                     "fleet.session_id": str(session_id),
                 },
+                "metadata": {
+                    "fleet.run_id": str(run_id),
+                    "fleet.app_version": turn_tracing._FLEET_APP_VERSION,
+                },
             }
         ]
     assert current_turn_trace_id() is None
+
+
+def test_observed_url_tool_is_nested_under_turn_root_with_bounded_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = _install_fake_mlflow(monkeypatch)
+    observed: list[Any] = []
+
+    def fetch_url(url: str) -> dict[str, object]:
+        """Return a simulated URL fetch result with private source content and cache status.
+
+        Parameters:
+                url (str): URL whose content would be fetched.
+
+        Returns:
+                dict[str, object]: A result containing the source content and cache-hit status.
+        """
+        del url
+        return {"content": "private source body", "cache_hit": False}
+
+    source = dspy.Tool(
+        fetch_url,
+        name="fetch_url",
+    )
+    wrapped = observe_tool(
+        source,
+        observed.append,
+        ToolEventView(
+            input_projection=lambda _arguments: {"source_id": "source-1"},
+            output_projection=lambda result: {"cache_hit": result["cache_hit"]},
+        ),
+    )
+
+    with turn_trace(uuid4(), uuid4(), enabled=True):
+        assert wrapped.func(url="https://example.com/report")["content"] == "private source body"
+
+    assert calls.start_span_names == ["fleet_turn", "tool.fetch_url"]
+    assert calls.span_inputs[-1]["input"] == {"source_id": "source-1"}
+    assert calls.span_outputs[-1]["output"] == {"cache_hit": False}
+    assert "private source body" not in str(calls.span_inputs + calls.span_outputs)
+    assert "private source body" not in str(observed)
+
+
+def test_daytona_broker_preserves_batched_tool_span_under_turn_root(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from fleet_rlm.daytona.http_broker import DaytonaHttpToolBroker
+
+    calls = _install_fake_mlflow(monkeypatch)
+    observed: list[Any] = []
+
+    def llm_query_batched(prompts: list[str]) -> list[str]:
+        """Generate a deterministic result string for each prompt.
+
+        Parameters:
+            prompts (list[str]): Prompts to associate with generated results.
+
+        Returns:
+            list[str]: Results labeled by the prompts' positions.
+        """
+        return [f"result-{index}" for index, _prompt in enumerate(prompts)]
+
+    wrapped = observe_tool(
+        dspy.Tool(llm_query_batched, name="llm_query_batched"),
+        observed.append,
+        ToolEventView(
+            input_projection=lambda arguments: {
+                "prompt_count": len(arguments["prompts"]),
+                "prompt_chars": sum(len(prompt) for prompt in arguments["prompts"]),
+            },
+            output_projection=lambda result: {"result_count": len(result)},
+        ),
+    )
+    broker = DaytonaHttpToolBroker(sandbox=SimpleNamespace())
+    broker._broker_url = "http://example.test"
+    broker._broker_secret = "secret"
+    pending = [
+        {
+            "id": "batch-1",
+            "lease_token": "lease",
+            "tool_name": "llm_query_batched",
+            "args": [["alpha evidence", "beta evidence"]],
+            "kwargs": {},
+        }
+    ]
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        """Return pending requests for the pending endpoint and an empty response for other paths.
+
+        Parameters:
+                request (httpx.Request): The incoming HTTP request.
+
+        Returns:
+                httpx.Response: A response containing pending requests for `/pending`,
+                    or an empty JSON object for other paths.
+        """
+        nonlocal pending
+        if request.url.path == "/pending":
+            result, pending = pending, []
+            return httpx.Response(200, json={"requests": result})
+        return httpx.Response(200, json={})
+
+    broker._client = httpx.Client(
+        transport=httpx.MockTransport(handler),
+        base_url="http://example.test",
+        headers=broker._preview_headers(),
+    )
+
+    def execute(name: str, args: list[Any], kwargs: dict[str, Any]) -> Any:
+        """Execute the wrapped batched LLM query tool.
+
+        Parameters:
+                name (str): The tool name, which must be ``"llm_query_batched"``.
+                args (list[Any]): Positional arguments for the wrapped function.
+                kwargs (dict[str, Any]): Keyword arguments for the wrapped function.
+
+        Returns:
+                Any: The wrapped function's result.
+        """
+        assert name == "llm_query_batched"
+        return wrapped.func(*args, **kwargs)
+
+    with turn_trace(uuid4(), uuid4(), enabled=True):
+        assert broker._poll_once(execute) is True
+
+    assert calls.start_span_names == ["fleet_turn", "tool.llm_query_batched"]
+    assert calls.span_inputs[-1]["input"] == {"prompt_count": 2, "prompt_chars": 27}
+    assert calls.span_outputs[-1]["output"] == {"result_count": 2}
+    assert "alpha evidence" not in str(calls.span_inputs + calls.span_outputs)
 
 
 def test_turn_trace_span_failure_is_soft(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -193,6 +329,10 @@ def test_annotate_trace_io_updates_trace_request_response(monkeypatch: pytest.Mo
     assert calls.span_outputs[-1] == {
         "answer": "public answer",
         "final_reasoning": "public reasoning",
+    }
+    assert calls.update_kwargs[-1] == {
+        "request_preview": "how are you?",
+        "response_preview": "display answer",
     }
     assert "internal_payload" not in calls.span_outputs[-1]
 

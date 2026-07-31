@@ -161,6 +161,9 @@ _FIELDS: tuple[PolicyField, ...] = (
         "storage.max_upload_bytes", "Storage", "Maximum upload bytes", "number", settings_field="max_upload_bytes"
     ),
     PolicyField(
+        "storage.max_url_bytes", "Storage", "Maximum URL source bytes", "number", settings_field="max_url_bytes"
+    ),
+    PolicyField(
         "storage.max_artifact_bytes", "Storage", "Maximum artifact bytes", "number", settings_field="max_artifact_bytes"
     ),
     PolicyField("storage.database_url_env", "Storage", "Database URL environment variable", "text"),
@@ -181,6 +184,16 @@ _FIELDS: tuple[PolicyField, ...] = (
     ),
     PolicyField(
         "mlflow.tracing_enabled", "MLflow", "Tracing enabled", "boolean", settings_field="mlflow_tracing_enabled"
+    ),
+    PolicyField(
+        "mlflow.async_logging", "MLflow", "Async trace logging", "boolean", settings_field="mlflow_async_logging"
+    ),
+    PolicyField(
+        "mlflow.trace_sampling_ratio",
+        "MLflow",
+        "Trace sampling ratio",
+        "number",
+        settings_field="mlflow_trace_sampling_ratio",
     ),
     PolicyField("mlflow.experiment_name", "MLflow", "Experiment name", "text", settings_field="mlflow_experiment_name"),
     PolicyField("mlflow.experiment_name_env", "MLflow", "Experiment environment variable", "text"),
@@ -393,6 +406,16 @@ class ConfigPolicyService:
         raise AssertionError(f"unsupported editor {field.editor}")
 
     def _validate(self, raw: str) -> None:
+        """
+        Validate Fleet policy TOML and its profile configurations.
+
+        Parameters:
+                raw (str): TOML content containing the Fleet policy.
+
+        Raises:
+                FleetConfigurationError: If the TOML is malformed or contains unsupported or invalid
+                    configuration values.
+        """
         try:
             root = _require_mapping(tomllib.loads(raw), "root")
         except tomllib.TOMLDecodeError as exc:
@@ -409,7 +432,7 @@ class ConfigPolicyService:
             raise FleetConfigurationError("config.default_profile must be a string")
         defaults = _require_mapping(root.get("defaults", {}), "defaults")
         profiles = _require_mapping(root.get("profiles", {}), "profiles")
-        _validate_policy_table(defaults, "defaults")
+        _validate_policy_table(defaults, "defaults", allow_partial_llm=True)
         for profile, value in profiles.items():
             selected = _require_mapping(value, f"profiles.{profile}")
             _validate_policy_table(selected, f"profiles.{profile}")
