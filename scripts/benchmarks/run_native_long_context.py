@@ -11,6 +11,7 @@ import argparse
 import asyncio
 import contextlib
 import io
+import itertools
 import json
 import platform
 import resource
@@ -44,11 +45,18 @@ def _rss_bytes() -> int:
 
 
 def _source(size: int, markers: tuple[str, ...]) -> str:
-    if size < 2 * max(len(marker) for marker in markers):
-        raise ValueError("benchmark source is too small for planted markers")
     data = bytearray(b"x" * size)
     positions = (64 * 1024 - len(markers[0]), size // 2, size - len(markers[2]) - 1)
-    for position, marker in zip(positions, markers, strict=True):
+    spans = tuple(zip(positions, markers, strict=True))
+    if any(position < 0 or position + len(marker) > size for position, marker in spans):
+        raise ValueError("benchmark source is too small for planted markers")
+    ordered = sorted(spans)
+    if any(
+        left_position + len(left_marker) > right_position
+        for (left_position, left_marker), (right_position, _) in itertools.pairwise(ordered)
+    ):
+        raise ValueError("planted markers overlap for this source size")
+    for position, marker in spans:
         data[position : position + len(marker)] = marker.encode("utf-8")
     return data.decode("utf-8")
 
