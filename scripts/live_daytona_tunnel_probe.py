@@ -469,6 +469,7 @@ class _ProbeRequestHandler(BaseHTTPRequestHandler):
             if "\r" in redirect_location or "\n" in redirect_location:
                 self._reply_json(500, {"error": "invalid redirect"})
                 return
+            redirect_location = redirect_location.replace("\r", "").replace("\n", "")
             self.send_response(302)
             self.send_header("Location", redirect_location)
             self.send_header("Content-Length", "0")
