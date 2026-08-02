@@ -16,6 +16,7 @@ EXPECTED_DAYTONA_MODULES = {
     "errors.py",
     "http_broker.py",
     "interpreter.py",
+    "optimization_evaluator.py",
     "platform.py",
     "provisioning.py",
     "run_environment.py",

@@ -32,11 +32,17 @@ class SandboxPlatform(Protocol):
     async def create(
         self,
         *,
-        volume_id: str,
-        mount_path: str,
-        volume_subpath: str,
+        volume_id: str | None = None,
+        mount_path: str | None = None,
+        volume_subpath: str | None = None,
         labels: dict[str, str] | None = None,
+        with_volume: bool = True,
         ephemeral: bool = False,
+        network_block_all: bool = False,
+        network_allow_list: str | None = None,
+        domain_allow_list: str | None = None,
+        auto_stop_interval: int | None = None,
+        auto_delete_interval: int | None = None,
     ) -> Any: ...
 
     async def delete(self, sandbox_id: Any) -> None: ...

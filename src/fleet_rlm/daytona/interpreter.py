@@ -533,14 +533,18 @@ class DaytonaCodeInterpreter:
                 duration_ms = int((time.perf_counter() - step_started) * 1_000)
                 self._observe(StepFinished(step, duration_ms))
 
-    def shutdown(self) -> None:
+    def shutdown(self, *, strict_broker_cleanup: bool = False) -> None:
         if self._shutdown:
             return
         self._shutdown = True
         if self._http_broker is not None:
-            with contextlib.suppress(Exception):
-                self._http_broker.stop()
+            broker = self._http_broker
             self._http_broker = None
+            if strict_broker_cleanup:
+                broker.stop(strict=True)
+            else:
+                with contextlib.suppress(Exception):
+                    broker.stop()
         if self._backend is not None:
             self._backend.close()
 

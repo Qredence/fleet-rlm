@@ -123,6 +123,37 @@ async def test_live_platform_get_raises_on_auth_error() -> None:
 
 
 @pytest.mark.asyncio
+async def test_live_platform_passes_strict_ephemeral_network_controls(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, object] = {}
+
+    class _Params:
+        def __init__(self, **kwargs: object) -> None:
+            captured.update(kwargs)
+
+    class _Client:
+        async def create(self, params: object) -> object:
+            return params
+
+    monkeypatch.setattr("daytona.CreateSandboxFromSnapshotParams", _Params)
+    platform = LiveDaytonaPlatform(_Client(), _SPEC)
+    await platform.create(
+        with_volume=False,
+        ephemeral=True,
+        network_block_all=True,
+        network_allow_list="10.0.0.0/8",
+        domain_allow_list="gateway.example.test",
+    )
+
+    assert captured["volumes"] is None
+    assert captured["ephemeral"] is True
+    assert captured["network_block_all"] is True
+    assert captured["network_allow_list"] == "10.0.0.0/8"
+    assert captured["domain_allow_list"] == "gateway.example.test"
+    assert captured["auto_stop_interval"] is None
+    assert captured["auto_delete_interval"] is None
+
+
+@pytest.mark.asyncio
 async def test_live_volume_client_waits_for_created_volume_to_be_ready(monkeypatch: pytest.MonkeyPatch) -> None:
     client = MagicMock()
     client.volume.get = AsyncMock(

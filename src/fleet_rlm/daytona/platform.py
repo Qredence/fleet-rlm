@@ -146,6 +146,11 @@ class LiveDaytonaPlatform:
         labels: dict[str, str] | None = None,
         with_volume: bool = True,
         ephemeral: bool = False,
+        network_block_all: bool = False,
+        network_allow_list: str | None = None,
+        domain_allow_list: str | None = None,
+        auto_stop_interval: int | None = None,
+        auto_delete_interval: int | None = None,
     ) -> Any:
         from daytona import CreateSandboxFromSnapshotParams, VolumeMount
 
@@ -169,6 +174,11 @@ class LiveDaytonaPlatform:
             labels=labels or {},
             volumes=volumes,
             ephemeral=ephemeral,
+            network_block_all=network_block_all,
+            network_allow_list=network_allow_list,
+            domain_allow_list=domain_allow_list,
+            auto_stop_interval=auto_stop_interval,
+            auto_delete_interval=auto_delete_interval,
         )
         return await self._client.create(params)
 

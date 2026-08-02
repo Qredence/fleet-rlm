@@ -457,7 +457,7 @@ class DaytonaHttpToolBroker:
         final = extract_final_payload(str(outcome))
         return BackendExecutionResult(stdout=str(outcome), final=final)
 
-    def stop(self) -> None:
+    def stop(self, *, strict: bool = False) -> None:
         self._stopped = True
         session_id = self._broker_session_id
         self._broker_session_id = None
@@ -469,12 +469,18 @@ class DaytonaHttpToolBroker:
         client = self._client
         self._client = None
         if client is not None:
-            with contextlib.suppress(Exception):
+            if strict:
                 client.close()
+            else:
+                with contextlib.suppress(Exception):
+                    client.close()
         if session_id is None:
             return
-        with contextlib.suppress(Exception):
+        if strict:
             self._sandbox.process.delete_session(session_id)
+        else:
+            with contextlib.suppress(Exception):
+                self._sandbox.process.delete_session(session_id)
 
     def _wait_health(self, *, timeout_s: float) -> None:
         deadline = time.monotonic() + timeout_s
@@ -518,8 +524,17 @@ class DaytonaHttpToolBroker:
         assert self._broker_url is not None
         self._poll_count += 1
         try:
-            payload = self._http().get("/pending", params={"max": "8"}, timeout=5).json()
+            response = self._http().get("/pending", params={"max": "8"}, timeout=5)
         except (httpx.HTTPError, TimeoutError, OSError, ValueError):
+            return False
+        if response.status_code != 200:
+            raise DaytonaAdapterError(
+                message=f"broker poll failed with HTTP {response.status_code}",
+                cause_type="BrokerPollError",
+            )
+        try:
+            payload = response.json()
+        except ValueError:
             return False
         requests_out = payload.get("requests") or []
         if not requests_out:

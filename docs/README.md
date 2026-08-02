@@ -33,6 +33,7 @@ See [configuration](reference/configuration.md) for profile prerequisites.
 - [Terminal UI](how-to-guides/terminal-tui.md)
 - [Database](reference/database.md)
 - [Testing strategy](how-to-guides/testing-strategy.md)
+- [Evaluation, monitoring, and signature optimization](how-to-guides/evaluation-optimization.md)
 - [Agent harness](agent-harness/README.md)
 
 `openapi.yaml` and `tools/fleet-tui/src/generated/openapi.ts` are generated
