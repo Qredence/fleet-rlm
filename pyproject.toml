@@ -89,6 +89,7 @@ server = [
     "uvicorn[standard]>=0.47.0,<1",
 ]
 benchmark = [
+    "databricks-agents>=1.5",
     "datasets>=5.0.0",
     "jsonlines>=4.0.0",
     "litellm>=1.88.1",
@@ -237,9 +238,11 @@ select = [
 ]
 
 # Public package re-exports and standalone script stdout are intentional.
+# Scripts bootstrap the repo root onto sys.path before sibling imports so they
+# run both as package modules and as direct file paths.
 [tool.ruff.lint.per-file-ignores]
 "__init__.py" = ["F401", "F403"]
-"scripts/**/*.py" = ["T201"]
+"scripts/**/*.py" = ["E402", "T201"]
 "src/fleet_rlm/skills/bundled/**/scripts/*.py" = ["T201"]
 
 [tool.ruff.lint.flake8-quotes]

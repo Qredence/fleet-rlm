@@ -18,9 +18,13 @@
 | `codex_feedback_loop.py` | Run the local Codex feedback-loop probes |
 | `deployment_observability.py` | Inspect deployment observability inputs |
 | `validate_mlflow_tracing.py` | Emit and validate a local or Managed Databricks trace using the selected Fleet TOML policy |
+| `benchmarks/rlm_eval_dataset.py` | Manage the UC-backed v2 evaluation dataset (static records + tagged production traces with expectations) |
+| `benchmarks/enable_monitoring.py` | Start, inspect, and stop server-side production monitoring scorers over UC-ingested traces |
+| `benchmarks/align_judges.py` | Align Fleet judges with SME feedback via labeling sessions and MemAlign, then re-evaluate the baseline |
 
-Legacy WebSocket, optimization, evaluation, and compatibility
-runtime scripts were retired with the backend hard cutover.
+Legacy WebSocket and compatibility runtime scripts were retired with the
+backend hard cutover. The evaluation entries above are maintained trusted-host
+CLI workflows.
 
 The live RLM latency gate is opt-in and never edits Fleet policy. Restart Fleet
 with each candidate configuration, then label that active policy explicitly:
@@ -30,6 +34,23 @@ FLEET_LIVE=1 uv run python scripts/benchmarks/run_rlm_latency.py benchmark \
   --variant baseline --output .scratch/benchmark-reports/rlm-latency-baseline.json
 ```
 
-`prepare-evaluation` and `evaluate` require `--judge-model` naming an endpoint
-supported directly by MLflow. The Fleet AI Gateway aliases used by DSPy are not
-automatically valid MLflow judge endpoints.
+`prepare-evaluation` and `evaluate` default to the probe-verified
+`databricks:/databricks-qwen35-122b-a10b` judge endpoint. Override it with
+`--judge-model` only when intentionally evaluating with a different
+MLflow-supported endpoint (e.g. `gateway:/databricks-inkling` via a local
+MLflow AI Gateway server); the Fleet DSPy model aliases are not automatically
+valid MLflow judge endpoints.
+
+## Evaluation and monitoring loop
+
+The Databricks-backed quality loop composes three opt-in steps that all require
+`FLEET_LIVE=1` and Databricks auth from the environment:
+
+1. `benchmarks/rlm_eval_dataset.py ingest-static|ingest-traces` builds the v2
+   UC dataset (`fleet-rlm-quality-v2`) with explicit expectations.
+2. `benchmarks/enable_monitoring.py start` scores a sampled fraction of
+   production `fleet_turn` traces server-side; `status`/`stop` manage the
+   registration without touching Turn execution.
+3. `benchmarks/align_judges.py prepare-labeling|align|reeval-baseline` opens an
+   SME labeling session, distills judge guidelines with MemAlign, and re-runs
+   the aligned baseline under a named run.

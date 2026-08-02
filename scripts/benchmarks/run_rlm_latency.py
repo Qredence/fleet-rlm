@@ -11,6 +11,7 @@ import argparse
 import json
 import os
 import statistics
+import sys
 import time
 from collections.abc import Iterator, Mapping, Sequence
 from datetime import UTC, datetime
@@ -21,12 +22,37 @@ from uuid import uuid4
 import httpx
 from dotenv import load_dotenv
 
+
+def _evaluation_dataset_name(tracking_url: str) -> str:
+    """Dataset name; UC-qualified (catalog.schema.table) for the Databricks backend."""
+    if tracking_url != "databricks":
+        return DATASET_NAME
+    catalog = os.environ.get("FLEET_MLFLOW_TRACE_CATALOG", "ml")
+    schema = os.environ.get("FLEET_MLFLOW_TRACE_SCHEMA", "genai")
+    return f"{catalog}.{schema}.fleet_rlm_latency_quality_v1"
+
+
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
+from scripts.benchmarks import judges as _judges
+
+# Re-exported judge contracts; conductors and tests import them from this module.
+CORRECTNESS_DESCRIPTION = _judges.CORRECTNESS_DESCRIPTION
+CORRECTNESS_INSTRUCTIONS = _judges.CORRECTNESS_INSTRUCTIONS
+DEFAULT_JUDGE_MODEL = _judges.DEFAULT_JUDGE_MODEL
+EVIDENCE_COVERAGE_DESCRIPTION = _judges.EVIDENCE_COVERAGE_DESCRIPTION
+EVIDENCE_COVERAGE_INSTRUCTIONS = _judges.EVIDENCE_COVERAGE_INSTRUCTIONS
+JUDGE_INFERENCE_PARAMS = _judges.JUDGE_INFERENCE_PARAMS
+JUDGE_NAMES = _judges.JUDGE_NAMES
+ensure_registered = _judges.ensure_registered
+
 RECEIPT_SCHEMA = "fleet.rlm-latency/v1"
 DATASET_NAME = "fleet-rlm-latency-quality-v1"
 DEFAULT_API_URL = "http://127.0.0.1:8000"
 DEFAULT_MLFLOW_URL = "http://127.0.0.1:5001"
 _LIVE_VALUES = frozenset({"1", "true", "yes"})
-_REPO_ROOT = Path(__file__).resolve().parents[2]
 
 LATENCY_WORKLOAD = """Analyze the following evidence and decide whether the customer can
 prevent renewal of OF-7781 effective 2025-04-01. Resolve conflicts by authority
@@ -696,36 +722,21 @@ def prepare_evaluation(args: argparse.Namespace) -> dict[str, Any]:
     """
     import mlflow
     from mlflow.genai import datasets
-    from mlflow.genai.judges import make_judge
-    from mlflow.genai.scorers import Correctness, list_scorers
 
     if not args.judge_model:
         raise BenchmarkError("prepare-evaluation requires --judge-model with an MLflow-supported model URI")
     mlflow.set_tracking_uri(args.mlflow_url)
     mlflow.set_experiment(experiment_id=args.experiment_id)
-    existing = [item for item in datasets.search_datasets([args.experiment_id]) if item.name == DATASET_NAME]
+    dataset_name = _evaluation_dataset_name(args.mlflow_url)
+    existing = [item for item in datasets.search_datasets([args.experiment_id]) if item.name == dataset_name]
     if existing:
         dataset = existing[0]
     else:
-        dataset = datasets.create_dataset(name=DATASET_NAME, experiment_id=args.experiment_id)
+        dataset = datasets.create_dataset(name=dataset_name, experiment_id=args.experiment_id)
         dataset.merge_records(list(QUALITY_RECORDS))
 
-    registered = {
-        scorer.name: getattr(scorer, "model", None) for scorer in list_scorers(experiment_id=args.experiment_id)
-    }
-    if registered.get("correctness") != args.judge_model:
-        Correctness(model=args.judge_model).register(experiment_id=args.experiment_id)
-    if registered.get("evidence_coverage") != args.judge_model:
-        make_judge(
-            name="evidence_coverage",
-            model=args.judge_model,
-            feedback_value_type=bool,
-            instructions=(
-                "Evaluate {{ outputs }} against {{ expectations }}. Return true only when the conclusion is "
-                "supported, every required_evidence identifier is used materially, required_uncertainty is "
-                "preserved, and no forbidden_claims are asserted. Otherwise return false."
-            ),
-        ).register(experiment_id=args.experiment_id)
+    for name in JUDGE_NAMES:
+        ensure_registered(name, args.judge_model, experiment_id=args.experiment_id)
     return {"dataset_id": dataset.dataset_id, "dataset_name": dataset.name, "records": len(dataset.to_df())}
 
 
@@ -754,7 +765,8 @@ def run_evaluation(args: argparse.Namespace) -> dict[str, Any]:
 
     mlflow.set_tracking_uri(args.mlflow_url)
     mlflow.set_experiment(experiment_id=args.experiment_id)
-    dataset = datasets.get_dataset(name=DATASET_NAME)
+    dataset_name = _evaluation_dataset_name(args.mlflow_url)
+    dataset = datasets.get_dataset(name=dataset_name)
     frame = dataset.to_df().head(3) if args.dry_run else dataset.to_df()
 
     def predict_fn(query: str) -> str:
@@ -770,16 +782,27 @@ def run_evaluation(args: argparse.Namespace) -> dict[str, Any]:
         with httpx.Client(base_url=args.api_url.rstrip("/"), timeout=httpx.Timeout(args.timeout)) as client:
             return str(run_turn(client, query, nonce=f"quality-{uuid4()}")["answer"])
 
-    result = mlflow.genai.evaluate(
-        data=frame,
-        predict_fn=predict_fn,
-        scorers=[
-            get_scorer(name="correctness", experiment_id=args.experiment_id),
-            get_scorer(name="evidence_coverage", experiment_id=args.experiment_id),
-        ],
-    )
+    run_name = args.run_name or f"quality-{datetime.now(UTC).strftime('%Y%m%dT%H%M%SZ')}"
+    with mlflow.start_run(run_name=run_name) as run:
+        result = mlflow.genai.evaluate(
+            data=frame,
+            predict_fn=predict_fn,
+            scorers=[
+                get_scorer(name="correctness", experiment_id=args.experiment_id),
+                get_scorer(name="evidence_coverage", experiment_id=args.experiment_id),
+            ],
+        )
+        run_id = run.info.run_id
     metrics = {str(key): value for key, value in result.metrics.items()}
-    receipt = {"dataset_name": DATASET_NAME, "dry_run": args.dry_run, "records": len(frame), "metrics": metrics}
+    receipt = {
+        "dataset_name": dataset_name,
+        "dataset_id": getattr(dataset, "dataset_id", None),
+        "run_id": run_id,
+        "run_name": run_name,
+        "dry_run": args.dry_run,
+        "records": len(frame),
+        "metrics": metrics,
+    }
     receipt["quality_complete"] = quality_gate(receipt)
     return receipt
 
@@ -801,8 +824,17 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--warmups", type=int, default=3)
     parser.add_argument("--runs", type=int, default=20)
     parser.add_argument("--timeout", type=float, default=2_000.0)
-    parser.add_argument("--judge-model", help="MLflow-supported judge URI, for example databricks:/<endpoint>")
+    parser.add_argument(
+        "--judge-model",
+        default=DEFAULT_JUDGE_MODEL,
+        help="MLflow-supported judge URI (default: the probe-verified qwen serving endpoint)",
+    )
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument(
+        "--run-name",
+        default="",
+        help="MLflow run name for evaluate (default: quality-<UTC timestamp>); reuse a name to build baselines",
+    )
     parser.add_argument("--baseline", type=Path)
     parser.add_argument("--candidate", type=Path)
     parser.add_argument("--quality", type=Path)
