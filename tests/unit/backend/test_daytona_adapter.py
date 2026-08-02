@@ -61,6 +61,29 @@ def test_shutdown_is_idempotent() -> None:
     assert backend.closed is True
 
 
+def test_strict_shutdown_preserves_broker_error_and_closes_backend() -> None:
+    from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter
+
+    class _Broker:
+        def stop(self, *, strict: bool = False) -> None:
+            assert strict is True
+            raise RuntimeError("broker cleanup failed")
+
+    class _FailingCloseBackend(_FakeBackend):
+        def close(self) -> None:
+            self.closed = True
+            raise RuntimeError("backend cleanup failed")
+
+    backend = _FailingCloseBackend()
+    interp = DaytonaCodeInterpreter(backend=backend)
+    interp._http_broker = _Broker()  # type: ignore[assignment]
+
+    with pytest.raises(RuntimeError, match="broker cleanup failed"):
+        interp.shutdown(strict_broker_cleanup=True)
+
+    assert backend.closed is True
+
+
 def test_lease_release_is_idempotent_and_does_not_delete_sandbox() -> None:
     from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter
     from fleet_rlm.daytona.session_manager import InterpreterLease

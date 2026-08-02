@@ -407,6 +407,19 @@ class DaytonaHttpToolBroker:
         run_code: Callable[[], str | BackendExecutionResult],
         tool_executor: Callable[[str, list[Any], dict[str, Any]], Any],
     ) -> BackendExecutionResult:
+        """
+        Execute sandbox code while servicing its tool callbacks.
+
+        Parameters:
+            run_code (Callable[[], str | BackendExecutionResult]): Code execution callable.
+            tool_executor (Callable[[str, list[Any], dict[str, Any]], Any]): Callback that executes a requested tool.
+
+        Returns:
+            BackendExecutionResult: The execution result, including captured output and any extracted final payload.
+
+        Raises:
+            DaytonaAdapterError: If the broker is stopped, execution fails, or produces no result.
+        """
         from fleet_rlm.daytona.interpreter import BackendExecutionResult
 
         self.ensure_started()
@@ -457,7 +470,13 @@ class DaytonaHttpToolBroker:
         final = extract_final_payload(str(outcome))
         return BackendExecutionResult(stdout=str(outcome), final=final)
 
-    def stop(self) -> None:
+    def stop(self, *, strict: bool = False) -> None:
+        """
+        Stop the broker and release its HTTP client and Daytona session.
+
+        Parameters:
+            strict (bool): Whether to re-raise the first cleanup error after all cleanup steps complete.
+        """
         self._stopped = True
         session_id = self._broker_session_id
         self._broker_session_id = None
@@ -468,15 +487,39 @@ class DaytonaHttpToolBroker:
         # client fail into the suppressed httpx error paths.
         client = self._client
         self._client = None
+        # Strict mode still runs every disposal step; the first failure is
+        # recorded and re-raised only after the remaining steps have run.
+        first_error: BaseException | None = None
         if client is not None:
-            with contextlib.suppress(Exception):
-                client.close()
-        if session_id is None:
-            return
-        with contextlib.suppress(Exception):
-            self._sandbox.process.delete_session(session_id)
+            if strict:
+                try:
+                    client.close()
+                except BaseException as exc:
+                    first_error = exc
+            else:
+                with contextlib.suppress(Exception):
+                    client.close()
+        if session_id is not None:
+            if strict:
+                try:
+                    self._sandbox.process.delete_session(session_id)
+                except BaseException as exc:
+                    first_error = first_error or exc
+            else:
+                with contextlib.suppress(Exception):
+                    self._sandbox.process.delete_session(session_id)
+        if first_error is not None:
+            raise first_error
 
     def _wait_health(self, *, timeout_s: float) -> None:
+        """Wait for the broker health endpoint to become ready.
+
+        Parameters:
+            timeout_s (float): Maximum time to wait for a successful health check.
+
+        Raises:
+            DaytonaAdapterError: If authentication fails or the broker does not become healthy before the timeout.
+        """
         deadline = time.monotonic() + timeout_s
         last_error = "unreachable"
         client = self._http()
@@ -507,19 +550,37 @@ class DaytonaHttpToolBroker:
         )
 
     def _poll_once(self, tool_executor: Callable[[str, list[Any], dict[str, Any]], Any]) -> bool:
-        """Poll for pending broker requests and fulfill them concurrently.
+        """
+        Poll for pending broker requests and fulfill them concurrently.
 
         Parameters:
             tool_executor (Callable[[str, list[Any], dict[str, Any]], Any]): Callback that executes each requested tool.
 
         Returns:
-            bool: `true` if pending requests were found and processed, `false` otherwise.
+            bool: `True` if pending requests were found and processed, `False` otherwise.
+
+        Raises:
+            DaytonaAdapterError: If the broker responds with a non-success, non-server-error status.
         """
         assert self._broker_url is not None
         self._poll_count += 1
         try:
-            payload = self._http().get("/pending", params={"max": "8"}, timeout=5).json()
+            response = self._http().get("/pending", params={"max": "8"}, timeout=5)
         except (httpx.HTTPError, TimeoutError, OSError, ValueError):
+            return False
+        if response.status_code != 200:
+            # 5xx from the preview proxy is a transient failure mode the poll
+            # loops recover from, exactly like the tolerated transport errors
+            # above; only non-recoverable statuses abort the execution.
+            if response.status_code >= 500:
+                return False
+            raise DaytonaAdapterError(
+                message=f"broker poll failed with HTTP {response.status_code}",
+                cause_type="BrokerPollError",
+            )
+        try:
+            payload = response.json()
+        except ValueError:
             return False
         requests_out = payload.get("requests") or []
         if not requests_out:

@@ -451,6 +451,20 @@ class DaytonaCodeInterpreter:
         return tools
 
     def execute(self, code: str, variables: dict[str, Any] | None = None) -> Any:
+        """
+        Execute Python code in the configured interpreter and process its result.
+
+        Parameters:
+            code (str): Python code to execute.
+            variables (dict[str, Any] | None): Variables made available to the execution.
+
+        Returns:
+            Any: Repair feedback for execution problems, a final submission result, or truncated execution output.
+
+        Raises:
+            DaytonaAdapterError: If the interpreter is shut down, misconfigured, or the execution provider fails.
+            TurnTerminalError: If execution repeats without making progress.
+        """
         if self._shutdown:
             msg = "interpreter already shut down"
             raise DaytonaAdapterError(message=msg, cause_type="InterpreterLifecycleError")
@@ -533,18 +547,43 @@ class DaytonaCodeInterpreter:
                 duration_ms = int((time.perf_counter() - step_started) * 1_000)
                 self._observe(StepFinished(step, duration_ms))
 
-    def shutdown(self) -> None:
+    def shutdown(self, *, strict_broker_cleanup: bool = False) -> None:
+        """
+        Shut down the interpreter and release its broker and backend resources.
+
+        Parameters:
+            strict_broker_cleanup (bool): Whether broker cleanup errors should be
+                propagated. When false, broker cleanup errors are suppressed.
+        """
         if self._shutdown:
             return
         self._shutdown = True
-        if self._http_broker is not None:
-            with contextlib.suppress(Exception):
-                self._http_broker.stop()
-            self._http_broker = None
-        if self._backend is not None:
-            self._backend.close()
+        first_error: BaseException | None = None
+        try:
+            if self._http_broker is not None:
+                broker = self._http_broker
+                self._http_broker = None
+                if strict_broker_cleanup:
+                    try:
+                        broker.stop(strict=True)
+                    except BaseException as exc:
+                        first_error = exc
+                else:
+                    with contextlib.suppress(Exception):
+                        broker.stop()
+        finally:
+            if self._backend is not None:
+                try:
+                    self._backend.close()
+                except BaseException as exc:
+                    first_error = first_error or exc
+        if first_error is not None:
+            raise first_error
 
     def _ensure_bindings(self) -> None:
+        """
+        Ensure execution tools and submission support are available for the configured backend.
+        """
         backend = self._backend
         if backend is None:
             return

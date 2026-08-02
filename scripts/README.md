@@ -10,6 +10,7 @@
 | `check_agents_md_freshness.py` | Validate agent-guide reachability |
 | `validate_release.py` | Validate package metadata and wheel contents |
 | `live_daytona_verify.py` | Run the opt-in Daytona MVP proof and validate its bounded JSON receipt |
+| `live_daytona_tunnel_probe.py` | Run the development-only strict Daytona egress smoke through two Cloudflare HTTPS origins |
 | `benchmark_daytona_lifecycle.py` | Benchmark full Daytona create-through-first-execution lifecycle and select retained versus per-Turn mode |
 | `benchmarks/run_official_oolong.py` | Run the official Oolong scorer against a live Fleet API using Attachments |
 | `benchmarks/run_native_long_context.py` | Measure native whole-value URL context at 1/5/10 MiB and emit the paging decision receipt |
@@ -60,4 +61,5 @@ The Databricks-backed quality loop composes four opt-in steps that all require
    candidates against the dataset with GEPA; the best candidate is written for
    human review and never auto-applied.
 
-See `scripts/optimize/AGENTS.md` for optimizer-lane constraints.
+See `docs/how-to-guides/evaluation-optimization.md` for the full workflow and
+`scripts/optimize/AGENTS.md` for optimizer-lane constraints.

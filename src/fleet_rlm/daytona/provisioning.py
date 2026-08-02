@@ -32,14 +32,47 @@ class SandboxPlatform(Protocol):
     async def create(
         self,
         *,
-        volume_id: str,
-        mount_path: str,
-        volume_subpath: str,
+        volume_id: str | None = None,
+        mount_path: str | None = None,
+        volume_subpath: str | None = None,
         labels: dict[str, str] | None = None,
+        with_volume: bool = True,
         ephemeral: bool = False,
-    ) -> Any: ...
+        network_block_all: bool = False,
+        network_allow_list: str | None = None,
+        domain_allow_list: str | None = None,
+        auto_stop_interval: int | None = None,
+        auto_delete_interval: int | None = None,
+    ) -> Any:
+        """
+        Create a sandbox with optional volume, network, labeling, and lifecycle configuration.
 
-    async def delete(self, sandbox_id: Any) -> None: ...
+        Parameters:
+            volume_id (str | None): Identifier of the volume to mount.
+            mount_path (str | None): Path at which to mount the volume.
+            volume_subpath (str | None): Subpath within the volume to mount.
+            labels (dict[str, str] | None): Labels to assign to the sandbox.
+            with_volume (bool): Whether to configure a volume for the sandbox.
+            ephemeral (bool): Whether to create the sandbox as ephemeral.
+            network_block_all (bool): Whether to block all network access.
+            network_allow_list (str | None): Network allow-list configuration.
+            domain_allow_list (str | None): Domain allow-list configuration.
+            auto_stop_interval (int | None): Interval after which the sandbox is stopped automatically.
+            auto_delete_interval (int | None): Interval after which the sandbox is deleted automatically.
+
+        Returns:
+            Any: The created sandbox.
+        """
+        ...
+
+    async def delete(self, sandbox_id: Any) -> None:
+        """
+        Delete the specified sandbox.
+
+        Parameters:
+            sandbox_id (Any): Identifier of the sandbox to delete.
+        """
+        ...
 
     async def start(self, sandbox_id: str) -> None: ...
 
