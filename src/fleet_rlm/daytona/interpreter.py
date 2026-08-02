@@ -537,16 +537,18 @@ class DaytonaCodeInterpreter:
         if self._shutdown:
             return
         self._shutdown = True
-        if self._http_broker is not None:
-            broker = self._http_broker
-            self._http_broker = None
-            if strict_broker_cleanup:
-                broker.stop(strict=True)
-            else:
-                with contextlib.suppress(Exception):
-                    broker.stop()
-        if self._backend is not None:
-            self._backend.close()
+        try:
+            if self._http_broker is not None:
+                broker = self._http_broker
+                self._http_broker = None
+                if strict_broker_cleanup:
+                    broker.stop(strict=True)
+                else:
+                    with contextlib.suppress(Exception):
+                        broker.stop()
+        finally:
+            if self._backend is not None:
+                self._backend.close()
 
     def _ensure_bindings(self) -> None:
         backend = self._backend
