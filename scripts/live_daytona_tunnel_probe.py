@@ -465,8 +465,12 @@ class _ProbeRequestHandler(BaseHTTPRequestHandler):
                 self._reply_json(404, {"error": "not found"})
                 return
             state.observe(probe_id, route)
+            redirect_location = f"{state.denied_origin}/probe/{probe_id}/denied"
+            if "\r" in redirect_location or "\n" in redirect_location:
+                self._reply_json(500, {"error": "invalid redirect"})
+                return
             self.send_response(302)
-            self.send_header("Location", f"{state.denied_origin}/probe/{probe_id}/denied")
+            self.send_header("Location", redirect_location)
             self.send_header("Content-Length", "0")
             self.end_headers()
             return
@@ -814,6 +818,7 @@ def _health_status_via_cloudflare_dns(origin: str) -> str:
     try:
         with socket.create_connection((address, 443), timeout=_HEALTH_TIMEOUT_SECONDS) as raw_socket:
             context = ssl.create_default_context()
+            context.minimum_version = ssl.TLSVersion.TLSv1_2
             with context.wrap_socket(raw_socket, server_hostname=hostname) as tls_socket:
                 tls_socket.settimeout(_HEALTH_TIMEOUT_SECONDS)
                 request = (
