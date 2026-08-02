@@ -5,6 +5,12 @@ import json
 import pytest
 
 from scripts.benchmarks.run_rlm_latency import (
+    CORRECTNESS_DESCRIPTION,
+    CORRECTNESS_INSTRUCTIONS,
+    DEFAULT_JUDGE_MODEL,
+    EVIDENCE_COVERAGE_DESCRIPTION,
+    EVIDENCE_COVERAGE_INSTRUCTIONS,
+    JUDGE_INFERENCE_PARAMS,
     QUALITY_RECORDS,
     _aggregate,
     _termination_mode_from_chunk,
@@ -42,6 +48,17 @@ def test_quality_dataset_is_five_bounded_json_records() -> None:
     assert "required_evidence" in encoded
     assert "forbidden_claims" in encoded
     assert "provider_request_id" not in encoded
+
+
+def test_default_judge_is_the_probe_verified_qwen_endpoint() -> None:
+    assert DEFAULT_JUDGE_MODEL == "databricks:/databricks-qwen35-122b-a10b"
+    assert JUDGE_INFERENCE_PARAMS == {"temperature": 0, "reasoning_effort": "low"}
+    assert "expected_response" in CORRECTNESS_INSTRUCTIONS
+    assert CORRECTNESS_DESCRIPTION.startswith("Check whether the response")
+    assert "required_evidence" in EVIDENCE_COVERAGE_INSTRUCTIONS
+    assert "required_uncertainty" in EVIDENCE_COVERAGE_INSTRUCTIONS
+    assert "forbidden_claims" in EVIDENCE_COVERAGE_INSTRUCTIONS
+    assert EVIDENCE_COVERAGE_DESCRIPTION.startswith("Check whether the response")
 
 
 def test_quality_gate_requires_all_five_records_and_perfect_means() -> None:
