@@ -9,6 +9,8 @@ from typing import Any
 
 import dspy
 
+from fleet_rlm.observability.failure_diagnostics import trace_failure_category
+from fleet_rlm.observability.turn_tracing import start_turn_span
 from fleet_rlm.rlm.dspy_contract import RLMOptions, _RLMTraceCallback, build_native_rlm, prediction_result
 from fleet_rlm.rlm.errors import RLMConfigError
 from fleet_rlm.rlm.model_bundle import RLMModelBundle
@@ -174,10 +176,29 @@ class RecursiveRLMExecutor:
         self._state.delegated_prompt_chars += len(prompt)
         self._state.maximum_prompt_chars = max(self._state.maximum_prompt_chars, len(prompt))
         child_depth = self._depth + 1
+        span = start_turn_span(
+            "RLM.recursive_call",
+            inputs={
+                "recursive_depth": child_depth,
+                "call_index": self._state.call_count,
+                "prompt_chars": len(prompt),
+            },
+        )
         if child_depth >= self._options.max_depth:
             self._state.depth_fallback_count += 1
-            answer = self._plain_sub_lm(prompt)
+            try:
+                answer = self._plain_sub_lm(prompt)
+            except Exception as exc:
+                span.finish(
+                    phase_status="failed",
+                    outputs={"failure_category": trace_failure_category(exc)},
+                )
+                raise
             self._state.termination_modes.append("depth_fallback")
+            span.finish(
+                phase_status="completed",
+                outputs={"termination_mode": "depth_fallback"},
+            )
             return answer
 
         interpreter = self._child_interpreter_factory() if self._child_interpreter_factory is not None else None
@@ -225,17 +246,26 @@ class RecursiveRLMExecutor:
                 max_output_chars=self._options.child_max_output_chars,
             )
             trajectory = getattr(prediction, "trajectory", ())
-            self._state.child_iterations += len(trajectory) if isinstance(trajectory, list) else 0
+            child_iterations = len(trajectory) if isinstance(trajectory, list) else 0
+            self._state.child_iterations += child_iterations
             mode = (
                 "native_extraction_fallback"
                 if getattr(prediction, "final_reasoning", None) == "Extract forced final output"
                 else "typed_submit"
             )
             self._state.termination_modes.append(mode)
+            span.finish(
+                phase_status="completed",
+                outputs={"termination_mode": mode, "child_iterations": child_iterations},
+            )
             return result.display_text
-        except Exception:
+        except Exception as exc:
             failed = True
             self._state.termination_modes.append("child_error")
+            span.finish(
+                phase_status="failed",
+                outputs={"failure_category": trace_failure_category(exc)},
+            )
             raise
         finally:
             if interpreter is not None:

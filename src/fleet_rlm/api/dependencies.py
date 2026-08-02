@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ipaddress
 from typing import Annotated, Protocol
 
 from fastapi import Depends, HTTPException, Request
@@ -22,6 +23,27 @@ from fleet_rlm.files.models import (
 from fleet_rlm.files.volume_storage import WorkspaceVolumeGateway
 from fleet_rlm.files.workspace_access import WorkspaceFileService
 from fleet_rlm.sessions.catalog import SessionCatalog
+
+
+def require_loopback_client(request: Request) -> None:
+    """Keep filesystem/compute administration local even on an unsafe API bind."""
+    # Reject requests that carry proxy-forwarding headers: a local reverse proxy
+    # connecting from 127.0.0.1 would make non-local clients appear loopback.
+    if request.headers.get("x-forwarded-for") or request.headers.get("forwarded"):
+        raise HTTPException(
+            status_code=403,
+            detail={"code": "settings_local_only", "message": "Available only from the local machine"},
+        )
+    host = request.client.host if request.client is not None else ""
+    try:
+        is_loopback = ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        is_loopback = False
+    if not is_loopback:
+        raise HTTPException(
+            status_code=403,
+            detail={"code": "settings_local_only", "message": "Available only from the local machine"},
+        )
 
 
 class AttachmentLifecyclePort(Protocol):

@@ -180,13 +180,15 @@ class TurnCoordinator:
     ) -> CommittedTurnReceipt | FailedRunReceipt:
         """Settle one executed Turn and expose only its terminal status to MLflow."""
         terminal_status = resolution.terminal_status
-        with turn_phase_span(
-            "Turn.settlement",
-            inputs={
-                "terminal_status": terminal_status,
-                "has_prediction": isinstance(resolution, RLMOutcome) and resolution.prediction is not None,
-            },
-        ):
+        settlement_inputs: dict[str, object] = {
+            "terminal_status": terminal_status,
+            "has_prediction": isinstance(resolution, RLMOutcome) and resolution.prediction is not None,
+        }
+        if isinstance(resolution, RLMOutcome):
+            settlement_inputs["duration_ms"] = resolution.duration_ms
+            settlement_inputs["artifact_candidate_count"] = len(resolution.artifact_candidates)
+            settlement_inputs["iterations"] = resolution.usage.get("iterations")
+        with turn_phase_span("Turn.settlement", inputs=settlement_inputs):
             return await self._lifecycle.finish(
                 turn,
                 resolution,

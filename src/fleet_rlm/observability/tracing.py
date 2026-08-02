@@ -17,9 +17,12 @@ Databricks auth remains outside FLEET secrets (SDK/CLI conventions):
 
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
 import os
 import socket
+from collections.abc import Mapping
 from typing import TYPE_CHECKING, cast
 from urllib.parse import urlparse
 
@@ -34,6 +37,69 @@ _TRACING_CONFIGURED = False
 _TRACING_ACTIVE = False
 _DEFAULT_TRACKING_URI = "databricks"
 _TRACE_DESTINATION_TAG = "mlflow.experiment.databricksTraceDestinationPath"
+_CONTENT_BEARING_KEYS = frozenset(
+    {
+        "answer",
+        "arguments",
+        "candidate",
+        "code",
+        "content",
+        "error",
+        "exception",
+        "feedback",
+        "input",
+        "inputs",
+        "instruction",
+        "message",
+        "output",
+        "outputs",
+        "prompt",
+        "query",
+        "reasoning",
+        "request",
+        "response",
+        "result",
+        "text",
+        "tool_input",
+        "tool_output",
+    }
+)
+
+
+def _trace_digest(value: object) -> str:
+    """Return a stable digest marker without exporting the original value."""
+    try:
+        encoded = json.dumps(value, sort_keys=True, default=lambda item: type(item).__name__, separators=(",", ":"))
+    except (TypeError, ValueError):
+        encoded = type(value).__name__
+    return f"[redacted sha256={hashlib.sha256(encoded.encode()).hexdigest()}]"
+
+
+def _sanitize_mlflow_value(value: object, *, key: str | None = None, depth: int = 0) -> object:
+    """Preserve operational metadata while replacing content-bearing trace values."""
+    if depth >= 8:
+        return "[redacted depth]"
+    normalized_key = (key or "").strip().lower().replace("-", "_")
+    if normalized_key in _CONTENT_BEARING_KEYS or normalized_key.endswith(
+        ("_input", "_output", "_prompt", "_response")
+    ):
+        return _trace_digest(value)
+    if isinstance(value, Mapping):
+        return {
+            str(item_key)[:128]: _sanitize_mlflow_value(item, key=str(item_key), depth=depth + 1)
+            for item_key, item in list(value.items())[:50]
+        }
+    if isinstance(value, (list, tuple)):
+        return [_sanitize_mlflow_value(item, depth=depth + 1) for item in list(value)[:50]]
+    if isinstance(value, str):
+        from fleet_rlm.rlm.sanitize import sanitize_public_text
+
+        if normalized_key in {"token", "api_key", "authorization", "credential", "password", "secret"}:
+            return "[redacted]"
+        return sanitize_public_text(value, max_len=256)
+    if value is None or isinstance(value, (bool, int, float)):
+        return value
+    return type(value).__name__
 
 
 def _sanitize_mlflow_span(span: object) -> None:
@@ -46,25 +112,25 @@ def _sanitize_mlflow_span(span: object) -> None:
         span (object): MLflow span to sanitize.
     """
     try:
-        from fleet_rlm.observability.turn_tracing import _trace_mapping, _trace_value
-
         inputs = getattr(span, "inputs", None)
         if inputs is not None:
             setter = getattr(span, "set_inputs", None)
             if callable(setter):
-                setter(_trace_value(inputs))
+                setter(_sanitize_mlflow_value(inputs))
 
         outputs = getattr(span, "outputs", None)
         if outputs is not None:
             setter = getattr(span, "set_outputs", None)
             if callable(setter):
-                setter(_trace_value(outputs))
+                setter(_sanitize_mlflow_value(outputs))
 
         attributes = getattr(span, "attributes", None)
-        if isinstance(attributes, dict):
+        if isinstance(attributes, Mapping):
             setter = getattr(span, "set_attributes", None)
             if callable(setter):
-                setter(_trace_mapping(attributes))
+                sanitized = _sanitize_mlflow_value(attributes)
+                if isinstance(sanitized, dict):
+                    setter(sanitized)
     except Exception:
         # A processor must never change the Turn outcome or break trace export.
         logger.debug("MLflow span sanitization failed; continuing", exc_info=True)

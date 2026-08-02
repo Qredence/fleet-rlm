@@ -239,10 +239,43 @@ def test_mlflow_315_span_processor_bounds_and_redacts_values() -> None:
 
     assert span.inputs["token"] == "[redacted]"
     assert isinstance(span.inputs["body"], str)
-    assert len(span.inputs["body"]) <= 1_000
-    assert isinstance(span.outputs["answer"], str)
-    assert len(span.outputs["answer"]) <= 1_000
+    assert len(span.inputs["body"]) <= 256
+    assert span.outputs["answer"].startswith("[redacted sha256=")
     assert span.attributes["api_key"] == "[redacted]"
+
+
+def test_mlflow_span_processor_redacts_autolog_content_fields() -> None:
+    class Span:
+        def __init__(self) -> None:
+            self.inputs: dict[str, object] = {
+                "prompt": "candidate instruction must never be exported",
+                "token_usage": 42,
+            }
+            self.outputs: dict[str, object] = {
+                "response": "provider body must never be exported",
+                "duration_ms": 15,
+            }
+            self.attributes: dict[str, object] = {"engine": "gepa", "tool_output": "private tool result"}
+
+        def set_inputs(self, value: object) -> None:
+            self.inputs = value
+
+        def set_outputs(self, value: object) -> None:
+            self.outputs = value
+
+        def set_attributes(self, value: dict[str, object]) -> None:
+            self.attributes = value
+
+    span = Span()
+
+    tracing._sanitize_mlflow_span(span)
+
+    assert span.inputs["prompt"].startswith("[redacted sha256=")
+    assert span.inputs["token_usage"] == 42
+    assert span.outputs["response"].startswith("[redacted sha256=")
+    assert span.outputs["duration_ms"] == 15
+    assert span.attributes["engine"] == "gepa"
+    assert span.attributes["tool_output"].startswith("[redacted sha256=")
 
 
 def test_configure_tracing_local_server_needs_only_experiment(

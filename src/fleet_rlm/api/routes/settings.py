@@ -2,37 +2,14 @@
 
 from __future__ import annotations
 
-import ipaddress
+from fastapi import APIRouter, Depends, HTTPException
 
-from fastapi import APIRouter, Depends, HTTPException, Request
-
-from fleet_rlm.api.dependencies import ConfigPolicyDep
+from fleet_rlm.api.dependencies import ConfigPolicyDep, require_loopback_client
 from fleet_rlm.api.schemas import SettingsPolicyPatchRequest, SettingsPolicyResponse
 from fleet_rlm.config import FleetConfigurationError
 from fleet_rlm.config_policy import PolicyAccessError, PolicyConflictError
 
 router = APIRouter(tags=["settings"])
-
-
-def require_loopback_client(request: Request) -> None:
-    """Keep filesystem policy administration local even on an unsafe API bind."""
-    # Reject requests that carry proxy-forwarding headers: a local reverse proxy
-    # connecting from 127.0.0.1 would make non-local clients appear loopback.
-    if request.headers.get("x-forwarded-for") or request.headers.get("forwarded"):
-        raise HTTPException(
-            status_code=403,
-            detail={"code": "settings_local_only", "message": "Settings are available only from the local machine"},
-        )
-    host = request.client.host if request.client is not None else ""
-    try:
-        is_loopback = ipaddress.ip_address(host).is_loopback
-    except ValueError:
-        is_loopback = False
-    if not is_loopback:
-        raise HTTPException(
-            status_code=403,
-            detail={"code": "settings_local_only", "message": "Settings are available only from the local machine"},
-        )
 
 
 def _response(snapshot) -> SettingsPolicyResponse:
