@@ -33,6 +33,7 @@ from urllib.request import Request, urlopen
 _LIVE_VALUES = frozenset({"1", "true", "yes"})
 _TUNNEL_URL = re.compile(r"https://[a-z0-9-]+\.trycloudflare\.com", re.IGNORECASE)
 _PROBE_ID = re.compile(r"^[A-Za-z0-9_-]{16,128}$")
+_TUNNEL_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 _NAMED_TUNNEL_ENVIRONMENT = (
     "FLEET_OPTIMIZATION_NAMED_TUNNEL_ID",
     "FLEET_OPTIMIZATION_NAMED_TUNNEL_CREDENTIALS_FILE",
@@ -205,7 +206,13 @@ class _ControllerState:
 
 
 class _ProbeController(ThreadingHTTPServer):
-    """Loopback-only controller plus a synthetic public probe application."""
+    """Token-guarded controller plus a synthetic public probe application.
+
+    The socket binds to loopback, but ``cloudflared`` also connects from
+    loopback, so every tunneled public request passes the client-address
+    check.  The bearer token, not the client address, separates the
+    controller routes from the public probe routes.
+    """
 
     daemon_threads = True
 
@@ -519,8 +526,11 @@ def _configured_named_tunnel() -> _NamedTunnelConfiguration | None:
     credentials_file = Path(values["FLEET_OPTIMIZATION_NAMED_TUNNEL_CREDENTIALS_FILE"])
     if not credentials_file.is_file():
         raise TunnelProbeError("named tunnel credentials file is not available")
+    tunnel_id = values["FLEET_OPTIMIZATION_NAMED_TUNNEL_ID"]
+    if not _TUNNEL_ID.fullmatch(tunnel_id):
+        raise TunnelProbeError("named tunnel identifier must be a bare identifier")
     configuration = _NamedTunnelConfiguration(
-        tunnel_id=values["FLEET_OPTIMIZATION_NAMED_TUNNEL_ID"],
+        tunnel_id=tunnel_id,
         credentials_file=credentials_file,
         allowed_origin=_validated_https_origin(values["FLEET_OPTIMIZATION_NAMED_TUNNEL_ALLOWED_ORIGIN"]),
         denied_origin=_validated_https_origin(values["FLEET_OPTIMIZATION_NAMED_TUNNEL_DENIED_ORIGIN"]),

@@ -468,19 +468,29 @@ class DaytonaHttpToolBroker:
         # client fail into the suppressed httpx error paths.
         client = self._client
         self._client = None
+        # Strict mode still runs every disposal step; the first failure is
+        # recorded and re-raised only after the remaining steps have run.
+        first_error: BaseException | None = None
         if client is not None:
             if strict:
-                client.close()
+                try:
+                    client.close()
+                except BaseException as exc:
+                    first_error = exc
             else:
                 with contextlib.suppress(Exception):
                     client.close()
-        if session_id is None:
-            return
-        if strict:
-            self._sandbox.process.delete_session(session_id)
-        else:
-            with contextlib.suppress(Exception):
-                self._sandbox.process.delete_session(session_id)
+        if session_id is not None:
+            if strict:
+                try:
+                    self._sandbox.process.delete_session(session_id)
+                except BaseException as exc:
+                    first_error = first_error or exc
+            else:
+                with contextlib.suppress(Exception):
+                    self._sandbox.process.delete_session(session_id)
+        if first_error is not None:
+            raise first_error
 
     def _wait_health(self, *, timeout_s: float) -> None:
         deadline = time.monotonic() + timeout_s
@@ -528,6 +538,11 @@ class DaytonaHttpToolBroker:
         except (httpx.HTTPError, TimeoutError, OSError, ValueError):
             return False
         if response.status_code != 200:
+            # 5xx from the preview proxy is a transient failure mode the poll
+            # loops recover from, exactly like the tolerated transport errors
+            # above; only non-recoverable statuses abort the execution.
+            if response.status_code >= 500:
+                return False
             raise DaytonaAdapterError(
                 message=f"broker poll failed with HTTP {response.status_code}",
                 cause_type="BrokerPollError",

@@ -54,17 +54,27 @@ Use `export --export-out records.json` to materialize records for
 ## 1. Dataset: expectation-bearing records (`fleet-rlm-quality-v2`)
 
 ```bash
-FLEET_LIVE=1 uv run python scripts/benchmarks/rlm_eval_dataset.py ingest-static \
+FLEET_LIVE=1 uv run --no-project --python 3.12 \
+  --with 'mlflow[genai]>=3.15' --with 'databricks-agents>=1.11' \
+  --with 'databricks-connect==18.0.0' --with httpx --with python-dotenv \
+  python scripts/benchmarks/rlm_eval_dataset.py ingest-static \
   --experiment-id <id> --output .scratch/evals/dataset-static.json
-FLEET_LIVE=1 uv run python scripts/benchmarks/rlm_eval_dataset.py ingest-traces \
+FLEET_LIVE=1 uv run --no-project --python 3.12 \
+  --with 'mlflow[genai]>=3.15' --with 'databricks-agents>=1.11' \
+  --with 'databricks-connect==18.0.0' --with httpx --with python-dotenv \
+  python scripts/benchmarks/rlm_eval_dataset.py ingest-traces \
   --experiment-id <id> --expectations-json .scratch/evals/expectations.json \
   --output .scratch/evals/dataset-traces.json
-FLEET_LIVE=1 uv run python scripts/benchmarks/rlm_eval_dataset.py show \
+FLEET_LIVE=1 uv run --no-project --python 3.12 \
+  --with 'mlflow[genai]>=3.15' --with 'databricks-agents>=1.11' \
+  --with 'databricks-connect==18.0.0' --with httpx --with python-dotenv \
+  python scripts/benchmarks/rlm_eval_dataset.py show \
   --experiment-id <id> --output .scratch/evals/dataset-show.json
 ```
 
-- `ingest-static` creates the managed dataset when missing and merges the five
-  static cases exactly once (`--force` re-merges).
+- `ingest-static` creates the managed dataset when missing and seeds the five
+  static cases only when the dataset is empty; any existing rows skip the merge
+  entirely (`--force` re-merges all five regardless).
 - `ingest-traces` merges production traces tagged `fleet_eval_candidate=true`;
   every merged record needs an entry in the expectations mapping
   (`{"trace_id": {"expected_response": ..., "required_evidence": [...], ...}}`),
@@ -131,25 +141,27 @@ never consumed by the runtime automatically.
 
 The same loop runs headless:
 
-    ```bash
-    uv sync --extra optimize
-    FLEET_LIVE=1 uv run python scripts/optimize/optimize_signature_omni.py \
-      --dataset-name fleet-rlm-quality-v2 --val-fraction 0.2 \
-      --judge-model databricks:/databricks-qwen35-122b-a10b \
-      --judge-params '{"temperature": 0}' \
-      --output .scratch/optimization/receipt.json
-    ```
+```bash
+uv sync --extra optimize
+FLEET_LIVE=1 uv run python scripts/optimize/optimize_signature_omni.py \
+  --dataset-name fleet-rlm-quality-v2 --val-fraction 0.2 \
+  --judge-model databricks:/databricks-qwen35-122b-a10b \
+  --judge-params '{"temperature": 0}' \
+  --output .scratch/optimization/receipt.json
+```
 
 **Judge model calibration practices (required for the cheap lane):**
 
 - Judge identity is part of the metric. Verified serving-endpoint judge
   candidates (2026-08 probes, 4-case evidence fixture):
+
   | Judge | Fixture | Params | Lane |
   | --- | --- | --- | --- |
   | `databricks:/databricks-qwen35-122b-a10b` | 4/4 | `{"temperature": 0}` or defaults | primary cheap judge |
   | `databricks:/databricks-gemini-3-5-flash` | 3/4 (coverage strict) | `{"temperature": 0}` | cost floor |
   | `databricks:/databricks-claude-sonnet-4-6` | passes | `{"temperature": 0}` | final-gate ceiling |
-  `databricks-inkling` (`correctness`-only with
+
+- `databricks-inkling` (`correctness`-only with
   `{"temperature": 0, "reasoning_effort": "none"}`), `deepseek-v4-pro`
   (rejects structured verdict responses), `claude-haiku-4-5`, `gpt-oss-120b`,
   and `gpt-5-mini` (temperature-locked) are unsuitable — recheck probes on any

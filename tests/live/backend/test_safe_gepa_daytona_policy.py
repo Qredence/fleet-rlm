@@ -356,6 +356,7 @@ async def test_safe_optimizer_strict_daytona_policy_canary(tmp_path) -> None:
         "host_credentials_absent": False,
         "approved_gateway_egress": False,
     }
+    primary_error: BaseException | None = None
     try:
         sandbox = await factory.create(
             policy=policy,
@@ -532,6 +533,9 @@ async def test_safe_optimizer_strict_daytona_policy_canary(tmp_path) -> None:
         await asyncio.sleep(_OBSERVATION_WINDOW_SECONDS)
         _assert_observations(await controller.observations(probe))
         passed["denied_egress_unobserved"] = True
+    except BaseException as exc:
+        primary_error = exc
+        raise
     finally:
         cleanup_error: BaseException | None = None
         if interpreter is not None:
@@ -553,7 +557,11 @@ async def test_safe_optimizer_strict_daytona_policy_canary(tmp_path) -> None:
             except BaseException as exc:
                 cleanup_error = cleanup_error or exc
         if cleanup_error is not None:
-            raise cleanup_error
+            # Mirror the production _cleanup precedence: never let a cleanup
+            # failure mask the primary probe failure; chain it as a note.
+            if primary_error is None:
+                raise cleanup_error
+            primary_error.add_note(f"cleanup also failed: {cleanup_error!r}")
 
     assert all(value is True for value in cleanup.values())
     report = DevelopmentDaytonaCanaryReport(
