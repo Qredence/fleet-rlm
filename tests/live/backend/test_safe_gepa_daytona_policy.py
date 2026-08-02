@@ -45,6 +45,16 @@ _PROBE_ID = re.compile(r"^[A-Za-z0-9_-]{16,128}$")
 
 
 def _live_value(name: str) -> str:
+    """
+    Retrieve a required non-empty environment variable value.
+    
+    Parameters:
+    	name (str): Name of the environment variable.
+    
+    Returns:
+    	str: The trimmed environment variable value.
+    
+    """
     value = os.environ.get(name, "").strip()
     if not value:
         pytest.skip(f"{name} is required")
@@ -52,6 +62,16 @@ def _live_value(name: str) -> str:
 
 
 def _https_url(value: str, *, label: str) -> str:
+    """
+    Validate and return an HTTPS URL without credentials, query parameters, or fragments.
+    
+    Parameters:
+        value (str): URL to validate.
+        label (str): Label used in the validation failure message.
+    
+    Returns:
+        str: The validated URL.
+    """
     parsed = urlparse(value)
     if (
         parsed.scheme != "https"
@@ -66,6 +86,16 @@ def _https_url(value: str, *, label: str) -> str:
 
 
 def _bare_domain(value: str, *, label: str) -> str:
+    """
+    Validate and normalize a bare DNS host name.
+    
+    Parameters:
+        value (str): Host name to validate.
+        label (str): Name used in the validation failure message.
+    
+    Returns:
+        str: The normalized lowercase host name.
+    """
     domain = value.strip().lower()
     if not re.fullmatch(r"(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}", domain):
         pytest.fail(f"{label} must be a bare DNS host name")
@@ -73,6 +103,15 @@ def _bare_domain(value: str, *, label: str) -> str:
 
 
 def _loopback_controller_url(value: str) -> str:
+    """
+    Validate and return a loopback HTTP probe-controller URL.
+    
+    Parameters:
+    	value (str): The URL to validate.
+    
+    Returns:
+    	str: The original URL when it uses HTTP, targets a loopback host, and contains no credentials, path, query, or fragment.
+    """
     parsed = urlparse(value)
     if (
         parsed.scheme != "http"
@@ -88,6 +127,15 @@ def _loopback_controller_url(value: str) -> str:
 
 
 def _sandbox_value(sandbox: object, name: str) -> object:
+    """Retrieve a named value from a sandbox mapping or object attribute.
+    
+    Parameters:
+    	sandbox (object): The sandbox mapping or object to inspect.
+    	name (str): The value name to retrieve.
+    
+    Returns:
+    	object: The value associated with the name, or `None` if it is unavailable.
+    """
     if isinstance(sandbox, dict):
         return sandbox.get(name)
     return getattr(sandbox, name, None)
@@ -114,11 +162,18 @@ class _ProbeController:
     """Host-side protocol for a controlled pair of HTTPS probe origins."""
 
     def __init__(self) -> None:
+        """Initialize the probe controller with its loopback URL and authentication token."""
         controller_url = _loopback_controller_url(_live_value("FLEET_OPTIMIZATION_PROBE_CONTROLLER_URL"))
         self._base_url = controller_url.rstrip("/") + "/"
         self._token = _live_value("FLEET_OPTIMIZATION_PROBE_CONTROLLER_TOKEN")
 
     async def create_probe(self) -> _Probe:
+        """
+        Create and validate controlled probe origins for the canary test.
+        
+        Returns:
+        	_Probe: Validated probe identifiers, URLs, and domains for allowed, redirected, and denied requests.
+        """
         payload = await asyncio.to_thread(
             self._request,
             "POST",
@@ -151,9 +206,26 @@ class _ProbeController:
         )
 
     async def observations(self, probe: _Probe) -> dict[str, object]:
+        """Retrieve observations recorded for a controlled probe.
+        
+        Parameters:
+        	probe (_Probe): The probe whose observations to retrieve.
+        
+        Returns:
+        	dict[str, object]: The probe's recorded observations.
+        """
         return await asyncio.to_thread(self._request, "GET", f"v1/probes/{probe.probe_id}", None)
 
     async def create_gateway_broker(self, probe: _Probe) -> _GatewayBroker:
+        """
+        Create and validate a gateway broker for the allowed probe domain.
+        
+        Parameters:
+        	probe (_Probe): Probe configuration whose allowed domain must match the broker URL.
+        
+        Returns:
+        	_GatewayBroker: Validated gateway broker credentials and URL.
+        """
         payload = await asyncio.to_thread(self._request, "POST", "v1/brokers", {"schema": "v1"})
         broker_id = payload.get("broker_id")
         secret = payload.get("broker_secret")
@@ -169,6 +241,15 @@ class _ProbeController:
         return _GatewayBroker(broker_id=broker_id, secret=secret, url=url)
 
     async def pending_gateway_calls(self, broker: _GatewayBroker) -> list[dict[str, object]]:
+        """
+        Retrieve pending requests for a gateway broker.
+        
+        Parameters:
+        	broker (_GatewayBroker): The broker whose pending requests should be retrieved.
+        
+        Returns:
+        	list[dict[str, object]]: The broker's pending requests.
+        """
         payload = await asyncio.to_thread(self._request, "GET", f"v1/brokers/{broker.broker_id}/pending", None)
         requests = payload.get("requests")
         if not isinstance(requests, list) or not all(isinstance(item, dict) for item in requests):
@@ -178,9 +259,21 @@ class _ProbeController:
     async def submit_gateway_result(
         self, broker: _GatewayBroker, payload: dict[str, object]
     ) -> None:
+        """Submit a gateway broker result payload to the probe controller."""
         await asyncio.to_thread(self._request, "POST", f"v1/brokers/{broker.broker_id}/result", payload)
 
     def _request(self, method: str, path: str, payload: dict[str, object] | None) -> dict[str, object]:
+        """
+        Send an authenticated JSON request to the probe controller.
+        
+        Parameters:
+        	method (str): HTTP method to use.
+        	path (str): Controller-relative request path.
+        	payload (dict[str, object] | None): JSON object to send, or `None` when no request body is needed.
+        
+        Returns:
+        	dict[str, object]: The controller's JSON object response.
+        """
         body = json.dumps(payload).encode() if payload is not None else None
         request = Request(
             urljoin(self._base_url, path),
@@ -205,6 +298,12 @@ class _ProbeController:
 
 
 def _record() -> OptimizationRecord:
+    """
+    Build the fixed synthetic optimization record used by the policy canary.
+    
+    Returns:
+    	OptimizationRecord: The synthetic record with its expected marker, output contract, provenance, and content digest.
+    """
     return OptimizationRecord(
         record_id="synthetic-policy-canary",
         query="Return the literal synthetic marker.",
@@ -217,12 +316,20 @@ def _record() -> OptimizationRecord:
 
 
 async def _execute(interpreter: DaytonaCodeInterpreter, code: str, variables: dict[str, object]) -> object:
-    """Run synchronous DSPy interpreter transport outside its owning event loop."""
+    """Execute interpreter code in a worker thread and return its result."""
     return await asyncio.to_thread(interpreter.execute, code, variables)
 
 
 def _gateway_broker_source(broker: _GatewayBroker) -> str:
-    """Return the sole sandbox-visible broker call through the allowed gateway."""
+    """
+    Generate sandbox source exposing the mediated curated-input capability.
+    
+    Parameters:
+        broker (_GatewayBroker): Gateway endpoint and authentication details embedded in the generated source.
+    
+    Returns:
+        str: Python source code for the sandbox-visible broker function.
+    """
     return (
         "import json as _json\n"
         "import urllib.request as _urllib_request\n\n"
@@ -259,7 +366,17 @@ async def _execute_gateway_broker(
     code: str,
     variables: dict[str, object],
 ) -> object:
-    """Execute untrusted code while the host mediates only pending broker calls."""
+    """
+    Execute untrusted code while mediating its curated-input requests through the gateway broker.
+    
+    Parameters:
+        reader (Callable[..., object]): Function used to resolve authorized curated-input requests.
+        code (str): Untrusted code to execute.
+        variables (dict[str, object]): Variables made available to the executed code.
+    
+    Returns:
+        object: The result produced by the executed code.
+    """
     task = asyncio.create_task(_execute(interpreter, _gateway_broker_source(broker) + "\n" + code, variables))
     while not task.done():
         for call in await controller.pending_gateway_calls(broker):
@@ -286,6 +403,16 @@ async def _execute_gateway_broker(
 
 
 def _answer(result: object) -> str:
+    """
+    Extract the validated answer from an interpreter or broker response.
+    
+    Parameters:
+        result (object): The response to validate and extract.
+    
+    Returns:
+        str: The response's string value under the ``answer`` key.
+    
+    """
     if is_final_output(result):
         result = getattr(result, "output", None)
     if not isinstance(result, dict):
@@ -298,6 +425,7 @@ def _answer(result: object) -> str:
 
 
 def _assert_observations(observations: dict[str, object]) -> None:
+    """Validate that probe observations match the expected allowed, redirected, and blocked request counts."""
     if observations.get("allowed_requests") != 1:
         pytest.fail("probe controller did not observe exactly one allowed gateway request")
     if observations.get("redirect_requests") != 1:
@@ -307,6 +435,16 @@ def _assert_observations(observations: dict[str, object]) -> None:
 
 
 async def _confirm_deleted(platform: LiveDaytonaPlatform, sandbox_id: str) -> None:
+    """
+    Confirm that the specified Daytona sandbox has been deleted.
+    
+    Parameters:
+        platform (LiveDaytonaPlatform): Daytona platform used to query the sandbox.
+        sandbox_id (str): Identifier of the sandbox to verify.
+    
+    Raises:
+        AssertionError: If the sandbox still exists after all deletion checks.
+    """
     for attempt in range(_DELETE_POLL_ATTEMPTS):
         if await platform.get(sandbox_id) is None:
             return

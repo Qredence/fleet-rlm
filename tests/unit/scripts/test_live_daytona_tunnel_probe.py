@@ -20,6 +20,12 @@ _SCRIPT = Path(__file__).parents[3] / "scripts" / "live_daytona_tunnel_probe.py"
 
 @pytest.fixture
 def subject(monkeypatch: pytest.MonkeyPatch) -> ModuleType:
+    """
+    Load the tunnel probe script with a deterministic health status.
+    
+    Returns:
+        ModuleType: The loaded and patched tunnel probe module.
+    """
     spec = importlib.util.spec_from_file_location("live_daytona_tunnel_probe_test", _SCRIPT)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
@@ -30,6 +36,18 @@ def subject(monkeypatch: pytest.MonkeyPatch) -> ModuleType:
 
 
 def _request(url: str, *, token: str = "", data: bytes | None = None, method: str = "GET") -> dict[str, object]:
+    """
+    Send an HTTP request and decode its JSON response.
+    
+    Parameters:
+    	url (str): The request URL.
+    	token (str): Optional bearer token for authorization.
+    	data (bytes | None): Optional request body.
+    	method (str): The HTTP method to use.
+    
+    Returns:
+    	dict[str, object]: The decoded JSON response, or an empty dictionary when the response has no body.
+    """
     request = Request(
         url,
         data=data,
@@ -100,6 +118,9 @@ def test_controller_keeps_observation_credentials_loopback_only(subject: ModuleT
 def test_named_tunnel_configuration_requires_two_bare_https_origins(
     subject: ModuleType, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
+    """
+    Verify that named-tunnel configuration accepts two bare HTTPS origins and rejects paths or incomplete settings.
+    """
     credentials = tmp_path / "tunnel-credentials.json"
     credentials.touch()
     environment = {
@@ -126,6 +147,9 @@ def test_named_tunnel_configuration_requires_two_bare_https_origins(
 
 
 def test_gateway_broker_delivers_only_claimed_host_tool_calls(subject: ModuleType) -> None:
+    """
+    Verify that the gateway broker delivers a claimed host's tool call and returns its submitted result.
+    """
     state = subject._ControllerState(  # type: ignore[attr-defined]
         allowed_origin="https://allow.trycloudflare.com",
         denied_origin="https://deny.trycloudflare.com",
@@ -145,6 +169,9 @@ def test_gateway_broker_delivers_only_claimed_host_tool_calls(subject: ModuleTyp
         result_box: list[dict[str, object]] = []
 
         def invoke() -> None:
+            """
+            Submit a broker tool-call request and store the decoded response.
+            """
             request = Request(
                 f"{controller.controller_url}/broker/{broker_id}/call",
                 data=b'{"tool_name":"read_curated_input","args":[],"kwargs":{"transaction_id":"t","sha256":"s"}}',

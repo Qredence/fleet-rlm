@@ -152,6 +152,28 @@ class LiveDaytonaPlatform:
         auto_stop_interval: int | None = None,
         auto_delete_interval: int | None = None,
     ) -> Any:
+        """
+        Create a Daytona sandbox from the configured snapshot.
+        
+        Parameters:
+            volume_id (str | None): Volume identifier required when `with_volume` is true.
+            mount_path (str | None): Sandbox mount path required when `with_volume` is true.
+            volume_subpath (str | None): Scoped subpath within the volume.
+            labels (dict[str, str] | None): Labels to assign to the sandbox.
+            with_volume (bool): Whether to attach a volume.
+            ephemeral (bool): Whether to create an ephemeral sandbox.
+            network_block_all (bool): Whether to block all network access.
+            network_allow_list (str | None): Comma-separated network allow-list.
+            domain_allow_list (str | None): Comma-separated domain allow-list.
+            auto_stop_interval (int | None): Automatic stop interval.
+            auto_delete_interval (int | None): Automatic deletion interval.
+        
+        Returns:
+            Any: The created sandbox.
+        
+        Raises:
+            ValueError: If `with_volume` is true and `volume_id` or `mount_path` is missing.
+        """
         from daytona import CreateSandboxFromSnapshotParams, VolumeMount
 
         volumes = None

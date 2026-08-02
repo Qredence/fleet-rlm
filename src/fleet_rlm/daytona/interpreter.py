@@ -451,6 +451,20 @@ class DaytonaCodeInterpreter:
         return tools
 
     def execute(self, code: str, variables: dict[str, Any] | None = None) -> Any:
+        """
+        Execute Python code in the configured interpreter and process its result.
+        
+        Parameters:
+            code (str): Python code to execute.
+            variables (dict[str, Any] | None): Variables made available to the execution.
+        
+        Returns:
+            Any: Repair feedback for execution problems, a final submission result, or truncated execution output.
+        
+        Raises:
+            DaytonaAdapterError: If the interpreter is shut down, misconfigured, or the execution provider fails.
+            TurnTerminalError: If execution repeats without making progress.
+        """
         if self._shutdown:
             msg = "interpreter already shut down"
             raise DaytonaAdapterError(message=msg, cause_type="InterpreterLifecycleError")
@@ -534,6 +548,13 @@ class DaytonaCodeInterpreter:
                 self._observe(StepFinished(step, duration_ms))
 
     def shutdown(self, *, strict_broker_cleanup: bool = False) -> None:
+        """
+        Shut down the interpreter and release its broker and backend resources.
+        
+        Parameters:
+            strict_broker_cleanup (bool): Whether broker cleanup errors should be
+                propagated. When false, broker cleanup errors are suppressed.
+        """
         if self._shutdown:
             return
         self._shutdown = True
@@ -551,6 +572,9 @@ class DaytonaCodeInterpreter:
                 self._backend.close()
 
     def _ensure_bindings(self) -> None:
+        """
+        Ensure execution tools and submission support are available for the configured backend.
+        """
         backend = self._backend
         if backend is None:
             return

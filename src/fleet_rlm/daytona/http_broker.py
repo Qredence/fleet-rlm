@@ -407,6 +407,19 @@ class DaytonaHttpToolBroker:
         run_code: Callable[[], str | BackendExecutionResult],
         tool_executor: Callable[[str, list[Any], dict[str, Any]], Any],
     ) -> BackendExecutionResult:
+        """
+        Execute sandbox code while servicing its tool callbacks.
+        
+        Parameters:
+        	run_code (Callable[[], str | BackendExecutionResult]): Code execution callable.
+        	tool_executor (Callable[[str, list[Any], dict[str, Any]], Any]): Callback that executes a requested tool.
+        
+        Returns:
+        	BackendExecutionResult: The execution result, including captured output and any extracted final payload.
+        
+        Raises:
+        	DaytonaAdapterError: If the broker is stopped, execution fails, or produces no result.
+        """
         from fleet_rlm.daytona.interpreter import BackendExecutionResult
 
         self.ensure_started()
@@ -458,6 +471,12 @@ class DaytonaHttpToolBroker:
         return BackendExecutionResult(stdout=str(outcome), final=final)
 
     def stop(self, *, strict: bool = False) -> None:
+        """
+        Stop the broker and release its HTTP client and Daytona session.
+        
+        Parameters:
+            strict (bool): Whether to re-raise the first cleanup error after all cleanup steps complete.
+        """
         self._stopped = True
         session_id = self._broker_session_id
         self._broker_session_id = None
@@ -493,6 +512,14 @@ class DaytonaHttpToolBroker:
             raise first_error
 
     def _wait_health(self, *, timeout_s: float) -> None:
+        """Wait for the broker health endpoint to become ready.
+        
+        Parameters:
+        	timeout_s (float): Maximum time to wait for a successful health check.
+        
+        Raises:
+        	DaytonaAdapterError: If authentication fails or the broker does not become healthy before the timeout.
+        """
         deadline = time.monotonic() + timeout_s
         last_error = "unreachable"
         client = self._http()
@@ -523,13 +550,17 @@ class DaytonaHttpToolBroker:
         )
 
     def _poll_once(self, tool_executor: Callable[[str, list[Any], dict[str, Any]], Any]) -> bool:
-        """Poll for pending broker requests and fulfill them concurrently.
-
+        """
+        Poll for pending broker requests and fulfill them concurrently.
+        
         Parameters:
             tool_executor (Callable[[str, list[Any], dict[str, Any]], Any]): Callback that executes each requested tool.
-
+        
         Returns:
-            bool: `true` if pending requests were found and processed, `false` otherwise.
+            bool: `True` if pending requests were found and processed, `False` otherwise.
+        
+        Raises:
+            DaytonaAdapterError: If the broker responds with a non-success, non-server-error status.
         """
         assert self._broker_url is not None
         self._poll_count += 1

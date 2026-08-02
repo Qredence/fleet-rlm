@@ -40,10 +40,20 @@ class _Platform:
     deleted: list[object] = field(default_factory=list)
 
     async def create(self, **kwargs: Any) -> object:
+        """
+        Record sandbox creation arguments and return a generated sandbox identifier.
+        
+        Parameters:
+        	**kwargs (Any): Sandbox creation arguments to record.
+        
+        Returns:
+        	object: A sandbox record containing the generated identifier.
+        """
         self.creates.append(kwargs)
         return {"id": f"sandbox-{len(self.creates)}"}
 
     async def delete(self, sandbox: object) -> None:
+        """Record the sandbox scheduled for deletion."""
         self.deleted.append(sandbox)
 
 
@@ -110,10 +120,18 @@ def test_policy_rejects_invalid_isolation_configuration(kwargs: dict, message: s
 
 class _Interpreter:
     def __init__(self, events: list[str], *, fail_shutdown: bool = False) -> None:
+        """
+        Configure the interpreter test double and its shutdown behavior.
+        
+        Parameters:
+            events (list[str]): Collection used to record lifecycle events.
+            fail_shutdown (bool): Whether shutdown should raise an error.
+        """
         self._events = events
         self._fail_shutdown = fail_shutdown
 
     def shutdown(self, *, strict_broker_cleanup: bool = False) -> None:
+        """Record interpreter shutdown and raise an error when shutdown is configured to fail."""
         assert strict_broker_cleanup is True
         self._events.append("shutdown")
         if self._fail_shutdown:
@@ -125,6 +143,20 @@ class _RLM:
         self._prediction = prediction
 
     async def acall(self, **kwargs: Any) -> object:
+        """
+        Evaluate a curated input request and provide the configured prediction.
+        
+        Parameters:
+            curated_input_handle (dict): Input handle containing the transaction ID,
+                SHA-256 hash, schema, and byte size.
+        
+        Returns:
+            object: The configured prediction.
+        
+        Raises:
+            BaseException: The configured prediction exception, when evaluation is
+                configured to fail.
+        """
         assert set(kwargs) == {"curated_input_handle"}
         assert set(kwargs["curated_input_handle"]) == {"transaction_id", "sha256", "schema", "byte_size"}
         if isinstance(self._prediction, BaseException):
@@ -145,6 +177,14 @@ class _LifecycleFactory:
         return object()
 
     async def delete(self, sandbox: object) -> None:
+        """Delete a sandbox and record the deletion event.
+        
+        Parameters:
+        	sandbox (object): The sandbox to delete.
+        
+        Raises:
+        	RuntimeError: If sandbox deletion fails.
+        """
         self.events.append("delete")
         self.deleted.append(sandbox)
         if self.fail_delete:
@@ -169,6 +209,13 @@ def _record() -> OptimizationRecord:
 
 
 def _proof() -> ValidatedStrictDaytonaProof:
+    """
+    Create a validated proof for the standard test sandbox policy.
+    
+    Returns:
+    	ValidatedStrictDaytonaProof: A proof confirming the configured snapshot,
+    	gateway domain, isolation controls, and required security outcomes.
+    """
     policy = OptimizationSandboxPolicy("fleet-test-v1", ("gateway.example.test",))
     return validate_strict_daytona_proof(
         StrictDaytonaProofReceipt(
@@ -202,6 +249,16 @@ def _proof() -> ValidatedStrictDaytonaProof:
 
 
 def _lifecycle(factory: _LifecycleFactory, proof: object) -> StrictDaytonaEvaluationLifecycle:
+    """
+    Create a strict Daytona evaluation lifecycle for the fleet test policy.
+    
+    Parameters:
+    	factory (_LifecycleFactory): Factory used to create evaluation sandboxes.
+    	proof (object): Sandbox proof supplied to the lifecycle.
+    
+    Returns:
+    	StrictDaytonaEvaluationLifecycle: Configured evaluation lifecycle.
+    """
     return StrictDaytonaEvaluationLifecycle(
         factory=factory,  # type: ignore[arg-type]
         policy=OptimizationSandboxPolicy("fleet-test-v1", ("gateway.example.test",)),
@@ -251,6 +308,15 @@ async def test_lifecycle_builds_fresh_interpreter_and_rlm_then_deletes(monkeypat
     rlms: list[_RLM] = []
 
     def build_interpreter(**kwargs: Any) -> _Interpreter:
+        """
+        Create and record an interpreter configured with the curated-input reader tool.
+        
+        Parameters:
+        	**kwargs (Any): Interpreter configuration, including the required `read_curated_input` tool.
+        
+        Returns:
+        	_Interpreter: The newly created interpreter.
+        """
         assert set(kwargs["tools"]) == {"read_curated_input"}
         interpreter = _Interpreter(events)
         interpreters.append(interpreter)
@@ -268,6 +334,15 @@ async def test_lifecycle_builds_fresh_interpreter_and_rlm_then_deletes(monkeypat
     monkeypatch.setattr(subject, "build_native_rlm", build_rlm)
 
     def strict_inputs(handle: dict[str, object]) -> dict[str, object]:
+        """
+        Wrap a validated curated-input handle for strict evaluation.
+        
+        Parameters:
+        	handle (dict[str, object]): Input handle containing exactly `transaction_id`, `sha256`, `schema`, and `byte_size`.
+        
+        Returns:
+        	dict[str, object]: A mapping containing the curated input handle.
+        """
         assert set(handle) == {"transaction_id", "sha256", "schema", "byte_size"}
         assert handle["sha256"] != hashlib.sha256(("a" * 64).encode()).hexdigest()
         return {"curated_input_handle": handle}

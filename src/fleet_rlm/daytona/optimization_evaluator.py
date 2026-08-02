@@ -71,9 +71,29 @@ class OptimizationSandboxPlatform(Protocol):
         domain_allow_list: str | None = None,
         auto_stop_interval: int | None = None,
         auto_delete_interval: int | None = None,
-    ) -> Any: ...
+    ) -> Any: """
+        Create a Daytona sandbox with the requested storage, network, lifecycle, and labeling settings.
+        
+        Parameters:
+        	volume_id (str | None): Identifier of the volume to attach.
+        	mount_path (str | None): Path where the volume is mounted.
+        	volume_subpath (str | None): Subdirectory of the volume to mount.
+        	labels (dict[str, str] | None): Labels to associate with the sandbox.
+        	with_volume (bool): Whether to attach a volume.
+        	ephemeral (bool): Whether the sandbox is disposable.
+        	network_block_all (bool): Whether to block all network access by default.
+        	network_allow_list (str | None): Network allow-list configuration.
+        	domain_allow_list (str | None): Domain-based network allow-list configuration.
+        	auto_stop_interval (int | None): Interval after which the sandbox stops automatically.
+        	auto_delete_interval (int | None): Interval after which the sandbox is deleted automatically.
+        
+        Returns:
+        	Any: The created sandbox.
+        """
+        ...
 
-    async def delete(self, sandbox_id: Any) -> None: ...
+    async def delete(self, sandbox_id: Any) -> None: """Delete a disposable optimization sandbox identified by its provider ID."""
+...
 
 
 @dataclass(frozen=True, slots=True)
@@ -92,6 +112,13 @@ class OptimizationSandboxPolicy:
     auto_delete_interval_seconds: int = 0
 
     def __post_init__(self) -> None:
+        """
+        Validate and normalize the optimization sandbox policy.
+        
+        Raises:
+            OptimizationSandboxPolicyError: If the snapshot, gateway domains, network
+                restrictions, or lifecycle intervals are invalid.
+        """
         if not self.snapshot.strip():
             raise OptimizationSandboxPolicyError("trusted optimization snapshot is required")
         if not self.gateway_domains:
@@ -143,7 +170,17 @@ class DisposableOptimizationSandboxFactory:
         candidate_sha256: str,
         record_id: str,
     ) -> Any:
-        """Create one ephemeral, no-volume, no-secret evaluator sandbox."""
+        """Create an ephemeral, no-volume evaluator sandbox using the specified policy and evidence labels.
+        
+        Parameters:
+        	policy (OptimizationSandboxPolicy): Validated sandbox policy to apply.
+        	run_id (str): Identifier for the evaluation run.
+        	candidate_sha256 (str): SHA-256 digest of the candidate.
+        	record_id (str): Identifier for the evaluated record.
+        
+        Returns:
+        	The created sandbox.
+        """
         if policy.snapshot != self._sandbox_spec.snapshot:
             raise OptimizationSandboxPolicyError("policy snapshot does not match the configured trusted snapshot")
         labels = {
@@ -180,10 +217,22 @@ class StrictEvaluationProof:
     proof_id: str
 
     def __post_init__(self) -> None:
+        """
+        Validate the strict evaluation proof identifier.
+        
+        Raises:
+            OptimizationSandboxPolicyError: If the proof identifier is missing or invalid.
+        """
         if not _label_value(self.proof_id):
             raise OptimizationSandboxPolicyError("strict evaluator proof identifier is required")
 
     def require_verified(self) -> None:
+        """
+        Require verified read-only input delivery and gateway/broker policy.
+        
+        Raises:
+            StrictEvaluationCapabilityError: If either required verification is absent.
+        """
         if not self.readonly_input_boundary_verified:
             raise StrictEvaluationCapabilityError("strict evaluator requires verified read-only input delivery")
         if not self.gateway_broker_verified:
@@ -208,6 +257,13 @@ class StrictEvaluationRequest:
     attempt: int = 1
 
     def __post_init__(self) -> None:
+        """
+        Validate the candidate evaluation request fields.
+        
+        Raises:
+            OptimizationSandboxPolicyError: If the candidate or run identifier is empty,
+                or if the attempt number is less than one.
+        """
         if not isinstance(self.candidate, str) or not self.candidate.strip():
             raise OptimizationSandboxPolicyError("candidate instructions must be non-empty text")
         if not isinstance(self.run_id, str) or not self.run_id.strip():
@@ -217,6 +273,7 @@ class StrictEvaluationRequest:
 
     @property
     def candidate_sha256(self) -> str:
+        """Return the SHA-256 digest of the candidate text."""
         return hashlib.sha256(self.candidate.encode()).hexdigest()
 
 
@@ -251,6 +308,23 @@ class StrictDaytonaEvaluationLifecycle:
         schema_id: str = "fleet.signature-optimization",
         schema_version: str = "1",
     ) -> None:
+        """
+        Initialize the strict Daytona evaluation lifecycle.
+        
+        Parameters:
+        	factory (DisposableOptimizationSandboxFactory): Factory for creating and deleting evaluation sandboxes.
+        	policy (OptimizationSandboxPolicy): Sandbox isolation and lifecycle policy.
+        	proof (ValidatedStrictDaytonaProof): Validated evidence that the required isolation and gateway controls are active.
+        	models (StrictEvaluationModels): Host-selected models used for candidate evaluation.
+        	options (RLMOptions): Runtime options for the evaluator.
+        	execution_timeout_seconds (int): Maximum execution time for an evaluation.
+        	schema_id (str): Identifier for the evaluator output schema.
+        	schema_version (str): Version of the evaluator output schema.
+        
+        Raises:
+        	OptimizationSandboxPolicyError: If the timeout or schema identity is invalid.
+        	StrictEvaluationCapabilityError: If the proof is not validated or does not match the configured policy.
+        """
         if execution_timeout_seconds < 1:
             raise OptimizationSandboxPolicyError("strict evaluator timeout must be positive")
         if not schema_id.strip() or not schema_version.strip():
@@ -274,7 +348,24 @@ class StrictDaytonaEvaluationLifecycle:
         self._schema_version = schema_version
 
     async def evaluate(self, request: StrictEvaluationRequest) -> StrictEvaluationResult:
-        """Run a candidate once, retaining lifecycle ownership through deletion."""
+        """
+        Evaluate one candidate in an isolated disposable sandbox.
+        
+        Parameters:
+            request (StrictEvaluationRequest): Candidate, curated record, run identifier,
+                and attempt metadata for the evaluation.
+        
+        Returns:
+            StrictEvaluationResult: Sanitized prediction and evaluation evidence,
+                including usage, timing, digests, policy and proof identifiers, and
+                termination mode.
+        
+        Raises:
+            StrictEvaluationError: If execution times out or produces invalid typed
+                output.
+            StrictEvaluationCleanupError: If evaluation succeeds but sandbox cleanup
+                fails.
+        """
         candidate_sha256 = request.candidate_sha256
         _require_sha256(request.record.content_sha256, "record")
         curated_input = CuratedEvaluationStore(candidate=request.candidate, record=request.record)
@@ -354,7 +445,15 @@ class StrictDaytonaEvaluationLifecycle:
                 raise StrictEvaluationCleanupError("strict evaluator sandbox cleanup failed") from cleanup_error
 
     async def _cleanup(self, interpreter: DaytonaCodeInterpreter | None, sandbox: Any) -> BaseException | None:
-        """Attempt shutdown then deletion even under caller cancellation."""
+        """
+        Attempt interpreter shutdown and sandbox deletion, preserving cleanup failures during cancellation.
+        
+        Returns:
+            BaseException | None: The first cleanup error, or `None` when cleanup succeeds.
+        
+        Raises:
+            asyncio.CancelledError: If the caller is cancelled while sandbox deletion is pending.
+        """
         cleanup_error: BaseException | None = None
         if interpreter is not None:
             try:
@@ -382,7 +481,14 @@ class StrictDaytonaEvaluationLifecycle:
 
 
 def _strict_evaluator_signature() -> type[dspy.Signature]:
-    """Return a fixed signature that exposes only a curated-input capability handle."""
+    """
+    Define the fixed interface for strict curated-input evaluation.
+    
+    The signature exposes a curated-input capability handle and one typed answer field while excluding direct access to task data and external resources.
+    
+    Returns:
+        type[dspy.Signature]: The strict curated-evaluation signature class.
+    """
 
     class StrictCuratedEvaluationSignature(dspy.Signature):
         """Evaluate the task using only the curated input capability.
@@ -403,22 +509,52 @@ def _strict_evaluator_signature() -> type[dspy.Signature]:
 
 
 def _strict_named_inputs(handle: dict[str, str | int]) -> dict[str, Any]:
-    """Return only a public capability handle; no record/candidate direct channel exists."""
+    """
+    Expose a copied curated-input capability handle for evaluator access.
+    
+    Parameters:
+    	handle (dict[str, str | int]): Public handle identifying the curated-input capability.
+    
+    Returns:
+    	dict[str, Any]: Mapping containing the copied handle under `curated_input_handle`.
+    """
     return {"curated_input_handle": dict(handle)}
 
 
 def _termination_mode(prediction: Any) -> str:
+    """
+    Determine how the evaluator terminated based on the prediction metadata.
+    
+    Parameters:
+    	prediction (Any): The evaluator prediction to inspect.
+    
+    Returns:
+    	str: `"native_extraction_fallback"` when forced final output extraction was used; `"typed_submit"` otherwise.
+    """
     if getattr(prediction, "final_reasoning", None) == "Extract forced final output":
         return "native_extraction_fallback"
     return "typed_submit"
 
 
 def _require_sha256(value: str, label: str) -> None:
+    """Validate that a labeled value is a lowercase SHA-256 digest."""
     if not isinstance(value, str) or not _SHA256.fullmatch(value):
         raise OptimizationSandboxPolicyError(f"strict evaluator {label} digest must be SHA-256")
 
 
 def _label_value(value: str) -> str:
+    """
+    Normalize and validate a sandbox evidence label.
+    
+    Parameters:
+        value (str): Label value to normalize and validate.
+    
+    Returns:
+        str: Lowercase, trimmed label suitable for sandbox evidence metadata.
+    
+    Raises:
+        OptimizationSandboxPolicyError: If the label is empty, exceeds 64 characters, or contains unsupported characters.
+    """
     normalized = value.strip().lower()
     if not normalized or len(normalized) > 64 or not re.fullmatch(r"[a-z0-9][a-z0-9._-]*", normalized):
         raise OptimizationSandboxPolicyError("sandbox evidence labels must be safe bounded identifiers")

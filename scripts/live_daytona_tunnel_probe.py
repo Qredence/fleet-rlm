@@ -90,19 +90,29 @@ class _ControllerState:
 
     @property
     def allowed_domain(self) -> str:
+        """Return the hostname of the allowed origin."""
         return _domain(self.allowed_origin)
 
     @property
     def denied_domain(self) -> str:
+        """Return the hostname of the denied origin."""
         return _domain(self.denied_origin)
 
     def create_probe(self) -> str:
+        """Create a probe and return its unique identifier."""
         probe_id = secrets.token_urlsafe(18)
         with self.lock:
             self.observations[probe_id] = _ProbeObservation()
         return probe_id
 
     def observe(self, probe_id: str, route: str) -> None:
+        """
+        Record a request observed on a probe route.
+        
+        Parameters:
+        	probe_id (str): Identifier of the probe receiving the request.
+        	route (str): Probe route to record: `allowed`, `redirect`, or `denied`.
+        """
         with self.lock:
             observation = self.observations.get(probe_id)
             if observation is None:
@@ -115,6 +125,14 @@ class _ControllerState:
                 observation.denied_requests += 1
 
     def observation(self, probe_id: str) -> _ProbeObservation | None:
+        """Return a snapshot of the recorded observations for a probe.
+        
+        Parameters:
+        	probe_id (str): The identifier of the probe to inspect.
+        
+        Returns:
+        	_ProbeObservation | None: A copy of the probe's observations, or `None` if the probe does not exist.
+        """
         with self.lock:
             observation = self.observations.get(probe_id)
             if observation is None:
@@ -126,6 +144,10 @@ class _ControllerState:
             )
 
     def create_broker(self) -> tuple[str, str]:
+        """Create a broker and return its identifier and secret.
+        
+        Returns:
+        	tuple[str, str]: The broker identifier and secret."""
         broker_id = secrets.token_urlsafe(18)
         broker = _GatewayBroker()
         with self.lock:
@@ -141,6 +163,21 @@ class _ControllerState:
         args: list[object],
         kwargs: dict[str, object],
     ) -> tuple[object | None, str | None]:
+        """
+        Queue a validated broker tool call and wait for its completion.
+        
+        Parameters:
+            broker_id (str): Identifier of the broker receiving the call.
+            secret (str): Secret required to authorize the request.
+            tool_name (str): Name of the broker tool to invoke.
+            args (list[object]): Positional arguments for the tool.
+            kwargs (dict[str, object]): Keyword arguments for the tool.
+        
+        Returns:
+            tuple[object | None, str | None]: The tool result and error message. The error
+            is ``None`` for a successful call; unauthorized, unsupported, or timed-out
+            calls return an error message.
+        """
         with self.lock:
             broker = self.brokers.get(broker_id)
             if broker is None or not secrets.compare_digest(secret, broker.secret):
@@ -163,6 +200,15 @@ class _ControllerState:
         return call.result, call.error
 
     def broker_pending(self, broker_id: str) -> list[dict[str, object]] | None:
+        """
+        Lease and return pending calls for a broker.
+        
+        Parameters:
+        	broker_id (str): Identifier of the broker whose calls should be retrieved.
+        
+        Returns:
+        	list[dict[str, object]] | None: Pending calls with lease tokens, or `None` if the broker does not exist.
+        """
         with self.lock:
             broker = self.brokers.get(broker_id)
             if broker is None:
@@ -192,6 +238,19 @@ class _ControllerState:
         result: object | None,
         error: str | None,
     ) -> bool:
+        """
+        Complete a leased broker call with a result or error.
+        
+        Parameters:
+            broker_id (str): Identifier of the broker containing the call.
+            call_id (str): Identifier of the broker call.
+            lease_token (str): Token assigned when the call was leased.
+            result (object | None): Result value for a successful call.
+            error (str | None): Error description for a failed call.
+        
+        Returns:
+            bool: True if the call was completed, false if the broker, call, or lease token was invalid.
+        """
         with self.lock:
             broker = self.brokers.get(broker_id)
             call = broker.calls.get(call_id) if broker is not None else None
@@ -222,6 +281,7 @@ class _ProbeController(ThreadingHTTPServer):
 
     @property
     def controller_url(self) -> str:
+        """Return the loopback URL of the controller server."""
         host, port = self.server_address[:2]
         return f"http://{host}:{port}"
 
@@ -252,6 +312,9 @@ class _ProbeRequestHandler(BaseHTTPRequestHandler):
         self._handle_public_probe(parsed.path)
 
     def _handle_controller(self, path: str) -> None:
+        """Handle authenticated controller API requests for probe and broker management.
+        
+        Creates probes and brokers, reports probe observations, leases pending broker requests, and records broker results. Responds with an error for unauthorized, malformed, unsupported, or unknown requests."""
         if not self._is_loopback_controller_request():
             self._reply_json(403, {"error": "forbidden"})
             return
@@ -338,6 +401,11 @@ class _ProbeRequestHandler(BaseHTTPRequestHandler):
         self._reply_json(404, {"error": "not found"})
 
     def _handle_public_broker(self, path: str) -> None:
+        """Handle an authenticated public broker request and return its tool result.
+        
+        Parameters:
+            path (str): Broker call path used to identify the broker.
+        """
         match = re.fullmatch(r"/broker/([A-Za-z0-9_-]{16,128})/call", path)
         if match is None or self.command != "POST" or not self._is_allowed_gateway_request():
             self._reply_json(404, {"error": "not found"})
@@ -365,6 +433,11 @@ class _ProbeRequestHandler(BaseHTTPRequestHandler):
         self._reply_json(200, {"result": result})
 
     def _handle_public_probe(self, path: str) -> None:
+        """
+        Handle public health and synthetic probe requests.
+        
+        Records valid probe observations and returns the corresponding health, allowed, redirect, or denied response.
+        """
         state = self.server.state
         if self.command == "GET" and path == "/health":
             self._reply_json(200, {"status": "ok"})
@@ -399,16 +472,23 @@ class _ProbeRequestHandler(BaseHTTPRequestHandler):
         self._reply_json(204, None)
 
     def _is_loopback_controller_request(self) -> bool:
+        """Determine whether the request originates from loopback and has the controller bearer token."""
         client_host = self.client_address[0]
         return client_host in {"127.0.0.1", "::1"} and secrets.compare_digest(
             self.headers.get("Authorization", ""), f"Bearer {self.server.state.token}"
         )
 
     def _is_allowed_gateway_request(self) -> bool:
+        """Determine whether the request's host matches the configured allowed domain.
+        
+        Returns:
+        	bool: `True` if the host matches the allowed domain, `False` otherwise.
+        """
         host = self.headers.get("Host", "").split(":", 1)[0].lower()
         return host == self.server.state.allowed_domain
 
     def _drain_body(self) -> None:
+        """Drain a bounded request body from the input stream."""
         try:
             size = int(self.headers.get("Content-Length", "0"))
         except ValueError:
@@ -417,6 +497,11 @@ class _ProbeRequestHandler(BaseHTTPRequestHandler):
             self.rfile.read(size)
 
     def _read_json_body(self) -> dict[str, object] | None:
+        """Parse a bounded request body as a JSON object.
+        
+        Returns:
+        	dict[str, object] | None: The decoded JSON object, or `None` when the body is missing, oversized, invalid, or not an object.
+        """
         try:
             size = int(self.headers.get("Content-Length", "0"))
         except ValueError:
@@ -430,6 +515,7 @@ class _ProbeRequestHandler(BaseHTTPRequestHandler):
         return value if isinstance(value, dict) else None
 
     def _reply_json(self, status: int, payload: dict[str, Any] | None) -> None:
+        """Send an HTTP response with an optional JSON body."""
         body = b"" if payload is None else json.dumps(payload, separators=(",", ":")).encode()
         self.send_response(status)
         self.send_header("Content-Length", str(len(body)))
@@ -447,6 +533,15 @@ class _Tunnel:
     configuration_path: Path | None = None
 
     def wait_for_url(self) -> str:
+        """
+        Wait for the tunnel process to publish its HTTPS hostname.
+        
+        Returns:
+        	str: The published lowercase HTTPS tunnel URL.
+        
+        Raises:
+        	TunnelProbeError: If the process exits before publishing a URL or the startup timeout expires.
+        """
         deadline = time.monotonic() + _START_TIMEOUT_SECONDS
         while time.monotonic() < deadline:
             if self.process.poll() is not None:
@@ -461,6 +556,11 @@ class _Tunnel:
         raise TunnelProbeError("Cloudflare quick tunnel did not publish an HTTPS hostname before timeout")
 
     def stop(self) -> None:
+        """
+        Stop the tunnel process and remove its temporary configuration file.
+        
+        The process is terminated gracefully and force-killed if it does not exit within the timeout.
+        """
         try:
             if self.process.poll() is not None:
                 return
@@ -476,6 +576,18 @@ class _Tunnel:
 
 
 def _start_tunnel(controller_url: str) -> _Tunnel:
+    """
+    Start a Cloudflare quick tunnel that forwards traffic to the controller.
+    
+    Parameters:
+    	controller_url (str): Local controller URL to expose through the tunnel.
+    
+    Returns:
+    	_Tunnel: Running tunnel process and its output queue.
+    
+    Raises:
+    	TunnelProbeError: If `cloudflared` is unavailable.
+    """
     try:
         process = subprocess.Popen(
             [
@@ -516,6 +628,15 @@ class _NamedTunnelConfiguration:
 
 
 def _configured_named_tunnel() -> _NamedTunnelConfiguration | None:
+    """
+    Load and validate the optional named-tunnel configuration from environment variables.
+    
+    Returns:
+    	_NamedTunnelConfiguration | None: The validated named-tunnel configuration, or `None` when no named-tunnel settings are provided.
+    
+    Raises:
+    	TunnelProbeError: If the configuration is incomplete or contains invalid credentials, identifiers, origins, or duplicate hostnames.
+    """
     values = {name: os.environ.get(name, "").strip() for name in _NAMED_TUNNEL_ENVIRONMENT}
     populated = {name: value for name, value in values.items() if value}
     if not populated:
@@ -541,6 +662,18 @@ def _configured_named_tunnel() -> _NamedTunnelConfiguration | None:
 
 
 def _validated_https_origin(origin: str) -> str:
+    """
+    Validate and normalize a named tunnel's HTTPS origin.
+    
+    Parameters:
+    	origin (str): Origin to validate.
+    
+    Returns:
+    	str: Lowercase HTTPS origin containing only the hostname.
+    
+    Raises:
+    	TunnelProbeError: If the origin is not a bare HTTPS origin.
+    """
     parsed = urlparse(origin)
     if (
         parsed.scheme != "https"
@@ -560,6 +693,19 @@ def _validated_https_origin(origin: str) -> str:
 def _start_named_tunnel(
     configuration: _NamedTunnelConfiguration, controller_url: str
 ) -> _Tunnel:
+    """
+    Start a configured Cloudflare named tunnel that routes both probe origins to the controller.
+    
+    Parameters:
+        configuration (_NamedTunnelConfiguration): Named-tunnel settings and origin hostnames.
+        controller_url (str): Loopback URL to expose through the tunnel.
+    
+    Returns:
+        _Tunnel: Running tunnel process and its temporary configuration.
+    
+    Raises:
+        TunnelProbeError: If `cloudflared` is unavailable.
+    """
     controller = urlparse(controller_url)
     assert controller.hostname and controller.port
     allowed_domain = _domain(configuration.allowed_origin)
@@ -621,6 +767,14 @@ def _start_named_tunnel(
 
 
 def _health_status(origin: str) -> str:
+    """Checks an origin's health endpoint and categorizes the response.
+    
+    Parameters:
+        origin (str): The HTTPS origin to check.
+    
+    Returns:
+        str: The HTTP status or a category describing the connectivity failure.
+    """
     try:
         request = Request(f"{origin}/health", headers=_HEALTH_HEADERS)
         with urlopen(request, timeout=_HEALTH_TIMEOUT_SECONDS) as response:
@@ -636,7 +790,15 @@ def _health_status(origin: str) -> str:
 
 
 def _health_status_via_cloudflare_dns(origin: str) -> str:
-    """Preflight a quick tunnel when the local resolver has not propagated it."""
+    """
+    Check a quick tunnel's health by resolving its hostname through Cloudflare DNS.
+    
+    Parameters:
+    	origin (str): HTTPS tunnel origin to check.
+    
+    Returns:
+    	str: The HTTP status category, or a reason for an invalid hostname, DNS failure, or unreachable edge.
+    """
     hostname = _domain(origin)
     if not hostname.endswith(".trycloudflare.com"):
         return "unreachable-invalid-host"
@@ -661,7 +823,15 @@ def _health_status_via_cloudflare_dns(origin: str) -> str:
 
 
 def _cloudflare_dns_ipv4(hostname: str) -> str | None:
-    """Resolve a temporary tunnel hostname through public DNS without logging it."""
+    """
+    Resolve a hostname through Cloudflare DNS-over-HTTPS and return its IPv4 address.
+    
+    Parameters:
+        hostname (str): Hostname to resolve.
+    
+    Returns:
+        str | None: The resolved IPv4 address, or `None` if resolution fails or no IPv4 address is found.
+    """
     current = hostname
     for _attempt in range(4):
         request = Request(
@@ -692,6 +862,15 @@ def _cloudflare_dns_ipv4(hostname: str) -> str | None:
 
 
 def _wait_healthy(origin: str) -> str:
+    """
+    Poll the origin until it responds over HTTP/2 or the health-check timeout expires.
+    
+    Parameters:
+    	origin (str): HTTPS origin to check.
+    
+    Returns:
+    	str: The most recent health status, including an HTTP/2 status when the origin becomes ready.
+    """
     deadline = time.monotonic() + _HEALTH_READY_TIMEOUT_SECONDS
     last_status = "unreachable"
     while time.monotonic() < deadline:
@@ -703,6 +882,18 @@ def _wait_healthy(origin: str) -> str:
 
 
 def _start_healthy_tunnel(controller_url: str) -> tuple[_Tunnel, str]:
+    """
+    Start a Cloudflare quick tunnel and wait for a healthy HTTPS origin.
+    
+    Parameters:
+        controller_url (str): Loopback controller URL exposed through the tunnel.
+    
+    Returns:
+        tuple[_Tunnel, str]: The running tunnel and its healthy public origin.
+    
+    Raises:
+        TunnelProbeError: If all tunnel startup attempts fail or the origin does not pass the HTTPS health check.
+    """
     failures: list[str] = []
     for _attempt in range(_TUNNEL_START_ATTEMPTS):
         tunnel = _start_tunnel(controller_url)
@@ -719,6 +910,15 @@ def _start_healthy_tunnel(controller_url: str) -> tuple[_Tunnel, str]:
 
 
 def _domain(origin: str) -> str:
+    """
+    Extract the lowercase hostname from an origin URL.
+    
+    Parameters:
+    	origin (str): Origin URL whose hostname should be extracted.
+    
+    Returns:
+    	str: The lowercase hostname.
+    """
     hostname = urlparse(origin).hostname
     if not hostname:
         raise TunnelProbeError("Cloudflare quick tunnel did not provide a hostname")
@@ -733,7 +933,15 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
-    """Start the development-only controller and execute one live-test command."""
+    """
+    Start the development-only controller and execute the specified live-test command.
+    
+    Parameters:
+        argv (list[str] | None): Optional command-line arguments to parse.
+    
+    Returns:
+        int: The child command's exit status, or 2 if setup validation fails.
+    """
     args = build_parser().parse_args(argv)
     command = list(args.command)
     if command[:1] == ["--"]:
