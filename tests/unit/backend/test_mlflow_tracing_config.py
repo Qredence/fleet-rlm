@@ -278,6 +278,23 @@ def test_mlflow_span_processor_redacts_autolog_content_fields() -> None:
     assert span.attributes["tool_output"].startswith("[redacted sha256=")
 
 
+def test_mlflow_span_processor_redacts_namespaced_and_unknown_text_fields() -> None:
+    sanitized = tracing._sanitize_mlflow_value(
+        {
+            "gen_ai.prompt": "private prompt",
+            "mlflow.spanInputs": "private input",
+            "custom_question": "private question",
+            "model": "openai/gpt-5",
+        }
+    )
+
+    assert isinstance(sanitized, dict)
+    assert sanitized["gen_ai.prompt"].startswith("[redacted sha256=")
+    assert sanitized["mlflow.spanInputs"].startswith("[redacted sha256=")
+    assert sanitized["custom_question"].startswith("[redacted sha256=")
+    assert sanitized["model"] == "openai/gpt-5"
+
+
 def test_configure_tracing_local_server_needs_only_experiment(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

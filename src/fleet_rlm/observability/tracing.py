@@ -21,6 +21,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 import socket
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, cast
@@ -37,6 +38,7 @@ _TRACING_CONFIGURED = False
 _TRACING_ACTIVE = False
 _DEFAULT_TRACKING_URI = "databricks"
 _TRACE_DESTINATION_TAG = "mlflow.experiment.databricksTraceDestinationPath"
+_CREDENTIAL_KEYS = frozenset({"api_key", "authorization", "credential", "password", "secret", "token"})
 _CONTENT_BEARING_KEYS = frozenset(
     {
         "answer",
@@ -64,6 +66,31 @@ _CONTENT_BEARING_KEYS = frozenset(
         "tool_output",
     }
 )
+_OPERATIONAL_TEXT_KEYS = frozenset(
+    {
+        "cache",
+        "engine",
+        "failure_category",
+        "kind",
+        "model",
+        "model_type",
+        "name",
+        "phase_status",
+        "provider",
+        "provider_type",
+        "role",
+        "status",
+        "termination_mode",
+        "type",
+    }
+)
+
+
+def _normalize_trace_key(key: str | None) -> str:
+    """Normalize dotted, hyphenated, and camel-case span keys for policy checks."""
+    raw = (key or "").strip()
+    raw = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", raw)
+    return re.sub(r"[^a-zA-Z0-9]+", "_", raw).strip("_").lower()
 
 
 def _trace_digest(value: object) -> str:
@@ -79,7 +106,7 @@ def _sanitize_mlflow_value(value: object, *, key: str | None = None, depth: int 
     """Preserve operational metadata while replacing content-bearing trace values."""
     if depth >= 8:
         return "[redacted depth]"
-    normalized_key = (key or "").strip().lower().replace("-", "_")
+    normalized_key = _normalize_trace_key(key)
     if normalized_key in _CONTENT_BEARING_KEYS or normalized_key.endswith(
         ("_input", "_output", "_prompt", "_response")
     ):
@@ -94,9 +121,13 @@ def _sanitize_mlflow_value(value: object, *, key: str | None = None, depth: int 
     if isinstance(value, str):
         from fleet_rlm.rlm.sanitize import sanitize_public_text
 
-        if normalized_key in {"token", "api_key", "authorization", "credential", "password", "secret"}:
+        if normalized_key in _CREDENTIAL_KEYS:
             return "[redacted]"
-        return sanitize_public_text(value, max_len=256)
+        if normalized_key in _OPERATIONAL_TEXT_KEYS:
+            return sanitize_public_text(value, max_len=256)
+        # DSPy signatures may use arbitrary field names, so unknown string
+        # fields must be treated as content rather than exported by default.
+        return _trace_digest(value)
     if value is None or isinstance(value, (bool, int, float)):
         return value
     return type(value).__name__
