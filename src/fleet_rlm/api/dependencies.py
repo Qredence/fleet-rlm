@@ -29,7 +29,9 @@ def require_loopback_client(request: Request) -> None:
     """Keep filesystem/compute administration local even on an unsafe API bind."""
     # Reject requests that carry proxy-forwarding headers: a local reverse proxy
     # connecting from 127.0.0.1 would make non-local clients appear loopback.
-    if request.headers.get("x-forwarded-for") or request.headers.get("forwarded"):
+    # Reject by header presence (even empty values), not truthiness.
+    forwarding_headers = ("x-forwarded-for", "forwarded", "x-real-ip")
+    if any(header in request.headers for header in forwarding_headers):
         raise HTTPException(
             status_code=403,
             detail={"code": "settings_local_only", "message": "Available only from the local machine"},
