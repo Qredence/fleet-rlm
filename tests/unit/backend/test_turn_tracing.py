@@ -444,3 +444,179 @@ def test_turn_phase_span_without_active_trace_preserves_body_exception(
         raise expected
 
     assert raised.value is expected
+
+
+def test_recursive_child_span_records_bounded_metadata(monkeypatch: pytest.MonkeyPatch) -> None:
+    import time
+
+    from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
+    from fleet_rlm.rlm.model_bundle import RLMModelBundle
+    from fleet_rlm.rlm.recursive_calls import RecursiveRLMExecutor, RecursiveRLMOptions
+
+    calls = _install_fake_mlflow(monkeypatch)
+    adapter = dspy.JSONAdapter()
+    executor = RecursiveRLMExecutor(
+        models=RLMModelBundle(
+            dspy.utils.DummyLM(
+                [{"reasoning": "submit", "code": "SUBMIT(answer='child-ok')"}],
+                adapter=adapter,
+            ),
+            dspy.utils.DummyLM([{"answer": "fallback"}], adapter=adapter),
+        ),
+        options=RecursiveRLMOptions(),
+        child_interpreter_factory=lambda: DaytonaCodeInterpreter(backend=InProcessInterpreterBackend()),
+        deadline=time.monotonic() + 30,
+    )
+
+    with turn_trace(uuid4(), uuid4(), enabled=True):
+        assert executor.tool(prompt="classify selected row") == "child-ok"
+
+    assert calls.start_span_names[:2] == ["fleet_turn", "RLM.recursive_call"]
+    recursive_inputs = [
+        payload
+        for payload in calls.span_inputs
+        if "recursive_depth" in payload and "prompt_chars" in payload and "role" not in payload
+    ]
+    assert recursive_inputs == [
+        {
+            "recursive_depth": 1,
+            "call_index": 1,
+            "prompt_chars": len("classify selected row"),
+        }
+    ]
+    recursive_outputs = [payload for payload in calls.span_outputs if payload.get("termination_mode")]
+    assert recursive_outputs[-1]["termination_mode"] == "typed_submit"
+    assert recursive_outputs[-1]["child_iterations"] == 1
+    assert recursive_outputs[-1]["phase_status"] == "completed"
+    assert "classify selected row" not in str(recursive_inputs)
+    assert "child-ok" not in str(recursive_outputs)
+
+
+def test_recursive_child_span_marks_shutdown_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    import time
+
+    from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
+    from fleet_rlm.rlm.model_bundle import RLMModelBundle
+    from fleet_rlm.rlm.recursive_calls import RecursiveRLMExecutor, RecursiveRLMOptions
+
+    calls = _install_fake_mlflow(monkeypatch)
+    adapter = dspy.JSONAdapter()
+    executor = RecursiveRLMExecutor(
+        models=RLMModelBundle(
+            dspy.utils.DummyLM(
+                [{"reasoning": "submit", "code": "SUBMIT(answer='child-ok')"}],
+                adapter=adapter,
+            ),
+            dspy.utils.DummyLM([{"answer": "fallback"}], adapter=adapter),
+        ),
+        options=RecursiveRLMOptions(),
+        child_interpreter_factory=lambda: DaytonaCodeInterpreter(backend=InProcessInterpreterBackend()),
+        deadline=time.monotonic() + 30,
+    )
+
+    def _shutdown_boom(self: DaytonaCodeInterpreter) -> None:
+        del self
+        raise RuntimeError("shutdown failed")
+
+    monkeypatch.setattr(DaytonaCodeInterpreter, "shutdown", _shutdown_boom)
+
+    with pytest.raises(RuntimeError, match="shutdown failed"), turn_trace(uuid4(), uuid4(), enabled=True):
+        executor.tool(prompt="classify selected row")
+
+    recursive_outputs = [payload for payload in calls.span_outputs if payload.get("phase_status")]
+    assert recursive_outputs[-1]["phase_status"] == "failed"
+    assert recursive_outputs[-1]["failure_category"] == "unknown"
+
+
+def test_recursive_child_span_marks_native_setup_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    import time
+
+    from fleet_rlm.rlm.model_bundle import RLMModelBundle
+    from fleet_rlm.rlm.recursive_calls import RecursiveRLMExecutor, RecursiveRLMOptions
+
+    calls = _install_fake_mlflow(monkeypatch)
+    adapter = dspy.JSONAdapter()
+
+    def _raise_setup_error() -> None:
+        raise RuntimeError("interpreter setup failed")
+
+    executor = RecursiveRLMExecutor(
+        models=RLMModelBundle(
+            dspy.utils.DummyLM([{"answer": "unused"}], adapter=adapter),
+            dspy.utils.DummyLM([{"answer": "unused"}], adapter=adapter),
+        ),
+        options=RecursiveRLMOptions(),
+        child_interpreter_factory=_raise_setup_error,
+        deadline=time.monotonic() + 30,
+    )
+
+    with pytest.raises(RuntimeError, match="interpreter setup failed"), turn_trace(uuid4(), uuid4(), enabled=True):
+        executor.tool(prompt="slice")
+
+    failed_outputs = [
+        payload
+        for payload in calls.span_outputs
+        if payload.get("phase_status") == "failed" and "failure_category" in payload
+    ]
+    assert failed_outputs[-1]["failure_category"] == "unknown"
+
+
+def test_recursive_depth_fallback_span_records_mode(monkeypatch: pytest.MonkeyPatch) -> None:
+    import time
+
+    from fleet_rlm.rlm.model_bundle import RLMModelBundle
+    from fleet_rlm.rlm.recursive_calls import RecursiveRLMExecutor, RecursiveRLMOptions
+
+    calls = _install_fake_mlflow(monkeypatch)
+    adapter = dspy.JSONAdapter()
+    executor = RecursiveRLMExecutor(
+        models=RLMModelBundle(
+            dspy.utils.DummyLM([{"answer": "unused"}], adapter=adapter),
+            dspy.utils.DummyLM([{"answer": "fallback-answer"}], adapter=adapter),
+        ),
+        options=RecursiveRLMOptions(max_depth=1),
+        child_interpreter_factory=None,
+        deadline=time.monotonic() + 30,
+    )
+
+    with turn_trace(uuid4(), uuid4(), enabled=True):
+        assert executor.tool(prompt="outer slice") == "fallback-answer"
+
+    assert calls.start_span_names[:2] == ["fleet_turn", "RLM.recursive_call"]
+    outputs = [payload for payload in calls.span_outputs if payload.get("termination_mode")]
+    assert any(payload["termination_mode"] == "depth_fallback" for payload in outputs)
+
+
+def test_recursive_call_span_marks_failure_with_bounded_category(monkeypatch: pytest.MonkeyPatch) -> None:
+    import time
+
+    from fleet_rlm.rlm.model_bundle import RLMModelBundle
+    from fleet_rlm.rlm.recursive_calls import RecursiveRLMExecutor, RecursiveRLMOptions
+
+    calls = _install_fake_mlflow(monkeypatch)
+    adapter = dspy.JSONAdapter()
+    executor = RecursiveRLMExecutor(
+        models=RLMModelBundle(
+            dspy.utils.DummyLM([{"answer": "unused"}], adapter=adapter),
+            dspy.utils.DummyLM([{"answer": "unused"}], adapter=adapter),
+        ),
+        options=RecursiveRLMOptions(max_depth=1),
+        child_interpreter_factory=None,
+        deadline=time.monotonic() + 30,
+    )
+
+    def _boom(self: RecursiveRLMExecutor, prompt: str) -> str:
+        del self, prompt
+        raise TimeoutError("child timed out")
+
+    monkeypatch.setattr(RecursiveRLMExecutor, "_plain_sub_lm", _boom)
+
+    with pytest.raises(TimeoutError), turn_trace(uuid4(), uuid4(), enabled=True):
+        executor.tool(prompt="slice")
+
+    failed_outputs = [
+        payload
+        for payload in calls.span_outputs
+        if payload.get("phase_status") == "failed" and "failure_category" in payload
+    ]
+    assert failed_outputs[-1]["failure_category"] == "timeout"

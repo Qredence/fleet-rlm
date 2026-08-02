@@ -239,10 +239,85 @@ def test_mlflow_315_span_processor_bounds_and_redacts_values() -> None:
 
     assert span.inputs["token"] == "[redacted]"
     assert isinstance(span.inputs["body"], str)
-    assert len(span.inputs["body"]) <= 1_000
-    assert isinstance(span.outputs["answer"], str)
-    assert len(span.outputs["answer"]) <= 1_000
+    assert len(span.inputs["body"]) <= 256
+    assert span.outputs["answer"].startswith("[redacted sha256=")
     assert span.attributes["api_key"] == "[redacted]"
+
+
+def test_mlflow_span_processor_redacts_autolog_content_fields() -> None:
+    class Span:
+        def __init__(self) -> None:
+            self.inputs: dict[str, object] = {
+                "prompt": "candidate instruction must never be exported",
+                "token_usage": 42,
+            }
+            self.outputs: dict[str, object] = {
+                "response": "provider body must never be exported",
+                "duration_ms": 15,
+            }
+            self.attributes: dict[str, object] = {"engine": "gepa", "tool_output": "private tool result"}
+
+        def set_inputs(self, value: object) -> None:
+            self.inputs = value
+
+        def set_outputs(self, value: object) -> None:
+            self.outputs = value
+
+        def set_attributes(self, value: dict[str, object]) -> None:
+            self.attributes = value
+
+    span = Span()
+
+    tracing._sanitize_mlflow_span(span)
+
+    assert span.inputs["prompt"].startswith("[redacted sha256=")
+    assert span.inputs["token_usage"] == 42
+    assert span.outputs["response"].startswith("[redacted sha256=")
+    assert span.outputs["duration_ms"] == 15
+    assert span.attributes["engine"] == "gepa"
+    assert span.attributes["tool_output"].startswith("[redacted sha256=")
+
+
+def test_mlflow_span_processor_redacts_namespaced_and_unknown_text_fields() -> None:
+    sanitized = tracing._sanitize_mlflow_value(
+        {
+            "gen_ai.prompt": "private prompt",
+            "mlflow.spanInputs": "private input",
+            "custom_question": "private question",
+            "openai_api_key": "private key",
+            "access_token": "private token",
+            "model": "openai/gpt-5",
+        }
+    )
+
+    assert isinstance(sanitized, dict)
+    assert sanitized["gen_ai.prompt"].startswith("[redacted sha256=")
+    assert sanitized["mlflow.spanInputs"].startswith("[redacted sha256=")
+    assert sanitized["custom_question"].startswith("[redacted sha256=")
+    assert sanitized["openai_api_key"] == "[redacted]"
+    assert sanitized["access_token"] == "[redacted]"
+    assert sanitized["model"] == "openai/gpt-5"
+
+
+def test_mlflow_span_processor_bounds_collection_size_and_depth() -> None:
+    mapping = tracing._sanitize_mlflow_value({str(index): index for index in range(60)})
+    values = tracing._sanitize_mlflow_value(list(range(60)))
+
+    assert isinstance(mapping, dict)
+    assert len(mapping) == 50
+    assert isinstance(values, list)
+    assert len(values) == 50
+
+    nested: object = {"value": "private"}
+    for _ in range(8):
+        nested = {"nested": nested}
+    sanitized_nested = tracing._sanitize_mlflow_value(nested)
+    assert isinstance(sanitized_nested, dict)
+    cursor: object = sanitized_nested
+    for _ in range(8):
+        assert isinstance(cursor, dict)
+        cursor = cursor["nested"]
+    assert cursor == "[redacted depth]"
 
 
 def test_configure_tracing_local_server_needs_only_experiment(
