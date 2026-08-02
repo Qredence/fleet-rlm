@@ -257,9 +257,7 @@ class _ProbeController:
             pytest.fail("probe controller returned invalid broker requests")
         return [cast(dict[str, object], item) for item in requests]
 
-    async def submit_gateway_result(
-        self, broker: _GatewayBroker, payload: dict[str, object]
-    ) -> None:
+    async def submit_gateway_result(self, broker: _GatewayBroker, payload: dict[str, object]) -> None:
         """Submit a gateway broker result payload to the probe controller."""
         await asyncio.to_thread(self._request, "POST", f"v1/brokers/{broker.broker_id}/result", payload)
 
@@ -696,6 +694,10 @@ async def test_safe_optimizer_strict_daytona_policy_canary(tmp_path) -> None:
                 cleanup["sandbox"] = True
             except BaseException as exc:
                 cleanup_error = cleanup_error or exc
+        try:
+            assert all(value is True for value in cleanup.values())
+        except AssertionError as exc:
+            cleanup_error = cleanup_error or exc
         if cleanup_error is not None:
             # Mirror the production _cleanup precedence: never let a cleanup
             # failure mask the primary probe failure; chain it as a note.
@@ -703,7 +705,6 @@ async def test_safe_optimizer_strict_daytona_policy_canary(tmp_path) -> None:
                 raise cleanup_error
             primary_error.add_note(f"cleanup also failed: {cleanup_error!r}")
 
-    assert all(value is True for value in cleanup.values())
     report = DevelopmentDaytonaCanaryReport(
         policy_id=policy.policy_id,
         snapshot=policy.snapshot,

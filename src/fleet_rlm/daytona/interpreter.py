@@ -558,18 +558,27 @@ class DaytonaCodeInterpreter:
         if self._shutdown:
             return
         self._shutdown = True
+        first_error: BaseException | None = None
         try:
             if self._http_broker is not None:
                 broker = self._http_broker
                 self._http_broker = None
                 if strict_broker_cleanup:
-                    broker.stop(strict=True)
+                    try:
+                        broker.stop(strict=True)
+                    except BaseException as exc:
+                        first_error = exc
                 else:
                     with contextlib.suppress(Exception):
                         broker.stop()
         finally:
             if self._backend is not None:
-                self._backend.close()
+                try:
+                    self._backend.close()
+                except BaseException as exc:
+                    first_error = first_error or exc
+        if first_error is not None:
+            raise first_error
 
     def _ensure_bindings(self) -> None:
         """
