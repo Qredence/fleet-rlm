@@ -284,6 +284,8 @@ def test_mlflow_span_processor_redacts_namespaced_and_unknown_text_fields() -> N
             "gen_ai.prompt": "private prompt",
             "mlflow.spanInputs": "private input",
             "custom_question": "private question",
+            "openai_api_key": "private key",
+            "access_token": "private token",
             "model": "openai/gpt-5",
         }
     )
@@ -292,6 +294,8 @@ def test_mlflow_span_processor_redacts_namespaced_and_unknown_text_fields() -> N
     assert sanitized["gen_ai.prompt"].startswith("[redacted sha256=")
     assert sanitized["mlflow.spanInputs"].startswith("[redacted sha256=")
     assert sanitized["custom_question"].startswith("[redacted sha256=")
+    assert sanitized["openai_api_key"] == "[redacted]"
+    assert sanitized["access_token"] == "[redacted]"
     assert sanitized["model"] == "openai/gpt-5"
 
 

@@ -212,6 +212,7 @@ class RecursiveRLMExecutor:
             observer=self._observer,
         )
         failed = False
+        completion_outputs: dict[str, object] | None = None
         try:
             child = build_native_rlm(
                 signature=RecursiveSubtaskSignature,
@@ -254,10 +255,7 @@ class RecursiveRLMExecutor:
                 else "typed_submit"
             )
             self._state.termination_modes.append(mode)
-            span.finish(
-                phase_status="completed",
-                outputs={"termination_mode": mode, "child_iterations": child_iterations},
-            )
+            completion_outputs = {"termination_mode": mode, "child_iterations": child_iterations}
             return result.display_text
         except Exception as exc:
             failed = True
@@ -271,9 +269,15 @@ class RecursiveRLMExecutor:
             if interpreter is not None:
                 try:
                     interpreter.shutdown()
-                except Exception:
+                except Exception as exc:
                     if not failed:
+                        span.finish(
+                            phase_status="failed",
+                            outputs={"failure_category": trace_failure_category(exc)},
+                        )
                         raise
+            if not failed and completion_outputs is not None:
+                span.finish(phase_status="completed", outputs=completion_outputs)
 
     def _plain_sub_lm(self, prompt: str) -> str:
         """Use the configured Sub LM at the depth cap.
