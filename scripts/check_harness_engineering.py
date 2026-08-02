@@ -50,7 +50,7 @@ STALE_CONTROL_MARKERS = (
     "src/fleet_rlm/integrations/daytona",
 )
 LOCAL_COMMAND_PATTERN = re.compile(
-    r"(?<![A-Za-z0-9_.-])((?:scripts|\.codex)/[A-Za-z0-9_./-]+\.(?:py|sh|zsh))(?![A-Za-z0-9_.-])"
+    r"(?<![A-Za-z0-9_./-])((?:scripts|\.codex)/[A-Za-z0-9_./-]+\.(?:py|sh|zsh))(?![A-Za-z0-9_.-])"
 )
 
 
