@@ -17,10 +17,10 @@ scripts import the installed `fleet_rlm` package; the backend never imports scri
   established constant name.
 - Credentialed scripts that load `.env` use
   `dotenv.load_dotenv(..., override=False)` so process exports still win.
-- Sibling imports across `scripts/benchmarks/` go through the established
-  repo-root `sys.path` bootstrap (`openapi_tools.py:16`), keeping both direct-file
-  and `-m` module execution working; shared Fleet judge definitions live only in
-  `scripts/benchmarks/judges.py`.
+- Sibling imports across `scripts/benchmarks/`/`scripts/optimize/` go through the
+  established repo-root `sys.path` bootstrap (`openapi_tools.py:16`), keeping both
+  direct-file and `-m` module execution working; shared Fleet judge definitions
+  live only in `scripts/benchmarks/judges.py`.
 - Print errors to `sys.stderr`; return non-zero on failure.
 
 ## Validation
@@ -34,10 +34,13 @@ make api-sync              # OpenAPI + generated TUI types (openapi_tools.py)
 ## Credential Boundary
 
 - Live proof and networked benchmark entry points, plus the maintained
-  Databricks quality-loop scripts, require explicit `FLEET_LIVE=1`.
+  Databricks quality-loop scripts and GEPA execution, require explicit
+  `FLEET_LIVE=1`; the reusable GEPA smoke runner enforces this before
+  credentials or models are constructed.
 - Never hardcode or log credentials; read from env after dotenv load.
 - `scripts/benchmarks/` owns benchmark and Databricks quality-loop helpers
-  (including the shared Fleet judge definitions).
+  (including the shared Fleet judge definitions); `scripts/optimize/` remains
+  the trusted-host signature-optimization lane.
 
 ## Quality-Gate Scripts
 

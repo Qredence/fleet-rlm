@@ -62,6 +62,10 @@ droid-wiki/
 # Generated video (Factory artifact)
 .factory/video/
 
+# GEPA optimizer engine run-dirs and agent tooling state
+outputs/
+.ai-dev-kit/
+
 # Local runtime state
 .fleet_rlm/
 

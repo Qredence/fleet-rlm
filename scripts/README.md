@@ -21,10 +21,12 @@
 | `benchmarks/rlm_eval_dataset.py` | Manage the UC-backed v2 evaluation dataset (static records + tagged production traces with expectations) |
 | `benchmarks/enable_monitoring.py` | Start, inspect, and stop server-side production monitoring scorers over UC-ingested traces |
 | `benchmarks/align_judges.py` | Align Fleet judges with SME feedback via labeling sessions and MemAlign, then re-evaluate the baseline |
+| `optimize/optimize_signature_omni.py` | Optimize the Fleet RLM signature with a GEPA omni-style explore/continue composition |
+| `optimize/optimize_signature_gepa.py` | Run the fail-closed preflight or development-only synthetic GEPA smoke |
 
 Legacy WebSocket and compatibility runtime scripts were retired with the
-backend hard cutover. The evaluation entries above are maintained trusted-host
-CLI workflows.
+backend hard cutover. The evaluation and optimization entries above are the
+maintained trusted-host CLI workflows.
 
 The live RLM latency gate is opt-in and never edits Fleet policy. Restart Fleet
 with each candidate configuration, then label that active policy explicitly:
@@ -41,9 +43,9 @@ MLflow-supported endpoint (e.g. `gateway:/databricks-inkling` via a local
 MLflow AI Gateway server); the Fleet DSPy model aliases are not automatically
 valid MLflow judge endpoints.
 
-## Evaluation and monitoring loop
+## Evaluation and optimization loop
 
-The Databricks-backed quality loop composes three opt-in steps that all require
+The Databricks-backed quality loop composes four opt-in steps that all require
 `FLEET_LIVE=1` and Databricks auth from the environment:
 
 1. `benchmarks/rlm_eval_dataset.py ingest-static|ingest-traces` builds the v2
@@ -54,3 +56,8 @@ The Databricks-backed quality loop composes three opt-in steps that all require
 3. `benchmarks/align_judges.py prepare-labeling|align|reeval-baseline` opens an
    SME labeling session, distills judge guidelines with MemAlign, and re-runs
    the aligned baseline under a named run.
+4. `optimize/optimize_signature_omni.py` explores and continues signature
+   candidates against the dataset with GEPA; the best candidate is written for
+   human review and never auto-applied.
+
+See `scripts/optimize/AGENTS.md` for optimizer-lane constraints.
