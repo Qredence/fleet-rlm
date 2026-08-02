@@ -97,6 +97,10 @@ benchmark = [
     "tiktoken>=0.13.0",
     "transformers>=5.14.1",
 ]
+optimize = [
+    # gepa pinned to the omni-capable commit below; see [tool.uv].
+    "gepa>=0.1.1",
+]
 
 [build-system]
 requires = ["setuptools>=77", "wheel"]
@@ -140,6 +144,14 @@ override-dependencies = [
     "litellm>=1.87.0",
     # urllib3 <2.7.0 has redirect header leak and streaming decompression issues.
     "urllib3>=2.7.0",
+    # Deliberate gepa override: dspy==3.3.0b1 declares gepa[dspy]==0.1.1, but
+    # the optimizer lane needs the omni API (optimize_best_of / gepa.oa
+    # engines), which exists only on the gepa main branch as of 2026-08. This
+    # pinned commit is what the 2026-07-22 omni blog documents. Fleet's Turn
+    # path never invokes dspy.GEPA; coexistence of dspy 3.3.0b1 with this gepa
+    # commit is validated by `make check` (2026-08 omni spike). Revisit when
+    # the DSPy gepa[dspy] constraint moves or a PyPI release ships the omni API.
+    "gepa @ git+https://github.com/gepa-ai/gepa@0310bb7b4952d4695718f9f557e450fd6781301e",
 ]
 
 [tool.setuptools]

@@ -25,6 +25,7 @@ For the current Codex Cloud delivery sequence, use `dev-0.7` as the base branch 
 
 - `src/fleet_rlm/AGENTS.md` - backend, runtime, API, persistence, Daytona, and package rules.
 - `scripts/AGENTS.md` - maintenance, validation, benchmark, and release scripts.
+- `scripts/optimize/AGENTS.md` - offline signature-optimization lane (GEPA, FRONTIER-tier rules).
 - `tools/fleet-tui/AGENTS.md` - pi-tui client, SSE projection, state, and tests.
 
 ## Durable Detail Locations
