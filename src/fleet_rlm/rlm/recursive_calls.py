@@ -201,19 +201,20 @@ class RecursiveRLMExecutor:
             )
             return answer
 
-        interpreter = self._child_interpreter_factory() if self._child_interpreter_factory is not None else None
-        child_executor = RecursiveRLMExecutor(
-            models=self._models,
-            options=self._options,
-            child_interpreter_factory=self._child_interpreter_factory,
-            deadline=self._deadline,
-            depth=child_depth,
-            state=self._state,
-            observer=self._observer,
-        )
+        interpreter: Any | None = None
         failed = False
         completion_outputs: dict[str, object] | None = None
         try:
+            interpreter = self._child_interpreter_factory() if self._child_interpreter_factory is not None else None
+            child_executor = RecursiveRLMExecutor(
+                models=self._models,
+                options=self._options,
+                child_interpreter_factory=self._child_interpreter_factory,
+                deadline=self._deadline,
+                depth=child_depth,
+                state=self._state,
+                observer=self._observer,
+            )
             child = build_native_rlm(
                 signature=RecursiveSubtaskSignature,
                 options=RLMOptions(

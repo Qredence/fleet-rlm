@@ -528,6 +528,39 @@ def test_recursive_child_span_marks_shutdown_failure(monkeypatch: pytest.MonkeyP
     assert recursive_outputs[-1]["failure_category"] == "unknown"
 
 
+def test_recursive_child_span_marks_native_setup_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    import time
+
+    from fleet_rlm.rlm.model_bundle import RLMModelBundle
+    from fleet_rlm.rlm.recursive_calls import RecursiveRLMExecutor, RecursiveRLMOptions
+
+    calls = _install_fake_mlflow(monkeypatch)
+    adapter = dspy.JSONAdapter()
+
+    def _raise_setup_error() -> None:
+        raise RuntimeError("interpreter setup failed")
+
+    executor = RecursiveRLMExecutor(
+        models=RLMModelBundle(
+            dspy.utils.DummyLM([{"answer": "unused"}], adapter=adapter),
+            dspy.utils.DummyLM([{"answer": "unused"}], adapter=adapter),
+        ),
+        options=RecursiveRLMOptions(),
+        child_interpreter_factory=_raise_setup_error,
+        deadline=time.monotonic() + 30,
+    )
+
+    with pytest.raises(RuntimeError, match="interpreter setup failed"), turn_trace(uuid4(), uuid4(), enabled=True):
+        executor.tool(prompt="slice")
+
+    failed_outputs = [
+        payload
+        for payload in calls.span_outputs
+        if payload.get("phase_status") == "failed" and "failure_category" in payload
+    ]
+    assert failed_outputs[-1]["failure_category"] == "unknown"
+
+
 def test_recursive_depth_fallback_span_records_mode(monkeypatch: pytest.MonkeyPatch) -> None:
     import time
 

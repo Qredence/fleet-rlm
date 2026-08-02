@@ -299,6 +299,27 @@ def test_mlflow_span_processor_redacts_namespaced_and_unknown_text_fields() -> N
     assert sanitized["model"] == "openai/gpt-5"
 
 
+def test_mlflow_span_processor_bounds_collection_size_and_depth() -> None:
+    mapping = tracing._sanitize_mlflow_value({str(index): index for index in range(60)})
+    values = tracing._sanitize_mlflow_value(list(range(60)))
+
+    assert isinstance(mapping, dict)
+    assert len(mapping) == 50
+    assert isinstance(values, list)
+    assert len(values) == 50
+
+    nested: object = {"value": "private"}
+    for _ in range(8):
+        nested = {"nested": nested}
+    sanitized_nested = tracing._sanitize_mlflow_value(nested)
+    assert isinstance(sanitized_nested, dict)
+    cursor: object = sanitized_nested
+    for _ in range(8):
+        assert isinstance(cursor, dict)
+        cursor = cursor["nested"]
+    assert cursor == "[redacted depth]"
+
+
 def test_configure_tracing_local_server_needs_only_experiment(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
