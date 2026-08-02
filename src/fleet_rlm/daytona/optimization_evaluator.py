@@ -71,29 +71,31 @@ class OptimizationSandboxPlatform(Protocol):
         domain_allow_list: str | None = None,
         auto_stop_interval: int | None = None,
         auto_delete_interval: int | None = None,
-    ) -> Any: """
+    ) -> Any:
+        """
         Create a Daytona sandbox with the requested storage, network, lifecycle, and labeling settings.
-        
+
         Parameters:
-        	volume_id (str | None): Identifier of the volume to attach.
-        	mount_path (str | None): Path where the volume is mounted.
-        	volume_subpath (str | None): Subdirectory of the volume to mount.
-        	labels (dict[str, str] | None): Labels to associate with the sandbox.
-        	with_volume (bool): Whether to attach a volume.
-        	ephemeral (bool): Whether the sandbox is disposable.
-        	network_block_all (bool): Whether to block all network access by default.
-        	network_allow_list (str | None): Network allow-list configuration.
-        	domain_allow_list (str | None): Domain-based network allow-list configuration.
-        	auto_stop_interval (int | None): Interval after which the sandbox stops automatically.
-        	auto_delete_interval (int | None): Interval after which the sandbox is deleted automatically.
-        
+            volume_id (str | None): Identifier of the volume to attach.
+            mount_path (str | None): Path where the volume is mounted.
+            volume_subpath (str | None): Subdirectory of the volume to mount.
+            labels (dict[str, str] | None): Labels to associate with the sandbox.
+            with_volume (bool): Whether to attach a volume.
+            ephemeral (bool): Whether the sandbox is disposable.
+            network_block_all (bool): Whether to block all network access by default.
+            network_allow_list (str | None): Network allow-list configuration.
+            domain_allow_list (str | None): Domain-based network allow-list configuration.
+            auto_stop_interval (int | None): Interval after which the sandbox stops automatically.
+            auto_delete_interval (int | None): Interval after which the sandbox is deleted automatically.
+
         Returns:
-        	Any: The created sandbox.
+            Any: The created sandbox.
         """
         ...
 
-    async def delete(self, sandbox_id: Any) -> None: """Delete a disposable optimization sandbox identified by its provider ID."""
-...
+    async def delete(self, sandbox_id: Any) -> None:
+        """Delete a disposable optimization sandbox identified by its provider ID."""
+        ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -114,7 +116,7 @@ class OptimizationSandboxPolicy:
     def __post_init__(self) -> None:
         """
         Validate and normalize the optimization sandbox policy.
-        
+
         Raises:
             OptimizationSandboxPolicyError: If the snapshot, gateway domains, network
                 restrictions, or lifecycle intervals are invalid.
@@ -171,15 +173,15 @@ class DisposableOptimizationSandboxFactory:
         record_id: str,
     ) -> Any:
         """Create an ephemeral, no-volume evaluator sandbox using the specified policy and evidence labels.
-        
+
         Parameters:
-        	policy (OptimizationSandboxPolicy): Validated sandbox policy to apply.
-        	run_id (str): Identifier for the evaluation run.
-        	candidate_sha256 (str): SHA-256 digest of the candidate.
-        	record_id (str): Identifier for the evaluated record.
-        
+            policy (OptimizationSandboxPolicy): Validated sandbox policy to apply.
+            run_id (str): Identifier for the evaluation run.
+            candidate_sha256 (str): SHA-256 digest of the candidate.
+            record_id (str): Identifier for the evaluated record.
+
         Returns:
-        	The created sandbox.
+            The created sandbox.
         """
         if policy.snapshot != self._sandbox_spec.snapshot:
             raise OptimizationSandboxPolicyError("policy snapshot does not match the configured trusted snapshot")
@@ -219,7 +221,7 @@ class StrictEvaluationProof:
     def __post_init__(self) -> None:
         """
         Validate the strict evaluation proof identifier.
-        
+
         Raises:
             OptimizationSandboxPolicyError: If the proof identifier is missing or invalid.
         """
@@ -229,7 +231,7 @@ class StrictEvaluationProof:
     def require_verified(self) -> None:
         """
         Require verified read-only input delivery and gateway/broker policy.
-        
+
         Raises:
             StrictEvaluationCapabilityError: If either required verification is absent.
         """
@@ -259,7 +261,7 @@ class StrictEvaluationRequest:
     def __post_init__(self) -> None:
         """
         Validate the candidate evaluation request fields.
-        
+
         Raises:
             OptimizationSandboxPolicyError: If the candidate or run identifier is empty,
                 or if the attempt number is less than one.
@@ -310,20 +312,21 @@ class StrictDaytonaEvaluationLifecycle:
     ) -> None:
         """
         Initialize the strict Daytona evaluation lifecycle.
-        
+
         Parameters:
-        	factory (DisposableOptimizationSandboxFactory): Factory for creating and deleting evaluation sandboxes.
-        	policy (OptimizationSandboxPolicy): Sandbox isolation and lifecycle policy.
-        	proof (ValidatedStrictDaytonaProof): Validated evidence that the required isolation and gateway controls are active.
-        	models (StrictEvaluationModels): Host-selected models used for candidate evaluation.
-        	options (RLMOptions): Runtime options for the evaluator.
-        	execution_timeout_seconds (int): Maximum execution time for an evaluation.
-        	schema_id (str): Identifier for the evaluator output schema.
-        	schema_version (str): Version of the evaluator output schema.
-        
+            factory (DisposableOptimizationSandboxFactory): Factory for creating and deleting evaluation sandboxes.
+            policy (OptimizationSandboxPolicy): Sandbox isolation and lifecycle policy.
+            proof (ValidatedStrictDaytonaProof): Validated evidence that the required isolation
+                and gateway controls are active.
+            models (StrictEvaluationModels): Host-selected models used for candidate evaluation.
+            options (RLMOptions): Runtime options for the evaluator.
+            execution_timeout_seconds (int): Maximum execution time for an evaluation.
+            schema_id (str): Identifier for the evaluator output schema.
+            schema_version (str): Version of the evaluator output schema.
+
         Raises:
-        	OptimizationSandboxPolicyError: If the timeout or schema identity is invalid.
-        	StrictEvaluationCapabilityError: If the proof is not validated or does not match the configured policy.
+            OptimizationSandboxPolicyError: If the timeout or schema identity is invalid.
+            StrictEvaluationCapabilityError: If the proof is not validated or does not match the configured policy.
         """
         if execution_timeout_seconds < 1:
             raise OptimizationSandboxPolicyError("strict evaluator timeout must be positive")
@@ -350,16 +353,16 @@ class StrictDaytonaEvaluationLifecycle:
     async def evaluate(self, request: StrictEvaluationRequest) -> StrictEvaluationResult:
         """
         Evaluate one candidate in an isolated disposable sandbox.
-        
+
         Parameters:
             request (StrictEvaluationRequest): Candidate, curated record, run identifier,
                 and attempt metadata for the evaluation.
-        
+
         Returns:
             StrictEvaluationResult: Sanitized prediction and evaluation evidence,
                 including usage, timing, digests, policy and proof identifiers, and
                 termination mode.
-        
+
         Raises:
             StrictEvaluationError: If execution times out or produces invalid typed
                 output.
@@ -447,10 +450,10 @@ class StrictDaytonaEvaluationLifecycle:
     async def _cleanup(self, interpreter: DaytonaCodeInterpreter | None, sandbox: Any) -> BaseException | None:
         """
         Attempt interpreter shutdown and sandbox deletion, preserving cleanup failures during cancellation.
-        
+
         Returns:
             BaseException | None: The first cleanup error, or `None` when cleanup succeeds.
-        
+
         Raises:
             asyncio.CancelledError: If the caller is cancelled while sandbox deletion is pending.
         """
@@ -483,9 +486,10 @@ class StrictDaytonaEvaluationLifecycle:
 def _strict_evaluator_signature() -> type[dspy.Signature]:
     """
     Define the fixed interface for strict curated-input evaluation.
-    
-    The signature exposes a curated-input capability handle and one typed answer field while excluding direct access to task data and external resources.
-    
+
+    The signature exposes a curated-input capability handle and one typed answer field while
+    excluding direct access to task data and external resources.
+
     Returns:
         type[dspy.Signature]: The strict curated-evaluation signature class.
     """
@@ -511,12 +515,12 @@ def _strict_evaluator_signature() -> type[dspy.Signature]:
 def _strict_named_inputs(handle: dict[str, str | int]) -> dict[str, Any]:
     """
     Expose a copied curated-input capability handle for evaluator access.
-    
+
     Parameters:
-    	handle (dict[str, str | int]): Public handle identifying the curated-input capability.
-    
+        handle (dict[str, str | int]): Public handle identifying the curated-input capability.
+
     Returns:
-    	dict[str, Any]: Mapping containing the copied handle under `curated_input_handle`.
+        dict[str, Any]: Mapping containing the copied handle under `curated_input_handle`.
     """
     return {"curated_input_handle": dict(handle)}
 
@@ -524,12 +528,12 @@ def _strict_named_inputs(handle: dict[str, str | int]) -> dict[str, Any]:
 def _termination_mode(prediction: Any) -> str:
     """
     Determine how the evaluator terminated based on the prediction metadata.
-    
+
     Parameters:
-    	prediction (Any): The evaluator prediction to inspect.
-    
+        prediction (Any): The evaluator prediction to inspect.
+
     Returns:
-    	str: `"native_extraction_fallback"` when forced final output extraction was used; `"typed_submit"` otherwise.
+        str: `"native_extraction_fallback"` when forced final output extraction was used; `"typed_submit"` otherwise.
     """
     if getattr(prediction, "final_reasoning", None) == "Extract forced final output":
         return "native_extraction_fallback"
@@ -545,15 +549,16 @@ def _require_sha256(value: str, label: str) -> None:
 def _label_value(value: str) -> str:
     """
     Normalize and validate a sandbox evidence label.
-    
+
     Parameters:
         value (str): Label value to normalize and validate.
-    
+
     Returns:
         str: Lowercase, trimmed label suitable for sandbox evidence metadata.
-    
+
     Raises:
-        OptimizationSandboxPolicyError: If the label is empty, exceeds 64 characters, or contains unsupported characters.
+        OptimizationSandboxPolicyError: If the label is empty, exceeds 64 characters, or
+            contains unsupported characters.
     """
     normalized = value.strip().lower()
     if not normalized or len(normalized) > 64 or not re.fullmatch(r"[a-z0-9][a-z0-9._-]*", normalized):

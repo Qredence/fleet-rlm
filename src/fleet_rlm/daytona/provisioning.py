@@ -43,9 +43,10 @@ class SandboxPlatform(Protocol):
         domain_allow_list: str | None = None,
         auto_stop_interval: int | None = None,
         auto_delete_interval: int | None = None,
-    ) -> Any: """
+    ) -> Any:
+        """
         Create a sandbox with optional volume, network, labeling, and lifecycle configuration.
-        
+
         Parameters:
             volume_id (str | None): Identifier of the volume to mount.
             mount_path (str | None): Path at which to mount the volume.
@@ -58,19 +59,20 @@ class SandboxPlatform(Protocol):
             domain_allow_list (str | None): Domain allow-list configuration.
             auto_stop_interval (int | None): Interval after which the sandbox is stopped automatically.
             auto_delete_interval (int | None): Interval after which the sandbox is deleted automatically.
-        
+
         Returns:
             Any: The created sandbox.
         """
         ...
 
-    async def delete(self, sandbox_id: Any) -> None: """
-Delete the specified sandbox.
+    async def delete(self, sandbox_id: Any) -> None:
+        """
+        Delete the specified sandbox.
 
-Parameters:
-	sandbox_id (Any): Identifier of the sandbox to delete.
-"""
-...
+        Parameters:
+            sandbox_id (Any): Identifier of the sandbox to delete.
+        """
+        ...
 
     async def start(self, sandbox_id: str) -> None: ...
 

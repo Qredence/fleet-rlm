@@ -22,7 +22,7 @@ _SCRIPT = Path(__file__).parents[3] / "scripts" / "live_daytona_tunnel_probe.py"
 def subject(monkeypatch: pytest.MonkeyPatch) -> ModuleType:
     """
     Load the tunnel probe script with a deterministic health status.
-    
+
     Returns:
         ModuleType: The loaded and patched tunnel probe module.
     """
@@ -38,15 +38,15 @@ def subject(monkeypatch: pytest.MonkeyPatch) -> ModuleType:
 def _request(url: str, *, token: str = "", data: bytes | None = None, method: str = "GET") -> dict[str, object]:
     """
     Send an HTTP request and decode its JSON response.
-    
+
     Parameters:
-    	url (str): The request URL.
-    	token (str): Optional bearer token for authorization.
-    	data (bytes | None): Optional request body.
-    	method (str): The HTTP method to use.
-    
+        url (str): The request URL.
+        token (str): Optional bearer token for authorization.
+        data (bytes | None): Optional request body.
+        method (str): The HTTP method to use.
+
     Returns:
-    	dict[str, object]: The decoded JSON response, or an empty dictionary when the response has no body.
+        dict[str, object]: The decoded JSON response, or an empty dictionary when the response has no body.
     """
     request = Request(
         url,

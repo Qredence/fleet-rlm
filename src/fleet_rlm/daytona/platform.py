@@ -154,7 +154,7 @@ class LiveDaytonaPlatform:
     ) -> Any:
         """
         Create a Daytona sandbox from the configured snapshot.
-        
+
         Parameters:
             volume_id (str | None): Volume identifier required when `with_volume` is true.
             mount_path (str | None): Sandbox mount path required when `with_volume` is true.
@@ -167,10 +167,10 @@ class LiveDaytonaPlatform:
             domain_allow_list (str | None): Comma-separated domain allow-list.
             auto_stop_interval (int | None): Automatic stop interval.
             auto_delete_interval (int | None): Automatic deletion interval.
-        
+
         Returns:
             Any: The created sandbox.
-        
+
         Raises:
             ValueError: If `with_volume` is true and `volume_id` or `mount_path` is missing.
         """

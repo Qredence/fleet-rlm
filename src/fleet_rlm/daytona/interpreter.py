@@ -453,14 +453,14 @@ class DaytonaCodeInterpreter:
     def execute(self, code: str, variables: dict[str, Any] | None = None) -> Any:
         """
         Execute Python code in the configured interpreter and process its result.
-        
+
         Parameters:
             code (str): Python code to execute.
             variables (dict[str, Any] | None): Variables made available to the execution.
-        
+
         Returns:
             Any: Repair feedback for execution problems, a final submission result, or truncated execution output.
-        
+
         Raises:
             DaytonaAdapterError: If the interpreter is shut down, misconfigured, or the execution provider fails.
             TurnTerminalError: If execution repeats without making progress.
@@ -550,7 +550,7 @@ class DaytonaCodeInterpreter:
     def shutdown(self, *, strict_broker_cleanup: bool = False) -> None:
         """
         Shut down the interpreter and release its broker and backend resources.
-        
+
         Parameters:
             strict_broker_cleanup (bool): Whether broker cleanup errors should be
                 propagated. When false, broker cleanup errors are suppressed.
