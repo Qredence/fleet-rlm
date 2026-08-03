@@ -119,14 +119,12 @@ def _sanitize_mlflow_value(value: object, *, key: str | None = None, depth: int 
     if isinstance(value, (list, tuple)):
         return [_sanitize_mlflow_value(item, depth=depth + 1) for item in list(value)[:50]]
     if isinstance(value, str):
-        from fleet_rlm.rlm.sanitize import sanitize_public_text
-
         if normalized_key in _CREDENTIAL_KEYS or normalized_key.endswith(
             tuple(f"_{credential_key}" for credential_key in _CREDENTIAL_KEYS)
         ):
             return "[redacted]"
         if normalized_key in _OPERATIONAL_TEXT_KEYS:
-            return sanitize_public_text(value, max_len=256)
+            return value
         # DSPy signatures may use arbitrary field names, so unknown string
         # fields must be treated as content rather than exported by default.
         return _trace_digest(value)
