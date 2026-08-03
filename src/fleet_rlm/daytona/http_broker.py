@@ -10,7 +10,6 @@ import contextlib
 import hashlib
 import inspect
 import json
-import keyword
 import re
 import secrets
 import time
@@ -383,9 +382,6 @@ class DaytonaHttpToolBroker:
         for name, fn in tools.items():
             if name in self._injected_tools:
                 continue
-            if not name.isidentifier() or keyword.iskeyword(name):
-                msg = f"invalid tool name: {name}"
-                raise DaytonaAdapterError(message=msg, cause_type="InvalidToolNameError")
             self._pending_wrappers.append(self._tool_wrapper_source(name, fn))
             self._injected_tools.add(name)
 
