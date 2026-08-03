@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from pathlib import PurePosixPath
 from typing import Protocol
 from uuid import UUID
 
@@ -62,8 +61,6 @@ class ArtifactPromotion:
                 raise ArtifactValidationError("Artifact Candidate locations must be unique")
             if candidate.staging_path == candidate.durable_path:
                 raise ArtifactValidationError("Artifact staging and durable locations must differ")
-            self._validate_path(candidate.staging_path)
-            self._validate_path(candidate.durable_path)
             if not 1 <= candidate.byte_size <= self._max_bytes:
                 raise ArtifactValidationError("Artifact Candidate size is invalid")
             checksum = candidate.checksum_sha256.lower()
@@ -73,8 +70,3 @@ class ArtifactPromotion:
             staging_paths.add(candidate.staging_path)
             durable_paths.add(candidate.durable_path)
         return candidates
-
-    @staticmethod
-    def _validate_path(value: str) -> None:
-        if not value or ".." in PurePosixPath(value).parts or "\\" in value or "\x00" in value:
-            raise ArtifactValidationError("Artifact Candidate location is invalid")
