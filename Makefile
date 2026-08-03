@@ -41,7 +41,7 @@ help:
 	@echo "  make test-unit        - Run unit tests (non-live/non-benchmark)"
 	@echo "  make test-contract    - Run backend contracts and CLI smoke tests"
 	@echo "  make test-daytona-cov - Run canonical non-live tests with Daytona branch coverage"
-	@echo "  make benchmark-oolong - Run official Oolong smoke (requires FLEET_LIVE=1; configure OOLONG_* variables)"
+	@echo "  make benchmark-oolong - Run pinned Prime Oolong smoke (runtime.live_enabled=true; configure credentials)"
 	@echo "  make benchmark-native-long-context - Measure native whole-value URL context at 1/5/10 MiB"
 	@echo ""
 	@echo "Quality:"
@@ -113,18 +113,13 @@ test-daytona-cov:
 test-db:
 	$(PYTEST) -q -m "db" -n 0
 
-OOLONG_SPLIT ?= real
-OOLONG_MIN_LEN ?= 32000
-OOLONG_MAX_LEN ?= 64000
-OOLONG_LIMIT ?= 3
-OOLONG_OUTPUT ?= .scratch/benchmark-reports/oolong-$(shell date +%Y-%m-%d).json
+OOLONG_LIMIT ?= 12
+OOLONG_OUTPUT ?= .scratch/benchmark-reports/prime-oolong-$(shell date +%Y-%m-%d).json
 OOLONG_API_URL ?= http://127.0.0.1:8000
-OOLONG_ROOT ?= ../oolong
 OOLONG_PROFILE ?= daytona-bench
 
 benchmark-oolong:
-	@test -n "$(FLEET_LIVE)" || { echo "FLEET_LIVE=1 is required for live OOLONG benchmark"; exit 1; }
-	uv run python scripts/benchmarks/run_official_oolong.py --split $(OOLONG_SPLIT) --min-len $(OOLONG_MIN_LEN) --max-len $(OOLONG_MAX_LEN) --limit $(OOLONG_LIMIT) --api-url $(OOLONG_API_URL) --oolong-root $(OOLONG_ROOT) --expected-profile $(OOLONG_PROFILE) --output $(OOLONG_OUTPUT)
+	uv run python scripts/benchmarks/run_prime_oolong.py --limit $(OOLONG_LIMIT) --api-url $(OOLONG_API_URL) --profile $(OOLONG_PROFILE) --output $(OOLONG_OUTPUT)
 
 NATIVE_LONG_CONTEXT_OUTPUT ?= .scratch/benchmark-reports/native-long-context-$(shell date +%Y-%m-%d).json
 

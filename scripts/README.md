@@ -12,7 +12,8 @@
 | `live_daytona_verify.py` | Run the opt-in Daytona MVP proof and validate its bounded JSON receipt |
 | `live_daytona_tunnel_probe.py` | Run the development-only strict Daytona egress smoke through two Cloudflare HTTPS origins |
 | `benchmark_daytona_lifecycle.py` | Benchmark full Daytona create-through-first-execution lifecycle and select retained versus per-Turn mode |
-| `benchmarks/run_official_oolong.py` | Run the official Oolong scorer against a live Fleet API using Attachments |
+| `benchmarks/run_prime_oolong.py` | Run the pinned PrimeIntellect Oolong environment against a live Fleet API using Attachments |
+| `benchmarks/prime_oolong_sidecar.py` | Isolated JSONL export/scoring bridge for the pinned PrimeIntellect environment |
 | `benchmarks/run_native_long_context.py` | Measure native whole-value URL context at 1/5/10 MiB and emit the paging decision receipt |
 | `benchmarks/run_rlm_latency.py` | Compare live Fleet RLM configuration variants and run the MLflow-native five-task quality gate |
 | `daytona_snapshot.py` | Explicitly create or check the immutable Fleet Daytona Snapshot |
