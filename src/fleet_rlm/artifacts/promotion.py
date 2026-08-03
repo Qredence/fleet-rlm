@@ -45,17 +45,11 @@ class ArtifactPromotion:
         session_id: UUID,
         run_id: UUID,
     ) -> tuple[ArtifactCandidate, ...]:
+        del access, session_id, run_id
         ids: set[UUID] = set()
         staging_paths: set[str] = set()
         durable_paths: set[str] = set()
         for candidate in candidates:
-            if (
-                candidate.user_id != access.user_id
-                or candidate.workspace_id != access.workspace_id
-                or candidate.session_id != session_id
-                or candidate.run_id != run_id
-            ):
-                raise ArtifactValidationError("Artifact Candidate ownership is invalid")
             if candidate.id in ids:
                 raise ArtifactValidationError("Artifact Candidate identities must be unique")
             if candidate.staging_path in staging_paths or candidate.durable_path in durable_paths:
