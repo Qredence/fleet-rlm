@@ -31,7 +31,6 @@ def _activate_fleet_trace_context(monkeypatch: pytest.MonkeyPatch) -> Iterator[N
     """Phase spans gate on an active fleet_turn trace; tests exercise span logic directly."""
     from fleet_rlm.observability import tracing
 
-    monkeypatch.setattr(tracing, "_TRACE_CONTENT_MODE", "safe")
     monkeypatch.setattr(tracing, "_TRACE_CONTENT_MAX_CHARS", 10_000)
     token = turn_tracing._fleet_trace_active.set(True)
     yield
@@ -345,19 +344,18 @@ def test_annotate_trace_io_updates_trace_request_response(monkeypatch: pytest.Mo
         "answer": "public answer",
         "final_reasoning": "public reasoning",
     }
-    assert calls.update_kwargs[-1]["request_preview"].startswith("[redacted sha256=")
-    assert calls.update_kwargs[-1]["response_preview"].startswith("[redacted sha256=")
-    assert "how are you?" not in str(calls.update_kwargs[-1])
-    assert "display answer" not in str(calls.update_kwargs[-1])
+    assert calls.update_kwargs[-1]["request_preview"] == "how are you?"
+    assert calls.update_kwargs[-1]["response_preview"] == "display answer"
+    assert "how are you?" in str(calls.update_kwargs[-1])
+    assert "display answer" in str(calls.update_kwargs[-1])
     assert "internal_payload" not in calls.span_outputs[-1]
 
 
-def test_annotate_trace_io_debug_mode_keeps_bounded_trace_previews(
+def test_annotate_trace_io_keeps_bounded_trace_previews(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from fleet_rlm.observability import tracing
 
-    monkeypatch.setattr(tracing, "_TRACE_CONTENT_MODE", "debug")
     monkeypatch.setattr(tracing, "_TRACE_CONTENT_MAX_CHARS", 256)
     calls = _install_fake_mlflow(monkeypatch)
 

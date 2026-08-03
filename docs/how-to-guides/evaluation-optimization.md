@@ -3,7 +3,7 @@
 The Databricks-backed quality loop runs server-side against the managed
 `fleet_turn` traces already written by the `daytona-managed` profile. It adds
 no Fleet Turn-path surface: tracing stays fail-soft and bounded by the
-`_sanitize_mlflow_span` export boundary, and every step is an opt-in script
+`_sanitize_mlflow_span` security export boundary, and every step is an opt-in script
 behind `FLEET_LIVE=1` with Databricks auth from the environment
 (`DATABRICKS_HOST`/`DATABRICKS_TOKEN` or databricks-cli).
 

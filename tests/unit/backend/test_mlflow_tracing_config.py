@@ -18,7 +18,6 @@ def _reset_tracing_latch(monkeypatch: pytest.MonkeyPatch) -> None:
     """Reset the tracing configuration and activation state for a test."""
     monkeypatch.setattr(tracing, "_TRACING_CONFIGURED", False)
     monkeypatch.setattr(tracing, "_TRACING_ACTIVE", False)
-    monkeypatch.setattr(tracing, "_TRACE_CONTENT_MODE", "safe")
     monkeypatch.setattr(tracing, "_TRACE_CONTENT_MAX_CHARS", 10_000)
 
 
@@ -209,7 +208,7 @@ def test_configure_tracing_applies_sampling_policy(monkeypatch: pytest.MonkeyPat
     assert calls.async_logging_args == [False]
 
 
-def test_mlflow_315_span_processor_bounds_and_redacts_values() -> None:
+def test_mlflow_315_span_processor_bounds_and_protects_secrets() -> None:
     class Span:
         def __init__(self) -> None:
             self.inputs: dict[str, object] = {"token": "real-secret", "body": "x" * 2_000}
@@ -241,20 +240,20 @@ def test_mlflow_315_span_processor_bounds_and_redacts_values() -> None:
 
     assert span.inputs["token"] == "[redacted]"
     assert isinstance(span.inputs["body"], str)
-    assert len(span.inputs["body"]) <= 256
-    assert span.outputs["answer"].startswith("[redacted sha256=")
+    assert span.inputs["body"] == "x" * 2_000
+    assert span.outputs["answer"] == "y" * 2_000
     assert span.attributes["api_key"] == "[redacted]"
 
 
-def test_mlflow_span_processor_redacts_autolog_content_fields() -> None:
+def test_mlflow_span_processor_preserves_autolog_content_fields() -> None:
     class Span:
         def __init__(self) -> None:
             self.inputs: dict[str, object] = {
-                "prompt": "candidate instruction must never be exported",
+                "prompt": "candidate instruction should remain readable",
                 "token_usage": 42,
             }
             self.outputs: dict[str, object] = {
-                "response": "provider body must never be exported",
+                "response": "provider body should remain readable",
                 "duration_ms": 15,
             }
             self.attributes: dict[str, object] = {"engine": "gepa", "tool_output": "private tool result"}
@@ -272,15 +271,15 @@ def test_mlflow_span_processor_redacts_autolog_content_fields() -> None:
 
     tracing._sanitize_mlflow_span(span)
 
-    assert span.inputs["prompt"].startswith("[redacted sha256=")
+    assert span.inputs["prompt"] == "candidate instruction should remain readable"
     assert span.inputs["token_usage"] == 42
-    assert span.outputs["response"].startswith("[redacted sha256=")
+    assert span.outputs["response"] == "provider body should remain readable"
     assert span.outputs["duration_ms"] == 15
     assert span.attributes["engine"] == "gepa"
-    assert span.attributes["tool_output"].startswith("[redacted sha256=")
+    assert span.attributes["tool_output"] == "private tool result"
 
 
-def test_mlflow_span_processor_redacts_namespaced_and_unknown_text_fields() -> None:
+def test_mlflow_span_processor_preserves_namespaced_and_unknown_text_fields() -> None:
     sanitized = tracing._sanitize_mlflow_value(
         {
             "gen_ai.prompt": "private prompt",
@@ -293,16 +292,16 @@ def test_mlflow_span_processor_redacts_namespaced_and_unknown_text_fields() -> N
     )
 
     assert isinstance(sanitized, dict)
-    assert sanitized["gen_ai.prompt"].startswith("[redacted sha256=")
-    assert sanitized["mlflow.spanInputs"].startswith("[redacted sha256=")
-    assert sanitized["custom_question"].startswith("[redacted sha256=")
+    assert sanitized["gen_ai.prompt"] == "private prompt"
+    assert sanitized["mlflow.spanInputs"] == "private input"
+    assert sanitized["custom_question"] == "private question"
     assert sanitized["openai_api_key"] == "[redacted]"
     assert sanitized["access_token"] == "[redacted]"
     assert sanitized["model"] == "openai/gpt-5"
 
 
-def test_mlflow_span_processor_debug_mode_keeps_bounded_content_readable() -> None:
-    tracing._set_trace_content_policy("debug", 256)
+def test_mlflow_span_processor_keeps_bounded_content_readable(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(tracing, "_TRACE_CONTENT_MAX_CHARS", 256)
 
     sanitized = tracing._sanitize_mlflow_value(
         {
@@ -324,20 +323,18 @@ def test_mlflow_span_processor_debug_mode_keeps_bounded_content_readable() -> No
         "request": "readable request",
         "api_key": "[redacted]",
     }
-    assert sanitized["custom_question"].startswith("[redacted sha256=")
+    assert sanitized["custom_question"] == "unknown fields remain protected"
 
 
-def test_configure_tracing_applies_debug_content_policy(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_configure_tracing_applies_content_bound(monkeypatch: pytest.MonkeyPatch) -> None:
     calls = _install_fake_mlflow(monkeypatch)
 
     tracing.configure_tracing(
         _enabled_settings(
-            mlflow_trace_content_mode="debug",
             mlflow_trace_content_max_chars=2_048,
         )
     )
 
-    assert tracing.trace_content_debug_enabled() is True
     assert tracing.trace_content_max_chars() == 2_048
     assert calls.processor_args[0][0] is tracing._sanitize_mlflow_span
 

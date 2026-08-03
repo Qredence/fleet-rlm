@@ -54,11 +54,10 @@ level = "INFO"
 [defaults.mlflow]
 # MLflow 3.15 keeps trace export off the Turn critical path. The sampler is
 # explicit policy so an ambient MLFLOW_TRACE_SAMPLING_RATIO cannot override it.
-tracing_enabled = false
+tracing_enabled = true
 expose_trace_id = true
 async_logging = true
 trace_sampling_ratio = 1.0
-trace_content_mode = "safe"
 trace_content_max_chars = 10000
 
 [profiles.daytona.runtime]
@@ -83,8 +82,6 @@ reasoning_effort = "none"
 tracing_enabled = true
 tracking_uri = "http://127.0.0.1:5001"
 experiment_name = "fleet-rlm"
-# Hash trace content by default; set "debug" only for explicit local diagnostics.
-trace_content_mode = "safe"
 
 # Managed Lakebase/MLflow policy. Select with
 # [config] default_profile = "daytona-managed" after populating the
@@ -111,7 +108,6 @@ reasoning_effort = "none"
 [profiles.daytona-managed.mlflow]
 tracing_enabled = true
 tracking_uri = "databricks"
-trace_content_mode = "safe"
 experiment_name_env = "FLEET_MLFLOW_EXPERIMENT_NAME"
 trace_catalog_env = "FLEET_MLFLOW_TRACE_CATALOG"
 trace_schema_env = "FLEET_MLFLOW_TRACE_SCHEMA"
@@ -137,6 +133,10 @@ base_url_env = "FLEET_DATABRICKS_AI_GATEWAY_BASE_URL"
 max_tokens = 8000
 cache = false
 
+# Benchmarks must stay traceless; override the on-by-default global below.
+[profiles.daytona-bench.mlflow]
+tracing_enabled = false
+
 [profiles.daytona-bench-40.runtime]
 environment = "daytona"
 
@@ -153,6 +153,10 @@ api_key_env = "DATABRICKS_TOKEN"
 base_url_env = "FLEET_DATABRICKS_AI_GATEWAY_BASE_URL"
 max_tokens = 8000
 cache = false
+
+# Benchmarks must stay traceless; override the on-by-default global below.
+[profiles.daytona-bench-40.mlflow]
+tracing_enabled = false
 
 [profiles.daytona-bench-40.rlm]
 max_iterations = 40

@@ -43,18 +43,28 @@ are independent: `storage.max_upload_bytes` bounds uploads and workspace files,
 When MLflow tracing is enabled, `mlflow.async_logging` keeps trace export off
 the Turn path and `mlflow.trace_sampling_ratio` controls the fraction of Turns
 sent to MLflow. The committed default is asynchronous export with a `1.0`
-sampling ratio; both are non-secret TOML policy values. Fleet also enables
-MLflow DSPy inference autologging for the selected experiment, while compile
-and evaluator traces remain disabled for live Turn observability.
+sampling ratio; both are non-secret TOML policy values. Tracing is enabled by
+default under the committed `[defaults.mlflow]` policy (the `Settings` field
+default is `false`, but the shipped policy enables it). The benchmark profiles
+(`daytona-bench`, `daytona-bench-40`) explicitly keep tracing off to stay
+traceless. Fleet also enables MLflow DSPy inference autologging for the selected
+experiment, while compile and evaluator traces remain disabled for live Turn
+observability.
 
-`mlflow.trace_content_mode` controls exported trace payloads. The committed
-`daytona` and `daytona-managed` profiles default to `safe`, which hashes
-content. Set the local `daytona` profile to `debug` only for an explicit local
-diagnostic session; debug makes bounded prompts, reasoning, generated code,
-tool payloads, and responses readable in local MLflow spans. Both modes retain
-the sanitizer's credential, connection-string, private-path, and system-prompt
-dump protections. `mlflow.trace_content_max_chars` bounds each readable field;
-it defaults to `10000` characters.
+MLflow trace payloads retain bounded, readable prompts, reasoning, generated
+code, tool payloads, and responses. `mlflow.trace_content_max_chars` bounds
+each readable field and defaults to `10000` characters. The trace export
+boundary still protects credentials, connection strings, private paths, and
+system-prompt dumps. Content is readable by default — there is no hashing
+"safe" content mode. Custom DSPy signature fields and MLflow autolog fields
+that do not match the sanitizer's protection patterns are exported readable up
+to the content bound, so treat the trace destination as a sensitive consumer of
+the same bounded payloads the TUI displays.
+
+> Migration note: the `mlflow.trace_content_mode` setting is removed. Existing
+> `fleet.toml` files that still set `trace_content_mode = "safe"` will fail
+> validation with an unknown-key error; delete the key. Trace content is now
+> always readable (bounded by `mlflow.trace_content_max_chars`).
 
 Each typed public Runtime Event is also projected as a bounded
 `Turn.progress.<event-kind>` child span. This includes RLM reasoning summaries,

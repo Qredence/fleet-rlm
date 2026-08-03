@@ -194,17 +194,9 @@ _FIELDS: tuple[PolicyField, ...] = (
         settings_field="mlflow_trace_sampling_ratio",
     ),
     PolicyField(
-        "mlflow.trace_content_mode",
-        "MLflow",
-        "Trace content mode",
-        "single_choice",
-        ("safe", "debug"),
-        "mlflow_trace_content_mode",
-    ),
-    PolicyField(
         "mlflow.trace_content_max_chars",
         "MLflow",
-        "Trace content character limit",
+        "Trace payload character limit",
         "number",
         settings_field="mlflow_trace_content_max_chars",
     ),

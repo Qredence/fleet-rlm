@@ -21,20 +21,8 @@ logger = logging.getLogger(__name__)
 _MAX_TRACE_TEXT_CHARS = 1_000
 
 
-def trace_content_debug_enabled() -> bool:
-    """Return whether the configured MLflow trace payloads are locally readable."""
-    try:
-        from fleet_rlm.observability.tracing import trace_content_debug_enabled as enabled
-
-        return enabled()
-    except Exception:
-        return False
-
-
 def trace_preview_limit(default: int = _MAX_TRACE_TEXT_CHARS) -> int:
-    """Return the configured readable preview bound, or the safe local default."""
-    if not trace_content_debug_enabled():
-        return default
+    """Return the configured readable preview bound, or the local default."""
     try:
         from fleet_rlm.observability.tracing import trace_content_max_chars
 

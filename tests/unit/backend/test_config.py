@@ -49,7 +49,6 @@ def test_daytona_profile_routes_tracing_to_supervised_local_mlflow() -> None:
         "tracing_enabled": True,
         "tracking_uri": "http://127.0.0.1:5001",
         "experiment_name": "fleet-rlm",
-        "trace_content_mode": "safe",
     }
 
 
@@ -58,11 +57,10 @@ def test_default_mlflow_policy_uses_async_full_fidelity_trace_delivery() -> None
     document = tomllib.loads(policy_path.read_text(encoding="utf-8"))
 
     assert document["defaults"]["mlflow"] == {
-        "tracing_enabled": False,
+        "tracing_enabled": True,
         "expose_trace_id": True,
         "async_logging": True,
         "trace_sampling_ratio": 1.0,
-        "trace_content_mode": "safe",
         "trace_content_max_chars": 10000,
     }
 
@@ -76,7 +74,6 @@ def test_daytona_managed_profile_declares_lakebase_and_mlflow_environment_refere
     assert managed["mlflow"] == {
         "tracing_enabled": True,
         "tracking_uri": "databricks",
-        "trace_content_mode": "safe",
         "experiment_name_env": "FLEET_MLFLOW_EXPERIMENT_NAME",
         "trace_catalog_env": "FLEET_MLFLOW_TRACE_CATALOG",
         "trace_schema_env": "FLEET_MLFLOW_TRACE_SCHEMA",
@@ -204,7 +201,9 @@ def test_daytona_benchmark_profiles_use_qwen_without_cache_or_mlflow() -> None:
     for profile in ("daytona-bench", "daytona-bench-40"):
         policy = document["profiles"][profile]
         assert policy["runtime"]["environment"] == "daytona"
-        assert "mlflow" not in policy
+        # Bench profiles stay traceless by explicitly declaring mlflow disabled,
+        # overriding the on-by-default [defaults.mlflow] policy.
+        assert policy["mlflow"]["tracing_enabled"] is False
         for role in ("root", "sub"):
             llm = policy["llm"][role]
             assert llm["model"] == "databricks-qwen35-122b-a10b"
@@ -489,9 +488,10 @@ def test_url_source_limit_defaults_to_ten_mebibytes() -> None:
     assert Settings(_env_file=None).max_url_bytes == 10 * 1024 * 1024
 
 
-def test_mlflow_tracing_defaults_to_disabled() -> None:
+def test_mlflow_tracing_field_defaults_to_disabled() -> None:
+    # The Settings field default is off; the committed [defaults.mlflow] policy
+    # enables it. Test the field default here, policy default in test_config.py.
     assert Settings(_env_file=None).mlflow_tracing_enabled is False
-    assert Settings(_env_file=None).mlflow_trace_content_mode == "safe"
     assert Settings(_env_file=None).mlflow_trace_content_max_chars == 10_000
 
 

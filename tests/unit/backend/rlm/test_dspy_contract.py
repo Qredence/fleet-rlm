@@ -406,8 +406,8 @@ def test_lm_trace_callback_records_role_and_failure_category(monkeypatch: pytest
 
     token = turn_tracing._fleet_trace_active.set(True)
     try:
-        callback.on_lm_start("call-1", root, {"prompt": "must not be traced"})
-        callback.on_lm_end("call-1", [], ValueError("provider response must not be traced"))
+        callback.on_lm_start("call-1", root, {"prompt": "readable prompt"})
+        callback.on_lm_end("call-1", [], ValueError("provider response failed"))
     finally:
         turn_tracing._fleet_trace_active.reset(token)
 
@@ -417,8 +417,9 @@ def test_lm_trace_callback_records_role_and_failure_category(monkeypatch: pytest
         "call_id": "call-1",
         "call_index": 1,
         "input_keys": ["prompt"],
-        "prompt_chars": 18,
-        "context_chars": 18,
+        "prompt_chars": 15,
+        "prompt_preview": "readable prompt",
+        "context_chars": 15,
         "history_length_before": None,
         "recursive_depth": 0,
     }
@@ -433,11 +434,10 @@ def test_lm_trace_callback_records_role_and_failure_category(monkeypatch: pytest
     assert calls.status == "ERROR"
 
 
-def test_lm_trace_profiles_include_bounded_debug_payloads(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_lm_trace_profiles_include_bounded_readable_payloads(monkeypatch: pytest.MonkeyPatch) -> None:
     from fleet_rlm.observability import tracing
     from fleet_rlm.rlm.dspy_contract import _lm_input_profile, _lm_output_profile
 
-    monkeypatch.setattr(tracing, "_TRACE_CONTENT_MODE", "debug")
     monkeypatch.setattr(tracing, "_TRACE_CONTENT_MAX_CHARS", 256)
 
     inputs = _lm_input_profile(
