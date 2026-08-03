@@ -51,12 +51,14 @@ clients cannot provide models, Signatures, or executable capabilities.
   as RLM actions: malformed responses remain bounded `adapter_parse_error`
   failures, which keeps the pinned DSPy protocol authoritative without changing
   process-global DSPy settings.
-- The production Daytona profile uses the Databricks DeepSeek v4-free service
-  `uscentral.default.deepseek-v4-flash` for Root actions
-  (`reasoning_effort = "low"`) and
-  `system.ai.inkling` for bounded Sub Model queries
-  (`reasoning_effort = "none"`, `temperature = 0`). Both responses are capped at
-  8,000 tokens. This LM response limit is distinct
+- The Daytona profiles use the Databricks AI Gateway model
+  `deepseek-v4-flash` for both Root actions and bounded Sub Model queries.
+  Fleet sends the non-secret provider route
+  `Databricks-Model-Provider-Service: uscentral.default.zencode-oai` and keeps
+  the credential in `DATABRICKS_TOKEN`. The standard profile uses
+  `reasoning_effort = "low"` for Root and `reasoning_effort = "none"`,
+  `temperature = 0` for Sub. Both responses are capped at 8,000 tokens. This
+  LM response limit is distinct
   from `dspy.RLM.max_output_chars`, which bounds REPL output retained in
   recursive history.
 - Fleet remains on DSPy's public program and LM call surfaces: `rlm.acall()`
@@ -68,6 +70,27 @@ clients cannot provide models, Signatures, or executable capabilities.
 - Do not replace the Turn-scoped adapter with global `dspy.configure()`.
   Composition may execute independent Turns with different scoped models, and
   Fleet must not mutate shared DSPy defaults.
+
+## Native DSPy streaming
+
+The live Root RLM uses DSPy's native streaming utilities. Fleet wraps each fresh
+`dspy.RLM` with `dspy.streamify` and registers reusable
+`dspy.streaming.StreamListener` instances against the named `generate_action`
+predictor for its `reasoning` and `code` fields. DSPy emits
+`dspy.streaming.StreamResponse` values through its async side channel before the
+final typed `dspy.Prediction`.
+
+Fleet converts those private DSPy values into the existing transport-neutral
+`RLMReasoning`, `RLMCode`, and `Status` Runtime Events. The existing
+`AISDKUIProjector` then emits AI SDK UI v1 SSE chunks, and `fleet-tui` appends
+delta chunks to stable step cards. DSPy semantic subcalls are not streamed to
+operators. `dspy.streaming_response` is deliberately not used because it would
+create a second OpenAI-compatible SSE protocol; Fleet already owns its public
+FastAPI SSE contract.
+
+When the provider or cache produces no field chunks, the final typed Prediction
+still completes and Fleet records an internal provider-fallback mode. This is a
+normal completion path, not evidence that token streaming occurred.
 
 ## Recursive harness limits
 
@@ -98,12 +121,13 @@ See [backend architecture](../architecture.md) for ownership and Turn commit ord
 
 ## Run the complete Daytona proof
 
-The release proof is intentionally opt-in and uses the real FastAPI, DSPy, and
-Daytona path. Export credentials in the invoking shell; never place them in the
-repository or pass them through Fleet API requests.
+The release proof is an explicitly invoked, policy-gated command that uses the
+real FastAPI, DSPy, and Daytona path. `runtime.live_enabled` is true by
+default; set it to `false` in `config/fleet.toml` to fail closed. Export
+credentials in the invoking shell or keep them in the repository `.env`; never
+place them in the repository or pass them through Fleet API requests.
 
 ```bash
-export FLEET_LIVE=1
 # Credentials may come from the process environment or repo `.env`
 # (loaded via python-dotenv; existing exports win).
 uv run python scripts/live_daytona_verify.py \
@@ -116,7 +140,7 @@ the immutable Snapshot named by that profile with the
 
 The verifier requires a clean tracked tree on a non-`main` branch, invokes the
 single live pytest scenario once, and performs no automatic retry. It resolves
-the production DeepSeek v4-free Root and Inkling Sub roles from the selected TOML profile;
+the DeepSeek v4 Flash Root and Sub roles from the selected TOML profile;
 ambient model variables are ignored, and swapped or obsolete model pairs fail
 the precondition. Its `--help` path requires no credentials.
 

@@ -16,15 +16,15 @@ from typing import Any
 
 from dotenv import load_dotenv
 
-from fleet_rlm.config import load_runtime_settings
+from fleet_rlm.config import FleetConfigurationError, Settings, load_runtime_settings, require_live_execution
 
 RECEIPT_SCHEMA = "fleet.daytona-mvp-proof/v1"
 EVIDENCE_ENV = "FLEET_LIVE_EVIDENCE_PATH"
 _LIVE_TEST = "tests/live/backend/test_fleet_rlm_daytona_mvp.py::test_complete_daytona_mvp_through_fastapi"
 _REQUIRED_ENV = ("FLEET_DAYTONA_API_KEY", "DATABRICKS_TOKEN")
 _REPO_ROOT = Path(__file__).resolve().parents[1]
-_LIVE_ROOT_MODEL = "uscentral.default.deepseek-v4-flash"
-_LIVE_SUB_MODEL = "system.ai.inkling"
+_LIVE_ROOT_MODEL = "deepseek-v4-flash"
+_LIVE_SUB_MODEL = "deepseek-v4-flash"
 _APPROVED_ROOT_MODELS = frozenset({_LIVE_ROOT_MODEL, f"openai/{_LIVE_ROOT_MODEL}"})
 _APPROVED_SUB_MODELS = frozenset({_LIVE_SUB_MODEL, f"openai/{_LIVE_SUB_MODEL}"})
 _DURABILITY_TEST = "tests/live/backend/test_attachment_artifact_durability.py"
@@ -36,6 +36,7 @@ _SUCCESS_FIELDS = frozenset(
         "models",
         "resources",
         "counts",
+        "streaming",
         "checksums",
         "assertions",
         "lanes",
@@ -379,6 +380,7 @@ def _validate_success_receipt(payload: dict[str, Any], *, sha: str) -> None:
             "sse_finish",
             "sse_done",
         },
+        "streaming": {"first_delta_ms", "delta_count", "fields"},
         "checksums": {"snapshot_sha256", "workspace_sha256", "typed_result_sha256"},
     }
     for name, fields in required_fields.items():
@@ -424,6 +426,21 @@ def _validate_success_receipt(payload: dict[str, Any], *, sha: str) -> None:
         for value in counts.values()
     ):
         raise ReceiptError("receipt_counts")
+    streaming = payload["streaming"]
+    if (
+        not isinstance(streaming, dict)
+        or set(streaming) != {"first_delta_ms", "delta_count", "fields"}
+        or not isinstance(streaming["first_delta_ms"], int)
+        or isinstance(streaming["first_delta_ms"], bool)
+        or not 0 <= streaming["first_delta_ms"] <= 86_400_000
+        or not isinstance(streaming["delta_count"], int)
+        or isinstance(streaming["delta_count"], bool)
+        or not 1 <= streaming["delta_count"] <= 1_000_000
+        or not isinstance(streaming["fields"], list)
+        or not streaming["fields"]
+        or any(value not in {"reasoning", "code"} for value in streaming["fields"])
+    ):
+        raise ReceiptError("receipt_streaming")
 
 
 def _validate_lane_evidence(payload: dict[str, Any]) -> dict[str, Any]:
@@ -619,10 +636,10 @@ def _load_repo_env() -> None:
     load_dotenv(_REPO_ROOT / ".env", override=False)
 
 
-def _configured_models() -> dict[str, str]:
+def _configured_models(settings: Settings | None = None) -> dict[str, str]:
     """Return the approved models resolved from the selected TOML profile."""
-    settings = load_runtime_settings()
-    return {"root": settings.root_model, "sub": settings.sub_model}
+    resolved = settings or load_runtime_settings()
+    return {"root": resolved.root_model, "sub": resolved.sub_model}
 
 
 def _models_are_approved(models: object) -> bool:
@@ -645,8 +662,18 @@ def main(argv: list[str] | None = None) -> int:
         print("Live proof precondition failed.", file=sys.stderr)
         return EXIT_PRECONDITION
     _load_repo_env()
-    live_enabled = os.environ.get("FLEET_LIVE", "").strip().lower() in {"1", "true", "yes"}
-    if not live_enabled or any(not os.environ.get(name) for name in _REQUIRED_ENV):
+    try:
+        settings = require_live_execution()
+    except FleetConfigurationError:
+        _write_failure(
+            output,
+            category="precondition_failed",
+            phase="environment",
+            started_at=started_at,
+        )
+        print("Live proof precondition failed.", file=sys.stderr)
+        return EXIT_PRECONDITION
+    if any(not os.environ.get(name) for name in _REQUIRED_ENV):
         _write_failure(
             output,
             category="precondition_failed",
@@ -666,7 +693,7 @@ def main(argv: list[str] | None = None) -> int:
         )
         print("Live proof candidate precondition failed.", file=sys.stderr)
         return EXIT_PRECONDITION
-    models = _configured_models()
+    models = _configured_models(settings)
     child_env = os.environ.copy()
     child_env.pop("FLEET_ROOT_MODEL", None)
     child_env.pop("FLEET_SUB_MODEL", None)

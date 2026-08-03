@@ -17,6 +17,7 @@ import platform
 import resource
 import sys
 import time
+from collections import Counter
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -29,14 +30,22 @@ from fleet_rlm.files.url_tool import UrlFetchResult, UrlToolHost, WorkspaceUrlSo
 from fleet_rlm.files.workspace_models import WorkspaceEntry, WorkspaceListResult, WorkspaceTextPage
 from fleet_rlm.observability.turn_tracing import turn_trace
 from fleet_rlm.rlm.dspy_contract import RLMOptions
+from fleet_rlm.rlm.events import ToolStarted
 from fleet_rlm.rlm.factory import RLMFactory
 from fleet_rlm.rlm.model_bundle import RLMModelBundle
 from fleet_rlm.rlm.tool_observer import observe_tool
 
-RECEIPT_SCHEMA = "fleet.native-long-context-benchmark/v1"
+RECEIPT_SCHEMA = "fleet.native-long-context-benchmark/v2"
 DEFAULT_SIZES = (1 * 1024 * 1024, 5 * 1024 * 1024, 10 * 1024 * 1024)
 DEFAULT_DEADLINE_SECONDS = 120.0
 RSS_GATE_BYTES = 64 * 1024 * 1024
+
+
+class NativeLongContextSignature(dspy.Signature):
+    """Analyze one deterministic long-context source and return its verified answer."""
+
+    request: str = dspy.InputField(desc="The long-context analysis request")
+    answer: str = dspy.OutputField(desc="The verified scalar answer")
 
 
 def _rss_bytes() -> int:
@@ -258,10 +267,19 @@ def _rlm(
         options=RLMOptions(max_iterations=len(codes), max_llm_calls=4, max_output_chars=2_000),
         interpreter=interpreter,
         tools=tools,
-        signature="request -> answer: str",
+        signature=NativeLongContextSignature,
     )
     rlm.generate_action = _Action(codes)
     return rlm
+
+
+def _termination_mode(prediction: dspy.Prediction) -> str:
+    return "forced_extraction" if prediction.final_reasoning == "Extract forced final output" else "typed_submit"
+
+
+def _usage_output(prediction: dspy.Prediction) -> object:
+    """Return exactly DSPy's public Prediction usage output."""
+    return prediction.get_lm_usage()
 
 
 async def _run_case(size: int, *, trace_enabled: bool) -> dict[str, object]:
@@ -324,7 +342,11 @@ async def _run_case(size: int, *, trace_enabled: bool) -> dict[str, object]:
     )
 
     trace_ids: list[str | None] = []
-    with contextlib.redirect_stdout(io.StringIO()), turn_trace(session_id, uuid4(), enabled=trace_enabled) as trace:
+    with (
+        contextlib.redirect_stdout(io.StringIO()),
+        turn_trace(session_id, uuid4(), enabled=trace_enabled) as trace,
+        dspy.context(track_usage=True),
+    ):
         trace_ids.append(trace.trace_id)
         first_prediction = await first.acall(request="Analyze the synthetic source")
     first_completed_at = time.perf_counter()
@@ -339,7 +361,11 @@ async def _run_case(size: int, *, trace_enabled: bool) -> dict[str, object]:
         interpreter=second_interpreter,
         sub_lm=semantic_lm,
     )
-    with contextlib.redirect_stdout(io.StringIO()), turn_trace(session_id, uuid4(), enabled=trace_enabled) as trace:
+    with (
+        contextlib.redirect_stdout(io.StringIO()),
+        turn_trace(session_id, uuid4(), enabled=trace_enabled) as trace,
+        dspy.context(track_usage=True),
+    ):
         trace_ids.append(trace.trace_id)
         second_prediction = await second.acall(request="Follow up on the source")
     completed_at = time.perf_counter()
@@ -353,6 +379,15 @@ async def _run_case(size: int, *, trace_enabled: bool) -> dict[str, object]:
     output_sizes = [len(item.output) for item in observed if hasattr(item, "output") and isinstance(item.output, str)]
     max_code_chars = max(code_sizes, default=0)
     max_output_chars = max(output_sizes, default=0)
+    tool_calls = Counter(item.tool_name for item in observed if isinstance(item, ToolStarted))
+    termination = {
+        "first_turn": _termination_mode(first_prediction),
+        "follow_up": _termination_mode(second_prediction),
+    }
+    usage = {
+        "first_turn": _usage_output(first_prediction),
+        "follow_up": _usage_output(second_prediction),
+    }
     return {
         "source_bytes": size,
         "correct": first_prediction.answer == expected and second_prediction.answer == "cache-hit",
@@ -370,14 +405,119 @@ async def _run_case(size: int, *, trace_enabled: bool) -> dict[str, object]:
             "follow_up": len(second_prediction.trajectory),
         },
         "sub_lm_call_count": len(semantic_lm.prompts),
+        "native_tool_call_counts": {
+            "llm_query": tool_calls["llm_query"],
+            "llm_query_batched": tool_calls["llm_query_batched"],
+        },
         "recursive_call_count": 0,
         "maximum_recursive_prompt_chars": 0,
         "selected_excerpt_max_chars": max((len(prompt) for prompt in semantic_lm.prompts), default=0),
         "max_interpreter_code_chars": max_code_chars,
         "max_interpreter_output_chars": max_output_chars,
         "interpreter_payload_within_limits": max_code_chars <= 12_000 and max_output_chars <= 2_000,
+        "termination": termination,
+        "typed_completion": all(mode == "typed_submit" for mode in termination.values()),
+        "prediction_lm_usage": usage,
+        "usage_tracking_attached": all(value is not None for value in usage.values()),
+        "rlm_type": f"{type(first).__module__}.{type(first).__qualname__}",
+        "registered_tool_names": sorted(first.tools),
         "trace_ids": trace_ids,
         "peak_host_rss_bytes": _rss_bytes(),
+    }
+
+
+def _case_prediction(case: dict[str, object]) -> dspy.Prediction:
+    native_calls = case["native_tool_call_counts"]
+    if not isinstance(native_calls, dict):
+        raise TypeError("native tool call counts must be a mapping")
+    evidence_present = (
+        bool(case["body_free_observations"])
+        and int(native_calls["llm_query_batched"]) == 1
+        and int(case["sub_lm_call_count"]) == 3
+        and int(case["selected_excerpt_max_chars"]) > 0
+    )
+    return dspy.Prediction(
+        answer_correct=bool(case["correct"]),
+        evidence_present=evidence_present,
+        typed_completion=bool(case["typed_completion"]),
+    )
+
+
+class _CaseProgram(dspy.Module):
+    def __init__(self, cases: list[dict[str, object]]) -> None:
+        super().__init__()
+        self._cases = {int(case["source_bytes"]): case for case in cases}
+
+    def forward(self, *, source_bytes: int) -> dspy.Prediction:
+        return _case_prediction(self._cases[source_bytes])
+
+
+def _metric_components(example: dspy.Example, prediction: dspy.Prediction) -> dict[str, float]:
+    return {
+        "answer_correctness": float(prediction.answer_correct == example.expected_answer_correct),
+        "evidence_presence": float(prediction.evidence_present == example.expected_evidence_present),
+        "typed_completion": float(prediction.typed_completion == example.expected_typed_completion),
+    }
+
+
+def native_quality_metric(example: dspy.Example, prediction: dspy.Prediction, trace: object = None) -> float:
+    """Return the bounded mean of correctness, evidence, and typed completion."""
+    del trace
+    components = _metric_components(example, prediction)
+    return sum(components.values()) / len(components)
+
+
+def _evaluate_cases(cases: list[dict[str, object]]) -> dict[str, object]:
+    devset = [
+        dspy.Example(
+            source_bytes=int(case["source_bytes"]),
+            expected_answer_correct=True,
+            expected_evidence_present=True,
+            expected_typed_completion=True,
+        ).with_inputs("source_bytes")
+        for case in cases
+    ]
+    result = dspy.Evaluate(
+        devset=devset,
+        metric=native_quality_metric,
+        num_threads=1,
+        display_progress=False,
+        display_table=False,
+    )(_CaseProgram(cases))
+    examples = []
+    for example, prediction, score in result.results:
+        examples.append(
+            {
+                "input": {"source_bytes": int(example.source_bytes)},
+                "expected": {
+                    "answer_correct": bool(example.expected_answer_correct),
+                    "evidence_present": bool(example.expected_evidence_present),
+                    "typed_completion": bool(example.expected_typed_completion),
+                },
+                "prediction": {
+                    "answer_correct": bool(prediction.answer_correct),
+                    "evidence_present": bool(prediction.evidence_present),
+                    "typed_completion": bool(prediction.typed_completion),
+                },
+                "sub_scores": _metric_components(example, prediction),
+                "score": float(score),
+            }
+        )
+    return {
+        "engine": "dspy.Evaluate",
+        "example_type": "dspy.Example",
+        "metric": "native_quality_metric",
+        "score": float(result.score),
+        "examples": examples,
+    }
+
+
+def _signature_contract() -> dict[str, object]:
+    return {
+        "name": NativeLongContextSignature.__name__,
+        "type": f"{NativeLongContextSignature.__module__}.{NativeLongContextSignature.__qualname__}",
+        "input_fields": list(NativeLongContextSignature.input_fields),
+        "output_fields": list(NativeLongContextSignature.output_fields),
     }
 
 
@@ -400,7 +540,12 @@ def _parse_sizes(value: str) -> tuple[int, ...]:
     return sizes
 
 
-def _gate(cases: list[dict[str, object]], *, deadline_seconds: float) -> dict[str, object]:
+def _gate(
+    cases: list[dict[str, object]],
+    *,
+    deadline_seconds: float,
+    evaluation: dict[str, object],
+) -> dict[str, object]:
     """
     Evaluate benchmark cases against correctness, performance, memory, caching, and execution limits.
 
@@ -415,6 +560,9 @@ def _gate(cases: list[dict[str, object]], *, deadline_seconds: float) -> dict[st
     largest = max(cases, key=lambda case: int(case["source_bytes"]))
     if baseline is None:
         return {"decision": "insufficient_baseline", "passed": False}
+    native_counts = largest["native_tool_call_counts"]
+    if not isinstance(native_counts, dict):
+        return {"decision": "invalid_native_call_counts", "passed": False}
     rss_delta = int(largest["peak_host_rss_bytes"]) - int(baseline["peak_host_rss_bytes"])
     largest["peak_rss_delta_over_1mib_bytes"] = rss_delta
     completion_ms = float(largest["first_turn_completion_ms"])
@@ -426,8 +574,15 @@ def _gate(cases: list[dict[str, object]], *, deadline_seconds: float) -> dict[st
         "body_free_observations": bool(largest["body_free_observations"]),
         "interpreter_payload_within_limits": bool(largest["interpreter_payload_within_limits"]),
         "batched_calls_without_recursion": (
-            int(largest["sub_lm_call_count"]) == 3 and int(largest["recursive_call_count"]) == 0
+            int(largest["sub_lm_call_count"]) == 3
+            and int(native_counts["llm_query"]) == 0
+            and int(native_counts["llm_query_batched"]) == 1
+            and int(largest["recursive_call_count"]) == 0
         ),
+        "typed_completion": bool(largest["typed_completion"]),
+        "usage_tracking_attached": bool(largest["usage_tracking_attached"]),
+        "stock_dspy_rlm": largest["rlm_type"] == "dspy.predict.rlm.RLM",
+        "dspy_evaluation_full_score": float(evaluation["score"]) == 100.0,
     }
     passed = all(checks.values())
     return {
@@ -472,6 +627,23 @@ async def _run(args: argparse.Namespace) -> dict[str, object]:
     if args.deadline_seconds <= 0:
         raise ValueError("deadline must be positive")
     cases = [await _run_case(size, trace_enabled=args.trace) for size in sizes]
+    evaluation = _evaluate_cases(cases)
+    dspy_contract = {
+        "version": dspy.__version__,
+        "rlm_type": cases[0]["rlm_type"],
+        "rlm_instances_per_case": 2,
+        "rlm_roles": ["primary", "follow_up"],
+        "signature": _signature_contract(),
+        "registered_tool_type": f"{dspy.Tool.__module__}.{dspy.Tool.__qualname__}",
+        "registered_tool_names": cases[0]["registered_tool_names"],
+        "native_tools": ["llm_query", "llm_query_batched", "SUBMIT"],
+        "prediction_type": f"{dspy.Prediction.__module__}.{dspy.Prediction.__qualname__}",
+        "sandbox_serializable_type": (f"{dspy.SandboxSerializable.__module__}.{dspy.SandboxSerializable.__qualname__}"),
+        "usage_source": "Prediction.get_lm_usage()",
+        "usage_tracking": "dspy.context(track_usage=True)",
+        "evaluation_type": f"{dspy.Evaluate.__module__}.{dspy.Evaluate.__qualname__}",
+        "metric": "native_quality_metric",
+    }
     return {
         "schema": RECEIPT_SCHEMA,
         "generated_at": datetime.now(UTC).isoformat(),
@@ -479,8 +651,10 @@ async def _run(args: argparse.Namespace) -> dict[str, object]:
         "platform": platform.platform(),
         "trace_enabled": bool(args.trace),
         "deadline_seconds": args.deadline_seconds,
+        "dspy_contract": dspy_contract,
         "cases": cases,
-        "gate": _gate(cases, deadline_seconds=args.deadline_seconds),
+        "evaluation": evaluation,
+        "gate": _gate(cases, deadline_seconds=args.deadline_seconds, evaluation=evaluation),
     }
 
 

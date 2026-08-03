@@ -16,7 +16,7 @@ from fastapi.sse import EventSourceResponse
 from fastapi.testclient import TestClient
 
 from fleet_rlm.composition.testing import create_testing_app
-from fleet_rlm.rlm.events import EventRecorder, RunCompleted, RunStarted, RuntimeEvent
+from fleet_rlm.rlm.events import EventRecorder, RLMReasoning, RunCompleted, RunStarted, RuntimeEvent
 
 _END = object()
 
@@ -180,6 +180,32 @@ async def test_native_heartbeats_keep_one_pending_event_read_and_done_is_emitted
     assert data.count("[DONE]") == 1
     assert data[-1] == "[DONE]"
     assert opened.close_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_native_sse_forwards_rlm_delta_before_terminal_finish() -> None:
+    run_id = uuid4()
+    recorder = EventRecorder(run_id, uuid4())
+    opened = _ControlledOpenedTurn(run_id)
+    probe = await _start_route(opened)
+
+    opened.put(
+        recorder.record(RunStarted("live")),
+        recorder.record(RLMReasoning("first token", 1, "stream-1", True, False)),
+        recorder.record(RLMReasoning("last token", 1, "stream-1", True, True)),
+        recorder.record(RunCompleted(checkpoint_version=1, delivery="live")),
+        _END,
+    )
+    await asyncio.wait_for(probe.task, timeout=1)
+
+    frames = probe.body.decode().split("\n\n")
+    data = [frame.removeprefix("data: ") for frame in frames if frame.startswith("data: ")]
+    chunks = [json.loads(value) for value in data if value != "[DONE]"]
+    types = [chunk["type"] for chunk in chunks]
+
+    assert types[:4] == ["start", "reasoning-start", "reasoning-delta", "reasoning-delta"]
+    assert types[4:] == ["reasoning-end", "finish"]
+    assert data[-1] == "[DONE]"
 
 
 @pytest.mark.asyncio

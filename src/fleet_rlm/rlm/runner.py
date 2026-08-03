@@ -7,6 +7,7 @@ import contextlib
 import logging
 import time
 from collections.abc import AsyncIterator, Callable, Sequence
+from dataclasses import replace
 from typing import Any, Protocol, Self, cast
 
 import dspy
@@ -38,6 +39,7 @@ from fleet_rlm.rlm.events import (
     RLMReasoning,
     RunStarted,
     RuntimeEvent,
+    RuntimeEventDetail,
     SkillActivated,
     SkillLoaded,
     Status,
@@ -140,12 +142,12 @@ class _DetailRelay:
         self._loop = asyncio.get_running_loop()
         # Lifecycle is a durable protocol signal, not optional diagnostic
         # detail. Keep it even while normal observation traffic is capped.
-        self._queue: asyncio.Queue[ExecutionDetail] = asyncio.Queue()
+        self._queue: asyncio.Queue[RuntimeEventDetail] = asyncio.Queue()
         self._maxsize = max(0, maxsize)
         self._ordinary_count = 0
         self.overflowed = False
 
-    def publish(self, detail: ExecutionDetail) -> None:
+    def publish(self, detail: RuntimeEventDetail) -> None:
         try:
             loop = asyncio.get_running_loop()
         except RuntimeError:
@@ -155,7 +157,7 @@ class _DetailRelay:
         else:
             self._loop.call_soon_threadsafe(self._put, detail)
 
-    def _put(self, detail: ExecutionDetail) -> None:
+    def _put(self, detail: RuntimeEventDetail) -> None:
         if not isinstance(detail, (SkillActivated, SkillLoaded)) and self._ordinary_count >= self._maxsize:
             self.overflowed = True
             return
@@ -163,14 +165,14 @@ class _DetailRelay:
             self._ordinary_count += 1
         self._queue.put_nowait(detail)
 
-    async def get(self) -> ExecutionDetail:
+    async def get(self) -> RuntimeEventDetail:
         detail = await self._queue.get()
         if not isinstance(detail, (SkillActivated, SkillLoaded)):
             self._ordinary_count -= 1
         return detail
 
-    def drain(self) -> list[ExecutionDetail]:
-        values: list[ExecutionDetail] = []
+    def drain(self) -> list[RuntimeEventDetail]:
+        values: list[RuntimeEventDetail] = []
         while True:
             try:
                 detail = self._queue.get_nowait()
@@ -179,6 +181,90 @@ class _DetailRelay:
                 values.append(detail)
             except asyncio.QueueEmpty:
                 return values
+
+
+class _FleetStatusMessageProvider(dspy.streaming.StatusMessageProvider):
+    """Emit bounded, provider-neutral status messages from DSPy callbacks."""
+
+    def tool_start_status_message(self, instance: Any, inputs: dict[str, Any]) -> str | None:
+        del instance, inputs
+        return "Running Fleet tool"
+
+    def tool_end_status_message(self, outputs: Any) -> str | None:
+        del outputs
+        return "Fleet tool completed"
+
+    def module_start_status_message(self, instance: Any, inputs: dict[str, Any]) -> str | None:
+        del instance, inputs
+        return None
+
+    def module_end_status_message(self, outputs: Any) -> str | None:
+        del outputs
+        return None
+
+    def lm_start_status_message(self, instance: Any, inputs: dict[str, Any]) -> str | None:
+        del instance, inputs
+        return "Generating RLM action"
+
+    def lm_end_status_message(self, outputs: Any) -> str | None:
+        del outputs
+        return "RLM action generation completed"
+
+
+class _NativeRLMStreamProjector:
+    """Convert DSPy stream values into bounded Fleet observation details."""
+
+    def __init__(self, *, run_id: Any, max_chars: int, publish: Callable[[RuntimeEventDetail], None]) -> None:
+        self._run_id = run_id
+        self._max_chars = max(1, int(max_chars))
+        self._publish = publish
+        self._step = 0
+        self._last_field: str | None = None
+        self._field_chars = {"reasoning": 0, "code": 0}
+
+    def publish(self, item: Any) -> bool:
+        if isinstance(item, dspy.streaming.StatusMessage):
+            message = truncate_public_text(str(item.message), max_len=240)
+            if message:
+                self._publish(Status("execution", "streaming", message))
+            return False
+        if not isinstance(item, dspy.streaming.StreamResponse):
+            return False
+        field = item.signature_field_name
+        if field not in {"reasoning", "code"}:
+            return False
+        if field == "reasoning" and self._last_field != "reasoning":
+            self._step += 1
+            self._field_chars["reasoning"] = 0
+            self._field_chars["code"] = 0
+        elif self._step == 0:
+            self._step = 1
+        self._last_field = field
+
+        remaining = self._max_chars - self._field_chars[field]
+        chunk = truncate_public_text(str(item.chunk), max_len=max(0, remaining)) if remaining else ""
+        self._field_chars[field] += len(chunk)
+        if not chunk and not item.is_last_chunk:
+            return False
+        stream_id = f"{self._run_id}:rlm:{self._step}:{field}"
+        if field == "reasoning":
+            detail: RuntimeEventDetail = RLMReasoning(
+                chunk,
+                self._step,
+                stream_id,
+                True,
+                bool(item.is_last_chunk),
+            )
+        else:
+            detail = RLMCode(
+                chunk,
+                self._step,
+                stream_id,
+                True,
+                bool(item.is_last_chunk),
+            )
+        self._publish(detail)
+        return True
 
 
 def _trajectory_details(steps: Sequence[TrajectoryStep], *, max_chars: int) -> list[ObservationDetail]:
@@ -198,6 +284,25 @@ def _trajectory_details(steps: Sequence[TrajectoryStep], *, max_chars: int) -> l
             )
         )
     return details
+
+
+def _preserve_stream_id(target: ObservationDetail, details: Sequence[ExecutionDetail], step: int) -> ObservationDetail:
+    """Keep one live stream identity when canonical trajectory data is emitted."""
+    if not isinstance(target, (RLMReasoning, RLMCode)):
+        return target
+    stream_id = next(
+        (
+            getattr(detail, "stream_id", None)
+            for detail in details
+            if type(detail) is type(target)
+            and getattr(detail, "step", None) == step
+            and isinstance(getattr(detail, "stream_id", None), str)
+        ),
+        None,
+    )
+    if stream_id is None:
+        return target
+    return replace(target, stream_id=stream_id, is_delta=False, is_final=True)
 
 
 def _detail_position(details: Sequence[ExecutionDetail], detail_type: type[object], step: int) -> int | None:
@@ -256,7 +361,8 @@ def _reconcile_trajectory(
             continue
 
         canonical = step_details[1:-1]
-        for target in canonical:
+        for raw_target in canonical:
+            target = _preserve_stream_id(raw_target, details, step)
             target_type = type(target)
             existing_positions = [
                 index
@@ -341,8 +447,8 @@ class _WorkerMonitor:
         self.intended_stop: BaseException | None = None
         self.caller_cancelled = False
 
-    async def stream(self) -> AsyncIterator[ExecutionDetail]:
-        pending: asyncio.Task[ExecutionDetail] | None = None
+    async def stream(self) -> AsyncIterator[RuntimeEventDetail]:
+        pending: asyncio.Task[RuntimeEventDetail] | None = None
         try:
             while not self.task.done():
                 if await self.context.cancellation_requested():
@@ -393,8 +499,9 @@ class _ObservationBuffer:
         self.recorder = recorder
         self.details: list[ExecutionDetail] = []
 
-    def record(self, detail: ExecutionDetail) -> RuntimeEvent:
-        self.details.append(detail)
+    def record(self, detail: RuntimeEventDetail) -> RuntimeEvent:
+        if not isinstance(detail, Status):
+            self.details.append(cast(ExecutionDetail, detail))
         return self.recorder.record(detail)
 
 
@@ -548,12 +655,17 @@ class RLMRunner:
             tools=all_tools or None,
             signature=spec.signature,
         )
-        self._bind_observer(rlm, relay, context.options.max_output_chars)
+        self._bind_observer(
+            rlm,
+            relay,
+            context.options.max_output_chars,
+            emit_reasoning=type(rlm) is not dspy.RLM,
+        )
         return (
             spec,
             relay,
             guards,
-            asyncio.create_task(self._execute_rlm_in_worker(rlm, context, spec, recursive_executor)),
+            asyncio.create_task(self._execute_rlm_in_worker(rlm, context, spec, recursive_executor, relay)),
         )
 
     async def _worker_events(
@@ -600,9 +712,19 @@ class RLMRunner:
             bind(context.attachment_context)
 
     @staticmethod
-    def _bind_observer(target: Any, relay: _DetailRelay, max_chars: int) -> None:
+    def _bind_observer(
+        target: Any,
+        relay: _DetailRelay,
+        max_chars: int,
+        *,
+        emit_reasoning: bool = True,
+    ) -> None:
         if type(target) is dspy.RLM:
-            bind_native_rlm_observer(target, relay.publish, max_chars=max_chars)
+            bind_native_rlm_observer(
+                target,
+                relay.publish if emit_reasoning else None,
+                max_chars=max_chars,
+            )
             return
         bind = getattr(target, "bind_observer", None)
         if callable(bind):
@@ -621,6 +743,7 @@ class RLMRunner:
         context: RLMExecutionContext,
         spec: RLMExecutionSpec,
         recursive_executor: RecursiveRLMExecutor,
+        relay: _DetailRelay,
     ) -> Any:
         kwargs = build_rlm_input_kwargs(
             request=context.request,
@@ -653,7 +776,51 @@ class RLMRunner:
             ),
         ):
             try:
-                prediction = await rlm.acall(**kwargs)
+                stream_mode = "legacy"
+                if type(rlm) is dspy.RLM and isinstance(rlm.generate_action, dspy.Predict):
+                    named_predictors = dict(rlm.named_predictors())
+                    predictor_name = next(
+                        (name for name, predictor in named_predictors.items() if predictor is rlm.generate_action),
+                        None,
+                    )
+                    if predictor_name is None:
+                        raise TypeError("native RLM action predictor is not addressable by name")
+                    listeners = [
+                        dspy.streaming.StreamListener(
+                            signature_field_name=field,
+                            predict=rlm.generate_action,
+                            predict_name=predictor_name,
+                            allow_reuse=True,
+                        )
+                        for field in ("reasoning", "code")
+                    ]
+                    stream_projector = _NativeRLMStreamProjector(
+                        run_id=context.run_id,
+                        max_chars=context.options.max_output_chars,
+                        publish=relay.publish,
+                    )
+                    stream_program = cast(
+                        Callable[..., AsyncIterator[Any]],
+                        dspy.streamify(
+                            rlm,
+                            status_message_provider=_FleetStatusMessageProvider(),
+                            stream_listeners=listeners,
+                            include_final_prediction_in_output_stream=True,
+                            is_async_program=True,
+                            async_streaming=True,
+                        ),
+                    )
+                    prediction = None
+                    streamed = False
+                    async for stream_item in stream_program(**kwargs):
+                        streamed |= stream_projector.publish(stream_item)
+                        if isinstance(stream_item, dspy.Prediction):
+                            prediction = stream_item
+                    if prediction is None:
+                        raise TypeError("DSPy streamify completed without a Prediction")
+                    stream_mode = "native" if streamed else "provider_fallback"
+                else:
+                    prediction = await rlm.acall(**kwargs)
             except BaseException as exc:
                 recursive_summary = recursive_executor.summary()
                 phase.set_outputs(
@@ -667,6 +834,11 @@ class RLMRunner:
                     }
                 )
                 raise
+            finally:
+                drain_accesses = getattr(context.interpreter, "drain_context_accesses", None)
+                record_accesses = getattr(context.capabilities, "record_attachment_accesses", None)
+                if callable(drain_accesses) and callable(record_accesses):
+                    record_accesses(tuple(drain_accesses()))
             final_reasoning = getattr(prediction, "final_reasoning", None)
             termination_mode = (
                 "native_extraction_fallback" if final_reasoning == "Extract forced final output" else "typed_submit"
@@ -682,6 +854,7 @@ class RLMRunner:
                     "recursive_call_count": recursive_executor.summary().call_count,
                     "recursive_prompt_chars": recursive_executor.summary().delegated_prompt_chars,
                     "recursive_depth_fallback_count": recursive_executor.summary().depth_fallback_count,
+                    "stream_mode": stream_mode,
                 }
             )
             return prediction
@@ -692,9 +865,10 @@ class RLMRunner:
         context: RLMExecutionContext,
         spec: RLMExecutionSpec,
         recursive_executor: RecursiveRLMExecutor,
+        relay: _DetailRelay,
     ) -> Any:
         def run() -> Any:
-            return asyncio.run(self._execute_rlm(rlm, context, spec, recursive_executor))
+            return asyncio.run(self._execute_rlm(rlm, context, spec, recursive_executor, relay))
 
         return await asyncio.to_thread(run)
 

@@ -189,13 +189,24 @@ export class LiveTurnProjector {
   ): StoreEvent[] {
     const value = data(chunk.data);
     const step = number(value.step, inferStep(chunk.id));
-    const id = `${field}-${chunk.id ?? `${this.runId}-${step}`}`;
+    const id = `${field}-${chunk.id ?? string(value.stream_id, `${this.runId}-${step}`)}`;
     const content = string(field === "code" ? value.code : value.output);
     if (!content) return [];
+    const prior = this.messages.get(id);
+    const isDelta = value.is_delta === true;
+    const priorContent =
+      field === "code"
+        ? prior?.kind === "code"
+          ? prior.code
+          : ""
+        : prior?.kind === "output"
+          ? prior.output
+          : "";
+    const nextContent = isDelta ? `${priorContent}${content}` : content;
     return this.save(
       field === "code"
-        ? code(id, this.runId, step, content, this.clock)
-        : output(id, this.runId, step, content, this.clock),
+        ? code(id, this.runId, step, nextContent, this.clock)
+        : output(id, this.runId, step, nextContent, this.clock),
     );
   }
 

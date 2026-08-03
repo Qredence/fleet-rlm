@@ -67,6 +67,9 @@ class RLMReasoning:
     kind: ClassVar[Literal["rlm.reasoning"]] = "rlm.reasoning"
     text: str
     step: int | None = None
+    stream_id: str | None = None
+    is_delta: bool = False
+    is_final: bool = True
 
 
 @dataclass(frozen=True, slots=True)
@@ -74,6 +77,9 @@ class RLMCode:
     kind: ClassVar[Literal["rlm.code"]] = "rlm.code"
     code: str
     step: int | None = None
+    stream_id: str | None = None
+    is_delta: bool = False
+    is_final: bool = True
 
 
 @dataclass(frozen=True, slots=True)

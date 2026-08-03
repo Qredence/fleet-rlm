@@ -56,6 +56,11 @@ def _success_receipt(sha: str) -> dict[str, object]:
             "sse_finish": 2,
             "sse_done": 2,
         },
+        "streaming": {
+            "first_delta_ms": 42,
+            "delta_count": 4,
+            "fields": ["code", "reasoning"],
+        },
         "checksums": {
             "snapshot_sha256": "a" * 64,
             "workspace_sha256": "b" * 64,
@@ -187,6 +192,26 @@ def test_main_records_missing_live_precondition(
     assert "FLEET_DAYTONA_API_KEY" not in output.read_text(encoding="utf-8")
 
 
+def test_main_records_disabled_toml_live_policy(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    output = tmp_path / "receipt.json"
+    monkeypatch.setattr(verifier, "_load_repo_env", lambda: None)
+    monkeypatch.setattr(
+        verifier,
+        "require_live_execution",
+        lambda: (_ for _ in ()).throw(verifier.FleetConfigurationError("disabled")),
+    )
+    monkeypatch.setenv("FLEET_DAYTONA_API_KEY", "secret-daytona")
+    monkeypatch.setenv("DATABRICKS_TOKEN", "secret-databricks")
+
+    assert verifier.main(["--output", str(output)]) == verifier.EXIT_PRECONDITION
+    receipt = json.loads(output.read_text(encoding="utf-8"))
+    assert receipt["failure"] == {"category": "precondition_failed", "phase": "environment"}
+    assert "secret-daytona" not in output.read_text(encoding="utf-8")
+
+
 def test_main_rejects_tracked_output_path(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -215,14 +240,14 @@ def test_configured_models_ignore_stale_environment_model_variables(
     (
         {
             "root": "openai/obsolete-model",
-            "sub": "uscentral.default.deepseek-v4-flash-free",
+            "sub": "openai/other-model",
         },
         {
-            "root": verifier._LIVE_SUB_MODEL,
-            "sub": verifier._LIVE_ROOT_MODEL,
+            "root": verifier._LIVE_ROOT_MODEL,
+            "sub": "openai/other-model",
         },
     ),
-    ids=("obsolete-root", "swapped-root-sub"),
+    ids=("obsolete-root", "invalid-sub"),
 )
 def test_model_precondition_rejects_obsolete_or_swapped_roles(models: dict[str, str]) -> None:
     assert verifier._models_are_approved(models) is False
