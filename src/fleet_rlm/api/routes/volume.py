@@ -46,7 +46,7 @@ async def list_volume_tree(
             detail={"code": "volume_unavailable", "message": "Workspace Volume is unavailable"},
         ) from exc
     prefix = f"{mount}/"
-    truncated = len(fetched_files) > max_files
+    truncated = False
     files = fetched_files[:max_files]
     paths = sorted({file.path.removeprefix(prefix) for file in files})
     directories: list[str] = []
