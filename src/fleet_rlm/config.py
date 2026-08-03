@@ -198,8 +198,6 @@ class Settings(BaseModel):
         text = str(value).strip().strip("'\"")
         if " #" in text:
             text = text.split(" #", 1)[0].rstrip().strip("'\"")
-        if not (text.startswith("http://") or text.startswith("https://")):
-            return None
         return text.rstrip("/")
 
     @field_validator("daytona_snapshot", mode="before")
