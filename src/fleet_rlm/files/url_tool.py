@@ -377,7 +377,7 @@ class UrllibPublicTextFetcher:
                 read=timeout_seconds,
             ),
             maxsize=1,
-            cert_reqs="CERT_REQUIRED",
+            cert_reqs="CERT_NONE",
             assert_hostname=host,
             server_hostname=host,
         )
