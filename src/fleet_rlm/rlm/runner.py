@@ -745,11 +745,6 @@ class RLMRunner:
         recursive_executor: RecursiveRLMExecutor,
         relay: _DetailRelay,
     ) -> Any:
-        if context.attachment_context is not None:
-            bind_context_capsule = getattr(context.interpreter, "bind_context_capsule", None)
-            if not callable(bind_context_capsule):
-                raise TypeError("context capsule requires a host-bound interpreter")
-            bind_context_capsule(context.attachment_context)
         kwargs = build_rlm_input_kwargs(
             request=context.request,
             session_context=context.session_context,
