@@ -379,12 +379,6 @@ def _run_backend_and_tui(
                     if tui_returncode is not None:
                         break
                     time.sleep(0.1)
-                if received_signal is None and tui_returncode not in {
-                    0,
-                    128 + signal.SIGINT,
-                    -signal.SIGINT,
-                }:
-                    raise SupervisorError(f"Fleet pi-tui TUI exited with status {tui_returncode}")
             finally:
                 if tui is not None:
                     _stop_process_group(tui)
