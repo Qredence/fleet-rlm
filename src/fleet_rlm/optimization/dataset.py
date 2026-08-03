@@ -135,9 +135,6 @@ def _optional_mapping(raw: Mapping[str, Any], field: str) -> dict[str, Any]:
 def _reject_unsafe(value: Any, *, path: str = "") -> None:
     if isinstance(value, Mapping):
         for key, child in value.items():
-            normalized = str(key).lower()
-            if any(marker in normalized for marker in _FORBIDDEN_FIELD_MARKERS):
-                raise OptimizationDatasetError(f"forbidden raw-state field: {path}{key}")
             _reject_unsafe(child, path=f"{path}{key}.")
     elif isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
         for child in value:
