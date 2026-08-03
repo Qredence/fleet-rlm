@@ -14,7 +14,6 @@ from typing import Any
 from uuid import UUID
 
 from fleet_rlm.daytona.errors import map_provider_error
-from fleet_rlm.daytona.platform import sandbox_state
 from fleet_rlm.daytona.provisioning import (
     DaytonaSandboxSpec,
     SandboxProvisioner,
@@ -257,8 +256,6 @@ class DaytonaWorkspaceGateway:
                     ephemeral=True,
                 )
                 await sandbox.refresh_data()
-                if sandbox_state(sandbox) != "running":
-                    raise RuntimeError("Workspace I/O Sandbox did not reach running state")
                 self._provisioner.verify(sandbox, expected)
                 paths = self._volume_config.paths()
                 await ensure_shared_volume_layout(sandbox, paths)
