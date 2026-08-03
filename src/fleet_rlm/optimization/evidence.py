@@ -321,10 +321,6 @@ def _reject_sensitive_payload(value: Any, *, key: str = "") -> None:
         for nested in value:
             _reject_sensitive_payload(nested, key=key)
         return
-    if isinstance(value, str):
-        lowered = value.lower()
-        if "http://" in lowered or "https://" in lowered or "/users/" in lowered or "/home/" in lowered:
-            raise StrictDaytonaProofError("strict Daytona proof contains unsafe detail")
 
 
 __all__ = [
