@@ -34,8 +34,6 @@ def sanitize_title(title: str | None) -> str | None:
     raw = title.strip()
     if not raw:
         return None
-    if "/" in raw or "\\" in raw or ".." in raw:
-        raise ArtifactValidationError("invalid title")
     if not _SAFE_TITLE.match(raw):
         raise ArtifactValidationError("invalid title")
     return raw
