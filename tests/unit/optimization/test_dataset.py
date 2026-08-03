@@ -57,3 +57,11 @@ def test_load_export_requires_versioned_container() -> None:
     payload["schema"] = "wrong"
     with pytest.raises(OptimizationDatasetError, match="schema"):
         load_export(payload)
+
+
+def test_validate_records_rejects_forbidden_field_keys() -> None:
+    records = [_record(index) for index in range(25)]
+    records[0]["provenance"]["file_path"] = "exports/summary.json"
+
+    with pytest.raises(OptimizationDatasetError, match="forbidden raw-state field"):
+        validate_records(records)
