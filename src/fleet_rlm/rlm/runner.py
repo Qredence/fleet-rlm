@@ -516,6 +516,7 @@ class RLMRunner:
         relay = _DetailRelay()
         guards = TurnToolGuards(required_targets=workspace_obligations(context.request))
         self._bind_observer(context.interpreter, relay, context.options.max_output_chars)
+        self._bind_context_capsule(context)
         recursive_executor = RecursiveRLMExecutor(
             models=context.models,
             options=context.recursive_options,
@@ -590,6 +591,15 @@ class RLMRunner:
             yield observations.record(item)
 
     @staticmethod
+    def _bind_context_capsule(context: RLMExecutionContext) -> None:
+        """Bind the prepared Volume context to the interpreter before the RLM starts."""
+        if context.attachment_context is None:
+            return
+        bind = getattr(context.interpreter, "bind_context_capsule", None)
+        if callable(bind):
+            bind(context.attachment_context)
+
+    @staticmethod
     def _bind_observer(target: Any, relay: _DetailRelay, max_chars: int) -> None:
         if type(target) is dspy.RLM:
             bind_native_rlm_observer(target, relay.publish, max_chars=max_chars)
@@ -617,6 +627,7 @@ class RLMRunner:
             session_context=context.session_context,
             skill_cards=spec.skill_cards,
             attachments=context.attachments,
+            attachment_context=context.attachment_context,
             workspace=spec.workspace,
         )
         started = time.perf_counter()
