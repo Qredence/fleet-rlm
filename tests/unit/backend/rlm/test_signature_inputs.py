@@ -20,7 +20,7 @@ from fleet_rlm.rlm.input_models import (
     SessionContextInput,
     SkillCardInput,
 )
-from fleet_rlm.rlm.inputs import AttachmentSandboxPayload, build_rlm_input_kwargs
+from fleet_rlm.rlm.inputs import AttachmentContextCapsule, AttachmentContextEntry, build_rlm_input_kwargs
 from fleet_rlm.skills.models import SkillCard
 
 SESSION_ID = UUID("00000000-0000-0000-0000-000000000001")
@@ -233,32 +233,173 @@ def test_invalid_request_fails_at_the_input_boundary() -> None:
 
 
 @pytest.mark.asyncio
-async def test_bounded_attachment_payload_round_trips_inside_the_interpreter() -> None:
+async def test_volume_attachment_context_round_trips_inside_the_interpreter(tmp_path: Path) -> None:
+    import hashlib
+
     from fleet_rlm.chat.session_context import SessionContextManifest
     from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
 
-    payload = AttachmentSandboxPayload(ATTACHMENT_ID, "report.bin", "application/octet-stream", b"\x00Fleet")
+    body = b"Fleet context"
+    context_file = tmp_path / "report.txt"
+    context_file.write_bytes(body)
+    payload = AttachmentContextCapsule(
+        (
+            AttachmentContextEntry(
+                ATTACHMENT_ID,
+                "report.txt",
+                "text/plain",
+                len(body),
+                hashlib.sha256(body).hexdigest(),
+                str(context_file),
+            ),
+        ),
+        mount_root=str(tmp_path),
+    )
     kwargs = build_rlm_input_kwargs(
         request="inspect the prepared payload",
         session_context=SessionContextManifest(SESSION_ID, 0, 0, ()),
-        attachment_payloads=(payload,),
+        attachment_context=payload,
     )
     lm = dspy.utils.DummyLM(
-        [{"reasoning": "submit the bytes", "code": "SUBMIT(answer=str(attachments[0]['data']))"}],
+        [{"reasoning": "submit the context", "code": "SUBMIT(answer=context)"}],
         adapter=dspy.JSONAdapter(),
     )
+    interpreter = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())
+    interpreter.bind_context_capsule(payload)
     rlm = dspy.RLM(
         "request -> answer: str",
         max_iterations=1,
-        interpreter=DaytonaCodeInterpreter(backend=InProcessInterpreterBackend()),
+        interpreter=interpreter,
     )
 
     with dspy.context(lm=lm, adapter=dspy.JSONAdapter()):
         prediction = await rlm.acall(**kwargs)
 
-    assert prediction.answer == "b'\\x00Fleet'"
-    assert payload.rlm_preview(10) == "prepared a"
+    assert prediction.answer == "Fleet context"
+    assert payload.rlm_preview(10) == "prepared i"
     assert "/home/daytona" not in payload.rlm_preview()
+    assert body not in payload.to_sandbox()
+
+
+def test_attachment_context_rejects_paths_outside_mount(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="outside"):
+        AttachmentContextCapsule(
+            (
+                AttachmentContextEntry(
+                    ATTACHMENT_ID,
+                    "report.txt",
+                    "text/plain",
+                    1,
+                    "a" * 64,
+                    "/outside/report.txt",
+                ),
+            ),
+            mount_root=str(tmp_path),
+        )
+
+
+def test_attachment_context_manifest_requires_the_host_bound_digest(tmp_path: Path) -> None:
+    import hashlib
+
+    from fleet_rlm.daytona.interpreter import InProcessInterpreterBackend
+    from fleet_rlm.rlm.inputs import _materialize_context_manifest
+
+    body = b"bound context"
+    context_file = tmp_path / "report.txt"
+    context_file.write_bytes(body)
+    capsule = AttachmentContextCapsule(
+        (
+            AttachmentContextEntry(
+                ATTACHMENT_ID,
+                "report.txt",
+                "text/plain",
+                len(body),
+                hashlib.sha256(body).hexdigest(),
+                str(context_file),
+            ),
+        ),
+        mount_root=str(tmp_path),
+    )
+    raw = capsule.to_sandbox()
+    manifest_sha256 = hashlib.sha256(raw).hexdigest()
+
+    values, accesses = _materialize_context_manifest(
+        raw,
+        trusted_mount_root=str(tmp_path),
+        expected_manifest_sha256=manifest_sha256,
+    )
+    assert values[0]["data"] == "bound context"
+    assert accesses == (str(ATTACHMENT_ID),)
+
+    forged = json.loads(raw)
+    forged["mount_root"] = "/"
+    with pytest.raises(ValueError, match="context manifest is invalid"):
+        _materialize_context_manifest(
+            json.dumps(forged).encode(),
+            trusted_mount_root=str(tmp_path),
+            expected_manifest_sha256=manifest_sha256,
+        )
+
+    backend = InProcessInterpreterBackend()
+    backend.bind_context_manifest(
+        trusted_mount_root=str(tmp_path),
+        expected_manifest_sha256=manifest_sha256,
+    )
+    forged_raw = json.dumps({**forged, "mount_root": "/"}).encode()
+    forged_result = backend.run(
+        "attachments = _fleet_load_context_manifest(_raw_attachments)",
+        {"_raw_attachments": forged_raw},
+    )
+    assert forged_result.error == "context manifest is invalid"
+
+    assignment = capsule.sandbox_assignment("attachments", "_raw_attachments")
+    assert manifest_sha256 not in assignment
+    assert str(tmp_path) not in assignment
+    assert "del _fleet_load_context_manifest" in assignment
+
+
+@pytest.mark.asyncio
+async def test_attachment_context_integrity_failure_aborts_before_reasoning(tmp_path: Path) -> None:
+    from fleet_rlm.daytona.errors import DaytonaAdapterError
+    from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
+
+    context_file = tmp_path / "report.txt"
+    context_file.write_text("changed", encoding="utf-8")
+    capsule = AttachmentContextCapsule(
+        (
+            AttachmentContextEntry(
+                ATTACHMENT_ID,
+                "report.txt",
+                "text/plain",
+                7,
+                "a" * 64,
+                str(context_file),
+            ),
+        ),
+        mount_root=str(tmp_path),
+    )
+    lm = dspy.utils.DummyLM(
+        [{"reasoning": "must not run", "code": "SUBMIT(answer='bad')"}],
+        adapter=dspy.JSONAdapter(),
+    )
+    interpreter = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())
+    interpreter.bind_context_capsule(capsule)
+    rlm = dspy.RLM(
+        "request, attachments -> answer: str",
+        max_iterations=1,
+        interpreter=interpreter,
+    )
+
+    with (
+        dspy.context(lm=lm, adapter=dspy.JSONAdapter()),
+        pytest.raises(DaytonaAdapterError, match="prepared context failed integrity verification"),
+    ):
+        await rlm.acall(
+            request="inspect",
+            attachments=capsule,
+        )
+
+    assert lm.history == []
 
 
 def test_backend_module_suffix_is_reserved_for_dspy_modules() -> None:

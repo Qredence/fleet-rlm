@@ -67,6 +67,16 @@ def test_repeated_authorized_host_tool_calls_have_no_fleet_count_limit(tmp_path)
     skill_events = skill_host.drain_public_events()
     assert [event["kind"] for event in skill_events] == ["skill.activated", "skill.loaded"]
     assert len(file_host.drain_public_events()) == 20
+    file_host.record_attachment_accesses((str(attachment_id), str(attachment_id), "invalid"))
+    local_access_events = file_host.drain_public_events()
+    assert local_access_events == [
+        {
+            "event_kind": "attachment.read",
+            "attachment_id": str(attachment_id),
+            "filename": "input.txt",
+            "byte_size": len(attachment_bytes),
+        }
+    ]
     assert len(file_host.drain_artifact_candidates()) == 20
     assert all(type(tool) is dspy.Tool for tool in (*skill_host.as_tools(), *file_host.as_tools()))
     assert set(skill_host.event_views()) == {"load_skill", "read_skill_resource"}

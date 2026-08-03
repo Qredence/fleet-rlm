@@ -52,6 +52,7 @@ class PolicyField:
 _FIELDS: tuple[PolicyField, ...] = (
     PolicyField("application.name", "Application", "Name", "text", settings_field="app_name"),
     PolicyField("runtime.environment", "Runtime", "Environment", "single_choice", ("daytona",), "run_environment"),
+    PolicyField("runtime.live_enabled", "Runtime", "Live execution", "boolean", settings_field="live_enabled"),
     PolicyField(
         "runtime.turn_timeout_seconds",
         "Runtime",
@@ -78,6 +79,13 @@ _FIELDS: tuple[PolicyField, ...] = (
     ),
     PolicyField("llm.root.model", "Root LLM", "Model", "text", settings_field="root_model"),
     PolicyField(
+        "llm.root.model_provider_service",
+        "Root LLM",
+        "Model provider service",
+        "text",
+        settings_field="root_llm_model_provider_service",
+    ),
+    PolicyField(
         "llm.root.api_key_env",
         "Root LLM",
         "API key environment variable",
@@ -91,6 +99,13 @@ _FIELDS: tuple[PolicyField, ...] = (
     PolicyField("llm.root.cache", "Root LLM", "Cache", "boolean", settings_field="root_llm_cache"),
     PolicyField("llm.root.num_retries", "Root LLM", "Retries", "number", settings_field="root_llm_num_retries"),
     PolicyField("llm.sub.model", "Sub LLM", "Model", "text", settings_field="sub_model"),
+    PolicyField(
+        "llm.sub.model_provider_service",
+        "Sub LLM",
+        "Model provider service",
+        "text",
+        settings_field="sub_llm_model_provider_service",
+    ),
     PolicyField(
         "llm.sub.api_key_env", "Sub LLM", "API key environment variable", "text", settings_field="sub_llm_api_key_env"
     ),

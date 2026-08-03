@@ -6,6 +6,7 @@ with host-side poll (mirrors legacy Fleet bridge semantics; it is not a JSON-RPC
 
 from __future__ import annotations
 
+import base64
 import contextlib
 import hashlib
 import inspect
@@ -41,6 +42,8 @@ _PREVIEW_LINK_RETRY_DELAYS = (0.25, 0.5)
 _BROKER_SERVER_PATH = "/home/daytona/fleet_rlm_broker_server.py"
 _BROKER_SESSION_COMMAND = f"cd /home/daytona && python {_BROKER_SERVER_PATH.rsplit('/', 1)[-1]}"
 _FINAL_OUTPUT_MARKER = "__FLEET_FINAL_OUTPUT__"
+_MAX_EXECUTE_REQUEST_BYTES = 2 * 1024 * 1024
+_MAX_EXECUTE_OUTPUT_CHARS = 64 * 1024
 
 
 def _is_retryable_preview_link_error(exc: DaytonaAdapterError) -> bool:
@@ -120,8 +123,13 @@ def extract_final_payload(stdout: str, *, marker: str = _FINAL_OUTPUT_MARKER) ->
 
 
 _BROKER_SERVER_CODE = """
+import base64
+import contextlib
+import hashlib
 import hmac
+import io
 import json
+import os
 import threading
 import time
 import uuid
@@ -133,10 +141,19 @@ _lock = threading.Lock()
 _pending_requests = {}
 _results = {}
 _BROKER_SECRET = __BROKER_SECRET__
+_MAX_REQUEST_BYTES = __MAX_REQUEST_BYTES__
+_MAX_OUTPUT_CHARS = __MAX_OUTPUT_CHARS__
+_CONTEXT_MOUNT_ROOT = __CONTEXT_MOUNT_ROOT__
+_CONTEXT_MANIFEST_SHA256 = __CONTEXT_MANIFEST_SHA256__
+_execution_lock = threading.Lock()
+_context_accesses = []
+_namespace = {"__name__": "__fleet_rlm_repl__"}
 
 
 def _read_json(handler):
     length = int(handler.headers.get("Content-Length", 0))
+    if length > _MAX_REQUEST_BYTES:
+        raise ValueError("request is too large")
     return json.loads(handler.rfile.read(length).decode("utf-8")) if length else {}
 
 
@@ -147,6 +164,102 @@ def _send_json(handler, data, status=200):
     handler.send_header("Content-Length", str(len(body)))
     handler.end_headers()
     handler.wfile.write(body)
+
+
+def _decode_value(value):
+    if isinstance(value, dict) and value.get("__fleet_type__") == "bytes":
+        return base64.b64decode(str(value.get("data") or ""), validate=True)
+    if isinstance(value, list):
+        return [_decode_value(item) for item in value]
+    if isinstance(value, dict):
+        return {str(key): _decode_value(item) for key, item in value.items()}
+    if value is None or isinstance(value, (bool, int, float, str)):
+        return value
+    raise ValueError("unsupported variable value")
+
+
+def _fleet_load_context_manifest(raw_manifest):
+    try:
+        if isinstance(raw_manifest, str):
+            raw_manifest = raw_manifest.encode("utf-8")
+        if _CONTEXT_MOUNT_ROOT is None or _CONTEXT_MANIFEST_SHA256 is None:
+            raise ValueError
+        if hashlib.sha256(bytes(raw_manifest)).hexdigest() != _CONTEXT_MANIFEST_SHA256:
+            raise ValueError
+        manifest = json.loads(bytes(raw_manifest).decode("utf-8"))
+        mount_root = os.path.realpath(str(_CONTEXT_MOUNT_ROOT))
+        if os.path.realpath(str(manifest["mount_root"])) != mount_root:
+            raise ValueError
+        entries = list(manifest["entries"])
+    except Exception as exc:
+        raise ValueError("context manifest is invalid") from exc
+    values = []
+    for entry in entries:
+        try:
+            attachment_id = str(entry["attachment_id"])
+            path = os.path.realpath(str(entry["sandbox_path"]))
+            expected_size = int(entry["byte_size"])
+            expected_sha = str(entry["checksum_sha256"])
+            if os.path.commonpath((mount_root, path)) != mount_root or path == mount_root:
+                raise ValueError
+            with open(path, "rb") as handle:
+                body = handle.read(expected_size + 1)
+            if len(body) != expected_size or hashlib.sha256(body).hexdigest() != expected_sha:
+                raise ValueError
+            try:
+                data = body.decode("utf-8")
+                encoding = "utf-8"
+                if any(ord(ch) == 0 for ch in data):
+                    raise UnicodeDecodeError("utf-8", body, 0, 1, "nul")
+            except UnicodeDecodeError:
+                data = body
+                encoding = "bytes"
+            values.append({
+                "id": attachment_id,
+                "filename": str(entry["filename"]),
+                "content_type": entry.get("content_type"),
+                "byte_size": expected_size,
+                "data": data,
+                "encoding": encoding,
+            })
+            _context_accesses.append(attachment_id)
+        except Exception as exc:
+            raise ValueError("prepared context failed integrity verification") from exc
+    if len(values) == 1 and values[0]["encoding"] == "utf-8":
+        _namespace["context"] = values[0]["data"]
+    else:
+        _namespace.pop("context", None)
+    return values
+
+
+_namespace["_fleet_load_context_manifest"] = _fleet_load_context_manifest
+
+
+def _execute(data):
+    code = data.get("code")
+    variables = data.get("variables") or {}
+    if not isinstance(code, str) or not isinstance(variables, dict):
+        raise ValueError("execution request is invalid")
+    stdout = io.StringIO()
+    stderr = io.StringIO()
+    result = {"stdout": "", "stderr": "", "final": None, "error": None, "error_category": None}
+    with _execution_lock:
+        access_start = len(_context_accesses)
+        _namespace.update({str(key): _decode_value(value) for key, value in variables.items()})
+        try:
+            with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+                exec(compile(code, "<fleet-rlm>", "exec"), _namespace, _namespace)
+        except BaseException as exc:
+            value = getattr(exc, "value", None)
+            if type(exc).__name__ in {"FleetFinalOutputError", "_FleetFinalOutput"} and isinstance(value, dict):
+                result["final"] = value
+            else:
+                result["error"] = str(exc)[:2000]
+                result["error_category"] = type(exc).__name__
+        result["stdout"] = stdout.getvalue()[:_MAX_OUTPUT_CHARS]
+        result["stderr"] = stderr.getvalue()[:_MAX_OUTPUT_CHARS]
+        result["context_accesses"] = _context_accesses[access_start:]
+    return result
 
 
 class _BrokerHandler(BaseHTTPRequestHandler):
@@ -190,7 +303,17 @@ class _BrokerHandler(BaseHTTPRequestHandler):
         if not hmac.compare_digest(secret, _BROKER_SECRET):
             _send_json(self, {"error": "unauthorized"}, 401)
             return
-        data = _read_json(self)
+        try:
+            data = _read_json(self)
+        except (ValueError, json.JSONDecodeError):
+            _send_json(self, {"error": "invalid request"}, 400)
+            return
+        if parsed.path == "/execute":
+            try:
+                _send_json(self, _execute(data))
+            except Exception:
+                _send_json(self, {"error": "execution request failed"}, 400)
+            return
         if parsed.path == "/tool_call":
             call_id = str(data.get("id") or uuid.uuid4())
             event = threading.Event()
@@ -289,12 +412,18 @@ class DaytonaHttpToolBroker:
         sandbox: Any,
         broker_port: int = DEFAULT_BROKER_PORT,
         poll_interval_s: float = 0.05,
+        context_mount_root: str | None = None,
+        context_manifest_sha256: str | None = None,
     ) -> None:
         self._sandbox = sandbox
         if not isinstance(broker_port, int) or isinstance(broker_port, bool) or not 0 < broker_port <= 65_535:
             raise ValueError(f"broker_port must be between 1 and 65535, got {broker_port!r}")
         self._broker_port = broker_port
         self._poll_interval_s = poll_interval_s
+        if (context_mount_root is None) != (context_manifest_sha256 is None):
+            raise ValueError("context binding must include both mount root and manifest digest")
+        self._context_mount_root = context_mount_root
+        self._context_manifest_sha256 = context_manifest_sha256
         self._broker_secret = secrets.token_urlsafe(32)
         self._broker_url: str | None = None
         self._broker_token: str | None = None
@@ -325,8 +454,13 @@ class DaytonaHttpToolBroker:
     def ensure_started(self) -> None:
         if self._broker_url is not None or self._stopped:
             return
-        server_code = _BROKER_SERVER_CODE.replace("__BROKER_SECRET__", repr(self._broker_secret)).replace(
-            "__BROKER_PORT__", str(self._broker_port)
+        server_code = (
+            _BROKER_SERVER_CODE.replace("__BROKER_SECRET__", repr(self._broker_secret))
+            .replace("__BROKER_PORT__", str(self._broker_port))
+            .replace("__MAX_REQUEST_BYTES__", str(_MAX_EXECUTE_REQUEST_BYTES))
+            .replace("__MAX_OUTPUT_CHARS__", str(_MAX_EXECUTE_OUTPUT_CHARS))
+            .replace("__CONTEXT_MOUNT_ROOT__", repr(self._context_mount_root))
+            .replace("__CONTEXT_MANIFEST_SHA256__", repr(self._context_manifest_sha256))
         )
         self._sandbox.fs.upload_file(server_code.encode("utf-8"), _BROKER_SERVER_PATH)
         expected_sha = hashlib.sha256(server_code.encode("utf-8")).hexdigest()
@@ -352,6 +486,22 @@ class DaytonaHttpToolBroker:
         self._broker_url = str(preview.url).rstrip("/")
         self._broker_token = str(getattr(preview, "token", "") or "")
         self._wait_health(timeout_s=60.0)
+
+    def bind_context_manifest(self, *, trusted_mount_root: str, expected_manifest_sha256: str) -> None:
+        """Bind host-authorized context before the broker process is started."""
+        binding = (str(trusted_mount_root), str(expected_manifest_sha256))
+        current = (self._context_mount_root, self._context_manifest_sha256)
+        if current != (None, None) and current != binding:
+            raise DaytonaAdapterError(
+                message="context manifest binding cannot be replaced",
+                cause_type="ContextIntegrityError",
+            )
+        if self._broker_url is not None and current != binding:
+            raise DaytonaAdapterError(
+                message="context manifest must be bound before broker startup",
+                cause_type="ContextIntegrityError",
+            )
+        self._context_mount_root, self._context_manifest_sha256 = binding
 
     def _get_preview_link_with_retry(self) -> Any:
         last_error: DaytonaAdapterError | None = None
@@ -400,6 +550,68 @@ class DaytonaHttpToolBroker:
         if wrappers:
             return f"{wrappers}\n\n{submit}"
         return submit
+
+    @staticmethod
+    def _encode_value(value: Any) -> Any:
+        if isinstance(value, bytes):
+            return {"__fleet_type__": "bytes", "data": base64.b64encode(value).decode("ascii")}
+        if value is None or isinstance(value, (bool, int, float, str)):
+            return value
+        if isinstance(value, (list, tuple)):
+            return [DaytonaHttpToolBroker._encode_value(item) for item in value]
+        if isinstance(value, Mapping):
+            return {str(key): DaytonaHttpToolBroker._encode_value(item) for key, item in value.items()}
+        raise DaytonaAdapterError(
+            message="sandbox variable type is unsupported",
+            cause_type="InterpreterVariableError",
+        )
+
+    def execute_code(
+        self,
+        code: str,
+        variables: Mapping[str, Any] | None = None,
+        *,
+        timeout_s: float = 130.0,
+    ) -> BackendExecutionResult:
+        """Execute one cell in the broker-owned persistent Python namespace."""
+        from fleet_rlm.daytona.interpreter import BackendExecutionResult
+
+        self.ensure_started()
+        if self._stopped:
+            raise DaytonaAdapterError(message="broker already stopped", cause_type="InterpreterLifecycleError")
+        payload = {
+            "code": code,
+            "variables": {str(key): self._encode_value(value) for key, value in (variables or {}).items()},
+        }
+        try:
+            response = self._http().post("/execute", json=payload, timeout=timeout_s)
+        except (httpx.HTTPError, TimeoutError, OSError, ValueError) as exc:
+            raise DaytonaAdapterError(
+                message="sandbox execution request failed",
+                cause_type="BrokerExecutionError",
+            ) from exc
+        if response.status_code != 200:
+            raise DaytonaAdapterError(
+                message=f"sandbox execution failed with HTTP {response.status_code}",
+                cause_type="BrokerExecutionError",
+            )
+        try:
+            result = response.json()
+        except ValueError as exc:
+            raise DaytonaAdapterError(
+                message="sandbox execution returned an invalid response",
+                cause_type="BrokerExecutionError",
+            ) from exc
+        final = result.get("final")
+        accesses = tuple(str(value) for value in result.get("context_accesses") or ())
+        return BackendExecutionResult(
+            stdout=str(result.get("stdout") or ""),
+            stderr=str(result.get("stderr") or ""),
+            final=dict(final) if isinstance(final, dict) else None,
+            error=str(result.get("error") or "") or None,
+            error_category=str(result.get("error_category") or "") or None,
+            context_accesses=accesses,
+        )
 
     def execute_with_callbacks(
         self,

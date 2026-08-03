@@ -211,12 +211,13 @@ class _DaytonaEnvironmentProvider:
                 )
 
             return RunEnvironment(
-                lease.interpreter,
-                sink,
-                sink,
-                release,
-                sink,
-                child_interpreter_factory,
+                interpreter=lease.interpreter,
+                attachment_sink=sink,
+                artifact_sink=sink,
+                release=release,
+                result_snapshot_sink=sink,
+                child_interpreter_factory=child_interpreter_factory,
+                context_mount_path=str(volume_paths_from_settings(self.resources.settings).mount_path),
             )
         except BaseException:
             await asyncio.shield(self.resources.session_manager.release(lease))

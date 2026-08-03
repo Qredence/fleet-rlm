@@ -64,7 +64,7 @@ Fleet maps these via `FLEET_RLM_MAX_ITERATIONS`, `FLEET_RLM_MAX_LLM_CALLS`, and 
   malformed output is an `adapter_parse_error`. RLM action output contains
   `reasoning` and `code`; `completed` is internal loop state, not a Signature
   output field. Production Daytona model roles cap each response at 8,000
-  tokens. The configured Databricks DeepSeek v4-free Root Model and Qwen Sub Model use the
+  tokens. The configured Databricks DeepSeek v4 Flash Root and Sub Models use the
   compatible Chat Completions path without a reasoning-effort override. This is
   separate from `max_output_chars`, which bounds REPL output retained in
   recursive history.

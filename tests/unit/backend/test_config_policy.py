@@ -31,6 +31,10 @@ def test_policy_read_exposes_toml_values_without_environment_secret_values(tmp_p
     assert field["editor"] == "text"
     assert "secret" not in str(field).lower()
 
+    provider_service = _field(service.read(), "daytona", "llm.root.model_provider_service")
+    assert provider_service["value"] == "uscentral.default.zencode-oai"
+    assert provider_service["editor"] == "text"
+
     tracking_uri = _field(service.read(), "daytona", "mlflow.tracking_uri")
     assert tracking_uri["value"] == "http://127.0.0.1:5001"
     assert "secret" not in str(tracking_uri).lower()
@@ -42,6 +46,10 @@ def test_policy_read_exposes_toml_values_without_environment_secret_values(tmp_p
     url_limit = _field(service.read(), "daytona", "storage.max_url_bytes")
     assert url_limit["value"] == 10 * 1024 * 1024
     assert url_limit["editor"] == "number"
+
+    live_enabled = _field(service.read(), "defaults", "runtime.live_enabled")
+    assert live_enabled["value"] is True
+    assert live_enabled["editor"] == "boolean"
 
 
 def test_policy_update_preserves_comments_and_validates_all_profiles(tmp_path: Path) -> None:
@@ -57,7 +65,7 @@ def test_policy_update_preserves_comments_and_validates_all_profiles(tmp_path: P
 
     assert _field(after, "defaults", "rlm.max_iterations")["value"] == 21
     content = policy.read_text(encoding="utf-8")
-    assert "# Official Oolong benchmark profiles" in content
+    assert "# Prime Oolong mechanics profile" in content
     assert "max_iterations = 21" in content
     assert _field(after, "daytona", "rlm.max_iterations")["value"] == 21
 
@@ -75,6 +83,21 @@ def test_policy_can_add_a_profile_override_for_an_inherited_setting(tmp_path: Pa
 
     assert "[profiles.daytona-bench.rlm]" in policy.read_text(encoding="utf-8")
     assert _field(service.read(), "daytona-bench", "rlm.max_iterations")["value"] == 12
+
+
+def test_policy_can_disable_live_execution_for_all_profiles(tmp_path: Path) -> None:
+    service, _ = _service(tmp_path)
+    before = service.read()
+
+    after = service.update(
+        scope="defaults",
+        path="runtime.live_enabled",
+        value=False,
+        revision=before.revision,
+    )
+
+    assert _field(after, "defaults", "runtime.live_enabled")["value"] is False
+    assert _field(after, "daytona", "runtime.live_enabled")["value"] is False
 
 
 def test_policy_rejects_stale_revision_and_invalid_database_environment_reference(tmp_path: Path) -> None:

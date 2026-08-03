@@ -83,6 +83,29 @@ class FileToolHost:
         self._pending_events.clear()
         return events
 
+    def record_attachment_accesses(self, attachment_ids: tuple[str, ...]) -> None:
+        """Record sandbox-local verified reads without reading the body again."""
+        seen: set[UUID] = set()
+        for value in attachment_ids:
+            try:
+                attachment_id = UUID(str(value))
+            except (TypeError, ValueError, AttributeError):
+                continue
+            if attachment_id in seen:
+                continue
+            ref = self._attachments.get(attachment_id)
+            if ref is None or attachment_id not in self._staged:
+                continue
+            seen.add(attachment_id)
+            self._pending_events.append(
+                {
+                    "event_kind": "attachment.read",
+                    "attachment_id": str(ref.id),
+                    "filename": ref.filename,
+                    "byte_size": ref.byte_size,
+                }
+            )
+
     def drain_artifact_candidates(self) -> tuple[ArtifactCandidate, ...]:
         candidates = tuple(self._artifact_candidates)
         self._artifact_candidates.clear()

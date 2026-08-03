@@ -33,10 +33,11 @@ make api-sync              # OpenAPI + generated TUI types (openapi_tools.py)
 
 ## Credential Boundary
 
-- Live proof and networked benchmark entry points, plus the maintained
-  Databricks quality-loop scripts and GEPA execution, require explicit
-  `FLEET_LIVE=1`; the reusable GEPA smoke runner enforces this before
-  credentials or models are constructed.
+- The Phase 1 live proof and Prime Oolong benchmark use the selected TOML
+  policy's `runtime.live_enabled` switch (true by default; false fails closed)
+  before credentials or models are constructed. The separate Databricks
+  quality-loop scripts and GEPA execution retain their explicit
+  `FLEET_LIVE=1` gate until that lane is migrated as its own phase.
 - Never hardcode or log credentials; read from env after dotenv load.
 - `scripts/benchmarks/` owns benchmark and Databricks quality-loop helpers
   (including the shared Fleet judge definitions); `scripts/optimize/` remains

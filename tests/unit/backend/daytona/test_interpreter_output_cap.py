@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import tomllib
 from pathlib import Path
-from typing import Any
 
 import pytest
 
@@ -71,39 +70,12 @@ def test_error_feedback_includes_capped_stderr() -> None:
     assert "characters omitted" in result
 
 
-def test_sandbox_backend_forwards_timeout_to_run_code() -> None:
-    captured: dict[str, Any] = {}
+def test_sandbox_backend_retains_timeout_for_broker_execution() -> None:
+    backend = sandbox_backend(object(), timeout_s=45)
+    assert backend.timeout_s == 45
 
-    class _FakeCodeInterpreter:
-        def create_context(self) -> str:
-            return "ctx-1"
-
-        def run_code(self, code: str, **kwargs: Any) -> Any:
-            del code
-            captured.update(kwargs)
-
-            class _Result:
-                stdout = "ok"
-                stderr = ""
-                error = None
-
-            return _Result()
-
-        def delete_context(self, context: Any, **kwargs: Any) -> None:
-            del context, kwargs
-
-    class _FakeSandbox:
-        code_interpreter = _FakeCodeInterpreter()
-
-    backend = sandbox_backend(_FakeSandbox(), timeout_s=45)
-    backend.run("print(1)")
-    assert captured["timeout"] == 45
-    assert captured["context"] == "ctx-1"
-
-    captured.clear()
-    unbounded = sandbox_backend(_FakeSandbox(), timeout_s=None)
-    unbounded.run("print(1)")
-    assert "timeout" not in captured
+    unbounded = sandbox_backend(object(), timeout_s=None)
+    assert unbounded.timeout_s is None
 
 
 def test_sandbox_backend_rejects_non_positive_timeout() -> None:

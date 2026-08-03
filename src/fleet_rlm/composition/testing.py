@@ -48,6 +48,9 @@ class TestingInterpreter:
         del code
         return ""
 
+    def drain_context_accesses(self) -> tuple[str, ...]:
+        return ()
+
 
 class TestingRunSink:
     def __init__(self) -> None:

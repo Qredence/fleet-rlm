@@ -75,7 +75,7 @@ async def test_live_preparation_stages_attachment_and_cleans_it(
 
     class Attachments:
         async def prepare_run(self, _access, _attachment_ids, _run, sink):
-            logical_path = "/volume/attachments/notes.txt"
+            logical_path = str(volume_root / "attachments" / "notes.txt")
             await sink.write_private(logical_path, data)
             from fleet_rlm.files.models import PreparedAttachments, StagedAttachment
 

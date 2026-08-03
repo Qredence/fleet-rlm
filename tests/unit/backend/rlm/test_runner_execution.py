@@ -279,6 +279,72 @@ def test_runner_uses_stock_json_adapter_without_protocol_salvage() -> None:
 
 
 @pytest.mark.asyncio
+async def test_runner_passes_prepared_attachment_context_to_rlm() -> None:
+    from fleet_rlm.chat.session_context import SessionContextManifest
+    from fleet_rlm.rlm.context import RLMExecutionContext, RLMExecutionSpec
+    from fleet_rlm.rlm.dspy_contract import RLMOptions
+    from fleet_rlm.rlm.inputs import AttachmentContextCapsule, AttachmentContextEntry
+    from fleet_rlm.rlm.runner import RLMRunner
+    from fleet_rlm.sessions.models import TurnAccess
+
+    class Program:
+        async def acall(self, **call_kwargs):
+            assert call_kwargs["attachments"] is attachment_context
+            return dspy.Prediction(answer="ok", trajectory=[])
+
+    class Factory:
+        def create(self, **_kwargs):
+            return Program()
+
+    class Capabilities:
+        spec = RLMExecutionSpec()
+
+        def drain_public_details(self):
+            return ()
+
+        def drain_artifact_candidates(self):
+            return ()
+
+    async def not_cancelled() -> bool:
+        return False
+
+    attachment_context = AttachmentContextCapsule(
+        (
+            AttachmentContextEntry(
+                attachment_id=uuid4(),
+                filename="notes.txt",
+                content_type="text/plain",
+                byte_size=3,
+                checksum_sha256="a" * 64,
+                sandbox_path="/home/daytona/run/notes.txt",
+            ),
+        ),
+        mount_root="/home/daytona/run",
+    )
+    context = RLMExecutionContext(
+        uuid4(),
+        uuid4(),
+        TurnAccess(uuid4(), uuid4()),
+        "use context",
+        SessionContextManifest(uuid4(), 0, 0, ()),
+        SimpleNamespace(root_lm=object(), sub_lm=object()),
+        RLMOptions(),
+        asyncio.get_running_loop().time() + 10,
+        None,
+        (),
+        Capabilities(),
+        not_cancelled,
+        (),
+        attachment_context=attachment_context,
+    )
+
+    stream = RLMRunner(factory=Factory()).stream(context)
+    _events = [event async for event in stream]
+
+    assert stream.outcome is not None and stream.outcome.succeeded
+
+
+@pytest.mark.asyncio
 async def test_runner_validates_host_metadata_before_provider_execution() -> None:
     from fleet_rlm.chat.session_context import SessionContextManifest, TurnPreview
     from fleet_rlm.rlm.context import RLMExecutionContext

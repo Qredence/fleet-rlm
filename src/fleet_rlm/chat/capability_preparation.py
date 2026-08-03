@@ -78,6 +78,11 @@ class PreparedHostCapabilities:
             return ()
         return self._files.drain_artifact_candidates()
 
+    def record_attachment_accesses(self, attachment_ids: tuple[str, ...]) -> None:
+        recorder = getattr(self._files, "record_attachment_accesses", None)
+        if callable(recorder):
+            recorder(attachment_ids)
+
     async def aclose(self) -> None:
         if self._close_files:
             await self._files.aclose()

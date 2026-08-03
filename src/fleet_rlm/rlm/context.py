@@ -16,6 +16,7 @@ from fleet_rlm.chat.session_context import SessionContextManifest
 from fleet_rlm.files.models import PreparedAttachment
 from fleet_rlm.files.workspace_models import UNAVAILABLE_WORKSPACE_CAPABILITY, WorkspaceCapabilityMetadata
 from fleet_rlm.rlm.dspy_contract import RLMOptions
+from fleet_rlm.rlm.inputs import AttachmentContextCapsule
 from fleet_rlm.rlm.model_bundle import RLMModelBundle
 from fleet_rlm.rlm.recursive_calls import ChildInterpreterFactory, RecursiveRLMOptions
 from fleet_rlm.rlm.signature import FleetRLMSignature
@@ -39,6 +40,8 @@ class RLMInterpreter(Protocol):
 
     def execute(self, code: str) -> Any: ...
 
+    def drain_context_accesses(self) -> tuple[str, ...]: ...
+
 
 class PreparedCapabilities(Protocol):
     """Already authorized and composed host capabilities for one Run."""
@@ -52,6 +55,8 @@ class PreparedCapabilities(Protocol):
     def preparation_notices(self) -> tuple[PreparationNotice, ...]: ...
 
     def drain_artifact_candidates(self) -> tuple[ArtifactCandidate, ...]: ...
+
+    def record_attachment_accesses(self, attachment_ids: tuple[str, ...]) -> None: ...
 
     async def aclose(self) -> None: ...
 
@@ -89,6 +94,7 @@ class RLMExecutionContext:
     capabilities: PreparedCapabilities
     cancellation_requested: AsyncCancellationProbe
     preparation_notices: tuple[PreparationNotice, ...]
+    attachment_context: AttachmentContextCapsule | None = None
     authority: RunAuthority = field(default_factory=RunAuthority)
     selected_skill_count: int = 0
     child_interpreter_factory: ChildInterpreterFactory | None = None

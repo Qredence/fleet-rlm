@@ -6,6 +6,9 @@ default_profile = "daytona"
 name = "fleet-rlm"
 
 [defaults.runtime]
+# Explicit live commands are enabled by default; set this to false to fail
+# closed without constructing provider or Daytona clients.
+live_enabled = true
 turn_timeout_seconds = 1800
 max_active_daytona_leases = 8
 heartbeat_seconds = 10
@@ -14,10 +17,12 @@ stale_after_seconds = 60
 # Shared role tuning only. Model and credential references belong to each
 # provider-specific profile below.
 [defaults.llm.root]
+model_provider_service = "uscentral.default.zencode-oai"
 cache = true
 num_retries = 3
 
 [defaults.llm.sub]
+model_provider_service = "uscentral.default.zencode-oai"
 cache = true
 num_retries = 3
 
@@ -64,14 +69,14 @@ trace_content_max_chars = 10000
 environment = "daytona"
 
 [profiles.daytona.llm.root]
-model = "uscentral.default.deepseek-v4-flash"
+model = "deepseek-v4-flash"
 api_key_env = "DATABRICKS_TOKEN"
 base_url_env = "FLEET_DATABRICKS_AI_GATEWAY_BASE_URL"
 max_tokens = 8000
 reasoning_effort = "low"
 
 [profiles.daytona.llm.sub]
-model = "system.ai.inkling"
+model = "deepseek-v4-flash"
 api_key_env = "DATABRICKS_TOKEN"
 base_url_env = "FLEET_DATABRICKS_AI_GATEWAY_BASE_URL"
 max_tokens = 8000
@@ -91,14 +96,14 @@ experiment_name = "fleet-rlm"
 environment = "daytona"
 
 [profiles.daytona-managed.llm.root]
-model = "uscentral.default.deepseek-v4-flash"
+model = "deepseek-v4-flash"
 api_key_env = "DATABRICKS_TOKEN"
 base_url_env = "FLEET_DATABRICKS_AI_GATEWAY_BASE_URL"
 max_tokens = 8000
 reasoning_effort = "low"
 
 [profiles.daytona-managed.llm.sub]
-model = "system.ai.inkling"
+model = "deepseek-v4-flash"
 api_key_env = "DATABRICKS_TOKEN"
 base_url_env = "FLEET_DATABRICKS_AI_GATEWAY_BASE_URL"
 max_tokens = 8000
@@ -114,20 +119,20 @@ trace_schema_env = "FLEET_MLFLOW_TRACE_SCHEMA"
 trace_table_prefix_env = "FLEET_MLFLOW_TRACE_TABLE_PREFIX"
 tracing_sql_warehouse_id_env = "FLEET_MLFLOW_TRACING_SQL_WAREHOUSE_ID"
 
-# Official Oolong benchmark profiles: cache must be disabled because multiple
-# questions reuse one context window.  MLflow is intentionally omitted.
+# Prime Oolong mechanics profile: cache is disabled because multiple questions
+# reuse one context window. MLflow is intentionally omitted.
 [profiles.daytona-bench.runtime]
 environment = "daytona"
 
 [profiles.daytona-bench.llm.root]
-model = "databricks-qwen35-122b-a10b"
+model = "deepseek-v4-flash"
 api_key_env = "DATABRICKS_TOKEN"
 base_url_env = "FLEET_DATABRICKS_AI_GATEWAY_BASE_URL"
 max_tokens = 8000
 cache = false
 
 [profiles.daytona-bench.llm.sub]
-model = "databricks-qwen35-122b-a10b"
+model = "deepseek-v4-flash"
 api_key_env = "DATABRICKS_TOKEN"
 base_url_env = "FLEET_DATABRICKS_AI_GATEWAY_BASE_URL"
 max_tokens = 8000
@@ -137,18 +142,23 @@ cache = false
 [profiles.daytona-bench.mlflow]
 tracing_enabled = false
 
+[profiles.daytona-bench.rlm]
+# Keep host logs free of model-generated execution output; live SSE remains
+# bounded and is the operator-facing execution surface.
+verbose = false
+
 [profiles.daytona-bench-40.runtime]
 environment = "daytona"
 
 [profiles.daytona-bench-40.llm.root]
-model = "databricks-qwen35-122b-a10b"
+model = "deepseek-v4-flash"
 api_key_env = "DATABRICKS_TOKEN"
 base_url_env = "FLEET_DATABRICKS_AI_GATEWAY_BASE_URL"
 max_tokens = 8000
 cache = false
 
 [profiles.daytona-bench-40.llm.sub]
-model = "databricks-qwen35-122b-a10b"
+model = "deepseek-v4-flash"
 api_key_env = "DATABRICKS_TOKEN"
 base_url_env = "FLEET_DATABRICKS_AI_GATEWAY_BASE_URL"
 max_tokens = 8000

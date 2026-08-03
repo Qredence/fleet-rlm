@@ -251,3 +251,88 @@ async def test_preparation_failure_removes_staged_run_bytes_but_not_session_work
 
     assert staged_path not in values
     assert values == {workspace_path: b"immediate workspace state"}
+
+
+@pytest.mark.asyncio
+async def test_capsule_validation_failure_releases_all_prepared_resources() -> None:
+    from fleet_rlm.chat.turn_lifecycle import ExecuteTurn, _TurnClaimToken
+    from fleet_rlm.chat.turn_preparation import DefaultTurnPreparer, RunEnvironment
+    from fleet_rlm.files.models import AttachmentRef, PreparedAttachments, StagedAttachment
+    from fleet_rlm.rlm.context import RLMExecutionSpec
+    from fleet_rlm.rlm.dspy_contract import RLMOptions
+    from fleet_rlm.rlm.model_bundle import RLMModelBundle
+    from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
+
+    attachment_id, run_id, session_id = uuid4(), uuid4(), uuid4()
+    operations: list[str] = []
+    staged_path = f"/outside/{attachment_id}.txt"
+
+    class Sink:
+        async def remove_private(self, location: str) -> None:
+            assert location == staged_path
+            operations.append("remove-attachment")
+
+    class Attachments:
+        async def prepare_run(self, access, ids, run, sink) -> PreparedAttachments:
+            del access, ids, run, sink
+            return PreparedAttachments(
+                (AttachmentRef(attachment_id, "input.txt", "text/plain", 1, "0" * 64),),
+                (StagedAttachment(attachment_id, staged_path),),
+            )
+
+    class Environments:
+        async def acquire(self, turn, *, deadline):
+            del turn, deadline
+
+            async def release() -> None:
+                operations.append("release-environment")
+
+            sink = Sink()
+            return RunEnvironment(
+                None,
+                sink,
+                sink,
+                release,
+                context_mount_path="/configured/volume",
+            )
+
+    class Capabilities:
+        spec = RLMExecutionSpec()
+
+        def drain_public_details(self):
+            return ()
+
+        def drain_artifact_candidates(self):
+            return ()
+
+        async def aclose(self) -> None:
+            operations.append("close-capabilities")
+
+    class CapabilityFactory:
+        async def prepare(self, turn, environment, attachments, *, deadline):
+            del turn, environment, attachments, deadline
+            return Capabilities()
+
+    async def not_cancelled() -> bool:
+        return False
+
+    turn = ExecuteTurn(
+        run_id,
+        session_id,
+        TurnAccess(uuid4(), uuid4()),
+        TurnInput("prepare", (attachment_id,)),
+        SessionHistory(),
+        not_cancelled,
+        _TurnClaimToken(uuid4()),
+    )
+
+    with pytest.raises(ValueError, match="outside"):
+        await DefaultTurnPreparer(
+            models=RLMModelBundle(object(), object()),
+            options=RLMOptions(),
+            attachments=Attachments(),
+            environments=Environments(),
+            capabilities=CapabilityFactory(),
+        ).prepare(turn, deadline=float("inf"))
+
+    assert operations == ["remove-attachment", "close-capabilities", "release-environment"]
