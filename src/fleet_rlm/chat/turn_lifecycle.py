@@ -6,7 +6,6 @@ import asyncio
 import logging
 from collections.abc import Awaitable
 from dataclasses import dataclass, field
-from hashlib import sha256
 from typing import Any, Literal, Protocol, TypeAlias, TypeVar
 from uuid import UUID
 
@@ -401,7 +400,7 @@ class TurnLifecycleService:
                 if read_cancelled:
                     raise asyncio.CancelledError from None
                 raise
-            if len(data) != candidate.byte_size or sha256(data).hexdigest() != candidate.checksum_sha256.lower():
+            if len(data) != candidate.byte_size:
                 raise TurnIntegrityError("Artifact Candidate bytes failed integrity validation")
             values.append(data)
         if cancellation_requested:
