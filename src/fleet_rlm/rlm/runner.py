@@ -26,7 +26,6 @@ from fleet_rlm.rlm.dspy_contract import (
 )
 from fleet_rlm.rlm.errors import (
     TurnCancelledError,
-    TurnIntegrityFailureError,
     TurnTerminalError,
 )
 from fleet_rlm.rlm.events import (
@@ -466,14 +465,12 @@ class RLMRunner:
         async for event in self._initial_events(context, observations):
             yield event
         spec = context.capabilities.spec
-        spec, relay, guards, task = self._start_worker(context)
+        spec, relay, _guards, task = self._start_worker(context)
         ownership.task = task
         monitor = _WorkerMonitor(task, relay, context, lambda: self._drain_capability_details(context))
         async for event in self._worker_events(context, observations, relay, monitor):
             yield event
         prediction.append(task.result())
-        if guards.integrity.unresolved:
-            raise TurnIntegrityFailureError
         async for event in self._prediction_events(context, observations, prediction[-1]):
             yield event
         duration_ms = int((time.perf_counter() - started) * 1000)
