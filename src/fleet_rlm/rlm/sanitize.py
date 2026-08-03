@@ -127,8 +127,7 @@ def sanitize_public_error(exc: BaseException | str) -> str:
     else:
         raw = str(exc).strip() or "Turn failed"
 
-    cleaned = _TOKENISH.sub("[redacted]", raw)
-    cleaned = _SECRETISH.sub("[redacted]", cleaned)
+    cleaned = _SECRETISH.sub("[redacted]", raw)
     cleaned = _DSNISH.sub("[redacted-dsn]", cleaned)
     cleaned = _PATHISH.sub("[path]", cleaned)
     cleaned = _PROMPTISH.sub("[redacted-prompt]", cleaned)
