@@ -35,7 +35,6 @@ from fleet_rlm.daytona.http_broker import (
 from fleet_rlm.files.workspace_tools import WorkspaceToolError
 from fleet_rlm.observability.turn_tracing import turn_phase_span
 from fleet_rlm.rlm.dspy_interpreter_contract import (
-    PUBLIC_FINAL_OUTPUT_LABEL,
     copy_output_fields,
     initial_tools_registered,
     is_final_output,
@@ -417,8 +416,6 @@ class DaytonaCodeInterpreter:
             return
 
     def _public_output(self, result: Any) -> str:
-        if is_final_output(result):
-            return PUBLIC_FINAL_OUTPUT_LABEL
         if isinstance(result, _RepairFeedback):
             return "Execution error"
         return truncate_public_text(str(result or ""), max_len=self._observation_max_chars)
