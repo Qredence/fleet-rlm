@@ -136,9 +136,9 @@ class AISDKUIProjector:
             part_id = self._detail_part_id(event, detail, "reasoning")
             chunks: list[dict[str, Any]] = []
             if detail.is_delta:
-                if not detail.text.strip() and not detail.is_final:
+                if not detail.text and not detail.is_final:
                     return []
-                if not detail.text.strip() and part_id not in self._reasoning_started:
+                if not detail.text and part_id not in self._reasoning_started:
                     return []
                 if part_id not in self._reasoning_started:
                     self._reasoning_started.add(part_id)
