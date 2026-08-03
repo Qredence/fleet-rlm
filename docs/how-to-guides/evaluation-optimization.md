@@ -166,10 +166,10 @@ FLEET_LIVE=1 uv run python scripts/optimize/optimize_signature_omni.py \
   (rejects structured verdict responses), `claude-haiku-4-5`, `gpt-oss-120b`,
   and `gpt-5-mini` (temperature-locked) are unsuitable — recheck probes on any
   model change.
-- Generational independence: qwen35 is also the Oolong bench *agent* model
-  (`daytona-bench` profiles). Judging the bench lane with qwen35 accepts
-  moderate self-preference risk; use the flash judge there if independence
-  matters more than depth.
+- Generational independence: the maintained Oolong mechanics profile uses
+  `deepseek-v4-flash` for both agent roles. A qwen35 judge is therefore
+  cross-family, but judge identity must still remain fixed within one metric
+  history.
 - Judge identity is not interchangeable mid-history: pick one family per
   metric track and keep receipts comparable to it. On judge-family switch,
   run one calibration pass over the static records (score arm / `evaluate`)
