@@ -99,6 +99,9 @@ class AISDKUIProjector:
         self._text_ids: dict[UUID, str] = {}
         self._text_started: set[UUID] = set()
         self._text_ended: set[UUID] = set()
+        self._stream_ids: dict[tuple[str, int | None], str] = {}
+        self._reasoning_started: set[str] = set()
+        self._reasoning_ended: set[str] = set()
 
     def project(self, event: RuntimeEvent) -> list[dict[str, Any]]:
         detail = event.detail
@@ -130,16 +133,39 @@ class AISDKUIProjector:
         if isinstance(detail, StepFinished):
             return [{"type": "finish-step"}]
         if isinstance(detail, RLMReasoning):
+            part_id = self._detail_part_id(event, detail, "reasoning")
+            chunks: list[dict[str, Any]] = []
+            if detail.is_delta:
+                if not detail.text.strip() and not detail.is_final:
+                    return []
+                if not detail.text.strip() and part_id not in self._reasoning_started:
+                    return []
+                if part_id not in self._reasoning_started:
+                    self._reasoning_started.add(part_id)
+                    chunks.append({"type": "reasoning-start", "id": part_id})
+                if detail.text:
+                    chunks.append({"type": "reasoning-delta", "id": part_id, "delta": detail.text})
+                if detail.is_final and part_id not in self._reasoning_ended:
+                    self._reasoning_ended.add(part_id)
+                    chunks.append({"type": "reasoning-end", "id": part_id})
+                return chunks
             if not detail.text.strip():
+                if part_id in self._reasoning_started and part_id not in self._reasoning_ended:
+                    self._reasoning_ended.add(part_id)
+                    return [{"type": "reasoning-end", "id": part_id}]
                 return []
-            part_id = self._step_id(event, detail.step, "reasoning")
-            return [
-                {"type": "reasoning-start", "id": part_id},
-                {"type": "reasoning-delta", "id": part_id, "delta": detail.text},
-                {"type": "reasoning-end", "id": part_id},
-            ]
+            chunks.extend(
+                (
+                    {"type": "reasoning-start", "id": part_id},
+                    {"type": "reasoning-delta", "id": part_id, "delta": detail.text},
+                    {"type": "reasoning-end", "id": part_id},
+                )
+            )
+            self._reasoning_started.add(part_id)
+            self._reasoning_ended.add(part_id)
+            return chunks
         if isinstance(detail, RLMCode):
-            return [self._data("rlm-code", data, part_id=self._step_id(event, detail.step, "code"))]
+            return [self._data("rlm-code", data, part_id=self._detail_part_id(event, detail, "code"))]
         if isinstance(detail, RLMOutput):
             return [self._data("rlm-output", data, part_id=self._step_id(event, detail.step, "output"))]
         if isinstance(detail, ToolStarted):
@@ -244,3 +270,10 @@ class AISDKUIProjector:
     @staticmethod
     def _step_id(event: RuntimeEvent, step: int | None, name: str) -> str:
         return f"{name}-{event.run_id}-{step or event.sequence}"
+
+    def _detail_part_id(self, event: RuntimeEvent, detail: RLMReasoning | RLMCode, name: str) -> str:
+        key = (name, detail.step)
+        if detail.stream_id:
+            self._stream_ids[key] = detail.stream_id
+            return detail.stream_id
+        return self._stream_ids.get(key, self._step_id(event, detail.step, name))

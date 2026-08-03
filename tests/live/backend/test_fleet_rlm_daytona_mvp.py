@@ -45,8 +45,8 @@ _RECEIPT_SCHEMA = "fleet.daytona-mvp-proof/v1"
 _EVIDENCE_ENV = "FLEET_LIVE_EVIDENCE_PATH"
 _SECRET_NAMES = ("FLEET_DAYTONA_API_KEY", "DATABRICKS_TOKEN")
 _CLEANUP_RETRY_DELAYS = (0.5, 1.0, 2.0, 4.0)
-_LIVE_ROOT_MODEL = "uscentral.default.deepseek-v4-flash"
-_LIVE_SUB_MODEL = "system.ai.inkling"
+_LIVE_ROOT_MODEL = "deepseek-v4-flash"
+_LIVE_SUB_MODEL = "deepseek-v4-flash"
 
 
 class LiveDaytonaMVPResult(dspy.Signature):
@@ -198,7 +198,7 @@ def _live_settings(tmp_path: Path) -> Settings:
         pytest.fail("Live Daytona MVP proof missing required credentials: " + ", ".join(missing))
     policy = load_runtime_settings()
     if (policy.root_model, policy.sub_model) != (_LIVE_ROOT_MODEL, _LIVE_SUB_MODEL):
-        pytest.fail("Live Daytona MVP proof requires the production DeepSeek v4-free Root and Inkling Sub policy")
+        pytest.fail("Live Daytona MVP proof requires the production DeepSeek v4 Flash Root and Sub policy")
     database_url = f"sqlite+aiosqlite:///{(tmp_path / 'live-mvp.db').resolve()}"
     upgrade_to_head(database_url)
     return policy.model_copy(
@@ -224,6 +224,51 @@ def _sse_chunks(response: Any) -> tuple[list[dict[str, Any]], int]:
         else:
             chunks.append(json.loads(payload))
     return chunks, done
+
+
+@dataclass(slots=True)
+class _FirstStreamDeltaProbe:
+    first_delta_at: float | None = None
+
+    def observe_body(self, body: bytes) -> None:
+        for line in body.splitlines():
+            if not line.startswith(b"data: "):
+                continue
+            try:
+                chunk = json.loads(line[6:])
+            except (UnicodeDecodeError, json.JSONDecodeError):
+                continue
+            if (
+                isinstance(chunk, dict)
+                and chunk.get("type") in {"reasoning-delta", "data-rlm-code"}
+                and self.first_delta_at is None
+            ):
+                self.first_delta_at = time.perf_counter()
+
+
+class _FirstStreamDeltaMiddleware:
+    def __init__(self, app: Any, *, probe: _FirstStreamDeltaProbe) -> None:
+        self.app = app
+        self.probe = probe
+
+    async def __call__(self, scope: dict[str, Any], receive: Any, send: Any) -> None:
+        pending = bytearray()
+
+        async def recording_send(message: dict[str, Any]) -> None:
+            if message.get("type") == "http.response.body":
+                body = message.get("body", b"")
+                if isinstance(body, bytes):
+                    pending.extend(body)
+                    lines = bytes(pending).splitlines(keepends=True)
+                    pending.clear()
+                    for line in lines:
+                        if line.endswith((b"\n", b"\r")):
+                            self.probe.observe_body(line)
+                        else:
+                            pending.extend(line)
+            await send(message)
+
+        await self.app(scope, receive, recording_send)
 
 
 def _assert_skill_lifecycle(chunks: list[dict[str, Any]], *, skill_id: UUID, version: str) -> None:
@@ -350,6 +395,22 @@ def _sse_finish_diagnostic(chunks: list[dict[str, Any]]) -> str:
         f"semantic_tool={_semantic_tool_diagnostic(chunks)} "
         f"submit_call_shapes={_call_shapes(chunks, 'SUBMIT')}"
     )
+
+
+def _streaming_evidence(chunks: list[dict[str, Any]]) -> tuple[int, list[str]]:
+    """Return only bounded evidence that native deltas reached the SSE stream."""
+    fields: set[str] = set()
+    delta_count = 0
+    for chunk in chunks:
+        if chunk.get("type") == "reasoning-delta":
+            fields.add("reasoning")
+            delta_count += 1
+        elif chunk.get("type") == "data-rlm-code":
+            data = chunk.get("data")
+            if isinstance(data, dict) and data.get("is_delta") is True:
+                fields.add("code")
+                delta_count += 1
+    return delta_count, sorted(fields)
 
 
 def _assert_sse_stop(chunks: list[dict[str, Any]], *, label: str) -> None:
@@ -632,6 +693,7 @@ def test_complete_daytona_mvp_through_fastapi(
     scenario_passed = False
     cleanup_failures: tuple[str, ...] = ()
     success_receipt: dict[str, object] | None = None
+    first_delta_probe = _FirstStreamDeltaProbe()
 
     token_tool = dspy.Tool(
         ledger.issue_iteration_token,
@@ -718,6 +780,7 @@ def test_complete_daytona_mvp_through_fastapi(
     )
 
     try:
+        app.add_middleware(_FirstStreamDeltaMiddleware, probe=first_delta_probe)
         with TestClient(app) as client:
             resources = app.state.run_environment_resources
             preparation = app.state.turn_preparation
@@ -734,6 +797,7 @@ def test_complete_daytona_mvp_through_fastapi(
                 assert created.status_code == 201
                 session_id = UUID(created.json()["id"])
 
+                first_started = time.perf_counter()
                 first = client.post(
                     f"/api/sessions/{session_id}/turns",
                     json={
@@ -745,6 +809,8 @@ def test_complete_daytona_mvp_through_fastapi(
                 assert first.status_code == 200
                 first_run_id = UUID(first.headers["x-fleet-run-id"])
                 first_chunks, first_done = _sse_chunks(first)
+                assert first_delta_probe.first_delta_at is not None, _sse_finish_diagnostic(first_chunks)
+                first_delta_ms = int((first_delta_probe.first_delta_at - first_started) * 1000)
                 _assert_skill_lifecycle(first_chunks, skill_id=skill.card.id, version=skill.card.version)
                 assert first_done == 1
                 assert sum(chunk["type"] == "start" for chunk in first_chunks) == 1
@@ -855,6 +921,8 @@ def test_complete_daytona_mvp_through_fastapi(
                 assert second.status_code == 200
                 second_run_id = UUID(second.headers["x-fleet-run-id"])
                 second_chunks, second_done = _sse_chunks(second)
+                first_stream_count, first_stream_fields = _streaming_evidence(first_chunks)
+                second_stream_count, second_stream_fields = _streaming_evidence(second_chunks)
                 _assert_skill_lifecycle(second_chunks, skill_id=skill.card.id, version=skill.card.version)
                 assert second_done == 1
                 assert sum(chunk["type"] == "start" for chunk in second_chunks) == 1
@@ -934,6 +1002,11 @@ def test_complete_daytona_mvp_through_fastapi(
                         "sse_start": 2,
                         "sse_finish": 2,
                         "sse_done": first_done + second_done,
+                    },
+                    "streaming": {
+                        "first_delta_ms": first_delta_ms,
+                        "delta_count": first_stream_count + second_stream_count,
+                        "fields": sorted(set(first_stream_fields) | set(second_stream_fields)),
                     },
                     "checksums": {
                         "snapshot_sha256": snapshot_checksum,

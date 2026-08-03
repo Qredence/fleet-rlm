@@ -174,6 +174,38 @@ describe("terminal projection", () => {
     ]);
   });
 
+  it("renders incremental RLM deltas into stable reasoning and code cards", () => {
+    const live = new LiveTurnProjector(clock);
+    live.push({ type: "start", messageId: "run-1", messageMetadata: {} });
+
+    const reasoning = [
+      { type: "reasoning-start", id: "stream-reasoning" },
+      { type: "reasoning-delta", id: "stream-reasoning", delta: "Inspect " },
+      { type: "reasoning-delta", id: "stream-reasoning", delta: "now" },
+      { type: "reasoning-end", id: "stream-reasoning" },
+    ] satisfies FleetUIMessageChunk[];
+    const code = [
+      {
+        type: "data-rlm-code",
+        id: "stream-code",
+        data: { step: 1, code: "SUBMIT(", is_delta: true, is_final: false },
+      },
+      {
+        type: "data-rlm-code",
+        id: "stream-code",
+        data: { step: 1, code: "answer='done')", is_delta: true, is_final: true },
+      },
+    ] satisfies FleetUIMessageChunk[];
+
+    const events = [...reasoning, ...code].flatMap((chunk) => live.push(chunk));
+    const messages = finalMessages(events);
+
+    expect(messages).toMatchObject([
+      { kind: "reasoning", id: "thinking-stream-reasoning", text: "Inspect now" },
+      { kind: "code", id: "code-stream-code", code: "SUBMIT(answer='done')" },
+    ]);
+  });
+
   it("omits empty trajectory code and output cards in live and durable projection", () => {
     const live = new LiveTurnProjector(clock);
     const liveEvents = [
