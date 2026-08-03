@@ -46,11 +46,6 @@ async def get_artifact(
             ArtifactAccess(identity.user_id, identity.workspace_id),
             artifact_id,
         )
-    except ArtifactNotFoundError as exc:
-        raise HTTPException(
-            status_code=404,
-            detail={"code": "artifact_not_found", "message": "Artifact not found"},
-        ) from exc
     except Exception as exc:
         raise HTTPException(
             status_code=503,
