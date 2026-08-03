@@ -419,7 +419,7 @@ class RLMRunner:
         started = time.perf_counter()
         prediction: list[Any] = []
         try:
-            async for event in self._run_success(context, outcome, ownership, prediction, started):
+            async for event in self._run_success(context, outcome, ownership, prediction):
                 yield event
         except (GeneratorExit, asyncio.CancelledError):
             duration_ms = int((time.perf_counter() - started) * 1000)
@@ -460,7 +460,6 @@ class RLMRunner:
         outcome: list[RLMOutcome],
         ownership: _WorkerOwnership,
         prediction: list[Any],
-        started: float,
     ) -> AsyncIterator[RuntimeEvent]:
         observations = _ObservationBuffer(EventRecorder(context.run_id, context.session_id))
         async for event in self._initial_events(context, observations):
@@ -476,7 +475,7 @@ class RLMRunner:
             raise TurnIntegrityFailureError
         async for event in self._prediction_events(context, observations, prediction[-1]):
             yield event
-        duration_ms = int((time.perf_counter() - started) * 1000)
+        duration_ms = 0
         result = prediction_result(
             prediction[-1],
             spec.signature,
