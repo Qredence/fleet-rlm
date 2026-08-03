@@ -32,13 +32,20 @@ applies migrations; use `uv run python scripts/db_init.py` or Alembic directly.
 
 `config/fleet.toml` deep-merges `[defaults]` into the selected
 `[profiles.<name>]`. It centralizes application identity; runtime timeouts,
-leases, and liveness; Root/Sub model ids, endpoint, token limit, temperature,
+leases, liveness, and the credentialed-command live switch; Root/Sub model ids, provider-service routing, endpoint, token limit, temperature,
 cache, retries, and secret-variable references; RLM limits and host verbosity;
 storage limits and database variable reference; Daytona API-key/Volume/Snapshot
 policy; MLflow tracking policy; and Fleet/DSPy logger level. The storage limits
 are independent: `storage.max_upload_bytes` bounds uploads and workspace files,
 `storage.max_url_bytes` bounds fetched public URL sources, and
 `storage.max_artifact_bytes` bounds artifact bodies.
+
+`runtime.live_enabled` defaults to `true` for explicitly invoked provider,
+Daytona, and Prime Oolong commands. Set it to `false` in the selected TOML
+policy to fail closed before those commands construct provider or Daytona
+clients. This policy replaces the old `FLEET_LIVE=1` shell switch for the
+Phase 1 verifier and Prime Oolong runner; invoking a live command remains an
+explicit operator action, and the required credentials are still validated.
 
 When MLflow tracing is enabled, `mlflow.async_logging` keeps trace export off
 the Turn path and `mlflow.trace_sampling_ratio` controls the fraction of Turns
@@ -86,12 +93,15 @@ override them. Children use fresh interpreter contexts but share the leased
 Daytona Sandbox and its workspace-scoped Volume, while durable Fleet Tools stay
 owned by the Root Turn.
 
-The standard `daytona` profile uses the Databricks DeepSeek v4-free service
-`uscentral.default.deepseek-v4-flash` for Root with
-`reasoning_effort = "low"`, and `system.ai.inkling` for Sub
-(`reasoning_effort = "none"`, `temperature = 0` for Sub), with an 8,000-output-token
-cap per call. The lower Root reasoning setting bounds intermediate repair and
-inspection calls while retaining a small reasoning budget for final synthesis.
+All Daytona profiles use `deepseek-v4-flash` for both Root and Sub through the
+Databricks AI Gateway. The inherited provider-service value is
+`uscentral.default.zencode-oai`, sent as
+`Databricks-Model-Provider-Service`; the credential remains `DATABRICKS_TOKEN`.
+The standard `daytona` profile keeps `reasoning_effort = "low"` for Root and
+`reasoning_effort = "none"`, `temperature = 0` for Sub, with an
+8,000-output-token cap per call. The lower Root reasoning setting bounds
+intermediate repair and inspection calls while retaining a small reasoning
+budget for final synthesis.
 It routes traces to
 the local `fleet-rlm` experiment at `http://127.0.0.1:5001`. The supervised
 `fleet cli` command starts or reuses that server; benchmark profiles disable

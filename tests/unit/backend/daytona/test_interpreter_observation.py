@@ -176,7 +176,7 @@ def test_f_string_backslash_syntax_error_gets_focused_native_repair_feedback() -
     assert "Build the escaped fragment before the f-string expression" in result
 
 
-def test_sandbox_backend_uses_one_explicit_context_per_run_and_fails_closed() -> None:
+def test_sandbox_backend_requires_co_located_broker_and_ignores_code_interpreter() -> None:
     class CodeInterpreter:
         def __init__(self) -> None:
             self.created: list[object] = []
@@ -197,24 +197,11 @@ def test_sandbox_backend_uses_one_explicit_context_per_run_and_fails_closed() ->
 
     code_interpreter = CodeInterpreter()
     sandbox = type("Sandbox", (), {"code_interpreter": code_interpreter})()
-    first = sandbox_backend(sandbox)
-    second = sandbox_backend(sandbox)
+    backend = sandbox_backend(sandbox)
 
-    assert first.run("_out = 'first'").stdout == "ok"
-    assert first.run("_out = 'again'").stdout == "ok"
-    assert second.run("_out = 'second'").stdout == "ok"
-    assert len(code_interpreter.created) == 2
+    with pytest.raises(DaytonaAdapterError, match="co-located broker"):
+        backend.run("print('must use broker')")
+    backend.close()
 
-    first.close()
-    second.close()
-    assert code_interpreter.deleted == code_interpreter.created
-
-    class Unavailable:
-        def create_context(self) -> object:
-            raise RuntimeError("api_key=private-key path=/home/daytona/private")
-
-    unavailable = type("Sandbox", (), {"code_interpreter": Unavailable()})()
-    with pytest.raises(DaytonaAdapterError) as failure:
-        sandbox_backend(unavailable).run("print('must not fall back')")
-    assert "private-key" not in str(failure.value)
-    assert "/home/daytona" not in str(failure.value)
+    assert code_interpreter.created == []
+    assert code_interpreter.deleted == []

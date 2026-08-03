@@ -29,6 +29,7 @@ from fleet_rlm.rlm.context import (
     RLMInterpreter,
 )
 from fleet_rlm.rlm.dspy_contract import RLMOptions
+from fleet_rlm.rlm.inputs import AttachmentContextCapsule, AttachmentContextEntry
 from fleet_rlm.rlm.model_bundle import RLMModelBundle
 from fleet_rlm.rlm.recursive_calls import ChildInterpreterFactory, RecursiveRLMOptions
 
@@ -100,6 +101,7 @@ class RunEnvironment:
     release: AsyncCleanup
     result_snapshot_sink: ResultSnapshotSink | None = None
     child_interpreter_factory: ChildInterpreterFactory | None = None
+    context_mount_path: str | None = None
 
 
 class RunEnvironmentProvider(Protocol):
@@ -170,6 +172,10 @@ class DefaultTurnPreparer:
 
         staged = PreparedAttachments((), ())
         capabilities: PreparedCapabilities | None = None
+
+        async def remove_staged() -> None:
+            await self._remove_staged(environment.attachment_sink, staged)
+
         try:
             self._check_deadline(deadline)
             with turn_phase_span(
@@ -209,20 +215,31 @@ class DefaultTurnPreparer:
             except (DatabaseConnectionError, OSError, SQLAlchemyError) as exc:
                 raise TurnPreparationUnavailableError("Turn cancellation status is unavailable") from exc
             self._check_deadline(deadline)
+
+            staged_by_id = {item.attachment_id: item for item in staged.staged}
+            attachment_context = None
+            if staged.refs and environment.context_mount_path is not None:
+                attachment_context = AttachmentContextCapsule(
+                    tuple(
+                        AttachmentContextEntry(
+                            attachment_id=ref.id,
+                            filename=ref.filename,
+                            content_type=ref.content_type,
+                            byte_size=ref.byte_size,
+                            checksum_sha256=ref.checksum_sha256,
+                            sandbox_path=staged_by_id[ref.id].sandbox_path,
+                        )
+                        for ref in staged.refs
+                    ),
+                    mount_root=environment.context_mount_path,
+                )
         except BaseException:
-
-            async def remove_partial() -> None:
-                await self._remove_staged(environment.attachment_sink, staged)
-
             cleanups: list[AsyncCleanup] = [environment.release]
             if capabilities is not None:
                 cleanups.append(capabilities.aclose)
-            cleanups.append(remove_partial)
+            cleanups.append(remove_staged)
             await asyncio.shield(_PreparedTurnResources(tuple(cleanups)).aclose())
             raise
-
-        async def remove_staged() -> None:
-            await self._remove_staged(environment.attachment_sink, staged)
 
         assert capabilities is not None
 
@@ -254,6 +271,7 @@ class DefaultTurnPreparer:
             capabilities=capabilities,
             cancellation_requested=turn.cancellation_requested,
             preparation_notices=tuple(getattr(capabilities, "preparation_notices", ())),
+            attachment_context=attachment_context,
             authority=turn.authority,
             selected_skill_count=len(turn.input.skill_selections),
             child_interpreter_factory=environment.child_interpreter_factory,

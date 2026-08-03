@@ -20,6 +20,7 @@ from fleet_rlm.rlm.model_bundle import RLMModelBundle
 # Values that look like secrets/keys must never be treated as base URLs.
 _URL_RE = re.compile(r"^https?://", re.IGNORECASE)
 _LEGACY_LLM_API_KEY_ENV = "FLEET_OPENAI_API_KEY"
+_MODEL_PROVIDER_SERVICE_HEADER = "Databricks-Model-Provider-Service"
 
 
 def sanitize_base_url(value: str | None) -> str | None:
@@ -95,6 +96,7 @@ def build_lm(
     model: str,
     *,
     api_key: str | None,
+    model_provider_service: str | None = None,
     base_url: str | None = None,
     max_tokens: int | None = None,
     temperature: float | None = None,
@@ -112,6 +114,8 @@ def build_lm(
     }
     if api_key:
         kwargs["api_key"] = api_key
+    if model_provider_service:
+        kwargs["headers"] = {_MODEL_PROVIDER_SERVICE_HEADER: model_provider_service}
     if base_url:
         kwargs["api_base"] = base_url
     if max_tokens is not None:
@@ -137,6 +141,7 @@ def build_model_bundle(settings: Settings) -> RLMModelBundle:
         return build_lm(
             policy.model,
             api_key=api_key,
+            model_provider_service=policy.model_provider_service,
             base_url=sanitize_base_url(policy.base_url),
             max_tokens=policy.max_tokens,
             temperature=policy.temperature,

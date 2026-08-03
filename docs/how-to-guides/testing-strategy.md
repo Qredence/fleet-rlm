@@ -81,7 +81,10 @@ Private deterministic tests may create ephemeral schemas explicitly.
 
 ## Credentialed Daytona gates
 
-Live checks require canonical credentials and explicit opt-in:
+Live pytest suites remain separately marked and require explicit live test
+environment setup. The Phase 1 verifier and Prime Oolong runner instead use
+`runtime.live_enabled` from the selected TOML policy (true by default; set it
+to `false` to fail closed) and still require canonical credentials:
 
 ```bash
 FLEET_LIVE=1 uv run python scripts/benchmark_daytona_lifecycle.py \
@@ -100,12 +103,12 @@ The complete release-oriented verifier loads `.env` with `override=False`, so
 existing process exports win:
 
 ```bash
-FLEET_LIVE=1 uv run python scripts/live_daytona_verify.py \
+uv run python scripts/live_daytona_verify.py \
   --output .scratch/release-ready-mvp/assets/daytona-mvp-proof.json
 ```
 
 Select the production `daytona` profile through `[config] default_profile`
-before this gate. The verifier requires the committed Databricks DeepSeek v4-free Root and Inkling Sub
+before this gate. The verifier requires the committed Databricks DeepSeek v4 Flash Root and Sub
 roles, records a passing receipt at the exact candidate SHA, verifies provider
 cleanup and secret isolation, and must be paired with same-SHA CI, local
 release, and human attestations before promotion. Historical receipts do not

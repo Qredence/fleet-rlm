@@ -25,20 +25,39 @@ def test_daytona_profile_uses_specialized_bounded_model_roles() -> None:
     assert document["defaults"]["daytona"]["snapshot"] == "fleet-rlm-python313-v4"
     llm = document["profiles"]["daytona"]["llm"]
     assert llm["root"] == {
-        "model": "uscentral.default.deepseek-v4-flash",
+        "model": "deepseek-v4-flash",
         "api_key_env": "DATABRICKS_TOKEN",
         "base_url_env": "FLEET_DATABRICKS_AI_GATEWAY_BASE_URL",
         "max_tokens": 8000,
         "reasoning_effort": "low",
     }
     assert llm["sub"] == {
-        "model": "system.ai.inkling",
+        "model": "deepseek-v4-flash",
         "api_key_env": "DATABRICKS_TOKEN",
         "base_url_env": "FLEET_DATABRICKS_AI_GATEWAY_BASE_URL",
         "max_tokens": 8000,
         "temperature": 0,
         "reasoning_effort": "none",
     }
+    assert document["defaults"]["llm"] == {
+        "root": {"model_provider_service": "uscentral.default.zencode-oai", "cache": True, "num_retries": 3},
+        "sub": {"model_provider_service": "uscentral.default.zencode-oai", "cache": True, "num_retries": 3},
+    }
+    assert document["defaults"]["runtime"]["live_enabled"] is True
+
+
+@pytest.mark.parametrize("profile", ("daytona", "daytona-managed", "daytona-bench", "daytona-bench-40"))
+def test_all_daytona_profiles_use_deepseek_v4_flash_for_both_roles(profile: str) -> None:
+    policy_path = Path(__file__).resolve().parents[3] / "config" / "fleet.toml"
+    document = tomllib.loads(policy_path.read_text(encoding="utf-8"))
+
+    llm = document["profiles"][profile]["llm"]
+    assert llm["root"]["model"] == "deepseek-v4-flash"
+    assert llm["sub"]["model"] == "deepseek-v4-flash"
+    assert llm["root"]["api_key_env"] == "DATABRICKS_TOKEN"
+    assert llm["sub"]["api_key_env"] == "DATABRICKS_TOKEN"
+    assert llm["root"]["base_url_env"] == "FLEET_DATABRICKS_AI_GATEWAY_BASE_URL"
+    assert llm["sub"]["base_url_env"] == "FLEET_DATABRICKS_AI_GATEWAY_BASE_URL"
 
 
 def test_daytona_profile_routes_tracing_to_supervised_local_mlflow() -> None:
@@ -100,6 +119,13 @@ def test_daytona_managed_profile_resolves_lakebase_and_managed_mlflow_values(
         encoding="utf-8",
     )
     monkeypatch.chdir(tmp_path)
+    for name in (
+        "FLEET_MLFLOW_EXPERIMENT_NAME",
+        "FLEET_MLFLOW_TRACE_SCHEMA",
+        "FLEET_MLFLOW_TRACE_TABLE_PREFIX",
+        "FLEET_MLFLOW_TRACING_SQL_WAREHOUSE_ID",
+    ):
+        monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv("FLEET_DAYTONA_API_KEY", "process-daytona-key")
     monkeypatch.setenv("DATABRICKS_TOKEN", "process-databricks-token")
     monkeypatch.setenv("FLEET_DATABRICKS_AI_GATEWAY_BASE_URL", "https://gateway.example.test/v1")
@@ -148,7 +174,7 @@ def test_daytona_managed_profile_requires_declared_database_and_mlflow_values(
         config.load_runtime_settings()
 
 
-def test_daytona_profile_resolves_deepseek_root_and_inkling_sub_with_gateway_params(
+def test_daytona_profile_resolves_deepseek_root_and_sub_with_gateway_params(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     import fleet_rlm.config as config
@@ -159,8 +185,10 @@ def test_daytona_profile_resolves_deepseek_root_and_inkling_sub_with_gateway_par
 
     settings = config.load_runtime_settings()
 
-    assert settings.root_model == "uscentral.default.deepseek-v4-flash"
-    assert settings.sub_model == "system.ai.inkling"
+    assert settings.root_model == "deepseek-v4-flash"
+    assert settings.sub_model == "deepseek-v4-flash"
+    assert settings.root_llm_model_provider_service == "uscentral.default.zencode-oai"
+    assert settings.sub_llm_model_provider_service == "uscentral.default.zencode-oai"
     assert settings.root_llm_reasoning_effort == "low"
     assert settings.sub_llm_reasoning_effort == "none"
     assert settings.sub_llm_temperature == 0
@@ -194,7 +222,13 @@ def test_recursive_depth_is_fixed_at_two_for_this_milestone() -> None:
     assert Settings(_env_file=None).rlm_recursion_max_depth == 2
 
 
-def test_daytona_benchmark_profiles_use_qwen_without_cache_or_mlflow() -> None:
+@pytest.mark.parametrize("value", ("", "   "))
+def test_model_provider_service_rejects_blank_values(value: str) -> None:
+    with pytest.raises(ValidationError, match="model_provider_service"):
+        Settings(_env_file=None, root_llm_model_provider_service=value)
+
+
+def test_daytona_benchmark_profiles_use_compatible_models_without_cache_or_mlflow() -> None:
     policy_path = Path(__file__).resolve().parents[3] / "config" / "fleet.toml"
     document = tomllib.loads(policy_path.read_text(encoding="utf-8"))
 
@@ -206,14 +240,14 @@ def test_daytona_benchmark_profiles_use_qwen_without_cache_or_mlflow() -> None:
         assert policy["mlflow"]["tracing_enabled"] is False
         for role in ("root", "sub"):
             llm = policy["llm"][role]
-            assert llm["model"] == "databricks-qwen35-122b-a10b"
+            assert llm["model"] == "deepseek-v4-flash"
             assert llm["api_key_env"] == "DATABRICKS_TOKEN"
             assert llm["base_url_env"] == "FLEET_DATABRICKS_AI_GATEWAY_BASE_URL"
             assert llm["cache"] is False
             assert llm["max_tokens"] == 8000
             assert "reasoning_effort" not in llm
 
-    assert "rlm" not in document["profiles"]["daytona-bench"]
+    assert document["profiles"]["daytona-bench"]["rlm"] == {"verbose": False}
     assert document["profiles"]["daytona-bench-40"]["rlm"] == {"max_iterations": 40}
 
 
@@ -245,8 +279,10 @@ def test_daytona_benchmark_profiles_resolve_without_mlflow(
     settings = config.load_runtime_settings()
 
     assert settings.run_environment == "daytona"
-    assert settings.root_model == "databricks-qwen35-122b-a10b"
+    assert settings.root_model == "deepseek-v4-flash"
     assert settings.sub_model == settings.root_model
+    assert settings.root_llm_model_provider_service == "uscentral.default.zencode-oai"
+    assert settings.sub_llm_model_provider_service == "uscentral.default.zencode-oai"
     assert settings.daytona_snapshot == "fleet-rlm-python313-v4"
     assert settings.root_llm_cache is False
     assert settings.sub_llm_cache is False
@@ -274,6 +310,7 @@ default_profile = "daytona"
 [defaults.application]
 name = "fleet-test"
 [defaults.runtime]
+live_enabled = true
 turn_timeout_seconds = 90
 max_active_daytona_leases = 2
 heartbeat_seconds = 5
@@ -329,10 +366,28 @@ def test_runtime_settings_deep_merge_profile_and_keep_role_policy(
     settings = config.load_runtime_settings()
 
     assert settings.run_environment == "daytona"
+    assert settings.live_enabled is True
     assert settings.rlm_max_iterations == 3
     assert settings.max_url_bytes == 30
     assert settings.llm_role("root").model == "openai/root"
     assert settings.llm_role("sub").temperature == 0.2
+
+
+def test_require_live_execution_honors_the_toml_switch(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    import fleet_rlm.config as config
+
+    policy = tmp_path / "fleet.toml"
+    _policy(policy)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(config, "_CONFIG_PATH", policy)
+
+    assert config.require_live_execution().live_enabled is True
+
+    policy.write_text(
+        policy.read_text(encoding="utf-8").replace("live_enabled = true", "live_enabled = false"), encoding="utf-8"
+    )
+    with pytest.raises(config.FleetConfigurationError, match=r"runtime\.live_enabled=false"):
+        config.require_live_execution()
 
 
 def test_runtime_settings_ignores_stale_environment_policy_overrides(
@@ -482,6 +537,11 @@ def test_startup_rejects_retired_budget_environment(monkeypatch: pytest.MonkeyPa
 
 def test_turn_timeout_defaults_to_thirty_minutes() -> None:
     assert Settings(_env_file=None).turn_timeout_seconds == 1800
+
+
+def test_live_execution_is_enabled_by_default_and_can_be_disabled() -> None:
+    assert Settings(_env_file=None).live_enabled is True
+    assert Settings(_env_file=None, live_enabled=False).live_enabled is False
 
 
 def test_url_source_limit_defaults_to_ten_mebibytes() -> None:

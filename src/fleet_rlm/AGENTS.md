@@ -96,9 +96,11 @@ uv run python scripts/check_codebase_tree.py
 make api-check
 ```
 
-Credentialed Daytona proof requires explicit `FLEET_LIVE=1`. Use the named MVP
-verifier and live durability/workspace tests; never use Daytona credentials as
-Fleet API bearer tokens.
+Credentialed Daytona proof uses the selected TOML policy's
+`runtime.live_enabled` switch (true by default; false fails closed). Use the
+named MVP verifier and live durability/workspace tests; never use Daytona
+credentials as Fleet API bearer tokens. The command itself remains an explicit
+operator action.
 
 ## Generated contract
 

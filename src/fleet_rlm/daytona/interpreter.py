@@ -1,7 +1,7 @@
 """Minimal Daytona-backed code interpreter for dspy.RLM wiring.
 
-Uses ``sandbox.code_interpreter.run_code`` (stateful REPL context), not
-``process.code_run`` (stateless per Daytona docs).
+Live execution uses one persistent Python namespace inside the sandbox broker
+process so generated code and localhost host-tool wrappers share a namespace.
 
 Host-tool / SUBMIT mediation (B1):
 - In-process backends bind host callables directly (offline seam).
@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import hashlib
 import inspect
 import time
 from collections.abc import Callable, Mapping
@@ -65,6 +66,7 @@ class BackendExecutionResult:
     error: str | None = None
     stderr: str = ""
     error_category: str | None = None
+    context_accesses: tuple[str, ...] = ()
 
 
 class InProcessInterpreterBackend:
@@ -75,6 +77,40 @@ class InProcessInterpreterBackend:
         self.closed = False
         self._host_tools: dict[str, Callable[..., Any]] = {}
         self._submit_key: tuple[tuple[str, str], ...] | None = None
+        self._context_accesses: list[str] = []
+        self._context_binding: tuple[str, str] | None = None
+
+        def load_context(
+            raw_manifest: bytes | str,
+        ) -> list[dict[str, Any]]:
+            from fleet_rlm.rlm.inputs import _materialize_context_manifest
+
+            binding = self._context_binding
+            if binding is None:
+                raise ValueError("context manifest is not host bound")
+            values, accesses = _materialize_context_manifest(
+                raw_manifest,
+                trusted_mount_root=binding[0],
+                expected_manifest_sha256=binding[1],
+            )
+            self._context_accesses.extend(accesses)
+            if len(values) == 1 and values[0]["encoding"] == "utf-8":
+                self.namespace["context"] = values[0]["data"]
+            else:
+                self.namespace.pop("context", None)
+            return values
+
+        self.namespace["_fleet_load_context_manifest"] = load_context
+
+    def bind_context_manifest(self, *, trusted_mount_root: str, expected_manifest_sha256: str) -> None:
+        """Bind the host-authorized capsule before generated code can load it."""
+        binding = (str(trusted_mount_root), str(expected_manifest_sha256))
+        if self._context_binding is not None and self._context_binding != binding:
+            raise DaytonaAdapterError(
+                message="context manifest binding cannot be replaced",
+                cause_type="ContextIntegrityError",
+            )
+        self._context_binding = binding
 
     def bind_host_tools(self, tools: Mapping[str, Callable[..., Any]]) -> None:
         self._host_tools = dict(tools)
@@ -99,17 +135,34 @@ class InProcessInterpreterBackend:
         try:
             exec(code, self.namespace, self.namespace)
         except FleetFinalOutputError as final:
-            return BackendExecutionResult(stdout=str(self.namespace.get("_out", "")), final=dict(final.value))
+            return BackendExecutionResult(
+                stdout=str(self.namespace.get("_out", "")),
+                final=dict(final.value),
+                context_accesses=self._drain_context_accesses(),
+            )
         except Exception as exc:
             value = getattr(exc, "value", None)
             if type(exc).__name__ == "FleetFinalOutputError" and isinstance(value, dict):
-                return BackendExecutionResult(stdout=str(self.namespace.get("_out", "")), final=dict(value))
+                return BackendExecutionResult(
+                    stdout=str(self.namespace.get("_out", "")),
+                    final=dict(value),
+                    context_accesses=self._drain_context_accesses(),
+                )
             return BackendExecutionResult(
                 stdout=str(self.namespace.get("_out", "")),
                 error=sanitize_provider_message(str(exc)),
                 error_category=type(exc).__name__,
+                context_accesses=self._drain_context_accesses(),
             )
-        return BackendExecutionResult(stdout=str(self.namespace.get("_out", "")))
+        return BackendExecutionResult(
+            stdout=str(self.namespace.get("_out", "")),
+            context_accesses=self._drain_context_accesses(),
+        )
+
+    def _drain_context_accesses(self) -> tuple[str, ...]:
+        values = tuple(self._context_accesses)
+        self._context_accesses.clear()
+        return values
 
     def close(self) -> None:
         self.closed = True
@@ -284,18 +337,11 @@ def sync_sandbox(sandbox: Any, loop: asyncio.AbstractEventLoop) -> Any:
     return _SyncDaytonaSandbox(sandbox, loop)
 
 
-def _assignments_preamble(variables: dict[str, object] | None) -> str:
-    if not variables:
-        return ""
-    return "\n".join(f"{key} = {value!r}" for key, value in variables.items()) + "\n"
-
-
-class _SandboxCodeInterpreterBackend:
-    """Adapter over Daytona ``sandbox.code_interpreter`` (persistent context)."""
+class _SandboxProcessBackend:
+    """Live sandbox handle whose persistent namespace is owned by the broker."""
 
     def __init__(self, sandbox: Any, *, timeout_s: int | None = None) -> None:
         self._sandbox = sandbox
-        self._context: Any | None = None
         if timeout_s is not None and int(timeout_s) <= 0:
             raise DaytonaAdapterError(
                 message="execution timeout must be positive",
@@ -307,59 +353,19 @@ class _SandboxCodeInterpreterBackend:
     def sandbox(self) -> Any:
         return self._sandbox
 
-    def _ensure_context(self) -> Any:
-        if self._context is None:
-            try:
-                self._context = self._sandbox.code_interpreter.create_context()
-            except Exception as exc:
-                raise map_provider_error(exc) from exc
-        return self._context
+    @property
+    def timeout_s(self) -> int | None:
+        return self._timeout_s
 
     def run(self, code: str, variables: dict[str, object] | None = None) -> BackendExecutionResult:
-        context = self._ensure_context()
-        run_kwargs: dict[str, Any] = {"context": context}
-        if self._timeout_s is not None:
-            run_kwargs["timeout"] = self._timeout_s
-        try:
-            result = self._sandbox.code_interpreter.run_code(
-                _assignments_preamble(variables) + code,
-                **run_kwargs,
-            )
-        except Exception as exc:
-            raise map_provider_error(exc) from exc
-
-        stdout = str(getattr(result, "stdout", None) or "")
-        stderr = str(getattr(result, "stderr", None) or "")
-        final = extract_final_payload(stdout)
-        error = getattr(result, "error", None)
-        if error is not None:
-            error_name = str(getattr(error, "name", "") or "")
-            if error_name in {"FleetFinalOutputError", "_FleetFinalOutput"} and final is not None:
-                return BackendExecutionResult(stdout=stdout, final=final, stderr=stderr)
-            raw = f"{getattr(error, 'name', 'Error')}: {getattr(error, 'value', error)}"
-            # User-generated Python errors are part of the RLM feedback loop:
-            # return them to DSPy so the next iteration can repair the code.
-            # Provider/transport failures still raise above from run_code().
-            return BackendExecutionResult(
-                stdout=stdout,
-                error=sanitize_provider_message(raw),
-                stderr=stderr,
-                error_category=error_name or None,
-            )
-        if final is not None:
-            return BackendExecutionResult(stdout=stdout, final=final, stderr=stderr)
-        return BackendExecutionResult(stdout=stdout, stderr=stderr)
+        del code, variables
+        raise DaytonaAdapterError(
+            message="live execution requires the co-located broker",
+            cause_type="InterpreterConfigurationError",
+        )
 
     def close(self) -> None:
-        # Delete only the lease-owned context. Never delete the Sandbox here.
-        if self._context is None:
-            return
-        context = self._context
-        self._context = None
-        try:
-            self._sandbox.code_interpreter.delete_context(context)
-        except Exception as exc:
-            raise map_provider_error(exc) from exc
+        return None
 
 
 class DaytonaCodeInterpreter:
@@ -390,6 +396,8 @@ class DaytonaCodeInterpreter:
         self._max_code_chars = max(1, int(max_code_chars))
         self._observation_step = 0
         self._last_execution: tuple[str, str] | None = None
+        self._context_accesses: list[str] = []
+        self._context_binding: tuple[str, str] | None = None
 
     @property
     def tools(self) -> dict[str, Callable[..., Any]]:
@@ -407,6 +415,35 @@ class DaytonaCodeInterpreter:
         self._observation_max_chars = max(1, int(max_chars))
         self._observation_step = 0
         self._last_execution = None
+
+    def bind_context_capsule(self, capsule: Any) -> None:
+        """Bind one host-created context capsule before DSPy starts the RLM."""
+        from fleet_rlm.rlm.inputs import AttachmentContextCapsule
+
+        if not isinstance(capsule, AttachmentContextCapsule):
+            raise DaytonaAdapterError(
+                message="context capsule is invalid",
+                cause_type="ContextIntegrityError",
+            )
+        raw_manifest = capsule.to_sandbox()
+        binding = (capsule.mount_root, hashlib.sha256(raw_manifest).hexdigest())
+        if self._context_binding is not None and self._context_binding != binding:
+            raise DaytonaAdapterError(
+                message="context manifest binding cannot be replaced",
+                cause_type="ContextIntegrityError",
+            )
+        if self._http_broker is not None:
+            self._http_broker.bind_context_manifest(
+                trusted_mount_root=binding[0],
+                expected_manifest_sha256=binding[1],
+            )
+        bind_backend = getattr(self._backend, "bind_context_manifest", None)
+        if callable(bind_backend):
+            bind_backend(
+                trusted_mount_root=binding[0],
+                expected_manifest_sha256=binding[1],
+            )
+        self._context_binding = binding
 
     def _observe(self, detail: StepStarted | RLMCode | RLMOutput | StepFinished) -> None:
         if self._observer is None:
@@ -508,15 +545,17 @@ class DaytonaCodeInterpreter:
                         f"keep one action under {self._max_code_chars} chars, use variables, and submit promptly.",
                         category="code_too_large",
                     )
-                elif self._http_broker is not None:
-                    self._ensure_bindings()
-                    ensure_bindings_ms = int((time.perf_counter() - bindings_started) * 1_000)
-                    result = self._execute_with_http_broker(code, variables)
                 else:
                     self._ensure_bindings()
                     ensure_bindings_ms = int((time.perf_counter() - bindings_started) * 1_000)
-                    raw = self._backend.run(code, variables)
-                    result = self._finalize(raw)
+                    if self._http_broker is not None:
+                        result = self._execute_with_http_broker(code, variables)
+                    else:
+                        raw = self._backend.run(code, variables)
+                        if isinstance(raw, BackendExecutionResult):
+                            self._context_accesses.extend(raw.context_accesses)
+                            self._raise_context_injection_error(code, raw)
+                        result = self._finalize(raw)
                 execute_ms = int((time.perf_counter() - execute_started) * 1_000)
                 self._reject_repeated_no_progress(normalized_code, result)
                 self._observe(RLMOutput(self._public_output(result), step))
@@ -595,7 +634,7 @@ class DaytonaCodeInterpreter:
             backend.ensure_submit(self.output_fields)
             self._tools_registered = mark_tools_registered()
             return
-        if not isinstance(backend, _SandboxCodeInterpreterBackend):
+        if not isinstance(backend, _SandboxProcessBackend):
             self._tools_registered = mark_tools_registered()
             return
         if not needs_tool_reinjection(
@@ -606,10 +645,19 @@ class DaytonaCodeInterpreter:
         if self._http_broker is None:
             from fleet_rlm.daytona.http_broker import DaytonaHttpToolBroker
 
-            self._http_broker = DaytonaHttpToolBroker(sandbox=backend.sandbox, broker_port=self._broker_port)
+            context_binding = self._context_binding
+            self._http_broker = DaytonaHttpToolBroker(
+                sandbox=backend.sandbox,
+                broker_port=self._broker_port,
+                context_mount_root=context_binding[0] if context_binding is not None else None,
+                context_manifest_sha256=context_binding[1] if context_binding is not None else None,
+            )
             self._http_broker.ensure_started()
         self._http_broker.register_tools(tools)
-        backend.run(self._http_broker.submit_setup_code(self.output_fields))
+        self._http_broker.execute_code(
+            self._http_broker.submit_setup_code(self.output_fields),
+            timeout_s=float(backend.timeout_s or DEFAULT_EXECUTION_TIMEOUT_S),
+        )
         self._tools_registered = mark_tools_registered()
 
     def _execute_with_http_broker(
@@ -642,11 +690,38 @@ class DaytonaCodeInterpreter:
                     cause_type=type(exc).__name__,
                 ) from exc
 
+        if isinstance(backend, _SandboxProcessBackend):
+            timeout_s = float(backend.timeout_s or DEFAULT_EXECUTION_TIMEOUT_S)
+
+            def run_code() -> str | BackendExecutionResult:
+                return broker.execute_code(code, variables, timeout_s=timeout_s)
+
+        else:
+
+            def run_code() -> str | BackendExecutionResult:
+                return backend.run(code, variables)
+
         raw = broker.execute_with_callbacks(
-            run_code=lambda: backend.run(code, variables),
+            run_code=run_code,
             tool_executor=tool_executor,
         )
+        self._context_accesses.extend(raw.context_accesses)
+        self._raise_context_injection_error(code, raw)
         return self._finalize(raw)
+
+    def drain_context_accesses(self) -> tuple[str, ...]:
+        """Return and clear sanitized attachment IDs read during capsule injection."""
+        values = tuple(self._context_accesses)
+        self._context_accesses.clear()
+        return values
+
+    @staticmethod
+    def _raise_context_injection_error(code: str, raw: BackendExecutionResult) -> None:
+        if raw.error and "_fleet_load_context_manifest" in code:
+            raise DaytonaAdapterError(
+                message="prepared context failed integrity verification",
+                cause_type="ContextIntegrityError",
+            )
 
     def _finalize(self, raw: str | BackendExecutionResult) -> Any:
         if isinstance(raw, BackendExecutionResult):
@@ -697,4 +772,4 @@ def sandbox_backend(
     """
     if loop is not None:
         sandbox = sync_sandbox(sandbox, loop)
-    return _SandboxCodeInterpreterBackend(sandbox, timeout_s=timeout_s)
+    return _SandboxProcessBackend(sandbox, timeout_s=timeout_s)

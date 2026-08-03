@@ -56,7 +56,11 @@ class FleetRLMSignature(dspy.Signature):
         desc="Authorized Skill Card metadata only; load instructions only when a card is relevant to the request"
     )
     attachments: list[AttachmentInput] = dspy.InputField(
-        desc="Immutable Attachment identity and bounded metadata; read bytes only when relevant to the request"
+        desc=(
+            "Authorized immutable Attachments. When prepared context is present, inspect its data programmatically "
+            "through the attachments variable only when relevant to the request; one text Attachment is also "
+            "available as context"
+        )
     )
     answer: str = dspy.OutputField(
         desc=(

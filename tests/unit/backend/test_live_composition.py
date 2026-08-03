@@ -114,6 +114,8 @@ def test_require_daytona_settings_fails_closed_without_deps(monkeypatch: pytest.
                 daytona_api_key=SecretStr("daytona-key"),
                 daytona_snapshot="fleet-test-v1",
                 llm_api_key=SecretStr(""),
+                root_llm_api_key_env="MISSING_ROOT_KEY",
+                sub_llm_api_key_env="MISSING_SUB_KEY",
             )
         )
     with pytest.raises(CompositionError, match="DATABASE_URL"):

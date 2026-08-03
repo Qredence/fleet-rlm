@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
@@ -28,6 +29,8 @@ def test_model_bundle_applies_independent_role_policy(monkeypatch: pytest.Monkey
         _env_file=None,
         root_model="openai/root",
         sub_model="openai/sub",
+        root_llm_model_provider_service="uscentral.default.zencode-oai",
+        sub_llm_model_provider_service="uscentral.default.zencode-oai",
         root_llm_api_key_env="ROOT_KEY",
         sub_llm_api_key_env="SUB_KEY",
         root_llm_max_tokens=101,
@@ -47,9 +50,11 @@ def test_model_bundle_applies_independent_role_policy(monkeypatch: pytest.Monkey
     assert build.call_args_list[0].kwargs["max_tokens"] == 101
     assert build.call_args_list[0].kwargs["cache"] is True
     assert build.call_args_list[0].kwargs["reasoning_effort"] == "none"
+    assert build.call_args_list[0].kwargs["model_provider_service"] == "uscentral.default.zencode-oai"
     assert build.call_args_list[1].kwargs["max_tokens"] == 202
     assert build.call_args_list[1].kwargs["cache"] is False
     assert build.call_args_list[1].kwargs["temperature"] == 0.3
+    assert build.call_args_list[1].kwargs["model_provider_service"] == "uscentral.default.zencode-oai"
 
 
 def test_build_lm_allows_reasoning_effort_only_when_configured(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -67,6 +72,53 @@ def test_build_lm_allows_reasoning_effort_only_when_configured(monkeypatch: pyte
     assert "allowed_openai_params" not in lm.call_args_list[0].kwargs
     assert lm.call_args_list[1].kwargs["reasoning_effort"] == "none"
     assert lm.call_args_list[1].kwargs["allowed_openai_params"] == ["reasoning_effort"]
+
+
+def test_build_lm_passes_databricks_model_provider_service_header(monkeypatch: pytest.MonkeyPatch) -> None:
+    import fleet_rlm.rlm.lm_factory as factory
+
+    lm = MagicMock(return_value="deepseek-lm")
+    monkeypatch.setattr(factory.dspy, "LM", lm)
+
+    result = factory.build_lm(
+        "deepseek-v4-flash",
+        api_key="token",
+        base_url="https://gateway.example/ai-gateway/openai/v1",
+        model_provider_service="uscentral.default.zencode-oai",
+    )
+
+    assert result == "deepseek-lm"
+    assert lm.call_args.args == ("openai/deepseek-v4-flash",)
+    assert lm.call_args.kwargs["headers"] == {"Databricks-Model-Provider-Service": "uscentral.default.zencode-oai"}
+
+
+def test_mocked_litellm_request_resolves_unqualified_deepseek_model(monkeypatch: pytest.MonkeyPatch) -> None:
+    import dspy.clients.lm as dspy_lm
+    from litellm import get_llm_provider
+
+    import fleet_rlm.rlm.lm_factory as factory
+
+    completion = MagicMock(return_value={"choices": []})
+    monkeypatch.setattr(dspy_lm, "_get_litellm", lambda: SimpleNamespace(completion=completion))
+    lm = factory.build_lm(
+        "deepseek-v4-flash",
+        api_key="token",
+        base_url="https://gateway.example/ai-gateway/openai/v1",
+        model_provider_service="uscentral.default.zencode-oai",
+        cache=False,
+    )
+
+    dspy_lm.litellm_completion(
+        request={"model": lm.model, "messages": [{"role": "user", "content": "ping"}], **lm.kwargs},
+        num_retries=0,
+    )
+
+    request = completion.call_args.kwargs
+    model, provider, _, api_base = get_llm_provider(model=request["model"], api_base=request["api_base"])
+    assert model == "deepseek-v4-flash"
+    assert provider == "openai"
+    assert api_base == "https://gateway.example/ai-gateway/openai/v1"
+    assert request["headers"]["Databricks-Model-Provider-Service"] == "uscentral.default.zencode-oai"
 
 
 def test_sanitize_base_url_accepts_https_and_strips_comments() -> None:

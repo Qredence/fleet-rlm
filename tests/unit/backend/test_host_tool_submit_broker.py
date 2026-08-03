@@ -3,7 +3,11 @@
 from __future__ import annotations
 
 import json
+import socket
+import subprocess
+import sys
 import time
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -21,6 +25,78 @@ class _RecordingTool:
         return f"loaded:{name}"
 
 
+def test_co_located_worker_preserves_state_and_services_callbacks(tmp_path: Path) -> None:
+    from fleet_rlm.daytona.http_broker import (
+        _BROKER_SERVER_CODE,
+        _MAX_EXECUTE_OUTPUT_CHARS,
+        _MAX_EXECUTE_REQUEST_BYTES,
+        DaytonaHttpToolBroker,
+    )
+
+    with socket.socket() as reservation:
+        reservation.bind(("127.0.0.1", 0))
+        port = int(reservation.getsockname()[1])
+    secret = "test-broker-secret"
+    source = (
+        _BROKER_SERVER_CODE.replace("__BROKER_SECRET__", repr(secret))
+        .replace("__BROKER_PORT__", str(port))
+        .replace("__MAX_REQUEST_BYTES__", str(_MAX_EXECUTE_REQUEST_BYTES))
+        .replace("__MAX_OUTPUT_CHARS__", str(_MAX_EXECUTE_OUTPUT_CHARS))
+        .replace("__CONTEXT_MOUNT_ROOT__", "None")
+        .replace("__CONTEXT_MANIFEST_SHA256__", "None")
+    )
+    server_path = tmp_path / "broker.py"
+    server_path.write_text(source, encoding="utf-8")
+    process = subprocess.Popen(
+        [sys.executable, str(server_path)],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    broker = DaytonaHttpToolBroker(sandbox=object(), broker_port=port, poll_interval_s=0.005)
+    broker._broker_url = f"http://127.0.0.1:{port}"
+    broker._broker_secret = secret
+    try:
+        deadline = time.monotonic() + 5
+        while True:
+            try:
+                if broker._http().get("/health").status_code == 200:
+                    break
+            except httpx.HTTPError:
+                pass
+            if time.monotonic() >= deadline:
+                pytest.fail("co-located worker did not become healthy")
+            time.sleep(0.01)
+
+        def llm_query_batched(prompts: list[str]) -> list[str]:
+            return [f"sub:{prompt}" for prompt in prompts]
+
+        broker.register_tools({"llm_query_batched": llm_query_batched})
+        broker.execute_code(broker.submit_setup_code([{"name": "answer", "type": "str"}]))
+        first = broker.execute_with_callbacks(
+            run_code=lambda: broker.execute_code("value = 41"),
+            tool_executor=lambda name, args, kwargs: (
+                llm_query_batched(*args, **kwargs) if name == "llm_query_batched" else None
+            ),
+        )
+        second = broker.execute_with_callbacks(
+            run_code=lambda: broker.execute_code(
+                "parts = llm_query_batched(['a', 'b'])\nSUBMIT(answer=f'{value + 1}:{parts[0]}:{parts[1]}')"
+            ),
+            tool_executor=lambda name, args, kwargs: (
+                llm_query_batched(*args, **kwargs) if name == "llm_query_batched" else None
+            ),
+        )
+
+        assert first.error is None
+        assert second.final == {"answer": "42:sub:a:sub:b"}
+        assert broker.last_execution_stats["tool_call_count"] == 1
+    finally:
+        if broker._client is not None:
+            broker._client.close()
+        process.terminate()
+        process.wait(timeout=5)
+
+
 def test_submit_returns_final_output() -> None:
     from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
 
@@ -33,6 +109,24 @@ def test_submit_returns_final_output() -> None:
 
     assert isinstance(result, FinalOutput)
     assert result.output == {"answer": "done"}
+
+
+def test_two_interpreters_do_not_share_python_variables() -> None:
+    from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
+
+    first = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())
+    second = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())
+    first.output_fields = [{"name": "answer", "type": "str"}]
+    second.output_fields = [{"name": "answer", "type": "str"}]
+    first.start()
+    second.start()
+
+    first.execute("private_value = 41")
+
+    assert "private_value' is not defined" in str(second.execute("SUBMIT(answer=str(private_value))"))
+    result = first.execute("SUBMIT(answer=str(private_value + 1))")
+    assert isinstance(result, FinalOutput)
+    assert result.output == {"answer": "42"}
 
 
 def test_sandbox_code_invokes_host_mediated_tool() -> None:
@@ -182,7 +276,12 @@ def test_http_broker_uses_isolated_port_for_server_and_wrappers() -> None:
             return type("Preview", (), {"url": "http://preview.test", "token": "preview-token"})()
 
     sandbox = _Sandbox()
-    broker = DaytonaHttpToolBroker(sandbox=sandbox, broker_port=3001)
+    broker = DaytonaHttpToolBroker(
+        sandbox=sandbox,
+        broker_port=3001,
+        context_mount_root="/home/daytona/run",
+        context_manifest_sha256="a" * 64,
+    )
     broker._wait_health = lambda **_kwargs: None  # type: ignore[method-assign]
     broker.ensure_started()
     source = broker._tool_wrapper_source("load_skill", lambda name: name)
@@ -190,6 +289,10 @@ def test_http_broker_uses_isolated_port_for_server_and_wrappers() -> None:
     assert "localhost:3001/tool_call" in source
     assert broker._broker_port == 3001
     assert '("0.0.0.0", 3001)' in sandbox.uploaded_content.decode()
+    uploaded = sandbox.uploaded_content.decode()
+    assert "def _fleet_load_context_manifest(raw_manifest):" in uploaded
+    assert "_CONTEXT_MOUNT_ROOT = '/home/daytona/run'" in uploaded
+    assert f"_CONTEXT_MANIFEST_SHA256 = {'a' * 64!r}" in uploaded
 
 
 def test_http_broker_health_fails_fast_on_http_401(monkeypatch: pytest.MonkeyPatch) -> None:
