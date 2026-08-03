@@ -301,9 +301,6 @@ class UrllibPublicTextFetcher:
                 if response.status < 200 or response.status >= 300:
                     raise UrlToolError("http_error", "URL returned an unsuccessful response")
                 content_type = response.headers.get("Content-Type", "").strip()
-                media_type = _media_type(content_type)
-                if media_type and media_type not in _ALLOWED_MEDIA_TYPES and not media_type.startswith("text/"):
-                    raise UrlToolError("unsupported_content", "URL content is not supported text")
                 declared_length = response.headers.get("Content-Length")
                 if declared_length is not None:
                     try:
