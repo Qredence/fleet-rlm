@@ -10,7 +10,7 @@ from typing import Any
 _SECRETISH = re.compile(
     r"(?i)("
     r"api[_-]?key|authorization|bearer\s+\S+|sk-[a-z0-9_-]+|"
-    r"password|secret|token|credential|private[_-]?key"
+    r"secret|token|credential|private[_-]?key"
     r")[=:\s]+\S+"
 )
 _TOKENISH = re.compile(r"(?i)\b(?:bearer\s+[a-z0-9._~+/=-]+|sk-[a-z0-9_-]{6,})")
