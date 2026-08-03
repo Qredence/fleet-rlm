@@ -96,3 +96,68 @@ def test_artifact_promotion_validates_the_complete_owned_candidate_batch() -> No
     assert policy.validate((candidate,), access=access, session_id=session_id, run_id=run_id) == (candidate,)
     with pytest.raises(ArtifactValidationError):
         policy.validate((candidate, candidate), access=access, session_id=session_id, run_id=run_id)
+
+
+@pytest.mark.parametrize("field", ["user_id", "workspace_id", "session_id", "run_id"])
+def test_artifact_promotion_rejects_candidate_owned_by_another_identity(field: str) -> None:
+    from fleet_rlm.artifacts.errors import ArtifactValidationError
+    from fleet_rlm.artifacts.models import ArtifactAccess, ArtifactCandidate
+    from fleet_rlm.artifacts.promotion import ArtifactPromotion
+
+    access = ArtifactAccess(user_id=uuid4(), workspace_id=uuid4())
+    session_id, run_id = uuid4(), uuid4()
+    kwargs = dict(
+        id=uuid4(),
+        user_id=access.user_id,
+        workspace_id=access.workspace_id,
+        session_id=session_id,
+        run_id=run_id,
+        kind="text",
+        title=None,
+        media_type="text/plain",
+        byte_size=3,
+        checksum_sha256="ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+        staging_path="runs/input/candidate.txt",
+        durable_path="artifacts/output.txt",
+    )
+    kwargs[field] = uuid4()
+    candidate = ArtifactCandidate(**kwargs)
+    policy = ArtifactPromotion(max_bytes=8)
+
+    with pytest.raises(ArtifactValidationError, match="ownership is invalid"):
+        policy.validate((candidate,), access=access, session_id=session_id, run_id=run_id)
+
+
+@pytest.mark.parametrize(
+    "path",
+    ["../outside.txt", "runs/../../escape", "back\\slash.txt", "nul\x00.bin"],
+    ids=["dotdot-prefix", "nested-dotdot", "backslash", "nul-byte"],
+)
+@pytest.mark.parametrize("location", ["staging_path", "durable_path"])
+def test_artifact_promotion_rejects_traversal_in_candidate_locations(path: str, location: str) -> None:
+    from fleet_rlm.artifacts.errors import ArtifactValidationError
+    from fleet_rlm.artifacts.models import ArtifactAccess, ArtifactCandidate
+    from fleet_rlm.artifacts.promotion import ArtifactPromotion
+
+    access = ArtifactAccess(user_id=uuid4(), workspace_id=uuid4())
+    session_id, run_id = uuid4(), uuid4()
+    kwargs = dict(
+        id=uuid4(),
+        user_id=access.user_id,
+        workspace_id=access.workspace_id,
+        session_id=session_id,
+        run_id=run_id,
+        kind="text",
+        title=None,
+        media_type="text/plain",
+        byte_size=3,
+        checksum_sha256="ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+        staging_path="runs/input/candidate.txt",
+        durable_path="artifacts/output.txt",
+    )
+    kwargs[location] = path
+    candidate = ArtifactCandidate(**kwargs)
+    policy = ArtifactPromotion(max_bytes=8)
+
+    with pytest.raises(ArtifactValidationError, match="location is invalid"):
+        policy.validate((candidate,), access=access, session_id=session_id, run_id=run_id)

@@ -473,3 +473,94 @@ def test_public_fetcher_closes_pool_when_response_processing_fails(monkeypatch: 
         UrllibPublicTextFetcher().fetch("https://example.com/report", max_bytes=1_024)
 
     assert calls == {"released": True, "response_closed": True, "pool_closed": True}
+
+
+def test_public_fetcher_requires_tls_certificate_verification(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "fleet_rlm.files.url_tool.socket.getaddrinfo",
+        lambda *_args, **_kwargs: [(0, 0, 0, "", ("93.184.216.34", 443))],
+    )
+    pool_kwargs: dict[str, object] = {}
+
+    class Response:
+        status = 200
+        headers: ClassVar[dict[str, str]] = {"Content-Type": "text/plain; charset=utf-8"}
+
+        def stream(self, _size: int, *, decode_content: bool):
+            del decode_content
+            return iter((b"ok",))
+
+        def release_conn(self) -> None:
+            pass
+
+        def close(self) -> None:
+            pass
+
+    class Pool:
+        def __init__(self, _host: str, **kwargs: object) -> None:
+            pool_kwargs.update(kwargs)
+
+        def close(self) -> None:
+            pass
+
+        def urlopen(self, _method: str, _target: str, **_kwargs: object) -> Response:
+            return Response()
+
+    monkeypatch.setattr("fleet_rlm.files.url_tool.urllib3.HTTPSConnectionPool", Pool)
+
+    result = UrllibPublicTextFetcher().fetch("https://example.com/report", max_bytes=1_024)
+
+    assert result.text == "ok"
+    assert pool_kwargs["cert_reqs"] == "CERT_REQUIRED"
+    assert pool_kwargs["assert_hostname"] == "example.com"
+    assert pool_kwargs["server_hostname"] == "example.com"
+
+
+def test_public_fetcher_stops_at_configured_redirect_limit(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "fleet_rlm.files.url_tool.socket.getaddrinfo",
+        lambda *_args, **_kwargs: [(0, 0, 0, "", ("93.184.216.34", 443))],
+    )
+
+    class Redirect:
+        def __init__(self, location: str) -> None:
+            self.status = 302
+            self.headers = {"Location": location}
+
+        def release_conn(self) -> None:
+            pass
+
+        def close(self) -> None:
+            pass
+
+    class Ok:
+        status = 200
+        headers: ClassVar[dict[str, str]] = {"Content-Type": "text/plain; charset=utf-8"}
+
+        def stream(self, _size: int, *, decode_content: bool):
+            del decode_content
+            return iter((b"ok",))
+
+        def release_conn(self) -> None:
+            pass
+
+        def close(self) -> None:
+            pass
+
+    responses = iter([Redirect(f"https://example.com/next/{index}") for index in range(4)] + [Ok()])
+
+    class Pool:
+        def __init__(self, _host: str, **_kwargs: object) -> None:
+            pass
+
+        def close(self) -> None:
+            pass
+
+        def urlopen(self, _method: str, _target: str, **_kwargs: object) -> Redirect | Ok:
+            """Serve one hop per connection: redirects, then a terminal 200 response."""
+            return next(responses)
+
+    monkeypatch.setattr("fleet_rlm.files.url_tool.urllib3.HTTPSConnectionPool", Pool)
+
+    with pytest.raises(UrlToolError, match="redirect limit"):
+        UrllibPublicTextFetcher(max_redirects=3).fetch("https://example.com/start", max_bytes=1_024)
