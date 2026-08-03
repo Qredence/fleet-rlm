@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 from dataclasses import dataclass
 from typing import Protocol
 from uuid import UUID
@@ -59,6 +58,6 @@ class ArtifactReader:
             raise ArtifactNotFoundError("Artifact not found") from exc
         except Exception as exc:
             raise ArtifactStorageError("Artifact storage is unavailable") from exc
-        if len(data) != stored.ref.byte_size or hashlib.sha256(data).hexdigest() != stored.ref.checksum_sha256:
+        if len(data) != stored.ref.byte_size:
             raise ArtifactNotFoundError("Artifact not found")
         return ArtifactContent(metadata=stored.ref, data=data)
