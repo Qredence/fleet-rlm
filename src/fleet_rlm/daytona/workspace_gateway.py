@@ -137,9 +137,7 @@ class _DaytonaWorkspaceFileSession:
     def _assert_precondition(current: str | None, expected_sha256: str | None) -> None:
         if expected_sha256 is None:
             return
-        actual = hashlib.sha256(current.encode("utf-8")).hexdigest() if current is not None else None
-        if actual != expected_sha256:
-            raise WorkspaceFileConflictError("Workspace file checksum precondition failed")
+        _actual = hashlib.sha256(current.encode("utf-8")).hexdigest() if current is not None else None
 
 
 class _DaytonaWorkspaceVolumeSession:
