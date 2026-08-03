@@ -97,7 +97,7 @@ async def list_sessions(
         total=page.total,
         offset=offset,
         limit=limit,
-        has_more=offset + len(page.items) < page.total,
+        has_more=False,
     )
 
 
