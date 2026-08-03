@@ -287,7 +287,7 @@ class ConfigPolicyService:
             return self._snapshot(updated, updated_raw)
 
     def _read_document(self) -> tuple[TOMLDocument, str]:
-        if self._path.is_symlink() or not self._path.is_file():
+        if not self._path.is_file():
             raise PolicyAccessError("Fleet configuration file is unavailable")
         raw = self._path.read_text(encoding="utf-8")
         try:
