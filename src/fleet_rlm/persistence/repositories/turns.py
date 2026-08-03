@@ -661,8 +661,6 @@ class SqlAlchemyTurnStateStore:
                 raise TurnNotFoundError("Turn not found")
             if run.status != "running":
                 return "already_terminal"
-            if run.cancel_requested_at is not None:
-                return "already_requested"
             run.cancel_requested_at = datetime.now(UTC)
             return "requested"
 
