@@ -132,8 +132,6 @@ def sanitize_public_error(exc: BaseException | str) -> str:
     cleaned = _DSNISH.sub("[redacted-dsn]", cleaned)
     cleaned = _PATHISH.sub("[path]", cleaned)
     cleaned = _PROMPTISH.sub("[redacted-prompt]", cleaned)
-    if _STACKISH.search(cleaned) or "Traceback" in cleaned or "\n  File " in cleaned:
-        return "Turn failed"
     # Cap length so stack-like dumps never fill SSE frames.
     if len(cleaned) > 240:
         cleaned = cleaned[:237] + "..."
