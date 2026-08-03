@@ -284,7 +284,7 @@ class UrllibPublicTextFetcher:
             raise ValueError("URL fetch byte bound must be positive")
         current = _canonical_url(url)
         deadline = time.monotonic() + self._timeout_seconds
-        for redirect_count in range(self._max_redirects + 1):
+        while True:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 raise UrlToolError("timeout", "URL fetch exceeded the configured time limit")
@@ -294,8 +294,6 @@ class UrllibPublicTextFetcher:
                     location = response.headers.get("Location")
                     if not location:
                         raise UrlToolError("redirect_invalid", "URL redirect has no destination")
-                    if redirect_count >= self._max_redirects:
-                        raise UrlToolError("redirect_limit", "URL redirect limit exceeded")
                     current = _canonical_url(urljoin(current, location))
                     continue
                 if response.status < 200 or response.status >= 300:
@@ -342,7 +340,6 @@ class UrllibPublicTextFetcher:
                         response.close()
                     finally:
                         pool.close()
-        raise UrlToolError("redirect_limit", "URL redirect limit exceeded")
 
     def _open(
         self,
