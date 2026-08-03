@@ -433,6 +433,27 @@ def test_lm_trace_callback_records_role_and_failure_category(monkeypatch: pytest
     assert calls.status == "ERROR"
 
 
+def test_lm_trace_profiles_include_bounded_debug_payloads(monkeypatch: pytest.MonkeyPatch) -> None:
+    from fleet_rlm.observability import tracing
+    from fleet_rlm.rlm.dspy_contract import _lm_input_profile, _lm_output_profile
+
+    monkeypatch.setattr(tracing, "_TRACE_CONTENT_MODE", "debug")
+    monkeypatch.setattr(tracing, "_TRACE_CONTENT_MAX_CHARS", 256)
+
+    inputs = _lm_input_profile(
+        {
+            "prompt": "readable prompt " + "x" * 400,
+            "messages": [{"role": "user", "content": "readable message"}],
+        }
+    )
+    outputs = _lm_output_profile({"content": "readable answer"})
+
+    assert inputs["prompt_preview"].startswith("readable prompt")
+    assert len(inputs["prompt_preview"]) <= 256
+    assert "readable message" in inputs["messages_preview"]
+    assert "readable answer" in outputs["response_preview"]
+
+
 def test_lm_trace_callback_records_call_specific_usage_and_standard_attribute(monkeypatch: pytest.MonkeyPatch) -> None:
     from types import SimpleNamespace
 

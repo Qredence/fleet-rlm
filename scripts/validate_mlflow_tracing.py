@@ -70,6 +70,8 @@ def _trace_summary(trace: Any) -> tuple[str, list[Any]]:
     state = str(getattr(info, "state", ""))
     if state != "OK":
         raise RuntimeError(f"trace state is {state!r}, expected 'OK'")
+    if getattr(info, "execution_duration", None) is None:
+        raise RuntimeError("trace is missing execution duration")
     if not spans:
         raise RuntimeError("trace contains no spans")
     root_spans = [span for span in spans if getattr(span, "parent_span_id", None) is None]
@@ -79,7 +81,23 @@ def _trace_summary(trace: Any) -> tuple[str, list[Any]]:
         raise RuntimeError("trace is missing request preview")
     if not getattr(info, "response_preview", None):
         raise RuntimeError("trace is missing response preview")
+    error_spans = [
+        str(getattr(span, "name", "unknown"))
+        for span in spans
+        if _span_status_code(span) in {"ERROR", "STATUS_CODE_ERROR"}
+    ]
+    if error_spans:
+        raise RuntimeError(f"trace contains error span(s): {', '.join(error_spans)}")
     return str(getattr(info, "trace_id", "")), spans
+
+
+def _span_status_code(span: Any) -> str:
+    """Normalize MLflow CLI and SDK span status representations."""
+    status = getattr(span, "status", None)
+    raw = getattr(status, "code", None)
+    if raw is None:
+        raw = getattr(status, "status_code", None)
+    return str(getattr(raw, "value", raw))
 
 
 def main() -> int:
@@ -154,6 +172,7 @@ def main() -> int:
     print(f"experiment_id={experiment.experiment_id}")
     print(f"trace_id={verified_trace_id}")
     print(f"span_count={len(spans)}")
+    print(f"execution_duration_ms={trace.info.execution_duration}")
     print(f"tracking_uri={settings.mlflow_tracking_uri}")
     print(f"trace_location={trace_location}")
     print("status=PASS")

@@ -58,6 +58,8 @@ tracing_enabled = false
 expose_trace_id = true
 async_logging = true
 trace_sampling_ratio = 1.0
+trace_content_mode = "safe"
+trace_content_max_chars = 10000
 
 [profiles.daytona.runtime]
 environment = "daytona"
@@ -67,6 +69,7 @@ model = "uscentral.default.deepseek-v4-flash"
 api_key_env = "DATABRICKS_TOKEN"
 base_url_env = "FLEET_DATABRICKS_AI_GATEWAY_BASE_URL"
 max_tokens = 8000
+reasoning_effort = "low"
 
 [profiles.daytona.llm.sub]
 model = "system.ai.inkling"
@@ -80,6 +83,8 @@ reasoning_effort = "none"
 tracing_enabled = true
 tracking_uri = "http://127.0.0.1:5001"
 experiment_name = "fleet-rlm"
+# Hash trace content by default; set "debug" only for explicit local diagnostics.
+trace_content_mode = "safe"
 
 # Managed Lakebase/MLflow policy. Select with
 # [config] default_profile = "daytona-managed" after populating the
@@ -93,6 +98,7 @@ model = "uscentral.default.deepseek-v4-flash"
 api_key_env = "DATABRICKS_TOKEN"
 base_url_env = "FLEET_DATABRICKS_AI_GATEWAY_BASE_URL"
 max_tokens = 8000
+reasoning_effort = "low"
 
 [profiles.daytona-managed.llm.sub]
 model = "system.ai.inkling"
@@ -105,6 +111,7 @@ reasoning_effort = "none"
 [profiles.daytona-managed.mlflow]
 tracing_enabled = true
 tracking_uri = "databricks"
+trace_content_mode = "safe"
 experiment_name_env = "FLEET_MLFLOW_EXPERIMENT_NAME"
 trace_catalog_env = "FLEET_MLFLOW_TRACE_CATALOG"
 trace_schema_env = "FLEET_MLFLOW_TRACE_SCHEMA"

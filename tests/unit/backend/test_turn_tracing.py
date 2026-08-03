@@ -18,15 +18,21 @@ from fleet_rlm.observability.turn_tracing import (
     annotate_trace_io,
     current_turn_trace_id,
     start_turn_span,
+    trace_runtime_detail,
     turn_phase_span,
     turn_trace,
 )
+from fleet_rlm.rlm.events import EventRecorder, RLMCode, RLMOutput, RLMReasoning, TextCompleted, ToolCompleted
 from fleet_rlm.rlm.tool_observer import ToolEventView, observe_tool
 
 
 @pytest.fixture(autouse=True)
-def _activate_fleet_trace_context() -> Iterator[None]:
+def _activate_fleet_trace_context(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     """Phase spans gate on an active fleet_turn trace; tests exercise span logic directly."""
+    from fleet_rlm.observability import tracing
+
+    monkeypatch.setattr(tracing, "_TRACE_CONTENT_MODE", "safe")
+    monkeypatch.setattr(tracing, "_TRACE_CONTENT_MAX_CHARS", 10_000)
     token = turn_tracing._fleet_trace_active.set(True)
     yield
     turn_tracing._fleet_trace_active.reset(token)
@@ -122,20 +128,19 @@ def test_turn_trace_enabled_sets_tags_and_trace_id(monkeypatch: pytest.MonkeyPat
         assert handle.trace_id == "tr-active-123"
         assert current_turn_trace_id() == "tr-active-123"
         assert calls.start_span_names == ["fleet_turn"]
-        assert calls.update_kwargs == [
-            {
-                "session_id": str(session_id),
-                "user": "fleet-local",
-                "tags": {
-                    "fleet.run_id": str(run_id),
-                    "fleet.session_id": str(session_id),
-                },
-                "metadata": {
-                    "fleet.run_id": str(run_id),
-                    "fleet.app_version": turn_tracing._FLEET_APP_VERSION,
-                },
-            }
-        ]
+        assert calls.update_kwargs[0] == {
+            "session_id": str(session_id),
+            "user": "fleet-local",
+            "tags": {
+                "fleet.run_id": str(run_id),
+                "fleet.session_id": str(session_id),
+            },
+            "metadata": {
+                "fleet.run_id": str(run_id),
+                "fleet.app_version": turn_tracing._FLEET_APP_VERSION,
+            },
+        }
+    assert calls.update_kwargs[-1] == {"state": "OK"}
     assert current_turn_trace_id() is None
 
 
@@ -275,14 +280,24 @@ def test_turn_trace_span_failure_is_soft(monkeypatch: pytest.MonkeyPatch) -> Non
 
 
 def test_turn_trace_preserves_managed_body_exception(monkeypatch: pytest.MonkeyPatch) -> None:
-    _install_fake_mlflow(monkeypatch)
+    calls = _install_fake_mlflow(monkeypatch)
     expected = ValueError("original turn failure")
 
     with pytest.raises(ValueError) as raised, turn_trace(uuid4(), uuid4(), enabled=True):
         raise expected
 
     assert raised.value is expected
+    assert calls.update_kwargs[-1] == {"state": "ERROR"}
     assert current_turn_trace_id() is None
+
+
+def test_turn_trace_preserves_explicit_failed_annotation(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = _install_fake_mlflow(monkeypatch)
+
+    with turn_trace(uuid4(), uuid4(), enabled=True):
+        annotate_trace_io(request="q", response_text="Turn failed", failed=True)
+
+    assert calls.update_kwargs[-1] == {"state": "ERROR"}
 
 
 def test_turn_trace_teardown_failure_does_not_change_success(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -330,11 +345,30 @@ def test_annotate_trace_io_updates_trace_request_response(monkeypatch: pytest.Mo
         "answer": "public answer",
         "final_reasoning": "public reasoning",
     }
-    assert calls.update_kwargs[-1] == {
-        "request_preview": "how are you?",
-        "response_preview": "display answer",
-    }
+    assert calls.update_kwargs[-1]["request_preview"].startswith("[redacted sha256=")
+    assert calls.update_kwargs[-1]["response_preview"].startswith("[redacted sha256=")
+    assert "how are you?" not in str(calls.update_kwargs[-1])
+    assert "display answer" not in str(calls.update_kwargs[-1])
     assert "internal_payload" not in calls.span_outputs[-1]
+
+
+def test_annotate_trace_io_debug_mode_keeps_bounded_trace_previews(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from fleet_rlm.observability import tracing
+
+    monkeypatch.setattr(tracing, "_TRACE_CONTENT_MODE", "debug")
+    monkeypatch.setattr(tracing, "_TRACE_CONTENT_MAX_CHARS", 256)
+    calls = _install_fake_mlflow(monkeypatch)
+
+    annotate_trace_io(
+        request="readable request " + "x" * 400,
+        response_text="readable response",
+    )
+
+    assert calls.update_kwargs[-1]["request_preview"].startswith("readable request")
+    assert len(calls.update_kwargs[-1]["request_preview"]) <= 256
+    assert calls.update_kwargs[-1]["response_preview"] == "readable response"
 
 
 def test_annotate_trace_io_falls_back_to_empty_answer(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -354,6 +388,7 @@ def test_annotate_trace_io_marks_root_span_error_when_failed(monkeypatch: pytest
 
     assert calls.span_outputs[-1] == {"answer": "Turn failed"}
     assert calls.span_statuses == ["ERROR"]
+    assert calls.update_kwargs[-1] == {"state": "ERROR"}
 
 
 def test_turn_phase_span_records_bounded_metadata_when_a_turn_span_is_active(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -365,6 +400,52 @@ def test_turn_phase_span_records_bounded_metadata_when_a_turn_span_is_active(mon
     assert calls.start_span_names == ["RLM.execute"]
     assert calls.span_inputs[-1] == {"max_iterations": 20, "max_llm_calls": 50}
     assert calls.span_outputs[-1] == {"phase_status": "completed"}
+
+
+def test_runtime_detail_spans_capture_reasoning_code_output_tools_and_answer(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = _install_fake_mlflow(monkeypatch)
+
+    details = (
+        RLMReasoning("inspect the corpus", step=2),
+        RLMCode("print('evidence')", step=2),
+        RLMOutput("evidence returned", step=2),
+        ToolCompleted("tool-1", "read_source", {"status": "ok"}),
+        TextCompleted("final answer"),
+    )
+    for sequence, detail in enumerate(details, start=1):
+        trace_runtime_detail(detail, sequence=sequence)
+
+    assert calls.start_span_names == [
+        "Turn.progress.rlm.reasoning",
+        "Turn.progress.rlm.code",
+        "Turn.progress.rlm.output",
+        "Turn.progress.tool.completed",
+        "Turn.progress.text.completed",
+    ]
+    assert calls.span_inputs[0] == {"sequence": 1, "kind": "rlm.reasoning"}
+    assert calls.span_outputs[0] == {
+        "step": 2,
+        "reasoning": "inspect the corpus",
+        "phase_status": "completed",
+    }
+    assert calls.span_outputs[1]["code"] == "print('evidence')"
+    assert calls.span_outputs[2]["output"] == "evidence returned"
+    assert calls.span_outputs[3]["tool_output"] == {"status": "ok"}
+    assert calls.span_outputs[4]["answer"] == "final answer"
+
+
+def test_event_recorder_projects_committed_public_answer_into_trace(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = _install_fake_mlflow(monkeypatch)
+    recorder = EventRecorder(run_id=uuid4(), session_id=uuid4())
+
+    event = recorder.record(TextCompleted("committed answer"))
+
+    assert event.sequence == 1
+    assert calls.start_span_names == ["Turn.progress.text.completed"]
+    assert calls.span_inputs[-1] == {"sequence": 1, "kind": "text.completed"}
+    assert calls.span_outputs[-1] == {"answer": "committed answer", "phase_status": "completed"}
 
 
 def test_start_turn_span_supports_callback_lifecycles_and_failure_status(

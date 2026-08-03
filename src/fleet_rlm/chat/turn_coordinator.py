@@ -477,6 +477,14 @@ class TurnCoordinator:
                     self._submit_cleanup(turn, stream, prepared, heartbeat, finalization_task)
                     heartbeat = None
                     await asyncio.sleep(0)
+            # A successful RLM outcome can still fail during durable commit;
+            # make the root trace reflect the terminal receipt before closing it.
+            if isinstance(receipt, FailedRunReceipt) and outcome.succeeded:
+                annotate_trace_io(
+                    request=trace_request,
+                    response_text=receipt.public_message or "Turn failed",
+                    failed=True,
+                )
             settled = True
             if isinstance(receipt, CommittedTurnReceipt):
                 for event in self._projector.project(

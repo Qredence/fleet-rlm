@@ -9,6 +9,8 @@ Fleet TOML policy (resolved through ``Settings``):
     mlflow.experiment_name  - experiment passed to set_experiment
     mlflow.tracking_uri     - tracking target
     mlflow.expose_trace_id  - surface trace ids on Turn SSE metadata
+    mlflow.trace_content_mode - safe hashes or bounded debug content
+    mlflow.trace_content_max_chars - per-field bound for debug content
 
 Databricks auth remains outside FLEET secrets (SDK/CLI conventions):
     DATABRICKS_HOST  - Workspace URL (e.g. https://...gcp.databricks.com)
@@ -24,7 +26,7 @@ import os
 import re
 import socket
 from collections.abc import Mapping
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Literal, cast
 from urllib.parse import urlparse
 
 if TYPE_CHECKING:
@@ -38,6 +40,9 @@ _TRACING_CONFIGURED = False
 _TRACING_ACTIVE = False
 _DEFAULT_TRACKING_URI = "databricks"
 _TRACE_DESTINATION_TAG = "mlflow.experiment.databricksTraceDestinationPath"
+TraceContentMode = Literal["safe", "debug"]
+_TRACE_CONTENT_MODE: TraceContentMode = "safe"
+_TRACE_CONTENT_MAX_CHARS = 10_000
 _CREDENTIAL_KEYS = frozenset({"api_key", "authorization", "credential", "password", "secret", "token"})
 _CONTENT_BEARING_KEYS = frozenset(
     {
@@ -45,45 +50,94 @@ _CONTENT_BEARING_KEYS = frozenset(
         "arguments",
         "candidate",
         "code",
+        "code_preview",
         "content",
         "error",
         "exception",
+        "final_reasoning",
         "feedback",
         "input",
         "inputs",
         "instruction",
         "message",
+        "messages",
+        "messages_preview",
         "output",
         "outputs",
         "prompt",
+        "prompt_preview",
         "query",
         "reasoning",
+        "reasoning_preview",
         "request",
+        "request_preview",
         "response",
+        "response_preview",
         "result",
         "text",
+        "text_delta",
         "tool_input",
         "tool_output",
+        "output_preview",
+        "mlflow_span_inputs",
+        "mlflow_span_outputs",
     }
 )
 _OPERATIONAL_TEXT_KEYS = frozenset(
     {
         "cache",
+        "delivery",
+        "detail_type",
+        "artifact_id",
+        "artifact_kind",
+        "attachment_id",
+        "affordances",
         "engine",
         "failure_category",
         "kind",
         "model",
         "model_type",
+        "mlflow_span_type",
         "name",
         "phase_status",
         "provider",
         "provider_type",
         "role",
+        "phase",
+        "schema_id",
+        "schema_version",
+        "skill_id",
         "status",
+        "tool_call_id",
+        "tool_name",
+        "trace_id",
         "termination_mode",
         "type",
+        "trust",
+        "version",
     }
 )
+
+
+def _set_trace_content_policy(mode: TraceContentMode, max_chars: int) -> None:
+    """Apply the selected bounded MLflow content policy for this process."""
+    global _TRACE_CONTENT_MODE, _TRACE_CONTENT_MAX_CHARS
+    _TRACE_CONTENT_MODE = mode if mode in {"safe", "debug"} else "safe"
+    try:
+        normalized_max_chars = int(max_chars)
+    except (TypeError, ValueError):
+        normalized_max_chars = 10_000
+    _TRACE_CONTENT_MAX_CHARS = max(256, min(normalized_max_chars, 50_000))
+
+
+def trace_content_debug_enabled() -> bool:
+    """Return whether bounded readable content is enabled for local tracing."""
+    return _TRACE_CONTENT_MODE == "debug"
+
+
+def trace_content_max_chars() -> int:
+    """Return the configured per-field bound for readable trace content."""
+    return _TRACE_CONTENT_MAX_CHARS
 
 
 def _normalize_trace_key(key: str | None) -> str:
@@ -102,31 +156,62 @@ def _trace_digest(value: object) -> str:
     return f"[redacted sha256={hashlib.sha256(encoded.encode()).hexdigest()}]"
 
 
-def _sanitize_mlflow_value(value: object, *, key: str | None = None, depth: int = 0) -> object:
+def trace_content_preview(value: object) -> str:
+    """Return a policy-controlled preview for MLflow trace-level metadata."""
+    if not trace_content_debug_enabled():
+        return _trace_digest(value)
+    from fleet_rlm.rlm.sanitize import sanitize_public_text
+
+    return sanitize_public_text(str(value or ""), max_len=_TRACE_CONTENT_MAX_CHARS)
+
+
+def _sanitize_mlflow_value(
+    value: object,
+    *,
+    key: str | None = None,
+    depth: int = 0,
+    content_context: bool = False,
+) -> object:
     """Preserve operational metadata while replacing content-bearing trace values."""
     if depth >= 8:
         return "[redacted depth]"
     normalized_key = _normalize_trace_key(key)
-    if normalized_key in _CONTENT_BEARING_KEYS or normalized_key.endswith(
-        ("_input", "_output", "_prompt", "_response")
+    if normalized_key in _CREDENTIAL_KEYS or normalized_key.endswith(
+        tuple(f"_{credential_key}" for credential_key in _CREDENTIAL_KEYS)
     ):
+        return "[redacted]"
+    content_key = normalized_key in _CONTENT_BEARING_KEYS or normalized_key.endswith(
+        ("_input", "_inputs", "_output", "_outputs", "_prompt", "_response", "_preview")
+    )
+    if content_key and not trace_content_debug_enabled():
         return _trace_digest(value)
     if isinstance(value, Mapping):
+        nested_content_context = content_context or (trace_content_debug_enabled() and content_key)
         return {
-            str(item_key)[:128]: _sanitize_mlflow_value(item, key=str(item_key), depth=depth + 1)
+            str(item_key)[:128]: _sanitize_mlflow_value(
+                item,
+                key=str(item_key),
+                depth=depth + 1,
+                content_context=nested_content_context,
+            )
             for item_key, item in list(value.items())[:50]
         }
     if isinstance(value, (list, tuple)):
-        return [_sanitize_mlflow_value(item, depth=depth + 1) for item in list(value)[:50]]
+        return [
+            _sanitize_mlflow_value(
+                item,
+                depth=depth + 1,
+                content_context=content_context or (trace_content_debug_enabled() and content_key),
+            )
+            for item in list(value)[:50]
+        ]
     if isinstance(value, str):
         from fleet_rlm.rlm.sanitize import sanitize_public_text
 
-        if normalized_key in _CREDENTIAL_KEYS or normalized_key.endswith(
-            tuple(f"_{credential_key}" for credential_key in _CREDENTIAL_KEYS)
-        ):
-            return "[redacted]"
         if normalized_key in _OPERATIONAL_TEXT_KEYS:
             return sanitize_public_text(value, max_len=256)
+        if trace_content_debug_enabled() and (content_context or content_key):
+            return sanitize_public_text(value, max_len=_TRACE_CONTENT_MAX_CHARS)
         # DSPy signatures may use arbitrary field names, so unknown string
         # fields must be treated as content rather than exported by default.
         return _trace_digest(value)
@@ -260,6 +345,10 @@ def configure_tracing(settings: Settings) -> None:
         return
     _TRACING_CONFIGURED = True
     _TRACING_ACTIVE = False
+    _set_trace_content_policy(
+        getattr(settings, "mlflow_trace_content_mode", "safe"),
+        getattr(settings, "mlflow_trace_content_max_chars", _TRACE_CONTENT_MAX_CHARS),
+    )
 
     if not settings.mlflow_tracing_enabled:
         logger.debug("MLflow tracing is disabled by Fleet policy")
@@ -347,16 +436,19 @@ def configure_tracing(settings: Settings) -> None:
             configure_processors(span_processors=[_sanitize_mlflow_span])
 
         # Enable MLflow's DSPy inference callback. The 3.15 span processor
-        # above is the export boundary that bounds and redacts its prompts,
-        # generated code, tool arguments, and provider responses. Keep compile
-        # and evaluator traces out of the live Turn experiment.
+        # above is the export boundary that bounds readable local debug content
+        # and protects credentials, paths, and system-prompt dumps. Keep
+        # compile and evaluator traces out of the live Turn experiment.
         mlflow.dspy.autolog(log_traces=True, log_traces_from_eval=False, silent=True)
         logger.info(
-            "MLflow DSPy autolog enabled (inference=true tracking_uri=%s experiment=%s async=%s sampling=%s)",
+            "MLflow DSPy autolog enabled (inference=true tracking_uri=%s experiment=%s async=%s sampling=%s "
+            "content_mode=%s content_max_chars=%s)",
             tracking_uri,
             settings.mlflow_experiment_name,
             settings.mlflow_async_logging,
             settings.mlflow_trace_sampling_ratio,
+            _TRACE_CONTENT_MODE,
+            _TRACE_CONTENT_MAX_CHARS,
         )
         _TRACING_ACTIVE = True
     except FleetConfigurationError:

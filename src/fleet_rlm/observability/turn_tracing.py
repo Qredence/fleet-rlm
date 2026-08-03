@@ -21,6 +21,28 @@ logger = logging.getLogger(__name__)
 _MAX_TRACE_TEXT_CHARS = 1_000
 
 
+def trace_content_debug_enabled() -> bool:
+    """Return whether the configured MLflow trace payloads are locally readable."""
+    try:
+        from fleet_rlm.observability.tracing import trace_content_debug_enabled as enabled
+
+        return enabled()
+    except Exception:
+        return False
+
+
+def trace_preview_limit(default: int = _MAX_TRACE_TEXT_CHARS) -> int:
+    """Return the configured readable preview bound, or the safe local default."""
+    if not trace_content_debug_enabled():
+        return default
+    try:
+        from fleet_rlm.observability.tracing import trace_content_max_chars
+
+        return trace_content_max_chars()
+    except Exception:
+        return default
+
+
 def _trace_value(value: object) -> object:
     """
     Sanitize and bound a value for safe inclusion in engineering traces.
@@ -34,24 +56,30 @@ def _trace_value(value: object) -> object:
     if isinstance(value, str):
         from fleet_rlm.rlm.sanitize import sanitize_public_text
 
-        return sanitize_public_text(value, max_len=_MAX_TRACE_TEXT_CHARS)
+        return sanitize_public_text(value, max_len=trace_preview_limit())
     if isinstance(value, Mapping):
         from fleet_rlm.rlm.sanitize import sanitize_public_value
 
-        sanitized = sanitize_public_value(dict(list(value.items())[:32]), max_len=_MAX_TRACE_TEXT_CHARS)
-        if isinstance(sanitized, Mapping):
-            return {str(key): _trace_value(item) for key, item in list(sanitized.items())[:32]}
-        return sanitized
+        normalized = {str(key): _trace_value(item) for key, item in list(value.items())[:32]}
+        return sanitize_public_value(normalized, max_len=trace_preview_limit())
     if isinstance(value, (list, tuple)):
         from fleet_rlm.rlm.sanitize import sanitize_public_value
 
-        sanitized = sanitize_public_value(list(value[:32]), max_len=_MAX_TRACE_TEXT_CHARS)
-        if isinstance(sanitized, list):
-            return [_trace_value(item) for item in sanitized[:32]]
-        return sanitized
+        normalized = [_trace_value(item) for item in value[:32]]
+        return sanitize_public_value(normalized, max_len=trace_preview_limit())
     if value is None or isinstance(value, (bool, int, float)):
         return value
     return type(value).__name__
+
+
+def _trace_content_preview(value: object) -> str:
+    """Return a safe trace-level preview even if policy lookup fails."""
+    try:
+        from fleet_rlm.observability.tracing import trace_content_preview
+
+        return trace_content_preview(value)
+    except Exception:
+        return "[redacted]"
 
 
 def _trace_mapping(values: Mapping[str, object]) -> dict[str, object]:
@@ -62,6 +90,157 @@ def _trace_mapping(values: Mapping[str, object]) -> dict[str, object]:
     return {}
 
 
+def _runtime_detail_payload(detail: object) -> tuple[dict[str, object], str]:
+    """Project one public Runtime Event detail into bounded trace fields.
+
+    Runtime Events are the transport-neutral public evidence stream. Keeping
+    this projection typed prevents arbitrary provider payloads or private
+    callback state from becoming trace content while still making reasoning,
+    generated code, tool activity, progress, and the final answer inspectable.
+    """
+    from fleet_rlm.rlm.events import (
+        ArtifactCreated,
+        AttachmentRead,
+        RLMCode,
+        RLMOutput,
+        RLMReasoning,
+        RunCancelled,
+        RunCompleted,
+        RunFailed,
+        RunStarted,
+        RunTimedOut,
+        SkillActivated,
+        SkillLoaded,
+        Status,
+        StepFinished,
+        StepStarted,
+        StructuredResult,
+        TextCompleted,
+        TextDelta,
+        ToolCompleted,
+        ToolFailed,
+        ToolStarted,
+        Usage,
+        WarningEvent,
+    )
+
+    if isinstance(detail, RunStarted):
+        return {"delivery": detail.delivery, "trace_id": detail.trace_id}, "completed"
+    if isinstance(detail, Status):
+        return {"phase": detail.phase, "status": detail.status, "message": detail.message}, "completed"
+    if isinstance(detail, StepStarted):
+        return {"step": detail.step}, "completed"
+    if isinstance(detail, StepFinished):
+        return {"step": detail.step, "duration_ms": detail.duration_ms}, "completed"
+    if isinstance(detail, RLMReasoning):
+        return {"step": detail.step, "reasoning": detail.text}, "completed"
+    if isinstance(detail, RLMCode):
+        return {"step": detail.step, "code": detail.code}, "completed"
+    if isinstance(detail, RLMOutput):
+        return {"step": detail.step, "output": detail.output}, "completed"
+    if isinstance(detail, ToolStarted):
+        return {
+            "tool_call_id": detail.tool_call_id,
+            "tool_name": detail.tool_name,
+            "tool_input": detail.input,
+        }, "completed"
+    if isinstance(detail, ToolCompleted):
+        return {
+            "tool_call_id": detail.tool_call_id,
+            "tool_name": detail.tool_name,
+            "tool_output": detail.output,
+        }, "completed"
+    if isinstance(detail, ToolFailed):
+        return {
+            "tool_call_id": detail.tool_call_id,
+            "tool_name": detail.tool_name,
+            "error": detail.error,
+        }, "failed"
+    if isinstance(detail, SkillActivated):
+        return {
+            "skill_id": detail.skill_id,
+            "name": detail.name,
+            "version": detail.version,
+            "trust": detail.trust,
+            "affordances": detail.affordances,
+        }, "completed"
+    if isinstance(detail, SkillLoaded):
+        return {
+            "skill_id": detail.skill_id,
+            "name": detail.name,
+            "version": detail.version,
+        }, "completed"
+    if isinstance(detail, AttachmentRead):
+        return {
+            "attachment_id": str(detail.attachment_id),
+            "filename": detail.filename,
+            "byte_size": detail.byte_size,
+        }, "completed"
+    if isinstance(detail, WarningEvent):
+        return {"message": detail.message, "code": detail.code}, "completed"
+    if isinstance(detail, ArtifactCreated):
+        return {
+            "artifact_id": str(detail.artifact_id),
+            "artifact_kind": detail.artifact_kind,
+            "title": detail.title,
+            "media_type": detail.media_type,
+            "byte_size": detail.byte_size,
+            "checksum_sha256": detail.checksum_sha256,
+        }, "completed"
+    if isinstance(detail, Usage):
+        return {"usage": detail.value}, "completed"
+    if isinstance(detail, StructuredResult):
+        return {
+            "schema_id": detail.schema_id,
+            "schema_version": detail.schema_version,
+            "result": detail.value,
+        }, "completed"
+    if isinstance(detail, TextDelta):
+        return {"text_delta": detail.text}, "completed"
+    if isinstance(detail, TextCompleted):
+        return {"answer": detail.text}, "completed"
+    if isinstance(detail, RunCompleted):
+        return {
+            "checkpoint_version": detail.checkpoint_version,
+            "delivery": detail.delivery,
+            "duration_ms": detail.duration_ms,
+            "trace_id": detail.trace_id,
+        }, "completed"
+    if isinstance(detail, RunFailed):
+        return {
+            "failure_category": detail.code,
+            "message": detail.message,
+            "duration_ms": detail.duration_ms,
+        }, "failed"
+    if isinstance(detail, RunCancelled):
+        return {"message": detail.message, "duration_ms": detail.duration_ms}, "failed"
+    if isinstance(detail, RunTimedOut):
+        return {"message": detail.message, "duration_ms": detail.duration_ms}, "failed"
+    return {"detail_type": type(detail).__name__}, "completed"
+
+
+def trace_runtime_detail(detail: object, *, sequence: int | None = None) -> None:
+    """Record one bounded public Runtime Event as a nested MLflow progress span.
+
+    The hook is intentionally attached to ``EventRecorder`` so live events,
+    reconciled trajectory events, and committed final answer events share one
+    trace projection. It records explicit public evidence only; hidden model
+    chain-of-thought and arbitrary provider payloads are never projected.
+    """
+    if not _fleet_trace_active.get():
+        return
+    try:
+        kind = str(getattr(detail, "kind", "unknown"))
+        allowed_kind_characters = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-"
+        if not kind or any(character not in allowed_kind_characters for character in kind):
+            kind = "unknown"
+        outputs, phase_status = _runtime_detail_payload(detail)
+        handle = start_turn_span(f"Turn.progress.{kind}", inputs={"sequence": sequence, "kind": kind})
+        handle.finish(phase_status=phase_status, outputs=outputs)
+    except Exception:
+        logger.debug("Runtime Event trace projection failed; continuing", exc_info=True)
+
+
 _LOCAL_BYOK_USER = "fleet-local"
 _SPAN_NAME = "fleet_turn"
 try:
@@ -69,6 +248,7 @@ try:
 except PackageNotFoundError:
     _FLEET_APP_VERSION = "unknown"
 _current_trace_id: ContextVar[str | None] = ContextVar("fleet_mlflow_trace_id", default=None)
+_current_trace_failed: ContextVar[bool] = ContextVar("fleet_mlflow_trace_failed", default=False)
 # True only while a fleet_turn root span is open. Phase spans gate on this so
 # tracing-disabled turns never import or touch MLflow at all.
 _fleet_trace_active: ContextVar[bool] = ContextVar("fleet_turn_trace_active", default=False)
@@ -79,6 +259,18 @@ class TraceHandle:
     """Public-safe handle for an optional active Turn trace."""
 
     trace_id: str | None
+
+
+def _set_current_trace_state(state: str) -> None:
+    """Persist a terminal MLflow trace state without affecting the Turn."""
+    try:
+        import mlflow
+
+        trace_update = getattr(mlflow, "update_current_trace", None)
+        if callable(trace_update):
+            trace_update(state=state)
+    except Exception:
+        logger.debug("MLflow trace state update failed; continuing", exc_info=True)
 
 
 def annotate_trace_io(
@@ -118,12 +310,14 @@ def annotate_trace_io(
         trace_update = getattr(mlflow, "update_current_trace", None)
         if callable(trace_update):
             preview_kwargs: dict[str, object] = {
-                "request_preview": _trace_value(request),
+                "request_preview": _trace_content_preview(request),
             }
             if response_text is not None:
-                preview_kwargs["response_preview"] = _trace_value(response_text)
+                preview_kwargs["response_preview"] = _trace_content_preview(response_text)
             trace_update(**preview_kwargs)
         if failed:
+            _current_trace_failed.set(True)
+            _set_current_trace_state("ERROR")
             try:
                 span.set_status("ERROR")
             except Exception:
@@ -244,10 +438,11 @@ def start_turn_span(
 def turn_phase_span(name: str, *, inputs: Mapping[str, object]) -> Iterator[PhaseSpanHandle]:
     """Record one bounded, nested Turn phase without affecting its outcome.
 
-    The caller supplies bounded operational metadata and already-redacted
-    previews when step-level debugging needs them. Full prompts, generated
-    programs, and interpreter output must never be attached. Yields a
-    ``PhaseSpanHandle`` so callers can attach bounded outputs at exit time.
+    The caller supplies bounded operational metadata and sanitized previews
+    when step-level debugging needs them. Unbounded prompts, generated
+    programs, interpreter output, and sensitive values must never be attached.
+    Yields a ``PhaseSpanHandle`` so callers can attach bounded outputs at exit
+    time.
     Outside an active ``fleet_turn`` trace this is a no-op that never imports
     MLflow, keeping tracing-disabled turns free of any MLflow footprint.
     """
@@ -287,6 +482,7 @@ def turn_trace(
         return
 
     token = _current_trace_id.set(None)
+    failed_token = _current_trace_failed.set(False)
     active_token: Token[bool] | None = None
     try:
         try:
@@ -338,12 +534,15 @@ def turn_trace(
         try:
             yield TraceHandle(trace_id=trace_id if expose_trace_id else None)
         except BaseException as exc:
+            _current_trace_failed.set(True)
+            _set_current_trace_state("ERROR")
             try:
                 span_context.__exit__(type(exc), exc, exc.__traceback__)
             except BaseException:
                 logger.warning("MLflow turn span teardown failed; continuing", exc_info=True)
             raise
         else:
+            _set_current_trace_state("ERROR" if _current_trace_failed.get() else "OK")
             try:
                 span_context.__exit__(None, None, None)
             except BaseException:
@@ -351,4 +550,5 @@ def turn_trace(
     finally:
         if active_token is not None:
             _fleet_trace_active.reset(active_token)
+        _current_trace_failed.reset(failed_token)
         _current_trace_id.reset(token)

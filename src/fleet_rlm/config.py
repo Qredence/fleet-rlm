@@ -176,6 +176,16 @@ class Settings(BaseModel):
         le=1.0,
         description="Fraction of Turn traces to sample for MLflow",
     )
+    mlflow_trace_content_mode: Literal["safe", "debug"] = Field(
+        default="safe",
+        description="Whether MLflow content fields are hashed or bounded and readable",
+    )
+    mlflow_trace_content_max_chars: int = Field(
+        default=10_000,
+        ge=256,
+        le=50_000,
+        description="Maximum characters retained in one readable MLflow trace content field",
+    )
     mlflow_trace_catalog: str | None = Field(default=None)
     mlflow_trace_schema: str | None = Field(default=None)
     mlflow_trace_table_prefix: str | None = Field(default=None)
@@ -270,6 +280,8 @@ _TABLE_KEYS: dict[str, frozenset[str]] = {
             "expose_trace_id",
             "async_logging",
             "trace_sampling_ratio",
+            "trace_content_mode",
+            "trace_content_max_chars",
             "trace_catalog",
             "trace_catalog_env",
             "trace_schema",
@@ -489,6 +501,10 @@ def _flatten_policy(policy: Mapping[str, Any]) -> dict[str, Any]:
         values["mlflow_async_logging"] = mlflow["async_logging"]
     if "trace_sampling_ratio" in mlflow:
         values["mlflow_trace_sampling_ratio"] = mlflow["trace_sampling_ratio"]
+    if "trace_content_mode" in mlflow:
+        values["mlflow_trace_content_mode"] = mlflow["trace_content_mode"]
+    if "trace_content_max_chars" in mlflow:
+        values["mlflow_trace_content_max_chars"] = mlflow["trace_content_max_chars"]
     for role in ("root", "sub"):
         role_values = _require_mapping(llm.get(role, {}), f"llm.{role}")
         values[f"{role}_model"] = role_values.get("model")

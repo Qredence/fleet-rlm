@@ -504,22 +504,38 @@ class _RLMTraceCallback(BaseCallback):
 
 
 def _trace_preview(value: object, *, max_chars: int = 900) -> str:
-    """Return bounded, redacted model text for an engineering trace preview."""
+    """Return bounded, sanitized model text for an engineering trace preview."""
+    from fleet_rlm.observability.turn_tracing import trace_preview_limit
     from fleet_rlm.rlm.sanitize import sanitize_public_text
 
-    return sanitize_public_text(str(value or ""), max_len=max_chars)
+    limit = trace_preview_limit(max_chars)
+    return sanitize_public_text(str(value or ""), max_len=limit)
+
+
+def _trace_payload_text(value: object) -> str:
+    """Serialize a bounded debug payload without retaining provider objects."""
+    try:
+        return json.dumps(value, default=str, ensure_ascii=False, sort_keys=True)
+    except (TypeError, ValueError):
+        return str(value)
 
 
 def _lm_input_profile(inputs: Mapping[str, Any]) -> dict[str, JsonValue]:
-    """Describe LM context size without retaining the prompt or message body."""
+    """Describe LM context and optionally retain a bounded local debug preview."""
+    from fleet_rlm.observability.turn_tracing import trace_content_debug_enabled
+
     profile: dict[str, JsonValue] = {}
     prompt = inputs.get("prompt")
     if isinstance(prompt, str):
         profile["prompt_chars"] = len(prompt)
+        if trace_content_debug_enabled():
+            profile["prompt_preview"] = _trace_preview(prompt)
     messages = inputs.get("messages")
     if isinstance(messages, Sequence) and not isinstance(messages, (str, bytes, bytearray)):
         profile["message_count"] = len(messages)
         profile["message_chars"] = sum(len(str(message)) for message in messages)
+        if trace_content_debug_enabled():
+            profile["messages_preview"] = _trace_preview(_trace_payload_text(messages))
     kwargs = inputs.get("kwargs")
     if isinstance(kwargs, Mapping):
         profile["kwargs_keys"] = tuple(sorted(str(key) for key in kwargs)[:32])
@@ -532,13 +548,17 @@ def _lm_input_profile(inputs: Mapping[str, Any]) -> dict[str, JsonValue]:
 
 
 def _lm_output_profile(outputs: Mapping[str, Any] | None) -> dict[str, JsonValue]:
-    """Describe an LM response without storing the provider response body."""
+    """Describe an LM response and optionally retain a bounded local debug preview."""
+    from fleet_rlm.observability.turn_tracing import trace_content_debug_enabled
+
     if not isinstance(outputs, Mapping):
         return {"response_keys": ()}
     profile: dict[str, JsonValue] = {"response_keys": tuple(sorted(str(key) for key in outputs)[:32])}
     response_chars = sum(len(str(value)) for value in outputs.values() if isinstance(value, str))
     if response_chars:
         profile["response_chars"] = response_chars
+    if trace_content_debug_enabled() and outputs:
+        profile["response_preview"] = _trace_preview(_trace_payload_text(outputs))
     return profile
 
 

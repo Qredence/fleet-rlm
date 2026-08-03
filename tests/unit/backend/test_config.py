@@ -29,6 +29,7 @@ def test_daytona_profile_uses_specialized_bounded_model_roles() -> None:
         "api_key_env": "DATABRICKS_TOKEN",
         "base_url_env": "FLEET_DATABRICKS_AI_GATEWAY_BASE_URL",
         "max_tokens": 8000,
+        "reasoning_effort": "low",
     }
     assert llm["sub"] == {
         "model": "system.ai.inkling",
@@ -48,6 +49,7 @@ def test_daytona_profile_routes_tracing_to_supervised_local_mlflow() -> None:
         "tracing_enabled": True,
         "tracking_uri": "http://127.0.0.1:5001",
         "experiment_name": "fleet-rlm",
+        "trace_content_mode": "safe",
     }
 
 
@@ -60,6 +62,8 @@ def test_default_mlflow_policy_uses_async_full_fidelity_trace_delivery() -> None
         "expose_trace_id": True,
         "async_logging": True,
         "trace_sampling_ratio": 1.0,
+        "trace_content_mode": "safe",
+        "trace_content_max_chars": 10000,
     }
 
 
@@ -72,6 +76,7 @@ def test_daytona_managed_profile_declares_lakebase_and_mlflow_environment_refere
     assert managed["mlflow"] == {
         "tracing_enabled": True,
         "tracking_uri": "databricks",
+        "trace_content_mode": "safe",
         "experiment_name_env": "FLEET_MLFLOW_EXPERIMENT_NAME",
         "trace_catalog_env": "FLEET_MLFLOW_TRACE_CATALOG",
         "trace_schema_env": "FLEET_MLFLOW_TRACE_SCHEMA",
@@ -159,7 +164,7 @@ def test_daytona_profile_resolves_deepseek_root_and_inkling_sub_with_gateway_par
 
     assert settings.root_model == "uscentral.default.deepseek-v4-flash"
     assert settings.sub_model == "system.ai.inkling"
-    assert settings.root_llm_reasoning_effort is None
+    assert settings.root_llm_reasoning_effort == "low"
     assert settings.sub_llm_reasoning_effort == "none"
     assert settings.sub_llm_temperature == 0
     assert settings.root_llm_max_tokens == settings.sub_llm_max_tokens == 8000
@@ -486,6 +491,8 @@ def test_url_source_limit_defaults_to_ten_mebibytes() -> None:
 
 def test_mlflow_tracing_defaults_to_disabled() -> None:
     assert Settings(_env_file=None).mlflow_tracing_enabled is False
+    assert Settings(_env_file=None).mlflow_trace_content_mode == "safe"
+    assert Settings(_env_file=None).mlflow_trace_content_max_chars == 10_000
 
 
 def test_mlflow_tracing_can_be_disabled_explicitly() -> None:

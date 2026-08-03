@@ -53,7 +53,7 @@ clients cannot provide models, Signatures, or executable capabilities.
   process-global DSPy settings.
 - The production Daytona profile uses the Databricks DeepSeek v4-free service
   `uscentral.default.deepseek-v4-flash` for Root actions
-  (without a `reasoning_effort` override) and
+  (`reasoning_effort = "low"`) and
   `system.ai.inkling` for bounded Sub Model queries
   (`reasoning_effort = "none"`, `temperature = 0`). Both responses are capped at
   8,000 tokens. This LM response limit is distinct
@@ -75,9 +75,11 @@ The default policy allows two recursive levels, four child calls per Turn, a
 50,000-character delegated prompt bound, eight child iterations, twelve child
 LM calls, and 4,000 child output characters. The depth cap falls back to one
 plain Sub Model query so recursion cannot grow without bound. Child prompts and
-answers are never copied into public Runtime Events or MLflow; traces retain
-only depth, counts, character bounds, duration, termination mode, and failure
-category.
+answers are never copied into public Runtime Events. Under the committed `safe`
+MLflow policy, traces retain only depth, counts, character bounds, duration,
+termination mode, and failure category. An explicitly selected local `debug`
+profile may retain bounded LM previews for diagnostics, including recursive
+child calls.
 
 ## Typed startup inputs
 

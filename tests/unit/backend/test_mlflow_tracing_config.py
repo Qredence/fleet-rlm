@@ -18,6 +18,8 @@ def _reset_tracing_latch(monkeypatch: pytest.MonkeyPatch) -> None:
     """Reset the tracing configuration and activation state for a test."""
     monkeypatch.setattr(tracing, "_TRACING_CONFIGURED", False)
     monkeypatch.setattr(tracing, "_TRACING_ACTIVE", False)
+    monkeypatch.setattr(tracing, "_TRACE_CONTENT_MODE", "safe")
+    monkeypatch.setattr(tracing, "_TRACE_CONTENT_MAX_CHARS", 10_000)
 
 
 def _install_fake_mlflow(
@@ -297,6 +299,47 @@ def test_mlflow_span_processor_redacts_namespaced_and_unknown_text_fields() -> N
     assert sanitized["openai_api_key"] == "[redacted]"
     assert sanitized["access_token"] == "[redacted]"
     assert sanitized["model"] == "openai/gpt-5"
+
+
+def test_mlflow_span_processor_debug_mode_keeps_bounded_content_readable() -> None:
+    tracing._set_trace_content_policy("debug", 256)
+
+    sanitized = tracing._sanitize_mlflow_value(
+        {
+            "prompt": "readable prompt " + "x" * 400,
+            "mlflow.spanType": "LLM",
+            "mlflow.spanInputs": {
+                "request": "readable request",
+                "api_key": "real-secret",
+            },
+            "custom_question": "unknown fields remain protected",
+        }
+    )
+
+    assert isinstance(sanitized, dict)
+    assert sanitized["prompt"].startswith("readable prompt")
+    assert len(sanitized["prompt"]) <= 256
+    assert sanitized["mlflow.spanType"] == "LLM"
+    assert sanitized["mlflow.spanInputs"] == {
+        "request": "readable request",
+        "api_key": "[redacted]",
+    }
+    assert sanitized["custom_question"].startswith("[redacted sha256=")
+
+
+def test_configure_tracing_applies_debug_content_policy(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = _install_fake_mlflow(monkeypatch)
+
+    tracing.configure_tracing(
+        _enabled_settings(
+            mlflow_trace_content_mode="debug",
+            mlflow_trace_content_max_chars=2_048,
+        )
+    )
+
+    assert tracing.trace_content_debug_enabled() is True
+    assert tracing.trace_content_max_chars() == 2_048
+    assert calls.processor_args[0][0] is tracing._sanitize_mlflow_span
 
 
 def test_mlflow_span_processor_bounds_collection_size_and_depth() -> None:

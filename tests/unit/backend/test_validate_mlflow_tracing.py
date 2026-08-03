@@ -117,10 +117,19 @@ def test_main_emits_and_retrieves_local_trace(
             info=SimpleNamespace(
                 state="OK",
                 trace_id="trace-1",
+                execution_duration=12.5,
                 request_preview="request",
                 response_preview="response",
             ),
-            data=SimpleNamespace(spans=[SimpleNamespace(parent_span_id=None)]),
+            data=SimpleNamespace(
+                spans=[
+                    SimpleNamespace(
+                        parent_span_id=None,
+                        name="fleet_mlflow_smoke",
+                        status=SimpleNamespace(code="STATUS_CODE_OK"),
+                    )
+                ]
+            ),
         )
 
     mlflow.get_trace = get_trace  # type: ignore[attr-defined]

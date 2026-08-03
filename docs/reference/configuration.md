@@ -47,6 +47,23 @@ sampling ratio; both are non-secret TOML policy values. Fleet also enables
 MLflow DSPy inference autologging for the selected experiment, while compile
 and evaluator traces remain disabled for live Turn observability.
 
+`mlflow.trace_content_mode` controls exported trace payloads. The committed
+`daytona` and `daytona-managed` profiles default to `safe`, which hashes
+content. Set the local `daytona` profile to `debug` only for an explicit local
+diagnostic session; debug makes bounded prompts, reasoning, generated code,
+tool payloads, and responses readable in local MLflow spans. Both modes retain
+the sanitizer's credential, connection-string, private-path, and system-prompt
+dump protections. `mlflow.trace_content_max_chars` bounds each readable field;
+it defaults to `10000` characters.
+
+Each typed public Runtime Event is also projected as a bounded
+`Turn.progress.<event-kind>` child span. This includes RLM reasoning summaries,
+generated code, interpreter output, tool inputs and outputs, status/progress
+events, structured results, streamed text, and the committed final answer.
+The projection is centralized at `EventRecorder`, so live, reconciled, and
+committed events remain aligned. It does not export hidden provider
+chain-of-thought or arbitrary callback payloads.
+
 `rlm.verbose` controls native DSPy host logs only. It does not control the
 typed Runtime Events projected through SSE or the terminal client.
 
@@ -60,10 +77,12 @@ Daytona Sandbox and its workspace-scoped Volume, while durable Fleet Tools stay
 owned by the Root Turn.
 
 The standard `daytona` profile uses the Databricks DeepSeek v4-free service
-`uscentral.default.deepseek-v4-flash` for Root and
-`system.ai.inkling` for Sub
+`uscentral.default.deepseek-v4-flash` for Root with
+`reasoning_effort = "low"`, and `system.ai.inkling` for Sub
 (`reasoning_effort = "none"`, `temperature = 0` for Sub), with an 8,000-output-token
-cap per call. It routes traces to
+cap per call. The lower Root reasoning setting bounds intermediate repair and
+inspection calls while retaining a small reasoning budget for final synthesis.
+It routes traces to
 the local `fleet-rlm` experiment at `http://127.0.0.1:5001`. The supervised
 `fleet cli` command starts or reuses that server; benchmark profiles disable
 tracing and model caching.

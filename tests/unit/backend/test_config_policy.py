@@ -35,6 +35,14 @@ def test_policy_read_exposes_toml_values_without_environment_secret_values(tmp_p
     assert tracking_uri["value"] == "http://127.0.0.1:5001"
     assert "secret" not in str(tracking_uri).lower()
 
+    content_mode = _field(service.read(), "daytona", "mlflow.trace_content_mode")
+    assert content_mode["value"] == "safe"
+    assert content_mode["choices"] == ["safe", "debug"]
+
+    content_limit = _field(service.read(), "defaults", "mlflow.trace_content_max_chars")
+    assert content_limit["value"] == 10_000
+    assert content_limit["editor"] == "number"
+
     url_limit = _field(service.read(), "daytona", "storage.max_url_bytes")
     assert url_limit["value"] == 10 * 1024 * 1024
     assert url_limit["editor"] == "number"

@@ -33,7 +33,7 @@ from fleet_rlm.daytona.http_broker import (
     extract_final_payload,
 )
 from fleet_rlm.files.workspace_tools import WorkspaceToolError
-from fleet_rlm.observability.turn_tracing import turn_phase_span
+from fleet_rlm.observability.turn_tracing import trace_preview_limit, turn_phase_span
 from fleet_rlm.rlm.dspy_interpreter_contract import (
     PUBLIC_FINAL_OUTPUT_LABEL,
     copy_output_fields,
@@ -476,6 +476,7 @@ class DaytonaCodeInterpreter:
         self._observation_step += 1
         step = self._observation_step
         step_started = time.perf_counter()
+        trace_chars = trace_preview_limit(900)
         self._observe(StepStarted(step))
         self._observe(RLMCode(truncate_public_text(code, max_len=self._observation_max_chars), step))
         with turn_phase_span(
@@ -485,8 +486,8 @@ class DaytonaCodeInterpreter:
                 "code_chars": len(code or ""),
                 "variable_count": len(variables or {}),
                 "code_preview": sanitize_public_text(
-                    truncate_head_tail(code or "", max_chars=900),
-                    max_len=900,
+                    truncate_head_tail(code or "", max_chars=trace_chars),
+                    max_len=trace_chars,
                 ),
             },
         ) as phase:
@@ -523,7 +524,7 @@ class DaytonaCodeInterpreter:
                     "path": "http_broker" if self._http_broker is not None else type(self._backend).__name__,
                     "result_kind": _result_kind(result),
                     "stdout_chars": len(str(result)),
-                    "output_preview": sanitize_public_text(str(result), max_len=900),
+                    "output_preview": sanitize_public_text(str(result), max_len=trace_chars),
                 }
                 if self._http_broker is not None:
                     outputs["ensure_bindings_ms"] = ensure_bindings_ms

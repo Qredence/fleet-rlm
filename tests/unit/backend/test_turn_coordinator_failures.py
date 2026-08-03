@@ -395,7 +395,7 @@ async def test_open_midstream_execution_failure_keeps_sequence_and_terminal_orde
 
 
 @pytest.mark.asyncio
-async def test_open_commit_failure_projects_commit_failure_terminal() -> None:
+async def test_open_commit_failure_projects_commit_failure_terminal(monkeypatch: pytest.MonkeyPatch) -> None:
 
     from fleet_rlm.chat.commands import OpenTurnCommand
     from fleet_rlm.chat.turn_coordinator import TurnCoordinator
@@ -405,6 +405,42 @@ async def test_open_commit_failure_projects_commit_failure_terminal() -> None:
     from fleet_rlm.rlm.events import TERMINAL_DETAIL_TYPES, EventRecorder, RunFailed, RunStarted
     from fleet_rlm.rlm.outcome import RLMOutcome
     from fleet_rlm.sessions.models import TurnAccess, TurnInput
+
+    updates: list[dict[str, object]] = []
+
+    class Span:
+        request_id = "tr-commit-failed"
+
+        def set_inputs(self, _payload):
+            return None
+
+        def set_outputs(self, _payload):
+            return None
+
+        def set_attributes(self, _payload):
+            return None
+
+        def set_status(self, _status):
+            return None
+
+    span = Span()
+
+    @contextmanager
+    def start_span(**_kwargs: Any) -> Iterator[Span]:
+        yield span
+
+    def update_current_trace(**kwargs: object) -> None:
+        updates.append(kwargs)
+
+    mlflow = ModuleType("mlflow")
+    mlflow.start_span = start_span  # type: ignore[attr-defined]
+    mlflow.update_current_trace = update_current_trace  # type: ignore[attr-defined]
+    mlflow.get_last_active_trace_id = lambda: span.request_id  # type: ignore[attr-defined]
+    mlflow.get_current_active_span = lambda: span  # type: ignore[attr-defined]
+    entities = ModuleType("mlflow.entities")
+    entities.SpanType = SimpleNamespace(CHAIN="CHAIN")  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "mlflow", mlflow)
+    monkeypatch.setitem(sys.modules, "mlflow.entities", entities)
 
     access = TurnAccess(uuid4(), uuid4())
     authoritative = InMemoryTurnStateStore()
@@ -467,6 +503,7 @@ async def test_open_commit_failure_projects_commit_failure_terminal() -> None:
         lifecycle=TurnLifecycleService(CommitFailingStore(), max_artifact_bytes=100),
         preparation=Preparation(),
         runner=Runner(),
+        mlflow_tracing_enabled=True,
     )
     events = [
         event
@@ -480,6 +517,7 @@ async def test_open_commit_failure_projects_commit_failure_terminal() -> None:
     assert isinstance(events[-1].detail, RunFailed)
     assert events[-1].detail.code == "commit_failed"
     assert events[-1].detail.message == "Turn could not be committed"
+    assert updates[-1] == {"state": "ERROR"}
     assert closes == 1
     assert await authoritative.turn_records(session.id, access) == ()
 
@@ -599,6 +637,16 @@ async def test_failed_turn_emits_settlement_claim_and_cleanup_spans(
         await cleanup.shutdown(drain_seconds=1)
 
         assert isinstance(events[-1].detail, RunFailed)
-        assert names == ["Turn.prepare", "Turn.settlement", "Turn.claim_transition", "Turn.cleanup"]
+        assert [name for name in names if not name.startswith("Turn.progress.")] == [
+            "Turn.prepare",
+            "Turn.settlement",
+            "Turn.claim_transition",
+            "Turn.cleanup",
+        ]
+        assert [name for name in names if name.startswith("Turn.progress.")] == [
+            "Turn.progress.run.started",
+            "Turn.progress.status",
+            "Turn.progress.run.failed",
+        ]
     finally:
         turn_tracing._fleet_trace_active.reset(token)
