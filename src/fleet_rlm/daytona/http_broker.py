@@ -209,7 +209,7 @@ def _fleet_load_context_manifest(raw_manifest):
             try:
                 data = body.decode("utf-8")
                 encoding = "utf-8"
-                if "\\x00" in data:
+                if any(ord(ch) == 0 for ch in data):
                     raise UnicodeDecodeError("utf-8", body, 0, 1, "nul")
             except UnicodeDecodeError:
                 data = body
