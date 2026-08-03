@@ -24,7 +24,6 @@ _SENSITIVE_KEYS = frozenset(
         "password",
         "private_key",
         "secret",
-        "token",
     }
 )
 
