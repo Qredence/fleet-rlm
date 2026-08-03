@@ -217,7 +217,6 @@ def binding_matches_expected(binding: SandboxBinding, expected: ExpectedWorkspac
         return False
     return (
         binding.workspace_id == expected.workspace_id
-        and binding.volume_id == expected.volume_id
         and binding.volume_subpath == expected.volume_subpath
         and binding.mount_path == expected.mount_path
     )
