@@ -22,8 +22,9 @@ class ChildRuntimeLease(Protocol):
     volume_id: str
     volume_subpath: str
 
-    def close(self) -> None: """Close the child runtime lease and release its resources."""
-...
+    def close(self) -> None:
+        """Close the child runtime lease and release its resources."""
+        ...
 
 
 ChildRuntimeFactory = Callable[[int], ChildRuntimeLease]
