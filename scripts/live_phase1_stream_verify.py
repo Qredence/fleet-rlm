@@ -331,20 +331,22 @@ def main(argv: list[str] | None = None) -> int:
     child_env.pop("FLEET_SUB_MODEL", None)
     child_env[EVIDENCE_ENV] = str(receipt_path)
     try:
-        completed = subprocess.run(
-            pytest_command(args.timeout_seconds),
-            cwd=_REPO_ROOT,
-            env=child_env,
-            check=False,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            timeout=args.timeout_seconds + 30,
-        )
-    except (KeyboardInterrupt, subprocess.TimeoutExpired):
-        _write_failure(output, category="interrupted", phase="scenario", started_at=started_at, sha=sha, branch=branch)
-        print("Phase 1 stream canary was interrupted.", file=sys.stderr)
-        return EXIT_INTERRUPTED
-    try:
+        try:
+            completed = subprocess.run(
+                pytest_command(args.timeout_seconds),
+                cwd=_REPO_ROOT,
+                env=child_env,
+                check=False,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=args.timeout_seconds + 30,
+            )
+        except (KeyboardInterrupt, subprocess.TimeoutExpired):
+            _write_failure(
+                output, category="interrupted", phase="scenario", started_at=started_at, sha=sha, branch=branch
+            )
+            print("Phase 1 stream canary was interrupted.", file=sys.stderr)
+            return EXIT_INTERRUPTED
         if completed.returncode != 0:
             _write_failure(
                 output,

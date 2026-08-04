@@ -107,6 +107,7 @@ async def _acquire_child_runtime(
             ephemeral=True,
         )
         sandbox_id = _sandbox_id(sandbox)
+        child_sandbox_id = sandbox_id
         _require_authorized(is_authorized)
         interpreter = DaytonaCodeInterpreter(
             backend=sandbox_backend(sandbox, loop=loop, timeout_s=execution_timeout_s),
@@ -118,13 +119,13 @@ async def _acquire_child_runtime(
                 loop=loop,
                 platform=platform,
                 sandbox=sandbox,
-                sandbox_id=sandbox_id,
+                sandbox_id=child_sandbox_id,
                 mount_path=mount_path,
                 interpreter=interpreter,
                 permit=permit,
             )
 
-        return ChildRuntimeLease(interpreter, sandbox_id, volume_id, subpath, close)
+        return ChildRuntimeLease(interpreter, child_sandbox_id, volume_id, subpath, close)
     except BaseException:
         try:
             await _cleanup_after_failed_acquire(platform, sandbox, sandbox_id, permit)

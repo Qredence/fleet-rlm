@@ -26,6 +26,7 @@ from fleet_rlm.rlm.dspy_contract import (
     prediction_result,
 )
 from fleet_rlm.rlm.errors import (
+    RLMConfigError,
     TurnCancelledError,
     TurnIntegrityFailureError,
     TurnTerminalError,
@@ -633,6 +634,8 @@ class RLMRunner:
         self._bind_context_capsule(context)
         recursive_executor = None
         if context.recursive_options.enabled:
+            if context.child_runtime_factory is None and context.recursive_options.max_depth > 1:
+                raise RLMConfigError("recursive child runtime is unavailable")
             recursive_executor = RecursiveRLMExecutor(
                 models=context.models,
                 options=context.recursive_options,
