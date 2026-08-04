@@ -509,7 +509,7 @@ def test_lm_trace_callback_records_call_specific_usage_and_standard_attribute(mo
 
     token = turn_tracing._fleet_trace_active.set(True)
     try:
-        callback.on_lm_start("call-2", root, {"prompt": "bounded"})
+        callback.on_lm_start("call-2", root, {"prompt": "child-prompt-sentinel"})
         root.history.append(
             {
                 "usage": {
@@ -528,13 +528,20 @@ def test_lm_trace_callback_records_call_specific_usage_and_standard_attribute(mo
                 "outputs": "must-not-be-traced",
             }
         )
-        callback.on_lm_end("call-2", [])
+        callback.on_lm_end(
+            "call-2",
+            {
+                "content": "child-answer-sentinel",
+                "reasoning": "child-reasoning-sentinel",
+                "code": "child-code-sentinel",
+            },
+        )
     finally:
         turn_tracing._fleet_trace_active.reset(token)
 
     assert calls.inputs["recursive_depth"] == 1
     assert calls.inputs["call_index"] == 1
-    assert calls.inputs["prompt_chars"] == 7
+    assert calls.inputs["prompt_chars"] == len("child-prompt-sentinel")
     assert calls.inputs["history_length_before"] == 1
     assert calls.outputs[-1]["token_usage"] == {
         "prompt_tokens": 7,
@@ -544,7 +551,7 @@ def test_lm_trace_callback_records_call_specific_usage_and_standard_attribute(mo
         "cache_read_input_tokens": 4,
         "prompt_cache_hit_tokens": 4,
     }
-    assert calls.outputs[-1]["response_keys"] == []
+    assert calls.outputs[-1]["response_keys"] == ["code", "content", "reasoning"]
     assert calls.outputs[-1]["wall_time_ms"] == 500.0
     assert calls.outputs[-1]["provider_response_ms"] == 401.25
     assert calls.outputs[-1]["litellm_overhead_ms"] == 12.5
@@ -552,6 +559,10 @@ def test_lm_trace_callback_records_call_specific_usage_and_standard_attribute(mo
     assert calls.outputs[-1]["provider_request_id"] == "provider-request-7"
     assert "authorization" not in str(calls.outputs[-1])
     assert "must-not-be-traced" not in str(calls.outputs[-1])
+    assert "child-prompt-sentinel" not in str(calls.inputs)
+    assert "child-answer-sentinel" not in str(calls.outputs[-1])
+    assert "child-reasoning-sentinel" not in str(calls.outputs[-1])
+    assert "child-code-sentinel" not in str(calls.outputs[-1])
     assert calls.attributes == [
         {
             "mlflow.chat.tokenUsage": {

@@ -13,6 +13,7 @@ from fleet_rlm.daytona.errors import (
     provider_status_category,
     sanitize_provider_message,
 )
+from fleet_rlm.rlm.child_runtime import ChildRuntimeAuthorizationError, ChildRuntimeCleanupError
 
 
 @dataclass(frozen=True, slots=True)
@@ -40,7 +41,19 @@ def normalize_turn_failure(exc: BaseException) -> FailureDiagnostic:
 
 
 def trace_failure_category(exc: BaseException) -> str:
-    """Return a bounded failure category suitable for internal MLflow metadata."""
+    """
+    Classify an exception into a bounded failure category for internal MLflow metadata.
+    
+    Parameters:
+    	exc (BaseException): The failure to classify.
+    
+    Returns:
+    	str: A failure category such as ``unauthorized``, ``cleanup_failed``, ``timeout``, ``cancelled``, or the normalized diagnostic cause type.
+    """
+    if isinstance(exc, ChildRuntimeAuthorizationError):
+        return "unauthorized"
+    if isinstance(exc, ChildRuntimeCleanupError):
+        return "cleanup_failed"
     status = getattr(exc, "status", None)
     if status in {"timeout", "cancelled"}:
         return str(status)

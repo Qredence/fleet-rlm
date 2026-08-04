@@ -3,8 +3,8 @@
 Fleet starts from the required, committed [`config/fleet.toml`](../../config/fleet.toml)
 policy file. The active profile is selected by the `[config] default_profile` key
 inside that file (or, when only one profile exists, that single profile). Set
-`default_profile` to one of the named profiles (`daytona`, `daytona-managed`,
-`daytona-bench`, or `daytona-bench-40`) before starting any
+`default_profile` to one of the named profiles (`daytona`, `daytona-recursive`,
+`daytona-managed`, `daytona-bench`, or `daytona-bench-40`) before starting any
 backend or running `fleet doctor`. Policy is strict, resolved once at process
 startup, and takes effect only after restart.
 
@@ -22,7 +22,7 @@ references fail startup.
 
 | Profile | Required | Optional persistence |
 | --- | --- | --- |
-| `daytona` / benchmark profiles | `DATABRICKS_TOKEN`, `FLEET_DAYTONA_API_KEY`, `FLEET_DATABRICKS_AI_GATEWAY_BASE_URL`, `FLEET_DATABASE_URL` at Alembic head | none |
+| `daytona` / `daytona-recursive` / benchmark profiles | `DATABRICKS_TOKEN`, `FLEET_DAYTONA_API_KEY`, `FLEET_DATABRICKS_AI_GATEWAY_BASE_URL`, `FLEET_DATABASE_URL` at Alembic head | none |
 | `daytona-managed` | Daytona requirements plus managed MLflow variables listed below; `FLEET_DATABASE_URL` must point to Lakebase at Alembic head | none |
 
 Profiles are explicit and do not fall back to each other. Daytona startup never
@@ -84,20 +84,24 @@ chain-of-thought or arbitrary callback payloads.
 `rlm.verbose` controls native DSPy host logs only. It does not control the
 typed Runtime Events projected through SSE or the terminal client.
 
-The `[rlm]` recursion settings bound the native `rlm_query(prompt)` child
-harness: `recursion_max_depth`, `recursion_max_calls`,
+The `[rlm]` recursion settings include `recursion_enabled` and bound the native
+`rlm_query(prompt)` child harness: `recursion_max_depth`, `recursion_max_calls`,
 `recursion_max_prompt_chars`, `recursion_child_max_iterations`,
 `recursion_child_max_llm_calls`, and `recursion_child_max_output_chars`.
 These are non-secret policy values; `.env` and ambient process variables do not
-override them. Children use fresh interpreter contexts but share the leased
-Daytona Sandbox and its workspace-scoped Volume, while durable Fleet Tools stay
-owned by the Root Turn.
+override them. The default and `daytona` policies keep recursion disabled.
+`daytona-recursive` enables one real child level: each child receives a fresh,
+dedicated Daytona Sandbox, ordinary Daytona network egress, and the same Volume
+ID mounted at `recursive/<workspace-id>/<run-id>/<call-index>`. That private
+sibling scope cannot reach the Root `workspaces/<workspace-id>` mount. The
+child receives no Fleet Tools or credentials; strict cleanup purges its scope
+and deletes its Sandbox before Root success can commit.
 
 All Daytona profiles use `deepseek-v4-flash` for both Root and Sub through the
 Databricks AI Gateway. The inherited provider-service value is
 `uscentral.default.zencode-oai`, sent as
 `Databricks-Model-Provider-Service`; the credential remains `DATABRICKS_TOKEN`.
-The standard `daytona` profile keeps `reasoning_effort = "low"` for Root and
+The standard `daytona` and `daytona-recursive` profiles keep `reasoning_effort = "low"` for Root and
 `reasoning_effort = "none"`, `temperature = 0` for Sub, with an
 8,000-output-token cap per call. The lower Root reasoning setting bounds
 intermediate repair and inspection calls while retaining a small reasoning
@@ -105,7 +109,8 @@ budget for final synthesis.
 It routes traces to
 the local `fleet-rlm` experiment at `http://127.0.0.1:5001`. The supervised
 `fleet cli` command starts or reuses that server; benchmark profiles disable
-tracing and model caching.
+tracing and model caching. Child DSPy trace spans remain structural only even
+when the selected Root trace policy permits bounded readable previews.
 
 Custom policies may still target Managed Databricks MLflow with
 `tracking_uri = "databricks"` and the existing experiment, Unity Catalog,

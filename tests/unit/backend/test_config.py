@@ -18,6 +18,7 @@ def test_daytona_profile_uses_specialized_bounded_model_roles() -> None:
 
     assert set(document["profiles"]) == {
         "daytona",
+        "daytona-recursive",
         "daytona-managed",
         "daytona-bench",
         "daytona-bench-40",
@@ -46,7 +47,10 @@ def test_daytona_profile_uses_specialized_bounded_model_roles() -> None:
     assert document["defaults"]["runtime"]["live_enabled"] is True
 
 
-@pytest.mark.parametrize("profile", ("daytona", "daytona-managed", "daytona-bench", "daytona-bench-40"))
+@pytest.mark.parametrize(
+    "profile",
+    ("daytona", "daytona-recursive", "daytona-managed", "daytona-bench", "daytona-bench-40"),
+)
 def test_all_daytona_profiles_use_deepseek_v4_flash_for_both_roles(profile: str) -> None:
     policy_path = Path(__file__).resolve().parents[3] / "config" / "fleet.toml"
     document = tomllib.loads(policy_path.read_text(encoding="utf-8"))
@@ -220,6 +224,15 @@ def test_recursive_depth_is_fixed_at_two_for_this_milestone() -> None:
         Settings(_env_file=None, rlm_recursion_max_depth=1)
 
     assert Settings(_env_file=None).rlm_recursion_max_depth == 2
+
+
+def test_recursive_daytona_profile_enables_only_the_recursive_tool_policy() -> None:
+    policy_path = Path(__file__).resolve().parents[3] / "config" / "fleet.toml"
+    document = tomllib.loads(policy_path.read_text(encoding="utf-8"))
+
+    assert document["defaults"]["rlm"]["recursion_enabled"] is False
+    assert document["profiles"]["daytona-recursive"]["rlm"] == {"recursion_enabled": True}
+    assert document["profiles"]["daytona-recursive"]["llm"] == document["profiles"]["daytona"]["llm"]
 
 
 @pytest.mark.parametrize("value", ("", "   "))

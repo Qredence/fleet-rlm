@@ -14,6 +14,7 @@ import httpx
 import pytest
 
 from fleet_rlm.observability import turn_tracing
+from fleet_rlm.observability.failure_diagnostics import trace_failure_category
 from fleet_rlm.observability.turn_tracing import (
     annotate_trace_io,
     current_turn_trace_id,
@@ -43,6 +44,16 @@ def _install_fake_mlflow(
     explode: bool = False,
     teardown_explode: bool = False,
 ) -> SimpleNamespace:
+    """
+    Install a configurable fake MLflow module for tracing tests.
+    
+    Parameters:
+        explode (bool): Whether starting a span raises an error.
+        teardown_explode (bool): Whether exiting a span raises an error.
+    
+    Returns:
+        SimpleNamespace: Recorded span and trace interactions.
+    """
     calls = SimpleNamespace(
         start_span_names=[],
         update_kwargs=[],
@@ -102,6 +113,28 @@ def _install_fake_mlflow(
     monkeypatch.setitem(sys.modules, "mlflow", mlflow)
     monkeypatch.setitem(sys.modules, "mlflow.entities", entities)
     return calls
+
+
+def _in_process_child_runtime(call_index: int):
+    """Create an in-process child runtime lease for recursive execution tests.
+    
+    Parameters:
+        call_index (int): Index used to identify the child runtime and workspace.
+    
+    Returns:
+        ChildRuntimeLease: A lease backed by an in-process interpreter.
+    """
+    from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
+    from fleet_rlm.daytona.recursive_child_runtime import ChildRuntimeLease
+
+    interpreter = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())
+    return ChildRuntimeLease(
+        interpreter,
+        f"child-{call_index}",
+        "test-volume",
+        f"recursive/test-workspace/test-run/{call_index}",
+        interpreter.shutdown,
+    )
 
 
 def test_turn_trace_disabled_is_noop(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -528,7 +561,6 @@ def test_turn_phase_span_without_active_trace_preserves_body_exception(
 def test_recursive_child_span_records_bounded_metadata(monkeypatch: pytest.MonkeyPatch) -> None:
     import time
 
-    from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
     from fleet_rlm.rlm.model_bundle import RLMModelBundle
     from fleet_rlm.rlm.recursive_calls import RecursiveRLMExecutor, RecursiveRLMOptions
 
@@ -543,7 +575,7 @@ def test_recursive_child_span_records_bounded_metadata(monkeypatch: pytest.Monke
             dspy.utils.DummyLM([{"answer": "fallback"}], adapter=adapter),
         ),
         options=RecursiveRLMOptions(),
-        child_interpreter_factory=lambda: DaytonaCodeInterpreter(backend=InProcessInterpreterBackend()),
+        child_runtime_factory=_in_process_child_runtime,
         deadline=time.monotonic() + 30,
     )
 
@@ -574,7 +606,8 @@ def test_recursive_child_span_records_bounded_metadata(monkeypatch: pytest.Monke
 def test_recursive_child_span_marks_shutdown_failure(monkeypatch: pytest.MonkeyPatch) -> None:
     import time
 
-    from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
+    from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter
+    from fleet_rlm.rlm.child_runtime import ChildRuntimeCleanupError
     from fleet_rlm.rlm.model_bundle import RLMModelBundle
     from fleet_rlm.rlm.recursive_calls import RecursiveRLMExecutor, RecursiveRLMOptions
 
@@ -589,7 +622,7 @@ def test_recursive_child_span_marks_shutdown_failure(monkeypatch: pytest.MonkeyP
             dspy.utils.DummyLM([{"answer": "fallback"}], adapter=adapter),
         ),
         options=RecursiveRLMOptions(),
-        child_interpreter_factory=lambda: DaytonaCodeInterpreter(backend=InProcessInterpreterBackend()),
+        child_runtime_factory=_in_process_child_runtime,
         deadline=time.monotonic() + 30,
     )
 
@@ -599,12 +632,16 @@ def test_recursive_child_span_marks_shutdown_failure(monkeypatch: pytest.MonkeyP
 
     monkeypatch.setattr(DaytonaCodeInterpreter, "shutdown", _shutdown_boom)
 
-    with pytest.raises(RuntimeError, match="shutdown failed"), turn_trace(uuid4(), uuid4(), enabled=True):
+    with (
+        pytest.raises(ChildRuntimeCleanupError, match="recursive child cleanup failed") as raised,
+        turn_trace(uuid4(), uuid4(), enabled=True),
+    ):
         executor.tool(prompt="classify selected row")
 
+    assert trace_failure_category(raised.value) == "cleanup_failed"
     recursive_outputs = [payload for payload in calls.span_outputs if payload.get("phase_status")]
     assert recursive_outputs[-1]["phase_status"] == "failed"
-    assert recursive_outputs[-1]["failure_category"] == "unknown"
+    assert recursive_outputs[-1]["failure_category"] == "cleanup_failed"
 
 
 def test_recursive_child_span_marks_native_setup_failure(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -616,7 +653,7 @@ def test_recursive_child_span_marks_native_setup_failure(monkeypatch: pytest.Mon
     calls = _install_fake_mlflow(monkeypatch)
     adapter = dspy.JSONAdapter()
 
-    def _raise_setup_error() -> None:
+    def _raise_setup_error(_call_index: int) -> None:
         raise RuntimeError("interpreter setup failed")
 
     executor = RecursiveRLMExecutor(
@@ -625,7 +662,7 @@ def test_recursive_child_span_marks_native_setup_failure(monkeypatch: pytest.Mon
             dspy.utils.DummyLM([{"answer": "unused"}], adapter=adapter),
         ),
         options=RecursiveRLMOptions(),
-        child_interpreter_factory=_raise_setup_error,
+        child_runtime_factory=_raise_setup_error,
         deadline=time.monotonic() + 30,
     )
 
@@ -654,7 +691,7 @@ def test_recursive_depth_fallback_span_records_mode(monkeypatch: pytest.MonkeyPa
             dspy.utils.DummyLM([{"answer": "fallback-answer"}], adapter=adapter),
         ),
         options=RecursiveRLMOptions(max_depth=1),
-        child_interpreter_factory=None,
+        child_runtime_factory=None,
         deadline=time.monotonic() + 30,
     )
 
@@ -680,7 +717,7 @@ def test_recursive_call_span_marks_failure_with_bounded_category(monkeypatch: py
             dspy.utils.DummyLM([{"answer": "unused"}], adapter=adapter),
         ),
         options=RecursiveRLMOptions(max_depth=1),
-        child_interpreter_factory=None,
+        child_runtime_factory=None,
         deadline=time.monotonic() + 30,
     )
 

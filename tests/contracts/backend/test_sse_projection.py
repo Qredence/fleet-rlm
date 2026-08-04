@@ -48,14 +48,24 @@ def test_projection_does_not_consume_extra_runtime_event_sequences() -> None:
 
     recorder = EventRecorder(run_id=uuid4(), session_id=uuid4())
     before = recorder.record(RunStarted("live"))
-    after = recorder.record(Status("execution", "running", "working"))
+    after = recorder.record(
+        Status(
+            "recursive",
+            "child_completed",
+            "call_index=1 recursive_depth=1 duration_ms=2 cleanup_status=completed",
+        )
+    )
 
     assert before.sequence == 1
     assert after.sequence == 2
     assert AISDKUIProjector().project(after) == [
         {
             "type": "data-status",
-            "data": {"phase": "execution", "status": "running", "message": "working"},
+            "data": {
+                "phase": "recursive",
+                "status": "child_completed",
+                "message": "call_index=1 recursive_depth=1 duration_ms=2 cleanup_status=completed",
+            },
             "transient": True,
         }
     ]

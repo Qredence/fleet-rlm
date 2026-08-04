@@ -11,6 +11,7 @@ from dspy.utils.exceptions import AdapterParseError
 
 from fleet_rlm.config import Settings
 from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
+from fleet_rlm.daytona.recursive_child_runtime import ChildRuntimeLease
 from fleet_rlm.rlm.dspy_contract import RLMOptions, build_native_rlm
 from fleet_rlm.rlm.errors import RLMConfigError
 from fleet_rlm.rlm.lm_factory import build_lm, resolve_role_api_key, sanitize_base_url
@@ -55,18 +56,25 @@ def _root_lm(settings: Settings) -> dspy.LM:
 
 
 async def probe_root_lm(root_lm: Any) -> RLMProviderProbeResult:
-    """Run a bounded recursive native action sequence using the stock adapter.
-
-    The readiness probe deliberately uses the in-process interpreter. It tests
-    the provider/DSPy protocol without creating a Daytona Sandbox; Daytona's
-    separate doctor still verifies the stateful provider interpreter and mount.
+    """
+    Probe a root language model for compatibility with the native recursive RLM protocol.
+    
+    Parameters:
+        root_lm (Any): The root language model to test.
+    
+    Returns:
+        RLMProviderProbeResult: The number of RLM iterations and the termination mode.
+    
+    Raises:
+        RLMProviderContractError: If the model fails the recursive RLM compatibility
+            requirements or produces an invalid response.
     """
 
     interpreter = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())
     recursive = RecursiveRLMExecutor(
         models=RLMModelBundle(root_lm=root_lm, sub_lm=root_lm),
         options=RecursiveRLMOptions(max_depth=2, max_calls=1, max_prompt_chars=2_000),
-        child_interpreter_factory=lambda: DaytonaCodeInterpreter(backend=InProcessInterpreterBackend()),
+        child_runtime_factory=_in_process_child_runtime,
         deadline=time.monotonic() + 120,
     )
     rlm = build_native_rlm(
@@ -114,6 +122,25 @@ async def probe_configured_root_lm(settings: Settings) -> RLMProviderProbeResult
     """Build only the policy-selected Root LM and probe it once."""
 
     return await probe_root_lm(_root_lm(settings))
+
+
+def _in_process_child_runtime(call_index: int) -> ChildRuntimeLease:
+    """Create a credential-free in-process runtime for a recursive provider probe.
+    
+    Parameters:
+    	call_index (int): Identifier used to distinguish the child runtime and its path.
+    
+    Returns:
+    	ChildRuntimeLease: A child runtime lease with interpreter cleanup handling.
+    """
+    interpreter = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())
+    return ChildRuntimeLease(
+        interpreter,
+        f"provider-probe-{call_index}",
+        "in-process",
+        f"recursive/provider-probe/run/{call_index}",
+        interpreter.shutdown,
+    )
 
 
 __all__ = [

@@ -112,6 +112,124 @@ async def test_success_validates_and_publishes_before_atomic_commit() -> None:
 
 
 @pytest.mark.asyncio
+async def test_authority_revocation_after_artifact_publish_rolls_back_before_commit() -> None:
+    from fleet_rlm.artifacts.models import ArtifactCandidate
+    from fleet_rlm.chat.turn_lifecycle import (
+        ExecuteTurn,
+        FailedRunReceipt,
+        TurnLifecycleService,
+        _TurnClaimToken,
+    )
+    from fleet_rlm.rlm.dspy_contract import PredictionResult
+    from fleet_rlm.rlm.outcome import RLMOutcome
+    from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
+
+    data = b"artifact"
+    access = TurnAccess(uuid4(), uuid4())
+    run_id, session_id = uuid4(), uuid4()
+    candidate = ArtifactCandidate(
+        uuid4(),
+        access.user_id,
+        access.workspace_id,
+        session_id,
+        run_id,
+        "text",
+        None,
+        "text/plain",
+        len(data),
+        sha256(data).hexdigest(),
+        "/staging/result.txt",
+        "/artifacts/result.txt",
+    )
+
+    async def not_cancelled() -> bool:
+        """
+        Determine whether cancellation has occurred.
+        
+        Returns:
+        	bool: `False`, indicating that cancellation has occurred.
+        """
+        return False
+
+    turn = ExecuteTurn(
+        run_id,
+        session_id,
+        access,
+        TurnInput("hello"),
+        SessionHistory(),
+        not_cancelled,
+        _TurnClaimToken(uuid4()),
+    )
+
+    class Store:
+        commits = 0
+
+        async def commit(self, *_args):
+            self.commits += 1
+            raise AssertionError("revoked Turn must not reach commit")
+
+        async def transition_claim(self, claimed, command):
+            """
+            Create a failed-run receipt from the claimed run and command failure.
+            
+            Parameters:
+                claimed: The claimed run whose identifier is included in the receipt.
+                command: The command containing the failure code and public message.
+            
+            Returns:
+                FailedRunReceipt: A receipt representing the failed run.
+            """
+            from fleet_rlm.chat.turn_lifecycle import FailedRunReceipt
+
+            return FailedRunReceipt(
+                claimed.run_id,
+                "failed",
+                command.failure.code,
+                command.failure.public_message,
+                True,
+            )
+
+    class Sink:
+        values: ClassVar[dict[str, bytes]] = {candidate.staging_path: data}
+
+        async def read(self, location, *, max_bytes):
+            """Read the value stored at the specified location."""
+            del max_bytes
+            return self.values[location]
+
+        async def write(self, location, value):
+            """
+            Store a value at the specified location and revoke turn authority.
+            """
+            self.values[location] = value
+            turn.authority.revoke()
+
+        async def remove(self, location):
+            """
+            Remove the value associated with a location.
+            
+            Parameters:
+            	location: The location whose value should be removed.
+            """
+            self.values.pop(location, None)
+
+    store, sink = Store(), Sink()
+    receipt = await TurnLifecycleService(store, max_artifact_bytes=100).finish(
+        turn,
+        RLMOutcome(
+            "completed",
+            PredictionResult("done", {"answer": "done"}, "fleet.default", "1"),
+            artifact_candidates=(candidate,),
+        ),
+        artifact_sink=sink,
+    )
+
+    assert isinstance(receipt, FailedRunReceipt)
+    assert store.commits == 0
+    assert sink.values == {}
+
+
+@pytest.mark.asyncio
 async def test_integrity_failure_does_not_publish_and_finalizes_safely() -> None:
     from fleet_rlm.artifacts.models import ArtifactCandidate
     from fleet_rlm.chat.turn_lifecycle import ExecuteTurn, FailedRunReceipt, TurnLifecycleService, _TurnClaimToken

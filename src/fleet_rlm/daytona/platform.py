@@ -7,7 +7,7 @@ from typing import Any, Literal
 
 from fleet_rlm.config import Settings
 from fleet_rlm.daytona.errors import DaytonaAdapterError, is_sandbox_not_found, map_provider_error
-from fleet_rlm.daytona.provisioning import DaytonaSandboxSpec, require_scoped_volume_subpath
+from fleet_rlm.daytona.provisioning import DaytonaSandboxSpec, require_volume_mount_subpath
 
 _VOLUME_READY_RETRY_DELAYS = (0.25, 0.5, 1.0, 2.0, 4.0, 8.0)
 _VOLUME_FAILED_STATES = frozenset({"deleting", "deleted", "error"})
@@ -181,7 +181,7 @@ class LiveDaytonaPlatform:
             if not volume_id or not mount_path:
                 msg = "volume_id and mount_path are required when with_volume=True"
                 raise ValueError(msg)
-            scoped = require_scoped_volume_subpath(volume_subpath or "")
+            scoped = require_volume_mount_subpath(volume_subpath or "")
             volumes = [
                 VolumeMount(
                     volume_id=volume_id,

@@ -69,3 +69,34 @@ class FleetRLMSignature(dspy.Signature):
             "or artifact tools first, then submit a short summary that references only a relative workspace path."
         )
     )
+
+
+def root_signature_for_recursion(
+    signature: type[dspy.Signature],
+    *,
+    recursion_enabled: bool,
+) -> type[dspy.Signature]:
+    """
+    Select the signature appropriate for the recursive execution policy.
+    
+    Skill-owned signatures are preserved unchanged. When recursion is disabled,
+    the default Fleet signature is returned without recursive-query guidance.
+    
+    Parameters:
+        signature (type[dspy.Signature]): Signature to select.
+        recursion_enabled (bool): Whether recursive querying is available.
+    
+    Returns:
+        type[dspy.Signature]: The original signature or an adjusted default Fleet
+            signature.
+    
+    Raises:
+        RuntimeError: If the default signature's recursive guidance is malformed.
+    """
+    if recursion_enabled or signature is not FleetRLMSignature:
+        return signature
+    before, marker, remainder = FleetRLMSignature.instructions.partition("5. Use ``rlm_query(prompt)``")
+    _discarded, next_marker, after = remainder.partition("6. Verify")
+    if not marker or not next_marker:
+        raise RuntimeError("FleetRLMSignature recursive guidance is malformed")
+    return FleetRLMSignature.with_instructions(f"{before}5. Verify{after}")

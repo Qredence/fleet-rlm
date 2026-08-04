@@ -251,6 +251,23 @@ class TurnLifecycleService:
         artifact_sink: RunArtifactSink | None = None,
         result_snapshot_sink: ResultSnapshotSink | None = None,
     ) -> TurnFinalization:
+        """
+        Finalize a turn with a successful outcome or record its failure.
+        
+        Parameters:
+            turn (ExecuteTurn): The claimed turn being finalized.
+            resolution (RLMOutcome | TurnFailure): The execution outcome or failure to record.
+            artifact_sink (RunArtifactSink | None): Storage for staged and promoted artifacts.
+            result_snapshot_sink (ResultSnapshotSink | None): Storage for the optional result snapshot.
+        
+        Returns:
+            TurnFinalization: The receipt for the committed turn or recorded failure.
+        
+        Raises:
+            TurnLifecycleUnavailableError: If the turn claim has been revoked.
+            TurnStateError: If the outcome contains an invalid state.
+            TurnValidationError: If artifacts are provided without an artifact sink.
+        """
         if turn.authority.revoked:
             raise TurnLifecycleUnavailableError("Turn claim is no longer available")
         if isinstance(resolution, TurnFailure):
@@ -288,6 +305,8 @@ class TurnLifecycleService:
             validated = await self._read_candidates(candidates, artifact_sink)
             stage = "publish_artifacts"
             promoted = await self._publish(candidates, validated, artifact_sink, written)
+            if turn.authority.revoked:
+                raise TurnLifecycleUnavailableError("Turn claim is no longer available")
             stage = "build_committed_turn"
             committed = commit_success(resolution, tuple(item.ref for item in promoted))
             if result_snapshot_sink is not None:
@@ -308,6 +327,8 @@ class TurnLifecycleService:
                 # the commit is durable (see _reconcile_snapshot_after_commit).
                 snapshot_task = asyncio.ensure_future(result_snapshot_sink.write(snapshot_path, snapshot))
             stage = "commit_turn"
+            if turn.authority.revoked:
+                raise TurnLifecycleUnavailableError("Turn claim is no longer available")
             commit_task, commit_cancelled = await _settle_owned(self._store.commit(turn, committed, promoted))
             try:
                 receipt = commit_task.result()

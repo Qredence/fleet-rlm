@@ -442,7 +442,7 @@ class _RLMTraceCallback(BaseCallback):
                     "call_id": call_id,
                     "call_index": call_index,
                     "input_keys": sorted(str(key) for key in inputs)[:32],
-                    **_lm_input_profile(inputs),
+                    **_lm_input_profile(inputs, include_previews=self._recursive_depth == 0),
                     "history_length_before": history_length,
                     "recursive_depth": self._recursive_depth,
                 },
@@ -458,12 +458,12 @@ class _RLMTraceCallback(BaseCallback):
         exception: Exception | None = None,
     ) -> None:
         """
-        Finalize an LM tracing span with response, timing, usage, and failure details.
-
+        Finalize the tracing span for an LM call.
+        
         Parameters:
-            call_id (str): Identifier of the LM call being finalized.
-            outputs (dict[str, Any] | None): LM response data used to create a safe output profile.
-            exception (Exception | None): Exception that caused the call to fail, if applicable.
+            call_id (str): Identifier of the LM call.
+            outputs (dict[str, Any] | None): Response data from the LM call.
+            exception (Exception | None): Error that caused the call to fail, if any.
         """
         state = self._spans.pop(call_id, None)
         if state is None:
@@ -472,7 +472,7 @@ class _RLMTraceCallback(BaseCallback):
         usage, provider = _latest_lm_telemetry(instance, history_length)
         standard_usage = _mlflow_token_usage(usage)
         attributes = {"mlflow.chat.tokenUsage": standard_usage} if standard_usage else None
-        response_details = _lm_output_profile(outputs)
+        response_details = _lm_output_profile(outputs, include_previews=self._recursive_depth == 0)
         response_details.update(
             {
                 "call_index": call_index,
@@ -520,19 +520,35 @@ def _trace_payload_text(value: object) -> str:
         return str(value)
 
 
-def _lm_input_profile(inputs: Mapping[str, Any]) -> dict[str, JsonValue]:
-    """Describe LM context and retain bounded readable trace previews."""
+def _lm_input_profile(
+    inputs: Mapping[str, Any],
+    *,
+    include_previews: bool = True,
+) -> dict[str, JsonValue]:
+    """
+    Summarize the structural characteristics of language-model input context.
+    
+    Parameters:
+        inputs (Mapping[str, Any]): Language-model input values.
+        include_previews (bool): Whether to include bounded prompt and message previews.
+    
+    Returns:
+        dict[str, JsonValue]: A profile containing available context sizes, message counts,
+            keyword keys, and optionally bounded previews.
+    """
 
     profile: dict[str, JsonValue] = {}
     prompt = inputs.get("prompt")
     if isinstance(prompt, str):
         profile["prompt_chars"] = len(prompt)
-        profile["prompt_preview"] = _trace_preview(prompt)
+        if include_previews:
+            profile["prompt_preview"] = _trace_preview(prompt)
     messages = inputs.get("messages")
     if isinstance(messages, Sequence) and not isinstance(messages, (str, bytes, bytearray)):
         profile["message_count"] = len(messages)
         profile["message_chars"] = sum(len(str(message)) for message in messages)
-        profile["messages_preview"] = _trace_preview(_trace_payload_text(messages))
+        if include_previews:
+            profile["messages_preview"] = _trace_preview(_trace_payload_text(messages))
     kwargs = inputs.get("kwargs")
     if isinstance(kwargs, Mapping):
         profile["kwargs_keys"] = tuple(sorted(str(key) for key in kwargs)[:32])
@@ -544,8 +560,21 @@ def _lm_input_profile(inputs: Mapping[str, Any]) -> dict[str, JsonValue]:
     return profile
 
 
-def _lm_output_profile(outputs: Mapping[str, Any] | None) -> dict[str, JsonValue]:
-    """Describe an LM response and retain a bounded readable trace preview."""
+def _lm_output_profile(
+    outputs: Mapping[str, Any] | None,
+    *,
+    include_previews: bool = True,
+) -> dict[str, JsonValue]:
+    """
+    Describe an LM response for tracing.
+    
+    Parameters:
+        outputs (Mapping[str, Any] | None): The LM response values to profile.
+        include_previews (bool): Whether to include a bounded response preview.
+    
+    Returns:
+        dict[str, JsonValue]: Structural response metadata, character count, and optionally a response preview.
+    """
 
     if not isinstance(outputs, Mapping):
         return {"response_keys": ()}
@@ -553,7 +582,7 @@ def _lm_output_profile(outputs: Mapping[str, Any] | None) -> dict[str, JsonValue
     response_chars = sum(len(str(value)) for value in outputs.values() if isinstance(value, str))
     if response_chars:
         profile["response_chars"] = response_chars
-    if outputs:
+    if outputs and include_previews:
         profile["response_preview"] = _trace_preview(_trace_payload_text(outputs))
     return profile
 

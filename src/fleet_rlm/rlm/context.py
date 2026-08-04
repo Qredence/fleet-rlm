@@ -15,10 +15,11 @@ from fleet_rlm.chat.run_authority import RunAuthority
 from fleet_rlm.chat.session_context import SessionContextManifest
 from fleet_rlm.files.models import PreparedAttachment
 from fleet_rlm.files.workspace_models import UNAVAILABLE_WORKSPACE_CAPABILITY, WorkspaceCapabilityMetadata
+from fleet_rlm.rlm.child_runtime import ChildRuntimeFactory
 from fleet_rlm.rlm.dspy_contract import RLMOptions
 from fleet_rlm.rlm.inputs import AttachmentContextCapsule
 from fleet_rlm.rlm.model_bundle import RLMModelBundle
-from fleet_rlm.rlm.recursive_calls import ChildInterpreterFactory, RecursiveRLMOptions
+from fleet_rlm.rlm.recursive_calls import RecursiveRLMOptions
 from fleet_rlm.rlm.signature import FleetRLMSignature
 from fleet_rlm.rlm.tool_observer import ToolEventView
 from fleet_rlm.sessions.models import TurnAccess
@@ -97,5 +98,5 @@ class RLMExecutionContext:
     attachment_context: AttachmentContextCapsule | None = None
     authority: RunAuthority = field(default_factory=RunAuthority)
     selected_skill_count: int = 0
-    child_interpreter_factory: ChildInterpreterFactory | None = None
+    child_runtime_factory: ChildRuntimeFactory | None = None
     recursive_options: RecursiveRLMOptions = field(default_factory=RecursiveRLMOptions)

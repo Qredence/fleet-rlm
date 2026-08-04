@@ -28,6 +28,7 @@ def test_settings_policy_is_loopback_only_and_revision_checked(monkeypatch, tmp_
         assert {scope["name"] for scope in body["scopes"]} == {
             "defaults",
             "daytona",
+            "daytona-recursive",
             "daytona-managed",
             "daytona-bench",
             "daytona-bench-40",

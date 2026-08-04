@@ -147,6 +147,7 @@ class Settings(BaseModel):
     rlm_max_output_chars: int = Field(default=10_000, gt=0)
     rlm_max_execution_output_chars: int = Field(default=4_000, gt=0)
     rlm_execution_timeout_s: int = Field(default=120, gt=0)
+    rlm_recursion_enabled: bool = False
     rlm_recursion_max_depth: Literal[2] = 2
     rlm_recursion_max_calls: int = Field(default=4, gt=0)
     rlm_recursion_max_prompt_chars: int = Field(default=50_000, gt=0)
@@ -284,6 +285,7 @@ _TABLE_KEYS: dict[str, frozenset[str]] = {
             "max_output_chars",
             "max_execution_output_chars",
             "execution_timeout_s",
+            "recursion_enabled",
             "recursion_max_depth",
             "recursion_max_calls",
             "recursion_max_prompt_chars",
@@ -492,6 +494,7 @@ def _flatten_policy(policy: Mapping[str, Any]) -> dict[str, Any]:
         "rlm_max_output_chars": rlm.get("max_output_chars"),
         "rlm_max_execution_output_chars": rlm.get("max_execution_output_chars"),
         "rlm_execution_timeout_s": rlm.get("execution_timeout_s"),
+        "rlm_recursion_enabled": rlm.get("recursion_enabled", False),
         "rlm_recursion_max_depth": rlm.get("recursion_max_depth", 2),
         "rlm_recursion_max_calls": rlm.get("recursion_max_calls", 4),
         "rlm_recursion_max_prompt_chars": rlm.get("recursion_max_prompt_chars", 50_000),
