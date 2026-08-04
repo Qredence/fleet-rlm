@@ -122,6 +122,14 @@ def _recursive_failure_category(exc: BaseException) -> str:
     return category if category in {"timeout", "unauthorized", "cleanup_failed"} else "child_failed"
 
 
+def _as_cleanup_error(exc: BaseException) -> ChildRuntimeCleanupError:
+    if isinstance(exc, ChildRuntimeCleanupError):
+        return exc
+    error = ChildRuntimeCleanupError("recursive child cleanup failed")
+    error.__cause__ = exc
+    return error
+
+
 class RecursiveRLMExecutor:
     """Execute bounded recursive child RLMs from a synchronous DSPy worker.
 
@@ -215,7 +223,7 @@ class RecursiveRLMExecutor:
     def raise_if_cleanup_failed(self) -> None:
         """Raise a runtime error when recursive child cleanup has failed."""
         if self._state.fatal_cleanup_error is not None:
-            raise RuntimeError("recursive child cleanup failed") from self._state.fatal_cleanup_error
+            raise ChildRuntimeCleanupError("recursive child cleanup failed") from self._state.fatal_cleanup_error
 
     def _recursive_output(self, _result: Any) -> dict[str, object]:
         """Return metadata for the most recent recursive completion."""
@@ -436,10 +444,10 @@ class RecursiveRLMExecutor:
                     lease.close()
                     cleanup_status = "completed"
                 except BaseException as exc:
-                    cleanup_error = exc
+                    cleanup_error = _as_cleanup_error(exc)
                     cleanup_status = "failed"
                     if self._state.fatal_cleanup_error is None:
-                        self._state.fatal_cleanup_error = exc
+                        self._state.fatal_cleanup_error = cleanup_error
             if cleanup_error is not None and not primary_failed:
                 failed = True
                 failure_category = "cleanup_failed"

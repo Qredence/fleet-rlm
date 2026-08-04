@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import PurePosixPath
@@ -98,7 +99,11 @@ def build_child_runtime_factory(
             ),
             loop,
         )
-        return future.result()
+        try:
+            return future.result(timeout=max(0.0, deadline - time.monotonic()))
+        except TimeoutError:
+            future.cancel()
+            raise TimeoutError("recursive child runtime acquisition deadline exceeded") from None
 
     return create
 
@@ -136,13 +141,14 @@ async def _acquire_child_runtime(
     subpath = recursive_child_volume_subpath(workspace_id, run_id, call_index)
     try:
         _require_authorized(is_authorized)
-        sandbox = await platform.create(
-            volume_id=volume_id,
-            mount_path=mount_path,
-            volume_subpath=subpath,
-            labels={"fleet.runtime": "recursive-child"},
-            ephemeral=True,
-        )
+        async with asyncio.timeout_at(deadline):
+            sandbox = await platform.create(
+                volume_id=volume_id,
+                mount_path=mount_path,
+                volume_subpath=subpath,
+                labels={"fleet.runtime": "recursive-child"},
+                ephemeral=True,
+            )
         sandbox_id = _sandbox_id(sandbox)
         child_sandbox_id = sandbox_id
         _require_authorized(is_authorized)

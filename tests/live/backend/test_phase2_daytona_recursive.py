@@ -23,6 +23,7 @@ from fleet_rlm.daytona import recursive_child_runtime
 from fleet_rlm.rlm.lm_factory import has_llm_credentials
 from fleet_rlm.rlm.tool_observer import ToolEventView
 from tests.live.backend._database import upgrade_to_head
+from tests.live.backend.test_phase1_daytona_stream import _strict_cleanup
 
 pytestmark = [pytest.mark.live_daytona, pytest.mark.timeout(960)]
 
@@ -306,56 +307,63 @@ def test_phase2_daytona_recursive_through_fastapi(tmp_path: Path, monkeypatch: p
     )
     started = time.perf_counter()
     pending_receipt: dict[str, object] | None = None
+    cleanup_failures: tuple[str, ...] = ()
     app = create_app(settings=settings)
     with TestClient(app) as client:
+        resources = app.state.run_environment_resources
         preparation = app.state.turn_preparation
         preparation._capabilities = _ProofCapabilityPreparer(preparation._capabilities, (proof_tool,), proof_views)
-        created = client.post("/api/sessions", json={"title": "Phase 2 Daytona recursive canary"})
-        assert created.status_code == 201
-        session_id = UUID(created.json()["id"])
-        response = client.post(
-            f"/api/sessions/{session_id}/turns",
-            json={"text": "Execute the narrow native DSPy Phase 2 recursive proof."},
-            headers={"Idempotency-Key": f"phase2-daytona-recursive-{uuid4()}"},
-        )
-        assert response.status_code == 200
-        chunks, done = _sse_chunks(response)
-        assert done == 1
-        assert chunks[-1].get("type") == "finish"
-        assert chunks[-1].get("finishReason") == "stop"
-        completion = _recursive_completion(chunks)
-        assert completion is not None
-        assert completion["status"] == "completed"
-        assert completion["call_index"] == 1
-        assert completion["recursive_depth"] == 1
-        assert completion["termination_mode"] == "typed_submit"
-        assert isinstance(completion["child_iterations"], int) and completion["child_iterations"] >= 1
-        structured = [chunk for chunk in chunks if chunk.get("type") == "data-structured-result"]
-        assert len(structured) == 1
-        assert structured[0].get("data", {}).get("schema_id") == _CONTRACT_ID
-        assert ledger.calls == 1
-        assert child_evidence.created == 1
-        assert child_evidence.same_volume_sibling_scope
-        assert child_evidence.cleanup_succeeded
-        pending_receipt = {
-            "schema": _RECEIPT_SCHEMA,
-            "timing": {
-                "turn_duration_ms": int((time.perf_counter() - started) * 1000),
-                "child_duration_ms": child_evidence.child_duration_ms,
-            },
-            "assertions": {
-                "dedicated_child_sandbox": True,
-                "same_volume_sibling_scope": True,
-                "root_marker_absent_in_child": ledger.root_marker_absent_in_child,
-                "root_continuity": ledger.root_continuity,
-                "child_typed_submit": completion["termination_mode"] == "typed_submit",
-                "root_typed_submit": True,
-                "strict_child_cleanup": True,
-                "terminal_ordering": True,
-                "no_grandchild_sandbox": child_evidence.created == 1,
-            },
-            "failure": None,
-            "passed": True,
-        }
+        try:
+            created = client.post("/api/sessions", json={"title": "Phase 2 Daytona recursive canary"})
+            assert created.status_code == 201
+            session_id = UUID(created.json()["id"])
+            response = client.post(
+                f"/api/sessions/{session_id}/turns",
+                json={"text": "Execute the narrow native DSPy Phase 2 recursive proof."},
+                headers={"Idempotency-Key": f"phase2-daytona-recursive-{uuid4()}"},
+            )
+            assert response.status_code == 200
+            chunks, done = _sse_chunks(response)
+            assert done == 1
+            assert chunks[-1].get("type") == "finish"
+            assert chunks[-1].get("finishReason") == "stop"
+            completion = _recursive_completion(chunks)
+            assert completion is not None
+            assert completion["status"] == "completed"
+            assert completion["call_index"] == 1
+            assert completion["recursive_depth"] == 1
+            assert completion["termination_mode"] == "typed_submit"
+            assert isinstance(completion["child_iterations"], int) and completion["child_iterations"] >= 1
+            structured = [chunk for chunk in chunks if chunk.get("type") == "data-structured-result"]
+            assert len(structured) == 1
+            assert structured[0].get("data", {}).get("schema_id") == _CONTRACT_ID
+            assert ledger.calls == 1
+            assert child_evidence.created == 1
+            assert child_evidence.same_volume_sibling_scope
+            assert child_evidence.cleanup_succeeded
+            pending_receipt = {
+                "schema": _RECEIPT_SCHEMA,
+                "timing": {
+                    "turn_duration_ms": int((time.perf_counter() - started) * 1000),
+                    "child_duration_ms": child_evidence.child_duration_ms,
+                },
+                "assertions": {
+                    "dedicated_child_sandbox": True,
+                    "same_volume_sibling_scope": True,
+                    "root_marker_absent_in_child": ledger.root_marker_absent_in_child,
+                    "root_continuity": ledger.root_continuity,
+                    "child_typed_submit": completion["termination_mode"] == "typed_submit",
+                    "root_typed_submit": True,
+                    "strict_child_cleanup": child_evidence.cleanup_succeeded,
+                    "terminal_ordering": True,
+                    "no_grandchild_sandbox": child_evidence.created == 1,
+                },
+                "failure": None,
+                "passed": True,
+            }
+        finally:
+            assert client.portal is not None
+            cleanup_failures = client.portal.call(_strict_cleanup, resources, settings.volume_name)
+    assert cleanup_failures == ()
     assert pending_receipt is not None
     _write_receipt(pending_receipt)

@@ -14,6 +14,7 @@ import httpx
 import pytest
 
 from fleet_rlm.observability import turn_tracing
+from fleet_rlm.observability.failure_diagnostics import trace_failure_category
 from fleet_rlm.observability.turn_tracing import (
     annotate_trace_io,
     current_turn_trace_id,
@@ -606,6 +607,7 @@ def test_recursive_child_span_marks_shutdown_failure(monkeypatch: pytest.MonkeyP
     import time
 
     from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter
+    from fleet_rlm.rlm.child_runtime import ChildRuntimeCleanupError
     from fleet_rlm.rlm.model_bundle import RLMModelBundle
     from fleet_rlm.rlm.recursive_calls import RecursiveRLMExecutor, RecursiveRLMOptions
 
@@ -630,9 +632,13 @@ def test_recursive_child_span_marks_shutdown_failure(monkeypatch: pytest.MonkeyP
 
     monkeypatch.setattr(DaytonaCodeInterpreter, "shutdown", _shutdown_boom)
 
-    with pytest.raises(RuntimeError, match="shutdown failed"), turn_trace(uuid4(), uuid4(), enabled=True):
+    with (
+        pytest.raises(ChildRuntimeCleanupError, match="recursive child cleanup failed") as raised,
+        turn_trace(uuid4(), uuid4(), enabled=True),
+    ):
         executor.tool(prompt="classify selected row")
 
+    assert trace_failure_category(raised.value) == "cleanup_failed"
     recursive_outputs = [payload for payload in calls.span_outputs if payload.get("phase_status")]
     assert recursive_outputs[-1]["phase_status"] == "failed"
     assert recursive_outputs[-1]["failure_category"] == "cleanup_failed"
