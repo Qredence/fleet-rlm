@@ -104,6 +104,20 @@ def _install_fake_mlflow(
     return calls
 
 
+def _in_process_child_runtime(call_index: int):
+    from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
+    from fleet_rlm.daytona.recursive_child_runtime import ChildRuntimeLease
+
+    interpreter = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())
+    return ChildRuntimeLease(
+        interpreter,
+        f"child-{call_index}",
+        "test-volume",
+        f"recursive/test-workspace/test-run/{call_index}",
+        interpreter.shutdown,
+    )
+
+
 def test_turn_trace_disabled_is_noop(monkeypatch: pytest.MonkeyPatch) -> None:
     def _boom(*_a: Any, **_k: Any) -> Any:
         raise AssertionError("mlflow must not be used when disabled")
@@ -528,7 +542,6 @@ def test_turn_phase_span_without_active_trace_preserves_body_exception(
 def test_recursive_child_span_records_bounded_metadata(monkeypatch: pytest.MonkeyPatch) -> None:
     import time
 
-    from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
     from fleet_rlm.rlm.model_bundle import RLMModelBundle
     from fleet_rlm.rlm.recursive_calls import RecursiveRLMExecutor, RecursiveRLMOptions
 
@@ -543,7 +556,7 @@ def test_recursive_child_span_records_bounded_metadata(monkeypatch: pytest.Monke
             dspy.utils.DummyLM([{"answer": "fallback"}], adapter=adapter),
         ),
         options=RecursiveRLMOptions(),
-        child_interpreter_factory=lambda: DaytonaCodeInterpreter(backend=InProcessInterpreterBackend()),
+        child_runtime_factory=_in_process_child_runtime,
         deadline=time.monotonic() + 30,
     )
 
@@ -574,7 +587,7 @@ def test_recursive_child_span_records_bounded_metadata(monkeypatch: pytest.Monke
 def test_recursive_child_span_marks_shutdown_failure(monkeypatch: pytest.MonkeyPatch) -> None:
     import time
 
-    from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
+    from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter
     from fleet_rlm.rlm.model_bundle import RLMModelBundle
     from fleet_rlm.rlm.recursive_calls import RecursiveRLMExecutor, RecursiveRLMOptions
 
@@ -589,7 +602,7 @@ def test_recursive_child_span_marks_shutdown_failure(monkeypatch: pytest.MonkeyP
             dspy.utils.DummyLM([{"answer": "fallback"}], adapter=adapter),
         ),
         options=RecursiveRLMOptions(),
-        child_interpreter_factory=lambda: DaytonaCodeInterpreter(backend=InProcessInterpreterBackend()),
+        child_runtime_factory=_in_process_child_runtime,
         deadline=time.monotonic() + 30,
     )
 
@@ -604,7 +617,7 @@ def test_recursive_child_span_marks_shutdown_failure(monkeypatch: pytest.MonkeyP
 
     recursive_outputs = [payload for payload in calls.span_outputs if payload.get("phase_status")]
     assert recursive_outputs[-1]["phase_status"] == "failed"
-    assert recursive_outputs[-1]["failure_category"] == "unknown"
+    assert recursive_outputs[-1]["failure_category"] == "cleanup_failed"
 
 
 def test_recursive_child_span_marks_native_setup_failure(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -616,7 +629,7 @@ def test_recursive_child_span_marks_native_setup_failure(monkeypatch: pytest.Mon
     calls = _install_fake_mlflow(monkeypatch)
     adapter = dspy.JSONAdapter()
 
-    def _raise_setup_error() -> None:
+    def _raise_setup_error(_call_index: int) -> None:
         raise RuntimeError("interpreter setup failed")
 
     executor = RecursiveRLMExecutor(
@@ -625,7 +638,7 @@ def test_recursive_child_span_marks_native_setup_failure(monkeypatch: pytest.Mon
             dspy.utils.DummyLM([{"answer": "unused"}], adapter=adapter),
         ),
         options=RecursiveRLMOptions(),
-        child_interpreter_factory=_raise_setup_error,
+        child_runtime_factory=_raise_setup_error,
         deadline=time.monotonic() + 30,
     )
 
@@ -654,7 +667,7 @@ def test_recursive_depth_fallback_span_records_mode(monkeypatch: pytest.MonkeyPa
             dspy.utils.DummyLM([{"answer": "fallback-answer"}], adapter=adapter),
         ),
         options=RecursiveRLMOptions(max_depth=1),
-        child_interpreter_factory=None,
+        child_runtime_factory=None,
         deadline=time.monotonic() + 30,
     )
 
@@ -680,7 +693,7 @@ def test_recursive_call_span_marks_failure_with_bounded_category(monkeypatch: py
             dspy.utils.DummyLM([{"answer": "unused"}], adapter=adapter),
         ),
         options=RecursiveRLMOptions(max_depth=1),
-        child_interpreter_factory=None,
+        child_runtime_factory=None,
         deadline=time.monotonic() + 30,
     )
 

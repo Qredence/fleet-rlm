@@ -180,3 +180,15 @@ def test_legacy_generic_key_does_not_cross_provider_role_boundaries(monkeypatch:
     )
 
     assert resolve_role_api_key(settings, settings.llm_role("root")) is None
+
+
+def test_explicit_role_environment_credentials_are_detected(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("DATABRICKS_TOKEN", "provider-key")
+    settings = Settings(
+        _env_file=None,
+        root_llm_api_key_env="DATABRICKS_TOKEN",
+        sub_llm_api_key_env="DATABRICKS_TOKEN",
+    )
+
+    assert settings.llm_api_key is None
+    assert has_llm_credentials(settings) is True

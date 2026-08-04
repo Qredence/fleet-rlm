@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import itertools
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -27,8 +26,7 @@ from fleet_rlm.chat.turn_preparation import (
 from fleet_rlm.composition.common import recursive_rlm_options
 from fleet_rlm.config import Settings, load_runtime_settings
 from fleet_rlm.daytona.bindings import BindingStore, InMemoryBindingStore
-from fleet_rlm.daytona.http_broker import DEFAULT_BROKER_PORT
-from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, sandbox_backend, sync_sandbox
+from fleet_rlm.daytona.interpreter import sync_sandbox
 from fleet_rlm.daytona.platform import (
     LiveDaytonaPlatform,
     LiveDaytonaVolumeClient,
@@ -39,6 +37,7 @@ from fleet_rlm.daytona.provisioning import (
     sandbox_spec_from_settings,
     volume_config_from_settings,
 )
+from fleet_rlm.daytona.recursive_child_runtime import build_child_runtime_factory
 from fleet_rlm.daytona.session_manager import (
     DEFAULT_IDLE_STOP_SECONDS,
     DaytonaAdmission,
@@ -197,18 +196,19 @@ class _DaytonaEnvironmentProvider:
                 await self.resources.session_manager.release(lease)
 
             main_loop = asyncio.get_running_loop()
-            next_child_broker_port = itertools.count(DEFAULT_BROKER_PORT + 1)
-
-            def child_interpreter_factory() -> DaytonaCodeInterpreter:
-                return DaytonaCodeInterpreter(
-                    backend=sandbox_backend(
-                        sandbox,
-                        loop=main_loop,
-                        timeout_s=self.resources.settings.rlm_execution_timeout_s,
-                    ),
-                    broker_port=next(next_child_broker_port),
-                    execution_output_cap=self.resources.settings.rlm_max_execution_output_chars,
-                )
+            child_runtime_factory = build_child_runtime_factory(
+                loop=main_loop,
+                platform=self.resources.platform,
+                admission=self.resources.daytona_admission,
+                volume_id=lease.volume_id,
+                mount_path=self.resources.volume_config.mount_path,
+                workspace_id=turn.access.workspace_id,
+                run_id=turn.run_id,
+                deadline=deadline,
+                execution_timeout_s=self.resources.settings.rlm_execution_timeout_s,
+                execution_output_cap=self.resources.settings.rlm_max_execution_output_chars,
+                is_authorized=lambda: not turn.authority.revoked,
+            )
 
             return RunEnvironment(
                 interpreter=lease.interpreter,
@@ -216,7 +216,7 @@ class _DaytonaEnvironmentProvider:
                 artifact_sink=sink,
                 release=release,
                 result_snapshot_sink=sink,
-                child_interpreter_factory=child_interpreter_factory,
+                child_runtime_factory=child_runtime_factory,
                 context_mount_path=str(volume_paths_from_settings(self.resources.settings).mount_path),
             )
         except BaseException:

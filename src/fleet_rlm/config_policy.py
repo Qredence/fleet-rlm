@@ -135,6 +135,13 @@ _FIELDS: tuple[PolicyField, ...] = (
         settings_field="rlm_execution_timeout_s",
     ),
     PolicyField(
+        "rlm.recursion_enabled",
+        "RLM",
+        "Enable recursive child RLMs",
+        "boolean",
+        settings_field="rlm_recursion_enabled",
+    ),
+    PolicyField(
         "rlm.recursion_max_depth", "RLM", "Recursive maximum depth", "number", settings_field="rlm_recursion_max_depth"
     ),
     PolicyField(

@@ -12,13 +12,21 @@ from uuid import uuid4
 import dspy
 
 from fleet_rlm.rlm.errors import TurnNoProgressError
-from fleet_rlm.rlm.events import JsonValue, ObservationDetail, ToolCompleted, ToolFailed, ToolStarted, WarningEvent
+from fleet_rlm.rlm.events import (
+    JsonValue,
+    ObservationDetail,
+    Status,
+    ToolCompleted,
+    ToolFailed,
+    ToolStarted,
+    WarningEvent,
+)
 from fleet_rlm.rlm.tool_guards import TurnToolGuards
 
 ToolInputProjection = Callable[[Mapping[str, Any]], JsonValue]
 ToolOutputProjection = Callable[[Any], JsonValue]
 ToolAfterResult = Callable[[Any], None]
-ToolObserver: TypeAlias = Callable[[ObservationDetail | WarningEvent], None]
+ToolObserver: TypeAlias = Callable[[ObservationDetail | Status | WarningEvent], None]
 
 
 def _empty_input(_arguments: Mapping[str, Any]) -> JsonValue:

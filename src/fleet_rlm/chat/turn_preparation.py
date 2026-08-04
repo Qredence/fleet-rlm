@@ -23,6 +23,7 @@ from fleet_rlm.files.models import (
 from fleet_rlm.observability.turn_tracing import turn_phase_span
 from fleet_rlm.persistence.database import DatabaseConnectionError
 from fleet_rlm.result_snapshot import ResultSnapshotSink
+from fleet_rlm.rlm.child_runtime import ChildRuntimeFactory
 from fleet_rlm.rlm.context import (
     PreparedCapabilities,
     RLMExecutionContext,
@@ -31,7 +32,7 @@ from fleet_rlm.rlm.context import (
 from fleet_rlm.rlm.dspy_contract import RLMOptions
 from fleet_rlm.rlm.inputs import AttachmentContextCapsule, AttachmentContextEntry
 from fleet_rlm.rlm.model_bundle import RLMModelBundle
-from fleet_rlm.rlm.recursive_calls import ChildInterpreterFactory, RecursiveRLMOptions
+from fleet_rlm.rlm.recursive_calls import RecursiveRLMOptions
 
 AsyncCleanup = Callable[[], Awaitable[None]]
 
@@ -100,7 +101,7 @@ class RunEnvironment:
     artifact_sink: RunArtifactSink
     release: AsyncCleanup
     result_snapshot_sink: ResultSnapshotSink | None = None
-    child_interpreter_factory: ChildInterpreterFactory | None = None
+    child_runtime_factory: ChildRuntimeFactory | None = None
     context_mount_path: str | None = None
 
 
@@ -274,7 +275,7 @@ class DefaultTurnPreparer:
             attachment_context=attachment_context,
             authority=turn.authority,
             selected_skill_count=len(turn.input.skill_selections),
-            child_interpreter_factory=environment.child_interpreter_factory,
+            child_runtime_factory=environment.child_runtime_factory,
             recursive_options=self._recursive_options,
         )
         return PreparedTurn(

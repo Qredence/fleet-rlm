@@ -145,7 +145,13 @@ def test_set_default_profile_persists_and_surfaces_in_snapshot(tmp_path: Path) -
     before = service.read()
 
     assert before.default_profile == "daytona"
-    assert set(before.available_profiles) == {"daytona", "daytona-managed", "daytona-bench", "daytona-bench-40"}
+    assert set(before.available_profiles) == {
+        "daytona",
+        "daytona-recursive",
+        "daytona-managed",
+        "daytona-bench",
+        "daytona-bench-40",
+    }
 
     after = service.set_default_profile("daytona-bench", revision=before.revision)
 

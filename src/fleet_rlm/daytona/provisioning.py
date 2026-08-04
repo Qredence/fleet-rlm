@@ -206,6 +206,18 @@ def workspace_volume_subpath(workspace_id: UUID) -> str:
     return f"workspaces/{require_non_zero_workspace_id(workspace_id)}"
 
 
+def recursive_child_volume_subpath(workspace_id: UUID, run_id: UUID, call_index: int) -> str:
+    """Return the private sibling Volume Scope for one disposable child RLM."""
+    workspace = require_non_zero_workspace_id(workspace_id)
+    if not isinstance(run_id, UUID):
+        raise TypeError("run_id must be a UUID")
+    if run_id == _ZERO_UUID:
+        raise ValueError("run_id must not be the zero UUID")
+    if not isinstance(call_index, int) or isinstance(call_index, bool) or call_index <= 0:
+        raise ValueError("call_index must be a positive integer")
+    return f"recursive/{workspace}/{run_id}/{call_index}"
+
+
 def require_scoped_volume_subpath(subpath: str, *, workspace_id: UUID | None = None) -> str:
     if not isinstance(subpath, str) or not subpath.strip():
         raise ValueError("VolumeMount without workspace subpath is rejected")
@@ -220,6 +232,55 @@ def require_scoped_volume_subpath(subpath: str, *, workspace_id: UUID | None = N
     if workspace_id is not None and normalized != workspace_volume_subpath(workspace_id):
         raise ValueError("volume subpath does not match workspace_id")
     return normalized
+
+
+def require_recursive_child_volume_subpath(
+    subpath: str,
+    *,
+    workspace_id: UUID | None = None,
+    run_id: UUID | None = None,
+    call_index: int | None = None,
+) -> str:
+    """Validate exactly one transient recursive child Volume Scope.
+
+    This intentionally does not widen :func:`require_scoped_volume_subpath`,
+    which remains the strict persistent Root workspace binding validator.
+    """
+    if not isinstance(subpath, str) or not subpath.strip():
+        raise ValueError("recursive child volume subpath is required")
+    normalized = subpath.strip().strip("/")
+    parts = normalized.split("/")
+    if len(parts) != 4 or parts[0] != "recursive" or ".." in parts:
+        raise ValueError("recursive child volume subpath must be recursive/<workspace_id>/<run_id>/<call_index>")
+    try:
+        parsed_workspace = UUID(parts[1])
+        parsed_run = UUID(parts[2])
+    except (TypeError, ValueError):
+        raise ValueError("recursive child volume subpath must contain UUID ownership") from None
+    try:
+        parsed_index = int(parts[3])
+    except ValueError:
+        raise ValueError("recursive child volume subpath call index must be a positive integer") from None
+    expected = recursive_child_volume_subpath(parsed_workspace, parsed_run, parsed_index)
+    if normalized != expected:
+        raise ValueError("recursive child volume subpath is not canonical")
+    if workspace_id is not None and parsed_workspace != require_non_zero_workspace_id(workspace_id):
+        raise ValueError("recursive child volume subpath does not match workspace_id")
+    if run_id is not None and parsed_run != run_id:
+        raise ValueError("recursive child volume subpath does not match run_id")
+    if call_index is not None and parsed_index != call_index:
+        raise ValueError("recursive child volume subpath does not match call_index")
+    return normalized
+
+
+def require_volume_mount_subpath(subpath: str) -> str:
+    """Validate the only two Volume Scope families Fleet may mount."""
+    if not isinstance(subpath, str) or not subpath.strip():
+        return require_scoped_volume_subpath(subpath)
+    try:
+        return require_scoped_volume_subpath(subpath)
+    except ValueError:
+        return require_recursive_child_volume_subpath(subpath)
 
 
 def volume_mount_spec(config: VolumeConfig, volume_id: str, *, workspace_id: UUID) -> dict[str, str]:

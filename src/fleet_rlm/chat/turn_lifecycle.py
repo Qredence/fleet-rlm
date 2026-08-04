@@ -288,6 +288,8 @@ class TurnLifecycleService:
             validated = await self._read_candidates(candidates, artifact_sink)
             stage = "publish_artifacts"
             promoted = await self._publish(candidates, validated, artifact_sink, written)
+            if turn.authority.revoked:
+                raise TurnLifecycleUnavailableError("Turn claim is no longer available")
             stage = "build_committed_turn"
             committed = commit_success(resolution, tuple(item.ref for item in promoted))
             if result_snapshot_sink is not None:
@@ -308,6 +310,8 @@ class TurnLifecycleService:
                 # the commit is durable (see _reconcile_snapshot_after_commit).
                 snapshot_task = asyncio.ensure_future(result_snapshot_sink.write(snapshot_path, snapshot))
             stage = "commit_turn"
+            if turn.authority.revoked:
+                raise TurnLifecycleUnavailableError("Turn claim is no longer available")
             commit_task, commit_cancelled = await _settle_owned(self._store.commit(turn, committed, promoted))
             try:
                 receipt = commit_task.result()

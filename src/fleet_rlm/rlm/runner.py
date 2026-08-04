@@ -50,12 +50,19 @@ from fleet_rlm.rlm.events import (
 from fleet_rlm.rlm.factory import RLMFactory
 from fleet_rlm.rlm.inputs import build_rlm_input_kwargs
 from fleet_rlm.rlm.outcome import ExecutionDetail, RLMOutcome, TerminalStatus
-from fleet_rlm.rlm.recursive_calls import RecursiveRLMExecutor
+from fleet_rlm.rlm.recursive_calls import RecursiveCallSummary, RecursiveRLMExecutor
 from fleet_rlm.rlm.sanitize import truncate_public_text
+from fleet_rlm.rlm.signature import root_signature_for_recursion
 from fleet_rlm.rlm.tool_guards import TurnToolGuards, workspace_obligations
 from fleet_rlm.rlm.tool_observer import ToolEventView, observe_tool
 
 logger = logging.getLogger(__name__)
+
+
+def _recursive_summary(executor: RecursiveRLMExecutor | None) -> RecursiveCallSummary:
+    if executor is not None:
+        return executor.summary()
+    return RecursiveCallSummary(0, 0, 0, 0, 0, ())
 
 
 class RLMFactoryLike(Protocol):
@@ -624,12 +631,22 @@ class RLMRunner:
         guards = TurnToolGuards(required_targets=workspace_obligations(context.request))
         self._bind_observer(context.interpreter, relay, context.options.max_output_chars)
         self._bind_context_capsule(context)
-        recursive_executor = RecursiveRLMExecutor(
-            models=context.models,
-            options=context.recursive_options,
-            child_interpreter_factory=context.child_interpreter_factory,
-            deadline=context.deadline,
-            observer=relay.publish,
+        recursive_executor = None
+        if context.recursive_options.enabled:
+            recursive_executor = RecursiveRLMExecutor(
+                models=context.models,
+                options=context.recursive_options,
+                child_runtime_factory=context.child_runtime_factory,
+                deadline=context.deadline,
+                observer=relay.publish,
+                is_authorized=lambda: not context.authority.revoked,
+            )
+        spec = replace(
+            spec,
+            signature=root_signature_for_recursion(
+                spec.signature,
+                recursion_enabled=context.recursive_options.enabled,
+            ),
         )
 
         def relay_capability_details(_result: Any) -> None:
@@ -647,7 +664,7 @@ class RLMRunner:
             )
             for tool in spec.tools
         )
-        all_tools = (*observed_tools, recursive_executor.tool)
+        all_tools = (*observed_tools, *((recursive_executor.tool,) if recursive_executor is not None else ()))
         rlm = self._factory.create(
             models=context.models,
             options=context.options,
@@ -742,7 +759,7 @@ class RLMRunner:
         rlm: Any,
         context: RLMExecutionContext,
         spec: RLMExecutionSpec,
-        recursive_executor: RecursiveRLMExecutor,
+        recursive_executor: RecursiveRLMExecutor | None,
         relay: _DetailRelay,
     ) -> Any:
         kwargs = build_rlm_input_kwargs(
@@ -821,8 +838,10 @@ class RLMRunner:
                     stream_mode = "native" if streamed else "provider_fallback"
                 else:
                     prediction = await rlm.acall(**kwargs)
+                if recursive_executor is not None:
+                    recursive_executor.raise_if_cleanup_failed()
             except BaseException as exc:
-                recursive_summary = recursive_executor.summary()
+                recursive_summary = _recursive_summary(recursive_executor)
                 phase.set_outputs(
                     {
                         "elapsed_ms": int((time.perf_counter() - started) * 1000),
@@ -851,9 +870,9 @@ class RLMRunner:
                     "termination_mode": termination_mode,
                     "elapsed_ms": usage["duration_ms"],
                     "request_status": "completed",
-                    "recursive_call_count": recursive_executor.summary().call_count,
-                    "recursive_prompt_chars": recursive_executor.summary().delegated_prompt_chars,
-                    "recursive_depth_fallback_count": recursive_executor.summary().depth_fallback_count,
+                    "recursive_call_count": _recursive_summary(recursive_executor).call_count,
+                    "recursive_prompt_chars": _recursive_summary(recursive_executor).delegated_prompt_chars,
+                    "recursive_depth_fallback_count": _recursive_summary(recursive_executor).depth_fallback_count,
                     "stream_mode": stream_mode,
                 }
             )
@@ -864,7 +883,7 @@ class RLMRunner:
         rlm: Any,
         context: RLMExecutionContext,
         spec: RLMExecutionSpec,
-        recursive_executor: RecursiveRLMExecutor,
+        recursive_executor: RecursiveRLMExecutor | None,
         relay: _DetailRelay,
     ) -> Any:
         def run() -> Any:

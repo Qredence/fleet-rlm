@@ -17,6 +17,7 @@ from fleet_rlm.chat.turn_lifecycle import ExecuteTurn, _TurnClaimToken
 from fleet_rlm.chat.turn_preparation import TurnPreparationUnavailableError
 from fleet_rlm.config import Settings
 from fleet_rlm.daytona.run_environment import build_turn_preparation
+from fleet_rlm.daytona.session_manager import DaytonaAdmission
 from fleet_rlm.files.models import AttachmentRef
 from fleet_rlm.rlm.model_bundle import RLMModelBundle
 from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
@@ -68,7 +69,7 @@ async def test_live_preparation_stages_attachment_and_cleans_it(
 
         async def acquire(self, _request, *, deadline):
             assert deadline > asyncio.get_running_loop().time()
-            return SimpleNamespace(sandbox_id="sandbox", interpreter=object())
+            return SimpleNamespace(sandbox_id="sandbox", interpreter=object(), volume_id="test-volume")
 
         async def release(self, _lease) -> None:
             self.released = True
@@ -87,6 +88,8 @@ async def test_live_preparation_stages_attachment_and_cleans_it(
         platform=SimpleNamespace(get=AsyncMock(return_value=SimpleNamespace(fs=SandboxFs(), process=SandboxProcess()))),
         models=RLMModelBundle(object(), object()),
         track_sandbox=lambda _sandbox_id: None,
+        daytona_admission=DaytonaAdmission(max_active_leases=2),
+        volume_config=SimpleNamespace(mount_path=str(volume_root)),
     )
     if with_skill_catalog:
         from fleet_rlm.skills.catalog import build_bundled_skill_catalog
@@ -313,64 +316,3 @@ async def test_post_acquisition_sandbox_lookup_settles_before_lease_release(mode
         with pytest.raises(TurnPreparationTimeoutError):
             await acquisition
     assert resources.session_manager.released == 1
-
-
-@pytest.mark.asyncio
-async def test_daytona_child_interpreters_use_distinct_broker_ports(monkeypatch: pytest.MonkeyPatch) -> None:
-    import fleet_rlm.daytona.run_environment as run_environment
-
-    captured: list[dict[str, object]] = []
-    sandbox = object()
-
-    class FakeInterpreter:
-        def __init__(self, **kwargs: object) -> None:
-            captured.append(kwargs)
-
-    class FakeSink:
-        volume_fs = None
-
-        def __init__(self, *_args: object, **_kwargs: object) -> None:
-            return None
-
-    class SessionManager:
-        async def acquire(self, _request, *, deadline):
-            del deadline
-            return SimpleNamespace(sandbox_id="sandbox", interpreter=object())
-
-        async def release(self, _lease) -> None:
-            return None
-
-    class Platform:
-        async def get(self, _sandbox_id):
-            return sandbox
-
-    monkeypatch.setattr(run_environment, "DaytonaCodeInterpreter", FakeInterpreter)
-    monkeypatch.setattr(run_environment, "_DaytonaRunSink", FakeSink)
-    monkeypatch.setattr(run_environment, "sandbox_backend", lambda *_args, **_kwargs: SimpleNamespace(sandbox=sandbox))
-
-    resources = SimpleNamespace(
-        settings=Settings(run_environment="daytona"),
-        session_manager=SessionManager(),
-        platform=Platform(),
-        track_sandbox=lambda _sandbox_id: None,
-    )
-    turn = ExecuteTurn(
-        uuid4(),
-        uuid4(),
-        TurnAccess(uuid4(), uuid4()),
-        TurnInput("child broker"),
-        SessionHistory(()),
-        AsyncMock(return_value=False),
-        _TurnClaimToken(uuid4()),
-    )
-
-    environment = await run_environment._DaytonaEnvironmentProvider(resources).acquire(
-        turn,
-        deadline=asyncio.get_running_loop().time() + 30,
-    )
-    assert environment.child_interpreter_factory is not None
-
-    environment.child_interpreter_factory()
-    environment.child_interpreter_factory()
-
-    assert [call["broker_port"] for call in captured] == [3001, 3002]

@@ -442,7 +442,7 @@ class _RLMTraceCallback(BaseCallback):
                     "call_id": call_id,
                     "call_index": call_index,
                     "input_keys": sorted(str(key) for key in inputs)[:32],
-                    **_lm_input_profile(inputs),
+                    **_lm_input_profile(inputs, include_previews=self._recursive_depth == 0),
                     "history_length_before": history_length,
                     "recursive_depth": self._recursive_depth,
                 },
@@ -472,7 +472,7 @@ class _RLMTraceCallback(BaseCallback):
         usage, provider = _latest_lm_telemetry(instance, history_length)
         standard_usage = _mlflow_token_usage(usage)
         attributes = {"mlflow.chat.tokenUsage": standard_usage} if standard_usage else None
-        response_details = _lm_output_profile(outputs)
+        response_details = _lm_output_profile(outputs, include_previews=self._recursive_depth == 0)
         response_details.update(
             {
                 "call_index": call_index,
@@ -520,19 +520,25 @@ def _trace_payload_text(value: object) -> str:
         return str(value)
 
 
-def _lm_input_profile(inputs: Mapping[str, Any]) -> dict[str, JsonValue]:
-    """Describe LM context and retain bounded readable trace previews."""
+def _lm_input_profile(
+    inputs: Mapping[str, Any],
+    *,
+    include_previews: bool = True,
+) -> dict[str, JsonValue]:
+    """Describe LM context, retaining readable previews only for Root calls."""
 
     profile: dict[str, JsonValue] = {}
     prompt = inputs.get("prompt")
     if isinstance(prompt, str):
         profile["prompt_chars"] = len(prompt)
-        profile["prompt_preview"] = _trace_preview(prompt)
+        if include_previews:
+            profile["prompt_preview"] = _trace_preview(prompt)
     messages = inputs.get("messages")
     if isinstance(messages, Sequence) and not isinstance(messages, (str, bytes, bytearray)):
         profile["message_count"] = len(messages)
         profile["message_chars"] = sum(len(str(message)) for message in messages)
-        profile["messages_preview"] = _trace_preview(_trace_payload_text(messages))
+        if include_previews:
+            profile["messages_preview"] = _trace_preview(_trace_payload_text(messages))
     kwargs = inputs.get("kwargs")
     if isinstance(kwargs, Mapping):
         profile["kwargs_keys"] = tuple(sorted(str(key) for key in kwargs)[:32])
@@ -544,8 +550,12 @@ def _lm_input_profile(inputs: Mapping[str, Any]) -> dict[str, JsonValue]:
     return profile
 
 
-def _lm_output_profile(outputs: Mapping[str, Any] | None) -> dict[str, JsonValue]:
-    """Describe an LM response and retain a bounded readable trace preview."""
+def _lm_output_profile(
+    outputs: Mapping[str, Any] | None,
+    *,
+    include_previews: bool = True,
+) -> dict[str, JsonValue]:
+    """Describe an LM response, retaining a preview only for Root calls."""
 
     if not isinstance(outputs, Mapping):
         return {"response_keys": ()}
@@ -553,7 +563,7 @@ def _lm_output_profile(outputs: Mapping[str, Any] | None) -> dict[str, JsonValue
     response_chars = sum(len(str(value)) for value in outputs.values() if isinstance(value, str))
     if response_chars:
         profile["response_chars"] = response_chars
-    if outputs:
+    if outputs and include_previews:
         profile["response_preview"] = _trace_preview(_trace_payload_text(outputs))
     return profile
 
