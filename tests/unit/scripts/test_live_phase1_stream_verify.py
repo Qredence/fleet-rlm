@@ -21,6 +21,12 @@ def _avoid_loading_repository_credentials(monkeypatch: pytest.MonkeyPatch) -> No
 
 
 def _test_receipt() -> dict[str, object]:
+    """
+    Create a valid receipt fixture for verifier tests.
+    
+    Returns:
+    	dict[str, object]: A receipt containing schema, timing, streaming, assertion, resource, failure, and pass-status data.
+    """
     return {
         "schema": verifier.RECEIPT_SCHEMA,
         "timing": {"first_delta_ms": 42, "duration_ms": 800},
@@ -43,6 +49,15 @@ def _test_receipt() -> dict[str, object]:
 
 
 def _settings(*, profile: str = "daytona") -> object:
+    """
+    Create test settings for a Daytona live-execution profile.
+    
+    Parameters:
+    	profile (str): Name of the active execution profile.
+    
+    Returns:
+    	object: Settings object configured for Daytona live execution.
+    """
     class Settings:
         run_environment = "daytona"
         root_model = verifier._LIVE_ROOT_MODEL
@@ -129,6 +144,15 @@ def test_success_receipt_is_enriched_and_sanitized(
     monkeypatch.setattr(verifier, "_lockfile_sha256", lambda: "b" * 64)
 
     def run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        """
+        Write a test receipt to the evidence path specified in the environment.
+        
+        Parameters:
+            kwargs (object): Keyword arguments containing an ``env`` mapping with the evidence file path.
+        
+        Returns:
+            subprocess.CompletedProcess[str]: A successful completed-process result for the command.
+        """
         evidence_path = Path(kwargs["env"][verifier.EVIDENCE_ENV])  # type: ignore[index]
         assert evidence_path == test_receipt
         evidence_path.write_text(json.dumps(_test_receipt()), encoding="utf-8")

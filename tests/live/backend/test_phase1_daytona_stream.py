@@ -68,6 +68,18 @@ class _ProofCapabilityPreparer:
     event_views: MappingProxyType[str, ToolEventView]
 
     async def prepare(self, turn: Any, environment: Any, attachments: Any, *, deadline: float) -> Any:
+        """
+        Prepare a turn with the Phase 1 result signature, output contract, verification tools, and event views.
+        
+        Parameters:
+        	turn (Any): The turn to prepare.
+        	environment (Any): The execution environment.
+        	attachments (Any): Attachments available to the turn.
+        	deadline (float): The preparation deadline.
+        
+        Returns:
+        	Any: The prepared turn configured for Phase 1 execution.
+        """
         prepared = await self.delegate.prepare(turn, environment, attachments, deadline=deadline)
         prepared.spec = replace(
             prepared.spec,
@@ -86,6 +98,20 @@ class _ProofLedger:
     semantic_calls: list[tuple[str, tuple[str, ...]]] = field(default_factory=list)
 
     def verify_phase1(self, attachment_text: str, single_result: str, batch_results: list[str]) -> dict[str, bool]:
+        """
+        Validate the Phase 1 attachment and semantic-query results.
+        
+        Parameters:
+            attachment_text (str): Materialized attachment content to validate.
+            single_result (str): Result from the single semantic query.
+            batch_results (list[str]): Ordered results from the batched semantic query.
+        
+        Returns:
+            dict[str, bool]: A mapping containing `{"ok": True}` when validation succeeds.
+        
+        Raises:
+            ValueError: If the verifier is called more than once or any expected attachment or semantic-query result is invalid.
+        """
         self.calls += 1
         if self.calls != 1:
             raise ValueError("phase1 verifier must be called exactly once")
@@ -106,6 +132,12 @@ class _FirstStreamDeltaProbe:
     first_delta_at: float | None = None
 
     def observe_body(self, body: bytes) -> None:
+        """
+        Record the timestamp of the first reasoning or RLM-code streaming event found in a response body.
+        
+        Parameters:
+            body (bytes): Response body containing newline-delimited SSE data.
+        """
         for line in body.splitlines():
             if not line.startswith(b"data: "):
                 continue
@@ -127,9 +159,15 @@ class _FirstStreamDeltaMiddleware:
         self.probe = probe
 
     async def __call__(self, scope: dict[str, Any], receive: Any, send: Any) -> None:
+        """
+        Observe streamed HTTP response bodies while forwarding each message to the underlying sender.
+        """
         pending = bytearray()
 
         async def recording_send(message: dict[str, Any]) -> None:
+            """
+            Record complete HTTP response-body lines for streaming inspection before forwarding each message.
+            """
             if message.get("type") == "http.response.body":
                 body = message.get("body", b"")
                 if isinstance(body, bytes):
@@ -147,6 +185,19 @@ class _FirstStreamDeltaMiddleware:
 
 
 def _load_live_settings(tmp_path: Path) -> Settings:
+    """
+    Load and validate live Phase 1 streaming test settings.
+    
+    Parameters:
+    	tmp_path (Path): Temporary directory for the test database.
+    
+    Returns:
+    	Settings: Validated Daytona settings with an upgraded temporary database and bounded execution limits.
+    
+    Raises:
+    	pytest.skip: If the evidence-path environment variable is not configured.
+    	pytest.fail: If live execution, the Daytona profile, required models, or provider credentials are unavailable.
+    """
     if not os.environ.get(_EVIDENCE_ENV):
         pytest.skip("Run this credentialed canary via scripts/live_phase1_stream_verify.py")
     load_dotenv(_REPO_ROOT / ".env", override=False)
@@ -174,6 +225,15 @@ def _load_live_settings(tmp_path: Path) -> Settings:
 
 
 def _sse_chunks(response: Any) -> tuple[list[dict[str, Any]], int]:
+    """
+    Parse server-sent event data from an HTTP response.
+    
+    Parameters:
+    	response (Any): Response containing newline-delimited SSE data.
+    
+    Returns:
+    	tuple[list[dict[str, Any]], int]: Parsed JSON event chunks and the number of `[DONE]` markers.
+    """
     chunks: list[dict[str, Any]] = []
     done = 0
     for line in response.text.splitlines():
@@ -188,6 +248,16 @@ def _sse_chunks(response: Any) -> tuple[list[dict[str, Any]], int]:
 
 
 def _streaming_evidence(chunks: list[dict[str, Any]]) -> tuple[int, list[str]]:
+    """
+    Summarize reasoning and code streaming evidence from parsed SSE chunks.
+    
+    Parameters:
+    	chunks (list[dict[str, Any]]): Parsed streaming chunks to inspect.
+    
+    Returns:
+    	tuple[int, list[str]]: The number of relevant delta events and the sorted
+    	names of streaming fields observed.
+    """
     fields: set[str] = set()
     count = 0
     for chunk in chunks:
@@ -201,6 +271,16 @@ def _streaming_evidence(chunks: list[dict[str, Any]]) -> tuple[int, list[str]]:
 
 
 def _call_shapes(chunks: list[dict[str, Any]], call_name: str) -> list[dict[str, object]]:
+    """
+    Extracts argument shapes for calls with the specified name from streamed RLM code chunks.
+    
+    Parameters:
+        chunks (list[dict[str, Any]]): Streamed event chunks containing RLM code.
+        call_name (str): Function name to match.
+    
+    Returns:
+        list[dict[str, object]]: Argument counts and keyword names for each matching call.
+    """
     shapes: list[dict[str, object]] = []
     for chunk in chunks:
         if chunk.get("type") != "data-rlm-code":
@@ -220,6 +300,14 @@ def _call_shapes(chunks: list[dict[str, Any]], call_name: str) -> list[dict[str,
 
 
 async def _retry_cleanup(operation: Any) -> bool:
+    """Retry an asynchronous cleanup operation until it succeeds or all configured attempts fail.
+    
+    Parameters:
+    	operation (Any): Asynchronous cleanup operation to execute.
+    
+    Returns:
+    	bool: `True` if the operation succeeds, `False` after all attempts fail.
+    """
     for delay in (*_CLEANUP_RETRY_DELAYS, None):
         try:
             await operation()
@@ -232,9 +320,24 @@ async def _retry_cleanup(operation: Any) -> bool:
 
 
 async def _strict_cleanup(resources: Any, volume_name: str) -> tuple[str, ...]:
+    """
+    Delete tracked sandboxes and the owned volume, returning labels for cleanup failures.
+    
+    Parameters:
+        resources (Any): Resource manager containing tracked sandboxes and cleanup clients.
+        volume_name (str): Name of the volume to delete.
+    
+    Returns:
+        tuple[str, ...]: Cleanup failure labels, including "sandbox", "tracking", or "volume".
+    """
     failures: list[str] = []
     for sandbox_id in sorted(set(resources._sandbox_ids)):
         async def delete_sandbox(sandbox_id: str = sandbox_id) -> None:
+            """Delete the specified Daytona sandbox if it exists.
+            
+            Parameters:
+            	sandbox_id (str): Identifier of the sandbox to delete.
+            """
             sandbox = await resources.platform.get(sandbox_id)
             if sandbox is not None:
                 await resources.platform.delete(sandbox)
@@ -247,6 +350,7 @@ async def _strict_cleanup(resources: Any, volume_name: str) -> tuple[str, ...]:
         failures.append("tracking")
 
     async def delete_volume() -> None:
+        """Delete the configured volume if it exists."""
         volume = await resources.client.volume.get(volume_name, create=False)
         if volume is not None:
             await resources.client.volume.delete(volume)
@@ -257,6 +361,12 @@ async def _strict_cleanup(resources: Any, volume_name: str) -> tuple[str, ...]:
 
 
 def _write_receipt(payload: dict[str, object]) -> None:
+    """
+    Write a JSON proof receipt to the configured evidence path using an atomic replacement.
+    
+    Parameters:
+    	payload (dict[str, object]): Receipt data to serialize.
+    """
     output = Path(os.environ[_EVIDENCE_ENV]).expanduser().resolve()
     output.parent.mkdir(parents=True, exist_ok=True)
     descriptor, temporary_name = tempfile.mkstemp(

@@ -23,11 +23,33 @@ def _executor(
     observer=None,
     is_authorized: Callable[[], bool] | None = None,
 ) -> RecursiveRLMExecutor:
+    """
+    Construct a recursive executor backed by dummy root and sub-models for tests.
+    
+    Parameters:
+        root_actions (list[dict[str, str]]): Responses supplied by the root model.
+        sub_actions (list[dict[str, str]] | None): Responses supplied by the sub-model.
+        options (RecursiveRLMOptions | None): Executor configuration.
+        factory_calls (list[DaytonaCodeInterpreter] | None): Collection to receive created child interpreters.
+        observer: Optional event observer.
+        is_authorized (Callable[[], bool] | None): Optional callback used to authorize recursive calls.
+    
+    Returns:
+        RecursiveRLMExecutor: A configured executor with an in-process child-runtime factory.
+    """
     adapter = dspy.JSONAdapter()
     root = dspy.utils.DummyLM(root_actions, adapter=adapter)
     sub = dspy.utils.DummyLM(sub_actions or [{"answer": "fallback"}], adapter=adapter)
 
     def factory(call_index: int) -> ChildRuntimeLease:
+        """Create a child runtime lease backed by an in-process interpreter.
+        
+        Parameters:
+        	call_index (int): Index used to identify the child runtime.
+        
+        Returns:
+        	ChildRuntimeLease: A lease for the newly created child runtime.
+        """
         interpreter = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())
         if factory_calls is not None:
             factory_calls.append(interpreter)
@@ -157,6 +179,12 @@ def test_recursive_tool_rechecks_authority_before_child_allocation() -> None:
     events: list[object] = []
 
     def is_authorized() -> bool:
+        """
+        Determines whether an authorization check is permitted.
+        
+        Returns:
+        	bool: `true` for the first check, `false` for subsequent checks.
+        """
         nonlocal checks
         checks += 1
         return checks == 1
@@ -181,6 +209,12 @@ def test_recursive_tool_closes_lease_when_authority_is_revoked_after_acquisition
     events: list[object] = []
 
     def is_authorized() -> bool:
+        """
+        Determine whether authorization remains available for the current check.
+        
+        Returns:
+            bool: `True` for the first four checks, and `False` thereafter.
+        """
         nonlocal checks
         checks += 1
         return checks < 5
@@ -210,6 +244,12 @@ def test_recursive_tool_discards_result_when_authority_is_revoked_after_executio
     events: list[object] = []
 
     def is_authorized() -> bool:
+        """
+        Determines whether authorization remains valid for the next check.
+        
+        Returns:
+        	bool: `True` for the first six checks and `False` thereafter.
+        """
         nonlocal checks
         checks += 1
         return checks < 7

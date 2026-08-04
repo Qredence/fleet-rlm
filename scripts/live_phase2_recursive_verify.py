@@ -58,6 +58,12 @@ class ReceiptError(ValueError):
 
 
 def build_parser() -> argparse.ArgumentParser:
+    """
+    Create the command-line parser for the receipt output path and execution timeout.
+    
+    Returns:
+    	argparse.ArgumentParser: Configured parser for the command-line arguments.
+    """
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--output",
@@ -70,6 +76,14 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def pytest_command(timeout_seconds: int) -> list[str]:
+    """Build the command used to run the designated live pytest scenario.
+    
+    Parameters:
+    	timeout_seconds (int): Maximum duration allowed for the test run.
+    
+    Returns:
+    	list[str]: The pytest command and its execution arguments.
+    """
     return ["uv", "run", "pytest", _LIVE_TEST, "-q", "-n", "0", f"--timeout={timeout_seconds}"]
 
 
@@ -78,6 +92,14 @@ def _load_repo_env() -> None:
 
 
 def _path_is_allowed(path: Path) -> bool:
+    """Determine whether a path is an eligible JSON receipt location within the evidence directory.
+    
+    Parameters:
+    	path (Path): Path to validate.
+    
+    Returns:
+    	`true` if the path is a JSON file below the evidence directory, `false` otherwise.
+    """
     try:
         path.relative_to(_EVIDENCE_ROOT)
     except ValueError:
@@ -86,10 +108,29 @@ def _path_is_allowed(path: Path) -> bool:
 
 
 def _git(*args: str) -> str:
+    """Run a Git command from the repository root and return its trimmed standard output.
+    
+    Parameters:
+    	args (str): Arguments passed to Git.
+    
+    Returns:
+    	str: The command's standard output without leading or trailing whitespace.
+    """
     return subprocess.check_output(["git", *args], cwd=_REPO_ROOT, text=True).strip()
 
 
 def _candidate() -> tuple[str, str]:
+    """
+    Validate the repository candidate and return its commit SHA and branch name.
+    
+    Raises:
+        RuntimeError: If the candidate is not on a non-main, non-master branch,
+            the commit SHA is invalid, the worktree contains changes, or a
+            required candidate file is not tracked.
+    
+    Returns:
+        tuple[str, str]: The commit SHA and branch name.
+    """
     sha = _git("rev-parse", "HEAD")
     branch = _git("branch", "--show-current")
     if len(sha) != 40 or not branch or branch in {"main", "master"}:
@@ -108,6 +149,14 @@ def _candidate() -> tuple[str, str]:
 
 
 def _installed_versions(env: dict[str, str]) -> dict[str, str]:
+    """Return the installed versions of Python, DSPy, and Daytona.
+    
+    Parameters:
+        env (dict[str, str]): Retained for compatibility and ignored.
+    
+    Returns:
+        dict[str, str]: Version strings keyed by package name.
+    """
     del env
     return {
         "python": sys.version.split()[0],
@@ -117,10 +166,22 @@ def _installed_versions(env: dict[str, str]) -> dict[str, str]:
 
 
 def _lockfile_sha256() -> str:
+    """Compute the SHA-256 digest of the repository's uv.lock file.
+    
+    Returns:
+    	str: The hexadecimal SHA-256 digest of uv.lock.
+    """
     return hashlib.sha256((_REPO_ROOT / "uv.lock").read_bytes()).hexdigest()
 
 
 def _write_json(path: Path, payload: dict[str, object]) -> None:
+    """
+    Write a JSON payload atomically to the specified path.
+    
+    Parameters:
+        path (Path): Destination path for the JSON file.
+        payload (dict[str, object]): JSON-serializable data to write.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
     descriptor, temporary_name = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp", text=True)
     temporary = Path(temporary_name)
@@ -136,6 +197,19 @@ def _write_json(path: Path, payload: dict[str, object]) -> None:
 
 
 def _failure(*, category: str, phase: str) -> dict[str, object]:
+    """
+    Create a bounded failure receipt for the specified category and phase.
+    
+    Parameters:
+    	category (str): Failure category.
+    	phase (str): Execution phase associated with the failure.
+    
+    Returns:
+    	dict[str, object]: A failure receipt containing the schema, failure details, and a failed status.
+    
+    Raises:
+    	ValueError: If the category or phase is not allowed.
+    """
     if category not in _FAILURE_CATEGORIES or phase not in _FAILURE_PHASES:
         raise ValueError("invalid bounded failure")
     return {
@@ -146,10 +220,23 @@ def _failure(*, category: str, phase: str) -> dict[str, object]:
 
 
 def _write_failure(path: Path, *, category: str, phase: str) -> None:
+    """Write a failure receipt for the specified category and phase."""
     _write_json(path, _failure(category=category, phase=phase))
 
 
 def validate_test_receipt(receipt: object) -> dict[str, Any]:
+    """
+    Validate a live test receipt against the required schema, assertions, timing, and content rules.
+    
+    Parameters:
+        receipt (object): Receipt data to validate.
+    
+    Returns:
+        dict[str, Any]: The validated receipt.
+    
+    Raises:
+        ReceiptError: If the receipt is malformed, unsuccessful, contains invalid timing or assertions, or includes forbidden content.
+    """
     if not isinstance(receipt, dict) or set(receipt) != _TEST_FIELDS:
         raise ReceiptError("receipt_fields")
     if (
@@ -180,6 +267,19 @@ def validate_test_receipt(receipt: object) -> dict[str, Any]:
 
 
 def _policy(settings: Any) -> dict[str, str]:
+    """
+    Validate and return the execution policy required for the live recursive scenario.
+    
+    Parameters:
+    	settings (Any): Execution settings containing the active profile, environment,
+    		model identifiers, and recursion flag.
+    
+    Returns:
+    	dict[str, str]: The validated profile, environment, root model, and sub-model.
+    
+    Raises:
+    	ReceiptError: If the settings do not match the required policy or recursion is disabled.
+    """
     policy = {
         "profile": active_profile(settings) or "",
         "environment": str(settings.run_environment),
@@ -205,6 +305,22 @@ def _success_receipt(
     policy: dict[str, str],
     child_env: dict[str, str],
 ) -> dict[str, object]:
+    """
+    Build a successful verification receipt from validated test evidence.
+    
+    Parameters:
+    	test_receipt (object): Test evidence to validate and include in the receipt.
+    	sha (str): Candidate commit SHA.
+    	branch (str): Candidate branch name.
+    	policy (dict[str, str]): Validated execution policy.
+    	child_env (dict[str, str]): Environment used to determine installed package versions.
+    
+    Returns:
+    	dict[str, object]: A validated success receipt containing candidate metadata, policy, timing, assertions, and no failure.
+    
+    Raises:
+    	ReceiptError: If the resulting receipt does not contain the required fields.
+    """
     evidence = validate_test_receipt(test_receipt)
     receipt = {
         "schema": RECEIPT_SCHEMA,
@@ -227,6 +343,15 @@ def _success_receipt(
 
 
 def main(argv: list[str] | None = None) -> int:
+    """
+    Run the Phase 2 recursive-child canary and write a validated JSON receipt.
+    
+    Parameters:
+    	argv (list[str] | None): Optional command-line arguments. If omitted, arguments are read from the process command line.
+    
+    Returns:
+    	int: The canary exit code, indicating success, a precondition failure, proof failure, or interruption.
+    """
     args = build_parser().parse_args(argv)
     output = args.output.expanduser().resolve()
     if args.timeout_seconds <= 0 or not _path_is_allowed(output):

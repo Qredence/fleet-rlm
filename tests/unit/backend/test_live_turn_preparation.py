@@ -30,6 +30,9 @@ async def test_live_preparation_stages_attachment_and_cleans_it(
     tmp_path,
     with_skill_catalog: bool,
 ) -> None:
+    """
+    Verify that live turn preparation stages attachments, configures workspace capabilities, persists memory and result snapshots, and cleans up the staged attachment when the prepared turn closes.
+    """
     del monkeypatch
     data = b"attachment body"
     attachment_id = uuid4()
@@ -68,6 +71,15 @@ async def test_live_preparation_stages_attachment_and_cleans_it(
         released = False
 
         async def acquire(self, _request, *, deadline):
+            """
+            Provide a mock sandbox acquisition result for a valid future deadline.
+            
+            Parameters:
+            	deadline (float): Monotonic time by which acquisition must complete.
+            
+            Returns:
+            	SimpleNamespace: A mock acquisition result containing the sandbox, interpreter, and volume identifiers.
+            """
             assert deadline > asyncio.get_running_loop().time()
             return SimpleNamespace(sandbox_id="sandbox", interpreter=object(), volume_id="test-volume")
 

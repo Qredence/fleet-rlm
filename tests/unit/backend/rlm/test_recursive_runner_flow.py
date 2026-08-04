@@ -102,6 +102,14 @@ async def test_root_child_root_flow_preserves_parent_repl_and_typed_submit() -> 
 
 
 def _child_lease(call_index: int) -> ChildRuntimeLease:
+    """Create a child runtime lease for a recursive test invocation.
+    
+    Parameters:
+        call_index (int): Index used to identify the child runtime and workspace.
+    
+    Returns:
+        ChildRuntimeLease: A lease backed by an in-process interpreter.
+    """
     interpreter = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())
     return ChildRuntimeLease(
         interpreter,
@@ -114,6 +122,7 @@ def _child_lease(call_index: int) -> ChildRuntimeLease:
 
 @pytest.mark.asyncio
 async def test_runner_rejects_recursive_tool_after_authority_revocation() -> None:
+    """Verify that recursive execution is rejected when run authority has been revoked before the run starts."""
     adapter = dspy.JSONAdapter()
     root = dspy.utils.DummyLM(
         [{"reasoning": "delegate too late", "code": "rlm_query('late child request')"}],
@@ -131,12 +140,32 @@ async def test_runner_rejects_recursive_tool_after_authority_revocation() -> Non
             return ()
 
         def drain_artifact_candidates(self):
+            """
+            Drain pending artifact candidates.
+            
+            Returns:
+                tuple: An empty tuple.
+            """
             return ()
 
     async def not_cancelled() -> bool:
+        """Indicate that cancellation has not been requested.
+        
+        Returns:
+        	bool: `False`, indicating that cancellation has been requested.
+        """
         return False
 
     def child_factory(call_index: int) -> ChildRuntimeLease:
+        """
+        Create a child runtime lease for the specified recursive call index.
+        
+        Parameters:
+        	call_index (int): Index of the recursive call.
+        
+        Returns:
+        	ChildRuntimeLease: The runtime lease for the child call.
+        """
         created.append(call_index)
         return _child_lease(call_index)
 
@@ -179,6 +208,9 @@ async def test_normal_daytona_policy_omits_recursive_tool_and_guidance() -> None
 
     class Factory:
         def create(self, **kwargs: object):
+            """
+            Create an RLM instance while recording the supplied configuration arguments.
+            """
             captured.update(kwargs)
             return RLMFactory().create(**kwargs)
 
@@ -189,9 +221,20 @@ async def test_normal_daytona_policy_omits_recursive_tool_and_guidance() -> None
             return ()
 
         def drain_artifact_candidates(self):
+            """
+            Drain pending artifact candidates.
+            
+            Returns:
+                tuple: An empty tuple.
+            """
             return ()
 
     async def not_cancelled() -> bool:
+        """Indicate that cancellation has not been requested.
+        
+        Returns:
+        	bool: `False`, indicating that cancellation has been requested.
+        """
         return False
 
     context = RLMExecutionContext(
@@ -221,6 +264,9 @@ async def test_normal_daytona_policy_omits_recursive_tool_and_guidance() -> None
 
 @pytest.mark.asyncio
 async def test_failed_child_cleanup_prevents_successful_root_outcome() -> None:
+    """
+    Verify that failed child-runtime cleanup causes the root RLM execution to fail.
+    """
     adapter = dspy.JSONAdapter()
     root = dspy.utils.DummyLM(
         [
@@ -239,15 +285,28 @@ async def test_failed_child_cleanup_prevents_successful_root_outcome() -> None:
             return ()
 
         def drain_artifact_candidates(self):
+            """
+            Drain pending artifact candidates.
+            
+            Returns:
+                tuple: An empty tuple.
+            """
             return ()
 
     async def not_cancelled() -> bool:
+        """Indicate that cancellation has not been requested.
+        
+        Returns:
+        	bool: `False`, indicating that cancellation has been requested.
+        """
         return False
 
     def failed_lease(call_index: int) -> ChildRuntimeLease:
+        """Create a child runtime lease whose cleanup raises an error."""
         interpreter = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())
 
         def close() -> None:
+            """Shut down the interpreter and raise an error indicating that child cleanup failed."""
             interpreter.shutdown()
             raise RuntimeError("child cleanup failed")
 

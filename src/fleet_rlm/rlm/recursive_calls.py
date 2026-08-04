@@ -94,10 +94,26 @@ _MAX_PROGRESS_DURATION_MS = 86_400_000
 
 
 def _bounded_progress_integer(value: int) -> int:
+    """Clamp a progress value to the supported integer range.
+    
+    Parameters:
+    	value (int): The progress value to clamp.
+    
+    Returns:
+    	int: The value limited to the range from zero through the maximum supported progress integer.
+    """
     return max(0, min(int(value), _MAX_PROGRESS_INTEGER))
 
 
 def _recursive_failure_category(exc: BaseException) -> str:
+    """Classify a recursive child failure for completion metadata.
+    
+    Parameters:
+    	exc (BaseException): The failure raised during child execution.
+    
+    Returns:
+    	str: The failure category: ``"unauthorized"``, ``"cleanup_failed"``, ``"timeout"``, or ``"child_failed"``.
+    """
     if isinstance(exc, ChildRuntimeAuthorizationError):
         return "unauthorized"
     if isinstance(exc, ChildRuntimeCleanupError):
@@ -140,6 +156,19 @@ class RecursiveRLMExecutor:
         observer: ToolObserver | None = None,
         is_authorized: Callable[[], bool] | None = None,
     ) -> None:
+        """
+        Configure a bounded recursive RLM executor.
+        
+        Parameters:
+            models (RLMModelBundle): Models used for recursive and fallback execution.
+            options (RecursiveRLMOptions): Limits and behavior for recursive calls.
+            child_runtime_factory (ChildRuntimeFactory | None): Factory for acquiring child runtimes.
+            deadline (float): Absolute execution deadline.
+            depth (int): Current recursion depth.
+            state (_RecursiveState | None): Shared state for aggregating nested-call metadata.
+            observer (ToolObserver | None): Optional observer for tool execution events.
+            is_authorized (Callable[[], bool] | None): Optional authorization check for recursive execution.
+        """
         self._models = models
         self._options = options
         self._child_runtime_factory = child_runtime_factory
@@ -184,16 +213,22 @@ class RecursiveRLMExecutor:
         )
 
     def raise_if_cleanup_failed(self) -> None:
-        """Prevent a typed Root prediction from committing after failed child cleanup."""
+        """Raise a runtime error when recursive child cleanup has failed."""
         if self._state.fatal_cleanup_error is not None:
             raise RuntimeError("recursive child cleanup failed") from self._state.fatal_cleanup_error
 
     def _recursive_output(self, _result: Any) -> dict[str, object]:
+        """Return metadata for the most recent recursive completion."""
         if self._last_completion is None:
             return {"status": "completed"}
         return dict(self._last_completion)
 
     def _ensure_authorized(self) -> None:
+        """Ensure the current recursive child execution remains authorized.
+        
+        Raises:
+            ChildRuntimeAuthorizationError: If authorization is no longer valid.
+        """
         if self._is_authorized is not None and not self._is_authorized():
             raise ChildRuntimeAuthorizationError("Turn is no longer authorized")
 
@@ -207,6 +242,17 @@ class RecursiveRLMExecutor:
         cleanup_status: str | None = None,
         failure_category: str | None = None,
     ) -> None:
+        """
+        Emit a bounded recursive execution status event to the configured observer.
+        
+        Parameters:
+            status (str): The execution status to emit.
+            call_index (int): The recursive call index.
+            recursive_depth (int): The recursive execution depth.
+            started_at (float): The monotonic start time used to calculate completion duration.
+            cleanup_status (str | None): The cleanup outcome associated with the call.
+            failure_category (str | None): The failure classification, when the call failed.
+        """
         if self._observer is None:
             return
         if status == "child_started":
@@ -232,6 +278,20 @@ class RecursiveRLMExecutor:
             return
 
     def _call(self, prompt: str) -> str:
+        """
+        Execute a bounded recursive query for the given prompt.
+        
+        Parameters:
+            prompt (str): The trimmed textual prompt to delegate.
+        
+        Returns:
+            str: The bounded answer produced by the recursive child query.
+        
+        Raises:
+            ValueError: If the prompt is not text, is empty, or exceeds the configured character limit.
+            RuntimeError: If the recursive call budget is exhausted or child runtime is unavailable.
+            TimeoutError: If the recursive call deadline has expired.
+        """
         if not isinstance(prompt, str):
             raise ValueError("rlm_query prompt must be text")
         prompt = prompt.strip()
@@ -401,17 +461,14 @@ class RecursiveRLMExecutor:
                 raise cleanup_error
 
     def _plain_sub_lm(self, prompt: str) -> str:
-        """Use the configured Sub LM at the depth cap.
-
-        ``dspy.Predict`` and ``dspy.context`` are native DSPy Module/configuration
-        surfaces (`dspy/primitives/module.py:94` and
-        `dspy/dsp/utils/settings.py:216-235`).
-
-        Args:
-            prompt: The bounded child subproblem.
-
+        """
+        Generate a concise answer for a child subproblem using the configured sub-language model.
+        
+        Parameters:
+        	prompt (str): The bounded child subproblem to answer.
+        
         Returns:
-            The validated concise Sub LM answer.
+        	str: The validated, bounded answer.
         """
         predictor = dspy.Predict(RecursiveSubtaskSignature)
         with dspy.context(

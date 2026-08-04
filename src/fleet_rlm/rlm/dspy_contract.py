@@ -458,12 +458,12 @@ class _RLMTraceCallback(BaseCallback):
         exception: Exception | None = None,
     ) -> None:
         """
-        Finalize an LM tracing span with response, timing, usage, and failure details.
-
+        Finalize the tracing span for an LM call.
+        
         Parameters:
-            call_id (str): Identifier of the LM call being finalized.
-            outputs (dict[str, Any] | None): LM response data used to create a safe output profile.
-            exception (Exception | None): Exception that caused the call to fail, if applicable.
+            call_id (str): Identifier of the LM call.
+            outputs (dict[str, Any] | None): Response data from the LM call.
+            exception (Exception | None): Error that caused the call to fail, if any.
         """
         state = self._spans.pop(call_id, None)
         if state is None:
@@ -525,7 +525,17 @@ def _lm_input_profile(
     *,
     include_previews: bool = True,
 ) -> dict[str, JsonValue]:
-    """Describe LM context, retaining readable previews only for Root calls."""
+    """
+    Summarize the structural characteristics of language-model input context.
+    
+    Parameters:
+        inputs (Mapping[str, Any]): Language-model input values.
+        include_previews (bool): Whether to include bounded prompt and message previews.
+    
+    Returns:
+        dict[str, JsonValue]: A profile containing available context sizes, message counts,
+            keyword keys, and optionally bounded previews.
+    """
 
     profile: dict[str, JsonValue] = {}
     prompt = inputs.get("prompt")
@@ -555,7 +565,16 @@ def _lm_output_profile(
     *,
     include_previews: bool = True,
 ) -> dict[str, JsonValue]:
-    """Describe an LM response, retaining a preview only for Root calls."""
+    """
+    Describe an LM response for tracing.
+    
+    Parameters:
+        outputs (Mapping[str, Any] | None): The LM response values to profile.
+        include_previews (bool): Whether to include a bounded response preview.
+    
+    Returns:
+        dict[str, JsonValue]: Structural response metadata, character count, and optionally a response preview.
+    """
 
     if not isinstance(outputs, Mapping):
         return {"response_keys": ()}

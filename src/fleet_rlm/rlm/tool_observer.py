@@ -30,6 +30,7 @@ ToolObserver: TypeAlias = Callable[[ObservationDetail | Status | WarningEvent], 
 
 
 def _empty_input(_arguments: Mapping[str, Any]) -> JsonValue:
+    """Return an empty JSON object for any argument mapping."""
     return {}
 
 

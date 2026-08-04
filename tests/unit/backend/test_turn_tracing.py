@@ -43,6 +43,16 @@ def _install_fake_mlflow(
     explode: bool = False,
     teardown_explode: bool = False,
 ) -> SimpleNamespace:
+    """
+    Install a configurable fake MLflow module for tracing tests.
+    
+    Parameters:
+        explode (bool): Whether starting a span raises an error.
+        teardown_explode (bool): Whether exiting a span raises an error.
+    
+    Returns:
+        SimpleNamespace: Recorded span and trace interactions.
+    """
     calls = SimpleNamespace(
         start_span_names=[],
         update_kwargs=[],
@@ -105,6 +115,14 @@ def _install_fake_mlflow(
 
 
 def _in_process_child_runtime(call_index: int):
+    """Create an in-process child runtime lease for recursive execution tests.
+    
+    Parameters:
+        call_index (int): Index used to identify the child runtime and workspace.
+    
+    Returns:
+        ChildRuntimeLease: A lease backed by an in-process interpreter.
+    """
     from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
     from fleet_rlm.daytona.recursive_child_runtime import ChildRuntimeLease
 

@@ -127,7 +127,12 @@ def rlm_options(settings: Settings) -> RLMOptions:
 
 
 def recursive_rlm_options(settings: Settings) -> RecursiveRLMOptions:
-    """Project policy onto the bounded recursive child-RLM contract."""
+    """
+    Create bounded options for recursive child RLM execution.
+    
+    Returns:
+    	RecursiveRLMOptions: Recursive execution settings derived from the application configuration.
+    """
     return RecursiveRLMOptions(
         enabled=settings.rlm_recursion_enabled,
         max_depth=settings.rlm_recursion_max_depth,

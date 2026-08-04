@@ -35,6 +35,15 @@ def test_daytona_package_has_exact_simplified_module_boundary() -> None:
 
 
 def _imported_roots(tree: ast.AST) -> set[str]:
+    """
+    Extract the top-level module names referenced by import statements in an abstract syntax tree.
+    
+    Parameters:
+    	tree (ast.AST): The syntax tree to inspect.
+    
+    Returns:
+    	set[str]: The set of imported top-level module names.
+    """
     imported: set[str] = set()
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
@@ -45,6 +54,14 @@ def _imported_roots(tree: ast.AST) -> set[str]:
 
 
 def _imported_modules(tree: ast.AST) -> set[str]:
+    """Collect fully qualified module names imported by an abstract syntax tree.
+    
+    Parameters:
+    	tree (ast.AST): The syntax tree to inspect.
+    
+    Returns:
+    	set[str]: The imported module names.
+    """
     imported: set[str] = set()
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):

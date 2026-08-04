@@ -61,6 +61,15 @@ logger = logging.getLogger(__name__)
 
 
 def _recursive_summary(executor: RecursiveRLMExecutor | None) -> RecursiveCallSummary:
+    """
+    Return recursive execution metrics, or zero-valued metrics when recursion is disabled.
+    
+    Parameters:
+    	executor (RecursiveRLMExecutor | None): The recursive executor whose metrics should be summarized.
+    
+    Returns:
+    	RecursiveCallSummary: The executor's recursive call metrics or an empty summary.
+    """
     if executor is not None:
         return executor.summary()
     return RecursiveCallSummary(0, 0, 0, 0, 0, ())
@@ -76,7 +85,21 @@ class RLMFactoryLike(Protocol):
         tools: Sequence[dspy.Tool] | None = None,
         signature: Any = None,
         verbose: bool = True,
-    ) -> Any: ...
+    ) -> Any: """
+        Constructs an RLM with the specified models, execution options, interpreter, tools, and signature.
+        
+        Parameters:
+            models (Any): Models used by the RLM.
+            options (Any): Execution options for the RLM.
+            interpreter (Any): Interpreter used to execute RLM operations.
+            tools (Sequence[dspy.Tool] | None): Optional tools available to the RLM.
+            signature (Any): Optional signature defining the RLM interface.
+            verbose (bool): Whether to enable verbose execution output.
+        
+        Returns:
+            Any: The configured RLM instance.
+        """
+        ...
 
 
 class _WorkerOwnership:
@@ -627,6 +650,18 @@ class RLMRunner:
     def _start_worker(
         self, context: RLMExecutionContext
     ) -> tuple[RLMExecutionSpec, _DetailRelay, TurnToolGuards, asyncio.Task[Any]]:
+        """
+        Prepare the RLM worker and supporting execution state for a turn.
+        
+        Parameters:
+            context (RLMExecutionContext): Execution context containing the request, capabilities, runtime options, and authorization state.
+        
+        Returns:
+            tuple: The execution specification, detail relay, tool guards, and worker task.
+        
+        Raises:
+            RLMConfigError: If recursive execution requires a child runtime factory that is unavailable.
+        """
         spec = context.capabilities.spec
         relay = _DetailRelay()
         guards = TurnToolGuards(required_targets=workspace_obligations(context.request))
@@ -653,6 +688,7 @@ class RLMRunner:
         )
 
         def relay_capability_details(_result: Any) -> None:
+            """Relay pending capability details to the event stream."""
             for detail in self._drain_capability_details(context):
                 relay.publish(detail)
 
@@ -765,6 +801,11 @@ class RLMRunner:
         recursive_executor: RecursiveRLMExecutor | None,
         relay: _DetailRelay,
     ) -> Any:
+        """
+        Execute the RLM with the prepared request context and return its prediction.
+        
+        The execution records tracing and usage metadata, publishes supported streaming observations, and records attachment accesses. Cleanup failures from recursive execution are surfaced as execution failures.
+        """
         kwargs = build_rlm_input_kwargs(
             request=context.request,
             session_context=context.session_context,
@@ -889,6 +930,19 @@ class RLMRunner:
         recursive_executor: RecursiveRLMExecutor | None,
         relay: _DetailRelay,
     ) -> Any:
+        """
+        Execute the RLM in a worker thread with its own asynchronous event loop.
+        
+        Parameters:
+            rlm (Any): The RLM instance to execute.
+            context (RLMExecutionContext): Runtime context for the execution.
+            spec (RLMExecutionSpec): Execution configuration.
+            recursive_executor (RecursiveRLMExecutor | None): Optional executor for recursive calls.
+            relay (_DetailRelay): Relay for execution details.
+        
+        Returns:
+            Any: The RLM execution result.
+        """
         def run() -> Any:
             return asyncio.run(self._execute_rlm(rlm, context, spec, recursive_executor, relay))
 

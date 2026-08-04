@@ -143,6 +143,12 @@ async def test_authority_revocation_after_artifact_publish_rolls_back_before_com
     )
 
     async def not_cancelled() -> bool:
+        """
+        Determine whether cancellation has occurred.
+        
+        Returns:
+        	bool: `False`, indicating that cancellation has occurred.
+        """
         return False
 
     turn = ExecuteTurn(
@@ -163,6 +169,16 @@ async def test_authority_revocation_after_artifact_publish_rolls_back_before_com
             raise AssertionError("revoked Turn must not reach commit")
 
         async def transition_claim(self, claimed, command):
+            """
+            Create a failed-run receipt from the claimed run and command failure.
+            
+            Parameters:
+                claimed: The claimed run whose identifier is included in the receipt.
+                command: The command containing the failure code and public message.
+            
+            Returns:
+                FailedRunReceipt: A receipt representing the failed run.
+            """
             from fleet_rlm.chat.turn_lifecycle import FailedRunReceipt
 
             return FailedRunReceipt(
@@ -177,14 +193,24 @@ async def test_authority_revocation_after_artifact_publish_rolls_back_before_com
         values: ClassVar[dict[str, bytes]] = {candidate.staging_path: data}
 
         async def read(self, location, *, max_bytes):
+            """Read the value stored at the specified location."""
             del max_bytes
             return self.values[location]
 
         async def write(self, location, value):
+            """
+            Store a value at the specified location and revoke turn authority.
+            """
             self.values[location] = value
             turn.authority.revoke()
 
         async def remove(self, location):
+            """
+            Remove the value associated with a location.
+            
+            Parameters:
+            	location: The location whose value should be removed.
+            """
             self.values.pop(location, None)
 
     store, sink = Store(), Sink()

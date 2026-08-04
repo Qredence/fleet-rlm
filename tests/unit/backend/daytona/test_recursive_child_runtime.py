@@ -24,10 +24,26 @@ class _Fs:
     deleted: list[str] = field(default_factory=list)
 
     async def list_files(self, _root: str, *, depth: int) -> list[SimpleNamespace]:
+        """
+        List tracked files at the supported filesystem traversal depth.
+        
+        Parameters:
+            _root (str): Root path for the listing.
+            depth (int): Traversal depth, which must be 64.
+        
+        Returns:
+            list[SimpleNamespace]: File entries sorted by path.
+        """
         assert depth == 64
         return [SimpleNamespace(path=path, is_dir=False) for path in sorted(self.files)]
 
     async def delete_file(self, path: str) -> None:
+        """
+        Delete a tracked file and record the deletion.
+        
+        Parameters:
+            path (str): Path of the file to delete.
+        """
         self.files.remove(path)
         self.deleted.append(path)
 
@@ -45,10 +61,20 @@ class _Platform:
         self.deleted: list[str] = []
 
     async def create(self, **kwargs: object) -> _Sandbox:
+        """
+        Create a child sandbox using the supplied options.
+        
+        Parameters:
+            **kwargs: Sandbox creation options.
+        
+        Returns:
+            _Sandbox: The configured child sandbox.
+        """
         self.create_calls.append(kwargs)
         return self.child
 
     async def delete(self, sandbox_id: str) -> None:
+        """Record a sandbox deletion request for the specified sandbox."""
         self.deleted.append(sandbox_id)
 
 
@@ -70,6 +96,12 @@ async def test_child_runtime_uses_sibling_volume_scope_and_strictly_cleans_only_
             return None
 
         def shutdown(self, *, strict_broker_cleanup: bool = False) -> None:
+            """
+            Record an interpreter shutdown request and whether strict broker cleanup was requested.
+            
+            Parameters:
+                strict_broker_cleanup (bool): Whether strict broker cleanup was requested.
+            """
             shutdown_calls.append(strict_broker_cleanup)
 
     monkeypatch.setattr(recursive_child_runtime, "DaytonaCodeInterpreter", Interpreter)
@@ -125,6 +157,15 @@ async def test_child_runtime_attempts_scope_and_sandbox_cleanup_after_interprete
             return None
 
         def shutdown(self, *, strict_broker_cleanup: bool = False) -> None:
+            """
+            Simulate a failed strict broker cleanup.
+            
+            Parameters:
+                strict_broker_cleanup (bool): Must be set to `True`.
+            
+            Raises:
+                RuntimeError: Always raised to represent broker cleanup failure.
+            """
             assert strict_broker_cleanup is True
             raise RuntimeError("broker cleanup failed")
 
@@ -182,6 +223,11 @@ async def test_revocation_after_admission_releases_permit_without_sandbox_creati
     checks = 0
 
     def is_authorized() -> bool:
+        """Determine whether authorization is granted on the first check.
+        
+        Returns:
+        	bool: `True` on the first call and `False` on subsequent calls.
+        """
         nonlocal checks
         checks += 1
         return checks == 1
@@ -273,9 +319,16 @@ async def test_failed_child_creation_with_failed_cleanup_is_marked_fatal(
 
     class Platform:
         async def create(self, **_kwargs: object) -> object:
+            """
+            Create and return the configured child sandbox.
+            
+            Returns:
+                object: The child sandbox.
+            """
             return child
 
         async def delete(self, _sandbox_id: str) -> None:
+            """Raise an error to simulate a failed provider cleanup operation."""
             raise RuntimeError("provider cleanup failed")
 
     monkeypatch.setattr(recursive_child_runtime, "sandbox_backend", lambda sandbox, **_kwargs: sandbox)

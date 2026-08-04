@@ -63,6 +63,15 @@ class _ProofCapabilityPreparer:
     event_views: MappingProxyType[str, ToolEventView]
 
     async def prepare(self, turn: Any, environment: Any, attachments: Any, *, deadline: float) -> Any:
+        """
+        Prepare a turn with the Phase 2 recursive execution specification.
+        
+        Parameters:
+            deadline (float): Maximum time allowed for preparation.
+        
+        Returns:
+            Any: The prepared turn with the Phase 2 signature, contract metadata, tools, and event views.
+        """
         prepared = await self.delegate.prepare(turn, environment, attachments, deadline=deadline)
         prepared.spec = replace(
             prepared.spec,
@@ -82,6 +91,19 @@ class _ProofLedger:
     root_continuity: bool = False
 
     def verify_phase2(self, child_result: str, root_marker: str) -> dict[str, bool]:
+        """
+        Verify child isolation and root-state continuity for the Phase 2 recursion proof.
+        
+        Parameters:
+        	child_result (str): Child-submitted value expected to be "absent".
+        	root_marker (str): Root marker expected to be "root-only".
+        
+        Returns:
+        	dict[str, bool]: A result containing `{"ok": True}` when both checks pass.
+        
+        Raises:
+        	ValueError: If the verifier is called more than once or either check fails.
+        """
         self.calls += 1
         if self.calls != 1:
             raise ValueError("phase2 verifier must be called exactly once")
@@ -102,6 +124,16 @@ class _ChildEvidence:
 
 
 def _load_live_settings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Settings:
+    """
+    Load and validate live settings for the Phase 2 recursive canary.
+    
+    Parameters:
+    	tmp_path (Path): Temporary directory for the copied policy and SQLite database.
+    	monkeypatch (pytest.MonkeyPatch): Pytest fixture used to apply the temporary configuration path.
+    
+    Returns:
+    	Settings: Validated settings configured for the Daytona recursive canary.
+    """
     if not os.environ.get(_EVIDENCE_ENV):
         pytest.skip("Run this credentialed canary via scripts/live_phase2_recursive_verify.py")
     load_dotenv(_REPO_ROOT / ".env", override=False)
@@ -142,9 +174,19 @@ def _load_live_settings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Sett
 
 
 def _install_child_evidence(monkeypatch: pytest.MonkeyPatch, evidence: _ChildEvidence) -> None:
+    """Instrument child-runtime acquisition and cleanup to record evidence for the test."""
     original = recursive_child_runtime._acquire_child_runtime
 
     async def observed(**kwargs: object) -> recursive_child_runtime.ChildRuntimeLease:
+        """
+        Wrap child-runtime acquisition to record creation, recursive sibling scope, cleanup success, and duration.
+        
+        Parameters:
+        	**kwargs (object): Child-runtime acquisition arguments, including workspace, run, call, and volume identifiers.
+        
+        Returns:
+        	recursive_child_runtime.ChildRuntimeLease: The acquired child-runtime lease.
+        """
         evidence.started_at = time.perf_counter()
         lease = await original(**kwargs)  # type: ignore[arg-type]
         evidence.created += 1
@@ -155,6 +197,7 @@ def _install_child_evidence(monkeypatch: pytest.MonkeyPatch, evidence: _ChildEvi
         close = lease._close
 
         def observed_close() -> None:
+            """Close the child runtime and record cleanup success and elapsed duration."""
             try:
                 close()
             except Exception:
@@ -172,6 +215,15 @@ def _install_child_evidence(monkeypatch: pytest.MonkeyPatch, evidence: _ChildEvi
 
 
 def _sse_chunks(response: Any) -> tuple[list[dict[str, Any]], int]:
+    """
+    Parse Server-Sent Event data from a response.
+    
+    Parameters:
+    	response (Any): Response whose text contains SSE lines.
+    
+    Returns:
+    	tuple[list[dict[str, Any]], int]: Parsed JSON event chunks and the number of `[DONE]` markers.
+    """
     chunks: list[dict[str, Any]] = []
     done = 0
     for line in response.text.splitlines():
@@ -186,6 +238,14 @@ def _sse_chunks(response: Any) -> tuple[list[dict[str, Any]], int]:
 
 
 def _recursive_completion(chunks: list[dict[str, Any]]) -> dict[str, object] | None:
+    """Finds the completed recursive tool output in a sequence of event chunks.
+    
+    Parameters:
+    	chunks (list[dict[str, Any]]): Event chunks to inspect.
+    
+    Returns:
+    	dict[str, object] | None: The first completed recursive output, or `None` if no matching output is found.
+    """
     for chunk in chunks:
         if chunk.get("type") != "tool-output-available":
             continue
@@ -196,6 +256,9 @@ def _recursive_completion(chunks: list[dict[str, Any]]) -> dict[str, object] | N
 
 
 def _write_receipt(payload: dict[str, object]) -> None:
+    """
+    Write the evidence payload as formatted JSON to the configured output path.
+    """
     output = Path(os.environ[_EVIDENCE_ENV]).expanduser().resolve()
     output.parent.mkdir(parents=True, exist_ok=True)
     descriptor, temporary_name = tempfile.mkstemp(
@@ -217,6 +280,13 @@ def _write_receipt(payload: dict[str, object]) -> None:
 
 
 def test_phase2_daytona_recursive_through_fastapi(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """
+    Run the live Daytona recursive canary through the FastAPI application.
+    
+    Parameters:
+    	tmp_path (Path): Temporary directory used to create the live test database.
+    	monkeypatch (pytest.MonkeyPatch): Pytest fixture for patching runtime behavior and environment settings.
+    """
     settings = _load_live_settings(tmp_path, monkeypatch)
     ledger = _ProofLedger()
     child_evidence = _ChildEvidence()

@@ -151,6 +151,20 @@ class _DaytonaEnvironmentProvider:
     resources: LiveKernelResources
 
     async def acquire(self, turn: ExecuteTurn, *, deadline: float) -> RunEnvironment:
+        """
+        Acquire and configure a Daytona-backed run environment for a turn.
+        
+        Parameters:
+            turn (ExecuteTurn): Turn whose session, access, and run identifiers determine the environment.
+            deadline (float): Absolute time limit for environment acquisition and setup.
+        
+        Returns:
+            RunEnvironment: Configured environment with run sinks, resource cleanup, and child-runtime creation.
+        
+        Raises:
+            TurnPreparationUnavailableError: If environment admission times out.
+            TurnPreparationTimeoutError: If lease acquisition or environment setup exceeds the deadline.
+        """
         try:
             lease = await self.resources.session_manager.acquire(
                 LeaseRequest(
