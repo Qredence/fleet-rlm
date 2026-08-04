@@ -264,8 +264,9 @@ def main(argv: list[str] | None = None) -> int:
                 cwd=_REPO_ROOT,
                 env=child_env,
                 check=False,
-                text=True,
                 timeout=args.timeout_seconds + 30,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
             )
         except (KeyboardInterrupt, subprocess.TimeoutExpired):
             _write_failure(output, category="interrupted", phase="scenario")

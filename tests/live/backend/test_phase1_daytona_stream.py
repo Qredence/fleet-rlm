@@ -220,15 +220,14 @@ def _call_shapes(chunks: list[dict[str, Any]], call_name: str) -> list[dict[str,
 
 
 async def _retry_cleanup(operation: Any) -> bool:
-    for attempt, delay in enumerate((0.0, *_CLEANUP_RETRY_DELAYS)):
+    for delay in (*_CLEANUP_RETRY_DELAYS, None):
         try:
             await operation()
             return True
         except Exception:
-            if attempt == len(_CLEANUP_RETRY_DELAYS):
+            if delay is None:
                 return False
-            if delay:
-                await asyncio.sleep(delay)
+            await asyncio.sleep(delay)
     return False
 
 
