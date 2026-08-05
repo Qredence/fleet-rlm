@@ -756,6 +756,7 @@ def _metrics_query(mlflow_url: str, experiment_id: str, *, workload_id: str, var
     Parameters:
         mlflow_url (str): Base URL of the MLflow server.
         experiment_id (str): MLflow experiment identifier.
+        workload_id (str): Fleet workload identifier used to filter traces.
         variant (str): Performance variant used to filter traces.
 
     Returns:

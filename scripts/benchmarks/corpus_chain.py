@@ -78,10 +78,15 @@ class CorpusEvidenceValidation:
 
 
 def _choose_indices(rng: random.Random, *, size: int, count: int, excluded: set[int]) -> tuple[int, ...]:
-    candidates = [index for index in range(1, size - 1) if index not in excluded]
-    if len(candidates) < count:
+    available = (size - 2) - sum(1 for index in excluded if 1 <= index <= size - 2)
+    if available < count:
         raise ValueError("corpus fixture does not have enough free indices")
-    return tuple(sorted(rng.sample(candidates, count)))
+    chosen: set[int] = set()
+    while len(chosen) < count:
+        candidate = rng.randrange(1, size - 1)
+        if candidate not in excluded:
+            chosen.add(candidate)
+    return tuple(sorted(chosen))
 
 
 def make_corpus_case(seed: int, *, size: int = CORPUS_SIZE) -> CorpusCase:
