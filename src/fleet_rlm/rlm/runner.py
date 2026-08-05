@@ -243,7 +243,12 @@ class _FleetStatusMessageProvider(dspy.streaming.StatusMessageProvider):
 
 
 class _NativeRLMStreamProjector:
-    """Convert DSPy stream values into bounded Fleet observation details."""
+    """Project live DSPy ``streamify`` values into bounded Fleet details.
+
+    The stream is a live projection only; the completed DSPy
+    ``Prediction.trajectory`` remains the canonical source reconciled by the
+    runner after execution.
+    """
 
     def __init__(self, *, run_id: Any, max_chars: int, publish: Callable[[RuntimeEventDetail], None]) -> None:
         self._run_id = run_id
@@ -374,7 +379,7 @@ def _reconcile_trajectory(
     *,
     max_chars: int,
 ) -> list[ObservationDetail]:
-    """Make native trajectory the durable source while retaining live timing.
+    """Reconcile completed DSPy trajectory details with live observations.
 
     Existing equal observations stay put. A differing same-step RLM detail is
     replaced in the durable list and re-emitted with the same stable step ID so

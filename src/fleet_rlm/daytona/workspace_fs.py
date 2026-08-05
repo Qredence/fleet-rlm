@@ -5,13 +5,16 @@ from __future__ import annotations
 import base64
 import contextlib
 import json
+import time
 from collections.abc import Mapping
+from fnmatch import fnmatchcase
 from pathlib import PurePosixPath
+from threading import Lock
 from typing import Any, cast
 
 from fleet_rlm.daytona.errors import is_sandbox_not_found, map_provider_error
 from fleet_rlm.daytona.workspace_agent import WorkspaceAgentStorageError, run_workspace_agent, run_workspace_agent_async
-from fleet_rlm.files.volume_paths import as_posix
+from fleet_rlm.files.volume_paths import DEFAULT_VOLUME_MOUNT_PATH, as_posix, validate_mount_path
 from fleet_rlm.files.volume_storage import VolumeFile
 from fleet_rlm.files.workspace_models import WorkspaceEntry, WorkspaceListResult, WorkspaceTextPage
 from fleet_rlm.files.workspace_validation import normalize_workspace_path
@@ -24,26 +27,142 @@ class WorkspaceStorageError(OSError):
     public_message = "Session Workspace storage does not support this mutation"
 
 
+_CACHEABLE_PATTERNS = (
+    "artifacts/*",
+    "sessions/*/output/*",
+    "recursive/*/*",
+)
+
+
+def _cacheable_path(path: str, mount_path: str) -> bool:
+    """Match cache patterns against a path relative to the trusted mount."""
+    try:
+        relative = PurePosixPath(path).relative_to(PurePosixPath(mount_path))
+    except ValueError:
+        return False
+    relative_path = str(relative)
+    return any(fnmatchcase(relative_path, pattern) for pattern in _CACHEABLE_PATTERNS)
+
+
+def _list_cache_key(root: str, *, max_depth: int, max_files: int) -> str:
+    return f"list:{root}:depth={max_depth}:count={max_files}"
+
+
+def _modified_timestamp(value: Any) -> float | None:
+    if hasattr(value, "timestamp"):
+        try:
+            value = value.timestamp()
+        except Exception:
+            return None
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return float(value)
+
+
+class _LRUCache:
+    """Thread-safe LRU cache for file content with configurable size limit."""
+
+    def __init__(self, max_size_mb: int = 100):
+        self._cache: dict[str, tuple[bytes, float]] = {}
+        self.max_bytes = max_size_mb * 1024 * 1024
+        self._lock = Lock()
+        self._current_size = 0
+
+    def get(self, key: str) -> bytes | None:
+        """Get cached value by key, updating access time."""
+        with self._lock:
+            if key not in self._cache:
+                return None
+            value, _timestamp = self._cache[key]
+            # Update access time
+            self._cache[key] = (value, time.time())
+            return value
+
+    def put(self, key: str, value: bytes) -> None:
+        """Store value in cache with current timestamp."""
+        if len(value) > self.max_bytes:
+            self.evict(key)
+            return
+        with self._lock:
+            # Check if key already exists
+            if key in self._cache:
+                old_value, _ = self._cache[key]
+                self._current_size -= len(old_value)
+
+            # Evict oldest entries if necessary
+            while self._current_size + len(value) > self.max_bytes and self._cache:
+                oldest_key = min(self._cache, key=lambda k: self._cache[k][1])
+                old_value, _ = self._cache.pop(oldest_key)
+                self._current_size -= len(old_value)
+
+            self._cache[key] = (value, time.time())
+            self._current_size += len(value)
+
+    def evict(self, key: str) -> None:
+        """Remove specific key from cache."""
+        with self._lock:
+            if key in self._cache:
+                value, _ = self._cache.pop(key)
+                self._current_size -= len(value)
+
+    def clear(self) -> None:
+        """Clear all cache entries."""
+        with self._lock:
+            self._cache.clear()
+            self._current_size = 0
+
+
 class AsyncDaytonaVolumeFS:
     """Native async byte I/O over one mounted Workspace Volume Scope."""
 
-    def __init__(self, sandbox: Any) -> None:
+    CACHEABLE_PATTERNS = _CACHEABLE_PATTERNS
+
+    def __init__(self, sandbox: Any, *, mount_path: str = DEFAULT_VOLUME_MOUNT_PATH) -> None:
         self.sandbox = sandbox
+        self.mount_path = str(validate_mount_path(mount_path))
+        self._content_cache = _LRUCache(max_size_mb=100)
+        self._metadata_cache = _LRUCache(max_size_mb=10)
+
+    def _should_cache(self, path: str) -> bool:
+        return _cacheable_path(path, self.mount_path)
+
+    def _invalidate_mutation(self, path: str) -> None:
+        self._content_cache.evict(path)
+        self._metadata_cache.clear()
 
     async def write_bytes(self, logical_path: str, data: bytes) -> None:
         path = as_posix(logical_path)
         parent = str(PurePosixPath(path).parent)
         with contextlib.suppress(Exception):
             await self.sandbox.fs.create_folder(parent, "700")
-        await self.sandbox.fs.upload_file(data, path)
+        try:
+            await self.sandbox.fs.upload_file(data, path)
+        finally:
+            self._invalidate_mutation(path)
 
-    async def read_bytes(self, logical_path: str) -> bytes:
-        raw = await self.sandbox.fs.download_file(as_posix(logical_path))
+    async def read_bytes(self, logical_path: str, *, use_cache: bool = True) -> bytes:
+        path = as_posix(logical_path)
+
+        # Check cache first
+        if use_cache and self._should_cache(path):
+            cached = self._content_cache.get(path)
+            if cached is not None:
+                return cached
+
+        # Perform actual read
+        raw = await self.sandbox.fs.download_file(path)
         if isinstance(raw, bytes):
-            return raw
-        if isinstance(raw, str):
-            return raw.encode("utf-8")
-        return bytes(raw)
+            data = raw
+        elif isinstance(raw, str):
+            data = raw.encode("utf-8")
+        else:
+            data = bytes(raw)
+
+        # Cache result if applicable
+        if use_cache and self._should_cache(path):
+            self._content_cache.put(path, data)
+
+        return data
 
     async def exists(self, logical_path: str) -> bool:
         try:
@@ -55,11 +174,44 @@ class AsyncDaytonaVolumeFS:
         return True
 
     async def remove(self, logical_path: str) -> None:
+        path = as_posix(logical_path)
         try:
-            await self.sandbox.fs.delete_file(as_posix(logical_path))
+            await self.sandbox.fs.delete_file(path)
         except Exception as exc:
             if not _provider_not_found(exc):
                 raise map_provider_error(exc) from exc
+        finally:
+            self._invalidate_mutation(path)
+
+    async def stat(self, logical_path: str) -> dict[str, Any] | None:
+        """Get file metadata with caching."""
+        path = as_posix(logical_path)
+
+        # Check metadata cache
+        cache_key = f"stat:{path}"
+        cached = self._metadata_cache.get(cache_key)
+        if cached is not None:
+            return json.loads(cached.decode("utf-8"))
+
+        try:
+            # Get file info from sandbox
+            entry = await self.sandbox.fs.list_files(
+                str(PurePosixPath(path).parent),
+                depth=1,
+            )
+            for e in entry:
+                if getattr(e, "path", None) == path:
+                    result = {
+                        "path": path,
+                        "is_dir": getattr(e, "is_dir", False),
+                        "mod_time": _modified_timestamp(getattr(e, "mod_time", None)),
+                    }
+                    # Cache metadata
+                    self._metadata_cache.put(cache_key, json.dumps(result).encode("utf-8"))
+                    return result
+            return None
+        except Exception:
+            return None
 
     async def list_files(self, logical_root: str, *, max_depth: int, max_files: int) -> tuple[VolumeFile, ...]:
         if max_depth <= 0:
@@ -67,43 +219,86 @@ class AsyncDaytonaVolumeFS:
         if max_files <= 0:
             raise ValueError("max_files must be positive")
         root = as_posix(logical_root)
+
+        # Check if directory listing is cached
+        cache_key = _list_cache_key(root, max_depth=max_depth, max_files=max_files)
+        cached = self._metadata_cache.get(cache_key)
+        if cached is not None:
+            cached_data = json.loads(cached.decode("utf-8"))
+            return tuple(VolumeFile(f["path"], f["modified_at"]) for f in cached_data)
+
         entries = await self.sandbox.fs.list_files(root, depth=max_depth)
         results: list[VolumeFile] = []
         for entry in entries:
             path = getattr(entry, "path", None)
             if not isinstance(path, str) or not _is_under(path, root) or bool(getattr(entry, "is_dir", False)):
                 continue
-            modified_at = getattr(entry, "mod_time", None)
-            if hasattr(modified_at, "timestamp"):
-                modified_at = modified_at.timestamp()
-            if not isinstance(modified_at, (int, float)):
+            modified_at = _modified_timestamp(getattr(entry, "mod_time", None))
+            if modified_at is None:
                 continue
-            results.append(VolumeFile(path, float(modified_at)))
+            results.append(VolumeFile(path, modified_at))
             if len(results) >= max_files:
                 break
+
+        # Cache directory listing
+        if len(results) <= 100:  # Only cache small listings
+            cached_data = [{"path": rf.path, "modified_at": rf.modified_at} for rf in results]
+            self._metadata_cache.put(cache_key, json.dumps(cached_data).encode("utf-8"))
+
         return tuple(results)
 
 
 class DaytonaSandboxVolumeFs:
     """Synchronous mounted-byte view used only by DSPy host tools."""
 
-    def __init__(self, sandbox: Any) -> None:
+    CACHEABLE_PATTERNS = _CACHEABLE_PATTERNS
+
+    def __init__(self, sandbox: Any, *, mount_path: str = DEFAULT_VOLUME_MOUNT_PATH) -> None:
         self.sandbox = sandbox
+        self.mount_path = str(validate_mount_path(mount_path))
+        self._content_cache = _LRUCache(max_size_mb=100)
+        self._metadata_cache = _LRUCache(max_size_mb=10)
+
+    def _should_cache(self, path: str) -> bool:
+        return _cacheable_path(path, self.mount_path)
+
+    def _invalidate_mutation(self, path: str) -> None:
+        self._content_cache.evict(path)
+        self._metadata_cache.clear()
 
     def write_bytes(self, logical_path: str, data: bytes) -> None:
         path = as_posix(logical_path)
         parent = str(PurePosixPath(path).parent)
         with contextlib.suppress(Exception):
             self.sandbox.fs.create_folder(parent, "700")
-        self.sandbox.fs.upload_file(data, path)
+        try:
+            self.sandbox.fs.upload_file(data, path)
+        finally:
+            self._invalidate_mutation(path)
 
-    def read_bytes(self, logical_path: str) -> bytes:
-        raw = self.sandbox.fs.download_file(as_posix(logical_path))
+    def read_bytes(self, logical_path: str, *, use_cache: bool = True) -> bytes:
+        path = as_posix(logical_path)
+
+        # Check cache first
+        if use_cache and self._should_cache(path):
+            cached = self._content_cache.get(path)
+            if cached is not None:
+                return cached
+
+        # Perform actual read
+        raw = self.sandbox.fs.download_file(path)
         if isinstance(raw, bytes):
-            return raw
-        if isinstance(raw, str):
-            return raw.encode("utf-8")
-        return bytes(raw)
+            data = raw
+        elif isinstance(raw, str):
+            data = raw.encode("utf-8")
+        else:
+            data = bytes(raw)
+
+        # Cache result if applicable
+        if use_cache and self._should_cache(path):
+            self._content_cache.put(path, data)
+
+        return data
 
     def exists(self, logical_path: str) -> bool:
         try:
@@ -115,11 +310,14 @@ class DaytonaSandboxVolumeFs:
         return True
 
     def remove(self, logical_path: str) -> None:
+        path = as_posix(logical_path)
         try:
-            self.sandbox.fs.delete_file(as_posix(logical_path))
+            self.sandbox.fs.delete_file(path)
         except Exception as exc:
             if not _provider_not_found(exc):
                 raise map_provider_error(exc) from exc
+        finally:
+            self._invalidate_mutation(path)
 
     def list_files(self, logical_root: str, *, max_depth: int, max_files: int) -> tuple[VolumeFile, ...]:
         if max_depth <= 0:
@@ -127,20 +325,29 @@ class DaytonaSandboxVolumeFs:
         if max_files <= 0:
             raise ValueError("max_files must be positive")
         root = as_posix(logical_root)
+
+        cache_key = _list_cache_key(root, max_depth=max_depth, max_files=max_files)
+        cached = self._metadata_cache.get(cache_key)
+        if cached is not None:
+            cached_data = json.loads(cached.decode("utf-8"))
+            return tuple(VolumeFile(f["path"], f["modified_at"]) for f in cached_data)
+
         entries = self.sandbox.fs.list_files(root, depth=max_depth)
         results: list[VolumeFile] = []
         for entry in entries:
             path = getattr(entry, "path", None)
             if not isinstance(path, str) or not _is_under(path, root) or bool(getattr(entry, "is_dir", False)):
                 continue
-            modified_at = getattr(entry, "mod_time", None)
-            if hasattr(modified_at, "timestamp"):
-                modified_at = modified_at.timestamp()
-            if not isinstance(modified_at, (int, float)):
+            modified_at = _modified_timestamp(getattr(entry, "mod_time", None))
+            if modified_at is None:
                 continue
-            results.append(VolumeFile(path, float(modified_at)))
+            results.append(VolumeFile(path, modified_at))
             if len(results) >= max_files:
                 break
+
+        if len(results) <= 100:
+            cached_data = [{"path": rf.path, "modified_at": rf.modified_at} for rf in results]
+            self._metadata_cache.put(cache_key, json.dumps(cached_data).encode("utf-8"))
         return tuple(results)
 
 

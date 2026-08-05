@@ -116,8 +116,11 @@ class _DaytonaRunSink:
         paths: VolumePaths,
     ) -> None:
         self._sandbox = sandbox
-        self._files = AsyncDaytonaVolumeFS(sandbox)
-        self.volume_fs = DaytonaSandboxVolumeFs(sync_sandbox(sandbox, loop)) if loop is not None else None
+        mount_path = str(paths.mount_path)
+        self._files = AsyncDaytonaVolumeFS(sandbox, mount_path=mount_path)
+        self.volume_fs = (
+            DaytonaSandboxVolumeFs(sync_sandbox(sandbox, loop), mount_path=mount_path) if loop is not None else None
+        )
         self._max_read_bytes = max_read_bytes
         self._paths = paths
 

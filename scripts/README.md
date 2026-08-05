@@ -14,6 +14,9 @@
 | `live_daytona_verify.py` | Run the opt-in Daytona MVP proof and validate its bounded JSON receipt |
 | `live_daytona_tunnel_probe.py` | Run the development-only strict Daytona egress smoke through two Cloudflare HTTPS origins |
 | `benchmark_daytona_lifecycle.py` | Benchmark full Daytona create-through-first-execution lifecycle and select retained versus per-Turn mode |
+| `run_benchmarks.py` | Run the offline Daytona volume performance baseline |
+| `performance_benchmarks/daytona_baseline.py` | Measure local volume I/O and filesystem-operation baselines without a cloud Sandbox |
+| `performance_benchmarks/concurrency_stress.py` | Exercise local concurrent file-operation scaling without a cloud Sandbox |
 | `benchmarks/run_prime_oolong.py` | Run the pinned PrimeIntellect Oolong environment against a live Fleet API using Attachments |
 | `benchmarks/prime_oolong_sidecar.py` | Isolated JSONL export/scoring bridge for the pinned PrimeIntellect environment |
 | `benchmarks/run_native_long_context.py` | Measure native whole-value URL context at 1/5/10 MiB and emit the paging decision receipt |

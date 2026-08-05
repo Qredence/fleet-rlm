@@ -1,4 +1,10 @@
-"""Exact DSPy 3.3.0 RLM construction and observation contract."""
+"""DSPy 3.3.0 contract and trajectory normalization utilities.
+
+DSPy's native ``RLM`` owns one immutable ``REPLHistory`` per invocation and
+returns completed interactions as ``Prediction.trajectory``. Fleet validates
+that public trajectory projection for SSE and durable observation details while
+leaving history construction and lifecycle ownership to DSPy.
+"""
 
 from __future__ import annotations
 
@@ -61,12 +67,7 @@ class TrajectoryStep:
 
 
 def normalize_prediction_trajectory(prediction: Any) -> tuple[TrajectoryStep, ...]:
-    """Validate the native trajectory without mutating its ``Prediction`` owner.
-
-    DSPy owns the trajectory lifecycle. Fleet only accepts its documented list of
-    iteration mappings and turns absent public fields into empty strings for the
-    internal reconciliation seam.
-    """
+    """Validate and convert DSPy's public ``Prediction.trajectory`` projection."""
     trajectory = getattr(prediction, "trajectory", None)
     if not isinstance(trajectory, Sequence) or isinstance(trajectory, (str, bytes, bytearray)):
         raise PredictionOutputError

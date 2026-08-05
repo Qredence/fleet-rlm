@@ -150,6 +150,20 @@ def test_prediction_result_outputs_are_deeply_immutable() -> None:
         result.outputs["answer"] = "changed"  # type: ignore[index]
 
 
+def test_prediction_trajectory_normalization_does_not_mutate_dspy_prediction() -> None:
+    from fleet_rlm.rlm.dspy_contract import normalize_prediction_trajectory
+
+    raw_trajectory = [{"reasoning": "inspect", "code": "value = 1", "output": "1"}]
+    prediction = dspy.Prediction(trajectory=raw_trajectory)
+
+    normalized = normalize_prediction_trajectory(prediction)
+
+    assert normalized[0].reasoning == "inspect"
+    assert normalized[0].code == "value = 1"
+    assert normalized[0].output == "1"
+    assert prediction.trajectory == raw_trajectory
+
+
 def _lookup(value: str) -> str:
     """Return a value through a host tool."""
     return value

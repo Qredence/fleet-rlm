@@ -144,8 +144,8 @@ class _DaytonaWorkspaceFileSession:
 
 class _DaytonaWorkspaceVolumeSession:
     def __init__(self, sandbox: object, *, mount_path: str) -> None:
-        self._files = AsyncDaytonaVolumeFS(sandbox)
         self._mount_path = validate_mount_path(mount_path)
+        self._files = AsyncDaytonaVolumeFS(sandbox, mount_path=str(self._mount_path))
 
     def _path(self, logical_path: str) -> str:
         path = PurePosixPath(logical_path)
