@@ -178,14 +178,13 @@ async def test_native_rlm_preserves_state_tools_submit_prediction_and_trajectory
     rlm = RLMFactory().create(
         models=RLMModelBundle(root_lm=object(), sub_lm=object()),  # type: ignore[arg-type]
         options=RLMOptions(max_iterations=2),
-        interpreter=interpreter,
         tools=(observe_tool(dspy.Tool(helper), observed.append, ToolEventView.metadata_only()),),
         signature="request -> answer",
     )
     rlm.generate_action = _StatefulActionPredictor()
     bind_native_rlm_observer(rlm, observed.append, max_chars=1_000)
 
-    prediction = await rlm.acall(request="run the deterministic contract")
+    prediction = await rlm.acall(interpreter, request="run the deterministic contract")
 
     assert isinstance(rlm, dspy.RLM)
     assert rlm.verbose is True
@@ -212,6 +211,7 @@ async def test_native_rlm_preserves_state_tools_submit_prediction_and_trajectory
         "Call the registered helper and retain the result.",
         "Submit the retained result.",
     ]
+    interpreter.shutdown()
 
 
 @pytest.mark.asyncio
@@ -221,13 +221,12 @@ async def test_native_repl_history_and_python_state_are_isolated_per_turn() -> N
     first = RLMFactory().create(
         models=models,
         options=RLMOptions(max_iterations=3),
-        interpreter=first_interpreter,
         signature="request -> answer: str",
     )
     actions = _ThreeIterationActions()
     first.generate_action = actions
 
-    prediction = await first.acall(request="complete the accumulator contract")
+    prediction = await first.acall(first_interpreter, request="complete the accumulator contract")
 
     assert prediction.answer == "10"
     assert prediction.final_reasoning == "submit the verified result"
@@ -247,34 +246,35 @@ async def test_native_repl_history_and_python_state_are_isolated_per_turn() -> N
     second = RLMFactory().create(
         models=models,
         options=RLMOptions(max_iterations=1),
-        interpreter=second_interpreter,
         signature="request -> answer: str",
     )
     fresh_action = _FreshTurnAction()
     second.generate_action = fresh_action
 
-    fresh_prediction = await second.acall(request="confirm transient state was discarded")
+    fresh_prediction = await second.acall(second_interpreter, request="confirm transient state was discarded")
 
     assert first is not second
     assert first_interpreter is not second_interpreter
     assert fresh_prediction.answer == "fresh"
     assert fresh_action.history is not None
     assert fresh_action.history is not actions.histories[0]
+    first_interpreter.shutdown()
+    second_interpreter.shutdown()
 
 
 @pytest.mark.asyncio
 async def test_native_extract_fallback_receives_accumulated_repl_history() -> None:
     extractor = _CapturingExtract()
+    interpreter = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())
     rlm = RLMFactory().create(
         models=RLMModelBundle(root_lm=object(), sub_lm=object()),  # type: ignore[arg-type]
         options=RLMOptions(max_iterations=2),
-        interpreter=DaytonaCodeInterpreter(backend=InProcessInterpreterBackend()),
         signature="request -> answer: str",
     )
     rlm.generate_action = _TwoIterationNoSubmit()
     rlm.extract = extractor
 
-    prediction = await rlm.acall(request="exercise extraction")
+    prediction = await rlm.acall(interpreter, request="exercise extraction")
 
     assert extractor.history is not None
     assert len(extractor.history.entries) == 2
@@ -282,34 +282,37 @@ async def test_native_extract_fallback_receives_accumulated_repl_history() -> No
     assert prediction.answer == "extracted"
     assert prediction.final_reasoning == "Extract forced final output"
     assert [entry["reasoning"] for entry in prediction.trajectory] == ["initialize", "extend"]
+    interpreter.shutdown()
 
 
 @pytest.mark.asyncio
 async def test_native_rlm_repairs_invalid_submit_and_typed_extract_fallback() -> None:
     models = RLMModelBundle(root_lm=object(), sub_lm=object())  # type: ignore[arg-type]
+    repaired_interpreter = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())
     repaired = RLMFactory().create(
         models=models,
         options=RLMOptions(max_iterations=2),
-        interpreter=DaytonaCodeInterpreter(backend=InProcessInterpreterBackend()),
         signature="request -> answer: str",
     )
     repaired.generate_action = _InvalidThenValidSubmit()
-    repaired_prediction = await repaired.acall(request="repair")
+    repaired_prediction = await repaired.acall(repaired_interpreter, request="repair")
 
+    extracted_interpreter = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())
     extracted = RLMFactory().create(
         models=models,
         options=RLMOptions(max_iterations=1),
-        interpreter=DaytonaCodeInterpreter(backend=InProcessInterpreterBackend()),
         signature="request -> answer: str",
     )
     extracted.generate_action = _NeverSubmit()
     extracted.extract = _TypedExtract()
-    extracted_prediction = await extracted.acall(request="extract")
+    extracted_prediction = await extracted.acall(extracted_interpreter, request="extract")
 
     assert repaired_prediction.answer == "repaired"
     assert len(repaired_prediction.trajectory) == 2
     assert extracted_prediction.answer == "extracted"
     assert extracted_prediction.final_reasoning == "Extract forced final output"
+    repaired_interpreter.shutdown()
+    extracted_interpreter.shutdown()
 
 
 @pytest.mark.asyncio
@@ -327,19 +330,19 @@ async def test_native_rlm_rejects_invalid_host_tool_type_before_host_logic() -> 
     rlm = RLMFactory().create(
         models=RLMModelBundle(root_lm=object(), sub_lm=object()),  # type: ignore[arg-type]
         options=RLMOptions(max_iterations=2),
-        interpreter=interpreter,
         tools=(observe_tool(dspy.Tool(helper), observed.append, ToolEventView.metadata_only()),),
         signature="request -> answer: str",
     )
     rlm.generate_action = _InvalidToolThenSubmit()
 
-    prediction = await rlm.acall(request="repair invalid host Tool input")
+    prediction = await rlm.acall(interpreter, request="repair invalid host Tool input")
 
     assert prediction.answer == "repaired"
     assert host_calls == 0
     assert any(isinstance(item, ToolStarted) for item in observed)
     assert any(isinstance(item, ToolFailed) for item in observed)
     assert not any(isinstance(item, ToolCompleted) for item in observed)
+    interpreter.shutdown()
 
 
 @pytest.mark.asyncio

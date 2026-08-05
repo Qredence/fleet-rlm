@@ -188,11 +188,32 @@ def observe_tool(
         finish_trace(status="completed", output={"tool_status": "completed", "output": projected_output})
         return result
 
+    source_args = source.args or {}
+    source_arg_types = source.arg_types or {}
+
+    def permissive_schema(schema: object) -> dict[str, Any]:
+        value = dict(schema) if isinstance(schema, Mapping) else {}
+        # DSPy skips JSON-schema validation for ``Any`` while retaining all
+        # source metadata (defaults, descriptions, and provider-facing fields).
+        value["type"] = "Any"
+        return value
+
+    permissive_args = {name: permissive_schema(schema) for name, schema in source_args.items()}
+    for name in source_arg_types:
+        permissive_args.setdefault(name, {"type": "Any"})
     return dspy.Tool(
         wrapped,
         name=source.name,
         desc=source.desc,
-        args=source.args,
-        arg_types=source.arg_types,
+        # The final DSPy RLM validates the normalized Tool against ``args``
+        # before invoking it. Use unconstrained schemas here so Fleet's
+        # source validator below remains the single validation/observation
+        # point and can report invalid values publicly.
+        args=permissive_args,
+        # DSPy 3.3.0 validates the normalized Tool before invoking its
+        # function. Keep that outer adapter permissive so Fleet's wrapped
+        # validator can emit the public ToolStarted/ToolFailed events and
+        # preserve the original source validation contract.
+        arg_types={name: Any for name in permissive_args},
         arg_desc=source.arg_desc,
     )

@@ -81,14 +81,14 @@ async def probe_root_lm(root_lm: Any) -> RLMProviderProbeResult:
         signature=_ProviderProbeSignature,
         options=RLMOptions(max_iterations=4, max_llm_calls=4, max_output_chars=2_000),
         tools=[recursive.tool],
-        interpreter=interpreter,
     )
     try:
         with dspy.context(lm=root_lm, adapter=dspy.JSONAdapter(), track_usage=False):
             prediction = await rlm.acall(
+                interpreter,
                 probe=(
                     "Set marker = 'probe-slice'. On a later REPL iteration call "
-                    "child = rlm_query('Classify this selected value: ' + marker), "
+                    "child = rlm_query(prompt='Classify this selected value: ' + marker), "
                     "then submit the child answer with typed SUBMIT(answer=child). "
                     "Use at least three REPL iterations and keep the prompt bounded."
                 )

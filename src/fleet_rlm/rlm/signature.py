@@ -28,7 +28,7 @@ class FleetRLMSignature(dspy.Signature):
     3. Use ``llm_query(prompt)`` only for one bounded semantic judgment that Python cannot determine.
     4. Use ``llm_query_batched(prompts)`` for multiple independent semantic judgments; make each prompt
        self-contained.
-    5. Use ``rlm_query(prompt)`` only when a selected, self-contained subproblem needs its own iterative Python
+    5. Use ``rlm_query(prompt=prompt)`` only when a selected, self-contained subproblem needs its own iterative Python
        exploration. It creates a fresh child RLM and interpreter, so do not use it for ordinary extraction,
        counting, parsing, aggregation, or independent semantic excerpts. Keep large inputs in Python variables,
        select only the relevant slice, and never forward the complete Turn, history, Attachment, or Workspace
@@ -95,7 +95,7 @@ def root_signature_for_recursion(
     """
     if recursion_enabled or signature is not FleetRLMSignature:
         return signature
-    before, marker, remainder = FleetRLMSignature.instructions.partition("5. Use ``rlm_query(prompt)``")
+    before, marker, remainder = FleetRLMSignature.instructions.partition("5. Use ``rlm_query(prompt=prompt)``")
     _discarded, next_marker, after = remainder.partition("6. Verify")
     if not marker or not next_marker:
         raise RuntimeError("FleetRLMSignature recursive guidance is malformed")

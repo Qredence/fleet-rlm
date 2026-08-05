@@ -17,6 +17,13 @@ All notable changes to this project are documented in this file.
 
 ### Changed
 
+- **Change:** Migrated the native Fleet RLM integration to DSPy `3.3.0`,
+  preserving Fleet's `max_iterations` configuration while adapting
+  construction and caller-owned interpreter invocation to DSPy's final contract.
+  **Outcome:** Native Turns, streaming, recursive children, and deterministic
+  test composition retain their existing event and cleanup behavior while using
+  the exact DSPy `3.3.0` runtime.
+
 - **Change:** Bumped `fastapi[standard]` from `==0.139.0` to `==0.141.1`
   (latest PyPI release, Jul 29 2026) along with `fastapi-cli` 0.0.24 -> 0.0.32,
   taking the 0.140.x dependency-solver memory refactors and SSE/streaming

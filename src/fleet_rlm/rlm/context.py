@@ -17,6 +17,7 @@ from fleet_rlm.files.models import PreparedAttachment
 from fleet_rlm.files.workspace_models import UNAVAILABLE_WORKSPACE_CAPABILITY, WorkspaceCapabilityMetadata
 from fleet_rlm.rlm.child_runtime import ChildRuntimeFactory
 from fleet_rlm.rlm.dspy_contract import RLMOptions
+from fleet_rlm.rlm.dspy_interpreter_contract import CodeInterpreter
 from fleet_rlm.rlm.inputs import AttachmentContextCapsule
 from fleet_rlm.rlm.model_bundle import RLMModelBundle
 from fleet_rlm.rlm.recursive_calls import RecursiveRLMOptions
@@ -36,10 +37,8 @@ class PreparationNotice:
     message: str
 
 
-class RLMInterpreter(Protocol):
+class RLMInterpreter(CodeInterpreter, Protocol):
     """Narrow interpreter surface consumed by DSPy's RLM adapter."""
-
-    def execute(self, code: str) -> Any: ...
 
     def drain_context_accesses(self) -> tuple[str, ...]: ...
 

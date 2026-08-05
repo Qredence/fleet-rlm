@@ -102,7 +102,7 @@ def test_success_receipt_is_enriched_and_sanitized(tmp_path: Path, monkeypatch: 
     monkeypatch.setattr(
         verifier,
         "_installed_versions",
-        lambda _env: {"python": "3.13.13", "dspy": "3.3.0b1", "daytona": "0.199.0"},
+        lambda _env: {"python": "3.13.13", "dspy": "3.3.0", "daytona": "0.199.0"},
     )
     monkeypatch.setattr(verifier, "_lockfile_sha256", lambda: "b" * 64)
 

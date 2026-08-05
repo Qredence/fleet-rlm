@@ -150,12 +150,6 @@ def test_prediction_result_outputs_are_deeply_immutable() -> None:
         result.outputs["answer"] = "changed"  # type: ignore[index]
 
 
-class _Interpreter:
-    @property
-    def tools(self) -> dict[str, Any]:
-        return {}
-
-
 def _lookup(value: str) -> str:
     """Return a value through a host tool."""
     return value
@@ -179,13 +173,11 @@ def test_build_native_rlm_preserves_exact_public_constructor_inputs() -> None:
         answer: str = dspy.OutputField()
 
     sub_lm = object()
-    interpreter = _Interpreter()
     kwargs: dict[str, Any] = {
         "signature": TaskSignature,
         "options": RLMOptions(max_iterations=7, max_llm_calls=11, max_output_chars=2048),
         "tools": [_lookup],
         "sub_lm": sub_lm,
-        "interpreter": interpreter,
     }
 
     first = build_native_rlm(**kwargs)
@@ -195,13 +187,24 @@ def test_build_native_rlm_preserves_exact_public_constructor_inputs() -> None:
     assert first is not second
     assert first.verbose is True
     assert first.signature is TaskSignature
-    assert first.max_iterations == 7
+    assert first.max_iters == 7
     assert first.max_llm_calls == 11
     assert first.max_output_chars == 2048
     assert first.sub_lm is sub_lm
-    assert first._interpreter is interpreter
+    assert not hasattr(first, "_interpreter")
+    assert first._interpreter_factory.__name__ == "_missing_caller_owned_interpreter"
     assert set(first.tools) == {"_lookup"}
     assert first.generate_action.callbacks == []
+
+
+def test_build_native_rlm_fails_closed_without_a_caller_owned_interpreter() -> None:
+    from fleet_rlm.rlm.dspy_contract import RLMOptions, build_native_rlm
+    from fleet_rlm.rlm.errors import RLMConfigError
+
+    rlm = build_native_rlm(signature="request -> answer", options=RLMOptions(max_iterations=1))
+
+    with pytest.raises(RLMConfigError, match="caller-owned interpreter"):
+        rlm(request="missing interpreter")
 
 
 @pytest.mark.asyncio
@@ -271,6 +274,9 @@ async def test_native_rlm_callback_observes_completed_action_without_altering_pr
     class Interpreter:
         tools: ClassVar[dict[str, object]] = {}
 
+        def __init__(self) -> None:
+            self.shutdown_calls = 0
+
         def start(self) -> None:
             return None
 
@@ -281,31 +287,33 @@ async def test_native_rlm_callback_observes_completed_action_without_altering_pr
             return wrap_final_output({"answer": "ok"})
 
         def shutdown(self) -> None:
-            return None
+            self.shutdown_calls += 1
 
     observed: list[object] = []
+    interpreter = Interpreter()
     rlm = build_native_rlm(
         signature=TaskSignature,
         options=RLMOptions(max_iterations=1),
-        interpreter=Interpreter(),
     )
     rlm.generate_action = Action()
     bind_native_rlm_observer(rlm, observed.append, max_chars=64)
 
-    prediction = await rlm.acall(request="go")
+    prediction = await rlm.acall(interpreter, request="go")
 
     assert type(rlm) is dspy.RLM
     assert prediction.answer == "ok"
+    assert interpreter.shutdown_calls == 0
     assert [type(item) for item in observed] == [RLMReasoning]
     assert observed[0].text == "Decide the answer directly."
     assert observed[0].step == 1
+    interpreter.shutdown()
 
 
 def test_composition_version_guard_rejects_any_unpinned_dspy(monkeypatch: pytest.MonkeyPatch) -> None:
     from fleet_rlm.rlm.dspy_contract import assert_dspy_version
 
-    monkeypatch.setattr(dspy, "__version__", "3.3.0")
-    with pytest.raises(RuntimeError, match=r"DSPy 3.3.0b1 is required"):
+    monkeypatch.setattr(dspy, "__version__", "3.3.0b1")
+    with pytest.raises(RuntimeError, match=r"DSPy 3.3.0 is required"):
         assert_dspy_version()
 
 

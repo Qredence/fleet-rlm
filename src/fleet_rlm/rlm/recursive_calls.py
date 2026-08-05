@@ -382,7 +382,6 @@ class RecursiveRLMExecutor:
                 ),
                 tools=[child_executor.tool],
                 sub_lm=self._models.sub_lm,
-                interpreter=lease.interpreter,
                 verbose=False,
             )
             self._ensure_authorized()
@@ -398,7 +397,7 @@ class RecursiveRLMExecutor:
                 ],
                 track_usage=True,
             ):
-                prediction = child(prompt=prompt)
+                prediction = child(lease.interpreter, prompt=prompt)
             result = prediction_result(
                 prediction,
                 RecursiveSubtaskSignature,

@@ -111,7 +111,7 @@ def test_recursive_tool_uses_sub_lm_at_depth_cap_without_new_interpreter() -> No
     created: list[DaytonaCodeInterpreter] = []
     executor = _executor(
         [
-            {"reasoning": "delegate deeper", "code": "inner = rlm_query('inner slice')"},
+            {"reasoning": "delegate deeper", "code": "inner = rlm_query(prompt='inner slice')"},
             {"reasoning": "submit child", "code": "SUBMIT(answer=inner)"},
         ],
         sub_actions=[{"answer": "fallback-answer"}],

@@ -2,7 +2,7 @@
 
 Optimizes the ``FleetRLMSignature`` instruction text against the UC-managed
 evaluation dataset (Wave 2) scored by the shared Fleet judges (Wave 4
-alignment included when ``--scorer-source registry``). ``dspy==3.3.0b1`` pins
+alignment included when ``--scorer-source registry``). ``dspy==3.3.0`` pins
 ``gepa[dspy]==0.1.1``, so the native omni engine registry is unavailable: this
 script composes ``optimize_anything`` runs instead — parallel explore variants
 with distinct seeds, best-of selection by validation aggregate, then a fresh
@@ -193,37 +193,40 @@ class InProcessTurnExecutor:
         from fleet_rlm.rlm.inputs import build_rlm_input_kwargs
 
         signature = build_candidate_signature(candidate)
-        rlm = build_native_rlm(
-            signature=signature,
-            options=self._options,
-            sub_lm=self._models.sub_lm,
-            interpreter=DaytonaCodeInterpreter(backend=InProcessInterpreterBackend()),
-            verbose=False,
-        )
-        context = SessionContextManifest(session_id=uuid4(), checkpoint_version=0, message_count=0, recent=())
-        kwargs = build_rlm_input_kwargs(request=query, session_context=context)
-        started = time.perf_counter()
-        with dspy.context(lm=self._models.root_lm, adapter=dspy.JSONAdapter(), track_usage=True):
-            prediction = rlm(**kwargs)
-        result = prediction_result(
-            prediction,
-            signature,
-            schema_id="fleet.signature-optimization",
-            schema_version="1",
-            max_output_chars=self._options.max_output_chars,
-        )
-        trajectory = getattr(prediction, "trajectory", ())
-        mode = (
-            "native_extraction_fallback"
-            if getattr(prediction, "final_reasoning", None) == "Extract forced final output"
-            else "typed_submit"
-        )
-        return {
-            "answer": result.display_text,
-            "iterations": len(trajectory) if isinstance(trajectory, list) else 0,
-            "termination_mode": mode,
-            "elapsed_ms": int((time.perf_counter() - started) * 1000),
-        }
+        interpreter = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())
+        try:
+            rlm = build_native_rlm(
+                signature=signature,
+                options=self._options,
+                sub_lm=self._models.sub_lm,
+                verbose=False,
+            )
+            context = SessionContextManifest(session_id=uuid4(), checkpoint_version=0, message_count=0, recent=())
+            kwargs = build_rlm_input_kwargs(request=query, session_context=context)
+            started = time.perf_counter()
+            with dspy.context(lm=self._models.root_lm, adapter=dspy.JSONAdapter(), track_usage=True):
+                prediction = rlm(interpreter, **kwargs)
+            result = prediction_result(
+                prediction,
+                signature,
+                schema_id="fleet.signature-optimization",
+                schema_version="1",
+                max_output_chars=self._options.max_output_chars,
+            )
+            trajectory = getattr(prediction, "trajectory", ())
+            mode = (
+                "native_extraction_fallback"
+                if getattr(prediction, "final_reasoning", None) == "Extract forced final output"
+                else "typed_submit"
+            )
+            return {
+                "answer": result.display_text,
+                "iterations": len(trajectory) if isinstance(trajectory, list) else 0,
+                "termination_mode": mode,
+                "elapsed_ms": int((time.perf_counter() - started) * 1000),
+            }
+        finally:
+            interpreter.shutdown()
 
 
 def _judge_value(feedback: Any) -> bool:

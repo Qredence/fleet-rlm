@@ -1,11 +1,11 @@
-name: Check dspy beta pin
+name: Check dspy pin
 
 permissions:
   contents: read
 
 on:
   schedule:
-    # Daily at 06:00 UTC — catches a yanked beta before it causes an outage.
+    # Daily at 06:00 UTC — catches a yanked release before it causes an outage.
     - cron: "0 6 * * *"
   workflow_dispatch:
   pull_request:
@@ -15,8 +15,8 @@ on:
       - ".github/workflows/check-dspy-pin.yml"
 
 jobs:
-  check-dspy-beta-availability:
-    name: Verify dspy==3.3.0b1 is installable from PyPI
+  check-dspy-availability:
+    name: Verify dspy==3.3.0 is installable from PyPI
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -31,17 +31,17 @@ jobs:
       - name: Set up Python
         run: uv python install 3.12
 
-      - name: Check dspy==3.3.0b1 installability
+      - name: Check dspy==3.3.0 installability
         run: |
-          # 3.3.0b1 is the backend contract pin in pyproject.toml.
-          # Fail loudly if PyPI yanks or removes the beta.
+          # 3.3.0 is the backend contract pin in pyproject.toml.
+          # Fail loudly if PyPI yanks or removes the release.
           # uv-managed Python installations are externally managed; probe from
           # a temporary virtual environment instead of writing to the base
           # interpreter.
           probe_venv="$RUNNER_TEMP/dspy-pin-venv"
           uv venv --python 3.12 "$probe_venv"
-          if ! uv pip install --dry-run --python "$probe_venv/bin/python" "dspy==3.3.0b1"; then
-            echo "::error::dspy==3.3.0b1 is no longer installable from PyPI. The beta may have been yanked. Re-pin to a reissued beta or vendor the source per the AGENTS.md contract."
+          if ! uv pip install --dry-run --python "$probe_venv/bin/python" "dspy==3.3.0"; then
+            echo "::error::dspy==3.3.0 is no longer installable from PyPI. The release may have been yanked. Re-pin to a reissued release or vendor the source per the AGENTS.md contract."
             exit 1
           fi
-          echo "dspy==3.3.0b1 is available from PyPI."
+          echo "dspy==3.3.0 is available from PyPI."

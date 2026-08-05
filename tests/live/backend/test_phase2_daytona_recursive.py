@@ -48,7 +48,7 @@ class Phase2Result(dspy.Signature):
 
 _SCENARIO = """
 Run exactly one recursive Daytona proof. First set `root_marker = "root-only"`. Then make exactly one
-`child_result = rlm_query(...)` call. The child prompt must tell the fresh child interpreter to determine whether
+`child_result = rlm_query(prompt=...)` call. The child prompt must tell the fresh child interpreter to determine whether
 the Python name `root_marker` exists, return exactly `absent` when it does not, and use typed
 `SUBMIT(answer="absent")`; do not call rlm_query inside the child. After return, assert that root_marker is still
 `root-only` and child_result is exactly `absent`. Call verify_phase2 exactly once with those values and require

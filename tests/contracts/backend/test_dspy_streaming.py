@@ -50,11 +50,8 @@ async def test_stock_rlm_streamify_yields_field_chunks_before_prediction() -> No
         request: str = dspy.InputField()
         answer: str = dspy.OutputField()
 
-    rlm = dspy.RLM(
-        Signature,
-        max_iterations=2,
-        interpreter=DaytonaCodeInterpreter(backend=InProcessInterpreterBackend()),
-    )
+    interpreter = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())
+    rlm = dspy.RLM(Signature, max_iters=2)
     predictor_name = next(name for name, predictor in rlm.named_predictors() if predictor is rlm.generate_action)
     listeners = [
         dspy.streaming.StreamListener(
@@ -73,14 +70,17 @@ async def test_stock_rlm_streamify_yields_field_chunks_before_prediction() -> No
     )
     lm = dspy.LM("openai/fleet-test", cache=False)
 
-    with (
-        patch("dspy.clients.lm._get_litellm", return_value=_StreamingLiteLLM()),
-        dspy.context(
-            lm=lm,
-            adapter=dspy.JSONAdapter(),
-        ),
-    ):
-        values = [value async for value in streamify(request="stream this")]
+    try:
+        with (
+            patch("dspy.clients.lm._get_litellm", return_value=_StreamingLiteLLM()),
+            dspy.context(
+                lm=lm,
+                adapter=dspy.JSONAdapter(),
+            ),
+        ):
+            values = [value async for value in streamify(interpreter, request="stream this")]
+    finally:
+        interpreter.shutdown()
 
     assert isinstance(values[-1], dspy.Prediction)
     assert values[-1].answer == "done"
@@ -169,7 +169,7 @@ async def test_native_stream_path_completes_when_streamify_only_returns_predicti
         def drain_artifact_candidates(self):
             return ()
 
-    async def no_stream(**_kwargs: object):
+    async def no_stream(*_args: object, **_kwargs: object):
         yield dspy.Prediction(
             answer="fallback",
             trajectory=[

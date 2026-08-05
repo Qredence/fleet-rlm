@@ -1,6 +1,6 @@
-# dspy.RLM contract (Fleet / DSPy 3.3.0b1)
+# dspy.RLM contract (Fleet / DSPy 3.3.0)
 
-Authority: installed `dspy==3.3.0b1` and [dspy.ai RLM](https://dspy.ai/api/modules/RLM/). Do not treat Daytona provider docs as DSPy module authority.
+Authority: installed `dspy==3.3.0` and [dspy.ai RLM](https://dspy.ai/api/modules/RLM/). Do not treat Daytona provider docs as DSPy module authority.
 
 ## Name
 
@@ -15,7 +15,7 @@ Authority: installed `dspy==3.3.0b1` and [dspy.ai RLM](https://dspy.ai/api/modul
 1. The Root LM inspects bound inputs and REPL history, then emits reasoning plus Python code.
 2. Code runs in a sandboxed interpreter. Variables persist for the Run.
 3. Built-ins include `llm_query(prompt)`, `llm_query_batched(prompts)`, and `SUBMIT(...)`.
-4. Fleet adds `rlm_query(prompt)` for one bounded child-RLM subproblem.
+4. Fleet adds `rlm_query(prompt=prompt)` for one bounded child-RLM subproblem.
 5. Host Tools (Fleet) are additional callables registered for the Turn.
 6. `SUBMIT(...)` ends the RLM loop with typed Signature outputs.
 7. If the loop ends without SUBMIT, DSPy may extract outputs from the trajectory.
@@ -30,7 +30,7 @@ keep large values in REPL variables or Session Workspace, and never paste a
 long report or repeat the complete request in generated code. The Daytona
 interpreter rejects an action above its 12,000-character safety bound with
 bounded repair feedback so the next action can be smaller.
-Use `rlm_query(prompt)` when the selected subproblem benefits from its own
+Use `rlm_query(prompt=prompt)` when the selected subproblem benefits from its own
 bounded REPL loop. Keep large input-specific values in parent REPL variables,
 pass only the smallest sufficient slice, and retain the child answer in a
 parent variable. Child RLMs have fresh interpreter contexts and no Fleet
@@ -44,15 +44,32 @@ independent verification in separate iterations.
 
 | Parameter | Default | Role |
 |-----------|--------:|------|
-| `max_iterations` | 20 | Max REPL iterations |
+| `max_iters` | 20 | Max REPL iterations |
 | `max_llm_calls` | 50 | Max sub-LM calls (`llm_query` / batched) |
 | `max_output_chars` | 10000 | Truncates **REPL step output** fed back into the loop (not a silent truncate of SUBMIT) |
 
-Fleet follows the installed DSPy 3.3.0b1 constructor, which uses
-`max_iterations`. The current upstream documentation still shows `max_iters`;
-do not copy that spelling into Fleet while this pin is active.
+Fleet keeps the public `RLMOptions.max_iterations` configuration field and maps
+it to DSPy 3.3.0's `max_iters` constructor parameter in
+`rlm.dspy_contract`. Do not rename the Fleet field.
 
 Fleet maps these via `FLEET_RLM_MAX_ITERATIONS`, `FLEET_RLM_MAX_LLM_CALLS`, and `FLEET_RLM_MAX_OUTPUT_CHARS`.
+
+## Fleet-to-DSPy construction and ownership
+
+| Fleet surface | Fleet value | DSPy 3.3.0 surface |
+|---|---|---|
+| Fleet iteration budget | `max_iterations` | `max_iters` |
+| Native construction | `build_native_rlm(...)` without an interpreter | `dspy.RLM(..., interpreter_factory=...)` |
+| Native async execution | Existing caller-owned interpreter | `await rlm.acall(interpreter, **named_inputs)` |
+| Native streaming | Existing caller-owned interpreter | `stream_program(interpreter, **named_inputs)` |
+| Shutdown | Fleet or the child lease | DSPy does not shut down caller-owned interpreters |
+
+Fleet's private `interpreter_factory` is fail-closed: if a native RLM is
+invoked without the caller-owned positional interpreter, it raises the
+sanitized `RLMConfigError` instead of creating DSPy's default interpreter.
+Never pass an existing Fleet interpreter through `interpreter_factory`; DSPy
+would then treat it as DSPy-owned. Deterministic `_TestingRLM` substitutes stay
+keyword-only and are not routed through the native positional call contract.
 
 ## Fleet mapping
 
@@ -81,6 +98,11 @@ Fleet maps these via `FLEET_RLM_MAX_ITERATIONS`, `FLEET_RLM_MAX_LLM_CALLS`, and 
   bounded code/output previews and execution timings. Full prompts, credentials, and
   unbounded generated content are not retained in these spans.
 - Declared `answer` JSON must fit the Turn commit budget. Oversized SUBMIT fails with public message `Turn output is too large`. Prefer writing long reports to Session Workspace, then SUBMIT a short summary.
+
+DSPy 3.3.0's final namespace, Tool, and sub-LM response validation is
+authoritative. Fleet host Tools preserve their own bounded validation and event
+views; generated Tool calls use keyword arguments, including
+`rlm_query(prompt=...)`.
 
 ## SUBMIT
 

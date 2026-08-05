@@ -157,8 +157,9 @@ def test_turn_trace_enabled_sets_tags_and_trace_id(monkeypatch: pytest.MonkeyPat
     session_id = uuid4()
     run_id = uuid4()
     with turn_trace(session_id, run_id, enabled=True) as handle:
-        assert handle.trace_id == "tr-active-123"
-        assert current_turn_trace_id() == "tr-active-123"
+        assert handle.trace_id == "tr-from-span"
+        assert current_turn_trace_id() == "tr-from-span"
+        assert calls.get_trace_calls == 0
         assert calls.start_span_names == ["fleet_turn"]
         assert calls.update_kwargs[0] == {
             "session_id": str(session_id),
@@ -336,9 +337,21 @@ def test_turn_trace_teardown_failure_does_not_change_success(monkeypatch: pytest
     _install_fake_mlflow(monkeypatch, teardown_explode=True)
 
     with turn_trace(uuid4(), uuid4(), enabled=True) as handle:
-        assert handle.trace_id == "tr-active-123"
+        assert handle.trace_id == "tr-from-span"
 
     assert current_turn_trace_id() is None
+
+
+def test_turn_trace_uses_current_span_when_last_active_trace_is_stale(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = _install_fake_mlflow(monkeypatch)
+    mlflow = sys.modules["mlflow"]
+    mlflow.get_last_active_trace_id = lambda: "tr-from-previous-preparation"  # type: ignore[attr-defined]
+
+    with turn_trace(uuid4(), uuid4(), enabled=True) as handle:
+        assert handle.trace_id == "tr-from-span"
+        assert current_turn_trace_id() == "tr-from-span"
+
+    assert calls.get_trace_calls == 0
 
 
 def test_turn_trace_teardown_failure_preserves_body_exception(monkeypatch: pytest.MonkeyPatch) -> None:

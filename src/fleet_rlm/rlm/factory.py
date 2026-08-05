@@ -25,7 +25,6 @@ class RLMFactory:
         *,
         models: RLMModelBundle,
         options: RLMOptions,
-        interpreter: Any,
         tools: Sequence[dspy.Tool] | None = None,
         signature: type[dspy.Signature] | str | None = None,
         verbose: bool | None = None,
@@ -37,6 +36,5 @@ class RLMFactory:
             options=options,
             tools=tools,
             sub_lm=models.sub_lm,
-            interpreter=interpreter,
             verbose=self._verbose if verbose is None else verbose,
         )

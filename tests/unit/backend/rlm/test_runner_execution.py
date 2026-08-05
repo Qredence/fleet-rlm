@@ -14,6 +14,24 @@ import pytest
 
 
 @pytest.mark.asyncio
+async def test_detail_relay_keeps_1024_ordinary_events_and_lifecycle_details() -> None:
+    from fleet_rlm.rlm.events import RLMOutput, SkillLoaded
+    from fleet_rlm.rlm.runner import _MAX_DETAIL_EVENTS, _DetailRelay
+
+    relay = _DetailRelay()
+    for index in range(_MAX_DETAIL_EVENTS):
+        relay.publish(RLMOutput(f"detail-{index}", index))
+    relay.publish(SkillLoaded("skill-1", "benchmark", "1.0.0"))
+    relay.publish(RLMOutput("dropped", _MAX_DETAIL_EVENTS + 1))
+
+    details = relay.drain()
+
+    assert sum(isinstance(detail, RLMOutput) for detail in details) == _MAX_DETAIL_EVENTS
+    assert any(isinstance(detail, SkillLoaded) for detail in details)
+    assert relay.overflowed is True
+
+
+@pytest.mark.asyncio
 async def test_runner_uses_native_path_for_plain_greeting() -> None:
     from fleet_rlm.chat.session_context import SessionContextManifest
     from fleet_rlm.rlm.context import RLMExecutionContext, RLMExecutionSpec

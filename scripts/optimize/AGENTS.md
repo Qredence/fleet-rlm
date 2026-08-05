@@ -13,7 +13,7 @@ backend never imports scripts.
   directory is the only place it is wired.
 - `pyproject.toml [tool.uv] override-dependencies` pins gepa to the omni
   commit `0310bb7` (blog, 2026-07-22), a documented deviation from
-  dspy==3.3.0b1's declared `gepa[dspy]==0.1.1`. `make check` must stay green on
+  dspy==3.3.0's declared `gepa[dspy]==0.1.1`. `make check` must stay green on
   every bump of that commit. Native omni (`optimize_best_of` explore + fresh
   gepa continue) is the default via `--engine auto`; `--engine gepa` forces the
   single-engine fallback composition; `autoresearch`/`meta_harness` shell out

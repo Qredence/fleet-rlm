@@ -58,6 +58,7 @@ from fleet_rlm.rlm.tool_guards import TurnToolGuards, workspace_obligations
 from fleet_rlm.rlm.tool_observer import ToolEventView, observe_tool
 
 logger = logging.getLogger(__name__)
+_MAX_DETAIL_EVENTS = 1024
 
 
 def _recursive_summary(executor: RecursiveRLMExecutor | None) -> RecursiveCallSummary:
@@ -81,17 +82,16 @@ class RLMFactoryLike(Protocol):
         *,
         models: Any,
         options: Any,
-        interpreter: Any,
         tools: Sequence[dspy.Tool] | None = None,
         signature: Any = None,
         verbose: bool = True,
-    ) -> Any: """
-        Constructs an RLM with the specified models, execution options, interpreter, tools, and signature.
+    ) -> Any:
+        """
+        Constructs an RLM with the specified models, execution options, tools, and signature.
         
         Parameters:
             models (Any): Models used by the RLM.
             options (Any): Execution options for the RLM.
-            interpreter (Any): Interpreter used to execute RLM operations.
             tools (Sequence[dspy.Tool] | None): Optional tools available to the RLM.
             signature (Any): Optional signature defining the RLM interface.
             verbose (bool): Whether to enable verbose execution output.
@@ -169,7 +169,7 @@ class TurnEventStream:
 
 
 class _DetailRelay:
-    def __init__(self, *, maxsize: int = 256) -> None:
+    def __init__(self, *, maxsize: int = _MAX_DETAIL_EVENTS) -> None:
         self._loop = asyncio.get_running_loop()
         # Lifecycle is a durable protocol signal, not optional diagnostic
         # detail. Keep it even while normal observation traffic is capped.
@@ -663,7 +663,7 @@ class RLMRunner:
             RLMConfigError: If recursive execution requires a child runtime factory that is unavailable.
         """
         spec = context.capabilities.spec
-        relay = _DetailRelay()
+        relay = _DetailRelay(maxsize=_MAX_DETAIL_EVENTS)
         guards = TurnToolGuards(required_targets=workspace_obligations(context.request))
         self._bind_observer(context.interpreter, relay, context.options.max_output_chars)
         self._bind_context_capsule(context)
@@ -707,7 +707,6 @@ class RLMRunner:
         rlm = self._factory.create(
             models=context.models,
             options=context.options,
-            interpreter=context.interpreter,
             tools=all_tools or None,
             signature=spec.signature,
         )
@@ -826,7 +825,7 @@ class RLMRunner:
             ) as phase,
             dspy.context(
                 lm=context.models.root_lm,
-                # DSPy 3.3.0b1 combines context callbacks with instance
+                # DSPy 3.3.0 combines context callbacks with instance
                 # callbacks around LM requests (dspy/utils/callback.py:258-288).
                 callbacks=[_RLMTraceCallback(root_lm=context.models.root_lm, sub_lm=context.models.sub_lm)],
                 # Keep the pinned DSPy JSON action protocol authoritative. A
@@ -838,6 +837,11 @@ class RLMRunner:
         ):
             try:
                 stream_mode = "legacy"
+                native_call_args: tuple[Any, ...] = ()
+                if type(rlm) is dspy.RLM:
+                    if context.interpreter is None:
+                        raise RLMConfigError("native RLM execution requires a caller-owned interpreter")
+                    native_call_args = (context.interpreter,)
                 if type(rlm) is dspy.RLM and isinstance(rlm.generate_action, dspy.Predict):
                     named_predictors = dict(rlm.named_predictors())
                     predictor_name = next(
@@ -873,7 +877,7 @@ class RLMRunner:
                     )
                     prediction = None
                     streamed = False
-                    async for stream_item in stream_program(**kwargs):
+                    async for stream_item in stream_program(*native_call_args, **kwargs):
                         streamed |= stream_projector.publish(stream_item)
                         if isinstance(stream_item, dspy.Prediction):
                             prediction = stream_item
@@ -881,7 +885,7 @@ class RLMRunner:
                         raise TypeError("DSPy streamify completed without a Prediction")
                     stream_mode = "native" if streamed else "provider_fallback"
                 else:
-                    prediction = await rlm.acall(**kwargs)
+                    prediction = await rlm.acall(*native_call_args, **kwargs)
                 if recursive_executor is not None:
                     recursive_executor.raise_if_cleanup_failed()
             except BaseException as exc:

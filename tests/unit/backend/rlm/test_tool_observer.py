@@ -182,8 +182,11 @@ def test_observe_tool_preserves_metadata_and_correlates_explicit_view() -> None:
     assert another is not wrapped
     assert wrapped.name == source.name
     assert wrapped.desc == source.desc
-    assert wrapped.args == source.args
-    assert wrapped.arg_types == source.arg_types
+    # DSPy 3.3.0 validates normalized Tools before calling ``func``. The
+    # wrapper deliberately keeps that outer schema permissive so Fleet's
+    # source validator remains the event-producing validation boundary.
+    assert wrapped.args == {"key": {"type": "Any", "description": "Registered key"}}
+    assert wrapped.arg_types == {"key": Any}
     assert wrapped.arg_desc == source.arg_desc
     assert result == {"key": "alpha", "value": "private-result"}
     assert [type(item) for item in observed] == [ToolStarted, ToolCompleted]
@@ -191,6 +194,20 @@ def test_observe_tool_preserves_metadata_and_correlates_explicit_view() -> None:
     assert observed[0].input == {"key": "alpha"}
     assert observed[1].output == {"found": True}
     assert "private-result" not in str(observed)
+
+
+def test_observe_tool_keeps_optional_argument_schema_metadata_while_relaxing_outer_validation() -> None:
+    def optional(value: int = 3) -> int:
+        return value
+
+    source = dspy.Tool(optional, arg_desc={"value": "Optional numeric value"})
+    wrapped = observe_tool(source, lambda _event: None, ToolEventView.metadata_only())
+
+    assert wrapped.args["value"]["type"] == "Any"
+    assert wrapped.args["value"]["default"] == source.args["value"]["default"] == 3
+    assert wrapped.arg_desc == source.arg_desc
+    assert wrapped.format_as_litellm_function_call()["function"]["parameters"]["required"] == []
+    assert wrapped.func() == 3
 
 
 def test_after_result_hook_runs_between_started_and_completed_without_projecting_body() -> None:

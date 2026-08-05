@@ -11,7 +11,7 @@ async def test_provider_probe_requires_multiple_native_actions_and_typed_submit(
     lm = dspy.utils.DummyLM(
         [
             {"reasoning": "initialize", "code": "marker = 'probe-slice'"},
-            {"reasoning": "delegate", "code": "child = rlm_query('Classify: ' + marker)"},
+            {"reasoning": "delegate", "code": "child = rlm_query(prompt='Classify: ' + marker)"},
             {"reasoning": "child submit", "code": "SUBMIT(answer='child-ok')"},
             {"reasoning": "submit", "code": "SUBMIT(answer=child)"},
         ],

@@ -3,15 +3,15 @@
 Fleet executes every primary Turn through a fresh native `dspy.RLM`. The Root
 Model generates iterative Python, while the Sub Model answers `llm_query()` and
 ordered `llm_query_batched()` calls. Only the `daytona-recursive` policy also
-lets the Root call `rlm_query(prompt)` for one bounded subproblem through a
-fresh child `dspy.RLM`. Both model roles are host-configured; API clients cannot
+lets the Root call `rlm_query(prompt=prompt)` for one bounded subproblem through
+a fresh child `dspy.RLM`. Both model roles are host-configured; API clients cannot
 provide models, Signatures, or executable capabilities.
 
 ## Execution contract
 
 - One Run owns one Code-Interpreter Context. Variables, imports, and functions
   persist across RLM iterations in that Run only.
-- `rlm_query(prompt)` is the only recursive primitive and is absent from the
+- `rlm_query(prompt=prompt)` is the only recursive primitive and is absent from the
   normal `daytona` policy. Under `daytona-recursive`, Root code keeps large
   input-specific data in REPL variables and passes only the smallest sufficient
   slice to a child; the parent retains authority over public output and final
@@ -65,15 +65,34 @@ provide models, Signatures, or executable capabilities.
   LM response limit is distinct
   from `dspy.RLM.max_output_chars`, which bounds REPL output retained in
   recursive history.
-- Fleet remains on DSPy's public program and LM call surfaces: `rlm.acall()`
-  delegates request and response normalization to stock DSPy. Application code
-  does not call LM `forward()` methods, construct provider-shaped requests, or
-  opt into DSPy's experimental typed LM API while `dspy==3.3.0b1` is pinned.
+- Fleet remains on DSPy's public program and LM call surfaces:
+  `rlm.acall(interpreter, ...)` delegates request and response normalization to
+  stock DSPy. Application code does not call LM `forward()` methods, construct
+  provider-shaped requests, or opt into DSPy's experimental typed LM API while
+  `dspy==3.3.0` is pinned.
   See DSPy's
   [normalized LM API migration](https://dspy.ai/community/normalized-lm-api-migration/).
 - Do not replace the Turn-scoped adapter with global `dspy.configure()`.
   Composition may execute independent Turns with different scoped models, and
   Fleet must not mutate shared DSPy defaults.
+
+## DSPy 3.3.0 ownership contract
+
+Fleet keeps the public configuration key `max_iterations`. The adapter in
+`rlm.dspy_contract` maps that key to DSPy 3.3.0's constructor parameter
+`max_iters`; no other Fleet configuration or public API uses the DSPy spelling.
+Native RLM construction does not accept an interpreter. It installs a
+fail-closed `interpreter_factory` so an invocation without a caller-owned
+interpreter becomes a bounded `RLMConfigError` rather than silently creating a
+DSPy interpreter.
+
+At execution time, Fleet passes its existing interpreter positionally:
+`await rlm.acall(interpreter, **named_inputs)` and, for streaming,
+`stream_program(interpreter, **named_inputs)`. Fleet or the child lease owns
+shutdown for these caller-provided interpreters; DSPy must not shut them down.
+Deterministic test RLMs remain keyword-only substitutes. DSPy 3.3.0's stricter
+namespace, Tool, and sub-LM response validation remains authoritative, while
+Fleet preserves its existing RuntimeEvent, SSE, and TUI projections.
 
 ## Native DSPy streaming
 
@@ -115,7 +134,7 @@ and termination mode.
 
 Fleet keeps domain dataclasses authoritative and validates the bounded
 model-visible payload once at the `rlm.inputs` boundary immediately before
-`rlm.acall()`. The default `FleetRLMSignature` describes that payload with
+`rlm.acall(interpreter, ...)`. The default `FleetRLMSignature` describes that payload with
 strict Pydantic DTOs. Skill instructions, resource bodies, Attachment bytes,
 provider paths, and older history remain behind host-mediated Tools.
 

@@ -21,14 +21,16 @@ contracts, and tracked docs remain authoritative.
 - Keep Daytona SDK imports inside `daytona/`.
 - Create a fresh native DSPy RLM per Turn through `rlm.dspy_contract`. Inject and
   `FinalOutput` protocol knowledge lives in `rlm.dspy_interpreter_contract`.
-  Daytona supplies a fresh custom interpreter. Call only the supported
-  `await rlm.acall(**named_inputs)` surface.
+  Daytona supplies a fresh custom interpreter. Native calls use the supported
+  `await rlm.acall(interpreter, **named_inputs)` surface; deterministic testing
+  doubles remain keyword-only. Fleet owns shutdown for caller-provided
+  interpreters.
 - Every Signature receives request text, bounded `session_context`, bounded
   `skill_cards`, and bounded Attachment metadata. Older committed messages
   remain behind the Session-scoped `read_session_history` Tool.
 - The default `FleetRLMSignature` uses strict Pydantic DTOs local to `rlm/`;
   `rlm.inputs` validates and JSON-serializes the bounded payload once before
-  native `rlm.acall()`. Custom Skill Signatures retain JSON-compatible common
+  native `rlm.acall(interpreter, ...)`. Custom Skill Signatures retain JSON-compatible common
   input annotations and declared output schemas.
 - Runtime-specific Session Workspace availability is bounded inside context;
   Daytona registers list/stat/paged-read/write/append workspace Tools plus

@@ -511,13 +511,21 @@ def turn_trace(
             logger.warning("MLflow update_current_trace failed; continuing", exc_info=True)
         trace_id: str | None = None
         try:
-            raw = mlflow.get_last_active_trace_id() or getattr(span, "request_id", None)
+            # The root span is the only authoritative identity for this Turn.
+            # ``get_last_active_trace_id`` can refer to a prior trace after a
+            # preparation span has already been closed, which would leak the
+            # previous trace ID into this Turn's SSE events.
+            raw = getattr(span, "request_id", None)
+            if raw is None:
+                get_current_active_span = getattr(mlflow, "get_current_active_span", None)
+                current_span = get_current_active_span() if callable(get_current_active_span) else None
+                raw = getattr(current_span, "request_id", None)
             if raw is not None:
                 trace_id = str(raw)
                 if expose_trace_id:
                     _current_trace_id.set(trace_id)
         except Exception:
-            logger.warning("MLflow get_last_active_trace_id failed; continuing", exc_info=True)
+            logger.warning("MLflow active trace ID lookup failed; continuing", exc_info=True)
 
         try:
             yield TraceHandle(trace_id=trace_id if expose_trace_id else None)

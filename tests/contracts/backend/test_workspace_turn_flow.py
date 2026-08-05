@@ -145,7 +145,7 @@ class WorkspaceFlowFactory:
         self.interpreters: list[Interpreter] = []
 
     def create(self, **kwargs):
-        interpreter = kwargs["interpreter"]
+        interpreter = Interpreter()
         self.interpreters.append(interpreter)
         tools = {str(tool.name): tool for tool in kwargs["tools"]}
 

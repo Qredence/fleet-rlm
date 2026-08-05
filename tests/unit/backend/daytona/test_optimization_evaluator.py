@@ -142,7 +142,7 @@ class _RLM:
     def __init__(self, prediction: object | BaseException) -> None:
         self._prediction = prediction
 
-    async def acall(self, **kwargs: Any) -> object:
+    async def acall(self, *args: Any, **kwargs: Any) -> object:
         """
         Evaluate a curated input request and provide the configured prediction.
 
@@ -157,6 +157,7 @@ class _RLM:
             BaseException: The configured prediction exception, when evaluation is
                 configured to fail.
         """
+        assert len(args) == 1
         assert set(kwargs) == {"curated_input_handle"}
         assert set(kwargs["curated_input_handle"]) == {"transaction_id", "sha256", "schema", "byte_size"}
         if isinstance(self._prediction, BaseException):
