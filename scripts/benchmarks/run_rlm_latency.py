@@ -8,10 +8,12 @@ execution requires ``FLEET_LIVE=1``; receipts contain bounded aggregates only.
 from __future__ import annotations
 
 import argparse
+import gzip
 import json
 import os
 import statistics
 import sys
+import tempfile
 import time
 from collections.abc import Iterator, Mapping, Sequence
 from datetime import UTC, datetime
@@ -37,6 +39,16 @@ if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 from scripts.benchmarks import judges as _judges
+from scripts.benchmarks.corpus_chain import (
+    CORPUS_SEEDS,
+    CORPUS_WORKLOAD_ID,
+    CorpusCase,
+    corpus_workload,
+    make_corpus_case,
+    validate_corpus_evidence,
+    validate_corpus_report,
+    write_corpus,
+)
 
 # Re-exported judge contracts; conductors and tests import them from this module.
 CORRECTNESS_DESCRIPTION = _judges.CORRECTNESS_DESCRIPTION
@@ -53,6 +65,10 @@ DATASET_NAME = "fleet-rlm-latency-quality-v1"
 DEFAULT_API_URL = "http://127.0.0.1:8000"
 DEFAULT_MLFLOW_URL = "http://127.0.0.1:5001"
 _LIVE_VALUES = frozenset({"1", "true", "yes"})
+EVIDENCE_WORKLOAD_ID = "evidence-conflict-v1"
+WORKLOAD_CHOICES = (EVIDENCE_WORKLOAD_ID, CORPUS_WORKLOAD_ID)
+_TRAJECTORY_ITEM_LIMIT = 64
+_TRAJECTORY_CHAR_LIMIT = 64 * 1024
 
 LATENCY_WORKLOAD = """Analyze the following evidence and decide whether the customer can
 prevent renewal of OF-7781 effective 2025-04-01. Resolve conflicts by authority
@@ -204,7 +220,7 @@ def latency_gate(baseline: Mapping[str, Any], candidate: Mapping[str, Any]) -> d
     baseline_p50 = float(baseline["end_to_end_ms"]["p50"])
     candidate_p50 = float(candidate["end_to_end_ms"]["p50"])
     checks = {
-        "p50_reduced_by_20_percent": candidate_p50 <= baseline_p50 * 0.8,
+        "p50_reduced_by_50_percent": candidate_p50 <= baseline_p50 * 0.5,
         "p95_not_worse": float(candidate["end_to_end_ms"]["p95"]) <= float(baseline["end_to_end_ms"]["p95"]),
         "error_rate_not_worse": float(candidate["error_rate"]) <= float(baseline["error_rate"]),
         "quality_complete": bool(candidate.get("quality_complete")),
@@ -331,6 +347,36 @@ def _structured_answer(chunk: Mapping[str, Any]) -> str | None:
     return None
 
 
+def _append_trajectory_value(values: list[str], value: object) -> None:
+    """Keep trajectory evidence bounded by item count and total characters."""
+    if not isinstance(value, str) or len(values) >= _TRAJECTORY_ITEM_LIMIT:
+        return
+    remaining = _TRAJECTORY_CHAR_LIMIT - sum(len(item) for item in values)
+    if remaining > 0:
+        values.append(value[:remaining])
+
+
+def _upload_corpus(client: httpx.Client, corpus_path: Path, *, seed: int) -> str:
+    """Upload the host-generated corpus as a bounded compressed Attachment."""
+    with corpus_path.open("rb") as handle:
+        compressed = gzip.compress(handle.read(), mtime=0)
+    response = client.post(
+        "/api/attachments",
+        files={
+            "attachment": (
+                f"fleet-corpus-{seed}.ndjson.gz",
+                compressed,
+                "application/gzip",
+            )
+        },
+    )
+    response.raise_for_status()
+    payload = response.json()
+    if not isinstance(payload, Mapping) or not isinstance(payload.get("id"), str):
+        raise BenchmarkError("Fleet corpus attachment response is malformed")
+    return payload["id"]
+
+
 def _termination_mode_from_chunk(chunk: Mapping[str, Any]) -> str | None:
     """
     Identify the termination mode signaled by a stream chunk.
@@ -353,7 +399,13 @@ def _termination_mode_from_chunk(chunk: Mapping[str, Any]) -> str | None:
     return None
 
 
-def run_turn(client: httpx.Client, query: str, *, nonce: str) -> dict[str, Any]:
+def run_turn(
+    client: httpx.Client,
+    query: str,
+    *,
+    nonce: str,
+    attachment_ids: Sequence[str] = (),
+) -> dict[str, Any]:
     """
     Execute one Fleet Turn and collect its response, timing, usage, trace identifiers, and tool-call counts.
 
@@ -361,6 +413,7 @@ def run_turn(client: httpx.Client, query: str, *, nonce: str) -> dict[str, Any]:
         client (httpx.Client): HTTP client configured for the Fleet API.
         query (str): Prompt to submit for the Turn.
         nonce (str): Unique value used to identify the benchmark request.
+        attachment_ids (Sequence[str]): Authorized Attachment IDs to pass to the Turn.
 
     Returns:
         dict[str, Any]: Bounded operational results, including the answer, identifiers, latency measurements,
@@ -381,13 +434,16 @@ def run_turn(client: httpx.Client, query: str, *, nonce: str) -> dict[str, Any]:
     iterations = 0
     batch_calls = 0
     recursive_calls = 0
+    requested_attachment_ids = {str(value) for value in attachment_ids}
+    attachment_accessed = False
+    trajectory = {"codes": [], "outputs": []}
     first_event_ms: float | None = None
     termination_mode: str | None = None
     started = time.perf_counter()
     with client.stream(
         "POST",
         f"/api/sessions/{session_id}/turns",
-        json={"text": prompt, "attachment_ids": [], "skill_selections": []},
+        json={"text": prompt, "attachment_ids": list(attachment_ids), "skill_selections": []},
         headers={"Idempotency-Key": f"rlm-latency-{uuid4()}"},
     ) as response:
         response.raise_for_status()
@@ -415,6 +471,14 @@ def run_turn(client: httpx.Client, query: str, *, nonce: str) -> dict[str, Any]:
                 tool_name = chunk.get("toolName")
                 batch_calls += int(tool_name == "llm_query_batched")
                 recursive_calls += int(tool_name == "rlm_query")
+            elif chunk_type == "data-attachment" and isinstance(chunk.get("data"), Mapping):
+                data = chunk["data"]
+                accessed_id = data.get("attachment_id", data.get("attachmentId"))
+                attachment_accessed = attachment_accessed or str(accessed_id) in requested_attachment_ids
+            elif chunk_type == "data-rlm-code" and isinstance(chunk.get("data"), Mapping):
+                _append_trajectory_value(trajectory["codes"], chunk["data"].get("code"))
+            elif chunk_type == "data-rlm-output" and isinstance(chunk.get("data"), Mapping):
+                _append_trajectory_value(trajectory["outputs"], chunk["data"].get("output"))
             elif chunk_type in {"error", "abort"}:
                 raise BenchmarkError(str(chunk.get("errorText") or chunk.get("reason") or "Turn failed"))
             elif chunk_type == "finish" and chunk.get("finishReason") != "stop":
@@ -430,6 +494,8 @@ def run_turn(client: httpx.Client, query: str, *, nonce: str) -> dict[str, Any]:
         "batch_calls": batch_calls,
         "recursive_calls": recursive_calls,
         "termination_mode": termination_mode,
+        "attachment_accessed": attachment_accessed,
+        "trajectory": trajectory,
     }
 
 
@@ -498,6 +564,57 @@ def _execution_trace_id(mlflow_url: str, experiment_id: str, run_id: str) -> str
     return None
 
 
+def _attach_trace_identity(row: dict[str, Any], execution_trace_id: str | None) -> dict[str, Any]:
+    """Require the public and execution traces to identify the same root trace."""
+    stream_trace_id = row.get("trace_id")
+    row["stream_trace_id"] = stream_trace_id
+    row["execution_trace_id"] = execution_trace_id
+    row["trace_id_match"] = (
+        isinstance(stream_trace_id, str)
+        and bool(stream_trace_id)
+        and isinstance(execution_trace_id, str)
+        and bool(execution_trace_id)
+        and stream_trace_id == execution_trace_id
+    )
+    if not isinstance(stream_trace_id, str) or not stream_trace_id:
+        raise BenchmarkError("SSE trace ID was missing")
+    if not isinstance(execution_trace_id, str) or not execution_trace_id:
+        raise BenchmarkError("execution trace was not found")
+    if stream_trace_id != execution_trace_id:
+        raise BenchmarkError("SSE and execution trace IDs did not match")
+    # Keep the public SSE ID as the canonical receipt ID. Never overwrite it
+    # with a separately discovered trace after this validation.
+    row["trace_id"] = stream_trace_id
+    return row
+
+
+def _execution_trace_diagnostics(mlflow_url: str, trace_id: str) -> dict[str, Any]:
+    """Collect bounded span diagnostics needed for benchmark comparisons."""
+    try:
+        import mlflow
+
+        mlflow.set_tracking_uri(mlflow_url)
+        trace = mlflow.get_trace(trace_id)
+        spans = list(trace.data.spans)
+        repair_error_count = 0
+        detail_overflowed = False
+        for span in spans:
+            outputs = getattr(span, "outputs", None)
+            if isinstance(outputs, Mapping):
+                result_kind = outputs.get("result_kind")
+                if result_kind == "repair_error":
+                    repair_error_count += 1
+                if span.name == "Turn.progress.warning" and "omitted" in str(outputs.get("message", "")):
+                    detail_overflowed = True
+        return {
+            "root_lm_span_count": sum(span.name == "RLM.root_lm" for span in spans),
+            "repair_error_count": repair_error_count,
+            "detail_overflowed": detail_overflowed,
+        }
+    except Exception as exc:
+        return {"status": "unavailable", "error_category": type(exc).__name__}
+
+
 def _tag_trace(mlflow_url: str, trace_id: str, *, workload_id: str, variant: str, sample: str) -> None:
     """Tag an MLflow trace with Fleet workload, performance variant, and sample metadata.
 
@@ -517,7 +634,7 @@ def _tag_trace(mlflow_url: str, trace_id: str, *, workload_id: str, variant: str
     client.set_trace_tag(trace_id, "fleet.sample_kind", sample)
 
 
-def _aggregate(rows: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+def _aggregate(rows: Sequence[Mapping[str, Any]], *, workload_id: str = EVIDENCE_WORKLOAD_ID) -> dict[str, Any]:
     """Aggregate measured benchmark rows into latency, error, usage, execution, and trace metrics.
 
     Parameters:
@@ -535,6 +652,30 @@ def _aggregate(rows: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     for row in successes:
         for key, value in _usage_totals(row.get("usage")).items():
             usage[key] += value
+    trace_matches = [bool(row["trace_id_match"]) for row in measured if isinstance(row.get("trace_id_match"), bool)]
+    corpus_report_results = [
+        row.get("corpus_validation", {}).get("passed") is True
+        if isinstance(row.get("corpus_validation"), Mapping)
+        else False
+        for row in measured
+    ]
+    corpus_evidence_results = [
+        row.get("corpus_evidence", {}).get("passed") is True
+        if isinstance(row.get("corpus_evidence"), Mapping)
+        else False
+        for row in measured
+    ]
+    corpus_quality_results = [row.get("corpus_quality_passed") is True for row in measured]
+    corpus_report_complete = bool(measured) and all(corpus_report_results)
+    corpus_evidence_complete = bool(measured) and all(corpus_evidence_results)
+    corpus_quality_complete = (
+        bool(measured) and corpus_report_complete and corpus_evidence_complete and all(corpus_quality_results)
+    )
+    diagnostics: list[Mapping[str, Any]] = []
+    for row in successes:
+        item = row.get("trace_diagnostics")
+        if isinstance(item, Mapping):
+            diagnostics.append(item)
     return {
         "sample_count": len(measured),
         "end_to_end_ms": {
@@ -553,7 +694,14 @@ def _aggregate(rows: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
         "typed_submit_count": sum(row.get("termination_mode") == "typed_submit" for row in successes),
         "token_totals": usage,
         "trace_ids": [row["trace_id"] for row in successes if row.get("trace_id")],
-        "quality_complete": False,
+        "trace_id_match_rate": (sum(trace_matches) / len(trace_matches)) if trace_matches else 0.0,
+        "root_lm_span_count": sum(int(item.get("root_lm_span_count", 0)) for item in diagnostics),
+        "repair_error_count": sum(int(item.get("repair_error_count", 0)) for item in diagnostics),
+        "detail_overflowed": any(item.get("detail_overflowed") is True for item in diagnostics),
+        "corpus_report_complete": corpus_report_complete if workload_id == CORPUS_WORKLOAD_ID else None,
+        "corpus_evidence_complete": corpus_evidence_complete if workload_id == CORPUS_WORKLOAD_ID else None,
+        "corpus_quality_complete": corpus_quality_complete if workload_id == CORPUS_WORKLOAD_ID else None,
+        "quality_complete": corpus_quality_complete if workload_id == CORPUS_WORKLOAD_ID else False,
     }
 
 
@@ -601,13 +749,14 @@ def _usage_totals(value: object) -> dict[str, int]:
     return result
 
 
-def _metrics_query(mlflow_url: str, experiment_id: str, *, variant: str) -> dict[str, Any]:
+def _metrics_query(mlflow_url: str, experiment_id: str, *, workload_id: str, variant: str) -> dict[str, Any]:
     """
     Query MLflow latency metrics for the configured Fleet workload and performance variant.
 
     Parameters:
         mlflow_url (str): Base URL of the MLflow server.
         experiment_id (str): MLflow experiment identifier.
+        workload_id (str): Fleet workload identifier used to filter traces.
         variant (str): Performance variant used to filter traces.
 
     Returns:
@@ -629,7 +778,7 @@ def _metrics_query(mlflow_url: str, experiment_id: str, *, variant: str) -> dict
         payload = {
             **common,
             "filters": [
-                'trace.tag.fleet.workload_id = "evidence-conflict-v1"',
+                f'trace.tag.fleet.workload_id = "{workload_id}"',
                 f'trace.tag.fleet.perf_variant = "{variant}"',
                 f'span.name = "{span_name}"',
             ],
@@ -657,49 +806,92 @@ def run_benchmark(args: argparse.Namespace) -> dict[str, Any]:
         and MLflow span metrics.
     """
     _require_live()
+    workload_id = str(args.workload)
+    corpus_case: CorpusCase | None = make_corpus_case(args.corpus_seed) if workload_id == CORPUS_WORKLOAD_ID else None
+    workload = corpus_workload(corpus_case) if corpus_case is not None else LATENCY_WORKLOAD
     rows: list[dict[str, Any]] = []
     with httpx.Client(base_url=args.api_url.rstrip("/"), timeout=httpx.Timeout(args.timeout)) as client:
         policy = _active_policy(client)
-        for index in range(args.warmups + args.runs):
-            sample = "warmup" if index < args.warmups else "measured"
-            nonce = f"{args.variant}-{sample}-{uuid4()}"
-            sample_started = time.perf_counter()
-            try:
-                row = run_turn(client, LATENCY_WORKLOAD, nonce=nonce)
-                if row.get("run_id"):
-                    execution_trace_id = _execution_trace_id(
-                        args.mlflow_url,
-                        args.experiment_id,
-                        str(row["run_id"]),
+        with tempfile.TemporaryDirectory(prefix="fleet-corpus-") as temp_dir:
+            attachment_ids: tuple[str, ...] = ()
+            if corpus_case is not None:
+                corpus_path = Path(temp_dir) / "corpus.ndjson"
+                write_corpus(corpus_case, corpus_path)
+                attachment_ids = (_upload_corpus(client, corpus_path, seed=corpus_case.seed),)
+            for index in range(args.warmups + args.runs):
+                sample = "warmup" if index < args.warmups else "measured"
+                nonce = f"{args.variant}-{sample}-{uuid4()}"
+                sample_started = time.perf_counter()
+                row: dict[str, Any] = {}
+                try:
+                    row = run_turn(client, workload, nonce=nonce, attachment_ids=attachment_ids)
+                    execution_trace_id = (
+                        _execution_trace_id(
+                            args.mlflow_url,
+                            args.experiment_id,
+                            str(row["run_id"]),
+                        )
+                        if row.get("run_id")
+                        else None
                     )
-                    row["trace_id"] = execution_trace_id
-                if row.get("trace_id"):
-                    _tag_trace(
+                    _attach_trace_identity(row, execution_trace_id)
+                    row["trace_diagnostics"] = _execution_trace_diagnostics(
                         args.mlflow_url,
                         str(row["trace_id"]),
-                        workload_id="evidence-conflict-v1",
-                        variant=args.variant,
-                        sample=sample,
                     )
-            except Exception as exc:
-                row = {
-                    "duration_ms": round((time.perf_counter() - sample_started) * 1000, 3),
-                    "first_event_ms": -1.0,
-                    "error_category": type(exc).__name__,
-                    "trace_id": None,
-                }
-            row["sample_kind"] = sample
-            rows.append(row)
-    aggregate = _aggregate(rows)
+                    if row.get("trace_id"):
+                        _tag_trace(
+                            args.mlflow_url,
+                            str(row["trace_id"]),
+                            workload_id=workload_id,
+                            variant=args.variant,
+                            sample=sample,
+                        )
+                    if corpus_case is not None:
+                        diagnostics = row.get("trace_diagnostics")
+                        if isinstance(diagnostics, Mapping) and diagnostics.get("detail_overflowed") is True:
+                            raise BenchmarkError("corpus detail event overflowed the bounded relay")
+                        validation = validate_corpus_report(str(row.get("answer", "")), corpus_case)
+                        trajectory = row.get("trajectory")
+                        evidence = validate_corpus_evidence(
+                            trajectory if isinstance(trajectory, Mapping) else {},
+                            attachment_accessed=row.get("attachment_accessed") is True,
+                        )
+                        row["corpus_validation"] = validation.as_dict()
+                        row["corpus_evidence"] = evidence.as_dict()
+                        row["corpus_quality_passed"] = validation.passed and evidence.passed
+                        if not row["corpus_quality_passed"]:
+                            raise BenchmarkError("corpus report or execution evidence validation failed")
+                except Exception as exc:
+                    row = {
+                        **row,
+                        "duration_ms": row.get("duration_ms", round((time.perf_counter() - sample_started) * 1000, 3)),
+                        "first_event_ms": row.get("first_event_ms", -1.0),
+                        "error_category": type(exc).__name__,
+                        "trace_id": row.get("trace_id"),
+                    }
+                row["workload_id"] = workload_id
+                if corpus_case is not None:
+                    row["corpus_seed"] = corpus_case.seed
+                row["sample_kind"] = sample
+                rows.append(row)
+    aggregate = _aggregate(rows, workload_id=workload_id)
     metrics: dict[str, Any]
     try:
-        metrics = _metrics_query(args.mlflow_url, args.experiment_id, variant=args.variant)
+        metrics = _metrics_query(
+            args.mlflow_url,
+            args.experiment_id,
+            workload_id=workload_id,
+            variant=args.variant,
+        )
     except Exception as exc:
         metrics = {"status": "unavailable", "error_category": type(exc).__name__}
     return {
         "schema": RECEIPT_SCHEMA,
         "generated_at": datetime.now(UTC).isoformat(),
         "variant": args.variant,
+        "workload_id": workload_id,
+        "corpus_seed": corpus_case.seed if corpus_case is not None else None,
         "active_policy": policy,
         "warmups": args.warmups,
         "aggregate": aggregate,
@@ -821,6 +1013,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--mlflow-url", default=DEFAULT_MLFLOW_URL)
     parser.add_argument("--experiment-id", default="1")
     parser.add_argument("--variant", default="baseline")
+    parser.add_argument("--workload", choices=WORKLOAD_CHOICES, default=EVIDENCE_WORKLOAD_ID)
+    parser.add_argument("--corpus-seed", choices=CORPUS_SEEDS, type=int, default=CORPUS_SEEDS[0])
     parser.add_argument("--warmups", type=int, default=3)
     parser.add_argument("--runs", type=int, default=20)
     parser.add_argument("--timeout", type=float, default=2_000.0)

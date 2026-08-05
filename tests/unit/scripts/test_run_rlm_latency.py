@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import gzip
 import json
+import json as json_module
 
 import pytest
 
@@ -12,14 +14,83 @@ from scripts.benchmarks.run_rlm_latency import (
     EVIDENCE_COVERAGE_INSTRUCTIONS,
     JUDGE_INFERENCE_PARAMS,
     QUALITY_RECORDS,
+    BenchmarkError,
     _aggregate,
+    _attach_trace_identity,
     _termination_mode_from_chunk,
+    _upload_corpus,
     _usage_totals,
+    build_parser,
     latency_gate,
     main,
     percentile,
     quality_gate,
+    run_turn,
 )
+
+
+class _Response:
+    def __init__(self, *, payload: object | None = None, lines: list[str] | None = None) -> None:
+        self._payload = payload
+        self._lines = lines or []
+
+    def raise_for_status(self) -> None:
+        return None
+
+    def json(self) -> object:
+        return self._payload
+
+    def iter_lines(self) -> list[str]:
+        return self._lines
+
+
+class _Stream:
+    def __init__(self, response: _Response) -> None:
+        self.response = response
+
+    def __enter__(self) -> _Response:
+        return self.response
+
+    def __exit__(self, *_args: object) -> None:
+        return None
+
+
+class _TurnClient:
+    def __init__(self) -> None:
+        self.turn_request: dict[str, object] | None = None
+
+    def post(self, path: str, **_kwargs: object) -> _Response:
+        assert path == "/api/sessions"
+        return _Response(payload={"id": "session-1"})
+
+    def stream(self, _method: str, _path: str, *, json: dict[str, object], headers: dict[str, str]) -> _Stream:
+        self.turn_request = json
+        assert headers["Idempotency-Key"].startswith("rlm-latency-")
+        lines = [
+            "data: " + json_module.dumps({"type": "data-attachment", "data": {"attachment_id": "attachment-1"}}),
+            "data: "
+            + json_module.dumps(
+                {
+                    "type": "data-rlm-code",
+                    "data": {"code": "source = read_attachment(attachment_id=attachments[0]['id'])"},
+                }
+            ),
+            "data: " + json_module.dumps({"type": "data-rlm-output", "data": {"output": "FINAL submitted"}}),
+            "data: " + json_module.dumps({"type": "data-structured-result", "data": {"value": "{}"}}),
+            "data: " + json_module.dumps({"type": "finish", "finishReason": "stop"}),
+        ]
+        return _Stream(_Response(lines=lines))
+
+
+class _UploadClient:
+    def __init__(self) -> None:
+        self.path: str | None = None
+        self.files: dict[str, object] | None = None
+
+    def post(self, path: str, **kwargs: object) -> _Response:
+        self.path = path
+        self.files = kwargs["files"]
+        return _Response(payload={"id": "attachment-1"})
 
 
 def test_nearest_rank_percentiles_are_deterministic() -> None:
@@ -30,14 +101,86 @@ def test_nearest_rank_percentiles_are_deterministic() -> None:
         percentile([], 50)
 
 
+def test_run_turn_propagates_attachment_ids_and_captures_bounded_trajectory() -> None:
+    client = _TurnClient()
+
+    row = run_turn(client, "inspect the attachment", nonce="test", attachment_ids=("attachment-1",))
+
+    assert client.turn_request == {
+        "text": "inspect the attachment\n\nBenchmark nonce: test. It has no semantic meaning.",
+        "attachment_ids": ["attachment-1"],
+        "skill_selections": [],
+    }
+    assert row["attachment_accessed"] is True
+    assert row["trajectory"] == {
+        "codes": ["source = read_attachment(attachment_id=attachments[0]['id'])"],
+        "outputs": ["FINAL submitted"],
+    }
+    assert row["termination_mode"] == "typed_submit"
+
+
+def test_upload_corpus_uses_the_attachment_route_and_preserves_host_fixture(tmp_path) -> None:
+    corpus_path = tmp_path / "corpus.ndjson"
+    corpus_path.write_text("entry-1\nentry-2\n", encoding="utf-8")
+    client = _UploadClient()
+
+    assert _upload_corpus(client, corpus_path, seed=1) == "attachment-1"
+
+    assert client.path == "/api/attachments"
+    assert client.files is not None
+    filename, body, content_type = client.files["attachment"]
+    assert filename == "fleet-corpus-1.ndjson.gz"
+    assert gzip.decompress(body) == corpus_path.read_bytes()
+    assert content_type == "application/gzip"
+
+
+def test_corpus_quality_aggregate_requires_report_and_evidence() -> None:
+    incomplete = _aggregate(
+        [
+            {
+                "sample_kind": "measured",
+                "duration_ms": 100,
+                "first_event_ms": 10,
+                "corpus_validation": {"passed": True},
+                "corpus_evidence": {"passed": False},
+                "corpus_quality_passed": False,
+            }
+        ],
+        workload_id="corpus-chain-v1",
+    )
+    complete = _aggregate(
+        [
+            {
+                "sample_kind": "measured",
+                "duration_ms": 100,
+                "first_event_ms": 10,
+                "corpus_validation": {"passed": True},
+                "corpus_evidence": {"passed": True},
+                "corpus_quality_passed": True,
+            }
+        ],
+        workload_id="corpus-chain-v1",
+    )
+
+    assert incomplete["corpus_report_complete"] is True
+    assert incomplete["corpus_evidence_complete"] is False
+    assert incomplete["quality_complete"] is False
+    assert complete["corpus_report_complete"] is True
+    assert complete["corpus_evidence_complete"] is True
+    assert complete["quality_complete"] is True
+
+
 def test_latency_gate_requires_improvement_tail_stability_and_quality() -> None:
     baseline = {"end_to_end_ms": {"p50": 100.0, "p95": 150.0}, "error_rate": 0.0}
     candidate = {
-        "end_to_end_ms": {"p50": 80.0, "p95": 149.0},
+        "end_to_end_ms": {"p50": 50.0, "p95": 149.0},
         "error_rate": 0.0,
         "quality_complete": True,
     }
     assert latency_gate(baseline, candidate)["passed"] is True
+    candidate["end_to_end_ms"]["p50"] = 51.0
+    assert latency_gate(baseline, candidate)["passed"] is False
+    candidate["end_to_end_ms"]["p50"] = 50.0
     candidate["end_to_end_ms"]["p95"] = 151.0
     assert latency_gate(baseline, candidate)["passed"] is False
 
@@ -129,6 +272,36 @@ def test_aggregate_excludes_failed_durations_from_latency_metrics() -> None:
     assert aggregate["sample_count"] == 2
     assert aggregate["end_to_end_ms"] == {"mean": 100.0, "p50": 100.0, "p95": 100.0}
     assert aggregate["error_rate"] == 0.5
+
+
+def test_trace_identity_must_match_public_and_execution_roots() -> None:
+    row = {"trace_id": "tr-current"}
+
+    _attach_trace_identity(row, "tr-current")
+
+    assert row["stream_trace_id"] == "tr-current"
+    assert row["execution_trace_id"] == "tr-current"
+    assert row["trace_id_match"] is True
+
+    with pytest.raises(BenchmarkError, match="did not match"):
+        _attach_trace_identity({"trace_id": "tr-current"}, "tr-previous")
+
+
+def test_parser_supports_seeded_corpus_workloads() -> None:
+    args = build_parser().parse_args(
+        [
+            "benchmark",
+            "--workload",
+            "corpus-chain-v1",
+            "--corpus-seed",
+            "1",
+            "--output",
+            "receipt.json",
+        ]
+    )
+
+    assert args.workload == "corpus-chain-v1"
+    assert args.corpus_seed == 1
 
 
 def test_cli_writes_bounded_failure_receipt(tmp_path) -> None:
