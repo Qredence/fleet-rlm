@@ -7,9 +7,21 @@ from scripts.benchmarks.run_native_long_context import (
     _evaluate_cases,
     _run_case,
     _source,
+    _with_native_interpreter,
 )
 
 MARKERS = ("first-marker", "middle-marker", "last-marker")
+
+
+class _FakeInterpreter:
+    def __init__(self, *, shutdown_error: BaseException | None = None) -> None:
+        self.shutdown_error = shutdown_error
+        self.shutdown_calls = 0
+
+    def shutdown(self) -> None:
+        self.shutdown_calls += 1
+        if self.shutdown_error is not None:
+            raise self.shutdown_error
 
 
 def test_source_rejects_sizes_that_cannot_hold_planted_markers() -> None:
@@ -57,3 +69,30 @@ async def test_native_case_records_stock_dspy_tools_usage_and_typed_submit() -> 
         "evidence_presence": 1.0,
         "typed_completion": 1.0,
     }
+
+
+@pytest.mark.asyncio
+async def test_native_interpreter_is_shutdown_when_rlm_construction_fails() -> None:
+    interpreter = _FakeInterpreter()
+
+    async def construct_and_fail(_interpreter: _FakeInterpreter) -> None:
+        raise RuntimeError("RLM construction failed")
+
+    with pytest.raises(RuntimeError, match="RLM construction failed"):
+        await _with_native_interpreter(lambda: interpreter, construct_and_fail)
+
+    assert interpreter.shutdown_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_native_interpreter_shutdown_failure_does_not_mask_primary_error() -> None:
+    interpreter = _FakeInterpreter(shutdown_error=OSError("shutdown failed"))
+
+    async def execute_and_fail(_interpreter: _FakeInterpreter) -> None:
+        raise ValueError("execution failed")
+
+    with pytest.raises(ValueError, match="execution failed") as caught:
+        await _with_native_interpreter(lambda: interpreter, execute_and_fail)
+
+    assert interpreter.shutdown_calls == 1
+    assert any("shutdown failed" in note for note in caught.value.__notes__)
