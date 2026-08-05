@@ -213,7 +213,7 @@ class _SemanticLM:
                 prompt (str): The prompt to record.
 
         Returns:
-                str: A response containing the prompt length.
+                list[dict[str, str]]: A single-completion payload whose text encodes the prompt length.
         """
         self.prompts.append(prompt)
         return [{"text": f"semantic:{len(prompt)}"}]
