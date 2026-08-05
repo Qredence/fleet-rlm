@@ -247,7 +247,6 @@ def _rlm(
     *,
     tools: tuple[dspy.Tool, ...],
     codes: list[str],
-    interpreter: DaytonaCodeInterpreter,
     sub_lm: _SemanticLM,
 ) -> dspy.RLM:
     """
@@ -256,7 +255,6 @@ def _rlm(
     Parameters:
         tools: Tools available to the RLM.
         codes: Interpreter code returned across successive RLM iterations.
-        interpreter: Code interpreter used by the RLM.
         sub_lm: Semantic language model used for subcalls.
 
     Returns:
@@ -265,7 +263,6 @@ def _rlm(
     rlm = RLMFactory(verbose=False).create(
         models=RLMModelBundle(root_lm=_root_lm(), sub_lm=sub_lm),
         options=RLMOptions(max_iterations=len(codes), max_llm_calls=4, max_output_chars=2_000),
-        interpreter=interpreter,
         tools=tools,
         signature=NativeLongContextSignature,
     )
@@ -337,7 +334,6 @@ async def _run_case(size: int, *, trace_enabled: bool) -> dict[str, object]:
     first = _rlm(
         tools=(source_tool,),
         codes=first_codes,
-        interpreter=first_interpreter,
         sub_lm=semantic_lm,
     )
 
@@ -348,7 +344,7 @@ async def _run_case(size: int, *, trace_enabled: bool) -> dict[str, object]:
         dspy.context(track_usage=True),
     ):
         trace_ids.append(trace.trace_id)
-        first_prediction = await first.acall(request="Analyze the synthetic source")
+        first_prediction = await first.acall(first_interpreter, request="Analyze the synthetic source")
     first_completed_at = time.perf_counter()
 
     second_interpreter = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())
@@ -358,7 +354,6 @@ async def _run_case(size: int, *, trace_enabled: bool) -> dict[str, object]:
         codes=[
             "source = fetch_url(url=" + repr(url) + ")\nassert source['cache_hit'] is True\nSUBMIT(answer='cache-hit')"
         ],
-        interpreter=second_interpreter,
         sub_lm=semantic_lm,
     )
     with (
@@ -367,7 +362,7 @@ async def _run_case(size: int, *, trace_enabled: bool) -> dict[str, object]:
         dspy.context(track_usage=True),
     ):
         trace_ids.append(trace.trace_id)
-        second_prediction = await second.acall(request="Follow up on the source")
+        second_prediction = await second.acall(second_interpreter, request="Follow up on the source")
     completed_at = time.perf_counter()
 
     body_free = ("x" * 1024) not in str(observed)
