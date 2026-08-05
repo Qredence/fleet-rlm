@@ -18,9 +18,10 @@ import resource
 import sys
 import time
 from collections import Counter
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeVar
 from uuid import uuid4
 
 import dspy
@@ -39,6 +40,7 @@ RECEIPT_SCHEMA = "fleet.native-long-context-benchmark/v2"
 DEFAULT_SIZES = (1 * 1024 * 1024, 5 * 1024 * 1024, 10 * 1024 * 1024)
 DEFAULT_DEADLINE_SECONDS = 120.0
 RSS_GATE_BYTES = 64 * 1024 * 1024
+_ResultT = TypeVar("_ResultT")
 
 
 class NativeLongContextSignature(dspy.Signature):
@@ -204,17 +206,17 @@ class _SemanticLM:
     def __init__(self) -> None:
         self.prompts: list[str] = []
 
-    def __call__(self, prompt: str) -> str:
+    def __call__(self, prompt: str) -> list[dict[str, str]]:
         """Record a prompt and return a deterministic response based on its length.
 
         Parameters:
                 prompt (str): The prompt to record.
 
         Returns:
-                str: A response containing the prompt length.
+                list[dict[str, str]]: A single-completion payload whose text encodes the prompt length.
         """
         self.prompts.append(prompt)
-        return f"semantic:{len(prompt)}"
+        return [{"text": f"semantic:{len(prompt)}"}]
 
 
 class _Action(dspy.Predict):
@@ -279,6 +281,31 @@ def _usage_output(prediction: dspy.Prediction) -> object:
     return prediction.get_lm_usage()
 
 
+async def _with_native_interpreter(
+    factory: Callable[[], DaytonaCodeInterpreter],
+    execute: Callable[[DaytonaCodeInterpreter], Awaitable[_ResultT]],
+) -> _ResultT:
+    """Own one interpreter across setup, RLM construction, execution, and shutdown."""
+    interpreter: DaytonaCodeInterpreter | None = None
+    primary_error: BaseException | None = None
+    try:
+        interpreter = factory()
+        return await execute(interpreter)
+    except BaseException as exc:
+        primary_error = exc
+        raise
+    finally:
+        if interpreter is not None:
+            try:
+                interpreter.shutdown()
+            except BaseException as cleanup_error:
+                if primary_error is None:
+                    raise
+                primary_error.add_note(
+                    f"native interpreter shutdown failed: {type(cleanup_error).__name__}: {cleanup_error}"
+                )
+
+
 async def _run_case(size: int, *, trace_enabled: bool) -> dict[str, object]:
     """
     Run a deterministic benchmark case for a synthetic source of the specified size.
@@ -329,40 +356,54 @@ async def _run_case(size: int, *, trace_enabled: bool) -> dict[str, object]:
         "assert all(marker in content for marker in markers)\n"
         "SUBMIT(answer=f'{len(positions)}|{len(batch)}|{markers[0]}')",
     ]
-    first_interpreter = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())
-    first_interpreter.bind_observer(observe, max_chars=2_000)
-    first = _rlm(
-        tools=(source_tool,),
-        codes=first_codes,
-        sub_lm=semantic_lm,
-    )
-
     trace_ids: list[str | None] = []
-    with (
-        contextlib.redirect_stdout(io.StringIO()),
-        turn_trace(session_id, uuid4(), enabled=trace_enabled) as trace,
-        dspy.context(track_usage=True),
-    ):
-        trace_ids.append(trace.trace_id)
-        first_prediction = await first.acall(first_interpreter, request="Analyze the synthetic source")
+
+    async def execute_first(interpreter: DaytonaCodeInterpreter) -> tuple[dspy.Prediction, dspy.RLM, str | None]:
+        interpreter.bind_observer(observe, max_chars=2_000)
+        rlm = _rlm(
+            tools=(source_tool,),
+            codes=first_codes,
+            sub_lm=semantic_lm,
+        )
+        with (
+            contextlib.redirect_stdout(io.StringIO()),
+            turn_trace(session_id, uuid4(), enabled=trace_enabled) as trace,
+            dspy.context(track_usage=True),
+        ):
+            prediction = await rlm.acall(interpreter, request="Analyze the synthetic source")
+        return prediction, rlm, trace.trace_id
+
+    first_prediction, first, first_trace_id = await _with_native_interpreter(
+        lambda: DaytonaCodeInterpreter(backend=InProcessInterpreterBackend()),
+        execute_first,
+    )
+    trace_ids.append(first_trace_id)
     first_completed_at = time.perf_counter()
 
-    second_interpreter = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())
-    second_interpreter.bind_observer(observe, max_chars=2_000)
-    second = _rlm(
-        tools=(source_tool,),
-        codes=[
-            "source = fetch_url(url=" + repr(url) + ")\nassert source['cache_hit'] is True\nSUBMIT(answer='cache-hit')"
-        ],
-        sub_lm=semantic_lm,
+    async def execute_second(interpreter: DaytonaCodeInterpreter) -> tuple[dspy.Prediction, dspy.RLM, str | None]:
+        interpreter.bind_observer(observe, max_chars=2_000)
+        rlm = _rlm(
+            tools=(source_tool,),
+            codes=[
+                "source = fetch_url(url="
+                + repr(url)
+                + ")\nassert source['cache_hit'] is True\nSUBMIT(answer='cache-hit')"
+            ],
+            sub_lm=semantic_lm,
+        )
+        with (
+            contextlib.redirect_stdout(io.StringIO()),
+            turn_trace(session_id, uuid4(), enabled=trace_enabled) as trace,
+            dspy.context(track_usage=True),
+        ):
+            prediction = await rlm.acall(interpreter, request="Follow up on the source")
+        return prediction, rlm, trace.trace_id
+
+    second_prediction, _second, second_trace_id = await _with_native_interpreter(
+        lambda: DaytonaCodeInterpreter(backend=InProcessInterpreterBackend()),
+        execute_second,
     )
-    with (
-        contextlib.redirect_stdout(io.StringIO()),
-        turn_trace(session_id, uuid4(), enabled=trace_enabled) as trace,
-        dspy.context(track_usage=True),
-    ):
-        trace_ids.append(trace.trace_id)
-        second_prediction = await second.acall(second_interpreter, request="Follow up on the source")
+    trace_ids.append(second_trace_id)
     completed_at = time.perf_counter()
 
     body_free = ("x" * 1024) not in str(observed)
