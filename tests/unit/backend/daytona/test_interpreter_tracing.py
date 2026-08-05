@@ -24,7 +24,7 @@ def fleet_trace_active() -> Iterator[None]:
 
 
 def _install_fake_mlflow(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
-    calls = SimpleNamespace(start_span_names=[], span_inputs=[], span_outputs=[])
+    calls = SimpleNamespace(start_span_names=[], span_inputs=[], span_outputs=[], span_statuses=[])
 
     class _FakeSpan:
         def set_inputs(self, payload: dict[str, object]) -> None:
@@ -32,6 +32,9 @@ def _install_fake_mlflow(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
 
         def set_outputs(self, payload: dict[str, object]) -> None:
             calls.span_outputs.append(payload)
+
+        def set_status(self, status: str) -> None:
+            calls.span_statuses.append(status)
 
     active_span = _FakeSpan()
 
@@ -91,7 +94,9 @@ def test_sandbox_execute_span_tracks_iteration_and_repair_kind(
     assert calls.span_inputs[1]["iteration"] == 2
     assert calls.span_outputs[1]["result_kind"] == "repair_error"
     assert calls.span_outputs[1]["repair_category"] == "NameError"
-    assert calls.span_outputs[1]["phase_status"] == "completed"
+    assert calls.span_outputs[1]["execution_status"] == "recovered_error"
+    assert calls.span_outputs[1]["phase_status"] == "failed"
+    assert calls.span_statuses == ["ERROR"]
 
 
 def test_sandbox_rejects_oversized_intermediate_code_before_backend_execution(
@@ -121,6 +126,7 @@ def test_sandbox_rejects_oversized_intermediate_code_before_backend_execution(
     assert backend.calls == 0
     assert calls.span_outputs[0]["result_kind"] == "repair_error"
     assert calls.span_outputs[0]["repair_category"] == "code_too_large"
+    assert calls.span_outputs[0]["phase_status"] == "failed"
 
 
 def test_sandbox_execute_span_marks_failed_phase_without_suppressing(

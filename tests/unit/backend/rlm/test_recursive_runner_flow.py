@@ -26,7 +26,7 @@ async def test_root_child_root_flow_preserves_parent_repl_and_typed_submit() -> 
     root = dspy.utils.DummyLM(
         [
             {"reasoning": "prepare selected data", "code": "root_marker = 'root-only'"},
-            {"reasoning": "delegate selected row", "code": "child = rlm_query('classify selected row')"},
+            {"reasoning": "delegate selected row", "code": "child = rlm_query(prompt='classify selected row')"},
             {
                 "reasoning": "check child scope",
                 "code": (
@@ -125,7 +125,7 @@ async def test_runner_rejects_recursive_tool_after_authority_revocation() -> Non
     """Verify that recursive execution is rejected when run authority has been revoked before the run starts."""
     adapter = dspy.JSONAdapter()
     root = dspy.utils.DummyLM(
-        [{"reasoning": "delegate too late", "code": "rlm_query('late child request')"}],
+        [{"reasoning": "delegate too late", "code": "rlm_query(prompt='late child request')"}],
         adapter=adapter,
     )
     sub = dspy.utils.DummyLM([{"answer": "unused"}], adapter=adapter)
@@ -270,7 +270,7 @@ async def test_failed_child_cleanup_prevents_successful_root_outcome() -> None:
     adapter = dspy.JSONAdapter()
     root = dspy.utils.DummyLM(
         [
-            {"reasoning": "delegate", "code": "child = rlm_query('small task')"},
+            {"reasoning": "delegate", "code": "child = rlm_query(prompt='small task')"},
             {"reasoning": "child submit", "code": "SUBMIT(answer='child')"},
             {"reasoning": "submit anyway", "code": "SUBMIT(answer='unexpected')"},
         ],

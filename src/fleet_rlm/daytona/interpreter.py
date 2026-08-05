@@ -571,7 +571,14 @@ class DaytonaCodeInterpreter:
                     outputs.update(self._http_broker.last_execution_stats)
                 if isinstance(result, _RepairFeedback):
                     outputs["repair_category"] = result.category
-                phase.set_outputs(outputs)
+                    outputs["execution_status"] = "recovered_error"
+                    phase.finish(
+                        phase_status="failed",
+                        outputs=outputs,
+                        attributes={"recovered": True, "failure_category": result.category},
+                    )
+                else:
+                    phase.set_outputs(outputs)
                 return result
             except TurnTerminalError:
                 self._observe(RLMOutput("Execution failed", step))

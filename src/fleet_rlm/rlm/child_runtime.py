@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Any, Protocol
+from typing import TYPE_CHECKING, Protocol
+
+if TYPE_CHECKING:
+    from fleet_rlm.rlm.dspy_interpreter_contract import CodeInterpreter
 
 
 class ChildRuntimeCleanupError(RuntimeError):
@@ -17,7 +20,11 @@ class ChildRuntimeAuthorizationError(RuntimeError):
 class ChildRuntimeLease(Protocol):
     """A dedicated child interpreter and its strictly owned cleanup operation."""
 
-    interpreter: Any
+    @property
+    def interpreter(self) -> CodeInterpreter:
+        """Return the caller-owned interpreter for this child lease."""
+        ...
+
     sandbox_id: str
     volume_id: str
     volume_subpath: str

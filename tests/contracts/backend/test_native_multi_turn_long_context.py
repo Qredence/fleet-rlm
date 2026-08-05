@@ -133,10 +133,10 @@ class _SemanticLM:
     def __init__(self) -> None:
         self.prompts: list[str] = []
 
-    def __call__(self, prompt: str) -> str:
+    def __call__(self, prompt: str) -> list[dict[str, str]]:
         """Generate a deterministic semantic response for a prompt and record the prompt."""
         self.prompts.append(prompt)
-        return f"semantic:{len(prompt)}"
+        return [{"text": f"semantic:{len(prompt)}"}]
 
 
 class _OneAction(dspy.Predict):
@@ -164,7 +164,9 @@ class _OneAction(dspy.Predict):
         return dspy.Prediction(reasoning="Use the source through the native REPL.", code=code)
 
 
-def _rlm(*, tools: tuple[dspy.Tool, ...], action: list[str], root_lm: Any, sub_lm: Any) -> dspy.RLM:
+def _rlm(
+    *, tools: tuple[dspy.Tool, ...], action: list[str], root_lm: Any, sub_lm: Any
+) -> tuple[dspy.RLM, DaytonaCodeInterpreter]:
     """
     Create an RLM configured with the supplied tools, language models, and deterministic action sequence.
 
@@ -175,17 +177,17 @@ def _rlm(*, tools: tuple[dspy.Tool, ...], action: list[str], root_lm: Any, sub_l
         sub_lm (Any): Language model used for subqueries.
 
     Returns:
-        dspy.RLM: The configured RLM instance.
+        tuple[dspy.RLM, DaytonaCodeInterpreter]: The configured RLM and its caller-owned interpreter.
     """
+    interpreter = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())
     rlm = RLMFactory().create(
         models=RLMModelBundle(root_lm=root_lm, sub_lm=sub_lm),
         options=RLMOptions(max_iterations=len(action), max_llm_calls=4),
-        interpreter=DaytonaCodeInterpreter(backend=InProcessInterpreterBackend()),
         tools=tools,
         signature="request -> answer: str",
     )
     rlm.generate_action = _OneAction(action)
-    return rlm
+    return rlm, interpreter
 
 
 @pytest.mark.asyncio
@@ -218,7 +220,7 @@ async def test_native_rlm_keeps_source_in_repl_and_reuses_session_cache_across_t
         adapter=dspy.JSONAdapter(),
     )
 
-    first = _rlm(
+    first, first_interpreter = _rlm(
         tools=(source_tool,),
         action=[
             "source = fetch_url(url='https://example.com/report')\n"
@@ -234,9 +236,9 @@ async def test_native_rlm_keeps_source_in_repl_and_reuses_session_cache_across_t
         root_lm=root_lm,
         sub_lm=semantic_lm,
     )
-    first_prediction = await first.acall(request="Analyze the URL")
+    first_prediction = await first.acall(first_interpreter, request="Analyze the URL")
 
-    second = _rlm(
+    second, second_interpreter = _rlm(
         tools=(source_tool, history_tool),
         action=[
             "source = fetch_url(url='https://example.com/report')\n"
@@ -249,7 +251,10 @@ async def test_native_rlm_keeps_source_in_repl_and_reuses_session_cache_across_t
         root_lm=root_lm,
         sub_lm=semantic_lm,
     )
-    second_prediction = await second.acall(request="Follow up on the URL")
+    second_prediction = await second.acall(second_interpreter, request="Follow up on the URL")
+
+    first_interpreter.shutdown()
+    second_interpreter.shutdown()
 
     assert first_prediction.answer == "1|2"
     assert second_prediction.answer == "needle: 42|Earlier turn established cobalt-orchid."

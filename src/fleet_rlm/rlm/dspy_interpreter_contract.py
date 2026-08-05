@@ -1,4 +1,4 @@
-"""Pinned DSPy 3.3.0b1 interpreter inject and FinalOutput contract.
+"""Pinned DSPy 3.3.0 interpreter injection and FinalOutput contract.
 
 Public ``CodeInterpreter`` only requires ``tools``, ``start``, ``execute``, and
 ``shutdown``. Stock ``dspy.RLM`` additionally probes custom interpreters during
@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from dspy.primitives.code_interpreter import FinalOutput
+from dspy.primitives.code_interpreter import CodeInterpreter, FinalOutput
 
 PUBLIC_FINAL_OUTPUT_LABEL = "FINAL submitted"
 
@@ -59,6 +59,7 @@ def is_final_output(value: Any) -> bool:
 
 __all__ = [
     "PUBLIC_FINAL_OUTPUT_LABEL",
+    "CodeInterpreter",
     "FinalOutput",
     "copy_output_fields",
     "initial_tools_registered",

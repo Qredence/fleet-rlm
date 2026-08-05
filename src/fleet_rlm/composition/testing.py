@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
@@ -44,9 +45,22 @@ class TestingLM:
 
 
 class TestingInterpreter:
-    def execute(self, code: str) -> str:
-        del code
+    def __init__(self) -> None:
+        self._tools: dict[str, Callable[..., Any]] = {}
+
+    @property
+    def tools(self) -> dict[str, Callable[..., Any]]:
+        return self._tools
+
+    def start(self) -> None:
+        return None
+
+    def execute(self, code: str, variables: dict[str, Any] | None = None) -> str:
+        del code, variables
         return ""
+
+    def shutdown(self) -> None:
+        return None
 
     def drain_context_accesses(self) -> tuple[str, ...]:
         return ()

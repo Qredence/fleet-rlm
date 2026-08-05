@@ -11,22 +11,23 @@ import pytest
 from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
 
 
-def test_dspy_rlm_constructor_uses_max_iterations_not_max_iters() -> None:
-    """Lock installed DSPy 3.3.Xb naming so upgrades fail here, not at runtime."""
+def test_dspy_rlm_constructor_uses_max_iters_and_caller_owned_interpreters() -> None:
+    """Lock the DSPy 3.3.0 constructor contract at the dependency seam."""
     import dspy
 
     parameters = inspect.signature(dspy.RLM.__init__).parameters
-    assert "max_iterations" in parameters
-    assert "max_iters" not in parameters
+    assert "max_iters" in parameters
+    assert "max_iterations" not in parameters
     for name in (
         "signature",
         "max_llm_calls",
         "max_output_chars",
         "tools",
         "sub_lm",
-        "interpreter",
+        "interpreter_factory",
     ):
         assert name in parameters, f"missing constructor field: {name}"
+    assert "interpreter" not in parameters
 
 
 def test_dspy_rlm_accepts_file_tool_names_and_fresh_custom_interpreters() -> None:
@@ -45,23 +46,32 @@ def test_dspy_rlm_accepts_file_tool_names_and_fresh_custom_interpreters() -> Non
 
     first_interpreter = Interpreter()
     second_interpreter = Interpreter()
+
+    def first_factory() -> Interpreter:
+        return first_interpreter
+
+    def second_factory() -> Interpreter:
+        return second_interpreter
+
     explicit_tool = dspy.Tool(lambda key: {"key": key}, name="lookup", desc="Lookup registered knowledge")
     first = dspy.RLM(
         FleetRLMSignature,
         tools=[read_attachment, create_artifact, explicit_tool],
-        interpreter=first_interpreter,
+        interpreter_factory=first_factory,
     )
     second = dspy.RLM(
         FleetRLMSignature,
         tools=[read_attachment, create_artifact],
-        interpreter=second_interpreter,
+        interpreter_factory=second_factory,
     )
 
     assert set(first.tools) == {"read_attachment", "create_artifact", "lookup"}
     assert set(second.tools) == {"read_attachment", "create_artifact"}
     assert first is not second
-    assert first._interpreter is first_interpreter
-    assert second._interpreter is second_interpreter
+    assert first._interpreter_factory is first_factory
+    assert second._interpreter_factory is second_factory
+    assert not hasattr(first, "_interpreter")
+    assert not hasattr(second, "_interpreter")
 
 
 def test_pinned_json_adapter_formats_typed_inputs_and_native_rlm_action_outputs() -> None:
@@ -147,14 +157,17 @@ async def test_native_json_rlm_computes_and_submits_verified_pi_digit_without_re
         ],
         adapter=adapter,
     )
-    rlm = dspy.RLM(
-        "request -> answer: str",
-        max_iterations=3,
-        interpreter=DaytonaCodeInterpreter(backend=InProcessInterpreterBackend()),
-    )
+    interpreter = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())
+    try:
+        rlm = dspy.RLM("request -> answer: str", max_iters=3)
 
-    with dspy.context(lm=lm, adapter=adapter):
-        prediction = await rlm.acall(request="Tell me the 14952th digit after the decimal point of Pi")
+        with dspy.context(lm=lm, adapter=adapter):
+            prediction = await rlm.acall(
+                interpreter,
+                request="Tell me the 14952th digit after the decimal point of Pi",
+            )
+    finally:
+        interpreter.shutdown()
 
     assert prediction.answer == "1"
     assert prediction.trajectory[0]["output"] == "049449650117321313895"
@@ -184,16 +197,15 @@ async def test_pinned_async_rlm_creates_fresh_native_history_and_honors_output_b
             return dspy.Prediction(reasoning="submit typed output", code="SUBMIT(answer='ok')")
 
     actions = Actions()
-    rlm = dspy.RLM(
-        "request -> answer: str",
-        max_iterations=2,
-        max_output_chars=12,
-        interpreter=DaytonaCodeInterpreter(backend=InProcessInterpreterBackend()),
-    )
+    interpreter = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())
+    rlm = dspy.RLM("request -> answer: str", max_iters=2, max_output_chars=12)
     rlm.generate_action = actions
 
-    first = await rlm.acall(request="first")
-    second = await rlm.acall(request="second")
+    try:
+        first = await rlm.acall(interpreter, request="first")
+        second = await rlm.acall(interpreter, request="second")
+    finally:
+        interpreter.shutdown()
 
     assert first.answer == second.answer == "ok"
     assert first.final_reasoning == second.final_reasoning == "submit typed output"

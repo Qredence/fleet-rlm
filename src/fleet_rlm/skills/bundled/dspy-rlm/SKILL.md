@@ -31,4 +31,4 @@ or implementing `dspy.RLM`; ordinary RLM Turns do not need it.
    independent invariant, known reference, higher-precision stability, or a
    genuinely independent formulation before submitting.
 
-Authority: pinned DSPy 3.3.0b1 and https://dspy.ai/api/modules/RLM/ — not Daytona docs as DSPy authority.
+Authority: pinned DSPy 3.3.0 and https://dspy.ai/api/modules/RLM/ — not Daytona docs as DSPy authority.

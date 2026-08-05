@@ -42,7 +42,6 @@ def test_stock_rlm_resets_tools_registered_on_inject() -> None:
     rlm = build_native_rlm(
         signature=FleetRLMSignature,
         options=RLMOptions(max_iterations=1),
-        interpreter=interp,
     )
     rlm._inject_execution_context(interp, {})
     assert interp._tools_registered is False

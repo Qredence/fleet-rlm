@@ -101,7 +101,7 @@ Run `make check-docs` when docs, commands, Codex config, generated contracts, or
 - Do not commit `AGENTS.md` unless changes are intentional team workflow guidance; continual-learning workspace-fact deltas may stay uncommitted.
 - Avoid introducing direct `litellm` usage in application code; reach LLM providers through `dspy.LM` instead.
 - Prefer wire-protocol-named Literal unions (`openai_responses`, `openai_chat_completion`, `anthropic_messages`) over vendor-flavored or `_compatible`-suffixed provider-type enums, and keep LLM profiles flat (profile name, provider type, base endpoint, API key) rather than over-abstracting.
-- Cite ONLY DSPy (installed 3.3.0b1 source + dspy.ai docs) as the reference contract for LLM/runtime design; do NOT cite the `/daytona` or `daytona-signature` skill as authority for DSPy/RLM decisions. For Daytona sandbox/interpreter and FastAPI API work, use the `/daytona` and `/fastapi` skills for provider/framework best practices.
+- Cite ONLY DSPy (installed 3.3.0 source + dspy.ai docs) as the reference contract for LLM/runtime design; do NOT cite the `/daytona` or `daytona-signature` skill as authority for DSPy/RLM decisions. For Daytona sandbox/interpreter and FastAPI API work, use the `/daytona` and `/fastapi` skills for provider/framework best practices.
 - When asked for a plan, make it code-tree-explicit: exact file paths, line ranges, and ADD/REMOVE/EDIT tables; include expected behavior, capability, and code-change impacts; and cite DSPy, Daytona, and/or FastAPI docs when justifying relevance — not generic prose. When grilling or collecting decisions, prefer AskUser/AskQuestion over long inline multi-question dumps when that tool is available.
 - Prefer live per-iteration RLM reasoning on the existing SSE/`RLMReasoning` → TUI path; treat `dspy.RLM(verbose=…)` as host-logger-only and insufficient for operator-visible streaming.
 
@@ -141,10 +141,10 @@ Run `make check-docs` when docs, commands, Codex config, generated contracts, or
   include the maintained TUI. Live promotion uses `tests/live/backend/` with
   explicit `FLEET_LIVE=1`. `make api-sync` owns root OpenAPI and generated TUI
   HTTP types; a future graphical client is separate work.
-- Under pinned DSPy 3.3.0b1, every model passed to `dspy.LM` must resolve a
-  provider. Model roles and defaults come from the selected TOML profile; bare
-  ids on OpenAI-compatible bases are normalized by `normalize_model_id`. Prefer stock
-  `dspy.LM` with stateless call/context overrides over stateful copies or custom
-  LM wrappers. Pinned `dspy==3.3.0b1` RLM uses `max_iterations` (not
-  `max_iters`). DSPy private-protocol knowledge stays behind `rlm.dspy_contract`
-  (construction/usage) and `rlm.dspy_interpreter_contract` (inject/`FinalOutput`).
+- Under pinned DSPy 3.3.0, every `dspy.LM` model must resolve a provider; model
+  roles/defaults come from the selected TOML profile, and bare compatible-base
+  IDs use `normalize_model_id`. Prefer stock LMs with stateless overrides.
+  Fleet retains `max_iterations` and maps it to DSPy's `max_iters`; native RLMs
+  use a fail-closed `interpreter_factory`, take the caller-owned interpreter
+  positionally, and are shut down by Fleet or the child lease. Keep DSPy private
+  protocol knowledge in `rlm.dspy_contract` and `rlm.dspy_interpreter_contract`.

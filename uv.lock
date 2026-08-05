@@ -912,7 +912,7 @@ wheels = [
 
 [[package]]
 name = "dspy"
-version = "3.3.0b1"
+version = "3.3.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "anyio" },
@@ -930,9 +930,9 @@ dependencies = [
     { name = "tenacity" },
     { name = "tqdm" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/0a/c5/a0f7fce02ca671c0763bd11a6ce3c2aa3f0f6eac1c36a4ca2395b9e78ecb/dspy-3.3.0b1.tar.gz", hash = "sha256:dd24e554f46015406f8c94489d6a5865f3daae73d739e86725139f5f448d71bb", size = 322305, upload-time = "2026-05-28T01:09:05.255Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/29/24/b455b9f3ed55264c1036eecfb56dece4f3e52ae7450401a155a83433ccae/dspy-3.3.0.tar.gz", hash = "sha256:39aa9531391accda8acd7903b52f3c9d2efe462d4bab0c2256db5352e7392754", size = 354248, upload-time = "2026-08-03T19:54:46.112Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/3c/6c/27fdddb63d8f9fdb2cfe6528e1bb1a85e892979e1256bce349ff6a26bf5b/dspy-3.3.0b1-py3-none-any.whl", hash = "sha256:1e6e34c9ed8e748ec216d0d64e35506c53a4c86adac2f846f957546c05a93871", size = 377844, upload-time = "2026-05-28T01:09:04.021Z" },
+    { url = "https://files.pythonhosted.org/packages/67/28/9ae061db912d63d108cfd60593c2d715b0bb0d70191ed0882c4c8780b0a4/dspy-3.3.0-py3-none-any.whl", hash = "sha256:358cbfb15d13246dc4a289bb2350c0ee602260c8a3869f7f63a48a9d2233e48c", size = 413687, upload-time = "2026-08-03T19:54:44.661Z" },
 ]
 
 [[package]]
@@ -1248,7 +1248,7 @@ requires-dist = [
     { name = "databricks-agents", marker = "extra == 'benchmark'", specifier = ">=1.5" },
     { name = "datasets", marker = "extra == 'benchmark'", specifier = ">=5.0.0" },
     { name = "daytona", specifier = "==0.202.0" },
-    { name = "dspy", specifier = "==3.3.0b1" },
+    { name = "dspy", specifier = "==3.3.0" },
     { name = "fastapi", extras = ["standard"], specifier = "==0.141.1" },
     { name = "gepa", marker = "extra == 'optimize'", specifier = ">=0.1.1" },
     { name = "httpx", specifier = ">=0.28,<1" },

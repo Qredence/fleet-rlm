@@ -2,32 +2,9 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
-from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
-
-
-class _FakeInterpreter:
-    """Minimal CodeInterpreter-compatible stub (no network)."""
-
-    def __init__(self) -> None:
-        self._tools: dict[str, Callable[..., str]] = {}
-
-    @property
-    def tools(self) -> dict[str, Callable[..., str]]:
-        return self._tools
-
-    def start(self) -> None:
-        return None
-
-    def execute(self, code: str, variables: dict[str, Any] | None = None) -> str:
-        del code, variables
-        return ""
-
-    def shutdown(self) -> None:
-        return None
 
 
 def host_echo(value: str = "ok") -> str:
@@ -80,7 +57,6 @@ def test_factory_passes_explicit_constructor_kwargs() -> None:
 
     root = MagicMock(name="root_lm")
     sub = MagicMock(name="sub_lm")
-    interpreter = _FakeInterpreter()
     options = RLMOptions(
         max_iterations=7,
         max_llm_calls=11,
@@ -91,7 +67,6 @@ def test_factory_passes_explicit_constructor_kwargs() -> None:
     rlm = RLMFactory().create(
         models=models,
         options=options,
-        interpreter=interpreter,
         tools=[host_echo],
     )
 
@@ -99,11 +74,11 @@ def test_factory_passes_explicit_constructor_kwargs() -> None:
     assert type(rlm) is dspy.RLM
     assert rlm.verbose is True
     assert not hasattr(rlm, "bind_observer")
-    assert rlm.max_iterations == 7
+    assert rlm.max_iters == 7
     assert rlm.max_llm_calls == 11
     assert rlm.max_output_chars == 2048
     assert rlm.sub_lm is sub
-    assert rlm._interpreter is interpreter
+    assert not hasattr(rlm, "_interpreter")
     assert "host_echo" in rlm.tools
     assert rlm.signature is FleetRLMSignature
     # Root is owned by the bundle for the runner; factory does not hide it in RLM ctor.
@@ -118,10 +93,8 @@ def test_each_factory_call_returns_new_rlm_instance() -> None:
     factory = RLMFactory()
     models = RLMModelBundle(root_lm=MagicMock(), sub_lm=MagicMock())
     options = RLMOptions()
-    interpreter = _FakeInterpreter()
-
-    first = factory.create(models=models, options=options, interpreter=interpreter)
-    second = factory.create(models=models, options=options, interpreter=interpreter)
+    first = factory.create(models=models, options=options)
+    second = factory.create(models=models, options=options)
 
     assert first is not second
 
@@ -134,7 +107,6 @@ def test_factory_accepts_policy_controlled_host_verbosity() -> None:
     rlm = RLMFactory(verbose=False).create(
         models=RLMModelBundle(root_lm=MagicMock(), sub_lm=MagicMock()),
         options=RLMOptions(),
-        interpreter=_FakeInterpreter(),
     )
 
     assert rlm.verbose is False

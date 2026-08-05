@@ -238,6 +238,7 @@ async def test_volume_attachment_context_round_trips_inside_the_interpreter(tmp_
 
     from fleet_rlm.chat.session_context import SessionContextManifest
     from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
+    from fleet_rlm.rlm.signature import FleetRLMSignature
 
     body = b"Fleet context"
     context_file = tmp_path / "report.txt"
@@ -267,13 +268,14 @@ async def test_volume_attachment_context_round_trips_inside_the_interpreter(tmp_
     interpreter = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())
     interpreter.bind_context_capsule(payload)
     rlm = dspy.RLM(
-        "request -> answer: str",
-        max_iterations=1,
-        interpreter=interpreter,
+        FleetRLMSignature,
+        max_iters=1,
     )
 
     with dspy.context(lm=lm, adapter=dspy.JSONAdapter()):
-        prediction = await rlm.acall(**kwargs)
+        prediction = await rlm.acall(interpreter, **kwargs)
+
+    interpreter.shutdown()
 
     assert prediction.answer == "Fleet context"
     assert payload.rlm_preview(10) == "prepared i"
@@ -386,8 +388,7 @@ async def test_attachment_context_integrity_failure_aborts_before_reasoning(tmp_
     interpreter.bind_context_capsule(capsule)
     rlm = dspy.RLM(
         "request, attachments -> answer: str",
-        max_iterations=1,
-        interpreter=interpreter,
+        max_iters=1,
     )
 
     with (
@@ -395,10 +396,12 @@ async def test_attachment_context_integrity_failure_aborts_before_reasoning(tmp_
         pytest.raises(DaytonaAdapterError, match="prepared context failed integrity verification"),
     ):
         await rlm.acall(
+            interpreter,
             request="inspect",
             attachments=capsule,
         )
 
+    interpreter.shutdown()
     assert lm.history == []
 
 
