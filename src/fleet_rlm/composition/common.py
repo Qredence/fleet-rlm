@@ -129,9 +129,9 @@ def rlm_options(settings: Settings) -> RLMOptions:
 def recursive_rlm_options(settings: Settings) -> RecursiveRLMOptions:
     """
     Create bounded options for recursive child RLM execution.
-    
+
     Returns:
-    	RecursiveRLMOptions: Recursive execution settings derived from the application configuration.
+        RecursiveRLMOptions: Recursive execution settings derived from the application configuration.
     """
     return RecursiveRLMOptions(
         enabled=settings.rlm_recursion_enabled,

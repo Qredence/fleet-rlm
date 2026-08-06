@@ -103,10 +103,10 @@ async def test_root_child_root_flow_preserves_parent_repl_and_typed_submit() -> 
 
 def _child_lease(call_index: int) -> ChildRuntimeLease:
     """Create a child runtime lease for a recursive test invocation.
-    
+
     Parameters:
         call_index (int): Index used to identify the child runtime and workspace.
-    
+
     Returns:
         ChildRuntimeLease: A lease backed by an in-process interpreter.
     """
@@ -142,7 +142,7 @@ async def test_runner_rejects_recursive_tool_after_authority_revocation() -> Non
         def drain_artifact_candidates(self):
             """
             Drain pending artifact candidates.
-            
+
             Returns:
                 tuple: An empty tuple.
             """
@@ -150,21 +150,21 @@ async def test_runner_rejects_recursive_tool_after_authority_revocation() -> Non
 
     async def not_cancelled() -> bool:
         """Indicate that cancellation has not been requested.
-        
+
         Returns:
-        	bool: `False`, indicating that cancellation has been requested.
+                bool: `False`, indicating that cancellation has been requested.
         """
         return False
 
     def child_factory(call_index: int) -> ChildRuntimeLease:
         """
         Create a child runtime lease for the specified recursive call index.
-        
+
         Parameters:
-        	call_index (int): Index of the recursive call.
-        
+                call_index (int): Index of the recursive call.
+
         Returns:
-        	ChildRuntimeLease: The runtime lease for the child call.
+                ChildRuntimeLease: The runtime lease for the child call.
         """
         created.append(call_index)
         return _child_lease(call_index)
@@ -223,7 +223,7 @@ async def test_normal_daytona_policy_omits_recursive_tool_and_guidance() -> None
         def drain_artifact_candidates(self):
             """
             Drain pending artifact candidates.
-            
+
             Returns:
                 tuple: An empty tuple.
             """
@@ -231,9 +231,9 @@ async def test_normal_daytona_policy_omits_recursive_tool_and_guidance() -> None
 
     async def not_cancelled() -> bool:
         """Indicate that cancellation has not been requested.
-        
+
         Returns:
-        	bool: `False`, indicating that cancellation has been requested.
+                bool: `False`, indicating that cancellation has been requested.
         """
         return False
 
@@ -287,7 +287,7 @@ async def test_failed_child_cleanup_prevents_successful_root_outcome() -> None:
         def drain_artifact_candidates(self):
             """
             Drain pending artifact candidates.
-            
+
             Returns:
                 tuple: An empty tuple.
             """
@@ -295,9 +295,9 @@ async def test_failed_child_cleanup_prevents_successful_root_outcome() -> None:
 
     async def not_cancelled() -> bool:
         """Indicate that cancellation has not been requested.
-        
+
         Returns:
-        	bool: `False`, indicating that cancellation has been requested.
+                bool: `False`, indicating that cancellation has been requested.
         """
         return False
 

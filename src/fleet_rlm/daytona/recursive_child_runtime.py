@@ -55,30 +55,31 @@ def build_child_runtime_factory(
 ) -> ChildRuntimeFactory:
     """
     Build a factory that acquires disposable child runtimes for a root turn.
-    
+
     The returned factory blocks the calling worker thread until child-runtime acquisition completes on the event loop.
-    
+
     Parameters:
-    	volume_id (str): Identifier of the volume mounted in child runtimes.
-    	mount_path (str): Mount path used by child runtimes.
-    	workspace_id (UUID): Identifier of the workspace owning the runtimes.
-    	run_id (UUID): Identifier of the root turn run.
-    	deadline (float): Acquisition deadline as a monotonic timestamp.
-    	execution_timeout_s (int): Maximum execution time for each child runtime.
-    	execution_output_cap (int): Maximum output size for each child runtime.
-    	is_authorized (Callable[[], bool] | None): Optional callback that determines whether child-runtime creation remains authorized.
-    
+        volume_id (str): Identifier of the volume mounted in child runtimes.
+        mount_path (str): Mount path used by child runtimes.
+        workspace_id (UUID): Identifier of the workspace owning the runtimes.
+        run_id (UUID): Identifier of the root turn run.
+        deadline (float): Acquisition deadline as a monotonic timestamp.
+        execution_timeout_s (int): Maximum execution time for each child runtime.
+        execution_output_cap (int): Maximum output size for each child runtime.
+        is_authorized (Callable[[], bool] | None): Optional callback that determines whether
+            child-runtime creation remains authorized.
+
     Returns:
-    	ChildRuntimeFactory: A factory that accepts a call index and returns a leased child runtime.
+        ChildRuntimeFactory: A factory that accepts a call index and returns a leased child runtime.
     """
 
     def create(call_index: int) -> ChildRuntimeLease:
         """
         Acquire a disposable child runtime lease for a recursive call.
-        
+
         Parameters:
             call_index (int): Index identifying the recursive child call.
-        
+
         Returns:
             ChildRuntimeLease: Lease for the acquired child runtime.
         """
@@ -125,14 +126,14 @@ async def _acquire_child_runtime(
 ) -> ChildRuntimeLease:
     """
     Acquire a disposable runtime lease for a recursive child execution.
-    
+
     Parameters:
-    	call_index (int): The child call index used to derive its volume subpath.
-    	deadline (float): The time limit for acquiring admission.
-    	is_authorized (Callable[[], bool] | None): Optional callback used to verify authorization during acquisition.
-    
+        call_index (int): The child call index used to derive its volume subpath.
+        deadline (float): The time limit for acquiring admission.
+        is_authorized (Callable[[], bool] | None): Optional callback used to verify authorization during acquisition.
+
     Returns:
-    	ChildRuntimeLease: The child interpreter lease and its associated sandbox and cleanup lifecycle.
+        ChildRuntimeLease: The child interpreter lease and its associated sandbox and cleanup lifecycle.
     """
     _require_authorized(is_authorized)
     permit = await admission.acquire(deadline=deadline)
@@ -190,9 +191,9 @@ def _close_child_runtime_sync(
 ) -> None:
     """
     Close a child runtime and release its associated sandbox resources.
-    
+
     Raises:
-    	ChildRuntimeCleanupError: If interpreter shutdown or resource cleanup fails.
+        ChildRuntimeCleanupError: If interpreter shutdown or resource cleanup fails.
     """
     first_error: BaseException | None = None
     try:
@@ -225,12 +226,12 @@ async def _cleanup_after_failed_acquire(
 ) -> None:
     """
     Clean up resources allocated during a failed child-runtime acquisition.
-    
+
     Parameters:
-    	platform (SandboxPlatform): Platform used to delete the sandbox.
-    	sandbox (Any | None): Partially created sandbox, if available.
-    	sandbox_id (str | None): Validated sandbox identifier, if available.
-    	permit (DaytonaAdmissionPermit): Admission permit to release after cleanup.
+        platform (SandboxPlatform): Platform used to delete the sandbox.
+        sandbox (Any | None): Partially created sandbox, if available.
+        sandbox_id (str | None): Validated sandbox identifier, if available.
+        permit (DaytonaAdmissionPermit): Admission permit to release after cleanup.
     """
     try:
         if sandbox is not None:
@@ -249,14 +250,14 @@ async def _cleanup_child_runtime_async(
 ) -> None:
     """
     Clean up a child runtime's files and sandbox, then release its admission permit.
-    
+
     Parameters:
         platform (SandboxPlatform): Platform used to delete the sandbox.
         sandbox (Any): Sandbox whose mounted files are purged.
         sandbox_id (str): Identifier of the sandbox to delete.
         mount_path (str): Root path under which regular files are removed.
         permit (DaytonaAdmissionPermit): Admission permit to release after cleanup.
-    
+
     Raises:
         BaseException: The first error encountered while purging files or deleting the sandbox.
     """
@@ -280,10 +281,10 @@ async def _cleanup_child_runtime_async(
 async def _purge_regular_files(sandbox: Any, mount_path: str) -> None:
     """
     Delete regular files contained within the specified mount path.
-    
+
     Parameters:
-    	sandbox (Any): Sandbox providing file listing and deletion operations.
-    	mount_path (str): Root path whose regular files should be deleted.
+        sandbox (Any): Sandbox providing file listing and deletion operations.
+        mount_path (str): Root path whose regular files should be deleted.
     """
     root = PurePosixPath(mount_path)
     entries = await sandbox.fs.list_files(str(root), depth=64)
@@ -301,15 +302,15 @@ async def _purge_regular_files(sandbox: Any, mount_path: str) -> None:
 
 def _sandbox_id(sandbox: Any) -> str:
     """Extract and validate the identifier of a recursive child sandbox.
-    
+
     Parameters:
-    	sandbox (Any): Sandbox object whose identifier is required.
-    
+        sandbox (Any): Sandbox object whose identifier is required.
+
     Returns:
-    	str: The nonempty sandbox identifier.
-    
+        str: The nonempty sandbox identifier.
+
     Raises:
-    	RuntimeError: If the sandbox does not have a nonempty string identifier.
+        RuntimeError: If the sandbox does not have a nonempty string identifier.
     """
     value = getattr(sandbox, "id", None)
     if not isinstance(value, str) or not value:
@@ -319,12 +320,12 @@ def _sandbox_id(sandbox: Any) -> str:
 
 def _require_authorized(is_authorized: Callable[[], bool] | None) -> None:
     """Ensure the current turn remains authorized when an authorization callback is provided.
-    
+
     Parameters:
-    	is_authorized (Callable[[], bool] | None): Callback that reports whether the turn is still authorized.
-    
+        is_authorized (Callable[[], bool] | None): Callback that reports whether the turn is still authorized.
+
     Raises:
-    	ChildRuntimeAuthorizationError: If the callback reports that the turn is no longer authorized.
+        ChildRuntimeAuthorizationError: If the callback reports that the turn is no longer authorized.
     """
     if is_authorized is not None and not is_authorized():
         raise ChildRuntimeAuthorizationError("Turn is no longer authorized")

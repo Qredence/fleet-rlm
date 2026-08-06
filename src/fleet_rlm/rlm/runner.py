@@ -64,12 +64,12 @@ _MAX_DETAIL_EVENTS = 1024
 def _recursive_summary(executor: RecursiveRLMExecutor | None) -> RecursiveCallSummary:
     """
     Return recursive execution metrics, or zero-valued metrics when recursion is disabled.
-    
+
     Parameters:
-    	executor (RecursiveRLMExecutor | None): The recursive executor whose metrics should be summarized.
-    
+        executor (RecursiveRLMExecutor | None): The recursive executor whose metrics should be summarized.
+
     Returns:
-    	RecursiveCallSummary: The executor's recursive call metrics or an empty summary.
+        RecursiveCallSummary: The executor's recursive call metrics or an empty summary.
     """
     if executor is not None:
         return executor.summary()
@@ -88,14 +88,14 @@ class RLMFactoryLike(Protocol):
     ) -> Any:
         """
         Constructs an RLM with the specified models, execution options, tools, and signature.
-        
+
         Parameters:
             models (Any): Models used by the RLM.
             options (Any): Execution options for the RLM.
             tools (Sequence[dspy.Tool] | None): Optional tools available to the RLM.
             signature (Any): Optional signature defining the RLM interface.
             verbose (bool): Whether to enable verbose execution output.
-        
+
         Returns:
             Any: The configured RLM instance.
         """
@@ -657,13 +657,14 @@ class RLMRunner:
     ) -> tuple[RLMExecutionSpec, _DetailRelay, TurnToolGuards, asyncio.Task[Any]]:
         """
         Prepare the RLM worker and supporting execution state for a turn.
-        
+
         Parameters:
-            context (RLMExecutionContext): Execution context containing the request, capabilities, runtime options, and authorization state.
-        
+            context (RLMExecutionContext): Execution context containing the request, capabilities,
+                runtime options, and authorization state.
+
         Returns:
             tuple: The execution specification, detail relay, tool guards, and worker task.
-        
+
         Raises:
             RLMConfigError: If recursive execution requires a child runtime factory that is unavailable.
         """
@@ -807,8 +808,10 @@ class RLMRunner:
     ) -> Any:
         """
         Execute the RLM with the prepared request context and return its prediction.
-        
-        The execution records tracing and usage metadata, publishes supported streaming observations, and records attachment accesses. Cleanup failures from recursive execution are surfaced as execution failures.
+
+        The execution records tracing and usage metadata, publishes supported streaming
+        observations, and records attachment accesses. Cleanup failures from recursive execution
+        are surfaced as execution failures.
         """
         kwargs = build_rlm_input_kwargs(
             request=context.request,
@@ -941,17 +944,18 @@ class RLMRunner:
     ) -> Any:
         """
         Execute the RLM in a worker thread with its own asynchronous event loop.
-        
+
         Parameters:
             rlm (Any): The RLM instance to execute.
             context (RLMExecutionContext): Runtime context for the execution.
             spec (RLMExecutionSpec): Execution configuration.
             recursive_executor (RecursiveRLMExecutor | None): Optional executor for recursive calls.
             relay (_DetailRelay): Relay for execution details.
-        
+
         Returns:
             Any: The RLM execution result.
         """
+
         def run() -> Any:
             return asyncio.run(self._execute_rlm(rlm, context, spec, recursive_executor, relay))
 

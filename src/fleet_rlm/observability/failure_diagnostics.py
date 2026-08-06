@@ -43,12 +43,13 @@ def normalize_turn_failure(exc: BaseException) -> FailureDiagnostic:
 def trace_failure_category(exc: BaseException) -> str:
     """
     Classify an exception into a bounded failure category for internal MLflow metadata.
-    
+
     Parameters:
-    	exc (BaseException): The failure to classify.
-    
+        exc (BaseException): The failure to classify.
+
     Returns:
-    	str: A failure category such as ``unauthorized``, ``cleanup_failed``, ``timeout``, ``cancelled``, or the normalized diagnostic cause type.
+        str: A failure category such as ``unauthorized``, ``cleanup_failed``, ``timeout``,
+            ``cancelled``, or the normalized diagnostic cause type.
     """
     if isinstance(exc, ChildRuntimeAuthorizationError):
         return "unauthorized"

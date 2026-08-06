@@ -153,14 +153,14 @@ class DefaultTurnPreparer:
     async def prepare(self, turn: ExecuteTurn, *, deadline: float) -> PreparedTurn:
         """
         Prepare the execution context and resources required to run a turn.
-        
+
         Parameters:
             turn (ExecuteTurn): Turn request and execution metadata.
             deadline (float): Absolute deadline for turn preparation.
-        
+
         Returns:
             PreparedTurn: Prepared execution context, artifact sinks, and managed resources.
-        
+
         Raises:
             TurnPreparationCancelledError: If the turn is cancelled.
             TurnPreparationTimeoutError: If preparation exceeds the deadline.

@@ -23,9 +23,10 @@ def _avoid_loading_repository_credentials(monkeypatch: pytest.MonkeyPatch) -> No
 def _test_receipt() -> dict[str, object]:
     """
     Create a valid receipt fixture for verifier tests.
-    
+
     Returns:
-    	dict[str, object]: A receipt containing schema, timing, streaming, assertion, resource, failure, and pass-status data.
+        dict[str, object]: A receipt containing schema, timing, streaming, assertion, resource,
+            failure, and pass-status data.
     """
     return {
         "schema": verifier.RECEIPT_SCHEMA,
@@ -51,13 +52,14 @@ def _test_receipt() -> dict[str, object]:
 def _settings(*, profile: str = "daytona") -> object:
     """
     Create test settings for a Daytona live-execution profile.
-    
+
     Parameters:
-    	profile (str): Name of the active execution profile.
-    
+        profile (str): Name of the active execution profile.
+
     Returns:
-    	object: Settings object configured for Daytona live execution.
+        object: Settings object configured for Daytona live execution.
     """
+
     class Settings:
         run_environment = "daytona"
         root_model = verifier._LIVE_ROOT_MODEL
@@ -146,10 +148,10 @@ def test_success_receipt_is_enriched_and_sanitized(
     def run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
         """
         Write a test receipt to the evidence path specified in the environment.
-        
+
         Parameters:
             kwargs (object): Keyword arguments containing an ``env`` mapping with the evidence file path.
-        
+
         Returns:
             subprocess.CompletedProcess[str]: A successful completed-process result for the command.
         """

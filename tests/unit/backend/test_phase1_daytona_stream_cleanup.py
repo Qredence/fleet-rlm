@@ -20,9 +20,9 @@ class _Platform:
     async def delete(self, sandbox: SimpleNamespace) -> None:
         """
         Record the sandbox identifier as deleted.
-        
+
         Parameters:
-        	sandbox (SimpleNamespace): Sandbox object whose identifier is recorded.
+                sandbox (SimpleNamespace): Sandbox object whose identifier is recorded.
         """
         self.delete_calls.append(str(sandbox.id))
 
@@ -35,12 +35,12 @@ class _VolumeClient:
     async def get(self, name: str, *, create: bool) -> SimpleNamespace:
         """
         Retrieve a volume representation by name.
-        
+
         Parameters:
-        	create (bool): Whether to create the volume if it does not exist.
-        
+                create (bool): Whether to create the volume if it does not exist.
+
         Returns:
-        	SimpleNamespace: A volume object containing the requested name.
+                SimpleNamespace: A volume object containing the requested name.
         """
         self.get_calls.append((name, create))
         return SimpleNamespace(name=name)
