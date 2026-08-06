@@ -38,7 +38,8 @@ describe("TranscriptComponent", () => {
 
     const header = new TranscriptComponent(store).render(100)[1];
 
-    expect(header).toContain("Unsafe Title ]52;c;secret");
+    expect(header).toContain("Unsafe Title · resumed · active");
+    expect(header).not.toContain("secret");
     expect(header).not.toContain("\n");
     expect(header).not.toContain("\x1b]52");
     expect(header).not.toContain("\x07");
@@ -85,9 +86,13 @@ describe("TranscriptComponent", () => {
     expect(light).toContain("styled");
   });
 
-  it("rerenders active streaming text and running tools", () => {
+  it("rerenders active streaming evidence through one render cache", () => {
     const store = new ConversationStore();
-    const render = vi.fn((value: Message) => [value.id]);
+    const caches: unknown[] = [];
+    const render = vi.fn((value: Message, _width: number, cache: unknown) => {
+      caches.push(cache);
+      return [value.id];
+    });
     store.dispatch({
       type: "message/upsert",
       message: {
@@ -113,11 +118,36 @@ describe("TranscriptComponent", () => {
         ts: 1,
       },
     });
+    store.dispatch({
+      type: "message/upsert",
+      message: {
+        id: "code",
+        kind: "code",
+        runId: "run-1",
+        step: 1,
+        code: "partial",
+        streaming: true,
+        ts: 1,
+      },
+    });
+    store.dispatch({
+      type: "message/upsert",
+      message: {
+        id: "output",
+        kind: "output",
+        runId: "run-1",
+        step: 1,
+        output: "partial",
+        streaming: true,
+        ts: 1,
+      },
+    });
     const transcript = new TranscriptComponent(store, render);
 
     transcript.render(80);
     transcript.render(80);
 
-    expect(render).toHaveBeenCalledTimes(4);
+    expect(render).toHaveBeenCalledTimes(8);
+    expect(caches[0]).toBe(caches[1]);
   });
 });

@@ -12,6 +12,7 @@ describe("terminal projection", () => {
     const live = new LiveTurnProjector(clock);
 
     expect(live.push({ type: "text-start", id: "text-1" })).toEqual([]);
+    expect(live.push({ type: "text-delta", id: "text-1", delta: "" })).toEqual([]);
     expect(live.push({ type: "text-end", id: "text-1" })).toEqual([]);
   });
 
@@ -202,7 +203,113 @@ describe("terminal projection", () => {
 
     expect(messages).toMatchObject([
       { kind: "reasoning", id: "thinking-stream-reasoning", text: "Inspect now" },
-      { kind: "code", id: "code-stream-code", code: "SUBMIT(answer='done')" },
+      {
+        kind: "code",
+        id: "code-stream-code",
+        code: "SUBMIT(answer='done')",
+        language: "python",
+        streaming: false,
+      },
+    ]);
+  });
+
+  it("upserts a canonical reasoning correction into the existing step card", () => {
+    const live = new LiveTurnProjector(clock);
+    live.push({ type: "start", messageId: "run-1", messageMetadata: {} });
+
+    const events = [
+      { type: "reasoning-start", id: "stream-reasoning" },
+      { type: "reasoning-delta", id: "stream-reasoning", delta: "stale" },
+      { type: "reasoning-end", id: "stream-reasoning" },
+      { type: "reasoning-start", id: "stream-reasoning:canonical" },
+      { type: "reasoning-delta", id: "stream-reasoning:canonical", delta: "canonical" },
+      { type: "reasoning-end", id: "stream-reasoning:canonical" },
+    ] satisfies FleetUIMessageChunk[];
+
+    expect(finalMessages(events.flatMap((chunk) => live.push(chunk)))).toMatchObject([
+      { id: "thinking-stream-reasoning", kind: "reasoning", text: "canonical" },
+    ]);
+  });
+
+  it("replaces output deltas with a canonical final output", () => {
+    const live = new LiveTurnProjector(clock);
+    live.push({ type: "start", messageId: "run-1", messageMetadata: {} });
+
+    const events = [
+      {
+        type: "data-rlm-output",
+        id: "stream-output",
+        data: { step: 1, output: "first", is_delta: true, is_final: false },
+      },
+      {
+        type: "data-rlm-output",
+        id: "stream-output",
+        data: { step: 1, output: "first second", is_delta: false, is_final: true },
+      },
+    ] satisfies FleetUIMessageChunk[];
+
+    expect(finalMessages(events.flatMap((chunk) => live.push(chunk)))).toMatchObject([
+      {
+        kind: "output",
+        id: "output-stream-output",
+        output: "first second",
+        streaming: false,
+      },
+    ]);
+  });
+
+  it("accumulates output deltas and settles an empty final delta", () => {
+    const live = new LiveTurnProjector(clock);
+    live.push({ type: "start", messageId: "run-1", messageMetadata: {} });
+
+    const events = [
+      {
+        type: "data-rlm-output",
+        id: "stream-output",
+        data: { step: 1, output: "first", is_delta: true, is_final: false },
+      },
+      {
+        type: "data-rlm-output",
+        id: "stream-output",
+        data: { step: 1, output: " second", is_delta: true, is_final: false },
+      },
+      {
+        type: "data-rlm-output",
+        id: "stream-output",
+        data: { step: 1, output: "", is_delta: true, is_final: true },
+      },
+    ] satisfies FleetUIMessageChunk[];
+
+    const messages = finalMessages(events.flatMap((chunk) => live.push(chunk)));
+
+    expect(messages).toMatchObject([
+      {
+        kind: "output",
+        id: "output-stream-output",
+        output: "first second",
+        streaming: false,
+      },
+    ]);
+  });
+
+  it("does not collapse malformed empty stream ids into one output card", () => {
+    const live = new LiveTurnProjector(clock);
+    live.push({ type: "start", messageId: "run-1", messageMetadata: {} });
+
+    const first = live.push({
+      type: "data-rlm-output",
+      id: "output-first",
+      data: { step: 1, output: "first", stream_id: "", is_delta: false, is_final: true },
+    });
+    const second = live.push({
+      type: "data-rlm-output",
+      id: "output-second",
+      data: { step: 2, output: "second", stream_id: "", is_delta: false, is_final: true },
+    });
+
+    expect(finalMessages([...first, ...second])).toMatchObject([
+      { kind: "output", id: "output-output-first", output: "first" },
+      { kind: "output", id: "output-output-second", output: "second" },
     ]);
   });
 
@@ -455,6 +562,29 @@ describe("terminal projection", () => {
       "skill-1",
       "skill-1:1",
     ]);
+  });
+
+  it("renders the runtime artifact kind field", () => {
+    const projector = new LiveTurnProjector(clock);
+    const messages = finalMessages(
+      [
+        { type: "start", messageId: "run-1", messageMetadata: {} },
+        {
+          type: "data-artifact",
+          id: "artifact-1",
+          data: {
+            artifact_id: "artifact-1",
+            artifact_kind: "markdown",
+            title: "report",
+            media_type: "text/markdown",
+            byte_size: 3,
+            checksum_sha256: "a".repeat(64),
+          },
+        },
+      ].flatMap((chunk) => projector.push(chunk as FleetUIMessageChunk)),
+    );
+
+    expect(messages).toMatchObject([{ kind: "artifact", artifactKind: "markdown" }]);
   });
 
   it("preserves distinct Skill lifecycle metadata live and after hydration", () => {

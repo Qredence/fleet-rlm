@@ -7,7 +7,15 @@ export type Phase = "idle" | "submitting" | "running" | "cancelling" | "complete
 export type Role = "user" | "assistant" | "system";
 
 export type Message =
-  | { id: string; kind: "text"; role: Role; text: string; ts: number; streaming: boolean }
+  | {
+      id: string;
+      kind: "text";
+      role: Role;
+      text: string;
+      ts: number;
+      streaming: boolean;
+      runId?: string;
+    }
   | {
       id: string;
       kind: "reasoning";
@@ -36,6 +44,8 @@ export type Message =
       runId: string;
       step: number;
       code: string;
+      language?: string;
+      streaming?: boolean;
       ts: number;
     }
   | {
@@ -44,6 +54,7 @@ export type Message =
       runId: string;
       step: number;
       output: string;
+      streaming?: boolean;
       ts: number;
     }
   | {
@@ -255,6 +266,28 @@ export class ConversationStore {
   }
 }
 
+function settleStreamingMessages(messages: Message[], runId: string | null): Message[] {
+  let changed = false;
+  const settled = messages.map((message) => {
+    const belongsToRun =
+      message.kind === "text"
+        ? message.role === "assistant" && (message.runId === runId || message.runId === undefined)
+        : "runId" in message && message.runId === runId;
+    if (!belongsToRun) return message;
+
+    if (message.kind === "text" && message.streaming) {
+      changed = true;
+      return { ...message, streaming: false };
+    }
+    if ((message.kind === "code" || message.kind === "output") && message.streaming) {
+      changed = true;
+      return { ...message, streaming: false };
+    }
+    return message;
+  });
+  return changed ? settled : messages;
+}
+
 function reduce(state: State, event: Event): State {
   switch (event.type) {
     case "session/init":
@@ -327,6 +360,7 @@ function reduce(state: State, event: Event): State {
     case "run/finish":
       return {
         ...state,
+        messages: settleStreamingMessages(state.messages, state.run.id),
         run: {
           ...state.run,
           phase: event.error ? "error" : "completed",
@@ -346,6 +380,7 @@ function reduce(state: State, event: Event): State {
     case "run/cancelled":
       return {
         ...state,
+        messages: settleStreamingMessages(state.messages, state.run.id),
         run: {
           ...state.run,
           phase: "idle",
@@ -359,6 +394,7 @@ function reduce(state: State, event: Event): State {
     case "run/interrupted":
       return {
         ...state,
+        messages: settleStreamingMessages(state.messages, state.run.id),
         run: {
           ...state.run,
           phase: "error",

@@ -1,10 +1,11 @@
 import { truncateToWidth, type Component } from "@earendil-works/pi-tui";
 
-import { renderMessage } from "./message-renderer.js";
+import { MessageRenderCache, renderMessage } from "./message-renderer.js";
+import { terminalSafeLine } from "./terminal-text.js";
 import type { ConversationStore, Message } from "./store.js";
 import { theme } from "./theme.js";
 
-type MessageRenderer = (message: Message, width: number) => string[];
+type MessageRenderer = (message: Message, width: number, cache: MessageRenderCache) => string[];
 
 type CachedMessage = {
   message: Message;
@@ -14,6 +15,7 @@ type CachedMessage = {
 
 export class TranscriptComponent implements Component {
   private readonly cache = new Map<string, CachedMessage>();
+  private readonly renderCache = new MessageRenderCache();
 
   constructor(
     private readonly store: ConversationStore,
@@ -22,6 +24,7 @@ export class TranscriptComponent implements Component {
 
   invalidate(): void {
     this.cache.clear();
+    this.renderCache.clear();
   }
 
   render(width: number): string[] {
@@ -55,6 +58,7 @@ export class TranscriptComponent implements Component {
     if (state.messages.length === 0) {
       lines.push(dim("(empty conversation — type a prompt or /help)"));
       this.cache.clear();
+      this.renderCache.clear();
       return lines;
     }
 
@@ -67,16 +71,18 @@ export class TranscriptComponent implements Component {
     for (const id of this.cache.keys()) {
       if (!retained.has(id)) this.cache.delete(id);
     }
+    this.renderCache.retain(retained);
     return lines;
   }
 
   private renderCached(message: Message, width: number): string[] {
     const dynamic =
       (message.kind === "text" && message.streaming) ||
-      (message.kind === "tool" && message.status === "running");
+      (message.kind === "tool" && message.status === "running") ||
+      ((message.kind === "code" || message.kind === "output") && message.streaming === true);
     const cached = this.cache.get(message.id);
     if (!dynamic && cached?.message === message && cached.width === width) return cached.lines;
-    const lines = this.renderer(message, width);
+    const lines = this.renderer(message, width, this.renderCache);
     if (!dynamic) this.cache.set(message.id, { message, width, lines });
     return lines;
   }
@@ -84,11 +90,4 @@ export class TranscriptComponent implements Component {
 
 function dim(value: string): string {
   return theme.fg("dim", value);
-}
-
-function terminalSafeLine(value: string): string {
-  return value
-    .replaceAll(/[\p{Cc}\p{Zl}\p{Zp}]+/gu, " ")
-    .replaceAll(/\s+/gu, " ")
-    .trim();
 }

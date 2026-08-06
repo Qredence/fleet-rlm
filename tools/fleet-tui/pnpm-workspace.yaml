@@ -1,6 +1,4 @@
 allowBuilds:
   esbuild: true
 minimumReleaseAgeExclude:
-  - '@ai-sdk/gateway@4.0.28'
-  - '@earendil-works/pi-tui@0.82.0'
-  - ai@7.0.37
+  - '@earendil-works/pi-tui@0.84.0'

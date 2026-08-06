@@ -46,16 +46,47 @@ function runSample(): number {
   transcript.render(100);
 
   const startedAt = performance.now();
+  let liveText = "";
+  let liveCode = "";
+  let liveOutput = "";
   for (let index = 0; index < updatesPerSample; index += 1) {
+    liveText += `${index % 20 === 0 ? "\n\n## Step " : " token "}${index}`;
+    liveCode += `${index === 0 ? "answer = " : ""}${index % 10}\n`;
+    liveOutput += `${index % 25 === 0 ? "\n" : ""}output-${index}`;
     store.dispatch({
       type: "message/upsert",
       message: {
-        id: "live",
+        id: "live-text",
         kind: "text",
         role: "assistant",
-        text: `delta-${index}`,
+        text: liveText,
         streaming: true,
-        ts: 2,
+        ts: index,
+      },
+    });
+    store.dispatch({
+      type: "message/upsert",
+      message: {
+        id: "live-code",
+        kind: "code",
+        runId: "run-live",
+        step: 1,
+        code: liveCode,
+        language: "python",
+        streaming: true,
+        ts: index,
+      },
+    });
+    store.dispatch({
+      type: "message/upsert",
+      message: {
+        id: "live-output",
+        kind: "output",
+        runId: "run-live",
+        step: 1,
+        output: liveOutput,
+        streaming: true,
+        ts: index,
       },
     });
     transcript.render(100);

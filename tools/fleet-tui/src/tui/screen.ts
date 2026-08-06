@@ -10,6 +10,7 @@ import {
 
 import { formatDuration, formatTokens, shortTraceId } from "./format.js";
 import { summarizeExecution } from "./execution-summary.js";
+import { terminalSafeLine } from "./terminal-text.js";
 import type { ConversationStore, Run, State } from "./store.js";
 import { theme } from "./theme.js";
 import { TranscriptComponent } from "./transcript.js";
@@ -161,7 +162,7 @@ function activityAction(state: State): string {
   for (let index = state.messages.length - 1; index >= 0; index -= 1) {
     const message = state.messages[index];
     if (message?.kind === "tool" && message.status === "running" && message.runId === run.id) {
-      return `Running Tool ${message.name}`;
+      return `Running Tool ${terminalSafeLine(message.name)}`;
     }
   }
 
@@ -175,11 +176,7 @@ function activityAction(state: State): string {
 }
 
 function terminalSafeStatus(value: string): string {
-  return value
-    .replaceAll(/[\p{Cc}\p{Zl}\p{Zp}]+/gu, " ")
-    .replaceAll(/[_-]+/g, " ")
-    .replaceAll(/\s+/g, " ")
-    .trim();
+  return terminalSafeLine(value).replaceAll(/[_-]+/g, " ");
 }
 
 function formatObservedTokens(value: number | null): string {

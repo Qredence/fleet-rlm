@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { renderMessage } from "../message-renderer.js";
 import type { Message } from "../store.js";
 import { setTerminalColorScheme } from "../theme.js";
+import { terminalSafeText } from "../terminal-text.js";
 
 describe("renderMessage", () => {
   beforeEach(() => setTerminalColorScheme("dark"));
@@ -169,6 +170,76 @@ describe("renderMessage", () => {
     expect(output).toContain("```ts");
     expect(output).toContain("const value = 1;");
     expect(output).not.toContain("\n  ``\n");
+  });
+
+  it("keeps a streaming cursor visible without exceeding narrow terminal widths", () => {
+    const message: Message = {
+      id: "narrow-stream",
+      kind: "text",
+      role: "assistant",
+      text: "1234567890",
+      streaming: true,
+      ts: 1,
+    };
+
+    for (const width of [1, 2, 3, 8, 20]) {
+      const lines = renderMessage(message, width);
+      expect(lines.every((line) => visibleWidth(line) <= width)).toBe(true);
+      expect(stripAnsi(lines.join("\n"))).toContain("█");
+    }
+  });
+
+  it("renders partial RLM code and output as live evidence", () => {
+    const code: Message = {
+      id: "partial-code",
+      kind: "code",
+      runId: "run",
+      step: 1,
+      code: "answer =",
+      language: "python",
+      streaming: true,
+      ts: 1,
+    };
+    const output: Message = {
+      id: "partial-output",
+      kind: "output",
+      runId: "run",
+      step: 1,
+      output: "partial output",
+      streaming: true,
+      ts: 2,
+    };
+
+    const visible = stripAnsi(
+      [...renderMessage(code, 40), ...renderMessage(output, 40)].join("\n"),
+    );
+
+    expect(visible).toContain("CODE  step 1 · streaming");
+    expect(visible).toContain("OUTPUT  step 1 · streaming");
+    expect(visible).toContain("answer =");
+    expect(visible).toContain("partial output");
+  });
+
+  it("strips terminal control sequences from streamed evidence", () => {
+    const message: Message = {
+      id: "unsafe-output",
+      kind: "output",
+      runId: "run",
+      step: 1,
+      output: "safe\x1b]52;c;secret\x07",
+      streaming: false,
+      ts: 1,
+    };
+
+    const output = renderMessage(message, 48).join("\n");
+
+    expect(output).toContain("safe");
+    expect(output).not.toContain("secret");
+    expect(output).not.toContain("\x1b]52");
+  });
+
+  it("strips Unicode format controls from terminal text", () => {
+    expect(terminalSafeText("safe\u200bhidden\u202Edirection")).toBe("safehiddendirection");
   });
 
   it("renders static complete execution evidence within the terminal width", () => {

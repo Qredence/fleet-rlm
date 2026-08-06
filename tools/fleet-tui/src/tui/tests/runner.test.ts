@@ -108,6 +108,7 @@ describe("RunController", () => {
     streamController?.enqueue(
       encoder.encode(
         [
+          'data: {"type":"reasoning-end","id":"reasoning-run-streaming-1"}\n\n',
           'data: {"type":"finish","finishReason":"stop","messageMetadata":{"durationMs":1250,"checkpointVersion":4}}\n\n',
           "data: [DONE]\n\n",
         ].join(""),

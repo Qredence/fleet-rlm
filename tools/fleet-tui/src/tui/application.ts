@@ -1,4 +1,10 @@
-import { Editor, ProcessTerminal, TUI, type Terminal } from "@earendil-works/pi-tui";
+import {
+  Editor,
+  ProcessTerminal,
+  TuiMainScreen,
+  type TUI,
+  type Terminal,
+} from "@earendil-works/pi-tui";
 
 import type { FleetApiClient, FleetSession } from "../fleet-api-client.js";
 import { FleetAutocompleteProvider } from "./autocomplete.js";
@@ -47,7 +53,7 @@ class FleetTuiApplicationImpl implements FleetTuiApplication {
   constructor(private readonly options: FleetTuiOptions) {
     setTerminalColorScheme("dark");
     this.terminal = options.terminal ?? new ProcessTerminal();
-    this.ui = new TUI(this.terminal);
+    this.ui = new TuiMainScreen(this.terminal);
     this.controller = new RunController(this.store, options.client);
     this.editor = new Editor(this.ui, editorTheme, { paddingX: 1, autocompleteMaxVisible: 8 });
     this.editor.setAutocompleteProvider(new FleetAutocompleteProvider(options.client));

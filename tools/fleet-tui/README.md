@@ -1,7 +1,7 @@
 # Fleet RLM Terminal UI
 
 This is Fleet's maintained local Node 22.19+ client. It uses
-`@earendil-works/pi-tui@0.82.0` to render the backend's AI SDK UI v1 HTTP/SSE
+`@earendil-works/pi-tui@0.84.0` to render the backend's AI SDK UI v1 HTTP/SSE
 contract; it does not run a model, Harness agent, or Sandbox.
 
 ## Run
@@ -45,7 +45,9 @@ projection and renderer-neutral store.
 Fleet does not capture the mouse, clip old messages, or maintain a transcript
 viewport. Use native terminal scrollback. Assistant, user, reasoning, and Result
 narrative text is rendered as pi-tui Markdown, including lists, links,
-blockquotes, fenced code, and tables. The live activity loader names the current
+blockquotes, fenced code, and tables. Partial text, generated code, and
+interpreter output retain stable stream cards until the Turn settles. The live
+activity loader names the current
 preparation, RLM step, Tool, replay, or cancellation action. The footer reports
 observed committed input/output tokens, Turn steps, Tools, and outcome; absent
 provider telemetry displays as `—` rather than an estimated zero.
