@@ -567,10 +567,8 @@ class SandboxProvisioner:
     ) -> Any:
         """Create a sandbox with timing instrumentation for performance profiling."""
         start_time = time.perf_counter()
-        phase_start = start_time
         timeline = {
             "init_timestamp": datetime.now(UTC).isoformat(),
-            "phase_start": round(phase_start - start_time, 4),
         }
 
         try:
@@ -602,7 +600,12 @@ class SandboxProvisioner:
             timeline["status"] = "failed"
             timeline["error_type"] = type(exc).__name__
 
-            raise map_provider_error(exc) from exc
+            # Expose the failure timeline through the same telemetry path as
+            # successful creation: an attribute on the raised object.
+            mapped = map_provider_error(exc)
+            if hasattr(mapped, "__dict__"):
+                setattr(mapped, "_provisioning_timeline", timeline)  # noqa: B010
+            raise mapped from exc
 
     def verify(self, sandbox: Any, expected: ExpectedWorkspaceMount) -> None:
         verify_sandbox_workspace_mount(sandbox, expected)

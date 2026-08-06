@@ -46,6 +46,54 @@ def test_baseline_profiler_and_report_use_supported_apis(tmp_path) -> None:
     assert report["concurrency_stress"]["status"] == "offline"
 
 
+@pytest.mark.asyncio
+async def test_each_failed_operation_is_counted_and_reported(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+    real_open = concurrency_stress.aiofiles.open
+
+    def flaky_open(path: object, mode: str = "r", *args: object, **kwargs: object):
+        name = str(path)
+        if mode == "wb" and (name.endswith("op_0.tmp") or name.endswith("op_2.tmp")):
+            raise OSError("simulated write failure")
+        return real_open(path, mode, *args, **kwargs)
+
+    monkeypatch.setattr(concurrency_stress.aiofiles, "open", flaky_open)
+
+    result = await concurrency_stress.simulate_concurrent_operations(
+        num_sandboxes=1,
+        operations_per_sandbox=4,
+        test_dir=str(tmp_path / "stress"),
+    )
+    # One worker keeps processing after a failed operation: two operations
+    # fail independently, the other two complete.
+    assert result.failed_operations == 2
+    assert result.completed_operations == 2
+
+    output_path = tmp_path / "stress.json"
+    concurrency_stress.generate_stress_test_report({"flaky": result}, str(output_path))
+    report = json.loads(output_path.read_text(encoding="utf-8"))
+    assert report["results"]["flaky"]["failed_operations"] == 2
+    assert report["results"]["flaky"]["completed_operations"] == 2
+    assert report["results"]["flaky"]["effective_concurrency"] == 1
+
+
+@pytest.mark.asyncio
+async def test_effective_concurrency_defaults_to_num_sandboxes_and_is_capped(tmp_path) -> None:
+    full = await concurrency_stress.simulate_concurrent_operations(
+        num_sandboxes=3,
+        operations_per_sandbox=1,
+        test_dir=str(tmp_path / "full"),
+    )
+    assert full.effective_concurrency == 3
+
+    capped = await concurrency_stress.simulate_concurrent_operations(
+        num_sandboxes=3,
+        operations_per_sandbox=1,
+        test_dir=str(tmp_path / "capped"),
+        max_concurrency=2,
+    )
+    assert capped.effective_concurrency == 2
+
+
 def test_stress_report_is_json_serializable(tmp_path) -> None:
     result = concurrency_stress.ConcurrencyTestResult(
         num_sandboxes=1,
@@ -70,3 +118,15 @@ def test_benchmark_runner_returns_subprocess_failures(
 
     assert run_benchmarks.main() == 7
     assert "exit code 7" in capsys.readouterr().err
+
+
+def test_benchmark_runner_reports_launch_failures(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    def missing(*_args: object, **_kwargs: object) -> None:
+        raise FileNotFoundError("uv")
+
+    monkeypatch.setattr(run_benchmarks.subprocess, "run", missing)
+
+    assert run_benchmarks.main() == 1
+    assert "Could not start benchmark runner" in capsys.readouterr().err

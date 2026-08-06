@@ -92,6 +92,9 @@ server = [
     "uvicorn[standard]>=0.47.0,<1",
 ]
 benchmark = [
+    # Direct dependency of scripts/performance_benchmarks/*; keep declared even
+    # though daytona currently pulls it in transitively.
+    "aiofiles>=24.1.0",
     "databricks-agents>=1.5",
     "datasets>=5.0.0",
     "jsonlines>=4.0.0",

@@ -23,6 +23,9 @@ def main() -> int:
             check=True,
             cwd=Path(__file__).resolve().parents[1],
         )
+    except OSError as exc:
+        print(f"Could not start benchmark runner: {exc}", file=sys.stderr)
+        return 1
     except subprocess.CalledProcessError as exc:
         print(f"Benchmark baseline failed with exit code {exc.returncode}", file=sys.stderr)
         return exc.returncode if exc.returncode > 0 else 1

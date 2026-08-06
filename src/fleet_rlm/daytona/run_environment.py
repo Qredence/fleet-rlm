@@ -46,7 +46,7 @@ from fleet_rlm.daytona.session_manager import (
     DaytonaSessionManager,
     LeaseRequest,
 )
-from fleet_rlm.daytona.workspace_fs import AsyncDaytonaVolumeFS, DaytonaSandboxVolumeFs
+from fleet_rlm.daytona.workspace_fs import AsyncDaytonaVolumeFS, DaytonaSandboxVolumeFs, VolumeFSCacheState
 from fleet_rlm.files.models import (
     AttachmentAccess,
     AttachmentRun,
@@ -117,9 +117,14 @@ class _DaytonaRunSink:
     ) -> None:
         self._sandbox = sandbox
         mount_path = str(paths.mount_path)
-        self._files = AsyncDaytonaVolumeFS(sandbox, mount_path=mount_path)
+        # Both adapters view the same sandbox and mount; share one cache
+        # coordinator so mutations through either adapter invalidate both.
+        cache_state = VolumeFSCacheState()
+        self._files = AsyncDaytonaVolumeFS(sandbox, mount_path=mount_path, cache_state=cache_state)
         self.volume_fs = (
-            DaytonaSandboxVolumeFs(sync_sandbox(sandbox, loop), mount_path=mount_path) if loop is not None else None
+            DaytonaSandboxVolumeFs(sync_sandbox(sandbox, loop), mount_path=mount_path, cache_state=cache_state)
+            if loop is not None
+            else None
         )
         self._max_read_bytes = max_read_bytes
         self._paths = paths

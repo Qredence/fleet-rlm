@@ -1203,6 +1203,7 @@ dependencies = [
 
 [package.optional-dependencies]
 benchmark = [
+    { name = "aiofiles" },
     { name = "databricks-agents" },
     { name = "datasets" },
     { name = "jsonlines" },
@@ -1243,6 +1244,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "aiofiles", marker = "extra == 'benchmark'", specifier = ">=24.1.0" },
     { name = "aiosqlite", specifier = ">=0.20.0" },
     { name = "alembic", specifier = ">=1.18.5,<2" },
     { name = "asyncpg", specifier = ">=0.31.0,<1" },

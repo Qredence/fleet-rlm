@@ -60,11 +60,14 @@ def _modified_timestamp(value: Any) -> float | None:
 
 
 class _LRUCache:
-    """Thread-safe LRU cache for file content with configurable size limit."""
+    """Thread-safe LRU cache for file content with byte and entry limits."""
 
-    def __init__(self, max_size_mb: int = 100):
+    def __init__(self, max_size_mb: int = 100, max_entries: int = 1024):
+        if max_entries < 1:
+            raise ValueError("max_entries must be positive")
         self._cache: dict[str, tuple[bytes, float]] = {}
         self.max_bytes = max_size_mb * 1024 * 1024
+        self.max_entries = max_entries
         self._lock = Lock()
         self._current_size = 0
 
@@ -84,13 +87,16 @@ class _LRUCache:
             self.evict(key)
             return
         with self._lock:
-            # Check if key already exists
+            # Replace existing key without spurious evictions
             if key in self._cache:
-                old_value, _ = self._cache[key]
+                old_value, _ = self._cache.pop(key)
                 self._current_size -= len(old_value)
 
-            # Evict oldest entries if necessary
-            while self._current_size + len(value) > self.max_bytes and self._cache:
+            # Evict oldest entries while either the byte budget or the entry
+            # count limit would be exceeded.
+            while self._cache and (
+                self._current_size + len(value) > self.max_bytes or len(self._cache) >= self.max_entries
+            ):
                 oldest_key = min(self._cache, key=lambda k: self._cache[k][1])
                 old_value, _ = self._cache.pop(oldest_key)
                 self._current_size -= len(old_value)
@@ -111,24 +117,82 @@ class _LRUCache:
             self._cache.clear()
             self._current_size = 0
 
+    def __len__(self) -> int:
+        with self._lock:
+            return len(self._cache)
+
+
+class VolumeFSCacheState:
+    """Shared, generation-aware cache coordinator for one sandbox and mount.
+
+    Both volume adapters over the same sandbox and mount must share one
+    instance so a mutation through either adapter invalidates the other's
+    view. A monotonically increasing mutation generation prevents an in-flight
+    read, stat, or listing from re-caching provider data that was fetched
+    before a local mutation invalidated it.
+    """
+
+    def __init__(self, *, content_max_size_mb: int = 100, metadata_max_size_mb: int = 10):
+        self._content = _LRUCache(max_size_mb=content_max_size_mb)
+        self._metadata = _LRUCache(max_size_mb=metadata_max_size_mb)
+        self._lock = Lock()
+        self._generation = 0
+
+    @property
+    def generation(self) -> int:
+        """Snapshot the mutation generation before fetching provider data."""
+        with self._lock:
+            return self._generation
+
+    def invalidate_mutation(self, path: str) -> None:
+        """Record a local mutation: bump generation, drop affected entries."""
+        with self._lock:
+            self._generation += 1
+            self._content.evict(path)
+            self._metadata.clear()
+
+    def get_content(self, key: str) -> bytes | None:
+        return self._content.get(key)
+
+    def put_content(self, key: str, value: bytes, *, generation: int) -> None:
+        """Store fetched content only when no mutation happened since fetch."""
+        with self._lock:
+            if generation != self._generation:
+                return
+            self._content.put(key, value)
+
+    def get_metadata(self, key: str) -> bytes | None:
+        return self._metadata.get(key)
+
+    def put_metadata(self, key: str, value: bytes, *, generation: int) -> None:
+        """Store fetched metadata only when no mutation happened since fetch."""
+        with self._lock:
+            if generation != self._generation:
+                return
+            self._metadata.put(key, value)
+
 
 class AsyncDaytonaVolumeFS:
     """Native async byte I/O over one mounted Workspace Volume Scope."""
 
     CACHEABLE_PATTERNS = _CACHEABLE_PATTERNS
 
-    def __init__(self, sandbox: Any, *, mount_path: str = DEFAULT_VOLUME_MOUNT_PATH) -> None:
+    def __init__(
+        self,
+        sandbox: Any,
+        *,
+        mount_path: str = DEFAULT_VOLUME_MOUNT_PATH,
+        cache_state: VolumeFSCacheState | None = None,
+    ) -> None:
         self.sandbox = sandbox
         self.mount_path = str(validate_mount_path(mount_path))
-        self._content_cache = _LRUCache(max_size_mb=100)
-        self._metadata_cache = _LRUCache(max_size_mb=10)
+        self._cache_state = cache_state if cache_state is not None else VolumeFSCacheState()
 
     def _should_cache(self, path: str) -> bool:
         return _cacheable_path(path, self.mount_path)
 
     def _invalidate_mutation(self, path: str) -> None:
-        self._content_cache.evict(path)
-        self._metadata_cache.clear()
+        self._cache_state.invalidate_mutation(path)
 
     async def write_bytes(self, logical_path: str, data: bytes) -> None:
         path = as_posix(logical_path)
@@ -145,9 +209,13 @@ class AsyncDaytonaVolumeFS:
 
         # Check cache first
         if use_cache and self._should_cache(path):
-            cached = self._content_cache.get(path)
+            cached = self._cache_state.get_content(path)
             if cached is not None:
                 return cached
+
+        # Snapshot the mutation generation before fetching so a concurrent
+        # local mutation prevents caching stale provider data.
+        generation = self._cache_state.generation
 
         # Perform actual read
         raw = await self.sandbox.fs.download_file(path)
@@ -160,7 +228,7 @@ class AsyncDaytonaVolumeFS:
 
         # Cache result if applicable
         if use_cache and self._should_cache(path):
-            self._content_cache.put(path, data)
+            self._cache_state.put_content(path, data, generation=generation)
 
         return data
 
@@ -189,10 +257,11 @@ class AsyncDaytonaVolumeFS:
 
         # Check metadata cache
         cache_key = f"stat:{path}"
-        cached = self._metadata_cache.get(cache_key)
+        cached = self._cache_state.get_metadata(cache_key)
         if cached is not None:
             return json.loads(cached.decode("utf-8"))
 
+        generation = self._cache_state.generation
         try:
             # Get file info from sandbox
             entry = await self.sandbox.fs.list_files(
@@ -207,7 +276,7 @@ class AsyncDaytonaVolumeFS:
                         "mod_time": _modified_timestamp(getattr(e, "mod_time", None)),
                     }
                     # Cache metadata
-                    self._metadata_cache.put(cache_key, json.dumps(result).encode("utf-8"))
+                    self._cache_state.put_metadata(cache_key, json.dumps(result).encode("utf-8"), generation=generation)
                     return result
             return None
         except Exception:
@@ -222,11 +291,12 @@ class AsyncDaytonaVolumeFS:
 
         # Check if directory listing is cached
         cache_key = _list_cache_key(root, max_depth=max_depth, max_files=max_files)
-        cached = self._metadata_cache.get(cache_key)
+        cached = self._cache_state.get_metadata(cache_key)
         if cached is not None:
             cached_data = json.loads(cached.decode("utf-8"))
             return tuple(VolumeFile(f["path"], f["modified_at"]) for f in cached_data)
 
+        generation = self._cache_state.generation
         entries = await self.sandbox.fs.list_files(root, depth=max_depth)
         results: list[VolumeFile] = []
         for entry in entries:
@@ -243,7 +313,7 @@ class AsyncDaytonaVolumeFS:
         # Cache directory listing
         if len(results) <= 100:  # Only cache small listings
             cached_data = [{"path": rf.path, "modified_at": rf.modified_at} for rf in results]
-            self._metadata_cache.put(cache_key, json.dumps(cached_data).encode("utf-8"))
+            self._cache_state.put_metadata(cache_key, json.dumps(cached_data).encode("utf-8"), generation=generation)
 
         return tuple(results)
 
@@ -253,18 +323,22 @@ class DaytonaSandboxVolumeFs:
 
     CACHEABLE_PATTERNS = _CACHEABLE_PATTERNS
 
-    def __init__(self, sandbox: Any, *, mount_path: str = DEFAULT_VOLUME_MOUNT_PATH) -> None:
+    def __init__(
+        self,
+        sandbox: Any,
+        *,
+        mount_path: str = DEFAULT_VOLUME_MOUNT_PATH,
+        cache_state: VolumeFSCacheState | None = None,
+    ) -> None:
         self.sandbox = sandbox
         self.mount_path = str(validate_mount_path(mount_path))
-        self._content_cache = _LRUCache(max_size_mb=100)
-        self._metadata_cache = _LRUCache(max_size_mb=10)
+        self._cache_state = cache_state if cache_state is not None else VolumeFSCacheState()
 
     def _should_cache(self, path: str) -> bool:
         return _cacheable_path(path, self.mount_path)
 
     def _invalidate_mutation(self, path: str) -> None:
-        self._content_cache.evict(path)
-        self._metadata_cache.clear()
+        self._cache_state.invalidate_mutation(path)
 
     def write_bytes(self, logical_path: str, data: bytes) -> None:
         path = as_posix(logical_path)
@@ -281,9 +355,13 @@ class DaytonaSandboxVolumeFs:
 
         # Check cache first
         if use_cache and self._should_cache(path):
-            cached = self._content_cache.get(path)
+            cached = self._cache_state.get_content(path)
             if cached is not None:
                 return cached
+
+        # Snapshot the mutation generation before fetching so a concurrent
+        # local mutation prevents caching stale provider data.
+        generation = self._cache_state.generation
 
         # Perform actual read
         raw = self.sandbox.fs.download_file(path)
@@ -296,7 +374,7 @@ class DaytonaSandboxVolumeFs:
 
         # Cache result if applicable
         if use_cache and self._should_cache(path):
-            self._content_cache.put(path, data)
+            self._cache_state.put_content(path, data, generation=generation)
 
         return data
 
@@ -327,11 +405,12 @@ class DaytonaSandboxVolumeFs:
         root = as_posix(logical_root)
 
         cache_key = _list_cache_key(root, max_depth=max_depth, max_files=max_files)
-        cached = self._metadata_cache.get(cache_key)
+        cached = self._cache_state.get_metadata(cache_key)
         if cached is not None:
             cached_data = json.loads(cached.decode("utf-8"))
             return tuple(VolumeFile(f["path"], f["modified_at"]) for f in cached_data)
 
+        generation = self._cache_state.generation
         entries = self.sandbox.fs.list_files(root, depth=max_depth)
         results: list[VolumeFile] = []
         for entry in entries:
@@ -347,7 +426,7 @@ class DaytonaSandboxVolumeFs:
 
         if len(results) <= 100:
             cached_data = [{"path": rf.path, "modified_at": rf.modified_at} for rf in results]
-            self._metadata_cache.put(cache_key, json.dumps(cached_data).encode("utf-8"))
+            self._cache_state.put_metadata(cache_key, json.dumps(cached_data).encode("utf-8"), generation=generation)
         return tuple(results)
 
 
