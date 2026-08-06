@@ -697,7 +697,7 @@ class DaytonaHttpToolBroker:
                 if done:
                     break
                 time.sleep(self._poll_interval_s)
-            self._poll_output(execution_id, offset, on_stdout, release=done)
+            self._poll_output(execution_id, offset, on_stdout, release=True)
 
         if request_errors:
             raise DaytonaAdapterError(
