@@ -231,7 +231,7 @@ function isTypedDataPayload(type: string, value: unknown): boolean {
   const alternatives = dataAlternatives[type] ?? [];
   if (
     alternatives.length &&
-    !alternatives.some((group) => group.every((field) => hasOwn(value, field)))
+    !alternatives.some((group) => group.every((field) => hasUsableValue(value, field)))
   ) {
     return false;
   }
@@ -242,6 +242,10 @@ function isTypedDataPayload(type: string, value: unknown): boolean {
 
 function hasOwn(value: Record<string, unknown>, field: string): boolean {
   return Object.hasOwn(value, field);
+}
+
+function hasUsableValue(value: Record<string, unknown>, field: string): boolean {
+  return hasOwn(value, field) && value[field] !== null && value[field] !== undefined;
 }
 
 function isString(value: unknown): value is string {

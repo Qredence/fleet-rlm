@@ -114,6 +114,7 @@ describe("Fleet SSE parser", () => {
   it("rejects malformed typed render data payloads", () => {
     const chunks = [
       { type: "data-status", data: { phase: "execution" } },
+      { type: "data-status", data: { phase: "execution", message: null } },
       { type: "data-rlm-code", data: { code: 7 } },
       { type: "data-rlm-output", data: {} },
       { type: "data-usage", data: { usage: [] } },

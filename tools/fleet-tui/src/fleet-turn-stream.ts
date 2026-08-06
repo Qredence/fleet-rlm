@@ -42,6 +42,7 @@ export async function* streamFleetTurn({
 class StreamLifecycle {
   private started = false;
   private terminal = false;
+  private cleanFinish = false;
   private done = false;
   private sawError = false;
   private stepDepth = 0;
@@ -116,6 +117,7 @@ class StreamLifecycle {
           throw new Error("Fleet API emitted finish:error without an error chunk");
         }
         this.terminal = true;
+        this.cleanFinish = chunk.finishReason === "stop";
         return;
       case "abort":
         this.terminal = true;
@@ -129,6 +131,19 @@ class StreamLifecycle {
     if (!this.started) throw new Error("Fleet API stream ended before a start chunk");
     if (!this.terminal) throw new Error("Fleet API stream ended before a terminal chunk");
     if (!this.done) throw new Error("Fleet API stream ended before [DONE]");
+    if (!this.cleanFinish) return;
+    if (this.stepDepth !== 0) {
+      throw new Error("Fleet API stream finished with unclosed start-step chunks");
+    }
+    this.assertAllClosed(this.reasoningOpen, "reasoning stream");
+    this.assertAllClosed(this.textOpen, "text stream");
+    this.assertAllClosed(this.toolsOpen, "tool call");
+  }
+
+  private assertAllClosed(open: Set<string>, label: string): void {
+    if (open.size > 0) {
+      throw new Error(`Fleet API stream finished with an open ${label}: ${[...open].join(", ")}`);
+    }
   }
 
   private begin(id: string, open: Set<string>, ended: Set<string>, label: string): void {

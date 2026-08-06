@@ -169,6 +169,42 @@ describe("streamFleetTurn", () => {
         "[DONE]",
       ],
     ],
+    [
+      "clean finish with an open text stream",
+      [
+        '{"type":"start","messageId":"run-1","messageMetadata":{}}',
+        '{"type":"text-start","id":"text-1"}',
+        '{"type":"finish","finishReason":"stop"}',
+        "[DONE]",
+      ],
+    ],
+    [
+      "clean finish with an open reasoning stream",
+      [
+        '{"type":"start","messageId":"run-1","messageMetadata":{}}',
+        '{"type":"reasoning-start","id":"reasoning-1"}',
+        '{"type":"finish","finishReason":"stop"}',
+        "[DONE]",
+      ],
+    ],
+    [
+      "clean finish with an open tool call",
+      [
+        '{"type":"start","messageId":"run-1","messageMetadata":{}}',
+        '{"type":"tool-input-available","toolCallId":"call-1","toolName":"tool","input":{}}',
+        '{"type":"finish","finishReason":"stop"}',
+        "[DONE]",
+      ],
+    ],
+    [
+      "clean finish with an unclosed step",
+      [
+        '{"type":"start","messageId":"run-1","messageMetadata":{}}',
+        '{"type":"start-step"}',
+        '{"type":"finish","finishReason":"stop"}',
+        "[DONE]",
+      ],
+    ],
   ])("rejects %s", async (_label, frames) => {
     await expect(
       collect({
@@ -177,5 +213,26 @@ describe("streamFleetTurn", () => {
         message: "hello",
       }),
     ).rejects.toThrow();
+  });
+
+  it("accepts an aborted stream that cuts an open part", async () => {
+    const streamTurn = vi
+      .fn()
+      .mockResolvedValue(
+        response(
+          '{"type":"start","messageId":"run-1","messageMetadata":{}}',
+          '{"type":"text-start","id":"text-1"}',
+          '{"type":"abort","reason":"cancelled"}',
+          "[DONE]",
+        ),
+      );
+
+    await expect(
+      collect({ client: client(streamTurn), sessionId: "session-1", message: "hello" }),
+    ).resolves.toEqual([
+      { type: "start", messageId: "run-1", messageMetadata: {} },
+      { type: "text-start", id: "text-1" },
+      { type: "abort", reason: "cancelled" },
+    ]);
   });
 });
