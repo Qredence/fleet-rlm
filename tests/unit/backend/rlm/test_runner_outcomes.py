@@ -271,3 +271,69 @@ async def test_runner_emits_preloaded_skill_events_before_cancel_or_timeout(term
     ]
     assert stream.outcome is not None
     assert stream.outcome.terminal_status == terminal_status
+
+
+def test_public_failure_message_honors_instance_override() -> None:
+    from fleet_rlm.rlm.errors import TurnTerminalError
+    from fleet_rlm.rlm.runner import _public_failure_message
+
+    # A parametrized terminal error sets an instance ``public_message``; the
+    # runner must honor it (matching sanitize_public_error) instead of reading
+    # the class attribute.
+    error = TurnTerminalError("custom public message")
+    assert _public_failure_message(error) == "custom public message"
+    assert str(type(error).public_message) == "Turn failed"
+
+
+@pytest.mark.asyncio
+async def test_stream_closed_before_iteration_synthesizes_cancelled_outcome() -> None:
+    from fleet_rlm.chat.session_context import SessionContextManifest
+    from fleet_rlm.rlm.context import RLMExecutionContext, RLMExecutionSpec
+    from fleet_rlm.rlm.dspy_contract import RLMOptions
+    from fleet_rlm.rlm.runner import RLMRunner
+    from fleet_rlm.sessions.models import TurnAccess
+
+    class Capabilities:
+        spec = RLMExecutionSpec()
+
+        def drain_public_details(self):
+            return ()
+
+        def drain_artifact_candidates(self):
+            return ()
+
+        async def aclose(self):
+            return None
+
+    class Factory:
+        def create(self, **_kwargs):
+            raise AssertionError("worker factory must not run when the stream is closed early")
+
+    async def not_cancelled() -> bool:
+        return False
+
+    loop = asyncio.get_running_loop()
+    context = RLMExecutionContext(
+        uuid4(),
+        uuid4(),
+        TurnAccess(uuid4(), uuid4()),
+        "answer",
+        SessionContextManifest(uuid4(), 0, 0, ()),
+        SimpleNamespace(root_lm=object(), sub_lm=object()),
+        RLMOptions(),
+        loop.time() + 10,
+        None,
+        (),
+        Capabilities(),
+        not_cancelled,
+        (),
+    )
+    stream = RLMRunner(factory=Factory()).stream(context)
+    await stream.aclose()
+
+    # Closing before any iteration must not raise IndexError: synthesize a
+    # cancelled outcome matching the GeneratorExit path in ``_generate``.
+    assert stream.outcome is not None
+    assert stream.outcome.terminal_status == "cancelled"
+    assert stream.outcome.public_error_message == "Turn cancelled"
+    assert stream.outcome.usage == {"iterations": 0, "observed_lm_usage": {}, "duration_ms": 0}

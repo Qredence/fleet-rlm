@@ -108,6 +108,36 @@ def test_trajectory_reconciliation_replaces_live_details_without_duplicates() ->
     )
 
 
+def test_trajectory_reconciliation_replaces_incremental_output_with_one_canonical_part() -> None:
+    from fleet_rlm.rlm.dspy_contract import TrajectoryStep
+    from fleet_rlm.rlm.events import RLMCode, RLMOutput, RLMReasoning, StepFinished, StepStarted
+    from fleet_rlm.rlm.runner import _reconcile_trajectory
+
+    details = [
+        StepStarted(1),
+        RLMReasoning("", 1),
+        RLMCode("", 1),
+        RLMOutput("native ", 1, "output-1", True, False),
+        RLMOutput("stale", 1, "output-1", True, False),
+        StepFinished(1),
+    ]
+
+    emissions = _reconcile_trajectory(
+        details,
+        (TrajectoryStep(1, "", "", "canonical output"),),
+        max_chars=100,
+    )
+
+    assert emissions == [RLMOutput("canonical output", 1, "output-1", False, True)]
+    assert details == [
+        StepStarted(1),
+        RLMReasoning("", 1),
+        RLMCode("", 1),
+        RLMOutput("canonical output", 1, "output-1", False, True),
+        StepFinished(1),
+    ]
+
+
 def test_trajectory_reconciliation_keeps_live_reasoning_emitted_before_step_started() -> None:
     from fleet_rlm.rlm.dspy_contract import TrajectoryStep
     from fleet_rlm.rlm.events import RLMCode, RLMOutput, RLMReasoning, StepFinished, StepStarted

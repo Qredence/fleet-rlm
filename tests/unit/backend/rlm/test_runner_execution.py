@@ -32,6 +32,22 @@ async def test_detail_relay_keeps_1024_ordinary_events_and_lifecycle_details() -
 
 
 @pytest.mark.asyncio
+async def test_detail_relay_retains_step_lifecycle_when_ordinary_queue_is_full() -> None:
+    from fleet_rlm.rlm.events import RLMOutput, StepFinished, StepStarted
+    from fleet_rlm.rlm.runner import _DetailRelay
+
+    relay = _DetailRelay(maxsize=1)
+    relay.publish(RLMOutput("queued", 1))
+    relay.publish(StepStarted(1))
+    relay.publish(RLMOutput("dropped", 1))
+    assert await relay.get() == RLMOutput("queued", 1)
+    relay.publish(StepFinished(1))
+
+    assert relay.drain() == [StepStarted(1), StepFinished(1)]
+    assert relay.overflowed is True
+
+
+@pytest.mark.asyncio
 async def test_runner_uses_native_path_for_plain_greeting() -> None:
     from fleet_rlm.chat.session_context import SessionContextManifest
     from fleet_rlm.rlm.context import RLMExecutionContext, RLMExecutionSpec

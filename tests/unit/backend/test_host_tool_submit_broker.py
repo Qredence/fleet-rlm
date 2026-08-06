@@ -72,6 +72,15 @@ def test_co_located_worker_preserves_state_and_services_callbacks(tmp_path: Path
 
         broker.register_tools({"llm_query_batched": llm_query_batched})
         broker.execute_code(broker.submit_setup_code([{"name": "answer", "type": "str"}]))
+        streamed: list[str] = []
+        output = broker.execute_code(
+            'import time\nprint("one", flush=True)\ntime.sleep(0.05)\nprint("two", flush=True)',
+            on_stdout=streamed.append,
+        )
+        assert output.stdout == "one\ntwo\n"
+        assert "one" in "".join(streamed)
+        assert "two" in "".join(streamed)
+
         first = broker.execute_with_callbacks(
             run_code=lambda: broker.execute_code("value = 41"),
             tool_executor=lambda name, args, kwargs: (
@@ -80,7 +89,8 @@ def test_co_located_worker_preserves_state_and_services_callbacks(tmp_path: Path
         )
         second = broker.execute_with_callbacks(
             run_code=lambda: broker.execute_code(
-                "parts = llm_query_batched(['a', 'b'])\nSUBMIT(answer=f'{value + 1}:{parts[0]}:{parts[1]}')"
+                "parts = llm_query_batched(['a', 'b'])\n"
+                "SUBMIT(answer=f'{value + 1}:{parts[0]}:{parts[1]}:__FLEET_FINAL_OUTPUT__')"
             ),
             tool_executor=lambda name, args, kwargs: (
                 llm_query_batched(*args, **kwargs) if name == "llm_query_batched" else None
@@ -88,7 +98,7 @@ def test_co_located_worker_preserves_state_and_services_callbacks(tmp_path: Path
         )
 
         assert first.error is None
-        assert second.final == {"answer": "42:sub:a:sub:b"}
+        assert second.final == {"answer": "42:sub:a:sub:b:__FLEET_FINAL_OUTPUT__"}
         assert broker.last_execution_stats["tool_call_count"] == 1
     finally:
         if broker._client is not None:
@@ -690,6 +700,50 @@ def test_execute_with_callbacks_records_per_execution_stats(monkeypatch: pytest.
     stats = broker.last_execution_stats
     assert stats["tool_call_count"] == 1
     assert stats["poll_count"] >= 1
+
+
+def test_execute_code_attempts_final_output_release_after_poll_failures(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from fleet_rlm.daytona.http_broker import DaytonaHttpToolBroker
+
+    class _Sandbox:
+        pass
+
+    release_flags: list[str] = []
+
+    def _handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/execute":
+            return httpx.Response(
+                200,
+                json={"stdout": "", "stderr": "", "final": None, "error": None},
+            )
+        if request.url.path == "/output":
+            release = request.url.params.get("release", "0")
+            release_flags.append(release)
+            if release == "1":
+                return httpx.Response(
+                    200,
+                    json={"stdout": "", "stderr": "", "done": True, "next_offset": 0},
+                )
+            return httpx.Response(503)
+        return httpx.Response(404)
+
+    broker = DaytonaHttpToolBroker(sandbox=_Sandbox(), poll_interval_s=0.0)
+    broker._broker_url = "http://example.test"
+    broker._broker_token = "tok"
+    broker._broker_secret = "secret"
+    broker._client = httpx.Client(
+        transport=httpx.MockTransport(_handler),
+        base_url="http://example.test",
+        headers=broker._preview_headers(),
+    )
+    monkeypatch.setattr(time, "sleep", lambda _s: None)
+
+    broker.execute_code("print('ok')", on_stdout=lambda _value: None)
+
+    assert release_flags
+    assert release_flags[-1] == "1"
 
 
 def test_stop_closes_pooled_client() -> None:

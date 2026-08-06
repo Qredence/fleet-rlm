@@ -13,7 +13,7 @@ def test_host_tool_rejects_calls_after_authority_revocation() -> None:
     import dspy
 
     from fleet_rlm.chat.run_authority import RunAuthority
-    from fleet_rlm.rlm.events import ToolFailed
+    from fleet_rlm.rlm.events import ToolFailed, ToolStarted
     from fleet_rlm.rlm.tool_observer import ToolEventView, observe_tool
 
     authority = RunAuthority()
@@ -35,8 +35,7 @@ def test_host_tool_rejects_calls_after_authority_revocation() -> None:
     with pytest.raises(RuntimeError, match="no longer authorized"):
         tool(value="late write")
     assert effects == []
-    assert len(details) == 1
-    assert isinstance(details[0], ToolFailed)
+    assert [type(detail) for detail in details] == [ToolStarted, ToolFailed]
 
 
 @pytest.mark.asyncio

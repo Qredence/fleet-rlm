@@ -211,6 +211,51 @@ async def test_native_stream_path_completes_when_streamify_only_returns_predicti
     assert stream.outcome.prediction.display_text == "fallback"
 
 
+def test_native_stream_projector_does_not_infer_iterations_from_interleaved_fields() -> None:
+    import dspy
+
+    from fleet_rlm.rlm.events import RLMCode, RLMReasoning
+    from fleet_rlm.rlm.runner import _NativeRLMStreamProjector
+
+    events = []
+    projector = _NativeRLMStreamProjector(run_id="run", max_chars=100, publish=events.append)
+    items = [
+        dspy.streaming.StreamResponse("generate_action", "reasoning", "think ", False),
+        dspy.streaming.StreamResponse("generate_action", "code", "x = ", False),
+        dspy.streaming.StreamResponse("generate_action", "reasoning", "more", False),
+        dspy.streaming.StreamResponse("generate_action", "code", "1", False),
+        dspy.streaming.StreamResponse("generate_action", "reasoning", "done", True),
+        dspy.streaming.StreamResponse("generate_action", "code", "2", True),
+    ]
+
+    for item in items:
+        projector.publish(item)
+
+    streamed = [event for event in events if isinstance(event, (RLMReasoning, RLMCode))]
+    assert [event.step for event in streamed] == [1, 1, 1, 1, 1, 1]
+    assert {event.stream_id for event in streamed} == {"run:rlm:1:reasoning", "run:rlm:1:code"}
+
+
+def test_native_stream_projector_advances_after_completed_action_fields() -> None:
+    import dspy
+
+    from fleet_rlm.rlm.events import RLMReasoning
+    from fleet_rlm.rlm.runner import _NativeRLMStreamProjector
+
+    events = []
+    projector = _NativeRLMStreamProjector(run_id="run", max_chars=100, publish=events.append)
+    for item in (
+        dspy.streaming.StreamResponse("generate_action", "reasoning", "one", True),
+        dspy.streaming.StreamResponse("generate_action", "code", "SUBMIT()", True),
+        dspy.streaming.StreamResponse("generate_action", "reasoning", "two", False),
+    ):
+        projector.publish(item)
+
+    reasoning = [event for event in events if isinstance(event, RLMReasoning)]
+    assert [event.step for event in reasoning] == [1, 2]
+    assert [event.stream_id for event in reasoning] == ["run:rlm:1:reasoning", "run:rlm:2:reasoning"]
+
+
 def test_stream_metadata_projects_to_one_stable_sse_part() -> None:
     from fleet_rlm.api.sse import AISDKUIProjector
     from fleet_rlm.rlm.events import EventRecorder, RLMCode, RLMReasoning
