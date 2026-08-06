@@ -55,7 +55,10 @@ export class LiveTurnProjector {
       case "data-structured-result":
         return this.projectResult(chunk);
       case "reasoning-start": {
-        const id = `thinking-${chunk.id}`;
+        const canonicalBaseId = canonicalReasoningBaseId(chunk.id);
+        const id = canonicalBaseId
+          ? (this.reasoningIds.get(canonicalBaseId) ?? `thinking-${canonicalBaseId}`)
+          : `thinking-${chunk.id}`;
         this.reasoningIds.set(chunk.id, id);
         return this.save(thinking(id, this.runId, inferStep(chunk.id), "", this.clock));
       }
@@ -77,6 +80,7 @@ export class LiveTurnProjector {
         return [];
       }
       case "text-delta": {
+        if (chunk.delta.length === 0) return [];
         if (this.resultId) {
           const prior = this.messages.get(this.resultId);
           if (prior?.kind !== "result") return [];
@@ -89,7 +93,7 @@ export class LiveTurnProjector {
         this.textId = id;
         const prior = this.messages.get(id);
         const value = prior?.kind === "text" ? prior.text + chunk.delta : chunk.delta;
-        return this.save(text(id, "assistant", value, true, this.clock));
+        return this.save(text(id, "assistant", value, true, this.clock, this.runId));
       }
       case "text-end": {
         if (this.resultId) return [];
@@ -189,11 +193,23 @@ export class LiveTurnProjector {
   ): StoreEvent[] {
     const value = data(chunk.data);
     const step = number(value.step, inferStep(chunk.id));
-    const id = `${field}-${chunk.id ?? string(value.stream_id, `${this.runId}-${step}`)}`;
-    const content = string(field === "code" ? value.code : value.output);
-    if (!content) return [];
+    const streamId =
+      optionalString(value.stream_id) ?? optionalString(chunk.id) ?? `${this.runId}-${step}`;
+    const id = `${field}-${streamId}`;
     const prior = this.messages.get(id);
     const isDelta = value.is_delta === true;
+    const isFinal = value.is_final === true || !isDelta;
+    const content = string(field === "code" ? value.code : value.output);
+    if (!content) {
+      if (!isFinal) return [];
+      if (field === "code" && prior?.kind === "code" && prior.streaming) {
+        return this.save({ ...prior, streaming: false });
+      }
+      if (field === "output" && prior?.kind === "output" && prior.streaming) {
+        return this.save({ ...prior, streaming: false });
+      }
+      return [];
+    }
     const priorContent =
       field === "code"
         ? prior?.kind === "code"
@@ -205,8 +221,8 @@ export class LiveTurnProjector {
     const nextContent = isDelta ? `${priorContent}${content}` : content;
     return this.save(
       field === "code"
-        ? code(id, this.runId, step, nextContent, this.clock)
-        : output(id, this.runId, step, nextContent, this.clock),
+        ? code(id, this.runId, step, nextContent, !isFinal, this.clock)
+        : output(id, this.runId, step, nextContent, !isFinal, this.clock),
     );
   }
 
@@ -346,8 +362,8 @@ export function projectDurableTurns(turns: FleetTurn[], clock: Clock = Date.now)
           currentStep = step;
           messages.push(
             part.type === "data-rlm-code"
-              ? code(id, runId, step, content, clock)
-              : output(id, runId, step, content, clock),
+              ? code(id, runId, step, content, false, clock)
+              : output(id, runId, step, content, false, clock),
           );
           break;
         }
@@ -385,8 +401,23 @@ export function projectDurableTurns(turns: FleetTurn[], clock: Clock = Date.now)
   }));
 }
 
-function text(id: string, role: Role, value: string, streaming: boolean, clock: Clock): Message {
-  return { id, kind: "text", role, text: value, streaming, ts: clock() };
+function text(
+  id: string,
+  role: Role,
+  value: string,
+  streaming: boolean,
+  clock: Clock,
+  runId?: string,
+): Message {
+  return {
+    id,
+    kind: "text",
+    role,
+    text: value,
+    streaming,
+    ...(runId ? { runId } : {}),
+    ts: clock(),
+  };
 }
 
 function thinking(id: string, runId: string, step: number, value: string, clock: Clock): Message {
@@ -421,12 +452,43 @@ function tool(
   };
 }
 
-function code(id: string, runId: string, step: number, value: string, clock: Clock): Message {
-  return { id, kind: "code", runId, step, code: value, ts: clock() };
+function code(
+  id: string,
+  runId: string,
+  step: number,
+  value: string,
+  streaming: boolean,
+  clock: Clock,
+): Message {
+  return {
+    id,
+    kind: "code",
+    runId,
+    step,
+    code: value,
+    language: "python",
+    streaming,
+    ts: clock(),
+  };
 }
 
-function output(id: string, runId: string, step: number, value: string, clock: Clock): Message {
-  return { id, kind: "output", runId, step, output: value, ts: clock() };
+function output(
+  id: string,
+  runId: string,
+  step: number,
+  value: string,
+  streaming: boolean,
+  clock: Clock,
+): Message {
+  return {
+    id,
+    kind: "output",
+    runId,
+    step,
+    output: value,
+    streaming,
+    ts: clock(),
+  };
 }
 
 function result(
@@ -539,7 +601,7 @@ function artifact(
     runId,
     artifactId: string(value.artifactId ?? value.artifact_id ?? fallbackId),
     name: string(value.title ?? value.name, "(artifact)"),
-    artifactKind: string(value.kind, "file"),
+    artifactKind: string(value.kind ?? value.artifact_kind, "file"),
     bytes: number(value.byteSize ?? value.byte_size),
     ts: clock(),
   };
@@ -586,6 +648,13 @@ function number(value: unknown, fallback = 0): number {
 function inferStep(id: string | undefined): number {
   const match = id?.match(/(\d+)(?!.*\d)/);
   return match?.[1] ? Number(match[1]) : 0;
+}
+
+function canonicalReasoningBaseId(id: string): string | undefined {
+  const suffix = ":canonical";
+  if (!id.endsWith(suffix)) return undefined;
+  const base = id.slice(0, -suffix.length);
+  return base || undefined;
 }
 
 function metadataString(turn: FleetTurn, key: string): string | undefined {

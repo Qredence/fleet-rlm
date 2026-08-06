@@ -74,6 +74,69 @@ describe("ConversationStore", () => {
     expect(state.run.checkpointVersion).toBe(3);
   });
 
+  it("settles live text, code, and output when any Run terminal path arrives", () => {
+    const terminalEvents = [
+      {
+        type: "run/finish" as const,
+        finishReason: "stop",
+        error: null,
+        durationMs: null,
+        checkpointVersion: null,
+      },
+      { type: "run/cancelled" as const, reason: "Cancelled by operator" },
+      { type: "run/interrupted" as const, error: "Connection lost" },
+    ];
+
+    for (const terminal of terminalEvents) {
+      const store = makeStore();
+      store.dispatch({ type: "run/start", runId: "r-1", delivery: "live" });
+      store.dispatch({
+        type: "message/upsert",
+        message: {
+          id: "text",
+          kind: "text",
+          role: "assistant",
+          runId: "r-1",
+          text: "partial",
+          streaming: true,
+          ts: 1,
+        },
+      });
+      store.dispatch({
+        type: "message/upsert",
+        message: {
+          id: "code",
+          kind: "code",
+          runId: "r-1",
+          step: 1,
+          code: "partial",
+          streaming: true,
+          ts: 2,
+        },
+      });
+      store.dispatch({
+        type: "message/upsert",
+        message: {
+          id: "output",
+          kind: "output",
+          runId: "r-1",
+          step: 1,
+          output: "partial",
+          streaming: true,
+          ts: 3,
+        },
+      });
+
+      store.dispatch(terminal);
+
+      expect(store.getState().messages).toMatchObject([
+        { id: "text", streaming: false },
+        { id: "code", streaming: false },
+        { id: "output", streaming: false },
+      ]);
+    }
+  });
+
   it("counts steps only from the SSE step lifecycle", () => {
     const store = makeStore();
     store.dispatch({ type: "run/start", runId: "r-1", delivery: "live" });

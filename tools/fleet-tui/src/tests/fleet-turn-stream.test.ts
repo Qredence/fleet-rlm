@@ -26,7 +26,9 @@ describe("streamFleetTurn", () => {
       .mockResolvedValue(
         response(
           '{"type":"start","messageId":"run-1","messageMetadata":{}}',
+          '{"type":"text-start","id":"text-1"}',
           '{"type":"text-delta","id":"text-1","delta":"hi"}',
+          '{"type":"text-end","id":"text-1"}',
           '{"type":"finish","finishReason":"stop"}',
           "[DONE]",
         ),
@@ -36,7 +38,9 @@ describe("streamFleetTurn", () => {
       collect({ client: client(streamTurn), sessionId: "session-1", message: "hello" }),
     ).resolves.toEqual([
       { type: "start", messageId: "run-1", messageMetadata: {} },
+      { type: "text-start", id: "text-1" },
       { type: "text-delta", id: "text-1", delta: "hi" },
+      { type: "text-end", id: "text-1" },
       { type: "finish", finishReason: "stop" },
     ]);
   });
@@ -93,6 +97,36 @@ describe("streamFleetTurn", () => {
       expect.objectContaining({ skillSelections, onStreamOpen }),
     );
     expect(onStreamOpen).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects inactive text, reasoning, and Tool parts", async () => {
+    const cases = [
+      [
+        '{"type":"start","messageId":"run-1","messageMetadata":{}}',
+        '{"type":"text-delta","id":"text-1","delta":"late"}',
+      ],
+      [
+        '{"type":"start","messageId":"run-1","messageMetadata":{}}',
+        '{"type":"reasoning-start","id":"reasoning-1"}',
+        '{"type":"reasoning-end","id":"reasoning-1"}',
+        '{"type":"reasoning-delta","id":"reasoning-1","delta":"late"}',
+      ],
+      [
+        '{"type":"start","messageId":"run-1","messageMetadata":{}}',
+        '{"type":"tool-output-available","toolCallId":"call-1","output":"late"}',
+      ],
+      ['{"type":"start","messageId":"run-1","messageMetadata":{}}', '{"type":"finish-step"}'],
+    ];
+
+    for (const frames of cases) {
+      await expect(
+        collect({
+          client: client(vi.fn().mockResolvedValue(response(...frames))),
+          sessionId: "session-1",
+          message: "hello",
+        }),
+      ).rejects.toThrow();
+    }
   });
 
   it.each([

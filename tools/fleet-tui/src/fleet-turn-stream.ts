@@ -26,49 +26,129 @@ export async function* streamFleetTurn({
     signal,
   );
 
-  let sawStart = false;
-  let sawError = false;
-  let sawTerminal = false;
-  let sawDone = false;
+  if (!response.body) throw new Error("Fleet API returned an empty stream body");
+  const lifecycle = new StreamLifecycle();
 
-  for await (const data of parseSSE(response.body!)) {
+  for await (const data of parseSSE(response.body)) {
     const chunk = parseUIChunk(data);
-    if (chunk === "[DONE]") {
-      if (sawDone) throw new Error("Fleet API emitted duplicate [DONE] markers");
-      if (!sawTerminal) throw new Error("Fleet API emitted [DONE] before a terminal chunk");
-      sawDone = true;
-      continue;
-    }
-    if (sawDone) throw new Error("Fleet API emitted a chunk after [DONE]");
-    if (sawTerminal) {
-      if (chunk.type === "finish" || chunk.type === "abort") {
-        throw new Error("Fleet API emitted duplicate terminal chunks");
-      }
-      throw new Error("Fleet API emitted a chunk after its terminal chunk");
-    }
-    if (!sawStart) {
-      if (chunk.type !== "start") {
-        throw new Error("Fleet API stream did not start with a start chunk");
-      }
-      sawStart = true;
-    } else if (chunk.type === "start") {
-      throw new Error("Fleet API emitted duplicate start chunks");
-    }
-
-    if (chunk.type === "error") sawError = true;
-    if (chunk.type === "finish") {
-      if (chunk.finishReason === "error" && !sawError) {
-        throw new Error("Fleet API emitted finish:error without an error chunk");
-      }
-      sawTerminal = true;
-    } else if (chunk.type === "abort") {
-      sawTerminal = true;
-    }
-
+    lifecycle.accept(chunk);
+    if (chunk === "[DONE]") continue;
     yield chunk;
   }
 
-  if (!sawDone) throw new Error("Fleet API stream ended before [DONE]");
+  lifecycle.assertComplete();
+}
+
+class StreamLifecycle {
+  private started = false;
+  private terminal = false;
+  private done = false;
+  private sawError = false;
+  private stepDepth = 0;
+  private readonly reasoningOpen = new Set<string>();
+  private readonly reasoningEnded = new Set<string>();
+  private readonly textOpen = new Set<string>();
+  private readonly textEnded = new Set<string>();
+  private readonly toolsOpen = new Set<string>();
+  private readonly toolsEnded = new Set<string>();
+
+  accept(chunk: FleetUIMessageChunk | "[DONE]"): void {
+    if (chunk === "[DONE]") {
+      if (this.done) throw new Error("Fleet API emitted duplicate [DONE] markers");
+      if (!this.terminal) throw new Error("Fleet API emitted [DONE] before a terminal chunk");
+      this.done = true;
+      return;
+    }
+
+    if (this.done) throw new Error("Fleet API emitted a chunk after [DONE]");
+    if (this.terminal) throw new Error("Fleet API emitted a chunk after its terminal chunk");
+    if (!this.started && chunk.type !== "start") {
+      throw new Error("Fleet API stream did not start with a start chunk");
+    }
+    if (this.started && chunk.type === "start") {
+      throw new Error("Fleet API emitted duplicate start chunks");
+    }
+
+    switch (chunk.type) {
+      case "start":
+        this.started = true;
+        return;
+      case "start-step":
+        this.stepDepth += 1;
+        return;
+      case "finish-step":
+        if (this.stepDepth === 0) {
+          throw new Error("Fleet API emitted finish-step without a matching start-step");
+        }
+        this.stepDepth -= 1;
+        return;
+      case "reasoning-start":
+        this.begin(chunk.id, this.reasoningOpen, this.reasoningEnded, "reasoning stream");
+        return;
+      case "reasoning-delta":
+        this.requireOpen(chunk.id, this.reasoningOpen, this.reasoningEnded, "reasoning stream");
+        return;
+      case "reasoning-end":
+        this.end(chunk.id, this.reasoningOpen, this.reasoningEnded, "reasoning stream");
+        return;
+      case "text-start":
+        this.begin(chunk.id, this.textOpen, this.textEnded, "text stream");
+        return;
+      case "text-delta":
+        this.requireOpen(chunk.id, this.textOpen, this.textEnded, "text stream");
+        return;
+      case "text-end":
+        this.end(chunk.id, this.textOpen, this.textEnded, "text stream");
+        return;
+      case "tool-input-available":
+        this.begin(chunk.toolCallId, this.toolsOpen, this.toolsEnded, "tool call");
+        return;
+      case "tool-output-available":
+      case "tool-output-error":
+        this.end(chunk.toolCallId, this.toolsOpen, this.toolsEnded, "tool call");
+        return;
+      case "error":
+        if (this.sawError) throw new Error("Fleet API emitted duplicate error chunks");
+        this.sawError = true;
+        return;
+      case "finish":
+        if (chunk.finishReason === "error" && !this.sawError) {
+          throw new Error("Fleet API emitted finish:error without an error chunk");
+        }
+        this.terminal = true;
+        return;
+      case "abort":
+        this.terminal = true;
+        return;
+      default:
+        return;
+    }
+  }
+
+  assertComplete(): void {
+    if (!this.started) throw new Error("Fleet API stream ended before a start chunk");
+    if (!this.terminal) throw new Error("Fleet API stream ended before a terminal chunk");
+    if (!this.done) throw new Error("Fleet API stream ended before [DONE]");
+  }
+
+  private begin(id: string, open: Set<string>, ended: Set<string>, label: string): void {
+    if (open.has(id) || ended.has(id)) {
+      throw new Error(`Fleet API emitted duplicate ${label} start for ${id}`);
+    }
+    open.add(id);
+  }
+
+  private requireOpen(id: string, open: Set<string>, ended: Set<string>, label: string): void {
+    if (!open.has(id) || ended.has(id)) {
+      throw new Error(`Fleet API emitted data for an inactive ${label} ${id}`);
+    }
+  }
+
+  private end(id: string, open: Set<string>, ended: Set<string>, label: string): void {
+    this.requireOpen(id, open, ended, label);
+    open.delete(id);
+    ended.add(id);
+  }
 }
 
 async function openWithOneNetworkRetry(

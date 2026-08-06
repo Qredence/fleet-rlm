@@ -108,7 +108,10 @@ describe("FleetTuiApplication", () => {
     await vi.waitFor(() =>
       expect(terminal.writes.join("")).toContain("visible historical evidence"),
     );
-    expect(terminal.writes.join("")).toContain("FLEET");
+    const terminalOutput = terminal.writes.join("");
+    expect(terminalOutput).toContain("FLEET");
+    expect(terminalOutput).toContain("\x1b[?2026h");
+    expect(terminalOutput).not.toContain("\x1b[?1049h");
     for (const mode of [1000, 1002, 1003, 1006]) {
       expect(terminal.writes.join("")).not.toContain(`${String.fromCharCode(27)}[?${mode}h`);
     }
