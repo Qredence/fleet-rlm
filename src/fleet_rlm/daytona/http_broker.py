@@ -263,8 +263,7 @@ class _OutputBuffer(io.StringIO):
         self._field = field
 
     def write(self, value):
-        current_length = len(self.getvalue())
-        remaining = _MAX_OUTPUT_CHARS - current_length
+        remaining = _MAX_OUTPUT_CHARS - self.tell()
         if remaining > 0:
             super().write(value[:remaining])
         if value and self._execution_id:
