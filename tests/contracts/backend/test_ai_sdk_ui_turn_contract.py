@@ -58,6 +58,20 @@ def test_error_terminal_projects_error_then_finish_as_single_runtime_terminal() 
     assert types == ["start", "error", "finish"]
 
 
+def test_error_terminal_after_text_delta_does_not_invent_extra_terminal_chunks() -> None:
+    recorder = EventRecorder(run_id=uuid4(), session_id=uuid4())
+    events = [
+        recorder.record(RunStarted("live")),
+        recorder.record(TextDelta("partial")),
+        recorder.record(RunFailed("execution_failed", "Turn failed")),
+    ]
+
+    assert len([event for event in events if isinstance(event.detail, TERMINAL_DETAIL_TYPES)]) == 1
+    assert isinstance(events[-1].detail, TERMINAL_DETAIL_TYPES)
+    types = _projected_types(events)
+    assert types == ["start", "text-start", "text-delta", "error", "finish"]
+
+
 def test_abort_terminal_projects_abort_as_single_runtime_terminal() -> None:
     recorder = EventRecorder(run_id=uuid4(), session_id=uuid4())
     events = [recorder.record(RunStarted("live")), recorder.record(RunCancelled())]
