@@ -99,6 +99,70 @@ def test_projector_does_not_create_an_empty_reasoning_panel() -> None:
     assert AISDKUIProjector().project(event) == []
 
 
+def test_projector_projects_incremental_output_with_stable_stream_metadata() -> None:
+    from fleet_rlm.api.sse import AISDKUIProjector
+    from fleet_rlm.rlm.events import EventRecorder, RLMOutput
+
+    recorder = EventRecorder(run_id=uuid4(), session_id=uuid4())
+    projector = AISDKUIProjector()
+    chunks = [
+        projector.project(recorder.record(RLMOutput("first", 1, "output-1", True, False)))[0],
+        projector.project(recorder.record(RLMOutput("first second", 1, "output-1", False, True)))[0],
+    ]
+
+    assert [chunk["data"] for chunk in chunks] == [
+        {"output": "first", "step": 1, "stream_id": "output-1", "is_delta": True, "is_final": False},
+        {
+            "output": "first second",
+            "step": 1,
+            "stream_id": "output-1",
+            "is_delta": False,
+            "is_final": True,
+        },
+    ]
+    assert [chunk["id"] for chunk in chunks] == ["output-1", "output-1"]
+
+
+def test_projector_replaces_completed_live_reasoning_with_canonical_stream() -> None:
+    from fleet_rlm.api.sse import AISDKUIProjector
+    from fleet_rlm.rlm.events import EventRecorder, RLMReasoning
+
+    recorder = EventRecorder(run_id=uuid4(), session_id=uuid4())
+    projector = AISDKUIProjector()
+
+    live = projector.project(recorder.record(RLMReasoning("Inspect", 1, "reasoning-1", True, True)))
+    canonical = projector.project(recorder.record(RLMReasoning("Canonical inspect", 1)))
+
+    assert live == [
+        {"type": "reasoning-start", "id": "reasoning-1"},
+        {"type": "reasoning-delta", "id": "reasoning-1", "delta": "Inspect"},
+        {"type": "reasoning-end", "id": "reasoning-1"},
+    ]
+    assert canonical == [
+        {"type": "reasoning-start", "id": "reasoning-1:canonical"},
+        {"type": "reasoning-delta", "id": "reasoning-1:canonical", "delta": "Canonical inspect"},
+        {"type": "reasoning-end", "id": "reasoning-1:canonical"},
+    ]
+
+
+def test_projector_closes_partial_live_reasoning_before_canonical_correction() -> None:
+    from fleet_rlm.api.sse import AISDKUIProjector
+    from fleet_rlm.rlm.events import EventRecorder, RLMReasoning
+
+    recorder = EventRecorder(run_id=uuid4(), session_id=uuid4())
+    projector = AISDKUIProjector()
+
+    projector.project(recorder.record(RLMReasoning("partial", 1, "reasoning-1", True, False)))
+    canonical = projector.project(recorder.record(RLMReasoning("canonical", 1)))
+
+    assert canonical == [
+        {"type": "reasoning-end", "id": "reasoning-1"},
+        {"type": "reasoning-start", "id": "reasoning-1:canonical"},
+        {"type": "reasoning-delta", "id": "reasoning-1:canonical", "delta": "canonical"},
+        {"type": "reasoning-end", "id": "reasoning-1:canonical"},
+    ]
+
+
 def test_projector_reuses_same_step_ids_for_trajectory_corrections() -> None:
     from fleet_rlm.api.sse import AISDKUIProjector
     from fleet_rlm.rlm.events import EventRecorder, RLMCode, RLMOutput

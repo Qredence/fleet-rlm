@@ -55,6 +55,7 @@ class _PendingToolCall:
 class _NormalizeState:
     parts: list[CommittedPart | None]
     pending: dict[str, _PendingToolCall]
+    streaming_outputs: dict[str, int]
 
 
 def _append_step_started(detail: StepStarted, state: _NormalizeState) -> None:
@@ -74,7 +75,26 @@ def _append_code(detail: RLMCode, state: _NormalizeState) -> None:
 
 
 def _append_output(detail: RLMOutput, state: _NormalizeState) -> None:
-    state.parts.append(OutputPart(output=detail.output, step=detail.step))
+    stream_id = detail.stream_id
+    position = state.streaming_outputs.get(stream_id) if stream_id else None
+    if detail.is_delta and stream_id:
+        if position is None:
+            state.streaming_outputs[stream_id] = len(state.parts)
+            state.parts.append(OutputPart(output=detail.output, step=detail.step))
+            return
+        prior = state.parts[position]
+        if not isinstance(prior, OutputPart):
+            raise TurnDetailPolicyError("streaming output position is not an output part")
+        state.parts[position] = OutputPart(output=prior.output + detail.output, step=detail.step)
+        return
+
+    part = OutputPart(output=detail.output, step=detail.step)
+    if position is not None:
+        state.parts[position] = part
+        return
+    if stream_id:
+        state.streaming_outputs[stream_id] = len(state.parts)
+    state.parts.append(part)
 
 
 def _append_tool_started(detail: ToolStarted, state: _NormalizeState) -> None:
@@ -167,7 +187,7 @@ _DETAIL_HANDLERS: dict[type, _DetailHandler] = {
 
 
 def _normalize_execution(outcome: RLMOutcome) -> list[CommittedPart]:
-    state = _NormalizeState(parts=[], pending={})
+    state = _NormalizeState(parts=[], pending={}, streaming_outputs={})
 
     for detail in outcome.execution_details:
         handler = _DETAIL_HANDLERS.get(type(detail))

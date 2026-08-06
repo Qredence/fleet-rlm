@@ -53,6 +53,30 @@ def test_commit_success_normalizes_details_and_appends_the_canonical_suffix() ->
     assert committed.structured_result == {"answer": "42", "total": 42}
 
 
+def test_commit_success_coalesces_incremental_output_before_durable_commit() -> None:
+    from fleet_rlm.chat.turn_detail_policy import commit_success
+    from fleet_rlm.rlm.dspy_contract import PredictionResult
+    from fleet_rlm.rlm.events import RLMOutput
+    from fleet_rlm.rlm.outcome import RLMOutcome
+    from fleet_rlm.sessions.committed_turn import OutputPart
+
+    committed = commit_success(
+        RLMOutcome(
+            terminal_status="completed",
+            prediction=PredictionResult("done", {"answer": "done"}, "default", "1"),
+            execution_details=(
+                RLMOutput("first", 1, "output-1", True, False),
+                RLMOutput(" second", 1, "output-1", True, False),
+                RLMOutput("first second", 1, "output-1", False, True),
+            ),
+        ),
+        (),
+    )
+
+    outputs = [part for part in committed.parts if isinstance(part, OutputPart)]
+    assert outputs == [OutputPart(output="first second", step=1)]
+
+
 def test_commit_omits_structured_duplicate_for_single_output_prediction() -> None:
     from fleet_rlm.chat.turn_detail_policy import commit_success
     from fleet_rlm.rlm.dspy_contract import PredictionResult

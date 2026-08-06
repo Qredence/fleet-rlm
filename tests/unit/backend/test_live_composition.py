@@ -28,14 +28,16 @@ def test_composition_module_imports_without_credentials() -> None:
 @pytest.mark.asyncio
 async def test_daytona_startup_recovery_bounds_provider_fence() -> None:
     from fleet_rlm.composition.daytona import _reconcile_daytona_settling
+    from fleet_rlm.persistence.repositories.turns import ReconciliationSummary
 
     session_id = uuid4()
     fence_calls: list[object] = []
 
     class TurnState:
-        async def reconcile_settling(self, fence):
+        async def reconcile_settling(self, fence, *, deadline=None):  # noqa: ARG002
             with pytest.raises(asyncio.TimeoutError):
                 await fence(session_id)
+            return ReconciliationSummary(candidates=1, fence_failures=1)
 
     class SessionManager:
         async def fence_session(self, value):
@@ -46,9 +48,53 @@ async def test_daytona_startup_recovery_bounds_provider_fence() -> None:
         TurnState(),
         SessionManager(),
         fence_timeout=0.01,
+        deadline=asyncio.get_running_loop().time() + 1,
     )
 
     assert fence_calls == [session_id]
+
+
+@pytest.mark.asyncio
+async def test_daytona_startup_recovery_stops_after_shared_deadline() -> None:
+    from fleet_rlm.composition.daytona import _reconcile_daytona_settling
+    from fleet_rlm.persistence.repositories.turns import ReconciliationSummary
+
+    session_ids = [uuid4(), uuid4()]
+    fence_calls: list[object] = []
+
+    class TurnState:
+        async def reconcile_settling(self, fence, *, deadline=None):
+            failures = 0
+            for session_id in session_ids:
+                if deadline is not None and asyncio.get_running_loop().time() >= deadline:
+                    return ReconciliationSummary(
+                        candidates=len(session_ids),
+                        fence_failures=failures,
+                        skipped=len(session_ids) - len(fence_calls),
+                        budget_exhausted=True,
+                    )
+                try:
+                    await fence(session_id)
+                except TimeoutError:
+                    failures += 1
+            return ReconciliationSummary(candidates=len(session_ids), fence_failures=failures)
+
+    class SessionManager:
+        async def fence_session(self, value):
+            fence_calls.append(value)
+            await asyncio.sleep(60)
+
+    deadline = asyncio.get_running_loop().time() + 0.01
+    summary = await _reconcile_daytona_settling(
+        TurnState(),
+        SessionManager(),
+        fence_timeout=0.05,
+        deadline=deadline,
+    )
+
+    assert fence_calls == [session_ids[0]]
+    assert summary.budget_exhausted is True
+    assert summary.skipped == 1
 
 
 @pytest.mark.parametrize("session_factory", [None, object()], ids=["local", "sql"])

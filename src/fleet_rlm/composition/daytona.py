@@ -7,7 +7,7 @@ import logging
 from dataclasses import dataclass
 from datetime import timedelta
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from fastapi import FastAPI
 
@@ -16,9 +16,13 @@ from fleet_rlm.config import Settings
 from fleet_rlm.persistence.database import ensure_database_compatible
 from fleet_rlm.skills.catalog import build_bundled_skill_catalog
 
+if TYPE_CHECKING:
+    from fleet_rlm.persistence.repositories.turns import ReconciliationSummary
+
 logger = logging.getLogger(__name__)
 _ORPHAN_CLEANUP_TIMEOUT_SECONDS = 60
 _STARTUP_RECOVERY_FENCE_TIMEOUT_SECONDS = 15
+_STARTUP_CLEANUP_RECOVERY_BUDGET_SECONDS = 75.0
 
 
 def require_daytona_settings(settings: Settings) -> None:
@@ -89,13 +93,19 @@ async def _reconcile_daytona_settling(
     session_manager: Any,
     *,
     fence_timeout: float = _STARTUP_RECOVERY_FENCE_TIMEOUT_SECONDS,
-) -> None:
+    deadline: float | None = None,
+) -> ReconciliationSummary:
     """Recover stale Turns without letting one provider fence block startup."""
 
     async def bounded_fence(session_id: Any) -> None:
-        await asyncio.wait_for(session_manager.fence_session(session_id), timeout=fence_timeout)
+        remaining = fence_timeout
+        if deadline is not None:
+            remaining = min(remaining, deadline - asyncio.get_running_loop().time())
+        if remaining <= 0:
+            raise TimeoutError("startup recovery budget exhausted")
+        await asyncio.wait_for(session_manager.fence_session(session_id), timeout=remaining)
 
-    await turn_state.reconcile_settling(bounded_fence)
+    return await turn_state.reconcile_settling(bounded_fence, deadline=deadline)
 
 
 async def build_daytona_composition(settings: Settings) -> DaytonaCompositionHandles:
@@ -180,21 +190,42 @@ async def build_daytona_composition(settings: Settings) -> DaytonaCompositionHan
         )
         workspace_file_service = WorkspaceFileService(mounted_workspace_gateway)
         local_scope = LocalScope()
-        try:
-            async with asyncio.timeout(_ORPHAN_CLEANUP_TIMEOUT_SECONDS):
-                await cleanup_orphan_bytes(
-                    gateway,
-                    workspace_id=local_scope.workspace_id,
-                    paths=volume_paths,
-                    committed_storage_refs=await artifact_catalog.list_storage_refs(
-                        workspace_id=local_scope.workspace_id
-                    ),
-                    completed_runs=await artifact_catalog.list_completed_runs(workspace_id=local_scope.workspace_id),
-                    active_runs=await artifact_catalog.list_active_runs(workspace_id=local_scope.workspace_id),
-                    grace_period=timedelta(hours=1),
+        startup_started = asyncio.get_running_loop().time()
+        startup_deadline = startup_started + _STARTUP_CLEANUP_RECOVERY_BUDGET_SECONDS
+        cleanup_remaining = startup_deadline - asyncio.get_running_loop().time()
+        if cleanup_remaining <= 0:
+            logger.warning("Daytona orphan cleanup skipped phase=orphan_cleanup budget_exhausted=true")
+        else:
+            cleanup_timeout = min(_ORPHAN_CLEANUP_TIMEOUT_SECONDS, cleanup_remaining)
+            try:
+                async with asyncio.timeout(cleanup_timeout):
+                    cleanup_report = await cleanup_orphan_bytes(
+                        gateway,
+                        workspace_id=local_scope.workspace_id,
+                        paths=volume_paths,
+                        committed_storage_refs=await artifact_catalog.list_storage_refs(
+                            workspace_id=local_scope.workspace_id
+                        ),
+                        completed_runs=await artifact_catalog.list_completed_runs(
+                            workspace_id=local_scope.workspace_id
+                        ),
+                        active_runs=await artifact_catalog.list_active_runs(workspace_id=local_scope.workspace_id),
+                        grace_period=timedelta(hours=1),
+                    )
+                logger.info(
+                    "Daytona orphan cleanup complete phase=orphan_cleanup scanned=%d removed=%d retained=%d "
+                    "skipped_fresh=%d timeout_seconds=%.3f",
+                    cleanup_report.scanned,
+                    cleanup_report.removed,
+                    cleanup_report.retained,
+                    cleanup_report.skipped_fresh,
+                    cleanup_timeout,
                 )
-        except TimeoutError:
-            logger.warning("Daytona orphan cleanup timed out; continuing startup")
+            except TimeoutError:
+                logger.warning(
+                    "Daytona orphan cleanup timed out phase=orphan_cleanup timeout_seconds=%.3f; continuing startup",
+                    cleanup_timeout,
+                )
         turn_preparation = build_turn_preparation(
             resources,
             attachment_lifecycle=attachment_lifecycle,
@@ -212,7 +243,30 @@ async def build_daytona_composition(settings: Settings) -> DaytonaCompositionHan
             stale_after_seconds=resolved.run_stale_after_seconds,
             cleanup=cleanup,
         )
-        await _reconcile_daytona_settling(turn_state, resources.session_manager)
+        recovery = await _reconcile_daytona_settling(
+            turn_state,
+            resources.session_manager,
+            deadline=startup_deadline,
+        )
+        recovery_elapsed_ms = int((asyncio.get_running_loop().time() - startup_started) * 1000)
+        logger.info(
+            "Daytona startup recovery complete phase=settling_recovery candidates=%d recovered=%d "
+            "fence_failures=%d skipped=%d budget_exhausted=%s elapsed_ms=%d",
+            recovery.candidates,
+            recovery.recovered,
+            recovery.fence_failures,
+            recovery.skipped,
+            recovery.budget_exhausted,
+            recovery_elapsed_ms,
+        )
+        if recovery.fence_failures or recovery.skipped:
+            logger.warning(
+                "Daytona startup recovery left retryable work phase=settling_recovery fence_failures=%d "
+                "skipped=%d budget_exhausted=%s",
+                recovery.fence_failures,
+                recovery.skipped,
+                recovery.budget_exhausted,
+            )
         coordinator = TurnCoordinator(
             lifecycle=lifecycle,
             preparation=turn_preparation,
