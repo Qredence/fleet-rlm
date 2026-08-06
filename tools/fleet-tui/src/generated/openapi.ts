@@ -711,25 +711,59 @@ export interface components {
             /** @constant */
             type: "data-status";
             id?: string;
-            data: unknown;
+            data: {
+                phase: string;
+                status?: string;
+                detail?: string;
+                message?: string | null;
+            } & {
+                [key: string]: unknown;
+            };
             transient?: boolean;
         } | {
             /** @constant */
             type: "data-skill";
             id?: string;
-            data: unknown;
+            data: {
+                skill_id?: string;
+                skillId?: string;
+                name: string;
+                version: string;
+                /** @enum {string} */
+                phase?: "activated" | "loaded";
+                trust?: string;
+                affordances?: string[];
+            } & {
+                [key: string]: unknown;
+            };
             transient?: boolean;
         } | {
             /** @constant */
             type: "data-rlm-code";
             id?: string;
-            data: unknown;
+            data: {
+                code: string;
+                step?: number | null;
+                stream_id?: string | null;
+                is_delta?: boolean;
+                is_final?: boolean;
+            } & {
+                [key: string]: unknown;
+            };
             transient?: boolean;
         } | {
             /** @constant */
             type: "data-rlm-output";
             id?: string;
-            data: unknown;
+            data: {
+                output: string;
+                step?: number | null;
+                stream_id?: string | null;
+                is_delta?: boolean;
+                is_final?: boolean;
+            } & {
+                [key: string]: unknown;
+            };
             transient?: boolean;
         } | {
             /** @constant */
@@ -757,31 +791,74 @@ export interface components {
             /** @constant */
             type: "data-attachment";
             id?: string;
-            data: unknown;
+            data: {
+                attachment_id?: string;
+                attachmentId?: string;
+                phase?: string;
+                filename: string;
+                byte_size?: number;
+                byteSize?: number;
+            } & {
+                [key: string]: unknown;
+            };
             transient?: boolean;
         } | {
             /** @constant */
             type: "data-warning";
             id?: string;
-            data: unknown;
+            data: {
+                message: string;
+                code?: string | null;
+            } & {
+                [key: string]: unknown;
+            };
             transient?: boolean;
         } | {
             /** @constant */
             type: "data-artifact";
             id?: string;
-            data: unknown;
+            data: {
+                artifact_id?: string;
+                artifactId?: string;
+                artifact_kind?: string;
+                kind?: string;
+                title?: string | null;
+                name?: string;
+                media_type?: string;
+                mediaType?: string;
+                byte_size?: number;
+                byteSize?: number;
+                checksum_sha256?: string;
+                checksumSha256?: string;
+            } & {
+                [key: string]: unknown;
+            };
             transient?: boolean;
         } | {
             /** @constant */
             type: "data-usage";
             id?: string;
-            data: unknown;
+            data: {
+                usage: {
+                    [key: string]: unknown;
+                };
+            } & {
+                [key: string]: unknown;
+            };
             transient?: boolean;
         } | {
             /** @constant */
             type: "data-structured-result";
             id?: string;
-            data: unknown;
+            data: {
+                schema_id?: string;
+                schemaId?: string;
+                schema_version?: string;
+                schemaVersion?: string;
+                value: unknown;
+            } & {
+                [key: string]: unknown;
+            };
             transient?: boolean;
         } | {
             /** @constant */

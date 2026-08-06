@@ -91,6 +91,17 @@ class _SessionState:
     status: Literal["active", "archived"] = "active"
 
 
+@dataclass(frozen=True, slots=True)
+class ReconciliationSummary:
+    """Bounded startup-recovery accounting returned by Turn state adapters."""
+
+    candidates: int = 0
+    recovered: int = 0
+    fence_failures: int = 0
+    skipped: int = 0
+    budget_exhausted: bool = False
+
+
 def _decode_failure_status(value: str) -> Literal["failed", "cancelled", "timeout"]:
     if value in {"failed", "cancelled", "timeout"}:
         return value
@@ -401,19 +412,43 @@ class InMemoryTurnStateStore:
     async def reconcile_settling(
         self,
         fence: Callable[[UUID], Awaitable[None]] | None = None,
-    ) -> None:
+        *,
+        deadline: float | None = None,
+    ) -> ReconciliationSummary:
         """In-memory workers cannot survive the process that owned them."""
         async with self._lock:
             pending = [run for run in self._runs.values() if run.status == "settling"]
-        for pending_run in pending:
-            if fence is not None:
-                await fence(pending_run.session_id)
+        recovered = 0
+        fence_failures = 0
+        skipped = 0
+        budget_exhausted = False
+        for index, pending_run in enumerate(pending):
+            if deadline is not None and asyncio.get_running_loop().time() >= deadline:
+                skipped += len(pending) - index
+                budget_exhausted = True
+                break
+            try:
+                if fence is not None:
+                    await fence(pending_run.session_id)
+            except Exception:
+                fence_failures += 1
+                continue
             async with self._lock:
                 run = self._runs.get(pending_run.run_id)
                 if run is not None and run.status == "settling" and run.terminal_intent is not None:
                     decision = decide_claim_transition(_memory_claim_state(run), CompleteSettlement()).transition
                     if decision is not None and decision.next_state is not None:
                         _apply_memory_next_state(run, decision.next_state)
+                        recovered += 1
+                else:
+                    skipped += 1
+        return ReconciliationSummary(
+            candidates=len(pending),
+            recovered=recovered,
+            fence_failures=fence_failures,
+            skipped=skipped,
+            budget_exhausted=budget_exhausted,
+        )
 
 
 class SqlAlchemyTurnStateStore:
@@ -673,7 +708,9 @@ class SqlAlchemyTurnStateStore:
     async def reconcile_settling(
         self,
         fence: Callable[[UUID], Awaitable[None]] | None = None,
-    ) -> None:
+        *,
+        deadline: float | None = None,
+    ) -> ReconciliationSummary:
         """Recover stale provider claims left by a prior process.
 
         Recovery first claims each stale row with a conditional update, then
@@ -695,10 +732,19 @@ class SqlAlchemyTurnStateStore:
                     )
                 ).all()
             )
-        for pending_run in pending:
+        recovered = 0
+        fence_failures = 0
+        skipped = 0
+        budget_exhausted = False
+        for index, pending_run in enumerate(pending):
+            if deadline is not None and asyncio.get_running_loop().time() >= deadline:
+                skipped += len(pending) - index
+                budget_exhausted = True
+                break
             owner = pending_run.claim_owner
             heartbeat = pending_run.claim_heartbeat_at
             if owner is None or heartbeat is None:
+                skipped += 1
                 continue
             recovery_owner = f"recovery:{uuid4()}"
             async with self._sessions() as db, db.begin():
@@ -719,11 +765,13 @@ class SqlAlchemyTurnStateStore:
                     )
                 )
                 if claimed_id is None:
+                    skipped += 1
                     continue
             try:
                 if fence is not None:
                     await fence(pending_run.session_id)
             except Exception:
+                fence_failures += 1
                 async with self._sessions() as db, db.begin():
                     run = await db.get(RunRow, pending_run.id, with_for_update=True)
                     if run is not None and run.status == pending_run.status and run.claim_owner == recovery_owner:
@@ -741,11 +789,13 @@ class SqlAlchemyTurnStateStore:
             async with self._sessions() as db, db.begin():
                 run = await db.get(RunRow, pending_run.id, with_for_update=True)
                 if run is None or run.status != pending_run.status or run.claim_owner != recovery_owner:
+                    skipped += 1
                     continue
                 if run.status == "running":
                     stale = ClaimFailure("failed", "stale_claim", "Turn failed")
                     revocation = decide_claim_transition(_row_claim_state(run), RevokeClaim(stale)).transition
                     if revocation is None or revocation.next_state is None:
+                        skipped += 1
                         continue
                     _apply_row_next_state(
                         run,
@@ -757,8 +807,10 @@ class SqlAlchemyTurnStateStore:
                     try:
                         decision = decide_claim_transition(_row_claim_state(run), CompleteSettlement()).transition
                     except InvalidClaimTransitionError:
+                        skipped += 1
                         continue
                 if decision is None or decision.next_state is None:
+                    skipped += 1
                     continue
                 _apply_row_next_state(
                     run,
@@ -769,6 +821,14 @@ class SqlAlchemyTurnStateStore:
                 run.claim_owner = None
                 run.claim_heartbeat_at = None
                 run.recovery_metadata_json = None
+                recovered += 1
+        return ReconciliationSummary(
+            candidates=len(pending),
+            recovered=recovered,
+            fence_failures=fence_failures,
+            skipped=skipped,
+            budget_exhausted=budget_exhausted,
+        )
 
     async def _receipt(self, db: AsyncSession, run: RunRow) -> CommittedTurnReceipt:
         row = await db.scalar(select(TurnRow).where(TurnRow.run_id == run.id, TurnRow.role == "assistant"))

@@ -69,3 +69,20 @@ def test_projection_does_not_consume_extra_runtime_event_sequences() -> None:
             "transient": True,
         }
     ]
+
+
+def test_openapi_declares_typed_render_data_payloads() -> None:
+    from fleet_rlm.composition.testing import create_testing_app
+
+    schema = create_testing_app().openapi()
+    variants = schema["components"]["schemas"]["FleetUIMessageChunk"]["oneOf"]
+    by_type = {variant["properties"]["type"]["const"]: variant for variant in variants}
+
+    code_data = by_type["data-rlm-code"]["properties"]["data"]
+    output_data = by_type["data-rlm-output"]["properties"]["data"]
+    structured_data = by_type["data-structured-result"]["properties"]["data"]
+
+    assert code_data["type"] == "object"
+    assert code_data["properties"]["code"] == {"type": "string"}
+    assert output_data["properties"]["output"] == {"type": "string"}
+    assert structured_data["properties"]["value"] == {}

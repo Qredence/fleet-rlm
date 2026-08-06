@@ -1523,7 +1523,22 @@ components:
             const: data-status
           id:
             type: string
-          data: {}
+          data:
+            type: object
+            properties:
+              phase:
+                type: string
+              status:
+                type: string
+              detail:
+                type: string
+              message:
+                anyOf:
+                - type: string
+                - type: 'null'
+            additionalProperties: true
+            required:
+            - phase
           transient:
             type: boolean
         required:
@@ -1537,7 +1552,32 @@ components:
             const: data-skill
           id:
             type: string
-          data: {}
+          data:
+            type: object
+            properties:
+              skill_id:
+                type: string
+              skillId:
+                type: string
+              name:
+                type: string
+              version:
+                type: string
+              phase:
+                type: string
+                enum:
+                - activated
+                - loaded
+              trust:
+                type: string
+              affordances:
+                type: array
+                items:
+                  type: string
+            additionalProperties: true
+            required:
+            - name
+            - version
           transient:
             type: boolean
         required:
@@ -1551,7 +1591,26 @@ components:
             const: data-rlm-code
           id:
             type: string
-          data: {}
+          data:
+            type: object
+            properties:
+              code:
+                type: string
+              step:
+                anyOf:
+                - type: integer
+                - type: 'null'
+              stream_id:
+                anyOf:
+                - type: string
+                - type: 'null'
+              is_delta:
+                type: boolean
+              is_final:
+                type: boolean
+            additionalProperties: true
+            required:
+            - code
           transient:
             type: boolean
         required:
@@ -1565,7 +1624,26 @@ components:
             const: data-rlm-output
           id:
             type: string
-          data: {}
+          data:
+            type: object
+            properties:
+              output:
+                type: string
+              step:
+                anyOf:
+                - type: integer
+                - type: 'null'
+              stream_id:
+                anyOf:
+                - type: string
+                - type: 'null'
+              is_delta:
+                type: boolean
+              is_final:
+                type: boolean
+            additionalProperties: true
+            required:
+            - output
           transient:
             type: boolean
         required:
@@ -1634,7 +1712,24 @@ components:
             const: data-attachment
           id:
             type: string
-          data: {}
+          data:
+            type: object
+            properties:
+              attachment_id:
+                type: string
+              attachmentId:
+                type: string
+              phase:
+                type: string
+              filename:
+                type: string
+              byte_size:
+                type: integer
+              byteSize:
+                type: integer
+            additionalProperties: true
+            required:
+            - filename
           transient:
             type: boolean
         required:
@@ -1648,7 +1743,18 @@ components:
             const: data-warning
           id:
             type: string
-          data: {}
+          data:
+            type: object
+            properties:
+              message:
+                type: string
+              code:
+                anyOf:
+                - type: string
+                - type: 'null'
+            additionalProperties: true
+            required:
+            - message
           transient:
             type: boolean
         required:
@@ -1662,7 +1768,36 @@ components:
             const: data-artifact
           id:
             type: string
-          data: {}
+          data:
+            type: object
+            properties:
+              artifact_id:
+                type: string
+              artifactId:
+                type: string
+              artifact_kind:
+                type: string
+              kind:
+                type: string
+              title:
+                anyOf:
+                - type: string
+                - type: 'null'
+              name:
+                type: string
+              media_type:
+                type: string
+              mediaType:
+                type: string
+              byte_size:
+                type: integer
+              byteSize:
+                type: integer
+              checksum_sha256:
+                type: string
+              checksumSha256:
+                type: string
+            additionalProperties: true
           transient:
             type: boolean
         required:
@@ -1676,7 +1811,15 @@ components:
             const: data-usage
           id:
             type: string
-          data: {}
+          data:
+            type: object
+            properties:
+              usage:
+                type: object
+                additionalProperties: true
+            additionalProperties: true
+            required:
+            - usage
           transient:
             type: boolean
         required:
@@ -1690,7 +1833,21 @@ components:
             const: data-structured-result
           id:
             type: string
-          data: {}
+          data:
+            type: object
+            properties:
+              schema_id:
+                type: string
+              schemaId:
+                type: string
+              schema_version:
+                type: string
+              schemaVersion:
+                type: string
+              value: {}
+            additionalProperties: true
+            required:
+            - value
           transient:
             type: boolean
         required:

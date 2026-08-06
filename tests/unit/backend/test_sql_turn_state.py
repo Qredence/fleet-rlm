@@ -365,6 +365,75 @@ async def test_startup_reconciliation_fences_a_live_prior_claim_without_waiting_
 
 
 @pytest.mark.asyncio
+async def test_reconcile_deadline_recovers_one_run_and_leaves_later_claim_retryable() -> None:
+    from fleet_rlm.chat.turn_lifecycle import BeginTurn, ExecuteTurn
+    from fleet_rlm.persistence.database import create_async_engine_from_url, create_session_factory, create_tables
+    from fleet_rlm.persistence.models import RunRow, SessionRow, UserRow, WorkspaceRow
+    from fleet_rlm.persistence.repositories.turns import SqlAlchemyTurnStateStore
+    from fleet_rlm.sessions.models import TurnAccess, TurnInput
+
+    engine = create_async_engine_from_url("sqlite+aiosqlite:///:memory:")
+    try:
+        await create_tables(engine)
+        factory = create_session_factory(engine)
+        access = TurnAccess(uuid4(), uuid4())
+        session_ids = [uuid4(), uuid4()]
+        run_ids = [uuid4(), uuid4()]
+        async with factory() as db, db.begin():
+            db.add(UserRow(id=access.user_id))
+            db.add(WorkspaceRow(id=access.workspace_id))
+            db.add_all(
+                SessionRow(
+                    id=session_id,
+                    user_id=access.user_id,
+                    workspace_id=access.workspace_id,
+                    title=f"deadline-{index}",
+                )
+                for index, session_id in enumerate(session_ids)
+            )
+
+        store = SqlAlchemyTurnStateStore(factory, stale_after_seconds=30)
+        owners: dict[object, str] = {}
+        for index, (session_id, run_id) in enumerate(zip(session_ids, run_ids, strict=True)):
+            started = await store.begin(BeginTurn(access, session_id, TurnInput("hello"), f"key-{index}", run_id))
+            assert isinstance(started, ExecuteTurn)
+            async with factory() as db, db.begin():
+                row = await db.get(RunRow, run_id)
+                assert row is not None
+                assert row.claim_owner is not None
+                owners[run_id] = row.claim_owner
+                row.claim_heartbeat_at = datetime.now(UTC) - timedelta(seconds=40 - index)
+
+        fenced: list[object] = []
+
+        async def fence(session_id):
+            fenced.append(session_id)
+            await asyncio.sleep(0.02)
+
+        summary = await store.reconcile_settling(
+            fence,
+            deadline=asyncio.get_running_loop().time() + 0.01,
+        )
+
+        assert summary.candidates == 2
+        assert summary.recovered == 1
+        assert summary.skipped == 1
+        assert summary.budget_exhausted is True
+        assert fenced == [session_ids[0]]
+        async with factory() as db:
+            recovered = await db.get(RunRow, run_ids[0])
+            pending = await db.get(RunRow, run_ids[1])
+            assert recovered is not None
+            assert recovered.status == "failed"
+            assert recovered.claim_owner is None
+            assert pending is not None
+            assert pending.status == "running"
+            assert pending.claim_owner == owners[run_ids[1]]
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
 async def test_reconcile_retries_failed_settling_fence_without_losing_intent() -> None:
     from fleet_rlm.chat.turn_claim import BeginSettlement, ClaimFailure
     from fleet_rlm.chat.turn_lifecycle import BeginTurn, ExecuteTurn, TurnFailure

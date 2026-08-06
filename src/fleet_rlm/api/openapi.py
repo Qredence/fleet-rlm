@@ -53,6 +53,120 @@ _CHUNK_FIELD_SPECS: dict[str, tuple[tuple[str, ...], list[str]]] = {
     "error": (("errorText",), ["type", "errorText"]),
 }
 
+_DATA_STRING = {"type": "string"}
+_DATA_INTEGER = {"type": "integer"}
+_DATA_BOOLEAN = {"type": "boolean"}
+_DATA_JSON = {}
+
+
+def _nullable(schema: dict[str, Any]) -> dict[str, Any]:
+    return {"anyOf": [schema, {"type": "null"}]}
+
+
+def _data_object_schema(
+    properties: dict[str, dict[str, Any]],
+    *,
+    required: tuple[str, ...] = (),
+) -> dict[str, Any]:
+    schema: dict[str, Any] = {
+        "type": "object",
+        "properties": properties,
+        "additionalProperties": True,
+    }
+    if required:
+        schema["required"] = list(required)
+    return schema
+
+
+_DATA_PAYLOAD_SCHEMAS: dict[str, dict[str, Any]] = {
+    "data-status": _data_object_schema(
+        {
+            "phase": _DATA_STRING,
+            "status": _DATA_STRING,
+            "detail": _DATA_STRING,
+            "message": _nullable(_DATA_STRING),
+        },
+        required=("phase",),
+    ),
+    "data-skill": _data_object_schema(
+        {
+            "skill_id": _DATA_STRING,
+            "skillId": _DATA_STRING,
+            "name": _DATA_STRING,
+            "version": _DATA_STRING,
+            "phase": {"type": "string", "enum": ["activated", "loaded"]},
+            "trust": _DATA_STRING,
+            "affordances": {"type": "array", "items": _DATA_STRING},
+        },
+        required=("name", "version"),
+    ),
+    "data-rlm-code": _data_object_schema(
+        {
+            "code": _DATA_STRING,
+            "step": _nullable(_DATA_INTEGER),
+            "stream_id": _nullable(_DATA_STRING),
+            "is_delta": _DATA_BOOLEAN,
+            "is_final": _DATA_BOOLEAN,
+        },
+        required=("code",),
+    ),
+    "data-rlm-output": _data_object_schema(
+        {
+            "output": _DATA_STRING,
+            "step": _nullable(_DATA_INTEGER),
+            "stream_id": _nullable(_DATA_STRING),
+            "is_delta": _DATA_BOOLEAN,
+            "is_final": _DATA_BOOLEAN,
+        },
+        required=("output",),
+    ),
+    "data-attachment": _data_object_schema(
+        {
+            "attachment_id": _DATA_STRING,
+            "attachmentId": _DATA_STRING,
+            "phase": _DATA_STRING,
+            "filename": _DATA_STRING,
+            "byte_size": _DATA_INTEGER,
+            "byteSize": _DATA_INTEGER,
+        },
+        required=("filename",),
+    ),
+    "data-warning": _data_object_schema(
+        {"message": _DATA_STRING, "code": _nullable(_DATA_STRING)},
+        required=("message",),
+    ),
+    "data-artifact": _data_object_schema(
+        {
+            "artifact_id": _DATA_STRING,
+            "artifactId": _DATA_STRING,
+            "artifact_kind": _DATA_STRING,
+            "kind": _DATA_STRING,
+            "title": _nullable(_DATA_STRING),
+            "name": _DATA_STRING,
+            "media_type": _DATA_STRING,
+            "mediaType": _DATA_STRING,
+            "byte_size": _DATA_INTEGER,
+            "byteSize": _DATA_INTEGER,
+            "checksum_sha256": _DATA_STRING,
+            "checksumSha256": _DATA_STRING,
+        },
+    ),
+    "data-usage": _data_object_schema(
+        {"usage": {"type": "object", "additionalProperties": True}},
+        required=("usage",),
+    ),
+    "data-structured-result": _data_object_schema(
+        {
+            "schema_id": _DATA_STRING,
+            "schemaId": _DATA_STRING,
+            "schema_version": _DATA_STRING,
+            "schemaVersion": _DATA_STRING,
+            "value": _DATA_JSON,
+        },
+        required=("value",),
+    ),
+}
+
 
 def _chunk_field_spec(chunk_type: str) -> tuple[tuple[str, ...], list[str]]:
     if chunk_type in _CHUNK_FIELD_SPECS:
@@ -66,6 +180,8 @@ def _chunk_schema(chunk_type: str) -> dict[str, Any]:
     fields, required = _chunk_field_spec(chunk_type)
     properties: dict[str, Any] = {"type": {"type": "string", "const": chunk_type}}
     properties.update({field: _CHUNK_FIELD_TYPES[field] for field in fields})
+    if chunk_type in _DATA_PAYLOAD_SCHEMAS:
+        properties["data"] = _DATA_PAYLOAD_SCHEMAS[chunk_type]
     return {
         "type": "object",
         "properties": properties,
