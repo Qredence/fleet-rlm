@@ -697,6 +697,8 @@ class DaytonaHttpToolBroker:
                 if done:
                     break
                 time.sleep(self._poll_interval_s)
+            # Always make a final release attempt after the execution thread
+            # has finished, even if transient polls never observed ``done``.
             self._poll_output(execution_id, offset, on_stdout, release=True)
 
         if request_errors:

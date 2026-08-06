@@ -702,6 +702,50 @@ def test_execute_with_callbacks_records_per_execution_stats(monkeypatch: pytest.
     assert stats["poll_count"] >= 1
 
 
+def test_execute_code_attempts_final_output_release_after_poll_failures(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from fleet_rlm.daytona.http_broker import DaytonaHttpToolBroker
+
+    class _Sandbox:
+        pass
+
+    release_flags: list[str] = []
+
+    def _handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/execute":
+            return httpx.Response(
+                200,
+                json={"stdout": "", "stderr": "", "final": None, "error": None},
+            )
+        if request.url.path == "/output":
+            release = request.url.params.get("release", "0")
+            release_flags.append(release)
+            if release == "1":
+                return httpx.Response(
+                    200,
+                    json={"stdout": "", "stderr": "", "done": True, "next_offset": 0},
+                )
+            return httpx.Response(503)
+        return httpx.Response(404)
+
+    broker = DaytonaHttpToolBroker(sandbox=_Sandbox(), poll_interval_s=0.0)
+    broker._broker_url = "http://example.test"
+    broker._broker_token = "tok"
+    broker._broker_secret = "secret"
+    broker._client = httpx.Client(
+        transport=httpx.MockTransport(_handler),
+        base_url="http://example.test",
+        headers=broker._preview_headers(),
+    )
+    monkeypatch.setattr(time, "sleep", lambda _s: None)
+
+    broker.execute_code("print('ok')", on_stdout=lambda _value: None)
+
+    assert release_flags
+    assert release_flags[-1] == "1"
+
+
 def test_stop_closes_pooled_client() -> None:
     from fleet_rlm.daytona.http_broker import DaytonaHttpToolBroker
 
