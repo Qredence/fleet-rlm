@@ -17,6 +17,15 @@ def test_wrap_and_is_final_output_round_trip() -> None:
     assert not is_final_output("stdout")
 
 
+def test_interpreter_types_use_dspy_public_namespace() -> None:
+    import dspy
+
+    from fleet_rlm.rlm.dspy_interpreter_contract import CodeInterpreter, FinalOutput
+
+    assert CodeInterpreter is dspy.CodeInterpreter
+    assert FinalOutput is dspy.FinalOutput
+
+
 def test_copy_output_fields_defensive_copy() -> None:
     from fleet_rlm.rlm.dspy_interpreter_contract import copy_output_fields
 
@@ -25,6 +34,17 @@ def test_copy_output_fields_defensive_copy() -> None:
     assert copied == fields
     assert copied is not fields
     assert copy_output_fields(None) is None
+
+
+def test_copy_output_fields_does_not_share_nested_metadata() -> None:
+    from fleet_rlm.rlm.dspy_interpreter_contract import copy_output_fields
+
+    fields = [{"name": "answer", "metadata": {"description": "final answer"}}]
+    copied = copy_output_fields(fields)
+
+    assert copied is not None
+    copied[0]["metadata"]["description"] = "changed"
+    assert fields[0]["metadata"]["description"] == "final answer"
 
 
 def test_needs_tool_reinjection_matches_inject_cycle() -> None:

@@ -323,11 +323,26 @@ async def test_native_rlm_callback_observes_completed_action_without_altering_pr
     interpreter.shutdown()
 
 
-def test_composition_version_guard_rejects_any_unpinned_dspy(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_composition_version_guard_accepts_3_3_x_and_rejects_other_minors(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from fleet_rlm.rlm.dspy_contract import assert_dspy_version
 
-    monkeypatch.setattr(dspy, "__version__", "3.3.0b1")
-    with pytest.raises(RuntimeError, match=r"DSPy 3.3.0 is required"):
+    monkeypatch.setattr(dspy, "__version__", "3.3.0")
+    assert_dspy_version()  # pinned release
+    monkeypatch.setattr(dspy, "__version__", "3.3.1")
+    assert_dspy_version()  # patch within the pinned minor
+    monkeypatch.setattr(dspy, "__version__", "3.3.7.post1")
+    assert_dspy_version()  # post-release within the supported minor
+    monkeypatch.setattr(dspy, "__version__", "3.4.0")
+    with pytest.raises(RuntimeError, match=r"DSPy 3.3.x is required"):
+        assert_dspy_version()
+    for prerelease in ("3.3.0.dev1", "3.3.0rc1", "3.3.0b1"):
+        monkeypatch.setattr(dspy, "__version__", prerelease)
+        with pytest.raises(RuntimeError, match=r"DSPy 3.3.x release is required"):
+            assert_dspy_version()
+    monkeypatch.setattr(dspy, "__version__", "not-a-version")
+    with pytest.raises(RuntimeError, match=r"DSPy 3.3.x release is required"):
         assert_dspy_version()
 
 

@@ -12,7 +12,7 @@ from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInter
 
 
 def test_dspy_rlm_constructor_uses_max_iters_and_caller_owned_interpreters() -> None:
-    """Lock the DSPy 3.3.0 constructor contract at the dependency seam."""
+    """Lock the DSPy 3.3.x constructor contract at the dependency seam."""
     import dspy
 
     parameters = inspect.signature(dspy.RLM.__init__).parameters

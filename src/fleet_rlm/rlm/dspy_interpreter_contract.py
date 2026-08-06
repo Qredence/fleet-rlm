@@ -1,4 +1,4 @@
-"""Pinned DSPy 3.3.0 interpreter injection and FinalOutput contract.
+"""DSPy 3.3.x interpreter injection and FinalOutput contract.
 
 Public ``CodeInterpreter`` only requires ``tools``, ``start``, ``execute``, and
 ``shutdown``. Stock ``dspy.RLM`` additionally probes custom interpreters during
@@ -14,9 +14,10 @@ the HTTP broker has not yet been started for this reinjection cycle).
 
 from __future__ import annotations
 
+from copy import deepcopy
 from typing import Any
 
-from dspy.primitives.code_interpreter import CodeInterpreter, FinalOutput
+from dspy import CodeInterpreter, FinalOutput
 
 PUBLIC_FINAL_OUTPUT_LABEL = "FINAL submitted"
 
@@ -24,10 +25,10 @@ PUBLIC_FINAL_OUTPUT_LABEL = "FINAL submitted"
 def copy_output_fields(
     output_fields: list[dict[str, Any]] | None,
 ) -> list[dict[str, Any]] | None:
-    """Return a defensive copy of signature output metadata for interpreter state."""
+    """Return an independent copy of signature output metadata for interpreter state."""
     if output_fields is None:
         return None
-    return list(output_fields)
+    return deepcopy(output_fields)
 
 
 def initial_tools_registered() -> bool:

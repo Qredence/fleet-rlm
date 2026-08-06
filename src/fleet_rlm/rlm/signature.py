@@ -78,18 +78,18 @@ def root_signature_for_recursion(
 ) -> type[dspy.Signature]:
     """
     Select the signature appropriate for the recursive execution policy.
-    
+
     Skill-owned signatures are preserved unchanged. When recursion is disabled,
     the default Fleet signature is returned without recursive-query guidance.
-    
+
     Parameters:
         signature (type[dspy.Signature]): Signature to select.
         recursion_enabled (bool): Whether recursive querying is available.
-    
+
     Returns:
         type[dspy.Signature]: The original signature or an adjusted default Fleet
             signature.
-    
+
     Raises:
         RuntimeError: If the default signature's recursive guidance is malformed.
     """

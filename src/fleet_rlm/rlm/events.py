@@ -87,6 +87,9 @@ class RLMOutput:
     kind: ClassVar[Literal["rlm.output"]] = "rlm.output"
     output: str
     step: int | None = None
+    stream_id: str | None = None
+    is_delta: bool = False
+    is_final: bool = True
 
 
 @dataclass(frozen=True, slots=True)

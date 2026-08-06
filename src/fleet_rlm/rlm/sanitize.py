@@ -227,22 +227,34 @@ def _contains_sensitive_value(value: Any) -> bool:
     return True
 
 
-def _validate_declared_text(text: str) -> None:
+def _validate_declared_secret_assignments(text: str) -> None:
     for match in _DECLARED_SECRET_ASSIGNMENT.finditer(text):
         if not _is_safe_placeholder(match.group("value")):
             raise ValueError("declared output contains a sensitive value")
+
+
+def _validate_declared_bearer_tokens(text: str) -> None:
     for match in _DECLARED_BEARER.finditer(text):
         if not _is_safe_placeholder(match.group("value")):
             raise ValueError("declared output contains a bearer credential")
-    if _DECLARED_PROVIDER_TOKEN.search(text):
-        raise ValueError("declared output contains a provider credential")
-    if _DSNISH.search(text):
-        raise ValueError("declared output contains a connection string")
+
+
+def _validate_declared_private_paths(text: str) -> None:
     for match in _DECLARED_PRIVATE_PATH.finditer(text):
         path = match.group(0).rstrip(".,;:)]}")
         if path == "/home/daytona/fleet" or path.startswith("/home/daytona/fleet/"):
             continue
         raise ValueError("declared output contains a private host path")
+
+
+def _validate_declared_text(text: str) -> None:
+    _validate_declared_secret_assignments(text)
+    _validate_declared_bearer_tokens(text)
+    if _DECLARED_PROVIDER_TOKEN.search(text):
+        raise ValueError("declared output contains a provider credential")
+    if _DSNISH.search(text):
+        raise ValueError("declared output contains a connection string")
+    _validate_declared_private_paths(text)
     if _DECLARED_STACK_DUMP.search(text):
         raise ValueError("declared output contains a stack dump")
     if _DECLARED_PROMPT_DUMP.search(text):
