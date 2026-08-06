@@ -1,6 +1,6 @@
-# dspy.RLM contract (Fleet / DSPy 3.3.0)
+# dspy.RLM contract (Fleet / DSPy 3.3.x)
 
-Authority: installed `dspy==3.3.0` and [dspy.ai RLM](https://dspy.ai/api/modules/RLM/). Do not treat Daytona provider docs as DSPy module authority.
+Authority: supported DSPy 3.3.x and [dspy.ai RLM](https://dspy.ai/api/modules/RLM/). The current lock resolves 3.3.0. Do not treat Daytona provider docs as DSPy module authority.
 
 ## Name
 
@@ -49,14 +49,14 @@ independent verification in separate iterations.
 | `max_output_chars` | 10000 | Truncates **REPL step output** fed back into the loop (not a silent truncate of SUBMIT) |
 
 Fleet keeps the public `RLMOptions.max_iterations` configuration field and maps
-it to DSPy 3.3.0's `max_iters` constructor parameter in
+it to DSPy 3.3.x's `max_iters` constructor parameter in
 `rlm.dspy_contract`. Do not rename the Fleet field.
 
 Fleet maps these via `FLEET_RLM_MAX_ITERATIONS`, `FLEET_RLM_MAX_LLM_CALLS`, and `FLEET_RLM_MAX_OUTPUT_CHARS`.
 
 ## Fleet-to-DSPy construction and ownership
 
-| Fleet surface | Fleet value | DSPy 3.3.0 surface |
+| Fleet surface | Fleet value | DSPy 3.3.x surface |
 |---|---|---|
 | Fleet iteration budget | `max_iterations` | `max_iters` |
 | Native construction | `build_native_rlm(...)` without an interpreter | `dspy.RLM(..., interpreter_factory=...)` |
@@ -99,7 +99,7 @@ keyword-only and are not routed through the native positional call contract.
   unbounded generated content are not retained in these spans.
 - Declared `answer` JSON must fit the Turn commit budget. Oversized SUBMIT fails with public message `Turn output is too large`. Prefer writing long reports to Session Workspace, then SUBMIT a short summary.
 
-DSPy 3.3.0's final namespace, Tool, and sub-LM response validation is
+DSPy 3.3.x's final namespace, Tool, and sub-LM response validation is
 authoritative. Fleet host Tools preserve their own bounded validation and event
 views; generated Tool calls use keyword arguments, including
 `rlm_query(prompt=...)`.

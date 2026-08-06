@@ -62,7 +62,11 @@ JSON-compatible common input annotations.
   async-to-sync view, and it blocks only the DSPy worker thread.
   `WorkspaceVolumeGateway.open_workspace()` scopes each grouped I/O operation
   to one ephemeral Sandbox, which is deleted before the context exits.
-- `RLMRunner` executes one fresh DSPy RLM and emits no terminal event.
+- `RLMRunner` executes one fresh DSPy RLM and emits no terminal event. The
+  caller-owned interpreter observes ordinary stdout at the execution boundary,
+  publishes bounded `RLMOutput` deltas with one per-step stream identity, and
+  emits a final non-delta correction; trajectory reconciliation and durable
+  Turn normalization retain one canonical output part.
 - `TurnLifecycle.finish()` owns private result snapshots, Artifact publication,
   atomic Turn Commit, and durable failure settlement.
 - `TurnLifecycleService` translates lifecycle outcomes into typed Claim commands;
@@ -113,14 +117,16 @@ exception text.
 
 ## Terminal client
 
-`@earendil-works/pi-tui@0.82.0` is the only renderer. The client requires Node
-22.19+, owns no model or provider runtime, and consumes the FastAPI HTTP/SSE
-contract.
+`@earendil-works/pi-tui@0.84.0` is the only renderer. Fleet uses its
+`TuiMainScreen` adapter to preserve native terminal scrollback; the client
+requires Node 22.19+, owns no model or provider runtime, and consumes the
+FastAPI HTTP/SSE contract.
 
-`fleet-turn-stream.ts` owns strict request/retry/stream lifecycle; `sse.ts` owns
-framing and generated-chunk validation; `tui/runner.ts` owns active Run and
-cancellation control; `projection.ts` owns live/durable parity; `store.ts` owns
-atomic hydration. The application, screen, message renderer, commands,
+`fleet-turn-stream.ts` owns strict request/retry/stream lifecycle and part
+ordering; `sse.ts` owns framing and generated-chunk validation; `tui/runner.ts`
+owns active Run and cancellation control; `projection.ts` owns live/durable
+parity and stream accumulation; `store.ts` owns atomic hydration and terminal
+stream settlement. The application, screen, message renderer, commands,
 presenters, and autocomplete own interaction and static presentation.
 
 The operator timeline renders all evidence fully expanded in native terminal
