@@ -16,7 +16,6 @@ Metrics captured:
 import asyncio
 import json
 import os
-import resource
 import sys
 import time
 from dataclasses import dataclass, field
@@ -65,8 +64,13 @@ def current_rss_mb() -> float | None:
 def lifetime_peak_rss_mb() -> float:
     """Process lifetime high-water RSS in MB with platform-correct units.
 
-    ru_maxrss is reported in bytes on macOS and in KiB on Linux.
+    ru_maxrss is reported in bytes on macOS and in KiB on Linux. Returns 0.0
+    on platforms without the resource module (for example Windows).
     """
+    try:
+        import resource
+    except ImportError:
+        return 0.0
     max_rss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
     if sys.platform == "darwin":
         return max_rss / (1024 * 1024)

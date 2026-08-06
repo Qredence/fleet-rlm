@@ -35,13 +35,23 @@ _CACHEABLE_PATTERNS = (
 
 
 def _cacheable_path(path: str, mount_path: str) -> bool:
-    """Match cache patterns against a path relative to the trusted mount."""
+    """Match cache patterns against a path relative to the trusted mount.
+
+    Patterns match segment-wise so a ``*`` wildcard never crosses a ``/``
+    boundary; ``artifacts/*`` matches direct children only.
+    """
     try:
         relative = PurePosixPath(path).relative_to(PurePosixPath(mount_path))
     except ValueError:
         return False
-    relative_path = str(relative)
-    return any(fnmatchcase(relative_path, pattern) for pattern in _CACHEABLE_PATTERNS)
+    parts = relative.parts
+    for pattern in _CACHEABLE_PATTERNS:
+        pattern_parts = PurePosixPath(pattern).parts
+        if len(parts) == len(pattern_parts) and all(
+            fnmatchcase(part, pattern_part) for part, pattern_part in zip(parts, pattern_parts, strict=True)
+        ):
+            return True
+    return False
 
 
 def _list_cache_key(root: str, *, max_depth: int, max_files: int) -> str:
@@ -279,8 +289,10 @@ class AsyncDaytonaVolumeFS:
                     self._cache_state.put_metadata(cache_key, json.dumps(result).encode("utf-8"), generation=generation)
                     return result
             return None
-        except Exception:
-            return None
+        except Exception as exc:
+            if _provider_not_found(exc) or is_sandbox_not_found(exc):
+                return None
+            raise map_provider_error(exc) from exc
 
     async def list_files(self, logical_root: str, *, max_depth: int, max_files: int) -> tuple[VolumeFile, ...]:
         if max_depth <= 0:
