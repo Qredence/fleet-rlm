@@ -182,7 +182,7 @@ def test_observe_tool_preserves_metadata_and_correlates_explicit_view() -> None:
     assert another is not wrapped
     assert wrapped.name == source.name
     assert wrapped.desc == source.desc
-    # DSPy 3.3.0 validates normalized Tools before calling ``func``. The
+    # DSPy 3.3.x validates normalized Tools before calling ``func``. The
     # wrapper deliberately keeps that outer schema permissive so Fleet's
     # source validator remains the event-producing validation boundary.
     assert wrapped.args == {"key": {"type": "Any", "description": "Registered key"}}

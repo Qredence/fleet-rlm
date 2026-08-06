@@ -21,6 +21,7 @@ from fleet_rlm.rlm.dspy_contract import (
     TrajectoryStep,
     _RLMTraceCallback,
     bind_native_rlm_observer,
+    empty_rlm_usage,
     normalize_prediction_trajectory,
     observed_usage,
     prediction_result,
@@ -46,6 +47,9 @@ from fleet_rlm.rlm.events import (
     Status,
     StepFinished,
     StepStarted,
+    ToolCompleted,
+    ToolFailed,
+    ToolStarted,
     WarningEvent,
 )
 from fleet_rlm.rlm.factory import RLMFactory
@@ -171,8 +175,8 @@ class TurnEventStream:
 class _DetailRelay:
     def __init__(self, *, maxsize: int = _MAX_DETAIL_EVENTS) -> None:
         self._loop = asyncio.get_running_loop()
-        # Lifecycle is a durable protocol signal, not optional diagnostic
-        # detail. Keep it even while normal observation traffic is capped.
+        # Step and Tool lifecycle are durable protocol signals, not optional
+        # diagnostic detail. Keep them even while normal observation traffic is capped.
         self._queue: asyncio.Queue[RuntimeEventDetail] = asyncio.Queue()
         self._maxsize = max(0, maxsize)
         self._ordinary_count = 0
@@ -189,16 +193,26 @@ class _DetailRelay:
             self._loop.call_soon_threadsafe(self._put, detail)
 
     def _put(self, detail: RuntimeEventDetail) -> None:
-        if not isinstance(detail, (SkillActivated, SkillLoaded)) and self._ordinary_count >= self._maxsize:
+        if isinstance(
+            detail, (SkillActivated, SkillLoaded, StepStarted, StepFinished, ToolStarted, ToolCompleted, ToolFailed)
+        ):
+            self._queue.put_nowait(detail)
+            return
+        if self._ordinary_count >= self._maxsize:
             self.overflowed = True
             return
-        if not isinstance(detail, (SkillActivated, SkillLoaded)):
-            self._ordinary_count += 1
+        self._ordinary_count += 1
         self._queue.put_nowait(detail)
+
+    @staticmethod
+    def _is_retained(detail: RuntimeEventDetail) -> bool:
+        return isinstance(
+            detail, (SkillActivated, SkillLoaded, StepStarted, StepFinished, ToolStarted, ToolCompleted, ToolFailed)
+        )
 
     async def get(self) -> RuntimeEventDetail:
         detail = await self._queue.get()
-        if not isinstance(detail, (SkillActivated, SkillLoaded)):
+        if not self._is_retained(detail):
             self._ordinary_count -= 1
         return detail
 
@@ -207,7 +221,7 @@ class _DetailRelay:
         while True:
             try:
                 detail = self._queue.get_nowait()
-                if not isinstance(detail, (SkillActivated, SkillLoaded)):
+                if not self._is_retained(detail):
                     self._ordinary_count -= 1
                 values.append(detail)
             except asyncio.QueueEmpty:
@@ -257,6 +271,7 @@ class _NativeRLMStreamProjector:
         self._step = 0
         self._last_field: str | None = None
         self._field_chars = {"reasoning": 0, "code": 0}
+        self._field_completed = {"reasoning": False, "code": False}
 
     def publish(self, item: Any) -> bool:
         if isinstance(item, dspy.streaming.StatusMessage):
@@ -269,12 +284,18 @@ class _NativeRLMStreamProjector:
         field = item.signature_field_name
         if field not in {"reasoning", "code"}:
             return False
-        if field == "reasoning" and self._last_field != "reasoning":
+        if self._step == 0:
+            self._step = 1
+        elif field == "reasoning" and self._last_field != "reasoning" and self._field_completed["code"]:
+            # DSPy may yield both listeners for alternating chunks of one JSON
+            # response. A field transition is not an RLM iteration boundary;
+            # only a new reasoning field after the prior code field completed
+            # identifies the next action.
             self._step += 1
             self._field_chars["reasoning"] = 0
             self._field_chars["code"] = 0
-        elif self._step == 0:
-            self._step = 1
+            self._field_completed["reasoning"] = False
+            self._field_completed["code"] = False
         self._last_field = field
 
         remaining = self._max_chars - self._field_chars[field]
@@ -282,6 +303,7 @@ class _NativeRLMStreamProjector:
         self._field_chars[field] += len(chunk)
         if not chunk and not item.is_last_chunk:
             return False
+        self._field_completed[field] = bool(item.is_last_chunk)
         stream_id = f"{self._run_id}:rlm:{self._step}:{field}"
         if field == "reasoning":
             detail: RuntimeEventDetail = RLMReasoning(
@@ -324,7 +346,7 @@ def _trajectory_details(steps: Sequence[TrajectoryStep], *, max_chars: int) -> l
 
 def _preserve_stream_id(target: ObservationDetail, details: Sequence[ExecutionDetail], step: int) -> ObservationDetail:
     """Keep one live stream identity when canonical trajectory data is emitted."""
-    if not isinstance(target, (RLMReasoning, RLMCode)):
+    if not isinstance(target, (RLMReasoning, RLMCode, RLMOutput)):
         return target
     stream_id = next(
         (
@@ -333,6 +355,7 @@ def _preserve_stream_id(target: ObservationDetail, details: Sequence[ExecutionDe
             if type(detail) is type(target)
             and getattr(detail, "step", None) == step
             and isinstance(getattr(detail, "stream_id", None), str)
+            and bool(getattr(detail, "stream_id", None))
         ),
         None,
     )
@@ -444,10 +467,13 @@ def _terminal_status(exc: BaseException) -> TerminalStatus:
 
 
 def _public_failure_message(exc: BaseException) -> str:
+    # Read the instance attribute so a parametrized ``TurnTerminalError("...")``
+    # override is honored, matching ``sanitize_public_error``. Class-attr
+    # defaults (currently all raise sites) fall through the same lookup.
     if isinstance(exc, PredictionOutputError):
-        return str(type(exc).public_message)
+        return str(getattr(exc, "public_message", "Turn output is invalid"))
     if isinstance(exc, TurnTerminalError):
-        return str(type(exc).public_message)
+        return str(getattr(exc, "public_message", "Turn failed"))
     if isinstance(exc, AdapterParseError):
         return "The model produced a response that could not be parsed into the expected fields."
     return "Turn failed"
@@ -551,7 +577,23 @@ class RLMRunner:
         outcome: list[RLMOutcome] = []
         ownership = _WorkerOwnership()
         events = self._generate(context, outcome, ownership)
-        return TurnEventStream(events, lambda: outcome[-1], ownership)
+        return TurnEventStream(
+            events,
+            # A stream closed before the generator body ever runs leaves the
+            # outcome cell empty; synthesize a cancelled outcome (matching the
+            # GeneratorExit path in ``_generate``) instead of raising IndexError.
+            lambda: (
+                outcome[-1]
+                if outcome
+                else RLMOutcome(
+                    terminal_status="cancelled",
+                    usage=empty_rlm_usage(),
+                    public_error_message="Turn cancelled",
+                    duration_ms=0,
+                )
+            ),
+            ownership,
+        )
 
     async def _generate(
         self,
@@ -798,6 +840,141 @@ class RLMRunner:
             for detail in details
         )
 
+    @staticmethod
+    def _native_call_args(rlm: Any, context: RLMExecutionContext) -> tuple[Any, ...]:
+        if type(rlm) is not dspy.RLM:
+            return ()
+        if context.interpreter is None:
+            raise RLMConfigError("native RLM execution requires a caller-owned interpreter")
+        return (context.interpreter,)
+
+    async def _stream_native_rlm(
+        self,
+        rlm: Any,
+        context: RLMExecutionContext,
+        kwargs: dict[str, Any],
+        native_call_args: tuple[Any, ...],
+        relay: _DetailRelay,
+    ) -> tuple[Any, bool]:
+        named_predictors = dict(rlm.named_predictors())
+        predictor_name = next(
+            (name for name, predictor in named_predictors.items() if predictor is rlm.generate_action),
+            None,
+        )
+        if predictor_name is None:
+            raise TypeError("native RLM action predictor is not addressable by name")
+        listeners = [
+            dspy.streaming.StreamListener(
+                signature_field_name=field,
+                predict=rlm.generate_action,
+                predict_name=predictor_name,
+                allow_reuse=True,
+            )
+            for field in ("reasoning", "code")
+        ]
+        stream_projector = _NativeRLMStreamProjector(
+            run_id=context.run_id,
+            max_chars=context.options.max_output_chars,
+            publish=relay.publish,
+        )
+        stream_program = cast(
+            Callable[..., AsyncIterator[Any]],
+            dspy.streamify(
+                rlm,
+                # DSPy 3.3.x exposes status messages and selected signature
+                # fields through this streamify adapter.
+                status_message_provider=_FleetStatusMessageProvider(),
+                stream_listeners=listeners,
+                include_final_prediction_in_output_stream=True,
+                is_async_program=True,
+                async_streaming=True,
+            ),
+        )
+        prediction = None
+        streamed = False
+        async for stream_item in stream_program(*native_call_args, **kwargs):
+            streamed |= stream_projector.publish(stream_item)
+            if isinstance(stream_item, dspy.Prediction):
+                prediction = stream_item
+        if prediction is None:
+            raise TypeError("DSPy streamify completed without a Prediction")
+        return prediction, streamed
+
+    async def _invoke_rlm(
+        self,
+        rlm: Any,
+        context: RLMExecutionContext,
+        kwargs: dict[str, Any],
+        relay: _DetailRelay,
+    ) -> tuple[Any, str]:
+        native_call_args = self._native_call_args(rlm, context)
+        if type(rlm) is dspy.RLM and isinstance(rlm.generate_action, dspy.Predict):
+            prediction, streamed = await self._stream_native_rlm(
+                rlm,
+                context,
+                kwargs,
+                native_call_args,
+                relay,
+            )
+            return prediction, "native" if streamed else "provider_fallback"
+        prediction = await rlm.acall(*native_call_args, **kwargs)
+        return prediction, "legacy"
+
+    @staticmethod
+    def _record_attachment_accesses(context: RLMExecutionContext) -> None:
+        drain_accesses = getattr(context.interpreter, "drain_context_accesses", None)
+        record_accesses = getattr(context.capabilities, "record_attachment_accesses", None)
+        if callable(drain_accesses) and callable(record_accesses):
+            record_accesses(tuple(drain_accesses()))
+
+    @staticmethod
+    def _record_phase_failure(
+        phase: Any,
+        started: float,
+        recursive_executor: RecursiveRLMExecutor | None,
+        exc: BaseException,
+    ) -> None:
+        recursive_summary = _recursive_summary(recursive_executor)
+        phase.set_outputs(
+            {
+                "elapsed_ms": int((time.perf_counter() - started) * 1000),
+                "request_status": "failed",
+                "failure_category": trace_failure_category(exc),
+                "recursive_call_count": recursive_summary.call_count,
+                "recursive_prompt_chars": recursive_summary.delegated_prompt_chars,
+                "recursive_depth_fallback_count": recursive_summary.depth_fallback_count,
+            }
+        )
+
+    @staticmethod
+    def _record_phase_success(
+        phase: Any,
+        prediction: Any,
+        started: float,
+        stream_mode: str,
+        recursive_executor: RecursiveRLMExecutor | None,
+    ) -> Any:
+        final_reasoning = getattr(prediction, "final_reasoning", None)
+        termination_mode = (
+            "native_extraction_fallback" if final_reasoning == "Extract forced final output" else "typed_submit"
+        )
+        usage = observed_usage(prediction, duration_ms=int((time.perf_counter() - started) * 1000))
+        recursive_summary = _recursive_summary(recursive_executor)
+        phase.set_outputs(
+            {
+                "iterations": usage["iterations"],
+                "observed_lm_usage": usage["observed_lm_usage"],
+                "termination_mode": termination_mode,
+                "elapsed_ms": usage["duration_ms"],
+                "request_status": "completed",
+                "recursive_call_count": recursive_summary.call_count,
+                "recursive_prompt_chars": recursive_summary.delegated_prompt_chars,
+                "recursive_depth_fallback_count": recursive_summary.depth_fallback_count,
+                "stream_mode": stream_mode,
+            }
+        )
+        return prediction
+
     async def _execute_rlm(
         self,
         rlm: Any,
@@ -833,7 +1010,7 @@ class RLMRunner:
             ) as phase,
             dspy.context(
                 lm=context.models.root_lm,
-                # DSPy 3.3.0 combines context callbacks with instance
+                # DSPy 3.3.x combines context callbacks with instance
                 # callbacks around LM requests (dspy/utils/callback.py:258-288).
                 callbacks=[_RLMTraceCallback(root_lm=context.models.root_lm, sub_lm=context.models.sub_lm)],
                 # Keep the pinned DSPy JSON action protocol authoritative. A
@@ -844,95 +1021,15 @@ class RLMRunner:
             ),
         ):
             try:
-                stream_mode = "legacy"
-                native_call_args: tuple[Any, ...] = ()
-                if type(rlm) is dspy.RLM:
-                    if context.interpreter is None:
-                        raise RLMConfigError("native RLM execution requires a caller-owned interpreter")
-                    native_call_args = (context.interpreter,)
-                if type(rlm) is dspy.RLM and isinstance(rlm.generate_action, dspy.Predict):
-                    named_predictors = dict(rlm.named_predictors())
-                    predictor_name = next(
-                        (name for name, predictor in named_predictors.items() if predictor is rlm.generate_action),
-                        None,
-                    )
-                    if predictor_name is None:
-                        raise TypeError("native RLM action predictor is not addressable by name")
-                    listeners = [
-                        dspy.streaming.StreamListener(
-                            signature_field_name=field,
-                            predict=rlm.generate_action,
-                            predict_name=predictor_name,
-                            allow_reuse=True,
-                        )
-                        for field in ("reasoning", "code")
-                    ]
-                    stream_projector = _NativeRLMStreamProjector(
-                        run_id=context.run_id,
-                        max_chars=context.options.max_output_chars,
-                        publish=relay.publish,
-                    )
-                    stream_program = cast(
-                        Callable[..., AsyncIterator[Any]],
-                        dspy.streamify(
-                            rlm,
-                            status_message_provider=_FleetStatusMessageProvider(),
-                            stream_listeners=listeners,
-                            include_final_prediction_in_output_stream=True,
-                            is_async_program=True,
-                            async_streaming=True,
-                        ),
-                    )
-                    prediction = None
-                    streamed = False
-                    async for stream_item in stream_program(*native_call_args, **kwargs):
-                        streamed |= stream_projector.publish(stream_item)
-                        if isinstance(stream_item, dspy.Prediction):
-                            prediction = stream_item
-                    if prediction is None:
-                        raise TypeError("DSPy streamify completed without a Prediction")
-                    stream_mode = "native" if streamed else "provider_fallback"
-                else:
-                    prediction = await rlm.acall(*native_call_args, **kwargs)
+                prediction, stream_mode = await self._invoke_rlm(rlm, context, kwargs, relay)
                 if recursive_executor is not None:
                     recursive_executor.raise_if_cleanup_failed()
             except BaseException as exc:
-                recursive_summary = _recursive_summary(recursive_executor)
-                phase.set_outputs(
-                    {
-                        "elapsed_ms": int((time.perf_counter() - started) * 1000),
-                        "request_status": "failed",
-                        "failure_category": trace_failure_category(exc),
-                        "recursive_call_count": recursive_summary.call_count,
-                        "recursive_prompt_chars": recursive_summary.delegated_prompt_chars,
-                        "recursive_depth_fallback_count": recursive_summary.depth_fallback_count,
-                    }
-                )
+                self._record_phase_failure(phase, started, recursive_executor, exc)
                 raise
             finally:
-                drain_accesses = getattr(context.interpreter, "drain_context_accesses", None)
-                record_accesses = getattr(context.capabilities, "record_attachment_accesses", None)
-                if callable(drain_accesses) and callable(record_accesses):
-                    record_accesses(tuple(drain_accesses()))
-            final_reasoning = getattr(prediction, "final_reasoning", None)
-            termination_mode = (
-                "native_extraction_fallback" if final_reasoning == "Extract forced final output" else "typed_submit"
-            )
-            usage = observed_usage(prediction, duration_ms=int((time.perf_counter() - started) * 1000))
-            phase.set_outputs(
-                {
-                    "iterations": usage["iterations"],
-                    "observed_lm_usage": usage["observed_lm_usage"],
-                    "termination_mode": termination_mode,
-                    "elapsed_ms": usage["duration_ms"],
-                    "request_status": "completed",
-                    "recursive_call_count": _recursive_summary(recursive_executor).call_count,
-                    "recursive_prompt_chars": _recursive_summary(recursive_executor).delegated_prompt_chars,
-                    "recursive_depth_fallback_count": _recursive_summary(recursive_executor).depth_fallback_count,
-                    "stream_mode": stream_mode,
-                }
-            )
-            return prediction
+                self._record_attachment_accesses(context)
+            return self._record_phase_success(phase, prediction, started, stream_mode, recursive_executor)
 
     async def _execute_rlm_in_worker(
         self,

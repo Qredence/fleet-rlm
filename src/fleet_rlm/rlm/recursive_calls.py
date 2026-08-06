@@ -130,6 +130,25 @@ def _as_cleanup_error(exc: BaseException) -> ChildRuntimeCleanupError:
     return error
 
 
+def _validate_recursive_prompt(prompt: object, *, max_chars: int) -> str:
+    if not isinstance(prompt, str):
+        raise ValueError("rlm_query prompt must be text")
+    prompt = prompt.strip()
+    if not prompt:
+        raise ValueError("rlm_query prompt must not be empty")
+    if len(prompt) > max_chars:
+        raise ValueError("rlm_query prompt exceeds the configured character bound")
+    return prompt
+
+
+@dataclass(frozen=True, slots=True)
+class _RecursiveCall:
+    call_index: int
+    child_depth: int
+    started_at: float
+    span: Any
+
+
 class RecursiveRLMExecutor:
     """Execute bounded recursive child RLMs from a synchronous DSPy worker.
 
@@ -285,6 +304,175 @@ class RecursiveRLMExecutor:
         except Exception:
             return
 
+    def _begin_call(self, prompt: str) -> _RecursiveCall:
+        self._state.call_count += 1
+        call_index = self._state.call_count
+        self._state.delegated_prompt_chars += len(prompt)
+        self._state.maximum_prompt_chars = max(self._state.maximum_prompt_chars, len(prompt))
+        child_depth = self._depth + 1
+        started_at = time.monotonic()
+        span = start_turn_span(
+            "RLM.recursive_call",
+            inputs={
+                "recursive_depth": child_depth,
+                "call_index": call_index,
+                "prompt_chars": len(prompt),
+            },
+        )
+        return _RecursiveCall(call_index, child_depth, started_at, span)
+
+    def _run_depth_fallback(self, prompt: str, call: _RecursiveCall) -> tuple[str, dict[str, object]]:
+        self._state.depth_fallback_count += 1
+        answer = self._plain_sub_lm(prompt)
+        self._ensure_authorized()
+        completion_outputs = self._record_completion(
+            call,
+            mode="depth_fallback",
+            child_iterations=0,
+            include_child_iterations=False,
+        )
+        return answer, completion_outputs
+
+    def _acquire_child_lease(self, call_index: int) -> ChildRuntimeLease:
+        if self._child_runtime_factory is None:
+            raise RuntimeError("recursive child runtime is unavailable")
+        self._ensure_authorized()
+        return self._child_runtime_factory(call_index)
+
+    def _run_native_child(
+        self,
+        prompt: str,
+        call: _RecursiveCall,
+        lease: ChildRuntimeLease,
+    ) -> tuple[str, dict[str, object]]:
+        self._ensure_authorized()
+        child_executor = RecursiveRLMExecutor(
+            models=self._models,
+            options=self._options,
+            child_runtime_factory=self._child_runtime_factory,
+            deadline=self._deadline,
+            depth=call.child_depth,
+            state=self._state,
+            observer=self._observer,
+            is_authorized=self._is_authorized,
+        )
+        child = build_native_rlm(
+            signature=RecursiveSubtaskSignature,
+            options=RLMOptions(
+                max_iterations=self._options.child_max_iterations,
+                max_llm_calls=self._options.child_max_llm_calls,
+                max_output_chars=self._options.child_max_output_chars,
+            ),
+            tools=[child_executor.tool],
+            sub_lm=self._models.sub_lm,
+            verbose=False,
+        )
+        self._ensure_authorized()
+        with dspy.context(
+            lm=self._models.root_lm,
+            adapter=dspy.JSONAdapter(),
+            callbacks=[
+                _RLMTraceCallback(
+                    root_lm=self._models.root_lm,
+                    sub_lm=self._models.sub_lm,
+                    recursive_depth=call.child_depth,
+                )
+            ],
+            track_usage=True,
+        ):
+            prediction = child(lease.interpreter, prompt=prompt)
+        result = prediction_result(
+            prediction,
+            RecursiveSubtaskSignature,
+            schema_id="fleet.recursive-subtask",
+            schema_version="1",
+            max_output_chars=self._options.child_max_output_chars,
+        )
+        self._ensure_authorized()
+        trajectory = getattr(prediction, "trajectory", ())
+        child_iterations = len(trajectory) if isinstance(trajectory, list) else 0
+        mode = (
+            "native_extraction_fallback"
+            if getattr(prediction, "final_reasoning", None) == "Extract forced final output"
+            else "typed_submit"
+        )
+        completion_outputs = self._record_completion(call, mode=mode, child_iterations=child_iterations)
+        return result.display_text, completion_outputs
+
+    def _record_completion(
+        self,
+        call: _RecursiveCall,
+        *,
+        mode: str,
+        child_iterations: int,
+        include_child_iterations: bool = True,
+    ) -> dict[str, object]:
+        self._state.child_iterations += child_iterations
+        self._state.termination_modes.append(mode)
+        completion_outputs: dict[str, object] = {"termination_mode": mode}
+        if include_child_iterations:
+            completion_outputs["child_iterations"] = child_iterations
+        self._last_completion = {
+            "status": "completed",
+            "call_index": call.call_index,
+            "recursive_depth": call.child_depth,
+            "child_iterations": child_iterations,
+            "termination_mode": mode,
+        }
+        return completion_outputs
+
+    def _record_primary_failure(self, call: _RecursiveCall, exc: BaseException) -> str:
+        failure_category = _recursive_failure_category(exc)
+        if isinstance(exc, ChildRuntimeCleanupError) and self._state.fatal_cleanup_error is None:
+            self._state.fatal_cleanup_error = exc
+        self._state.termination_modes.append("child_error")
+        call.span.finish(
+            phase_status="failed",
+            outputs={"failure_category": trace_failure_category(exc)},
+        )
+        return failure_category
+
+    def _finalize_call(
+        self,
+        call: _RecursiveCall,
+        lease: ChildRuntimeLease | None,
+        *,
+        cleanup_status: str,
+        failed: bool,
+        primary_failed: bool,
+        completion_outputs: dict[str, object] | None,
+        failure_category: str | None,
+    ) -> None:
+        cleanup_error: BaseException | None = None
+        if lease is not None:
+            try:
+                lease.close()
+                cleanup_status = "completed"
+            except BaseException as exc:
+                cleanup_error = _as_cleanup_error(exc)
+                cleanup_status = "failed"
+                if self._state.fatal_cleanup_error is None:
+                    self._state.fatal_cleanup_error = cleanup_error
+        if cleanup_error is not None and not primary_failed:
+            failed = True
+            failure_category = "cleanup_failed"
+            call.span.finish(
+                phase_status="failed",
+                outputs={"failure_category": failure_category},
+            )
+        elif not failed and completion_outputs is not None:
+            call.span.finish(phase_status="completed", outputs=completion_outputs)
+        self._emit_progress(
+            "child_failed" if failed else "child_completed",
+            call_index=call.call_index,
+            recursive_depth=call.child_depth,
+            started_at=call.started_at,
+            cleanup_status=cleanup_status,
+            failure_category=failure_category if failed else None,
+        )
+        if cleanup_error is not None and not primary_failed:
+            raise cleanup_error
+
     def _call(self, prompt: str) -> str:
         """
         Execute a bounded recursive query for the given prompt.
@@ -300,38 +488,19 @@ class RecursiveRLMExecutor:
             RuntimeError: If the recursive call budget is exhausted or child runtime is unavailable.
             TimeoutError: If the recursive call deadline has expired.
         """
-        if not isinstance(prompt, str):
-            raise ValueError("rlm_query prompt must be text")
-        prompt = prompt.strip()
-        if not prompt:
-            raise ValueError("rlm_query prompt must not be empty")
-        if len(prompt) > self._options.max_prompt_chars:
-            raise ValueError("rlm_query prompt exceeds the configured character bound")
+        prompt = _validate_recursive_prompt(prompt, max_chars=self._options.max_prompt_chars)
         if self._state.call_count >= self._options.max_calls:
             raise RuntimeError("recursive call budget exhausted")
         if time.monotonic() >= self._deadline:
             raise TimeoutError("recursive call deadline exceeded")
         self._ensure_authorized()
 
-        self._state.call_count += 1
-        call_index = self._state.call_count
-        self._state.delegated_prompt_chars += len(prompt)
-        self._state.maximum_prompt_chars = max(self._state.maximum_prompt_chars, len(prompt))
-        child_depth = self._depth + 1
-        started_at = time.monotonic()
-        span = start_turn_span(
-            "RLM.recursive_call",
-            inputs={
-                "recursive_depth": child_depth,
-                "call_index": call_index,
-                "prompt_chars": len(prompt),
-            },
-        )
+        call = self._begin_call(prompt)
         self._emit_progress(
             "child_started",
-            call_index=call_index,
-            recursive_depth=child_depth,
-            started_at=started_at,
+            call_index=call.call_index,
+            recursive_depth=call.child_depth,
+            started_at=call.started_at,
         )
         lease: ChildRuntimeLease | None = None
         failed = False
@@ -341,131 +510,30 @@ class RecursiveRLMExecutor:
         primary_failed = False
         try:
             self._ensure_authorized()
-            if child_depth >= self._options.max_depth:
-                self._state.depth_fallback_count += 1
-                answer = self._plain_sub_lm(prompt)
+            if call.child_depth >= self._options.max_depth:
+                answer, completion_outputs = self._run_depth_fallback(prompt, call)
+            else:
+                cleanup_status = "not_acquired"
+                lease = self._acquire_child_lease(call.call_index)
+                cleanup_status = "acquired"
                 self._ensure_authorized()
-                self._state.termination_modes.append("depth_fallback")
-                completion_outputs = {"termination_mode": "depth_fallback"}
-                self._last_completion = {
-                    "status": "completed",
-                    "call_index": call_index,
-                    "recursive_depth": child_depth,
-                    "child_iterations": 0,
-                    "termination_mode": "depth_fallback",
-                }
-                return answer
-
-            cleanup_status = "not_acquired"
-            if self._child_runtime_factory is None:
-                raise RuntimeError("recursive child runtime is unavailable")
-            self._ensure_authorized()
-            lease = self._child_runtime_factory(call_index)
-            cleanup_status = "acquired"
-            self._ensure_authorized()
-            child_executor = RecursiveRLMExecutor(
-                models=self._models,
-                options=self._options,
-                child_runtime_factory=self._child_runtime_factory,
-                deadline=self._deadline,
-                depth=child_depth,
-                state=self._state,
-                observer=self._observer,
-                is_authorized=self._is_authorized,
-            )
-            child = build_native_rlm(
-                signature=RecursiveSubtaskSignature,
-                options=RLMOptions(
-                    max_iterations=self._options.child_max_iterations,
-                    max_llm_calls=self._options.child_max_llm_calls,
-                    max_output_chars=self._options.child_max_output_chars,
-                ),
-                tools=[child_executor.tool],
-                sub_lm=self._models.sub_lm,
-                verbose=False,
-            )
-            self._ensure_authorized()
-            with dspy.context(
-                lm=self._models.root_lm,
-                adapter=dspy.JSONAdapter(),
-                callbacks=[
-                    _RLMTraceCallback(
-                        root_lm=self._models.root_lm,
-                        sub_lm=self._models.sub_lm,
-                        recursive_depth=self._depth + 1,
-                    )
-                ],
-                track_usage=True,
-            ):
-                prediction = child(lease.interpreter, prompt=prompt)
-            result = prediction_result(
-                prediction,
-                RecursiveSubtaskSignature,
-                schema_id="fleet.recursive-subtask",
-                schema_version="1",
-                max_output_chars=self._options.child_max_output_chars,
-            )
-            self._ensure_authorized()
-            trajectory = getattr(prediction, "trajectory", ())
-            child_iterations = len(trajectory) if isinstance(trajectory, list) else 0
-            self._state.child_iterations += child_iterations
-            mode = (
-                "native_extraction_fallback"
-                if getattr(prediction, "final_reasoning", None) == "Extract forced final output"
-                else "typed_submit"
-            )
-            self._state.termination_modes.append(mode)
-            completion_outputs = {"termination_mode": mode, "child_iterations": child_iterations}
-            self._last_completion = {
-                "status": "completed",
-                "call_index": call_index,
-                "recursive_depth": child_depth,
-                "child_iterations": child_iterations,
-                "termination_mode": mode,
-            }
-            return result.display_text
+                answer, completion_outputs = self._run_native_child(prompt, call, lease)
+            return answer
         except BaseException as exc:
             failed = True
             primary_failed = True
-            failure_category = _recursive_failure_category(exc)
-            if isinstance(exc, ChildRuntimeCleanupError) and self._state.fatal_cleanup_error is None:
-                self._state.fatal_cleanup_error = exc
-            self._state.termination_modes.append("child_error")
-            span.finish(
-                phase_status="failed",
-                outputs={"failure_category": trace_failure_category(exc)},
-            )
+            failure_category = self._record_primary_failure(call, exc)
             raise
         finally:
-            cleanup_error: BaseException | None = None
-            if lease is not None:
-                try:
-                    lease.close()
-                    cleanup_status = "completed"
-                except BaseException as exc:
-                    cleanup_error = _as_cleanup_error(exc)
-                    cleanup_status = "failed"
-                    if self._state.fatal_cleanup_error is None:
-                        self._state.fatal_cleanup_error = cleanup_error
-            if cleanup_error is not None and not primary_failed:
-                failed = True
-                failure_category = "cleanup_failed"
-                span.finish(
-                    phase_status="failed",
-                    outputs={"failure_category": failure_category},
-                )
-            elif not failed and completion_outputs is not None:
-                span.finish(phase_status="completed", outputs=completion_outputs)
-            self._emit_progress(
-                "child_failed" if failed else "child_completed",
-                call_index=call_index,
-                recursive_depth=child_depth,
-                started_at=started_at,
+            self._finalize_call(
+                call,
+                lease,
                 cleanup_status=cleanup_status,
-                failure_category=failure_category if failed else None,
+                failed=failed,
+                primary_failed=primary_failed,
+                completion_outputs=completion_outputs,
+                failure_category=failure_category,
             )
-            if cleanup_error is not None and not primary_failed:
-                raise cleanup_error
 
     def _plain_sub_lm(self, prompt: str) -> str:
         """

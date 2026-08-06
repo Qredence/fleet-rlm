@@ -41,7 +41,8 @@ DEFAULT_BROKER_PORT = 3000
 _PREVIEW_LINK_RETRY_DELAYS = (0.25, 0.5)
 _BROKER_SERVER_PATH = "/home/daytona/fleet_rlm_broker_server.py"
 _BROKER_SESSION_COMMAND = f"cd /home/daytona && python {_BROKER_SERVER_PATH.rsplit('/', 1)[-1]}"
-_FINAL_OUTPUT_MARKER = "__FLEET_FINAL_OUTPUT__"
+FINAL_OUTPUT_MARKER = "__FLEET_FINAL_OUTPUT__"
+_FINAL_OUTPUT_MARKER = FINAL_OUTPUT_MARKER
 _MAX_EXECUTE_REQUEST_BYTES = 2 * 1024 * 1024
 _MAX_EXECUTE_OUTPUT_CHARS = 64 * 1024
 
@@ -67,6 +68,7 @@ def build_submit_setup_code(output_fields: list[dict[str, Any]] | None) -> str:
 
 def remote_submit_setup_code(output_fields: list[dict[str, Any]] | None) -> str:
     return f"""
+import base64 as _base64
 import json as _json
 _FINAL_OUTPUT_MARKER = {_FINAL_OUTPUT_MARKER!r}
 
@@ -81,8 +83,11 @@ class FleetFinalOutputError(Exception):
 
 def _generic_submit_source() -> str:
     return """
+import base64 as _base64
+
 def SUBMIT(**kwargs):
-    print(f"{_FINAL_OUTPUT_MARKER}{_json.dumps(kwargs, ensure_ascii=False)}{_FINAL_OUTPUT_MARKER}")
+    payload = _base64.b64encode(_json.dumps(kwargs, ensure_ascii=False).encode("utf-8")).decode("ascii")
+    print(f"{_FINAL_OUTPUT_MARKER}{payload}{_FINAL_OUTPUT_MARKER}")
     raise FleetFinalOutputError(kwargs)
 """.strip()
 
@@ -100,9 +105,12 @@ def _typed_submit_source(output_fields: list[dict[str, Any]]) -> str:
     signature = ", ".join(signature_parts) or "**kwargs"
     body = f"result = {{{', '.join(result_parts)}}}" if result_parts else "result = dict(kwargs)"
     return f"""
+import base64 as _base64
+
 def SUBMIT({signature}):
     {body}
-    print(f"{{_FINAL_OUTPUT_MARKER}}{{_json.dumps(result, ensure_ascii=False)}}{{_FINAL_OUTPUT_MARKER}}")
+    payload = _base64.b64encode(_json.dumps(result, ensure_ascii=False).encode("utf-8")).decode("ascii")
+    print(f"{{_FINAL_OUTPUT_MARKER}}{{payload}}{{_FINAL_OUTPUT_MARKER}}")
     raise FleetFinalOutputError(result)
 """.strip()
 
@@ -115,11 +123,23 @@ def extract_final_payload(stdout: str, *, marker: str = _FINAL_OUTPUT_MARKER) ->
     end = stdout.find(marker, start)
     if end == -1:
         return None
+    encoded = stdout[start:end]
     try:
-        parsed = json.loads(stdout[start:end])
+        payload = base64.b64decode(encoded, validate=True).decode("utf-8")
+    except (ValueError, UnicodeError):
+        # Accept the pre-envelope representation while older sandboxes drain.
+        payload = encoded
+    try:
+        parsed = json.loads(payload)
     except json.JSONDecodeError:
         return None
     return parsed if isinstance(parsed, dict) else None
+
+
+def final_output_frame(value: Mapping[str, Any], *, marker: str = _FINAL_OUTPUT_MARKER) -> str:
+    """Return the exact private stdout frame emitted by ``SUBMIT``."""
+    encoded = base64.b64encode(json.dumps(dict(value), ensure_ascii=False).encode("utf-8")).decode("ascii")
+    return f"{marker}{encoded}{marker}"
 
 
 _BROKER_SERVER_CODE = """
@@ -140,6 +160,7 @@ from urllib.parse import parse_qs, urlparse
 _lock = threading.Lock()
 _pending_requests = {}
 _results = {}
+_execution_outputs = {}
 _BROKER_SECRET = __BROKER_SECRET__
 _MAX_REQUEST_BYTES = __MAX_REQUEST_BYTES__
 _MAX_OUTPUT_CHARS = __MAX_OUTPUT_CHARS__
@@ -235,31 +256,64 @@ def _fleet_load_context_manifest(raw_manifest):
 _namespace["_fleet_load_context_manifest"] = _fleet_load_context_manifest
 
 
+class _OutputBuffer(io.StringIO):
+    def __init__(self, execution_id, field):
+        super().__init__()
+        self._execution_id = execution_id
+        self._field = field
+
+    def write(self, value):
+        current_length = len(self.getvalue())
+        remaining = _MAX_OUTPUT_CHARS - current_length
+        if remaining > 0:
+            super().write(value[:remaining])
+        if value and self._execution_id:
+            with _lock:
+                state = _execution_outputs.get(self._execution_id)
+                if state is not None:
+                    current = state[self._field]
+                    remaining = _MAX_OUTPUT_CHARS - len(current)
+                    if remaining > 0:
+                        state[self._field] = current + value[:remaining]
+        return len(value)
+
+
 def _execute(data):
     code = data.get("code")
     variables = data.get("variables") or {}
+    execution_id = str(data.get("execution_id") or "")
     if not isinstance(code, str) or not isinstance(variables, dict):
         raise ValueError("execution request is invalid")
-    stdout = io.StringIO()
-    stderr = io.StringIO()
+    if execution_id:
+        with _lock:
+            _execution_outputs[execution_id] = {"stdout": "", "stderr": "", "done": False}
+    stdout = _OutputBuffer(execution_id, "stdout")
+    stderr = _OutputBuffer(execution_id, "stderr")
     result = {"stdout": "", "stderr": "", "final": None, "error": None, "error_category": None}
-    with _execution_lock:
-        access_start = len(_context_accesses)
-        _namespace.update({str(key): _decode_value(value) for key, value in variables.items()})
-        try:
-            with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
-                exec(compile(code, "<fleet-rlm>", "exec"), _namespace, _namespace)
-        except BaseException as exc:
-            value = getattr(exc, "value", None)
-            if type(exc).__name__ in {"FleetFinalOutputError", "_FleetFinalOutput"} and isinstance(value, dict):
-                result["final"] = value
-            else:
-                result["error"] = str(exc)[:2000]
-                result["error_category"] = type(exc).__name__
-        result["stdout"] = stdout.getvalue()[:_MAX_OUTPUT_CHARS]
-        result["stderr"] = stderr.getvalue()[:_MAX_OUTPUT_CHARS]
-        result["context_accesses"] = _context_accesses[access_start:]
-    return result
+    try:
+        with _execution_lock:
+            access_start = len(_context_accesses)
+            _namespace.update({str(key): _decode_value(value) for key, value in variables.items()})
+            try:
+                with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+                    exec(compile(code, "<fleet-rlm>", "exec"), _namespace, _namespace)
+            except BaseException as exc:
+                value = getattr(exc, "value", None)
+                if type(exc).__name__ in {"FleetFinalOutputError", "_FleetFinalOutput"} and isinstance(value, dict):
+                    result["final"] = value
+                else:
+                    result["error"] = str(exc)[:2000]
+                    result["error_category"] = type(exc).__name__
+            result["stdout"] = stdout.getvalue()[:_MAX_OUTPUT_CHARS]
+            result["stderr"] = stderr.getvalue()[:_MAX_OUTPUT_CHARS]
+            result["context_accesses"] = _context_accesses[access_start:]
+        return result
+    finally:
+        if execution_id:
+            with _lock:
+                state = _execution_outputs.get(execution_id)
+                if state is not None:
+                    state["done"] = True
 
 
 class _BrokerHandler(BaseHTTPRequestHandler):
@@ -270,6 +324,36 @@ class _BrokerHandler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         if parsed.path == "/health":
             _send_json(self, {"status": "ok"})
+            return
+        if parsed.path == "/output":
+            secret = self.headers.get("X-Broker-Secret", "")
+            if not hmac.compare_digest(secret, _BROKER_SECRET):
+                _send_json(self, {"error": "unauthorized"}, 401)
+                return
+            qs = parse_qs(parsed.query)
+            execution_id = str(qs.get("execution_id", [""])[0])
+            try:
+                offset = max(0, int(qs.get("offset", ["0"])[0]))
+            except ValueError:
+                offset = 0
+            release = qs.get("release", ["0"])[0] == "1"
+            with _lock:
+                state = _execution_outputs.get(execution_id)
+                if state is None:
+                    _send_json(self, {"error": "unknown execution"}, 404)
+                    return
+                stdout = state["stdout"]
+                stderr = state["stderr"]
+                done = bool(state["done"])
+                body = {
+                    "stdout": stdout[offset:],
+                    "stderr": stderr,
+                    "done": done,
+                    "next_offset": len(stdout),
+                }
+                if release and done:
+                    _execution_outputs.pop(execution_id, None)
+            _send_json(self, body)
             return
         if parsed.path == "/pending":
             qs = parse_qs(parsed.query)
@@ -572,24 +656,60 @@ class DaytonaHttpToolBroker:
         variables: Mapping[str, Any] | None = None,
         *,
         timeout_s: float = 130.0,
+        on_stdout: Callable[[str], None] | None = None,
     ) -> BackendExecutionResult:
-        """Execute one cell in the broker-owned persistent Python namespace."""
+        """Execute one cell and optionally forward stdout while it is produced."""
         from fleet_rlm.daytona.interpreter import BackendExecutionResult
 
         self.ensure_started()
         if self._stopped:
             raise DaytonaAdapterError(message="broker already stopped", cause_type="InterpreterLifecycleError")
+        execution_id = uuid.uuid4().hex if on_stdout is not None else None
         payload = {
             "code": code,
             "variables": {str(key): self._encode_value(value) for key, value in (variables or {}).items()},
         }
-        try:
-            response = self._http().post("/execute", json=payload, timeout=timeout_s)
-        except (httpx.HTTPError, TimeoutError, OSError, ValueError) as exc:
+        if execution_id is not None:
+            payload["execution_id"] = execution_id
+        self._http()
+
+        response_box: list[httpx.Response] = []
+        request_errors: list[BaseException] = []
+
+        def request() -> None:
+            try:
+                response_box.append(self._http().post("/execute", json=payload, timeout=timeout_s))
+            except BaseException as exc:
+                request_errors.append(exc)
+
+        if on_stdout is None:
+            request()
+        else:
+            thread = Thread(target=request, daemon=True)
+            thread.start()
+            offset = 0
+            done = False
+            while thread.is_alive():
+                done, offset = self._poll_output(execution_id, offset, on_stdout)
+                thread.join(timeout=self._poll_interval_s)
+            thread.join()
+            for _ in range(20):
+                done, offset = self._poll_output(execution_id, offset, on_stdout)
+                if done:
+                    break
+                time.sleep(self._poll_interval_s)
+            self._poll_output(execution_id, offset, on_stdout, release=done)
+
+        if request_errors:
             raise DaytonaAdapterError(
                 message="sandbox execution request failed",
                 cause_type="BrokerExecutionError",
-            ) from exc
+            ) from request_errors[0]
+        if not response_box:
+            raise DaytonaAdapterError(
+                message="sandbox execution produced no response", cause_type="BrokerExecutionError"
+            )
+        response = response_box[0]
         if response.status_code != 200:
             raise DaytonaAdapterError(
                 message=f"sandbox execution failed with HTTP {response.status_code}",
@@ -612,6 +732,43 @@ class DaytonaHttpToolBroker:
             error_category=str(result.get("error_category") or "") or None,
             context_accesses=accesses,
         )
+
+    def _poll_output(
+        self,
+        execution_id: str | None,
+        offset: int,
+        on_stdout: Callable[[str], None],
+        *,
+        release: bool = False,
+    ) -> tuple[bool, int]:
+        if execution_id is None:
+            return False, offset
+        try:
+            response = self._http().get(
+                "/output",
+                params={
+                    "execution_id": execution_id,
+                    "offset": str(offset),
+                    "release": "1" if release else "0",
+                },
+                timeout=5,
+            )
+        except (httpx.HTTPError, TimeoutError, OSError, ValueError):
+            return False, offset
+        if response.status_code != 200:
+            return False, offset
+        try:
+            result = response.json()
+        except ValueError:
+            return False, offset
+        stdout = str(result.get("stdout") or "")
+        if stdout:
+            on_stdout(stdout)
+        try:
+            next_offset = max(offset, int(result.get("next_offset", offset)))
+        except (TypeError, ValueError):
+            next_offset = offset + len(stdout)
+        return bool(result.get("done")), next_offset
 
     def execute_with_callbacks(
         self,

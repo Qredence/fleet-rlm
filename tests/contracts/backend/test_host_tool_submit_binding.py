@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import base64
+import json
+
 from fleet_rlm.daytona.http_broker import extract_final_payload, remote_submit_setup_code
 from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
 from fleet_rlm.rlm.dspy_contract import RLMOptions, build_native_rlm
@@ -25,6 +28,18 @@ def test_remote_submit_setup_emits_marker_payload() -> None:
     assert "__FLEET_FINAL_OUTPUT__" in source
     payload = extract_final_payload('__FLEET_FINAL_OUTPUT__{"answer": "x"}__FLEET_FINAL_OUTPUT__')
     assert payload == {"answer": "x"}
+
+
+def test_submit_payload_encoding_survives_marker_text_in_json() -> None:
+    from fleet_rlm.daytona.http_broker import FINAL_OUTPUT_MARKER
+
+    encoded = base64.b64encode(
+        json.dumps({"answer": f"left {FINAL_OUTPUT_MARKER} right"}, ensure_ascii=False).encode("utf-8")
+    ).decode("ascii")
+
+    assert extract_final_payload(f"{FINAL_OUTPUT_MARKER}{encoded}{FINAL_OUTPUT_MARKER}") == {
+        "answer": f"left {FINAL_OUTPUT_MARKER} right"
+    }
 
 
 def test_final_output_type_is_dspy_final_output() -> None:

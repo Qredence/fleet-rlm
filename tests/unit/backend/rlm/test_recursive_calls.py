@@ -169,8 +169,7 @@ def test_recursive_tool_rejects_revoked_authority_before_child_creation() -> Non
         executor.tool(prompt="late child request")
 
     assert created == []
-    assert len(events) == 1
-    assert isinstance(events[0], ToolFailed)
+    assert [type(event) for event in events] == [ToolStarted, ToolFailed]
 
 
 def test_recursive_tool_rechecks_authority_before_child_allocation() -> None:

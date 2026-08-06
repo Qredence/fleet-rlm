@@ -72,6 +72,15 @@ def test_co_located_worker_preserves_state_and_services_callbacks(tmp_path: Path
 
         broker.register_tools({"llm_query_batched": llm_query_batched})
         broker.execute_code(broker.submit_setup_code([{"name": "answer", "type": "str"}]))
+        streamed: list[str] = []
+        output = broker.execute_code(
+            'import time\nprint("one", flush=True)\ntime.sleep(0.05)\nprint("two", flush=True)',
+            on_stdout=streamed.append,
+        )
+        assert output.stdout == "one\ntwo\n"
+        assert "one" in "".join(streamed)
+        assert "two" in "".join(streamed)
+
         first = broker.execute_with_callbacks(
             run_code=lambda: broker.execute_code("value = 41"),
             tool_executor=lambda name, args, kwargs: (
@@ -80,7 +89,8 @@ def test_co_located_worker_preserves_state_and_services_callbacks(tmp_path: Path
         )
         second = broker.execute_with_callbacks(
             run_code=lambda: broker.execute_code(
-                "parts = llm_query_batched(['a', 'b'])\nSUBMIT(answer=f'{value + 1}:{parts[0]}:{parts[1]}')"
+                "parts = llm_query_batched(['a', 'b'])\n"
+                "SUBMIT(answer=f'{value + 1}:{parts[0]}:{parts[1]}:__FLEET_FINAL_OUTPUT__')"
             ),
             tool_executor=lambda name, args, kwargs: (
                 llm_query_batched(*args, **kwargs) if name == "llm_query_batched" else None
@@ -88,7 +98,7 @@ def test_co_located_worker_preserves_state_and_services_callbacks(tmp_path: Path
         )
 
         assert first.error is None
-        assert second.final == {"answer": "42:sub:a:sub:b"}
+        assert second.final == {"answer": "42:sub:a:sub:b:__FLEET_FINAL_OUTPUT__"}
         assert broker.last_execution_stats["tool_call_count"] == 1
     finally:
         if broker._client is not None:

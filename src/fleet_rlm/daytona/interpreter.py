@@ -15,10 +15,12 @@ import asyncio
 import contextlib
 import hashlib
 import inspect
+import io
 import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Protocol, cast
+from uuid import uuid4
 
 import dspy
 
@@ -29,9 +31,11 @@ from fleet_rlm.daytona.errors import (
 )
 from fleet_rlm.daytona.http_broker import (
     DEFAULT_BROKER_PORT,
+    FINAL_OUTPUT_MARKER,
     FleetFinalOutputError,
     build_submit_setup_code,
     extract_final_payload,
+    final_output_frame,
 )
 from fleet_rlm.files.workspace_tools import WorkspaceToolError
 from fleet_rlm.observability.turn_tracing import trace_preview_limit, turn_phase_span
@@ -55,6 +59,8 @@ if TYPE_CHECKING:
 DEFAULT_EXECUTION_OUTPUT_CHARS = 4_000
 DEFAULT_EXECUTION_TIMEOUT_S = 120
 DEFAULT_INTERMEDIATE_CODE_CHARS = 12_000
+_MAX_CAPTURED_OUTPUT_CHARS = 64 * 1024
+OutputCallback = Callable[[str], None]
 
 
 @dataclass(frozen=True, slots=True)
@@ -67,6 +73,34 @@ class BackendExecutionResult:
     stderr: str = ""
     error_category: str | None = None
     context_accesses: tuple[str, ...] = ()
+
+
+class _StreamingTextBuffer(io.StringIO):
+    """Capture interpreter text while forwarding each write to an observer."""
+
+    def __init__(self, callback: OutputCallback | None = None) -> None:
+        super().__init__()
+        self._callback = callback
+
+    def write(self, value: str) -> int:
+        remaining = _MAX_CAPTURED_OUTPUT_CHARS - self.tell()
+        if remaining > 0:
+            super().write(value[:remaining])
+        if value and self._callback is not None:
+            self._callback(value)
+        return len(value)
+
+
+def _combine_stdout(captured: str, legacy: object) -> str:
+    """Prefer real stdout, retaining the legacy ``_out`` fallback for tests."""
+    return captured or str(legacy or "")
+
+
+def _submitted_payload(result: Any) -> Mapping[str, Any] | None:
+    if not is_final_output(result):
+        return None
+    value = getattr(result, "output", None)
+    return value if isinstance(value, Mapping) else None
 
 
 class InProcessInterpreterBackend:
@@ -127,35 +161,43 @@ class InProcessInterpreterBackend:
         exec(build_submit_setup_code(output_fields), self.namespace, self.namespace)
         self._submit_key = key
 
-    def run(self, code: str, variables: dict[str, object] | None = None) -> BackendExecutionResult:
+    def run(
+        self,
+        code: str,
+        variables: dict[str, object] | None = None,
+        *,
+        on_stdout: OutputCallback | None = None,
+    ) -> BackendExecutionResult:
         if self.closed:
             raise DaytonaAdapterError(message="backend already closed", cause_type="InterpreterLifecycleError")
         if variables:
             self.namespace.update(variables)
-        try:
-            exec(code, self.namespace, self.namespace)
-        except FleetFinalOutputError as final:
-            return BackendExecutionResult(
-                stdout=str(self.namespace.get("_out", "")),
-                final=dict(final.value),
-                context_accesses=self._drain_context_accesses(),
-            )
-        except Exception as exc:
-            value = getattr(exc, "value", None)
-            if type(exc).__name__ == "FleetFinalOutputError" and isinstance(value, dict):
+        stdout = _StreamingTextBuffer(on_stdout)
+        with contextlib.redirect_stdout(stdout):
+            try:
+                exec(code, self.namespace, self.namespace)
+            except FleetFinalOutputError as final:
                 return BackendExecutionResult(
-                    stdout=str(self.namespace.get("_out", "")),
-                    final=dict(value),
+                    stdout=_combine_stdout(stdout.getvalue(), self.namespace.get("_out", "")),
+                    final=dict(final.value),
                     context_accesses=self._drain_context_accesses(),
                 )
-            return BackendExecutionResult(
-                stdout=str(self.namespace.get("_out", "")),
-                error=sanitize_provider_message(str(exc)),
-                error_category=type(exc).__name__,
-                context_accesses=self._drain_context_accesses(),
-            )
+            except Exception as exc:
+                value = getattr(exc, "value", None)
+                if type(exc).__name__ == "FleetFinalOutputError" and isinstance(value, dict):
+                    return BackendExecutionResult(
+                        stdout=_combine_stdout(stdout.getvalue(), self.namespace.get("_out", "")),
+                        final=dict(value),
+                        context_accesses=self._drain_context_accesses(),
+                    )
+                return BackendExecutionResult(
+                    stdout=_combine_stdout(stdout.getvalue(), self.namespace.get("_out", "")),
+                    error=sanitize_provider_message(str(exc)),
+                    error_category=type(exc).__name__,
+                    context_accesses=self._drain_context_accesses(),
+                )
         return BackendExecutionResult(
-            stdout=str(self.namespace.get("_out", "")),
+            stdout=_combine_stdout(stdout.getvalue(), self.namespace.get("_out", "")),
             context_accesses=self._drain_context_accesses(),
         )
 
@@ -357,8 +399,14 @@ class _SandboxProcessBackend:
     def timeout_s(self) -> int | None:
         return self._timeout_s
 
-    def run(self, code: str, variables: dict[str, object] | None = None) -> BackendExecutionResult:
-        del code, variables
+    def run(
+        self,
+        code: str,
+        variables: dict[str, object] | None = None,
+        *,
+        on_stdout: OutputCallback | None = None,
+    ) -> BackendExecutionResult:
+        del code, variables, on_stdout
         raise DaytonaAdapterError(
             message="live execution requires the co-located broker",
             cause_type="InterpreterConfigurationError",
@@ -366,6 +414,67 @@ class _SandboxProcessBackend:
 
     def close(self) -> None:
         return None
+
+
+class _PublicStdoutProjector:
+    """Forward ordinary stdout while hiding the known SUBMIT stdout frame.
+
+    The marker may also occur in ordinary user stdout, so a marker alone is not
+    treated as a control frame. The private frame is removed only when it exactly
+    matches the final payload returned by the execution backend.
+    """
+
+    def __init__(self, emit: OutputCallback) -> None:
+        self._emit = emit
+        self._marker = FINAL_OUTPUT_MARKER
+        self._buffer = ""
+
+    def feed(self, value: str) -> None:
+        if not value:
+            return
+        pending = self._buffer + value
+        self._buffer = ""
+        start = pending.find(self._marker)
+        if start >= 0:
+            if start:
+                self._emit(pending[:start])
+            self._buffer = pending[start:]
+            return
+        suffix = self._marker_prefix_suffix(pending)
+        if suffix:
+            self._emit(pending[: -len(suffix)])
+            self._buffer = suffix
+        else:
+            self._emit(pending)
+
+    def finish(self, *, expected_final: Mapping[str, Any] | None = None) -> None:
+        pending = self._buffer
+        self._buffer = ""
+        if not pending:
+            return
+        if expected_final is None:
+            self._emit(pending)
+            return
+
+        frame = final_output_frame(expected_final, marker=self._marker)
+        offset = 0
+        while True:
+            start = pending.find(frame, offset)
+            if start < 0:
+                self._emit(pending[offset:])
+                return
+            self._emit(pending[offset:start])
+            offset = start + len(frame)
+            if pending.startswith("\r\n", offset):
+                offset += 2
+            elif pending.startswith(("\n", "\r"), offset):
+                offset += 1
+
+    def _marker_prefix_suffix(self, value: str) -> str:
+        for length in range(min(len(value), len(self._marker) - 1), 0, -1):
+            if value.endswith(self._marker[:length]):
+                return value[-length:]
+        return ""
 
 
 class DaytonaCodeInterpreter:
@@ -395,6 +504,7 @@ class DaytonaCodeInterpreter:
         self._execution_output_cap = max(1, int(execution_output_cap))
         self._max_code_chars = max(1, int(max_code_chars))
         self._observation_step = 0
+        self._observation_namespace = uuid4().hex
         self._last_execution: tuple[str, str] | None = None
         self._context_accesses: list[str] = []
         self._context_binding: tuple[str, str] | None = None
@@ -460,6 +570,41 @@ class DaytonaCodeInterpreter:
             return "Execution error"
         return truncate_public_text(str(result or ""), max_len=self._observation_max_chars)
 
+    def _emit_output_delta(self, value: str, *, step: int, stream_id: str, emitted_chars: list[int]) -> None:
+        if not value:
+            return
+        remaining = self._observation_max_chars - emitted_chars[0]
+        if remaining <= 0:
+            return
+        chunk = value[:remaining]
+        emitted_chars[0] += len(chunk)
+        if chunk:
+            self._observe(RLMOutput(chunk, step, stream_id, True, False))
+
+    def _run_backend(
+        self,
+        code: str,
+        variables: dict[str, Any] | None,
+        *,
+        on_stdout: OutputCallback,
+    ) -> str | BackendExecutionResult:
+        backend = self._backend
+        if backend is None:
+            raise DaytonaAdapterError(
+                message="interpreter backend is not configured", cause_type="InterpreterConfigurationError"
+            )
+        run = cast(Callable[..., str | BackendExecutionResult], backend.run)
+        try:
+            parameters = inspect.signature(run).parameters.values()
+        except (TypeError, ValueError):
+            parameters = ()
+        supports_callback = any(
+            parameter.name == "on_stdout" or parameter.kind is inspect.Parameter.VAR_KEYWORD for parameter in parameters
+        )
+        if supports_callback:
+            return run(code, variables, on_stdout=on_stdout)
+        return run(code, variables)
+
     def _execution_tools(self) -> dict[str, Callable[..., Any]]:
         tools = dict(self._tools)
         if self._observer is None:
@@ -512,6 +657,16 @@ class DaytonaCodeInterpreter:
             raise DaytonaAdapterError(message=msg, cause_type="InterpreterConfigurationError")
         self._observation_step += 1
         step = self._observation_step
+        output_stream_id = f"interpreter:{self._observation_namespace}:output:{step}"
+        emitted_chars = [0]
+        stdout_projector = _PublicStdoutProjector(
+            lambda value: self._emit_output_delta(
+                value,
+                step=step,
+                stream_id=output_stream_id,
+                emitted_chars=emitted_chars,
+            )
+        )
         step_started = time.perf_counter()
         trace_chars = trace_preview_limit(900)
         self._observe(StepStarted(step))
@@ -549,16 +704,21 @@ class DaytonaCodeInterpreter:
                     self._ensure_bindings()
                     ensure_bindings_ms = int((time.perf_counter() - bindings_started) * 1_000)
                     if self._http_broker is not None:
-                        result = self._execute_with_http_broker(code, variables)
+                        result = self._execute_with_http_broker(
+                            code,
+                            variables,
+                            on_stdout=stdout_projector.feed,
+                        )
                     else:
-                        raw = self._backend.run(code, variables)
+                        raw = self._run_backend(code, variables, on_stdout=stdout_projector.feed)
                         if isinstance(raw, BackendExecutionResult):
                             self._context_accesses.extend(raw.context_accesses)
                             self._raise_context_injection_error(code, raw)
                         result = self._finalize(raw)
                 execute_ms = int((time.perf_counter() - execute_started) * 1_000)
                 self._reject_repeated_no_progress(normalized_code, result)
-                self._observe(RLMOutput(self._public_output(result), step))
+                stdout_projector.finish(expected_final=_submitted_payload(result))
+                self._observe(RLMOutput(self._public_output(result), step, output_stream_id, False, True))
                 outputs: dict[str, Any] = {
                     "path": "http_broker" if self._http_broker is not None else type(self._backend).__name__,
                     "result_kind": _result_kind(result),
@@ -581,14 +741,17 @@ class DaytonaCodeInterpreter:
                     phase.set_outputs(outputs)
                 return result
             except TurnTerminalError:
-                self._observe(RLMOutput("Execution failed", step))
+                stdout_projector.finish()
+                self._observe(RLMOutput("Execution failed", step, output_stream_id, False, True))
                 raise
             except DaytonaAdapterError:
-                self._observe(RLMOutput("Execution failed", step))
+                stdout_projector.finish()
+                self._observe(RLMOutput("Execution failed", step, output_stream_id, False, True))
                 raise
             except Exception as exc:
                 mapped = map_provider_error(exc)
-                self._observe(RLMOutput("Execution failed", step))
+                stdout_projector.finish()
+                self._observe(RLMOutput("Execution failed", step, output_stream_id, False, True))
                 raise mapped from exc
             finally:
                 duration_ms = int((time.perf_counter() - step_started) * 1_000)
@@ -671,6 +834,8 @@ class DaytonaCodeInterpreter:
         self,
         code: str,
         variables: dict[str, Any] | None,
+        *,
+        on_stdout: OutputCallback,
     ) -> Any:
         broker = self._http_broker
         backend = self._backend
@@ -701,12 +866,12 @@ class DaytonaCodeInterpreter:
             timeout_s = float(backend.timeout_s or DEFAULT_EXECUTION_TIMEOUT_S)
 
             def run_code() -> str | BackendExecutionResult:
-                return broker.execute_code(code, variables, timeout_s=timeout_s)
+                return broker.execute_code(code, variables, timeout_s=timeout_s, on_stdout=on_stdout)
 
         else:
 
             def run_code() -> str | BackendExecutionResult:
-                return backend.run(code, variables)
+                return self._run_backend(code, variables, on_stdout=on_stdout)
 
         raw = broker.execute_with_callbacks(
             run_code=run_code,
