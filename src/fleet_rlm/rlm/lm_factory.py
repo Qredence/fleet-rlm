@@ -44,11 +44,12 @@ def sanitize_base_url(value: str | None) -> str | None:
     return text.rstrip("/")
 
 
-def normalize_model_id(model: str, *, base_url: str | None) -> str:
+def normalize_model_id(model: str) -> str:
     """Ensure LiteLLM-style ``provider/model`` form used by ``dspy.LM``.
 
-    Custom OpenAI-compatible gateways typically need the ``openai/`` provider
-    prefix even when the model name is gateway-local.
+    Bare model names get the OpenAI-compatible provider prefix even when the
+    model name is gateway-local; the prefix is required by LiteLLM regardless
+    of whether a custom ``api_base`` is configured.
     """
     cleaned = (model or "").strip().strip("'\"")
     if not cleaned:
@@ -56,10 +57,6 @@ def normalize_model_id(model: str, *, base_url: str | None) -> str:
         raise ValueError(msg)
     if "/" in cleaned:
         return cleaned
-    # Bare model name + custom base → OpenAI-compatible provider
-    if base_url:
-        return f"openai/{cleaned}"
-    # Default inference: still require a provider for normalized API
     return f"openai/{cleaned}"
 
 
@@ -106,7 +103,7 @@ def build_lm(
     num_retries: int = 3,
 ) -> dspy.LM:
     """Construct a stock ``dspy.LM`` per the public LM constructor contract."""
-    model_id = normalize_model_id(model, base_url=base_url)
+    model_id = normalize_model_id(model)
     kwargs: dict[str, Any] = {
         "model_type": model_type,
         "cache": cache,

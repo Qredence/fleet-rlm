@@ -58,13 +58,13 @@ def _root_lm(settings: Settings) -> dspy.LM:
 async def probe_root_lm(root_lm: Any) -> RLMProviderProbeResult:
     """
     Probe a root language model for compatibility with the native recursive RLM protocol.
-    
+
     Parameters:
         root_lm (Any): The root language model to test.
-    
+
     Returns:
         RLMProviderProbeResult: The number of RLM iterations and the termination mode.
-    
+
     Raises:
         RLMProviderContractError: If the model fails the recursive RLM compatibility
             requirements or produces an invalid response.
@@ -91,7 +91,7 @@ async def probe_root_lm(root_lm: Any) -> RLMProviderProbeResult:
                     "child = rlm_query(prompt='Classify this selected value: ' + marker), "
                     "then submit the child answer with typed SUBMIT(answer=child). "
                     "Use at least three REPL iterations and keep the prompt bounded."
-                )
+                ),
             )
     except AdapterParseError as exc:
         raise RLMProviderContractError("Root LM returned an unparseable RLM action") from exc
@@ -126,12 +126,12 @@ async def probe_configured_root_lm(settings: Settings) -> RLMProviderProbeResult
 
 def _in_process_child_runtime(call_index: int) -> ChildRuntimeLease:
     """Create a credential-free in-process runtime for a recursive provider probe.
-    
+
     Parameters:
-    	call_index (int): Identifier used to distinguish the child runtime and its path.
-    
+        call_index (int): Identifier used to distinguish the child runtime and its path.
+
     Returns:
-    	ChildRuntimeLease: A child runtime lease with interpreter cleanup handling.
+        ChildRuntimeLease: A child runtime lease with interpreter cleanup handling.
     """
     interpreter = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())
     return ChildRuntimeLease(

@@ -253,16 +253,16 @@ class TurnLifecycleService:
     ) -> TurnFinalization:
         """
         Finalize a turn with a successful outcome or record its failure.
-        
+
         Parameters:
             turn (ExecuteTurn): The claimed turn being finalized.
             resolution (RLMOutcome | TurnFailure): The execution outcome or failure to record.
             artifact_sink (RunArtifactSink | None): Storage for staged and promoted artifacts.
             result_snapshot_sink (ResultSnapshotSink | None): Storage for the optional result snapshot.
-        
+
         Returns:
             TurnFinalization: The receipt for the committed turn or recorded failure.
-        
+
         Raises:
             TurnLifecycleUnavailableError: If the turn claim has been revoked.
             TurnStateError: If the outcome contains an invalid state.

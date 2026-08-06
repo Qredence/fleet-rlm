@@ -93,6 +93,12 @@ def test_default_input_payload_contains_only_bounded_metadata() -> None:
     }
 
 
+def test_custom_skill_payload_matches_dspy_rlm_declared_inputs() -> None:
+    from fleet_rlm.skills.signatures import DataAnalysisSignature
+
+    dspy.RLM(DataAnalysisSignature)._validate_inputs(_payload())
+
+
 def test_model_visible_payload_excludes_bodies_paths_and_runtime_objects() -> None:
     payload = _payload()
     serialized = json.dumps(payload, sort_keys=True)

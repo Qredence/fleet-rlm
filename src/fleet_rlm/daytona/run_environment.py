@@ -46,7 +46,7 @@ from fleet_rlm.daytona.session_manager import (
     DaytonaSessionManager,
     LeaseRequest,
 )
-from fleet_rlm.daytona.workspace_fs import AsyncDaytonaVolumeFS, DaytonaSandboxVolumeFs
+from fleet_rlm.daytona.workspace_fs import AsyncDaytonaVolumeFS, DaytonaSandboxVolumeFs, VolumeFSCacheState
 from fleet_rlm.files.models import (
     AttachmentAccess,
     AttachmentRun,
@@ -116,8 +116,16 @@ class _DaytonaRunSink:
         paths: VolumePaths,
     ) -> None:
         self._sandbox = sandbox
-        self._files = AsyncDaytonaVolumeFS(sandbox)
-        self.volume_fs = DaytonaSandboxVolumeFs(sync_sandbox(sandbox, loop)) if loop is not None else None
+        mount_path = str(paths.mount_path)
+        # Both adapters view the same sandbox and mount; share one cache
+        # coordinator so mutations through either adapter invalidate both.
+        cache_state = VolumeFSCacheState()
+        self._files = AsyncDaytonaVolumeFS(sandbox, mount_path=mount_path, cache_state=cache_state)
+        self.volume_fs = (
+            DaytonaSandboxVolumeFs(sync_sandbox(sandbox, loop), mount_path=mount_path, cache_state=cache_state)
+            if loop is not None
+            else None
+        )
         self._max_read_bytes = max_read_bytes
         self._paths = paths
 
@@ -153,14 +161,14 @@ class _DaytonaEnvironmentProvider:
     async def acquire(self, turn: ExecuteTurn, *, deadline: float) -> RunEnvironment:
         """
         Acquire and configure a Daytona-backed run environment for a turn.
-        
+
         Parameters:
             turn (ExecuteTurn): Turn whose session, access, and run identifiers determine the environment.
             deadline (float): Absolute time limit for environment acquisition and setup.
-        
+
         Returns:
             RunEnvironment: Configured environment with run sinks, resource cleanup, and child-runtime creation.
-        
+
         Raises:
             TurnPreparationUnavailableError: If environment admission times out.
             TurnPreparationTimeoutError: If lease acquisition or environment setup exceeds the deadline.

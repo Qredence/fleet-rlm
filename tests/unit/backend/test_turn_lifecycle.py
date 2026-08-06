@@ -145,9 +145,9 @@ async def test_authority_revocation_after_artifact_publish_rolls_back_before_com
     async def not_cancelled() -> bool:
         """
         Determine whether cancellation has occurred.
-        
+
         Returns:
-        	bool: `False`, indicating that cancellation has occurred.
+                bool: `False`, indicating that cancellation has occurred.
         """
         return False
 
@@ -171,11 +171,11 @@ async def test_authority_revocation_after_artifact_publish_rolls_back_before_com
         async def transition_claim(self, claimed, command):
             """
             Create a failed-run receipt from the claimed run and command failure.
-            
+
             Parameters:
                 claimed: The claimed run whose identifier is included in the receipt.
                 command: The command containing the failure code and public message.
-            
+
             Returns:
                 FailedRunReceipt: A receipt representing the failed run.
             """
@@ -207,9 +207,9 @@ async def test_authority_revocation_after_artifact_publish_rolls_back_before_com
         async def remove(self, location):
             """
             Remove the value associated with a location.
-            
+
             Parameters:
-            	location: The location whose value should be removed.
+                location: The location whose value should be removed.
             """
             self.values.pop(location, None)
 

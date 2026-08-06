@@ -36,10 +36,11 @@ def _test_receipt() -> dict[str, object]:
 def _settings() -> object:
     """
     Create Daytona recursive execution settings for verifier tests.
-    
+
     Returns:
-    	object: Settings configured with the live verifier models and the Daytona recursive profile.
+        object: Settings configured with the live verifier models and the Daytona recursive profile.
     """
+
     class Settings:
         run_environment = "daytona"
         root_model = verifier._LIVE_ROOT_MODEL
@@ -148,13 +149,13 @@ def test_scenario_interruption_writes_bounded_failure_receipt(
     def run(_command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
         """
         Record subprocess invocation options and simulate an interruption.
-        
+
         Parameters:
-        	_command (list[str]): The command whose execution is being simulated
-        	**kwargs (object): Subprocess invocation options to record
-        
+                _command (list[str]): The command whose execution is being simulated
+                **kwargs (object): Subprocess invocation options to record
+
         Raises:
-        		BaseException: The configured interruption.
+                        BaseException: The configured interruption.
         """
         calls.update(kwargs)
         raise interruption
@@ -190,7 +191,7 @@ def test_inherited_environment_values_win_over_dotenv(monkeypatch: pytest.Monkey
     def load_dotenv(path: Path, *, override: bool) -> None:
         """
         Record dotenv loading options and optionally set the test API key.
-        
+
         Parameters:
             override (bool): Whether to replace the existing API key environment variable.
         """

@@ -26,11 +26,11 @@ class _Fs:
     async def list_files(self, _root: str, *, depth: int) -> list[SimpleNamespace]:
         """
         List tracked files at the supported filesystem traversal depth.
-        
+
         Parameters:
             _root (str): Root path for the listing.
             depth (int): Traversal depth, which must be 64.
-        
+
         Returns:
             list[SimpleNamespace]: File entries sorted by path.
         """
@@ -40,7 +40,7 @@ class _Fs:
     async def delete_file(self, path: str) -> None:
         """
         Delete a tracked file and record the deletion.
-        
+
         Parameters:
             path (str): Path of the file to delete.
         """
@@ -63,10 +63,10 @@ class _Platform:
     async def create(self, **kwargs: object) -> _Sandbox:
         """
         Create a child sandbox using the supplied options.
-        
+
         Parameters:
             **kwargs: Sandbox creation options.
-        
+
         Returns:
             _Sandbox: The configured child sandbox.
         """
@@ -98,7 +98,7 @@ async def test_child_runtime_uses_sibling_volume_scope_and_strictly_cleans_only_
         def shutdown(self, *, strict_broker_cleanup: bool = False) -> None:
             """
             Record an interpreter shutdown request and whether strict broker cleanup was requested.
-            
+
             Parameters:
                 strict_broker_cleanup (bool): Whether strict broker cleanup was requested.
             """
@@ -159,10 +159,10 @@ async def test_child_runtime_attempts_scope_and_sandbox_cleanup_after_interprete
         def shutdown(self, *, strict_broker_cleanup: bool = False) -> None:
             """
             Simulate a failed strict broker cleanup.
-            
+
             Parameters:
                 strict_broker_cleanup (bool): Must be set to `True`.
-            
+
             Raises:
                 RuntimeError: Always raised to represent broker cleanup failure.
             """
@@ -224,9 +224,9 @@ async def test_revocation_after_admission_releases_permit_without_sandbox_creati
 
     def is_authorized() -> bool:
         """Determine whether authorization is granted on the first check.
-        
+
         Returns:
-        	bool: `True` on the first call and `False` on subsequent calls.
+                bool: `True` on the first call and `False` on subsequent calls.
         """
         nonlocal checks
         checks += 1
@@ -321,7 +321,7 @@ async def test_failed_child_creation_with_failed_cleanup_is_marked_fatal(
         async def create(self, **_kwargs: object) -> object:
             """
             Create and return the configured child sandbox.
-            
+
             Returns:
                 object: The child sandbox.
             """

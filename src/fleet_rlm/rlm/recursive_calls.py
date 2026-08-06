@@ -95,24 +95,24 @@ _MAX_PROGRESS_DURATION_MS = 86_400_000
 
 def _bounded_progress_integer(value: int) -> int:
     """Clamp a progress value to the supported integer range.
-    
+
     Parameters:
-    	value (int): The progress value to clamp.
-    
+        value (int): The progress value to clamp.
+
     Returns:
-    	int: The value limited to the range from zero through the maximum supported progress integer.
+        int: The value limited to the range from zero through the maximum supported progress integer.
     """
     return max(0, min(int(value), _MAX_PROGRESS_INTEGER))
 
 
 def _recursive_failure_category(exc: BaseException) -> str:
     """Classify a recursive child failure for completion metadata.
-    
+
     Parameters:
-    	exc (BaseException): The failure raised during child execution.
-    
+        exc (BaseException): The failure raised during child execution.
+
     Returns:
-    	str: The failure category: ``"unauthorized"``, ``"cleanup_failed"``, ``"timeout"``, or ``"child_failed"``.
+        str: The failure category: ``"unauthorized"``, ``"cleanup_failed"``, ``"timeout"``, or ``"child_failed"``.
     """
     if isinstance(exc, ChildRuntimeAuthorizationError):
         return "unauthorized"
@@ -166,7 +166,7 @@ class RecursiveRLMExecutor:
     ) -> None:
         """
         Configure a bounded recursive RLM executor.
-        
+
         Parameters:
             models (RLMModelBundle): Models used for recursive and fallback execution.
             options (RecursiveRLMOptions): Limits and behavior for recursive calls.
@@ -233,7 +233,7 @@ class RecursiveRLMExecutor:
 
     def _ensure_authorized(self) -> None:
         """Ensure the current recursive child execution remains authorized.
-        
+
         Raises:
             ChildRuntimeAuthorizationError: If authorization is no longer valid.
         """
@@ -252,7 +252,7 @@ class RecursiveRLMExecutor:
     ) -> None:
         """
         Emit a bounded recursive execution status event to the configured observer.
-        
+
         Parameters:
             status (str): The execution status to emit.
             call_index (int): The recursive call index.
@@ -288,13 +288,13 @@ class RecursiveRLMExecutor:
     def _call(self, prompt: str) -> str:
         """
         Execute a bounded recursive query for the given prompt.
-        
+
         Parameters:
             prompt (str): The trimmed textual prompt to delegate.
-        
+
         Returns:
             str: The bounded answer produced by the recursive child query.
-        
+
         Raises:
             ValueError: If the prompt is not text, is empty, or exceeds the configured character limit.
             RuntimeError: If the recursive call budget is exhausted or child runtime is unavailable.
@@ -470,12 +470,12 @@ class RecursiveRLMExecutor:
     def _plain_sub_lm(self, prompt: str) -> str:
         """
         Generate a concise answer for a child subproblem using the configured sub-language model.
-        
+
         Parameters:
-        	prompt (str): The bounded child subproblem to answer.
-        
+                prompt (str): The bounded child subproblem to answer.
+
         Returns:
-        	str: The validated, bounded answer.
+                str: The validated, bounded answer.
         """
         predictor = dspy.Predict(RecursiveSubtaskSignature)
         with dspy.context(

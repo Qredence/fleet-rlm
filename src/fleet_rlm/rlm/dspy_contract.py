@@ -1,4 +1,10 @@
-"""Exact DSPy 3.3.0 RLM construction and observation contract."""
+"""DSPy 3.3.x contract and trajectory normalization utilities.
+
+DSPy's native ``RLM`` owns one immutable ``REPLHistory`` per invocation and
+returns completed interactions as ``Prediction.trajectory``. Fleet validates
+that public trajectory projection for SSE and durable observation details while
+leaving history construction and lifecycle ownership to DSPy.
+"""
 
 from __future__ import annotations
 
@@ -13,6 +19,7 @@ from typing import Any, TypeAlias, TypedDict, cast
 
 import dspy
 from dspy.utils.callback import BaseCallback
+from packaging.version import InvalidVersion, Version
 from pydantic import TypeAdapter
 from pydantic_core import PydanticSerializationError
 
@@ -20,9 +27,8 @@ from fleet_rlm.json_types import JsonValue as JsonValue
 from fleet_rlm.rlm.errors import RLMConfigError
 from fleet_rlm.rlm.sanitize import truncate_public_text, validate_declared_public_value
 
-DSPY_VERSION = "3.3.0"
+DSPY_VERSION = "3.3.x"
 
-ObservedUsageValue: TypeAlias = bool | int | float | str | dict[str, JsonValue] | None
 ReasoningObserver: TypeAlias = Callable[[Any], None]
 
 
@@ -61,12 +67,7 @@ class TrajectoryStep:
 
 
 def normalize_prediction_trajectory(prediction: Any) -> tuple[TrajectoryStep, ...]:
-    """Validate the native trajectory without mutating its ``Prediction`` owner.
-
-    DSPy owns the trajectory lifecycle. Fleet only accepts its documented list of
-    iteration mappings and turns absent public fields into empty strings for the
-    internal reconciliation seam.
-    """
+    """Validate and convert DSPy's public ``Prediction.trajectory`` projection."""
     trajectory = getattr(prediction, "trajectory", None)
     if not isinstance(trajectory, Sequence) or isinstance(trajectory, (str, bytes, bytearray)):
         raise PredictionOutputError
@@ -226,6 +227,30 @@ def _observed_scalar(value: object, *, path: str) -> JsonValue:
     raise ValueError(f"{path} must contain a scalar usage value")
 
 
+def _safe_usage_details(value: object, *, path: str, filter_unknown: bool) -> dict[str, JsonValue]:
+    if not isinstance(value, Mapping):
+        dump = getattr(value, "model_dump", None)
+        value = dump() if callable(dump) else value
+    if not isinstance(value, Mapping) or any(not isinstance(detail, str) for detail in value):
+        raise ValueError(f"{path} must be an object")
+
+    detail_usage = cast(Mapping[str, object], value)
+    details: dict[str, JsonValue] = {}
+    for detail, detail_value in detail_usage.items():
+        if detail not in _SAFE_USAGE_DETAIL_KEYS:
+            if filter_unknown:
+                continue
+            raise ValueError(f"{path}.{detail} is not safe observed usage telemetry")
+        details[detail] = _observed_scalar(detail_value, path=f"{path}.{detail}")
+    return details
+
+
+def _safe_usage_value(key: str, value: object, *, path: str, filter_unknown: bool) -> JsonValue:
+    if key.endswith("_details"):
+        return _safe_usage_details(value, path=f"{path}.{key}", filter_unknown=filter_unknown)
+    return _observed_scalar(value, path=f"{path}.{key}")
+
+
 def _safe_usage_entry(value: object, *, path: str, filter_unknown: bool) -> dict[str, JsonValue]:
     """
     Validate and normalize an observed usage mapping for safe telemetry.
@@ -247,23 +272,7 @@ def _safe_usage_entry(value: object, *, path: str, filter_unknown: bool) -> dict
             if filter_unknown:
                 continue
             raise ValueError(f"{path}.{key} is not safe observed usage telemetry")
-        if key.endswith("_details"):
-            if not isinstance(item, Mapping):
-                dump = getattr(item, "model_dump", None)
-                item = dump() if callable(dump) else item
-            if not isinstance(item, Mapping) or any(not isinstance(detail, str) for detail in item):
-                raise ValueError(f"{path}.{key} must be an object")
-            detail_usage = cast(Mapping[str, object], item)
-            details: dict[str, JsonValue] = {}
-            for detail, detail_value in detail_usage.items():
-                if detail not in _SAFE_USAGE_DETAIL_KEYS:
-                    if filter_unknown:
-                        continue
-                    raise ValueError(f"{path}.{key}.{detail} is not safe observed usage telemetry")
-                details[detail] = _observed_scalar(detail_value, path=f"{path}.{key}.{detail}")
-            result[key] = details
-        else:
-            result[key] = _observed_scalar(item, path=f"{path}.{key}")
+        result[key] = _safe_usage_value(key, item, path=path, filter_unknown=filter_unknown)
     return result
 
 
@@ -296,9 +305,21 @@ def validate_rlm_usage(value: Mapping[str, object]) -> RLMUsage:
 
 
 def assert_dspy_version() -> None:
-    """Fail composition before resources start when DSPy is not the pinned contract."""
-    if dspy.__version__ != DSPY_VERSION:
-        raise RuntimeError(f"DSPy {DSPY_VERSION} is required; installed {dspy.__version__}")
+    """Fail composition before resources start when DSPy is not a supported 3.3.x contract.
+
+    Patch releases within the 3.3 line are accepted; pre-releases and other
+    minors (3.4+) are rejected because the interpreter-injection seam is only
+    pinned to the 3.3 line.
+    """
+    installed = dspy.__version__
+    try:
+        version = Version(installed)
+    except InvalidVersion as exc:
+        raise RuntimeError(f"DSPy 3.3.x release is required; installed {installed}") from exc
+    if version.major != 3 or version.minor != 3:
+        raise RuntimeError(f"DSPy 3.3.x is required; installed {installed}")
+    if version.is_prerelease:
+        raise RuntimeError(f"DSPy 3.3.x release is required; installed {installed}")
 
 
 @dataclass(frozen=True, slots=True)
@@ -459,7 +480,7 @@ class _RLMTraceCallback(BaseCallback):
     ) -> None:
         """
         Finalize the tracing span for an LM call.
-        
+
         Parameters:
             call_id (str): Identifier of the LM call.
             outputs (dict[str, Any] | None): Response data from the LM call.
@@ -527,11 +548,11 @@ def _lm_input_profile(
 ) -> dict[str, JsonValue]:
     """
     Summarize the structural characteristics of language-model input context.
-    
+
     Parameters:
         inputs (Mapping[str, Any]): Language-model input values.
         include_previews (bool): Whether to include bounded prompt and message previews.
-    
+
     Returns:
         dict[str, JsonValue]: A profile containing available context sizes, message counts,
             keyword keys, and optionally bounded previews.
@@ -567,11 +588,11 @@ def _lm_output_profile(
 ) -> dict[str, JsonValue]:
     """
     Describe an LM response for tracing.
-    
+
     Parameters:
         outputs (Mapping[str, Any] | None): The LM response values to profile.
         include_previews (bool): Whether to include a bounded response preview.
-    
+
     Returns:
         dict[str, JsonValue]: Structural response metadata, character count, and optionally a response preview.
     """
@@ -695,12 +716,6 @@ def _mlflow_token_usage(usage: Mapping[str, JsonValue]) -> dict[str, JsonValue]:
     return result
 
 
-def _latest_lm_usage(instance: Any, history_length: int | None) -> dict[str, JsonValue]:
-    """Compatibility helper returning only safe call-specific token usage."""
-    usage, _provider = _latest_lm_telemetry(instance, history_length)
-    return usage
-
-
 def _trace_failure_category(exc: BaseException) -> str:
     """Resolve failure classification lazily to preserve the package boundary."""
     from fleet_rlm.observability.failure_diagnostics import trace_failure_category
@@ -742,7 +757,7 @@ def build_native_rlm(
     sub_lm: dspy.LM | None = None,
     verbose: bool = True,
 ) -> Any:
-    """Build one fresh RLM through the DSPy 3.3.0 constructor seam.
+    """Build one fresh RLM through the DSPy 3.3.x constructor seam.
 
     Fleet keeps the interpreter caller-owned: callers pass it as the first
     positional argument when invoking the returned RLM and retain shutdown

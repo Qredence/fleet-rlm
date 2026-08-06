@@ -39,7 +39,3 @@ class TurnNoProgressError(TurnTerminalError):
 
 class TurnIntegrityFailureError(TurnTerminalError):
     public_message = "Turn failed because a required workspace update was not completed"
-
-
-class TurnParseExhaustedError(TurnTerminalError):
-    public_message = "Turn stopped after the model repeatedly produced unparseable responses"

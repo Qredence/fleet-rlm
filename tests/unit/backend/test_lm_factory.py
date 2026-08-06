@@ -135,13 +135,10 @@ def test_sanitize_base_url_rejects_keys_and_empty() -> None:
     assert sanitize_base_url("openai.com/v1") is None  # missing scheme
 
 
-def test_normalize_model_id_adds_openai_prefix_for_compatible_bases() -> None:
-    assert (
-        normalize_model_id("deepseek-v4-flash-free", base_url="https://opencode.ai/zen/v1")
-        == "openai/deepseek-v4-flash-free"
-    )
-    assert normalize_model_id("openai/gpt-4o-mini", base_url="https://opencode.ai/zen/v1") == "openai/gpt-4o-mini"
-    assert normalize_model_id("anthropic/claude-sonnet-4", base_url=None) == "anthropic/claude-sonnet-4"
+def test_normalize_model_id_adds_openai_prefix_to_bare_names() -> None:
+    assert normalize_model_id("deepseek-v4-flash-free") == "openai/deepseek-v4-flash-free"
+    assert normalize_model_id("openai/gpt-4o-mini") == "openai/gpt-4o-mini"
+    assert normalize_model_id("anthropic/claude-sonnet-4") == "anthropic/claude-sonnet-4"
 
 
 def test_runtime_does_not_accept_provider_environment_aliases(monkeypatch: pytest.MonkeyPatch) -> None:

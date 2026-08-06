@@ -109,3 +109,12 @@ operator action.
 `make api-sync` owns both `openapi.yaml` and
 `tools/fleet-tui/src/generated/openapi.ts`. Do not hand-edit either artifact;
 run `make api-check` after any HTTP contract change.
+
+## DSPy RLM history contract
+
+Under the pinned DSPy 3.3.x line, `RLM` owns one immutable `REPLHistory` per
+`RLM.acall`/`RLM.forward` invocation. The caller-owned Daytona interpreter
+provides execution state and lifecycle only; it must not mirror or reset
+DSPy's history. Completed interactions are exposed by DSPy as
+`Prediction.trajectory`, which Fleet may normalize for SSE and durable
+observation projection without mutating the prediction.

@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import hashlib
+import time
 from collections.abc import Iterable
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from importlib.resources import files
 from typing import Any, Protocol
 from uuid import UUID
@@ -205,12 +207,12 @@ def require_non_zero_workspace_id(workspace_id: UUID) -> UUID:
 def workspace_volume_subpath(workspace_id: UUID) -> str:
     """
     Build the canonical persistent volume subpath for a workspace.
-    
+
     Parameters:
-    	workspace_id (UUID): The non-zero workspace identifier.
-    
+        workspace_id (UUID): The non-zero workspace identifier.
+
     Returns:
-    	str: The validated path under the workspace volume.
+        str: The validated path under the workspace volume.
     """
     return f"workspaces/{require_non_zero_workspace_id(workspace_id)}"
 
@@ -218,18 +220,18 @@ def workspace_volume_subpath(workspace_id: UUID) -> str:
 def recursive_child_volume_subpath(workspace_id: UUID, run_id: UUID, call_index: int) -> str:
     """
     Builds the canonical recursive volume scope for a disposable child RLM.
-    
+
     Parameters:
-    	workspace_id (UUID): The workspace identifier.
-    	run_id (UUID): The child run identifier.
-    	call_index (int): The positive child call index.
-    
+        workspace_id (UUID): The workspace identifier.
+        run_id (UUID): The child run identifier.
+        call_index (int): The positive child call index.
+
     Returns:
-    	str: The recursive volume scope path.
-    
+        str: The recursive volume scope path.
+
     Raises:
-    	TypeError: If `workspace_id` or `run_id` is not a UUID.
-    	ValueError: If an identifier is the zero UUID or `call_index` is not positive.
+        TypeError: If `workspace_id` or `run_id` is not a UUID.
+        ValueError: If an identifier is the zero UUID or `call_index` is not positive.
     """
     workspace = require_non_zero_workspace_id(workspace_id)
     if not isinstance(run_id, UUID):
@@ -244,16 +246,17 @@ def recursive_child_volume_subpath(workspace_id: UUID, run_id: UUID, call_index:
 def require_scoped_volume_subpath(subpath: str, *, workspace_id: UUID | None = None) -> str:
     """
     Validate and normalize a workspace-scoped volume subpath.
-    
+
     Parameters:
-    	subpath (str): The volume subpath, which must identify exactly one workspace.
-    	workspace_id (UUID | None): If provided, the subpath must match this workspace.
-    
+        subpath (str): The volume subpath, which must identify exactly one workspace.
+        workspace_id (UUID | None): If provided, the subpath must match this workspace.
+
     Returns:
-    	str: The normalized `workspaces/<workspace_id>` subpath.
-    
+        str: The normalized `workspaces/<workspace_id>` subpath.
+
     Raises:
-    	ValueError: If the subpath is empty, uses traversal, does not identify exactly one workspace, or does not match `workspace_id`.
+        ValueError: If the subpath is empty, uses traversal, does not identify exactly one workspace,
+            or does not match `workspace_id`.
     """
     if not isinstance(subpath, str) or not subpath.strip():
         raise ValueError("VolumeMount without workspace subpath is rejected")
@@ -279,17 +282,17 @@ def require_recursive_child_volume_subpath(
 ) -> str:
     """
     Validate and return a canonical recursive child volume subpath.
-    
+
     Parameters:
         subpath (str): Candidate path in the form
             ``recursive/<workspace UUID>/<run UUID>/<positive call index>``.
         workspace_id (UUID | None): Optional workspace identifier to require.
         run_id (UUID | None): Optional run identifier to require.
         call_index (int | None): Optional call index to require.
-    
+
     Returns:
         str: The normalized recursive child volume subpath.
-    
+
     Raises:
         ValueError: If the path is invalid, non-canonical, or does not match a
             provided identifier.
@@ -324,10 +327,10 @@ def require_recursive_child_volume_subpath(
 def require_volume_mount_subpath(subpath: str) -> str:
     """
     Validate a persistent workspace or recursive child volume mount subpath.
-    
+
     Parameters:
         subpath (str): The volume mount subpath to validate.
-    
+
     Returns:
         str: The validated volume mount subpath.
     """
@@ -341,14 +344,14 @@ def require_volume_mount_subpath(subpath: str) -> str:
 
 def volume_mount_spec(config: VolumeConfig, volume_id: str, *, workspace_id: UUID) -> dict[str, str]:
     """Build a validated workspace-scoped volume mount specification.
-    
+
     Parameters:
-    	config (VolumeConfig): Volume configuration containing the mount path.
-    	volume_id (str): Identifier of the volume to mount.
-    	workspace_id (UUID): Workspace whose persistent subpath is mounted.
-    
+        config (VolumeConfig): Volume configuration containing the mount path.
+        volume_id (str): Identifier of the volume to mount.
+        workspace_id (UUID): Workspace whose persistent subpath is mounted.
+
     Returns:
-    	dict[str, str]: Volume ID, validated mount path, and workspace subpath.
+        dict[str, str]: Volume ID, validated mount path, and workspace subpath.
     """
     if not volume_id or not str(volume_id).strip():
         raise ValueError("volume_id is required")
@@ -562,8 +565,14 @@ class SandboxProvisioner:
         labels: dict[str, str],
         ephemeral: bool,
     ) -> Any:
+        """Create a sandbox with timing instrumentation for performance profiling."""
+        start_time = time.perf_counter()
+        timeline = {
+            "init_timestamp": datetime.now(UTC).isoformat(),
+        }
+
         try:
-            return await self._platform.create(
+            result = await self._platform.create(
                 volume_id=expected.volume_id,
                 mount_path=str(expected.mount_path),
                 volume_subpath=require_scoped_volume_subpath(
@@ -573,8 +582,30 @@ class SandboxProvisioner:
                 labels=labels,
                 ephemeral=ephemeral,
             )
+
+            # Record successful creation timing
+            total_time_ms = (time.perf_counter() - start_time) * 1000
+            timeline["total_time_ms"] = round(total_time_ms, 3)
+            timeline["status"] = "success"
+
+            # Add timing metadata to result object if possible
+            if hasattr(result, "__dict__"):
+                result._provisioning_timeline = timeline
+
+            return result
         except Exception as exc:
-            raise map_provider_error(exc) from exc
+            # Record failure timing
+            total_time_ms = (time.perf_counter() - start_time) * 1000
+            timeline["total_time_ms"] = round(total_time_ms, 3)
+            timeline["status"] = "failed"
+            timeline["error_type"] = type(exc).__name__
+
+            # Expose the failure timeline through the same telemetry path as
+            # successful creation: an attribute on the raised object.
+            mapped = map_provider_error(exc)
+            if hasattr(mapped, "__dict__"):
+                setattr(mapped, "_provisioning_timeline", timeline)  # noqa: B010
+            raise mapped from exc
 
     def verify(self, sandbox: Any, expected: ExpectedWorkspaceMount) -> None:
         verify_sandbox_workspace_mount(sandbox, expected)
