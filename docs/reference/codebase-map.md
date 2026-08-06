@@ -62,13 +62,13 @@ The authoritative route inventory and shapes are in
 | --- | --- |
 | `src/cli-core.ts` | CLI options and verified atomic Artifact download |
 | `src/fleet-api-client.ts` | HTTP requests and response handling |
-| `src/fleet-turn-stream.ts` | request opening, bounded same-key retry, strict stream lifecycle |
+| `src/fleet-turn-stream.ts` | request opening, bounded same-key retry, strict stream and part lifecycle |
 | `src/sse.ts` | SSE framing and closed generated chunk validation |
 | `src/tui/runner.ts` | active Run state, submission, cancellation |
-| `src/tui/projection.ts` | shared live and durable display projection |
-| `src/tui/store.ts` | conversation state and atomic Session hydration |
-| `src/tui/application.ts`, `screen.ts`, `transcript.ts` | pi-tui lifecycle, editor/input, cached static native-scrollback layout, and mutable Run activity |
-| `src/tui/message-renderer.ts` | complete event, Markdown, result, Artifact, and code presentation |
+| `src/tui/projection.ts` | shared live/durable display projection and stream accumulation |
+| `src/tui/store.ts` | conversation state, atomic Session hydration, and terminal stream settlement |
+| `src/tui/application.ts`, `screen.ts`, `transcript.ts` | pi-tui main-screen lifecycle, editor/input, cached native-scrollback layout, terminal-safe status, and mutable Run activity |
+| `src/tui/message-renderer.ts`, `terminal-text.ts` | complete event, cached Markdown, result, Artifact, code/output presentation, and terminal-safe text |
 | `src/tui/commands.ts`, `command-presenter.ts`, `autocomplete.ts` | slash commands, overlays, status, and completion |
 | `src/generated/openapi.ts` | generated HTTP types owned by `make api-sync` |
 

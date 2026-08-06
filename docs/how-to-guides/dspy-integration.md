@@ -69,17 +69,17 @@ provide models, Signatures, or executable capabilities.
   `rlm.acall(interpreter, ...)` delegates request and response normalization to
   stock DSPy. Application code does not call LM `forward()` methods, construct
   provider-shaped requests, or opt into DSPy's experimental typed LM API while
-  `dspy==3.3.0` is pinned.
+  the supported DSPy 3.3.x line is selected. The current lock resolves 3.3.0.
   See DSPy's
   [normalized LM API migration](https://dspy.ai/community/normalized-lm-api-migration/).
 - Do not replace the Turn-scoped adapter with global `dspy.configure()`.
   Composition may execute independent Turns with different scoped models, and
   Fleet must not mutate shared DSPy defaults.
 
-## DSPy 3.3.0 ownership contract
+## DSPy 3.3.x ownership contract
 
 Fleet keeps the public configuration key `max_iterations`. The adapter in
-`rlm.dspy_contract` maps that key to DSPy 3.3.0's constructor parameter
+`rlm.dspy_contract` maps that key to DSPy 3.3.x's constructor parameter
 `max_iters`; no other Fleet configuration or public API uses the DSPy spelling.
 Native RLM construction does not accept an interpreter. It installs a
 fail-closed `interpreter_factory` so an invocation without a caller-owned
@@ -90,7 +90,7 @@ At execution time, Fleet passes its existing interpreter positionally:
 `await rlm.acall(interpreter, **named_inputs)` and, for streaming,
 `stream_program(interpreter, **named_inputs)`. Fleet or the child lease owns
 shutdown for these caller-provided interpreters; DSPy must not shut them down.
-Deterministic test RLMs remain keyword-only substitutes. DSPy 3.3.0's stricter
+Deterministic test RLMs remain keyword-only substitutes. DSPy 3.3.x's stricter
 namespace, Tool, and sub-LM response validation remains authoritative, while
 Fleet preserves its existing RuntimeEvent, SSE, and TUI projections.
 
@@ -104,9 +104,15 @@ predictor for its `reasoning` and `code` fields. DSPy emits
 final typed `dspy.Prediction`.
 
 Fleet converts those private DSPy values into the existing transport-neutral
-`RLMReasoning`, `RLMCode`, and `Status` Runtime Events. The existing
-`AISDKUIProjector` then emits AI SDK UI v1 SSE chunks, and `fleet-tui` appends
-delta chunks to stable step cards. DSPy semantic subcalls are not streamed to
+`RLMReasoning`, `RLMCode`, and `Status` Runtime Events. Field switches do not
+create new RLM iterations: Fleet keeps one action identity while DSPy fields are
+interleaved and advances only after a native completed `code` field. If DSPy
+does not expose that boundary, Fleet does not synthesize another step; the
+canonical trajectory remains authoritative. The caller-owned Daytona interpreter
+separately forwards ordinary stdout as bounded `RLMOutput` deltas with one
+per-execution stream identity, then emits a complete correction. The existing
+`AISDKUIProjector` emits AI SDK UI v1 SSE chunks, and `fleet-tui` appends delta
+chunks to stable step cards. DSPy semantic subcalls are not streamed to
 operators. `dspy.streaming_response` is deliberately not used because it would
 create a second OpenAI-compatible SSE protocol; Fleet already owns its public
 FastAPI SSE contract.

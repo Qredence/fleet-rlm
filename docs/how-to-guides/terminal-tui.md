@@ -1,7 +1,7 @@
 # Use the Fleet terminal UI
 
 `tools/fleet-tui/` is the maintained Node 22.19+ development client for Fleet's
-FastAPI HTTP/SSE API. It uses pi-tui 0.82.0 and owns no model, provider key,
+FastAPI HTTP/SSE API. It uses pi-tui 0.84.0 and owns no model, provider key,
 Sandbox, or execution runtime.
 
 ## Start a supervised session
@@ -49,7 +49,11 @@ decoration.
 Fleet identity and runtime evidence remain unchanged: user/assistant text,
 sanitized reasoning, generated code, interpreter output, Tools, Skills,
 Attachments, warnings, recoverable errors, Artifacts, typed results, and usage
-stay chronological, complete, static, and expanded. The theme is automatic;
+stay chronological, complete, static, and expanded. Live text, generated code,
+and interpreter output are accumulated by stream identity and finalized without
+leaving a stale streaming cursor. Daytona forwards ordinary interpreter stdout
+as bounded deltas; private `SUBMIT` protocol markers never enter the timeline.
+The theme is automatic;
 there is no theme command or persisted theme setting.
 
 Transcript, activity, editor, and footer still form native terminal history. Fleet
