@@ -13,6 +13,7 @@ from fleet_rlm.api.errors import install_error_handlers
 from fleet_rlm.api.routes.turns import router
 from fleet_rlm.chat.turn_lifecycle import TurnLifecycleUnavailableError
 from fleet_rlm.chat.turn_preparation import TurnPreparationTimeoutError, TurnPreparationUnavailableError
+from fleet_rlm.composition.inventory import RuntimeInventory
 from fleet_rlm.config import Settings
 from fleet_rlm.daytona.errors import ProviderRequestError
 
@@ -36,7 +37,7 @@ def _client(cause: BaseException) -> TestClient:
     app = FastAPI()
     app.state.settings = Settings()
     app.state.composition_ready = True
-    app.state.turn_coordinator = _FailingCoordinator(cause)
+    app.state.runtime_inventory = RuntimeInventory(turn_coordinator=_FailingCoordinator(cause))
     install_error_handlers(app)
     app.include_router(router)
     return TestClient(app)

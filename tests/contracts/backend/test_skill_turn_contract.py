@@ -18,6 +18,7 @@ from fleet_rlm.api.routes.turns import router as turns_router
 from fleet_rlm.api.schemas import CreateTurnRequest
 from fleet_rlm.chat.commands import OpenTurnCommand
 from fleet_rlm.chat.turn_lifecycle import ExecuteTurn, _TurnClaimToken
+from fleet_rlm.composition.inventory import RuntimeInventory
 from fleet_rlm.files.models import AttachmentRef, PreparedAttachments, StagedAttachment
 from fleet_rlm.rlm.dspy_contract import RLMOptions
 from fleet_rlm.rlm.events import EventRecorder, RuntimeEvent
@@ -57,7 +58,7 @@ class _Coordinator:
 def _turn_client(coordinator: _Coordinator) -> TestClient:
     app = FastAPI()
     app.state.composition_ready = True
-    app.state.turn_coordinator = coordinator
+    app.state.runtime_inventory = RuntimeInventory(turn_coordinator=coordinator)
     install_error_handlers(app)
     app.include_router(turns_router)
     return TestClient(app)

@@ -13,6 +13,7 @@ from fleet_rlm.api.errors import install_error_handlers
 from fleet_rlm.api.routes.turns import router
 from fleet_rlm.api.schemas import CreateTurnRequest
 from fleet_rlm.chat.commands import OpenTurnCommand
+from fleet_rlm.composition.inventory import RuntimeInventory
 from fleet_rlm.rlm.events import RuntimeEvent
 from fleet_rlm.skills.errors import InvalidSkillSelectionError
 
@@ -47,7 +48,7 @@ class _CapturingCoordinator:
 def _client(coordinator: _CapturingCoordinator) -> TestClient:
     app = FastAPI()
     app.state.composition_ready = True
-    app.state.turn_coordinator = coordinator
+    app.state.runtime_inventory = RuntimeInventory(turn_coordinator=coordinator)
     install_error_handlers(app)
     app.include_router(router)
     return TestClient(app)

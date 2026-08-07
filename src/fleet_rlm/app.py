@@ -3,15 +3,29 @@
 from __future__ import annotations
 
 import os
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Protocol
 
 from fastapi import FastAPI
 
 from . import __version__
 from .config import Settings, configure_logging, load_runtime_settings
+
+if TYPE_CHECKING:
+    from fleet_rlm.composition.inventory import RuntimeDatabaseLifecycle, RuntimeInventory
+
+
+class _CompositionInstaller(Protocol):
+    def __call__(
+        self,
+        app: FastAPI,
+        settings: Settings,
+        *,
+        database: RuntimeDatabaseLifecycle,
+    ) -> RuntimeInventory: ...
+
 
 _RETIRED_ENVIRONMENT_VARIABLES = frozenset(
     {
@@ -50,9 +64,9 @@ def _reject_retired_environment_variables() -> None:
 async def _local_db_lifespan(
     app: FastAPI,
     settings_obj: Settings,
-    install_fn: Callable[..., Any],
+    install_fn: _CompositionInstaller,
 ) -> AsyncIterator[None]:
-    from fleet_rlm.composition import clear_composition_state
+    from fleet_rlm.composition.inventory import RuntimeDatabaseLifecycle, clear_runtime_inventory
 
     engine = None
     session_factory = None
@@ -66,32 +80,31 @@ async def _local_db_lifespan(
             )
 
             engine = create_async_engine_from_url(settings_obj.database_url)
-            app.state.db_engine = engine
             session_factory = create_session_factory(engine)
             if is_sqlite_url(settings_obj.database_url):
                 await create_tables(engine)
-        handles = install_fn(app, settings_obj, session_factory=session_factory)
-        turn_state = getattr(app.state, "turn_state_store", None)
+        database = RuntimeDatabaseLifecycle(engine=engine, session_factory=session_factory)
+        inventory = install_fn(app, settings_obj, database=database)
+        turn_state = inventory.turn_state_store
         reconcile = getattr(turn_state, "reconcile_settling", None)
         if callable(reconcile):
             await reconcile()
         yield
     finally:
-        cleanup = getattr(locals().get("handles", None), "turn_cleanup_supervisor", None)
+        detached = clear_runtime_inventory(app)
+        cleanup = getattr(detached, "turn_cleanup_supervisor", None)
         if cleanup is not None:
             await cleanup.shutdown(drain_seconds=30)
-        clear_composition_state(app)
-        try:
-            if engine is not None:
-                await engine.dispose()
-        finally:
-            app.state.db_engine = None
+        if detached is not None:
+            await detached.database.aclose()
+        elif engine is not None:
+            await engine.dispose()
 
 
 def create_app(
     *,
     settings: Settings | None = None,
-    _composition_installer: Callable[..., Any] | None = None,
+    _composition_installer: _CompositionInstaller | None = None,
 ) -> FastAPI:
     """
     Create and configure the Fleet RLM FastAPI application.
@@ -163,11 +176,7 @@ def create_app(
     )
     app.state.settings = resolved
     app.state.composition_ready = False
-    app.state.db_engine = None
-    from fleet_rlm.composition.common import COMPOSITION_STATE_FIELDS
-
-    for name in COMPOSITION_STATE_FIELDS:
-        setattr(app.state, name, None)
+    app.state.runtime_inventory = None
 
     from fleet_rlm.api.errors import install_error_handlers
     from fleet_rlm.api.openapi import install_openapi_contract

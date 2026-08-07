@@ -310,8 +310,11 @@ def test_phase2_daytona_recursive_through_fastapi(tmp_path: Path, monkeypatch: p
     cleanup_failures: tuple[str, ...] = ()
     app = create_app(settings=settings)
     with TestClient(app) as client:
-        resources = app.state.run_environment_resources
-        preparation = app.state.turn_preparation
+        inventory = app.state.runtime_inventory
+        resources = inventory.run_environment_resources
+        preparation = inventory.turn_preparation
+        assert resources is not None
+        assert preparation is not None
         preparation._capabilities = _ProofCapabilityPreparer(preparation._capabilities, (proof_tool,), proof_views)
         try:
             created = client.post("/api/sessions", json={"title": "Phase 2 Daytona recursive canary"})

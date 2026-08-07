@@ -97,7 +97,8 @@ def test_volume_tree_returns_relative_logical_paths(tmp_path: Path) -> None:
     import asyncio
 
     with TestClient(app) as client:
-        gateway = app.state.workspace_volume_gateway
+        gateway = app.state.runtime_inventory.workspace_volume_gateway
+        assert gateway is not None
         asyncio.run(gateway.write_bytes(workspace_id, "/home/daytona/fleet/sessions/a/turn.json", b"{}"))
         response = client.get("/api/volume/tree")
         assert response.status_code == 200
@@ -115,7 +116,8 @@ def test_volume_tree_is_not_truncated_when_file_count_equals_requested_limit(tmp
     import asyncio
 
     with TestClient(app) as client:
-        gateway = app.state.workspace_volume_gateway
+        gateway = app.state.runtime_inventory.workspace_volume_gateway
+        assert gateway is not None
         asyncio.run(gateway.write_bytes(workspace_id, "/home/daytona/fleet/sessions/a/turn.json", b"{}"))
         response = client.get("/api/volume/tree", params={"max_files": 1})
 

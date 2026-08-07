@@ -14,8 +14,10 @@ from pydantic import SecretStr
 
 from fleet_rlm.app import create_app
 from fleet_rlm.composition import CompositionError, require_daytona_settings
+from fleet_rlm.composition.inventory import RuntimeInventory, clear_runtime_inventory, install_runtime_inventory
 from fleet_rlm.composition.testing import create_testing_app
 from fleet_rlm.config import Settings
+from fleet_rlm.skills.catalog import SkillCatalog
 
 
 def test_composition_module_imports_without_credentials() -> None:
@@ -207,14 +209,15 @@ def test_daytona_environment_fails_closed_without_secrets() -> None:
 def test_testing_app_composes_only_inside_lifespan() -> None:
     app = create_testing_app()
     assert app.state.composition_ready is False
-    assert app.state.turn_coordinator is None
-    assert app.state.attachment_lifecycle is None
-    assert app.state.artifact_reader is None
+    assert app.state.runtime_inventory is None
     with TestClient(app) as client:
         assert app.state.composition_ready is True
-        assert app.state.turn_coordinator is not None
-        assert app.state.attachment_lifecycle is not None
-        assert app.state.artifact_reader is not None
+        inventory = app.state.runtime_inventory
+        assert isinstance(inventory, RuntimeInventory)
+        assert inventory.turn_coordinator is not None
+        assert inventory.attachment_lifecycle is not None
+        assert inventory.artifact_reader is not None
+        assert app.state.skill_catalog is not None
         # The clean-break API never creates an implicit Session.
         response = client.post(
             f"/api/sessions/{uuid4()}/turns",
@@ -224,9 +227,100 @@ def test_testing_app_composes_only_inside_lifespan() -> None:
         assert response.status_code == 404
 
     assert app.state.composition_ready is False
-    assert app.state.turn_coordinator is None
-    assert app.state.attachment_lifecycle is None
-    assert app.state.artifact_reader is None
+    assert app.state.runtime_inventory is None
+    assert app.state.skill_catalog is not None
+
+
+def test_runtime_inventory_publish_sets_readiness_last() -> None:
+    events: list[tuple[str, object]] = []
+
+    class RecordingState:
+        def __setattr__(self, name: str, value: object) -> None:
+            events.append((name, value))
+            super().__setattr__(name, value)
+
+    app = SimpleNamespace(state=RecordingState())
+    inventory = RuntimeInventory()
+
+    installed = install_runtime_inventory(app, inventory)
+
+    assert installed is inventory
+    assert events == [("runtime_inventory", inventory), ("composition_ready", True)]
+    assert app.state.runtime_inventory is inventory
+    assert app.state.composition_ready is True
+
+
+def test_runtime_inventory_clear_marks_unready_and_detaches_inventory() -> None:
+    events: list[tuple[str, object]] = []
+
+    class RecordingState:
+        def __setattr__(self, name: str, value: object) -> None:
+            events.append((name, value))
+            super().__setattr__(name, value)
+
+    inventory = RuntimeInventory()
+    state = RecordingState()
+    state.runtime_inventory = inventory
+    state.composition_ready = True
+    events.clear()
+    app = SimpleNamespace(state=state)
+
+    detached = clear_runtime_inventory(app)
+
+    assert detached is inventory
+    assert events == [("composition_ready", False), ("runtime_inventory", None)]
+    assert app.state.runtime_inventory is None
+    assert app.state.composition_ready is False
+
+
+@pytest.mark.asyncio
+async def test_daytona_dispose_detaches_inventory_before_disposal() -> None:
+    import fleet_rlm.composition.daytona as composition
+
+    observations: list[tuple[str, object, object]] = []
+    app = SimpleNamespace(state=SimpleNamespace())
+
+    def record(phase: str) -> None:
+        observations.append(
+            (
+                phase,
+                getattr(app.state, "composition_ready", None),
+                getattr(app.state, "runtime_inventory", None),
+            )
+        )
+
+    class Cleanup:
+        async def shutdown(self, *, drain_seconds: int) -> None:
+            assert drain_seconds == 30
+            record("cleanup")
+
+    class Resources:
+        engine = None
+        session_manager = object()
+        models = object()
+
+        async def adispose(self) -> None:
+            record("resources")
+
+    class Gateway:
+        async def close(self) -> None:
+            record("gateway")
+
+    inventory = RuntimeInventory(
+        turn_cleanup_supervisor=Cleanup(),
+        run_environment_resources=Resources(),
+        workspace_volume_gateway=Gateway(),
+    )
+    app.state.runtime_inventory = inventory
+    app.state.composition_ready = True
+
+    await composition.dispose_daytona_composition(app)
+
+    assert observations == [
+        ("cleanup", False, None),
+        ("resources", False, None),
+        ("gateway", False, None),
+    ]
 
 
 def test_testing_database_is_created_and_closed_by_lifespan() -> None:
@@ -235,15 +329,15 @@ def test_testing_database_is_created_and_closed_by_lifespan() -> None:
             database_url="sqlite+aiosqlite:///:memory:",
         )
     )
-    assert app.state.db_engine is None
-    assert app.state.session_catalog is None
+    assert app.state.runtime_inventory is None
 
     with TestClient(app):
-        assert app.state.db_engine is not None
-        assert app.state.session_catalog is not None
+        inventory = app.state.runtime_inventory
+        assert isinstance(inventory, RuntimeInventory)
+        assert inventory.db_engine is not None
+        assert inventory.session_catalog is not None
 
-    assert app.state.db_engine is None
-    assert app.state.session_catalog is None
+    assert app.state.runtime_inventory is None
 
 
 def test_local_startup_reconciles_sql_runs_once(monkeypatch) -> None:
@@ -275,9 +369,9 @@ def test_local_composition_installs_once_for_in_memory_and_sql(monkeypatch, data
     calls: list[object | None] = []
     original = testing_composition.install_testing_composition
 
-    def track_install(app, settings, *, session_factory=None):
-        calls.append(session_factory)
-        return original(app, settings, session_factory=session_factory)
+    def track_install(app, settings, *, database=None):
+        calls.append(database.session_factory if database is not None else None)
+        return original(app, settings, database=database)
 
     monkeypatch.setattr(testing_composition, "install_testing_composition", track_install)
     app = testing_composition.create_testing_app(
@@ -296,11 +390,9 @@ def test_local_composition_installs_once_for_in_memory_and_sql(monkeypatch, data
 def test_local_startup_failure_rolls_back_partial_inventory(monkeypatch) -> None:
     import fleet_rlm.composition.testing as testing_composition
 
-    marker = object()
-
-    def fail_install(app, _settings, *, session_factory=None):
-        del session_factory
-        app.state.turn_coordinator = marker
+    def fail_install(app, _settings, *, database=None):
+        del database
+        app.state.runtime_inventory = RuntimeInventory(turn_coordinator=object())
         app.state.composition_ready = True
         raise RuntimeError("local wiring unavailable")
 
@@ -315,9 +407,7 @@ def test_local_startup_failure_rolls_back_partial_inventory(monkeypatch) -> None
         pass
 
     assert app.state.composition_ready is False
-    assert app.state.turn_coordinator is None
-    assert app.state.db_engine is None
-    assert app.state.session_catalog is None
+    assert app.state.runtime_inventory is None
 
 
 def test_unready_composition_never_builds_route_dependencies() -> None:
@@ -369,8 +459,8 @@ async def test_install_daytona_composition_does_not_create_schema(monkeypatch) -
         pass
 
     preparation = object()
-    handles = composition.DaytonaCompositionHandles(
-        resources=Resources(),
+    inventory = RuntimeInventory(
+        run_environment_resources=Resources(),
         turn_coordinator=object(),
         session_catalog=object(),
         turn_lifecycle=object(),
@@ -380,8 +470,9 @@ async def test_install_daytona_composition_does_not_create_schema(monkeypatch) -
         turn_preparation=preparation,
     )
 
-    async def fake_build(_settings):
-        return handles
+    async def fake_build(_settings, *, skill_catalog):
+        assert isinstance(skill_catalog, SkillCatalog)
+        return inventory
 
     async def fail_tables(_engine):
         raise AssertionError("live startup must not create the schema")
@@ -389,12 +480,12 @@ async def test_install_daytona_composition_does_not_create_schema(monkeypatch) -
     monkeypatch.setattr(composition, "build_daytona_composition", fake_build)
     monkeypatch.setattr(database, "create_tables", fail_tables)
 
-    app = SimpleNamespace(state=SimpleNamespace())
+    app = SimpleNamespace(state=SimpleNamespace(skill_catalog=SkillCatalog(())))
     installed = await composition.install_daytona_composition(app, Settings(run_environment="daytona"))
 
-    assert installed is handles
+    assert installed is app.state.runtime_inventory
+    assert installed.turn_preparation is preparation
     assert app.state.composition_ready is True
-    assert app.state.turn_preparation is preparation
 
 
 def test_offline_lifespan_disposes_engine_when_table_creation_fails(monkeypatch) -> None:
@@ -433,11 +524,9 @@ async def test_live_startup_preserves_original_error_and_attempts_all_cleanup(mo
     disposed: list[str] = []
 
     class Resources:
+        session_manager = object()
+        models = object()
         engine = object()
-
-        @property
-        def session_manager(self):
-            raise RuntimeError("wiring unavailable")
 
         async def adispose(self) -> None:
             disposed.append("resources")
@@ -447,8 +536,8 @@ async def test_live_startup_preserves_original_error_and_attempts_all_cleanup(mo
             disposed.append("gateway")
             raise RuntimeError("cleanup failed")
 
-    handles = composition.DaytonaCompositionHandles(
-        resources=Resources(),
+    inventory = RuntimeInventory(
+        run_environment_resources=Resources(),
         turn_coordinator=object(),
         session_catalog=object(),
         turn_lifecycle=object(),
@@ -457,14 +546,19 @@ async def test_live_startup_preserves_original_error_and_attempts_all_cleanup(mo
         workspace_volume_gateway=Gateway(),
     )
 
-    async def fake_build(_settings):
-        return handles
+    async def fake_build(_settings, *, skill_catalog):
+        assert isinstance(skill_catalog, SkillCatalog)
+        return inventory
+
+    def fail_publish(_app, _inventory):
+        raise RuntimeError("wiring unavailable")
 
     monkeypatch.setattr(composition, "build_daytona_composition", fake_build)
+    monkeypatch.setattr(composition, "install_runtime_inventory", fail_publish)
 
     with pytest.raises(RuntimeError, match="wiring unavailable"):
         await composition.install_daytona_composition(
-            SimpleNamespace(state=SimpleNamespace()), Settings(run_environment="daytona")
+            SimpleNamespace(state=SimpleNamespace(skill_catalog=SkillCatalog(()))), Settings(run_environment="daytona")
         )
 
     assert disposed == ["resources", "gateway"]
