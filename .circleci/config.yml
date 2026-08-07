@@ -11,7 +11,7 @@ executors:
       UV_CACHE_DIR: ~/.cache/uv
   node:
     docker:
-      - image: cimg/node:lts
+      - image: cimg/node:22.23.2@sha256:7c78a95e25876729c2c9cada532b0636fd3ec7dbae922b3d90d83704f4c87639
     working_directory: ~/project
 
 commands:
