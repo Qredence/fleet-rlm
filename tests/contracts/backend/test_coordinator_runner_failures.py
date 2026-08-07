@@ -16,7 +16,13 @@ from fleet_rlm.chat.turn_coordinator import TurnCoordinator
 from fleet_rlm.chat.turn_lifecycle import ExecuteTurn, TurnLifecycleService
 from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
 from fleet_rlm.persistence.repositories import InMemoryTurnStateStore
-from fleet_rlm.rlm.context import RLMExecutionContext, RLMExecutionSpec
+from fleet_rlm.rlm.context import (
+    ExecutionRuntime,
+    RLMExecutionContext,
+    RLMExecutionSpec,
+    SessionView,
+    TurnIdentity,
+)
 from fleet_rlm.rlm.dspy_contract import RLMOptions
 from fleet_rlm.rlm.events import (
     TERMINAL_DETAIL_TYPES,
@@ -112,25 +118,27 @@ class _Harness:
         now = asyncio.get_running_loop().time()
         deadline = now if self.mode == "timeout" else now + 10
         execution = RLMExecutionContext(
-            run_id=turn.run_id,
-            session_id=turn.session_id,
-            access=turn.access,
-            request=turn.input.text,
-            session_context=build_session_context_manifest(
-                turn.session_id,
-                turn.checkpoint_version,
-                turn.history,
+            identity=TurnIdentity(run_id=turn.run_id, session_id=turn.session_id, access=turn.access),
+            session=SessionView(
+                request=turn.input.text,
+                session_context=build_session_context_manifest(
+                    turn.session_id,
+                    turn.checkpoint_version,
+                    turn.history,
+                ),
+                attachments=(),
+                preparation_notices=(),
             ),
-            models=SimpleNamespace(root_lm=object(), sub_lm=object()),
-            options=RLMOptions(),
-            deadline=deadline,
-            interpreter=(
-                DaytonaCodeInterpreter(backend=InProcessInterpreterBackend()) if self.mode == "native_success" else None
+            execution=ExecutionRuntime(
+                models=SimpleNamespace(root_lm=object(), sub_lm=object()),
+                options=RLMOptions(),
+                deadline=deadline,
+                interpreter=DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())
+                if self.mode == "native_success"
+                else None,
+                cancellation_requested=turn.cancellation_requested,
             ),
-            attachments=(),
             capabilities=_Capabilities(),
-            cancellation_requested=turn.cancellation_requested,
-            preparation_notices=(),
         )
         harness = self
 

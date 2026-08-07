@@ -92,7 +92,13 @@ async def test_stock_rlm_streamify_yields_field_chunks_before_prediction() -> No
 @pytest.mark.asyncio
 async def test_runner_projects_native_stream_chunks_before_typed_completion() -> None:
     from fleet_rlm.chat.session_context import SessionContextManifest
-    from fleet_rlm.rlm.context import RLMExecutionContext, RLMExecutionSpec
+    from fleet_rlm.rlm.context import (
+        ExecutionRuntime,
+        RLMExecutionContext,
+        RLMExecutionSpec,
+        SessionView,
+        TurnIdentity,
+    )
     from fleet_rlm.rlm.dspy_contract import RLMOptions
     from fleet_rlm.rlm.events import RLMCode, RLMReasoning
     from fleet_rlm.rlm.model_bundle import RLMModelBundle
@@ -114,19 +120,21 @@ async def test_runner_projects_native_stream_chunks_before_typed_completion() ->
         return False
 
     context = RLMExecutionContext(
-        uuid4(),
-        uuid4(),
-        TurnAccess(uuid4(), uuid4()),
-        "stream this",
-        SessionContextManifest(uuid4(), 0, 0, ()),
-        RLMModelBundle(root_lm=lm, sub_lm=lm),
-        RLMOptions(max_iterations=2),
-        asyncio.get_running_loop().time() + 10,
-        DaytonaCodeInterpreter(backend=InProcessInterpreterBackend()),
-        (),
-        Capabilities(),
-        not_cancelled,
-        (),
+        identity=TurnIdentity(run_id=uuid4(), session_id=uuid4(), access=TurnAccess(uuid4(), uuid4())),
+        session=SessionView(
+            request="stream this",
+            session_context=SessionContextManifest(uuid4(), 0, 0, ()),
+            attachments=(),
+            preparation_notices=(),
+        ),
+        execution=ExecutionRuntime(
+            models=RLMModelBundle(root_lm=lm, sub_lm=lm),
+            options=RLMOptions(max_iterations=2),
+            deadline=asyncio.get_running_loop().time() + 10,
+            interpreter=DaytonaCodeInterpreter(backend=InProcessInterpreterBackend()),
+            cancellation_requested=not_cancelled,
+        ),
+        capabilities=Capabilities(),
     )
 
     with patch("dspy.clients.lm._get_litellm", return_value=_StreamingLiteLLM()):
@@ -154,7 +162,13 @@ async def test_native_stream_path_completes_when_streamify_only_returns_predicti
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from fleet_rlm.chat.session_context import SessionContextManifest
-    from fleet_rlm.rlm.context import RLMExecutionContext, RLMExecutionSpec
+    from fleet_rlm.rlm.context import (
+        ExecutionRuntime,
+        RLMExecutionContext,
+        RLMExecutionSpec,
+        SessionView,
+        TurnIdentity,
+    )
     from fleet_rlm.rlm.dspy_contract import RLMOptions
     from fleet_rlm.rlm.model_bundle import RLMModelBundle
     from fleet_rlm.rlm.runner import RLMRunner
@@ -188,19 +202,21 @@ async def test_native_stream_path_completes_when_streamify_only_returns_predicti
         return False
 
     context = RLMExecutionContext(
-        uuid4(),
-        uuid4(),
-        TurnAccess(uuid4(), uuid4()),
-        "complete without provider chunks",
-        SessionContextManifest(uuid4(), 0, 0, ()),
-        RLMModelBundle(root_lm=lm, sub_lm=lm),
-        RLMOptions(),
-        asyncio.get_running_loop().time() + 10,
-        DaytonaCodeInterpreter(backend=InProcessInterpreterBackend()),
-        (),
-        Capabilities(),
-        not_cancelled,
-        (),
+        identity=TurnIdentity(run_id=uuid4(), session_id=uuid4(), access=TurnAccess(uuid4(), uuid4())),
+        session=SessionView(
+            request="complete without provider chunks",
+            session_context=SessionContextManifest(uuid4(), 0, 0, ()),
+            attachments=(),
+            preparation_notices=(),
+        ),
+        execution=ExecutionRuntime(
+            models=RLMModelBundle(root_lm=lm, sub_lm=lm),
+            options=RLMOptions(),
+            deadline=asyncio.get_running_loop().time() + 10,
+            interpreter=DaytonaCodeInterpreter(backend=InProcessInterpreterBackend()),
+            cancellation_requested=not_cancelled,
+        ),
+        capabilities=Capabilities(),
     )
 
     stream = RLMRunner().stream(context)

@@ -194,7 +194,13 @@ def test_trajectory_reconciliation_updates_pre_step_live_reasoning_when_canonica
 @pytest.mark.asyncio
 async def test_runner_deduplicates_final_reasoning_against_nonadjacent_normalized_trajectory() -> None:
     from fleet_rlm.chat.session_context import SessionContextManifest
-    from fleet_rlm.rlm.context import RLMExecutionContext, RLMExecutionSpec
+    from fleet_rlm.rlm.context import (
+        ExecutionRuntime,
+        RLMExecutionContext,
+        RLMExecutionSpec,
+        SessionView,
+        TurnIdentity,
+    )
     from fleet_rlm.rlm.dspy_contract import RLMOptions
     from fleet_rlm.rlm.events import RLMReasoning
     from fleet_rlm.rlm.runner import RLMRunner
@@ -231,19 +237,21 @@ async def test_runner_deduplicates_final_reasoning_against_nonadjacent_normalize
         return False
 
     context = RLMExecutionContext(
-        uuid4(),
-        uuid4(),
-        TurnAccess(uuid4(), uuid4()),
-        "answer",
-        SessionContextManifest(uuid4(), 0, 0, ()),
-        SimpleNamespace(root_lm=object(), sub_lm=object()),
-        RLMOptions(max_output_chars=16),
-        asyncio.get_running_loop().time() + 10,
-        None,
-        (),
-        Capabilities(),
-        not_cancelled,
-        (),
+        identity=TurnIdentity(run_id=uuid4(), session_id=uuid4(), access=TurnAccess(uuid4(), uuid4())),
+        session=SessionView(
+            request="answer",
+            session_context=SessionContextManifest(uuid4(), 0, 0, ()),
+            attachments=(),
+            preparation_notices=(),
+        ),
+        execution=ExecutionRuntime(
+            models=SimpleNamespace(root_lm=object(), sub_lm=object()),
+            options=RLMOptions(max_output_chars=16),
+            deadline=asyncio.get_running_loop().time() + 10,
+            interpreter=None,
+            cancellation_requested=not_cancelled,
+        ),
+        capabilities=Capabilities(),
     )
 
     events = [event async for event in RLMRunner(factory=Factory()).stream(context)]

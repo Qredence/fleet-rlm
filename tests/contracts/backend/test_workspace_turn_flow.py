@@ -23,7 +23,13 @@ from fleet_rlm.files.workspace_models import (
     WorkspaceTextPage,
 )
 from fleet_rlm.files.workspace_tools import WorkspaceToolError, WorkspaceToolHost
-from fleet_rlm.rlm.context import RLMExecutionContext, RLMExecutionSpec
+from fleet_rlm.rlm.context import (
+    ExecutionRuntime,
+    RLMExecutionContext,
+    RLMExecutionSpec,
+    SessionView,
+    TurnIdentity,
+)
 from fleet_rlm.rlm.dspy_contract import RLMOptions
 from fleet_rlm.rlm.errors import TurnCancelledError
 from fleet_rlm.rlm.events import RuntimeEvent
@@ -245,19 +251,21 @@ async def _run(
     else:
         task_request = request
     context = RLMExecutionContext(
-        run_id=uuid4(),
-        session_id=workspace.session_id,
-        access=workspace.access,
-        request=task_request,
-        session_context=SessionContextManifest(workspace.session_id, 0, 0, ()),
-        models=SimpleNamespace(root_lm=object(), sub_lm=object()),
-        options=RLMOptions(),
-        deadline=asyncio.get_running_loop().time() + 10,
-        interpreter=Interpreter(),
-        attachments=(),
+        identity=TurnIdentity(run_id=uuid4(), session_id=workspace.session_id, access=workspace.access),
+        session=SessionView(
+            request=task_request,
+            session_context=SessionContextManifest(workspace.session_id, 0, 0, ()),
+            attachments=(),
+            preparation_notices=(),
+        ),
+        execution=ExecutionRuntime(
+            models=SimpleNamespace(root_lm=object(), sub_lm=object()),
+            options=RLMOptions(),
+            deadline=asyncio.get_running_loop().time() + 10,
+            interpreter=Interpreter(),
+            cancellation_requested=not_cancelled,
+        ),
         capabilities=Capabilities(workspace),
-        cancellation_requested=not_cancelled,
-        preparation_notices=(),
     )
     stream = RLMRunner(factory=factory).stream(context)
     observed = [event async for event in stream]

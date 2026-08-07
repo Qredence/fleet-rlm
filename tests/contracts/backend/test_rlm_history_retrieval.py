@@ -16,7 +16,13 @@ from fleet_rlm.sessions.history_tools import SESSION_HISTORY_RESULT_BYTE_BUDGET
 async def test_native_rlm_retrieves_older_content_absent_from_initial_kwargs() -> None:
     from fleet_rlm.chat.session_context import build_session_context_manifest
     from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
-    from fleet_rlm.rlm.context import RLMExecutionContext, RLMExecutionSpec
+    from fleet_rlm.rlm.context import (
+        ExecutionRuntime,
+        RLMExecutionContext,
+        RLMExecutionSpec,
+        SessionView,
+        TurnIdentity,
+    )
     from fleet_rlm.rlm.dspy_contract import RLMOptions
     from fleet_rlm.rlm.factory import RLMFactory
     from fleet_rlm.rlm.runner import RLMRunner
@@ -72,19 +78,18 @@ async def test_native_rlm_retrieves_older_content_absent_from_initial_kwargs() -
         return False
 
     context = RLMExecutionContext(
-        run_id=uuid4(),
-        session_id=session_id,
-        access=TurnAccess(uuid4(), uuid4()),
-        request="What was the project codename?",
-        session_context=manifest,
-        models=SimpleNamespace(root_lm=object(), sub_lm=object()),
-        options=RLMOptions(max_iterations=1),
-        deadline=asyncio.get_running_loop().time() + 10,
-        interpreter=DaytonaCodeInterpreter(backend=InProcessInterpreterBackend()),
-        attachments=(),
+        identity=TurnIdentity(run_id=uuid4(), session_id=session_id, access=TurnAccess(uuid4(), uuid4())),
+        session=SessionView(
+            request="What was the project codename?", session_context=manifest, attachments=(), preparation_notices=()
+        ),
+        execution=ExecutionRuntime(
+            models=SimpleNamespace(root_lm=object(), sub_lm=object()),
+            options=RLMOptions(max_iterations=1),
+            deadline=asyncio.get_running_loop().time() + 10,
+            interpreter=DaytonaCodeInterpreter(backend=InProcessInterpreterBackend()),
+            cancellation_requested=not_cancelled,
+        ),
         capabilities=Capabilities(),
-        cancellation_requested=not_cancelled,
-        preparation_notices=(),
     )
     factory = Factory()
     stream = RLMRunner(factory=factory).stream(context)
@@ -101,7 +106,13 @@ async def test_native_rlm_retrieves_older_content_absent_from_initial_kwargs() -
 async def test_native_rlm_continues_history_across_truncated_pages() -> None:
     from fleet_rlm.chat.session_context import build_session_context_manifest
     from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
-    from fleet_rlm.rlm.context import RLMExecutionContext, RLMExecutionSpec
+    from fleet_rlm.rlm.context import (
+        ExecutionRuntime,
+        RLMExecutionContext,
+        RLMExecutionSpec,
+        SessionView,
+        TurnIdentity,
+    )
     from fleet_rlm.rlm.dspy_contract import RLMOptions
     from fleet_rlm.rlm.factory import RLMFactory
     from fleet_rlm.rlm.runner import RLMRunner
@@ -163,19 +174,18 @@ async def test_native_rlm_continues_history_across_truncated_pages() -> None:
         return False
 
     context = RLMExecutionContext(
-        run_id=uuid4(),
-        session_id=session_id,
-        access=TurnAccess(uuid4(), uuid4()),
-        request="What is the final detail?",
-        session_context=manifest,
-        models=SimpleNamespace(root_lm=object(), sub_lm=object()),
-        options=RLMOptions(max_iterations=1),
-        deadline=asyncio.get_running_loop().time() + 10,
-        interpreter=DaytonaCodeInterpreter(backend=InProcessInterpreterBackend()),
-        attachments=(),
+        identity=TurnIdentity(run_id=uuid4(), session_id=session_id, access=TurnAccess(uuid4(), uuid4())),
+        session=SessionView(
+            request="What is the final detail?", session_context=manifest, attachments=(), preparation_notices=()
+        ),
+        execution=ExecutionRuntime(
+            models=SimpleNamespace(root_lm=object(), sub_lm=object()),
+            options=RLMOptions(max_iterations=1),
+            deadline=asyncio.get_running_loop().time() + 10,
+            interpreter=DaytonaCodeInterpreter(backend=InProcessInterpreterBackend()),
+            cancellation_requested=not_cancelled,
+        ),
         capabilities=Capabilities(),
-        cancellation_requested=not_cancelled,
-        preparation_notices=(),
     )
     factory = Factory()
     stream = RLMRunner(factory=factory).stream(context)

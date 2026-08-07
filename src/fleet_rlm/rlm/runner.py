@@ -615,10 +615,10 @@ class _WorkerMonitor:
         pending: asyncio.Task[RuntimeEventDetail] | None = None
         try:
             while not self.task.done():
-                if await self.context.cancellation_requested():
+                if await self.context.execution.cancellation_requested():
                     self.intended_stop = TurnCancelledError()
                     break
-                remaining = self.context.deadline - asyncio.get_running_loop().time()
+                remaining = self.context.execution.deadline - asyncio.get_running_loop().time()
                 if remaining <= 0:
                     self.intended_stop = TimeoutError()
                     break
@@ -749,7 +749,7 @@ class RLMRunner:
         prediction: list[Any],
         started: float,
     ) -> AsyncIterator[RuntimeEvent]:
-        observations = _ObservationBuffer(EventRecorder(context.run_id, context.session_id))
+        observations = _ObservationBuffer(EventRecorder(context.identity.run_id, context.identity.session_id))
         async for event in self._initial_events(context, observations):
             yield event
         spec = context.capabilities.spec
@@ -769,7 +769,7 @@ class RLMRunner:
             spec.signature,
             schema_id=spec.output_schema_id,
             schema_version=spec.output_schema_version,
-            max_output_chars=context.options.max_output_chars,
+            max_output_chars=context.execution.options.max_output_chars,
         )
         outcome.append(
             RLMOutcome(
@@ -789,11 +789,11 @@ class RLMRunner:
     ) -> AsyncIterator[RuntimeEvent]:
         yield observations.recorder.record(RunStarted(delivery="live"))
         yield observations.recorder.record(Status("execution", "running"))
-        for notice in context.preparation_notices:
+        for notice in context.session.preparation_notices:
             yield observations.recorder.record(WarningEvent(notice.message, notice.code))
         for item in self._drain_capability_details(context):
             yield observations.record(item)
-        if await context.cancellation_requested():
+        if await context.execution.cancellation_requested():
             raise TurnCancelledError
 
     def _start_worker(
@@ -814,26 +814,26 @@ class RLMRunner:
         """
         spec = context.capabilities.spec
         relay = _DetailRelay(maxsize=_MAX_DETAIL_EVENTS)
-        guards = TurnToolGuards(required_targets=workspace_obligations(context.request))
-        self._bind_observer(context.interpreter, relay, context.options.max_output_chars)
+        guards = TurnToolGuards(required_targets=workspace_obligations(context.session.request))
+        self._bind_observer(context.execution.interpreter, relay, context.execution.options.max_output_chars)
         self._bind_context_capsule(context)
         recursive_executor = None
-        if context.recursive_options.enabled:
-            if context.child_runtime_factory is None and context.recursive_options.max_depth > 1:
+        if context.delegation.recursive_options.enabled:
+            if context.delegation.child_runtime_factory is None and context.delegation.recursive_options.max_depth > 1:
                 raise RLMConfigError("recursive child runtime is unavailable")
             recursive_executor = RecursiveRLMExecutor(
-                models=context.models,
-                options=context.recursive_options,
-                child_runtime_factory=context.child_runtime_factory,
-                deadline=context.deadline,
+                models=context.execution.models,
+                options=context.delegation.recursive_options,
+                child_runtime_factory=context.delegation.child_runtime_factory,
+                deadline=context.execution.deadline,
                 observer=relay.publish,
-                is_authorized=lambda: not context.authority.revoked,
+                is_authorized=lambda: not context.identity.authority.revoked,
             )
         spec = replace(
             spec,
             signature=root_signature_for_recursion(
                 spec.signature,
-                recursion_enabled=context.recursive_options.enabled,
+                recursion_enabled=context.delegation.recursive_options.enabled,
             ),
         )
 
@@ -848,22 +848,22 @@ class RLMRunner:
                 relay.publish,
                 spec.tool_event_views.get(str(tool.name), ToolEventView.metadata_only()),
                 after_result=(relay_capability_details if str(tool.name) == "load_skill" else None),
-                is_authorized=lambda: not context.authority.revoked,
+                is_authorized=lambda: not context.identity.authority.revoked,
                 guards=guards,
             )
             for tool in spec.tools
         )
         all_tools = (*observed_tools, *((recursive_executor.tool,) if recursive_executor is not None else ()))
         rlm = self._factory.create(
-            models=context.models,
-            options=context.options,
+            models=context.execution.models,
+            options=context.execution.options,
             tools=all_tools or None,
             signature=spec.signature,
         )
         self._bind_observer(
             rlm,
             relay,
-            context.options.max_output_chars,
+            context.execution.options.max_output_chars,
             emit_reasoning=type(rlm) is not dspy.RLM,
         )
         return (
@@ -896,12 +896,16 @@ class RLMRunner:
         prediction: Any,
     ) -> AsyncIterator[RuntimeEvent]:
         trajectory = normalize_prediction_trajectory(prediction)
-        for item in _reconcile_trajectory(observations.details, trajectory, max_chars=context.options.max_output_chars):
+        for item in _reconcile_trajectory(
+            observations.details, trajectory, max_chars=context.execution.options.max_output_chars
+        ):
             yield observations.recorder.record(item)
         final_reasoning = getattr(prediction, "final_reasoning", None)
         if isinstance(final_reasoning, str) and final_reasoning.strip():
-            public_reasoning = truncate_public_text(final_reasoning, max_len=context.options.max_output_chars)
-            if not self._has_reasoning(observations.details, public_reasoning, context.options.max_output_chars):
+            public_reasoning = truncate_public_text(final_reasoning, max_len=context.execution.options.max_output_chars)
+            if not self._has_reasoning(
+                observations.details, public_reasoning, context.execution.options.max_output_chars
+            ):
                 item = RLMReasoning(public_reasoning)
                 yield observations.record(item)
         for item in self._drain_capability_details(context):
@@ -910,11 +914,11 @@ class RLMRunner:
     @staticmethod
     def _bind_context_capsule(context: RLMExecutionContext) -> None:
         """Bind the prepared Volume context to the interpreter before the RLM starts."""
-        if context.attachment_context is None:
+        if context.session.attachment_context is None:
             return
-        bind = getattr(context.interpreter, "bind_context_capsule", None)
+        bind = getattr(context.execution.interpreter, "bind_context_capsule", None)
         if callable(bind):
-            bind(context.attachment_context)
+            bind(context.session.attachment_context)
 
     @staticmethod
     def _bind_observer(
@@ -946,9 +950,9 @@ class RLMRunner:
     def _native_call_args(rlm: Any, context: RLMExecutionContext) -> tuple[Any, ...]:
         if type(rlm) is not dspy.RLM:
             return ()
-        if context.interpreter is None:
+        if context.execution.interpreter is None:
             raise RLMConfigError("native RLM execution requires a caller-owned interpreter")
-        return (context.interpreter,)
+        return (context.execution.interpreter,)
 
     async def _stream_native_rlm(
         self,
@@ -975,8 +979,8 @@ class RLMRunner:
             for field in ("reasoning", "code")
         ]
         stream_projector = _NativeRLMStreamProjector(
-            run_id=context.run_id,
-            max_chars=context.options.max_output_chars,
+            run_id=context.identity.run_id,
+            max_chars=context.execution.options.max_output_chars,
             publish=relay.publish,
         )
         stream_program = cast(
@@ -1024,7 +1028,7 @@ class RLMRunner:
 
     @staticmethod
     def _record_attachment_accesses(context: RLMExecutionContext) -> None:
-        drain_accesses = getattr(context.interpreter, "drain_context_accesses", None)
+        drain_accesses = getattr(context.execution.interpreter, "drain_context_accesses", None)
         record_accesses = getattr(context.capabilities, "record_attachment_accesses", None)
         if callable(drain_accesses) and callable(record_accesses):
             record_accesses(tuple(drain_accesses()))
@@ -1093,11 +1097,11 @@ class RLMRunner:
         are surfaced as execution failures.
         """
         kwargs = build_rlm_input_kwargs(
-            request=context.request,
-            session_context=context.session_context,
+            request=context.session.request,
+            session_context=context.session.session_context,
             skill_cards=spec.skill_cards,
-            attachments=context.attachments,
-            attachment_context=context.attachment_context,
+            attachments=context.session.attachments,
+            attachment_context=context.session.attachment_context,
             workspace=spec.workspace,
         )
         started = time.perf_counter()
@@ -1105,16 +1109,18 @@ class RLMRunner:
             turn_phase_span(
                 "RLM.execute",
                 inputs={
-                    "max_iterations": context.options.max_iterations,
-                    "max_llm_calls": context.options.max_llm_calls,
-                    "max_output_chars": context.options.max_output_chars,
+                    "max_iterations": context.execution.options.max_iterations,
+                    "max_llm_calls": context.execution.options.max_llm_calls,
+                    "max_output_chars": context.execution.options.max_output_chars,
                 },
             ) as phase,
             dspy.context(
-                lm=context.models.root_lm,
+                lm=context.execution.models.root_lm,
                 # DSPy 3.3.x combines context callbacks with instance
                 # callbacks around LM requests (dspy/utils/callback.py:258-288).
-                callbacks=[_RLMTraceCallback(root_lm=context.models.root_lm, sub_lm=context.models.sub_lm)],
+                callbacks=[
+                    _RLMTraceCallback(root_lm=context.execution.models.root_lm, sub_lm=context.execution.models.sub_lm)
+                ],
                 # Keep the pinned DSPy JSON action protocol authoritative. A
                 # provider-native token stream is an adapter failure, not a
                 # second grammar that Fleet should reinterpret.

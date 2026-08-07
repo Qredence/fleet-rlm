@@ -78,24 +78,52 @@ class RLMExecutionSpec:
 
 
 @dataclass(frozen=True, slots=True)
-class RLMExecutionContext:
-    """Complete immutable input accepted by `RLMRunner`."""
+class TurnIdentity:
+    """Who/which: the Run's durable identity and authority."""
 
     run_id: UUID
     session_id: UUID
     access: TurnAccess
+    authority: RunAuthority = field(default_factory=RunAuthority)
+
+
+@dataclass(frozen=True, slots=True)
+class SessionView:
+    """What the Turn is about, bounded by Session scope."""
+
     request: str
     session_context: SessionContextManifest
+    attachments: tuple[PreparedAttachment, ...]
+    attachment_context: AttachmentContextCapsule | None = None
+    preparation_notices: tuple[PreparationNotice, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class ExecutionRuntime:
+    """Live execution control: models, limits, interpreter, cancellation."""
+
     models: RLMModelBundle
     options: RLMOptions
-    deadline: float
     interpreter: RLMInterpreter | None
-    attachments: tuple[PreparedAttachment, ...]
-    capabilities: PreparedCapabilities
     cancellation_requested: AsyncCancellationProbe
-    preparation_notices: tuple[PreparationNotice, ...]
-    attachment_context: AttachmentContextCapsule | None = None
-    authority: RunAuthority = field(default_factory=RunAuthority)
-    selected_skill_count: int = 0
+    deadline: float
+
+
+@dataclass(frozen=True, slots=True)
+class DelegationPolicy:
+    """Cross-sandbox recursive-RLM policy (empty when recursion is disabled)."""
+
     child_runtime_factory: ChildRuntimeFactory | None = None
     recursive_options: RecursiveRLMOptions = field(default_factory=RecursiveRLMOptions)
+
+
+@dataclass(frozen=True, slots=True)
+class RLMExecutionContext:
+    """Complete immutable input accepted by `RLMRunner`, in five deep members."""
+
+    identity: TurnIdentity
+    session: SessionView
+    execution: ExecutionRuntime
+    capabilities: PreparedCapabilities
+    delegation: DelegationPolicy = field(default_factory=DelegationPolicy)
+    selected_skill_count: int = 0

@@ -154,7 +154,7 @@ async def test_prepared_rlm_kwargs_bound_a_large_session_to_recent_previews() ->
     encoded = json.dumps(factory.kwargs)
     assert messages[0].content not in encoded
     assert messages[-1].content not in encoded
-    assert prepared.execution.session_context.message_count == 100
+    assert prepared.execution.session.session_context.message_count == 100
     assert not hasattr(prepared.execution, "history")
 
     await prepared.aclose()

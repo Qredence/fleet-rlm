@@ -25,9 +25,13 @@ from fleet_rlm.persistence.database import DatabaseConnectionError
 from fleet_rlm.result_snapshot import ResultSnapshotSink
 from fleet_rlm.rlm.child_runtime import ChildRuntimeFactory
 from fleet_rlm.rlm.context import (
+    DelegationPolicy,
+    ExecutionRuntime,
     PreparedCapabilities,
     RLMExecutionContext,
     RLMInterpreter,
+    SessionView,
+    TurnIdentity,
 )
 from fleet_rlm.rlm.dspy_contract import RLMOptions
 from fleet_rlm.rlm.inputs import AttachmentContextCapsule, AttachmentContextEntry
@@ -261,37 +265,45 @@ class DefaultTurnPreparer:
 
         resources = _PreparedTurnResources((environment.release, capabilities.aclose, remove_staged))
         execution = RLMExecutionContext(
-            run_id=turn.run_id,
-            session_id=turn.session_id,
-            access=turn.access,
-            request=turn.input.text,
-            session_context=build_session_context_manifest(
-                turn.session_id,
-                turn.checkpoint_version,
-                turn.history,
+            identity=TurnIdentity(
+                run_id=turn.run_id,
+                session_id=turn.session_id,
+                access=turn.access,
+                authority=turn.authority,
             ),
-            models=self._models,
-            options=self._options,
-            deadline=deadline,
-            interpreter=environment.interpreter,
-            attachments=tuple(
-                PreparedAttachment(
-                    ref.id,
-                    ref.filename,
-                    ref.content_type,
-                    ref.byte_size,
-                    ref.checksum_sha256,
-                )
-                for ref in staged.refs
+            session=SessionView(
+                request=turn.input.text,
+                session_context=build_session_context_manifest(
+                    turn.session_id,
+                    turn.checkpoint_version,
+                    turn.history,
+                ),
+                attachments=tuple(
+                    PreparedAttachment(
+                        ref.id,
+                        ref.filename,
+                        ref.content_type,
+                        ref.byte_size,
+                        ref.checksum_sha256,
+                    )
+                    for ref in staged.refs
+                ),
+                attachment_context=attachment_context,
+                preparation_notices=tuple(getattr(capabilities, "preparation_notices", ())),
+            ),
+            execution=ExecutionRuntime(
+                models=self._models,
+                options=self._options,
+                interpreter=environment.interpreter,
+                cancellation_requested=turn.cancellation_requested,
+                deadline=deadline,
             ),
             capabilities=capabilities,
-            cancellation_requested=turn.cancellation_requested,
-            preparation_notices=tuple(getattr(capabilities, "preparation_notices", ())),
-            attachment_context=attachment_context,
-            authority=turn.authority,
+            delegation=DelegationPolicy(
+                child_runtime_factory=environment.child_runtime_factory,
+                recursive_options=self._recursive_options,
+            ),
             selected_skill_count=len(turn.input.skill_selections),
-            child_runtime_factory=environment.child_runtime_factory,
-            recursive_options=self._recursive_options,
         )
         return PreparedTurn(
             execution,
