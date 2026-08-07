@@ -10,8 +10,8 @@ from uuid import UUID, uuid4
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response
 from fastapi.sse import EventSourceResponse, ServerSentEvent
 
-from fleet_rlm.api.dependencies import TurnCoordinatorDep
-from fleet_rlm.api.local_scope import LocalScope, get_local_scope
+from fleet_rlm.api.dependencies import LocalScopeDep, TurnCoordinatorDep
+from fleet_rlm.api.errors import http_error
 from fleet_rlm.api.schemas import CreateTurnRequest
 from fleet_rlm.api.sse import AISDKUIProjector
 from fleet_rlm.chat.commands import OpenTurnCommand
@@ -28,18 +28,8 @@ from fleet_rlm.sessions.models import TurnAccess, TurnInput
 from fleet_rlm.skills.errors import InvalidSkillSelectionError
 from fleet_rlm.skills.models import SkillSelectionRef
 
-router = APIRouter(tags=["turns"])
+router = APIRouter(prefix="/api/sessions", tags=["turns"])
 logger = logging.getLogger(__name__)
-
-
-def _http_error(
-    status: int,
-    code: str,
-    message: str,
-    *,
-    headers: dict[str, str] | None = None,
-) -> HTTPException:
-    return HTTPException(status_code=status, detail={"code": code, "message": message}, headers=headers)
 
 
 def _correlation_id(request: Request) -> str:
@@ -60,7 +50,7 @@ def _preparation_unavailable(request: Request, exc: BaseException) -> HTTPExcept
         diagnostic.provider_status_category,
         diagnostic.message,
     )
-    return _http_error(
+    return http_error(
         503,
         "turn_unavailable",
         "Turn is unavailable",
@@ -76,7 +66,7 @@ async def _open_turn(
     body: CreateTurnRequest,
     request: Request,
     response: Response,
-    identity: Annotated[LocalScope, Depends(get_local_scope)],
+    identity: LocalScopeDep,
     coordinator: TurnCoordinatorDep,
     idempotency_key: Annotated[
         str,
@@ -100,19 +90,19 @@ async def _open_turn(
         )
         opened = await coordinator.open(command)
     except TurnNotFoundError as exc:
-        raise _http_error(404, "session_not_found", "Session not found") from exc
+        raise http_error(404, "session_not_found", "Session not found") from exc
     except TurnInProgressError as exc:
-        raise _http_error(409, "turn_in_progress", "A Turn is already running") from exc
+        raise http_error(409, "turn_in_progress", "A Turn is already running") from exc
     except TurnIdempotencyMismatchError as exc:
-        raise _http_error(409, "idempotency_mismatch", "Idempotency key input mismatch") from exc
+        raise http_error(409, "idempotency_mismatch", "Idempotency key input mismatch") from exc
     except InvalidSkillSelectionError as exc:
-        raise _http_error(422, "invalid_skill_selection", "Invalid Skill selection") from exc
+        raise http_error(422, "invalid_skill_selection", "Invalid Skill selection") from exc
     except TurnPreparationTimeoutError as exc:
-        raise _http_error(504, "turn_preparation_timeout", "Turn preparation timed out") from exc
+        raise http_error(504, "turn_preparation_timeout", "Turn preparation timed out") from exc
     except (TurnLifecycleUnavailableError, TurnPreparationUnavailableError) as exc:
         raise _preparation_unavailable(request, exc) from exc
     except ValueError as exc:
-        raise _http_error(422, "invalid_request", "Invalid request") from exc
+        raise http_error(422, "invalid_request", "Invalid request") from exc
 
     response.headers["x-vercel-ai-ui-message-stream"] = "v1"
     response.headers["X-Fleet-Run-ID"] = str(opened.run_id)
@@ -123,7 +113,7 @@ OpenedTurnDep = Annotated[OpenedTurnStream, Depends(_open_turn)]
 
 
 @router.post(
-    "/api/sessions/{session_id}/turns",
+    "/{session_id}/turns",
     operation_id="create_turn",
     response_class=EventSourceResponse,
     responses={

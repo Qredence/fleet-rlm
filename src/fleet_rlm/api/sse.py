@@ -1,11 +1,20 @@
 """Exhaustive AI SDK UI v1 projection for typed Fleet Runtime Events."""
 
+# The AI SDK UI chunk contract is hand-maintained in FOUR places; keep them in
+# sync (this projector is the runtime source of truth; the golden-stream
+# fixture in scripts/generate_stream_fixture.py locks it to the TUI):
+#   1. this module (AISDKUIProjector)
+#   2. src/fleet_rlm/api/ui_message.py       (reload projection)
+#   3. src/fleet_rlm/api/openapi.py          (OpenAPI chunk schemas)
+#   4. tools/fleet-tui/src/sse.ts            (TUI runtime validator)
+
 from __future__ import annotations
 
 from collections.abc import Mapping
 from typing import Any
 from uuid import UUID
 
+from fleet_rlm.api.json_util import to_plain_json
 from fleet_rlm.rlm.events import (
     ArtifactCreated,
     AttachmentRead,
@@ -70,14 +79,6 @@ def _detail_data(detail: object) -> dict[str, Any]:
         if name != "kind"
         for value in (getattr(detail, name),)
     }
-
-
-def _json_value(value: Any) -> Any:
-    if isinstance(value, Mapping):
-        return {str(key): _json_value(item) for key, item in value.items()}
-    if isinstance(value, (tuple, list)):
-        return [_json_value(item) for item in value]
-    return value
 
 
 def _event_to_public_dict(event: RuntimeEvent) -> dict[str, Any]:
@@ -300,7 +301,7 @@ class AISDKUIProjector:
         if isinstance(detail, ArtifactCreated):
             return [self._data("artifact", data, part_id=str(detail.artifact_id))]
         if isinstance(detail, Usage):
-            return [self._data("usage", {"usage": _json_value(detail.value)}, part_id=f"usage-{event.run_id}")]
+            return [self._data("usage", {"usage": to_plain_json(detail.value)}, part_id=f"usage-{event.run_id}")]
         if isinstance(detail, StructuredResult):
             return [self._data("structured-result", data, part_id=f"result-{event.run_id}")]
         return [self._data("warning", data)]

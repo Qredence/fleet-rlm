@@ -377,7 +377,33 @@ paths:
           title: Artifact Id
       responses:
         '200':
-          description: Successful Response
+          description: Artifact bytes with integrity headers
+          headers:
+            Content-Disposition:
+              schema:
+                type: string
+            ETag:
+              description: SHA-256 of the artifact bytes, quoted (e.g. "hex")
+              schema:
+                type: string
+            Content-Length:
+              schema:
+                type: integer
+            X-Content-Type-Options:
+              schema:
+                type: string
+        '404':
+          description: Artifact not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: Artifact storage is unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '422':
           description: Validation Error
           content:
@@ -521,8 +547,10 @@ paths:
         required: false
         schema:
           type: string
+          description: Workspace-relative path
           default: .
           title: Path
+        description: Workspace-relative path
       - name: limit
         in: query
         required: false
@@ -894,6 +922,7 @@ components:
       - status
       - checkpoint_version
       title: SessionDetailResponse
+      description: Session detail — same public shape as the summary today.
     SessionListResponse:
       properties:
         items:
@@ -1578,6 +1607,7 @@ components:
             required:
             - name
             - version
+            - skill_id
           transient:
             type: boolean
         required:
@@ -1730,6 +1760,7 @@ components:
             additionalProperties: true
             required:
             - filename
+            - attachment_id
           transient:
             type: boolean
         required:
@@ -1798,6 +1829,8 @@ components:
               checksumSha256:
                 type: string
             additionalProperties: true
+            required:
+            - artifact_id
           transient:
             type: boolean
         required:
@@ -1847,6 +1880,8 @@ components:
               value: {}
             additionalProperties: true
             required:
+            - schema_id
+            - schema_version
             - value
           transient:
             type: boolean

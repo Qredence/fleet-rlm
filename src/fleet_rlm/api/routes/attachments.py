@@ -5,26 +5,26 @@ from __future__ import annotations
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, File, UploadFile
 
-from fleet_rlm.api.dependencies import AttachmentLifecycleDep
-from fleet_rlm.api.local_scope import LocalScope, get_local_scope
+from fleet_rlm.api.dependencies import AttachmentLifecycleDep, LocalScopeDep
+from fleet_rlm.api.errors import http_error
 from fleet_rlm.api.schemas import AttachmentResponse
 from fleet_rlm.files.errors import AttachmentError, AttachmentNotFoundError
 from fleet_rlm.files.models import AttachmentAccess, AttachmentUpload
 
-router = APIRouter(tags=["attachments"])
+router = APIRouter(prefix="/api/attachments", tags=["attachments"])
 
 
 @router.post(
-    "/api/attachments",
+    "",
     response_model=AttachmentResponse,
     status_code=201,
     operation_id="create_attachment",
 )
 async def upload_attachment(
     attachment: Annotated[UploadFile, File()],
-    identity: Annotated[LocalScope, Depends(get_local_scope)],
+    identity: LocalScopeDep,
     lifecycle: AttachmentLifecycleDep,
 ) -> AttachmentResponse:
     try:
@@ -37,23 +37,20 @@ async def upload_attachment(
             ),
         )
     except AttachmentError as exc:
-        raise HTTPException(status_code=400, detail={"code": "attachment_invalid", "message": str(exc)}) from exc
+        raise http_error(400, "attachment_invalid", str(exc)) from exc
     except Exception as exc:
-        raise HTTPException(
-            status_code=503,
-            detail={"code": "attachment_unavailable", "message": "Attachment storage is unavailable"},
-        ) from exc
+        raise http_error(503, "attachment_unavailable", "Attachment storage is unavailable") from exc
     return AttachmentResponse.model_validate(ref, from_attributes=True)
 
 
 @router.get(
-    "/api/attachments/{attachment_id}",
+    "/{attachment_id}",
     response_model=AttachmentResponse,
     operation_id="get_attachment",
 )
 async def get_attachment(
     attachment_id: UUID,
-    identity: Annotated[LocalScope, Depends(get_local_scope)],
+    identity: LocalScopeDep,
     lifecycle: AttachmentLifecycleDep,
 ) -> AttachmentResponse:
     try:
@@ -63,13 +60,7 @@ async def get_attachment(
         )
         ref = refs[0]
     except AttachmentNotFoundError as exc:
-        raise HTTPException(
-            status_code=404,
-            detail={"code": "attachment_not_found", "message": "Attachment not found"},
-        ) from exc
+        raise http_error(404, "attachment_not_found", "Attachment not found") from exc
     except Exception as exc:
-        raise HTTPException(
-            status_code=503,
-            detail={"code": "attachment_unavailable", "message": "Attachment storage is unavailable"},
-        ) from exc
+        raise http_error(503, "attachment_unavailable", "Attachment storage is unavailable") from exc
     return AttachmentResponse.model_validate(ref, from_attributes=True)

@@ -7,6 +7,7 @@ from typing import Annotated
 
 from fastapi import Depends, HTTPException, Request
 
+from fleet_rlm.api.local_scope import LocalScope, get_local_scope
 from fleet_rlm.artifacts.reader import ArtifactReader
 from fleet_rlm.chat.turn_coordinator import TurnCoordinator
 from fleet_rlm.chat.turn_lifecycle import TurnLifecycle
@@ -17,6 +18,7 @@ from fleet_rlm.files.lifecycle import AttachmentLifecycle
 from fleet_rlm.files.volume_storage import WorkspaceVolumeGateway
 from fleet_rlm.files.workspace_access import WorkspaceFileService
 from fleet_rlm.sessions.catalog import SessionCatalog
+from fleet_rlm.skills.catalog import SkillCatalog
 
 
 def require_loopback_client(request: Request) -> None:
@@ -74,10 +76,9 @@ def get_artifact_reader(request: Request) -> ArtifactReader:
 
 
 def get_session_catalog(request: Request) -> SessionCatalog:
-    inventory = get_runtime_inventory(request.app)
-    catalog = inventory.session_catalog if inventory is not None else None
+    catalog = get_ready_runtime_inventory(request).session_catalog
     if catalog is None:
-        raise HTTPException(status_code=503, detail="database not configured")
+        raise HTTPException(status_code=503, detail="application composition is not ready")
     return catalog
 
 
@@ -90,6 +91,13 @@ def get_turn_lifecycle(request: Request) -> TurnLifecycle:
 
 def get_settings(request: Request) -> Settings:
     return request.app.state.settings
+
+
+def get_skill_catalog(request: Request) -> SkillCatalog:
+    catalog = getattr(request.app.state, "skill_catalog", None)
+    if not isinstance(catalog, SkillCatalog):
+        raise RuntimeError("bundled Skill catalog is unavailable")
+    return catalog
 
 
 def get_config_policy(request: Request) -> ConfigPolicyService:
@@ -119,19 +127,23 @@ AttachmentLifecycleDep = Annotated[AttachmentLifecycle, Depends(get_attachment_l
 SessionCatalogDep = Annotated[SessionCatalog, Depends(get_session_catalog)]
 TurnLifecycleDep = Annotated[TurnLifecycle, Depends(get_turn_lifecycle)]
 SettingsDep = Annotated[Settings, Depends(get_settings)]
+SkillCatalogDep = Annotated[SkillCatalog, Depends(get_skill_catalog)]
 ConfigPolicyDep = Annotated[ConfigPolicyService, Depends(get_config_policy)]
 WorkspaceFileServiceDep = Annotated[WorkspaceFileService, Depends(get_workspace_file_service)]
 WorkspaceVolumeGatewayDep = Annotated[WorkspaceVolumeGateway, Depends(get_workspace_volume_gateway)]
+LocalScopeDep = Annotated[LocalScope, Depends(get_local_scope)]
 
 __all__ = [
     "ArtifactReaderDep",
     "AttachmentLifecycleDep",
     "ConfigPolicyDep",
+    "LocalScopeDep",
     "SessionCatalogDep",
     "SettingsDep",
+    "SkillCatalogDep",
     "TurnCoordinatorDep",
     "TurnLifecycleDep",
     "WorkspaceFileServiceDep",
     "WorkspaceVolumeGatewayDep",
-    "get_ready_runtime_inventory",
+    "require_loopback_client",
 ]

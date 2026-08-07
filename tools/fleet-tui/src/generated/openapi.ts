@@ -380,7 +380,10 @@ export interface components {
             /** Title */
             title?: string | null;
         };
-        /** SessionDetailResponse */
+        /**
+         * SessionDetailResponse
+         * @description Session detail — same public shape as the summary today.
+         */
         SessionDetailResponse: {
             /**
              * Id
@@ -725,7 +728,7 @@ export interface components {
             type: "data-skill";
             id?: string;
             data: {
-                skill_id?: string;
+                skill_id: string;
                 skillId?: string;
                 name: string;
                 version: string;
@@ -792,7 +795,7 @@ export interface components {
             type: "data-attachment";
             id?: string;
             data: {
-                attachment_id?: string;
+                attachment_id: string;
                 attachmentId?: string;
                 phase?: string;
                 filename: string;
@@ -818,7 +821,7 @@ export interface components {
             type: "data-artifact";
             id?: string;
             data: {
-                artifact_id?: string;
+                artifact_id: string;
                 artifactId?: string;
                 artifact_kind?: string;
                 kind?: string;
@@ -851,9 +854,9 @@ export interface components {
             type: "data-structured-result";
             id?: string;
             data: {
-                schema_id?: string;
+                schema_id: string;
                 schemaId?: string;
-                schema_version?: string;
+                schema_version: string;
                 schemaVersion?: string;
                 value: unknown;
             } & {
@@ -1250,15 +1253,38 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Successful Response */
+            /** @description Artifact bytes with integrity headers */
             200: {
                 headers: {
+                    "Content-Disposition"?: string;
+                    /** @description SHA-256 of the artifact bytes, quoted (e.g. "hex") */
+                    ETag?: string;
+                    "Content-Length"?: number;
+                    "X-Content-Type-Options"?: string;
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Artifact not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
             /** @description Validation Error */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Artifact storage is unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -1418,6 +1444,7 @@ export interface operations {
     list_workspace_files_api: {
         parameters: {
             query?: {
+                /** @description Workspace-relative path */
                 path?: string;
                 limit?: number;
                 after?: string | null;

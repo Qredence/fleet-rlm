@@ -10,6 +10,13 @@ from fastapi.openapi.utils import get_openapi
 from fleet_rlm.api.errors import ErrorResponse
 from fleet_rlm.api.sse import FLEET_UI_CHUNK_TYPES
 
+# The AI SDK UI chunk contract is hand-maintained in FOUR places; keep them in
+# sync (tests/contracts/backend/test_stream_fixture.py + the TUI golden-stream
+# test lock this copy against the runtime projector):
+#   1. src/fleet_rlm/api/sse.py            (runtime projector)
+#   2. src/fleet_rlm/api/ui_message.py     (reload projection)
+#   3. this module                          (OpenAPI chunk schemas)
+#   4. tools/fleet-tui/src/sse.ts           (TUI runtime validator)
 _CHUNK_FIELD_TYPES: dict[str, dict[str, Any]] = {
     "id": {"type": "string"},
     "messageId": {"type": "string", "format": "uuid"},
@@ -51,6 +58,8 @@ _CHUNK_FIELD_SPECS: dict[str, tuple[tuple[str, ...], list[str]]] = {
     "finish": (("finishReason", "messageMetadata"), ["type", "finishReason"]),
     "abort": (("reason",), ["type", "reason"]),
     "error": (("errorText",), ["type", "errorText"]),
+    "start-step": ((), ["type"]),
+    "finish-step": ((), ["type"]),
 }
 
 _DATA_STRING = {"type": "string"}
@@ -98,7 +107,10 @@ _DATA_PAYLOAD_SCHEMAS: dict[str, dict[str, Any]] = {
             "trust": _DATA_STRING,
             "affordances": {"type": "array", "items": _DATA_STRING},
         },
-        required=("name", "version"),
+        # The runtime projector always emits the snake_case id form; the TUI
+        # validator requires at least one id form per payload. Document the
+        # guaranteed form as required so the contract matches enforcement.
+        required=("name", "version", "skill_id"),
     ),
     "data-rlm-code": _data_object_schema(
         {
@@ -129,7 +141,7 @@ _DATA_PAYLOAD_SCHEMAS: dict[str, dict[str, Any]] = {
             "byte_size": _DATA_INTEGER,
             "byteSize": _DATA_INTEGER,
         },
-        required=("filename",),
+        required=("filename", "attachment_id"),
     ),
     "data-warning": _data_object_schema(
         {"message": _DATA_STRING, "code": _nullable(_DATA_STRING)},
@@ -150,6 +162,7 @@ _DATA_PAYLOAD_SCHEMAS: dict[str, dict[str, Any]] = {
             "checksum_sha256": _DATA_STRING,
             "checksumSha256": _DATA_STRING,
         },
+        required=("artifact_id",),
     ),
     "data-usage": _data_object_schema(
         {"usage": {"type": "object", "additionalProperties": True}},
@@ -163,7 +176,7 @@ _DATA_PAYLOAD_SCHEMAS: dict[str, dict[str, Any]] = {
             "schemaVersion": _DATA_STRING,
             "value": _DATA_JSON,
         },
-        required=("value",),
+        required=("schema_id", "schema_version", "value"),
     ),
 }
 

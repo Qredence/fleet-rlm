@@ -20,7 +20,6 @@ class SkillSelectionRequest(BaseModel):
 
     id: UUID
     expected_version: str = Field(
-        ...,
         min_length=1,
         max_length=64,
         pattern=r"^[A-Za-z0-9][A-Za-z0-9._+-]{0,63}$",
@@ -38,7 +37,7 @@ class CreateTurnRequest(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    text: str = Field(..., min_length=1, max_length=100_000)
+    text: str = Field(min_length=1, max_length=100_000)
     attachment_ids: list[UUID] = Field(default_factory=list)
     skill_selections: list[SkillSelectionRequest] = Field(default_factory=list, max_length=4)
 
@@ -119,13 +118,8 @@ class SessionSummaryResponse(BaseModel):
     updated_at: str | None = None
 
 
-class SessionDetailResponse(BaseModel):
-    id: UUID
-    title: str
-    status: Literal["active", "archived"]
-    checkpoint_version: int
-    created_at: str | None = None
-    updated_at: str | None = None
+class SessionDetailResponse(SessionSummaryResponse):
+    """Session detail — same public shape as the summary today."""
 
 
 class SessionListResponse(BaseModel):

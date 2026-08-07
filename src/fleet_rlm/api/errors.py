@@ -25,13 +25,20 @@ _STATUS_DEFAULTS = {
     504: ErrorResponse(code="turn_preparation_timeout", message="Turn preparation timed out"),
 }
 
-_DETAIL_CODES = {
-    "session not found": "session_not_found",
-    "run not found": "run_not_found",
-    "attachment not found": "attachment_not_found",
-    "artifact not found": "artifact_not_found",
-    "skill not found": "skill_not_found",
-}
+
+def http_error(
+    status: int,
+    code: str,
+    message: str,
+    *,
+    headers: dict[str, str] | None = None,
+) -> HTTPException:
+    """Build a public closed-contract HTTP error (code/message dict detail).
+
+    Routes must raise the dict form so the global handler never has to guess a
+    code from a free-form string.
+    """
+    return HTTPException(status_code=status, detail={"code": code, "message": message}, headers=headers)
 
 
 def _error(status_code: int, detail: Any) -> ErrorResponse:
@@ -40,11 +47,6 @@ def _error(status_code: int, detail: Any) -> ErrorResponse:
         message = detail.get("message")
         if isinstance(code, str) and isinstance(message, str):
             return ErrorResponse(code=code, message=message)
-    if isinstance(detail, str):
-        normalized = detail.strip()
-        code = _DETAIL_CODES.get(normalized.lower())
-        if code is not None:
-            return ErrorResponse(code=code, message=normalized[:1].upper() + normalized[1:])
     return _STATUS_DEFAULTS.get(
         status_code,
         ErrorResponse(code="request_failed", message="Request failed"),
