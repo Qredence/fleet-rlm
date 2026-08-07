@@ -88,7 +88,9 @@ async def _local_db_lifespan(
         turn_state = inventory.turn_state_store
         reconcile = getattr(turn_state, "reconcile_settling", None)
         if callable(reconcile):
-            await reconcile()
+            from fleet_rlm.composition.common import no_provider_recovery_fence
+
+            await reconcile(no_provider_recovery_fence)
         yield
     finally:
         detached = clear_runtime_inventory(app)

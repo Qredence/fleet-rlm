@@ -10,13 +10,13 @@ compatibility runtime and parallel foundation package no longer exist.
 | `app.py`, `main.py` | FastAPI factory, handlers/routers, static Skill catalog, lifespan selection, ASGI entrypoint | composition, API routers, Skill catalog |
 | `composition/` | common inventory plus explicit Daytona and private testing wiring | domain modules and adapters |
 | `api/` | HTTP translation, local scope, dependency aliases, OpenAPI/SSE projection, UIMessage reload | domain interfaces and composed modules |
-| `chat/` | Turn preparation, shared capability preparation, coordinator orchestration, lifecycle finalization, shared Turn Claim policy | RLM, Sessions, Skills, files |
+| `chat/` | Turn preparation, shared capability preparation, coordinator facade, private Turn execution driver, lifecycle finalization, shared Turn Claim policy | RLM, Sessions, Skills, files |
 | `rlm/` | DSPy Signature, model roles, fresh RLM construction, options, events, runner | DSPy and domain values |
-| `daytona/` | exclusive SDK boundary: async platform/provisioning, Session ownership, DSPy-only sync interpreter seam, broker, diagnostics, Session Workspace gateways, and the mounted Workspace Memory adapter | Daytona SDK and domain values |
+| `daytona/` | exclusive SDK boundary: async platform/provisioning, provider-only Session ownership, DSPy-only sync interpreter seam, pure broker source plus transport, diagnostics, Session Workspace gateways, and the mounted Workspace Memory adapter | Daytona SDK and domain values |
 | `sessions/` | Session catalog, Turn input/history, versioned Committed Turn | domain values |
 | `files/`, `artifacts/` | Attachment staging, paged/append Session Workspace tools, workspace-wide Memory values/tools, direct Workspace Artifact Candidate staging, Artifact promotion/read | storage interfaces and safe paths |
 | `skills/` | bundled catalog, authorization, progressive loading, capability seam, Tool construction | domain values and package resources |
-| `persistence/` | SQLAlchemy models and repository adapters | Session/file/Artifact interfaces |
+| `persistence/` | SQLAlchemy models and repository adapters, including named startup-recovery phases | Session/file/Artifact interfaces |
 | `observability/` | sanitized failure diagnostics; opt-in Databricks MLflow DSPy tracing | domain errors, Settings |
 | `cli/` | supervised Daytona plus pi-tui, backend launchers, doctor dispatch | ASGI entrypoint and Daytona diagnostics |
 
@@ -34,8 +34,20 @@ compatibility runtime and parallel foundation package no longer exist.
 - `TurnLifecycleService` maps outcomes to typed Claim commands, and both Turn
   repositories apply them through one `transition_claim()` seam under their
   existing lock/transaction boundaries.
-- `LiveKernelResources` owns process-lifetime Daytona resources only;
-  `composition/daytona.py` explicitly constructs Turn preparation.
+- `RuntimeInventory` publishes the complete dynamic route-facing graph only after
+  validation; `settings` and the static Skill catalog remain app-level. Lifespan
+  detaches the inventory before disposing its closeable resources.
+- `DaytonaRuntimeResources` owns provider resources only;
+  `composition/daytona.py` injects database, binding, model, preparation, limits,
+  and cleanup ports.
+- `chat/turn_execution.py` owns the private post-preparation Turn state machine;
+  `TurnCoordinator` remains the public stream facade and `TurnLifecycle.finish()`
+  remains the artifact/atomic-commit owner.
+- `daytona/broker_source.py` owns pure broker source generation;
+  `http_broker.py` keeps compatibility re-exports for existing callers.
+- Startup recovery claims eligible nonterminal rows by ownership. Daytona startup
+  supplies a bounded provider fence; deterministic compositions supply an explicit
+  no-provider fence policy, and failed fences restore retryable ownership.
 - Daytona Admission bounds acquiring or active Interpreter Leases, not retained
   Session Sandboxes. Released Session Sandboxes are stopped after the explicit
   five-minute idle policy and restarted on the next acquisition.

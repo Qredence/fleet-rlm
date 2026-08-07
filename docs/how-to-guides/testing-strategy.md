@@ -62,6 +62,16 @@ pnpm --dir tools/fleet-tui run test
 git diff --check
 ```
 
+For separation-of-concerns changes, keep boundary checks close to the
+production seam: composition inventory tests live in
+`tests/contracts/backend/test_composition_inventory.py`, Turn execution tests
+in `tests/unit/backend/chat/test_turn_execution.py`, binding repository tests
+in `tests/unit/backend/test_sandbox_binding_repository.py`, and pure broker
+source tests in `tests/unit/backend/daytona/test_broker_source.py`. Include
+the claim-heartbeat, cleanup, claim-parity, live-preparation, orphan-cleanup,
+broker-binding, and interpreter-observation suites when changing lifecycle or
+provider ownership.
+
 The TUI suite observes the application through an injected deterministic
 terminal. It covers strict stream state, live/durable ordering, atomic hydration,
 commands and Skill selection, cancellation, complete static rendering,

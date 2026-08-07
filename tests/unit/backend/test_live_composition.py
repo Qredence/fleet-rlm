@@ -380,13 +380,14 @@ def test_testing_database_is_created_and_closed_by_lifespan() -> None:
 
 
 def test_local_startup_reconciles_sql_runs_once(monkeypatch) -> None:
+    from fleet_rlm.composition.common import no_provider_recovery_fence
     from fleet_rlm.persistence.repositories.turns import SqlAlchemyTurnStateStore
 
     calls: list[object] = []
 
     async def reconcile(self, fence=None):
         calls.append(self)
-        assert fence is None
+        assert fence is no_provider_recovery_fence
 
     monkeypatch.setattr(SqlAlchemyTurnStateStore, "reconcile_settling", reconcile)
     app = create_testing_app(

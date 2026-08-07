@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -21,6 +22,10 @@ from fleet_rlm.rlm.runner import RLMFactoryLike
 
 class CompositionError(RuntimeError):
     """Raised when a runtime composition cannot be assembled."""
+
+
+async def no_provider_recovery_fence(_session_id: UUID) -> None:
+    """Declare that deterministic compositions have no provider state to fence."""
 
 
 @dataclass(frozen=True, slots=True)

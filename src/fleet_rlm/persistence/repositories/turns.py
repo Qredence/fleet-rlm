@@ -717,8 +717,47 @@ class SqlAlchemyTurnStateStore:
         fences provider state outside the database transaction. A failed fence
         leaves the row non-terminal and eligible for a later retry.
         """
+        pending = await self._load_recovery_candidates()
+        recovered = 0
+        fence_failures = 0
+        skipped = 0
+        budget_exhausted = False
+        for index, pending_run in enumerate(pending):
+            if deadline is not None and asyncio.get_running_loop().time() >= deadline:
+                skipped += len(pending) - index
+                budget_exhausted = True
+                break
+            recovery_owner = await self._claim_recovery_owner(pending_run)
+            if recovery_owner is None:
+                skipped += 1
+                continue
+            try:
+                if fence is not None:
+                    await fence(pending_run.session_id)
+            except Exception:
+                fence_failures += 1
+                await self._restore_after_fence_failure(
+                    pending_run,
+                    recovery_owner,
+                    original_owner=pending_run.claim_owner,
+                )
+                continue
+            if await self._complete_recovery(pending_run, recovery_owner):
+                recovered += 1
+            else:
+                skipped += 1
+        return ReconciliationSummary(
+            candidates=len(pending),
+            recovered=recovered,
+            fence_failures=fence_failures,
+            skipped=skipped,
+            budget_exhausted=budget_exhausted,
+        )
+
+    async def _load_recovery_candidates(self) -> list[RunRow]:
+        """Load bounded nonterminal claims that require startup ownership recovery."""
         async with self._sessions() as db:
-            pending = list(
+            return list(
                 (
                     await db.scalars(
                         select(RunRow)
@@ -732,103 +771,90 @@ class SqlAlchemyTurnStateStore:
                     )
                 ).all()
             )
-        recovered = 0
-        fence_failures = 0
-        skipped = 0
-        budget_exhausted = False
-        for index, pending_run in enumerate(pending):
-            if deadline is not None and asyncio.get_running_loop().time() >= deadline:
-                skipped += len(pending) - index
-                budget_exhausted = True
-                break
-            owner = pending_run.claim_owner
-            heartbeat = pending_run.claim_heartbeat_at
-            if owner is None or heartbeat is None:
-                skipped += 1
-                continue
-            recovery_owner = f"recovery:{uuid4()}"
-            async with self._sessions() as db, db.begin():
-                await db.execute(
-                    update(RunRow)
-                    .where(
-                        RunRow.id == pending_run.id,
-                        RunRow.status == pending_run.status,
-                        RunRow.claim_owner == owner,
-                        RunRow.claim_heartbeat_at == heartbeat,
-                    )
-                    .values(claim_owner=recovery_owner)
+
+    async def _claim_recovery_owner(self, pending_run: RunRow) -> str | None:
+        """Take conditional ownership before any provider call is awaited."""
+        owner = pending_run.claim_owner
+        heartbeat = pending_run.claim_heartbeat_at
+        if owner is None or heartbeat is None:
+            return None
+        recovery_owner = f"recovery:{uuid4()}"
+        async with self._sessions() as db, db.begin():
+            await db.execute(
+                update(RunRow)
+                .where(
+                    RunRow.id == pending_run.id,
+                    RunRow.status == pending_run.status,
+                    RunRow.claim_owner == owner,
+                    RunRow.claim_heartbeat_at == heartbeat,
                 )
-                claimed_id = await db.scalar(
-                    select(RunRow.id).where(
-                        RunRow.id == pending_run.id,
-                        RunRow.claim_owner == recovery_owner,
-                    )
+                .values(claim_owner=recovery_owner)
+            )
+            claimed_id = await db.scalar(
+                select(RunRow.id).where(
+                    RunRow.id == pending_run.id,
+                    RunRow.claim_owner == recovery_owner,
                 )
-                if claimed_id is None:
-                    skipped += 1
-                    continue
-            try:
-                if fence is not None:
-                    await fence(pending_run.session_id)
-            except Exception:
-                fence_failures += 1
-                async with self._sessions() as db, db.begin():
-                    run = await db.get(RunRow, pending_run.id, with_for_update=True)
-                    if run is not None and run.status == pending_run.status and run.claim_owner == recovery_owner:
-                        metadata = dict(run.recovery_metadata_json or {})
-                        recovery = dict(metadata.get("recovery") or {})
-                        prior_attempts = recovery.get("attempts", 0)
-                        if not isinstance(prior_attempts, int) or isinstance(prior_attempts, bool):
-                            prior_attempts = 0
-                        recovery["attempts"] = max(0, prior_attempts) + 1
-                        recovery["last_error"] = "provider_fence_failed"
-                        metadata["recovery"] = recovery
-                        run.recovery_metadata_json = metadata
-                        run.claim_owner = owner
-                continue
-            async with self._sessions() as db, db.begin():
-                run = await db.get(RunRow, pending_run.id, with_for_update=True)
-                if run is None or run.status != pending_run.status or run.claim_owner != recovery_owner:
-                    skipped += 1
-                    continue
-                if run.status == "running":
-                    stale = ClaimFailure("failed", "stale_claim", "Turn failed")
-                    revocation = decide_claim_transition(_row_claim_state(run), RevokeClaim(stale)).transition
-                    if revocation is None or revocation.next_state is None:
-                        skipped += 1
-                        continue
-                    _apply_row_next_state(
-                        run,
-                        revocation.next_state,
-                        public_message=revocation.public_message,
-                    )
-                    decision = decide_claim_transition(revocation.next_state, CompleteSettlement()).transition
-                else:
-                    try:
-                        decision = decide_claim_transition(_row_claim_state(run), CompleteSettlement()).transition
-                    except InvalidClaimTransitionError:
-                        skipped += 1
-                        continue
-                if decision is None or decision.next_state is None:
-                    skipped += 1
-                    continue
+            )
+        return recovery_owner if claimed_id is not None else None
+
+    async def _restore_after_fence_failure(
+        self,
+        pending_run: RunRow,
+        recovery_owner: str,
+        *,
+        original_owner: str | None,
+    ) -> None:
+        """Restore the prior owner and record retry metadata after a fence failure."""
+        async with self._sessions() as db, db.begin():
+            run = await db.get(RunRow, pending_run.id, with_for_update=True)
+            if run is None or run.status != pending_run.status or run.claim_owner != recovery_owner:
+                return
+            metadata = dict(run.recovery_metadata_json or {})
+            recovery = dict(metadata.get("recovery") or {})
+            prior_attempts = recovery.get("attempts", 0)
+            if not isinstance(prior_attempts, int) or isinstance(prior_attempts, bool):
+                prior_attempts = 0
+            recovery["attempts"] = max(0, prior_attempts) + 1
+            recovery["last_error"] = "provider_fence_failed"
+            metadata["recovery"] = recovery
+            run.recovery_metadata_json = metadata
+            run.claim_owner = original_owner
+
+    async def _complete_recovery(self, pending_run: RunRow, recovery_owner: str) -> bool:
+        """Apply the stale-claim transition and release recovery ownership atomically."""
+        async with self._sessions() as db, db.begin():
+            run = await db.get(RunRow, pending_run.id, with_for_update=True)
+            if run is None or run.status != pending_run.status or run.claim_owner != recovery_owner:
+                return False
+            if run.status == "running":
+                stale = ClaimFailure("failed", "stale_claim", "Turn failed")
+                revocation = decide_claim_transition(_row_claim_state(run), RevokeClaim(stale)).transition
+                if revocation is None or revocation.next_state is None:
+                    return False
                 _apply_row_next_state(
                     run,
-                    decision.next_state,
-                    public_message=decision.public_message,
+                    revocation.next_state,
+                    public_message=revocation.public_message,
                 )
-                run.finished_at = datetime.now(UTC)
-                run.claim_owner = None
-                run.claim_heartbeat_at = None
-                run.recovery_metadata_json = None
-                recovered += 1
-        return ReconciliationSummary(
-            candidates=len(pending),
-            recovered=recovered,
-            fence_failures=fence_failures,
-            skipped=skipped,
-            budget_exhausted=budget_exhausted,
-        )
+                decision = decide_claim_transition(revocation.next_state, CompleteSettlement()).transition
+            else:
+                try:
+                    decision = decide_claim_transition(_row_claim_state(run), CompleteSettlement()).transition
+                except InvalidClaimTransitionError:
+                    return False
+            if decision is None or decision.next_state is None:
+                return False
+            _apply_row_next_state(
+                run,
+                decision.next_state,
+                public_message=decision.public_message,
+            )
+            run.finished_at = datetime.now(UTC)
+            run.claim_owner = None
+            run.claim_heartbeat_at = None
+            run.recovery_metadata_json = None
+            return True
 
     async def _receipt(self, db: AsyncSession, run: RunRow) -> CommittedTurnReceipt:
         row = await db.scalar(select(TurnRow).where(TurnRow.run_id == run.id, TurnRow.role == "assistant"))
