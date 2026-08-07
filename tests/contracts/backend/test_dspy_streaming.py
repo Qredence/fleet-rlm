@@ -256,6 +256,54 @@ def test_native_stream_projector_advances_after_completed_action_fields() -> Non
     assert [event.stream_id for event in reasoning] == ["run:rlm:1:reasoning", "run:rlm:2:reasoning"]
 
 
+def test_native_stream_projector_decodes_json_encoded_field_chunks() -> None:
+    """DSPy's JSONAdapter streams raw JSON-encoded values (quotes + \\n escapes)
+    that bleed into the next field; the projector must decode them so the TUI
+    shows clean reasoning/code instead of a raw JSON blob."""
+
+    import dspy
+
+    from fleet_rlm.rlm.events import RLMCode, RLMReasoning
+    from fleet_rlm.rlm.runner import _NativeRLMStreamProjector
+
+    events = []
+    projector = _NativeRLMStreamProjector(run_id="run", max_chars=10_000, publish=events.append)
+    # Mirrors the real DSPy JSONAdapter stream: the reasoning chunks carry the
+    # raw JSON (leading quote, \\n escape) and bleed into the code field.
+    for item in (
+        dspy.streaming.StreamResponse("generate_action", "reasoning", '"Let me think\\nabout it","co', False),
+        dspy.streaming.StreamResponse("generate_action", "reasoning", 'de":"print(1)"', True),
+        dspy.streaming.StreamResponse("generate_action", "code", '"print(1)"', True),
+    ):
+        projector.publish(item)
+
+    streamed = [event for event in events if isinstance(event, (RLMReasoning, RLMCode))]
+    reasoning = [event.text for event in streamed if isinstance(event, RLMReasoning)]
+    code = [event.code for event in streamed if isinstance(event, RLMCode)]
+    assert reasoning[0] == "Let me think\nabout it"  # real newline, quotes stripped
+    assert code == ["print(1)"]
+
+
+def test_native_stream_projector_decodes_incremental_json_chunks() -> None:
+    """A JSON string spanning multiple fragments must decode incrementally."""
+
+    import dspy
+
+    from fleet_rlm.rlm.events import RLMCode
+    from fleet_rlm.rlm.runner import _NativeRLMStreamProjector
+
+    events = []
+    projector = _NativeRLMStreamProjector(run_id="run", max_chars=10_000, publish=events.append)
+    for item in (
+        dspy.streaming.StreamResponse("generate_action", "code", '"print(', False),
+        dspy.streaming.StreamResponse("generate_action", "code", '\\"hello\\")"', True),
+    ):
+        projector.publish(item)
+
+    code = [event.code for event in events if isinstance(event, RLMCode)]
+    assert code == ["print(", '"hello")']
+
+
 def test_stream_metadata_projects_to_one_stable_sse_part() -> None:
     from fleet_rlm.api.sse import AISDKUIProjector
     from fleet_rlm.rlm.events import EventRecorder, RLMCode, RLMReasoning
