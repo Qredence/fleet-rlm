@@ -337,7 +337,7 @@ describe("RunController", () => {
             'data: {"type":"reasoning-end","id":"reasoning-run-structured-2"}\n\n',
             'data: {"type":"data-rlm-output","id":"output-run-structured-2","data":{"step":2,"output":"verified: 1"}}\n\n',
             'data: {"type":"data-usage","id":"usage-run-structured","data":{"usage":{"iterations":2,"observed_lm_usage":{},"duration_ms":20}}}\n\n',
-            'data: {"type":"data-structured-result","id":"result-run-structured","data":{"schemaId":"digit","schemaVersion":"1","value":{"digit":"1"}}}\n\n',
+            'data: {"type":"data-structured-result","id":"result-run-structured","data":{"schema_id":"digit","schema_version":"1","value":{"digit":"1"}}}\n\n',
             'data: {"type":"text-start","id":"text-run-structured"}\n\n',
             'data: {"type":"text-delta","id":"text-run-structured","delta":"The verified digit is 1."}\n\n',
             'data: {"type":"text-end","id":"text-run-structured"}\n\n',

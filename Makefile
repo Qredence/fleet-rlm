@@ -175,9 +175,11 @@ check-codebase-tree:
 
 api-check:
 	uv run python scripts/openapi_tools.py check
+	uv run python scripts/generate_tui_chunk_validation.py check
 
 api-sync:
 	uv run python scripts/openapi_tools.py generate
+	uv run python scripts/generate_tui_chunk_validation.py generate
 
 stream-check:
 	uv run python scripts/generate_stream_fixture.py check
