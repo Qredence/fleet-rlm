@@ -3,7 +3,9 @@ version: 2.1
 executors:
   python:
     docker:
-      - image: cimg/python:3.13.13
+      # The -node variant adds Node.js so openapi-typescript (npx) can run in
+      # the same job as the python gates (api-check regenerates TUI types).
+      - image: cimg/python:3.13.13-node
     working_directory: ~/project
     environment:
       UV_CACHE_DIR: ~/.cache/uv
@@ -155,7 +157,9 @@ jobs:
       - checkout
       - run:
           name: Install pnpm
-          command: npm install --global pnpm@10.33.2
+          command: |
+            corepack enable
+            corepack prepare pnpm@10.33.2 --activate
       - run:
           name: Install TUI dependencies
           command: pnpm --dir tools/fleet-tui install --frozen-lockfile

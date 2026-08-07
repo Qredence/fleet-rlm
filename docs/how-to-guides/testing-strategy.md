@@ -52,7 +52,9 @@ substitute for the opt-in live Daytona durability checks below.
 - codebase-tree and documentation/harness checks.
 
 CircleCI enforces the same non-live surface: the `ci` workflow runs `quality`
-(release, docs, security, dependency, `api-check`, and `stream-check`),
+(on the Node-bearing `cimg/python:*-node` executor so `api-check` can run
+openapi-typescript there: release, docs, security, dependency, `api-check`,
+and `stream-check`),
 `lint-typecheck`, `test-unit`, `test-e2e`, `daytona-coverage`, and the `tui`
 job (pnpm format, lint, typecheck, and Vitest against the maintained client).
 The api/stream contract and TUI lanes therefore block merges on drift, not

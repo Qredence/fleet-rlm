@@ -1,6 +1,7 @@
 approval_policy = "on-request"
 sandbox_mode = "workspace-write"
 web_search = "live"
+model_verbosity = "low"
 [features]
 hooks = true
 multi_agent = true
