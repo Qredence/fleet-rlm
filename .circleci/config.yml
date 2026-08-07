@@ -7,6 +7,10 @@ executors:
     working_directory: ~/project
     environment:
       UV_CACHE_DIR: ~/.cache/uv
+  node:
+    docker:
+      - image: cimg/node:lts
+    working_directory: ~/project
 
 commands:
   install_uv:
@@ -66,6 +70,11 @@ jobs:
       - run:
           name: Security checks
           command: make check-security
+      - run:
+          name: API and stream contract checks
+          command: |
+            make api-check
+            make stream-check
       - run:
           name: Python dependency check
           command: uvx deptry . --config pyproject.toml
@@ -139,6 +148,25 @@ jobs:
           path: .scratch/coverage
           destination: coverage/daytona
 
+  tui:
+    executor: node
+    resource_class: small
+    steps:
+      - checkout
+      - run:
+          name: Install pnpm
+          command: npm install --global pnpm@10.33.2
+      - run:
+          name: Install TUI dependencies
+          command: pnpm --dir tools/fleet-tui install --frozen-lockfile
+      - run:
+          name: TUI lint, type, and tests
+          command: |
+            pnpm --dir tools/fleet-tui run format:check
+            pnpm --dir tools/fleet-tui run lint
+            pnpm --dir tools/fleet-tui run typecheck
+            pnpm --dir tools/fleet-tui test
+
 workflows:
   ci:
     jobs:
@@ -147,3 +175,4 @@ workflows:
       - test-unit
       - test-e2e
       - daytona-coverage
+      - tui
