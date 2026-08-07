@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import pytest
 
+from fleet_rlm.daytona.broker_source import FINAL_OUTPUT_MARKER
 from fleet_rlm.daytona.errors import DaytonaAdapterError
-from fleet_rlm.daytona.http_broker import FINAL_OUTPUT_MARKER
 from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend, sandbox_backend
 from fleet_rlm.rlm.errors import TurnNoProgressError
 from fleet_rlm.rlm.events import RLMCode, RLMOutput, StepFinished, StepStarted, ToolCompleted, ToolStarted

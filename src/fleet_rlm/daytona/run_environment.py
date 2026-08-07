@@ -339,7 +339,6 @@ class _LiveCapabilityPreparer:
         spec, skill_host, notices = await prepare_host_capabilities(
             turn=turn,
             skill_catalog=self.skill_catalog,
-            files=file_host,
             base_tools=(*file_tools, *workspace_tools, *memory_tools, *url_tools),
             base_event_views=base_views,
             workspace=DAYTONA_WORKSPACE_CAPABILITY,

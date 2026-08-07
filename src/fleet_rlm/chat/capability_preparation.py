@@ -92,13 +92,11 @@ async def prepare_host_capabilities(
     *,
     turn: ExecuteTurn,
     skill_catalog: SkillCatalog,
-    files: Any,
     base_tools: Sequence[dspy.Tool],
     base_event_views: Mapping[str, ToolEventView],
     workspace: WorkspaceCapabilityMetadata,
     deadline: float,
 ) -> tuple[RLMExecutionSpec, SkillToolHost | EmptySkillHost, tuple[PreparationNotice, ...]]:
-    del files
     """Resolve history and exact Skills identically for every Run environment."""
     history_host = SessionHistoryToolHost(turn.history)
     history_tools = history_host.as_tools()

@@ -224,7 +224,6 @@ class TestingCapabilityPreparer:
         spec, skill_host, notices = await prepare_host_capabilities(
             turn=turn,
             skill_catalog=self._skill_catalog,
-            files=file_host,
             base_tools=(*file_tools, *url_tools),
             base_event_views={**file_event_views, **url_event_views},
             workspace=UNAVAILABLE_WORKSPACE_CAPABILITY,
