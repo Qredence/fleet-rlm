@@ -53,6 +53,8 @@ help:
 	@echo "  make check-codebase-tree - Enforce import boundaries defined in codebase map"
 	@echo "  make api-check        - Verify OpenAPI and generated TUI HTTP types"
 	@echo "  make api-sync         - Regenerate OpenAPI and generated TUI HTTP types"
+	@echo "  make stream-check     - Verify the TUI turn-stream fixture is current"
+	@echo "  make stream-sync      - Regenerate the TUI turn-stream fixture"
 	@echo ""
 	@echo "Build & release:"
 	@echo "  make build            - Build Python distributions"
@@ -136,6 +138,7 @@ daytona-snapshot-check:
 
 tui-check:
 	$(MAKE) api-check
+	$(MAKE) stream-check
 	pnpm --dir tools/fleet-tui run format:check
 	pnpm --dir tools/fleet-tui run lint
 	pnpm --dir tools/fleet-tui run typecheck
@@ -175,6 +178,12 @@ api-check:
 
 api-sync:
 	uv run python scripts/openapi_tools.py generate
+
+stream-check:
+	uv run python scripts/generate_stream_fixture.py check
+
+stream-sync:
+	uv run python scripts/generate_stream_fixture.py generate
 
 build:
 	rm -rf dist build

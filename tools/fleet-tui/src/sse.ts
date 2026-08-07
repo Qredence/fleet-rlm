@@ -1,5 +1,19 @@
 import type { components } from "./generated/openapi.js";
 
+/**
+ * The AI SDK UI chunk contract is hand-maintained in FOUR places; keep them in
+ * sync or the golden stream test (`tests/stream-fixture.test.ts`) fails:
+ *
+ * 1. Backend runtime projector  — src/fleet_rlm/api/sse.py (AISDKUIProjector)
+ * 2. Backend reload projection  — src/fleet_rlm/api/ui_message.py
+ * 3. OpenAPI hook               — src/fleet_rlm/api/openapi.py (_CHUNK_FIELD_*)
+ * 4. This runtime validator     — dataFieldChecks / dataRequiredFields /
+ *                                dataAlternatives below
+ *
+ * The validator below is the STRICTEST copy: a backend emission that violates
+ * it throws mid-stream ("Fleet API returned an invalid AI SDK UI stream chunk")
+ * in a terminal, so a shape change must land here and in #1/#3 together.
+ */
 export type FleetUIMessageChunk = components["schemas"]["FleetUIMessageChunk"];
 
 const chunkTypes = new Set<FleetUIMessageChunk["type"]>([
