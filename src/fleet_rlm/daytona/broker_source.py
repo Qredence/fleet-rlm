@@ -360,6 +360,7 @@ class _BrokerHandler(BaseHTTPRequestHandler):
             if not event.wait(timeout=180.0):
                 with _lock:
                     _pending_requests.pop(call_id, None)
+                    _results.pop(call_id, None)
                 _send_json(self, {"error": "tool call timed out"}, 504)
                 return
             with _lock:

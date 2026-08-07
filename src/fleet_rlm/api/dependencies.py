@@ -102,7 +102,9 @@ def get_settings(request: Request) -> Settings:
 def get_skill_catalog(request: Request) -> SkillCatalog:
     catalog = getattr(request.app.state, "skill_catalog", None)
     if not isinstance(catalog, SkillCatalog):
-        raise RuntimeError("bundled Skill catalog is unavailable")
+        # The bundled catalog is installed by create_app() independently of
+        # lifespan composition; its absence still surfaces as the closed 503.
+        raise _composition_unavailable()
     return catalog
 
 

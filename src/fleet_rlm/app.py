@@ -99,7 +99,7 @@ async def _local_db_lifespan(
             await cleanup.shutdown(drain_seconds=30)
         if detached is not None:
             await detached.database.aclose()
-        elif engine is not None:
+        if engine is not None and (detached is None or detached.database.engine is not engine):
             await engine.dispose()
 
 
