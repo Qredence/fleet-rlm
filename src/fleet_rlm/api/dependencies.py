@@ -7,6 +7,7 @@ from typing import Annotated
 
 from fastapi import Depends, HTTPException, Request
 
+from fleet_rlm.api.errors import http_error
 from fleet_rlm.api.local_scope import LocalScope, get_local_scope
 from fleet_rlm.artifacts.reader import ArtifactReader
 from fleet_rlm.chat.turn_coordinator import TurnCoordinator
@@ -44,12 +45,17 @@ def require_loopback_client(request: Request) -> None:
         )
 
 
+def _composition_unavailable() -> HTTPException:
+    """Closed-contract 503 raised while lifespan composition is incomplete."""
+    return http_error(503, "turn_unavailable", "Service unavailable")
+
+
 def get_ready_runtime_inventory(request: Request) -> RuntimeInventory:
     if not getattr(request.app.state, "composition_ready", False):
-        raise HTTPException(status_code=503, detail="application composition is not ready")
+        raise _composition_unavailable()
     inventory = get_runtime_inventory(request.app)
     if inventory is None:
-        raise HTTPException(status_code=503, detail="application composition is not ready")
+        raise _composition_unavailable()
     return inventory
 
 
@@ -57,35 +63,35 @@ def get_turn_coordinator(request: Request) -> TurnCoordinator:
     inventory = get_ready_runtime_inventory(request)
     coordinator = inventory.turn_coordinator
     if coordinator is None:
-        raise HTTPException(status_code=503, detail="application composition is not ready")
+        raise _composition_unavailable()
     return coordinator
 
 
 def get_attachment_lifecycle(request: Request) -> AttachmentLifecycle:
     lifecycle = get_ready_runtime_inventory(request).attachment_lifecycle
     if lifecycle is None:
-        raise HTTPException(status_code=503, detail="application composition is not ready")
+        raise _composition_unavailable()
     return lifecycle
 
 
 def get_artifact_reader(request: Request) -> ArtifactReader:
     reader = get_ready_runtime_inventory(request).artifact_reader
     if reader is None:
-        raise HTTPException(status_code=503, detail="application composition is not ready")
+        raise _composition_unavailable()
     return reader
 
 
 def get_session_catalog(request: Request) -> SessionCatalog:
     catalog = get_ready_runtime_inventory(request).session_catalog
     if catalog is None:
-        raise HTTPException(status_code=503, detail="application composition is not ready")
+        raise _composition_unavailable()
     return catalog
 
 
 def get_turn_lifecycle(request: Request) -> TurnLifecycle:
     lifecycle = get_ready_runtime_inventory(request).turn_lifecycle
     if lifecycle is None:
-        raise HTTPException(status_code=503, detail="application composition is not ready")
+        raise _composition_unavailable()
     return lifecycle
 
 
@@ -103,21 +109,21 @@ def get_skill_catalog(request: Request) -> SkillCatalog:
 def get_config_policy(request: Request) -> ConfigPolicyService:
     policy = get_ready_runtime_inventory(request).config_policy
     if not isinstance(policy, ConfigPolicyService):
-        raise HTTPException(status_code=503, detail="application composition is not ready")
+        raise _composition_unavailable()
     return policy
 
 
 def get_workspace_file_service(request: Request) -> WorkspaceFileService:
     service = get_ready_runtime_inventory(request).workspace_file_service
     if not isinstance(service, WorkspaceFileService):
-        raise HTTPException(status_code=503, detail="application composition is not ready")
+        raise _composition_unavailable()
     return service
 
 
 def get_workspace_volume_gateway(request: Request) -> WorkspaceVolumeGateway:
     gateway = get_ready_runtime_inventory(request).workspace_volume_gateway
     if gateway is None:
-        raise HTTPException(status_code=503, detail="application composition is not ready")
+        raise _composition_unavailable()
     return gateway
 
 
