@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from typing import Protocol
+from typing import ClassVar, Protocol
 from uuid import UUID
 
 from fastapi import FastAPI
@@ -60,6 +60,10 @@ class AsyncCloseable(Protocol):
     async def close(self) -> None: ...
 
 
+class RuntimeInventoryError(RuntimeError):
+    """Raised when a runtime inventory is incomplete or invalid."""
+
+
 @dataclass(frozen=True, slots=True)
 class RuntimeDatabaseLifecycle:
     """Database handles created for one application lifespan."""
@@ -92,6 +96,23 @@ class RuntimeInventory:
     workspace_file_service: WorkspaceFileService | None = None
     workspace_volume_mirror: VolumeTreeFs | None = None
 
+    _REQUIRED_ROUTE_FIELDS: ClassVar[tuple[str, ...]] = (
+        "turn_coordinator",
+        "attachment_lifecycle",
+        "artifact_reader",
+        "session_catalog",
+        "turn_lifecycle",
+        "config_policy",
+        "workspace_volume_gateway",
+        "workspace_file_service",
+    )
+
+    def validate_complete(self) -> None:
+        """Require every dynamic route-facing service before readiness is published."""
+        missing = tuple(name for name in self._REQUIRED_ROUTE_FIELDS if getattr(self, name) is None)
+        if missing:
+            raise RuntimeInventoryError("runtime inventory missing required service(s): " + ", ".join(missing))
+
     @property
     def db_engine(self) -> AsyncEngine | None:
         if self.database.engine is not None:
@@ -123,6 +144,7 @@ def get_runtime_inventory(app: FastAPI) -> RuntimeInventory | None:
 
 def install_runtime_inventory(app: FastAPI, inventory: RuntimeInventory) -> RuntimeInventory:
     """Publish a complete runtime graph and mark composition ready last."""
+    inventory.validate_complete()
     app.state.runtime_inventory = inventory
     app.state.composition_ready = True
     return inventory
@@ -140,6 +162,7 @@ __all__ = [
     "AsyncCloseable",
     "RuntimeDatabaseLifecycle",
     "RuntimeInventory",
+    "RuntimeInventoryError",
     "RuntimeProcessResources",
     "RuntimeSessionManager",
     "SettlingTurnStore",

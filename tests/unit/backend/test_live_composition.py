@@ -14,10 +14,28 @@ from pydantic import SecretStr
 
 from fleet_rlm.app import create_app
 from fleet_rlm.composition import CompositionError, require_daytona_settings
-from fleet_rlm.composition.inventory import RuntimeInventory, clear_runtime_inventory, install_runtime_inventory
+from fleet_rlm.composition.inventory import (
+    RuntimeInventory,
+    RuntimeInventoryError,
+    clear_runtime_inventory,
+    install_runtime_inventory,
+)
 from fleet_rlm.composition.testing import create_testing_app
 from fleet_rlm.config import Settings
 from fleet_rlm.skills.catalog import SkillCatalog
+
+
+def _complete_runtime_inventory() -> RuntimeInventory:
+    return RuntimeInventory(
+        turn_coordinator=object(),
+        attachment_lifecycle=object(),
+        artifact_reader=object(),
+        session_catalog=object(),
+        turn_lifecycle=object(),
+        config_policy=object(),
+        workspace_volume_gateway=object(),
+        workspace_file_service=object(),
+    )
 
 
 def test_composition_module_imports_without_credentials() -> None:
@@ -240,7 +258,7 @@ def test_runtime_inventory_publish_sets_readiness_last() -> None:
             super().__setattr__(name, value)
 
     app = SimpleNamespace(state=RecordingState())
-    inventory = RuntimeInventory()
+    inventory = _complete_runtime_inventory()
 
     installed = install_runtime_inventory(app, inventory)
 
@@ -248,6 +266,27 @@ def test_runtime_inventory_publish_sets_readiness_last() -> None:
     assert events == [("runtime_inventory", inventory), ("composition_ready", True)]
     assert app.state.runtime_inventory is inventory
     assert app.state.composition_ready is True
+
+
+def test_runtime_inventory_rejects_incomplete_graph_without_readiness() -> None:
+    events: list[tuple[str, object]] = []
+
+    class RecordingState:
+        composition_ready = False
+        runtime_inventory = None
+
+        def __setattr__(self, name: str, value: object) -> None:
+            events.append((name, value))
+            super().__setattr__(name, value)
+
+    app = SimpleNamespace(state=RecordingState())
+
+    with pytest.raises(RuntimeInventoryError, match="turn_coordinator"):
+        install_runtime_inventory(app, RuntimeInventory())
+
+    assert events == []
+    assert app.state.runtime_inventory is None
+    assert app.state.composition_ready is False
 
 
 def test_runtime_inventory_clear_marks_unready_and_detaches_inventory() -> None:
@@ -467,6 +506,7 @@ async def test_install_daytona_composition_does_not_create_schema(monkeypatch) -
         attachment_lifecycle=object(),
         artifact_reader=object(),
         workspace_volume_gateway=Gateway(),
+        workspace_file_service=object(),
         turn_preparation=preparation,
     )
 
