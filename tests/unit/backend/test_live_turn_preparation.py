@@ -130,6 +130,8 @@ async def test_live_preparation_stages_attachment_and_cleans_it(
         resources,
         attachment_lifecycle=Attachments(),
         skill_catalog=skill_catalog,
+        settings=resources.settings,
+        models=RLMModelBundle(object(), object()),
     ).prepare(turn, deadline=float("inf"))
 
     assert prepared.execution.attachments[0].attachment_id == attachment_id
@@ -260,6 +262,8 @@ async def test_admission_timeout_is_sanitized_by_live_preparation() -> None:
             resources,
             attachment_lifecycle=Attachments(),
             skill_catalog=SkillCatalog(()),
+            settings=resources.settings,
+            models=RLMModelBundle(object(), object()),
         ).prepare(turn, deadline=float("inf"))
     assert str(caught.value) == "Turn environment is unavailable"
     assert "secret" not in str(caught.value)
@@ -310,7 +314,9 @@ async def test_post_acquisition_sandbox_lookup_settles_before_lease_release(mode
         _TurnClaimToken(uuid4()),
     )
     deadline = asyncio.get_running_loop().time() + (0.05 if mode == "timeout" else 10)
-    acquisition = asyncio.create_task(_DaytonaEnvironmentProvider(resources).acquire(turn, deadline=deadline))
+    acquisition = asyncio.create_task(
+        _DaytonaEnvironmentProvider(resources, resources.settings).acquire(turn, deadline=deadline)
+    )
     assert await asyncio.to_thread(entered.wait, 2)
     if mode == "cancel":
         acquisition.cancel()

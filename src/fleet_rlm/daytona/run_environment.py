@@ -6,11 +6,8 @@ import asyncio
 import contextlib
 from collections.abc import Sequence
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any, cast
 from uuid import UUID
-
-from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from fleet_rlm.chat.capability_preparation import (
     PreparedHostCapabilities,
@@ -25,7 +22,6 @@ from fleet_rlm.chat.turn_preparation import (
 )
 from fleet_rlm.composition.common import recursive_rlm_options
 from fleet_rlm.config import Settings, load_runtime_settings
-from fleet_rlm.daytona.bindings import BindingStore, InMemoryBindingStore
 from fleet_rlm.daytona.interpreter import sync_sandbox
 from fleet_rlm.daytona.platform import (
     LiveDaytonaPlatform,
@@ -40,6 +36,7 @@ from fleet_rlm.daytona.provisioning import (
 from fleet_rlm.daytona.recursive_child_runtime import build_child_runtime_factory
 from fleet_rlm.daytona.session_manager import (
     DEFAULT_IDLE_STOP_SECONDS,
+    BindingStoreLike,
     DaytonaAdmission,
     DaytonaAdmissionTimeoutError,
     DaytonaLeaseAcquisitionTimeoutError,
@@ -54,14 +51,9 @@ from fleet_rlm.files.models import (
 )
 from fleet_rlm.files.volume_paths import VolumePaths, volume_paths_from_settings
 from fleet_rlm.files.workspace_models import DAYTONA_WORKSPACE_CAPABILITY
-from fleet_rlm.persistence.database import (
-    create_async_engine_from_url,
-    create_session_factory,
-    create_tables,
-)
 from fleet_rlm.rlm.context import RLMExecutionSpec
 from fleet_rlm.rlm.dspy_contract import RLMOptions
-from fleet_rlm.rlm.lm_factory import build_model_bundle
+from fleet_rlm.rlm.model_bundle import RLMModelBundle
 from fleet_rlm.skills.catalog import SkillCatalog
 
 
@@ -156,7 +148,8 @@ class _DaytonaRunSink:
 
 @dataclass(slots=True)
 class _DaytonaEnvironmentProvider:
-    resources: LiveKernelResources
+    resources: DaytonaRuntimeResources
+    settings: Settings
 
     async def acquire(self, turn: ExecuteTurn, *, deadline: float) -> RunEnvironment:
         """
@@ -210,8 +203,8 @@ class _DaytonaEnvironmentProvider:
             sink = _DaytonaRunSink(
                 sandbox,
                 loop=asyncio.get_running_loop(),
-                max_read_bytes=self.resources.settings.max_upload_bytes,
-                paths=volume_paths_from_settings(self.resources.settings),
+                max_read_bytes=self.settings.max_upload_bytes,
+                paths=volume_paths_from_settings(self.settings),
             )
 
             async def release() -> None:
@@ -227,8 +220,8 @@ class _DaytonaEnvironmentProvider:
                 workspace_id=turn.access.workspace_id,
                 run_id=turn.run_id,
                 deadline=deadline,
-                execution_timeout_s=self.resources.settings.rlm_execution_timeout_s,
-                execution_output_cap=self.resources.settings.rlm_max_execution_output_chars,
+                execution_timeout_s=self.settings.rlm_execution_timeout_s,
+                execution_output_cap=self.settings.rlm_max_execution_output_chars,
                 is_authorized=lambda: not turn.authority.revoked,
             )
 
@@ -239,7 +232,7 @@ class _DaytonaEnvironmentProvider:
                 release=release,
                 result_snapshot_sink=sink,
                 child_runtime_factory=child_runtime_factory,
-                context_mount_path=str(volume_paths_from_settings(self.resources.settings).mount_path),
+                context_mount_path=str(volume_paths_from_settings(self.settings).mount_path),
             )
         except BaseException:
             await asyncio.shield(self.resources.session_manager.release(lease))
@@ -262,7 +255,7 @@ class _LiveAttachmentLifecycle:
 
 @dataclass(slots=True)
 class _LiveCapabilityPreparer:
-    resources: LiveKernelResources
+    settings: Settings
     skill_catalog: SkillCatalog
 
     async def prepare(
@@ -292,7 +285,7 @@ class _LiveCapabilityPreparer:
         sink = environment.attachment_sink
         volume_fs = cast(_DaytonaRunSink, sink).volume_fs
         assert volume_fs is not None  # _DaytonaRunSink is always constructed with loop
-        paths = volume_paths_from_settings(self.resources.settings)
+        paths = volume_paths_from_settings(self.settings)
         file_host = FileToolHost(
             attachments=attachments.refs,
             staged_attachments=attachments.staged,
@@ -301,18 +294,18 @@ class _LiveCapabilityPreparer:
             workspace_id=turn.access.workspace_id,
             session_id=turn.session_id,
             run_id=turn.run_id,
-            max_artifact_bytes=self.resources.settings.max_artifact_bytes,
+            max_artifact_bytes=self.settings.max_artifact_bytes,
             volume_paths=paths,
         )
         session_workspace = DaytonaSessionWorkspaceFS(
             volume_fs.sandbox,
             volume_root=str(paths.mount_path),
             root=str(paths.session_workspace_dir(turn.session_id)),
-            max_file_bytes=self.resources.settings.max_upload_bytes,
+            max_file_bytes=self.settings.max_upload_bytes,
         )
         workspace_host = WorkspaceToolHost(
             session_workspace,
-            max_file_bytes=self.resources.settings.max_upload_bytes,
+            max_file_bytes=self.settings.max_upload_bytes,
         )
         url_host = UrlToolHost(
             session_id=turn.session_id,
@@ -321,16 +314,16 @@ class _LiveCapabilityPreparer:
                     volume_fs.sandbox,
                     volume_root=str(paths.mount_path),
                     root=str(paths.session_workspace_dir(turn.session_id)),
-                    max_file_bytes=self.resources.settings.max_url_bytes,
+                    max_file_bytes=self.settings.max_url_bytes,
                 )
             ),
-            max_bytes=self.resources.settings.max_url_bytes,
+            max_bytes=self.settings.max_url_bytes,
         )
         memory_host = WorkspaceMemoryToolHost(
             DaytonaWorkspaceMemoryStore(
                 volume_fs.sandbox,
                 volume_paths=paths,
-                max_upload_bytes=self.resources.settings.max_upload_bytes,
+                max_upload_bytes=self.settings.max_upload_bytes,
             )
         )
         file_tools = file_host.as_tools()
@@ -365,22 +358,20 @@ def resolve_settings(settings: Settings | None = None) -> Settings:
     return settings or load_runtime_settings()
 
 
-class LiveKernelResources:
-    """Holds live clients for one process; delete sandboxes on cleanup.
-
-    Default: in-memory bindings (kernel smoke).
-    Pass ``session_factory`` for durable bindings and coordinated Turn state.
-    """
+class DaytonaRuntimeResources:
+    """Provider-owned Daytona clients and session lifecycle for one process."""
 
     def __init__(
         self,
         settings: Settings,
         *,
-        bindings: Any | None = None,
-        session_factory: async_sessionmaker[AsyncSession] | None = None,
-        engine: AsyncEngine | None = None,
+        bindings: BindingStoreLike,
+        cleanup: Any,
         sandbox_spec: DaytonaSandboxSpec | None = None,
-        cleanup: Any | None = None,
+        max_active_leases: int,
+        idle_stop_seconds: float | None = DEFAULT_IDLE_STOP_SECONDS,
+        execution_output_cap: int,
+        execution_timeout_s: int,
     ) -> None:
         self.settings = resolve_settings(settings)
         self.sandbox_spec = sandbox_spec or sandbox_spec_from_settings(self.settings)
@@ -388,16 +379,9 @@ class LiveKernelResources:
         self.platform = LiveDaytonaPlatform(self.client, self.sandbox_spec)
         self.volume_client = LiveDaytonaVolumeClient(self.client)
         self.volume_config = volume_config_from_settings(self.settings)
-        self._engine = engine
-        self._session_factory = session_factory
-        if bindings is not None:
-            self.bindings = bindings
-        elif session_factory is not None:
-            self.bindings = BindingStore(session_factory)
-        else:
-            self.bindings = InMemoryBindingStore()
+        self.bindings = bindings
         self.daytona_admission = DaytonaAdmission(
-            max_active_leases=self.settings.max_active_daytona_leases,
+            max_active_leases=max_active_leases,
         )
         self.session_manager = DaytonaSessionManager(
             platform=self.platform,
@@ -407,43 +391,11 @@ class LiveKernelResources:
             admission=self.daytona_admission,
             sandbox_spec=self.sandbox_spec,
             cleanup=cleanup,
-            idle_stop_seconds=DEFAULT_IDLE_STOP_SECONDS,
-            execution_output_cap=self.settings.rlm_max_execution_output_chars,
-            execution_timeout_s=self.settings.rlm_execution_timeout_s,
+            idle_stop_seconds=idle_stop_seconds,
+            execution_output_cap=execution_output_cap,
+            execution_timeout_s=execution_timeout_s,
         )
-        self.models = build_model_bundle(self.settings)
         self._sandbox_ids: list[str] = []
-
-    @classmethod
-    async def with_sqlite_file(
-        cls,
-        db_path: Path | str,
-        settings: Settings | None = None,
-    ) -> LiveKernelResources:
-        """Durable sqlite-backed bindings + sessions for recovery proofs."""
-        path = Path(db_path)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        url = f"sqlite+aiosqlite:///{path.resolve()}"
-        engine = create_async_engine_from_url(url)
-        await create_tables(engine)
-        factory = create_session_factory(engine)
-        return cls(
-            settings or Settings(),
-            session_factory=factory,
-            engine=engine,
-        )
-
-    @classmethod
-    async def reopen_sqlite_file(
-        cls,
-        db_path: Path | str,
-        settings: Settings | None = None,
-    ) -> LiveKernelResources:
-        """Simulate API restart: new clients against the same sqlite file."""
-        return await cls.with_sqlite_file(
-            db_path,
-            settings,
-        )
 
     def track_sandbox(self, sandbox_id: str | None) -> None:
         if sandbox_id and sandbox_id not in self._sandbox_ids:
@@ -453,48 +405,39 @@ class LiveKernelResources:
         """Drop tracked sandbox ids without deleting (API-restart simulation)."""
         self._sandbox_ids.clear()
 
-    @property
-    def engine(self) -> AsyncEngine | None:
-        return self._engine
-
     async def cleanup(self) -> None:
-        """Delete tracked sandboxes (best-effort). Does not dispose the DB engine."""
+        """Delete tracked sandboxes (best-effort)."""
         for sid in list(self._sandbox_ids):
             with contextlib.suppress(Exception):
                 await self.platform.delete(sid)
         self._sandbox_ids.clear()
 
-    async def adispose_engine(self) -> None:
-        """Dispose the sqlite engine without deleting sandboxes."""
-        if self._engine is not None:
-            await self._engine.dispose()
-            self._engine = None
-
     async def adispose(self) -> None:
-        """Delete sandboxes and dispose engine (end of proof)."""
+        """Delete tracked sandboxes and close Daytona clients."""
         await self.session_manager.aclose()
         await self.cleanup()
-        await self.adispose_engine()
         await self.client.close()
 
 
 def build_turn_preparation(
-    resources: LiveKernelResources,
+    resources: DaytonaRuntimeResources,
     *,
     attachment_lifecycle: Any,
     skill_catalog: SkillCatalog,
+    settings: Settings,
+    models: RLMModelBundle,
 ) -> DefaultTurnPreparer:
     """Compose Daytona Turn preparation without mutating resource ownership."""
     options = RLMOptions(
-        max_iterations=resources.settings.rlm_max_iterations,
-        max_llm_calls=resources.settings.rlm_max_llm_calls,
-        max_output_chars=resources.settings.rlm_max_output_chars,
+        max_iterations=settings.rlm_max_iterations,
+        max_llm_calls=settings.rlm_max_llm_calls,
+        max_output_chars=settings.rlm_max_output_chars,
     )
     return DefaultTurnPreparer(
-        models=resources.models,
+        models=models,
         options=options,
-        recursive_options=recursive_rlm_options(resources.settings),
+        recursive_options=recursive_rlm_options(settings),
         attachments=_LiveAttachmentLifecycle(attachment_lifecycle),
-        environments=_DaytonaEnvironmentProvider(resources),
-        capabilities=_LiveCapabilityPreparer(resources, skill_catalog),
+        environments=_DaytonaEnvironmentProvider(resources, settings),
+        capabilities=_LiveCapabilityPreparer(settings, skill_catalog),
     )

@@ -64,10 +64,11 @@ async def _dispose_components(
     *,
     resources: RuntimeProcessResources | None,
     gateway: object | None,
+    database: RuntimeDatabaseLifecycle | None = None,
     suppress_errors: bool,
 ) -> None:
     first_error: Exception | None = None
-    for target, method_name in ((resources, "adispose"), (gateway, "close")):
+    for target, method_name in ((resources, "adispose"), (gateway, "close"), (database, "aclose")):
         method = getattr(target, method_name, None)
         if not callable(method):
             continue
@@ -114,7 +115,7 @@ async def build_daytona_composition(settings: Settings, *, skill_catalog: SkillC
     from fleet_rlm.chat.turn_coordinator import TurnCoordinator
     from fleet_rlm.chat.turn_lifecycle import TurnLifecycleService
     from fleet_rlm.daytona.provisioning import sandbox_spec_from_settings
-    from fleet_rlm.daytona.run_environment import LiveKernelResources, build_turn_preparation, resolve_settings
+    from fleet_rlm.daytona.run_environment import DaytonaRuntimeResources, build_turn_preparation, resolve_settings
     from fleet_rlm.daytona.workspace_gateway import (
         DaytonaWorkspaceGateway,
         DaytonaWorkspaceVolumeGateway,
@@ -129,17 +130,20 @@ async def build_daytona_composition(settings: Settings, *, skill_catalog: SkillC
     from fleet_rlm.persistence.repositories import (
         SqlAlchemyArtifactCatalog,
         SqlAlchemyAttachmentCatalog,
+        SqlAlchemySandboxBindingStore,
         SqlAlchemySessionCatalog,
         SqlAlchemyTurnStateStore,
     )
     from fleet_rlm.rlm.factory import RLMFactory
+    from fleet_rlm.rlm.lm_factory import build_model_bundle
     from fleet_rlm.rlm.runner import RLMRunner
 
     resolved = resolve_settings(settings)
     require_daytona_settings(resolved)
     sandbox_spec = sandbox_spec_from_settings(resolved)
     engine = create_async_engine_from_url(resolved.database_url or "")
-    resources: LiveKernelResources | None = None
+    database_lifecycle: RuntimeDatabaseLifecycle | None = None
+    resources: DaytonaRuntimeResources | None = None
     gateway: object | None = None
     try:
         # Fail closed on an unreachable or non-head database, inside the
@@ -149,13 +153,18 @@ async def build_daytona_composition(settings: Settings, *, skill_catalog: SkillC
             repo_root=Path(__file__).resolve().parents[3],
         )
         session_factory = create_session_factory(engine)
+        database_lifecycle = RuntimeDatabaseLifecycle(engine=engine, session_factory=session_factory)
         cleanup = TurnCleanupSupervisor(max_jobs=8)
-        resources = LiveKernelResources(
+        bindings = SqlAlchemySandboxBindingStore(session_factory)
+        model_bundle = build_model_bundle(resolved)
+        resources = DaytonaRuntimeResources(
             resolved,
-            session_factory=session_factory,
-            engine=engine,
-            sandbox_spec=sandbox_spec,
+            bindings=bindings,
             cleanup=cleanup,
+            sandbox_spec=sandbox_spec,
+            max_active_leases=resolved.max_active_daytona_leases,
+            execution_output_cap=resolved.rlm_max_execution_output_chars,
+            execution_timeout_s=resolved.rlm_execution_timeout_s,
         )
         mounted_workspace_gateway = DaytonaWorkspaceGateway(
             platform=resources.platform,
@@ -222,6 +231,8 @@ async def build_daytona_composition(settings: Settings, *, skill_catalog: SkillC
             resources,
             attachment_lifecycle=attachment_lifecycle,
             skill_catalog=skill_catalog,
+            settings=resolved,
+            models=model_bundle,
         )
         turn_state = SqlAlchemyTurnStateStore(
             session_factory,
@@ -281,13 +292,19 @@ async def build_daytona_composition(settings: Settings, *, skill_catalog: SkillC
             turn_cleanup_supervisor=cleanup,
             turn_preparation=turn_preparation,
             turn_state_store=turn_state,
-            database=RuntimeDatabaseLifecycle(engine=engine, session_factory=session_factory, dispose_engine=False),
+            database=database_lifecycle,
+            model_bundle=model_bundle,
         )
     except Exception:
-        if resources is None:
+        if resources is None and database_lifecycle is None:
             await engine.dispose()
         else:
-            await _dispose_components(resources=resources, gateway=gateway, suppress_errors=True)
+            await _dispose_components(
+                resources=resources,
+                gateway=gateway,
+                database=database_lifecycle,
+                suppress_errors=True,
+            )
         raise
 
 
@@ -318,6 +335,7 @@ async def install_daytona_composition(
                 active_profile=active_profile(settings),
             ),
             database=inventory.database,
+            model_bundle=inventory.model_bundle,
             run_environment_resources=inventory.run_environment_resources,
             workspace_volume_gateway=inventory.workspace_volume_gateway,
             workspace_file_service=inventory.workspace_file_service,
@@ -329,6 +347,7 @@ async def install_daytona_composition(
         await _dispose_components(
             resources=inventory.run_environment_resources,
             gateway=inventory.workspace_volume_gateway,
+            database=inventory.database,
             suppress_errors=True,
         )
         raise
@@ -343,5 +362,6 @@ async def dispose_daytona_composition(app: FastAPI) -> None:
     await _dispose_components(
         resources=inventory.run_environment_resources if inventory is not None else None,
         gateway=inventory.workspace_volume_gateway if inventory is not None else None,
+        database=inventory.database if inventory is not None else None,
         suppress_errors=False,
     )

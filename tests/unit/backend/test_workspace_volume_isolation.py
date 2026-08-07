@@ -8,7 +8,6 @@ from uuid import UUID, uuid4
 
 import pytest
 
-from fleet_rlm.daytona.bindings import InMemoryBindingStore, SandboxBinding
 from fleet_rlm.daytona.errors import DaytonaAdapterError
 from fleet_rlm.daytona.platform import LiveDaytonaPlatform
 from fleet_rlm.daytona.provisioning import (
@@ -24,6 +23,8 @@ from fleet_rlm.daytona.session_manager import (
     DaytonaSessionManager,
     LeaseRequest,
 )
+from fleet_rlm.runtime.bindings import InMemorySandboxBindingStore as InMemoryBindingStore
+from fleet_rlm.runtime.bindings import SandboxBinding
 
 _SPEC = DaytonaSandboxSpec("fleet-test-v1")
 

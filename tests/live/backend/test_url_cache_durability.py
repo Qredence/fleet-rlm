@@ -11,10 +11,10 @@ from uuid import UUID, uuid4
 
 import pytest
 
+from fleet_rlm.chat.turn_cleanup import TurnCleanupSupervisor
 from fleet_rlm.config import Settings, load_runtime_settings
-from fleet_rlm.daytona.bindings import SandboxBinding
 from fleet_rlm.daytona.interpreter import sync_sandbox
-from fleet_rlm.daytona.run_environment import LiveKernelResources
+from fleet_rlm.daytona.run_environment import DaytonaRuntimeResources
 from fleet_rlm.daytona.session_manager import LeaseRequest
 from fleet_rlm.daytona.workspace_fs import DaytonaSessionWorkspaceFS
 from fleet_rlm.files.url_tool import UrlFetchResult, UrlToolHost, WorkspaceUrlSourceStore
@@ -22,6 +22,7 @@ from fleet_rlm.files.volume_paths import volume_paths_from_settings
 from fleet_rlm.observability.turn_tracing import turn_trace
 from fleet_rlm.rlm.events import ToolCompleted
 from fleet_rlm.rlm.tool_observer import observe_tool
+from fleet_rlm.runtime.bindings import InMemorySandboxBindingStore, SandboxBinding
 
 pytestmark = [pytest.mark.live_daytona]
 
@@ -91,6 +92,17 @@ def _workspace(
     )
 
 
+def _live_resources(settings: Settings, cleanup: TurnCleanupSupervisor) -> DaytonaRuntimeResources:
+    return DaytonaRuntimeResources(
+        settings,
+        bindings=InMemorySandboxBindingStore(),
+        cleanup=cleanup,
+        max_active_leases=settings.max_active_daytona_leases,
+        execution_output_cap=settings.rlm_max_execution_output_chars,
+        execution_timeout_s=settings.rlm_execution_timeout_s,
+    )
+
+
 @pytest.mark.asyncio
 @pytest.mark.timeout(600)
 async def test_url_cache_survives_daytona_sandbox_replacement_with_body_free_events() -> None:
@@ -98,7 +110,8 @@ async def test_url_cache_survives_daytona_sandbox_replacement_with_body_free_eve
     _skip_unless_live(settings)
 
     user_id, workspace_id, session_id = uuid4(), uuid4(), uuid4()
-    resources: LiveKernelResources | None = None
+    resources: DaytonaRuntimeResources | None = None
+    cleanup: TurnCleanupSupervisor | None = None
     first_lease = None
     second_lease = None
     observed: list[object] = []
@@ -107,7 +120,8 @@ async def test_url_cache_survives_daytona_sandbox_replacement_with_body_free_eve
     try:
         with warnings.catch_warnings(record=True) as captured:
             warnings.simplefilter("always")
-            resources = LiveKernelResources(settings)
+            cleanup = TurnCleanupSupervisor(max_jobs=8)
+            resources = _live_resources(settings, cleanup)
 
         first_lease = await resources.session_manager.acquire(
             LeaseRequest(session_id=session_id, user_id=user_id, workspace_id=workspace_id),
@@ -189,4 +203,6 @@ async def test_url_cache_survives_daytona_sandbox_replacement_with_body_free_eve
                 await resources.session_manager.release(first_lease)
             if second_lease is not None:
                 await resources.session_manager.release(second_lease)
+            if cleanup is not None:
+                await cleanup.shutdown(drain_seconds=30)
             await resources.adispose()

@@ -17,7 +17,6 @@ from typing import Any, Protocol
 from uuid import UUID, uuid4
 
 from fleet_rlm.chat.turn_cleanup import TurnCleanupSupervisor, TurnCleanupUnavailableError
-from fleet_rlm.daytona.bindings import SandboxBinding
 from fleet_rlm.daytona.errors import (
     DaytonaAdapterError,
     ProviderRequestError,
@@ -43,6 +42,7 @@ from fleet_rlm.daytona.provisioning import (
     require_scoped_volume_subpath,
     workspace_volume_subpath,
 )
+from fleet_rlm.runtime.bindings import SandboxBinding
 
 logger = logging.getLogger(__name__)
 

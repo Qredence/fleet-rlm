@@ -7,10 +7,10 @@ from uuid import uuid4
 
 import pytest
 
+from fleet_rlm.artifacts.models import CompletedRun
 from fleet_rlm.daytona.workspace_gateway import cleanup_orphan_bytes
 from fleet_rlm.files.host_volume import HostVolumeMirror, OfflineHostVolumeGateway
 from fleet_rlm.files.volume_paths import VolumePaths
-from fleet_rlm.persistence.repositories.artifacts import CompletedRun
 
 
 @pytest.mark.asyncio

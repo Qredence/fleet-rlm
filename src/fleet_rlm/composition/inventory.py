@@ -45,13 +45,7 @@ class RuntimeProcessResources(Protocol):
     """Closeable process-scoped resources owned by one runtime composition."""
 
     @property
-    def engine(self) -> AsyncEngine | None: ...
-
-    @property
     def session_manager(self) -> RuntimeSessionManager: ...
-
-    @property
-    def models(self) -> RLMModelBundle: ...
 
     async def adispose(self) -> None: ...
 
@@ -92,6 +86,7 @@ class RuntimeInventory:
     config_policy: ConfigPolicyService | None = None
     database: RuntimeDatabaseLifecycle = field(default_factory=RuntimeDatabaseLifecycle)
     run_environment_resources: RuntimeProcessResources | None = None
+    model_bundle: RLMModelBundle | None = None
     workspace_volume_gateway: WorkspaceVolumeGateway | None = None
     workspace_file_service: WorkspaceFileService | None = None
     workspace_volume_mirror: VolumeTreeFs | None = None
@@ -115,11 +110,7 @@ class RuntimeInventory:
 
     @property
     def db_engine(self) -> AsyncEngine | None:
-        if self.database.engine is not None:
-            return self.database.engine
-        if self.run_environment_resources is not None:
-            return self.run_environment_resources.engine
-        return None
+        return self.database.engine
 
     @property
     def session_manager(self) -> RuntimeSessionManager | None:
@@ -129,9 +120,7 @@ class RuntimeInventory:
 
     @property
     def rlm_model_bundle(self) -> RLMModelBundle | None:
-        if self.run_environment_resources is None:
-            return None
-        return self.run_environment_resources.models
+        return self.model_bundle
 
 
 def get_runtime_inventory(app: FastAPI) -> RuntimeInventory | None:

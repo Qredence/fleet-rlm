@@ -13,6 +13,7 @@ from pathlib import PurePosixPath
 from typing import Any
 from uuid import UUID
 
+from fleet_rlm.artifacts.models import CompletedRun
 from fleet_rlm.daytona.errors import map_provider_error
 from fleet_rlm.daytona.platform import sandbox_state
 from fleet_rlm.daytona.provisioning import (
@@ -33,7 +34,6 @@ from fleet_rlm.files.workspace_access import (
     WorkspaceFileSession,
 )
 from fleet_rlm.files.workspace_models import WorkspaceEntry, WorkspaceTextPage
-from fleet_rlm.persistence.repositories.artifacts import CompletedRun
 
 logger = logging.getLogger(__name__)
 
