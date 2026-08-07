@@ -76,6 +76,12 @@ export class RunController {
           streamOpened = true;
           options.onStreamOpen?.();
         },
+        // Header fallback: the run is already live once headers commit, so a
+        // stream cut before the start chunk must still be cancellable. The
+        // start chunk's messageId is authoritative and overwrites this later.
+        onRunId: (runId) => {
+          execution.runId ??= runId;
+        },
         signal: controller.signal,
       })) {
         if (chunk.type === "start") {

@@ -8,6 +8,8 @@ export type StreamFleetTurnOptions = {
   idempotencyKey?: string;
   skillSelections?: readonly FleetSkillSelection[];
   onStreamOpen?: () => void;
+  /** Fires with the backend's X-Fleet-Run-ID once stream headers are accepted. */
+  onRunId?: (runId: string) => void;
   signal?: AbortSignal;
 };
 
@@ -18,6 +20,7 @@ export async function* streamFleetTurn({
   idempotencyKey = crypto.randomUUID(),
   skillSelections = [],
   onStreamOpen,
+  onRunId,
   signal,
 }: StreamFleetTurnOptions): AsyncGenerator<FleetUIMessageChunk> {
   const response = await openWithOneNetworkRetry(
@@ -27,6 +30,11 @@ export async function* streamFleetTurn({
   );
 
   if (!response.body) throw new Error("Fleet API returned an empty stream body");
+  // The run is live on the backend the moment headers commit, so surface the
+  // run id from the header as a fallback: it lets the operator cancel even if
+  // the stream is cut before the first (start) chunk arrives.
+  const runId = response.headers.get("X-Fleet-Run-ID");
+  if (runId) onRunId?.(runId);
   const lifecycle = new StreamLifecycle();
 
   for await (const data of parseSSE(response.body)) {
@@ -39,7 +47,9 @@ export async function* streamFleetTurn({
   lifecycle.assertComplete();
 }
 
-class StreamLifecycle {
+// Exported for the fixture test that validates the backend projector's golden
+// stream through the same ordering grammar the live TUI enforces.
+export class StreamLifecycle {
   private started = false;
   private terminal = false;
   private cleanFinish = false;
