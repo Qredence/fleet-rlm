@@ -100,7 +100,7 @@ async def test_preparation_bounds_history_and_closes_in_dependency_order() -> No
         capabilities=CapabilityFactory(),
     ).prepare(turn, deadline=float("inf"))
 
-    assert prepared.execution.session_context.to_input() == {
+    assert prepared.execution.session.session_context.to_input() == {
         "session_id": str(turn.session_id),
         "checkpoint_version": 0,
         "message_count": 1,

@@ -134,7 +134,7 @@ async def test_live_preparation_stages_attachment_and_cleans_it(
         models=RLMModelBundle(object(), object()),
     ).prepare(turn, deadline=float("inf"))
 
-    assert prepared.execution.attachments[0].attachment_id == attachment_id
+    assert prepared.execution.session.attachments[0].attachment_id == attachment_id
     assert data in volume.values()
     expected_tools = {
         "create_artifact",

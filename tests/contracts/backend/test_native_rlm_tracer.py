@@ -11,7 +11,12 @@ import dspy
 import pytest
 
 from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
-from fleet_rlm.rlm.context import RLMExecutionSpec
+from fleet_rlm.rlm.context import (
+    ExecutionRuntime,
+    RLMExecutionSpec,
+    SessionView,
+    TurnIdentity,
+)
 from fleet_rlm.rlm.dspy_contract import RLMOptions, bind_native_rlm_observer
 from fleet_rlm.rlm.events import (
     RLMCode,
@@ -349,7 +354,9 @@ async def test_native_rlm_rejects_invalid_host_tool_type_before_host_logic() -> 
 @pytest.mark.parametrize("fallback", [False, True], ids=["invalid-submit-repair", "typed-extract"])
 async def test_runner_completes_native_repair_and_extract_as_prediction_result(fallback: bool) -> None:
     from fleet_rlm.chat.session_context import SessionContextManifest
-    from fleet_rlm.rlm.context import RLMExecutionContext
+    from fleet_rlm.rlm.context import (
+        RLMExecutionContext,
+    )
 
     class Capabilities:
         spec = RLMExecutionSpec()
@@ -375,19 +382,21 @@ async def test_runner_completes_native_repair_and_extract_as_prediction_result(f
 
     options = RLMOptions(max_iterations=1 if fallback else 2)
     context = RLMExecutionContext(
-        uuid4(),
-        uuid4(),
-        TurnAccess(uuid4(), uuid4()),
-        "complete natively",
-        SessionContextManifest(uuid4(), 0, 0, ()),
-        SimpleNamespace(root_lm=object(), sub_lm=object()),
-        options,
-        asyncio.get_running_loop().time() + 10,
-        DaytonaCodeInterpreter(backend=InProcessInterpreterBackend()),
-        (),
-        Capabilities(),
-        not_cancelled,
-        (),
+        identity=TurnIdentity(run_id=uuid4(), session_id=uuid4(), access=TurnAccess(uuid4(), uuid4())),
+        session=SessionView(
+            request="complete natively",
+            session_context=SessionContextManifest(uuid4(), 0, 0, ()),
+            attachments=(),
+            preparation_notices=(),
+        ),
+        execution=ExecutionRuntime(
+            models=SimpleNamespace(root_lm=object(), sub_lm=object()),
+            options=options,
+            deadline=asyncio.get_running_loop().time() + 10,
+            interpreter=DaytonaCodeInterpreter(backend=InProcessInterpreterBackend()),
+            cancellation_requested=not_cancelled,
+        ),
+        capabilities=Capabilities(),
     )
     stream = RLMRunner(factory=NativeFactory()).stream(context)
     events = [event async for event in stream]

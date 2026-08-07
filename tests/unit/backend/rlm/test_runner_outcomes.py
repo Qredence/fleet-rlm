@@ -13,7 +13,13 @@ import pytest
 @pytest.mark.asyncio
 async def test_runner_retains_prediction_usage_when_typed_output_is_invalid() -> None:
     from fleet_rlm.chat.session_context import SessionContextManifest
-    from fleet_rlm.rlm.context import RLMExecutionContext, RLMExecutionSpec
+    from fleet_rlm.rlm.context import (
+        ExecutionRuntime,
+        RLMExecutionContext,
+        RLMExecutionSpec,
+        SessionView,
+        TurnIdentity,
+    )
     from fleet_rlm.rlm.dspy_contract import RLMOptions
     from fleet_rlm.rlm.runner import RLMRunner
     from fleet_rlm.sessions.models import TurnAccess
@@ -50,19 +56,21 @@ async def test_runner_retains_prediction_usage_when_typed_output_is_invalid() ->
         return False
 
     context = RLMExecutionContext(
-        uuid4(),
-        uuid4(),
-        TurnAccess(uuid4(), uuid4()),
-        "answer",
-        SessionContextManifest(uuid4(), 0, 0, ()),
-        SimpleNamespace(root_lm=object(), sub_lm=object()),
-        RLMOptions(),
-        asyncio.get_running_loop().time() + 10,
-        None,
-        (),
-        Capabilities(),
-        not_cancelled,
-        (),
+        identity=TurnIdentity(run_id=uuid4(), session_id=uuid4(), access=TurnAccess(uuid4(), uuid4())),
+        session=SessionView(
+            request="answer",
+            session_context=SessionContextManifest(uuid4(), 0, 0, ()),
+            attachments=(),
+            preparation_notices=(),
+        ),
+        execution=ExecutionRuntime(
+            models=SimpleNamespace(root_lm=object(), sub_lm=object()),
+            options=RLMOptions(),
+            deadline=asyncio.get_running_loop().time() + 10,
+            interpreter=None,
+            cancellation_requested=not_cancelled,
+        ),
+        capabilities=Capabilities(),
     )
     stream = RLMRunner(factory=Factory()).stream(context)
     _ = [event async for event in stream]
@@ -79,7 +87,13 @@ async def test_runner_retains_prediction_usage_when_typed_output_is_invalid() ->
 @pytest.mark.asyncio
 async def test_runner_reports_turn_output_too_large_for_oversized_answer() -> None:
     from fleet_rlm.chat.session_context import SessionContextManifest
-    from fleet_rlm.rlm.context import RLMExecutionContext, RLMExecutionSpec
+    from fleet_rlm.rlm.context import (
+        ExecutionRuntime,
+        RLMExecutionContext,
+        RLMExecutionSpec,
+        SessionView,
+        TurnIdentity,
+    )
     from fleet_rlm.rlm.dspy_contract import RLMOptions
     from fleet_rlm.rlm.runner import RLMRunner
     from fleet_rlm.sessions.models import TurnAccess
@@ -119,19 +133,21 @@ async def test_runner_reports_turn_output_too_large_for_oversized_answer() -> No
         return False
 
     context = RLMExecutionContext(
-        uuid4(),
-        uuid4(),
-        TurnAccess(uuid4(), uuid4()),
-        "answer",
-        SessionContextManifest(uuid4(), 0, 0, ()),
-        SimpleNamespace(root_lm=object(), sub_lm=object()),
-        RLMOptions(max_output_chars=32),
-        asyncio.get_running_loop().time() + 10,
-        None,
-        (),
-        Capabilities(),
-        not_cancelled,
-        (),
+        identity=TurnIdentity(run_id=uuid4(), session_id=uuid4(), access=TurnAccess(uuid4(), uuid4())),
+        session=SessionView(
+            request="answer",
+            session_context=SessionContextManifest(uuid4(), 0, 0, ()),
+            attachments=(),
+            preparation_notices=(),
+        ),
+        execution=ExecutionRuntime(
+            models=SimpleNamespace(root_lm=object(), sub_lm=object()),
+            options=RLMOptions(max_output_chars=32),
+            deadline=asyncio.get_running_loop().time() + 10,
+            interpreter=None,
+            cancellation_requested=not_cancelled,
+        ),
+        capabilities=Capabilities(),
     )
     stream = RLMRunner(factory=Factory()).stream(context)
     _ = [event async for event in stream]
@@ -144,7 +160,13 @@ async def test_runner_reports_turn_output_too_large_for_oversized_answer() -> No
 @pytest.mark.asyncio
 async def test_runner_emits_preloaded_skill_events_before_later_output_failure() -> None:
     from fleet_rlm.chat.session_context import SessionContextManifest
-    from fleet_rlm.rlm.context import RLMExecutionContext, RLMExecutionSpec
+    from fleet_rlm.rlm.context import (
+        ExecutionRuntime,
+        RLMExecutionContext,
+        RLMExecutionSpec,
+        SessionView,
+        TurnIdentity,
+    )
     from fleet_rlm.rlm.dspy_contract import RLMOptions
     from fleet_rlm.rlm.events import SkillActivated, SkillLoaded
     from fleet_rlm.rlm.runner import RLMRunner
@@ -179,19 +201,21 @@ async def test_runner_emits_preloaded_skill_events_before_later_output_failure()
         return False
 
     context = RLMExecutionContext(
-        uuid4(),
-        uuid4(),
-        TurnAccess(uuid4(), uuid4()),
-        "answer",
-        SessionContextManifest(uuid4(), 0, 0, ()),
-        SimpleNamespace(root_lm=object(), sub_lm=object()),
-        RLMOptions(),
-        asyncio.get_running_loop().time() + 10,
-        None,
-        (),
-        Capabilities(),
-        not_cancelled,
-        (),
+        identity=TurnIdentity(run_id=uuid4(), session_id=uuid4(), access=TurnAccess(uuid4(), uuid4())),
+        session=SessionView(
+            request="answer",
+            session_context=SessionContextManifest(uuid4(), 0, 0, ()),
+            attachments=(),
+            preparation_notices=(),
+        ),
+        execution=ExecutionRuntime(
+            models=SimpleNamespace(root_lm=object(), sub_lm=object()),
+            options=RLMOptions(),
+            deadline=asyncio.get_running_loop().time() + 10,
+            interpreter=None,
+            cancellation_requested=not_cancelled,
+        ),
+        capabilities=Capabilities(),
     )
     stream = RLMRunner(factory=Factory()).stream(context)
     events = [event async for event in stream]
@@ -210,7 +234,13 @@ async def test_runner_emits_preloaded_skill_events_before_later_output_failure()
 @pytest.mark.parametrize("terminal_status", ["cancelled", "timeout"])
 async def test_runner_emits_preloaded_skill_events_before_cancel_or_timeout(terminal_status: str) -> None:
     from fleet_rlm.chat.session_context import SessionContextManifest
-    from fleet_rlm.rlm.context import RLMExecutionContext, RLMExecutionSpec
+    from fleet_rlm.rlm.context import (
+        ExecutionRuntime,
+        RLMExecutionContext,
+        RLMExecutionSpec,
+        SessionView,
+        TurnIdentity,
+    )
     from fleet_rlm.rlm.dspy_contract import RLMOptions
     from fleet_rlm.rlm.events import SkillActivated, SkillLoaded
     from fleet_rlm.rlm.runner import RLMRunner
@@ -246,19 +276,21 @@ async def test_runner_emits_preloaded_skill_events_before_cancel_or_timeout(term
 
     loop = asyncio.get_running_loop()
     context = RLMExecutionContext(
-        uuid4(),
-        uuid4(),
-        TurnAccess(uuid4(), uuid4()),
-        "answer",
-        SessionContextManifest(uuid4(), 0, 0, ()),
-        SimpleNamespace(root_lm=object(), sub_lm=object()),
-        RLMOptions(),
-        loop.time() - 1 if terminal_status == "timeout" else loop.time() + 10,
-        None,
-        (),
-        Capabilities(),
-        cancellation_probe,
-        (),
+        identity=TurnIdentity(run_id=uuid4(), session_id=uuid4(), access=TurnAccess(uuid4(), uuid4())),
+        session=SessionView(
+            request="answer",
+            session_context=SessionContextManifest(uuid4(), 0, 0, ()),
+            attachments=(),
+            preparation_notices=(),
+        ),
+        execution=ExecutionRuntime(
+            models=SimpleNamespace(root_lm=object(), sub_lm=object()),
+            options=RLMOptions(),
+            deadline=loop.time() - 1 if terminal_status == "timeout" else loop.time() + 10,
+            interpreter=None,
+            cancellation_requested=cancellation_probe,
+        ),
+        capabilities=Capabilities(),
     )
     stream = RLMRunner(factory=Factory()).stream(context)
     events = [event async for event in stream]
@@ -288,7 +320,13 @@ def test_public_failure_message_honors_instance_override() -> None:
 @pytest.mark.asyncio
 async def test_stream_closed_before_iteration_synthesizes_cancelled_outcome() -> None:
     from fleet_rlm.chat.session_context import SessionContextManifest
-    from fleet_rlm.rlm.context import RLMExecutionContext, RLMExecutionSpec
+    from fleet_rlm.rlm.context import (
+        ExecutionRuntime,
+        RLMExecutionContext,
+        RLMExecutionSpec,
+        SessionView,
+        TurnIdentity,
+    )
     from fleet_rlm.rlm.dspy_contract import RLMOptions
     from fleet_rlm.rlm.runner import RLMRunner
     from fleet_rlm.sessions.models import TurnAccess
@@ -314,19 +352,21 @@ async def test_stream_closed_before_iteration_synthesizes_cancelled_outcome() ->
 
     loop = asyncio.get_running_loop()
     context = RLMExecutionContext(
-        uuid4(),
-        uuid4(),
-        TurnAccess(uuid4(), uuid4()),
-        "answer",
-        SessionContextManifest(uuid4(), 0, 0, ()),
-        SimpleNamespace(root_lm=object(), sub_lm=object()),
-        RLMOptions(),
-        loop.time() + 10,
-        None,
-        (),
-        Capabilities(),
-        not_cancelled,
-        (),
+        identity=TurnIdentity(run_id=uuid4(), session_id=uuid4(), access=TurnAccess(uuid4(), uuid4())),
+        session=SessionView(
+            request="answer",
+            session_context=SessionContextManifest(uuid4(), 0, 0, ()),
+            attachments=(),
+            preparation_notices=(),
+        ),
+        execution=ExecutionRuntime(
+            models=SimpleNamespace(root_lm=object(), sub_lm=object()),
+            options=RLMOptions(),
+            deadline=loop.time() + 10,
+            interpreter=None,
+            cancellation_requested=not_cancelled,
+        ),
+        capabilities=Capabilities(),
     )
     stream = RLMRunner(factory=Factory()).stream(context)
     await stream.aclose()

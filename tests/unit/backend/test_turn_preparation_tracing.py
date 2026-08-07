@@ -175,5 +175,5 @@ async def test_prepare_without_active_trace_is_noop() -> None:
     """No fake mlflow and no trace gate: preparation succeeds without MLflow."""
     prepared = await _make_preparer().prepare(_make_turn(), deadline=float("inf"))
 
-    assert prepared.execution.request == "next"
+    assert prepared.execution.session.request == "next"
     await prepared.aclose()

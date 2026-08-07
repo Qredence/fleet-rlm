@@ -10,7 +10,14 @@ from fleet_rlm.chat.run_authority import RunAuthority
 from fleet_rlm.chat.session_context import SessionContextManifest
 from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
 from fleet_rlm.daytona.recursive_child_runtime import ChildRuntimeLease
-from fleet_rlm.rlm.context import RLMExecutionContext, RLMExecutionSpec
+from fleet_rlm.rlm.context import (
+    DelegationPolicy,
+    ExecutionRuntime,
+    RLMExecutionContext,
+    RLMExecutionSpec,
+    SessionView,
+    TurnIdentity,
+)
 from fleet_rlm.rlm.dspy_contract import RLMOptions
 from fleet_rlm.rlm.events import Status, ToolCompleted, ToolStarted
 from fleet_rlm.rlm.factory import RLMFactory
@@ -57,21 +64,25 @@ async def test_root_child_root_flow_preserves_parent_repl_and_typed_submit() -> 
         return False
 
     context = RLMExecutionContext(
-        run_id=uuid4(),
-        session_id=uuid4(),
-        access=TurnAccess(uuid4(), uuid4()),
-        request="classify the selected row",
-        session_context=SessionContextManifest(uuid4(), 0, 0, ()),
-        models=RLMModelBundle(root, sub),
-        options=RLMOptions(max_iterations=4, max_llm_calls=4),
-        deadline=time.monotonic() + 30,
-        interpreter=DaytonaCodeInterpreter(backend=InProcessInterpreterBackend()),
-        attachments=(),
+        identity=TurnIdentity(run_id=uuid4(), session_id=uuid4(), access=TurnAccess(uuid4(), uuid4())),
+        session=SessionView(
+            request="classify the selected row",
+            session_context=SessionContextManifest(uuid4(), 0, 0, ()),
+            attachments=(),
+            preparation_notices=(),
+        ),
+        execution=ExecutionRuntime(
+            models=RLMModelBundle(root, sub),
+            options=RLMOptions(max_iterations=4, max_llm_calls=4),
+            deadline=time.monotonic() + 30,
+            interpreter=DaytonaCodeInterpreter(backend=InProcessInterpreterBackend()),
+            cancellation_requested=not_cancelled,
+        ),
+        delegation=DelegationPolicy(
+            recursive_options=RecursiveRLMOptions(enabled=True, max_calls=2),
+            child_runtime_factory=lambda call_index: _child_lease(call_index),
+        ),
         capabilities=Capabilities(),
-        cancellation_requested=not_cancelled,
-        preparation_notices=(),
-        recursive_options=RecursiveRLMOptions(enabled=True, max_calls=2),
-        child_runtime_factory=lambda call_index: _child_lease(call_index),
     )
 
     stream = RLMRunner().stream(context)
@@ -170,22 +181,26 @@ async def test_runner_rejects_recursive_tool_after_authority_revocation() -> Non
         return _child_lease(call_index)
 
     context = RLMExecutionContext(
-        run_id=uuid4(),
-        session_id=uuid4(),
-        access=TurnAccess(uuid4(), uuid4()),
-        request="delegate after claim loss",
-        session_context=SessionContextManifest(uuid4(), 0, 0, ()),
-        models=RLMModelBundle(root, sub),
-        options=RLMOptions(max_iterations=2, max_llm_calls=2),
-        deadline=time.monotonic() + 30,
-        interpreter=DaytonaCodeInterpreter(backend=InProcessInterpreterBackend()),
-        attachments=(),
+        identity=TurnIdentity(
+            run_id=uuid4(), session_id=uuid4(), access=TurnAccess(uuid4(), uuid4()), authority=authority
+        ),
+        session=SessionView(
+            request="delegate after claim loss",
+            session_context=SessionContextManifest(uuid4(), 0, 0, ()),
+            attachments=(),
+            preparation_notices=(),
+        ),
+        execution=ExecutionRuntime(
+            models=RLMModelBundle(root, sub),
+            options=RLMOptions(max_iterations=2, max_llm_calls=2),
+            deadline=time.monotonic() + 30,
+            interpreter=DaytonaCodeInterpreter(backend=InProcessInterpreterBackend()),
+            cancellation_requested=not_cancelled,
+        ),
+        delegation=DelegationPolicy(
+            recursive_options=RecursiveRLMOptions(enabled=True, max_calls=1), child_runtime_factory=child_factory
+        ),
         capabilities=Capabilities(),
-        cancellation_requested=not_cancelled,
-        preparation_notices=(),
-        authority=authority,
-        recursive_options=RecursiveRLMOptions(enabled=True, max_calls=1),
-        child_runtime_factory=child_factory,
     )
 
     stream = RLMRunner().stream(context)
@@ -238,20 +253,22 @@ async def test_normal_daytona_policy_omits_recursive_tool_and_guidance() -> None
         return False
 
     context = RLMExecutionContext(
-        run_id=uuid4(),
-        session_id=uuid4(),
-        access=TurnAccess(uuid4(), uuid4()),
-        request="answer directly",
-        session_context=SessionContextManifest(uuid4(), 0, 0, ()),
-        models=RLMModelBundle(root, sub),
-        options=RLMOptions(max_iterations=2, max_llm_calls=2),
-        deadline=time.monotonic() + 30,
-        interpreter=DaytonaCodeInterpreter(backend=InProcessInterpreterBackend()),
-        attachments=(),
+        identity=TurnIdentity(run_id=uuid4(), session_id=uuid4(), access=TurnAccess(uuid4(), uuid4())),
+        session=SessionView(
+            request="answer directly",
+            session_context=SessionContextManifest(uuid4(), 0, 0, ()),
+            attachments=(),
+            preparation_notices=(),
+        ),
+        execution=ExecutionRuntime(
+            models=RLMModelBundle(root, sub),
+            options=RLMOptions(max_iterations=2, max_llm_calls=2),
+            deadline=time.monotonic() + 30,
+            interpreter=DaytonaCodeInterpreter(backend=InProcessInterpreterBackend()),
+            cancellation_requested=not_cancelled,
+        ),
+        delegation=DelegationPolicy(recursive_options=RecursiveRLMOptions(enabled=False)),
         capabilities=Capabilities(),
-        cancellation_requested=not_cancelled,
-        preparation_notices=(),
-        recursive_options=RecursiveRLMOptions(enabled=False),
     )
 
     stream = RLMRunner(factory=Factory()).stream(context)
@@ -319,21 +336,24 @@ async def test_failed_child_cleanup_prevents_successful_root_outcome() -> None:
         )
 
     context = RLMExecutionContext(
-        run_id=uuid4(),
-        session_id=uuid4(),
-        access=TurnAccess(uuid4(), uuid4()),
-        request="delegate one task",
-        session_context=SessionContextManifest(uuid4(), 0, 0, ()),
-        models=RLMModelBundle(root, sub),
-        options=RLMOptions(max_iterations=4, max_llm_calls=4),
-        deadline=time.monotonic() + 30,
-        interpreter=DaytonaCodeInterpreter(backend=InProcessInterpreterBackend()),
-        attachments=(),
+        identity=TurnIdentity(run_id=uuid4(), session_id=uuid4(), access=TurnAccess(uuid4(), uuid4())),
+        session=SessionView(
+            request="delegate one task",
+            session_context=SessionContextManifest(uuid4(), 0, 0, ()),
+            attachments=(),
+            preparation_notices=(),
+        ),
+        execution=ExecutionRuntime(
+            models=RLMModelBundle(root, sub),
+            options=RLMOptions(max_iterations=4, max_llm_calls=4),
+            deadline=time.monotonic() + 30,
+            interpreter=DaytonaCodeInterpreter(backend=InProcessInterpreterBackend()),
+            cancellation_requested=not_cancelled,
+        ),
+        delegation=DelegationPolicy(
+            recursive_options=RecursiveRLMOptions(enabled=True, max_calls=2), child_runtime_factory=failed_lease
+        ),
         capabilities=Capabilities(),
-        cancellation_requested=not_cancelled,
-        preparation_notices=(),
-        recursive_options=RecursiveRLMOptions(enabled=True, max_calls=2),
-        child_runtime_factory=failed_lease,
     )
 
     stream = RLMRunner().stream(context)

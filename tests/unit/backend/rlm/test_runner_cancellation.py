@@ -14,7 +14,13 @@ import pytest
 @pytest.mark.asyncio
 async def test_runner_returns_promptly_and_retains_blocking_worker_for_cleanup() -> None:
     from fleet_rlm.chat.session_context import SessionContextManifest
-    from fleet_rlm.rlm.context import RLMExecutionContext, RLMExecutionSpec
+    from fleet_rlm.rlm.context import (
+        ExecutionRuntime,
+        RLMExecutionContext,
+        RLMExecutionSpec,
+        SessionView,
+        TurnIdentity,
+    )
     from fleet_rlm.rlm.dspy_contract import RLMOptions
     from fleet_rlm.rlm.runner import RLMRunner
     from fleet_rlm.sessions.models import TurnAccess
@@ -47,19 +53,21 @@ async def test_runner_returns_promptly_and_retains_blocking_worker_for_cleanup()
         return cancel_requested
 
     context = RLMExecutionContext(
-        uuid4(),
-        uuid4(),
-        TurnAccess(uuid4(), uuid4()),
-        "answer",
-        SessionContextManifest(uuid4(), 0, 0, ()),
-        SimpleNamespace(root_lm=object(), sub_lm=object()),
-        RLMOptions(),
-        asyncio.get_running_loop().time() + 10,
-        None,
-        (),
-        Capabilities(),
-        cancellation_probe,
-        (),
+        identity=TurnIdentity(run_id=uuid4(), session_id=uuid4(), access=TurnAccess(uuid4(), uuid4())),
+        session=SessionView(
+            request="answer",
+            session_context=SessionContextManifest(uuid4(), 0, 0, ()),
+            attachments=(),
+            preparation_notices=(),
+        ),
+        execution=ExecutionRuntime(
+            models=SimpleNamespace(root_lm=object(), sub_lm=object()),
+            options=RLMOptions(),
+            deadline=asyncio.get_running_loop().time() + 10,
+            interpreter=None,
+            cancellation_requested=cancellation_probe,
+        ),
+        capabilities=Capabilities(),
     )
     stream = RLMRunner(factory=Factory()).stream(context)
 
@@ -83,7 +91,13 @@ async def test_runner_returns_promptly_and_retains_blocking_worker_for_cleanup()
 @pytest.mark.asyncio
 async def test_runner_transfers_blocking_worker_after_caller_cancellation() -> None:
     from fleet_rlm.chat.session_context import SessionContextManifest
-    from fleet_rlm.rlm.context import RLMExecutionContext, RLMExecutionSpec
+    from fleet_rlm.rlm.context import (
+        ExecutionRuntime,
+        RLMExecutionContext,
+        RLMExecutionSpec,
+        SessionView,
+        TurnIdentity,
+    )
     from fleet_rlm.rlm.dspy_contract import RLMOptions
     from fleet_rlm.rlm.runner import RLMRunner
     from fleet_rlm.sessions.models import TurnAccess
@@ -115,19 +129,21 @@ async def test_runner_transfers_blocking_worker_after_caller_cancellation() -> N
         return False
 
     context = RLMExecutionContext(
-        uuid4(),
-        uuid4(),
-        TurnAccess(uuid4(), uuid4()),
-        "answer",
-        SessionContextManifest(uuid4(), 0, 0, ()),
-        SimpleNamespace(root_lm=object(), sub_lm=object()),
-        RLMOptions(),
-        asyncio.get_running_loop().time() + 10,
-        None,
-        (),
-        Capabilities(),
-        not_cancelled,
-        (),
+        identity=TurnIdentity(run_id=uuid4(), session_id=uuid4(), access=TurnAccess(uuid4(), uuid4())),
+        session=SessionView(
+            request="answer",
+            session_context=SessionContextManifest(uuid4(), 0, 0, ()),
+            attachments=(),
+            preparation_notices=(),
+        ),
+        execution=ExecutionRuntime(
+            models=SimpleNamespace(root_lm=object(), sub_lm=object()),
+            options=RLMOptions(),
+            deadline=asyncio.get_running_loop().time() + 10,
+            interpreter=None,
+            cancellation_requested=not_cancelled,
+        ),
+        capabilities=Capabilities(),
     )
     stream = RLMRunner(factory=Factory()).stream(context)
 
