@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import ast
 import socket
+import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -54,6 +57,23 @@ def test_settings_exclude_secrets_from_serialization() -> None:
     }
 
 
+def test_composition_common_import_does_not_configure_dspy_providers() -> None:
+    """Importing composition.common alone must not configure a DSPy provider LM."""
+    script = (
+        "import fleet_rlm.composition.common\n"
+        "import dspy\n"
+        "assert dspy.settings.lm is None, repr(dspy.settings.lm)\n"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=180,
+    )
+    assert result.returncode == 0, result.stderr
+
+
 def test_create_app_returns_fastapi_without_side_effects(monkeypatch) -> None:
     """create_app must return a FastAPI instance without constructing clients."""
     from fastapi import FastAPI
@@ -70,10 +90,32 @@ def test_create_app_returns_fastapi_without_side_effects(monkeypatch) -> None:
 def test_generic_runtime_modules_do_not_import_daytona_implementations() -> None:
     root = Path("src/fleet_rlm")
     candidates = [
-        path for package in ("chat", "files", "artifacts", "skills") for path in (root / package).glob("*.py")
+        path
+        for package in ("chat", "files", "artifacts", "runtime", "skills")
+        for path in (root / package).glob("*.py")
     ]
     candidates.append(root / "composition" / "testing.py")
 
     violations = [str(path) for path in candidates if "fleet_rlm.daytona" in path.read_text(encoding="utf-8")]
 
     assert violations == []
+
+
+def test_daytona_binding_compatibility_exports_do_not_import_sql_models() -> None:
+    path = Path("src/fleet_rlm/daytona/bindings.py")
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    imported: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            imported.update(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.module is not None:
+            imported.add(node.module)
+
+    assert not any(module.startswith("fleet_rlm.persistence") for module in imported)
+
+
+def test_provider_probe_has_no_daytona_imports() -> None:
+    path = Path("src/fleet_rlm/rlm/provider_probe.py")
+    source = path.read_text(encoding="utf-8")
+
+    assert "fleet_rlm.daytona" not in source

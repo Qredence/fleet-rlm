@@ -480,6 +480,25 @@ def test_runtime_detail_spans_capture_reasoning_code_output_tools_and_answer(
     assert calls.span_outputs[4]["answer"] == "final answer"
 
 
+def test_streaming_rlm_deltas_do_not_flood_the_trace(monkeypatch: pytest.MonkeyPatch) -> None:
+    """One step's code/reasoning is streamed in dozens of token-ish chunks; each
+    chunk must NOT become a Turn.progress span (the canonical trajectory traces
+    the complete values), or a single turn explodes to 1,200+ spans."""
+
+    calls = _install_fake_mlflow(monkeypatch)
+
+    for sequence in range(1, 21):
+        trace_runtime_detail(
+            RLMReasoning("tok", step=1, stream_id="s", is_delta=True, is_final=False),
+            sequence=sequence,
+        )
+    trace_runtime_detail(RLMCode("print(", step=1, stream_id="s", is_delta=True, is_final=False), sequence=21)
+    trace_runtime_detail(RLMCode("print('x')", step=1), sequence=22)  # canonical complete value
+
+    assert calls.start_span_names == ["Turn.progress.rlm.code"]
+    assert calls.span_outputs[0]["code"] == "print('x')"
+
+
 def test_event_recorder_projects_committed_public_answer_into_trace(monkeypatch: pytest.MonkeyPatch) -> None:
     calls = _install_fake_mlflow(monkeypatch)
     recorder = EventRecorder(run_id=uuid4(), session_id=uuid4())

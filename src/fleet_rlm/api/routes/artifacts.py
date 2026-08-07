@@ -3,18 +3,17 @@
 from __future__ import annotations
 
 import re
-from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, Response
 
-from fleet_rlm.api.dependencies import ArtifactReaderDep
-from fleet_rlm.api.local_scope import LocalScope, get_local_scope
+from fleet_rlm.api.dependencies import ArtifactReaderDep, LocalScopeDep
+from fleet_rlm.api.errors import http_error
 from fleet_rlm.api.schemas import ArtifactResponse
 from fleet_rlm.artifacts.errors import ArtifactNotFoundError
 from fleet_rlm.artifacts.models import ArtifactAccess, ArtifactRef
 
-router = APIRouter(tags=["artifacts"])
+router = APIRouter(prefix="/api/artifacts", tags=["artifacts"])
 _SAFE_FILENAME = re.compile(r"[^A-Za-z0-9._-]+")
 
 
@@ -32,13 +31,13 @@ def _to_response(ref: ArtifactRef) -> ArtifactResponse:
 
 
 @router.get(
-    "/api/artifacts/{artifact_id}",
+    "/{artifact_id}",
     response_model=ArtifactResponse,
     operation_id="get_artifact",
 )
 async def get_artifact(
     artifact_id: UUID,
-    identity: Annotated[LocalScope, Depends(get_local_scope)],
+    identity: LocalScopeDep,
     reader: ArtifactReaderDep,
 ) -> ArtifactResponse:
     try:
@@ -47,26 +46,36 @@ async def get_artifact(
             artifact_id,
         )
     except ArtifactNotFoundError as exc:
-        raise HTTPException(
-            status_code=404,
-            detail={"code": "artifact_not_found", "message": "Artifact not found"},
-        ) from exc
+        raise http_error(404, "artifact_not_found", "Artifact not found") from exc
     except Exception as exc:
-        raise HTTPException(
-            status_code=503,
-            detail={"code": "artifact_unavailable", "message": "Artifact storage is unavailable"},
-        ) from exc
+        raise http_error(503, "artifact_unavailable", "Artifact storage is unavailable") from exc
     return _to_response(ref)
 
 
 @router.get(
-    "/api/artifacts/{artifact_id}/content",
+    "/{artifact_id}/content",
     response_class=Response,
     operation_id="download_artifact",
+    responses={
+        200: {
+            "description": "Artifact bytes with integrity headers",
+            "headers": {
+                "Content-Disposition": {"schema": {"type": "string"}},
+                "ETag": {
+                    "description": 'SHA-256 of the artifact bytes, quoted (e.g. "hex")',
+                    "schema": {"type": "string"},
+                },
+                "Content-Length": {"schema": {"type": "integer"}},
+                "X-Content-Type-Options": {"schema": {"type": "string"}},
+            },
+        },
+        404: {"description": "Artifact not found"},
+        503: {"description": "Artifact storage is unavailable"},
+    },
 )
 async def download_artifact(
     artifact_id: UUID,
-    identity: Annotated[LocalScope, Depends(get_local_scope)],
+    identity: LocalScopeDep,
     reader: ArtifactReaderDep,
 ) -> Response:
     try:
@@ -77,15 +86,9 @@ async def download_artifact(
         ref = content.metadata
         data = content.data
     except ArtifactNotFoundError as exc:
-        raise HTTPException(
-            status_code=404,
-            detail={"code": "artifact_not_found", "message": "Artifact not found"},
-        ) from exc
+        raise http_error(404, "artifact_not_found", "Artifact not found") from exc
     except Exception as exc:
-        raise HTTPException(
-            status_code=503,
-            detail={"code": "artifact_unavailable", "message": "Artifact storage is unavailable"},
-        ) from exc
+        raise http_error(503, "artifact_unavailable", "Artifact storage is unavailable") from exc
 
     extension = {"text": ".txt", "markdown": ".md", "json": ".json"}[ref.kind]
     stem = _SAFE_FILENAME.sub("-", ref.title or "artifact").strip(".-") or "artifact"

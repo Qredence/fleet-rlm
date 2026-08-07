@@ -9,20 +9,28 @@ and its matching automated check in the same patch.
   SSE projection. Routes do not construct runtime stores, engines, LMs, or
   provider clients.
 - `app.create_app()` installs the FastAPI shell and static bundled Skill
-  catalog/authorizer/empty capability registry. Lifespan owns runtime inventory.
+  catalog/authorizer/empty capability registry. Lifespan owns a validated
+  `RuntimeInventory`, publishes readiness last, and detaches it before disposal.
 - `composition/` owns complete common, Daytona, and private testing wiring.
 - `chat/` owns preparation, coordination, Turn Lifecycle, terminal ordering, and
-  cleanup. `TurnLifecycle.finish()` owns Artifact publication and atomic commit;
-  `TurnCoordinator` owns stream settlement and resource release.
+  cleanup. `chat/turn_execution.py` owns the private post-preparation state
+  machine; `TurnLifecycle.finish()` owns Artifact publication and atomic commit;
+  `TurnCoordinator` owns the public stream facade and resource release.
 - Turn Claim persistence has one typed `transition_claim()` operation. Its pure
   command/state policy is shared by in-memory and SQL adapters; successful
   commit and cancellation requests remain separate.
 - `rlm/` owns model roles, Signature inputs, fresh native RLM construction,
   options, Runtime Events, cancellation, and execution.
 - `daytona/` is the exclusive SDK boundary and owns provider-error normalization.
+  `DaytonaRuntimeResources` remains provider-only; composition injects database,
+  binding, model, preparation, limits, and cleanup ports.
 - `sessions/`, `files/`, `artifacts/`, and `skills/` own domain interfaces and
   deterministic policy. `persistence/` owns SQLAlchemy adapters.
 - Imports remain credential-free and side-effect-free.
+
+- `daytona/broker_source.py` contains pure broker source generation. The HTTP
+  broker may re-export those helpers for compatibility, but source generation
+  does not own provider lifecycle or persistence.
 
 ## Turn and async boundary
 
@@ -40,6 +48,11 @@ and its matching automated check in the same patch.
   Failure produces exactly one sanitized terminal and no history advance.
 - Hold an Interpreter Lease through finalization; release it during coordinator
   cleanup even after cancellation or repeated caller cancellation.
+
+- Startup recovery claims eligible nonterminal rows by owner before awaiting a
+  provider fence. Daytona requires a bounded fence; deterministic compositions
+  pass an explicit no-provider policy. A failed fence restores the prior owner,
+  preserves the claim heartbeat, and records retry metadata.
 
 Raw provider calls and exceptions never cross the `daytona/` boundary into
 routes or public events.

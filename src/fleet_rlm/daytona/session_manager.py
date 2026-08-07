@@ -17,7 +17,6 @@ from typing import Any, Protocol
 from uuid import UUID, uuid4
 
 from fleet_rlm.chat.turn_cleanup import TurnCleanupSupervisor, TurnCleanupUnavailableError
-from fleet_rlm.daytona.bindings import SandboxBinding
 from fleet_rlm.daytona.errors import (
     DaytonaAdapterError,
     ProviderRequestError,
@@ -43,6 +42,7 @@ from fleet_rlm.daytona.provisioning import (
     require_scoped_volume_subpath,
     workspace_volume_subpath,
 )
+from fleet_rlm.runtime.bindings import SandboxBinding
 
 logger = logging.getLogger(__name__)
 
@@ -171,6 +171,12 @@ class LeaseRequest:
     user_id: UUID
     workspace_id: UUID
     run_id: UUID | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class _AcquisitionContext:
+    expected: ExpectedWorkspaceMount
+    binding: SandboxBinding | None
 
 
 class BindingStoreLike(Protocol):
@@ -418,80 +424,117 @@ class DaytonaSessionManager:
 
     async def _acquire_provider(self, request: LeaseRequest, *, run_id: UUID) -> InterpreterLease:
         """Complete provider work after admission; caller owns settlement."""
-        session_id = request.session_id
+        context = await self._resolve_acquisition_context(request)
+        sandbox, created_sandbox = await self._prepare_sandbox(request, context)
+        await self._verify_run_layout(sandbox, context.expected, request.session_id, run_id, created_sandbox)
+        return await self._persist_binding_and_build_lease(request, run_id, context.expected, sandbox, created_sandbox)
+
+    async def _resolve_acquisition_context(self, request: LeaseRequest) -> _AcquisitionContext:
+        """Resolve the workspace mount and reject bindings still under provider fencing."""
         volume_id = await self._resolve_volume_id()
         expected = self._expected_mount(volume_id=volume_id, workspace_id=request.workspace_id)
-        binding = await self._bindings.get(session_id)
-
+        binding = await self._bindings.get(request.session_id)
         if binding is not None and binding.provider_state == "fencing":
             raise DaytonaAdapterError(
                 message="sandbox execution fence is not confirmed",
                 cause_type="SandboxFenceUnconfirmed",
             )
+        return _AcquisitionContext(expected, binding)
 
-        sandbox: Any | None = None
-        if (
-            binding is not None
-            and binding.sandbox_id
-            and binding.provider_state not in {"quarantined", "unrecoverable"}
-        ):
-            if not binding_matches_expected(binding, expected):
-                raise DaytonaAdapterError(
-                    message="sandbox binding does not match workspace scope",
-                    cause_type="WorkspaceMountMismatch",
-                )
-            try:
-                sandbox = await self._platform.get(binding.sandbox_id)
-            except ProviderRequestError:
-                raise
-            except DaytonaAdapterError:
-                raise
-            except Exception as exc:
-                raise map_provider_error(exc) from exc
-
-        if sandbox is not None:
-            try:
-                self._provisioner.verify(sandbox, expected)
-                state = sandbox_state(sandbox)
-                sandbox = await self._ensure_running(
-                    sandbox,
-                    state,
-                    volume_id=expected.volume_id,
-                    mount_path=expected.mount_path,
-                )
-                self._provisioner.verify(sandbox, expected)
-            except ProviderRequestError:
-                raise
-            except DaytonaAdapterError as exc:
-                if exc.cause_type not in {"SandboxUnrecoverable", "SandboxSnapshotMismatch"}:
-                    raise
-                if binding is not None:
-                    binding = await self.replace(
-                        SandboxBinding(
-                            session_id=session_id,
-                            sandbox_id=binding.sandbox_id,
-                            workspace_id=request.workspace_id,
-                            volume_id=expected.volume_id,
-                            volume_subpath=expected.volume_subpath,
-                            mount_path=expected.mount_path,
-                            provider_state="unrecoverable",
-                        ),
-                        workspace_id=request.workspace_id,
-                        user_id=request.user_id,
-                    )
-                    sandbox = await self._platform.get(binding.sandbox_id or "")
-                else:
-                    sandbox = None
-        created_sandbox = False
-        if sandbox is None:
+    async def _prepare_sandbox(
+        self,
+        request: LeaseRequest,
+        context: _AcquisitionContext,
+    ) -> tuple[Any, bool]:
+        """Reuse a verified binding or replace/create a Sandbox for the workspace."""
+        sandbox = await self._reuse_bound_sandbox(request, context)
+        created_sandbox = sandbox is None
+        if created_sandbox:
             sandbox = await self._create_sandbox(
-                volume_id=expected.volume_id,
-                mount_path=expected.mount_path,
-                volume_subpath=expected.volume_subpath,
+                volume_id=context.expected.volume_id,
+                mount_path=context.expected.mount_path,
+                volume_subpath=context.expected.volume_subpath,
                 request=request,
             )
-            created_sandbox = True
+        return sandbox, created_sandbox
 
+    async def _reuse_bound_sandbox(
+        self,
+        request: LeaseRequest,
+        context: _AcquisitionContext,
+    ) -> Any | None:
+        binding = context.binding
+        if binding is None or not binding.sandbox_id or binding.provider_state in {"quarantined", "unrecoverable"}:
+            return None
+        if not binding_matches_expected(binding, context.expected):
+            raise DaytonaAdapterError(
+                message="sandbox binding does not match workspace scope",
+                cause_type="WorkspaceMountMismatch",
+            )
+        sandbox = await self._get_bound_sandbox(binding.sandbox_id)
+        if sandbox is None:
+            return None
+        try:
+            self._provisioner.verify(sandbox, context.expected)
+            sandbox = await self._ensure_running(
+                sandbox,
+                sandbox_state(sandbox),
+                volume_id=context.expected.volume_id,
+                mount_path=context.expected.mount_path,
+            )
+            self._provisioner.verify(sandbox, context.expected)
+            return sandbox
+        except ProviderRequestError:
+            raise
+        except DaytonaAdapterError as exc:
+            if exc.cause_type not in {"SandboxUnrecoverable", "SandboxSnapshotMismatch"}:
+                raise
+            replacement = await self.replace(
+                SandboxBinding(
+                    session_id=request.session_id,
+                    sandbox_id=binding.sandbox_id,
+                    workspace_id=request.workspace_id,
+                    volume_id=context.expected.volume_id,
+                    volume_subpath=context.expected.volume_subpath,
+                    mount_path=context.expected.mount_path,
+                    provider_state="unrecoverable",
+                ),
+                workspace_id=request.workspace_id,
+                user_id=request.user_id,
+            )
+            replacement_id = replacement.sandbox_id
+            if not replacement_id:
+                raise DaytonaAdapterError(
+                    message="sandbox replacement did not produce a sandbox id",
+                    cause_type="SandboxReplaceIdentityError",
+                )
+            replacement_sandbox = await self._get_bound_sandbox(replacement_id)
+            if replacement_sandbox is None:
+                raise DaytonaAdapterError(
+                    message="replacement sandbox is not retrievable",
+                    cause_type="SandboxUnrecoverable",
+                )
+            return replacement_sandbox
+
+    async def _get_bound_sandbox(self, sandbox_id: str) -> Any | None:
+        try:
+            return await self._platform.get(sandbox_id)
+        except ProviderRequestError:
+            raise
+        except DaytonaAdapterError:
+            raise
+        except Exception as exc:
+            raise map_provider_error(exc) from exc
+
+    async def _verify_run_layout(
+        self,
+        sandbox: Any,
+        expected: ExpectedWorkspaceMount,
+        session_id: UUID,
+        run_id: UUID,
+        created_sandbox: bool,
+    ) -> None:
+        """Verify the run-specific layout and delete only a newly created invalid Sandbox."""
         try:
             await self._provisioner.verify_run_layout(
                 sandbox,
@@ -505,8 +548,17 @@ class DaytonaSessionManager:
                     await self._platform.delete(_sandbox_id(sandbox))
             raise
 
+    async def _persist_binding_and_build_lease(
+        self,
+        request: LeaseRequest,
+        run_id: UUID,
+        expected: ExpectedWorkspaceMount,
+        sandbox: Any,
+        created_sandbox: bool,
+    ) -> InterpreterLease:
+        """Persist the verified provider binding and construct the caller-owned interpreter lease."""
+        session_id = request.session_id
         sid = _sandbox_id(sandbox)
-        now = datetime.now(UTC)
         await self._bindings.upsert(
             SandboxBinding(
                 session_id=session_id,
@@ -516,20 +568,18 @@ class DaytonaSessionManager:
                 volume_subpath=expected.volume_subpath,
                 mount_path=expected.mount_path,
                 provider_state="running",
-                last_verified_at=now,
+                last_verified_at=datetime.now(UTC),
             )
         )
-
         interpreter = _build_interpreter(
             sandbox,
             loop=asyncio.get_running_loop(),
             execution_output_cap=self._execution_output_cap,
             execution_timeout_s=self._execution_timeout_s,
         )
-        interpreter_id = f"interp-{sid}-{uuid4().hex[:8]}"
         return InterpreterLease(
             sandbox_id=sid,
-            interpreter_id=interpreter_id,
+            interpreter_id=f"interp-{sid}-{uuid4().hex[:8]}",
             volume_id=expected.volume_id,
             mount_path=expected.mount_path,
             volume_subpath=expected.volume_subpath,

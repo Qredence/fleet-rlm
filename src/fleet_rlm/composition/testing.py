@@ -22,11 +22,15 @@ from fleet_rlm.chat.turn_preparation import (
     RunEnvironmentProvider,
 )
 from fleet_rlm.composition.common import (
-    LocalCompositionHandles,
+    build_local_inventory,
     build_local_storage_adapters,
     host_roots,
-    install_local_inventory,
     rlm_options,
+)
+from fleet_rlm.composition.inventory import (
+    RuntimeDatabaseLifecycle,
+    RuntimeInventory,
+    install_runtime_inventory,
 )
 from fleet_rlm.config import Settings
 from fleet_rlm.files.lifecycle import AttachmentLifecycle
@@ -294,8 +298,8 @@ def install_testing_composition(
     app: FastAPI,
     settings: Settings,
     *,
-    session_factory: Any | None = None,
-) -> LocalCompositionHandles:
+    database: RuntimeDatabaseLifecycle | None = None,
+) -> RuntimeInventory:
     """Install credential-free deterministic adapters for a test lifespan."""
     from fleet_rlm.artifacts.workspace_storage import WorkspaceArtifactBlobGateway
     from fleet_rlm.files.host_volume import HostVolumeMirror, OfflineHostVolumeGateway
@@ -310,6 +314,7 @@ def install_testing_composition(
     )
 
     upload_root, _artifact_root = host_roots(settings)
+    database = database or RuntimeDatabaseLifecycle()
     mirror = HostVolumeMirror(
         Path(upload_root) / "_workspace_volume",
         volume_paths=volume_paths_from_settings(settings),
@@ -317,16 +322,15 @@ def install_testing_composition(
     volume_gateway = OfflineHostVolumeGateway(mirror)
     storage = build_local_storage_adapters(
         settings,
-        session_factory=session_factory,
+        session_factory=database.session_factory,
         volume_paths=mirror.volume_paths,
         sql_attachment_blobs=WorkspaceAttachmentBlobGateway(volume_gateway),
         sql_attachment_paths=WorkspaceAttachmentPathPolicy(mirror.volume_paths),
         sql_artifact_blobs=WorkspaceArtifactBlobGateway(volume_gateway),
     )
-    handles = install_local_inventory(
-        app,
+    local_inventory = build_local_inventory(
         settings,
-        session_factory=session_factory,
+        database=database,
         attachment_lifecycle=storage.attachment_lifecycle,
         artifact_reader=storage.artifact_reader,
         preparation=DeterministicTurnPreparation(
@@ -339,14 +343,27 @@ def install_testing_composition(
         rlm_factory=TestingRLMFactory(),
         workspace_volume_mirror=mirror,
     )
-    app.state.workspace_file_service = WorkspaceFileService(
-        HostWorkspaceAccessGateway(
-            Path(settings.data_root) / "workspace-files",
-            max_file_bytes=settings.max_upload_bytes,
-        )
+    inventory = RuntimeInventory(
+        turn_coordinator=local_inventory.turn_coordinator,
+        attachment_lifecycle=local_inventory.attachment_lifecycle,
+        artifact_reader=local_inventory.artifact_reader,
+        session_catalog=local_inventory.session_catalog,
+        turn_lifecycle=local_inventory.turn_lifecycle,
+        turn_preparation=local_inventory.turn_preparation,
+        turn_cleanup_supervisor=local_inventory.turn_cleanup_supervisor,
+        turn_state_store=local_inventory.turn_state_store,
+        config_policy=local_inventory.config_policy,
+        database=local_inventory.database,
+        workspace_volume_gateway=volume_gateway,
+        workspace_file_service=WorkspaceFileService(
+            HostWorkspaceAccessGateway(
+                Path(settings.data_root) / "workspace-files",
+                max_file_bytes=settings.max_upload_bytes,
+            )
+        ),
+        workspace_volume_mirror=local_inventory.workspace_volume_mirror,
     )
-    app.state.workspace_volume_gateway = volume_gateway
-    return handles
+    return install_runtime_inventory(app, inventory)
 
 
 def create_testing_app(*, settings: Settings | None = None) -> FastAPI:

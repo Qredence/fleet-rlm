@@ -21,16 +21,17 @@ from uuid import uuid4
 import pytest
 
 from fleet_rlm.artifacts.local_catalog import LocalArtifactCatalog
+from fleet_rlm.chat.turn_cleanup import TurnCleanupSupervisor
 from fleet_rlm.config import Settings, load_runtime_settings
-from fleet_rlm.daytona.bindings import SandboxBinding
 from fleet_rlm.daytona.interpreter import sync_sandbox
-from fleet_rlm.daytona.run_environment import LiveKernelResources
+from fleet_rlm.daytona.run_environment import DaytonaRuntimeResources
 from fleet_rlm.daytona.session_manager import LeaseRequest
 from fleet_rlm.daytona.workspace_fs import DaytonaSandboxVolumeFs
 from fleet_rlm.files.lifecycle import AttachmentLifecycleService
 from fleet_rlm.files.local_catalog import LocalAttachmentCatalog
 from fleet_rlm.files.models import AttachmentAccess, AttachmentRun, AttachmentUpload
 from fleet_rlm.files.paths import WorkspaceAttachmentPathPolicy
+from fleet_rlm.runtime.bindings import InMemorySandboxBindingStore, SandboxBinding
 
 
 class _LiveAttachmentBlob:
@@ -116,6 +117,17 @@ def _write_evidence(name: str, payload: dict[str, Any]) -> Path:
     return path
 
 
+def _live_resources(settings: Settings, cleanup: TurnCleanupSupervisor) -> DaytonaRuntimeResources:
+    return DaytonaRuntimeResources(
+        settings,
+        bindings=InMemorySandboxBindingStore(),
+        cleanup=cleanup,
+        max_active_leases=settings.max_active_daytona_leases,
+        execution_output_cap=settings.rlm_max_execution_output_chars,
+        execution_timeout_s=settings.rlm_execution_timeout_s,
+    )
+
+
 @pytest.mark.asyncio
 @pytest.mark.timeout(600)
 async def test_staged_attachment_is_readable_and_artifact_survives_replacement(tmp_path: Path) -> None:
@@ -124,7 +136,8 @@ async def test_staged_attachment_is_readable_and_artifact_survives_replacement(t
 
     user_id, workspace_id = uuid4(), uuid4()
     session_id, run_id = uuid4(), uuid4()
-    resources = LiveKernelResources(settings)
+    cleanup = TurnCleanupSupervisor(max_jobs=8)
+    resources = _live_resources(settings, cleanup)
     sandbox_ids: list[str] = []
     volume_id: str | None = None
 
@@ -269,5 +282,5 @@ async def test_staged_attachment_is_readable_and_artifact_survives_replacement(t
         path = _write_evidence("live-b5-attachment-artifact-durability-evidence.json", evidence)
         assert path.is_file()
     finally:
-        await resources.cleanup()
-        await resources.adispose_engine()
+        await cleanup.shutdown(drain_seconds=30)
+        await resources.adispose()

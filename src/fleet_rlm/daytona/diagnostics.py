@@ -193,7 +193,31 @@ class _ProductionDaytonaDoctorDependencies:
     async def check_rlm_readiness(self, settings: Settings) -> None:
         from fleet_rlm.rlm.provider_probe import probe_configured_root_lm
 
-        await probe_configured_root_lm(settings)
+        await probe_configured_root_lm(
+            settings,
+            interpreter_factory=_provider_probe_interpreter,
+            child_runtime_factory=_provider_probe_child_runtime,
+        )
+
+
+def _provider_probe_interpreter() -> Any:
+    from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
+
+    return DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())
+
+
+def _provider_probe_child_runtime(call_index: int) -> Any:
+    from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
+    from fleet_rlm.daytona.recursive_child_runtime import ChildRuntimeLease
+
+    interpreter = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())
+    return ChildRuntimeLease(
+        interpreter=interpreter,
+        sandbox_id=f"provider-probe-{call_index}",
+        volume_id="in-process",
+        volume_subpath=f"recursive/provider-probe/run/{call_index}",
+        _close=interpreter.shutdown,
+    )
 
 
 _SUCCESS_MESSAGES: dict[DoctorStepName, str] = {

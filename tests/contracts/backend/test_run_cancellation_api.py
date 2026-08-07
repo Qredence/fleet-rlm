@@ -41,7 +41,9 @@ async def test_cancel_owned_run_records_intent_and_is_idempotent() -> None:
     with TestClient(app) as client:
         created = client.post("/api/sessions", json={"title": "t"}, headers=headers)
         session_id = UUID(created.json()["id"])
-        started = await app.state.turn_lifecycle.begin(
+        lifecycle = app.state.runtime_inventory.turn_lifecycle
+        assert lifecycle is not None
+        started = await lifecycle.begin(
             BeginTurn(TurnAccess(user, ws), session_id, TurnInput("question"), "key-2", uuid4())
         )
         assert isinstance(started, ExecuteTurn)

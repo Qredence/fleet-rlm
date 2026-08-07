@@ -347,7 +347,7 @@ describe("terminal projection", () => {
       {
         type: "data-structured-result",
         id: "result-run-1",
-        data: { schemaId: "answer", schemaVersion: "1", value: 7 },
+        data: { schema_id: "answer", schema_version: "1", value: 7 },
       },
       { type: "text-start", id: "text-1" },
       { type: "text-delta", id: "text-1", delta: "The answer is 7." },
@@ -404,7 +404,7 @@ describe("terminal projection", () => {
           parts: [
             {
               type: "data-structured-result",
-              data: { schemaId: "answer", schemaVersion: "1", value: 7 },
+              data: { schema_id: "answer", schema_version: "1", value: 7 },
             },
             { type: "text", text: "The answer is 7.", state: "done" },
             { type: "data-step", data: { step: 2 } },
@@ -691,7 +691,7 @@ describe("terminal projection", () => {
         {
           type: "data-structured-result",
           id: "result-1",
-          data: { schemaId: "answer", schemaVersion: "1", value: 7 },
+          data: { schema_id: "answer", schema_version: "1", value: 7 },
         },
       ].flatMap((chunk) => projector.push(chunk as FleetUIMessageChunk)),
     );

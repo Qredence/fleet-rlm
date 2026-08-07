@@ -28,10 +28,10 @@ from fastapi.testclient import TestClient
 from fleet_rlm.api.local_scope import LocalScope
 from fleet_rlm.app import create_app
 from fleet_rlm.config import Settings, load_runtime_settings
-from fleet_rlm.daytona.bindings import SandboxBinding
 from fleet_rlm.daytona.workspace_fs import DaytonaSandboxVolumeFs
 from fleet_rlm.files.volume_paths import volume_paths_from_settings
 from fleet_rlm.rlm.tool_observer import ToolEventView
+from fleet_rlm.runtime.bindings import SandboxBinding
 from fleet_rlm.skills.catalog import stable_skill_id
 from tests.live.backend._database import upgrade_to_head
 
@@ -594,7 +594,8 @@ def test_direct_pi_digit_uses_deterministic_repl_without_optional_capabilities(t
     cleanup_failures: tuple[str, ...] = ()
 
     with TestClient(app) as client:
-        resources = app.state.run_environment_resources
+        resources = app.state.runtime_inventory.run_environment_resources
+        assert resources is not None
         portal = client.portal
         assert portal is not None
         try:
@@ -782,8 +783,11 @@ def test_complete_daytona_mvp_through_fastapi(
     try:
         app.add_middleware(_FirstStreamDeltaMiddleware, probe=first_delta_probe)
         with TestClient(app) as client:
-            resources = app.state.run_environment_resources
-            preparation = app.state.turn_preparation
+            inventory = app.state.runtime_inventory
+            resources = inventory.run_environment_resources
+            preparation = inventory.turn_preparation
+            assert resources is not None
+            assert preparation is not None
             preparation._capabilities = _ProofCapabilityPreparer(
                 preparation._capabilities,
                 proof_tools,

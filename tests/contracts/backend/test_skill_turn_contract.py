@@ -18,6 +18,7 @@ from fleet_rlm.api.routes.turns import router as turns_router
 from fleet_rlm.api.schemas import CreateTurnRequest
 from fleet_rlm.chat.commands import OpenTurnCommand
 from fleet_rlm.chat.turn_lifecycle import ExecuteTurn, _TurnClaimToken
+from fleet_rlm.composition.inventory import RuntimeInventory
 from fleet_rlm.files.models import AttachmentRef, PreparedAttachments, StagedAttachment
 from fleet_rlm.rlm.dspy_contract import RLMOptions
 from fleet_rlm.rlm.events import EventRecorder, RuntimeEvent
@@ -57,7 +58,7 @@ class _Coordinator:
 def _turn_client(coordinator: _Coordinator) -> TestClient:
     app = FastAPI()
     app.state.composition_ready = True
-    app.state.turn_coordinator = coordinator
+    app.state.runtime_inventory = RuntimeInventory(turn_coordinator=coordinator)
     install_error_handlers(app)
     app.include_router(turns_router)
     return TestClient(app)
@@ -197,13 +198,10 @@ async def test_progressive_resource_requires_load_and_daytona_preparation_is_pro
     assert host.load_skill(str(selected.card.id), selected.card.version)["ok"] is True
     assert host.read_skill_resource(str(selected.card.id), resource_path, selected.card.version)["ok"] is True
 
-    resources = SimpleNamespace(
-        settings=Settings(_env_file=None, run_environment="daytona"),
-        models=RLMModelBundle(MagicMock(), MagicMock()),
-    )
+    settings = Settings(_env_file=None, run_environment="daytona")
     environment = SimpleNamespace(attachment_sink=SimpleNamespace(volume_fs=SimpleNamespace(sandbox=object())))
     turn = _turn()
-    prepared = await _LiveCapabilityPreparer(resources, catalog).prepare(
+    prepared = await _LiveCapabilityPreparer(settings, catalog).prepare(
         turn,
         environment,
         PreparedAttachments((), ()),
@@ -399,12 +397,9 @@ async def test_daytona_report_builder_workspace_selection_keeps_workspace_host_o
             SkillSelectionRef(workspace_files.card.id, workspace_files.card.version),
         )
     )
-    resources = SimpleNamespace(
-        settings=Settings(_env_file=None, run_environment="daytona"),
-        models=RLMModelBundle(MagicMock(), MagicMock()),
-    )
+    settings = Settings(_env_file=None, run_environment="daytona")
     environment = SimpleNamespace(attachment_sink=SimpleNamespace(volume_fs=SimpleNamespace(sandbox=object())))
-    prepared = await _LiveCapabilityPreparer(resources, catalog).prepare(
+    prepared = await _LiveCapabilityPreparer(settings, catalog).prepare(
         turn,
         environment,
         PreparedAttachments((), ()),

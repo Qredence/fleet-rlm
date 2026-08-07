@@ -69,6 +69,29 @@ describe("streamFleetTurn", () => {
     expect(streamTurn.mock.calls[1]?.[0].idempotencyKey).toBe("same-key");
   });
 
+  it("surfaces the backend X-Fleet-Run-ID header as an early runId fallback", async () => {
+    const onRunId = vi.fn();
+    const streamTurn = vi.fn().mockResolvedValue(
+      new Response(
+        'data: {"type":"start","messageId":"run-1","messageMetadata":{}}\n\n' +
+          'data: {"type":"finish","finishReason":"stop"}\n\n' +
+          "data: [DONE]\n\n",
+        {
+          headers: { "x-vercel-ai-ui-message-stream": "v1", "X-Fleet-Run-ID": "run-1" },
+        },
+      ),
+    );
+
+    await collect({
+      client: client(streamTurn),
+      sessionId: "session-1",
+      message: "hello",
+      onRunId,
+    });
+
+    expect(onRunId).toHaveBeenCalledWith("run-1");
+  });
+
   it("forwards pinned Skill selections and the stream-open acknowledgement", async () => {
     const onStreamOpen = vi.fn();
     const streamTurn = vi

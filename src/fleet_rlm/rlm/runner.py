@@ -256,6 +256,88 @@ class _FleetStatusMessageProvider(dspy.streaming.StatusMessageProvider):
         return "RLM action generation completed"
 
 
+# JSON escapes that map to their decoded control/structural character. JSON's
+# remaining standard escapes (``\b`` backspace, ``\f`` form feed) are NOT
+# decoded: control characters would corrupt terminal rendering, so they are
+# emitted as their literal letter (``b`` / ``f``) instead.
+_JSON_SIMPLE_ESCAPES = {"n": "\n", "t": "\t", "r": "\r", '"': '"', "\\": "\\", "/": "/"}
+
+
+def _extract_json_string_prefix(raw: str) -> str:
+    """Decode the first JSON string literal in ``raw`` (or its decoded prefix).
+
+    DSPy's JSONAdapter streams the raw JSON-encoded field value — surrounding
+    quotes, JSON escapes (``\\n`` etc.) — and the value can bleed into the next
+    field (e.g. a reasoning chunk ends with ``,"code":...``). This extracts and
+    decodes the first JSON string, ignoring everything after its closing quote,
+    so the TUI receives clean reasoning/code text instead of a raw JSON blob.
+    An incomplete trailing escape (straddling a chunk boundary) is left for the
+    next fragment. ``\\uXXXX`` escapes decode via ``chr``, with UTF-16
+    surrogate pairs combined into one character; invalid hex, unpaired
+    surrogates, and the ``\\b``/``\\f`` control escapes stay as their literal
+    text.
+    """
+    start = raw.find('"')
+    if start == -1:
+        return ""
+    decoded: list[str] = []
+    index = start + 1
+    while index < len(raw):
+        char = raw[index]
+        if char == '"':
+            return "".join(decoded)
+        if char != "\\":
+            decoded.append(char)
+            index += 1
+            continue
+        if index + 1 >= len(raw):
+            break  # escape tail straddles the next fragment
+        escaped = raw[index + 1]
+        if escaped == "u":
+            if index + 5 >= len(raw):
+                break  # incomplete \uXXXX
+            hex4 = raw[index + 2 : index + 6]
+            try:
+                code_point = int(hex4, 16)
+            except ValueError:
+                decoded.append(raw[index : index + 6])
+                index += 6
+                continue
+            if 0xD800 <= code_point <= 0xDBFF:
+                # Non-BMP characters arrive as a UTF-16 surrogate pair; decode
+                # both halves together so no lone surrogate reaches the UTF-8
+                # encoder on the SSE path.
+                if index + 11 >= len(raw):
+                    break  # low surrogate straddles the next fragment
+                if raw[index + 6 : index + 8] == "\\u":
+                    try:
+                        low = int(raw[index + 8 : index + 12], 16)
+                    except ValueError:
+                        low = -1
+                    if 0xDC00 <= low <= 0xDFFF:
+                        decoded.append(chr(0x10000 + ((code_point - 0xD800) << 10) + (low - 0xDC00)))
+                        index += 12
+                        continue
+                decoded.append(raw[index : index + 6])
+                index += 6
+                continue
+            if 0xDC00 <= code_point <= 0xDFFF:
+                # An unpaired low surrogate cannot be UTF-8 encoded; keep the
+                # literal escape text.
+                decoded.append(raw[index : index + 6])
+                index += 6
+                continue
+            decoded.append(chr(code_point))
+            index += 6
+        elif escaped in _JSON_SIMPLE_ESCAPES:
+            decoded.append(_JSON_SIMPLE_ESCAPES[escaped])
+            index += 2
+        else:
+            decoded.append(escaped)
+            index += 2
+    return "".join(decoded)
+
+
 class _NativeRLMStreamProjector:
     """Project live DSPy ``streamify`` values into bounded Fleet details.
 
@@ -272,6 +354,8 @@ class _NativeRLMStreamProjector:
         self._last_field: str | None = None
         self._field_chars = {"reasoning": 0, "code": 0}
         self._field_completed = {"reasoning": False, "code": False}
+        self._field_raw: dict[str, str] = {}
+        self._decoded_emitted: dict[str, str] = {}
 
     def publish(self, item: Any) -> bool:
         if isinstance(item, dspy.streaming.StatusMessage):
@@ -296,10 +380,28 @@ class _NativeRLMStreamProjector:
             self._field_chars["code"] = 0
             self._field_completed["reasoning"] = False
             self._field_completed["code"] = False
+            self._field_raw = {}
+            self._decoded_emitted = {}
         self._last_field = field
 
+        # The raw JSON buffer exists only to finish in-flight escapes; once the
+        # public output bound is exhausted the delta is empty, so stop growing
+        # it and keep a pathological long stream memory-bounded.
         remaining = self._max_chars - self._field_chars[field]
-        chunk = truncate_public_text(str(item.chunk), max_len=max(0, remaining)) if remaining else ""
+        delta = ""
+        if remaining > 0:
+            field_raw = self._field_raw.get(field, "") + str(item.chunk)
+            self._field_raw[field] = field_raw
+            # DSPy's JSONAdapter streams the raw JSON-encoded value (quotes +
+            # \\n escapes); decode the first JSON string so the TUI gets clean
+            # text. A chunk without a leading quote is already clean (e.g.
+            # replay paths).
+            decoded = _extract_json_string_prefix(field_raw) if field_raw.startswith('"') else field_raw
+            emitted = self._decoded_emitted.get(field, "")
+            delta = decoded[len(emitted) :] if len(decoded) > len(emitted) else ""
+            self._decoded_emitted[field] = decoded
+
+        chunk = truncate_public_text(delta, max_len=remaining) if remaining else ""
         self._field_chars[field] += len(chunk)
         if not chunk and not item.is_last_chunk:
             return False

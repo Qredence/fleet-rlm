@@ -63,3 +63,11 @@ class ArtifactCandidate:
 class ArtifactContent:
     metadata: ArtifactRef
     data: bytes
+
+
+@dataclass(frozen=True, slots=True)
+class CompletedRun:
+    """Run identity whose private result snapshot is allowed to remain."""
+
+    session_id: UUID
+    run_id: UUID

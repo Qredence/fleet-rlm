@@ -4,10 +4,10 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Query
 
-from fleet_rlm.api.dependencies import WorkspaceFileServiceDep
-from fleet_rlm.api.local_scope import LocalScope, get_local_scope
+from fleet_rlm.api.dependencies import LocalScopeDep, WorkspaceFileServiceDep
+from fleet_rlm.api.errors import http_error
 from fleet_rlm.api.schemas import (
     WorkspaceFileAppendRequest,
     WorkspaceFileEntryResponse,
@@ -31,36 +31,25 @@ def _entry(value: WorkspaceFileEntry) -> WorkspaceFileEntryResponse:
 
 def _raise_public_error(exc: BaseException) -> None:
     if isinstance(exc, (WorkspaceFileConflictError, FileExistsError)):
-        raise HTTPException(
-            status_code=409,
-            detail={
-                "code": "workspace_file_conflict",
-                "message": "Workspace file precondition did not match",
-            },
+        raise http_error(
+            409,
+            "workspace_file_conflict",
+            "Workspace file precondition did not match",
         ) from exc
     if isinstance(exc, FileNotFoundError):
-        raise HTTPException(
-            status_code=404,
-            detail={"code": "workspace_file_not_found", "message": "Workspace file not found"},
-        ) from exc
+        raise http_error(404, "workspace_file_not_found", "Workspace file not found") from exc
     if isinstance(exc, (ValueError, IsADirectoryError, NotADirectoryError)):
-        raise HTTPException(
-            status_code=400,
-            detail={"code": "workspace_file_invalid", "message": "Workspace file request is invalid"},
-        ) from exc
-    raise HTTPException(
-        status_code=503,
-        detail={"code": "workspace_files_unavailable", "message": "Workspace files are unavailable"},
-    ) from exc
+        raise http_error(400, "workspace_file_invalid", "Workspace file request is invalid") from exc
+    raise http_error(503, "workspace_files_unavailable", "Workspace files are unavailable") from exc
 
 
 @router.get("", response_model=WorkspaceFileListResponse, operation_id="list_workspace_files_api")
 async def list_workspace_files(
-    identity: Annotated[LocalScope, Depends(get_local_scope)],
+    identity: LocalScopeDep,
     service: WorkspaceFileServiceDep,
-    path: str = ".",
-    limit: int = Query(default=MAX_PUBLIC_LIST_LIMIT, ge=1, le=MAX_PUBLIC_LIST_LIMIT),
-    after: str | None = None,
+    path: Annotated[str, Query(description="Workspace-relative path")] = ".",
+    limit: Annotated[int, Query(ge=1, le=MAX_PUBLIC_LIST_LIMIT)] = MAX_PUBLIC_LIST_LIMIT,
+    after: Annotated[str | None, Query()] = None,
 ) -> WorkspaceFileListResponse:
     try:
         listing = await service.list(
@@ -84,8 +73,8 @@ async def list_workspace_files(
     operation_id="stat_workspace_file_api",
 )
 async def stat_workspace_file(
-    path: str,
-    identity: Annotated[LocalScope, Depends(get_local_scope)],
+    path: Annotated[str, Query()],
+    identity: LocalScopeDep,
     service: WorkspaceFileServiceDep,
 ) -> WorkspaceFileEntryResponse:
     try:
@@ -94,7 +83,10 @@ async def stat_workspace_file(
             raise FileNotFoundError(path)
     except Exception as exc:
         _raise_public_error(exc)
-    assert value is not None
+    if value is None:
+        # stat() raises for missing files; the guard keeps type narrowing even
+        # under `python -O`, where `assert` would be stripped.
+        raise http_error(503, "workspace_files_unavailable", "Workspace files are unavailable")
     return _entry(value)
 
 
@@ -104,11 +96,11 @@ async def stat_workspace_file(
     operation_id="read_workspace_file_api",
 )
 async def read_workspace_file(
-    path: str,
-    identity: Annotated[LocalScope, Depends(get_local_scope)],
+    path: Annotated[str, Query()],
+    identity: LocalScopeDep,
     service: WorkspaceFileServiceDep,
-    cursor: str | None = None,
-    max_chars: int = Query(default=MAX_PUBLIC_READ_CHARS, ge=1, le=MAX_PUBLIC_READ_CHARS),
+    cursor: Annotated[str | None, Query()] = None,
+    max_chars: Annotated[int, Query(ge=1, le=MAX_PUBLIC_READ_CHARS)] = MAX_PUBLIC_READ_CHARS,
 ) -> WorkspaceFileReadResponse:
     try:
         page = await service.read(
@@ -135,7 +127,7 @@ async def read_workspace_file(
 )
 async def write_workspace_file(
     body: WorkspaceFileWriteRequest,
-    identity: Annotated[LocalScope, Depends(get_local_scope)],
+    identity: LocalScopeDep,
     service: WorkspaceFileServiceDep,
 ) -> WorkspaceFileEntryResponse:
     try:
@@ -158,7 +150,7 @@ async def write_workspace_file(
 )
 async def append_workspace_file(
     body: WorkspaceFileAppendRequest,
-    identity: Annotated[LocalScope, Depends(get_local_scope)],
+    identity: LocalScopeDep,
     service: WorkspaceFileServiceDep,
 ) -> WorkspaceFileEntryResponse:
     try:

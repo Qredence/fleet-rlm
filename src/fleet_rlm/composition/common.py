@@ -1,60 +1,39 @@
-"""Shared composition types and local inventory wiring."""
+"""Shared composition helpers and local inventory wiring."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+from uuid import UUID
 
-from fastapi import FastAPI
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from fleet_rlm.artifacts.reader import ArtifactReader
+from fleet_rlm.chat.turn_preparation import TurnPreparation
+from fleet_rlm.composition.inventory import RuntimeDatabaseLifecycle, RuntimeInventory
 from fleet_rlm.config import Settings
+from fleet_rlm.files.lifecycle import AttachmentLifecycle
+from fleet_rlm.files.volume_storage import VolumeTreeFs
 from fleet_rlm.rlm.dspy_contract import RLMOptions, assert_dspy_version
 from fleet_rlm.rlm.recursive_calls import RecursiveRLMOptions
+from fleet_rlm.rlm.runner import RLMFactoryLike
 
 
 class CompositionError(RuntimeError):
     """Raised when a runtime composition cannot be assembled."""
 
 
-COMPOSITION_STATE_FIELDS = (
-    "artifact_reader",
-    "config_policy",
-    "attachment_lifecycle",
-    "rlm_model_bundle",
-    "run_environment_resources",
-    "session_catalog",
-    "session_manager",
-    "turn_coordinator",
-    "turn_cleanup_supervisor",
-    "turn_lifecycle",
-    "turn_preparation",
-    "turn_state_store",
-    "workspace_volume_gateway",
-    "workspace_volume_mirror",
-    "workspace_file_service",
-)
-
-
-@dataclass(slots=True)
-class LocalCompositionHandles:
-    """Process-owned adapters for local/private test compositions."""
-
-    turn_coordinator: Any
-    attachment_lifecycle: Any
-    artifact_reader: Any
-    workspace_volume_mirror: Any
-    session_catalog: Any
-    turn_lifecycle: Any
-    turn_cleanup_supervisor: Any
+async def no_provider_recovery_fence(_session_id: UUID) -> None:
+    """Declare that deterministic compositions have no provider state to fence."""
 
 
 @dataclass(frozen=True, slots=True)
 class LocalStorageAdapters:
     """Attachment and Artifact adapters shared by local runtime profiles."""
 
-    attachment_lifecycle: Any
-    artifact_reader: Any
+    attachment_lifecycle: AttachmentLifecycle
+    artifact_reader: ArtifactReader
 
 
 def host_roots(settings: Settings) -> tuple[str, str]:
@@ -65,7 +44,7 @@ def host_roots(settings: Settings) -> tuple[str, str]:
 def build_local_storage_adapters(
     settings: Settings,
     *,
-    session_factory: Any | None,
+    session_factory: async_sessionmaker[AsyncSession] | None,
     volume_paths: Any | None,
     sql_attachment_blobs: Any | None,
     sql_attachment_paths: Any | None,
@@ -85,7 +64,7 @@ def build_local_storage_adapters(
 
     upload_root, artifact_root = host_roots(settings)
     if session_factory is None:
-        attachment_lifecycle: Any = AttachmentLifecycleService(
+        attachment_lifecycle = AttachmentLifecycleService(
             catalog=LocalAttachmentCatalog(upload_root),
             blobs=LocalAttachmentBlobGateway(Path(upload_root)),
             paths=LocalAttachmentPathPolicy(Path(upload_root)),
@@ -96,7 +75,7 @@ def build_local_storage_adapters(
             max_bytes=settings.max_artifact_bytes,
             volume_paths=volume_paths,
         )
-        artifact_reader: Any = ArtifactReader(
+        artifact_reader = ArtifactReader(
             catalog=LocalArtifactReaderCatalog(artifact_catalog),
             blobs=LocalArtifactBlobGateway(artifact_catalog),
         )
@@ -144,25 +123,17 @@ def recursive_rlm_options(settings: Settings) -> RecursiveRLMOptions:
     )
 
 
-def clear_composition_state(app: FastAPI) -> None:
-    """Make every process-owned adapter unavailable after shutdown or rollback."""
-    app.state.composition_ready = False
-    for name in COMPOSITION_STATE_FIELDS:
-        setattr(app.state, name, None)
-
-
-def install_local_inventory(
-    app: FastAPI,
+def build_local_inventory(
     settings: Settings,
     *,
-    session_factory: Any | None,
-    attachment_lifecycle: Any,
-    artifact_reader: Any,
-    preparation: Any,
-    rlm_factory: Any,
-    workspace_volume_mirror: Any | None,
-) -> LocalCompositionHandles:
-    """Attach the shared in-memory/SQL inventory for one local runtime."""
+    database: RuntimeDatabaseLifecycle,
+    attachment_lifecycle: AttachmentLifecycle,
+    artifact_reader: ArtifactReader,
+    preparation: TurnPreparation,
+    rlm_factory: RLMFactoryLike,
+    workspace_volume_mirror: VolumeTreeFs | None,
+) -> RuntimeInventory:
+    """Build the shared in-memory/SQL inventory for one local runtime."""
     assert_dspy_version()
     from fleet_rlm.chat.turn_cleanup import TurnCleanupSupervisor
     from fleet_rlm.chat.turn_coordinator import TurnCoordinator
@@ -177,6 +148,7 @@ def install_local_inventory(
     )
     from fleet_rlm.rlm.runner import RLMRunner
 
+    session_factory = database.session_factory
     if session_factory is None:
         turn_state = InMemoryTurnStateStore()
         session_catalog = InMemorySessionCatalog(turn_state)
@@ -204,7 +176,7 @@ def install_local_inventory(
         mlflow_tracing_enabled=settings.mlflow_tracing_enabled,
         mlflow_expose_trace_id=settings.mlflow_expose_trace_id,
     )
-    handles = LocalCompositionHandles(
+    return RuntimeInventory(
         turn_coordinator=coordinator,
         attachment_lifecycle=attachment_lifecycle,
         artifact_reader=artifact_reader,
@@ -212,19 +184,11 @@ def install_local_inventory(
         session_catalog=session_catalog,
         turn_lifecycle=lifecycle,
         turn_cleanup_supervisor=cleanup,
+        turn_preparation=preparation,
+        turn_state_store=turn_state,
+        config_policy=ConfigPolicyService(
+            _CONFIG_PATH,
+            active_profile=active_profile(settings),
+        ),
+        database=database,
     )
-    app.state.config_policy = ConfigPolicyService(
-        _CONFIG_PATH,
-        active_profile=active_profile(settings),
-    )
-    app.state.turn_coordinator = coordinator
-    app.state.turn_preparation = preparation
-    app.state.turn_lifecycle = lifecycle
-    app.state.turn_cleanup_supervisor = cleanup
-    app.state.turn_state_store = turn_state
-    app.state.session_catalog = session_catalog
-    app.state.attachment_lifecycle = attachment_lifecycle
-    app.state.artifact_reader = artifact_reader
-    app.state.workspace_volume_mirror = workspace_volume_mirror
-    app.state.composition_ready = True
-    return handles

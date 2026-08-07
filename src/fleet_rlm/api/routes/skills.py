@@ -5,23 +5,14 @@ from __future__ import annotations
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Query
 
+from fleet_rlm.api.dependencies import SkillCatalogDep
+from fleet_rlm.api.errors import http_error
 from fleet_rlm.api.schemas import SkillCardResponse
-from fleet_rlm.skills.catalog import SkillCatalog
 from fleet_rlm.skills.models import SkillCard
 
 router = APIRouter(tags=["skills"])
-
-
-def get_skill_catalog(request: Request) -> SkillCatalog:
-    catalog = getattr(request.app.state, "skill_catalog", None)
-    if not isinstance(catalog, SkillCatalog):
-        raise RuntimeError("bundled Skill catalog is unavailable")
-    return catalog
-
-
-SkillCatalogDep = Annotated[SkillCatalog, Depends(get_skill_catalog)]
 
 
 def _to_response(card: SkillCard) -> SkillCardResponse:
@@ -63,5 +54,5 @@ def list_skills(
 def get_skill(skill_id: UUID, catalog: SkillCatalogDep) -> SkillCardResponse:
     skill = catalog.get(skill_id)
     if skill is None:
-        raise HTTPException(status_code=404, detail="skill not found")
+        raise http_error(404, "skill_not_found", "Skill not found")
     return _to_response(skill.card)

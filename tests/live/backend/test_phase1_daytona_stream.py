@@ -416,8 +416,11 @@ def test_phase1_daytona_stream_through_fastapi(tmp_path: Path) -> None:
     )
     app.add_middleware(_FirstStreamDeltaMiddleware, probe=probe)
     with TestClient(app) as client:
-        resources = app.state.run_environment_resources
-        preparation = app.state.turn_preparation
+        inventory = app.state.runtime_inventory
+        resources = inventory.run_environment_resources
+        preparation = inventory.turn_preparation
+        assert resources is not None
+        assert preparation is not None
         preparation._capabilities = _ProofCapabilityPreparer(preparation._capabilities, (proof_tool,), proof_views)
         try:
             created = client.post("/api/sessions", json={"title": "Phase 1 Daytona stream canary"})

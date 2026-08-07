@@ -217,6 +217,13 @@ def trace_runtime_detail(detail: object, *, sequence: int | None = None) -> None
     """
     if not _fleet_trace_active.get():
         return
+    # Streaming RLM deltas are one span per token-ish chunk — a single turn can
+    # emit 1,200+ of these (819 code + 426 reasoning in one 9-step trace), each
+    # carrying a near-empty fragment like ` json` or `\n`. The canonical
+    # trajectory reconciliation traces the complete reasoning/code/output
+    # values, so per-chunk spans are observability noise. Skip them.
+    if getattr(detail, "is_delta", False):
+        return
     try:
         kind = str(getattr(detail, "kind", "unknown"))
         allowed_kind_characters = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-"

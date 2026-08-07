@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
 from typing import Any, assert_never
 
+from fleet_rlm.api.json_util import to_plain_json
 from fleet_rlm.sessions.committed_turn import (
     ArtifactPart,
     AttachmentPart,
@@ -21,14 +21,6 @@ from fleet_rlm.sessions.committed_turn import (
     WarningPart,
 )
 from fleet_rlm.sessions.models import AssistantTurnRecord, UserTurnRecord
-
-
-def _json_value(value: Any) -> Any:
-    if isinstance(value, Mapping):
-        return {str(key): _json_value(item) for key, item in value.items()}
-    if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
-        return [_json_value(item) for item in value]
-    return value
 
 
 def _assistant_part(part: CommittedPart) -> dict[str, Any]:
@@ -48,11 +40,11 @@ def _assistant_part(part: CommittedPart) -> dict[str, Any]:
             "type": "dynamic-tool",
             "toolName": part.tool_name,
             "toolCallId": part.tool_call_id,
-            "input": _json_value(part.input),
+            "input": to_plain_json(part.input),
             "providerExecuted": True,
         }
         if part.state == "completed":
-            value.update(state="output-available", output=_json_value(part.output))
+            value.update(state="output-available", output=to_plain_json(part.output))
         else:
             value.update(state="output-error", errorText=part.error)
         return value
@@ -94,14 +86,14 @@ def _assistant_part(part: CommittedPart) -> dict[str, Any]:
             },
         }
     if isinstance(part, UsagePart):
-        return {"type": "data-usage", "data": _json_value(part.value)}
+        return {"type": "data-usage", "data": to_plain_json(part.value)}
     if isinstance(part, StructuredResultPart):
         return {
             "type": "data-structured-result",
             "data": {
                 "schemaId": part.schema_id,
                 "schemaVersion": part.schema_version,
-                "value": _json_value(part.value),
+                "value": to_plain_json(part.value),
             },
         }
     if isinstance(part, TextPart):

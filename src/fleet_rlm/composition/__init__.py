@@ -7,24 +7,30 @@ directly in tests; it is never installed by lifespan and is not re-exported here
 
 from fleet_rlm.composition.common import (
     CompositionError,
-    LocalCompositionHandles,
-    clear_composition_state,
 )
 from fleet_rlm.composition.daytona import (
-    DaytonaCompositionHandles,
     build_daytona_composition,
     dispose_daytona_composition,
     install_daytona_composition,
     require_daytona_settings,
 )
+from fleet_rlm.composition.inventory import (
+    RuntimeDatabaseLifecycle,
+    RuntimeInventory,
+    clear_runtime_inventory,
+    get_runtime_inventory,
+    install_runtime_inventory,
+)
 
 __all__ = [
     "CompositionError",
-    "DaytonaCompositionHandles",
-    "LocalCompositionHandles",
+    "RuntimeDatabaseLifecycle",
+    "RuntimeInventory",
     "build_daytona_composition",
-    "clear_composition_state",
+    "clear_runtime_inventory",
     "dispose_daytona_composition",
+    "get_runtime_inventory",
     "install_daytona_composition",
+    "install_runtime_inventory",
     "require_daytona_settings",
 ]

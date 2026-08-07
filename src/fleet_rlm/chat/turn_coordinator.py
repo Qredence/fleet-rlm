@@ -3,18 +3,25 @@
 from __future__ import annotations
 
 import asyncio
-import contextlib
 from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable
-from dataclasses import dataclass, replace
-from typing import Protocol, Self
+from typing import Self
 from uuid import UUID
 
 from fleet_rlm.chat.commands import OpenTurnCommand
 from fleet_rlm.chat.committed_turn_events import CommittedTurnEventProjector
 from fleet_rlm.chat.turn_cleanup import TurnCleanupSupervisor, TurnCleanupUnavailableError
+from fleet_rlm.chat.turn_execution import (
+    TurnEventStream,  # noqa: F401 - compatibility export
+    TurnExecutionDriver,
+    TurnRunner,
+    _ClaimHeartbeat,
+    _shield_cleanup,
+    _stop_heartbeat,
+    _terminal,  # noqa: F401 - compatibility export
+    _with_trace_id,  # noqa: F401 - compatibility export
+)
 from fleet_rlm.chat.turn_lifecycle import (
     BeginTurn,
-    CommittedTurnReceipt,
     ExecuteTurn,
     FailedRunReceipt,
     ReplayTurn,
@@ -30,50 +37,8 @@ from fleet_rlm.chat.turn_preparation import (
     TurnPreparationTimeoutError,
 )
 from fleet_rlm.observability.turn_tracing import annotate_trace_io, turn_phase_span, turn_trace
-from fleet_rlm.rlm.context import RLMExecutionContext
 from fleet_rlm.rlm.dspy_contract import empty_rlm_usage
-from fleet_rlm.rlm.events import (
-    TERMINAL_DETAIL_TYPES,
-    EventRecorder,
-    RunCancelled,
-    RunCompleted,
-    RunFailed,
-    RunFailedMessage,
-    RunStarted,
-    RunTimedOut,
-    RuntimeEvent,
-    Status,
-)
-from fleet_rlm.rlm.outcome import RLMOutcome
-
-
-class TurnEventStream(AsyncIterator[RuntimeEvent], Protocol):
-    @property
-    def outcome(self) -> RLMOutcome | None: ...
-
-    async def aclose(self) -> None: ...
-
-    async def wait_owned(self) -> None: ...
-
-
-class TurnRunner(Protocol):
-    def stream(self, context: RLMExecutionContext) -> TurnEventStream: ...
-
-
-@dataclass(slots=True)
-class _ClaimHeartbeat:
-    task: asyncio.Task[None]
-    lost: asyncio.Event
-
-
-async def _shield_cleanup(awaitable) -> None:
-    """Complete owned settlement/cleanup even if the caller is cancelled."""
-    task = asyncio.ensure_future(awaitable)
-    try:
-        await asyncio.shield(task)
-    except asyncio.CancelledError:
-        await asyncio.shield(task)
-        raise
+from fleet_rlm.rlm.events import EventRecorder, RunCompleted, RunStarted, RuntimeEvent, Status
 
 
 class OpenedTurnStream:
@@ -93,57 +58,6 @@ class OpenedTurnStream:
         close = getattr(self._events, "aclose", None)
         if close is not None:
             await _shield_cleanup(close())
-
-
-def _terminal(
-    recorder: EventRecorder,
-    receipt: CommittedTurnReceipt | FailedRunReceipt,
-    *,
-    trace_id: str | None = None,
-) -> RuntimeEvent:
-    if isinstance(receipt, CommittedTurnReceipt):
-        return recorder.record(
-            RunCompleted(
-                checkpoint_version=receipt.checkpoint_version,
-                delivery="live",
-                trace_id=trace_id,
-            )
-        )
-    if receipt.terminal_status == "cancelled":
-        return recorder.record(RunCancelled())
-    if receipt.terminal_status == "timeout":
-        return recorder.record(RunTimedOut())
-    if receipt.failure_code == "preparation_failed":
-        return recorder.record(RunFailed(code="preparation_failed", message="Turn could not be prepared"))
-    if receipt.failure_code == "commit_failed":
-        return recorder.record(RunFailed(code="commit_failed", message="Turn could not be committed"))
-    message = receipt.public_message.strip() if receipt.public_message else ""
-    if message == "Turn output is too large":
-        public_message: RunFailedMessage = "Turn output is too large"
-    elif message == "Turn output is invalid":
-        public_message = "Turn output is invalid"
-    else:
-        public_message = "Turn failed"
-    return recorder.record(RunFailed(code="execution_failed", message=public_message))
-
-
-def _with_trace_id(event: RuntimeEvent, trace_id: str | None) -> RuntimeEvent:
-    if not trace_id:
-        return event
-    detail = event.detail
-    if isinstance(detail, RunStarted) and detail.trace_id is None:
-        return replace(event, detail=RunStarted(delivery=detail.delivery, trace_id=trace_id))
-    if isinstance(detail, RunCompleted) and detail.trace_id is None:
-        return replace(
-            event,
-            detail=RunCompleted(
-                checkpoint_version=detail.checkpoint_version,
-                delivery=detail.delivery,
-                duration_ms=detail.duration_ms,
-                trace_id=trace_id,
-            ),
-        )
-    return event
 
 
 class TurnCoordinator:
@@ -171,30 +85,15 @@ class TurnCoordinator:
         self._claim_loss_fence = claim_loss_fence
         self._mlflow_tracing_enabled = mlflow_tracing_enabled
         self._mlflow_expose_trace_id = mlflow_expose_trace_id
-
-    async def _finish_with_trace(
-        self,
-        turn: ExecuteTurn,
-        resolution: RLMOutcome | TurnFailure,
-        prepared: PreparedTurn,
-    ) -> CommittedTurnReceipt | FailedRunReceipt:
-        """Settle one executed Turn and expose only its terminal status to MLflow."""
-        terminal_status = resolution.terminal_status
-        settlement_inputs: dict[str, object] = {
-            "terminal_status": terminal_status,
-            "has_prediction": isinstance(resolution, RLMOutcome) and resolution.prediction is not None,
-        }
-        if isinstance(resolution, RLMOutcome):
-            settlement_inputs["duration_ms"] = resolution.duration_ms
-            settlement_inputs["artifact_candidate_count"] = len(resolution.artifact_candidates)
-            settlement_inputs["iterations"] = resolution.usage.get("iterations")
-        with turn_phase_span("Turn.settlement", inputs=settlement_inputs):
-            return await self._lifecycle.finish(
-                turn,
-                resolution,
-                artifact_sink=prepared.artifact_sink,
-                result_snapshot_sink=prepared.result_snapshot_sink,
-            )
+        self._execution_driver = TurnExecutionDriver(
+            lifecycle=lifecycle,
+            runner=runner,
+            projector=self._projector,
+            cleanup=self._cleanup,
+            claim_loss_fence=claim_loss_fence,
+            turn_timeout_seconds=self._turn_timeout_seconds,
+            revoke_claim=self._revoke_claim,
+        )
 
     async def _prepare_with_trace(self, start: ExecuteTurn, *, deadline: float) -> PreparedTurn:
         """Trace preparation separately because SSE begins only after it succeeds."""
@@ -270,7 +169,7 @@ class TurnCoordinator:
                 heartbeat_lost.cancel()
                 await asyncio.gather(heartbeat_lost, return_exceptions=True)
         except TurnPreparationCancelledError:
-            await self._stop_heartbeat(heartbeat)
+            await _stop_heartbeat(heartbeat)
             await _shield_cleanup(
                 self._lifecycle.finish(
                     start,
@@ -279,7 +178,7 @@ class TurnCoordinator:
             )
             raise
         except (TurnPreparationTimeoutError, TimeoutError) as exc:
-            await self._stop_heartbeat(heartbeat)
+            await _stop_heartbeat(heartbeat)
             await _shield_cleanup(
                 self._lifecycle.finish(
                     start,
@@ -292,7 +191,7 @@ class TurnCoordinator:
         except Exception:
             if start.authority.revoked:
                 raise
-            await self._stop_heartbeat(heartbeat)
+            await _stop_heartbeat(heartbeat)
             await _shield_cleanup(
                 self._lifecycle.finish(
                     start,
@@ -327,244 +226,8 @@ class TurnCoordinator:
             enabled=self._mlflow_tracing_enabled,
             expose_trace_id=self._mlflow_expose_trace_id,
         ) as handle:
-            async for event in self._execute_traced(turn, prepared, heartbeat, trace_id=handle.trace_id):
+            async for event in self._execution_driver.stream(turn, prepared, heartbeat, trace_id=handle.trace_id):
                 yield event
-
-    async def _execute_traced(
-        self,
-        turn: ExecuteTurn,
-        prepared: PreparedTurn,
-        heartbeat: _ClaimHeartbeat | None,
-        *,
-        trace_id: str | None,
-    ) -> AsyncGenerator[RuntimeEvent]:
-        stream: TurnEventStream | None = None
-        settled = False
-        recorder = EventRecorder(turn.run_id, turn.session_id)
-        cleanup_handed_off = False
-        finalization_task: asyncio.Task[CommittedTurnReceipt | FailedRunReceipt] | None = None
-        trace_request = getattr(prepared.execution, "request", "")
-        if not isinstance(trace_request, str):
-            trace_request = ""
-        try:
-            stream = self._runner.stream(prepared.execution)
-            last_sequence = 0
-            while True:
-                next_event = asyncio.ensure_future(anext(stream))
-                heartbeat_lost = asyncio.create_task(heartbeat.lost.wait()) if heartbeat is not None else None
-                waiters = {next_event}
-                if heartbeat_lost is not None:
-                    waiters.add(heartbeat_lost)
-                done, _ = await asyncio.wait(waiters, return_when=asyncio.FIRST_COMPLETED)
-                if heartbeat_lost is not None and heartbeat_lost in done:
-                    assert heartbeat is not None
-                    if not heartbeat.lost.is_set():
-                        raise AssertionError("heartbeat loss waiter completed without claim loss")
-                    next_event.cancel()
-                    await asyncio.gather(next_event, return_exceptions=True)
-                    cleanup_handed_off = True
-                    self._submit_cleanup(
-                        turn,
-                        stream,
-                        prepared,
-                        heartbeat,
-                        claim_lost=True,
-                        claim_loss_usage=empty_rlm_usage(),
-                    )
-                    heartbeat = None
-                    settled = True
-                    annotate_trace_io(
-                        request=trace_request,
-                        response_text="Turn failed",
-                        failed=True,
-                    )
-                    yield recorder.record(RunFailed(code="unavailable", message="Turn failed"))
-                    return
-                if heartbeat_lost is not None:
-                    heartbeat_lost.cancel()
-                    await asyncio.gather(heartbeat_lost, return_exceptions=True)
-                try:
-                    event = next_event.result()
-                except StopAsyncIteration:
-                    break
-                if isinstance(event.detail, TERMINAL_DETAIL_TYPES):
-                    raise RuntimeError("runner emitted a terminal Runtime Event")
-                last_sequence = event.sequence
-                recorder = EventRecorder(turn.run_id, turn.session_id, start_sequence=last_sequence)
-                yield _with_trace_id(event, trace_id)
-            outcome = stream.outcome or RLMOutcome(
-                terminal_status="failed",
-                public_error_message="Turn failed",
-            )
-            # Propagate request/response to root trace span for MLflow judges
-            annotate_trace_io(
-                request=trace_request,
-                response_text=(outcome.prediction.display_text if outcome.prediction else outcome.public_error_message),
-                response_outputs=(dict(outcome.prediction.outputs) if outcome.prediction else None),
-                failed=not outcome.succeeded,
-            )
-            if outcome.terminal_status in {"timeout", "cancelled"}:
-                status = "timeout" if outcome.terminal_status == "timeout" else "cancelled"
-                receipt = await self._lifecycle.settle(
-                    turn,
-                    TurnFailure(
-                        status,
-                        status,
-                        outcome.public_error_message or ("Turn timed out" if status == "timeout" else "Turn cancelled"),
-                        outcome.usage,
-                    ),
-                )
-                cleanup_handed_off = True
-                self._submit_cleanup(turn, stream, prepared, heartbeat)
-                heartbeat = None
-                await asyncio.sleep(0)
-            else:
-                finalization_task = asyncio.create_task(
-                    self._finish_with_trace(
-                        turn,
-                        outcome,
-                        prepared,
-                    )
-                )
-                execution_deadline = float(
-                    getattr(
-                        prepared.execution,
-                        "deadline",
-                        asyncio.get_running_loop().time() + self._turn_timeout_seconds,
-                    )
-                )
-                remaining = max(0.0, execution_deadline - asyncio.get_running_loop().time())
-                heartbeat_lost = asyncio.create_task(heartbeat.lost.wait()) if heartbeat is not None else None
-                waiters = {finalization_task}
-                if heartbeat_lost is not None:
-                    waiters.add(heartbeat_lost)
-                done, _ = await asyncio.wait(waiters, timeout=remaining, return_when=asyncio.FIRST_COMPLETED)
-                if finalization_task in done:
-                    if heartbeat_lost is not None:
-                        heartbeat_lost.cancel()
-                        await asyncio.gather(heartbeat_lost, return_exceptions=True)
-                    receipt = finalization_task.result()
-                elif heartbeat_lost is not None and heartbeat_lost in done:
-                    assert heartbeat is not None
-                    cleanup_handed_off = True
-                    self._submit_cleanup(
-                        turn,
-                        stream,
-                        prepared,
-                        heartbeat,
-                        finalization_task,
-                        claim_lost=True,
-                        claim_loss_usage=outcome.usage,
-                    )
-                    heartbeat = None
-                    settled = True
-                    annotate_trace_io(
-                        request=trace_request,
-                        response_text="Turn failed",
-                        failed=True,
-                    )
-                    yield recorder.record(RunFailed(code="unavailable", message="Turn failed"))
-                    return
-                else:
-                    if heartbeat_lost is not None:
-                        heartbeat_lost.cancel()
-                        await asyncio.gather(heartbeat_lost, return_exceptions=True)
-                    receipt = await self._lifecycle.settle(
-                        turn,
-                        TurnFailure("timeout", "timeout", "Turn timed out", outcome.usage),
-                    )
-                    cleanup_handed_off = True
-                    self._submit_cleanup(turn, stream, prepared, heartbeat, finalization_task)
-                    heartbeat = None
-                    await asyncio.sleep(0)
-            # A successful RLM outcome can still fail during durable commit;
-            # make the root trace reflect the terminal receipt before closing it.
-            if isinstance(receipt, FailedRunReceipt) and outcome.succeeded:
-                annotate_trace_io(
-                    request=trace_request,
-                    response_text=receipt.public_message or "Turn failed",
-                    failed=True,
-                )
-            settled = True
-            if isinstance(receipt, CommittedTurnReceipt):
-                for event in self._projector.project(
-                    receipt.committed_turn,
-                    recorder,
-                    mode="live_suffix",
-                ):
-                    yield event
-            yield _terminal(recorder, receipt, trace_id=trace_id)
-        except (GeneratorExit, asyncio.CancelledError):
-            if not settled:
-                try:
-                    await asyncio.shield(
-                        self._lifecycle.settle(
-                            turn,
-                            TurnFailure("cancelled", "cancelled", "Turn cancelled", empty_rlm_usage()),
-                        )
-                    )
-                    cleanup_handed_off = True
-                    self._submit_cleanup(turn, stream, prepared, heartbeat, finalization_task)
-                    heartbeat = None
-                    await asyncio.sleep(0)
-                except Exception:
-                    pass
-            raise
-        except Exception:
-            if not settled:
-                annotate_trace_io(
-                    request=trace_request,
-                    response_text="Turn failed",
-                    failed=True,
-                )
-                try:
-                    receipt = await asyncio.shield(
-                        self._finish_with_trace(
-                            turn,
-                            TurnFailure("failed", "execution_failed", "Turn failed", empty_rlm_usage()),
-                            prepared,
-                        )
-                    )
-                    settled = True
-                    yield _terminal(recorder, receipt, trace_id=trace_id)
-                except Exception:
-                    yield recorder.record(RunFailed(code="unavailable", message="Turn failed"))
-        finally:
-            with turn_phase_span("Turn.cleanup", inputs={"cleanup_owned": not cleanup_handed_off}):
-                await self._stop_heartbeat(heartbeat)
-                if not cleanup_handed_off:
-                    await _shield_cleanup(prepared.aclose())
-
-    def _submit_cleanup(
-        self,
-        turn: ExecuteTurn,
-        stream: TurnEventStream | None,
-        prepared: PreparedTurn,
-        heartbeat: _ClaimHeartbeat | None,
-        finalization_task: asyncio.Task[CommittedTurnReceipt | FailedRunReceipt] | None = None,
-        *,
-        claim_lost: bool = False,
-        claim_loss_usage=None,
-    ) -> None:
-        async def cleanup() -> None:
-            try:
-                if claim_lost:
-                    await self._revoke_claim(turn, claim_loss_usage or empty_rlm_usage())
-                    if self._claim_loss_fence is not None:
-                        await self._claim_loss_fence(turn.session_id)
-                if stream is not None:
-                    with contextlib.suppress(BaseException):
-                        await stream.aclose()
-                    await stream.wait_owned()
-                if finalization_task is not None:
-                    with contextlib.suppress(BaseException):
-                        await asyncio.shield(finalization_task)
-                await prepared.aclose()
-                await self._lifecycle.complete_settling(turn)
-            finally:
-                await self._stop_heartbeat(heartbeat)
-
-        self._cleanup.submit(cleanup())
 
     def _start_heartbeat(self, turn: ExecuteTurn) -> _ClaimHeartbeat | None:
         interval = max(0.01, float(self._lifecycle.heartbeat_seconds))
@@ -599,13 +262,6 @@ class TurnCoordinator:
 
         return _ClaimHeartbeat(asyncio.create_task(maintain_claim(), name="fleet-turn-heartbeat"), lost)
 
-    @staticmethod
-    async def _stop_heartbeat(heartbeat: _ClaimHeartbeat | None) -> None:
-        if heartbeat is None:
-            return
-        heartbeat.task.cancel()
-        await asyncio.gather(heartbeat.task, return_exceptions=True)
-
     def _submit_claim_loss_cleanup(self, turn: ExecuteTurn, heartbeat: _ClaimHeartbeat) -> None:
         async def cleanup() -> None:
             try:
@@ -614,7 +270,7 @@ class TurnCoordinator:
                     await self._claim_loss_fence(turn.session_id)
                 await self._lifecycle.complete_settling(turn)
             finally:
-                await self._stop_heartbeat(heartbeat)
+                await _stop_heartbeat(heartbeat)
 
         self._cleanup.submit(cleanup())
 

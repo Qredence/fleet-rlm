@@ -2,23 +2,16 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from uuid import UUID
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from fleet_rlm.artifacts.errors import ArtifactNotFoundError
-from fleet_rlm.artifacts.models import ArtifactAccess, ArtifactRef
+from fleet_rlm.artifacts.models import ArtifactAccess, ArtifactRef, CompletedRun
 from fleet_rlm.artifacts.reader import StoredArtifact
 from fleet_rlm.artifacts.safety import parse_kind
 from fleet_rlm.persistence.models import ArtifactRow, RunRow, SessionRow
-
-
-@dataclass(frozen=True, slots=True)
-class CompletedRun:
-    session_id: UUID
-    run_id: UUID
 
 
 class SqlAlchemyArtifactCatalog:

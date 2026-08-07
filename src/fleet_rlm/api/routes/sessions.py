@@ -6,10 +6,10 @@ from datetime import datetime
 from typing import Annotated, Literal, cast
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Query
 
-from fleet_rlm.api.dependencies import SessionCatalogDep
-from fleet_rlm.api.local_scope import LocalScope, get_local_scope
+from fleet_rlm.api.dependencies import LocalScopeDep, SessionCatalogDep
+from fleet_rlm.api.errors import http_error
 from fleet_rlm.api.schemas import (
     SessionCreateRequest,
     SessionDetailResponse,
@@ -24,7 +24,7 @@ from fleet_rlm.sessions.catalog import SequenceCursor
 from fleet_rlm.sessions.errors import SessionNotFoundError
 from fleet_rlm.sessions.models import AssistantTurnRecord, SessionRecord
 
-router = APIRouter(tags=["sessions"])
+router = APIRouter(prefix="/api/sessions", tags=["sessions"])
 
 
 def _iso(value: datetime | None) -> str | None:
@@ -49,14 +49,14 @@ def _to_summary(record: SessionRecord) -> SessionSummaryResponse:
 
 
 @router.post(
-    "/api/sessions",
+    "",
     response_model=SessionDetailResponse,
     status_code=201,
     operation_id="create_session",
 )
 async def create_session(
     body: SessionCreateRequest,
-    identity: Annotated[LocalScope, Depends(get_local_scope)],
+    identity: LocalScopeDep,
     repo: SessionCatalogDep,
 ) -> SessionDetailResponse:
     title = (body.title or "New Session").strip() or "New Session"
@@ -75,9 +75,9 @@ async def create_session(
     )
 
 
-@router.get("/api/sessions", response_model=SessionListResponse, operation_id="list_sessions")
+@router.get("", response_model=SessionListResponse, operation_id="list_sessions")
 async def list_sessions(
-    identity: Annotated[LocalScope, Depends(get_local_scope)],
+    identity: LocalScopeDep,
     repo: SessionCatalogDep,
     status: Annotated[Literal["active", "archived"] | None, Query()] = None,
     search: Annotated[str | None, Query(description="Title contains")] = None,
@@ -102,13 +102,13 @@ async def list_sessions(
 
 
 @router.get(
-    "/api/sessions/{session_id}",
+    "/{session_id}",
     response_model=SessionDetailResponse,
     operation_id="get_session",
 )
 async def get_session(
     session_id: UUID,
-    identity: Annotated[LocalScope, Depends(get_local_scope)],
+    identity: LocalScopeDep,
     repo: SessionCatalogDep,
 ) -> SessionDetailResponse:
     try:
@@ -118,7 +118,7 @@ async def get_session(
             workspace_id=identity.workspace_id,
         )
     except SessionNotFoundError as exc:
-        raise HTTPException(status_code=404, detail="session not found") from exc
+        raise http_error(404, "session_not_found", "Session not found") from exc
     return SessionDetailResponse(
         id=record.id,
         title=record.title,
@@ -130,22 +130,22 @@ async def get_session(
 
 
 @router.patch(
-    "/api/sessions/{session_id}",
+    "/{session_id}",
     response_model=SessionDetailResponse,
     operation_id="update_session",
 )
 async def patch_session(
     session_id: UUID,
     body: SessionPatchRequest,
-    identity: Annotated[LocalScope, Depends(get_local_scope)],
+    identity: LocalScopeDep,
     repo: SessionCatalogDep,
 ) -> SessionDetailResponse:
     if body.title is None and body.status is None:
-        raise HTTPException(status_code=422, detail="no fields to update")
+        raise http_error(422, "session_no_fields", "No fields to update")
     if body.title is not None and not body.title.strip():
-        raise HTTPException(status_code=422, detail="title must not be empty")
+        raise http_error(422, "session_title_empty", "Title must not be empty")
     if body.status is not None and body.status.strip().lower() not in {"active", "archived"}:
-        raise HTTPException(status_code=422, detail="status must be active or archived")
+        raise http_error(422, "session_status_invalid", "Status must be active or archived")
     try:
         record = await repo.update(
             session_id,
@@ -155,9 +155,11 @@ async def patch_session(
             status=body.status,
         )
     except SessionNotFoundError as exc:
-        raise HTTPException(status_code=404, detail="session not found") from exc
+        raise http_error(404, "session_not_found", "Session not found") from exc
     except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)[:200]) from exc
+        # Internal validation failures must not leak exception text into the
+        # public contract; collapse them to the closed invalid_request code.
+        raise http_error(422, "invalid_request", "Invalid request") from exc
     return SessionDetailResponse(
         id=record.id,
         title=record.title,
@@ -169,13 +171,13 @@ async def patch_session(
 
 
 @router.get(
-    "/api/sessions/{session_id}/turns",
+    "/{session_id}/turns",
     response_model=SessionTurnPageResponse,
     operation_id="list_session_turns",
 )
 async def list_session_turns(
     session_id: UUID,
-    identity: Annotated[LocalScope, Depends(get_local_scope)],
+    identity: LocalScopeDep,
     repo: SessionCatalogDep,
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
     after_sequence: Annotated[int | None, Query(ge=0)] = None,
@@ -189,7 +191,7 @@ async def list_session_turns(
             limit=limit,
         )
     except SessionNotFoundError as exc:
-        raise HTTPException(status_code=404, detail="session not found") from exc
+        raise http_error(404, "session_not_found", "Session not found") from exc
     messages = [
         assistant_turn_to_ui_message(item) if isinstance(item, AssistantTurnRecord) else user_turn_to_ui_message(item)
         for item in page.items

@@ -2,18 +2,18 @@
 
 from __future__ import annotations
 
-from typing import Annotated, Literal
+from typing import Literal
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter
 from pydantic import BaseModel
 
-from fleet_rlm.api.dependencies import TurnLifecycleDep
-from fleet_rlm.api.local_scope import LocalScope, get_local_scope
+from fleet_rlm.api.dependencies import LocalScopeDep, TurnLifecycleDep
+from fleet_rlm.api.errors import http_error
 from fleet_rlm.chat.turn_lifecycle import TurnNotFoundError
 from fleet_rlm.sessions.models import TurnAccess
 
-router = APIRouter(tags=["runs"])
+router = APIRouter(prefix="/api/runs", tags=["runs"])
 
 
 class CancellationResponse(BaseModel):
@@ -22,20 +22,17 @@ class CancellationResponse(BaseModel):
 
 
 @router.put(
-    "/api/runs/{run_id}/cancellation",
+    "/{run_id}/cancellation",
     response_model=CancellationResponse,
     operation_id="request_run_cancellation",
 )
 async def request_run_cancellation(
     run_id: UUID,
-    identity: Annotated[LocalScope, Depends(get_local_scope)],
+    identity: LocalScopeDep,
     lifecycle: TurnLifecycleDep,
 ) -> CancellationResponse:
     try:
         status = await lifecycle.request_cancel(TurnAccess(identity.user_id, identity.workspace_id), run_id)
     except TurnNotFoundError as exc:
-        raise HTTPException(
-            status_code=404,
-            detail={"code": "run_not_found", "message": "Run not found"},
-        ) from exc
+        raise http_error(404, "run_not_found", "Run not found") from exc
     return CancellationResponse(run_id=run_id, state=status)
