@@ -26,8 +26,8 @@ class _RecordingTool:
 
 
 def test_co_located_worker_preserves_state_and_services_callbacks(tmp_path: Path) -> None:
+    from fleet_rlm.daytona.broker_source import BROKER_SERVER_CODE
     from fleet_rlm.daytona.http_broker import (
-        _BROKER_SERVER_CODE,
         _MAX_EXECUTE_OUTPUT_CHARS,
         _MAX_EXECUTE_REQUEST_BYTES,
         DaytonaHttpToolBroker,
@@ -38,7 +38,7 @@ def test_co_located_worker_preserves_state_and_services_callbacks(tmp_path: Path
         port = int(reservation.getsockname()[1])
     secret = "test-broker-secret"
     source = (
-        _BROKER_SERVER_CODE.replace("__BROKER_SECRET__", repr(secret))
+        BROKER_SERVER_CODE.replace("__BROKER_SECRET__", repr(secret))
         .replace("__BROKER_PORT__", str(port))
         .replace("__MAX_REQUEST_BYTES__", str(_MAX_EXECUTE_REQUEST_BYTES))
         .replace("__MAX_OUTPUT_CHARS__", str(_MAX_EXECUTE_OUTPUT_CHARS))

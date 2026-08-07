@@ -130,7 +130,13 @@ export function renderMessage(
     case "skill":
       return wrappedLine(
         `  ${theme.fg("accent", theme.bold(`· SKILL ${message.phase.toUpperCase()}`))}  ${theme.bold(terminalSafeText(message.name))}  ${muted(
-          [`v${message.version}`, message.trust ? terminalSafeText(message.trust) : null]
+          [
+            `v${message.version}`,
+            message.trust ? terminalSafeText(message.trust) : null,
+            message.affordances?.length
+              ? `can use ${message.affordances.map(terminalSafeText).join(", ")}`
+              : null,
+          ]
             .filter((value): value is string => value !== null)
             .join(" · "),
         )}`,

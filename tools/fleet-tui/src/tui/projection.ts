@@ -546,6 +546,9 @@ function skill(
         ? "activated"
         : "loaded";
   const trust = optionalString(value.trust);
+  const affordances = Array.isArray(value.affordances)
+    ? value.affordances.filter((item): item is string => typeof item === "string")
+    : undefined;
   return {
     id,
     kind: "skill",
@@ -555,6 +558,7 @@ function skill(
     phase,
     version: string(value.version, "1.0.0"),
     ...(trust ? { trust } : {}),
+    ...(affordances?.length ? { affordances } : {}),
     ts: clock(),
   };
 }

@@ -27,11 +27,8 @@ from daytona import SessionExecuteRequest
 
 from fleet_rlm.daytona.broker_source import (
     BROKER_SERVER_CODE,
-    FINAL_OUTPUT_MARKER,
     TOOL_WRAPPER_TEMPLATE,
-    build_submit_setup_code,  # noqa: F401 - compatibility re-export
     extract_final_payload,
-    final_output_frame,  # noqa: F401 - compatibility re-export
     remote_submit_setup_code,
 )
 from fleet_rlm.daytona.errors import (
@@ -50,7 +47,6 @@ DEFAULT_BROKER_PORT = 3000
 _PREVIEW_LINK_RETRY_DELAYS = (0.25, 0.5)
 _BROKER_SERVER_PATH = "/home/daytona/fleet_rlm_broker_server.py"
 _BROKER_SESSION_COMMAND = f"cd /home/daytona && python {_BROKER_SERVER_PATH.rsplit('/', 1)[-1]}"
-_FINAL_OUTPUT_MARKER = FINAL_OUTPUT_MARKER
 _MAX_EXECUTE_REQUEST_BYTES = 2 * 1024 * 1024
 _MAX_EXECUTE_OUTPUT_CHARS = 64 * 1024
 
@@ -68,12 +64,6 @@ class FleetFinalOutputError(Exception):
     def __init__(self, value: dict[str, Any]) -> None:
         self.value = value
         super().__init__("Final output submitted")
-
-
-# Keep the old private names available to diagnostics/tests while the pure
-# source payloads live in ``broker_source``.
-_BROKER_SERVER_CODE = BROKER_SERVER_CODE
-_TOOL_WRAPPER_TEMPLATE = TOOL_WRAPPER_TEMPLATE
 
 
 class DaytonaHttpToolBroker:
@@ -128,7 +118,7 @@ class DaytonaHttpToolBroker:
         if self._broker_url is not None or self._stopped:
             return
         server_code = (
-            _BROKER_SERVER_CODE.replace("__BROKER_SECRET__", repr(self._broker_secret))
+            BROKER_SERVER_CODE.replace("__BROKER_SECRET__", repr(self._broker_secret))
             .replace("__BROKER_PORT__", str(self._broker_port))
             .replace("__MAX_REQUEST_BYTES__", str(_MAX_EXECUTE_REQUEST_BYTES))
             .replace("__MAX_OUTPUT_CHARS__", str(_MAX_EXECUTE_OUTPUT_CHARS))
@@ -620,7 +610,7 @@ class DaytonaHttpToolBroker:
                 kwargs_parts.append(f'"{name}": {name}')
             else:
                 args_list.append(name)
-        return _TOOL_WRAPPER_TEMPLATE.format(
+        return TOOL_WRAPPER_TEMPLATE.format(
             tool_name=tool_name,
             signature=", ".join(sig_parts),
             args_list=", ".join(args_list),

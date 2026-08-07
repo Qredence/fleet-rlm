@@ -11,7 +11,7 @@ import dspy
 
 from fleet_rlm.chat.turn_lifecycle import ExecuteTurn
 from fleet_rlm.chat.turn_preparation import TurnPreparationCancelledError, TurnPreparationTimeoutError
-from fleet_rlm.files.workspace_models import WorkspaceCapabilityMetadata
+from fleet_rlm.files.workspace_models import SessionWorkspaceFS, WorkspaceCapabilityMetadata
 from fleet_rlm.rlm.context import PreparationNotice, RLMExecutionSpec
 from fleet_rlm.rlm.events import AttachmentRead, SkillActivated, SkillLoaded
 from fleet_rlm.rlm.tool_observer import ToolEventView
@@ -92,13 +92,12 @@ async def prepare_host_capabilities(
     *,
     turn: ExecuteTurn,
     skill_catalog: SkillCatalog,
-    files: Any,
     base_tools: Sequence[dspy.Tool],
     base_event_views: Mapping[str, ToolEventView],
     workspace: WorkspaceCapabilityMetadata,
+    workspace_fs: SessionWorkspaceFS | None = None,
     deadline: float,
 ) -> tuple[RLMExecutionSpec, SkillToolHost | EmptySkillHost, tuple[PreparationNotice, ...]]:
-    del files
     """Resolve history and exact Skills identically for every Run environment."""
     history_host = SessionHistoryToolHost(turn.history)
     history_tools = history_host.as_tools()
@@ -130,6 +129,7 @@ async def prepare_host_capabilities(
     skill_host = SkillToolHost(
         skill_catalog,
         allowed_skill_ids=(frozenset(skill.card.id for skill in resolved.selected) if selections else None),
+        workspace=workspace_fs,
     )
     schema_id, schema_version = resolved_schema(resolved)
     spec = RLMExecutionSpec(

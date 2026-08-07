@@ -136,6 +136,33 @@ readable preview policy, while child traces retain structural metadata only:
 role, model, call index, key/count metadata, usage, duration, failure category,
 and termination mode.
 
+## Delegation lanes
+
+Fleet exposes two bounded ways for the RLM to delegate work to a smaller model.
+
+The default lane is DSPy's native sub-LM: `llm_query(prompt)` for one bounded
+semantic judgment or `llm_query_batched(prompts)` for independent judgments in
+one round trip (`rlm/signature.py` guidance). These run inside the Root
+interpreter namespace as plain LM completions against `RLMModelBundle.sub_lm`,
+so they cost one provider call and inherit the Root trust domain. That
+inheritance is acceptable for prompt-only judgments because the Root's own
+generated code already executes in the same Sandbox.
+
+The opt-in isolation lane is the dedicated child Sandbox exposed as `rlm_query`
+only when `[defaults.rlm] recursion_enabled = true` (the
+`[profiles.daytona-recursive]` profile). Each delegation provisions its own
+ephemeral Sandbox running a full native RLM, mounted at the sibling Volume
+scope `recursive/<workspace>/<run>/<call-index>` with no Fleet capabilities,
+credentials, history, or broker state; strict child cleanup gates Root success.
+Cross-sandbox child runtimes are a Fleet feature, not something DSPy 3.3
+provides, so their cost is sandbox provisioning, broker/interpreter startup,
+and the child's own iteration budget — see `scripts/benchmark_daytona_lifecycle.py`
+for measured spin-up numbers.
+
+Choose the sub-LM lane for prompt-only extraction, counting, classification,
+and judgment. Reserve the child lane for sub-problems that need iterative,
+code-executing, file-touching lifecycles in isolation.
+
 ## Typed startup inputs
 
 Fleet keeps domain dataclasses authoritative and validates the bounded

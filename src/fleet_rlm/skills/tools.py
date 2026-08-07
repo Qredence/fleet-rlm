@@ -10,6 +10,7 @@ from uuid import UUID
 
 import dspy
 
+from fleet_rlm.files.workspace_models import SessionWorkspaceFS
 from fleet_rlm.rlm.events import JsonValue
 from fleet_rlm.rlm.tool_observer import ToolEventView, bound_event_text
 from fleet_rlm.skills.catalog import SkillCatalog
@@ -24,7 +25,7 @@ def skill_activated_public_payload(skill: SkillDefinition) -> dict[str, Any]:
         "name": card.name,
         "version": card.version,
         "trust": "system",
-        "affordances": [],
+        "affordances": list(card.affordances),
     }
 
 
@@ -42,13 +43,41 @@ class SkillToolHost:
         *,
         allowed_skill_ids: frozenset[UUID] | None = None,
         max_loaded_skills: int = 4,
+        workspace: SessionWorkspaceFS | None = None,
     ) -> None:
         self._catalog = catalog
         self._allowed_skill_ids = allowed_skill_ids
         self._max_loaded_skills = min(4, max(0, int(max_loaded_skills)))
+        self._workspace = workspace
         self._loaded_ids: set[UUID] = set()
+        self._installed_ids: set[UUID] = set()
         self._pending_events: list[dict[str, Any]] = []
         self._lock = RLock()
+
+    @staticmethod
+    def _installed_paths(skill: SkillDefinition) -> tuple[str, ...]:
+        return tuple(f"skills/{skill.card.name}/{resource.path}" for resource in skill.resources.values())
+
+    def _install_resources(self, skill: SkillDefinition) -> tuple[str, ...]:
+        """Persist loaded Skill resources as addressable Session Workspace files.
+
+        Resources stay read-only UTF-8 text owned by the bundled catalog; the
+        install only surfaces them at `skills/<name>/<path>` so generated code
+        can read or execute them. All-or-nothing: a write failure skips the
+        install (resources remain readable via `read_skill_resource`).
+        """
+        workspace = self._workspace
+        if workspace is None or not skill.resources:
+            return ()
+        if skill.card.id in self._installed_ids:
+            return self._installed_paths(skill)
+        for path, resource in zip(self._installed_paths(skill), skill.resources.values(), strict=True):
+            try:
+                workspace.write_text(path, resource.content, overwrite=True)
+            except Exception:
+                return ()
+        self._installed_ids.add(skill.card.id)
+        return self._installed_paths(skill)
 
     @property
     def loaded_skill_ids(self) -> frozenset[UUID]:
@@ -84,6 +113,7 @@ class SkillToolHost:
             if len(self._loaded_ids) >= self._max_loaded_skills:
                 raise ValueError("too many loaded Skills")
             self._loaded_ids.add(skill.card.id)
+            self._install_resources(skill)
             self._pending_events.extend((skill_activated_public_payload(skill), skill_loaded_public_payload(skill)))
 
     def load_skill(self, skill_id: str, expected_version: str | None = None) -> dict[str, Any]:
@@ -95,8 +125,9 @@ class SkillToolHost:
                 if len(self._loaded_ids) >= self._max_loaded_skills:
                     return {"ok": False, "error": "skill_limit_exceeded"}
                 self.mark_preloaded(skill)
+            installed_paths = self._install_resources(skill)
         card = skill.card
-        return {
+        result: dict[str, Any] = {
             "ok": True,
             "skill_id": str(card.id),
             "name": card.name,
@@ -113,6 +144,9 @@ class SkillToolHost:
                 for resource in skill.resources.values()
             ],
         }
+        if self._workspace is not None:
+            result["installed_paths"] = list(installed_paths)
+        return result
 
     def read_skill_resource(
         self, skill_id: str, resource_path: str, expected_version: str | None = None

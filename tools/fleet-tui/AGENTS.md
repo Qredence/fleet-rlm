@@ -27,6 +27,9 @@ Individual lanes: `pnpm test`, `pnpm typecheck`, `pnpm lint`, `pnpm format:check
 ## Constraints
 
 - Monochrome operator timeline; no mouse capture, no transcript viewport.
+- Single client protocol: the AI SDK UI v1 stream projected by
+  `src/fleet_rlm/api/sse.py`, with HTTP types owned by `make api-sync`. Do not
+  design a second client protocol unless a second client exists.
 - State mutations exclusively through `store.dispatch`; no direct mutation.
 - SSE ordering invariants are enforced in `streamFleetTurn` — one start, one terminal, [DONE] last.
 - API errors use `FleetApiError` with `status`, `correlationId`, `code`.

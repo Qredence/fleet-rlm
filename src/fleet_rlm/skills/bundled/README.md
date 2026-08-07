@@ -20,3 +20,15 @@ The catalog follows three disclosure levels:
    after that Skill is loaded.
 
 Bundled Skills contain model-facing product workflows only. Repository maintenance, operator diagnostics, browser development, and Skill authoring guidance belong in the development agent catalog and canonical documentation.
+
+## Catalog conventions
+
+- Every Skill Card advertises bounded `affordances` — the capability families
+  the Skill expects (for example `workspace.files`, `artifacts.publish`,
+  `fetch_url`, `llm_query`, `llm_query_batched`). Affordances are guidance only;
+  they never gate which host tools exist.
+- While a Turn has Session Workspace capability, loading a Skill (explicit
+  selection preload or progressive `load_skill`) installs its resources at
+  `skills/<name>/<path>` in the Session Workspace so generated code can read or
+  execute them. Installs are idempotent per Turn, all-or-nothing on failure,
+  and resources remain readable through `read_skill_resource` regardless.

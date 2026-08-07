@@ -55,6 +55,11 @@ def test_bundled_skill_cards_are_bounded_metadata_only() -> None:
         assert _PRIVATE_FIELDS.isdisjoint(card)
 
     serialized = json.dumps(cards).lower()
+    assert next(card for card in cards if card["name"] == "long-context")["affordances"] == [
+        "fetch_url",
+        "llm_query_batched",
+        "workspace.files",
+    ]
     assert "# long-context analysis" not in serialized
     assert "# workspace files" not in serialized
     assert "# dspy rlm" not in serialized

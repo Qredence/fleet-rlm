@@ -507,13 +507,13 @@ class DaytonaSessionManager:
                 raise DaytonaAdapterError(
                     message="sandbox replacement did not produce a sandbox id",
                     cause_type="SandboxReplaceIdentityError",
-                )
+                ) from exc
             replacement_sandbox = await self._get_bound_sandbox(replacement_id)
             if replacement_sandbox is None:
                 raise DaytonaAdapterError(
                     message="replacement sandbox is not retrievable",
                     cause_type="SandboxUnrecoverable",
-                )
+                ) from exc
             return replacement_sandbox
 
     async def _get_bound_sandbox(self, sandbox_id: str) -> Any | None:
