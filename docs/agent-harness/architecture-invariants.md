@@ -3,6 +3,27 @@
 If a change violates an invariant, remediate the code or update this document
 and its matching automated check in the same patch.
 
+## Product identity
+
+Fleet is one product: a durable conversational RLM Session. Judge every change
+by whether it makes one of the following substantially better; if it does not,
+question it:
+
+- the conversational RLM agent — one fresh `dspy.RLM` per Turn; DSPy primitives
+  support that agent, they are not peer execution modes
+- Session continuity — a Session is a context boundary: new Sessions start
+  cold, continuity exists only inside one Session; cross-session persistence
+  happens only through explicit workspace-scope actions (Attachments,
+  Artifacts, Workspace Memory), never automatically
+- the Daytona workspace — durable shared Volume state with replaceable Sandbox
+  compute attached to it
+- the single client protocol — AI SDK UI v1 over SSE plus the generated
+  artifacts owned by `make api-sync`
+
+Fleet is not a general DSPy execution platform. Skills steer the agent's
+guidance only; they never register host executables and never gate which tools
+exist.
+
 ## Backend layers
 
 - `api/` owns HTTP identity, dependency aliases, schemas, routes, OpenAPI, and

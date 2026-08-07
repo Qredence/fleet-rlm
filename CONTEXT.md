@@ -62,7 +62,9 @@ file at the root of the mounted Workspace Volume Scope. The RLM reads the
 bounded newest records on demand through a host-mediated Tool and appends one
   record only when the user explicitly asks to remember something. Appends are
   immediately durable, independent of Turn Commit, and survive failed or
-  cancelled Runs and Sandbox replacement.
+  cancelled Runs and Sandbox replacement. Append serialization is
+  process-local: one Fleet host writes `MEMORIES.md`; concurrent multi-process
+  append is not coordinated.
 _Avoid_: Session History, automatic Turn-start recall, unbounded learned state
 
 **Workspace Volume Tree**:

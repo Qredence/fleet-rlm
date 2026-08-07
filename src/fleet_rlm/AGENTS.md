@@ -76,6 +76,10 @@ contracts, and tracked docs remain authoritative.
   state under the fixed `MEMORIES.md` root and are independent of Turn Commit;
   the Daytona-only `/api/volume/tree` route exposes only a bounded read-only
   logical path view, not a general-purpose filesystem browser.
+  Deployment contract: append serialization is process-local to one Fleet
+  host; statefulness lives in the shared Volume and survives Sandbox
+  replacement; appends from multiple host processes are not coordinated
+  today.
 - Daytona composition owns one process-scoped `AsyncDaytona`. Provisioning,
   lifecycle, filesystem, and FastAPI-facing Workspace operations remain native
   async. Only DSPy's synchronous interpreter and host-tool execution receive
