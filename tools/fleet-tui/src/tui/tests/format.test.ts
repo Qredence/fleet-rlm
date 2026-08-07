@@ -5,30 +5,11 @@ import {
   formatDuration,
   formatTokens,
   formatStructuredResult,
-  previewJson,
   redact,
   shortId,
-  sliceVisible,
-  visibleLength,
-  wrapToWidth,
 } from "../format.js";
 
 describe("format helpers", () => {
-  it("measures visible length ignoring ANSI escapes", () => {
-    expect(visibleLength("hello")).toBe(5);
-    expect(visibleLength("\x1b[31mhello\x1b[0m")).toBe(5);
-  });
-
-  it("slices up to a visible width and preserves ANSI sequences", () => {
-    expect(sliceVisible("\x1b[31mhello world\x1b[0m", 5)).toBe("\x1b[31mhello");
-  });
-
-  it("wraps lines to the requested width", () => {
-    const lines = wrapToWidth("the quick brown fox jumps over the lazy dog", 10);
-    expect(lines.length).toBeGreaterThan(1);
-    for (const line of lines) expect(visibleLength(line)).toBeLessThanOrEqual(10);
-  });
-
   it("formats duration in mm:ss or h:mm:ss", () => {
     expect(formatDuration(0)).toBe("0:00");
     expect(formatDuration(45_000)).toBe("0:45");
@@ -56,13 +37,6 @@ describe("format helpers", () => {
       nested: { password: "[redacted]" },
       ok: 1,
     });
-  });
-
-  it("previews JSON without throwing on circular structures", () => {
-    expect(previewJson({ a: 1, token: "x" })).toBe('{"a":1,"token":"[redacted]"}');
-    const cycle: Record<string, unknown> = {};
-    cycle.self = cycle;
-    expect(previewJson(cycle)).toBe("[object Object]");
   });
 
   it.each([

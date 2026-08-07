@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
 
+import { listCommands } from "../tui/commands.js";
+import { tuiUsage } from "../cli-core.js";
+
 import { parseArgs, run } from "../cli.js";
 
 describe("CLI options", () => {
@@ -21,5 +24,16 @@ describe("CLI options", () => {
     await expect(run({ apiUrl: "http://fleet.test" })).rejects.toThrow(
       "requires interactive stdin and stdout terminals",
     );
+  });
+});
+
+describe("tuiUsage", () => {
+  it("lists every registered slash command", () => {
+    const usage = tuiUsage();
+    for (const spec of listCommands()) expect(usage).toContain(spec.usage.split(" ", 1)[0]);
+    expect(usage).toContain("/profiles");
+    expect(usage).toContain("/settings");
+    expect(usage).toContain("/volume");
+    expect(usage).toContain("/rename");
   });
 });

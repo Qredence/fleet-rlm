@@ -230,6 +230,11 @@ registerCommand({
   description: "Cancel the current run",
   usage: "/cancel",
   handler: async (_args, ctx) => {
+    const phase = ctx.store.getState().run.phase;
+    if (phase !== "submitting" && phase !== "running") {
+      appendSystem(ctx.store, "No active run.");
+      return;
+    }
     await ctx.cancelActiveRun();
     appendSystem(ctx.store, "Cancellation requested.");
   },

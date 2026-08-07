@@ -212,7 +212,6 @@ type Event =
   | { type: "run/cancelled"; reason: string }
   | { type: "run/interrupted"; error: string }
   | { type: "message/upsert"; message: Message }
-  | { type: "message/patch"; id: string; patch: Partial<Message> }
   | { type: "skill-selection/pin"; selection: PendingSkillSelection }
   | { type: "skill-selection/clear" }
   | { type: "skill-selection/replace"; selections: PendingSkillSelection[] }
@@ -445,20 +444,6 @@ function reduce(state: State, event: Event): State {
         }
       }
       return { ...state, messages: [...state.messages, incoming], run };
-    }
-    case "message/patch": {
-      const existing = state.messages.findIndex((m) => m.id === event.id);
-      if (existing < 0) return state;
-      const target = state.messages[existing] as Message;
-      const run = state.run;
-      if (target.kind === "text") {
-        const messages = state.messages.slice();
-        messages[existing] = { ...target, ...event.patch } as Message;
-        return { ...state, messages, run };
-      }
-      const messages = state.messages.slice();
-      messages[existing] = { ...target, ...event.patch } as Message;
-      return { ...state, messages, run };
     }
     case "skill-selection/pin": {
       const existing = state.pendingSkillSelections.findIndex(

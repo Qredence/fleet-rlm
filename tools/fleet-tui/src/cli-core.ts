@@ -3,6 +3,7 @@ import { open, rename, rm } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 
 import { FleetApiClient } from "./fleet-api-client.js";
+import { listCommands } from "./tui/commands.js";
 
 export type CliOptions = {
   apiUrl: string;
@@ -110,24 +111,19 @@ export async function runArtifactDownload(options: CliOptions): Promise<boolean>
 }
 
 export function tuiUsage(): string {
+  const commandLines = listCommands()
+    .map((spec) => `  ${spec.usage.padEnd(28)}  ${spec.description}`)
+    .join("\n");
   return `Usage: pnpm start -- [options]
 
 Options:
   --api-url <url>          Fleet API base URL (default: http://127.0.0.1:8000)
   --session <uuid>         Resume an existing Fleet session
   artifact <uuid> --output <path>
-                            Download, verify, and atomically save an Artifact
+                           Download, verify, and atomically save an Artifact
   --help, -h               Show this help
 
 Slash commands:
-  /help      list commands
-  /clear     clear the visible conversation
-  /sessions  list recent sessions
-  /resume    resume a session by id
-  /cancel    cancel the current run
-  /skills    select Skills for the next Turn
-  /skill     pin a Skill by name or exact UUID@version
-  /status    show session, run, and usage
-  /exit      exit
+${commandLines}
 `;
 }
