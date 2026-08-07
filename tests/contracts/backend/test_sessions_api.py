@@ -84,9 +84,7 @@ async def test_session_turns_are_canonical_ui_messages() -> None:
         session_id = UUID(client.post("/api/sessions", json={}, headers=headers).json()["id"])
         lifecycle = app.state.runtime_inventory.turn_lifecycle
         assert lifecycle is not None
-        started = await lifecycle.begin(
-            BeginTurn(access, session_id, TurnInput("question"), "turn-key", uuid4())
-        )
+        started = await lifecycle.begin(BeginTurn(access, session_id, TurnInput("question"), "turn-key", uuid4()))
         assert isinstance(started, ExecuteTurn)
         await lifecycle.finish(
             started,
