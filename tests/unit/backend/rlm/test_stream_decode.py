@@ -40,6 +40,23 @@ def test_invalid_unicode_escape_kept_as_literal_text() -> None:
     assert _extract_json_string_prefix('"a\\uZZZZb"') == "a\\uZZZZb"
 
 
+def test_surrogate_pair_decodes_to_single_character() -> None:
+    assert _extract_json_string_prefix('"a\\ud83d\\ude00b"') == "a\U0001f600b"
+
+
+def test_high_surrogate_straddling_fragment_boundary_waits_for_low_half() -> None:
+    assert _extract_json_string_prefix('"a\\ud83d') == "a"
+    assert _extract_json_string_prefix('"a\\ud83d\\ude0') == "a"
+
+
+def test_unpaired_surrogates_stay_literal_text() -> None:
+    """Lone surrogates cannot be UTF-8 encoded; keep the literal escape text
+    so the SSE path never raises UnicodeEncodeError."""
+    assert _extract_json_string_prefix('"a\\ud83d follows"') == "a\\ud83d follows"
+    assert _extract_json_string_prefix('"a\\udc00 follows"') == "a\\udc00 follows"
+    assert _extract_json_string_prefix('"a\\ud83d\\u0041b"') == "a\\ud83dAb"
+
+
 def test_backspace_and_formfeed_escapes_stay_literal_letters() -> None:
     """JSON \\b/\\f decode to control characters; the projector deliberately
     emits the literal letters instead so terminal output stays clean."""

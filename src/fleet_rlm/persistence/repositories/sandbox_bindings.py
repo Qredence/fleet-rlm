@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from fleet_rlm.files.volume_paths import DEFAULT_VOLUME_MOUNT_PATH
@@ -42,6 +43,15 @@ class SqlAlchemySandboxBindingStore:
 
     async def upsert(self, binding: SandboxBinding) -> SandboxBinding:
         validate_sandbox_binding(binding)
+        try:
+            return await self._write_binding(binding)
+        except IntegrityError:
+            # Two racing first writes both observed no row; the unique
+            # session_id constraint rejected the loser. Retry once so the
+            # loser lands as an update of the winner's committed row.
+            return await self._write_binding(binding)
+
+    async def _write_binding(self, binding: SandboxBinding) -> SandboxBinding:
         async with self._session_factory() as db:
             result = await db.execute(
                 select(SandboxBindingRow).where(SandboxBindingRow.session_id == binding.session_id)

@@ -304,6 +304,10 @@ class _BrokerHandler(BaseHTTPRequestHandler):
             _send_json(self, body)
             return
         if parsed.path == "/pending":
+            secret = self.headers.get("X-Broker-Secret", "")
+            if not hmac.compare_digest(secret, _BROKER_SECRET):
+                _send_json(self, {"error": "unauthorized"}, 401)
+                return
             qs = parse_qs(parsed.query)
             try:
                 max_items = max(1, int(qs.get("max", ["1"])[0]))

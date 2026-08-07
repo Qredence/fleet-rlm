@@ -272,8 +272,10 @@ def _extract_json_string_prefix(raw: str) -> str:
     decodes the first JSON string, ignoring everything after its closing quote,
     so the TUI receives clean reasoning/code text instead of a raw JSON blob.
     An incomplete trailing escape (straddling a chunk boundary) is left for the
-    next fragment. ``\\uXXXX`` escapes decode via ``chr``; invalid hex and the
-    ``\\b``/``\\f`` control escapes stay as their literal text.
+    next fragment. ``\\uXXXX`` escapes decode via ``chr``, with UTF-16
+    surrogate pairs combined into one character; invalid hex, unpaired
+    surrogates, and the ``\\b``/``\\f`` control escapes stay as their literal
+    text.
     """
     start = raw.find('"')
     if start == -1:
@@ -296,9 +298,36 @@ def _extract_json_string_prefix(raw: str) -> str:
                 break  # incomplete \uXXXX
             hex4 = raw[index + 2 : index + 6]
             try:
-                decoded.append(chr(int(hex4, 16)))
+                code_point = int(hex4, 16)
             except ValueError:
                 decoded.append(raw[index : index + 6])
+                index += 6
+                continue
+            if 0xD800 <= code_point <= 0xDBFF:
+                # Non-BMP characters arrive as a UTF-16 surrogate pair; decode
+                # both halves together so no lone surrogate reaches the UTF-8
+                # encoder on the SSE path.
+                if index + 11 >= len(raw):
+                    break  # low surrogate straddles the next fragment
+                if raw[index + 6 : index + 8] == "\\u":
+                    try:
+                        low = int(raw[index + 8 : index + 12], 16)
+                    except ValueError:
+                        low = -1
+                    if 0xDC00 <= low <= 0xDFFF:
+                        decoded.append(chr(0x10000 + ((code_point - 0xD800) << 10) + (low - 0xDC00)))
+                        index += 12
+                        continue
+                decoded.append(raw[index : index + 6])
+                index += 6
+                continue
+            if 0xDC00 <= code_point <= 0xDFFF:
+                # An unpaired low surrogate cannot be UTF-8 encoded; keep the
+                # literal escape text.
+                decoded.append(raw[index : index + 6])
+                index += 6
+                continue
+            decoded.append(chr(code_point))
             index += 6
         elif escaped in _JSON_SIMPLE_ESCAPES:
             decoded.append(_JSON_SIMPLE_ESCAPES[escaped])

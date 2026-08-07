@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import ast
 import socket
+import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -53,6 +55,23 @@ def test_settings_exclude_secrets_from_serialization() -> None:
         "",
         "**********",
     }
+
+
+def test_composition_common_import_does_not_configure_dspy_providers() -> None:
+    """Importing composition.common alone must not configure a DSPy provider LM."""
+    script = (
+        "import fleet_rlm.composition.common\n"
+        "import dspy\n"
+        "assert dspy.settings.lm is None, repr(dspy.settings.lm)\n"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=180,
+    )
+    assert result.returncode == 0, result.stderr
 
 
 def test_create_app_returns_fastapi_without_side_effects(monkeypatch) -> None:
