@@ -23,7 +23,7 @@ def _to_response(card: SkillCard) -> SkillCardResponse:
         scope="system",
         version=card.version,
         trust="system",
-        affordances=[],
+        affordances=list(card.affordances),
         resources_available=card.resources_available,
     )
 

@@ -102,3 +102,18 @@ def test_models_are_immutable_and_validate_paths_versions_and_bodies() -> None:
         SkillDefinition(SkillCard(uuid4(), "empty", "Empty", "1", False), "")
     with pytest.raises(ValueError, match="version"):
         SkillSelectionRef(uuid4(), "")
+
+
+def test_bundled_cards_advertise_bounded_capability_affordances() -> None:
+    """Cards name the capability families each Skill expects so the model and
+    operator see them before loading; affordances stay closed and bounded."""
+
+    catalog = build_bundled_skill_catalog()
+    by_name = {card.name: card for card in catalog.cards()}
+    assert by_name["long-context"].affordances == ("fetch_url", "llm_query_batched", "workspace.files")
+    assert by_name["workspace-files"].affordances == ("workspace.files", "artifacts.publish")
+    assert by_name["data-analysis"].affordances == ("artifacts.publish", "llm_query_batched")
+    assert by_name["report-builder"].affordances == ("workspace.files", "artifacts.publish")
+    assert by_name["dspy-rlm"].affordances == ("interpreter", "llm_query")
+    assert all(isinstance(card.affordances, tuple) for card in catalog.cards())
+    assert all(len(card.affordances) <= 8 for card in catalog.cards())

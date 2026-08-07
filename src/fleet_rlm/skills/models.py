@@ -12,6 +12,7 @@ from uuid import UUID
 import dspy
 
 _SAFE_NAME = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
+_SAFE_AFFORDANCE = re.compile(r"^[a-z0-9]+([._-][a-z0-9]+)*$")
 _SAFE_VERSION = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._+-]{0,63}$")
 
 
@@ -44,6 +45,7 @@ class SkillCard:
     description: str
     version: str
     resources_available: bool
+    affordances: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if not isinstance(self.id, UUID):
@@ -66,6 +68,20 @@ class SkillCard:
             raise ValueError("invalid skill version")
         if not isinstance(self.resources_available, bool):
             raise ValueError("skill resource flag must be boolean")
+        affordances = tuple(self.affordances)
+        if (
+            len(affordances) > 8
+            or len(set(affordances)) != len(affordances)
+            or any(
+                not isinstance(value, str)
+                or not 1 <= len(value) <= 32
+                or not value.isprintable()
+                or _SAFE_AFFORDANCE.fullmatch(value) is None
+                for value in affordances
+            )
+        ):
+            raise ValueError("invalid skill affordances")
+        object.__setattr__(self, "affordances", affordances)
 
 
 @dataclass(frozen=True, slots=True)

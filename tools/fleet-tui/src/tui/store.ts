@@ -76,6 +76,7 @@ export type Message =
       phase: "activated" | "loaded";
       version: string;
       trust?: string;
+      affordances?: string[];
       ts: number;
     }
   | {

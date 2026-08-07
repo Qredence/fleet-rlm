@@ -24,6 +24,7 @@ class _BundledSpec:
     version: str
     resources: tuple[tuple[str, str], ...] = ()
     signature: type[dspy.Signature] | None = None
+    affordances: tuple[str, ...] = ()
 
 
 _BUNDLED_SPECS = (
@@ -33,6 +34,7 @@ _BUNDLED_SPECS = (
         "(Recursive Language Model / REPL code agent). Not for RAG or dspy.Retrieve.",
         "1.0.0",
         (("references/rlm-contract.md", "text/markdown"),),
+        affordances=("interpreter", "llm_query"),
     ),
     _BundledSpec(
         "long-context",
@@ -43,23 +45,27 @@ _BUNDLED_SPECS = (
             ("scripts/rank_chunks.py", "text/x-python"),
             ("references/chunking-strategies.md", "text/markdown"),
         ),
+        affordances=("fetch_url", "llm_query_batched", "workspace.files"),
     ),
     _BundledSpec(
         "workspace-files",
         "Use durable Session Workspace, Attachment, and Artifact tools correctly.",
         "1.0.0",
         (("references/filesystem-contract.md", "text/markdown"),),
+        affordances=("workspace.files", "artifacts.publish"),
     ),
     _BundledSpec(
         "data-analysis",
         "Compute and verify descriptive statistics, trends, and qualified anomalies.",
         "1.0.0",
         signature=DataAnalysisSignature,
+        affordances=("artifacts.publish", "llm_query_batched"),
     ),
     _BundledSpec(
         "report-builder",
         "Create, save, read back, and verify reports from trusted source data.",
         "1.0.0",
+        affordances=("workspace.files", "artifacts.publish"),
     ),
 )
 
@@ -117,6 +123,13 @@ def build_bundled_skill_catalog() -> SkillCatalog:
         }
         if spec.signature is not None:
             validate_skill_signature(spec.signature)
-        card = SkillCard(stable_skill_id(spec.name), spec.name, spec.description, spec.version, bool(resources))
+        card = SkillCard(
+            stable_skill_id(spec.name),
+            spec.name,
+            spec.description,
+            spec.version,
+            bool(resources),
+            spec.affordances,
+        )
         definitions.append(SkillDefinition(card, instructions, resources, spec.signature))
     return SkillCatalog(tuple(definitions))

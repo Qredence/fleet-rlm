@@ -342,6 +342,7 @@ class _LiveCapabilityPreparer:
             base_tools=(*file_tools, *workspace_tools, *memory_tools, *url_tools),
             base_event_views=base_views,
             workspace=DAYTONA_WORKSPACE_CAPABILITY,
+            workspace_fs=session_workspace,
             deadline=deadline,
         )
         return LivePreparedCapabilities(

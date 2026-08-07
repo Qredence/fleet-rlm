@@ -348,6 +348,21 @@ describe("renderMessage", () => {
     };
 
     expect(renderMessage(activated, 60).join("\n")).toContain("SKILL ACTIVATED");
+    const withAffordances: Message = {
+      id: "affordance-skill",
+      kind: "skill",
+      runId: "run",
+      skillId: "skill",
+      name: "inspect",
+      phase: "activated",
+      version: "2",
+      trust: "workspace",
+      affordances: ["workspace.files", "artifacts.publish"],
+      ts: 3,
+    };
+    expect(renderMessage(withAffordances, 120).join("\n")).toContain(
+      "can use workspace.files, artifacts.publish",
+    );
     const loadedOutput = renderMessage(loaded, 60).join("\n");
     expect(loadedOutput).toContain("SKILL LOADED");
     expect(loadedOutput).not.toContain("system");
