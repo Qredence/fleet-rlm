@@ -110,7 +110,7 @@ class WorkspaceFileService:
             return await files.list_entries(normalized, limit=limit, after=after)
 
     async def stat(self, workspace_id: UUID, path: str) -> WorkspaceFileEntry | None:
-        normalized = normalize_workspace_path(path)
+        normalized = normalize_workspace_path(path, allow_root=True)
         async with self._gateway.open_workspace(workspace_id, purpose="workspace-files-stat") as files:
             return await files.stat(normalized)
 
@@ -238,7 +238,7 @@ class _HostWorkspaceFileSession:
         )
 
     async def stat(self, path: str) -> WorkspaceFileEntry | None:
-        target = self._path(path)
+        target = self._path(path, allow_root=True)
         if not target.exists():
             return None
         return self._entry(target, path, checksum=target.is_file())

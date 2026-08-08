@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import hashlib
+from contextlib import redirect_stdout, suppress
+from io import StringIO
+from pathlib import Path
 from types import SimpleNamespace
 from uuid import uuid4
 
@@ -132,3 +136,63 @@ async def test_bytes_survive_across_two_different_deleted_io_sandboxes() -> None
 
     assert len(platform.created) == 2
     assert platform.deleted == ["sandbox-1", "sandbox-2"]
+
+
+class _LocalProcess:
+    """Exec the generated workspace-agent code against a local tmp volume."""
+
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+
+    async def code_run(self, code: str):
+        self.calls.append(code)
+        output = StringIO()
+        with redirect_stdout(output), suppress(SystemExit):
+            exec(code, {})
+        return SimpleNamespace(exit_code=0, result=output.getvalue().strip())
+
+
+def _workspace_session(root: Path):
+    from fleet_rlm.daytona.workspace_fs import AsyncDaytonaSessionWorkspaceFS
+    from fleet_rlm.daytona.workspace_gateway import _DaytonaWorkspaceFileSession
+
+    process = _LocalProcess()
+    workspace = AsyncDaytonaSessionWorkspaceFS(
+        SimpleNamespace(process=process),
+        volume_root=str(root.parents[2]),
+        root=str(root),
+        max_file_bytes=1024,
+    )
+    return _DaytonaWorkspaceFileSession(workspace, max_file_bytes=1024), process
+
+
+@pytest.mark.asyncio
+async def test_stat_returns_agent_side_checksum_in_one_round_trip(tmp_path: Path) -> None:
+    root = tmp_path / "volume" / "sessions" / "session" / "workspace"
+    root.mkdir(parents=True)
+    content = b"hello checksum"
+    (root / "note.txt").write_bytes(content)
+    (root / "notes").mkdir()
+    session, process = _workspace_session(root)
+
+    file_entry = await session.stat("note.txt")
+
+    assert file_entry is not None
+    assert file_entry.path == "note.txt"
+    assert file_entry.kind == "file"
+    assert file_entry.byte_size == len(content)
+    assert file_entry.checksum_sha256 == hashlib.sha256(content).hexdigest()
+    assert len(process.calls) == 1
+
+    directory_entry = await session.stat("notes")
+    assert directory_entry is not None
+    assert directory_entry.kind == "directory"
+    assert directory_entry.checksum_sha256 is None
+
+    root_entry = await session.stat(".")
+    assert root_entry is not None
+    assert root_entry.path == "."
+    assert root_entry.kind == "directory"
+    assert root_entry.checksum_sha256 is None
+
+    assert await session.stat("missing.txt") is None

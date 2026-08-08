@@ -68,13 +68,10 @@ class _DaytonaWorkspaceFileSession:
         )
 
     async def stat(self, path: str) -> WorkspaceFileEntry | None:
-        entry = await self._workspace.stat(path)
+        entry = await self._workspace.stat(path, include_checksum=True)
         if entry is None:
             return None
-        checksum = None
-        if entry.kind == "file":
-            content = await self._workspace.read_text(path, max_bytes=self._max_file_bytes)
-            checksum = hashlib.sha256(content.encode("utf-8")).hexdigest()
+        checksum = entry.checksum_sha256 if entry.kind == "file" else None
         return _public_entry(entry, checksum)
 
     async def read_text_page(

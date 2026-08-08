@@ -124,3 +124,46 @@ def test_volume_tree_is_not_truncated_when_file_count_equals_requested_limit(tmp
         assert response.status_code == 200
         assert response.json()["paths"] == ["sessions/a/turn.json"]
         assert response.json()["truncated"] is False
+
+
+def test_workspace_files_stat_reports_content_checksum_and_directory_entries(tmp_path: Path) -> None:
+    app = create_testing_app(
+        settings=Settings(
+            _env_file=None,
+            run_environment="daytona",
+            data_root=str(tmp_path),
+        )
+    )
+
+    with TestClient(app) as client:
+        created = client.put(
+            "/api/files/content",
+            json={"path": "notes/report.md", "content": "first", "overwrite": False},
+        )
+        assert created.status_code == 200
+
+        file_stat = client.get("/api/files/stat", params={"path": "notes/report.md"})
+        assert file_stat.status_code == 200
+        file_body = file_stat.json()
+        assert file_body["path"] == "notes/report.md"
+        assert file_body["kind"] == "file"
+        assert file_body["byte_size"] == 5
+        assert file_body["checksum_sha256"] == hashlib.sha256(b"first").hexdigest()
+
+        directory_stat = client.get("/api/files/stat", params={"path": "notes"})
+        assert directory_stat.status_code == 200
+        directory_body = directory_stat.json()
+        assert directory_body["kind"] == "directory"
+        assert directory_body["byte_size"] is None
+        assert directory_body["checksum_sha256"] is None
+
+        root_stat = client.get("/api/files/stat", params={"path": "."})
+        assert root_stat.status_code == 200
+        root_body = root_stat.json()
+        assert root_body["path"] == "."
+        assert root_body["kind"] == "directory"
+        assert root_body["checksum_sha256"] is None
+
+        missing = client.get("/api/files/stat", params={"path": "missing.txt"})
+        assert missing.status_code == 404
+        assert missing.json()["code"] == "workspace_file_not_found"

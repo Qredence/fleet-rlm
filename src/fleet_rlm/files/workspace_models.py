@@ -12,6 +12,7 @@ class WorkspaceEntry:
     kind: Literal["file", "directory"]
     byte_size: int | None
     modified_at: str | None
+    checksum_sha256: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

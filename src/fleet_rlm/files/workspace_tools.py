@@ -28,7 +28,13 @@ class WorkspaceToolError(RuntimeError):
 
 
 def _entry(entry: WorkspaceEntry) -> dict[str, object]:
-    return asdict(entry)
+    result = asdict(entry)
+    # The LLM-facing tool result keeps its established 4-key entry shape; the
+    # checksum is an opt-in workspace-fs capability that REPL stat/list never
+    # requests, so an absent checksum adds no key.
+    if result.get("checksum_sha256") is None:
+        result.pop("checksum_sha256")
+    return result
 
 
 def _raise_tool_error(exc: BaseException) -> NoReturn:

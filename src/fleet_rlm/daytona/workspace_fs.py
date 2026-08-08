@@ -510,6 +510,7 @@ def _normalize_list_cursor(path: str, after: str | None) -> str | None:
 def _entry_from_payload(raw: Mapping[str, object]) -> WorkspaceEntry:
     byte_size = raw.get("byte_size")
     modified_at = raw.get("modified_at")
+    checksum = raw.get("checksum")
     parsed_byte_size: int | None
     if byte_size is None:
         parsed_byte_size = None
@@ -522,6 +523,7 @@ def _entry_from_payload(raw: Mapping[str, object]) -> WorkspaceEntry:
         kind="directory" if raw.get("kind") == "directory" else "file",
         byte_size=parsed_byte_size,
         modified_at=str(modified_at) if modified_at else None,
+        checksum_sha256=str(checksum) if isinstance(checksum, str) else None,
     )
 
 
@@ -615,19 +617,20 @@ class DaytonaSessionWorkspaceFS:
             next_cursor=str(next_cursor) if isinstance(next_cursor, str) else None,
         )
 
-    def stat(self, path: str) -> WorkspaceEntry | None:
+    def stat(self, path: str, *, include_checksum: bool = False) -> WorkspaceEntry | None:
         relative = normalize_workspace_path(path, allow_root=True)
         payload = self._atomic_run(
             operation="stat",
             relative=relative,
             allow_missing=True,
-            max_bytes=0,
+            max_bytes=self._max_file_bytes if include_checksum else 0,
             limit=0,
             overwrite=False,
             content_b64="",
             after="",
             offset=0,
             max_chars=0,
+            checksum=include_checksum,
         )
         if payload.get("entry") is None:
             if relative == ".":
@@ -761,6 +764,7 @@ class DaytonaSessionWorkspaceFS:
         after: str,
         offset: int,
         max_chars: int,
+        checksum: bool = False,
     ) -> dict[str, object]:
         try:
             return run_workspace_agent(
@@ -777,6 +781,7 @@ class DaytonaSessionWorkspaceFS:
                 after=after,
                 offset=offset,
                 max_chars=max_chars,
+                checksum=checksum,
             )
         except WorkspaceAgentStorageError as exc:
             raise WorkspaceStorageError(*exc.args) from exc
@@ -834,9 +839,15 @@ class AsyncDaytonaSessionWorkspaceFS:
             next_cursor=str(cursor) if isinstance(cursor, str) else None,
         )
 
-    async def stat(self, path: str) -> WorkspaceEntry | None:
+    async def stat(self, path: str, *, include_checksum: bool = False) -> WorkspaceEntry | None:
         relative = normalize_workspace_path(path, allow_root=True)
-        payload = await self._atomic_run(operation="stat", relative=relative, allow_missing=True)
+        payload = await self._atomic_run(
+            operation="stat",
+            relative=relative,
+            allow_missing=True,
+            max_bytes=self._max_file_bytes if include_checksum else 0,
+            checksum=include_checksum,
+        )
         entry = payload.get("entry")
         if entry is None:
             return WorkspaceEntry(".", "directory", None, None) if relative == "." else None
@@ -935,6 +946,7 @@ class AsyncDaytonaSessionWorkspaceFS:
         after: str = "",
         offset: int = 0,
         max_chars: int = 0,
+        checksum: bool = False,
     ) -> dict[str, object]:
         try:
             return await run_workspace_agent_async(
@@ -951,6 +963,7 @@ class AsyncDaytonaSessionWorkspaceFS:
                 after=after,
                 offset=offset,
                 max_chars=max_chars,
+                checksum=checksum,
             )
         except WorkspaceAgentStorageError as exc:
             raise WorkspaceStorageError(*exc.args) from exc
