@@ -29,7 +29,7 @@ dependencies = [
     # dspy 3.3.0b1 adds SandboxSerializable (#9411) used for native RLM
     # large-input handling. Pinned exactly: pre-release, and the runtime relies
     # on RLM internals that are private API.
-    "dspy==3.3.0b1",
+    "dspy==3.3.0",
     # Core orchestration and CLI/runtime ergonomics.
     "daytona==0.192.0",
     "hydra-core>=1.3,<2",
