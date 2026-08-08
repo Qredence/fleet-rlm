@@ -378,9 +378,9 @@ def test_native_stream_projector_never_reopens_an_ended_field_stream() -> None:
     projector = _NativeRLMStreamProjector(run_id="run", max_chars=10_000, publish=events.append)
     for item in (
         dspy.streaming.StreamResponse("predict", "reasoning", '"reasoning', False),
-        dspy.streaming.StreamResponse("predict", "reasoning", ' text","co', True),  # step-2 reasoning end
+        dspy.streaming.StreamResponse("predict", "reasoning", " text", True),  # step-1 reasoning end
         dspy.streaming.StreamResponse("predict", "code", '"x=1', False),  # code begins
-        dspy.streaming.StreamResponse("predict", "reasoning", '" continuation","co', False),  # delta AFTER end
+        dspy.streaming.StreamResponse("predict", "reasoning", ' continuation","co', False),  # delta AFTER end
         dspy.streaming.StreamResponse("predict", "code", '"', True),
     ):
         projector.publish(item)
