@@ -313,10 +313,19 @@ async def install_daytona_composition(
     settings: Settings,
 ) -> RuntimeInventory:
     """Attach an already-migrated Daytona inventory to app state."""
+    from fleet_rlm.daytona.interpreter import set_bridge_service_loop
+
     skill_catalog = getattr(app.state, "skill_catalog", None)
     if not isinstance(skill_catalog, SkillCatalog):
         raise CompositionError("bundled Skill catalog is unavailable")
-    inventory = await build_daytona_composition(settings, skill_catalog=skill_catalog)
+    # The composition loop owns every loop-affine Daytona SDK object and never
+    # performs nested synchronous waits; bridges post SDK coroutines here.
+    set_bridge_service_loop(asyncio.get_running_loop())
+    try:
+        inventory = await build_daytona_composition(settings, skill_catalog=skill_catalog)
+    except Exception:
+        set_bridge_service_loop(None)
+        raise
     try:
         from fleet_rlm.config import _CONFIG_PATH, active_profile
         from fleet_rlm.config_policy import ConfigPolicyService
@@ -350,11 +359,14 @@ async def install_daytona_composition(
             database=inventory.database,
             suppress_errors=True,
         )
+        set_bridge_service_loop(None)
         raise
 
 
 async def dispose_daytona_composition(app: FastAPI) -> None:
     """Best-effort shutdown of Daytona resources."""
+    from fleet_rlm.daytona.interpreter import set_bridge_service_loop
+
     inventory = clear_runtime_inventory(app)
     cleanup = getattr(inventory, "turn_cleanup_supervisor", None)
     if cleanup is not None:
@@ -365,3 +377,6 @@ async def dispose_daytona_composition(app: FastAPI) -> None:
         database=inventory.database if inventory is not None else None,
         suppress_errors=False,
     )
+    # Release the bridge service loop after component disposal so bridges can
+    # still run SDK coroutines while runtimes shut down.
+    set_bridge_service_loop(None)

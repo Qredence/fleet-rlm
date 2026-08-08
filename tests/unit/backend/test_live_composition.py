@@ -370,6 +370,58 @@ async def test_daytona_dispose_detaches_inventory_before_disposal() -> None:
     ]
 
 
+@pytest.mark.asyncio
+async def test_daytona_install_registers_and_dispose_clears_bridge_service_loop(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The composition loop is the bridge service loop for the app lifespan.
+
+    Sync Daytona bridges post SDK coroutines to this registered loop (the one
+    loop-affine to every Daytona SDK object, which never performs nested
+    synchronous waits); disposal releases it so post-lifespan bridge traffic
+    falls back to caller capture instead of posting to a closing loop.
+    """
+    import fleet_rlm.composition.daytona as composition
+    from fleet_rlm.daytona.interpreter import bridge_service_loop, set_bridge_service_loop
+
+    inventory = RuntimeInventory(
+        turn_coordinator=object(),
+        attachment_lifecycle=object(),
+        artifact_reader=object(),
+        session_catalog=object(),
+        turn_lifecycle=object(),
+        turn_preparation=object(),
+        turn_state_store=object(),
+        model_bundle=object(),
+        run_environment_resources=object(),
+        workspace_volume_gateway=object(),
+        workspace_file_service=object(),
+        workspace_volume_mirror=object(),
+    )
+
+    async def fake_build(_settings: object, *, skill_catalog: SkillCatalog) -> RuntimeInventory:
+        assert skill_catalog is app.state.skill_catalog
+        return inventory
+
+    monkeypatch.setattr(composition, "build_daytona_composition", fake_build)
+    monkeypatch.setattr("fleet_rlm.config_policy.ConfigPolicyService", lambda *_a, **_k: object())
+    monkeypatch.setattr("fleet_rlm.config.active_profile", lambda _settings: "test-profile")
+
+    app = SimpleNamespace(state=SimpleNamespace())
+    app.state.skill_catalog = SkillCatalog(())
+
+    try:
+        installed = await composition.install_daytona_composition(app, object())
+        assert bridge_service_loop() is asyncio.get_running_loop()
+        assert installed is app.state.runtime_inventory
+
+        await composition.dispose_daytona_composition(app)
+        assert bridge_service_loop() is None
+    finally:
+        set_bridge_service_loop(None)
+    assert bridge_service_loop() is None
+
+
 def test_testing_database_is_created_and_closed_by_lifespan() -> None:
     app = create_testing_app(
         settings=Settings(

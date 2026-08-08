@@ -19,6 +19,8 @@ from fleet_rlm.rlm.child_runtime import (
     ChildRuntimeFactory,
 )
 
+_CHILD_CLEANUP_RESULT_TIMEOUT_S = 60.0
+
 
 @dataclass(slots=True)
 class ChildRuntimeLease:
@@ -200,17 +202,29 @@ def _close_child_runtime_sync(
         interpreter.shutdown(strict_broker_cleanup=True)
     except BaseException as exc:
         first_error = exc
+    # The cleanup coroutine must stay on the caller-captured loop: it releases
+    # the DaytonaAdmission permit, a loop-bound asyncio.Semaphore. The wait is
+    # bounded so a stalled owner loop surfaces a typed cleanup error instead of
+    # the pre-RC-7 unbounded Future.result() hang.
+    cleanup = _cleanup_child_runtime_async(
+        platform=platform,
+        sandbox=sandbox,
+        sandbox_id=sandbox_id,
+        mount_path=mount_path,
+        permit=permit,
+    )
     try:
-        asyncio.run_coroutine_threadsafe(
-            _cleanup_child_runtime_async(
-                platform=platform,
-                sandbox=sandbox,
-                sandbox_id=sandbox_id,
-                mount_path=mount_path,
-                permit=permit,
-            ),
-            loop,
-        ).result()
+        try:
+            future = asyncio.run_coroutine_threadsafe(cleanup, loop)
+        except BaseException:
+            cleanup.close()
+            raise
+        try:
+            future.result(timeout=_CHILD_CLEANUP_RESULT_TIMEOUT_S)
+        except BaseException:
+            future.cancel()
+            cleanup.close()
+            raise
     except BaseException as exc:
         if first_error is None:
             first_error = exc

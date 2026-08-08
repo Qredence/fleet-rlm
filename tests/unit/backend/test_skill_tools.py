@@ -1,5 +1,8 @@
 """Progressive catalog-bound Skill tools."""
 
+import threading
+import time
+from concurrent.futures import Future, ThreadPoolExecutor
 from uuid import uuid4
 
 import pytest
@@ -211,3 +214,105 @@ async def test_prepare_host_capabilities_installs_preloaded_skill_resources() ->
     assert notices == ()
     assert spec.output_schema_id == "fleet.default"  # long-context has no custom signature
     assert "skills/long-context/references/chunking-strategies.md" in workspace.written
+
+
+def test_lock_is_never_held_across_brokered_workspace_writes() -> None:
+    """RC-7 three-way shape: drains proceed while a tool call parks in I/O.
+
+    Live-captured cycle that deadlocked the service loop: a broker Fulfill
+    thread held ``SkillToolHost._lock`` across the brokered sandbox
+    ``write_text`` posting (which waits on the service loop), while the
+    service-loop thread itself synchronously acquired the same lock in
+    ``drain_public_events``. Locks now guard book-keeping only, so the drain
+    must complete while the write is still parked.
+    """
+    catalog = build_bundled_skill_catalog()
+    skill = catalog.require(stable_skill_id("long-context"))
+
+    class _BlockingWorkspace(_RecordingWorkspace):
+        def __init__(self) -> None:
+            super().__init__()
+            self.entered = threading.Event()
+            self.release = threading.Event()
+
+        def write_text(self, path: str, content: str, *, overwrite: bool) -> None:
+            self.entered.set()
+            assert self.release.wait(timeout=10)
+            super().write_text(path, content, overwrite=overwrite)
+
+    workspace = _BlockingWorkspace()
+    host = SkillToolHost(catalog, workspace=workspace)
+    outcome: dict[str, object] = {}
+
+    def tool_thread() -> None:
+        outcome["result"] = host.load_skill(str(skill.card.id), skill.card.version)
+
+    thread = threading.Thread(target=tool_thread, daemon=True)
+    thread.start()
+    assert workspace.entered.wait(timeout=5), "load_skill did not reach the workspace write"
+
+    # The service-loop-side drain must NOT block on the parked write's lock.
+    started = time.perf_counter()
+    drained = host.drain_public_events()
+    drain_elapsed = time.perf_counter() - started
+    assert drain_elapsed < 5, "drain_public_events blocked on the in-flight sandbox write"
+    assert drained == []  # lifecycle events publish only after the install settles
+
+    workspace.release.set()
+    thread.join(timeout=5)
+    assert not thread.is_alive(), "load_skill deadlocked against the concurrent drain"
+    assert outcome["result"]["ok"] is True
+    assert set(workspace.written) == {f"skills/{skill.card.name}/{path}" for path in skill.resources}
+
+    # Full lifecycle events land once the install settles.
+    assert [event["kind"] for event in host.drain_public_events()] == ["skill.activated", "skill.loaded"]
+
+
+def test_legacy_lock_spanning_write_deadlocks_drains() -> None:
+    """Pre-fix reproduction: a lock spanning the write deadlocks the drain.
+
+    Simulates the old mark_preloaded discipline by holding the host's own
+    ``_lock`` across the parked workspace write; the concurrent drain on the
+    same lock then cannot proceed. Released via the workspace gate so the
+    harness exits deterministically.
+    """
+    catalog = build_bundled_skill_catalog()
+    skill = catalog.require(stable_skill_id("long-context"))
+
+    class _BlockingWorkspace(_RecordingWorkspace):
+        def __init__(self) -> None:
+            super().__init__()
+            self.entered = threading.Event()
+            self.release = threading.Event()
+
+        def write_text(self, path: str, content: str, *, overwrite: bool) -> None:
+            self.entered.set()
+            assert self.release.wait(timeout=10)
+            super().write_text(path, content, overwrite=overwrite)
+
+    workspace = _BlockingWorkspace()
+    host = SkillToolHost(catalog, workspace=workspace)
+    marker = f"skills/{skill.card.name}/references/chunking-strategies.md"
+
+    def tool_thread() -> None:
+        # Legacy discipline: the write happens while holding the host lock.
+        host._lock.acquire()
+        try:
+            workspace.write_text(marker, "payload", overwrite=True)
+        finally:
+            host._lock.release()
+
+    thread = threading.Thread(target=tool_thread, daemon=True)
+    thread.start()
+    assert workspace.entered.wait(timeout=5)
+
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        drain: Future[list[dict[str, object]]] = pool.submit(host.drain_public_events)
+        with pytest.raises(TimeoutError):
+            drain.result(timeout=2)
+        workspace.release.set()
+        assert drain.result(timeout=5) == [], "cancellation released the legacy-shape drain"
+
+    thread.join(timeout=5)
+    assert not thread.is_alive()
+    assert workspace.written[marker] == "payload"
