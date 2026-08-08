@@ -1,42 +1,69 @@
-# Fleet RLM Recursive Runtime
+# Fleet RLM — TODOS
 
-Current phase: Phase 1 and Phase 2 live-evidence closure
-ExecPlan: .scratch/fleet-rlm-recursive-runtime/phase-01-dspy-context-daytona-repl.md
-Phase 2 ExecPlan: .scratch/fleet-rlm-recursive-runtime/phase-02-dspy-recursive-children-daytona.md
-Status: implementation and offline/repository validation complete; credentialed canaries and receipts pending
+Program: tool-surface revival + volume architecture (canonical plan: `plans/tool-surface-revival.md`)
+Base: `dev-0.7` (no `main`/`master` targets). Evidence: `/tmp/fleet-dogfood/` dogfooding 2026-08-08.
+Each PR: branch → focused suite → full gate (make check incl. TUI via pnpm 10.33.2, check-security, build/check-release, check-docs, git diff --check) → live dogfood spot-run → PR → babysit → merge (merge-commit, keep branch).
 
-## Phase 1 progress and exit gate
+## PR-A — fix(rlm): kwargs-only tool forwarding + error surfacing (critical) — `codex/broker-kwargs-only-tools`
+- [ ] `daytona/http_broker.py` `_tool_wrapper_source`: forward all params as kwargs (args only for POSITIONAL_ONLY); assert no positional-only params on current surface
+- [ ] `daytona/http_broker.py`: module logger + WARNING per host tool failure (name + sanitized message only)
+- [ ] `daytona/broker_source.py` `TOOL_WRAPPER_TEMPLATE`: read HTTPError body, raise `RuntimeError("Tool call failed: <safe message>")`
+- [ ] `daytona/interpreter.py`: kwargs-only contract comment at `tool_executor`
+- [ ] Tests: broker wrapper wire-payload (stubbed urlopen), kwargs-only executor regression via real pinned DSPy `_make_interpreter_tool`, `rlm_query` payload
+- [ ] Live replay: lanes fetch/write/recursion/report green; report turn commits artifact
 
-- [x] Daytona executes persistent Python cells and host callbacks in one process namespace.
-- [x] A Volume-backed `dspy.SandboxSerializable` capsule injects authorized immutable context.
-- [x] Prepared and sandbox-accessed attachments project through the existing bounded event.
-- [x] Stock `dspy.RLM` uses native `dspy.streamify` and `dspy.streaming.StreamListener` for Root reasoning/code.
-- [x] First DSPy stream deltas reach FastAPI SSE before typed `Prediction` completion and `[DONE]` remains last.
-- [x] `fleet-tui` appends incremental reasoning/code chunks to stable cards and accepts canonical corrections without duplicates.
-- [x] Provider/cache no-stream fallback still completes through typed `Prediction`.
-- [x] Explicit live commands use the TOML `runtime.live_enabled` policy; `false` fails closed before provider access.
-- [x] The focused Phase 1 lane, `make check`, security, release, docs, and diff gates pass; the full check reached 81.06% coverage.
-- [x] The Phase 1 canary and policy-gated receipt verifier are implemented, with focused unit coverage for fail-closed policy, receipt validation, output-path safety, and inherited environment preservation.
-- [ ] Run one explicitly authorized DeepSeek/Daytona Phase 1 canary against a clean committed candidate and record its sanitized receipt.
-- [ ] Reconcile the Phase 1 receipt and retrospective, then close the phase.
+## PR-B — fix(turns): no-progress guard terminal event + stream dedupe (critical) — `codex/turn-guard-terminal-event`
+- [ ] Verify TUI strict-lifecycle requirement for terminal `is_final` per output stream (`tools/fleet-tui/src/sse.ts`, `tui/projection.ts`) — decides flush shape
+- [ ] `rlm/tool_observer.py`: emit `ToolFailed` before `TurnNoProgressError` raise
+- [ ] `rlm/runner.py` `_reconcile_trajectory`: payload-identity comparison; identical content never re-emitted; corrections still upsert same stream_id
+- [ ] `daytona/interpreter.py`: final output flush = unsent tail only (use `emitted_chars`); no output after SUBMIT
+- [ ] Tests: observer sequence, commit policy with no-progress history, trajectory dedupe, interpreter flush
+- [ ] Live replay: zero duplicate `data-rlm-output` frames per capture; guard-storm turn commits
 
-## Phase 2 progress and exit gate
+## PR-C — fix(api): workspace stat checksum + root stat — `codex/workspace-stat-checksum`
+- [ ] `daytona/workspace_agent.py`: optional sandbox-side `checksum` on stat op
+- [ ] `daytona/workspace_fs.py`: flag pass-through (sync+async)
+- [ ] `daytona/workspace_gateway.py`: stat via flag; drop full-content read
+- [ ] `files/workspace_access.py`: `allow_root=True` for stat
+- [ ] Tests: gateway stat file/dir/missing; `/api/files/stat` contract tests
+- [ ] Live replay: root+nested stat 200 with sha256
 
-- [x] `daytona-recursive` enables recursion explicitly; normal `daytona` exposes neither `rlm_query` nor recursive Root guidance.
-- [x] Each real Root delegation creates one dedicated ephemeral Daytona child Sandbox running a native DSPy RLM with normal network egress.
-- [x] The child shares only the Daytona Volume ID, mounted at `recursive/<workspace-id>/<run-id>/<call-index>`; it cannot mount the Root workspace scope or receive Fleet capabilities, credentials, Attachments, Artifacts, history, or broker state.
-- [x] Strict child cleanup shuts down its interpreter, removes only files in its child scope, deletes only its child Sandbox, and blocks Root success when cleanup fails.
-- [x] Root continuity, depth fallback without a grandchild, structural-only child tracing, policy gating, cleanup failure settlement, and child mount isolation are covered offline.
-- [x] The Phase 2 live canary, sanitized receipt verifier, operator documentation, and focused verifier tests are implemented. Focused tests, `make check`, security, release, docs, direct Ruff/compile checks, and `git diff --check` pass.
-- [ ] After Phase 1 has a committed passing receipt and live execution is explicitly authorized, run the Phase 2 canary against a clean committed candidate and record its sanitized receipt.
-- [ ] Reconcile the Phase 2 receipt and retrospective, then close the phase and begin the Phase 3 dependency-DAG design.
+## PR-D — feat(api): preparation heartbeats + cancel tombstone — `codex/pre-run-heartbeat`
+- [ ] `api/routes/turns.py`: generator-spanning open(); transient `data-status{phase:"preparation"}` at ~1 s then every `heartbeat_seconds`; prelude never recorded
+- [ ] `chat/turn_lifecycle.py` + `turn_detail_policy.py`: cancelled-turn tombstone part persisted (D2)
+- [ ] Docs: `abort` frame semantics (D3)
+- [ ] Tests: heartbeat cadence/transience, stream contract first-frame budget, tombstone persistence+listing
+- [ ] Live replay: cancel lane shows ≤1 s first frame + tombstone in GET /turns
 
-## Phase frontier
+## PR-E — feat(workspace): `projects/<slug>/` browsable deliverables root — `codex/project-workspace-root`
+- [ ] `files/volume_paths.py`: `projects_root()`/`project_dir(slug)` + slug/reserved/traversal validation
+- [ ] `files/workspace_tools.py`: `write/read/stat/list_project_*` tools (overwrite+expected_sha256 semantics)
+- [ ] `rlm/tool_guards.py`: project path obligations
+- [ ] `skills/bundled/report-builder`, `workspace-files`: convention docs (scratch→sessions, deliverables→projects)
+- [ ] Tests: slug matrix, reserved rejection, guards, promotion from project path
+- [ ] Live replay: report lane writes `projects/<slug>/...` + volume tree browse
 
-- [x] Phase 0 — Evidence, DSPy baseline, and Daytona feasibility (closed on negative callback evidence)
-- [ ] Phase 1 — Native DSPy context capsule, RLM streaming, and co-located Daytona REPL (implementation and offline validation complete; live receipt pending)
-- [ ] Phase 2 — DSPy recursive children (implementation and offline validation complete; Phase 1-gated live receipt pending)
-- [ ] Phase 3 — Dependency DAG and verified completion
-- [ ] Phase 4 — Commit-gated derived state
-- [ ] Phase 5 — Bounded SSE, replay, and TUI graph
-- [ ] Phase 6 — DSPy evaluation, GEPA, promotion, and legacy removal
+## PR-F — feat(memory): lifecycle + per-turn injection (tenant deferred) — `codex/memory-lifecycle`
+- [ ] `files/memory_models.py`: v2 ids `<!-- id:8hex -->`, v1-compatible; tolerant reads (skip malformed lines + warning)
+- [ ] Port + `daytona/workspace_memory.py`: `list_entries`, `delete_entry`, `edit_entry` (one atomic round trip)
+- [ ] `files/memory_tools.py`: `remember` (alias kept), `list_memories`, `edit_memory`, `forget`
+- [ ] Move store to `memory/MEMORIES.md` with legacy migration on open
+- [ ] `daytona/run_environment.py`: ≤4 KiB tail digest injected per turn (mtime-cached 30 s)
+- [ ] Tests: v1/v2 parse, tolerant read, CRUD round trips, injection budget
+- [ ] Live replay: turn 2 remembers turn 1 preference without tool calls; forget edits exactly one entry
+
+## PR-G — feat(volume): full CRUD — `codex/volume-full-crud`
+- [ ] `daytona/workspace_agent.py`: `delete` + `patch` ops (atomic, symlink/traversal/non-empty-dir safe)
+- [ ] `daytona/workspace_fs.py`: `delete_path`, `patch_text` (sync+async) + cache invalidation
+- [ ] `files/workspace_tools.py`: `delete_workspace_path`, `edit_workspace_text` (allowlisted roots only; catalog roots rejected)
+- [ ] `api/routes/workspace_files.py`: `DELETE`/`PATCH /api/files/content` (404/409 mapping)
+- [ ] `make api-sync` (openapi.yaml + TUI generated types)
+- [ ] `rlm/tool_guards.py`: delete/edit obligations
+- [ ] Tests: fs delete/patch, API contract, guards
+- [ ] Live replay: write→edit→read→delete→list on session+project roots
+
+## PR-H — chore(backend): `src/fleet_rlm` readability (mechanical, last) — `codex/backend-readability`
+- [ ] `daytona/workspace_fs.py`: single async FS core + thin sync bridge (~−300 LOC)
+- [ ] `daytona/interpreter.py`: extract output projection → `daytona/interpreter_output.py` (~−150 LOC)
+- [ ] `src/fleet_rlm/CONTEXT.md`: workspace-module naming map (fs/gateway/access/tools) + daytona/ module one-liners
+- [ ] Gate: `check-codebase-tree` + full make check green; zero behavior change
