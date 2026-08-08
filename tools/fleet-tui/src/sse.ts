@@ -130,8 +130,6 @@ function nonEmptyString(value: unknown): value is string {
   return typeof value === "string" && value.length > 0;
 }
 
-type FieldCheck = (value: unknown) => boolean;
-
 function isTypedDataPayload(type: string, value: unknown): boolean {
   if (!isRecord(value)) return false;
   const checks = dataFieldChecks[type];

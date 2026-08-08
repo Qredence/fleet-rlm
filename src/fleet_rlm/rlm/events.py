@@ -346,14 +346,4 @@ class EventRecorder:
         )
         if isinstance(detail, TERMINAL_DETAIL_TYPES):
             self._terminal_emitted = True
-        try:
-            # Keep the public event stream as the single source of truth for
-            # per-Turn progress spans. The import stays lazy to avoid making
-            # the transport model depend on optional MLflow at import time.
-            from fleet_rlm.observability.turn_tracing import trace_runtime_detail
-
-            trace_runtime_detail(detail, sequence=event.sequence)
-        except Exception:
-            # Observability is fail-soft and must never alter event delivery.
-            pass
         return event

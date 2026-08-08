@@ -643,10 +643,8 @@ async def test_failed_turn_emits_settlement_claim_and_cleanup_spans(
             "Turn.claim_transition",
             "Turn.cleanup",
         ]
-        assert [name for name in names if name.startswith("Turn.progress.")] == [
-            "Turn.progress.run.started",
-            "Turn.progress.status",
-            "Turn.progress.run.failed",
-        ]
+        # Runtime Events are no longer echoed into MLflow: only real phase
+        # spans (and standard DSPy autolog spans, not active here) exist.
+        assert [name for name in names if name.startswith("Turn.progress.")] == []
     finally:
         turn_tracing._fleet_trace_active.reset(token)

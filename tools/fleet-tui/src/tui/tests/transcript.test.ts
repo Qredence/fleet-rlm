@@ -145,9 +145,28 @@ describe("TranscriptComponent", () => {
     const transcript = new TranscriptComponent(store, render);
 
     transcript.render(80);
+    // First render paints every message; equal object identities on the second
+    // render must hit the cache (no re-render work).
+    expect(render).toHaveBeenCalledTimes(4);
     transcript.render(80);
-
-    expect(render).toHaveBeenCalledTimes(8);
+    expect(render).toHaveBeenCalledTimes(4);
     expect(caches[0]).toBe(caches[1]);
+
+    // A CHANGED streaming message (new object per dispatch) must bust the cache
+    // and re-render exactly the one that changed.
+    store.dispatch({
+      type: "message/upsert",
+      message: {
+        id: "code",
+        kind: "code",
+        runId: "run-1",
+        step: 1,
+        code: "partial-more",
+        streaming: true,
+        ts: 2,
+      },
+    });
+    transcript.render(80);
+    expect(render).toHaveBeenCalledTimes(5);
   });
 });

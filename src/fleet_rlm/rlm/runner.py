@@ -228,205 +228,6 @@ class _DetailRelay:
                 return values
 
 
-class _FleetStatusMessageProvider(dspy.streaming.StatusMessageProvider):
-    """Emit bounded, provider-neutral status messages from DSPy callbacks."""
-
-    def tool_start_status_message(self, instance: Any, inputs: dict[str, Any]) -> str | None:
-        del instance, inputs
-        return "Running Fleet tool"
-
-    def tool_end_status_message(self, outputs: Any) -> str | None:
-        del outputs
-        return "Fleet tool completed"
-
-    def module_start_status_message(self, instance: Any, inputs: dict[str, Any]) -> str | None:
-        del instance, inputs
-        return None
-
-    def module_end_status_message(self, outputs: Any) -> str | None:
-        del outputs
-        return None
-
-    def lm_start_status_message(self, instance: Any, inputs: dict[str, Any]) -> str | None:
-        del instance, inputs
-        return "Generating RLM action"
-
-    def lm_end_status_message(self, outputs: Any) -> str | None:
-        del outputs
-        return "RLM action generation completed"
-
-
-# JSON escapes that map to their decoded control/structural character. JSON's
-# remaining standard escapes (``\b`` backspace, ``\f`` form feed) are NOT
-# decoded: control characters would corrupt terminal rendering, so they are
-# emitted as their literal letter (``b`` / ``f``) instead.
-_JSON_SIMPLE_ESCAPES = {"n": "\n", "t": "\t", "r": "\r", '"': '"', "\\": "\\", "/": "/"}
-
-
-def _extract_json_string_prefix(raw: str) -> str:
-    """Decode the first JSON string literal in ``raw`` (or its decoded prefix).
-
-    DSPy's JSONAdapter streams the raw JSON-encoded field value — surrounding
-    quotes, JSON escapes (``\\n`` etc.) — and the value can bleed into the next
-    field (e.g. a reasoning chunk ends with ``,"code":...``). This extracts and
-    decodes the first JSON string, ignoring everything after its closing quote,
-    so the TUI receives clean reasoning/code text instead of a raw JSON blob.
-    An incomplete trailing escape (straddling a chunk boundary) is left for the
-    next fragment. ``\\uXXXX`` escapes decode via ``chr``, with UTF-16
-    surrogate pairs combined into one character; invalid hex, unpaired
-    surrogates, and the ``\\b``/``\\f`` control escapes stay as their literal
-    text.
-    """
-    start = raw.find('"')
-    if start == -1:
-        return ""
-    decoded: list[str] = []
-    index = start + 1
-    while index < len(raw):
-        char = raw[index]
-        if char == '"':
-            return "".join(decoded)
-        if char != "\\":
-            decoded.append(char)
-            index += 1
-            continue
-        if index + 1 >= len(raw):
-            break  # escape tail straddles the next fragment
-        escaped = raw[index + 1]
-        if escaped == "u":
-            if index + 5 >= len(raw):
-                break  # incomplete \uXXXX
-            hex4 = raw[index + 2 : index + 6]
-            try:
-                code_point = int(hex4, 16)
-            except ValueError:
-                decoded.append(raw[index : index + 6])
-                index += 6
-                continue
-            if 0xD800 <= code_point <= 0xDBFF:
-                # Non-BMP characters arrive as a UTF-16 surrogate pair; decode
-                # both halves together so no lone surrogate reaches the UTF-8
-                # encoder on the SSE path.
-                if index + 11 >= len(raw):
-                    break  # low surrogate straddles the next fragment
-                if raw[index + 6 : index + 8] == "\\u":
-                    try:
-                        low = int(raw[index + 8 : index + 12], 16)
-                    except ValueError:
-                        low = -1
-                    if 0xDC00 <= low <= 0xDFFF:
-                        decoded.append(chr(0x10000 + ((code_point - 0xD800) << 10) + (low - 0xDC00)))
-                        index += 12
-                        continue
-                decoded.append(raw[index : index + 6])
-                index += 6
-                continue
-            if 0xDC00 <= code_point <= 0xDFFF:
-                # An unpaired low surrogate cannot be UTF-8 encoded; keep the
-                # literal escape text.
-                decoded.append(raw[index : index + 6])
-                index += 6
-                continue
-            decoded.append(chr(code_point))
-            index += 6
-        elif escaped in _JSON_SIMPLE_ESCAPES:
-            decoded.append(_JSON_SIMPLE_ESCAPES[escaped])
-            index += 2
-        else:
-            decoded.append(escaped)
-            index += 2
-    return "".join(decoded)
-
-
-class _NativeRLMStreamProjector:
-    """Project live DSPy ``streamify`` values into bounded Fleet details.
-
-    The stream is a live projection only; the completed DSPy
-    ``Prediction.trajectory`` remains the canonical source reconciled by the
-    runner after execution.
-    """
-
-    def __init__(self, *, run_id: Any, max_chars: int, publish: Callable[[RuntimeEventDetail], None]) -> None:
-        self._run_id = run_id
-        self._max_chars = max(1, int(max_chars))
-        self._publish = publish
-        self._step = 0
-        self._last_field: str | None = None
-        self._field_chars = {"reasoning": 0, "code": 0}
-        self._field_completed = {"reasoning": False, "code": False}
-        self._field_raw: dict[str, str] = {}
-        self._decoded_emitted: dict[str, str] = {}
-
-    def publish(self, item: Any) -> bool:
-        if isinstance(item, dspy.streaming.StatusMessage):
-            message = truncate_public_text(str(item.message), max_len=240)
-            if message:
-                self._publish(Status("execution", "streaming", message))
-            return False
-        if not isinstance(item, dspy.streaming.StreamResponse):
-            return False
-        field = item.signature_field_name
-        if field not in {"reasoning", "code"}:
-            return False
-        if self._step == 0:
-            self._step = 1
-        elif field == "reasoning" and self._last_field != "reasoning" and self._field_completed["code"]:
-            # DSPy may yield both listeners for alternating chunks of one JSON
-            # response. A field transition is not an RLM iteration boundary;
-            # only a new reasoning field after the prior code field completed
-            # identifies the next action.
-            self._step += 1
-            self._field_chars["reasoning"] = 0
-            self._field_chars["code"] = 0
-            self._field_completed["reasoning"] = False
-            self._field_completed["code"] = False
-            self._field_raw = {}
-            self._decoded_emitted = {}
-        self._last_field = field
-
-        # The raw JSON buffer exists only to finish in-flight escapes; once the
-        # public output bound is exhausted the delta is empty, so stop growing
-        # it and keep a pathological long stream memory-bounded.
-        remaining = self._max_chars - self._field_chars[field]
-        delta = ""
-        if remaining > 0:
-            field_raw = self._field_raw.get(field, "") + str(item.chunk)
-            self._field_raw[field] = field_raw
-            # DSPy's JSONAdapter streams the raw JSON-encoded value (quotes +
-            # \\n escapes); decode the first JSON string so the TUI gets clean
-            # text. A chunk without a leading quote is already clean (e.g.
-            # replay paths).
-            decoded = _extract_json_string_prefix(field_raw) if field_raw.startswith('"') else field_raw
-            emitted = self._decoded_emitted.get(field, "")
-            delta = decoded[len(emitted) :] if len(decoded) > len(emitted) else ""
-            self._decoded_emitted[field] = decoded
-
-        chunk = truncate_public_text(delta, max_len=remaining) if remaining else ""
-        self._field_chars[field] += len(chunk)
-        if not chunk and not item.is_last_chunk:
-            return False
-        self._field_completed[field] = bool(item.is_last_chunk)
-        stream_id = f"{self._run_id}:rlm:{self._step}:{field}"
-        if field == "reasoning":
-            detail: RuntimeEventDetail = RLMReasoning(
-                chunk,
-                self._step,
-                stream_id,
-                True,
-                bool(item.is_last_chunk),
-            )
-        else:
-            detail = RLMCode(
-                chunk,
-                self._step,
-                stream_id,
-                True,
-                bool(item.is_last_chunk),
-            )
-        self._publish(detail)
-        return True
-
-
 def _trajectory_details(steps: Sequence[TrajectoryStep], *, max_chars: int) -> list[ObservationDetail]:
     """Project strictly normalized DSPy trajectory steps into public details."""
     details: list[ObservationDetail] = []
@@ -954,77 +755,21 @@ class RLMRunner:
             raise RLMConfigError("native RLM execution requires a caller-owned interpreter")
         return (context.execution.interpreter,)
 
-    async def _stream_native_rlm(
-        self,
-        rlm: Any,
-        context: RLMExecutionContext,
-        kwargs: dict[str, Any],
-        native_call_args: tuple[Any, ...],
-        relay: _DetailRelay,
-    ) -> tuple[Any, bool]:
-        named_predictors = dict(rlm.named_predictors())
-        predictor_name = next(
-            (name for name, predictor in named_predictors.items() if predictor is rlm.generate_action),
-            None,
-        )
-        if predictor_name is None:
-            raise TypeError("native RLM action predictor is not addressable by name")
-        listeners = [
-            dspy.streaming.StreamListener(
-                signature_field_name=field,
-                predict=rlm.generate_action,
-                predict_name=predictor_name,
-                allow_reuse=True,
-            )
-            for field in ("reasoning", "code")
-        ]
-        stream_projector = _NativeRLMStreamProjector(
-            run_id=context.identity.run_id,
-            max_chars=context.execution.options.max_output_chars,
-            publish=relay.publish,
-        )
-        stream_program = cast(
-            Callable[..., AsyncIterator[Any]],
-            dspy.streamify(
-                rlm,
-                # DSPy 3.3.x exposes status messages and selected signature
-                # fields through this streamify adapter.
-                status_message_provider=_FleetStatusMessageProvider(),
-                stream_listeners=listeners,
-                include_final_prediction_in_output_stream=True,
-                is_async_program=True,
-                async_streaming=True,
-            ),
-        )
-        prediction = None
-        streamed = False
-        async for stream_item in stream_program(*native_call_args, **kwargs):
-            streamed |= stream_projector.publish(stream_item)
-            if isinstance(stream_item, dspy.Prediction):
-                prediction = stream_item
-        if prediction is None:
-            raise TypeError("DSPy streamify completed without a Prediction")
-        return prediction, streamed
-
     async def _invoke_rlm(
         self,
         rlm: Any,
         context: RLMExecutionContext,
         kwargs: dict[str, Any],
         relay: _DetailRelay,
-    ) -> tuple[Any, str]:
+    ) -> Any:
+        # Fleet performs one standard dspy.RLM completion per action. Token-level
+        # streaming (dspy.streamify + chunk projection) is intentionally removed:
+        # it added a custom SSE delta grammar with measurable producer cost while
+        # the canonical trajectory reconciliation already publishes complete
+        # per-iteration reasoning/code/output events.
+        del relay
         native_call_args = self._native_call_args(rlm, context)
-        if type(rlm) is dspy.RLM and isinstance(rlm.generate_action, dspy.Predict):
-            prediction, streamed = await self._stream_native_rlm(
-                rlm,
-                context,
-                kwargs,
-                native_call_args,
-                relay,
-            )
-            return prediction, "native" if streamed else "provider_fallback"
-        prediction = await rlm.acall(*native_call_args, **kwargs)
-        return prediction, "legacy"
+        return await rlm.acall(*native_call_args, **kwargs)
 
     @staticmethod
     def _record_attachment_accesses(context: RLMExecutionContext) -> None:
@@ -1057,7 +802,6 @@ class RLMRunner:
         phase: Any,
         prediction: Any,
         started: float,
-        stream_mode: str,
         recursive_executor: RecursiveRLMExecutor | None,
     ) -> Any:
         final_reasoning = getattr(prediction, "final_reasoning", None)
@@ -1076,7 +820,6 @@ class RLMRunner:
                 "recursive_call_count": recursive_summary.call_count,
                 "recursive_prompt_chars": recursive_summary.delegated_prompt_chars,
                 "recursive_depth_fallback_count": recursive_summary.depth_fallback_count,
-                "stream_mode": stream_mode,
             }
         )
         return prediction
@@ -1092,8 +835,10 @@ class RLMRunner:
         """
         Execute the RLM with the prepared request context and return its prediction.
 
-        The execution records tracing and usage metadata, publishes supported streaming
-        observations, and records attachment accesses. Cleanup failures from recursive execution
+        The execution records tracing and usage metadata. Per-iteration reasoning
+        observations come from the action observer callback; the canonical
+        trajectory reconciliation after completion publishes any missing
+        reasoning/code/output values. Cleanup failures from recursive execution
         are surfaced as execution failures.
         """
         kwargs = build_rlm_input_kwargs(
@@ -1129,7 +874,7 @@ class RLMRunner:
             ),
         ):
             try:
-                prediction, stream_mode = await self._invoke_rlm(rlm, context, kwargs, relay)
+                prediction = await self._invoke_rlm(rlm, context, kwargs, relay)
                 if recursive_executor is not None:
                     recursive_executor.raise_if_cleanup_failed()
             except BaseException as exc:
@@ -1137,7 +882,7 @@ class RLMRunner:
                 raise
             finally:
                 self._record_attachment_accesses(context)
-            return self._record_phase_success(phase, prediction, started, stream_mode, recursive_executor)
+            return self._record_phase_success(phase, prediction, started, recursive_executor)
 
     async def _execute_rlm_in_worker(
         self,

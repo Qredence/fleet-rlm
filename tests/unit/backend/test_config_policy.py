@@ -27,7 +27,7 @@ def test_policy_read_exposes_toml_values_without_environment_secret_values(tmp_p
 
     field = _field(service.read(), "daytona", "llm.root.api_key_env")
 
-    assert field["value"] == "DATABRICKS_TOKEN"
+    assert field["value"] == "FLEET_OPENCODE_GO_API_KEY"
     assert field["editor"] == "text"
     assert "secret" not in str(field).lower()
 
@@ -144,7 +144,7 @@ def test_set_default_profile_persists_and_surfaces_in_snapshot(tmp_path: Path) -
     service, policy = _service(tmp_path)
     before = service.read()
 
-    assert before.default_profile == "daytona"
+    assert before.default_profile == "daytona-recursive"
     assert set(before.available_profiles) == {
         "daytona",
         "daytona-recursive",

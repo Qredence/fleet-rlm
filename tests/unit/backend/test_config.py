@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import tomllib
 from pathlib import Path
 
@@ -27,18 +28,21 @@ def test_daytona_profile_uses_specialized_bounded_model_roles() -> None:
     llm = document["profiles"]["daytona"]["llm"]
     assert llm["root"] == {
         "model": "deepseek-v4-flash",
-        "api_key_env": "DATABRICKS_TOKEN",
-        "base_url_env": "FLEET_DATABRICKS_AI_GATEWAY_BASE_URL",
+        "api_key_env": "FLEET_OPENCODE_GO_API_KEY",
+        "base_url_env": "FLEET_OPENCODE_GO_BASE_URL",
         "max_tokens": 8000,
+        # Cache hits emit zero streamify deltas and read as a frozen stream.
+        "cache": False,
         "reasoning_effort": "low",
     }
     assert llm["sub"] == {
         "model": "deepseek-v4-flash",
-        "api_key_env": "DATABRICKS_TOKEN",
-        "base_url_env": "FLEET_DATABRICKS_AI_GATEWAY_BASE_URL",
+        "api_key_env": "FLEET_OPENCODE_GO_API_KEY",
+        "base_url_env": "FLEET_OPENCODE_GO_BASE_URL",
         "max_tokens": 8000,
         "temperature": 0,
-        "reasoning_effort": "none",
+        "cache": False,
+        "reasoning_effort": "low",
     }
     assert document["defaults"]["llm"] == {
         "root": {"model_provider_service": "uscentral.default.zencode-oai", "cache": True, "num_retries": 3},
@@ -58,10 +62,17 @@ def test_all_daytona_profiles_use_deepseek_v4_flash_for_both_roles(profile: str)
     llm = document["profiles"][profile]["llm"]
     assert llm["root"]["model"] == "deepseek-v4-flash"
     assert llm["sub"]["model"] == "deepseek-v4-flash"
-    assert llm["root"]["api_key_env"] == "DATABRICKS_TOKEN"
-    assert llm["sub"]["api_key_env"] == "DATABRICKS_TOKEN"
-    assert llm["root"]["base_url_env"] == "FLEET_DATABRICKS_AI_GATEWAY_BASE_URL"
-    assert llm["sub"]["base_url_env"] == "FLEET_DATABRICKS_AI_GATEWAY_BASE_URL"
+    if profile in {"daytona", "daytona-recursive"}:
+        # The interactive profiles serve the OpenCode Go gateway (the
+        # recursive profile must mirror the daytona llm section exactly);
+        # every other profile stays on the Databricks AI Gateway.
+        expected_key_env, expected_base_env = "FLEET_OPENCODE_GO_API_KEY", "FLEET_OPENCODE_GO_BASE_URL"
+    else:
+        expected_key_env, expected_base_env = "DATABRICKS_TOKEN", "FLEET_DATABRICKS_AI_GATEWAY_BASE_URL"
+    assert llm["root"]["api_key_env"] == expected_key_env
+    assert llm["sub"]["api_key_env"] == expected_key_env
+    assert llm["root"]["base_url_env"] == expected_base_env
+    assert llm["sub"]["base_url_env"] == expected_base_env
 
 
 def test_daytona_profile_routes_tracing_to_supervised_local_mlflow() -> None:
@@ -184,8 +195,8 @@ def test_daytona_profile_resolves_deepseek_root_and_sub_with_gateway_params(
     import fleet_rlm.config as config
 
     monkeypatch.setenv("FLEET_DAYTONA_API_KEY", "test-daytona-key")
-    monkeypatch.setenv("DATABRICKS_TOKEN", "test-databricks-token")
-    monkeypatch.setenv("FLEET_DATABRICKS_AI_GATEWAY_BASE_URL", "https://gateway.example.test/v1")
+    monkeypatch.setenv("FLEET_OPENCODE_GO_API_KEY", "test-opencode-go-key")
+    monkeypatch.setenv("FLEET_OPENCODE_GO_BASE_URL", "https://gateway.example.test/v1")
 
     settings = config.load_runtime_settings()
 
@@ -194,8 +205,12 @@ def test_daytona_profile_resolves_deepseek_root_and_sub_with_gateway_params(
     assert settings.root_llm_model_provider_service == "uscentral.default.zencode-oai"
     assert settings.sub_llm_model_provider_service == "uscentral.default.zencode-oai"
     assert settings.root_llm_reasoning_effort == "low"
-    assert settings.sub_llm_reasoning_effort == "none"
+    assert settings.sub_llm_reasoning_effort == "low"
     assert settings.sub_llm_temperature == 0
+    # Streaming turns disable the LM cache: a hit would emit zero streamify
+    # deltas and read as a frozen stream.
+    assert settings.root_llm_cache is False
+    assert settings.sub_llm_cache is False
     assert settings.root_llm_max_tokens == settings.sub_llm_max_tokens == 8000
     assert settings.mlflow_tracing_enabled is True
     assert settings.mlflow_tracking_uri == "http://127.0.0.1:5001"
@@ -207,8 +222,8 @@ def test_daytona_ignores_managed_mlflow_environment_values_when_not_selected(
     import fleet_rlm.config as config
 
     monkeypatch.setenv("FLEET_DAYTONA_API_KEY", "test-daytona-key")
-    monkeypatch.setenv("DATABRICKS_TOKEN", "test-databricks-token")
-    monkeypatch.setenv("FLEET_DATABRICKS_AI_GATEWAY_BASE_URL", "https://gateway.example.test/v1")
+    monkeypatch.setenv("FLEET_OPENCODE_GO_API_KEY", "test-opencode-go-key")
+    monkeypatch.setenv("FLEET_OPENCODE_GO_BASE_URL", "https://gateway.example.test/v1")
     monkeypatch.setenv("FLEET_MLFLOW_EXPERIMENT_NAME", "managed-experiment")
     monkeypatch.setenv("FLEET_MLFLOW_TRACE_CATALOG", "managed_catalog")
 
@@ -269,7 +284,14 @@ def _select_profile(tmp_path: Path, *, profile: str, monkeypatch: pytest.MonkeyP
     source = Path("config/fleet.toml")
     policy = tmp_path / "fleet.toml"
     content = source.read_text(encoding="utf-8")
-    updated = content.replace('default_profile = "daytona"', f'default_profile = "{profile}"')
+    updated = re.sub(
+        r'^default_profile = "[^"]*"$',
+        f'default_profile = "{profile}"',
+        content,
+        count=1,
+        flags=re.MULTILINE,
+    )
+    assert updated != content or f'default_profile = "{profile}"' in content
     policy.write_text(updated, encoding="utf-8")
     monkeypatch.setattr("fleet_rlm.config._CONFIG_PATH", policy)
     return policy
@@ -286,6 +308,8 @@ def test_daytona_benchmark_profiles_resolve_without_mlflow(
 
     _select_profile(tmp_path, profile=profile, monkeypatch=monkeypatch)
     monkeypatch.setenv("FLEET_DAYTONA_API_KEY", "test-daytona-key")
+    # Benchmark profiles keep the Databricks AI Gateway; only the interactive
+    # daytona/daytona-recursive profiles use the OpenCode Go gateway.
     monkeypatch.setenv("DATABRICKS_TOKEN", "test-databricks-token")
     monkeypatch.setenv("FLEET_DATABRICKS_AI_GATEWAY_BASE_URL", "https://gateway.example.test/v1")
 
