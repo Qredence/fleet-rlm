@@ -111,3 +111,44 @@ def test_commit_success_rejects_failed_outcomes_or_unmatched_tool_calls() -> Non
             ),
             (),
         )
+
+
+def test_commit_success_normalizes_guard_closed_no_progress_tool_call() -> None:
+    """RC-2: ToolStarted closed by the guard's ToolFailed commits as failed."""
+    import dspy
+
+    from fleet_rlm.chat.turn_detail_policy import commit_success
+    from fleet_rlm.rlm.dspy_contract import PredictionResult
+    from fleet_rlm.rlm.errors import TurnNoProgressError
+    from fleet_rlm.rlm.events import ToolCompleted, ToolFailed, ToolStarted
+    from fleet_rlm.rlm.outcome import RLMOutcome
+    from fleet_rlm.rlm.tool_guards import TurnToolGuards
+    from fleet_rlm.rlm.tool_observer import ToolEventView, observe_tool
+    from fleet_rlm.sessions.committed_turn import ToolCallPart
+
+    observed: list[object] = []
+    wrapped = observe_tool(
+        dspy.Tool(lambda query: f"result for {query}", name="lookup"),
+        observed.append,
+        ToolEventView.metadata_only(),
+        guards=TurnToolGuards(),
+    )
+    assert wrapped(query="repeat") == "result for repeat"
+    with pytest.raises(TurnNoProgressError):
+        wrapped(query="repeat")
+
+    execution_details = tuple(item for item in observed if isinstance(item, (ToolStarted, ToolCompleted, ToolFailed)))
+    committed = commit_success(
+        RLMOutcome(
+            terminal_status="completed",
+            prediction=PredictionResult("done", {"answer": "done"}, "default", "1"),
+            execution_details=execution_details,
+        ),
+        (),
+    )
+
+    tools = [part for part in committed.parts if isinstance(part, ToolCallPart)]
+    assert [part.state for part in tools] == ["completed", "failed"]
+    assert tools[1].tool_name == "lookup"
+    assert tools[1].tool_call_id != tools[0].tool_call_id
+    assert tools[1].error == "repeated tool call produced no progress"

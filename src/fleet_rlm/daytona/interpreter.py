@@ -569,8 +569,20 @@ class DaytonaCodeInterpreter:
             return "Execution error"
         return truncate_public_text(str(result or ""), max_len=self._observation_max_chars)
 
-    def _emit_output_delta(self, value: str, *, step: int, stream_id: str, emitted_chars: list[int]) -> None:
-        if not value:
+    def _emit_output_delta(
+        self,
+        value: str,
+        *,
+        step: int,
+        stream_id: str,
+        emitted_chars: list[int],
+        streamed_chunks: list[str],
+        stream_closed: list[bool],
+    ) -> None:
+        if stream_closed[0] or not value:
+            # A step's terminal output frame (e.g. the "FINAL submitted" label
+            # or an error frame) closes its stream; late stdout from a
+            # straggler backend callback must not emit after it (RC-4b).
             return
         remaining = self._observation_max_chars - emitted_chars[0]
         if remaining <= 0:
@@ -578,7 +590,55 @@ class DaytonaCodeInterpreter:
         chunk = value[:remaining]
         emitted_chars[0] += len(chunk)
         if chunk:
+            streamed_chunks.append(chunk)
             self._observe(RLMOutput(chunk, step, stream_id, True, False))
+
+    def _close_output_stream(self, text: str, *, step: int, stream_id: str, stream_closed: list[bool]) -> None:
+        stream_closed[0] = True
+        self._observe(RLMOutput(text, step, stream_id, False, True))
+
+    def _flush_step_output(
+        self,
+        result: Any,
+        *,
+        step: int,
+        stream_id: str,
+        streamed_chunks: list[str],
+        stream_closed: list[bool],
+    ) -> None:
+        """Close one step's output stream without repeating streamed content.
+
+        RC-4b: stdout deltas are tracked in ``streamed_chunks`` so the final
+        flush is idempotent. When deltas already cover the full public output
+        no closing frame is emitted — the TUI contract
+        (tools/fleet-tui/src/tui/projection.ts `projectRlm`) does not require
+        a terminal ``is_final`` frame per rlm-output stream
+        (``fleet-turn-stream.ts`` lifecycle only tracks reasoning/text/tool
+        streams, and ``store.ts`` settles leftover streaming cards at the run
+        terminal), and an empty non-delta frame would REPLACE the accumulated
+        content with "" both in the TUI and in the durable
+        ``turn_detail_policy`` projection. A partially streamed step emits
+        only the unsent tail as a closing delta (a non-delta tail frame would
+        replace the stream with just the tail). Distinct terminal texts — the
+        SUBMIT label and repair feedback — still replace the stream with one
+        canonical non-delta final frame.
+        """
+        if stream_closed[0]:
+            return
+        public = self._public_output(result)
+        if is_final_output(result) or isinstance(result, _RepairFeedback):
+            self._close_output_stream(public, step=step, stream_id=stream_id, stream_closed=stream_closed)
+            return
+        streamed = "".join(streamed_chunks)
+        if public == streamed:
+            stream_closed[0] = True
+            return
+        if public.startswith(streamed):
+            tail = public[len(streamed) :]
+            stream_closed[0] = True
+            self._observe(RLMOutput(tail, step, stream_id, True, True))
+            return
+        self._close_output_stream(public, step=step, stream_id=stream_id, stream_closed=stream_closed)
 
     def _run_backend(
         self,
@@ -658,12 +718,16 @@ class DaytonaCodeInterpreter:
         step = self._observation_step
         output_stream_id = f"interpreter:{self._observation_namespace}:output:{step}"
         emitted_chars = [0]
+        streamed_chunks: list[str] = []
+        stream_closed = [False]
         stdout_projector = _PublicStdoutProjector(
             lambda value: self._emit_output_delta(
                 value,
                 step=step,
                 stream_id=output_stream_id,
                 emitted_chars=emitted_chars,
+                streamed_chunks=streamed_chunks,
+                stream_closed=stream_closed,
             )
         )
         step_started = time.perf_counter()
@@ -717,7 +781,13 @@ class DaytonaCodeInterpreter:
                 execute_ms = int((time.perf_counter() - execute_started) * 1_000)
                 self._reject_repeated_no_progress(normalized_code, result)
                 stdout_projector.finish(expected_final=_submitted_payload(result))
-                self._observe(RLMOutput(self._public_output(result), step, output_stream_id, False, True))
+                self._flush_step_output(
+                    result,
+                    step=step,
+                    stream_id=output_stream_id,
+                    streamed_chunks=streamed_chunks,
+                    stream_closed=stream_closed,
+                )
                 outputs: dict[str, Any] = {
                     "path": "http_broker" if self._http_broker is not None else type(self._backend).__name__,
                     "result_kind": _result_kind(result),
@@ -741,16 +811,22 @@ class DaytonaCodeInterpreter:
                 return result
             except TurnTerminalError:
                 stdout_projector.finish()
-                self._observe(RLMOutput("Execution failed", step, output_stream_id, False, True))
+                self._close_output_stream(
+                    "Execution failed", step=step, stream_id=output_stream_id, stream_closed=stream_closed
+                )
                 raise
             except DaytonaAdapterError:
                 stdout_projector.finish()
-                self._observe(RLMOutput("Execution failed", step, output_stream_id, False, True))
+                self._close_output_stream(
+                    "Execution failed", step=step, stream_id=output_stream_id, stream_closed=stream_closed
+                )
                 raise
             except Exception as exc:
                 mapped = map_provider_error(exc)
                 stdout_projector.finish()
-                self._observe(RLMOutput("Execution failed", step, output_stream_id, False, True))
+                self._close_output_stream(
+                    "Execution failed", step=step, stream_id=output_stream_id, stream_closed=stream_closed
+                )
                 raise mapped from exc
             finally:
                 duration_ms = int((time.perf_counter() - step_started) * 1_000)

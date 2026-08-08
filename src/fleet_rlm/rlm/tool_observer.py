@@ -223,6 +223,11 @@ def _check_tool_progress(
     observer(WarningEvent(warning, "tool_no_progress"))
     if event_view.allow_repeated_identical:
         return
+    # Close the tool observation before failing the turn: the durable turn
+    # detail policy rejects a ToolStarted without a terminal observation and
+    # would roll back the entire commit (RC-2). The guard warning is a fixed
+    # bounded public message, reused here as the failure detail.
+    observer(ToolFailed(trace.call_id, str(source.name), bound_event_text(warning)))
     trace.finish(status="failed", output={"tool_status": "failed", "failure_category": "no_progress"})
     raise TurnNoProgressError
 

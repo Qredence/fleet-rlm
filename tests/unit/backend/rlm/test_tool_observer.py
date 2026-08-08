@@ -9,7 +9,9 @@ from typing import Any
 import dspy
 import pytest
 
-from fleet_rlm.rlm.events import ToolCompleted, ToolFailed, ToolStarted
+from fleet_rlm.rlm.errors import TurnNoProgressError
+from fleet_rlm.rlm.events import ToolCompleted, ToolFailed, ToolStarted, WarningEvent
+from fleet_rlm.rlm.tool_guards import TurnToolGuards
 from fleet_rlm.rlm.tool_observer import ToolEventView, observe_tool
 
 
@@ -290,3 +292,71 @@ def test_observe_tool_rejects_non_tools_and_awaitable_results() -> None:
     with pytest.raises(TypeError, match="async host tools"):
         wrapped()
     assert [type(item) for item in observed] == [ToolStarted, ToolFailed]
+
+
+def test_no_progress_guard_closes_the_tool_observation_before_failing() -> None:
+    """RC-2: the guard raise is preceded by a terminal ToolFailed observation."""
+    observed: list[Any] = []
+
+    def lookup(query: str) -> str:
+        return f"private result for {query}"
+
+    wrapped = observe_tool(
+        dspy.Tool(lookup),
+        observed.append,
+        ToolEventView.metadata_only(),
+        guards=TurnToolGuards(),
+    )
+
+    assert wrapped(query="alpha") == "private result for alpha"
+    # The first identical repeat is the guard's no-progress trigger
+    # (``ToolProgressGuard`` warns exactly once, at ``_repetitions == 1``).
+    with pytest.raises(TurnNoProgressError, match="repeated tool calls made no progress"):
+        wrapped(query="alpha")
+
+    assert [type(item) for item in observed] == [
+        ToolStarted,
+        ToolCompleted,
+        ToolStarted,
+        WarningEvent,
+        ToolFailed,
+    ]
+    warning = observed[3]
+    failed = observed[4]
+    assert isinstance(warning, WarningEvent)
+    assert isinstance(failed, ToolFailed)
+    assert warning.code == "tool_no_progress"
+    assert failed.error == warning.message == "repeated tool call produced no progress"
+    assert failed.tool_name == "lookup"
+    assert failed.tool_call_id == observed[2].tool_call_id
+    # No dangling ToolStarted: each opening observation is terminally closed,
+    # so the durable turn detail policy can normalize the history.
+    started = {item.tool_call_id for item in observed if isinstance(item, ToolStarted)}
+    closed = {item.tool_call_id for item in observed if isinstance(item, (ToolCompleted, ToolFailed))}
+    assert started
+    assert started <= closed
+
+
+def test_no_progress_guard_warns_without_closing_when_repeats_are_allowed() -> None:
+    observed: list[Any] = []
+
+    def lookup(query: str) -> str:
+        return f"private result for {query}"
+
+    wrapped = observe_tool(
+        dspy.Tool(lookup),
+        observed.append,
+        ToolEventView(allow_repeated_identical=True),
+        guards=TurnToolGuards(),
+    )
+
+    assert wrapped(query="alpha") == "private result for alpha"
+    assert wrapped(query="alpha") == "private result for alpha"
+
+    assert [type(item) for item in observed] == [
+        ToolStarted,
+        ToolCompleted,
+        ToolStarted,
+        WarningEvent,
+        ToolCompleted,
+    ]

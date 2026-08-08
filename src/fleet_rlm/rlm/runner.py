@@ -267,6 +267,47 @@ def _preserve_stream_id(target: ObservationDetail, details: Sequence[ExecutionDe
     return replace(target, stream_id=stream_id, is_delta=False, is_final=True)
 
 
+_STREAM_TEXT_FIELDS: dict[type, str] = {
+    RLMReasoning: "text",
+    RLMCode: "code",
+    RLMOutput: "output",
+}
+
+
+def _stream_text(detail: ExecutionDetail) -> str:
+    field = _STREAM_TEXT_FIELDS.get(type(detail))
+    return str(getattr(detail, field, "") or "") if field is not None else ""
+
+
+def _same_stream_payload(
+    details: Sequence[ExecutionDetail],
+    positions: Sequence[int],
+    target: ObservationDetail,
+) -> bool:
+    """Payload identity between live rows and one canonical trajectory detail.
+
+    Live deltas and the canonical full-text trajectory row describe the same
+    stream content when (type, step, stream_id, public text) match, ignoring
+    ``is_delta``/``is_final`` flag drift (RC-4a). The live public text is the
+    in-order stream projection: delta rows concatenate; a non-delta row
+    replaces the content accumulated so far.
+    """
+    text = ""
+    stream_id: str | None = None
+    for position in positions:
+        detail = details[position]
+        if type(detail) is not type(target) or getattr(detail, "step", None) != getattr(target, "step", None):
+            return False
+        row_stream_id = getattr(detail, "stream_id", None) or None
+        if stream_id is None:
+            stream_id = row_stream_id
+        elif row_stream_id is not None and row_stream_id != stream_id:
+            return False
+        value = _stream_text(detail)
+        text = text + value if getattr(detail, "is_delta", False) else value
+    return stream_id == (getattr(target, "stream_id", None) or None) and text == _stream_text(target)
+
+
 def _detail_position(details: Sequence[ExecutionDetail], detail_type: type[object], step: int) -> int | None:
     return next(
         (
@@ -307,9 +348,11 @@ def _reconcile_trajectory(
 ) -> list[ObservationDetail]:
     """Reconcile completed DSPy trajectory details with live observations.
 
-    Existing equal observations stay put. A differing same-step RLM detail is
-    replaced in the durable list and re-emitted with the same stable step ID so
-    live TUI projection upserts it rather than appending a second card.
+    Observations with an identical public payload (type, step, stream_id, and
+    projected text) keep their position: the durable row is upserted to the
+    canonical flags without any re-emission. A differing same-step RLM detail
+    is replaced in the durable list and re-emitted with the same stable step
+    ID so live TUI projection upserts it rather than appending a second card.
     """
     emissions: list[ObservationDetail] = []
     for trajectory_step in trajectory:
@@ -333,9 +376,13 @@ def _reconcile_trajectory(
             ]
             if existing_positions:
                 first = existing_positions[0]
-                if details[first] != target:
-                    details[first] = target
+                # Identical public payload upserts the canonical flags
+                # (is_delta=False, is_final=True) into the durable row without
+                # re-emitting already-delivered content; a true correction is
+                # still re-emitted so the TUI upserts the same stream.
+                if not _same_stream_payload(details, existing_positions, target):
                     emissions.append(target)
+                details[first] = target
                 for duplicate in reversed(existing_positions[1:]):
                     del details[duplicate]
                 start = _detail_position(details, StepStarted, step)
@@ -346,9 +393,9 @@ def _reconcile_trajectory(
             # Live observation may publish reasoning before interpreter StepStarted.
             outside = _outside_reasoning_position(details, target, step)
             if outside is not None:
-                if details[outside] != target:
-                    details[outside] = target
+                if not _same_stream_payload(details, (outside,), target):
                     emissions.append(target)
+                details[outside] = target
                 continue
             insertion = _trajectory_insertion(details, target, step, finish)
             details.insert(insertion, target)

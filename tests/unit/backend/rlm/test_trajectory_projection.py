@@ -260,3 +260,100 @@ async def test_runner_deduplicates_final_reasoning_against_nonadjacent_normalize
         truncate_public_text("first distinct reason", max_len=16),
         truncate_public_text(repeated, max_len=16),
     ]
+
+
+def test_trajectory_reconciliation_silently_upserts_flag_drifted_identical_streams() -> None:
+    """RC-4a: live deltas equal to the canonical text emit nothing at turn end."""
+    from fleet_rlm.rlm.dspy_contract import TrajectoryStep
+    from fleet_rlm.rlm.events import RLMCode, RLMOutput, RLMReasoning, StepFinished, StepStarted
+    from fleet_rlm.rlm.runner import _reconcile_trajectory
+
+    details = [
+        StepStarted(1),
+        RLMReasoning("why", 1),
+        RLMCode("print(1)", 1),
+        RLMOutput("native out", 1, "output-1", True, False),
+        RLMOutput("put", 1, "output-1", True, False),
+        StepFinished(1),
+    ]
+
+    emissions = _reconcile_trajectory(
+        details,
+        (TrajectoryStep(1, "why", "print(1)", "native output"),),
+        max_chars=100,
+    )
+
+    # Identical public payload: no re-emission, but the durable row is
+    # upserted to the canonical full-text flags while keeping the live stream.
+    assert emissions == []
+    assert details == [
+        StepStarted(1),
+        RLMReasoning("why", 1),
+        RLMCode("print(1)", 1),
+        RLMOutput("native output", 1, "output-1", False, True),
+        StepFinished(1),
+    ]
+
+
+def test_trajectory_reconciliation_treats_submit_label_and_live_terminal_frame_as_identical() -> None:
+    """RC-4a: the pre-fix live log (delta + full final frame) reconciles silently."""
+    from fleet_rlm.rlm.dspy_contract import TrajectoryStep
+    from fleet_rlm.rlm.events import RLMCode, RLMOutput, RLMReasoning, StepFinished, StepStarted
+    from fleet_rlm.rlm.runner import _reconcile_trajectory
+
+    details = [
+        StepStarted(1),
+        RLMReasoning("done", 1),
+        RLMCode("SUBMIT(answer='ok')", 1),
+        RLMOutput("before\n", 1, "output-1", True, False),
+        RLMOutput("FINAL submitted", 1, "output-1", False, True),
+        StepFinished(1),
+    ]
+
+    emissions = _reconcile_trajectory(
+        details,
+        (TrajectoryStep(1, "done", "SUBMIT(answer='ok')", 'FINAL: {"answer": "ok"}'),),
+        max_chars=100,
+    )
+
+    # The non-delta FINAL label row restarts the stream projection, so the
+    # projected live payload matches the canonical label exactly.
+    assert emissions == []
+    assert details == [
+        StepStarted(1),
+        RLMReasoning("done", 1),
+        RLMCode("SUBMIT(answer='ok')", 1),
+        RLMOutput("FINAL submitted", 1, "output-1", False, True),
+        StepFinished(1),
+    ]
+
+
+def test_trajectory_reconciliation_re_emits_once_for_a_true_correction() -> None:
+    """RC-4a: corrected text still emits exactly one canonical replacement."""
+    from fleet_rlm.rlm.dspy_contract import TrajectoryStep
+    from fleet_rlm.rlm.events import RLMCode, RLMOutput, RLMReasoning, StepFinished, StepStarted
+    from fleet_rlm.rlm.runner import _reconcile_trajectory
+
+    details = [
+        StepStarted(1),
+        RLMReasoning("why", 1),
+        RLMCode("print(1)", 1),
+        RLMOutput("live out", 1, "output-1", True, False),
+        RLMOutput("put", 1, "output-1", True, False),
+        StepFinished(1),
+    ]
+
+    emissions = _reconcile_trajectory(
+        details,
+        (TrajectoryStep(1, "why", "print(1)", "corrected output"),),
+        max_chars=100,
+    )
+
+    assert emissions == [RLMOutput("corrected output", 1, "output-1", False, True)]
+    assert details == [
+        StepStarted(1),
+        RLMReasoning("why", 1),
+        RLMCode("print(1)", 1),
+        RLMOutput("corrected output", 1, "output-1", False, True),
+        StepFinished(1),
+    ]
