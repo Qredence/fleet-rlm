@@ -71,18 +71,18 @@ environment = "daytona"
 
 [profiles.daytona.llm.root]
 model = "deepseek-v4-flash"
-api_key_env = "DATABRICKS_TOKEN"
-base_url_env = "FLEET_DATABRICKS_AI_GATEWAY_BASE_URL"
+api_key_env = "FLEET_OPENCODE_GO_API_KEY"
+base_url_env = "FLEET_OPENCODE_GO_BASE_URL"
 max_tokens = 8000
 reasoning_effort = "low"
 
 [profiles.daytona.llm.sub]
 model = "deepseek-v4-flash"
-api_key_env = "DATABRICKS_TOKEN"
-base_url_env = "FLEET_DATABRICKS_AI_GATEWAY_BASE_URL"
+api_key_env = "FLEET_OPENCODE_GO_API_KEY"
+base_url_env = "FLEET_OPENCODE_GO_BASE_URL"
 max_tokens = 8000
 temperature = 0
-reasoning_effort = "none"
+reasoning_effort = "low"
 
 [profiles.daytona.mlflow]
 tracing_enabled = true
@@ -105,7 +105,7 @@ api_key_env = "DATABRICKS_TOKEN"
 base_url_env = "FLEET_DATABRICKS_AI_GATEWAY_BASE_URL"
 max_tokens = 8000
 temperature = 0
-reasoning_effort = "none"
+reasoning_effort = "low"
 
 [profiles.daytona-recursive.mlflow]
 tracing_enabled = true
@@ -135,7 +135,7 @@ api_key_env = "DATABRICKS_TOKEN"
 base_url_env = "FLEET_DATABRICKS_AI_GATEWAY_BASE_URL"
 max_tokens = 8000
 temperature = 0
-reasoning_effort = "none"
+reasoning_effort = "low"
 
 [profiles.daytona-managed.mlflow]
 tracing_enabled = true
