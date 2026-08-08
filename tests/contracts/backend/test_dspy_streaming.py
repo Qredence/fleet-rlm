@@ -361,3 +361,33 @@ def test_empty_final_reasoning_delta_closes_an_started_sse_part() -> None:
 
     assert [chunk["type"] for chunk in chunks] == ["reasoning-start", "reasoning-delta", "reasoning-end"]
     assert chunks[-1]["id"] == stream_id
+
+
+def test_native_stream_projector_never_reopens_an_ended_field_stream() -> None:
+    """Regression for the live TUI failure: DSPy closes the reasoning listener
+    as soon as the code key starts (StreamListener.stream_end). Any later
+    fragment for that (step, field) must NOT re-emit a delta — the TUI rejects
+    it as "data for an inactive reasoning stream"."""
+
+    import dspy
+
+    from fleet_rlm.rlm.events import RLMCode, RLMReasoning
+    from fleet_rlm.rlm.runner import _NativeRLMStreamProjector
+
+    events = []
+    projector = _NativeRLMStreamProjector(run_id="run", max_chars=10_000, publish=events.append)
+    for item in (
+        dspy.streaming.StreamResponse("predict", "reasoning", '"reasoning', False),
+        dspy.streaming.StreamResponse("predict", "reasoning", ' text","co', True),  # step-2 reasoning end
+        dspy.streaming.StreamResponse("predict", "code", '"x=1', False),  # code begins
+        dspy.streaming.StreamResponse("predict", "reasoning", '" continuation","co', False),  # delta AFTER end
+        dspy.streaming.StreamResponse("predict", "code", '"', True),
+    ):
+        projector.publish(item)
+
+    reasoning = [event for event in events if isinstance(event, RLMReasoning)]
+    code = [event for event in events if isinstance(event, RLMCode)]
+    # Exactly one reasoning stream: one delta + one end; the late fragment is dropped.
+    assert [(event.is_final, event.text) for event in reasoning] == [(False, "reasoning"), (True, " text")]
+    assert [event.step for event in reasoning] == [1, 1]
+    assert [(event.is_final, event.code) for event in code] == [(False, "x=1"), (True, "")]

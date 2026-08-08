@@ -384,6 +384,17 @@ class _NativeRLMStreamProjector:
             self._decoded_emitted = {}
         self._last_field = field
 
+        # A (step, field) stream emits exactly one end. DSPy's JSONAdapter closes
+        # the reasoning listener the moment the code key starts
+        # (`StreamListener.stream_end`), so a late fragment arriving after that
+        # is_final chunk would re-open a stream the TUI has already ended —
+        # a stream protocol violation (the TUI rejects it as "data for an
+        # inactive reasoning stream"). The canonical trajectory reconciliation
+        # re-projects the complete value at step end with the canonical id, so
+        # dropping the outlier keeps the display correct.
+        if self._field_completed[field]:
+            return False
+
         # The raw JSON buffer exists only to finish in-flight escapes; once the
         # public output bound is exhausted the delta is empty, so stop growing
         # it and keep a pathological long stream memory-bounded.
