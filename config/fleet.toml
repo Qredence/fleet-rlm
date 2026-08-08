@@ -1,6 +1,6 @@
 [config]
 schema_version = 1
-default_profile = "daytona"
+default_profile = "daytona-recursive"
 
 [defaults.application]
 name = "fleet-rlm"
@@ -74,6 +74,9 @@ model = "deepseek-v4-flash"
 api_key_env = "FLEET_OPENCODE_GO_API_KEY"
 base_url_env = "FLEET_OPENCODE_GO_BASE_URL"
 max_tokens = 8000
+# Streaming turns re-enter identical action prompts on retries/repeated steps;
+# a cache hit yields zero streamify deltas and reads as a frozen stream.
+cache = false
 reasoning_effort = "low"
 
 [profiles.daytona.llm.sub]
@@ -82,6 +85,7 @@ api_key_env = "FLEET_OPENCODE_GO_API_KEY"
 base_url_env = "FLEET_OPENCODE_GO_BASE_URL"
 max_tokens = 8000
 temperature = 0
+cache = false
 reasoning_effort = "low"
 
 [profiles.daytona.mlflow]
@@ -94,17 +98,19 @@ environment = "daytona"
 
 [profiles.daytona-recursive.llm.root]
 model = "deepseek-v4-flash"
-api_key_env = "DATABRICKS_TOKEN"
-base_url_env = "FLEET_DATABRICKS_AI_GATEWAY_BASE_URL"
+api_key_env = "FLEET_OPENCODE_GO_API_KEY"
+base_url_env = "FLEET_OPENCODE_GO_BASE_URL"
 max_tokens = 8000
+cache = false
 reasoning_effort = "low"
 
 [profiles.daytona-recursive.llm.sub]
 model = "deepseek-v4-flash"
-api_key_env = "DATABRICKS_TOKEN"
-base_url_env = "FLEET_DATABRICKS_AI_GATEWAY_BASE_URL"
+api_key_env = "FLEET_OPENCODE_GO_API_KEY"
+base_url_env = "FLEET_OPENCODE_GO_BASE_URL"
 max_tokens = 8000
 temperature = 0
+cache = false
 reasoning_effort = "low"
 
 [profiles.daytona-recursive.mlflow]

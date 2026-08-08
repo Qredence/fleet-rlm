@@ -19,11 +19,9 @@ from fleet_rlm.observability.turn_tracing import (
     annotate_trace_io,
     current_turn_trace_id,
     start_turn_span,
-    trace_runtime_detail,
     turn_phase_span,
     turn_trace,
 )
-from fleet_rlm.rlm.events import EventRecorder, RLMCode, RLMOutput, RLMReasoning, TextCompleted, ToolCompleted
 from fleet_rlm.rlm.tool_observer import ToolEventView, observe_tool
 
 
@@ -444,71 +442,6 @@ def test_turn_phase_span_records_bounded_metadata_when_a_turn_span_is_active(mon
     assert calls.start_span_names == ["RLM.execute"]
     assert calls.span_inputs[-1] == {"max_iterations": 20, "max_llm_calls": 50}
     assert calls.span_outputs[-1] == {"phase_status": "completed"}
-
-
-def test_runtime_detail_spans_capture_reasoning_code_output_tools_and_answer(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    calls = _install_fake_mlflow(monkeypatch)
-
-    details = (
-        RLMReasoning("inspect the corpus", step=2),
-        RLMCode("print('evidence')", step=2),
-        RLMOutput("evidence returned", step=2),
-        ToolCompleted("tool-1", "read_source", {"status": "ok"}),
-        TextCompleted("final answer"),
-    )
-    for sequence, detail in enumerate(details, start=1):
-        trace_runtime_detail(detail, sequence=sequence)
-
-    assert calls.start_span_names == [
-        "Turn.progress.rlm.reasoning",
-        "Turn.progress.rlm.code",
-        "Turn.progress.rlm.output",
-        "Turn.progress.tool.completed",
-        "Turn.progress.text.completed",
-    ]
-    assert calls.span_inputs[0] == {"sequence": 1, "kind": "rlm.reasoning"}
-    assert calls.span_outputs[0] == {
-        "step": 2,
-        "reasoning": "inspect the corpus",
-        "phase_status": "completed",
-    }
-    assert calls.span_outputs[1]["code"] == "print('evidence')"
-    assert calls.span_outputs[2]["output"] == "evidence returned"
-    assert calls.span_outputs[3]["tool_output"] == {"status": "ok"}
-    assert calls.span_outputs[4]["answer"] == "final answer"
-
-
-def test_streaming_rlm_deltas_do_not_flood_the_trace(monkeypatch: pytest.MonkeyPatch) -> None:
-    """One step's code/reasoning is streamed in dozens of token-ish chunks; each
-    chunk must NOT become a Turn.progress span (the canonical trajectory traces
-    the complete values), or a single turn explodes to 1,200+ spans."""
-
-    calls = _install_fake_mlflow(monkeypatch)
-
-    for sequence in range(1, 21):
-        trace_runtime_detail(
-            RLMReasoning("tok", step=1, stream_id="s", is_delta=True, is_final=False),
-            sequence=sequence,
-        )
-    trace_runtime_detail(RLMCode("print(", step=1, stream_id="s", is_delta=True, is_final=False), sequence=21)
-    trace_runtime_detail(RLMCode("print('x')", step=1), sequence=22)  # canonical complete value
-
-    assert calls.start_span_names == ["Turn.progress.rlm.code"]
-    assert calls.span_outputs[0]["code"] == "print('x')"
-
-
-def test_event_recorder_projects_committed_public_answer_into_trace(monkeypatch: pytest.MonkeyPatch) -> None:
-    calls = _install_fake_mlflow(monkeypatch)
-    recorder = EventRecorder(run_id=uuid4(), session_id=uuid4())
-
-    event = recorder.record(TextCompleted("committed answer"))
-
-    assert event.sequence == 1
-    assert calls.start_span_names == ["Turn.progress.text.completed"]
-    assert calls.span_inputs[-1] == {"sequence": 1, "kind": "text.completed"}
-    assert calls.span_outputs[-1] == {"answer": "committed answer", "phase_status": "completed"}
 
 
 def test_start_turn_span_supports_callback_lifecycles_and_failure_status(

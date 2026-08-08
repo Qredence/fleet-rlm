@@ -121,7 +121,7 @@ def test_fleet_doctor_reports_invalid_environment_without_traceback(
 
     fleet_main(["doctor", "daytona"])
     output = capsys.readouterr().out
-    assert output.startswith("[ok] policy: profile=daytona environment=daytona")
+    assert output.startswith("[ok] policy: profile=daytona-recursive environment=daytona")
     assert output.endswith("[ok] settings: Settings valid.\n")
 
 
