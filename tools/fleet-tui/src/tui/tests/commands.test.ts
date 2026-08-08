@@ -204,13 +204,26 @@ describe("command handlers", () => {
     });
   });
 
-  it("/cancel forwards to the cancelActiveRun hook", () => {
+  it("/cancel forwards to the cancelActiveRun hook while a Run is active", () => {
+    const { ctx } = makeContext();
+    const cancelSpy = vi.fn();
+    ctx.cancelActiveRun = cancelSpy;
+    ctx.store.dispatch({ type: "user/submit", text: "hi" });
+    ctx.store.dispatch({ type: "run/start", runId: "run-1", delivery: "live" });
+    const cancel = listCommands().find((c) => c.name === "cancel");
+    if (cancel) cancel.handler([], ctx);
+    expect(cancelSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("/cancel is a no-op without an active Run", () => {
     const { ctx } = makeContext();
     const cancelSpy = vi.fn();
     ctx.cancelActiveRun = cancelSpy;
     const cancel = listCommands().find((c) => c.name === "cancel");
     if (cancel) cancel.handler([], ctx);
-    expect(cancelSpy).toHaveBeenCalledTimes(1);
+    expect(cancelSpy).not.toHaveBeenCalled();
+    const last = ctx.store.getState().messages[ctx.store.getState().messages.length - 1];
+    expect(last?.kind === "text" && last.text).toContain("No active run.");
   });
 
   it("/skills lists only cards returned by discovery", async () => {

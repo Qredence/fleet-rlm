@@ -1,4 +1,14 @@
-"""Typed runtime inventory publication for FastAPI lifespan composition."""
+"""Typed runtime inventory publication for FastAPI lifespan composition.
+
+Why these seams are Protocols rather than attributes: the inventory is
+provider-neutral. `SettlingTurnStore`, `RuntimeSessionManager`, and
+`RuntimeProcessResources` let `composition/inventory.py` name exactly the
+surfaces startup recovery needs without importing `daytona/` (which owns the
+SDK boundary), and they let the private testing composition substitute
+deterministic, credential-free implementations for every provider-backed
+participant. Folding them into concrete classes would force composition to
+import provider modules and re-couple the test suite to Daytona.
+"""
 
 from __future__ import annotations
 

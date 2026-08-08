@@ -75,14 +75,14 @@ The authoritative route inventory and shapes are in
 | `src/cli-core.ts` | CLI options and verified atomic Artifact download |
 | `src/fleet-api-client.ts` | HTTP requests and response handling |
 | `src/fleet-turn-stream.ts` | request opening, bounded same-key retry, strict stream and part lifecycle |
-| `src/sse.ts` | SSE framing and closed generated chunk validation |
+| `src/sse.ts` | SSE framing and closed validation against generated chunk tables |
 | `src/tui/runner.ts` | active Run state, submission, cancellation |
 | `src/tui/projection.ts` | shared live/durable display projection and stream accumulation |
 | `src/tui/store.ts` | conversation state, atomic Session hydration, and terminal stream settlement |
 | `src/tui/application.ts`, `screen.ts`, `transcript.ts` | pi-tui main-screen lifecycle, editor/input, cached native-scrollback layout, terminal-safe status, and mutable Run activity |
 | `src/tui/message-renderer.ts`, `terminal-text.ts` | complete event, cached Markdown, result, Artifact, code/output presentation, and terminal-safe text |
 | `src/tui/commands.ts`, `command-presenter.ts`, `autocomplete.ts` | slash commands, overlays, status, and completion |
-| `src/generated/openapi.ts` | generated HTTP types owned by `make api-sync` |
+| `src/generated/openapi.ts`, `src/generated/fleet-ui-chunk-validation.ts` | generated HTTP types and chunk-validation tables owned by `make api-sync` |
 
 Live and reload use the same display semantics. Evidence is fully expanded and
 uses native terminal scrollback; there is no classic renderer, mouse capture,

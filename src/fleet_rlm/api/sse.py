@@ -1,12 +1,14 @@
 """Exhaustive AI SDK UI v1 projection for typed Fleet Runtime Events."""
 
-# The AI SDK UI chunk contract is hand-maintained in FOUR places; keep them in
-# sync (this projector is the runtime source of truth; the golden-stream
-# fixture in scripts/generate_stream_fixture.py locks it to the TUI):
+# The AI SDK UI chunk contract is hand-maintained in THREE places; the fourth
+# surface is GENERATED from the OpenAPI hook (the golden-stream fixture in
+# scripts/generate_stream_fixture.py locks them together):
 #   1. this module (AISDKUIProjector)
 #   2. src/fleet_rlm/api/ui_message.py       (reload projection)
 #   3. src/fleet_rlm/api/openapi.py          (OpenAPI chunk schemas)
-#   4. tools/fleet-tui/src/sse.ts            (TUI runtime validator)
+#   4. tools/fleet-tui/src/generated/fleet-ui-chunk-validation.ts
+#      (TUI validator tables, owned by scripts/generate_tui_chunk_validation.py
+#      via `make api-sync`)
 
 from __future__ import annotations
 

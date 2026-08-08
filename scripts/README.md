@@ -5,6 +5,7 @@
 | `db_init.py` | Upgrade a fresh `FLEET_DATABASE_URL` database to Alembic head |
 | `openapi_tools.py` | Generate or check backend-only `openapi.yaml` |
 | `generate_stream_fixture.py` | Generate or check the deterministic TUI turn-stream golden fixture |
+| `generate_tui_chunk_validation.py` | Generate or check the TUI runtime chunk-validation tables from `openapi.yaml` |
 | `check_codebase_tree.py` | Enforce canonical import and route boundaries |
 | `check_harness_engineering.py` | Validate repository agent-harness contracts |
 | `check_docs_quality.py` | Validate documentation structure and links |

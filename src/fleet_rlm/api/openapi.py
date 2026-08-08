@@ -10,13 +10,15 @@ from fastapi.openapi.utils import get_openapi
 from fleet_rlm.api.errors import ErrorResponse
 from fleet_rlm.api.sse import FLEET_UI_CHUNK_TYPES
 
-# The AI SDK UI chunk contract is hand-maintained in FOUR places; keep them in
-# sync (tests/contracts/backend/test_stream_fixture.py + the TUI golden-stream
-# test lock this copy against the runtime projector):
+# The AI SDK UI chunk contract is hand-maintained in THREE places; the TUI
+# validator tables are generated from this module's schemas
+# (tests/contracts/backend/test_stream_fixture.py + the TUI golden-stream test
+# lock the copies against the runtime projector):
 #   1. src/fleet_rlm/api/sse.py            (runtime projector)
 #   2. src/fleet_rlm/api/ui_message.py     (reload projection)
 #   3. this module                          (OpenAPI chunk schemas)
-#   4. tools/fleet-tui/src/sse.ts           (TUI runtime validator)
+#   4. tools/fleet-tui/src/generated/fleet-ui-chunk-validation.ts
+#      (TUI validator tables via scripts/generate_tui_chunk_validation.py)
 _CHUNK_FIELD_TYPES: dict[str, dict[str, Any]] = {
     "id": {"type": "string"},
     "messageId": {"type": "string", "format": "uuid"},

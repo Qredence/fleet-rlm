@@ -1,88 +1,5 @@
 /** Renderer-neutral shared formatters for the Fleet TUI. */
 
-const ESC = String.fromCharCode(27);
-const ansiPrefixPattern = new RegExp(`${ESC}\\[[0-9;]*m`);
-
-export function visibleLength(input: string): number {
-  let length = 0;
-  let index = 0;
-  while (index < input.length) {
-    const ansiMatch = input.slice(index).match(ansiPrefixPattern);
-    if (ansiMatch && ansiMatch.index === 0) {
-      index += ansiMatch[0].length;
-      continue;
-    }
-    const codePoint = input.codePointAt(index);
-    if (codePoint === undefined) break;
-    length += 1;
-    index += codePoint > 0xffff ? 2 : 1;
-  }
-  return length;
-}
-
-export function sliceVisible(input: string, width: number): string {
-  let visible = 0;
-  let index = 0;
-  let out = "";
-  while (index < input.length && visible < width) {
-    const ansiMatch = input.slice(index).match(ansiPrefixPattern);
-    if (ansiMatch && ansiMatch.index === 0) {
-      out += ansiMatch[0];
-      index += ansiMatch[0].length;
-      continue;
-    }
-    const codePoint = input.codePointAt(index);
-    if (codePoint === undefined) break;
-    out += String.fromCodePoint(codePoint);
-    index += codePoint > 0xffff ? 2 : 1;
-    visible += 1;
-  }
-  return out;
-}
-
-export function wrapToWidth(input: string, width: number): string[] {
-  if (width <= 0) return [input];
-  const lines: string[] = [];
-  for (const line of input.split("\n")) {
-    if (line.length === 0) {
-      lines.push("");
-      continue;
-    }
-    let remaining = line;
-    while (visibleLength(remaining) > width) {
-      let breakAt = -1;
-      let visible = 0;
-      let index = 0;
-      while (index < remaining.length) {
-        const ansiMatch = remaining.slice(index).match(ansiPrefixPattern);
-        if (ansiMatch && ansiMatch.index === 0) {
-          index += ansiMatch[0].length;
-          continue;
-        }
-        const codePoint = remaining.codePointAt(index);
-        if (codePoint === undefined) break;
-        if (visible >= width) {
-          breakAt = index;
-          break;
-        }
-        if (codePoint === 0x20 || codePoint === 0x09) {
-          breakAt = index + (codePoint > 0xffff ? 2 : 1);
-        }
-        index += codePoint > 0xffff ? 2 : 1;
-        visible += 1;
-      }
-      if (breakAt <= 0) {
-        breakAt = sliceVisible(remaining, width).length;
-        if (breakAt === 0) break;
-      }
-      lines.push(remaining.slice(0, breakAt).trimEnd());
-      remaining = remaining.slice(breakAt).trimStart();
-    }
-    lines.push(remaining);
-  }
-  return lines;
-}
-
 export function formatDuration(ms: number): string {
   if (ms < 0 || !Number.isFinite(ms)) return "0:00";
   const totalSeconds = Math.floor(ms / 1000);
@@ -140,15 +57,6 @@ export function redact(value: unknown): unknown {
     );
   }
   return value;
-}
-
-export function previewJson(value: unknown, maxLen = 240): string {
-  try {
-    const text = JSON.stringify(redact(value));
-    return text.length > maxLen ? `${text.slice(0, maxLen - 1)}…` : text;
-  } catch {
-    return String(value);
-  }
 }
 
 export type StructuredResultDisplay = {
