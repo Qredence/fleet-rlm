@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable
 from typing import Self
 from uuid import UUID
@@ -25,6 +26,7 @@ from fleet_rlm.chat.turn_lifecycle import (
     ExecuteTurn,
     FailedRunReceipt,
     ReplayTurn,
+    TurnAlreadyCompletedError,
     TurnFailure,
     TurnLifecycle,
     TurnLifecycleUnavailableError,
@@ -39,6 +41,8 @@ from fleet_rlm.chat.turn_preparation import (
 from fleet_rlm.observability.turn_tracing import annotate_trace_io, turn_phase_span, turn_trace
 from fleet_rlm.rlm.dspy_contract import empty_rlm_usage
 from fleet_rlm.rlm.events import EventRecorder, RunCompleted, RunStarted, RuntimeEvent, Status
+
+logger = logging.getLogger(__name__)
 
 
 class OpenedTurnStream:
@@ -244,6 +248,15 @@ class TurnCoordinator:
                 try:
                     async with asyncio.timeout_at(authority_deadline):
                         await self._lifecycle.heartbeat(turn)
+                except TurnAlreadyCompletedError:
+                    # The commit released the durable claim; the heartbeat must
+                    # never classify its own committed Run as claim loss.
+                    logger.info(
+                        "claim heartbeat stopped after commit session_id=%s run_id=%s",
+                        turn.session_id,
+                        turn.run_id,
+                    )
+                    return
                 except (TurnLifecycleUnavailableError, TurnStateError):
                     turn.authority.revoke()
                     lost.set()
@@ -265,7 +278,12 @@ class TurnCoordinator:
     def _submit_claim_loss_cleanup(self, turn: ExecuteTurn, heartbeat: _ClaimHeartbeat) -> None:
         async def cleanup() -> None:
             try:
-                await self._revoke_claim(turn, empty_rlm_usage())
+                receipt = await self._revoke_claim(turn, empty_rlm_usage())
+                if receipt is None:
+                    # The Run committed before the revocation attempt: the
+                    # commit owns the terminal state, so there is nothing to
+                    # fence or release.
+                    return
                 if self._claim_loss_fence is not None:
                     await self._claim_loss_fence(turn.session_id)
                 await self._lifecycle.complete_settling(turn)
@@ -274,6 +292,19 @@ class TurnCoordinator:
 
         self._cleanup.submit(cleanup())
 
-    async def _revoke_claim(self, turn: ExecuteTurn, usage) -> FailedRunReceipt:
+    async def _revoke_claim(self, turn: ExecuteTurn, usage) -> FailedRunReceipt | None:
+        """Revoke the durable claim, or return None when the Run already committed.
+
+        A racing commit always wins: revocation against a committed Run is a
+        benign no-op logged at INFO instead of surfacing as a failure.
+        """
         failure = TurnFailure("failed", "stale_claim", "Turn failed", usage)
-        return await self._lifecycle.revoke_claim(turn, failure)
+        try:
+            return await self._lifecycle.revoke_claim(turn, failure)
+        except TurnAlreadyCompletedError:
+            logger.info(
+                "stale-claim revocation skipped for committed Run session_id=%s run_id=%s",
+                turn.session_id,
+                turn.run_id,
+            )
+            return None

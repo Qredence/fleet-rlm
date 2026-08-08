@@ -39,6 +39,7 @@ from fleet_rlm.chat.turn_lifecycle import (
     FailedRunReceipt,
     FailureCode,
     ReplayTurn,
+    TurnAlreadyCompletedError,
     TurnFailure,
     TurnIdempotencyMismatchError,
     TurnInProgressError,
@@ -368,6 +369,8 @@ class InMemoryTurnStateStore:
             run = self._runs.get(turn.run_id)
             if run is None or run.access != turn.access or run.session_id != turn.session_id:
                 raise TurnNotFoundError("Turn not found")
+            if run.status == "completed":
+                raise TurnAlreadyCompletedError("Turn already committed")
             stale_terminal = (
                 isinstance(command, CompleteSettlement) and run.status == "failed" and run.failure_code == "stale_claim"
             )
@@ -644,6 +647,8 @@ class SqlAlchemyTurnStateStore:
             run = await db.get(RunRow, turn.run_id, with_for_update=True)
             if run is None or run.session_id != turn.session_id:
                 raise TurnNotFoundError("Turn not found")
+            if run.status == "completed":
+                raise TurnAlreadyCompletedError("Turn already committed")
             stale_terminal = (
                 isinstance(command, CompleteSettlement) and run.status == "failed" and run.failure_code == "stale_claim"
             )

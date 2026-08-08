@@ -155,7 +155,7 @@ class TurnExecutionDriver:
         cleanup: TurnCleanupSupervisor,
         claim_loss_fence: Callable[[UUID], Awaitable[None]] | None,
         turn_timeout_seconds: float,
-        revoke_claim: Callable[[ExecuteTurn, RLMUsage], Awaitable[FailedRunReceipt]],
+        revoke_claim: Callable[[ExecuteTurn, RLMUsage], Awaitable[FailedRunReceipt | None]],
     ) -> None:
         self._lifecycle = lifecycle
         self._runner = runner
@@ -482,9 +482,13 @@ class TurnExecutionDriver:
     ) -> None:
         async def cleanup() -> None:
             try:
+                committed = False
                 if claim_lost:
-                    await self._revoke_claim(turn, claim_loss_usage or empty_rlm_usage())
-                    if self._claim_loss_fence is not None:
+                    receipt = await self._revoke_claim(turn, claim_loss_usage or empty_rlm_usage())
+                    # A racing commit wins: no fence and no settlement release
+                    # against a committed Run, but owned resources still close.
+                    committed = receipt is None
+                    if not committed and self._claim_loss_fence is not None:
                         await self._claim_loss_fence(turn.session_id)
                 if stream is not None:
                     with contextlib.suppress(BaseException):
@@ -494,7 +498,8 @@ class TurnExecutionDriver:
                     with contextlib.suppress(BaseException):
                         await asyncio.shield(finalization_task)
                 await prepared.aclose()
-                await self._lifecycle.complete_settling(turn)
+                if not committed:
+                    await self._lifecycle.complete_settling(turn)
             finally:
                 await _stop_heartbeat(heartbeat)
 

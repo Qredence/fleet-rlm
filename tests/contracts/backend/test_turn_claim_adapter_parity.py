@@ -151,3 +151,35 @@ async def test_heartbeat_is_valid_only_while_claim_is_live(adapter_kind: str) ->
             await harness.store.transition_claim(harness.turn, HeartbeatClaim())
     finally:
         await harness.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("adapter_kind", ["memory", "sql"])
+async def test_committed_run_rejects_late_claim_transitions(adapter_kind: str) -> None:
+    from fleet_rlm.chat.turn_claim import (
+        ClaimFailure,
+        CompleteSettlement,
+        HeartbeatClaim,
+        RevokeClaim,
+    )
+    from fleet_rlm.chat.turn_detail_policy import commit_success
+    from fleet_rlm.chat.turn_lifecycle import TurnAlreadyCompletedError, TurnStateError
+    from fleet_rlm.rlm.dspy_contract import PredictionResult, empty_rlm_usage
+    from fleet_rlm.rlm.outcome import RLMOutcome
+
+    assert issubclass(TurnAlreadyCompletedError, TurnStateError)
+    harness = await _build_harness(adapter_kind)
+    try:
+        outcome = RLMOutcome("completed", PredictionResult("done", {"answer": "done"}, "fleet.default", "1"))
+        await harness.store.commit(harness.turn, commit_success(outcome, ()), ())
+        assert (await harness.state())[0] == "completed"
+        for command in (
+            HeartbeatClaim(),
+            RevokeClaim(ClaimFailure("failed", "stale_claim", "Turn failed"), empty_rlm_usage()),
+            CompleteSettlement(),
+        ):
+            with pytest.raises(TurnAlreadyCompletedError):
+                await harness.store.transition_claim(harness.turn, command)
+        assert (await harness.state())[0] == "completed"
+    finally:
+        await harness.close()
