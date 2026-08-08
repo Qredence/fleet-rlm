@@ -234,9 +234,13 @@ function renderTool(message: Extract<Message, { kind: "tool" }>, width: number):
     success: ["✓ success", "toolSuccessBg"],
     error: ["× error", "toolErrorBg"],
   } as const satisfies Record<typeof message.status, readonly [string, ThemeBackground]>;
+  // Running tools tick at 5s granularity: a mid-transcript card whose line
+  // content changes every render drags the differential renderer's
+  // firstChanged upward and rewrites everything below it per frame. The
+  // activity strip already shows the live elapsed for the current action.
   const elapsed = message.endedAt
     ? formatDuration(message.endedAt - message.startedAt)
-    : formatDuration(Date.now() - message.startedAt);
+    : formatDuration(Math.floor((Date.now() - message.startedAt) / 5000) * 5000);
   const output =
     message.status === "error"
       ? terminalSafeText(message.error ?? "Tool failed")

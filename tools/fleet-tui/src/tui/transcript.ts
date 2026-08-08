@@ -76,14 +76,14 @@ export class TranscriptComponent implements Component {
   }
 
   private renderCached(message: Message, width: number): string[] {
-    const dynamic =
-      (message.kind === "text" && message.streaming) ||
-      (message.kind === "tool" && message.status === "running") ||
-      ((message.kind === "code" || message.kind === "output") && message.streaming === true);
+    // Every message — including streaming/tool/running ones — is keyed on
+    // object identity + width: a render without either change costs nothing.
+    // Streaming/text-tool dispatches create a new message object via spread,
+    // so their cache entry busts exactly when content actually changes.
     const cached = this.cache.get(message.id);
-    if (!dynamic && cached?.message === message && cached.width === width) return cached.lines;
+    if (cached?.message === message && cached.width === width) return cached.lines;
     const lines = this.renderer(message, width, this.renderCache);
-    if (!dynamic) this.cache.set(message.id, { message, width, lines });
+    this.cache.set(message.id, { message, width, lines });
     return lines;
   }
 }
