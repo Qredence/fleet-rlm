@@ -141,13 +141,17 @@ async def test_live_preparation_stages_attachment_and_cleans_it(
         "fetch_url",
         "publish_workspace_artifact",
         "append_workspace_text",
+        "list_project_files",
         "list_workspace_files",
         "read_attachment",
+        "read_project_text",
         "read_workspace_memory",
         "read_workspace_text",
         "read_session_history",
+        "stat_project_file",
         "stat_workspace_file",
         "update_workspace_memory",
+        "write_project_text",
         "write_workspace_text",
     }
     expected_tools.update({"load_skill", "read_skill_resource"})
@@ -177,6 +181,35 @@ async def test_live_preparation_stages_attachment_and_cleans_it(
     assert "content" not in read_output
     assert learning not in repr((update_input, read_output))
     assert (volume_root / "MEMORIES.md").read_text(encoding="utf-8").endswith(f"**Preference**: {learning}\n")
+
+    # Project deliverables land under the browsable projects/<slug>/ root through
+    # the same atomic sandbox agent as the Session Workspace.
+    write_project = tools["write_project_text"]
+    written = await asyncio.to_thread(
+        write_project,
+        path="fleet-rlm/reports/review.md",
+        content="durable review",
+        overwrite=False,
+    )
+    assert written["ok"] is True
+    assert written["namespace"] == "project_workspace"
+    assert (volume_root / "projects" / "fleet-rlm" / "reports" / "review.md").read_text(
+        encoding="utf-8"
+    ) == "durable review"
+    read_back = await asyncio.to_thread(
+        tools["read_project_text"], path="fleet-rlm/reports/review.md", max_chars=10_000
+    )
+    assert read_back["content"] == "durable review"
+    project_views = prepared.execution.capabilities.spec.tool_event_views
+    write_input = project_views["write_project_text"].input(
+        {"path": "fleet-rlm/reports/review.md", "content": "durable review", "overwrite": False}
+    )
+    assert write_input == {
+        "path": "fleet-rlm/reports/review.md",
+        "overwrite": False,
+        "content_chars": len("durable review"),
+    }
+    assert "durable review" not in repr(write_input)
     assert prepared.result_snapshot_sink is prepared.artifact_sink
     assert prepared.result_snapshot_sink.result_path(turn.session_id, turn.run_id).endswith(
         f"/sessions/{turn.session_id}/runs/{turn.run_id}/result.json"
@@ -219,7 +252,12 @@ async def test_live_preparation_stages_attachment_and_cleans_it(
     assert set(volume) == {next(path for path, value in volume.items() if value == data), result_path}
 
     await prepared.aclose()
+    # The project deliverable survives attachment staging cleanup because it is
+    # Volume state written by the sandbox agent, not a staged Run attachment.
     assert set(volume) == {result_path}
+    assert (volume_root / "projects" / "fleet-rlm" / "reports" / "review.md").read_text(
+        encoding="utf-8"
+    ) == "durable review"
     assert resources.session_manager.released is True
 
 

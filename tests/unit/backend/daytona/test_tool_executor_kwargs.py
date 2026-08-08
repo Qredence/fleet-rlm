@@ -22,6 +22,7 @@ from dspy.predict.rlm import RLM
 
 from fleet_rlm.daytona.http_broker import DaytonaHttpToolBroker
 from fleet_rlm.files.memory_tools import WorkspaceMemoryToolHost
+from fleet_rlm.files.project_tools import ProjectToolHost
 from fleet_rlm.files.tools import FileToolHost
 from fleet_rlm.files.url_tool import UrlToolHost
 from fleet_rlm.files.workspace_tools import WorkspaceToolHost
@@ -140,6 +141,7 @@ def test_host_tool_surface_declares_no_positional_only_parameters() -> None:
     hosts = (
         WorkspaceToolHost(None, max_file_bytes=1024),  # type: ignore[arg-type]
         WorkspaceMemoryToolHost(None),  # type: ignore[arg-type]
+        ProjectToolHost(None, max_file_bytes=1024),  # type: ignore[arg-type]
         UrlToolHost(session_id=uuid4(), store=None, max_bytes=1024),  # type: ignore[arg-type]
         FileToolHost(
             attachments=(),

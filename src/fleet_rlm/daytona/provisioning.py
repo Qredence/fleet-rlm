@@ -377,6 +377,7 @@ def shared_volume_directories(paths: VolumePaths) -> tuple[str, ...]:
             paths.artifacts_root(),
             paths.attachments_root(),
             paths.files_root(),
+            paths.projects_root(),
             paths.sessions_root(),
         )
     )

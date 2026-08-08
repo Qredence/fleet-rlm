@@ -18,8 +18,8 @@ def test_bundled_catalog_is_fixed_sorted_and_version_stable() -> None:
         ("data-analysis", "1.0.0"),
         ("dspy-rlm", "1.0.0"),
         ("long-context", "2.0.0"),
-        ("report-builder", "1.0.0"),
-        ("workspace-files", "1.0.0"),
+        ("report-builder", "1.1.0"),
+        ("workspace-files", "1.1.0"),
     ]
     assert all(card.id == stable_skill_id(card.name) for card in catalog.cards())
     assert str(catalog.require(stable_skill_id("data-analysis")).card.id) == ("f4d260fa-a663-5ef9-835f-eac46c10c1bf")

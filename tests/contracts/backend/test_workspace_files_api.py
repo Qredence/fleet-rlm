@@ -104,7 +104,7 @@ def test_volume_tree_returns_relative_logical_paths(tmp_path: Path) -> None:
         assert response.status_code == 200
         assert response.json() == {
             "paths": ["sessions/a/turn.json"],
-            "directories": ["artifacts", "attachments", "files", "sessions"],
+            "directories": ["artifacts", "attachments", "files", "projects", "sessions"],
             "truncated": False,
         }
 

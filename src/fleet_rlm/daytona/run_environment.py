@@ -278,6 +278,7 @@ class _LiveCapabilityPreparer:
         from fleet_rlm.daytona.workspace_fs import DaytonaSessionWorkspaceFS
         from fleet_rlm.daytona.workspace_memory import DaytonaWorkspaceMemoryStore
         from fleet_rlm.files.memory_tools import WorkspaceMemoryToolHost
+        from fleet_rlm.files.project_tools import ProjectToolHost
         from fleet_rlm.files.tools import FileToolHost
         from fleet_rlm.files.url_tool import UrlToolHost, WorkspaceUrlSourceStore
         from fleet_rlm.files.workspace_tools import WorkspaceToolHost
@@ -307,6 +308,16 @@ class _LiveCapabilityPreparer:
             session_workspace,
             max_file_bytes=self.settings.max_upload_bytes,
         )
+        projects_fs = DaytonaSessionWorkspaceFS(
+            volume_fs.sandbox,
+            volume_root=str(paths.mount_path),
+            root=str(paths.projects_root()),
+            max_file_bytes=self.settings.max_upload_bytes,
+        )
+        project_host = ProjectToolHost(
+            projects_fs,
+            max_file_bytes=self.settings.max_upload_bytes,
+        )
         url_host = UrlToolHost(
             session_id=turn.session_id,
             store=WorkspaceUrlSourceStore(
@@ -328,18 +339,20 @@ class _LiveCapabilityPreparer:
         )
         file_tools = file_host.as_tools()
         workspace_tools = workspace_host.as_tools()
+        project_tools = project_host.as_tools()
         memory_tools = memory_host.as_tools()
         url_tools = url_host.as_tools()
         base_views = {
             **file_host.event_views(),
             **workspace_host.event_views(),
+            **project_host.event_views(),
             **memory_host.event_views(),
             **url_host.event_views(),
         }
         spec, skill_host, notices = await prepare_host_capabilities(
             turn=turn,
             skill_catalog=self.skill_catalog,
-            base_tools=(*file_tools, *workspace_tools, *memory_tools, *url_tools),
+            base_tools=(*file_tools, *workspace_tools, *project_tools, *memory_tools, *url_tools),
             base_event_views=base_views,
             workspace=DAYTONA_WORKSPACE_CAPABILITY,
             workspace_fs=session_workspace,

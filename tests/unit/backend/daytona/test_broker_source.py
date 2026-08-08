@@ -160,3 +160,38 @@ def test_tool_wrapper_falls_back_to_http_status_when_error_body_is_not_json(
 
     with pytest.raises(RuntimeError, match=r"Tool call failed: HTTP 503"):
         wrapper("notes/todo.md", "hello fleet")
+
+
+def test_project_tool_wrapper_forwards_every_parameter_as_kwargs(monkeypatch: pytest.MonkeyPatch) -> None:
+    """PR-E: project deliverable tools keep the kwargs-only wire contract."""
+    from fleet_rlm.files.project_tools import ProjectToolHost
+
+    host = ProjectToolHost(None, max_file_bytes=1024)  # type: ignore[arg-type]
+    tool = {str(item.name): item for item in host.as_tools()}["write_project_text"]
+    wrapper = _build_sandbox_wrapper("write_project_text", tool.func)
+    captured: list[dict[str, object]] = []
+
+    def fake_urlopen(request: urllib.request.Request, timeout: float = 0) -> _StubbedHTTPResponse:
+        del timeout
+        captured.append(json.loads(bytes(request.data).decode("utf-8")))
+        return _StubbedHTTPResponse({"result": {"ok": True}})
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+
+    assert wrapper("fleet-rlm/reports/review.md", "durable review", overwrite=True) == {"ok": True}
+    assert wrapper("fleet-rlm/reports/review.md", "durable review") == {"ok": True}
+
+    assert len(captured) == 2
+    assert captured[0]["tool_name"] == "write_project_text"
+    assert captured[0]["args"] == []
+    assert captured[0]["kwargs"] == {
+        "path": "fleet-rlm/reports/review.md",
+        "content": "durable review",
+        "overwrite": True,
+    }
+    assert captured[1]["args"] == []
+    assert captured[1]["kwargs"] == {
+        "path": "fleet-rlm/reports/review.md",
+        "content": "durable review",
+        "overwrite": False,
+    }

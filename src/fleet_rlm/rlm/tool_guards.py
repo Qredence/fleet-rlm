@@ -23,11 +23,24 @@ def _fingerprint(tool_name: str, arguments: Mapping[str, Any], result: object) -
 
 
 _WORKSPACE_PATH_RE = re.compile(
-    r"(?<![\w.-])(?:workspace/)?(?:[A-Za-z0-9_.-]+/)*[A-Za-z0-9_.-]+\.[A-Za-z0-9]{1,16}(?![\w.-])"
+    r"(?<![\w.-])(?:(?:workspace|projects)/)?(?:[A-Za-z0-9_.-]+/)*[A-Za-z0-9_.-]+\.[A-Za-z0-9]{1,16}(?![\w.-])"
 )
 
+# Host tool name -> stable guard-target namespace. Fingerprints for existing
+# ``session_workspace:`` targets are unchanged; ``projects/<slug>/<path>``
+# targets join as ``project_workspace:<slug>/<path>``.
+_WORKSPACE_TOOL_NAMESPACES = {
+    "write_workspace_text": "session_workspace",
+    "append_workspace_text": "session_workspace",
+    "read_workspace_text": "session_workspace",
+    "write_project_text": "project_workspace",
+    "read_project_text": "project_workspace",
+}
 
-def _canonical_path(path: object) -> str | None:
+_PREFIX_NAMESPACES = (("projects/", "project_workspace"), ("workspace/", "session_workspace"))
+
+
+def _canonical_target(path: object, *, default_namespace: str = "session_workspace") -> str | None:
     if not isinstance(path, str):
         return None
     try:
@@ -36,25 +49,29 @@ def _canonical_path(path: object) -> str | None:
         normalized = normalize_workspace_path(path)
     except (TypeError, WorkspacePathError):
         return None
-    if normalized.startswith("workspace/"):
-        normalized = normalized.removeprefix("workspace/")
-    return normalized
+    namespace = default_namespace
+    for prefix, prefix_namespace in _PREFIX_NAMESPACES:
+        if normalized.startswith(prefix):
+            namespace = prefix_namespace
+            normalized = normalized.removeprefix(prefix)
+            break
+    return f"{namespace}:{normalized}"
 
 
 def _workspace_target(tool_name: str, arguments: Mapping[str, Any]) -> str | None:
-    if tool_name not in {"write_workspace_text", "append_workspace_text", "read_workspace_text"}:
+    namespace = _WORKSPACE_TOOL_NAMESPACES.get(tool_name)
+    if namespace is None:
         return None
-    path = _canonical_path(arguments.get("path"))
-    return f"session_workspace:{path}" if path else None
+    return _canonical_target(arguments.get("path"), default_namespace=namespace)
 
 
 def workspace_obligations(request: str) -> frozenset[str] | None:
-    """Extract explicit workspace file targets from the user's task text."""
+    """Extract explicit workspace and project file targets from the user's task text."""
     targets: set[str] = set()
     for match in _WORKSPACE_PATH_RE.finditer(request):
-        path = _canonical_path(match.group(0))
-        if path:
-            targets.add(f"session_workspace:{path}")
+        target = _canonical_target(match.group(0))
+        if target:
+            targets.add(target)
     return frozenset(targets) if targets else None
 
 
@@ -82,7 +99,7 @@ class TurnIntegrityLedger:
         target = self._target(tool_name, arguments)
         if target is None:
             return
-        if tool_name == "write_workspace_text":
+        if tool_name in {"write_workspace_text", "write_project_text"}:
             content = arguments.get("content")
             if isinstance(content, str) and target in self._unresolved:
                 self._expected_content[target] = sha256(content.encode("utf-8")).hexdigest()
@@ -91,7 +108,7 @@ class TurnIntegrityLedger:
             self._unresolved.discard(target)
             self._expected_content.pop(target, None)
             return
-        if tool_name == "read_workspace_text":
+        if tool_name in {"read_workspace_text", "read_project_text"}:
             content: object = result
             eof = True
             if isinstance(result, Mapping):

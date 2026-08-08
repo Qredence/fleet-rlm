@@ -10,6 +10,8 @@ Before a Run begins, Fleet creates the shared roots and the current Session and 
 /home/daytona/fleet/
 ├── artifacts/
 ├── attachments/
+├── files/
+├── projects/<slug>/
 └── sessions/<session_uuid>/
     ├── workspace/
     └── runs/
@@ -24,7 +26,8 @@ Session and Run directory names are UUID-shaped. The containers exist at acquisi
 
 | Location | Meaning |
 |---|---|
-| `sessions/<session_uuid>/workspace/` | Immediate private Session working state; durable across Turns, failed Runs, and sandbox replacement. |
+| `projects/<slug>/` | Browsable durable deliverables named by an explicit model-chosen slug (`^[a-z0-9][a-z0-9._-]{0,63}$`; reserved roots `sessions`, `files`, `artifacts`, `attachments`, `memory` are not valid slugs). Write with `write_project_text`; replacement requires `overwrite=True`. |
+| `sessions/<session_uuid>/workspace/` | Immediate private Session working state (scratch); durable across Turns, failed Runs, and sandbox replacement. |
 | `sessions/<session_uuid>/runs/<run_uuid>/attachments/` | Private Run staging for Attachments authorized to that Turn. Read them with `read_attachment`, not by guessing a path. |
 | `sessions/<session_uuid>/runs/<run_uuid>/artifacts/` | Private Artifact Candidate bytes. Writing here directly does not publish or register an Artifact. |
 | `artifacts/<artifact_uuid>/` | Durable promoted bytes. They represent a public Artifact only after successful Turn Commit; raw paths remain private. |

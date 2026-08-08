@@ -49,8 +49,8 @@ _BUNDLED_SPECS = (
     ),
     _BundledSpec(
         "workspace-files",
-        "Use durable Session Workspace, Attachment, and Artifact tools correctly.",
-        "1.0.0",
+        "Use durable Session Workspace, Project, Attachment, and Artifact tools correctly.",
+        "1.1.0",
         (("references/filesystem-contract.md", "text/markdown"),),
         affordances=("workspace.files", "artifacts.publish"),
     ),
@@ -64,7 +64,7 @@ _BUNDLED_SPECS = (
     _BundledSpec(
         "report-builder",
         "Create, save, read back, and verify reports from trusted source data.",
-        "1.0.0",
+        "1.1.0",
         affordances=("workspace.files", "artifacts.publish"),
     ),
 )
