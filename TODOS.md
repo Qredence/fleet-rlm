@@ -4,13 +4,13 @@ Program: tool-surface revival + volume architecture (canonical plan: `plans/tool
 Base: `dev-0.7` (no `main`/`master` targets). Evidence: `/tmp/fleet-dogfood/` dogfooding 2026-08-08.
 Each PR: branch → focused suite → full gate (make check incl. TUI via pnpm 10.33.2, check-security, build/check-release, check-docs, git diff --check) → live dogfood spot-run → PR → babysit → merge (merge-commit, keep branch).
 
-## PR-A — fix(rlm): kwargs-only tool forwarding + error surfacing (critical) — `codex/broker-kwargs-only-tools`
-- [ ] `daytona/http_broker.py` `_tool_wrapper_source`: forward all params as kwargs (args only for POSITIONAL_ONLY); assert no positional-only params on current surface
-- [ ] `daytona/http_broker.py`: module logger + WARNING per host tool failure (name + sanitized message only)
-- [ ] `daytona/broker_source.py` `TOOL_WRAPPER_TEMPLATE`: read HTTPError body, raise `RuntimeError("Tool call failed: <safe message>")`
-- [ ] `daytona/interpreter.py`: kwargs-only contract comment at `tool_executor`
-- [ ] Tests: broker wrapper wire-payload (stubbed urlopen), kwargs-only executor regression via real pinned DSPy `_make_interpreter_tool`, `rlm_query` payload
-- [ ] Live replay: lanes fetch/write/recursion/report green; report turn commits artifact
+## PR-A — fix(rlm): kwargs-only tool forwarding + error surfacing (critical) — `codex/broker-kwargs-only-tools`  ✅ done in `1a2f3ea1e` (+ latent drain fix)
+- [x] `daytona/http_broker.py` `_tool_wrapper_source`: forward all params as kwargs (args only for POSITIONAL_ONLY); assert no positional-only params on current surface
+- [x] `daytona/http_broker.py`: module logger + WARNING per host tool failure (name + sanitized message only)
+- [x] `daytona/broker_source.py` `TOOL_WRAPPER_TEMPLATE`: read HTTPError body, raise `RuntimeError("Tool call failed: <safe message>")`
+- [x] `daytona/interpreter.py`: kwargs-only contract comment at `tool_executor`
+- [x] Tests: broker wrapper wire-payload (stubbed urlopen), kwargs-only executor regression via real pinned DSPy `_make_interpreter_tool`, `rlm_query` payload
+- [x] Live replay: lanes fetch/write/recursion/report green; report turn commits artifact
 
 ## PR-B — fix(turns): no-progress guard terminal event + stream dedupe (critical) — `codex/turn-guard-terminal-event`
 - [ ] Verify TUI strict-lifecycle requirement for terminal `is_final` per output stream (`tools/fleet-tui/src/sse.ts`, `tui/projection.ts`) — decides flush shape
@@ -67,3 +67,8 @@ Each PR: branch → focused suite → full gate (make check incl. TUI via pnpm 1
 - [ ] `daytona/interpreter.py`: extract output projection → `daytona/interpreter_output.py` (~−150 LOC)
 - [ ] `src/fleet_rlm/CONTEXT.md`: workspace-module naming map (fs/gateway/access/tools) + daytona/ module one-liners
 - [ ] Gate: `check-codebase-tree` + full make check green; zero behavior change
+
+## Follow-up investigation — RC-7 server wedge under load+disconnect (UNSCHEDULED, file after phase A)
+- [ ] Symptom: after 4 concurrent live turns incl. 1 recursive child (~16 min of throttled LLM rounds) and 3 client disconnects within seconds, the ASGI server froze completely: frozen log, `/openapi.json` (static) unresponsive >15 min. macOS `sample`: main thread spinning in uvloop idle → async_gen_asend chains = runaway coroutine starving the loop.
+- [ ] Controlled repro so far: 3 mid-run client disconnects alone do NOT wedge (server stayed healthy; orphaned turn completed server-side). Suspects: recursive child runtime settlement, settlement-on-disconnect path with in-flight recursive child, or a no-await loop in cleanup/drain under lease pressure. Needs faulthandler+SIGUSR1 reproduction with the recursion lane included (harness: /tmp/fleet-dogfood/fault_server.py, threaddump.txt path).
+- [ ] Fix owner: after PR-A merges; add to TODOS when scheduled.

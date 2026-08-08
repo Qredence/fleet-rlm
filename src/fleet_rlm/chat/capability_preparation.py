@@ -63,9 +63,15 @@ class PreparedHostCapabilities:
     def drain_public_details(self) -> tuple[AttachmentRead | SkillActivated | SkillLoaded, ...]:
         values: list[AttachmentRead | SkillActivated | SkillLoaded] = []
         for item in self._files.drain_public_events():
+            # Only canonical attachment-read payloads project here. Artifact
+            # candidate notices (``artifact.workspace_publish``) carry ``path``
+            # instead of ``attachment_id`` and reach the stream through the
+            # promotion path in ``TurnLifecycle.finish``.
+            if item.get("event_kind", "attachment.read") != "attachment.read":
+                continue
             values.append(
                 AttachmentRead(
-                    UUID(item["attachment_id"]),
+                    UUID(str(item["attachment_id"])),
                     str(item["filename"]),
                     int(item["byte_size"]),
                 )
