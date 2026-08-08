@@ -848,6 +848,10 @@ class DaytonaCodeInterpreter:
                 msg = f"unknown tool: {name}"
                 raise DaytonaAdapterError(message=msg, cause_type="UnknownToolError")
             try:
+                # Host contract is kwargs-only: DSPy 3.3.x interpreter tools are
+                # ``def invoke(**kwargs)`` callables behind spoofed signatures,
+                # so broker payloads forward every parameter by name. ``args``
+                # is retained only for POSITIONAL_ONLY completeness.
                 return fn(*args, **kwargs)
             except WorkspaceToolError as exc:
                 return {

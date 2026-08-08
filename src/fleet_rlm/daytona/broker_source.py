@@ -414,6 +414,7 @@ if __name__ == "__main__":
 TOOL_WRAPPER_TEMPLATE = """
 def {tool_name}({signature}):
     import json as _json
+    import urllib.error as _urllib_error
     import urllib.request as _urllib_request
     import uuid as _uuid
 
@@ -432,8 +433,20 @@ def {tool_name}({signature}):
         headers={{"Content-Type": "application/json", "X-Broker-Secret": "{broker_secret}"}},
         method="POST",
     )
-    with _urllib_request.urlopen(req, timeout=130) as resp:
-        data = _json.loads(resp.read().decode("utf-8"))
+    try:
+        with _urllib_request.urlopen(req, timeout=130) as resp:
+            data = _json.loads(resp.read().decode("utf-8"))
+    except _urllib_error.HTTPError as _exc:
+        # The broker answers host-tool failures with HTTP 500 plus an
+        # ``{{"error": "<safe message>"}}`` body; urllib raises before reading
+        # it, so surface the safe message instead of a bare status line.
+        try:
+            _error_message = _json.loads(_exc.read().decode("utf-8")).get("error")
+        except Exception:
+            _error_message = None
+        if _error_message:
+            raise RuntimeError(f"Tool call failed: {{_error_message}}") from None
+        raise RuntimeError(f"Tool call failed: HTTP {{_exc.code}}") from None
     if "error" in data:
         raise RuntimeError(f"Tool call failed: {{data['error']}}")
     return data.get("result")
