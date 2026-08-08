@@ -207,7 +207,14 @@ async def test_real_runner_failure_modes_have_one_ordered_terminal(
         assert isinstance(events[-1].detail, RunFailed)
         assert events[-1].detail.message == "Turn output is invalid"
     assert harness.cleanup_calls == 1
-    assert await harness.store.turn_records(harness.session_id, harness.access) == ()
+    if mode == "internal_cancel":
+        # D2: the cancelled Run leaves a bounded tombstone pair in the listing.
+        records = await harness.store.turn_records(harness.session_id, harness.access)
+        assert [type(record).__name__ for record in records] == ["UserTurnRecord", "AssistantTurnRecord"]
+        assert records[-1].committed.text == "Turn cancelled"
+        assert [part.type for part in records[-1].committed.parts] == ["status", "usage", "text"]
+    else:
+        assert await harness.store.turn_records(harness.session_id, harness.access) == ()
 
 
 @pytest.mark.asyncio
@@ -223,7 +230,11 @@ async def test_true_caller_cancellation_still_propagates_after_runner_starts() -
     if harness.cleanup_supervisor is not None:
         await harness.cleanup_supervisor.shutdown(drain_seconds=1)
     assert harness.cleanup_calls == 1
-    assert await harness.store.turn_records(harness.session_id, harness.access) == ()
+    # D2: the caller-cancelled Run leaves a bounded tombstone pair in the listing.
+    records = await harness.store.turn_records(harness.session_id, harness.access)
+    assert [type(record).__name__ for record in records] == ["UserTurnRecord", "AssistantTurnRecord"]
+    assert records[-1].committed.text == "Turn cancelled"
+    assert [part.type for part in records[-1].committed.parts] == ["status", "usage", "text"]
 
 
 @pytest.mark.asyncio

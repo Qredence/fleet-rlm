@@ -571,3 +571,97 @@ async def test_concurrent_recovery_workers_fence_a_run_once() -> None:
             assert row.status == "failed"
     finally:
         await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_sql_cancelled_settlement_persists_bounded_tombstone_rows() -> None:
+    from sqlalchemy import select
+
+    from fleet_rlm.chat.turn_lifecycle import BeginTurn, ExecuteTurn, TurnFailure, TurnLifecycleService
+    from fleet_rlm.persistence.database import create_async_engine_from_url, create_session_factory, create_tables
+    from fleet_rlm.persistence.models import RunRow, SessionRow, TurnRow, UserRow, WorkspaceRow
+    from fleet_rlm.persistence.repositories.session_catalog import SqlAlchemySessionCatalog
+    from fleet_rlm.persistence.repositories.turns import SqlAlchemyTurnStateStore
+    from fleet_rlm.rlm.dspy_contract import empty_rlm_usage
+    from fleet_rlm.sessions.catalog import SequenceCursor
+    from fleet_rlm.sessions.models import TurnAccess, TurnInput
+
+    engine = create_async_engine_from_url("sqlite+aiosqlite:///:memory:")
+    try:
+        await create_tables(engine)
+        factory = create_session_factory(engine)
+        access, session_id = TurnAccess(uuid4(), uuid4()), uuid4()
+        async with factory() as db, db.begin():
+            db.add_all(
+                (
+                    UserRow(id=access.user_id),
+                    WorkspaceRow(id=access.workspace_id),
+                    SessionRow(
+                        id=session_id,
+                        user_id=access.user_id,
+                        workspace_id=access.workspace_id,
+                        title="cancelled attempt",
+                    ),
+                )
+            )
+
+        store = SqlAlchemyTurnStateStore(factory)
+        lifecycle = TurnLifecycleService(store, max_artifact_bytes=1024)
+        turn = await lifecycle.begin(
+            BeginTurn(access, session_id, TurnInput("draft the report"), "key-cancel", uuid4())
+        )
+        assert isinstance(turn, ExecuteTurn)
+        await lifecycle.settle(turn, TurnFailure("cancelled", "cancelled", "Turn cancelled", empty_rlm_usage()))
+
+        # Nothing is listed while the claim is still settling.
+        async with factory() as db:
+            rows = (await db.scalars(select(TurnRow).where(TurnRow.session_id == session_id))).all()
+            assert rows == []
+
+        await lifecycle.complete_settling(turn)
+
+        async with factory() as db:
+            rows = (
+                await db.scalars(select(TurnRow).where(TurnRow.session_id == session_id).order_by(TurnRow.sequence))
+            ).all()
+            assert [(row.role, row.sequence) for row in rows] == [("user", 1), ("assistant", 2)]
+            assistant_row = rows[1]
+            assert assistant_row.run_id == turn.run_id
+            assert assistant_row.committed_turn_json is not None
+            parts = assistant_row.committed_turn_json["parts"]
+            assert [part["type"] for part in parts] == ["status", "usage", "text"]
+            assert parts[0] == {"type": "status", "phase": "cancelled", "status": "cancelled", "message": None}
+            assert parts[-1] == {"type": "text", "text": "Turn cancelled"}
+
+        catalog = SqlAlchemySessionCatalog(factory)
+        page = await catalog.turns(
+            session_id,
+            user_id=access.user_id,
+            workspace_id=access.workspace_id,
+            cursor=SequenceCursor(None),
+            limit=50,
+        )
+        assert [type(item).__name__ for item in page.items] == ["UserTurnRecord", "AssistantTurnRecord"]
+        assert page.items[0].input.text == "draft the report"
+        assert page.items[1].committed.text == "Turn cancelled"
+
+        # Retrying with the same idempotency key opens a fresh Run (cancelled rows
+        # stay outside the live idempotency index), never a replay of the tombstone.
+        retried = await lifecycle.begin(
+            BeginTurn(access, session_id, TurnInput("draft the report"), "key-cancel", uuid4())
+        )
+        assert isinstance(retried, ExecuteTurn)
+        assert retried.run_id != turn.run_id
+        # The tombstone attempt stays inside the RLM-visible canonical History.
+        assert [(message.role, message.content) for message in retried.history.messages] == [
+            ("user", "draft the report"),
+            ("assistant", "Turn cancelled"),
+        ]
+
+        # A run ROW stays claim-free and terminal after the tombstone lands.
+        async with factory() as db:
+            run = await db.get(RunRow, turn.run_id)
+            assert run is not None
+            assert (run.status, run.claim_owner, run.finished_at is not None) == ("cancelled", None, True)
+    finally:
+        await engine.dispose()

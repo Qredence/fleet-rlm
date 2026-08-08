@@ -57,6 +57,9 @@ _Avoid_: Turn (when meaning the user message), Sandbox
 An authorized request to stop a specific in-flight Run. Distinct from timeout.
 Ownership is re-checked. Outcome is one terminal Runtime
 Event and never a successful Committed Turn for work that did not complete.
+Once settlement completes, the cancelled attempt still persists a bounded
+tombstone Committed Turn (status marker, observed usage, closed text) so
+committed history shows the attempt without evidence parts.
 _Avoid_: disconnect alone, kill Sandbox (as the product act), Turn Cancellation
 
 **Turn Claim**:

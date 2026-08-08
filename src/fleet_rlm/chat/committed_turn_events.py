@@ -14,6 +14,7 @@ from fleet_rlm.rlm.events import (
     RuntimeEvent,
     SkillActivated,
     SkillLoaded,
+    Status,
     StepFinished,
     StepStarted,
     StructuredResult,
@@ -34,6 +35,7 @@ from fleet_rlm.sessions.committed_turn import (
     OutputPart,
     ReasoningPart,
     SkillPart,
+    StatusPart,
     StepPart,
     StructuredResultPart,
     TextPart,
@@ -112,6 +114,8 @@ def _details(part: CommittedPart):
         )
     if isinstance(part, WarningPart):
         return (WarningEvent(message=part.message, code=part.code),)
+    if isinstance(part, StatusPart):
+        return (Status(phase=part.phase, status=part.status, message=part.message),)
     if isinstance(part, ArtifactPart):
         return (
             ArtifactCreated(

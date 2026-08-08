@@ -12,28 +12,29 @@ Each PR: branch → focused suite → full gate (make check incl. TUI via pnpm 1
 - [x] Tests: broker wrapper wire-payload (stubbed urlopen), kwargs-only executor regression via real pinned DSPy `_make_interpreter_tool`, `rlm_query` payload
 - [x] Live replay: lanes fetch/write/recursion/report green; report turn commits artifact
 
-## PR-B — fix(turns): no-progress guard terminal event + stream dedupe (critical) — `codex/turn-guard-terminal-event`
-- [ ] Verify TUI strict-lifecycle requirement for terminal `is_final` per output stream (`tools/fleet-tui/src/sse.ts`, `tui/projection.ts`) — decides flush shape
-- [ ] `rlm/tool_observer.py`: emit `ToolFailed` before `TurnNoProgressError` raise
-- [ ] `rlm/runner.py` `_reconcile_trajectory`: payload-identity comparison; identical content never re-emitted; corrections still upsert same stream_id
-- [ ] `daytona/interpreter.py`: final output flush = unsent tail only (use `emitted_chars`); no output after SUBMIT
-- [ ] Tests: observer sequence, commit policy with no-progress history, trajectory dedupe, interpreter flush
-- [ ] Live replay: zero duplicate `data-rlm-output` frames per capture; guard-storm turn commits
+## PR-B — fix(turns): no-progress guard terminal event + stream dedupe (critical) — `codex/turn-guard-terminal-event`  ✅ done in `40d4a34d5`
+- [x] Verify TUI strict-lifecycle requirement for terminal `is_final` per output stream (`tools/fleet-tui/src/sse.ts`, `tui/projection.ts`) — decides flush shape
+- [x] `rlm/tool_observer.py`: emit `ToolFailed` before `TurnNoProgressError` raise
+- [x] `rlm/runner.py` `_reconcile_trajectory`: payload-identity comparison; identical content never re-emitted; corrections still upsert same stream_id
+- [x] `daytona/interpreter.py`: final output flush = unsent tail only (use `emitted_chars`); no output after SUBMIT
+- [x] Tests: observer sequence, commit policy with no-progress history, trajectory dedupe, interpreter flush
+- [x] Live replay: zero duplicate `data-rlm-output` frames per capture; guard-storm turn commits
 
-## PR-C — fix(api): workspace stat checksum + root stat — `codex/workspace-stat-checksum`
-- [ ] `daytona/workspace_agent.py`: optional sandbox-side `checksum` on stat op
-- [ ] `daytona/workspace_fs.py`: flag pass-through (sync+async)
-- [ ] `daytona/workspace_gateway.py`: stat via flag; drop full-content read
-- [ ] `files/workspace_access.py`: `allow_root=True` for stat
-- [ ] Tests: gateway stat file/dir/missing; `/api/files/stat` contract tests
-- [ ] Live replay: root+nested stat 200 with sha256
+## PR-C — fix(api): workspace stat checksum + root stat — `codex/workspace-stat-checksum`  ✅ done in `b856bf4e3`
+- [ ] FOLLOW-UP (from Phase C review): `_DaytonaWorkspaceFileSession._read_current` (write/append expected_sha256 preconditions) still reads full text → same >10_000 400 class on big files; switch to checksum-enabled stat like the PR-C fix.
+- [x] `daytona/workspace_agent.py`: optional sandbox-side `checksum` on stat op
+- [x] `daytona/workspace_fs.py`: flag pass-through (sync+async)
+- [x] `daytona/workspace_gateway.py`: stat via flag; drop full-content read
+- [x] `files/workspace_access.py`: `allow_root=True` for stat
+- [x] Tests: gateway stat file/dir/missing; `/api/files/stat` contract tests
+- [x] Live replay: root+nested stat 200 with sha256
 
-## PR-D — feat(api): preparation heartbeats + cancel tombstone — `codex/pre-run-heartbeat`
-- [ ] `api/routes/turns.py`: generator-spanning open(); transient `data-status{phase:"preparation"}` at ~1 s then every `heartbeat_seconds`; prelude never recorded
-- [ ] `chat/turn_lifecycle.py` + `turn_detail_policy.py`: cancelled-turn tombstone part persisted (D2)
-- [ ] Docs: `abort` frame semantics (D3)
-- [ ] Tests: heartbeat cadence/transience, stream contract first-frame budget, tombstone persistence+listing
-- [ ] Live replay: cancel lane shows ≤1 s first frame + tombstone in GET /turns
+## PR-D — feat(api): preparation heartbeats + cancel tombstone — `codex/pre-run-heartbeat`  ✅ done in this commit (live: first frame 32 ms, tombstone persisted)
+- [x] `api/routes/turns.py`: generator-spanning open(); transient `data-status{phase:"preparation"}` at ~1 s then every `heartbeat_seconds`; prelude never recorded
+- [x] `chat/turn_lifecycle.py` + `turn_detail_policy.py`: cancelled-turn tombstone part persisted (D2)
+- [x] Docs: `abort` frame semantics (D3)
+- [x] Tests: heartbeat cadence/transience, stream contract first-frame budget, tombstone persistence+listing
+- [x] Live replay: cancel lane shows ≤1 s first frame + tombstone in GET /turns
 
 ## PR-E — feat(workspace): `projects/<slug>/` browsable deliverables root — `codex/project-workspace-root`
 - [ ] `files/volume_paths.py`: `projects_root()`/`project_dir(slug)` + slug/reserved/traversal validation
@@ -67,6 +68,11 @@ Each PR: branch → focused suite → full gate (make check incl. TUI via pnpm 1
 - [ ] `daytona/interpreter.py`: extract output projection → `daytona/interpreter_output.py` (~−150 LOC)
 - [ ] `src/fleet_rlm/CONTEXT.md`: workspace-module naming map (fs/gateway/access/tools) + daytona/ module one-liners
 - [ ] Gate: `check-codebase-tree` + full make check green; zero behavior change
+
+
+## RC-8 — fix(chat): committed terminal must win over post-commit claim revoke  ✅ done in `040d957dc`
+- [x] Symptom: successful recursive turn committed (checkpoint written, turns persisted), then detached cleanup raced a stale-claim revoke into `turn_claim._revoke` → InvalidClaimTransitionError("a committed Run cannot be revoked") → live stream emitted `Turn failed` AFTER the commit. Durable truth and stream terminal disagreed.
+- [x] Fix: revoke/cleanup paths treat already-committed claim as benign no-op (log + complete settling, never emit failure); run one recursion replay lane proving finish=stop and persisted roles+answer.
 
 ## Follow-up investigation — RC-7 server wedge under load+disconnect (UNSCHEDULED, file after phase A)
 - [ ] Symptom: after 4 concurrent live turns incl. 1 recursive child (~16 min of throttled LLM rounds) and 3 client disconnects within seconds, the ASGI server froze completely: frozen log, `/openapi.json` (static) unresponsive >15 min. macOS `sample`: main thread spinning in uvloop idle → async_gen_asend chains = runaway coroutine starving the loop.

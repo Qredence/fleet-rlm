@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ast
 import asyncio
+import json
 from pathlib import Path
 from types import SimpleNamespace
 from uuid import uuid4
@@ -242,7 +243,14 @@ def test_testing_app_composes_only_inside_lifespan() -> None:
             json={"text": "ping"},
             headers={"Idempotency-Key": "testing-composition"},
         )
-        assert response.status_code == 404
+        # The unknown Session is now an in-stream failure: 200 + closed frames.
+        assert response.status_code == 200
+        frames = [line.removeprefix("data: ") for line in response.text.splitlines() if line.startswith("data: ")]
+        chunks = [json.loads(value) for value in frames if value != "[DONE]"]
+        assert chunks[-2:] == [
+            {"type": "error", "errorText": "Session not found"},
+            {"type": "finish", "finishReason": "error"},
+        ]
 
     assert app.state.composition_ready is False
     assert app.state.runtime_inventory is None

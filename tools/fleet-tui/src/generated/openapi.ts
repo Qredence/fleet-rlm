@@ -16,7 +16,7 @@ export interface paths {
         put?: never;
         /**
          * Create Turn
-         * @description Project one prepared Turn through FastAPI's native SSE transport.
+         * @description Stream one Turn, opening claim and preparation inside the SSE generator.
          */
         post: operations["create_turn"];
         delete?: never;
@@ -953,35 +953,16 @@ export interface operations {
             };
         };
         responses: {
-            /** @description AI SDK UI v1 UIMessage SSE stream */
+            /** @description AI SDK UI v1 UIMessage SSE stream. It opens immediately with a transient data-status prelude (phase=preparation) that repeats every runtime heartbeat until the Turn is claimed and prepared. Claim or preparation failures no longer change the HTTP status: they project closed error + finish chunks inside the stream, and cancellation projects one abort chunk. */
             200: {
                 headers: {
                     "Cache-Control"?: string;
                     "X-Accel-Buffering"?: string;
                     "x-vercel-ai-ui-message-stream"?: string;
-                    "X-Fleet-Run-ID"?: string;
                     [name: string]: unknown;
                 };
                 content: {
                     "text/event-stream": string;
-                };
-            };
-            /** @description Session not found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Turn conflict */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
             /** @description Invalid request */
@@ -993,17 +974,8 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description Turn unavailable */
+            /** @description Turn unavailable while composition installs dependencies */
             503: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Turn preparation timed out */
-            504: {
                 headers: {
                     [name: string]: unknown;
                 };

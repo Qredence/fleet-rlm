@@ -73,3 +73,23 @@ def test_live_suffix_excludes_execution_parts() -> None:
     )
 
     assert [event.kind for event in events] == ["usage", "text.delta", "text.completed"]
+
+
+def test_projector_maps_status_parts_back_to_transient_status_events() -> None:
+    from fleet_rlm.chat.committed_turn_events import CommittedTurnEventProjector
+    from fleet_rlm.chat.turn_detail_policy import commit_cancelled_tombstone
+    from fleet_rlm.rlm.dspy_contract import empty_rlm_usage
+    from fleet_rlm.rlm.events import EventRecorder, Status
+
+    turn = commit_cancelled_tombstone(empty_rlm_usage())
+
+    events = CommittedTurnEventProjector().project(turn, EventRecorder(uuid4(), uuid4()), mode="replay")
+
+    status = events[0].detail
+    assert isinstance(status, Status)
+    assert (status.phase, status.status, status.message) == ("cancelled", "cancelled", None)
+    assert [event.kind for event in events] == ["status", "usage", "text.delta", "text.completed"]
+
+    suffix = CommittedTurnEventProjector().project(turn, EventRecorder(uuid4(), uuid4()), mode="live_suffix")
+    # Status markers are not part of the post-commit live suffix.
+    assert [event.kind for event in suffix] == ["usage", "text.delta", "text.completed"]

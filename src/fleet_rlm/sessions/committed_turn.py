@@ -159,6 +159,20 @@ class WarningPart:
 
 
 @dataclass(frozen=True, slots=True)
+class StatusPart:
+    """Bounded terminal status marker (used only by cancellation tombstones)."""
+
+    phase: str
+    status: str
+    message: str | None = None
+    type: Literal["status"] = "status"
+
+    def __post_init__(self) -> None:
+        if not self.phase or not self.status:
+            raise CommittedTurnValidationError("status phase and status are required")
+
+
+@dataclass(frozen=True, slots=True)
 class ArtifactPart:
     artifact_id: UUID
     kind: Literal["text", "markdown", "json"]
@@ -226,6 +240,7 @@ CommittedPart: TypeAlias = (
     | SkillPart
     | AttachmentPart
     | WarningPart
+    | StatusPart
     | ArtifactPart
     | UsagePart
     | StructuredResultPart
@@ -241,6 +256,7 @@ _EXECUTION_PARTS = (
     SkillPart,
     AttachmentPart,
     WarningPart,
+    StatusPart,
 )
 
 
@@ -415,6 +431,13 @@ def _decode_part(value: object) -> CommittedPart:
             message=_required_str(data, "message"),
             code=_optional_str(data, "code"),
         )
+    if part_type == "status":
+        _expect_exact(data, {"type", "phase", "status", "message"})
+        return StatusPart(
+            phase=_required_str(data, "phase"),
+            status=_required_str(data, "status"),
+            message=_optional_str(data, "message"),
+        )
     if part_type == "artifact":
         _expect_exact(
             data,
@@ -494,6 +517,8 @@ def _encode_part(part: CommittedPart) -> dict[str, Any]:
         }
     if isinstance(part, WarningPart):
         return {"type": part.type, "message": part.message, "code": part.code}
+    if isinstance(part, StatusPart):
+        return {"type": part.type, "phase": part.phase, "status": part.status, "message": part.message}
     if isinstance(part, ArtifactPart):
         return {
             "type": part.type,

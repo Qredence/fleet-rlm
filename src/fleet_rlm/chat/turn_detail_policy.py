@@ -8,6 +8,7 @@ from typing import Any
 
 from fleet_rlm.artifacts.models import ArtifactRef
 from fleet_rlm.observability.turn_tracing import current_turn_trace_id
+from fleet_rlm.rlm.dspy_contract import RLMUsage
 from fleet_rlm.rlm.events import (
     AttachmentRead,
     RLMCode,
@@ -32,6 +33,7 @@ from fleet_rlm.sessions.committed_turn import (
     OutputPart,
     ReasoningPart,
     SkillPart,
+    StatusPart,
     StepPart,
     StructuredResultPart,
     TextPart,
@@ -233,3 +235,23 @@ def commit_success(outcome: RLMOutcome, artifacts: tuple[ArtifactRef, ...]) -> C
         )
     parts.append(TextPart(text=prediction.display_text))
     return CommittedTurn(schema_version=1, parts=tuple(parts), trace_id=current_turn_trace_id())
+
+
+CANCELLED_TOMBSTONE_TEXT = "Turn cancelled"
+
+
+def commit_cancelled_tombstone(usage: RLMUsage) -> CommittedTurn:
+    """Build the bounded D2 tombstone committed for one cancelled Run.
+
+    The mark is deliberately closed: one status part with ``phase="cancelled"``,
+    the observed usage, and a constant final text. No evidence parts (reasoning,
+    code, output, tools) ever enter the durable cancellation record.
+    """
+    return CommittedTurn(
+        schema_version=1,
+        parts=(
+            StatusPart(phase="cancelled", status="cancelled"),
+            UsagePart(value=usage),
+            TextPart(text=CANCELLED_TOMBSTONE_TEXT),
+        ),
+    )

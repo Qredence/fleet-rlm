@@ -62,11 +62,18 @@ exist.
   bounded Attachment metadata to the default Fleet Signature. Custom Task
   Contracts receive only declared host-bounded inputs. Keep older history behind
   `read_session_history` and call `await rlm.acall(**named_inputs)`.
-- Attachment ownership and Skill selection validation finish before SSE begins.
+- The Turn stream opens immediately with transient `data-status` preparation
+  heartbeats (never recorded); claim, preparation, Attachment-ownership, and
+  Skill-selection failures then resolve as closed `error` + `finish` chunks
+  inside the stream instead of HTTP error statuses, while request-schema
+  validation and composition readiness still answer 422/503 pre-headers.
 - Artifact Candidates remain private until byte promotion and atomic Turn Commit
   succeed.
 - Success ordering is `artifact.created*` then exactly one `run.completed`.
-  Failure produces exactly one sanitized terminal and no history advance.
+  Failure produces exactly one sanitized terminal and no history advance;
+  cancellation produces one `abort` terminal (no `finish`/usage/checkpoint) and
+  its settled attempt persists a bounded `data-status {phase="cancelled"}`
+  tombstone pair in committed history.
 - Hold an Interpreter Lease through finalization; release it during coordinator
   cleanup even after cancellation or repeated caller cancellation.
 

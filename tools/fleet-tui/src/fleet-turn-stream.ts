@@ -55,6 +55,10 @@ export class StreamLifecycle {
   private cleanFinish = false;
   private done = false;
   private sawError = false;
+  // A claim/preparation failure (or pre-stream cancellation) legally ends the
+  // stream without a start chunk: transient preparation heartbeats, then one
+  // error/abort terminal.
+  private openFailed = false;
   private stepDepth = 0;
   private readonly reasoningOpen = new Set<string>();
   private readonly reasoningEnded = new Set<string>();
@@ -73,8 +77,20 @@ export class StreamLifecycle {
 
     if (this.done) throw new Error("Fleet API emitted a chunk after [DONE]");
     if (this.terminal) throw new Error("Fleet API emitted a chunk after its terminal chunk");
-    if (!this.started && chunk.type !== "start") {
-      throw new Error("Fleet API stream did not start with a start chunk");
+    if (!this.started) {
+      // The stream opens with transient preparation heartbeats; after the
+      // Turn claim resolves it either starts or ends with a startless
+      // error/abort terminal.
+      if (chunk.type === "data-status") return;
+      if (this.sawError && chunk.type === "start") {
+        throw new Error("Fleet API emitted a start chunk after an error chunk");
+      }
+      if (chunk.type !== "start" && chunk.type !== "error" && chunk.type !== "abort") {
+        // Without a start only an error-closed finish terminal may follow.
+        if (!(chunk.type === "finish" && chunk.finishReason === "error" && this.sawError)) {
+          throw new Error("Fleet API stream did not start with a start chunk");
+        }
+      }
     }
     if (this.started && chunk.type === "start") {
       throw new Error("Fleet API emitted duplicate start chunks");
@@ -121,6 +137,7 @@ export class StreamLifecycle {
       case "error":
         if (this.sawError) throw new Error("Fleet API emitted duplicate error chunks");
         this.sawError = true;
+        if (!this.started) this.openFailed = true;
         return;
       case "finish":
         if (chunk.finishReason === "error" && !this.sawError) {
@@ -130,6 +147,7 @@ export class StreamLifecycle {
         this.cleanFinish = chunk.finishReason === "stop";
         return;
       case "abort":
+        if (!this.started) this.openFailed = true;
         this.terminal = true;
         return;
       default:
@@ -138,7 +156,9 @@ export class StreamLifecycle {
   }
 
   assertComplete(): void {
-    if (!this.started) throw new Error("Fleet API stream ended before a start chunk");
+    if (!this.started && !this.openFailed) {
+      throw new Error("Fleet API stream ended before a start chunk");
+    }
     if (!this.terminal) throw new Error("Fleet API stream ended before a terminal chunk");
     if (!this.done) throw new Error("Fleet API stream ended before [DONE]");
     if (!this.cleanFinish) return;

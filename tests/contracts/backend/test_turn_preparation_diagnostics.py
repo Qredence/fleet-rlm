@@ -1,7 +1,8 @@
-"""Safe diagnostics for failures before the Turn stream starts."""
+"""Safe diagnostics for failures projected inside the Turn stream."""
 
 from __future__ import annotations
 
+import json
 import logging
 from uuid import UUID, uuid4
 
@@ -48,7 +49,35 @@ def _post(client: TestClient, *, headers: dict[str, str] | None = None):
     return client.post(f"/api/sessions/{uuid4()}/turns", json={"text": "hello"}, headers=merged)
 
 
-def test_preparation_503_returns_incoming_request_id_and_logs_safe_metadata(
+def _frames(response) -> list[str]:
+    body = response.text
+    return [line.removeprefix("data: ") for line in body.splitlines() if line.startswith("data: ")]
+
+
+def _chunks(response) -> list[dict]:
+    return [json.loads(value) for value in _frames(response) if value != "[DONE]"]
+
+
+def _assert_streamed_failure(response, message: str) -> list[dict]:
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/event-stream")
+    frames = _frames(response)
+    assert frames[-1] == "[DONE]"
+    prelude = _chunks(response)[0]
+    assert prelude == {
+        "type": "data-status",
+        "data": {"phase": "preparation", "status": "running", "message": None},
+        "transient": True,
+    }
+    chunks = _chunks(response)[1:]
+    assert chunks == [
+        {"type": "error", "errorText": message},
+        {"type": "finish", "finishReason": "error"},
+    ]
+    return chunks
+
+
+def test_preparation_unavailable_streams_typed_failure_and_logs_safe_metadata(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     cause = ProviderRequestError(
@@ -60,10 +89,7 @@ def test_preparation_503_returns_incoming_request_id_and_logs_safe_metadata(
     with caplog.at_level(logging.WARNING, logger="fleet_rlm.api.routes.turns"):
         response = _post(_client(cause), headers={"X-Request-Id": "turn-corr-123"})
 
-    assert response.status_code == 503
-    assert response.json() == {"code": "turn_unavailable", "message": "Turn is unavailable"}
-    assert response.headers["x-request-id"] == "turn-corr-123"
-    assert response.headers["x-correlation-id"] == "turn-corr-123"
+    _assert_streamed_failure(response, "Turn is unavailable")
     assert len(caplog.records) == 1
     message = caplog.records[0].message
     assert "correlation_id=turn-corr-123" in message
@@ -72,47 +98,44 @@ def test_preparation_503_returns_incoming_request_id_and_logs_safe_metadata(
     assert "message=provider failed for [redacted] at [redacted]" in message
 
 
-def test_preparation_timeout_remains_typed_and_sanitized_before_stream() -> None:
+def test_preparation_timeout_remains_typed_and_sanitized_inside_stream() -> None:
     private_detail = "private provider timeout api_key=never-return"
 
     response = _post(_client(TurnPreparationTimeoutError(private_detail)))
 
-    assert response.status_code == 504
-    assert response.json() == {
-        "code": "turn_preparation_timeout",
-        "message": "Turn preparation timed out",
-    }
+    _assert_streamed_failure(response, "Turn preparation timed out")
     assert private_detail not in response.text
     assert "never-return" not in response.text
 
 
-def test_lifecycle_unavailable_returns_sanitized_503_with_correlation_headers() -> None:
-    response = _post(
-        _client(TurnLifecycleUnavailableError("database session setup failed")),
-        headers={"X-Request-Id": "lifecycle-corr"},
-    )
+def test_lifecycle_unavailable_streams_typed_failure_with_correlation_log(caplog: pytest.LogCaptureFixture) -> None:
+    with caplog.at_level(logging.WARNING, logger="fleet_rlm.api.routes.turns"):
+        response = _post(
+            _client(TurnLifecycleUnavailableError("database session setup failed")),
+            headers={"X-Request-Id": "lifecycle-corr"},
+        )
 
-    assert response.status_code == 503
-    assert response.json() == {"code": "turn_unavailable", "message": "Turn is unavailable"}
-    assert response.headers["x-request-id"] == "lifecycle-corr"
-    assert response.headers["x-correlation-id"] == "lifecycle-corr"
-
-
-def test_preparation_503_generates_uuid_correlation_id() -> None:
-    response = _post(_client(ProviderRequestError("offline", cause_type="ConnectionError")))
-
-    assert response.headers["x-request-id"] == response.headers["x-correlation-id"]
-    assert UUID(response.headers["x-correlation-id"])
+    _assert_streamed_failure(response, "Turn is unavailable")
+    assert "correlation_id=lifecycle-corr" in caplog.text
 
 
-def test_preparation_503_prefers_request_id_over_correlation_id() -> None:
-    response = _post(
-        _client(ProviderRequestError("offline", cause_type="ConnectionError")),
-        headers={"X-Request-Id": "request-wins", "X-Correlation-Id": "correlation-loses"},
-    )
+def test_preparation_unavailable_generates_uuid_correlation_id(caplog: pytest.LogCaptureFixture) -> None:
+    with caplog.at_level(logging.WARNING, logger="fleet_rlm.api.routes.turns"):
+        _post(_client(ProviderRequestError("offline", cause_type="ConnectionError")))
 
-    assert response.headers["x-request-id"] == "request-wins"
-    assert response.headers["x-correlation-id"] == "request-wins"
+    prefix = "correlation_id="
+    start = caplog.text.index(prefix) + len(prefix)
+    UUID(caplog.text[start:].split()[0])
+
+
+def test_preparation_unavailable_prefers_request_id_over_correlation_id(caplog: pytest.LogCaptureFixture) -> None:
+    with caplog.at_level(logging.WARNING, logger="fleet_rlm.api.routes.turns"):
+        _post(
+            _client(ProviderRequestError("offline", cause_type="ConnectionError")),
+            headers={"X-Request-Id": "request-wins", "X-Correlation-Id": "correlation-loses"},
+        )
+
+    assert "correlation_id=request-wins" in caplog.text
 
 
 def test_unknown_preparation_failure_logs_exception_class_only(
@@ -123,12 +146,13 @@ def test_unknown_preparation_failure_logs_exception_class_only(
     with caplog.at_level(logging.WARNING, logger="fleet_rlm.api.routes.turns"):
         response = _post(_client(RuntimeError(secret)), headers={"X-Correlation-Id": "unknown-corr"})
 
-    assert response.status_code == 503
-    assert response.headers["x-correlation-id"] == "unknown-corr"
+    _assert_streamed_failure(response, "Turn is unavailable")
+    assert "correlation_id=unknown-corr" in caplog.text
     assert "RuntimeError" in caplog.text
     assert secret not in caplog.text
     assert "never-log-this" not in caplog.text
     assert "/Users/zach" not in caplog.text
+    assert secret not in response.text
 
 
 def test_unknown_adapter_failure_logs_cause_class_only(caplog: pytest.LogCaptureFixture) -> None:
@@ -138,9 +162,8 @@ def test_unknown_adapter_failure_logs_cause_class_only(caplog: pytest.LogCapture
     )
 
     with caplog.at_level(logging.WARNING, logger="fleet_rlm.api.routes.turns"):
-        response = _post(_client(cause), headers={"X-Request-Id": "adapter-unknown"})
+        _post(_client(cause), headers={"X-Request-Id": "adapter-unknown"})
 
-    assert response.status_code == 503
     assert "message=UnexpectedSDKError" in caplog.text
     assert "never-log-this" not in caplog.text
     assert "/Users/zach" not in caplog.text

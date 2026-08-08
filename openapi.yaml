@@ -8,7 +8,7 @@ paths:
       tags:
       - turns
       summary: Create Turn
-      description: Project one prepared Turn through FastAPI's native SSE transport.
+      description: Stream one Turn, opening claim and preparation inside the SSE generator.
       operationId: create_turn
       parameters:
       - name: session_id
@@ -34,7 +34,11 @@ paths:
               $ref: '#/components/schemas/CreateTurnRequest'
       responses:
         '200':
-          description: AI SDK UI v1 UIMessage SSE stream
+          description: 'AI SDK UI v1 UIMessage SSE stream. It opens immediately with
+            a transient data-status prelude (phase=preparation) that repeats every
+            runtime heartbeat until the Turn is claimed and prepared. Claim or preparation
+            failures no longer change the HTTP status: they project closed error +
+            finish chunks inside the stream, and cancellation projects one abort chunk.'
           content:
             text/event-stream:
               itemSchema:
@@ -63,22 +67,6 @@ paths:
             x-vercel-ai-ui-message-stream:
               schema:
                 type: string
-            X-Fleet-Run-ID:
-              schema:
-                type: string
-                format: uuid
-        '404':
-          description: Session not found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        '409':
-          description: Turn conflict
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
         '422':
           description: Invalid request
           content:
@@ -86,13 +74,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         '503':
-          description: Turn unavailable
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        '504':
-          description: Turn preparation timed out
+          description: Turn unavailable while composition installs dependencies
           content:
             application/json:
               schema:

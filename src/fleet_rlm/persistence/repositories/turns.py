@@ -31,6 +31,7 @@ from fleet_rlm.chat.turn_claim import (
     RevokeClaim,
     decide_claim_transition,
 )
+from fleet_rlm.chat.turn_detail_policy import commit_cancelled_tombstone
 from fleet_rlm.chat.turn_lifecycle import (
     BeginTurn,
     CancelResult,
@@ -52,7 +53,7 @@ from fleet_rlm.chat.turn_lifecycle import (
 )
 from fleet_rlm.persistence.database import DatabaseConnectionError
 from fleet_rlm.persistence.models import ArtifactRow, RunRow, SessionRow, TurnRow
-from fleet_rlm.rlm.dspy_contract import RLMUsage
+from fleet_rlm.rlm.dspy_contract import RLMUsage, empty_rlm_usage
 from fleet_rlm.sessions.committed_turn import CommittedTurn, CommittedTurnCodec
 from fleet_rlm.sessions.models import (
     AssistantTurnRecord,
@@ -82,6 +83,8 @@ class _RunState:
     checkpoint_version: int | None = None
     artifacts: tuple[ArtifactRef, ...] = ()
     user_turn_id: UUID | None = None
+    tombstone: CommittedTurn | None = None
+    record_sequence: int | None = None
 
 
 @dataclass(slots=True)
@@ -89,6 +92,7 @@ class _SessionState:
     access: TurnAccess
     history: list[HistoryMessage] = field(default_factory=list)
     checkpoint_version: int = 0
+    turn_sequence: int = 0
     status: Literal["active", "archived"] = "active"
 
 
@@ -321,11 +325,31 @@ class InMemoryTurnStateStore:
             session.checkpoint_version += 1
             run.status = "completed"
             run.user_turn_id = uuid4()
+            run.record_sequence = session.turn_sequence + 1
+            session.turn_sequence += 2
             run.committed = committed
             run.checkpoint_version = session.checkpoint_version
             refs = tuple(item.ref for item in artifacts)
             run.artifacts = refs
             return CommittedTurnReceipt(run.run_id, session.checkpoint_version, committed, refs)
+
+    def _persist_cancel_tombstone(self, run: _RunState, *, usage: RLMUsage | None = None) -> None:
+        """Persist the bounded D2 tombstone for a claim transitioning to terminal cancelled."""
+        session = self._sessions.get(run.session_id)
+        if session is None or run.tombstone is not None:
+            return
+        if usage is None:
+            usage = run.terminal_intent.usage if run.terminal_intent is not None else empty_rlm_usage()
+        run.tombstone = commit_cancelled_tombstone(usage)
+        run.user_turn_id = uuid4()
+        run.record_sequence = session.turn_sequence + 1
+        session.turn_sequence += 2
+        session.history.extend(
+            (
+                HistoryMessage("user", run.input.text),
+                HistoryMessage("assistant", run.tombstone.text),
+            )
+        )
 
     async def turn_records(
         self,
@@ -336,28 +360,33 @@ class InMemoryTurnStateStore:
             session = self._sessions.get(session_id)
             if session is None or session.access != access:
                 raise TurnNotFoundError("Turn not found")
-            completed = sorted(
-                (run for run in self._runs.values() if run.session_id == session_id and run.status == "completed"),
-                key=lambda run: run.checkpoint_version or 0,
+            listed = sorted(
+                (
+                    run
+                    for run in self._runs.values()
+                    if run.session_id == session_id and run.record_sequence is not None
+                ),
+                key=lambda run: run.record_sequence or 0,
             )
             records: list[UserTurnRecord | AssistantTurnRecord] = []
-            for index, run in enumerate(completed):
-                if run.user_turn_id is None or run.committed is None:
-                    raise TurnStateError("completed Run is incomplete")
+            for run in listed:
+                committed = run.committed if run.status == "completed" else run.tombstone
+                if run.user_turn_id is None or run.record_sequence is None or committed is None:
+                    raise TurnStateError("listed Run has no durable record")
                 records.extend(
                     (
                         UserTurnRecord(
                             run.user_turn_id,
                             session_id,
-                            index * 2 + 1,
+                            run.record_sequence,
                             run.input,
                             run.run_id,
                         ),
                         AssistantTurnRecord(
                             run.run_id,
                             session_id,
-                            index * 2 + 2,
-                            run.committed,
+                            run.record_sequence + 1,
+                            committed,
                             run.run_id,
                         ),
                     )
@@ -389,6 +418,8 @@ class InMemoryTurnStateStore:
                 raise TurnStateError("claim decision did not include a transition")
             if transition.next_state is not None:
                 _apply_memory_next_state(run, transition.next_state, usage=_command_usage(command))
+                if transition.next_state.status == "cancelled":
+                    self._persist_cancel_tombstone(run, usage=_command_usage(command))
             return _transition_receipt(run.run_id, transition)
 
     async def request_cancel(self, access: TurnAccess, run_id: UUID) -> CancelResult:
@@ -442,6 +473,8 @@ class InMemoryTurnStateStore:
                     decision = decide_claim_transition(_memory_claim_state(run), CompleteSettlement()).transition
                     if decision is not None and decision.next_state is not None:
                         _apply_memory_next_state(run, decision.next_state)
+                        if decision.next_state.status == "cancelled":
+                            self._persist_cancel_tombstone(run)
                         recovered += 1
                 else:
                     skipped += 1
@@ -678,12 +711,57 @@ class SqlAlchemyTurnStateStore:
                     usage=_command_usage(command),
                 )
                 if isinstance(command, (FailClaim, CompleteSettlement)):
+                    # The cancelled terminal shape (claim released) must flush
+                    # before the tombstone's sequence read autoflushes the row.
                     run.finished_at = datetime.now(UTC)
                     run.claim_owner = None
                     run.claim_heartbeat_at = None
                 elif isinstance(command, (BeginSettlement, RevokeClaim)):
                     run.recovery_metadata_json = {"cleanup": "pending"}
+                if transition.next_state.status == "cancelled":
+                    await self._persist_cancel_tombstone(db, run, turn.input)
             return _transition_receipt(run.id, transition)
+
+    @staticmethod
+    async def _persist_cancel_tombstone(db: AsyncSession, run: RunRow, turn_input: TurnInput | None) -> None:
+        """Persist the bounded D2 tombstone atomically with the cancelled terminal transition.
+
+        Settle-time callers pass the claimed Turn input; startup recovery has no
+        input snapshot and persists the assistant tombstone alone.
+        """
+        usage: RLMUsage = cast(RLMUsage, run.failure_usage_json) if run.failure_usage_json else empty_rlm_usage()
+        tombstone = commit_cancelled_tombstone(usage)
+        last_sequence = int(
+            await db.scalar(
+                select(func.coalesce(func.max(TurnRow.sequence), 0)).where(TurnRow.session_id == run.session_id)
+            )
+            or 0
+        )
+        next_sequence = last_sequence + 1
+        if turn_input is not None:
+            db.add(
+                TurnRow(
+                    id=uuid4(),
+                    session_id=run.session_id,
+                    run_id=run.id,
+                    sequence=next_sequence,
+                    role="user",
+                    user_input_json=TurnInputCodec.encode(turn_input),
+                    committed_turn_json=None,
+                )
+            )
+            next_sequence += 1
+        db.add(
+            TurnRow(
+                id=run.id,
+                session_id=run.session_id,
+                run_id=run.id,
+                sequence=next_sequence,
+                role="assistant",
+                user_input_json=None,
+                committed_turn_json=CommittedTurnCodec.encode(tombstone),
+            )
+        )
 
     async def request_cancel(self, access: TurnAccess, run_id: UUID) -> CancelResult:
         async with self._sessions() as db, db.begin():
@@ -859,6 +937,9 @@ class SqlAlchemyTurnStateStore:
             run.claim_owner = None
             run.claim_heartbeat_at = None
             run.recovery_metadata_json = None
+            if decision.next_state.status == "cancelled":
+                # Flush the cancelled terminal shape before the tombstone reads.
+                await self._persist_cancel_tombstone(db, run, None)
             return True
 
     async def _receipt(self, db: AsyncSession, run: RunRow) -> CommittedTurnReceipt:

@@ -262,3 +262,128 @@ async def test_cancelled_commit_that_succeeds_retains_snapshot_and_receipt() -> 
     assert isinstance(receipt, CommittedTurnReceipt)
     assert snapshot.values.keys() == {snapshot.path}
     assert store.failures == 0
+
+
+@pytest.mark.asyncio
+async def test_cancelled_settlement_persists_bounded_tombstone_in_turn_listing() -> None:
+    from fleet_rlm.chat.turn_lifecycle import BeginTurn, ExecuteTurn, TurnFailure, TurnLifecycleService
+    from fleet_rlm.persistence.repositories import InMemorySessionCatalog, InMemoryTurnStateStore
+    from fleet_rlm.rlm.dspy_contract import empty_rlm_usage
+    from fleet_rlm.sessions.models import TurnAccess, TurnInput
+
+    access = TurnAccess(uuid4(), uuid4())
+    store = InMemoryTurnStateStore()
+    session = await InMemorySessionCatalog(store).create(
+        user_id=access.user_id,
+        workspace_id=access.workspace_id,
+        title="cancelled attempt",
+    )
+    lifecycle = TurnLifecycleService(store, max_artifact_bytes=1024)
+
+    turn = await lifecycle.begin(BeginTurn(access, session.id, TurnInput("draft the report"), "key-cancel", uuid4()))
+    settle = await lifecycle.settle(turn, TurnFailure("cancelled", "cancelled", "Turn cancelled", empty_rlm_usage()))
+    assert (settle.terminal_status, settle.durable) == ("cancelled", False)
+    # Nothing is listed while the claim is still settling.
+    assert await store.turn_records(session.id, access) == ()
+
+    final = await lifecycle.complete_settling(turn)
+    assert (final.terminal_status, final.durable) == ("cancelled", True)
+
+    records = await store.turn_records(session.id, access)
+    assert [type(record).__name__ for record in records] == ["UserTurnRecord", "AssistantTurnRecord"]
+    user, assistant = records
+    assert user.input.text == "draft the report"
+    assert user.sequence + 1 == assistant.sequence
+    status, usage, text = assistant.committed.parts
+    assert (status.type, status.phase, status.status, status.message) == ("status", "cancelled", "cancelled", None)
+    assert dict(usage.value) == dict(empty_rlm_usage())
+    assert text.text == "Turn cancelled"
+
+    # The cancelled attempt is bounded audit: no evidence parts, retry is fresh.
+    retried = await lifecycle.begin(BeginTurn(access, session.id, TurnInput("draft the report"), "key-cancel", uuid4()))
+    assert isinstance(retried, ExecuteTurn)
+    assert retried.run_id != turn.run_id
+
+    # Session History records the closed attempt pair, never evidence.
+    assert [(message.role, message.content) for message in retried.history.messages] == [
+        ("user", "draft the report"),
+        ("assistant", "Turn cancelled"),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_preparation_failclaim_cancelled_persists_tombstone_with_observed_usage() -> None:
+    from fleet_rlm.chat.turn_lifecycle import BeginTurn, TurnFailure, TurnLifecycleService
+    from fleet_rlm.persistence.repositories import InMemorySessionCatalog, InMemoryTurnStateStore
+    from fleet_rlm.sessions.models import TurnAccess, TurnInput
+
+    access = TurnAccess(uuid4(), uuid4())
+    store = InMemoryTurnStateStore()
+    session = await InMemorySessionCatalog(store).create(
+        user_id=access.user_id,
+        workspace_id=access.workspace_id,
+        title="preparation cancel",
+    )
+    lifecycle = TurnLifecycleService(store, max_artifact_bytes=1024)
+
+    turn = await lifecycle.begin(BeginTurn(access, session.id, TurnInput("gather two facts"), "key-prep", uuid4()))
+    usage = {"iterations": 3, "observed_lm_usage": {"root": {"total_tokens": 12}}, "duration_ms": 7}
+    receipt = await lifecycle.finish(turn, TurnFailure("cancelled", "cancelled", "Turn cancelled", usage))
+
+    assert (receipt.terminal_status, receipt.durable) == ("cancelled", True)
+    records = await store.turn_records(session.id, access)
+    assert len(records) == 2
+    assistant = records[-1]
+    assert dict(assistant.committed.parts[1].value) == usage
+    assert assistant.committed.text == "Turn cancelled"
+
+
+@pytest.mark.asyncio
+async def test_tombstone_sequences_interleave_with_committed_turns() -> None:
+    from fleet_rlm.chat.turn_lifecycle import BeginTurn, CommittedTurnReceipt, TurnFailure, TurnLifecycleService
+    from fleet_rlm.persistence.repositories import InMemorySessionCatalog, InMemoryTurnStateStore
+    from fleet_rlm.rlm.dspy_contract import PredictionResult, empty_rlm_usage
+    from fleet_rlm.rlm.outcome import RLMOutcome
+    from fleet_rlm.sessions.committed_turn import CommittedTurnCodec
+    from fleet_rlm.sessions.models import TurnAccess, TurnInput
+
+    access = TurnAccess(uuid4(), uuid4())
+    store = InMemoryTurnStateStore()
+    session = await InMemorySessionCatalog(store).create(
+        user_id=access.user_id,
+        workspace_id=access.workspace_id,
+        title="interleaved",
+    )
+    lifecycle = TurnLifecycleService(store, max_artifact_bytes=1024)
+
+    first = await lifecycle.begin(BeginTurn(access, session.id, TurnInput("one"), "key-1", uuid4()))
+    committed = await lifecycle.finish(
+        first,
+        RLMOutcome(
+            "completed",
+            PredictionResult("done", {"answer": "done"}, "fleet.default", "1"),
+            usage=empty_rlm_usage(),
+        ),
+    )
+    assert isinstance(committed, CommittedTurnReceipt)
+
+    second = await lifecycle.begin(BeginTurn(access, session.id, TurnInput("two"), "key-2", uuid4()))
+    await lifecycle.settle(second, TurnFailure("cancelled", "cancelled", "Turn cancelled", empty_rlm_usage()))
+    await lifecycle.complete_settling(second)
+
+    records = await store.turn_records(session.id, access)
+    assert [record.sequence for record in records] == [1, 2, 3, 4]
+    assert [type(record).__name__ for record in records] == [
+        "UserTurnRecord",
+        "AssistantTurnRecord",
+        "UserTurnRecord",
+        "AssistantTurnRecord",
+    ]
+    assert records[1].committed.text == "done"
+    assert records[3].committed.text == "Turn cancelled"
+    # Tombstones survive the strict JSON codec unchanged (cursor pages decode them).
+    from fleet_rlm.sessions.models import AssistantTurnRecord
+
+    for record in records:
+        if isinstance(record, AssistantTurnRecord):
+            assert CommittedTurnCodec.decode(CommittedTurnCodec.encode(record.committed)) == record.committed

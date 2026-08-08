@@ -258,4 +258,94 @@ describe("streamFleetTurn", () => {
       { type: "abort", reason: "cancelled" },
     ]);
   });
+
+  it("accepts transient preparation heartbeats ahead of the start chunk", async () => {
+    const streamTurn = vi
+      .fn()
+      .mockResolvedValue(
+        response(
+          '{"type":"data-status","data":{"phase":"preparation","status":"running","message":null},"transient":true}',
+          '{"type":"data-status","data":{"phase":"preparation","status":"running","message":null},"transient":true}',
+          '{"type":"start","messageId":"run-1","messageMetadata":{}}',
+          '{"type":"finish","finishReason":"stop"}',
+          "[DONE]",
+        ),
+      );
+
+    const chunks = await collect({
+      client: client(streamTurn),
+      sessionId: "session-1",
+      message: "hello",
+    });
+
+    expect(chunks.map((chunk) => chunk.type)).toEqual([
+      "data-status",
+      "data-status",
+      "start",
+      "finish",
+    ]);
+  });
+
+  it("accepts a startless claim-failure stream of error, finish, and DONE", async () => {
+    const streamTurn = vi
+      .fn()
+      .mockResolvedValue(
+        response(
+          '{"type":"data-status","data":{"phase":"preparation","status":"running","message":null},"transient":true}',
+          '{"type":"error","errorText":"A Turn is already running"}',
+          '{"type":"finish","finishReason":"error"}',
+          "[DONE]",
+        ),
+      );
+
+    await expect(
+      collect({ client: client(streamTurn), sessionId: "session-1", message: "hello" }),
+    ).resolves.toEqual([
+      {
+        type: "data-status",
+        data: { phase: "preparation", status: "running", message: null },
+        transient: true,
+      },
+      { type: "error", errorText: "A Turn is already running" },
+      { type: "finish", finishReason: "error" },
+    ]);
+  });
+
+  it("accepts a startless pre-stream cancellation as abort and DONE", async () => {
+    const streamTurn = vi
+      .fn()
+      .mockResolvedValue(response('{"type":"abort","reason":"Turn cancelled"}', "[DONE]"));
+
+    await expect(
+      collect({ client: client(streamTurn), sessionId: "session-1", message: "hello" }),
+    ).resolves.toEqual([{ type: "abort", reason: "Turn cancelled" }]);
+  });
+
+  it.each([
+    ["non-status chunk before start", ['{"type":"text-start","id":"text-1"}', "[DONE]"]],
+    ["finish before start", ['{"type":"finish","finishReason":"stop"}', "[DONE]"]],
+    [
+      "start after a pre-start error",
+      [
+        '{"type":"error","errorText":"Turn is unavailable"}',
+        '{"type":"start","messageId":"run-1","messageMetadata":{}}',
+      ],
+    ],
+    [
+      "chunk after a startless terminal",
+      [
+        '{"type":"error","errorText":"Turn is unavailable"}',
+        '{"type":"finish","finishReason":"error"}',
+        '{"type":"data-status","data":{"phase":"preparation","status":"running","message":null},"transient":true}',
+      ],
+    ],
+  ])("rejects %s", async (_label, frames) => {
+    await expect(
+      collect({
+        client: client(vi.fn().mockResolvedValue(response(...frames))),
+        sessionId: "session-1",
+        message: "hello",
+      }),
+    ).rejects.toThrow();
+  });
 });
