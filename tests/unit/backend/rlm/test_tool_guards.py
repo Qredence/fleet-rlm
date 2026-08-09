@@ -175,6 +175,33 @@ def test_project_target_strips_a_redundant_projects_prefix() -> None:
     assert guards.integrity.unresolved == ("project_workspace:fleet-rlm/review.md",)
 
 
+def test_tool_namespace_is_authoritative_over_path_prefixes() -> None:
+    # A session-workspace tool executes its path verbatim inside the session
+    # workspace, so a ``projects/...`` path must never satisfy (or even join)
+    # a ``project_workspace:`` obligation.
+    guards = TurnToolGuards(required_targets=frozenset({"project_workspace:fleet-rlm/review.md"}))
+    guards.failed("write_project_text", {"path": "fleet-rlm/review.md"})
+    assert guards.integrity.unresolved == ("project_workspace:fleet-rlm/review.md",)
+
+    guards.completed(
+        "write_workspace_text",
+        {"path": "projects/fleet-rlm/review.md", "content": "final", "overwrite": True},
+        {"ok": True},
+    )
+    guards.completed(
+        "read_workspace_text",
+        {"path": "projects/fleet-rlm/review.md"},
+        {"content": "final", "eof": True},
+    )
+    assert guards.integrity.unresolved == ("project_workspace:fleet-rlm/review.md",)
+
+    # The mirrored crossing (a project tool writing under a ``workspace``
+    # slug) stays in the project namespace instead of flipping to session.
+    session_guards = TurnToolGuards(required_targets=frozenset({"session_workspace:notes/report.md"}))
+    session_guards.failed("edit_project_text", {"path": "workspace/notes/report.md"})
+    assert session_guards.integrity.unresolved == ()
+
+
 def test_delete_and_edit_tools_join_guard_targets_in_both_namespaces() -> None:
     guards = TurnToolGuards()
 

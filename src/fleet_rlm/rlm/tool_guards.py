@@ -45,7 +45,17 @@ _WORKSPACE_TOOL_NAMESPACES = {
 _PREFIX_NAMESPACES = (("projects/", "project_workspace"), ("workspace/", "session_workspace"))
 
 
-def _canonical_target(path: object, *, default_namespace: str = "session_workspace") -> str | None:
+def _canonical_target(path: object, *, namespace: str | None = None) -> str | None:
+    """Canonicalize one guard target; an explicit tool namespace is authoritative.
+
+    Without ``namespace`` (request-text obligations) the guard-target language
+    infers the namespace from a ``projects/`` or ``workspace/`` path prefix.
+    With ``namespace`` (tool-derived targets) prefixes never cross namespaces:
+    project tools tolerate only a redundant leading ``projects/`` segment
+    (mirroring ``_normalize_project_path``), and session-workspace tools use
+    their paths verbatim, so a ``projects/...`` path passed to a session tool
+    stays a ``session_workspace:`` target.
+    """
     if not isinstance(path, str):
         return None
     try:
@@ -54,12 +64,15 @@ def _canonical_target(path: object, *, default_namespace: str = "session_workspa
         normalized = normalize_workspace_path(path)
     except (TypeError, WorkspacePathError):
         return None
-    namespace = default_namespace
-    for prefix, prefix_namespace in _PREFIX_NAMESPACES:
-        if normalized.startswith(prefix):
-            namespace = prefix_namespace
-            normalized = normalized.removeprefix(prefix)
-            break
+    if namespace is None:
+        namespace = "session_workspace"
+        for prefix, prefix_namespace in _PREFIX_NAMESPACES:
+            if normalized.startswith(prefix):
+                namespace = prefix_namespace
+                normalized = normalized.removeprefix(prefix)
+                break
+    elif namespace == "project_workspace":
+        normalized = normalized.removeprefix("projects/")
     return f"{namespace}:{normalized}"
 
 
@@ -67,7 +80,7 @@ def _workspace_target(tool_name: str, arguments: Mapping[str, Any]) -> str | Non
     namespace = _WORKSPACE_TOOL_NAMESPACES.get(tool_name)
     if namespace is None:
         return None
-    return _canonical_target(arguments.get("path"), default_namespace=namespace)
+    return _canonical_target(arguments.get("path"), namespace=namespace)
 
 
 def workspace_obligations(request: str) -> frozenset[str] | None:
