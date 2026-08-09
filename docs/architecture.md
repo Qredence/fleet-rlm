@@ -90,9 +90,11 @@ JSON-compatible common input annotations.
 - `persistence/` implements domain repository interfaces; Alembic owns the live
   schema. `persistence/repositories/run_codec.py` centralizes ORM/domain and
   durable JSON conversion inside the deep Run facade, while
-  `run_claim_decisions.py` groups idempotency/active-Run fencing and
+  `run_claim_decisions.py` groups idempotency/active-Run fencing,
   `run_liveness.py` groups heartbeat, recovery ownership, provider fencing,
-  cancellation marking, and tombstone persistence. The in-memory and SQL Run
+  cancellation marking, and tombstone persistence, `run_final_state.py` owns
+  commit/settlement transitions, and `run_queries.py` owns replay/history
+  projections. The in-memory and SQL Run
   state stores retain lock-backed and transaction-backed atomicity and the
   pure Run Claim transition policy.
 

@@ -75,7 +75,9 @@ contracts, and tracked docs remain authoritative.
   cleanup.
 - `RunLifecycleService` translates lifecycle outcomes into typed Claim commands;
   in-memory and SQL Run state stores share one `transition_claim()` operation and
-  pure policy, while successful commit and cancellation remain separate.
+  pure policy, while successful commit and cancellation remain separate. Internal
+  persistence mapping, claim/liveness, final-state, and query helpers stay behind
+  the same facade; only facades own locks, AsyncSessions, and transactions.
 - `CommittedTurn` is the only replay source. Durable assistant content is
   validated through the closed Pydantic `AssistantPart` discriminated union in
   `sessions/assistant_parts.py`; keep that durable vocabulary separate from
