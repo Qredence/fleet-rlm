@@ -279,6 +279,34 @@ def _stream_text(detail: ExecutionDetail) -> str:
     return str(getattr(detail, field, "") or "") if field is not None else ""
 
 
+def _align_trajectory_detail(
+    details: Sequence[ExecutionDetail],
+    target: ObservationDetail,
+    *,
+    used_positions: set[int],
+) -> ObservationDetail:
+    """Align canonical text with a live observation when setup consumed a step.
+
+    The interpreter may execute a host context/bootstrap capsule before DSPy's
+    first trajectory action.  That setup observation owns an earlier step number
+    even though DSPy's canonical trajectory starts at action one.  Matching the
+    exact public payload across steps lets reconciliation update the real live
+    action rather than emitting a duplicate canonical action stream.
+    """
+    text = _stream_text(target)
+    if not text:
+        return target
+    for index, detail in enumerate(details):
+        if index in used_positions or type(detail) is not type(target) or _stream_text(detail) != text:
+            continue
+        observed_step = getattr(detail, "step", None)
+        if isinstance(observed_step, int) and observed_step != getattr(target, "step", None):
+            target = replace(target, step=observed_step)
+        used_positions.add(index)
+        return target
+    return target
+
+
 def _same_stream_payload(
     details: Sequence[ExecutionDetail],
     positions: Sequence[int],
@@ -355,6 +383,7 @@ def _reconcile_trajectory(
     ID so live TUI projection upserts it rather than appending a second card.
     """
     emissions: list[ObservationDetail] = []
+    aligned_positions: set[int] = set()
     for trajectory_step in trajectory:
         step = trajectory_step.index
         step_details = _trajectory_details((trajectory_step,), max_chars=max_chars)
@@ -367,7 +396,16 @@ def _reconcile_trajectory(
 
         canonical = step_details[1:-1]
         for raw_target in canonical:
-            target = _preserve_stream_id(raw_target, details, step)
+            target = _align_trajectory_detail(details, raw_target, used_positions=aligned_positions)
+            target_step = getattr(target, "step", None)
+            target = _preserve_stream_id(target, details, target_step if isinstance(target_step, int) else step)
+            target_step = getattr(target, "step", None)
+            if isinstance(target_step, int) and target_step != step:
+                aligned_start = _detail_position(details, StepStarted, target_step)
+                aligned_finish = _detail_position(details, StepFinished, target_step)
+                if aligned_start is not None and aligned_finish is not None and aligned_start < aligned_finish:
+                    step = target_step
+                    start, finish = aligned_start, aligned_finish
             target_type = type(target)
             existing_positions = [
                 index

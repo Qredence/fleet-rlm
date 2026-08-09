@@ -357,3 +357,39 @@ def test_trajectory_reconciliation_re_emits_once_for_a_true_correction() -> None
         RLMOutput("corrected output", 1, "output-1", False, True),
         StepFinished(1),
     ]
+
+
+def test_trajectory_reconciliation_aligns_canonical_steps_after_setup_execution() -> None:
+    """A context setup execution must not cause a duplicate canonical action stream."""
+    from fleet_rlm.rlm.dspy_contract import TrajectoryStep
+    from fleet_rlm.rlm.events import RLMCode, RLMOutput, RLMReasoning, StepFinished, StepStarted
+    from fleet_rlm.rlm.runner import _reconcile_trajectory
+
+    details = [
+        StepStarted(1),
+        RLMCode("load prepared context", 1),
+        StepFinished(1),
+        StepStarted(2),
+        RLMReasoning("native reasoning", 2),
+        RLMCode("SUBMIT(answer=\"ok\")", 2),
+        RLMOutput("FINAL submitted", 2),
+        StepFinished(2),
+    ]
+
+    emissions = _reconcile_trajectory(
+        details,
+        (TrajectoryStep(1, "native reasoning", "SUBMIT(answer=\"ok\")", "FINAL: ok"),),
+        max_chars=100,
+    )
+
+    assert emissions == []
+    assert details == [
+        StepStarted(1),
+        RLMCode("load prepared context", 1),
+        StepFinished(1),
+        StepStarted(2),
+        RLMReasoning("native reasoning", 2),
+        RLMCode("SUBMIT(answer=\"ok\")", 2),
+        RLMOutput("FINAL submitted", 2),
+        StepFinished(2),
+    ]
