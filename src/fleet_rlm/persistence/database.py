@@ -95,7 +95,15 @@ _POSTGRES_CONNECT_TIMEOUT_SECONDS = 30.0
 
 
 def _pool_kwargs_for_url(normalized_url: str) -> dict[str, object]:
-    """Pool kwargs for a normalized URL; Postgres only, SQLite keeps defaults."""
+    """
+    Return PostgreSQL connection pool settings for a normalized database URL.
+    
+    Parameters:
+    	normalized_url (str): A normalized database connection URL.
+    
+    Returns:
+    	dict[str, object]: PostgreSQL pooling and connection timeout settings, or an empty dictionary for other database URLs.
+    """
     if normalized_url.startswith("postgresql+asyncpg://"):
         return {
             "pool_pre_ping": _POSTGRES_POOL_PRE_PING,

@@ -411,6 +411,9 @@ async def test_reconcile_deadline_recovers_one_run_and_leaves_later_claim_retrya
         # in-loop deadline check, and the fence span must exceed that margin so
         # the deadline is only crossed after run 0's fence completes.
         async def fence(session_id):
+            """
+            Record a fenced session and delay completion.
+            """
             fenced.append(session_id)
             await asyncio.sleep(1.0)
 
@@ -539,6 +542,12 @@ async def test_reconcile_deadline_does_not_restore_after_fence_consumes_budget(
     restore_calls: list[object] = []
 
     async def load_candidates() -> list[object]:
+        """
+        Load the pending run as a reconciliation candidate.
+        
+        Returns:
+            list[object]: A list containing the pending run.
+        """
         return [pending_run]
 
     async def claim_owner(_pending_run: object) -> str:
@@ -586,6 +595,12 @@ async def test_reconcile_deadline_bounds_fence_failure_restore(
     store = SqlAlchemyTurnStateStore(lambda: None)  # type: ignore[arg-type]
 
     async def load_candidates() -> list[object]:
+        """
+        Load the pending run as a reconciliation candidate.
+        
+        Returns:
+            list[object]: A list containing the pending run.
+        """
         return [pending_run]
 
     async def claim_owner(_pending_run: object) -> str:

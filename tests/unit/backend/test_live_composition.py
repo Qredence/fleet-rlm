@@ -620,6 +620,7 @@ def test_offline_lifespan_disposes_engine_when_table_creation_fails(monkeypatch)
 
 @pytest.mark.asyncio
 async def test_live_startup_preserves_original_error_and_attempts_all_cleanup(monkeypatch) -> None:
+    """Preserve the original startup failure while completing all available cleanup."""
     import fleet_rlm.composition.daytona as composition
 
     disposed: list[str] = []

@@ -163,7 +163,11 @@ _IMPORT_NAME_OVERRIDES: dict[str, str] = {"beautifulsoup4": "bs4"}
 
 
 def snapshot_dependency_import_names() -> tuple[tuple[str, str, str], ...]:
-    """Return (distribution, import-module, version) triples baked into the Snapshot."""
+    """Return dependency distributions, import module names, and pinned versions included in the snapshot.
+    
+    Returns:
+    	tuple[tuple[str, str, str], ...]: Triples containing each distribution name, its import module name, and its pinned version.
+    """
     triples = []
     for dependency in snapshot_execution_dependencies():
         package, version = dependency.split("==", 1)
@@ -178,6 +182,15 @@ def snapshot_dependency_sha256() -> str:
 
 
 def build_snapshot_image(spec: DaytonaSandboxSpec) -> Any:
+    """
+    Build the Daytona image used for the configured snapshot execution environment.
+    
+    Parameters:
+    	spec (DaytonaSandboxSpec): Snapshot specification containing the base image.
+    
+    Returns:
+    	Any: Configured Daytona image with required system and Python dependencies, environment variables, working directory, and user.
+    """
     from daytona import Image
 
     return (

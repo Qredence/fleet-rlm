@@ -134,6 +134,15 @@ def _api_url(host: str, port: int) -> str:
 
 
 def _validate_daytona_database(repo_root: Path, *, settings: Settings | None = None) -> None:
+    """Validate Fleet database compatibility before launching supervised processes.
+    
+    Parameters:
+    	repo_root (Path): Root directory used for database compatibility checks.
+    	settings (Settings | None): Runtime settings containing the database URL; loaded when omitted.
+    
+    Raises:
+    	SupervisorError: If the database URL is unavailable, the compatibility check times out, or the check fails.
+    """
     if settings is None:
         try:
             settings = load_runtime_settings()

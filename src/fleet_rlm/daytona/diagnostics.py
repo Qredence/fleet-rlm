@@ -147,6 +147,18 @@ class _ProductionDaytonaDoctorDependencies:
         verify_sandbox_spec(sandbox, self._sandbox_spec)
 
     async def execute(self, sandbox: Any) -> str:
+        """
+        Run the Daytona interpreter diagnostic in a temporary sandbox context.
+        
+        Parameters:
+            sandbox (Any): Sandbox whose code interpreter runs the diagnostic.
+        
+        Returns:
+            str: Diagnostic process output.
+        
+        Raises:
+            RuntimeError: If the interpreter reports an execution error.
+        """
         context = await sandbox.code_interpreter.create_context()
         run_error: BaseException | None = None
         try:
