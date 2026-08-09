@@ -39,6 +39,11 @@ Pydantic DTOs; conversion and JSON serialization happen once immediately before
 native `dspy.RLM.acall()`. Custom Skill Signatures retain their existing
 JSON-compatible common input annotations.
 
+`rlm/instructions.py` owns the default Fleet Root instruction fragments. Base,
+REPL, tool, optional recursion, verification, and bounded-context guidance are
+composed directly; disabling recursion no longer deletes text from one large
+monolithic Signature docstring.
+
 ## Composition and ownership
 
 - `app.create_app()` creates the FastAPI application, installs handlers and

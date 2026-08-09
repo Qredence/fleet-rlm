@@ -613,8 +613,8 @@ def _flatten_policy(policy: Mapping[str, Any]) -> dict[str, Any]:
         values[f"{role}_llm_max_tokens"] = role_values.get("max_tokens")
         values[f"{role}_llm_temperature"] = role_values.get("temperature")
         values[f"{role}_llm_reasoning_effort"] = role_values.get("reasoning_effort")
-        values[f"{role}_llm_cache"] = role_values.get("cache")
-        values[f"{role}_llm_num_retries"] = role_values.get("num_retries")
+        values[f"{role}_llm_cache"] = role_values.get("cache", True)
+        values[f"{role}_llm_num_retries"] = role_values.get("num_retries", 3)
     optional = {
         "database_url_env",
         "daytona_api_key_env",
@@ -637,6 +637,10 @@ def _flatten_policy(policy: Mapping[str, Any]) -> dict[str, Any]:
         "sub_llm_temperature",
         "root_llm_reasoning_effort",
         "sub_llm_reasoning_effort",
+        "root_llm_cache",
+        "sub_llm_cache",
+        "root_llm_num_retries",
+        "sub_llm_num_retries",
     }
     missing = sorted(key for key, value in values.items() if value is None and key not in optional)
     if missing:

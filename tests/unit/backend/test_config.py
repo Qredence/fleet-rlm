@@ -69,8 +69,8 @@ def test_daytona_profile_uses_specialized_bounded_model_roles() -> None:
         "reasoning_effort": "low",
     }
     assert document["defaults"]["llm"] == {
-        "root": {"model_provider_service": "uscentral.default.zencode-oai", "cache": True, "num_retries": 3},
-        "sub": {"model_provider_service": "uscentral.default.zencode-oai", "cache": True, "num_retries": 3},
+        "root": {"model_provider_service": "uscentral.default.zencode-oai"},
+        "sub": {"model_provider_service": "uscentral.default.zencode-oai"},
     }
     assert document["defaults"]["runtime"]["live_enabled"] is True
 
@@ -455,6 +455,24 @@ def test_runtime_settings_deep_merge_profile_and_keep_role_policy(
     assert settings.sub_lm.temperature == 0.2
     assert settings.lm_roles.root.model_provider_service is None
     assert settings.lm_roles.sub.api_key_env == "SUB_KEY"
+
+
+def test_omitted_role_cache_and_retry_defaults_resolve_to_settings_defaults(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    import fleet_rlm.config as config
+
+    policy = tmp_path / "fleet.toml"
+    _policy(policy)
+    policy.write_text(
+        policy.read_text(encoding="utf-8").replace("cache = false\n", "", 1).replace("num_retries = 4\n", "", 1),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(config, "_CONFIG_PATH", policy)
+
+    settings = config.load_runtime_settings()
+    assert settings.sub_lm.cache is True
+    assert settings.sub_lm.num_retries == 3
 
 
 def test_require_live_execution_honors_the_toml_switch(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

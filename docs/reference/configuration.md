@@ -81,6 +81,10 @@ the same bounded payloads the TUI displays.
 > validation with an unknown-key error; delete the key. Trace content is now
 > always readable (bounded by `mlflow.trace_content_max_chars`).
 
+Profile role tables avoid an inheritance framework. Only defaults that duplicate
+`Settings` behavior are omitted; explicit profiles keep operator-visible role
+values rather than gaining `extends`, mixins, or cross-profile aliases.
+
 Each typed public Runtime Event is also projected as a bounded
 `Turn.progress.<event-kind>` child span. This includes RLM reasoning summaries,
 generated code, interpreter output, tool inputs and outputs, status/progress

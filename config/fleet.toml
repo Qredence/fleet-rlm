@@ -14,17 +14,13 @@ max_active_daytona_leases = 8
 heartbeat_seconds = 10
 stale_after_seconds = 60
 
-# Shared role tuning only. Model and credential references belong to each
-# provider-specific profile below.
+# Shared gateway policy only. Model, credential references, and execution
+# tuning belong to each explicit provider-specific profile below.
 [defaults.llm.root]
 model_provider_service = "uscentral.default.zencode-oai"
-cache = true
-num_retries = 3
 
 [defaults.llm.sub]
 model_provider_service = "uscentral.default.zencode-oai"
-cache = true
-num_retries = 3
 
 [defaults.rlm]
 max_iterations = 20
