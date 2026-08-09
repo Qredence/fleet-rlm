@@ -31,7 +31,10 @@ provide models, Signatures, or executable capabilities.
   `dspy.Prediction`. Fleet projects that Prediction into chat text, an optional
   structured result, and a commit-gated private `result.json` snapshot.
 - Session Workspace files are immediate private Volume state. They survive
-  later Runs and Sandbox replacement; interpreter globals do not.
+  later Runs and Sandbox replacement; interpreter globals do not. The host
+  exposes list/stat/paged-read, write/append, unique-fragment edit, and
+  file-or-empty-directory delete; edits/deletes are optional-checksum guarded,
+  never recursive, and never follow symlinks.
 - Daytona Workspace Memory is separate workspace-wide immediate state at
   `memory/MEMORIES.md` under the already mounted
   `workspaces/<workspace_id>` Volume subpath (the legacy root `MEMORIES.md`
