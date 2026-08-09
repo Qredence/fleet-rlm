@@ -17,7 +17,7 @@ from fastapi.routing import APIRoute
 from fastapi.sse import EventSourceResponse
 from fastapi.testclient import TestClient
 
-from fleet_rlm.chat.turn_lifecycle import TurnInProgressError
+from fleet_rlm.chat.run_lifecycle import RunInProgressError
 from fleet_rlm.composition.testing import create_testing_app
 from fleet_rlm.rlm.events import EventRecorder, RLMReasoning, RunCompleted, RunStarted, RuntimeEvent
 
@@ -279,7 +279,7 @@ async def test_first_frame_precedes_slow_open_by_a_wide_margin() -> None:
 
 @pytest.mark.asyncio
 async def test_open_failure_projects_closed_error_and_finish_frames() -> None:
-    coordinator = _ControlledCoordinator(error=TurnInProgressError("Turn is already running"))
+    coordinator = _ControlledCoordinator(error=RunInProgressError("Turn is already running"))
     probe = await _start_route(coordinator)
 
     await asyncio.wait_for(probe.task, timeout=1)

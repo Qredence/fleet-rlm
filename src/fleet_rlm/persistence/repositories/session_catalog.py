@@ -11,7 +11,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from fleet_rlm.persistence.models import SessionRow, TurnRow, UserRow, WorkspaceRow
-from fleet_rlm.persistence.repositories.turns import InMemoryTurnStateStore
+from fleet_rlm.persistence.repositories.turns import InMemoryRunStateStore
 from fleet_rlm.sessions.catalog import SequenceCursor, SessionPage, SessionTurnPage
 from fleet_rlm.sessions.committed_turn import CommittedTurnCodec
 from fleet_rlm.sessions.errors import SessionNotFoundError
@@ -201,7 +201,7 @@ class SqlAlchemySessionCatalog:
 class InMemorySessionCatalog:
     """In-memory CRUD catalog sharing authoritative Turn state registration."""
 
-    def __init__(self, turns: InMemoryTurnStateStore) -> None:
+    def __init__(self, turns: InMemoryRunStateStore) -> None:
         self._turns = turns
         self._records: dict[UUID, SessionRecord] = {}
         self._lock = asyncio.Lock()

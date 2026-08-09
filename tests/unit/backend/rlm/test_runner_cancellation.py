@@ -18,8 +18,8 @@ async def test_runner_returns_promptly_and_retains_blocking_worker_for_cleanup()
         ExecutionRuntime,
         RLMExecutionContext,
         RLMExecutionSpec,
+        RunIdentity,
         SessionView,
-        TurnIdentity,
     )
     from fleet_rlm.rlm.dspy_contract import RLMOptions
     from fleet_rlm.rlm.runner import RLMRunner
@@ -53,7 +53,7 @@ async def test_runner_returns_promptly_and_retains_blocking_worker_for_cleanup()
         return cancel_requested
 
     context = RLMExecutionContext(
-        identity=TurnIdentity(run_id=uuid4(), session_id=uuid4(), access=TurnAccess(uuid4(), uuid4())),
+        identity=RunIdentity(run_id=uuid4(), session_id=uuid4(), access=TurnAccess(uuid4(), uuid4())),
         session=SessionView(
             request="answer",
             session_context=SessionContextManifest(uuid4(), 0, 0, ()),
@@ -95,8 +95,8 @@ async def test_runner_transfers_blocking_worker_after_caller_cancellation() -> N
         ExecutionRuntime,
         RLMExecutionContext,
         RLMExecutionSpec,
+        RunIdentity,
         SessionView,
-        TurnIdentity,
     )
     from fleet_rlm.rlm.dspy_contract import RLMOptions
     from fleet_rlm.rlm.runner import RLMRunner
@@ -129,7 +129,7 @@ async def test_runner_transfers_blocking_worker_after_caller_cancellation() -> N
         return False
 
     context = RLMExecutionContext(
-        identity=TurnIdentity(run_id=uuid4(), session_id=uuid4(), access=TurnAccess(uuid4(), uuid4())),
+        identity=RunIdentity(run_id=uuid4(), session_id=uuid4(), access=TurnAccess(uuid4(), uuid4())),
         session=SessionView(
             request="answer",
             session_context=SessionContextManifest(uuid4(), 0, 0, ()),

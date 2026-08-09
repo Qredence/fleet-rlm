@@ -189,12 +189,12 @@ class _RunStateStore(Protocol):
 
     async def commit(
         self,
-        turn: ClaimedRun,
+        run: ClaimedRun,
         committed: CommittedTurn,
         artifacts: tuple[PromotedArtifact, ...],
     ) -> CommittedTurnReceipt: ...
 
-    async def transition_claim(self, turn: ClaimedRun, command: ClaimCommand) -> FailedRunReceipt | None: ...
+    async def transition_claim(self, run: ClaimedRun, command: ClaimCommand) -> FailedRunReceipt | None: ...
 
     async def request_cancel(self, access: TurnAccess, run_id: UUID) -> CancelResult: ...
 
@@ -207,7 +207,7 @@ class RunLifecycle(Protocol):
 
     async def finish(
         self,
-        turn: ClaimedRun,
+        run: ClaimedRun,
         resolution: RLMOutcome | RunFailure,
         *,
         artifact_sink: RunArtifactSink | None = None,
@@ -216,13 +216,13 @@ class RunLifecycle(Protocol):
 
     async def request_cancel(self, access: TurnAccess, run_id: UUID) -> CancelResult: ...
 
-    async def heartbeat(self, turn: ClaimedRun) -> None: ...
+    async def heartbeat(self, run: ClaimedRun) -> None: ...
 
-    async def settle(self, turn: ClaimedRun, failure: RunFailure) -> FailedRunReceipt: ...
+    async def settle(self, run: ClaimedRun, failure: RunFailure) -> FailedRunReceipt: ...
 
-    async def revoke_claim(self, turn: ClaimedRun, failure: RunFailure) -> FailedRunReceipt: ...
+    async def revoke_claim(self, run: ClaimedRun, failure: RunFailure) -> FailedRunReceipt: ...
 
-    async def complete_settling(self, turn: ClaimedRun) -> FailedRunReceipt: ...
+    async def complete_settling(self, run: ClaimedRun) -> FailedRunReceipt: ...
 
 
 class RunLifecycleService:
@@ -249,17 +249,17 @@ class RunLifecycleService:
 
     async def finish(
         self,
-        turn: ClaimedRun,
+        run: ClaimedRun,
         resolution: RLMOutcome | RunFailure,
         *,
         artifact_sink: RunArtifactSink | None = None,
         result_snapshot_sink: ResultSnapshotSink | None = None,
     ) -> RunSettlement:
         """
-        Finalize a turn with a successful outcome or record its failure.
+        Finalize a Run with a successful outcome or record its failure.
 
         Parameters:
-            turn (ClaimedRun): The claimed turn being finalized.
+            run (ClaimedRun): The claimed Run being finalized.
             resolution (RLMOutcome | RunFailure): The execution outcome or failure to record.
             artifact_sink (RunArtifactSink | None): Storage for staged and promoted artifacts.
             result_snapshot_sink (ResultSnapshotSink | None): Storage for the optional result snapshot.
@@ -268,14 +268,14 @@ class RunLifecycleService:
             RunSettlement: The receipt for the committed turn or recorded failure.
 
         Raises:
-            RunLifecycleUnavailableError: If the turn claim has been revoked.
+            RunLifecycleUnavailableError: If the Run claim has been revoked.
             RunStateError: If the outcome contains an invalid state.
             RunValidationError: If artifacts are provided without an artifact sink.
         """
-        if turn.authority.revoked:
+        if run.authority.revoked:
             raise RunLifecycleUnavailableError("Turn claim is no longer available")
         if isinstance(resolution, RunFailure):
-            return await self._transition_receipt(turn, FailClaim(_claim_failure(resolution), resolution.usage))
+            return await self._transition_receipt(run, FailClaim(_claim_failure(resolution), resolution.usage))
         if not resolution.succeeded:
             await self._rollback(
                 artifact_sink,
@@ -290,13 +290,13 @@ class RunLifecycleService:
                 public_message=resolution.public_error_message or "Turn failed",
                 usage=resolution.usage,
             )
-            return await self._transition_receipt(turn, FailClaim(_claim_failure(failure), failure.usage))
+            return await self._transition_receipt(run, FailClaim(_claim_failure(failure), failure.usage))
 
         candidates = self._promotion.validate(
             resolution.artifact_candidates,
-            access=ArtifactAccess(turn.access.user_id, turn.access.workspace_id),
-            session_id=turn.session_id,
-            run_id=turn.run_id,
+            access=ArtifactAccess(run.access.user_id, run.access.workspace_id),
+            session_id=run.session_id,
+            run_id=run.run_id,
         )
         if candidates and artifact_sink is None:
             raise RunValidationError("Artifact Candidates require a Run Artifact sink")
@@ -309,7 +309,7 @@ class RunLifecycleService:
             validated = await self._read_candidates(candidates, artifact_sink)
             stage = "publish_artifacts"
             promoted = await self._publish(candidates, validated, artifact_sink, written)
-            if turn.authority.revoked:
+            if run.authority.revoked:
                 raise RunLifecycleUnavailableError("Turn claim is no longer available")
             stage = "build_committed_turn"
             committed = commit_success(resolution, tuple(item.ref for item in promoted))
@@ -318,10 +318,10 @@ class RunLifecycleService:
                 if prediction is None:
                     raise RunStateError("successful outcome requires a prediction")
                 stage = "encode_result_snapshot"
-                snapshot_path = result_snapshot_sink.result_path(turn.session_id, turn.run_id)
+                snapshot_path = result_snapshot_sink.result_path(run.session_id, run.run_id)
                 snapshot = encode_result_snapshot(
-                    turn.session_id,
-                    turn.run_id,
+                    run.session_id,
+                    run.run_id,
                     prediction,
                     resolution.usage,
                 )
@@ -331,9 +331,9 @@ class RunLifecycleService:
                 # the commit is durable (see _reconcile_snapshot_after_commit).
                 snapshot_task = asyncio.ensure_future(result_snapshot_sink.write(snapshot_path, snapshot))
             stage = "commit_turn"
-            if turn.authority.revoked:
+            if run.authority.revoked:
                 raise RunLifecycleUnavailableError("Turn claim is no longer available")
-            commit_task, commit_cancelled = await _settle_owned(self._store.commit(turn, committed, promoted))
+            commit_task, commit_cancelled = await _settle_owned(self._store.commit(run, committed, promoted))
             try:
                 receipt = commit_task.result()
             except BaseException:
@@ -359,8 +359,8 @@ class RunLifecycleService:
             logger.exception(
                 "Turn finalization failed stage=%s session_id=%s run_id=%s",
                 stage,
-                turn.session_id,
-                turn.run_id,
+                run.session_id,
+                run.run_id,
             )
             failure = RunFailure(
                 "failed",
@@ -368,7 +368,7 @@ class RunLifecycleService:
                 "Turn could not be committed",
                 resolution.usage,
             )
-            return await self._transition_receipt(turn, FailClaim(_claim_failure(failure), failure.usage))
+            return await self._transition_receipt(run, FailClaim(_claim_failure(failure), failure.usage))
 
         await self._reconcile_snapshot_after_commit(snapshot_task, result_snapshot_sink, snapshot_path)
         await self._settle_staging(artifact_sink, candidates)
@@ -377,27 +377,27 @@ class RunLifecycleService:
     async def request_cancel(self, access: TurnAccess, run_id: UUID) -> CancelResult:
         return await self._store.request_cancel(access, run_id)
 
-    async def heartbeat(self, turn: ClaimedRun) -> None:
-        await self._transition(turn, HeartbeatClaim())
+    async def heartbeat(self, run: ClaimedRun) -> None:
+        await self._transition(run, HeartbeatClaim())
 
-    async def settle(self, turn: ClaimedRun, failure: RunFailure) -> FailedRunReceipt:
+    async def settle(self, run: ClaimedRun, failure: RunFailure) -> FailedRunReceipt:
         """Revoke commit authority while retaining the durable claim for cleanup."""
-        return await self._transition_receipt(turn, BeginSettlement(_claim_failure(failure), failure.usage))
+        return await self._transition_receipt(run, BeginSettlement(_claim_failure(failure), failure.usage))
 
-    async def revoke_claim(self, turn: ClaimedRun, failure: RunFailure) -> FailedRunReceipt:
+    async def revoke_claim(self, run: ClaimedRun, failure: RunFailure) -> FailedRunReceipt:
         """Idempotently classify a Run whose durable claim authority was lost."""
-        return await self._transition_receipt(turn, RevokeClaim(_claim_failure(failure), failure.usage))
+        return await self._transition_receipt(run, RevokeClaim(_claim_failure(failure), failure.usage))
 
-    async def complete_settling(self, turn: ClaimedRun) -> FailedRunReceipt:
+    async def complete_settling(self, run: ClaimedRun) -> FailedRunReceipt:
         """Release a retained claim only after owned cleanup has completed."""
-        return await self._transition_receipt(turn, CompleteSettlement())
+        return await self._transition_receipt(run, CompleteSettlement())
 
-    async def _transition(self, turn: ClaimedRun, command: ClaimCommand) -> FailedRunReceipt | None:
-        return await self._store.transition_claim(turn, command)
+    async def _transition(self, run: ClaimedRun, command: ClaimCommand) -> FailedRunReceipt | None:
+        return await self._store.transition_claim(run, command)
 
-    async def _transition_receipt(self, turn: ClaimedRun, command: ClaimCommand) -> FailedRunReceipt:
+    async def _transition_receipt(self, run: ClaimedRun, command: ClaimCommand) -> FailedRunReceipt:
         with turn_phase_span("Turn.claim_transition", inputs={"command": type(command).__name__}):
-            receipt = await self._transition(turn, command)
+            receipt = await self._transition(run, command)
         if receipt is None:
             raise RunStateError("claim transition did not return a receipt")
         return receipt

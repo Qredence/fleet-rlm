@@ -88,8 +88,8 @@ def get_session_catalog(request: Request) -> SessionCatalog:
     return catalog
 
 
-def get_turn_lifecycle(request: Request) -> RunLifecycle:
-    lifecycle = get_ready_runtime_inventory(request).turn_lifecycle
+def get_run_lifecycle(request: Request) -> RunLifecycle:
+    lifecycle = get_ready_runtime_inventory(request).run_lifecycle
     if lifecycle is None:
         raise _composition_unavailable()
     return lifecycle
@@ -133,7 +133,10 @@ TurnCoordinatorDep = Annotated[TurnCoordinator, Depends(get_turn_coordinator)]
 ArtifactReaderDep = Annotated[ArtifactReader, Depends(get_artifact_reader)]
 AttachmentLifecycleDep = Annotated[AttachmentLifecycle, Depends(get_attachment_lifecycle)]
 SessionCatalogDep = Annotated[SessionCatalog, Depends(get_session_catalog)]
-TurnLifecycleDep = Annotated[RunLifecycle, Depends(get_turn_lifecycle)]
+RunLifecycleDep = Annotated[RunLifecycle, Depends(get_run_lifecycle)]
+# Compatibility aliases preserve internal callers during the vocabulary migration.
+get_turn_lifecycle = get_run_lifecycle
+TurnLifecycleDep = RunLifecycleDep
 SettingsDep = Annotated[Settings, Depends(get_settings)]
 SkillCatalogDep = Annotated[SkillCatalog, Depends(get_skill_catalog)]
 ConfigPolicyDep = Annotated[ConfigPolicyService, Depends(get_config_policy)]
@@ -146,6 +149,7 @@ __all__ = [
     "AttachmentLifecycleDep",
     "ConfigPolicyDep",
     "LocalScopeDep",
+    "RunLifecycleDep",
     "SessionCatalogDep",
     "SettingsDep",
     "SkillCatalogDep",

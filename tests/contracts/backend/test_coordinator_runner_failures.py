@@ -12,16 +12,16 @@ import dspy
 import pytest
 
 from fleet_rlm.chat.commands import OpenTurnCommand
+from fleet_rlm.chat.run_lifecycle import ClaimedRun, RunLifecycleService
 from fleet_rlm.chat.turn_coordinator import TurnCoordinator
-from fleet_rlm.chat.turn_lifecycle import ExecuteTurn, TurnLifecycleService
 from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
-from fleet_rlm.persistence.repositories import InMemoryTurnStateStore
+from fleet_rlm.persistence.repositories import InMemoryRunStateStore
 from fleet_rlm.rlm.context import (
     ExecutionRuntime,
     RLMExecutionContext,
     RLMExecutionSpec,
+    RunIdentity,
     SessionView,
-    TurnIdentity,
 )
 from fleet_rlm.rlm.dspy_contract import RLMOptions
 from fleet_rlm.rlm.events import (
@@ -99,8 +99,8 @@ class _Harness:
     def __init__(self, mode: HarnessMode) -> None:
         self.mode = mode
         self.access = TurnAccess(uuid4(), uuid4())
-        self.store = InMemoryTurnStateStore()
-        self.lifecycle = TurnLifecycleService(self.store, max_artifact_bytes=1024)
+        self.store = InMemoryRunStateStore()
+        self.lifecycle = RunLifecycleService(self.store, max_artifact_bytes=1024)
         self.session_id = uuid4()
         self.run_id = uuid4()
         self.cleanup_calls = 0
@@ -110,7 +110,7 @@ class _Harness:
     async def start(self) -> None:
         await self.store.add_session(self.session_id, self.access)
 
-    async def prepare(self, turn: ExecuteTurn, *, deadline: float):
+    async def prepare(self, turn: ClaimedRun, *, deadline: float):
         from fleet_rlm.chat.session_context import build_session_context_manifest
 
         if self.mode == "internal_cancel":
@@ -118,7 +118,7 @@ class _Harness:
         now = asyncio.get_running_loop().time()
         deadline = now if self.mode == "timeout" else now + 10
         execution = RLMExecutionContext(
-            identity=TurnIdentity(run_id=turn.run_id, session_id=turn.session_id, access=turn.access),
+            identity=RunIdentity(run_id=turn.run_id, session_id=turn.session_id, access=turn.access),
             session=SessionView(
                 request=turn.input.text,
                 session_context=build_session_context_manifest(

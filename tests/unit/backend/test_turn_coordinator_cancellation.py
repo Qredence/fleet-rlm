@@ -14,14 +14,14 @@ import pytest
 async def test_coordinator_settles_commit_after_cancellation(commit_succeeds: bool) -> None:
 
     from fleet_rlm.chat.commands import OpenTurnCommand
-    from fleet_rlm.chat.turn_coordinator import TurnCoordinator
-    from fleet_rlm.chat.turn_lifecycle import (
+    from fleet_rlm.chat.run_lifecycle import (
+        ClaimedRun,
         CommittedTurnReceipt,
-        ExecuteTurn,
         FailedRunReceipt,
-        TurnLifecycleService,
-        _TurnClaimToken,
+        RunLifecycleService,
+        _RunClaimToken,
     )
+    from fleet_rlm.chat.turn_coordinator import TurnCoordinator
     from fleet_rlm.rlm.dspy_contract import PredictionResult
     from fleet_rlm.rlm.outcome import RLMOutcome
     from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
@@ -31,14 +31,14 @@ async def test_coordinator_settles_commit_after_cancellation(commit_succeeds: bo
     async def not_cancelled() -> bool:
         return False
 
-    turn = ExecuteTurn(
+    turn = ClaimedRun(
         run_id,
         session_id,
         access,
         TurnInput("hi"),
         SessionHistory(),
         not_cancelled,
-        _TurnClaimToken(uuid4()),
+        _RunClaimToken(uuid4()),
     )
     commit_started, release_commit = asyncio.Event(), asyncio.Event()
 
@@ -58,12 +58,12 @@ async def test_coordinator_settles_commit_after_cancellation(commit_succeeds: bo
             return CommittedTurnReceipt(run_id, 1, committed, artifacts)
 
         async def transition_claim(self, claimed, command):
-            from fleet_rlm.chat.turn_claim import FailClaim
-            from fleet_rlm.chat.turn_lifecycle import TurnFailure
+            from fleet_rlm.chat.run_claim import FailClaim
+            from fleet_rlm.chat.run_lifecycle import RunFailure
             from fleet_rlm.rlm.dspy_contract import empty_rlm_usage
 
             assert isinstance(command, FailClaim)
-            failure = TurnFailure(
+            failure = RunFailure(
                 command.failure.status,
                 command.failure.code,
                 command.failure.public_message,
@@ -133,7 +133,7 @@ async def test_coordinator_settles_commit_after_cancellation(commit_succeeds: bo
 
     store = Store()
     coordinator = TurnCoordinator(
-        lifecycle=TurnLifecycleService(store, max_artifact_bytes=1024),
+        lifecycle=RunLifecycleService(store, max_artifact_bytes=1024),
         preparation=Preparation(),
         runner=Runner(),
     )

@@ -10,7 +10,7 @@ import pytest
 
 from fleet_rlm.files.workspace_models import WorkspaceEntry, WorkspaceListResult, WorkspaceTextPage
 from fleet_rlm.rlm.events import ToolFailed, WarningEvent
-from fleet_rlm.rlm.tool_guards import TurnToolGuards
+from fleet_rlm.rlm.tool_guards import RunToolGuards
 from fleet_rlm.rlm.tool_observer import observe_tool
 
 
@@ -274,7 +274,7 @@ def test_repeated_workspace_reads_are_idempotent_but_still_observed() -> None:
     host = WorkspaceToolHost(workspace, max_file_bytes=32)
     view = host.event_views()["read_workspace_text"]
     observed: list[object] = []
-    guards = TurnToolGuards()
+    guards = RunToolGuards()
     read = observe_tool(tools["read_workspace_text"], observed.append, view, guards=guards)
 
     assert read(path="date.txt", max_chars=32)["content"] == "2026-07-21"

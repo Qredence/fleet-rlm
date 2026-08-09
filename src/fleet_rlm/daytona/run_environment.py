@@ -159,7 +159,7 @@ class _DaytonaEnvironmentProvider:
     resources: DaytonaRuntimeResources
     settings: Settings
 
-    async def acquire(self, turn: ClaimedRun, *, deadline: float) -> RunEnvironment:
+    async def acquire(self, run: ClaimedRun, *, deadline: float) -> RunEnvironment:
         """
         Acquire and configure a Daytona-backed run environment for a turn.
 
@@ -177,10 +177,10 @@ class _DaytonaEnvironmentProvider:
         try:
             lease = await self.resources.session_manager.acquire(
                 LeaseRequest(
-                    session_id=turn.session_id,
-                    user_id=turn.access.user_id,
-                    workspace_id=turn.access.workspace_id,
-                    run_id=turn.run_id,
+                    session_id=run.session_id,
+                    user_id=run.access.user_id,
+                    workspace_id=run.access.workspace_id,
+                    run_id=run.run_id,
                 ),
                 deadline=deadline,
             )
@@ -225,12 +225,12 @@ class _DaytonaEnvironmentProvider:
                 admission=self.resources.daytona_admission,
                 volume_id=lease.volume_id,
                 mount_path=self.resources.volume_config.mount_path,
-                workspace_id=turn.access.workspace_id,
-                run_id=turn.run_id,
+                workspace_id=run.access.workspace_id,
+                run_id=run.run_id,
                 deadline=deadline,
                 execution_timeout_s=self.settings.rlm_execution_timeout_s,
                 execution_output_cap=self.settings.rlm_max_execution_output_chars,
-                is_authorized=lambda: not turn.authority.revoked,
+                is_authorized=lambda: not run.authority.revoked,
             )
 
             return RunEnvironment(
@@ -268,7 +268,7 @@ class _LiveCapabilityPreparer:
 
     async def prepare(
         self,
-        turn: ClaimedRun,
+        run: ClaimedRun,
         environment: RunEnvironment,
         attachments: PreparedAttachments,
         *,
@@ -302,17 +302,17 @@ class _LiveCapabilityPreparer:
             attachments=attachments.refs,
             staged_attachments=attachments.staged,
             volume_fs=volume_fs,
-            user_id=turn.access.user_id,
-            workspace_id=turn.access.workspace_id,
-            session_id=turn.session_id,
-            run_id=turn.run_id,
+            user_id=run.access.user_id,
+            workspace_id=run.access.workspace_id,
+            session_id=run.session_id,
+            run_id=run.run_id,
             max_artifact_bytes=self.settings.max_artifact_bytes,
             volume_paths=paths,
         )
         session_workspace = DaytonaSessionWorkspaceFS(
             volume_fs.sandbox,
             volume_root=str(paths.mount_path),
-            root=str(paths.session_workspace_dir(turn.session_id)),
+            root=str(paths.session_workspace_dir(run.session_id)),
             max_file_bytes=self.settings.max_upload_bytes,
         )
         workspace_host = WorkspaceToolHost(
@@ -330,12 +330,12 @@ class _LiveCapabilityPreparer:
             max_file_bytes=self.settings.max_upload_bytes,
         )
         url_host = UrlToolHost(
-            session_id=turn.session_id,
+            session_id=run.session_id,
             store=WorkspaceUrlSourceStore(
                 DaytonaSessionWorkspaceFS(
                     volume_fs.sandbox,
                     volume_root=str(paths.mount_path),
-                    root=str(paths.session_workspace_dir(turn.session_id)),
+                    root=str(paths.session_workspace_dir(run.session_id)),
                     max_file_bytes=self.settings.max_url_bytes,
                 )
             ),
@@ -366,7 +366,7 @@ class _LiveCapabilityPreparer:
             **url_host.event_views(),
         }
         spec, skill_host, notices = await prepare_host_capabilities(
-            turn=turn,
+            turn=run,
             skill_catalog=self.skill_catalog,
             base_tools=(*file_tools, *workspace_tools, *project_tools, *memory_tools, *url_tools),
             base_event_views=base_views,
@@ -449,7 +449,7 @@ class DaytonaRuntimeResources:
         await self.client.close()
 
 
-def build_turn_preparation(
+def build_run_preparation(
     resources: DaytonaRuntimeResources,
     *,
     attachment_lifecycle: Any,
@@ -471,3 +471,7 @@ def build_turn_preparation(
         environments=_DaytonaEnvironmentProvider(resources, settings),
         capabilities=_LiveCapabilityPreparer(settings, skill_catalog),
     )
+
+
+# Compatibility alias for pre-Phase-1 composition callers.
+build_turn_preparation = build_run_preparation

@@ -793,7 +793,7 @@ def test_complete_daytona_mvp_through_fastapi(
         with TestClient(app) as client:
             inventory = app.state.runtime_inventory
             resources = inventory.run_environment_resources
-            preparation = inventory.turn_preparation
+            preparation = inventory.run_preparation
             assert resources is not None
             assert preparation is not None
             preparation._capabilities = _ProofCapabilityPreparer(

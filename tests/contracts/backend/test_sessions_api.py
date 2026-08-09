@@ -8,7 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from fleet_rlm.api.local_scope import LocalScope
-from fleet_rlm.chat.turn_lifecycle import BeginTurn, ExecuteTurn
+from fleet_rlm.chat.run_lifecycle import ClaimedRun, RunClaim
 from fleet_rlm.composition.testing import create_testing_app
 from fleet_rlm.rlm.outcome import RLMOutcome
 from fleet_rlm.sessions.models import TurnAccess, TurnInput
@@ -82,10 +82,10 @@ async def test_session_turns_are_canonical_ui_messages() -> None:
     headers = {}
     with TestClient(app) as client:
         session_id = UUID(client.post("/api/sessions", json={}, headers=headers).json()["id"])
-        lifecycle = app.state.runtime_inventory.turn_lifecycle
+        lifecycle = app.state.runtime_inventory.run_lifecycle
         assert lifecycle is not None
-        started = await lifecycle.begin(BeginTurn(access, session_id, TurnInput("question"), "turn-key", uuid4()))
-        assert isinstance(started, ExecuteTurn)
+        started = await lifecycle.begin(RunClaim(access, session_id, TurnInput("question"), "turn-key", uuid4()))
+        assert isinstance(started, ClaimedRun)
         await lifecycle.finish(
             started,
             RLMOutcome(

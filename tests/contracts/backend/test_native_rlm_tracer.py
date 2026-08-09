@@ -14,8 +14,8 @@ from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInter
 from fleet_rlm.rlm.context import (
     ExecutionRuntime,
     RLMExecutionSpec,
+    RunIdentity,
     SessionView,
-    TurnIdentity,
 )
 from fleet_rlm.rlm.dspy_contract import RLMOptions, bind_native_rlm_observer
 from fleet_rlm.rlm.events import (
@@ -382,7 +382,7 @@ async def test_runner_completes_native_repair_and_extract_as_prediction_result(f
 
     options = RLMOptions(max_iterations=1 if fallback else 2)
     context = RLMExecutionContext(
-        identity=TurnIdentity(run_id=uuid4(), session_id=uuid4(), access=TurnAccess(uuid4(), uuid4())),
+        identity=RunIdentity(run_id=uuid4(), session_id=uuid4(), access=TurnAccess(uuid4(), uuid4())),
         session=SessionView(
             request="complete natively",
             session_context=SessionContextManifest(uuid4(), 0, 0, ()),

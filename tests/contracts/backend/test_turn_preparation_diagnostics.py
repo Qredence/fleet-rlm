@@ -12,8 +12,8 @@ from fastapi.testclient import TestClient
 
 from fleet_rlm.api.errors import install_error_handlers
 from fleet_rlm.api.routes.turns import router
-from fleet_rlm.chat.turn_lifecycle import TurnLifecycleUnavailableError
-from fleet_rlm.chat.turn_preparation import TurnPreparationTimeoutError, TurnPreparationUnavailableError
+from fleet_rlm.chat.run_lifecycle import RunLifecycleUnavailableError
+from fleet_rlm.chat.run_preparation import RunPreparationTimeoutError, RunPreparationUnavailableError
 from fleet_rlm.composition.inventory import RuntimeInventory
 from fleet_rlm.config import Settings
 from fleet_rlm.daytona.errors import ProviderRequestError
@@ -24,14 +24,14 @@ class _FailingCoordinator:
         self._cause = cause
 
     async def open(self, _command):
-        if isinstance(self._cause, TurnPreparationTimeoutError):
+        if isinstance(self._cause, RunPreparationTimeoutError):
             raise self._cause
-        if isinstance(self._cause, TurnLifecycleUnavailableError):
+        if isinstance(self._cause, RunLifecycleUnavailableError):
             raise self._cause
         try:
             raise self._cause
         except BaseException as cause:
-            raise TurnPreparationUnavailableError("Turn environment is unavailable") from cause
+            raise RunPreparationUnavailableError("Turn environment is unavailable") from cause
 
 
 def _client(cause: BaseException) -> TestClient:
@@ -101,7 +101,7 @@ def test_preparation_unavailable_streams_typed_failure_and_logs_safe_metadata(
 def test_preparation_timeout_remains_typed_and_sanitized_inside_stream() -> None:
     private_detail = "private provider timeout api_key=never-return"
 
-    response = _post(_client(TurnPreparationTimeoutError(private_detail)))
+    response = _post(_client(RunPreparationTimeoutError(private_detail)))
 
     _assert_streamed_failure(response, "Turn preparation timed out")
     assert private_detail not in response.text
@@ -111,7 +111,7 @@ def test_preparation_timeout_remains_typed_and_sanitized_inside_stream() -> None
 def test_lifecycle_unavailable_streams_typed_failure_with_correlation_log(caplog: pytest.LogCaptureFixture) -> None:
     with caplog.at_level(logging.WARNING, logger="fleet_rlm.api.routes.turns"):
         response = _post(
-            _client(TurnLifecycleUnavailableError("database session setup failed")),
+            _client(RunLifecycleUnavailableError("database session setup failed")),
             headers={"X-Request-Id": "lifecycle-corr"},
         )
 

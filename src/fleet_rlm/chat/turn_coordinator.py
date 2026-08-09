@@ -220,20 +220,20 @@ class TurnCoordinator:
 
     async def _execute(
         self,
-        turn: ClaimedRun,
+        run: ClaimedRun,
         prepared: PreparedRun,
         heartbeat: _ClaimHeartbeat | None,
     ) -> AsyncGenerator[RuntimeEvent]:
         with turn_trace(
-            turn.session_id,
-            turn.run_id,
+            run.session_id,
+            run.run_id,
             enabled=self._mlflow_tracing_enabled,
             expose_trace_id=self._mlflow_expose_trace_id,
         ) as handle:
-            async for event in self._execution_driver.stream(turn, prepared, heartbeat, trace_id=handle.trace_id):
+            async for event in self._execution_driver.stream(run, prepared, heartbeat, trace_id=handle.trace_id):
                 yield event
 
-    def _start_heartbeat(self, turn: ClaimedRun) -> _ClaimHeartbeat | None:
+    def _start_heartbeat(self, run: ClaimedRun) -> _ClaimHeartbeat | None:
         interval = max(0.01, float(self._lifecycle.heartbeat_seconds))
         stale_after = max(interval * 3, float(self._lifecycle.stale_after_seconds))
         lost = asyncio.Event()
@@ -247,24 +247,24 @@ class TurnCoordinator:
                 await asyncio.sleep(max(0.0, next_attempt - loop.time()))
                 try:
                     async with asyncio.timeout_at(authority_deadline):
-                        await self._lifecycle.heartbeat(turn)
+                        await self._lifecycle.heartbeat(run)
                 except RunAlreadyCompletedError:
                     # The commit released the durable claim; the heartbeat must
                     # never classify its own committed Run as claim loss.
                     logger.info(
                         "claim heartbeat stopped after commit session_id=%s run_id=%s",
-                        turn.session_id,
-                        turn.run_id,
+                        run.session_id,
+                        run.run_id,
                     )
                     return
                 except (RunLifecycleUnavailableError, RunStateError):
-                    turn.authority.revoke()
+                    run.authority.revoke()
                     lost.set()
                     return
                 except Exception:  # transient persistence failure
                     now = loop.time()
                     if now >= authority_deadline:
-                        turn.authority.revoke()
+                        run.authority.revoke()
                         lost.set()
                         return
                     next_attempt = min(authority_deadline, now + min(interval, 1.0))
@@ -275,24 +275,24 @@ class TurnCoordinator:
 
         return _ClaimHeartbeat(asyncio.create_task(maintain_claim(), name="fleet-turn-heartbeat"), lost)
 
-    def _submit_claim_loss_cleanup(self, turn: ClaimedRun, heartbeat: _ClaimHeartbeat) -> None:
+    def _submit_claim_loss_cleanup(self, run: ClaimedRun, heartbeat: _ClaimHeartbeat) -> None:
         async def cleanup() -> None:
             try:
-                receipt = await self._revoke_claim(turn, empty_rlm_usage())
+                receipt = await self._revoke_claim(run, empty_rlm_usage())
                 if receipt is None:
                     # The Run committed before the revocation attempt: the
                     # commit owns the terminal state, so there is nothing to
                     # fence or release.
                     return
                 if self._claim_loss_fence is not None:
-                    await self._claim_loss_fence(turn.session_id)
-                await self._lifecycle.complete_settling(turn)
+                    await self._claim_loss_fence(run.session_id)
+                await self._lifecycle.complete_settling(run)
             finally:
                 await _stop_heartbeat(heartbeat)
 
         self._cleanup.submit(cleanup())
 
-    async def _revoke_claim(self, turn: ClaimedRun, usage) -> FailedRunReceipt | None:
+    async def _revoke_claim(self, run: ClaimedRun, usage) -> FailedRunReceipt | None:
         """Revoke the durable claim, or return None when the Run already committed.
 
         A racing commit always wins: revocation against a committed Run is a
@@ -300,11 +300,11 @@ class TurnCoordinator:
         """
         failure = RunFailure("failed", "stale_claim", "Turn failed", usage)
         try:
-            return await self._lifecycle.revoke_claim(turn, failure)
+            return await self._lifecycle.revoke_claim(run, failure)
         except RunAlreadyCompletedError:
             logger.info(
                 "stale-claim revocation skipped for committed Run session_id=%s run_id=%s",
-                turn.session_id,
-                turn.run_id,
+                run.session_id,
+                run.run_id,
             )
             return None

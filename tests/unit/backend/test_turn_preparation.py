@@ -11,8 +11,8 @@ import pytest
 
 @pytest.mark.asyncio
 async def test_preparation_bounds_history_and_closes_in_dependency_order() -> None:
-    from fleet_rlm.chat.turn_lifecycle import ExecuteTurn, _TurnClaimToken
-    from fleet_rlm.chat.turn_preparation import DefaultTurnPreparer, RunEnvironment
+    from fleet_rlm.chat.run_lifecycle import ClaimedRun, _RunClaimToken
+    from fleet_rlm.chat.run_preparation import DefaultRunPreparer, RunEnvironment
     from fleet_rlm.files.models import PreparedAttachments
     from fleet_rlm.rlm.context import RLMExecutionSpec
     from fleet_rlm.rlm.dspy_contract import RLMOptions
@@ -84,16 +84,16 @@ async def test_preparation_bounds_history_and_closes_in_dependency_order() -> No
     async def not_cancelled():
         return False
 
-    turn = ExecuteTurn(
+    turn = ClaimedRun(
         uuid4(),
         uuid4(),
         TurnAccess(uuid4(), uuid4()),
         TurnInput("next"),
         SessionHistory((HistoryMessage("user", "prior"),)),
         not_cancelled,
-        _TurnClaimToken(uuid4()),
+        _RunClaimToken(uuid4()),
     )
-    prepared = await DefaultTurnPreparer(
+    prepared = await DefaultRunPreparer(
         models=RLMModelBundle(object(), object()),
         options=RLMOptions(),
         attachments=Attachments(),
@@ -117,8 +117,8 @@ async def test_preparation_bounds_history_and_closes_in_dependency_order() -> No
 async def test_capability_preparation_is_bounded_by_turn_deadline_and_releases_environment() -> None:
     import asyncio
 
-    from fleet_rlm.chat.turn_lifecycle import ExecuteTurn, _TurnClaimToken
-    from fleet_rlm.chat.turn_preparation import DefaultTurnPreparer, RunEnvironment, TurnPreparationTimeoutError
+    from fleet_rlm.chat.run_lifecycle import ClaimedRun, _RunClaimToken
+    from fleet_rlm.chat.run_preparation import DefaultRunPreparer, RunEnvironment, RunPreparationTimeoutError
     from fleet_rlm.files.models import PreparedAttachments
     from fleet_rlm.rlm.dspy_contract import RLMOptions
     from fleet_rlm.rlm.model_bundle import RLMModelBundle
@@ -156,16 +156,16 @@ async def test_capability_preparation_is_bounded_by_turn_deadline_and_releases_e
     async def not_cancelled() -> bool:
         return False
 
-    turn = ExecuteTurn(
+    turn = ClaimedRun(
         uuid4(),
         uuid4(),
         TurnAccess(uuid4(), uuid4()),
         TurnInput("prepare"),
         SessionHistory(()),
         not_cancelled,
-        _TurnClaimToken(uuid4()),
+        _RunClaimToken(uuid4()),
     )
-    module = DefaultTurnPreparer(
+    module = DefaultRunPreparer(
         models=RLMModelBundle(object(), object()),
         options=RLMOptions(),
         attachments=Attachments(),
@@ -173,15 +173,15 @@ async def test_capability_preparation_is_bounded_by_turn_deadline_and_releases_e
         capabilities=SlowCapabilities(),
     )
 
-    with pytest.raises(TurnPreparationTimeoutError, match="timed out"):
+    with pytest.raises(RunPreparationTimeoutError, match="timed out"):
         await module.prepare(turn, deadline=asyncio.get_running_loop().time() + 0.01)
     assert released is True
 
 
 @pytest.mark.asyncio
 async def test_preparation_failure_removes_staged_run_bytes_but_not_session_workspace() -> None:
-    from fleet_rlm.chat.turn_lifecycle import ExecuteTurn, _TurnClaimToken
-    from fleet_rlm.chat.turn_preparation import DefaultTurnPreparer, RunEnvironment
+    from fleet_rlm.chat.run_lifecycle import ClaimedRun, _RunClaimToken
+    from fleet_rlm.chat.run_preparation import DefaultRunPreparer, RunEnvironment
     from fleet_rlm.files.models import AttachmentRef, PreparedAttachments, StagedAttachment
     from fleet_rlm.rlm.dspy_contract import RLMOptions
     from fleet_rlm.rlm.model_bundle import RLMModelBundle
@@ -230,16 +230,16 @@ async def test_preparation_failure_removes_staged_run_bytes_but_not_session_work
     async def not_cancelled() -> bool:
         return False
 
-    turn = ExecuteTurn(
+    turn = ClaimedRun(
         run_id,
         session_id,
         access,
         TurnInput("prepare", (attachment_id,)),
         SessionHistory(),
         not_cancelled,
-        _TurnClaimToken(uuid4()),
+        _RunClaimToken(uuid4()),
     )
-    module = DefaultTurnPreparer(
+    module = DefaultRunPreparer(
         models=RLMModelBundle(object(), object()),
         options=RLMOptions(),
         attachments=Attachments(),
@@ -256,8 +256,8 @@ async def test_preparation_failure_removes_staged_run_bytes_but_not_session_work
 
 @pytest.mark.asyncio
 async def test_capsule_validation_failure_releases_all_prepared_resources() -> None:
-    from fleet_rlm.chat.turn_lifecycle import ExecuteTurn, _TurnClaimToken
-    from fleet_rlm.chat.turn_preparation import DefaultTurnPreparer, RunEnvironment
+    from fleet_rlm.chat.run_lifecycle import ClaimedRun, _RunClaimToken
+    from fleet_rlm.chat.run_preparation import DefaultRunPreparer, RunEnvironment
     from fleet_rlm.files.models import AttachmentRef, PreparedAttachments, StagedAttachment
     from fleet_rlm.rlm.context import RLMExecutionSpec
     from fleet_rlm.rlm.dspy_contract import RLMOptions
@@ -317,18 +317,18 @@ async def test_capsule_validation_failure_releases_all_prepared_resources() -> N
     async def not_cancelled() -> bool:
         return False
 
-    turn = ExecuteTurn(
+    turn = ClaimedRun(
         run_id,
         session_id,
         TurnAccess(uuid4(), uuid4()),
         TurnInput("prepare", (attachment_id,)),
         SessionHistory(),
         not_cancelled,
-        _TurnClaimToken(uuid4()),
+        _RunClaimToken(uuid4()),
     )
 
     with pytest.raises(ValueError, match="outside"):
-        await DefaultTurnPreparer(
+        await DefaultRunPreparer(
             models=RLMModelBundle(object(), object()),
             options=RLMOptions(),
             attachments=Attachments(),
@@ -435,11 +435,11 @@ async def test_prelude_emits_once_before_instant_open_and_failure_maps_to_error_
     from types import SimpleNamespace
 
     from fleet_rlm.api.routes.turns import create_turn
-    from fleet_rlm.chat.turn_lifecycle import TurnNotFoundError
+    from fleet_rlm.chat.run_lifecycle import RunNotFoundError
 
     class Coordinator:
         async def open(self, _command):
-            raise TurnNotFoundError("claim says no")
+            raise RunNotFoundError("claim says no")
 
     frames = [frame async for frame in create_turn(**_route_kwargs(Coordinator(), request=SimpleNamespace(headers={})))]
 
@@ -457,11 +457,11 @@ async def test_preparation_cancel_projects_single_abort_frame() -> None:
     from types import SimpleNamespace
 
     from fleet_rlm.api.routes.turns import create_turn
-    from fleet_rlm.chat.turn_preparation import TurnPreparationCancelledError
+    from fleet_rlm.chat.run_preparation import RunPreparationCancelledError
 
     class Coordinator:
         async def open(self, _command):
-            raise TurnPreparationCancelledError("Turn cancelled")
+            raise RunPreparationCancelledError("Turn cancelled")
 
     frames = [frame async for frame in create_turn(**_route_kwargs(Coordinator(), request=SimpleNamespace(headers={})))]
 
@@ -476,22 +476,22 @@ async def test_disconnect_before_open_resolves_settles_cancelled_and_persists_to
     from uuid import uuid4
 
     from fleet_rlm.api.routes.turns import create_turn
-    from fleet_rlm.chat.turn_cleanup import TurnCleanupSupervisor
+    from fleet_rlm.chat.run_cleanup import RunCleanupSupervisor
+    from fleet_rlm.chat.run_lifecycle import RunLifecycleService
     from fleet_rlm.chat.turn_coordinator import TurnCoordinator
-    from fleet_rlm.chat.turn_lifecycle import TurnLifecycleService
-    from fleet_rlm.persistence.repositories import InMemorySessionCatalog, InMemoryTurnStateStore
+    from fleet_rlm.persistence.repositories import InMemoryRunStateStore, InMemorySessionCatalog
     from fleet_rlm.rlm.events import EventRecorder, RunStarted, RuntimeEvent
     from fleet_rlm.sessions.models import TurnAccess
 
     access = TurnAccess(uuid4(), uuid4())
-    store = InMemoryTurnStateStore()
+    store = InMemoryRunStateStore()
     session = await InMemorySessionCatalog(store).create(
         user_id=access.user_id,
         workspace_id=access.workspace_id,
         title="disconnect during preparation",
     )
     release_preparation = asyncio.Event()
-    cleanup = TurnCleanupSupervisor()
+    cleanup = RunCleanupSupervisor()
     prepared_run_ids: list[object] = []
 
     class Preparation:
@@ -537,7 +537,7 @@ async def test_disconnect_before_open_resolves_settles_cancelled_and_persists_to
             return Stream()
 
     coordinator = TurnCoordinator(
-        lifecycle=TurnLifecycleService(store, max_artifact_bytes=1024),
+        lifecycle=RunLifecycleService(store, max_artifact_bytes=1024),
         preparation=Preparation(),
         runner=Runner(),
         cleanup=cleanup,

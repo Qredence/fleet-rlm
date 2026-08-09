@@ -242,7 +242,7 @@ def _apply_row_next_state(
         run.terminal_intent = next_state.intent.status
 
 
-class InMemoryTurnStateStore:
+class InMemoryRunStateStore:
     """Lock-backed parity adapter for private composition and lifecycle tests."""
 
     def __init__(self) -> None:
@@ -339,30 +339,30 @@ class InMemoryTurnStateStore:
 
     async def commit(
         self,
-        turn: ClaimedRun,
+        run: ClaimedRun,
         committed: CommittedTurn,
         artifacts: tuple[PromotedArtifact, ...],
     ) -> CommittedTurnReceipt:
         async with self._lock:
-            if turn.authority.revoked:
+            if run.authority.revoked:
                 raise RunStateError("Turn claim is invalid")
-            run, session = self._claimed(turn)
+            state, session = self._claimed(run)
             session.history.extend(
                 (
-                    HistoryMessage("user", turn.input.text),
+                    HistoryMessage("user", run.input.text),
                     HistoryMessage("assistant", committed.text),
                 )
             )
             session.checkpoint_version += 1
-            run.status = "completed"
-            run.user_turn_id = uuid4()
-            run.record_sequence = session.turn_sequence + 1
+            state.status = "completed"
+            state.user_turn_id = uuid4()
+            state.record_sequence = session.turn_sequence + 1
             session.turn_sequence += 2
-            run.committed = committed
-            run.checkpoint_version = session.checkpoint_version
+            state.committed = committed
+            state.checkpoint_version = session.checkpoint_version
             refs = tuple(item.ref for item in artifacts)
-            run.artifacts = refs
-            return CommittedTurnReceipt(run.run_id, session.checkpoint_version, committed, refs)
+            state.artifacts = refs
+            return CommittedTurnReceipt(state.run_id, session.checkpoint_version, committed, refs)
 
     def _persist_cancel_tombstone(self, run: _RunState, *, usage: RLMUsage | None = None) -> None:
         """Persist the bounded D2 tombstone for a claim transitioning to terminal cancelled."""
@@ -424,20 +424,22 @@ class InMemoryTurnStateStore:
                 )
             return tuple(records)
 
-    async def transition_claim(self, turn: ClaimedRun, command: ClaimCommand) -> FailedRunReceipt | None:
+    async def transition_claim(self, run: ClaimedRun, command: ClaimCommand) -> FailedRunReceipt | None:
         async with self._lock:
-            run = self._runs.get(turn.run_id)
-            if run is None or run.access != turn.access or run.session_id != turn.session_id:
+            state = self._runs.get(run.run_id)
+            if state is None or state.access != run.access or state.session_id != run.session_id:
                 raise RunNotFoundError("Turn not found")
-            if run.status == "completed":
+            if state.status == "completed":
                 raise RunAlreadyCompletedError("Turn already committed")
             stale_terminal = (
-                isinstance(command, CompleteSettlement) and run.status == "failed" and run.failure_code == "stale_claim"
+                isinstance(command, CompleteSettlement)
+                and state.status == "failed"
+                and state.failure_code == "stale_claim"
             )
-            if not isinstance(command, RevokeClaim) and not stale_terminal and run.claim != turn._claim:
+            if not isinstance(command, RevokeClaim) and not stale_terminal and state.claim != run._claim:
                 raise RunStateError("Turn claim is invalid")
             try:
-                decision = decide_claim_transition(_memory_claim_state(run), command)
+                decision = decide_claim_transition(_memory_claim_state(state), command)
             except InvalidClaimTransitionError as exc:
                 raise RunStateError(str(exc)) from exc
             if isinstance(command, HeartbeatClaim):
@@ -448,10 +450,10 @@ class InMemoryTurnStateStore:
             if transition is None:
                 raise RunStateError("claim decision did not include a transition")
             if transition.next_state is not None:
-                _apply_memory_next_state(run, transition.next_state, usage=_command_usage(command))
+                _apply_memory_next_state(state, transition.next_state, usage=_command_usage(command))
                 if transition.next_state.status == "cancelled":
-                    self._persist_cancel_tombstone(run, usage=_command_usage(command))
-            return _transition_receipt(run.run_id, transition)
+                    self._persist_cancel_tombstone(state, usage=_command_usage(command))
+            return _transition_receipt(state.run_id, transition)
 
     async def request_cancel(self, access: TurnAccess, run_id: UUID) -> CancelResult:
         async with self._lock:
@@ -465,14 +467,14 @@ class InMemoryTurnStateStore:
             run.cancel_requested = True
             return "requested"
 
-    def _claimed(self, turn: ClaimedRun) -> tuple[_RunState, _SessionState]:
-        run = self._runs.get(turn.run_id)
-        session = self._sessions.get(turn.session_id)
-        if run is None or session is None or run.access != turn.access or session.access != turn.access:
+    def _claimed(self, run: ClaimedRun) -> tuple[_RunState, _SessionState]:
+        state = self._runs.get(run.run_id)
+        session = self._sessions.get(run.session_id)
+        if state is None or session is None or state.access != run.access or session.access != run.access:
             raise RunNotFoundError("Turn not found")
-        if run.status != "running" or run.claim != turn._claim:
+        if state.status != "running" or state.claim != run._claim:
             raise RunStateError("Turn is not held by this claim")
-        return run, session
+        return state, session
 
     async def reconcile_settling(
         self,
@@ -518,7 +520,7 @@ class InMemoryTurnStateStore:
         )
 
 
-class SqlAlchemyTurnStateStore:
+class SqlAlchemyRunStateStore:
     """Transaction-backed authoritative Turn lifecycle state."""
 
     _RECOVERY_BATCH_SIZE = 100
@@ -616,39 +618,39 @@ class SqlAlchemyTurnStateStore:
 
     async def commit(
         self,
-        turn: ClaimedRun,
+        run: ClaimedRun,
         committed: CommittedTurn,
         artifacts: tuple[PromotedArtifact, ...],
     ) -> CommittedTurnReceipt:
         async with self._sessions() as db, db.begin():
-            if turn.authority.revoked:
+            if run.authority.revoked:
                 raise RunStateError("Turn claim is invalid")
-            run = await db.get(RunRow, turn.run_id, with_for_update=True)
-            if run is None or run.session_id != turn.session_id:
+            row = await db.get(RunRow, run.run_id, with_for_update=True)
+            if row is None or row.session_id != run.session_id:
                 raise RunNotFoundError("Turn not found")
-            if run.status == "completed":
-                return await self._receipt(db, run)
+            if row.status == "completed":
+                return await self._receipt(db, row)
             session = await db.scalar(
                 select(SessionRow)
                 .where(
-                    SessionRow.id == turn.session_id,
-                    SessionRow.user_id == turn.access.user_id,
-                    SessionRow.workspace_id == turn.access.workspace_id,
+                    SessionRow.id == run.session_id,
+                    SessionRow.user_id == run.access.user_id,
+                    SessionRow.workspace_id == run.access.workspace_id,
                 )
                 .with_for_update()
             )
             if session is None:
                 raise RunNotFoundError("Turn not found")
             if (
-                run.status != "running"
-                or run.claim_owner != str(turn._claim.value)
-                or run.base_checkpoint_version != turn._claim.base_checkpoint_version
-                or session.checkpoint_version != turn._claim.base_checkpoint_version
+                row.status != "running"
+                or row.claim_owner != str(run._claim.value)
+                or row.base_checkpoint_version != run._claim.base_checkpoint_version
+                or session.checkpoint_version != run._claim.base_checkpoint_version
             ):
                 raise RunStateError("Turn claim or Checkpoint is stale")
             last_sequence = int(
                 await db.scalar(
-                    select(func.coalesce(func.max(TurnRow.sequence), 0)).where(TurnRow.session_id == turn.session_id)
+                    select(func.coalesce(func.max(TurnRow.sequence), 0)).where(TurnRow.session_id == run.session_id)
                 )
                 or 0
             )
@@ -656,17 +658,17 @@ class SqlAlchemyTurnStateStore:
                 (
                     TurnRow(
                         id=uuid4(),
-                        session_id=turn.session_id,
-                        run_id=turn.run_id,
+                        session_id=run.session_id,
+                        run_id=run.run_id,
                         sequence=last_sequence + 1,
                         role="user",
-                        user_input_json=TurnInputCodec.encode(turn.input),
+                        user_input_json=TurnInputCodec.encode(run.input),
                         committed_turn_json=None,
                     ),
                     TurnRow(
-                        id=turn.run_id,
-                        session_id=turn.session_id,
-                        run_id=turn.run_id,
+                        id=run.run_id,
+                        session_id=run.session_id,
+                        run_id=run.run_id,
                         sequence=last_sequence + 2,
                         role="assistant",
                         user_input_json=None,
@@ -679,8 +681,8 @@ class SqlAlchemyTurnStateStore:
                 db.add(
                     ArtifactRow(
                         id=ref.id,
-                        user_id=turn.access.user_id,
-                        workspace_id=turn.access.workspace_id,
+                        user_id=run.access.user_id,
+                        workspace_id=run.access.workspace_id,
                         session_id=ref.session_id,
                         run_id=ref.run_id,
                         kind=ref.kind,
@@ -692,51 +694,47 @@ class SqlAlchemyTurnStateStore:
                     )
                 )
             session.checkpoint_version += 1
-            run.status = "completed"
-            run.commit_checkpoint_version = session.checkpoint_version
-            run.finished_at = datetime.now(UTC)
-            run.claim_owner = None
-            run.claim_heartbeat_at = None
-            if turn.authority.revoked:
+            row.status = "completed"
+            row.commit_checkpoint_version = session.checkpoint_version
+            row.finished_at = datetime.now(UTC)
+            row.claim_owner = None
+            row.claim_heartbeat_at = None
+            if run.authority.revoked:
                 raise RunStateError("Turn claim is invalid")
             return CommittedTurnReceipt(
-                turn.run_id,
+                run.run_id,
                 session.checkpoint_version,
                 committed,
                 tuple(item.ref for item in artifacts),
             )
 
-    async def transition_claim(self, turn: ClaimedRun, command: ClaimCommand) -> FailedRunReceipt | None:
+    async def transition_claim(self, run: ClaimedRun, command: ClaimCommand) -> FailedRunReceipt | None:
         async with self._sessions() as db, db.begin():
-            run = await db.get(RunRow, turn.run_id, with_for_update=True)
-            if run is None or run.session_id != turn.session_id:
+            row = await db.get(RunRow, run.run_id, with_for_update=True)
+            if row is None or row.session_id != run.session_id:
                 raise RunNotFoundError("Turn not found")
-            if run.status == "completed":
+            if row.status == "completed":
                 raise RunAlreadyCompletedError("Turn already committed")
             stale_terminal = (
-                isinstance(command, CompleteSettlement) and run.status == "failed" and run.failure_code == "stale_claim"
+                isinstance(command, CompleteSettlement) and row.status == "failed" and row.failure_code == "stale_claim"
             )
-            if (
-                not isinstance(command, RevokeClaim)
-                and not stale_terminal
-                and run.claim_owner != str(turn._claim.value)
-            ):
+            if not isinstance(command, RevokeClaim) and not stale_terminal and row.claim_owner != str(run._claim.value):
                 raise RunStateError("Turn claim is invalid")
             try:
-                decision = decide_claim_transition(_row_claim_state(run), command)
+                decision = decide_claim_transition(_row_claim_state(row), command)
             except InvalidClaimTransitionError as exc:
                 raise RunStateError(str(exc)) from exc
             if isinstance(command, HeartbeatClaim):
-                if not decision.heartbeat_allowed or run.claim_owner != str(turn._claim.value):
+                if not decision.heartbeat_allowed or row.claim_owner != str(run._claim.value):
                     raise RunStateError("Turn claim is invalid")
-                run.claim_heartbeat_at = datetime.now(UTC)
+                row.claim_heartbeat_at = datetime.now(UTC)
                 return None
             transition = decision.transition
             if transition is None:
                 raise RunStateError("claim decision did not include a transition")
             if transition.next_state is not None:
                 _apply_row_next_state(
-                    run,
+                    row,
                     transition.next_state,
                     public_message=transition.public_message,
                     usage=_command_usage(command),
@@ -744,14 +742,14 @@ class SqlAlchemyTurnStateStore:
                 if isinstance(command, (FailClaim, CompleteSettlement)):
                     # The cancelled terminal shape (claim released) must flush
                     # before the tombstone's sequence read autoflushes the row.
-                    run.finished_at = datetime.now(UTC)
-                    run.claim_owner = None
-                    run.claim_heartbeat_at = None
+                    row.finished_at = datetime.now(UTC)
+                    row.claim_owner = None
+                    row.claim_heartbeat_at = None
                 elif isinstance(command, (BeginSettlement, RevokeClaim)):
-                    run.recovery_metadata_json = {"cleanup": "pending"}
+                    row.recovery_metadata_json = {"cleanup": "pending"}
                 if transition.next_state.status == "cancelled":
-                    await self._persist_cancel_tombstone(db, run, turn.input)
-            return _transition_receipt(run.id, transition)
+                    await self._persist_cancel_tombstone(db, row, run.input)
+            return _transition_receipt(row.id, transition)
 
     @staticmethod
     async def _persist_cancel_tombstone(db: AsyncSession, run: RunRow, turn_input: TurnInput | None) -> None:
@@ -1027,3 +1025,8 @@ class SqlAlchemyTurnStateStore:
             else:
                 raise RunStateError("stored Turn shape is invalid")
         return SessionHistory(tuple(messages))
+
+
+# Compatibility aliases preserve the pre-Phase-1 Turn state-store imports.
+InMemoryTurnStateStore = InMemoryRunStateStore
+SqlAlchemyTurnStateStore = SqlAlchemyRunStateStore

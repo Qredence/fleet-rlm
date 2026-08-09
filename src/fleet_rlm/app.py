@@ -85,8 +85,8 @@ async def _local_db_lifespan(
                 await create_tables(engine)
         database = RuntimeDatabaseLifecycle(engine=engine, session_factory=session_factory)
         inventory = install_fn(app, settings_obj, database=database)
-        turn_state = inventory.turn_state_store
-        reconcile = getattr(turn_state, "reconcile_settling", None)
+        run_state = inventory.run_state_store
+        reconcile = getattr(run_state, "reconcile_settling", None)
         if callable(reconcile):
             from fleet_rlm.composition.common import no_provider_recovery_fence
 
@@ -94,7 +94,7 @@ async def _local_db_lifespan(
         yield
     finally:
         detached = clear_runtime_inventory(app)
-        cleanup = getattr(detached, "turn_cleanup_supervisor", None)
+        cleanup = getattr(detached, "run_cleanup_supervisor", None)
         if cleanup is not None:
             await cleanup.shutdown(drain_seconds=30)
         if detached is not None:

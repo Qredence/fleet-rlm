@@ -8,7 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from fleet_rlm.api.local_scope import LocalScope
-from fleet_rlm.chat.turn_lifecycle import BeginTurn, ExecuteTurn
+from fleet_rlm.chat.run_lifecycle import ClaimedRun, RunClaim
 from fleet_rlm.composition.testing import create_testing_app
 from fleet_rlm.sessions.models import TurnAccess, TurnInput
 
@@ -41,12 +41,12 @@ async def test_cancel_owned_run_records_intent_and_is_idempotent() -> None:
     with TestClient(app) as client:
         created = client.post("/api/sessions", json={"title": "t"}, headers=headers)
         session_id = UUID(created.json()["id"])
-        lifecycle = app.state.runtime_inventory.turn_lifecycle
+        lifecycle = app.state.runtime_inventory.run_lifecycle
         assert lifecycle is not None
         started = await lifecycle.begin(
-            BeginTurn(TurnAccess(user, ws), session_id, TurnInput("question"), "key-2", uuid4())
+            RunClaim(TurnAccess(user, ws), session_id, TurnInput("question"), "key-2", uuid4())
         )
-        assert isinstance(started, ExecuteTurn)
+        assert isinstance(started, ClaimedRun)
 
         r1 = client.put(f"/api/runs/{started.run_id}/cancellation", headers=headers)
         assert r1.status_code == 200

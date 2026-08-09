@@ -12,11 +12,11 @@ import pytest
 @pytest.mark.asyncio
 async def test_success_validates_and_publishes_before_atomic_commit() -> None:
     from fleet_rlm.artifacts.models import ArtifactCandidate
-    from fleet_rlm.chat.turn_lifecycle import (
+    from fleet_rlm.chat.run_lifecycle import (
+        ClaimedRun,
         CommittedTurnReceipt,
-        ExecuteTurn,
-        TurnLifecycleService,
-        _TurnClaimToken,
+        RunLifecycleService,
+        _RunClaimToken,
     )
     from fleet_rlm.rlm.dspy_contract import PredictionResult
     from fleet_rlm.rlm.outcome import RLMOutcome
@@ -43,14 +43,14 @@ async def test_success_validates_and_publishes_before_atomic_commit() -> None:
     async def not_cancelled() -> bool:
         return False
 
-    turn = ExecuteTurn(
+    turn = ClaimedRun(
         run_id,
         session_id,
         access,
         TurnInput("hello"),
         SessionHistory(),
         not_cancelled,
-        _TurnClaimToken(uuid4()),
+        _RunClaimToken(uuid4()),
     )
 
     class Store:
@@ -62,12 +62,12 @@ async def test_success_validates_and_publishes_before_atomic_commit() -> None:
             return CommittedTurnReceipt(run_id, 1, committed, artifacts)
 
         async def transition_claim(self, claimed, command):
-            from fleet_rlm.chat.turn_claim import FailClaim
-            from fleet_rlm.chat.turn_lifecycle import TurnFailure
+            from fleet_rlm.chat.run_claim import FailClaim
+            from fleet_rlm.chat.run_lifecycle import RunFailure
             from fleet_rlm.rlm.dspy_contract import empty_rlm_usage
 
             assert isinstance(command, FailClaim)
-            failure = TurnFailure(
+            failure = RunFailure(
                 command.failure.status,
                 command.failure.code,
                 command.failure.public_message,
@@ -93,7 +93,7 @@ async def test_success_validates_and_publishes_before_atomic_commit() -> None:
             self.values.pop(location, None)
 
     store, sink = Store(), Sink()
-    receipt = await TurnLifecycleService(store, max_artifact_bytes=100).finish(
+    receipt = await RunLifecycleService(store, max_artifact_bytes=100).finish(
         turn,
         RLMOutcome(
             terminal_status="completed",
@@ -114,11 +114,11 @@ async def test_success_validates_and_publishes_before_atomic_commit() -> None:
 @pytest.mark.asyncio
 async def test_authority_revocation_after_artifact_publish_rolls_back_before_commit() -> None:
     from fleet_rlm.artifacts.models import ArtifactCandidate
-    from fleet_rlm.chat.turn_lifecycle import (
-        ExecuteTurn,
+    from fleet_rlm.chat.run_lifecycle import (
+        ClaimedRun,
         FailedRunReceipt,
-        TurnLifecycleService,
-        _TurnClaimToken,
+        RunLifecycleService,
+        _RunClaimToken,
     )
     from fleet_rlm.rlm.dspy_contract import PredictionResult
     from fleet_rlm.rlm.outcome import RLMOutcome
@@ -151,14 +151,14 @@ async def test_authority_revocation_after_artifact_publish_rolls_back_before_com
         """
         return False
 
-    turn = ExecuteTurn(
+    turn = ClaimedRun(
         run_id,
         session_id,
         access,
         TurnInput("hello"),
         SessionHistory(),
         not_cancelled,
-        _TurnClaimToken(uuid4()),
+        _RunClaimToken(uuid4()),
     )
 
     class Store:
@@ -179,7 +179,7 @@ async def test_authority_revocation_after_artifact_publish_rolls_back_before_com
             Returns:
                 FailedRunReceipt: A receipt representing the failed run.
             """
-            from fleet_rlm.chat.turn_lifecycle import FailedRunReceipt
+            from fleet_rlm.chat.run_lifecycle import FailedRunReceipt
 
             return FailedRunReceipt(
                 claimed.run_id,
@@ -214,7 +214,7 @@ async def test_authority_revocation_after_artifact_publish_rolls_back_before_com
             self.values.pop(location, None)
 
     store, sink = Store(), Sink()
-    receipt = await TurnLifecycleService(store, max_artifact_bytes=100).finish(
+    receipt = await RunLifecycleService(store, max_artifact_bytes=100).finish(
         turn,
         RLMOutcome(
             "completed",
@@ -232,7 +232,7 @@ async def test_authority_revocation_after_artifact_publish_rolls_back_before_com
 @pytest.mark.asyncio
 async def test_integrity_failure_does_not_publish_and_finalizes_safely() -> None:
     from fleet_rlm.artifacts.models import ArtifactCandidate
-    from fleet_rlm.chat.turn_lifecycle import ExecuteTurn, FailedRunReceipt, TurnLifecycleService, _TurnClaimToken
+    from fleet_rlm.chat.run_lifecycle import ClaimedRun, FailedRunReceipt, RunLifecycleService, _RunClaimToken
     from fleet_rlm.rlm.dspy_contract import PredictionResult
     from fleet_rlm.rlm.outcome import RLMOutcome
     from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
@@ -242,14 +242,14 @@ async def test_integrity_failure_does_not_publish_and_finalizes_safely() -> None
     async def not_cancelled() -> bool:
         return False
 
-    turn = ExecuteTurn(
+    turn = ClaimedRun(
         run_id,
         session_id,
         access,
         TurnInput("hello"),
         SessionHistory(),
         not_cancelled,
-        _TurnClaimToken(uuid4()),
+        _RunClaimToken(uuid4()),
     )
     candidate = ArtifactCandidate(
         uuid4(),
@@ -268,12 +268,12 @@ async def test_integrity_failure_does_not_publish_and_finalizes_safely() -> None
 
     class Store:
         async def transition_claim(self, claimed, command):
-            from fleet_rlm.chat.turn_claim import FailClaim
-            from fleet_rlm.chat.turn_lifecycle import TurnFailure
+            from fleet_rlm.chat.run_claim import FailClaim
+            from fleet_rlm.chat.run_lifecycle import RunFailure
             from fleet_rlm.rlm.dspy_contract import empty_rlm_usage
 
             assert isinstance(command, FailClaim)
-            failure = TurnFailure(
+            failure = RunFailure(
                 command.failure.status,
                 command.failure.code,
                 command.failure.public_message,
@@ -302,7 +302,7 @@ async def test_integrity_failure_does_not_publish_and_finalizes_safely() -> None
             del location
             return None
 
-    receipt = await TurnLifecycleService(Store(), max_artifact_bytes=100).finish(
+    receipt = await RunLifecycleService(Store(), max_artifact_bytes=100).finish(
         turn,
         RLMOutcome(
             terminal_status="completed",
@@ -317,11 +317,11 @@ async def test_integrity_failure_does_not_publish_and_finalizes_safely() -> None
 
 @pytest.mark.asyncio
 async def test_daytona_success_writes_snapshot_before_commit_and_retains_it() -> None:
-    from fleet_rlm.chat.turn_lifecycle import (
+    from fleet_rlm.chat.run_lifecycle import (
+        ClaimedRun,
         CommittedTurnReceipt,
-        ExecuteTurn,
-        TurnLifecycleService,
-        _TurnClaimToken,
+        RunLifecycleService,
+        _RunClaimToken,
     )
     from fleet_rlm.rlm.dspy_contract import PredictionResult
     from fleet_rlm.rlm.outcome import RLMOutcome
@@ -332,14 +332,14 @@ async def test_daytona_success_writes_snapshot_before_commit_and_retains_it() ->
     async def not_cancelled() -> bool:
         return False
 
-    turn = ExecuteTurn(
+    turn = ClaimedRun(
         run_id,
         session_id,
         access,
         TurnInput("hello"),
         SessionHistory(),
         not_cancelled,
-        _TurnClaimToken(uuid4()),
+        _RunClaimToken(uuid4()),
     )
     operations: list[str] = []
 
@@ -351,12 +351,12 @@ async def test_daytona_success_writes_snapshot_before_commit_and_retains_it() ->
             return CommittedTurnReceipt(run_id, 1, committed, artifacts)
 
         async def transition_claim(self, claimed, command):
-            from fleet_rlm.chat.turn_claim import FailClaim
-            from fleet_rlm.chat.turn_lifecycle import TurnFailure
+            from fleet_rlm.chat.run_claim import FailClaim
+            from fleet_rlm.chat.run_lifecycle import RunFailure
             from fleet_rlm.rlm.dspy_contract import empty_rlm_usage
 
             assert isinstance(command, FailClaim)
-            failure = TurnFailure(
+            failure = RunFailure(
                 command.failure.status,
                 command.failure.code,
                 command.failure.public_message,
@@ -381,7 +381,7 @@ async def test_daytona_success_writes_snapshot_before_commit_and_retains_it() ->
             self.values.pop(location, None)
 
     snapshot = SnapshotSink()
-    receipt = await TurnLifecycleService(Store(), max_artifact_bytes=100).finish(
+    receipt = await RunLifecycleService(Store(), max_artifact_bytes=100).finish(
         turn,
         RLMOutcome(
             "completed",
@@ -399,11 +399,11 @@ async def test_daytona_success_writes_snapshot_before_commit_and_retains_it() ->
 @pytest.mark.asyncio
 async def test_commit_failure_removes_snapshot_logs_stage_and_keeps_public_failure_opaque(caplog) -> None:
     from fleet_rlm.artifacts.models import ArtifactCandidate
-    from fleet_rlm.chat.turn_lifecycle import (
-        ExecuteTurn,
+    from fleet_rlm.chat.run_lifecycle import (
+        ClaimedRun,
         FailedRunReceipt,
-        TurnLifecycleService,
-        _TurnClaimToken,
+        RunLifecycleService,
+        _RunClaimToken,
     )
     from fleet_rlm.rlm.dspy_contract import PredictionResult
     from fleet_rlm.rlm.outcome import RLMOutcome
@@ -414,14 +414,14 @@ async def test_commit_failure_removes_snapshot_logs_stage_and_keeps_public_failu
     async def not_cancelled() -> bool:
         return False
 
-    turn = ExecuteTurn(
+    turn = ClaimedRun(
         run_id,
         session_id,
         access,
         TurnInput("hello"),
         SessionHistory(),
         not_cancelled,
-        _TurnClaimToken(uuid4()),
+        _RunClaimToken(uuid4()),
     )
     data = b"artifact"
     candidate = ArtifactCandidate(
@@ -447,12 +447,12 @@ async def test_commit_failure_removes_snapshot_logs_stage_and_keeps_public_failu
             raise RuntimeError("database unavailable")
 
         async def transition_claim(self, claimed, command):
-            from fleet_rlm.chat.turn_claim import FailClaim
-            from fleet_rlm.chat.turn_lifecycle import TurnFailure
+            from fleet_rlm.chat.run_claim import FailClaim
+            from fleet_rlm.chat.run_lifecycle import RunFailure
             from fleet_rlm.rlm.dspy_contract import empty_rlm_usage
 
             assert isinstance(command, FailClaim)
-            failure = TurnFailure(
+            failure = RunFailure(
                 command.failure.status,
                 command.failure.code,
                 command.failure.public_message,
@@ -499,7 +499,7 @@ async def test_commit_failure_removes_snapshot_logs_stage_and_keeps_public_failu
             self.values.pop(location, None)
 
     artifacts, snapshot = ArtifactSink(), SnapshotSink()
-    receipt = await TurnLifecycleService(Store(), max_artifact_bytes=100).finish(
+    receipt = await RunLifecycleService(Store(), max_artifact_bytes=100).finish(
         turn,
         RLMOutcome(
             "completed",
@@ -538,11 +538,11 @@ async def test_commit_failure_removes_snapshot_logs_stage_and_keeps_public_failu
 @pytest.mark.asyncio
 @pytest.mark.parametrize("status", ["failed", "cancelled", "timeout"])
 async def test_non_success_never_writes_result_snapshot(status: str) -> None:
-    from fleet_rlm.chat.turn_lifecycle import (
-        ExecuteTurn,
+    from fleet_rlm.chat.run_lifecycle import (
+        ClaimedRun,
         FailedRunReceipt,
-        TurnLifecycleService,
-        _TurnClaimToken,
+        RunLifecycleService,
+        _RunClaimToken,
     )
     from fleet_rlm.rlm.outcome import RLMOutcome
     from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
@@ -552,24 +552,24 @@ async def test_non_success_never_writes_result_snapshot(status: str) -> None:
     async def not_cancelled() -> bool:
         return False
 
-    turn = ExecuteTurn(
+    turn = ClaimedRun(
         run_id,
         session_id,
         access,
         TurnInput("hello"),
         SessionHistory(),
         not_cancelled,
-        _TurnClaimToken(uuid4()),
+        _RunClaimToken(uuid4()),
     )
 
     class Store:
         async def transition_claim(self, claimed, command):
-            from fleet_rlm.chat.turn_claim import FailClaim
-            from fleet_rlm.chat.turn_lifecycle import TurnFailure
+            from fleet_rlm.chat.run_claim import FailClaim
+            from fleet_rlm.chat.run_lifecycle import RunFailure
             from fleet_rlm.rlm.dspy_contract import empty_rlm_usage
 
             assert isinstance(command, FailClaim)
-            failure = TurnFailure(
+            failure = RunFailure(
                 command.failure.status,
                 command.failure.code,
                 command.failure.public_message,
@@ -587,7 +587,7 @@ async def test_non_success_never_writes_result_snapshot(status: str) -> None:
         def __getattr__(self, name):
             raise AssertionError(name)
 
-    receipt = await TurnLifecycleService(Store(), max_artifact_bytes=100).finish(
+    receipt = await RunLifecycleService(Store(), max_artifact_bytes=100).finish(
         turn,
         RLMOutcome(status, public_error_message="Turn failed"),
         result_snapshot_sink=NeverSnapshot(),
@@ -600,11 +600,11 @@ async def test_non_success_never_writes_result_snapshot(status: str) -> None:
 @pytest.mark.parametrize("status", ["failed", "cancelled", "timeout"])
 async def test_non_success_removes_run_local_artifact_candidate_bytes(status: str) -> None:
     from fleet_rlm.artifacts.models import ArtifactCandidate
-    from fleet_rlm.chat.turn_lifecycle import (
-        ExecuteTurn,
+    from fleet_rlm.chat.run_lifecycle import (
+        ClaimedRun,
         FailedRunReceipt,
-        TurnLifecycleService,
-        _TurnClaimToken,
+        RunLifecycleService,
+        _RunClaimToken,
     )
     from fleet_rlm.rlm.outcome import RLMOutcome
     from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
@@ -629,24 +629,24 @@ async def test_non_success_removes_run_local_artifact_candidate_bytes(status: st
     async def not_cancelled() -> bool:
         return False
 
-    turn = ExecuteTurn(
+    turn = ClaimedRun(
         run_id,
         session_id,
         access,
         TurnInput("hello"),
         SessionHistory(),
         not_cancelled,
-        _TurnClaimToken(uuid4()),
+        _RunClaimToken(uuid4()),
     )
 
     class Store:
         async def transition_claim(self, claimed, command):
-            from fleet_rlm.chat.turn_claim import FailClaim
-            from fleet_rlm.chat.turn_lifecycle import TurnFailure
+            from fleet_rlm.chat.run_claim import FailClaim
+            from fleet_rlm.chat.run_lifecycle import RunFailure
             from fleet_rlm.rlm.dspy_contract import empty_rlm_usage
 
             assert isinstance(command, FailClaim)
-            failure = TurnFailure(
+            failure = RunFailure(
                 command.failure.status,
                 command.failure.code,
                 command.failure.public_message,
@@ -669,7 +669,7 @@ async def test_non_success_removes_run_local_artifact_candidate_bytes(status: st
             self.values.pop(location, None)
 
     sink = Sink()
-    receipt = await TurnLifecycleService(Store(), max_artifact_bytes=100).finish(
+    receipt = await RunLifecycleService(Store(), max_artifact_bytes=100).finish(
         turn,
         RLMOutcome(status, artifact_candidates=(candidate,)),
         artifact_sink=sink,

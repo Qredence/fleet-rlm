@@ -9,11 +9,11 @@ import pytest
 
 @pytest.mark.asyncio
 async def test_connection_reset_during_capability_preparation_is_unavailable() -> None:
-    from fleet_rlm.chat.turn_lifecycle import ExecuteTurn, _TurnClaimToken
-    from fleet_rlm.chat.turn_preparation import (
-        DefaultTurnPreparer,
+    from fleet_rlm.chat.run_lifecycle import ClaimedRun, _RunClaimToken
+    from fleet_rlm.chat.run_preparation import (
+        DefaultRunPreparer,
         RunEnvironment,
-        TurnPreparationUnavailableError,
+        RunPreparationUnavailableError,
     )
     from fleet_rlm.files.models import PreparedAttachments
     from fleet_rlm.persistence.database import DatabaseConnectionError
@@ -48,16 +48,16 @@ async def test_connection_reset_during_capability_preparation_is_unavailable() -
     async def not_cancelled() -> bool:
         return False
 
-    turn = ExecuteTurn(
+    turn = ClaimedRun(
         uuid4(),
         uuid4(),
         TurnAccess(uuid4(), uuid4()),
         TurnInput("prepare"),
         SessionHistory(),
         not_cancelled,
-        _TurnClaimToken(uuid4()),
+        _RunClaimToken(uuid4()),
     )
-    preparer = DefaultTurnPreparer(
+    preparer = DefaultRunPreparer(
         models=RLMModelBundle(object(), object()),
         options=RLMOptions(),
         attachments=Attachments(),
@@ -65,17 +65,17 @@ async def test_connection_reset_during_capability_preparation_is_unavailable() -
         capabilities=Capabilities(),
     )
 
-    with pytest.raises(TurnPreparationUnavailableError, match="capabilities"):
+    with pytest.raises(RunPreparationUnavailableError, match="capabilities"):
         await preparer.prepare(turn, deadline=float("inf"))
 
 
 @pytest.mark.asyncio
 async def test_connection_reset_during_attachment_staging_is_unavailable() -> None:
-    from fleet_rlm.chat.turn_lifecycle import ExecuteTurn, _TurnClaimToken
-    from fleet_rlm.chat.turn_preparation import (
-        DefaultTurnPreparer,
+    from fleet_rlm.chat.run_lifecycle import ClaimedRun, _RunClaimToken
+    from fleet_rlm.chat.run_preparation import (
+        DefaultRunPreparer,
         RunEnvironment,
-        TurnPreparationUnavailableError,
+        RunPreparationUnavailableError,
     )
     from fleet_rlm.persistence.database import DatabaseConnectionError
     from fleet_rlm.rlm.dspy_contract import RLMOptions
@@ -104,16 +104,16 @@ async def test_connection_reset_during_attachment_staging_is_unavailable() -> No
     async def not_cancelled() -> bool:
         return False
 
-    turn = ExecuteTurn(
+    turn = ClaimedRun(
         uuid4(),
         uuid4(),
         TurnAccess(uuid4(), uuid4()),
         TurnInput("prepare"),
         SessionHistory(),
         not_cancelled,
-        _TurnClaimToken(uuid4()),
+        _RunClaimToken(uuid4()),
     )
-    preparer = DefaultTurnPreparer(
+    preparer = DefaultRunPreparer(
         models=RLMModelBundle(object(), object()),
         options=RLMOptions(),
         attachments=Attachments(),
@@ -121,17 +121,17 @@ async def test_connection_reset_during_attachment_staging_is_unavailable() -> No
         capabilities=object(),
     )
 
-    with pytest.raises(TurnPreparationUnavailableError, match="attachments"):
+    with pytest.raises(RunPreparationUnavailableError, match="attachments"):
         await preparer.prepare(turn, deadline=float("inf"))
 
 
 @pytest.mark.asyncio
 async def test_connection_reset_during_post_capability_cancellation_probe_is_unavailable() -> None:
-    from fleet_rlm.chat.turn_lifecycle import ExecuteTurn, _TurnClaimToken
-    from fleet_rlm.chat.turn_preparation import (
-        DefaultTurnPreparer,
+    from fleet_rlm.chat.run_lifecycle import ClaimedRun, _RunClaimToken
+    from fleet_rlm.chat.run_preparation import (
+        DefaultRunPreparer,
         RunEnvironment,
-        TurnPreparationUnavailableError,
+        RunPreparationUnavailableError,
     )
     from fleet_rlm.files.models import PreparedAttachments
     from fleet_rlm.persistence.database import DatabaseConnectionError
@@ -177,16 +177,16 @@ async def test_connection_reset_during_post_capability_cancellation_probe_is_una
             return False
         raise DatabaseConnectionError("cancellation probe unavailable")
 
-    turn = ExecuteTurn(
+    turn = ClaimedRun(
         uuid4(),
         uuid4(),
         TurnAccess(uuid4(), uuid4()),
         TurnInput("prepare"),
         SessionHistory(),
         cancellation_probe,
-        _TurnClaimToken(uuid4()),
+        _RunClaimToken(uuid4()),
     )
-    preparer = DefaultTurnPreparer(
+    preparer = DefaultRunPreparer(
         models=RLMModelBundle(object(), object()),
         options=RLMOptions(),
         attachments=Attachments(),
@@ -194,5 +194,5 @@ async def test_connection_reset_during_post_capability_cancellation_probe_is_una
         capabilities=Capabilities(),
     )
 
-    with pytest.raises(TurnPreparationUnavailableError, match="cancellation"):
+    with pytest.raises(RunPreparationUnavailableError, match="cancellation"):
         await preparer.prepare(turn, deadline=float("inf"))

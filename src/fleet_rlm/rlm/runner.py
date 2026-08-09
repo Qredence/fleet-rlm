@@ -28,9 +28,9 @@ from fleet_rlm.rlm.dspy_contract import (
 )
 from fleet_rlm.rlm.errors import (
     RLMConfigError,
-    TurnCancelledError,
-    TurnIntegrityFailureError,
-    TurnTerminalError,
+    RunCancelledError,
+    RunIntegrityFailureError,
+    RunTerminalError,
 )
 from fleet_rlm.rlm.events import (
     AttachmentRead,
@@ -58,7 +58,7 @@ from fleet_rlm.rlm.outcome import ExecutionDetail, RLMOutcome, TerminalStatus
 from fleet_rlm.rlm.recursive_calls import RecursiveCallSummary, RecursiveRLMExecutor
 from fleet_rlm.rlm.sanitize import truncate_public_text
 from fleet_rlm.rlm.signature import root_signature_for_recursion
-from fleet_rlm.rlm.tool_guards import TurnToolGuards, workspace_obligations
+from fleet_rlm.rlm.tool_guards import RunToolGuards, workspace_obligations
 from fleet_rlm.rlm.tool_observer import ToolEventView, observe_tool
 
 logger = logging.getLogger(__name__)
@@ -445,7 +445,7 @@ def _reconcile_trajectory(
 
 
 def _terminal_status(exc: BaseException) -> TerminalStatus:
-    if isinstance(exc, TurnTerminalError):
+    if isinstance(exc, RunTerminalError):
         return cast(TerminalStatus, exc.status)
     if isinstance(exc, (TimeoutError, asyncio.TimeoutError)):
         return "timeout"
@@ -455,12 +455,12 @@ def _terminal_status(exc: BaseException) -> TerminalStatus:
 
 
 def _public_failure_message(exc: BaseException) -> str:
-    # Read the instance attribute so a parametrized ``TurnTerminalError("...")``
+    # Read the instance attribute so a parametrized ``RunTerminalError("...")``
     # override is honored, matching ``sanitize_public_error``. Class-attr
     # defaults (currently all raise sites) fall through the same lookup.
     if isinstance(exc, PredictionOutputError):
         return str(getattr(exc, "public_message", "Turn output is invalid"))
-    if isinstance(exc, TurnTerminalError):
+    if isinstance(exc, RunTerminalError):
         return str(getattr(exc, "public_message", "Turn failed"))
     if isinstance(exc, AdapterParseError):
         return "The model produced a response that could not be parsed into the expected fields."
@@ -502,7 +502,7 @@ class _WorkerMonitor:
         try:
             while not self.task.done():
                 if await self.context.execution.cancellation_requested():
-                    self.intended_stop = TurnCancelledError()
+                    self.intended_stop = RunCancelledError()
                     break
                 remaining = self.context.execution.deadline - asyncio.get_running_loop().time()
                 if remaining <= 0:
@@ -646,7 +646,7 @@ class RLMRunner:
             yield event
         prediction.append(task.result())
         if guards.integrity.unresolved:
-            raise TurnIntegrityFailureError
+            raise RunIntegrityFailureError
         async for event in self._prediction_events(context, observations, prediction[-1]):
             yield event
         duration_ms = int((time.perf_counter() - started) * 1000)
@@ -680,11 +680,11 @@ class RLMRunner:
         for item in self._drain_capability_details(context):
             yield observations.record(item)
         if await context.execution.cancellation_requested():
-            raise TurnCancelledError
+            raise RunCancelledError
 
     def _start_worker(
         self, context: RLMExecutionContext
-    ) -> tuple[RLMExecutionSpec, _DetailRelay, TurnToolGuards, asyncio.Task[Any]]:
+    ) -> tuple[RLMExecutionSpec, _DetailRelay, RunToolGuards, asyncio.Task[Any]]:
         """
         Prepare the RLM worker and supporting execution state for a turn.
 
@@ -700,7 +700,7 @@ class RLMRunner:
         """
         spec = context.capabilities.spec
         relay = _DetailRelay(maxsize=_MAX_DETAIL_EVENTS)
-        guards = TurnToolGuards(required_targets=workspace_obligations(context.session.request))
+        guards = RunToolGuards(required_targets=workspace_obligations(context.session.request))
         self._bind_observer(context.execution.interpreter, relay, context.execution.options.max_output_chars)
         self._bind_context_capsule(context)
         recursive_executor = None

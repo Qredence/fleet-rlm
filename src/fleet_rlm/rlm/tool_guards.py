@@ -1,4 +1,4 @@
-"""Per-Turn host-tool integrity and forward-progress safeguards."""
+"""Per-Run host-tool integrity and forward-progress safeguards."""
 
 from __future__ import annotations
 
@@ -94,7 +94,7 @@ def workspace_obligations(request: str) -> frozenset[str] | None:
 
 
 @dataclass(slots=True)
-class TurnIntegrityLedger:
+class RunIntegrityLedger:
     """Keep failed required workspace mutations unresolved until repaired in-place."""
 
     _unresolved: set[str] = field(default_factory=set)
@@ -175,10 +175,10 @@ class ToolProgressGuard:
 
 
 @dataclass(slots=True)
-class TurnToolGuards:
-    """Small runner-facing interface consolidating mutable per-Turn safeguards."""
+class RunToolGuards:
+    """Small runner-facing interface consolidating mutable per-Run safeguards."""
 
-    integrity: TurnIntegrityLedger = field(default_factory=TurnIntegrityLedger)
+    integrity: RunIntegrityLedger = field(default_factory=RunIntegrityLedger)
     progress: ToolProgressGuard = field(default_factory=ToolProgressGuard)
     required_targets: frozenset[str] | None = None
 
@@ -192,3 +192,8 @@ class TurnToolGuards:
 
     def failed(self, tool_name: str, arguments: Mapping[str, Any]) -> None:
         self.integrity.failed(tool_name, arguments)
+
+
+# Compatibility aliases preserve the pre-Run guard imports.
+TurnIntegrityLedger = RunIntegrityLedger
+TurnToolGuards = RunToolGuards

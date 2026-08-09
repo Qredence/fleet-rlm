@@ -17,8 +17,8 @@ async def test_runner_retains_prediction_usage_when_typed_output_is_invalid() ->
         ExecutionRuntime,
         RLMExecutionContext,
         RLMExecutionSpec,
+        RunIdentity,
         SessionView,
-        TurnIdentity,
     )
     from fleet_rlm.rlm.dspy_contract import RLMOptions
     from fleet_rlm.rlm.runner import RLMRunner
@@ -56,7 +56,7 @@ async def test_runner_retains_prediction_usage_when_typed_output_is_invalid() ->
         return False
 
     context = RLMExecutionContext(
-        identity=TurnIdentity(run_id=uuid4(), session_id=uuid4(), access=TurnAccess(uuid4(), uuid4())),
+        identity=RunIdentity(run_id=uuid4(), session_id=uuid4(), access=TurnAccess(uuid4(), uuid4())),
         session=SessionView(
             request="answer",
             session_context=SessionContextManifest(uuid4(), 0, 0, ()),
@@ -91,8 +91,8 @@ async def test_runner_reports_turn_output_too_large_for_oversized_answer() -> No
         ExecutionRuntime,
         RLMExecutionContext,
         RLMExecutionSpec,
+        RunIdentity,
         SessionView,
-        TurnIdentity,
     )
     from fleet_rlm.rlm.dspy_contract import RLMOptions
     from fleet_rlm.rlm.runner import RLMRunner
@@ -133,7 +133,7 @@ async def test_runner_reports_turn_output_too_large_for_oversized_answer() -> No
         return False
 
     context = RLMExecutionContext(
-        identity=TurnIdentity(run_id=uuid4(), session_id=uuid4(), access=TurnAccess(uuid4(), uuid4())),
+        identity=RunIdentity(run_id=uuid4(), session_id=uuid4(), access=TurnAccess(uuid4(), uuid4())),
         session=SessionView(
             request="answer",
             session_context=SessionContextManifest(uuid4(), 0, 0, ()),
@@ -164,8 +164,8 @@ async def test_runner_emits_preloaded_skill_events_before_later_output_failure()
         ExecutionRuntime,
         RLMExecutionContext,
         RLMExecutionSpec,
+        RunIdentity,
         SessionView,
-        TurnIdentity,
     )
     from fleet_rlm.rlm.dspy_contract import RLMOptions
     from fleet_rlm.rlm.events import SkillActivated, SkillLoaded
@@ -201,7 +201,7 @@ async def test_runner_emits_preloaded_skill_events_before_later_output_failure()
         return False
 
     context = RLMExecutionContext(
-        identity=TurnIdentity(run_id=uuid4(), session_id=uuid4(), access=TurnAccess(uuid4(), uuid4())),
+        identity=RunIdentity(run_id=uuid4(), session_id=uuid4(), access=TurnAccess(uuid4(), uuid4())),
         session=SessionView(
             request="answer",
             session_context=SessionContextManifest(uuid4(), 0, 0, ()),
@@ -238,8 +238,8 @@ async def test_runner_emits_preloaded_skill_events_before_cancel_or_timeout(term
         ExecutionRuntime,
         RLMExecutionContext,
         RLMExecutionSpec,
+        RunIdentity,
         SessionView,
-        TurnIdentity,
     )
     from fleet_rlm.rlm.dspy_contract import RLMOptions
     from fleet_rlm.rlm.events import SkillActivated, SkillLoaded
@@ -276,7 +276,7 @@ async def test_runner_emits_preloaded_skill_events_before_cancel_or_timeout(term
 
     loop = asyncio.get_running_loop()
     context = RLMExecutionContext(
-        identity=TurnIdentity(run_id=uuid4(), session_id=uuid4(), access=TurnAccess(uuid4(), uuid4())),
+        identity=RunIdentity(run_id=uuid4(), session_id=uuid4(), access=TurnAccess(uuid4(), uuid4())),
         session=SessionView(
             request="answer",
             session_context=SessionContextManifest(uuid4(), 0, 0, ()),
@@ -306,13 +306,13 @@ async def test_runner_emits_preloaded_skill_events_before_cancel_or_timeout(term
 
 
 def test_public_failure_message_honors_instance_override() -> None:
-    from fleet_rlm.rlm.errors import TurnTerminalError
+    from fleet_rlm.rlm.errors import RunTerminalError
     from fleet_rlm.rlm.runner import _public_failure_message
 
     # A parametrized terminal error sets an instance ``public_message``; the
     # runner must honor it (matching sanitize_public_error) instead of reading
     # the class attribute.
-    error = TurnTerminalError("custom public message")
+    error = RunTerminalError("custom public message")
     assert _public_failure_message(error) == "custom public message"
     assert str(type(error).public_message) == "Turn failed"
 
@@ -324,8 +324,8 @@ async def test_stream_closed_before_iteration_synthesizes_cancelled_outcome() ->
         ExecutionRuntime,
         RLMExecutionContext,
         RLMExecutionSpec,
+        RunIdentity,
         SessionView,
-        TurnIdentity,
     )
     from fleet_rlm.rlm.dspy_contract import RLMOptions
     from fleet_rlm.rlm.runner import RLMRunner
@@ -352,7 +352,7 @@ async def test_stream_closed_before_iteration_synthesizes_cancelled_outcome() ->
 
     loop = asyncio.get_running_loop()
     context = RLMExecutionContext(
-        identity=TurnIdentity(run_id=uuid4(), session_id=uuid4(), access=TurnAccess(uuid4(), uuid4())),
+        identity=RunIdentity(run_id=uuid4(), session_id=uuid4(), access=TurnAccess(uuid4(), uuid4())),
         session=SessionView(
             request="answer",
             session_context=SessionContextManifest(uuid4(), 0, 0, ()),

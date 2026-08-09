@@ -53,25 +53,25 @@ def _install_fake_mlflow(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
 
 
 def _make_turn() -> Any:
-    from fleet_rlm.chat.turn_lifecycle import ExecuteTurn, _TurnClaimToken
+    from fleet_rlm.chat.run_lifecycle import ClaimedRun, _RunClaimToken
     from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
 
     async def not_cancelled() -> bool:
         return False
 
-    return ExecuteTurn(
+    return ClaimedRun(
         uuid4(),
         uuid4(),
         TurnAccess(uuid4(), uuid4()),
         TurnInput("next"),
         SessionHistory(()),
         not_cancelled,
-        _TurnClaimToken(uuid4()),
+        _RunClaimToken(uuid4()),
     )
 
 
 def _make_preparer(*, environments: Any = None) -> Any:
-    from fleet_rlm.chat.turn_preparation import DefaultTurnPreparer, RunEnvironment
+    from fleet_rlm.chat.run_preparation import DefaultRunPreparer, RunEnvironment
     from fleet_rlm.files.models import PreparedAttachments
     from fleet_rlm.rlm.context import RLMExecutionSpec
     from fleet_rlm.rlm.dspy_contract import RLMOptions
@@ -116,7 +116,7 @@ def _make_preparer(*, environments: Any = None) -> Any:
             sink = Sink()
             return RunEnvironment(SimpleNamespace(), sink, sink, release)
 
-    return DefaultTurnPreparer(
+    return DefaultRunPreparer(
         models=RLMModelBundle(object(), object()),
         options=RLMOptions(),
         attachments=Attachments(),
@@ -154,7 +154,7 @@ async def test_acquire_environment_failure_marks_phase_failed(
     monkeypatch: pytest.MonkeyPatch, fleet_trace_active: None
 ) -> None:
     del fleet_trace_active
-    from fleet_rlm.chat.turn_preparation import TurnPreparationUnavailableError
+    from fleet_rlm.chat.run_preparation import RunPreparationUnavailableError
 
     calls = _install_fake_mlflow(monkeypatch)
 
@@ -163,7 +163,7 @@ async def test_acquire_environment_failure_marks_phase_failed(
             del turn, deadline
             raise RuntimeError("env boom")
 
-    with pytest.raises(TurnPreparationUnavailableError):
+    with pytest.raises(RunPreparationUnavailableError):
         await _make_preparer(environments=ExplodingEnvironments()).prepare(_make_turn(), deadline=float("inf"))
 
     assert calls.start_span_names == ["Turn.acquire_environment"]

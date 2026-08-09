@@ -108,11 +108,11 @@ def test_daytona_volume_adapter_removes_exact_file_path() -> None:
 
 @pytest.mark.asyncio
 async def test_live_daytona_sink_commit_failure_deletes_snapshot_through_adapter() -> None:
-    from fleet_rlm.chat.turn_lifecycle import (
-        ExecuteTurn,
+    from fleet_rlm.chat.run_lifecycle import (
+        ClaimedRun,
         FailedRunReceipt,
-        TurnLifecycleService,
-        _TurnClaimToken,
+        RunLifecycleService,
+        _RunClaimToken,
     )
     from fleet_rlm.daytona.run_environment import _DaytonaRunSink
     from fleet_rlm.files.volume_paths import VolumePaths
@@ -149,14 +149,14 @@ async def test_live_daytona_sink_commit_failure_deletes_snapshot_through_adapter
     async def not_cancelled() -> bool:
         return False
 
-    turn = ExecuteTurn(
+    turn = ClaimedRun(
         run_id,
         session_id,
         access,
         TurnInput("hello"),
         SessionHistory(),
         not_cancelled,
-        _TurnClaimToken(uuid4()),
+        _RunClaimToken(uuid4()),
     )
 
     class Store:
@@ -165,12 +165,12 @@ async def test_live_daytona_sink_commit_failure_deletes_snapshot_through_adapter
             raise RuntimeError("commit failed")
 
         async def transition_claim(self, claimed, command):
-            from fleet_rlm.chat.turn_claim import FailClaim
-            from fleet_rlm.chat.turn_lifecycle import TurnFailure
+            from fleet_rlm.chat.run_claim import FailClaim
+            from fleet_rlm.chat.run_lifecycle import RunFailure
             from fleet_rlm.rlm.dspy_contract import empty_rlm_usage
 
             assert isinstance(command, FailClaim)
-            failure = TurnFailure(
+            failure = RunFailure(
                 command.failure.status,
                 command.failure.code,
                 command.failure.public_message,
@@ -184,7 +184,7 @@ async def test_live_daytona_sink_commit_failure_deletes_snapshot_through_adapter
                 True,
             )
 
-    receipt = await TurnLifecycleService(Store(), max_artifact_bytes=1024).finish(
+    receipt = await RunLifecycleService(Store(), max_artifact_bytes=1024).finish(
         turn,
         RLMOutcome(
             "completed",

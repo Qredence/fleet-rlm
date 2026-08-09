@@ -20,8 +20,8 @@ async def test_native_rlm_retrieves_older_content_absent_from_initial_kwargs() -
         ExecutionRuntime,
         RLMExecutionContext,
         RLMExecutionSpec,
+        RunIdentity,
         SessionView,
-        TurnIdentity,
     )
     from fleet_rlm.rlm.dspy_contract import RLMOptions
     from fleet_rlm.rlm.factory import RLMFactory
@@ -78,7 +78,7 @@ async def test_native_rlm_retrieves_older_content_absent_from_initial_kwargs() -
         return False
 
     context = RLMExecutionContext(
-        identity=TurnIdentity(run_id=uuid4(), session_id=session_id, access=TurnAccess(uuid4(), uuid4())),
+        identity=RunIdentity(run_id=uuid4(), session_id=session_id, access=TurnAccess(uuid4(), uuid4())),
         session=SessionView(
             request="What was the project codename?", session_context=manifest, attachments=(), preparation_notices=()
         ),
@@ -110,8 +110,8 @@ async def test_native_rlm_continues_history_across_truncated_pages() -> None:
         ExecutionRuntime,
         RLMExecutionContext,
         RLMExecutionSpec,
+        RunIdentity,
         SessionView,
-        TurnIdentity,
     )
     from fleet_rlm.rlm.dspy_contract import RLMOptions
     from fleet_rlm.rlm.factory import RLMFactory
@@ -174,7 +174,7 @@ async def test_native_rlm_continues_history_across_truncated_pages() -> None:
         return False
 
     context = RLMExecutionContext(
-        identity=TurnIdentity(run_id=uuid4(), session_id=session_id, access=TurnAccess(uuid4(), uuid4())),
+        identity=RunIdentity(run_id=uuid4(), session_id=session_id, access=TurnAccess(uuid4(), uuid4())),
         session=SessionView(
             request="What is the final detail?", session_context=manifest, attachments=(), preparation_notices=()
         ),

@@ -116,8 +116,8 @@ class _TestingVolumeFsAdapter:
 
 
 class TestingRunEnvironmentProvider(RunEnvironmentProvider):
-    async def acquire(self, turn: ClaimedRun, *, deadline: float) -> RunEnvironment:
-        del turn, deadline
+    async def acquire(self, run: ClaimedRun, *, deadline: float) -> RunEnvironment:
+        del run, deadline
         sink = TestingRunSink()
 
         async def release() -> None:
@@ -168,7 +168,7 @@ class TestingCapabilityPreparer:
 
     async def prepare(
         self,
-        turn: ClaimedRun,
+        run: ClaimedRun,
         environment: RunEnvironment,
         attachments: PreparedAttachments,
         *,
@@ -196,10 +196,10 @@ class TestingCapabilityPreparer:
             attachments=attachments.refs,
             staged_attachments=attachments.staged,
             volume_fs=volume_fs,
-            user_id=turn.access.user_id,
-            workspace_id=turn.access.workspace_id,
-            session_id=turn.session_id,
-            run_id=turn.run_id,
+            user_id=run.access.user_id,
+            workspace_id=run.access.workspace_id,
+            session_id=run.session_id,
+            run_id=run.run_id,
             max_artifact_bytes=self._max_artifact_bytes,
             volume_paths=None,
         )
@@ -214,7 +214,7 @@ class TestingCapabilityPreparer:
             if name not in {"create_artifact", "publish_workspace_artifact"}
         }
         url_host = UrlToolHost(
-            session_id=turn.session_id,
+            session_id=run.session_id,
             store=self._url_store,
             max_bytes=self._max_url_bytes,
             fetcher=_TestingCacheOnlyUrlFetcher(),
@@ -222,7 +222,7 @@ class TestingCapabilityPreparer:
         url_tools = url_host.as_tools()
         url_event_views = url_host.event_views()
         spec, skill_host, notices = await prepare_host_capabilities(
-            turn=turn,
+            turn=run,
             skill_catalog=self._skill_catalog,
             base_tools=(*file_tools, *url_tools),
             base_event_views={**file_event_views, **url_event_views},
@@ -289,8 +289,8 @@ class DeterministicTurnPreparation:
             ),
         )
 
-    async def prepare(self, turn: ClaimedRun, *, deadline: float) -> PreparedRun:
-        return await self._module.prepare(turn, deadline=deadline)
+    async def prepare(self, run: ClaimedRun, *, deadline: float) -> PreparedRun:
+        return await self._module.prepare(run, deadline=deadline)
 
 
 def install_testing_composition(
@@ -347,10 +347,10 @@ def install_testing_composition(
         attachment_lifecycle=local_inventory.attachment_lifecycle,
         artifact_reader=local_inventory.artifact_reader,
         session_catalog=local_inventory.session_catalog,
-        turn_lifecycle=local_inventory.turn_lifecycle,
-        turn_preparation=local_inventory.turn_preparation,
-        turn_cleanup_supervisor=local_inventory.turn_cleanup_supervisor,
-        turn_state_store=local_inventory.turn_state_store,
+        run_lifecycle=local_inventory.run_lifecycle,
+        run_preparation=local_inventory.run_preparation,
+        run_cleanup_supervisor=local_inventory.run_cleanup_supervisor,
+        run_state_store=local_inventory.run_state_store,
         config_policy=local_inventory.config_policy,
         database=local_inventory.database,
         workspace_volume_gateway=volume_gateway,

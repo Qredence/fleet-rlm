@@ -10,21 +10,21 @@ import pytest
 
 
 def _turn():
-    from fleet_rlm.chat.turn_lifecycle import ExecuteTurn, _TurnClaimToken
+    from fleet_rlm.chat.run_lifecycle import ClaimedRun, _RunClaimToken
     from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
 
     async def not_cancelled() -> bool:
         return False
 
     access = TurnAccess(uuid4(), uuid4())
-    return ExecuteTurn(
+    return ClaimedRun(
         uuid4(),
         uuid4(),
         access,
         TurnInput("driver test"),
         SessionHistory(),
         not_cancelled,
-        _TurnClaimToken(uuid4()),
+        _RunClaimToken(uuid4()),
     )
 
 
@@ -81,21 +81,21 @@ class _CleanupLifecycle:
         self.finish_started.set()
         if self.release_finish is not None:
             await self.release_finish.wait()
-        from fleet_rlm.chat.turn_lifecycle import FailedRunReceipt
+        from fleet_rlm.chat.run_lifecycle import FailedRunReceipt
 
         return FailedRunReceipt(uuid4(), "failed", "execution_failed", "Turn failed", True)
 
     async def settle(self, turn, failure):
         del turn, failure
         self.settle_calls += 1
-        from fleet_rlm.chat.turn_lifecycle import FailedRunReceipt
+        from fleet_rlm.chat.run_lifecycle import FailedRunReceipt
 
         return FailedRunReceipt(uuid4(), "cancelled", "cancelled", "Turn cancelled", True)
 
     async def revoke_claim(self, turn, failure):
         del turn, failure
         self.revoke_calls += 1
-        from fleet_rlm.chat.turn_lifecycle import FailedRunReceipt
+        from fleet_rlm.chat.run_lifecycle import FailedRunReceipt
 
         return FailedRunReceipt(uuid4(), "failed", "stale_claim", "Turn failed", True)
 
@@ -106,9 +106,9 @@ class _CleanupLifecycle:
 
 def _driver(lifecycle, runner, cleanup):
     from fleet_rlm.chat.committed_turn_events import CommittedTurnEventProjector
-    from fleet_rlm.chat.turn_execution import TurnExecutionDriver
+    from fleet_rlm.chat.run_execution import RunExecutionDriver
 
-    return TurnExecutionDriver(
+    return RunExecutionDriver(
         lifecycle=lifecycle,
         runner=runner,
         projector=CommittedTurnEventProjector(),
@@ -121,8 +121,8 @@ def _driver(lifecycle, runner, cleanup):
 
 @pytest.mark.asyncio
 async def test_finalization_wins_simultaneous_claim_loss() -> None:
-    from fleet_rlm.chat.turn_cleanup import TurnCleanupSupervisor
-    from fleet_rlm.chat.turn_execution import _ClaimHeartbeat
+    from fleet_rlm.chat.run_cleanup import RunCleanupSupervisor
+    from fleet_rlm.chat.run_execution import _ClaimHeartbeat
     from fleet_rlm.rlm.events import RunFailed
     from fleet_rlm.rlm.outcome import RLMOutcome
 
@@ -134,7 +134,7 @@ async def test_finalization_wins_simultaneous_claim_loss() -> None:
     stream = _Stream(outcome=lifecycle.outcome, blocking=False)
     heartbeat_task = asyncio.create_task(asyncio.Event().wait())
     heartbeat = _ClaimHeartbeat(heartbeat_task, asyncio.Event())
-    cleanup = TurnCleanupSupervisor()
+    cleanup = RunCleanupSupervisor()
 
     class Runner:
         def stream(self, _execution):
@@ -158,8 +158,8 @@ async def test_finalization_wins_simultaneous_claim_loss() -> None:
 
 @pytest.mark.asyncio
 async def test_disconnect_cancels_provider_wait_and_orders_detached_cleanup() -> None:
-    from fleet_rlm.chat.turn_cleanup import TurnCleanupSupervisor
-    from fleet_rlm.chat.turn_execution import _ClaimHeartbeat
+    from fleet_rlm.chat.run_cleanup import RunCleanupSupervisor
+    from fleet_rlm.chat.run_execution import _ClaimHeartbeat
     from fleet_rlm.rlm.outcome import RLMOutcome
 
     order: list[str] = []
@@ -167,7 +167,7 @@ async def test_disconnect_cancels_provider_wait_and_orders_detached_cleanup() ->
     stream = _Stream(outcome=lifecycle.outcome, order=order)
     heartbeat_task = asyncio.create_task(asyncio.Event().wait())
     heartbeat = _ClaimHeartbeat(heartbeat_task, asyncio.Event())
-    cleanup = TurnCleanupSupervisor()
+    cleanup = RunCleanupSupervisor()
 
     class Runner:
         def stream(self, _execution):

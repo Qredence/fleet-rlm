@@ -21,7 +21,7 @@ from uuid import uuid4
 import pytest
 
 from fleet_rlm.artifacts.local_catalog import LocalArtifactCatalog
-from fleet_rlm.chat.turn_cleanup import TurnCleanupSupervisor
+from fleet_rlm.chat.run_cleanup import RunCleanupSupervisor
 from fleet_rlm.config import Settings, load_runtime_settings
 from fleet_rlm.daytona.interpreter import sync_sandbox
 from fleet_rlm.daytona.run_environment import DaytonaRuntimeResources
@@ -117,7 +117,7 @@ def _write_evidence(name: str, payload: dict[str, Any]) -> Path:
     return path
 
 
-def _live_resources(settings: Settings, cleanup: TurnCleanupSupervisor) -> DaytonaRuntimeResources:
+def _live_resources(settings: Settings, cleanup: RunCleanupSupervisor) -> DaytonaRuntimeResources:
     return DaytonaRuntimeResources(
         settings,
         bindings=InMemorySandboxBindingStore(),
@@ -136,7 +136,7 @@ async def test_staged_attachment_is_readable_and_artifact_survives_replacement(t
 
     user_id, workspace_id = uuid4(), uuid4()
     session_id, run_id = uuid4(), uuid4()
-    cleanup = TurnCleanupSupervisor(max_jobs=8)
+    cleanup = RunCleanupSupervisor(max_jobs=8)
     resources = _live_resources(settings, cleanup)
     sandbox_ids: list[str] = []
     volume_id: str | None = None

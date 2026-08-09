@@ -78,13 +78,17 @@ class RLMExecutionSpec:
 
 
 @dataclass(frozen=True, slots=True)
-class TurnIdentity:
+class RunIdentity:
     """Who/which: the Run's durable identity and authority."""
 
     run_id: UUID
     session_id: UUID
     access: TurnAccess
     authority: RunAuthority = field(default_factory=RunAuthority)
+
+
+# Compatibility alias preserves the pre-Run vocabulary import.
+TurnIdentity = RunIdentity
 
 
 @dataclass(frozen=True, slots=True)
@@ -122,7 +126,7 @@ class DelegationPolicy:
 class RLMExecutionContext:
     """Complete immutable input accepted by `RLMRunner`, in five deep members."""
 
-    identity: TurnIdentity
+    identity: RunIdentity
     session: SessionView
     execution: ExecutionRuntime
     capabilities: PreparedCapabilities

@@ -1,4 +1,4 @@
-"""Typed errors for RLM construction and turn termination."""
+"""Typed errors for RLM construction and Run termination."""
 
 from __future__ import annotations
 
@@ -11,8 +11,8 @@ class RLMModelBundleError(RLMConfigError):
     """Raised when required model roles are missing or invalid."""
 
 
-class TurnTerminalError(RuntimeError):
-    """Base for clean turn termination with a stable public status."""
+class RunTerminalError(RuntimeError):
+    """Base for clean Run termination with a stable public status."""
 
     status: str = "failed"
     public_message: str = "Turn failed"
@@ -23,19 +23,27 @@ class TurnTerminalError(RuntimeError):
             self.public_message = message
 
 
-class TurnCancelledError(TurnTerminalError):
+class RunCancelledError(RunTerminalError):
     status = "cancelled"
     public_message = "Turn cancelled"
 
 
-class TurnTimeoutError(TurnTerminalError):
+class RunTimeoutError(RunTerminalError):
     status = "timeout"
     public_message = "Turn timed out"
 
 
-class TurnNoProgressError(TurnTerminalError):
+class RunNoProgressError(RunTerminalError):
     public_message = "Turn stopped after repeated tool calls made no progress"
 
 
-class TurnIntegrityFailureError(TurnTerminalError):
+class RunIntegrityFailureError(RunTerminalError):
     public_message = "Turn failed because a required workspace update was not completed"
+
+
+# Compatibility aliases preserve the pre-Run execution error imports.
+TurnTerminalError = RunTerminalError
+TurnCancelledError = RunCancelledError
+TurnTimeoutError = RunTimeoutError
+TurnNoProgressError = RunNoProgressError
+TurnIntegrityFailureError = RunIntegrityFailureError

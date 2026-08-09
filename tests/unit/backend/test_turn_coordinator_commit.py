@@ -17,9 +17,9 @@ async def test_open_commits_typed_result_then_replays_without_rerun() -> None:
     importlib.import_module("fleet_rlm.rlm.outcome")
     from fleet_rlm.artifacts.models import ArtifactCandidate
     from fleet_rlm.chat.commands import OpenTurnCommand
+    from fleet_rlm.chat.run_lifecycle import RunClaim, RunLifecycleService
     from fleet_rlm.chat.turn_coordinator import TurnCoordinator
-    from fleet_rlm.chat.turn_lifecycle import BeginTurn, TurnLifecycleService
-    from fleet_rlm.persistence.repositories import InMemorySessionCatalog, InMemoryTurnStateStore
+    from fleet_rlm.persistence.repositories import InMemoryRunStateStore, InMemorySessionCatalog
     from fleet_rlm.rlm.dspy_contract import PredictionResult
     from fleet_rlm.rlm.events import (
         TERMINAL_DETAIL_TYPES,
@@ -35,7 +35,7 @@ async def test_open_commits_typed_result_then_replays_without_rerun() -> None:
     from fleet_rlm.sessions.models import AssistantTurnRecord, TurnAccess, TurnInput
 
     access = TurnAccess(uuid4(), uuid4())
-    store = InMemoryTurnStateStore()
+    store = InMemoryRunStateStore()
     session = await InMemorySessionCatalog(store).create(
         user_id=access.user_id,
         workspace_id=access.workspace_id,
@@ -128,7 +128,7 @@ async def test_open_commits_typed_result_then_replays_without_rerun() -> None:
             return Stream(execution)
 
     coordinator = TurnCoordinator(
-        lifecycle=TurnLifecycleService(store, max_artifact_bytes=100),
+        lifecycle=RunLifecycleService(store, max_artifact_bytes=100),
         preparation=Preparation(),
         runner=Runner(),
     )
@@ -159,7 +159,7 @@ async def test_open_commits_typed_result_then_replays_without_rerun() -> None:
     assert committed_artifact.artifact_id == candidate.id
     assert replay[0].detail == RunStarted(delivery="replay")
     assert replay[-1].detail == RunCompleted(checkpoint_version=1, delivery="replay")
-    next_turn = await store.begin(BeginTurn(access, session.id, TurnInput("next"), "next", uuid4()))
+    next_turn = await store.begin(RunClaim(access, session.id, TurnInput("next"), "next", uuid4()))
     assert [message.content for message in next_turn.history.messages] == ["hello", "done"]
 
 
@@ -171,15 +171,15 @@ async def test_open_invalid_typed_output_never_promotes_candidate() -> None:
     importlib.import_module("fleet_rlm.rlm.outcome")
     from fleet_rlm.artifacts.models import ArtifactCandidate
     from fleet_rlm.chat.commands import OpenTurnCommand
+    from fleet_rlm.chat.run_lifecycle import RunLifecycleService
     from fleet_rlm.chat.turn_coordinator import TurnCoordinator
-    from fleet_rlm.chat.turn_lifecycle import TurnLifecycleService
-    from fleet_rlm.persistence.repositories import InMemorySessionCatalog, InMemoryTurnStateStore
+    from fleet_rlm.persistence.repositories import InMemoryRunStateStore, InMemorySessionCatalog
     from fleet_rlm.rlm.events import TERMINAL_DETAIL_TYPES, ArtifactCreated, EventRecorder, RunFailed, RunStarted
     from fleet_rlm.rlm.outcome import RLMOutcome
     from fleet_rlm.sessions.models import TurnAccess, TurnInput
 
     access = TurnAccess(uuid4(), uuid4())
-    store = InMemoryTurnStateStore()
+    store = InMemoryRunStateStore()
     session = await InMemorySessionCatalog(store).create(
         user_id=access.user_id,
         workspace_id=access.workspace_id,
@@ -255,7 +255,7 @@ async def test_open_invalid_typed_output_never_promotes_candidate() -> None:
             return Stream()
 
     coordinator = TurnCoordinator(
-        lifecycle=TurnLifecycleService(store, max_artifact_bytes=100),
+        lifecycle=RunLifecycleService(store, max_artifact_bytes=100),
         preparation=Preparation(),
         runner=Runner(),
     )
@@ -283,12 +283,12 @@ async def test_open_commits_typed_result_through_temporary_sql(tmp_path) -> None
 
     importlib.import_module("fleet_rlm.rlm.outcome")
     from fleet_rlm.chat.commands import OpenTurnCommand
+    from fleet_rlm.chat.run_lifecycle import RunLifecycleService
     from fleet_rlm.chat.turn_coordinator import TurnCoordinator
-    from fleet_rlm.chat.turn_lifecycle import TurnLifecycleService
     from fleet_rlm.persistence.database import create_async_engine_from_url, create_session_factory, create_tables
     from fleet_rlm.persistence.models import SessionRow, UserRow, WorkspaceRow
     from fleet_rlm.persistence.repositories import SqlAlchemySessionCatalog
-    from fleet_rlm.persistence.repositories.turns import SqlAlchemyTurnStateStore
+    from fleet_rlm.persistence.repositories.turns import SqlAlchemyRunStateStore
     from fleet_rlm.rlm.dspy_contract import PredictionResult
     from fleet_rlm.rlm.events import TERMINAL_DETAIL_TYPES, EventRecorder, RunCompleted, RunStarted
     from fleet_rlm.rlm.outcome import RLMOutcome
@@ -359,9 +359,9 @@ async def test_open_commits_typed_result_through_temporary_sql(tmp_path) -> None
                 return Stream()
 
         runner = Runner()
-        store = SqlAlchemyTurnStateStore(factory)
+        store = SqlAlchemyRunStateStore(factory)
         coordinator = TurnCoordinator(
-            lifecycle=TurnLifecycleService(store, max_artifact_bytes=100),
+            lifecycle=RunLifecycleService(store, max_artifact_bytes=100),
             preparation=Preparation(),
             runner=runner,
         )
@@ -401,8 +401,8 @@ async def test_open_commits_typed_result_through_temporary_sql(tmp_path) -> None
 @pytest.mark.asyncio
 async def test_live_commit_projects_suffix_before_terminal_and_then_closes() -> None:
     from fleet_rlm.chat.commands import OpenTurnCommand
+    from fleet_rlm.chat.run_lifecycle import ClaimedRun, CommittedTurnReceipt, _RunClaimToken
     from fleet_rlm.chat.turn_coordinator import TurnCoordinator
-    from fleet_rlm.chat.turn_lifecycle import CommittedTurnReceipt, ExecuteTurn, _TurnClaimToken
     from fleet_rlm.rlm.dspy_contract import PredictionResult
     from fleet_rlm.rlm.outcome import RLMOutcome
     from fleet_rlm.sessions.committed_turn import CommittedTurn, TextPart, UsagePart
@@ -413,8 +413,8 @@ async def test_live_commit_projects_suffix_before_terminal_and_then_closes() -> 
     async def not_cancelled():
         return False
 
-    turn = ExecuteTurn(
-        run_id, session_id, access, TurnInput("hi"), SessionHistory(), not_cancelled, _TurnClaimToken(uuid4())
+    turn = ClaimedRun(
+        run_id, session_id, access, TurnInput("hi"), SessionHistory(), not_cancelled, _RunClaimToken(uuid4())
     )
     committed = CommittedTurn(
         1,

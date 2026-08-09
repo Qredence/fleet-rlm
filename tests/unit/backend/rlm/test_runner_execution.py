@@ -54,8 +54,8 @@ async def test_runner_uses_native_path_for_plain_greeting() -> None:
         ExecutionRuntime,
         RLMExecutionContext,
         RLMExecutionSpec,
+        RunIdentity,
         SessionView,
-        TurnIdentity,
     )
     from fleet_rlm.rlm.dspy_contract import RLMOptions
     from fleet_rlm.rlm.runner import RLMRunner
@@ -94,7 +94,7 @@ async def test_runner_uses_native_path_for_plain_greeting() -> None:
         return False
 
     context = RLMExecutionContext(
-        identity=TurnIdentity(run_id=uuid4(), session_id=uuid4(), access=TurnAccess(uuid4(), uuid4())),
+        identity=RunIdentity(run_id=uuid4(), session_id=uuid4(), access=TurnAccess(uuid4(), uuid4())),
         session=SessionView(
             request="  Hi!  ",
             session_context=SessionContextManifest(uuid4(), 0, 0, ()),
@@ -141,8 +141,8 @@ async def test_runner_uses_supported_async_call_and_returns_typed_outcome(
         ExecutionRuntime,
         RLMExecutionContext,
         RLMExecutionSpec,
+        RunIdentity,
         SessionView,
-        TurnIdentity,
     )
     from fleet_rlm.rlm.dspy_contract import RLMOptions
     from fleet_rlm.rlm.events import RLMCode, RLMOutput, StepFinished, StepStarted
@@ -249,7 +249,7 @@ async def test_runner_uses_supported_async_call_and_returns_typed_outcome(
     monkeypatch.setattr(dspy, "context", tracked_context)
     monkeypatch.setattr("fleet_rlm.rlm.runner.turn_phase_span", tracked_phase_span)
     context = RLMExecutionContext(
-        identity=TurnIdentity(run_id=uuid4(), session_id=uuid4(), access=TurnAccess(uuid4(), uuid4())),
+        identity=RunIdentity(run_id=uuid4(), session_id=uuid4(), access=TurnAccess(uuid4(), uuid4())),
         session=SessionView(
             request="answer",
             session_context=SessionContextManifest(uuid4(), 0, 0, ()),
@@ -335,8 +335,8 @@ async def test_runner_passes_prepared_attachment_context_to_rlm() -> None:
         ExecutionRuntime,
         RLMExecutionContext,
         RLMExecutionSpec,
+        RunIdentity,
         SessionView,
-        TurnIdentity,
     )
     from fleet_rlm.rlm.dspy_contract import RLMOptions
     from fleet_rlm.rlm.inputs import AttachmentContextCapsule, AttachmentContextEntry
@@ -378,7 +378,7 @@ async def test_runner_passes_prepared_attachment_context_to_rlm() -> None:
         mount_root="/home/daytona/run",
     )
     context = RLMExecutionContext(
-        identity=TurnIdentity(run_id=uuid4(), session_id=uuid4(), access=TurnAccess(uuid4(), uuid4())),
+        identity=RunIdentity(run_id=uuid4(), session_id=uuid4(), access=TurnAccess(uuid4(), uuid4())),
         session=SessionView(
             request="use context",
             session_context=SessionContextManifest(uuid4(), 0, 0, ()),
@@ -408,8 +408,8 @@ async def test_runner_validates_host_metadata_before_provider_execution() -> Non
     from fleet_rlm.rlm.context import (
         ExecutionRuntime,
         RLMExecutionContext,
+        RunIdentity,
         SessionView,
-        TurnIdentity,
     )
     from fleet_rlm.rlm.dspy_contract import RLMOptions
     from fleet_rlm.rlm.runner import RLMRunner
@@ -448,7 +448,7 @@ async def test_runner_validates_host_metadata_before_provider_execution() -> Non
         (TurnPreview(0, "system", "malformed"),),  # type: ignore[arg-type]
     )
     context = RLMExecutionContext(
-        identity=TurnIdentity(run_id=uuid4(), session_id=uuid4(), access=TurnAccess(uuid4(), uuid4())),
+        identity=RunIdentity(run_id=uuid4(), session_id=uuid4(), access=TurnAccess(uuid4(), uuid4())),
         session=SessionView(
             request="validate me", session_context=malformed_context, attachments=(), preparation_notices=()
         ),
@@ -479,8 +479,8 @@ async def test_runner_loads_two_skills_reads_python_resource_and_completes_submi
         ExecutionRuntime,
         RLMExecutionContext,
         RLMExecutionSpec,
+        RunIdentity,
         SessionView,
-        TurnIdentity,
     )
     from fleet_rlm.rlm.dspy_contract import RLMOptions
     from fleet_rlm.rlm.runner import RLMRunner
@@ -550,7 +550,7 @@ async def test_runner_loads_two_skills_reads_python_resource_and_completes_submi
         return False
 
     context = RLMExecutionContext(
-        identity=TurnIdentity(run_id=uuid4(), session_id=uuid4(), access=TurnAccess(user_id, workspace_id)),
+        identity=RunIdentity(run_id=uuid4(), session_id=uuid4(), access=TurnAccess(user_id, workspace_id)),
         session=SessionView(
             request="complete progressively",
             session_context=SessionContextManifest(uuid4(), 0, 0, ()),

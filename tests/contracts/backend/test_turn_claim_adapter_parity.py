@@ -19,17 +19,17 @@ class _Harness:
 
 
 async def _build_harness(adapter_kind: str) -> _Harness:
-    from fleet_rlm.chat.turn_lifecycle import BeginTurn, ExecuteTurn
-    from fleet_rlm.persistence.repositories import InMemoryTurnStateStore, SqlAlchemyTurnStateStore
+    from fleet_rlm.chat.run_lifecycle import ClaimedRun, RunClaim
+    from fleet_rlm.persistence.repositories import InMemoryRunStateStore, SqlAlchemyRunStateStore
     from fleet_rlm.sessions.models import TurnAccess, TurnInput
 
     access = TurnAccess(uuid4(), uuid4())
     session_id, run_id = uuid4(), uuid4()
     if adapter_kind == "memory":
-        store = InMemoryTurnStateStore()
+        store = InMemoryRunStateStore()
         await store.add_session(session_id, access)
-        turn = await store.begin(BeginTurn(access, session_id, TurnInput("claim parity"), "parity", run_id))
-        assert isinstance(turn, ExecuteTurn)
+        turn = await store.begin(RunClaim(access, session_id, TurnInput("claim parity"), "parity", run_id))
+        assert isinstance(turn, ClaimedRun)
 
         async def state() -> tuple[str, str | None]:
             run = store._runs[run_id]
@@ -54,9 +54,9 @@ async def _build_harness(adapter_kind: str) -> _Harness:
                 SessionRow(id=session_id, user_id=access.user_id, workspace_id=access.workspace_id, title="parity"),
             )
         )
-    store = SqlAlchemyTurnStateStore(factory)
-    turn = await store.begin(BeginTurn(access, session_id, TurnInput("claim parity"), "parity", run_id))
-    assert isinstance(turn, ExecuteTurn)
+    store = SqlAlchemyRunStateStore(factory)
+    turn = await store.begin(RunClaim(access, session_id, TurnInput("claim parity"), "parity", run_id))
+    assert isinstance(turn, ClaimedRun)
 
     async def state() -> tuple[str, str | None]:
         async with factory() as db:
@@ -73,13 +73,13 @@ async def _build_harness(adapter_kind: str) -> _Harness:
 @pytest.mark.asyncio
 @pytest.mark.parametrize("adapter_kind", ["memory", "sql"])
 async def test_settlement_retains_claim_until_cleanup(adapter_kind: str) -> None:
-    from fleet_rlm.chat.turn_claim import BeginSettlement, ClaimFailure, CompleteSettlement
-    from fleet_rlm.chat.turn_lifecycle import TurnFailure
+    from fleet_rlm.chat.run_claim import BeginSettlement, ClaimFailure, CompleteSettlement
+    from fleet_rlm.chat.run_lifecycle import RunFailure
     from fleet_rlm.rlm.dspy_contract import empty_rlm_usage
 
     harness = await _build_harness(adapter_kind)
     try:
-        failure = TurnFailure("cancelled", "cancelled", "Turn cancelled", empty_rlm_usage())
+        failure = RunFailure("cancelled", "cancelled", "Turn cancelled", empty_rlm_usage())
         first = await harness.store.transition_claim(
             harness.turn,
             BeginSettlement(
@@ -101,13 +101,13 @@ async def test_settlement_retains_claim_until_cleanup(adapter_kind: str) -> None
 @pytest.mark.asyncio
 @pytest.mark.parametrize("adapter_kind", ["memory", "sql"])
 async def test_stale_revocation_and_completion_have_equivalent_receipts(adapter_kind: str) -> None:
-    from fleet_rlm.chat.turn_claim import ClaimFailure, CompleteSettlement, RevokeClaim
-    from fleet_rlm.chat.turn_lifecycle import TurnFailure
+    from fleet_rlm.chat.run_claim import ClaimFailure, CompleteSettlement, RevokeClaim
+    from fleet_rlm.chat.run_lifecycle import RunFailure
     from fleet_rlm.rlm.dspy_contract import empty_rlm_usage
 
     harness = await _build_harness(adapter_kind)
     try:
-        failure = TurnFailure("timeout", "timeout", "Timed out", empty_rlm_usage())
+        failure = RunFailure("timeout", "timeout", "Timed out", empty_rlm_usage())
         revoked = await harness.store.transition_claim(
             harness.turn,
             RevokeClaim(
@@ -129,14 +129,14 @@ async def test_stale_revocation_and_completion_have_equivalent_receipts(adapter_
 @pytest.mark.asyncio
 @pytest.mark.parametrize("adapter_kind", ["memory", "sql"])
 async def test_heartbeat_is_valid_only_while_claim_is_live(adapter_kind: str) -> None:
-    from fleet_rlm.chat.turn_claim import BeginSettlement, ClaimFailure, CompleteSettlement, HeartbeatClaim
-    from fleet_rlm.chat.turn_lifecycle import TurnFailure, TurnStateError
+    from fleet_rlm.chat.run_claim import BeginSettlement, ClaimFailure, CompleteSettlement, HeartbeatClaim
+    from fleet_rlm.chat.run_lifecycle import RunFailure, RunStateError
     from fleet_rlm.rlm.dspy_contract import empty_rlm_usage
 
     harness = await _build_harness(adapter_kind)
     try:
         assert await harness.store.transition_claim(harness.turn, HeartbeatClaim()) is None
-        failure = TurnFailure("cancelled", "cancelled", "Turn cancelled", empty_rlm_usage())
+        failure = RunFailure("cancelled", "cancelled", "Turn cancelled", empty_rlm_usage())
         settling = await harness.store.transition_claim(
             harness.turn,
             BeginSettlement(
@@ -147,7 +147,7 @@ async def test_heartbeat_is_valid_only_while_claim_is_live(adapter_kind: str) ->
         assert await harness.store.transition_claim(harness.turn, HeartbeatClaim()) is None
         terminal = await harness.store.transition_claim(harness.turn, CompleteSettlement())
         assert terminal is not None
-        with pytest.raises(TurnStateError):
+        with pytest.raises(RunStateError):
             await harness.store.transition_claim(harness.turn, HeartbeatClaim())
     finally:
         await harness.close()
@@ -156,18 +156,18 @@ async def test_heartbeat_is_valid_only_while_claim_is_live(adapter_kind: str) ->
 @pytest.mark.asyncio
 @pytest.mark.parametrize("adapter_kind", ["memory", "sql"])
 async def test_committed_run_rejects_late_claim_transitions(adapter_kind: str) -> None:
-    from fleet_rlm.chat.turn_claim import (
+    from fleet_rlm.chat.run_claim import (
         ClaimFailure,
         CompleteSettlement,
         HeartbeatClaim,
         RevokeClaim,
     )
+    from fleet_rlm.chat.run_lifecycle import RunAlreadyCompletedError, RunStateError
     from fleet_rlm.chat.turn_detail_policy import commit_success
-    from fleet_rlm.chat.turn_lifecycle import TurnAlreadyCompletedError, TurnStateError
     from fleet_rlm.rlm.dspy_contract import PredictionResult, empty_rlm_usage
     from fleet_rlm.rlm.outcome import RLMOutcome
 
-    assert issubclass(TurnAlreadyCompletedError, TurnStateError)
+    assert issubclass(RunAlreadyCompletedError, RunStateError)
     harness = await _build_harness(adapter_kind)
     try:
         outcome = RLMOutcome("completed", PredictionResult("done", {"answer": "done"}, "fleet.default", "1"))
@@ -178,7 +178,7 @@ async def test_committed_run_rejects_late_claim_transitions(adapter_kind: str) -
             RevokeClaim(ClaimFailure("failed", "stale_claim", "Turn failed"), empty_rlm_usage()),
             CompleteSettlement(),
         ):
-            with pytest.raises(TurnAlreadyCompletedError):
+            with pytest.raises(RunAlreadyCompletedError):
                 await harness.store.transition_claim(harness.turn, command)
         assert (await harness.state())[0] == "completed"
     finally:

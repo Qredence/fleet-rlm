@@ -9,9 +9,9 @@ from typing import Any
 import dspy
 import pytest
 
-from fleet_rlm.rlm.errors import TurnNoProgressError
+from fleet_rlm.rlm.errors import RunNoProgressError
 from fleet_rlm.rlm.events import ToolCompleted, ToolFailed, ToolStarted, WarningEvent
-from fleet_rlm.rlm.tool_guards import TurnToolGuards
+from fleet_rlm.rlm.tool_guards import RunToolGuards
 from fleet_rlm.rlm.tool_observer import ToolEventView, observe_tool
 
 
@@ -305,13 +305,13 @@ def test_no_progress_guard_closes_the_tool_observation_before_failing() -> None:
         dspy.Tool(lookup),
         observed.append,
         ToolEventView.metadata_only(),
-        guards=TurnToolGuards(),
+        guards=RunToolGuards(),
     )
 
     assert wrapped(query="alpha") == "private result for alpha"
     # The first identical repeat is the guard's no-progress trigger
     # (``ToolProgressGuard`` warns exactly once, at ``_repetitions == 1``).
-    with pytest.raises(TurnNoProgressError, match="repeated tool calls made no progress"):
+    with pytest.raises(RunNoProgressError, match="repeated tool calls made no progress"):
         wrapped(query="alpha")
 
     assert [type(item) for item in observed] == [
@@ -347,7 +347,7 @@ def test_no_progress_guard_warns_without_closing_when_repeats_are_allowed() -> N
         dspy.Tool(lookup),
         observed.append,
         ToolEventView(allow_repeated_identical=True),
-        guards=TurnToolGuards(),
+        guards=RunToolGuards(),
     )
 
     assert wrapped(query="alpha") == "private result for alpha"

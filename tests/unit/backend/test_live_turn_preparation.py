@@ -13,10 +13,10 @@ from uuid import uuid4
 
 import pytest
 
-from fleet_rlm.chat.turn_lifecycle import ExecuteTurn, _TurnClaimToken
-from fleet_rlm.chat.turn_preparation import TurnPreparationUnavailableError
+from fleet_rlm.chat.run_lifecycle import ClaimedRun, _RunClaimToken
+from fleet_rlm.chat.run_preparation import RunPreparationUnavailableError
 from fleet_rlm.config import Settings
-from fleet_rlm.daytona.run_environment import build_turn_preparation
+from fleet_rlm.daytona.run_environment import build_run_preparation
 from fleet_rlm.daytona.session_manager import DaytonaAdmission
 from fleet_rlm.files.models import AttachmentRef
 from fleet_rlm.rlm.model_bundle import RLMModelBundle
@@ -117,16 +117,16 @@ async def test_live_preparation_stages_attachment_and_cleans_it(
     async def not_cancelled() -> bool:
         return False
 
-    turn = ExecuteTurn(
+    turn = ClaimedRun(
         uuid4(),
         uuid4(),
         TurnAccess(uuid4(), uuid4()),
         TurnInput("read it", (attachment_id,)),
         SessionHistory(()),
         not_cancelled,
-        _TurnClaimToken(uuid4()),
+        _RunClaimToken(uuid4()),
     )
-    prepared = await build_turn_preparation(
+    prepared = await build_run_preparation(
         resources,
         attachment_lifecycle=Attachments(),
         skill_catalog=skill_catalog,
@@ -224,16 +224,16 @@ async def test_live_preparation_stages_attachment_and_cleans_it(
 
             return PreparedAttachments((), ())
 
-    turn2 = ExecuteTurn(
+    turn2 = ClaimedRun(
         uuid4(),
         turn.session_id,
         turn.access,
         TurnInput("follow up", ()),
         SessionHistory(()),
         not_cancelled,
-        _TurnClaimToken(uuid4()),
+        _RunClaimToken(uuid4()),
     )
-    prepared2 = await build_turn_preparation(
+    prepared2 = await build_run_preparation(
         resources,
         attachment_lifecycle=NoAttachments(),
         skill_catalog=skill_catalog,
@@ -286,7 +286,7 @@ async def test_live_preparation_stages_attachment_and_cleans_it(
         f"/sessions/{turn.session_id}/runs/{turn.run_id}/result.json"
     )
 
-    from fleet_rlm.chat.turn_lifecycle import CommittedTurnReceipt, TurnLifecycleService
+    from fleet_rlm.chat.run_lifecycle import CommittedTurnReceipt, RunLifecycleService
     from fleet_rlm.rlm.dspy_contract import PredictionResult
     from fleet_rlm.rlm.outcome import RLMOutcome
 
@@ -295,12 +295,12 @@ async def test_live_preparation_stages_attachment_and_cleans_it(
             return CommittedTurnReceipt(claimed.run_id, 1, committed, artifacts)
 
         async def transition_claim(self, claimed, command):
-            from fleet_rlm.chat.turn_claim import FailClaim
-            from fleet_rlm.chat.turn_lifecycle import TurnFailure
+            from fleet_rlm.chat.run_claim import FailClaim
+            from fleet_rlm.chat.run_lifecycle import RunFailure
             from fleet_rlm.rlm.dspy_contract import empty_rlm_usage
 
             assert isinstance(command, FailClaim)
-            failure = TurnFailure(
+            failure = RunFailure(
                 command.failure.status,
                 command.failure.code,
                 command.failure.public_message,
@@ -308,7 +308,7 @@ async def test_live_preparation_stages_attachment_and_cleans_it(
             )
             raise AssertionError((claimed, failure))
 
-    receipt = await TurnLifecycleService(Store(), max_artifact_bytes=1024).finish(
+    receipt = await RunLifecycleService(Store(), max_artifact_bytes=1024).finish(
         turn,
         RLMOutcome(
             "completed",
@@ -356,18 +356,18 @@ async def test_admission_timeout_is_sanitized_by_live_preparation() -> None:
     async def not_cancelled() -> bool:
         return False
 
-    turn = ExecuteTurn(
+    turn = ClaimedRun(
         uuid4(),
         uuid4(),
         TurnAccess(uuid4(), uuid4()),
         TurnInput("wait"),
         SessionHistory(()),
         not_cancelled,
-        _TurnClaimToken(uuid4()),
+        _RunClaimToken(uuid4()),
     )
 
-    with pytest.raises(TurnPreparationUnavailableError) as caught:
-        await build_turn_preparation(
+    with pytest.raises(RunPreparationUnavailableError) as caught:
+        await build_run_preparation(
             resources,
             attachment_lifecycle=Attachments(),
             skill_catalog=SkillCatalog(()),
@@ -381,7 +381,7 @@ async def test_admission_timeout_is_sanitized_by_live_preparation() -> None:
 @pytest.mark.asyncio
 @pytest.mark.parametrize("mode", ["timeout", "cancel"])
 async def test_post_acquisition_sandbox_lookup_settles_before_lease_release(mode: str) -> None:
-    from fleet_rlm.chat.turn_preparation import TurnPreparationTimeoutError
+    from fleet_rlm.chat.run_preparation import RunPreparationTimeoutError
     from fleet_rlm.daytona.run_environment import _DaytonaEnvironmentProvider
 
     entered = threading.Event()
@@ -413,14 +413,14 @@ async def test_post_acquisition_sandbox_lookup_settles_before_lease_release(mode
     async def not_cancelled() -> bool:
         return False
 
-    turn = ExecuteTurn(
+    turn = ClaimedRun(
         uuid4(),
         uuid4(),
         TurnAccess(uuid4(), uuid4()),
         TurnInput("wait"),
         SessionHistory(()),
         not_cancelled,
-        _TurnClaimToken(uuid4()),
+        _RunClaimToken(uuid4()),
     )
     deadline = asyncio.get_running_loop().time() + (0.05 if mode == "timeout" else 10)
     acquisition = asyncio.create_task(
@@ -442,6 +442,6 @@ async def test_post_acquisition_sandbox_lookup_settles_before_lease_release(mode
         with pytest.raises(asyncio.CancelledError):
             await acquisition
     else:
-        with pytest.raises(TurnPreparationTimeoutError):
+        with pytest.raises(RunPreparationTimeoutError):
             await acquisition
     assert resources.session_manager.released == 1

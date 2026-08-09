@@ -14,37 +14,37 @@ from uuid import UUID, uuid4
 import pytest
 
 from fleet_rlm.artifacts.models import ArtifactCandidate
-from fleet_rlm.chat.turn_lifecycle import (
+from fleet_rlm.chat.run_lifecycle import (
+    ClaimedRun,
     CommittedTurnReceipt,
-    ExecuteTurn,
     FailedRunReceipt,
-    TurnLifecycleService,
-    _TurnClaimToken,
+    RunLifecycleService,
+    _RunClaimToken,
 )
 from fleet_rlm.rlm.dspy_contract import PredictionResult
 from fleet_rlm.rlm.outcome import RLMOutcome
 from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
 
 
-def _make_turn() -> tuple[ExecuteTurn, TurnAccess]:
+def _make_turn() -> tuple[ClaimedRun, TurnAccess]:
     access = TurnAccess(uuid4(), uuid4())
 
     async def not_cancelled() -> bool:
         return False
 
-    turn = ExecuteTurn(
+    turn = ClaimedRun(
         uuid4(),
         uuid4(),
         access,
         TurnInput("hello"),
         SessionHistory(),
         not_cancelled,
-        _TurnClaimToken(uuid4()),
+        _RunClaimToken(uuid4()),
     )
     return turn, access
 
 
-def _make_candidate(access: TurnAccess, turn: ExecuteTurn, name: str, data: bytes) -> ArtifactCandidate:
+def _make_candidate(access: TurnAccess, turn: ClaimedRun, name: str, data: bytes) -> ArtifactCandidate:
     return ArtifactCandidate(
         uuid4(),
         access.user_id,
@@ -61,7 +61,7 @@ def _make_candidate(access: TurnAccess, turn: ExecuteTurn, name: str, data: byte
     )
 
 
-def _outcome(turn: ExecuteTurn, candidates: tuple[ArtifactCandidate, ...]) -> RLMOutcome:
+def _outcome(turn: ClaimedRun, candidates: tuple[ArtifactCandidate, ...]) -> RLMOutcome:
     del turn
     return RLMOutcome(
         terminal_status="completed",
@@ -113,7 +113,7 @@ async def test_candidate_reads_run_concurrently() -> None:
             self.values.pop(location, None)
 
     sink = Sink()
-    receipt = await TurnLifecycleService(_CommitStore(), max_artifact_bytes=100).finish(
+    receipt = await RunLifecycleService(_CommitStore(), max_artifact_bytes=100).finish(
         turn, _outcome(turn, candidates), artifact_sink=sink
     )
 
@@ -165,7 +165,7 @@ async def test_snapshot_failure_after_commit_does_not_roll_back_committed_turn()
     store, sink = _CommitStore(), Sink()
     snapshot_sink = _SnapshotSink(fail_write=True)
 
-    receipt = await TurnLifecycleService(store, max_artifact_bytes=100).finish(
+    receipt = await RunLifecycleService(store, max_artifact_bytes=100).finish(
         turn,
         _outcome(turn, (candidate,)),
         artifact_sink=sink,
@@ -214,7 +214,7 @@ async def test_staging_rollback_is_detached_when_cleanup_supervisor_available() 
 
     sink = Sink()
     cleanup = _CapturingCleanup()
-    lifecycle = TurnLifecycleService(_CommitStore(), max_artifact_bytes=100, cleanup=cleanup)
+    lifecycle = RunLifecycleService(_CommitStore(), max_artifact_bytes=100, cleanup=cleanup)
 
     receipt = await lifecycle.finish(turn, _outcome(turn, (candidate,)), artifact_sink=sink)
 
@@ -250,7 +250,7 @@ async def test_staging_rollback_stays_inline_without_cleanup_supervisor() -> Non
             self.values.pop(location, None)
 
     sink = Sink()
-    receipt = await TurnLifecycleService(_CommitStore(), max_artifact_bytes=100).finish(
+    receipt = await RunLifecycleService(_CommitStore(), max_artifact_bytes=100).finish(
         turn, _outcome(turn, (candidate,)), artifact_sink=sink
     )
 
@@ -318,15 +318,15 @@ async def test_settle_emits_claim_transition_span_with_command_name(
     monkeypatch: pytest.MonkeyPatch, fleet_trace_active: None
 ) -> None:
     del fleet_trace_active
-    from fleet_rlm.chat.turn_lifecycle import TurnFailure
+    from fleet_rlm.chat.run_lifecycle import RunFailure
     from fleet_rlm.rlm.dspy_contract import empty_rlm_usage
 
     calls = _install_fake_mlflow(monkeypatch)
     turn, _access = _make_turn()
     store = _TransitionStore()
 
-    receipt = await TurnLifecycleService(store, max_artifact_bytes=100).settle(
-        turn, TurnFailure("timeout", "timeout", "Turn timed out", empty_rlm_usage())
+    receipt = await RunLifecycleService(store, max_artifact_bytes=100).settle(
+        turn, RunFailure("timeout", "timeout", "Turn timed out", empty_rlm_usage())
     )
 
     assert receipt.terminal_status == "failed"

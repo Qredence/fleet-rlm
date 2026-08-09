@@ -11,7 +11,7 @@ from uuid import UUID, uuid4
 
 import pytest
 
-from fleet_rlm.chat.turn_cleanup import TurnCleanupSupervisor
+from fleet_rlm.chat.run_cleanup import RunCleanupSupervisor
 from fleet_rlm.config import Settings, load_runtime_settings
 from fleet_rlm.daytona.interpreter import sync_sandbox
 from fleet_rlm.daytona.run_environment import DaytonaRuntimeResources
@@ -92,7 +92,7 @@ def _workspace(
     )
 
 
-def _live_resources(settings: Settings, cleanup: TurnCleanupSupervisor) -> DaytonaRuntimeResources:
+def _live_resources(settings: Settings, cleanup: RunCleanupSupervisor) -> DaytonaRuntimeResources:
     return DaytonaRuntimeResources(
         settings,
         bindings=InMemorySandboxBindingStore(),
@@ -111,7 +111,7 @@ async def test_url_cache_survives_daytona_sandbox_replacement_with_body_free_eve
 
     user_id, workspace_id, session_id = uuid4(), uuid4(), uuid4()
     resources: DaytonaRuntimeResources | None = None
-    cleanup: TurnCleanupSupervisor | None = None
+    cleanup: RunCleanupSupervisor | None = None
     first_lease = None
     second_lease = None
     observed: list[object] = []
@@ -120,7 +120,7 @@ async def test_url_cache_survives_daytona_sandbox_replacement_with_body_free_eve
     try:
         with warnings.catch_warnings(record=True) as captured:
             warnings.simplefilter("always")
-            cleanup = TurnCleanupSupervisor(max_jobs=8)
+            cleanup = RunCleanupSupervisor(max_jobs=8)
             resources = _live_resources(settings, cleanup)
 
         first_lease = await resources.session_manager.acquire(

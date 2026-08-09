@@ -32,7 +32,7 @@ def _complete_runtime_inventory() -> RuntimeInventory:
         attachment_lifecycle=object(),
         artifact_reader=object(),
         session_catalog=object(),
-        turn_lifecycle=object(),
+        run_lifecycle=object(),
         config_policy=object(),
         workspace_volume_gateway=object(),
         workspace_file_service=object(),
@@ -354,7 +354,7 @@ async def test_daytona_dispose_detaches_inventory_before_disposal() -> None:
             record("gateway")
 
     inventory = RuntimeInventory(
-        turn_cleanup_supervisor=Cleanup(),
+        run_cleanup_supervisor=Cleanup(),
         run_environment_resources=Resources(),
         workspace_volume_gateway=Gateway(),
     )
@@ -389,9 +389,9 @@ async def test_daytona_install_registers_and_dispose_clears_bridge_service_loop(
         attachment_lifecycle=object(),
         artifact_reader=object(),
         session_catalog=object(),
-        turn_lifecycle=object(),
-        turn_preparation=object(),
-        turn_state_store=object(),
+        run_lifecycle=object(),
+        run_preparation=object(),
+        run_state_store=object(),
         model_bundle=object(),
         run_environment_resources=object(),
         workspace_volume_gateway=object(),
@@ -441,7 +441,7 @@ def test_testing_database_is_created_and_closed_by_lifespan() -> None:
 
 def test_local_startup_reconciles_sql_runs_once(monkeypatch) -> None:
     from fleet_rlm.composition.common import no_provider_recovery_fence
-    from fleet_rlm.persistence.repositories.turns import SqlAlchemyTurnStateStore
+    from fleet_rlm.persistence.repositories.turns import SqlAlchemyRunStateStore
 
     calls: list[object] = []
 
@@ -449,7 +449,7 @@ def test_local_startup_reconciles_sql_runs_once(monkeypatch) -> None:
         calls.append(self)
         assert fence is no_provider_recovery_fence
 
-    monkeypatch.setattr(SqlAlchemyTurnStateStore, "reconcile_settling", reconcile)
+    monkeypatch.setattr(SqlAlchemyRunStateStore, "reconcile_settling", reconcile)
     app = create_testing_app(
         settings=Settings(
             database_url="sqlite+aiosqlite:///:memory:",
@@ -563,12 +563,12 @@ async def test_install_daytona_composition_does_not_create_schema(monkeypatch) -
         run_environment_resources=Resources(),
         turn_coordinator=object(),
         session_catalog=object(),
-        turn_lifecycle=object(),
+        run_lifecycle=object(),
         attachment_lifecycle=object(),
         artifact_reader=object(),
         workspace_volume_gateway=Gateway(),
         workspace_file_service=object(),
-        turn_preparation=preparation,
+        run_preparation=preparation,
     )
 
     async def fake_build(_settings, *, skill_catalog):
@@ -585,7 +585,7 @@ async def test_install_daytona_composition_does_not_create_schema(monkeypatch) -
     installed = await composition.install_daytona_composition(app, Settings(run_environment="daytona"))
 
     assert installed is app.state.runtime_inventory
-    assert installed.turn_preparation is preparation
+    assert installed.run_preparation is preparation
     assert app.state.composition_ready is True
 
 
@@ -653,7 +653,7 @@ async def test_live_startup_preserves_original_error_and_attempts_all_cleanup(mo
         run_environment_resources=Resources(),
         turn_coordinator=object(),
         session_catalog=object(),
-        turn_lifecycle=object(),
+        run_lifecycle=object(),
         attachment_lifecycle=object(),
         artifact_reader=object(),
         workspace_volume_gateway=Gateway(),

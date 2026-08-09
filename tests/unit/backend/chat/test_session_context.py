@@ -12,8 +12,8 @@ import pytest
 
 @pytest.mark.asyncio
 async def test_prepared_rlm_kwargs_bound_a_large_session_to_recent_previews() -> None:
-    from fleet_rlm.chat.turn_lifecycle import ExecuteTurn, _TurnClaimToken
-    from fleet_rlm.chat.turn_preparation import DefaultTurnPreparer, RunEnvironment
+    from fleet_rlm.chat.run_lifecycle import ClaimedRun, _RunClaimToken
+    from fleet_rlm.chat.run_preparation import DefaultRunPreparer, RunEnvironment
     from fleet_rlm.files.models import PreparedAttachments
     from fleet_rlm.rlm.context import RLMExecutionSpec
     from fleet_rlm.rlm.dspy_contract import RLMOptions
@@ -92,16 +92,16 @@ async def test_prepared_rlm_kwargs_bound_a_large_session_to_recent_previews() ->
     async def not_cancelled() -> bool:
         return False
 
-    turn = ExecuteTurn(
+    turn = ClaimedRun(
         uuid4(),
         session_id,
         TurnAccess(uuid4(), uuid4()),
         TurnInput("continue"),
         SessionHistory(messages),
         not_cancelled,
-        _TurnClaimToken(uuid4(), 7),
+        _RunClaimToken(uuid4(), 7),
     )
-    prepared = await DefaultTurnPreparer(
+    prepared = await DefaultRunPreparer(
         models=RLMModelBundle(object(), object()),
         options=RLMOptions(),
         attachments=Attachments(),

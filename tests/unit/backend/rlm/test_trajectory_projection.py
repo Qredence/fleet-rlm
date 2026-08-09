@@ -198,8 +198,8 @@ async def test_runner_deduplicates_final_reasoning_against_nonadjacent_normalize
         ExecutionRuntime,
         RLMExecutionContext,
         RLMExecutionSpec,
+        RunIdentity,
         SessionView,
-        TurnIdentity,
     )
     from fleet_rlm.rlm.dspy_contract import RLMOptions
     from fleet_rlm.rlm.events import RLMReasoning
@@ -237,7 +237,7 @@ async def test_runner_deduplicates_final_reasoning_against_nonadjacent_normalize
         return False
 
     context = RLMExecutionContext(
-        identity=TurnIdentity(run_id=uuid4(), session_id=uuid4(), access=TurnAccess(uuid4(), uuid4())),
+        identity=RunIdentity(run_id=uuid4(), session_id=uuid4(), access=TurnAccess(uuid4(), uuid4())),
         session=SessionView(
             request="answer",
             session_context=SessionContextManifest(uuid4(), 0, 0, ()),

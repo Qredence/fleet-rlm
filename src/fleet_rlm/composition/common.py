@@ -141,26 +141,26 @@ def build_local_inventory(
     from fleet_rlm.config import _CONFIG_PATH, active_profile
     from fleet_rlm.config_policy import ConfigPolicyService
     from fleet_rlm.persistence.repositories import (
+        InMemoryRunStateStore,
         InMemorySessionCatalog,
-        InMemoryTurnStateStore,
+        SqlAlchemyRunStateStore,
         SqlAlchemySessionCatalog,
-        SqlAlchemyTurnStateStore,
     )
     from fleet_rlm.rlm.runner import RLMRunner
 
     session_factory = database.session_factory
     if session_factory is None:
-        turn_state = InMemoryTurnStateStore()
-        session_catalog = InMemorySessionCatalog(turn_state)
+        run_state = InMemoryRunStateStore()
+        session_catalog = InMemorySessionCatalog(run_state)
     else:
-        turn_state = SqlAlchemyTurnStateStore(
+        run_state = SqlAlchemyRunStateStore(
             session_factory,
             stale_after_seconds=settings.run_stale_after_seconds,
         )
         session_catalog = SqlAlchemySessionCatalog(session_factory)
     cleanup = RunCleanupSupervisor(max_jobs=8)
     lifecycle = RunLifecycleService(
-        turn_state,
+        run_state,
         max_artifact_bytes=settings.max_artifact_bytes,
         heartbeat_seconds=settings.run_heartbeat_seconds,
         stale_after_seconds=settings.run_stale_after_seconds,
@@ -182,10 +182,10 @@ def build_local_inventory(
         artifact_reader=artifact_reader,
         workspace_volume_mirror=workspace_volume_mirror,
         session_catalog=session_catalog,
-        turn_lifecycle=lifecycle,
-        turn_cleanup_supervisor=cleanup,
-        turn_preparation=preparation,
-        turn_state_store=turn_state,
+        run_lifecycle=lifecycle,
+        run_cleanup_supervisor=cleanup,
+        run_preparation=preparation,
+        run_state_store=run_state,
         config_policy=ConfigPolicyService(
             _CONFIG_PATH,
             active_profile=active_profile(settings),

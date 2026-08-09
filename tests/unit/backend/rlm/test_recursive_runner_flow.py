@@ -15,8 +15,8 @@ from fleet_rlm.rlm.context import (
     ExecutionRuntime,
     RLMExecutionContext,
     RLMExecutionSpec,
+    RunIdentity,
     SessionView,
-    TurnIdentity,
 )
 from fleet_rlm.rlm.dspy_contract import RLMOptions
 from fleet_rlm.rlm.events import Status, ToolCompleted, ToolStarted
@@ -64,7 +64,7 @@ async def test_root_child_root_flow_preserves_parent_repl_and_typed_submit() -> 
         return False
 
     context = RLMExecutionContext(
-        identity=TurnIdentity(run_id=uuid4(), session_id=uuid4(), access=TurnAccess(uuid4(), uuid4())),
+        identity=RunIdentity(run_id=uuid4(), session_id=uuid4(), access=TurnAccess(uuid4(), uuid4())),
         session=SessionView(
             request="classify the selected row",
             session_context=SessionContextManifest(uuid4(), 0, 0, ()),
@@ -181,7 +181,7 @@ async def test_runner_rejects_recursive_tool_after_authority_revocation() -> Non
         return _child_lease(call_index)
 
     context = RLMExecutionContext(
-        identity=TurnIdentity(
+        identity=RunIdentity(
             run_id=uuid4(), session_id=uuid4(), access=TurnAccess(uuid4(), uuid4()), authority=authority
         ),
         session=SessionView(
@@ -253,7 +253,7 @@ async def test_normal_daytona_policy_omits_recursive_tool_and_guidance() -> None
         return False
 
     context = RLMExecutionContext(
-        identity=TurnIdentity(run_id=uuid4(), session_id=uuid4(), access=TurnAccess(uuid4(), uuid4())),
+        identity=RunIdentity(run_id=uuid4(), session_id=uuid4(), access=TurnAccess(uuid4(), uuid4())),
         session=SessionView(
             request="answer directly",
             session_context=SessionContextManifest(uuid4(), 0, 0, ()),
@@ -336,7 +336,7 @@ async def test_failed_child_cleanup_prevents_successful_root_outcome() -> None:
         )
 
     context = RLMExecutionContext(
-        identity=TurnIdentity(run_id=uuid4(), session_id=uuid4(), access=TurnAccess(uuid4(), uuid4())),
+        identity=RunIdentity(run_id=uuid4(), session_id=uuid4(), access=TurnAccess(uuid4(), uuid4())),
         session=SessionView(
             request="delegate one task",
             session_context=SessionContextManifest(uuid4(), 0, 0, ()),

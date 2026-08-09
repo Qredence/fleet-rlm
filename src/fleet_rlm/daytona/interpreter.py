@@ -57,7 +57,7 @@ from fleet_rlm.rlm.dspy_interpreter_contract import (
     needs_tool_reinjection,
     wrap_final_output,
 )
-from fleet_rlm.rlm.errors import TurnNoProgressError, TurnTerminalError
+from fleet_rlm.rlm.errors import RunNoProgressError, RunTerminalError
 from fleet_rlm.rlm.events import ObservationObserver, RLMCode, RLMOutput, StepFinished, StepStarted
 from fleet_rlm.rlm.sanitize import sanitize_public_text, truncate_head_tail, truncate_public_text
 from fleet_rlm.rlm.tool_observer import ToolEventView, ToolObserver, observe_tool
@@ -709,7 +709,7 @@ class DaytonaCodeInterpreter:
 
         Raises:
             DaytonaAdapterError: If the interpreter is shut down, misconfigured, or the execution provider fails.
-            TurnTerminalError: If execution repeats without making progress.
+            RunTerminalError: If execution repeats without making progress.
         """
         if self._shutdown:
             msg = "interpreter already shut down"
@@ -813,7 +813,7 @@ class DaytonaCodeInterpreter:
                 else:
                     phase.set_outputs(outputs)
                 return result
-            except TurnTerminalError:
+            except RunTerminalError:
                 stdout_projector.finish()
                 _close_output_stream(
                     "Execution failed", step=step, stream_id=output_stream_id, state=output_state, observe=self._observe
@@ -1010,7 +1010,7 @@ class DaytonaCodeInterpreter:
             return
         current = (normalized_code, str(result))
         if current == self._last_execution:
-            raise TurnNoProgressError
+            raise RunNoProgressError
         self._last_execution = current
 
 

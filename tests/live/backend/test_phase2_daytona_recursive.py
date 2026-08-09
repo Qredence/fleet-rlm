@@ -312,7 +312,7 @@ def test_phase2_daytona_recursive_through_fastapi(tmp_path: Path, monkeypatch: p
     with TestClient(app) as client:
         inventory = app.state.runtime_inventory
         resources = inventory.run_environment_resources
-        preparation = inventory.turn_preparation
+        preparation = inventory.run_preparation
         assert resources is not None
         assert preparation is not None
         preparation._capabilities = _ProofCapabilityPreparer(preparation._capabilities, (proof_tool,), proof_views)

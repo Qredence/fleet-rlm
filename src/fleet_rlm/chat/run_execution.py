@@ -167,7 +167,7 @@ class RunExecutionDriver:
 
     async def stream(
         self,
-        turn: ClaimedRun,
+        run: ClaimedRun,
         prepared: PreparedRun,
         heartbeat: _ClaimHeartbeat | None,
         *,
@@ -175,14 +175,14 @@ class RunExecutionDriver:
     ) -> AsyncGenerator[RuntimeEvent]:
         """Drain provider events, settle the Turn, and hand off owned cleanup."""
         state = _ExecutionState(
-            recorder=EventRecorder(turn.run_id, turn.session_id),
+            recorder=EventRecorder(run.run_id, run.session_id),
             heartbeat=heartbeat,
             claim_loss_waiter=(asyncio.create_task(heartbeat.lost.wait()) if heartbeat is not None else None),
         )
         trace_request = self._trace_request(prepared)
         try:
             state.stream = self._runner.stream(prepared.execution)
-            async for event in self._drain_events(turn, prepared, state, trace_request, trace_id):
+            async for event in self._drain_events(run, prepared, state, trace_request, trace_id):
                 yield event
             if state.settled:
                 return
@@ -192,7 +192,7 @@ class RunExecutionDriver:
                 public_error_message="Turn failed",
             )
             self._annotate_outcome(trace_request, outcome)
-            receipt = await self._settle_outcome(turn, prepared, state, outcome, trace_request)
+            receipt = await self._settle_outcome(run, prepared, state, outcome, trace_request)
             if isinstance(receipt, _ClaimLost):
                 yield state.recorder.record(RunFailed(code="unavailable", message="Turn failed"))
                 return
@@ -204,11 +204,11 @@ class RunExecutionDriver:
                     yield event
             yield _terminal(state.recorder, receipt, trace_id=trace_id)
         except (GeneratorExit, asyncio.CancelledError):
-            await self._settle_cancellation(turn, prepared, state)
+            await self._settle_cancellation(run, prepared, state)
             raise
         except Exception:
             if not state.settled:
-                receipt = await self._recover_failure(turn, prepared, trace_request)
+                receipt = await self._recover_failure(run, prepared, trace_request)
                 if receipt is not None:
                     state.settled = True
                     yield _terminal(state.recorder, receipt, trace_id=trace_id)
@@ -219,7 +219,7 @@ class RunExecutionDriver:
 
     async def _drain_events(
         self,
-        turn: ClaimedRun,
+        run: ClaimedRun,
         prepared: PreparedRun,
         state: _ExecutionState,
         trace_request: str,
@@ -237,7 +237,7 @@ class RunExecutionDriver:
                     state.pending_event = None
             if isinstance(result, _ClaimLost):
                 await self._handoff_cleanup(
-                    turn,
+                    run,
                     prepared,
                     state,
                     claim_lost=True,
@@ -251,7 +251,7 @@ class RunExecutionDriver:
                 return
             if isinstance(result.detail, TERMINAL_DETAIL_TYPES):
                 raise RuntimeError("runner emitted a terminal Runtime Event")
-            state.recorder = EventRecorder(turn.run_id, turn.session_id, start_sequence=result.sequence)
+            state.recorder = EventRecorder(run.run_id, run.session_id, start_sequence=result.sequence)
             yield _with_trace_id(result, trace_id)
 
     async def _wait_for_event(
@@ -274,7 +274,7 @@ class RunExecutionDriver:
 
     async def _settle_outcome(
         self,
-        turn: ClaimedRun,
+        run: ClaimedRun,
         prepared: PreparedRun,
         state: _ExecutionState,
         outcome: RLMOutcome,
@@ -283,7 +283,7 @@ class RunExecutionDriver:
         if outcome.terminal_status in {"timeout", "cancelled"}:
             status = "timeout" if outcome.terminal_status == "timeout" else "cancelled"
             receipt = await self._lifecycle.settle(
-                turn,
+                run,
                 RunFailure(
                     status,
                     status,
@@ -291,12 +291,12 @@ class RunExecutionDriver:
                     outcome.usage,
                 ),
             )
-            await self._handoff_cleanup(turn, prepared, state)
+            await self._handoff_cleanup(run, prepared, state)
             await asyncio.sleep(0)
             return receipt
 
         state.finalization_task = asyncio.create_task(
-            self._finish_with_trace(turn, outcome, prepared),
+            self._finish_with_trace(run, outcome, prepared),
             name="fleet-turn-finalization",
         )
         execution_deadline = float(
@@ -310,7 +310,7 @@ class RunExecutionDriver:
         result = await self._wait_for_finalization(state.finalization_task, state.claim_loss_waiter, remaining)
         if isinstance(result, _ClaimLost):
             await self._handoff_cleanup(
-                turn,
+                run,
                 prepared,
                 state,
                 claim_lost=True,
@@ -323,11 +323,11 @@ class RunExecutionDriver:
         if result is None:
             await self._stop_claim_waiter(state)
             receipt = await self._lifecycle.settle(
-                turn,
+                run,
                 RunFailure("timeout", "timeout", "Turn timed out", outcome.usage),
             )
             await self._handoff_cleanup(
-                turn,
+                run,
                 prepared,
                 state,
                 finalization_task=state.finalization_task,
@@ -360,7 +360,7 @@ class RunExecutionDriver:
 
     async def _finish_with_trace(
         self,
-        turn: ClaimedRun,
+        run: ClaimedRun,
         resolution: RLMOutcome | RunFailure,
         prepared: PreparedRun,
     ) -> RunSettlement:
@@ -375,7 +375,7 @@ class RunExecutionDriver:
             settlement_inputs["iterations"] = resolution.usage.get("iterations")
         with turn_phase_span("Turn.settlement", inputs=settlement_inputs):
             return await self._lifecycle.finish(
-                turn,
+                run,
                 resolution,
                 artifact_sink=prepared.artifact_sink,
                 result_snapshot_sink=prepared.result_snapshot_sink,
@@ -383,7 +383,7 @@ class RunExecutionDriver:
 
     async def _settle_cancellation(
         self,
-        turn: ClaimedRun,
+        run: ClaimedRun,
         prepared: PreparedRun,
         state: _ExecutionState,
     ) -> None:
@@ -393,18 +393,18 @@ class RunExecutionDriver:
             await self._cancel_pending_event(state)
             await asyncio.shield(
                 self._lifecycle.settle(
-                    turn,
+                    run,
                     RunFailure("cancelled", "cancelled", "Turn cancelled", empty_rlm_usage()),
                 )
             )
-            await self._handoff_cleanup(turn, prepared, state)
+            await self._handoff_cleanup(run, prepared, state)
             await asyncio.sleep(0)
         except Exception:
             pass
 
     async def _recover_failure(
         self,
-        turn: ClaimedRun,
+        run: ClaimedRun,
         prepared: PreparedRun,
         trace_request: str,
     ) -> FailedRunReceipt | CommittedTurnReceipt | None:
@@ -412,7 +412,7 @@ class RunExecutionDriver:
         try:
             return await asyncio.shield(
                 self._finish_with_trace(
-                    turn,
+                    run,
                     RunFailure("failed", "execution_failed", "Turn failed", empty_rlm_usage()),
                     prepared,
                 )
@@ -422,7 +422,7 @@ class RunExecutionDriver:
 
     async def _handoff_cleanup(
         self,
-        turn: ClaimedRun,
+        run: ClaimedRun,
         prepared: PreparedRun,
         state: _ExecutionState,
         *,
@@ -431,7 +431,7 @@ class RunExecutionDriver:
         finalization_task: asyncio.Task[RunSettlement] | None = None,
     ) -> None:
         self._submit_cleanup(
-            turn,
+            run,
             state.stream,
             prepared,
             state.heartbeat,
@@ -471,7 +471,7 @@ class RunExecutionDriver:
 
     def _submit_cleanup(
         self,
-        turn: ClaimedRun,
+        run: ClaimedRun,
         stream: RunEventStream | None,
         prepared: PreparedRun,
         heartbeat: _ClaimHeartbeat | None,
@@ -484,12 +484,12 @@ class RunExecutionDriver:
             try:
                 committed = False
                 if claim_lost:
-                    receipt = await self._revoke_claim(turn, claim_loss_usage or empty_rlm_usage())
+                    receipt = await self._revoke_claim(run, claim_loss_usage or empty_rlm_usage())
                     # A racing commit wins: no fence and no settlement release
                     # against a committed Run, but owned resources still close.
                     committed = receipt is None
                     if not committed and self._claim_loss_fence is not None:
-                        await self._claim_loss_fence(turn.session_id)
+                        await self._claim_loss_fence(run.session_id)
                 if stream is not None:
                     with contextlib.suppress(BaseException):
                         await stream.aclose()
@@ -499,7 +499,7 @@ class RunExecutionDriver:
                         await asyncio.shield(finalization_task)
                 await prepared.aclose()
                 if not committed:
-                    await self._lifecycle.complete_settling(turn)
+                    await self._lifecycle.complete_settling(run)
             finally:
                 await _stop_heartbeat(heartbeat)
 

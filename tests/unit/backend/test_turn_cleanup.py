@@ -10,17 +10,17 @@ import pytest
 
 @pytest.mark.asyncio
 async def test_cleanup_supervisor_is_bounded_and_drains_owned_work() -> None:
-    from fleet_rlm.chat.turn_cleanup import TurnCleanupSupervisor, TurnCleanupUnavailableError
+    from fleet_rlm.chat.run_cleanup import RunCleanupSupervisor, RunCleanupUnavailableError
 
     release = asyncio.Event()
-    supervisor = TurnCleanupSupervisor(max_jobs=1)
+    supervisor = RunCleanupSupervisor(max_jobs=1)
 
     async def cleanup() -> None:
         await release.wait()
 
     supervisor.submit(cleanup())
     assert supervisor.active_jobs == 1
-    with pytest.raises(TurnCleanupUnavailableError):
+    with pytest.raises(RunCleanupUnavailableError):
         supervisor.require_capacity()
 
     release.set()
@@ -30,21 +30,21 @@ async def test_cleanup_supervisor_is_bounded_and_drains_owned_work() -> None:
 
 @pytest.mark.asyncio
 async def test_settling_revokes_commit_and_blocks_replacement_until_cleanup() -> None:
-    from fleet_rlm.chat.turn_claim import BeginSettlement, ClaimFailure, CompleteSettlement
-    from fleet_rlm.chat.turn_lifecycle import BeginTurn, TurnFailure, TurnInProgressError, TurnStateError
-    from fleet_rlm.persistence.repositories import InMemorySessionCatalog, InMemoryTurnStateStore
+    from fleet_rlm.chat.run_claim import BeginSettlement, ClaimFailure, CompleteSettlement
+    from fleet_rlm.chat.run_lifecycle import RunClaim, RunFailure, RunInProgressError, RunStateError
+    from fleet_rlm.persistence.repositories import InMemoryRunStateStore, InMemorySessionCatalog
     from fleet_rlm.rlm.dspy_contract import empty_rlm_usage
     from fleet_rlm.sessions.models import TurnAccess, TurnInput
 
     access = TurnAccess(uuid4(), uuid4())
-    store = InMemoryTurnStateStore()
+    store = InMemoryRunStateStore()
     session = await InMemorySessionCatalog(store).create(
         user_id=access.user_id,
         workspace_id=access.workspace_id,
         title="settling",
     )
-    turn = await store.begin(BeginTurn(access, session.id, TurnInput("one"), "one", uuid4()))
-    failure = TurnFailure("timeout", "timeout", "Turn timed out", empty_rlm_usage())
+    turn = await store.begin(RunClaim(access, session.id, TurnInput("one"), "one", uuid4()))
+    failure = RunFailure("timeout", "timeout", "Turn timed out", empty_rlm_usage())
     receipt = await store.transition_claim(
         turn,
         BeginSettlement(
@@ -54,37 +54,37 @@ async def test_settling_revokes_commit_and_blocks_replacement_until_cleanup() ->
     assert receipt is not None
     assert receipt.durable is False
 
-    with pytest.raises(TurnStateError):
+    with pytest.raises(RunStateError):
         await store.commit(turn, None, ())  # type: ignore[arg-type]
-    with pytest.raises(TurnInProgressError):
-        await store.begin(BeginTurn(access, session.id, TurnInput("two"), "two", uuid4()))
+    with pytest.raises(RunInProgressError):
+        await store.begin(RunClaim(access, session.id, TurnInput("two"), "two", uuid4()))
 
     terminal = await store.transition_claim(turn, CompleteSettlement())
     assert terminal is not None
     assert terminal.durable is True
     assert terminal.terminal_status == "timeout"
-    await store.begin(BeginTurn(access, session.id, TurnInput("two"), "two", uuid4()))
+    await store.begin(RunClaim(access, session.id, TurnInput("two"), "two", uuid4()))
 
 
 @pytest.mark.asyncio
 async def test_in_memory_revoke_completion_uses_policy_terminal_intent() -> None:
-    from fleet_rlm.chat.turn_claim import ClaimFailure, CompleteSettlement, RevokeClaim
-    from fleet_rlm.chat.turn_lifecycle import BeginTurn, ExecuteTurn, TurnFailure
-    from fleet_rlm.persistence.repositories import InMemorySessionCatalog, InMemoryTurnStateStore
+    from fleet_rlm.chat.run_claim import ClaimFailure, CompleteSettlement, RevokeClaim
+    from fleet_rlm.chat.run_lifecycle import ClaimedRun, RunClaim, RunFailure
+    from fleet_rlm.persistence.repositories import InMemoryRunStateStore, InMemorySessionCatalog
     from fleet_rlm.rlm.dspy_contract import empty_rlm_usage
     from fleet_rlm.sessions.models import TurnAccess, TurnInput
 
     access = TurnAccess(uuid4(), uuid4())
-    store = InMemoryTurnStateStore()
+    store = InMemoryRunStateStore()
     session = await InMemorySessionCatalog(store).create(
         user_id=access.user_id,
         workspace_id=access.workspace_id,
         title="stale claim parity",
     )
-    turn = await store.begin(BeginTurn(access, session.id, TurnInput("one"), "one", uuid4()))
-    assert isinstance(turn, ExecuteTurn)
+    turn = await store.begin(RunClaim(access, session.id, TurnInput("one"), "one", uuid4()))
+    assert isinstance(turn, ClaimedRun)
 
-    failure = TurnFailure("timeout", "timeout", "Timed out", empty_rlm_usage())
+    failure = RunFailure("timeout", "timeout", "Timed out", empty_rlm_usage())
     revoked = await store.transition_claim(
         turn,
         RevokeClaim(ClaimFailure(failure.terminal_status, failure.failure_code, failure.public_message), failure.usage),
@@ -103,5 +103,5 @@ async def test_in_memory_revoke_completion_uses_policy_terminal_intent() -> None
     assert terminal is not None
     assert (terminal.terminal_status, terminal.failure_code, terminal.durable) == ("failed", "stale_claim", True)
     assert (run.status, run.failure_code) == ("failed", "stale_claim")
-    replacement = await store.begin(BeginTurn(access, session.id, TurnInput("two"), "two", uuid4()))
-    assert isinstance(replacement, ExecuteTurn)
+    replacement = await store.begin(RunClaim(access, session.id, TurnInput("two"), "two", uuid4()))
+    assert isinstance(replacement, ClaimedRun)

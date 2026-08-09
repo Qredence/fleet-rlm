@@ -15,8 +15,8 @@ def test_execution_context_is_immutable_and_contains_prepared_runner_inputs() ->
     from fleet_rlm.rlm.context import (
         ExecutionRuntime,
         RLMExecutionContext,
+        RunIdentity,
         SessionView,
-        TurnIdentity,
     )
     from fleet_rlm.rlm.dspy_contract import RLMOptions
     from fleet_rlm.rlm.model_bundle import RLMModelBundle
@@ -24,7 +24,7 @@ def test_execution_context_is_immutable_and_contains_prepared_runner_inputs() ->
 
     session_id = uuid4()
     context = RLMExecutionContext(
-        identity=TurnIdentity(
+        identity=RunIdentity(
             run_id=uuid4(), session_id=session_id, access=TurnAccess(user_id=uuid4(), workspace_id=uuid4())
         ),
         session=SessionView(

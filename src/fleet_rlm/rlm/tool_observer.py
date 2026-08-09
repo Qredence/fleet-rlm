@@ -11,7 +11,7 @@ from uuid import uuid4
 
 import dspy
 
-from fleet_rlm.rlm.errors import TurnNoProgressError
+from fleet_rlm.rlm.errors import RunNoProgressError
 from fleet_rlm.rlm.events import (
     JsonValue,
     ObservationDetail,
@@ -21,7 +21,7 @@ from fleet_rlm.rlm.events import (
     ToolStarted,
     WarningEvent,
 )
-from fleet_rlm.rlm.tool_guards import TurnToolGuards
+from fleet_rlm.rlm.tool_guards import RunToolGuards
 
 ToolInputProjection = Callable[[Mapping[str, Any]], JsonValue]
 ToolOutputProjection = Callable[[Any], JsonValue]
@@ -190,7 +190,7 @@ def _execute_observed_tool(
     event_view: ToolEventView,
     trace: _ToolTrace,
     after_result: ToolAfterResult | None,
-    guards: TurnToolGuards | None,
+    guards: RunToolGuards | None,
 ) -> Any:
     try:
         result = source.func(**validated)
@@ -213,7 +213,7 @@ def _check_tool_progress(
     observer: ToolObserver,
     event_view: ToolEventView,
     trace: _ToolTrace,
-    guards: TurnToolGuards | None,
+    guards: RunToolGuards | None,
 ) -> None:
     if guards is None:
         return
@@ -229,7 +229,7 @@ def _check_tool_progress(
     # bounded public message, reused here as the failure detail.
     observer(ToolFailed(trace.call_id, str(source.name), bound_event_text(warning)))
     trace.finish(status="failed", output={"tool_status": "failed", "failure_category": "no_progress"})
-    raise TurnNoProgressError
+    raise RunNoProgressError
 
 
 def _run_observed_tool(
@@ -240,7 +240,7 @@ def _run_observed_tool(
     event_view: ToolEventView,
     after_result: ToolAfterResult | None,
     is_authorized: Callable[[], bool] | None,
-    guards: TurnToolGuards | None,
+    guards: RunToolGuards | None,
     args: tuple[Any, ...],
     kwargs: Mapping[str, Any],
 ) -> Any:
@@ -292,7 +292,7 @@ def observe_tool(
     *,
     after_result: ToolAfterResult | None = None,
     is_authorized: Callable[[], bool] | None = None,
-    guards: TurnToolGuards | None = None,
+    guards: RunToolGuards | None = None,
 ) -> dspy.Tool:
     """Return a fresh Tool whose extracted ``func`` preserves DSPy validation."""
     if not isinstance(tool, dspy.Tool):

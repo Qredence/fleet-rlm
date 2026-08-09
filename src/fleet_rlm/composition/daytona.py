@@ -17,7 +17,7 @@ from fleet_rlm.composition.inventory import (
     RuntimeInventory,
     RuntimeProcessResources,
     RuntimeSessionManager,
-    SettlingTurnStore,
+    SettlingRunStateStore,
     clear_runtime_inventory,
     install_runtime_inventory,
 )
@@ -106,7 +106,7 @@ async def _cancel_orphan_cleanup(task: asyncio.Task[None] | None) -> None:
 
 
 async def _reconcile_daytona_settling(
-    turn_state: SettlingTurnStore,
+    run_state: SettlingRunStateStore,
     session_manager: RuntimeSessionManager,
     *,
     fence_timeout: float = _STARTUP_RECOVERY_FENCE_TIMEOUT_SECONDS,
@@ -131,7 +131,7 @@ async def _reconcile_daytona_settling(
             raise TimeoutError("startup recovery budget exhausted")
         await asyncio.wait_for(session_manager.fence_session(session_id), timeout=remaining)
 
-    return await turn_state.reconcile_settling(bounded_fence, deadline=deadline)
+    return await run_state.reconcile_settling(bounded_fence, deadline=deadline)
 
 
 async def run_deferred_orphan_cleanup(
@@ -204,7 +204,7 @@ async def build_daytona_composition(settings: Settings, *, skill_catalog: SkillC
     from fleet_rlm.chat.run_lifecycle import RunLifecycleService
     from fleet_rlm.chat.turn_coordinator import TurnCoordinator
     from fleet_rlm.daytona.provisioning import sandbox_spec_from_settings
-    from fleet_rlm.daytona.run_environment import DaytonaRuntimeResources, build_turn_preparation, resolve_settings
+    from fleet_rlm.daytona.run_environment import DaytonaRuntimeResources, build_run_preparation, resolve_settings
     from fleet_rlm.daytona.workspace_gateway import (
         DaytonaWorkspaceGateway,
         DaytonaWorkspaceVolumeGateway,
@@ -218,9 +218,9 @@ async def build_daytona_composition(settings: Settings, *, skill_catalog: SkillC
     from fleet_rlm.persistence.repositories import (
         SqlAlchemyArtifactCatalog,
         SqlAlchemyAttachmentCatalog,
+        SqlAlchemyRunStateStore,
         SqlAlchemySandboxBindingStore,
         SqlAlchemySessionCatalog,
-        SqlAlchemyTurnStateStore,
     )
     from fleet_rlm.rlm.factory import RLMFactory
     from fleet_rlm.rlm.lm_factory import build_model_bundle
@@ -282,27 +282,27 @@ async def build_daytona_composition(settings: Settings, *, skill_catalog: SkillC
         local_scope = LocalScope()
         startup_started = asyncio.get_running_loop().time()
         startup_deadline = startup_started + _STARTUP_CLEANUP_RECOVERY_BUDGET_SECONDS
-        turn_preparation = build_turn_preparation(
+        run_preparation = build_run_preparation(
             resources,
             attachment_lifecycle=attachment_lifecycle,
             skill_catalog=skill_catalog,
             settings=resolved,
             models=model_bundle,
         )
-        turn_state = SqlAlchemyTurnStateStore(
+        run_state = SqlAlchemyRunStateStore(
             session_factory,
             stale_after_seconds=resolved.run_stale_after_seconds,
         )
         session_catalog = SqlAlchemySessionCatalog(session_factory)
         lifecycle = RunLifecycleService(
-            turn_state,
+            run_state,
             max_artifact_bytes=resolved.max_artifact_bytes,
             heartbeat_seconds=resolved.run_heartbeat_seconds,
             stale_after_seconds=resolved.run_stale_after_seconds,
             cleanup=cleanup,
         )
         recovery = await _reconcile_daytona_settling(
-            turn_state,
+            run_state,
             resources.session_manager,
             deadline=startup_deadline,
         )
@@ -341,7 +341,7 @@ async def build_daytona_composition(settings: Settings, *, skill_catalog: SkillC
 
         coordinator = TurnCoordinator(
             lifecycle=lifecycle,
-            preparation=turn_preparation,
+            preparation=run_preparation,
             runner=RLMRunner(factory=RLMFactory(verbose=resolved.rlm_verbose)),
             turn_timeout_seconds=resolved.turn_timeout_seconds,
             cleanup=cleanup,
@@ -353,14 +353,14 @@ async def build_daytona_composition(settings: Settings, *, skill_catalog: SkillC
             run_environment_resources=resources,
             turn_coordinator=coordinator,
             session_catalog=session_catalog,
-            turn_lifecycle=lifecycle,
+            run_lifecycle=lifecycle,
             attachment_lifecycle=attachment_lifecycle,
             artifact_reader=artifact_reader,
             workspace_volume_gateway=gateway,
             workspace_file_service=workspace_file_service,
-            turn_cleanup_supervisor=cleanup,
-            turn_preparation=turn_preparation,
-            turn_state_store=turn_state,
+            run_cleanup_supervisor=cleanup,
+            run_preparation=run_preparation,
+            run_state_store=run_state,
             database=database_lifecycle,
             model_bundle=model_bundle,
             orphan_cleanup_task=orphan_cleanup_task,
@@ -414,10 +414,10 @@ async def install_daytona_composition(
             attachment_lifecycle=inventory.attachment_lifecycle,
             artifact_reader=inventory.artifact_reader,
             session_catalog=inventory.session_catalog,
-            turn_lifecycle=inventory.turn_lifecycle,
-            turn_preparation=inventory.turn_preparation,
-            turn_cleanup_supervisor=inventory.turn_cleanup_supervisor,
-            turn_state_store=inventory.turn_state_store,
+            run_lifecycle=inventory.run_lifecycle,
+            run_preparation=inventory.run_preparation,
+            run_cleanup_supervisor=inventory.run_cleanup_supervisor,
+            run_state_store=inventory.run_state_store,
             config_policy=ConfigPolicyService(
                 _CONFIG_PATH,
                 active_profile=active_profile(settings),
@@ -455,7 +455,7 @@ async def dispose_daytona_composition(app: FastAPI) -> None:
     inventory = clear_runtime_inventory(app)
     orphan_task = getattr(inventory, "orphan_cleanup_task", None)
     await _cancel_orphan_cleanup(orphan_task)
-    cleanup = getattr(inventory, "turn_cleanup_supervisor", None)
+    cleanup = getattr(inventory, "run_cleanup_supervisor", None)
     if cleanup is not None:
         await cleanup.shutdown(drain_seconds=30)
     await _dispose_components(

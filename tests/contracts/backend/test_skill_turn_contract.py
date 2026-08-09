@@ -17,7 +17,7 @@ from fleet_rlm.api.errors import install_error_handlers
 from fleet_rlm.api.routes.turns import router as turns_router
 from fleet_rlm.api.schemas import CreateTurnRequest
 from fleet_rlm.chat.commands import OpenTurnCommand
-from fleet_rlm.chat.turn_lifecycle import ExecuteTurn, _TurnClaimToken
+from fleet_rlm.chat.run_lifecycle import ClaimedRun, _RunClaimToken
 from fleet_rlm.composition.inventory import RuntimeInventory
 from fleet_rlm.config import Settings
 from fleet_rlm.files.models import AttachmentRef, PreparedAttachments, StagedAttachment
@@ -74,18 +74,18 @@ def _turn(
     *,
     selections: tuple[SkillSelectionRef, ...] = (),
     attachment_ids: tuple[UUID, ...] = (),
-) -> ExecuteTurn:
+) -> ClaimedRun:
     async def not_cancelled() -> bool:
         return False
 
-    return ExecuteTurn(
+    return ClaimedRun(
         uuid4(),
         uuid4(),
         TurnAccess(uuid4(), uuid4()),
         TurnInput("analyze the supplied material", attachment_ids, selections),
         SessionHistory(()),
         not_cancelled,
-        _TurnClaimToken(uuid4()),
+        _RunClaimToken(uuid4()),
     )
 
 

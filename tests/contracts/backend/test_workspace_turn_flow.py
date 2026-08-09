@@ -31,11 +31,11 @@ from fleet_rlm.rlm.context import (
     ExecutionRuntime,
     RLMExecutionContext,
     RLMExecutionSpec,
+    RunIdentity,
     SessionView,
-    TurnIdentity,
 )
 from fleet_rlm.rlm.dspy_contract import RLMOptions
-from fleet_rlm.rlm.errors import TurnCancelledError
+from fleet_rlm.rlm.errors import RunCancelledError
 from fleet_rlm.rlm.events import RuntimeEvent
 from fleet_rlm.rlm.runner import RLMRunner
 from fleet_rlm.sessions.models import TurnAccess
@@ -245,7 +245,7 @@ class WorkspaceFlowFactory:
                     if request == "remember_failed":
                         raise RuntimeError("turn failed after memory append")
                     if request == "remember_cancelled":
-                        raise TurnCancelledError
+                        raise RunCancelledError
                     return dspy.Prediction(answer="remembered", trajectory=[])
                 if request == "recall":
                     result = tools["read_workspace_memory"]()
@@ -288,7 +288,7 @@ class WorkspaceFlowFactory:
                 assert result["ok"] is True
                 if request == "failed":
                     raise RuntimeError("turn failed after write")
-                raise TurnCancelledError
+                raise RunCancelledError
 
         return Program()
 
@@ -310,7 +310,7 @@ async def _run(
     else:
         task_request = request
     context = RLMExecutionContext(
-        identity=TurnIdentity(run_id=uuid4(), session_id=workspace.session_id, access=workspace.access),
+        identity=RunIdentity(run_id=uuid4(), session_id=workspace.session_id, access=workspace.access),
         session=SessionView(
             request=task_request,
             session_context=SessionContextManifest(workspace.session_id, 0, 0, ()),

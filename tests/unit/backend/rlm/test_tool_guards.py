@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import pytest
 
-from fleet_rlm.rlm.tool_guards import TurnToolGuards, workspace_obligations
+from fleet_rlm.rlm.tool_guards import RunToolGuards, workspace_obligations
 
 
 def test_workspace_failure_is_cleared_only_by_successful_same_workspace_write() -> None:
-    guards = TurnToolGuards()
+    guards = RunToolGuards()
     original = {"path": "notes/report.md", "content": "old", "overwrite": False}
     other = {"path": "notes/other.md", "content": "new", "overwrite": True}
 
@@ -25,7 +25,7 @@ def test_workspace_failure_is_cleared_only_by_successful_same_workspace_write() 
 
 
 def test_required_target_scope_ignores_unrelated_diagnostic_mutations() -> None:
-    guards = TurnToolGuards(required_targets=frozenset({"session_workspace:notes/report.md"}))
+    guards = RunToolGuards(required_targets=frozenset({"session_workspace:notes/report.md"}))
 
     guards.failed("write_workspace_text", {"path": "notes/diagnostic.md"})
     guards.completed("write_workspace_text", {"path": "notes/report.md", "content": "new"}, {"ok": True})
@@ -43,7 +43,7 @@ def test_required_target_scope_ignores_unrelated_diagnostic_mutations() -> None:
     ],
 )
 def test_unrecognized_workspace_target_preserves_fail_closed_tracking(task_text: str) -> None:
-    guards = TurnToolGuards(required_targets=workspace_obligations(task_text))
+    guards = RunToolGuards(required_targets=workspace_obligations(task_text))
 
     guards.failed("write_workspace_text", {"path": "README"})
 
@@ -51,7 +51,7 @@ def test_unrecognized_workspace_target_preserves_fail_closed_tracking(task_text:
 
 
 def test_required_failure_remains_unresolved_after_unrelated_success() -> None:
-    guards = TurnToolGuards(required_targets=frozenset({"session_workspace:date.txt"}))
+    guards = RunToolGuards(required_targets=frozenset({"session_workspace:date.txt"}))
 
     guards.failed("write_workspace_text", {"path": "date.txt"})
     guards.completed(
@@ -64,7 +64,7 @@ def test_required_failure_remains_unresolved_after_unrelated_success() -> None:
 
 
 def test_unrelated_failure_does_not_block_verified_required_target() -> None:
-    guards = TurnToolGuards(required_targets=frozenset({"session_workspace:date.txt"}))
+    guards = RunToolGuards(required_targets=frozenset({"session_workspace:date.txt"}))
 
     guards.failed("write_workspace_text", {"path": "diagnostic.txt"})
     guards.completed(
@@ -78,7 +78,7 @@ def test_unrelated_failure_does_not_block_verified_required_target() -> None:
 
 
 def test_local_filesystem_success_does_not_satisfy_required_workspace_target() -> None:
-    guards = TurnToolGuards(required_targets=frozenset({"session_workspace:date.txt"}))
+    guards = RunToolGuards(required_targets=frozenset({"session_workspace:date.txt"}))
 
     guards.failed("write_workspace_text", {"path": "date.txt"})
     # A Python-local ``open`` never reaches this ledger and cannot clear it.
@@ -87,7 +87,7 @@ def test_local_filesystem_success_does_not_satisfy_required_workspace_target() -
 
 
 def test_cleanup_warning_does_not_invalidate_verified_primary_mutation() -> None:
-    guards = TurnToolGuards(required_targets=frozenset({"session_workspace:date.txt"}))
+    guards = RunToolGuards(required_targets=frozenset({"session_workspace:date.txt"}))
 
     guards.failed("write_workspace_text", {"path": "date.txt"})
     guards.completed(
@@ -99,7 +99,7 @@ def test_cleanup_warning_does_not_invalidate_verified_primary_mutation() -> None
 
 
 def test_successful_append_repairs_the_same_required_workspace_target() -> None:
-    guards = TurnToolGuards(required_targets=frozenset({"session_workspace:date.txt"}))
+    guards = RunToolGuards(required_targets=frozenset({"session_workspace:date.txt"}))
     guards.failed("append_workspace_text", {"path": "date.txt", "content": "new"})
     assert guards.integrity.unresolved == ("session_workspace:date.txt",)
 
@@ -108,7 +108,7 @@ def test_successful_append_repairs_the_same_required_workspace_target() -> None:
 
 
 def test_identical_tool_results_warn_once_without_terminally_failing_a_turn() -> None:
-    guards = TurnToolGuards()
+    guards = RunToolGuards()
     arguments = {"offset": 22, "limit": 5}
     eof = {"next_offset": None, "done": True, "messages": []}
 
@@ -118,7 +118,7 @@ def test_identical_tool_results_warn_once_without_terminally_failing_a_turn() ->
 
 
 def test_project_write_failure_is_cleared_only_by_verified_project_read_back() -> None:
-    guards = TurnToolGuards()
+    guards = RunToolGuards()
     original = {"path": "fleet-rlm/review.md", "content": "old", "overwrite": False}
     other = {"path": "fleet-rlm/other.md", "content": "new", "overwrite": True}
 
@@ -145,9 +145,7 @@ def test_project_obligations_use_the_projects_prefix_and_coexist_with_session_ta
 
 
 def test_project_tools_join_obligations_through_the_ledger_and_progress_guard() -> None:
-    guards = TurnToolGuards(
-        required_targets=workspace_obligations("deliver the report to projects/fleet-rlm/review.md")
-    )
+    guards = RunToolGuards(required_targets=workspace_obligations("deliver the report to projects/fleet-rlm/review.md"))
 
     guards.failed("write_project_text", {"path": "fleet-rlm/scratch.md"})
     assert guards.integrity.unresolved == ()  # unrelated diagnostic mutations stay out of scope
@@ -169,7 +167,7 @@ def test_project_tools_join_obligations_through_the_ledger_and_progress_guard() 
 
 
 def test_project_target_strips_a_redundant_projects_prefix() -> None:
-    guards = TurnToolGuards(required_targets=frozenset({"project_workspace:fleet-rlm/review.md"}))
+    guards = RunToolGuards(required_targets=frozenset({"project_workspace:fleet-rlm/review.md"}))
 
     guards.failed("write_project_text", {"path": "projects/fleet-rlm/review.md"})
     assert guards.integrity.unresolved == ("project_workspace:fleet-rlm/review.md",)
@@ -179,7 +177,7 @@ def test_tool_namespace_is_authoritative_over_path_prefixes() -> None:
     # A session-workspace tool executes its path verbatim inside the session
     # workspace, so a ``projects/...`` path must never satisfy (or even join)
     # a ``project_workspace:`` obligation.
-    guards = TurnToolGuards(required_targets=frozenset({"project_workspace:fleet-rlm/review.md"}))
+    guards = RunToolGuards(required_targets=frozenset({"project_workspace:fleet-rlm/review.md"}))
     guards.failed("write_project_text", {"path": "fleet-rlm/review.md"})
     assert guards.integrity.unresolved == ("project_workspace:fleet-rlm/review.md",)
 
@@ -197,13 +195,13 @@ def test_tool_namespace_is_authoritative_over_path_prefixes() -> None:
 
     # The mirrored crossing (a project tool writing under a ``workspace``
     # slug) stays in the project namespace instead of flipping to session.
-    session_guards = TurnToolGuards(required_targets=frozenset({"session_workspace:notes/report.md"}))
+    session_guards = RunToolGuards(required_targets=frozenset({"session_workspace:notes/report.md"}))
     session_guards.failed("edit_project_text", {"path": "workspace/notes/report.md"})
     assert session_guards.integrity.unresolved == ()
 
 
 def test_delete_and_edit_tools_join_guard_targets_in_both_namespaces() -> None:
-    guards = TurnToolGuards()
+    guards = RunToolGuards()
 
     # Failed delete/edit mutations are tracked against the same stable
     # namespaced targets as writes.
@@ -234,7 +232,7 @@ def test_delete_and_edit_tools_join_guard_targets_in_both_namespaces() -> None:
 
 
 def test_delete_edit_targets_respect_required_target_scoping() -> None:
-    guards = TurnToolGuards(required_targets=frozenset({"session_workspace:notes/report.md"}))
+    guards = RunToolGuards(required_targets=frozenset({"session_workspace:notes/report.md"}))
 
     guards.failed("delete_workspace_path", {"path": "notes/diagnostic.md"})
     assert guards.integrity.unresolved == ()  # unrelated deletes stay out of scope

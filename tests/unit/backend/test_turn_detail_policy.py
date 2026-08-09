@@ -119,10 +119,10 @@ def test_commit_success_normalizes_guard_closed_no_progress_tool_call() -> None:
 
     from fleet_rlm.chat.turn_detail_policy import commit_success
     from fleet_rlm.rlm.dspy_contract import PredictionResult
-    from fleet_rlm.rlm.errors import TurnNoProgressError
+    from fleet_rlm.rlm.errors import RunNoProgressError
     from fleet_rlm.rlm.events import ToolCompleted, ToolFailed, ToolStarted
     from fleet_rlm.rlm.outcome import RLMOutcome
-    from fleet_rlm.rlm.tool_guards import TurnToolGuards
+    from fleet_rlm.rlm.tool_guards import RunToolGuards
     from fleet_rlm.rlm.tool_observer import ToolEventView, observe_tool
     from fleet_rlm.sessions.committed_turn import ToolCallPart
 
@@ -131,10 +131,10 @@ def test_commit_success_normalizes_guard_closed_no_progress_tool_call() -> None:
         dspy.Tool(lambda query: f"result for {query}", name="lookup"),
         observed.append,
         ToolEventView.metadata_only(),
-        guards=TurnToolGuards(),
+        guards=RunToolGuards(),
     )
     assert wrapped(query="repeat") == "result for repeat"
-    with pytest.raises(TurnNoProgressError):
+    with pytest.raises(RunNoProgressError):
         wrapped(query="repeat")
 
     execution_details = tuple(item for item in observed if isinstance(item, (ToolStarted, ToolCompleted, ToolFailed)))

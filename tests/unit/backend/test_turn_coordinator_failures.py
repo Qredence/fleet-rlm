@@ -15,8 +15,8 @@ import pytest
 def test_terminal_maps_turn_output_too_large_public_message() -> None:
     from uuid import uuid4
 
+    from fleet_rlm.chat.run_lifecycle import FailedRunReceipt
     from fleet_rlm.chat.turn_coordinator import _terminal
-    from fleet_rlm.chat.turn_lifecycle import FailedRunReceipt
     from fleet_rlm.rlm.events import EventRecorder, RunFailed
 
     event = _terminal(
@@ -46,10 +46,10 @@ async def test_open_non_success_has_one_last_terminal_and_never_promotes(
 
     from fleet_rlm.artifacts.models import ArtifactCandidate
     from fleet_rlm.chat.commands import OpenTurnCommand
-    from fleet_rlm.chat.turn_cleanup import TurnCleanupSupervisor
+    from fleet_rlm.chat.run_cleanup import RunCleanupSupervisor
+    from fleet_rlm.chat.run_lifecycle import RunLifecycleService
     from fleet_rlm.chat.turn_coordinator import TurnCoordinator
-    from fleet_rlm.chat.turn_lifecycle import TurnLifecycleService
-    from fleet_rlm.persistence.repositories import InMemorySessionCatalog, InMemoryTurnStateStore
+    from fleet_rlm.persistence.repositories import InMemoryRunStateStore, InMemorySessionCatalog
     from fleet_rlm.rlm.events import (
         TERMINAL_DETAIL_TYPES,
         EventRecorder,
@@ -63,7 +63,7 @@ async def test_open_non_success_has_one_last_terminal_and_never_promotes(
 
     expected_terminal = {"RunCancelled": RunCancelled, "RunTimedOut": RunTimedOut}[terminal_type]
     access = TurnAccess(uuid4(), uuid4())
-    store = InMemoryTurnStateStore()
+    store = InMemoryRunStateStore()
     session = await InMemorySessionCatalog(store).create(
         user_id=access.user_id,
         workspace_id=access.workspace_id,
@@ -146,9 +146,9 @@ async def test_open_non_success_has_one_last_terminal_and_never_promotes(
         def stream(self, _execution):
             return Stream()
 
-    cleanup = TurnCleanupSupervisor()
+    cleanup = RunCleanupSupervisor()
     coordinator = TurnCoordinator(
-        lifecycle=TurnLifecycleService(store, max_artifact_bytes=100),
+        lifecycle=RunLifecycleService(store, max_artifact_bytes=100),
         preparation=Preparation(),
         runner=Runner(),
         cleanup=cleanup,
@@ -186,16 +186,16 @@ async def test_open_non_success_has_one_last_terminal_and_never_promotes(
 @pytest.mark.asyncio
 async def test_open_preparation_failure_is_durable_before_stream_and_releases_claim() -> None:
     from fleet_rlm.chat.commands import OpenTurnCommand
+    from fleet_rlm.chat.run_lifecycle import RunClaim, RunFailure, RunLifecycleService
+    from fleet_rlm.chat.run_preparation import RunPreparationUnavailableError
     from fleet_rlm.chat.turn_coordinator import TurnCoordinator
-    from fleet_rlm.chat.turn_lifecycle import BeginTurn, TurnFailure, TurnLifecycleService
-    from fleet_rlm.chat.turn_preparation import TurnPreparationUnavailableError
-    from fleet_rlm.persistence.repositories import InMemorySessionCatalog, InMemoryTurnStateStore
+    from fleet_rlm.persistence.repositories import InMemoryRunStateStore, InMemorySessionCatalog
     from fleet_rlm.rlm.dspy_contract import empty_rlm_usage
     from fleet_rlm.sessions.models import TurnAccess, TurnInput
 
     access = TurnAccess(uuid4(), uuid4())
-    store = InMemoryTurnStateStore()
-    lifecycle = TurnLifecycleService(store, max_artifact_bytes=100)
+    store = InMemoryRunStateStore()
+    lifecycle = RunLifecycleService(store, max_artifact_bytes=100)
     session = await InMemorySessionCatalog(store).create(
         user_id=access.user_id,
         workspace_id=access.workspace_id,
@@ -206,7 +206,7 @@ async def test_open_preparation_failure_is_durable_before_stream_and_releases_cl
     class Preparation:
         async def prepare(self, turn, *, deadline):
             del turn, deadline
-            raise TurnPreparationUnavailableError("provider detail must not escape")
+            raise RunPreparationUnavailableError("provider detail must not escape")
 
     class Runner:
         def stream(self, _execution):
@@ -215,15 +215,15 @@ async def test_open_preparation_failure_is_durable_before_stream_and_releases_cl
             raise AssertionError("runner must not start")
 
     coordinator = TurnCoordinator(lifecycle=lifecycle, preparation=Preparation(), runner=Runner())
-    with pytest.raises(TurnPreparationUnavailableError):
+    with pytest.raises(RunPreparationUnavailableError):
         await coordinator.open(OpenTurnCommand(access, session.id, TurnInput("prepare"), "prepare-failure", uuid4()))
 
     assert runner_calls == 0
     assert await store.turn_records(session.id, access) == ()
-    followup = await lifecycle.begin(BeginTurn(access, session.id, TurnInput("followup"), "followup", uuid4()))
+    followup = await lifecycle.begin(RunClaim(access, session.id, TurnInput("followup"), "followup", uuid4()))
     await lifecycle.finish(
         followup,
-        TurnFailure("failed", "execution_failed", "Turn failed", empty_rlm_usage()),
+        RunFailure("failed", "execution_failed", "Turn failed", empty_rlm_usage()),
     )
 
 
@@ -232,10 +232,10 @@ async def test_open_preparation_timeout_finishes_as_typed_timeout_before_stream(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from fleet_rlm.chat.commands import OpenTurnCommand
+    from fleet_rlm.chat.run_lifecycle import RunLifecycleService
+    from fleet_rlm.chat.run_preparation import RunPreparationTimeoutError
     from fleet_rlm.chat.turn_coordinator import TurnCoordinator
-    from fleet_rlm.chat.turn_lifecycle import TurnLifecycleService
-    from fleet_rlm.chat.turn_preparation import TurnPreparationTimeoutError
-    from fleet_rlm.persistence.repositories import InMemorySessionCatalog, InMemoryTurnStateStore
+    from fleet_rlm.persistence.repositories import InMemoryRunStateStore, InMemorySessionCatalog
     from fleet_rlm.sessions.models import TurnAccess, TurnInput
 
     class Span:
@@ -267,8 +267,8 @@ async def test_open_preparation_timeout_finishes_as_typed_timeout_before_stream(
     monkeypatch.setitem(sys.modules, "mlflow.entities", entities)
 
     access = TurnAccess(uuid4(), uuid4())
-    store = InMemoryTurnStateStore()
-    authoritative = TurnLifecycleService(store, max_artifact_bytes=100)
+    store = InMemoryRunStateStore()
+    authoritative = RunLifecycleService(store, max_artifact_bytes=100)
     session = await InMemorySessionCatalog(store).create(
         user_id=access.user_id,
         workspace_id=access.workspace_id,
@@ -302,13 +302,13 @@ async def test_open_preparation_timeout_finishes_as_typed_timeout_before_stream(
     class Preparation:
         async def prepare(self, turn, *, deadline):
             del turn, deadline
-            raise TurnPreparationTimeoutError("private provider timeout")
+            raise RunPreparationTimeoutError("private provider timeout")
 
     class Runner:
         def stream(self, _execution):
             raise AssertionError("runner must not start")
 
-    with pytest.raises(TurnPreparationTimeoutError):
+    with pytest.raises(RunPreparationTimeoutError):
         await TurnCoordinator(
             lifecycle=Lifecycle(),
             preparation=Preparation(),
@@ -326,14 +326,14 @@ async def test_open_preparation_timeout_finishes_as_typed_timeout_before_stream(
 async def test_open_midstream_execution_failure_keeps_sequence_and_terminal_order() -> None:
 
     from fleet_rlm.chat.commands import OpenTurnCommand
+    from fleet_rlm.chat.run_lifecycle import RunLifecycleService
     from fleet_rlm.chat.turn_coordinator import TurnCoordinator
-    from fleet_rlm.chat.turn_lifecycle import TurnLifecycleService
-    from fleet_rlm.persistence.repositories import InMemorySessionCatalog, InMemoryTurnStateStore
+    from fleet_rlm.persistence.repositories import InMemoryRunStateStore, InMemorySessionCatalog
     from fleet_rlm.rlm.events import TERMINAL_DETAIL_TYPES, EventRecorder, RunFailed, RunStarted, Status
     from fleet_rlm.sessions.models import TurnAccess, TurnInput
 
     access = TurnAccess(uuid4(), uuid4())
-    store = InMemoryTurnStateStore()
+    store = InMemoryRunStateStore()
     session = await InMemorySessionCatalog(store).create(
         user_id=access.user_id,
         workspace_id=access.workspace_id,
@@ -384,7 +384,7 @@ async def test_open_midstream_execution_failure_keeps_sequence_and_terminal_orde
             return Stream()
 
     coordinator = TurnCoordinator(
-        lifecycle=TurnLifecycleService(store, max_artifact_bytes=100),
+        lifecycle=RunLifecycleService(store, max_artifact_bytes=100),
         preparation=Preparation(),
         runner=Runner(),
     )
@@ -407,9 +407,9 @@ async def test_open_midstream_execution_failure_keeps_sequence_and_terminal_orde
 async def test_open_commit_failure_projects_commit_failure_terminal(monkeypatch: pytest.MonkeyPatch) -> None:
 
     from fleet_rlm.chat.commands import OpenTurnCommand
+    from fleet_rlm.chat.run_lifecycle import RunLifecycleService
     from fleet_rlm.chat.turn_coordinator import TurnCoordinator
-    from fleet_rlm.chat.turn_lifecycle import TurnLifecycleService
-    from fleet_rlm.persistence.repositories import InMemorySessionCatalog, InMemoryTurnStateStore
+    from fleet_rlm.persistence.repositories import InMemoryRunStateStore, InMemorySessionCatalog
     from fleet_rlm.rlm.dspy_contract import PredictionResult
     from fleet_rlm.rlm.events import TERMINAL_DETAIL_TYPES, EventRecorder, RunFailed, RunStarted
     from fleet_rlm.rlm.outcome import RLMOutcome
@@ -452,7 +452,7 @@ async def test_open_commit_failure_projects_commit_failure_terminal(monkeypatch:
     monkeypatch.setitem(sys.modules, "mlflow.entities", entities)
 
     access = TurnAccess(uuid4(), uuid4())
-    authoritative = InMemoryTurnStateStore()
+    authoritative = InMemoryRunStateStore()
     session = await InMemorySessionCatalog(authoritative).create(
         user_id=access.user_id,
         workspace_id=access.workspace_id,
@@ -509,7 +509,7 @@ async def test_open_commit_failure_projects_commit_failure_terminal(monkeypatch:
             return Stream()
 
     coordinator = TurnCoordinator(
-        lifecycle=TurnLifecycleService(CommitFailingStore(), max_artifact_bytes=100),
+        lifecycle=RunLifecycleService(CommitFailingStore(), max_artifact_bytes=100),
         preparation=Preparation(),
         runner=Runner(),
         mlflow_tracing_enabled=True,
@@ -536,11 +536,11 @@ async def test_failed_turn_emits_settlement_claim_and_cleanup_spans(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from fleet_rlm.chat.commands import OpenTurnCommand
-    from fleet_rlm.chat.turn_cleanup import TurnCleanupSupervisor
+    from fleet_rlm.chat.run_cleanup import RunCleanupSupervisor
+    from fleet_rlm.chat.run_lifecycle import RunLifecycleService
     from fleet_rlm.chat.turn_coordinator import TurnCoordinator
-    from fleet_rlm.chat.turn_lifecycle import TurnLifecycleService
     from fleet_rlm.observability import turn_tracing
-    from fleet_rlm.persistence.repositories import InMemorySessionCatalog, InMemoryTurnStateStore
+    from fleet_rlm.persistence.repositories import InMemoryRunStateStore, InMemorySessionCatalog
     from fleet_rlm.rlm.events import EventRecorder, RunFailed, RunStarted, Status
     from fleet_rlm.rlm.outcome import RLMOutcome
     from fleet_rlm.sessions.models import TurnAccess, TurnInput
@@ -579,7 +579,7 @@ async def test_failed_turn_emits_settlement_claim_and_cleanup_spans(
         monkeypatch.setitem(sys.modules, "mlflow.entities", entities)
 
         access = TurnAccess(uuid4(), uuid4())
-        store = InMemoryTurnStateStore()
+        store = InMemoryRunStateStore()
         session = await InMemorySessionCatalog(store).create(
             user_id=access.user_id, workspace_id=access.workspace_id, title="failed spans"
         )
@@ -630,9 +630,9 @@ async def test_failed_turn_emits_settlement_claim_and_cleanup_spans(
             def stream(self, _execution):
                 return Stream()
 
-        cleanup = TurnCleanupSupervisor()
+        cleanup = RunCleanupSupervisor()
         coordinator = TurnCoordinator(
-            lifecycle=TurnLifecycleService(store, max_artifact_bytes=100),
+            lifecycle=RunLifecycleService(store, max_artifact_bytes=100),
             preparation=Preparation(),
             runner=Runner(),
             cleanup=cleanup,
