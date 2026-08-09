@@ -15,7 +15,7 @@ Canonical Run Environment set: `daytona`.
 - In the Daytona environment, inspect the bounded, read-only logical Workspace
   Volume tree from the API or terminal client.
 - Use a Daytona profile for Sandbox-backed execution with Workspace Volume
-  storage, Session Workspace files, on-demand Workspace Memory, durable
+  storage, Session Workspace files, bounded Workspace Memory recall, durable
   Attachments, and committed Artifacts.
 - Download committed Artifacts with content-length and SHA-256 verification.
 
@@ -29,10 +29,12 @@ selected policy; they are never returned by the API.
 
 The Volume tree is a bounded read-only logical view of relative paths; it is not
 a general-purpose filesystem browser and does not expose provider paths or file
-contents. Daytona Workspace Memory is immediate workspace-wide state in the
-fixed root `MEMORIES.md`: the RLM reads it on demand, and may append only when
-the user explicitly asks to remember something. It is distinct from Session
-History and is not automatically injected into a Turn.
+contents. Daytona Workspace Memory is immediate workspace-wide state in
+`memory/MEMORIES.md`: each Turn receives a bounded newest-record digest in
+`session_context`, while the RLM may read or append through host-mediated Tools.
+It may append only when the user explicitly asks to remember something. Memory
+is distinct from Session History, survives failed or cancelled Runs and Sandbox
+replacement, and is not a Turn-commit record.
 
 Turns are durable only after `TurnLifecycle.finish()` successfully commits their
 validated result. A failed Turn does not advance Session history or publish an
@@ -45,11 +47,14 @@ engineering-only MLflow tracing.
 
 Select `[config] default_profile` in `config/fleet.toml`, directly or through
 the TUI `/profiles` command, then restart Fleet. The committed policy defines
-the runtime, model roles, and the names of external configuration values. Daytona
-is the supported durable environment and requires a migrated database, a Daytona
-credential, Databricks AI Gateway credentials, and its configured gateway URL.
-The current live proof does not yet establish Workspace Memory across real
-provider-backed Sandbox replacement and separate Sessions.
+the runtime, model roles, token limits, provider route, and names of external
+configuration values. The shipped `daytona-recursive` and `daytona` profiles use
+OpenCode Go; managed and benchmark profiles use the Databricks AI Gateway. See
+the [profile matrix](docs/reference/profile-matrix.md) before selecting a
+profile. Daytona requires a migrated database, a Daytona credential, and the
+provider values named by the selected policy. The current live proof does not
+yet establish Workspace Memory across real provider-backed Sandbox replacement
+and separate Sessions.
 
 See the [configuration reference](docs/reference/configuration.md),
 [architecture](docs/architecture.md), [HTTP API reference](docs/reference/http-api.md),

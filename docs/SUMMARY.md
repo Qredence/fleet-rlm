@@ -1,7 +1,6 @@
 # Table of contents
 
 * [Documentation Home](index.md)
-* [Documentation Overview](README.md)
 * [Architecture](architecture.md)
 * [Testing Strategy](how-to-guides/testing-strategy.md)
 * [DSPy RLM and Daytona Integration](how-to-guides/dspy-integration.md)
@@ -11,6 +10,7 @@
 * [Terminal UI](how-to-guides/terminal-tui.md)
 * [Reference](reference/index.md)
   * [Configuration](reference/configuration.md)
+  * [Runtime Profile Matrix](reference/profile-matrix.md)
   * [HTTP API](reference/http-api.md)
   * [CLI](reference/cli.md)
   * [Database](reference/database.md)

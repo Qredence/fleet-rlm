@@ -126,9 +126,11 @@ uv run python scripts/live_daytona_verify.py \
   --output .scratch/release-ready-mvp/assets/daytona-mvp-proof.json
 ```
 
-Select the production `daytona` profile through `[config] default_profile`
-before this gate. The verifier requires the committed Databricks DeepSeek v4 Flash Root and Sub
-roles, records a passing receipt at the exact candidate SHA, verifies provider
+Select the intended provider profile through `[config] default_profile` before
+this gate; the shipped default is `daytona-recursive`. The [profile matrix](../reference/profile-matrix.md)
+identifies the required provider values. The verifier requires the committed
+DeepSeek v4 Flash Root and Sub roles, records a passing receipt at the exact
+candidate SHA, verifies provider
 cleanup and secret isolation, and must be paired with same-SHA CI, local
 release, and human attestations before promotion. Historical receipts do not
 prove a later tip.

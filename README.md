@@ -37,22 +37,26 @@ Sandbox. See the [terminal guide](docs/how-to-guides/terminal-tui.md) and
 
 ### Daytona
 
-Daytona is the full Fleet runtime and requires a Databricks token, AI Gateway
-URL, Daytona key, and database URL. The selected policy supplies the immutable
-Daytona Snapshot. Initialize the configured database explicitly; startup never
-applies migrations automatically.
+Daytona is the full Fleet runtime. The shipped `daytona-recursive` default uses
+an OpenCode Go API key and base URL, plus the Daytona key and database URL. The
+`daytona-managed` and benchmark profiles use the Databricks AI Gateway instead.
+See the [generated profile matrix](docs/reference/profile-matrix.md) for the
+policy-derived environment names and token limits. Initialize the configured
+database explicitly; startup never applies migrations automatically.
 
 ```bash
 export FLEET_DATABASE_URL='postgresql+asyncpg://...'
 export FLEET_DAYTONA_API_KEY='...'
-export DATABRICKS_TOKEN='...'
-export FLEET_DATABRICKS_AI_GATEWAY_BASE_URL='https://<workspace>/ai-gateway/openai/v1'
+export FLEET_OPENCODE_GO_API_KEY='...'
+export FLEET_OPENCODE_GO_BASE_URL='https://<gateway>/v1'
 make daytona-snapshot-check
 uv run python scripts/db_init.py
 uv run fleet-rlm serve-api --port 8000
 ```
 
-Set `default_profile = "daytona"` before running the Daytona checks or backend.
+The committed default is `default_profile = "daytona-recursive"`. Set
+`default_profile = "daytona"` for the non-recursive interactive profile, or
+select another documented profile before restarting Fleet.
 
 Use `uv run fleet doctor daytona` for an opt-in disposable provider, database,
 mount, and interpreter probe before diagnosing a Turn.
@@ -85,12 +89,13 @@ result snapshot handling, Artifact publication, and atomic Turn Commit. The
 coordinator then projects the terminal suffix and cleans up Run resources.
 
 Daytona Turns acquire a fresh Interpreter Lease and use Workspace Volume Scope.
-They can read the latest bounded Workspace Memory on demand with
-`read_workspace_memory` and append a record with `update_workspace_memory` only
-when the user explicitly asks to remember something. Memory is stored in the
-workspace root `MEMORIES.md`, is not injected at Turn start, and is not a
-Session-history or Turn-commit record. Full Session history stays host-side
-behind the bounded `read_session_history` Tool.
+Each Turn receives a bounded newest-record digest of Workspace Memory in its
+`session_context`; the full `memory/MEMORIES.md` log remains behind the
+host-mediated Memory Tools. The RLM may append a record only when the user
+explicitly asks to remember something. Memory is immediate workspace state,
+not Session History or a Turn-commit record, and survives failed Runs and
+Sandbox replacement. Full Session history stays host-side behind the bounded
+`read_session_history` Tool.
 
 Read the [architecture](docs/architecture.md), [backend context](src/fleet_rlm/CONTEXT.md),
 and [codebase map](docs/reference/codebase-map.md).

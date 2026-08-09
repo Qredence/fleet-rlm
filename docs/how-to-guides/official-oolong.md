@@ -67,4 +67,6 @@ The receipt contains only environment identity, dataset arguments, example IDs a
 
 This is a mechanics gate: all tasks must complete through typed DSPy `SUBMIT`, context evidence must match, and rescoring must be identical. Mean Oolong reward and the trajectory diagnostic are recorded but are not promotion thresholds in this phase.
 
-After the benchmark, return to the normal `daytona` profile, restart Fleet, and verify both `active_profile` and `default_profile`.
+After the benchmark, return to the intended interactive profile (the shipped
+normal default is `daytona-recursive`), restart Fleet, and verify both
+`active_profile` and `default_profile`.

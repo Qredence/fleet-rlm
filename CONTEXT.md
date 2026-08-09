@@ -57,15 +57,15 @@ derivatives.
 _Avoid_: whole provider Volume, Sandbox filesystem
 
 **Workspace Memory**:
-Daytona-only workspace-wide immediate state stored in the fixed `MEMORIES.md`
-file at the root of the mounted Workspace Volume Scope. The RLM reads the
-bounded newest records on demand through a host-mediated Tool and appends one
-  record only when the user explicitly asks to remember something. Appends are
-  immediately durable, independent of Turn Commit, and survive failed or
-  cancelled Runs and Sandbox replacement. Append serialization is
-  process-local: one Fleet host writes `MEMORIES.md`; concurrent multi-process
-  append is not coordinated.
-_Avoid_: Session History, automatic Turn-start recall, unbounded learned state
+Daytona-only workspace-wide immediate state stored in `memory/MEMORIES.md` in
+the mounted Workspace Volume Scope. Each Turn receives a bounded digest of the
+newest records in `session_context`; the full log remains behind host-mediated
+Memory Tools. The RLM may append one record only when the user explicitly asks
+to remember something. Appends are immediately durable, independent of Turn
+Commit, and survive failed or cancelled Runs and Sandbox replacement. Append
+serialization is process-local: one Fleet host writes the file; concurrent
+multi-process append is not coordinated.
+_Avoid_: Session History, unbounded automatic recall, unbounded learned state
 
 **Workspace Volume Tree**:
 A Daytona-only bounded read-only logical listing of relative paths in the

@@ -6,23 +6,26 @@ All notable changes to this project are documented in this file.
 
 ### Added
 
-- **Change:** Wired opt-in Databricks-backed MLflow Option B: `FLEET_MLFLOW_*`
-  settings, real `set_tracking_uri("databricks")` / `set_experiment` /
-  `mlflow.dspy.autolog()` at app boot, fail-soft `fleet_turn` root spans on live
-  Turns, and operator-facing `traceId` on existing SSE `messageMetadata`, TUI run
-  status, and durable assistant UI metadata.
+- **Change:** Wired policy-controlled MLflow tracing: managed profiles use the
+  Databricks destination while interactive profiles use the supervised local
+  server, with `FLEET_MLFLOW_*` settings, real `set_tracking_uri` /
+  `set_experiment` / `mlflow.dspy.autolog()` at app boot, fail-soft `fleet_turn`
+  root spans on live Turns, and operator-facing `traceId` on existing SSE
+  `messageMetadata`, TUI run status, and durable assistant UI metadata.
   **Outcome:** Engineering DSPy traces land in a named Databricks experiment when
   enabled; operators can correlate Turns to traces without new SSE chunk types or
-  Turn-path coupling. Default remains off and fail-soft.
+  Turn-path coupling. The shipped TOML policy enables local tracing for interactive
+  profiles and keeps benchmark profiles off; export remains fail-soft.
 
 ### Changed
 
 - **Change:** Migrated the native Fleet RLM integration to DSPy `3.3.0`,
   preserving Fleet's `max_iterations` configuration while adapting
   construction and caller-owned interpreter invocation to DSPy's final contract.
-  **Outcome:** Native Turns, streaming, recursive children, and deterministic
-  test composition retain their existing event and cleanup behavior while using
-  the exact DSPy `3.3.0` runtime.
+  **Outcome:** Native Turns, live per-iteration observation, recursive children,
+  and deterministic test composition retain their event and cleanup behavior
+  while using the exact DSPy `3.3.0` runtime; Fleet no longer projects a second
+  token-level `dspy.streamify` protocol.
 
 - **Change:** Bumped `fastapi[standard]` from `==0.139.0` to `==0.141.1`
   (latest PyPI release, Jul 29 2026) along with `fastapi-cli` 0.0.24 -> 0.0.32,
@@ -36,6 +39,13 @@ All notable changes to this project are documented in this file.
   **Outcome:** Takes the Daytona event-subscription expiry-worker fix and the
   0.201.0/0.202.0 SDK additions with no code changes; the declared
   `httpx2>=2.5.0` floor now resolves to the current fork release.
+- **Change:** Aligned the provider/profile contract and generated matrix with
+  `config/fleet.toml`: interactive profiles use OpenCode Go with 16,000-token
+  roles, while managed and benchmark profiles use the Databricks AI Gateway with
+  8,000-token roles.
+  **Outcome:** README, configuration guidance, `.env.example`, and the live
+  Daytona verifier now resolve credentials from the selected policy instead of
+  assuming one provider.
 
 ## [0.7.0] - 2026-07-17
 

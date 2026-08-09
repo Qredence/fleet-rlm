@@ -1,8 +1,9 @@
 # Fleet RLM — TODOS
 
-Program: tool-surface revival + volume architecture (canonical plan: `plans/tool-surface-revival.md`)
-Base: `dev-0.7` (no `main`/`master` targets). Evidence: `/tmp/fleet-dogfood/` dogfooding 2026-08-08.
-Each PR: branch → focused suite → full gate (make check incl. TUI via pnpm 10.33.2, check-security, build/check-release, check-docs, git diff --check) → live dogfood spot-run → PR → babysit → merge (merge-commit, keep branch).
+Program: backend release and volume follow-ups on `dev-0.7`.
+The historical tool-surface plan and dogfood evidence remain ignored/local references;
+current code, tests, policy, and the status items below are authoritative. Do not
+treat this file as a deploy, push, or merge instruction.
 
 ## PR-A — fix(rlm): kwargs-only tool forwarding + error surfacing (critical) — `codex/broker-kwargs-only-tools`  ✅ done in `1a2f3ea1e` (+ latent drain fix)
 - [x] `daytona/http_broker.py` `_tool_wrapper_source`: forward all params as kwargs (args only for POSITIONAL_ONLY); assert no positional-only params on current surface
@@ -44,7 +45,8 @@ Each PR: branch → focused suite → full gate (make check incl. TUI via pnpm 1
 - [x] `files/workspace_tools.py`: `write/read/stat/list_project_*` tools (overwrite+expected_sha256 semantics)
 - [x] `rlm/tool_guards.py`: project path obligations
 - [x] `skills/bundled/report-builder`, `workspace-files`: convention docs (scratch→sessions, deliverables→projects)
-- [x] Tests: slug matrix, reserved rejection, guards, promotion from project path
+- [x] Tests: slug matrix, reserved rejection, guards, and project namespace
+  read/write behavior; project-path Artifact promotion remains the follow-up above.
 - [x] Live replay: report lane writes `projects/<slug>/...` + volume tree browse
 
 ## PR-F — feat(memory): lifecycle + per-turn injection (tenant deferred) — `codex/memory-lifecycle`  ✅ done (live: remember/list/edit/forget/ injected recall 0-tool) + FIX-1..4 review fixes + backend-compat append overhaul
@@ -79,13 +81,20 @@ Each PR: branch → focused suite → full gate (make check incl. TUI via pnpm 1
 
 ## RC-7 + deadlock root cause (DIAGNOSED 2026-08-08 via faulthandler SIGUSR1 capture, /tmp/fleet-dogfood/threaddump.txt)
 - [x] Root cause pinned: nested sync wait deadlock — tool execution (e.g. load_skill _install_resources) sync-calls run_workspace_agent through _SyncCodeInterpreter.code_run/_sync_await (interpreter.py:303-327) which posts the sandbox coroutine to the RLM WORKER THREAD'S OWN asyncio loop (runner.py:957 asyncio.run), while that worker thread is itself parked in nested Future.result() inside http_broker._poll_once. Circular wait: worker waits broker-answer; answer executor waits the worker's loop. Any tool whose host impl does sync FS work on the worker-owned bridge deadlocks the entire turn; uvicorn starves draining the turn generator (RC-7 wedge).
-- [ ] FIX (WS-RC7): give _Sync* sandbox bridges (interpreter.py:306-380) a DEDICATED daemon loop thread instead of capturing the caller's running loop; alternatively remove nested sync waiting in the broker fulfill path. Regression test must reproduce the deadlock shape (sync bridge inside a nested-wait coroutine).
+- [x] FIX (WS-RC7): implemented by `b5deb7e22` with a composition-wide bridge
+  service loop in `daytona/interpreter.py:289-319`; `tests/unit/backend/daytona/test_sync_bridge_loop.py`
+  covers the nested-wait regression. Private deterministic compositions retain
+  the documented caller-loop fallback.
 
 
 ## RC-11 — fix(api): /api/volume/tree lists nothing anywhere  ✅ done (Daytona mod_time is a string; _modified_timestamp now parses it)
-- [ ] Symptom: GET /api/volume/tree?root=<anything> returns paths:[] (+root hint dirs only) even though the same volume provably contains artifacts/, attachments/, files/dogfood/rest-probe.txt, projects/fleet-rlm/decisions/tool-forwarding.md (all visible via /api/files and via live RLM project tools). gateway.list_files (WorkspaceVolumeGatewayDep → daytona/workspace_fs.list_files → sandbox.fs.list_files + filtering) yields zero entries at every root (all filters fresh-cache tested). /api/files works — so REST gateway+mount are fine; bug sits in the tree-specific gateway/list_files path (entry filtering or its sandbox binding).
-- [ ] Also ergonomic inconsistency: tree uses query param `root` while /api/files uses `path` (documentation + maybe alias).
-- [ ] Fix with a contract test: seed two nested volumes paths; assert tree returns them.
+- [x] Symptom: fixed by `92cfbbc20`; Daytona `mod_time` strings are parsed by
+  `_modified_timestamp`, so nested entries are no longer discarded by the tree
+  projection.
+- [ ] Follow-up ergonomics: tree uses query parameter `root` while `/api/files`
+  uses `path`; document the distinction or add an explicitly tested alias.
+- [x] Contract coverage: `tests/contracts/backend/test_workspace_files_api.py:93-122`
+  seeds nested paths and asserts the tree projection.
 
 ## Follow-up investigation — RC-7 server wedge under load+disconnect (UNSCHEDULED, file after phase A)
 - [ ] Symptom: after 4 concurrent live turns incl. 1 recursive child (~16 min of throttled LLM rounds) and 3 client disconnects within seconds, the ASGI server froze completely: frozen log, `/openapi.json` (static) unresponsive >15 min. macOS `sample`: main thread spinning in uvloop idle → async_gen_asend chains = runaway coroutine starving the loop.
@@ -95,6 +104,9 @@ Each PR: branch → focused suite → full gate (make check incl. TUI via pnpm 1
 
 ## ENDGAME
 - [x] PR-H readability refactor
-- [ ] RC-11 volume-tree listing emptiness (deferred: file with fix route: daytona/workspace_fs.list_files filter for the tree gateway)
+- [x] RC-11 volume-tree listing emptiness (fixed by `92cfbbc20`; retain only the
+  query-parameter ergonomics follow-up above)
 - [x] Full `make check` + check-security + build/check-release + `git diff --check`
-- [ ] Push codex/tool-surface-revival and open PR -> dev-0.7 (phases A,B,C,D,E,F,G + RC-8 + RC-7), babysit, merge
+  (2026-08-09; credentialed Daytona live proof remains separate and was not run.)
+- [x] Release promotion and review remain human-owned; this file does not direct
+  push, PR, babysit, or merge operations.

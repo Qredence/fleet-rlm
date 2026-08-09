@@ -3,11 +3,12 @@
 Canonical Run Environment set: `daytona`.
 
 Set a Daytona profile in `config/fleet.toml` before starting this backend. The
-committed profiles provide these Run policies:
+committed profiles and their provider environment names are listed in the
+[profile matrix](profile-matrix.md):
 
 | Profile | Code execution | LLM calls | Durable volume | Auth/scope |
 | --- | --- | --- | --- | --- |
-| `daytona` (default) | Daytona Sandbox Code Interpreter | real `dspy.LM` | Workspace Volume | local scope |
+| `daytona-recursive` (default) | Daytona Sandbox Code Interpreter | real `dspy.LM` | Workspace Volume | local scope |
 
 Daytona is the full Fleet solution with Workspace Volume Scope and Turn Commit
 promotion. Private deterministic tests use an in-memory composition and do not

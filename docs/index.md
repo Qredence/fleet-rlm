@@ -8,7 +8,8 @@ FastAPI/SSE contract backed by DSPy, Daytona, and SQLAlchemy/Alembic.
 
 1. [Architecture](architecture.md)
 2. [Configuration](reference/configuration.md)
-3. [Backend API](reference/http-api.md)
+3. [Runtime profile matrix](reference/profile-matrix.md)
+4. [Backend API](reference/http-api.md)
 4. [CLI](reference/cli.md)
 5. [Terminal UI](how-to-guides/terminal-tui.md)
 6. [Testing strategy](how-to-guides/testing-strategy.md)
@@ -20,7 +21,6 @@ FastAPI/SSE contract backed by DSPy, Daytona, and SQLAlchemy/Alembic.
 
 ## Reference
 
-- [Documentation overview](README.md)
 - [Complete table of contents](SUMMARY.md)
 - [Reference index](reference/index.md)
 - [Codebase map](reference/codebase-map.md)

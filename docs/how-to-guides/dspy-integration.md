@@ -69,16 +69,16 @@ provide models, Signatures, or executable capabilities.
   as RLM actions: malformed responses remain bounded `adapter_parse_error`
   failures, which keeps the pinned DSPy protocol authoritative without changing
   process-global DSPy settings.
-- The Daytona profiles use the Databricks AI Gateway model
-  `deepseek-v4-flash` for both Root actions and bounded Sub Model queries.
-  Fleet sends the non-secret provider route
-  `Databricks-Model-Provider-Service: uscentral.default.zencode-oai` and keeps
-  the credential in `DATABRICKS_TOKEN`. The standard profile uses
-  `reasoning_effort = "low"` for Root and `reasoning_effort = "none"`,
-  `temperature = 0` for Sub. Both responses are capped at 8,000 tokens. This
-  LM response limit is distinct
-  from `dspy.RLM.max_output_chars`, which bounds REPL output retained in
-  recursive history.
+- All committed profiles use `deepseek-v4-flash` for both Root actions and
+  bounded Sub Model queries. The interactive `daytona` and
+  `daytona-recursive` profiles use the OpenCode Go gateway, disable LM caching,
+  and cap both roles at 16,000 tokens. Managed and benchmark profiles use the
+  Databricks AI Gateway and cap both roles at 8,000 tokens. The inherited
+  provider route is `Databricks-Model-Provider-Service:
+  uscentral.default.zencode-oai`; the exact credential and endpoint names are
+  policy-derived in [the profile matrix](../reference/profile-matrix.md). This
+  LM response limit is distinct from `dspy.RLM.max_output_chars`, which bounds
+  REPL output retained in recursive history.
 - Fleet remains on DSPy's public program and LM call surfaces:
   `rlm.acall(interpreter, ...)` delegates request and response normalization to
   stock DSPy. Application code does not call LM `forward()` methods, construct
@@ -101,39 +101,31 @@ interpreter becomes a bounded `RLMConfigError` rather than silently creating a
 DSPy interpreter.
 
 At execution time, Fleet passes its existing interpreter positionally:
-`await rlm.acall(interpreter, **named_inputs)` and, for streaming,
-`stream_program(interpreter, **named_inputs)`. Fleet or the child lease owns
-shutdown for these caller-provided interpreters; DSPy must not shut them down.
+`await rlm.acall(interpreter, **named_inputs)`. Fleet or the child lease owns
+shutdown for the caller-provided interpreter; DSPy must not shut it down. The
+same call is used for live and deterministic execution; operator-visible
+progress comes from Fleet's interpreter, Tool, callback, and trajectory
+observation boundaries rather than a second DSPy streaming protocol.
 Deterministic test RLMs remain keyword-only substitutes. DSPy 3.3.x's stricter
 namespace, Tool, and sub-LM response validation remains authoritative, while
 Fleet preserves its existing RuntimeEvent, SSE, and TUI projections.
 
-## Native DSPy streaming
+## Live iteration observation
 
-The live Root RLM uses DSPy's native streaming utilities. Fleet wraps each fresh
-`dspy.RLM` with `dspy.streamify` and registers reusable
-`dspy.streaming.StreamListener` instances against the named `generate_action`
-predictor for its `reasoning` and `code` fields. DSPy emits
-`dspy.streaming.StreamResponse` values through its async side channel before the
-final typed `dspy.Prediction`.
+Fleet does not wrap `dspy.RLM` with `dspy.streamify`, register DSPy
+`StreamListener` objects, or project token-level `StreamResponse` values. The
+pinned DSPy call remains one standard `await rlm.acall(interpreter, **inputs)`
+per action. This avoids a second delta grammar and the producer cost of
+re-entering provider streaming for repeated action prompts.
 
-Fleet converts those private DSPy values into the existing transport-neutral
-`RLMReasoning`, `RLMCode`, and `Status` Runtime Events. Field switches do not
-create new RLM iterations: Fleet keeps one action identity while DSPy fields are
-interleaved and advances only after a native completed `code` field. If DSPy
-does not expose that boundary, Fleet does not synthesize another step; the
-canonical trajectory remains authoritative. The caller-owned Daytona interpreter
-separately forwards ordinary stdout as bounded `RLMOutput` deltas with one
-per-execution stream identity, then emits a complete correction. The existing
-`AISDKUIProjector` emits AI SDK UI v1 SSE chunks, and `fleet-tui` appends delta
-chunks to stable step cards. DSPy semantic subcalls are not streamed to
-operators. `dspy.streaming_response` is deliberately not used because it would
-create a second OpenAI-compatible SSE protocol; Fleet already owns its public
-FastAPI SSE contract.
-
-When the provider or cache produces no field chunks, the final typed Prediction
-still completes and Fleet records an internal provider-fallback mode. This is a
-normal completion path, not evidence that token streaming occurred.
+Operator-visible progress is still live: Fleet observes native DSPy callback
+reasoning, generated interpreter code and output at the interpreter boundary,
+and host Tool activity. After completion, the native `Prediction.trajectory`
+reconciles missing or corrected observations into complete per-iteration
+`RLMReasoning`, `RLMCode`, `RLMOutput`, and `Status` Runtime Events. The existing
+`AISDKUIProjector` emits the AI SDK UI v1 SSE chunks, and `fleet-tui` renders the
+live evidence and completed trajectory in terminal scrollback. DSPy semantic
+subcalls are not token-streamed to operators.
 
 ## Recursive harness limits
 
@@ -253,9 +245,11 @@ uv run python scripts/live_daytona_verify.py \
   --output .scratch/release-ready-mvp/assets/daytona-mvp-proof.json
 ```
 
-Select `[config] default_profile = "daytona"` and restart Fleet first. Provision
-the immutable Snapshot named by that profile with the
-[Daytona Snapshot guide](daytona-snapshot.md).
+Select the intended provider profile in `[config] default_profile` and restart
+Fleet first. The shipped default is `daytona-recursive`; use the [profile
+matrix](../reference/profile-matrix.md) to provide its environment names.
+Provision the immutable Snapshot named by that profile with the [Daytona
+Snapshot guide](daytona-snapshot.md).
 
 The verifier requires a clean tracked tree on a non-`main` branch, invokes the
 single live pytest scenario once, and performs no automatic retry. It resolves

@@ -20,7 +20,7 @@ REQUIRED_HARNESS_DOCS = (
     "docs/agent-harness/quality-score.md",
     "docs/agent-harness/drift-control.md",
 )
-DOC_INDEXES = ("docs/README.md", "docs/index.md", "docs/SUMMARY.md")
+DOC_INDEXES = ("docs/index.md", "docs/SUMMARY.md")
 GENERATED_ARTIFACTS = ("openapi.yaml",)
 GENERATED_COMMANDS = ("make api-sync", "make api-check")
 HEAVY_IMPORTS = ("dspy", "mlflow", "posthog", "daytona")

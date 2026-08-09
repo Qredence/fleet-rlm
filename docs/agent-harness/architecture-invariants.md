@@ -13,8 +13,9 @@ question it:
   support that agent, they are not peer execution modes
 - Session continuity — a Session is a context boundary: new Sessions start
   cold, continuity exists only inside one Session; cross-session persistence
-  happens only through explicit workspace-scope actions (Attachments,
-  Artifacts, Workspace Memory), never automatically
+  happens through workspace-scope state (Attachments, Artifacts, and Workspace
+  Memory); Memory writes are explicit, while each Turn receives only its bounded
+  newest-record digest
 - the Daytona workspace — durable shared Volume state with replaceable Sandbox
   compute attached to it
 - the single client protocol — AI SDK UI v1 over SSE plus the generated
@@ -152,8 +153,9 @@ routes or public events.
 
 ## Configuration and compatibility
 
-- Runtime settings use only `FLEET_*`; the canonical public environment is
-  `daytona`.
+- Runtime settings resolve only environment names explicitly referenced by the
+  selected TOML policy; ambient selectors and unreferenced variables are
+  ignored. The canonical public Run Environment is `daytona`.
 - There is no `/api/v1`, WebSocket execution, dual serve, legacy migration,
   runtime-admin, optimization/evaluation API, or public Artifact creation.
 - The maintained client is pi-tui. A graphical/Web client is separate future

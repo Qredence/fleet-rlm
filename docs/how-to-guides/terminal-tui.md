@@ -6,8 +6,9 @@ Sandbox, or execution runtime.
 
 ## Start a supervised session
 
-For Daytona, select the `daytona` runtime policy profile, configure the
-LLM/Daytona keys and an upgraded database. The
+For Daytona, select an interactive runtime policy profile (the shipped default
+is `daytona-recursive`), configure the provider/Daytona values from the [profile
+matrix](../reference/profile-matrix.md), and use an upgraded database. The
 supervisor verifies Alembic head and never migrates automatically:
 
 ```bash
@@ -15,8 +16,9 @@ uv run python scripts/db_init.py
 uv run fleet cli --port 8000
 ```
 
-Set `[config] default_profile = "daytona"` in `config/fleet.toml` first, or
-select `daytona` with `/profiles` and restart Fleet.
+Set the intended interactive profile in `[config] default_profile` in
+`config/fleet.toml` first (the shipped default is `daytona-recursive`), or use
+`/profiles` and restart Fleet.
 
 See [configuration](../reference/configuration.md) for all settings. Supervised
 backend output is stored under `.fleet_rlm/logs/`; `latest.log` identifies the

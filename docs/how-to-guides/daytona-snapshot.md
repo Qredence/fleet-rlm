@@ -24,8 +24,10 @@ make daytona-snapshot-check
 uv run fleet doctor daytona
 ```
 
-Select `default_profile = "daytona"` in `config/fleet.toml` first. The Snapshot
-name comes from the selected profile's `daytona.snapshot` policy.
+The committed default is `default_profile = "daytona-recursive"`; select the
+profile you intend to exercise in `config/fleet.toml` first and provide the
+provider environment names listed in the [profile matrix](../reference/profile-matrix.md).
+The Snapshot name comes from the selected profile's `daytona.snapshot` policy.
 
 `create` never deletes or overwrites a Snapshot. Re-running it checks a
 pre-existing Snapshot's public name, state, and resource contract. The doctor

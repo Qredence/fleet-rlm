@@ -21,9 +21,11 @@ POST /api/sessions/{session_id}/turns + Idempotency-Key
   -> TurnCoordinator cleanup and Interpreter Lease release
 ```
 
-Preparation failures remain ordinary safe HTTP outcomes. Failures after headers
-emit exactly one sanitized terminal event. A failed commit advances no Session
-history, publishes no Artifact identity, and still releases owned resources.
+Malformed request bodies and structural schema failures remain ordinary safe
+HTTP outcomes before headers. Claim, ownership, and preparation failures after
+the stream opens emit closed `error` + `finish` chunks instead of late HTTP
+responses. A failed commit advances no Session history, publishes no Artifact
+identity, and still releases owned resources.
 
 Within one Run, interpreter calls reuse one context so Python state persists
 across RLM iterations. Every later Run receives a fresh context. Replacing a
@@ -113,8 +115,10 @@ exception text.
   first open), browsable `projects/<slug>/`, Session Workspace, Run attachments
   and candidates, committed Artifacts, and private `result.json`. Bundled
   Skills remain host-owned and are not copied into the Volume.
-- Profiles are explicit and fail closed when prerequisites are absent. Private
-  deterministic testing composition is not a public fallback profile.
+- Profiles are explicit and fail closed when prerequisites are absent. Their
+  provider, token, recursion, and environment contracts are generated in the
+  [profile matrix](reference/profile-matrix.md). Private deterministic testing
+  composition is not a public fallback profile.
 
 ## Terminal client
 

@@ -6,6 +6,7 @@
 | `openapi_tools.py` | Generate or check backend-only `openapi.yaml` |
 | `generate_stream_fixture.py` | Generate or check the deterministic TUI turn-stream golden fixture |
 | `generate_tui_chunk_validation.py` | Generate or check the TUI runtime chunk-validation tables from `openapi.yaml` |
+| `generate_profile_matrix.py` | Generate or check the provider/profile matrix from `config/fleet.toml` |
 | `check_codebase_tree.py` | Enforce canonical import and route boundaries |
 | `check_harness_engineering.py` | Validate repository agent-harness contracts |
 | `check_docs_quality.py` | Validate documentation structure and links |
@@ -16,9 +17,6 @@
 | `live_daytona_verify.py` | Run the opt-in Daytona MVP proof and validate its bounded JSON receipt |
 | `live_daytona_tunnel_probe.py` | Run the development-only strict Daytona egress smoke through two Cloudflare HTTPS origins |
 | `benchmark_daytona_lifecycle.py` | Benchmark full Daytona create-through-first-execution lifecycle and select retained versus per-Turn mode |
-| `run_benchmarks.py` | Run the offline Daytona volume performance baseline |
-| `performance_benchmarks/daytona_baseline.py` | Measure local volume I/O and filesystem-operation baselines without a cloud Sandbox |
-| `performance_benchmarks/concurrency_stress.py` | Exercise local concurrent file-operation scaling without a cloud Sandbox |
 | `benchmarks/run_prime_oolong.py` | Run the pinned PrimeIntellect Oolong environment against a live Fleet API using Attachments |
 | `benchmarks/prime_oolong_sidecar.py` | Isolated JSONL export/scoring bridge for the pinned PrimeIntellect environment |
 | `benchmarks/run_native_long_context.py` | Measure native whole-value URL context at 1/5/10 MiB and emit the paging decision receipt |
@@ -40,9 +38,9 @@ maintained trusted-host CLI workflows.
 ## Phase 1 Daytona stream canary
 
 `live_phase1_stream_verify.py` is the narrow, credentialed closure proof for
-native DSPy streaming on the normal `[profiles.daytona]` policy. It requires
-`runtime.live_enabled = true`, the selected `daytona` profile, configured
-Daytona and Databricks credentials (from the invoking environment or `.env`),
+live per-iteration Runtime Events on the normal `[profiles.daytona]` policy. It
+requires `runtime.live_enabled = true`, the selected `daytona` profile, the
+provider environment names shown in the [profile matrix](../docs/reference/profile-matrix.md),
 and a clean tracked candidate on a non-`main` branch. Existing environment
 values win over `.env` values.
 
@@ -52,7 +50,7 @@ uv run python scripts/live_phase1_stream_verify.py \
 ```
 
 The receipt records only the candidate fingerprint, dependency versions,
-selected non-secret model identifiers, bounded stream timing/counts, and
+selected non-secret model identifiers, bounded event timing/counts, and
 boolean assertions. It never includes Attachment content, prompts, generated
 code, provider responses, trace IDs, broker addresses, or credentials. This
 canary is not a release proof: use `live_daytona_verify.py` for the broader
@@ -64,7 +62,8 @@ MVP/release scenario with durability and Sandbox-replacement coverage.
 native DSPy recursive child on `[profiles.daytona-recursive]`. Run it only
 after a committed Phase 1 receipt and retrospective, and only with explicit
 live authorization. It requires `runtime.live_enabled = true`, the selected
-recursive profile, the normal Daytona/Databricks prerequisites, and a clean
+recursive profile, the provider environment names shown in the [profile matrix](../docs/reference/profile-matrix.md),
+and a clean
 tracked candidate on a non-`main` branch. Existing environment values continue
 to win over `.env` values.
 

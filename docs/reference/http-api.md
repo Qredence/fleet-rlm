@@ -76,10 +76,11 @@ After opening, one of three closings applies:
   observed usage, and the closed text "Turn cancelled" — never reasoning,
   code, output, or Tool evidence parts.
 
-Attachment ownership and explicit Skill selection structure are validated by
-FastAPI before SSE begins; provider exceptions, credentials, Skill
-instructions, resource bodies, and storage paths never enter public responses
-or Skill lifecycle projections.
+Malformed request bodies and explicit Skill-selection structure are validated
+by FastAPI before SSE begins. Attachment and catalog ownership checks complete
+through the Turn opening path; failures after headers are closed stream errors.
+Provider exceptions, credentials, Skill instructions, resource bodies, and
+storage paths never enter public responses or Skill lifecycle projections.
 
 The files API always resolves the process-local Workspace. Callers cannot
 select a Workspace or address Daytona Volume, mount, Sandbox, Attachment,

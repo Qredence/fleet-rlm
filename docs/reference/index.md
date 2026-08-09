@@ -1,6 +1,7 @@
 # Backend Reference
 
 - [Configuration](configuration.md) — canonical `FLEET_*` settings and profile prerequisites.
+- [Runtime profile matrix](profile-matrix.md) — policy-derived providers, token limits, and environment names.
 - [HTTP API](http-api.md) — supported routes and SSE behavior.
 - [CLI](cli.md) — supervised, backend-only, diagnostics, and Artifact commands.
 - [Database](database.md) — canonical tables and Alembic ownership.
