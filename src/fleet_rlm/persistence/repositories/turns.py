@@ -6,7 +6,7 @@ import asyncio
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import Any, Literal, cast
+from typing import Any, Literal
 from uuid import UUID, uuid4
 
 from sqlalchemy import func, select, update
@@ -15,15 +15,10 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from fleet_rlm.artifacts.models import ArtifactRef
 from fleet_rlm.artifacts.promotion import PromotedArtifact
-from fleet_rlm.artifacts.safety import parse_kind
 from fleet_rlm.chat.run_claim import (
     BeginSettlement,
     ClaimCommand,
     ClaimFailure,
-    ClaimFailureCode,
-    ClaimState,
-    ClaimStatus,
-    ClaimTransition,
     CompleteSettlement,
     FailClaim,
     HeartbeatClaim,
@@ -48,20 +43,32 @@ from fleet_rlm.chat.run_lifecycle import (
     RunStart,
     RunStateError,
     _RunClaimToken,
-    failure_code_for_terminal_status,
 )
-from fleet_rlm.chat.turn_detail_policy import commit_cancelled_tombstone
 from fleet_rlm.persistence.database import DatabaseConnectionError
 from fleet_rlm.persistence.models import ArtifactRow, RunRow, SessionRow, TurnRow
+from fleet_rlm.persistence.repositories.run_codec import (
+    _apply_memory_next_state,
+    _apply_row_next_state,
+    _artifact_refs_from_rows,
+    _artifact_row_for_commit,
+    _cancel_tombstone_rows,
+    _cancelled_tombstone,
+    _command_usage,
+    _committed_turn_rows,
+    _decode_committed_turn,
+    _history_from_turn_rows,
+    _memory_claim_state,
+    _row_claim_state,
+    _transition_receipt,
+)
 from fleet_rlm.rlm.dspy_contract import RLMUsage, empty_rlm_usage
-from fleet_rlm.sessions.committed_turn import CommittedTurn, CommittedTurnCodec
+from fleet_rlm.sessions.committed_turn import CommittedTurn
 from fleet_rlm.sessions.models import (
     AssistantTurnRecord,
     HistoryMessage,
     SessionHistory,
     TurnAccess,
     TurnInput,
-    TurnInputCodec,
     UserTurnRecord,
 )
 
@@ -125,121 +132,6 @@ def _recovery_deadline_exhausted(deadline: float | None) -> bool:
         `true` if the deadline has been reached, `false` otherwise.
     """
     return deadline is not None and asyncio.get_running_loop().time() >= deadline
-
-
-def _decode_failure_status(value: str) -> Literal["failed", "cancelled", "timeout"]:
-    """Validate and return a persisted run failure status.
-
-    Parameters:
-        value (str): The persisted failure status.
-
-    Returns:
-        The validated failure status.
-
-    Raises:
-        RunStateError: If the value is not a supported failure status.
-    """
-    if value in {"failed", "cancelled", "timeout"}:
-        return value
-    raise RunStateError("persisted Run has an invalid failure status")
-
-
-def _decode_failure_code(
-    value: str | None,
-    *,
-    status: Literal["failed", "cancelled", "timeout"],
-) -> RunFailureCode:
-    if value in {"preparation_failed", "execution_failed", "commit_failed", "cancelled", "timeout", "stale_claim"}:
-        return value
-    if value in {None, "failed"}:
-        return failure_code_for_terminal_status(status)
-    raise RunStateError("persisted Run has an invalid failure code")
-
-
-def _decode_claim_status(value: str) -> ClaimStatus:
-    if value in {"running", "settling", "completed", "failed", "cancelled", "timeout"}:
-        return value
-    raise RunStateError("persisted Run has an invalid claim status")
-
-
-def _decode_claim_code(value: str | None) -> ClaimFailureCode | None:
-    if value is None:
-        return None
-    if value in {"preparation_failed", "execution_failed", "commit_failed", "cancelled", "timeout", "stale_claim"}:
-        return value
-    raise RunStateError("persisted Run has an invalid failure code")
-
-
-def _claim_failure(failure: RunFailure) -> ClaimFailure:
-    return ClaimFailure(failure.terminal_status, failure.failure_code, failure.public_message)
-
-
-def _command_usage(command: ClaimCommand) -> RLMUsage | None:
-    if isinstance(command, (FailClaim, BeginSettlement, RevokeClaim)):
-        return cast(RLMUsage, command.usage)
-    return None
-
-
-def _turn_failure(intent: ClaimFailure, usage: RLMUsage) -> RunFailure:
-    return RunFailure(intent.status, intent.code, intent.public_message, usage)
-
-
-def _memory_claim_state(run: _RunState) -> ClaimState:
-    intent = _claim_failure(run.terminal_intent) if run.terminal_intent is not None else None
-    return ClaimState(_decode_claim_status(run.status), _decode_claim_code(run.failure_code), intent)
-
-
-def _row_claim_state(run: RunRow) -> ClaimState:
-    intent = None
-    if run.terminal_intent is not None:
-        status = _decode_failure_status(run.terminal_intent)
-        intent = ClaimFailure(
-            status,
-            _decode_failure_code(run.failure_code, status=status),
-            run.failure_public_message or "Turn failed",
-        )
-    return ClaimState(_decode_claim_status(run.status), _decode_claim_code(run.failure_code), intent)
-
-
-def _transition_receipt(run_id: UUID, decision: ClaimTransition) -> FailedRunReceipt:
-    status = _decode_failure_status(decision.status)
-    return FailedRunReceipt(
-        run_id,
-        status,
-        _decode_failure_code(decision.failure_code, status=status),
-        decision.public_message,
-        decision.finalized,
-    )
-
-
-def _apply_memory_next_state(
-    run: _RunState,
-    next_state: ClaimState,
-    *,
-    usage: RLMUsage | None = None,
-) -> None:
-    run.status = cast(Any, next_state.status)
-    run.failure_code = cast(RunFailureCode, next_state.failure_code)
-    if next_state.intent is not None:
-        if usage is None:
-            raise RunStateError("claim intent application requires usage")
-        run.terminal_intent = _turn_failure(next_state.intent, usage)
-
-
-def _apply_row_next_state(
-    run: RunRow,
-    next_state: ClaimState,
-    *,
-    public_message: str,
-    usage: RLMUsage | None = None,
-) -> None:
-    run.status = next_state.status
-    run.failure_code = next_state.failure_code
-    run.failure_public_message = public_message
-    if usage is not None:
-        run.failure_usage_json = dict(usage)
-    if next_state.intent is not None:
-        run.terminal_intent = next_state.intent.status
 
 
 class InMemoryRunStateStore:
@@ -371,7 +263,7 @@ class InMemoryRunStateStore:
             return
         if usage is None:
             usage = run.terminal_intent.usage if run.terminal_intent is not None else empty_rlm_usage()
-        run.tombstone = commit_cancelled_tombstone(usage)
+        run.tombstone = _cancelled_tombstone(usage)
         run.user_turn_id = uuid4()
         run.record_sequence = session.turn_sequence + 1
         session.turn_sequence += 2
@@ -655,44 +547,15 @@ class SqlAlchemyRunStateStore:
                 or 0
             )
             db.add_all(
-                (
-                    TurnRow(
-                        id=uuid4(),
-                        session_id=run.session_id,
-                        run_id=run.run_id,
-                        sequence=last_sequence + 1,
-                        role="user",
-                        user_input_json=TurnInputCodec.encode(run.input),
-                        committed_turn_json=None,
-                    ),
-                    TurnRow(
-                        id=run.run_id,
-                        session_id=run.session_id,
-                        run_id=run.run_id,
-                        sequence=last_sequence + 2,
-                        role="assistant",
-                        user_input_json=None,
-                        committed_turn_json=CommittedTurnCodec.encode(committed),
-                    ),
+                _committed_turn_rows(
+                    run_id=run.run_id,
+                    session_id=run.session_id,
+                    run_input=run.input,
+                    committed=committed,
+                    first_sequence=last_sequence + 1,
                 )
             )
-            for item in artifacts:
-                ref = item.ref
-                db.add(
-                    ArtifactRow(
-                        id=ref.id,
-                        user_id=run.access.user_id,
-                        workspace_id=run.access.workspace_id,
-                        session_id=ref.session_id,
-                        run_id=ref.run_id,
-                        kind=ref.kind,
-                        title=ref.title,
-                        media_type=ref.media_type,
-                        byte_size=ref.byte_size,
-                        checksum_sha256=ref.checksum_sha256,
-                        storage_ref=item.storage_ref,
-                    )
-                )
+            db.add_all(_artifact_row_for_commit(run, item) for item in artifacts)
             session.checkpoint_version += 1
             row.status = "completed"
             row.commit_checkpoint_version = session.checkpoint_version
@@ -758,39 +621,13 @@ class SqlAlchemyRunStateStore:
         Settle-time callers pass the claimed Turn input; startup recovery has no
         input snapshot and persists the assistant tombstone alone.
         """
-        usage: RLMUsage = cast(RLMUsage, run.failure_usage_json) if run.failure_usage_json else empty_rlm_usage()
-        tombstone = commit_cancelled_tombstone(usage)
         last_sequence = int(
             await db.scalar(
                 select(func.coalesce(func.max(TurnRow.sequence), 0)).where(TurnRow.session_id == run.session_id)
             )
             or 0
         )
-        next_sequence = last_sequence + 1
-        if turn_input is not None:
-            db.add(
-                TurnRow(
-                    id=uuid4(),
-                    session_id=run.session_id,
-                    run_id=run.id,
-                    sequence=next_sequence,
-                    role="user",
-                    user_input_json=TurnInputCodec.encode(turn_input),
-                    committed_turn_json=None,
-                )
-            )
-            next_sequence += 1
-        db.add(
-            TurnRow(
-                id=run.id,
-                session_id=run.session_id,
-                run_id=run.id,
-                sequence=next_sequence,
-                role="assistant",
-                user_input_json=None,
-                committed_turn_json=CommittedTurnCodec.encode(tombstone),
-            )
-        )
+        db.add_all(_cancel_tombstone_rows(run=run, turn_input=turn_input, next_sequence=last_sequence + 1))
 
     async def request_cancel(self, access: TurnAccess, run_id: UUID) -> CancelResult:
         async with self._sessions() as db, db.begin():
@@ -992,23 +829,11 @@ class SqlAlchemyRunStateStore:
         row = await db.scalar(select(TurnRow).where(TurnRow.run_id == run.id, TurnRow.role == "assistant"))
         if row is None or row.committed_turn_json is None or run.commit_checkpoint_version is None:
             raise RunStateError("completed Run has no committed Turn")
-        committed = CommittedTurnCodec.decode(row.committed_turn_json)
+        committed = _decode_committed_turn(row.committed_turn_json)
         artifact_rows = (
             await db.scalars(select(ArtifactRow).where(ArtifactRow.run_id == run.id).order_by(ArtifactRow.created_at))
         ).all()
-        artifacts = tuple(
-            ArtifactRef(
-                item.id,
-                item.session_id,
-                item.run_id,
-                parse_kind(item.kind),
-                item.title,
-                item.media_type,
-                item.byte_size,
-                item.checksum_sha256 or "",
-            )
-            for item in artifact_rows
-        )
+        artifacts = _artifact_refs_from_rows(artifact_rows)
         return CommittedTurnReceipt(run.id, run.commit_checkpoint_version, committed, artifacts)
 
     @staticmethod
@@ -1016,12 +841,4 @@ class SqlAlchemyRunStateStore:
         rows = (
             await db.scalars(select(TurnRow).where(TurnRow.session_id == session_id).order_by(TurnRow.sequence))
         ).all()
-        messages: list[HistoryMessage] = []
-        for row in rows:
-            if row.role == "user" and row.user_input_json is not None:
-                messages.append(HistoryMessage("user", TurnInputCodec.decode(row.user_input_json).text))
-            elif row.role == "assistant" and row.committed_turn_json is not None:
-                messages.append(HistoryMessage("assistant", CommittedTurnCodec.decode(row.committed_turn_json).text))
-            else:
-                raise RunStateError("stored Turn shape is invalid")
-        return SessionHistory(tuple(messages))
+        return _history_from_turn_rows(rows)

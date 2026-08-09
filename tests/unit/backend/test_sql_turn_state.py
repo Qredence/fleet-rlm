@@ -28,7 +28,7 @@ async def test_sql_begin_translates_session_setup_failures(failure_type: type[Ba
 
 
 def test_stale_claim_is_a_canonical_typed_failure_code() -> None:
-    from fleet_rlm.persistence.repositories.turns import _decode_failure_code
+    from fleet_rlm.persistence.repositories.run_codec import _decode_failure_code
 
     assert _decode_failure_code("stale_claim", status="failed") == "stale_claim"
 
