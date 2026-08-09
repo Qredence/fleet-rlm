@@ -70,9 +70,7 @@ def _list_cache_key(root: str, *, max_depth: int, max_files: int) -> str:
 
 # Daytona ``FileInfo.mod_time`` strings: ``2026-07-30 00:05:20.290395882
 # +0000 UTC`` (nanoseconds allowed) and ISO-8601 variants.
-_MOD_TIME_TEXT = re.compile(
-    r"^\s*(?P<date>\d{4}-\d{2}-\d{2})[T ](?P<time>\d{2}:\d{2}:\d{2})(?:\.(?P<frac>\d{1,6}))?"
-)
+_MOD_TIME_TEXT = re.compile(r"^\s*(?P<date>\d{4}-\d{2}-\d{2})[T ](?P<time>\d{2}:\d{2}:\d{2})(?:\.(?P<frac>\d{1,6}))?")
 
 
 def _modified_timestamp(value: Any) -> float | None:
