@@ -16,7 +16,7 @@ compatibility runtime and parallel foundation package no longer exist.
 | `sessions/` | Session catalog, Turn input/history, canonical AssistantPart vocabulary, versioned Committed Turn | domain values |
 | `files/`, `artifacts/` | Attachment staging, paged/full-lifecycle Session Workspace and Project tools, workspace-wide Memory values/tools, direct Workspace Artifact Candidate staging, Artifact promotion/read | storage interfaces and safe paths |
 | `skills/` | bundled catalog, authorization, progressive loading, capability seam, Tool construction | domain values and package resources |
-| `persistence/` | SQLAlchemy models, internal Run ORM/JSON codec, and repository adapters, including named startup-recovery phases | Session/file/Artifact interfaces |
+| `persistence/` | SQLAlchemy models, internal Run ORM/JSON codec, claim decisions, liveness/recovery helpers, and repository adapters | Session/file/Artifact interfaces |
 | `observability/` | sanitized failure diagnostics; opt-in Databricks MLflow DSPy tracing | domain errors, Settings |
 | `cli/` | supervised Daytona plus pi-tui, backend launchers, doctor dispatch | ASGI entrypoint and Daytona diagnostics |
 

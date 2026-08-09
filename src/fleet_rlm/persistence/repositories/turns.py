@@ -6,10 +6,10 @@ import asyncio
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import Any, Literal
+from typing import Literal
 from uuid import UUID, uuid4
 
-from sqlalchemy import func, select, update
+from sqlalchemy import func, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -18,7 +18,6 @@ from fleet_rlm.artifacts.promotion import PromotedArtifact
 from fleet_rlm.chat.run_claim import (
     BeginSettlement,
     ClaimCommand,
-    ClaimFailure,
     CompleteSettlement,
     FailClaim,
     HeartbeatClaim,
@@ -36,8 +35,6 @@ from fleet_rlm.chat.run_lifecycle import (
     RunClaim,
     RunFailure,
     RunFailureCode,
-    RunIdempotencyMismatchError,
-    RunInProgressError,
     RunLifecycleUnavailableError,
     RunNotFoundError,
     RunStart,
@@ -46,12 +43,19 @@ from fleet_rlm.chat.run_lifecycle import (
 )
 from fleet_rlm.persistence.database import DatabaseConnectionError
 from fleet_rlm.persistence.models import ArtifactRow, RunRow, SessionRow, TurnRow
+from fleet_rlm.persistence.repositories.run_claim_decisions import (
+    _claim_owner_matches,
+    _new_run_claim,
+    _prior_run_needs_replay,
+    _reject_active_run,
+    _validate_completed_replay_state,
+    _validate_sql_claim,
+)
 from fleet_rlm.persistence.repositories.run_codec import (
     _apply_memory_next_state,
     _apply_row_next_state,
     _artifact_refs_from_rows,
     _artifact_row_for_commit,
-    _cancel_tombstone_rows,
     _cancelled_tombstone,
     _command_usage,
     _committed_turn_rows,
@@ -60,6 +64,18 @@ from fleet_rlm.persistence.repositories.run_codec import (
     _memory_claim_state,
     _row_claim_state,
     _transition_receipt,
+)
+from fleet_rlm.persistence.repositories.run_liveness import (
+    _await_recovery_step,
+    _claim_recovery_owner,
+    _complete_recovery,
+    _heartbeat_unavailable,
+    _load_recovery_candidates,
+    _mark_cancel_requested,
+    _persist_cancel_tombstone,
+    _recovery_deadline_exhausted,
+    _restore_after_fence_failure,
+    _touch_claim_heartbeat,
 )
 from fleet_rlm.rlm.dspy_contract import RLMUsage, empty_rlm_usage
 from fleet_rlm.sessions.committed_turn import CommittedTurn
@@ -114,26 +130,6 @@ class ReconciliationSummary:
     budget_exhausted: bool = False
 
 
-async def _await_recovery_step(awaitable: Awaitable[Any], *, deadline: float | None) -> Any:
-    """Await one recovery operation without exceeding the shared startup deadline."""
-    if deadline is None:
-        return await awaitable
-    async with asyncio.timeout_at(deadline):
-        return await awaitable
-
-
-def _recovery_deadline_exhausted(deadline: float | None) -> bool:
-    """Determine whether the recovery deadline has been reached.
-
-    Parameters:
-        deadline (float | None): Monotonic time at which recovery must stop, or `None` for no deadline.
-
-    Returns:
-        `true` if the deadline has been reached, `false` otherwise.
-    """
-    return deadline is not None and asyncio.get_running_loop().time() >= deadline
-
-
 class InMemoryRunStateStore:
     """Lock-backed parity adapter for private composition and lifecycle tests."""
 
@@ -179,28 +175,25 @@ class InMemoryRunStateStore:
                 raise RunNotFoundError("Turn not found")
             key = (request.session_id, request.idempotency_key)
             prior_id = self._keys.get(key)
-            if prior_id is not None:
-                prior = self._runs[prior_id]
-                if prior.input_fingerprint not in request.input.acceptable_fingerprints:
-                    raise RunIdempotencyMismatchError("idempotency key is bound to different input")
-                if prior.status in {"running", "settling"}:
-                    raise RunInProgressError("Turn is already running")
-                if prior.status == "completed":
-                    if prior.committed is None or prior.checkpoint_version is None:
-                        raise RunStateError("completed Run has no committed Turn")
-                    return CommittedRunReplay(
-                        prior.run_id,
-                        prior.session_id,
-                        prior.committed,
-                        prior.checkpoint_version,
-                    )
-            if any(
-                run.session_id == request.session_id and run.status in {"running", "settling"}
-                for run in self._runs.values()
-            ):
-                raise RunInProgressError("Session already has a running Turn")
+            prior = self._runs.get(prior_id) if prior_id is not None else None
+            if _prior_run_needs_replay(prior, request):
+                assert prior is not None
+                _validate_completed_replay_state(committed=prior.committed, checkpoint_version=prior.checkpoint_version)
+                assert prior.committed is not None and prior.checkpoint_version is not None
+                return CommittedRunReplay(
+                    prior.run_id,
+                    prior.session_id,
+                    prior.committed,
+                    prior.checkpoint_version,
+                )
+            _reject_active_run(
+                any(
+                    run.session_id == request.session_id and run.status in {"running", "settling"}
+                    for run in self._runs.values()
+                )
+            )
 
-            claim = _RunClaimToken(uuid4(), session.checkpoint_version)
+            claim = _new_run_claim(session.checkpoint_version)
             run = _RunState(
                 request.proposed_run_id,
                 request.session_id,
@@ -452,11 +445,8 @@ class SqlAlchemyRunStateStore:
                     .order_by(RunRow.created_at.desc())
                     .limit(1)
                 )
-                if prior is not None:
-                    if prior.input_fingerprint not in request.input.acceptable_fingerprints:
-                        raise RunIdempotencyMismatchError("idempotency key is bound to different input")
-                    if prior.status in {"running", "settling"}:
-                        raise RunInProgressError("Turn is already running")
+                if _prior_run_needs_replay(prior, request):
+                    assert prior is not None
                     return await self._replay(db, prior)
                 active = await db.scalar(
                     select(RunRow.id).where(
@@ -464,10 +454,9 @@ class SqlAlchemyRunStateStore:
                         RunRow.status.in_(("running", "settling")),
                     )
                 )
-                if active is not None:
-                    raise RunInProgressError("Session already has a running Turn")
+                _reject_active_run(active is not None)
 
-                claim = _RunClaimToken(uuid4(), session.checkpoint_version)
+                claim = _new_run_claim(session.checkpoint_version)
                 db.add(
                     RunRow(
                         id=request.proposed_run_id,
@@ -533,13 +522,13 @@ class SqlAlchemyRunStateStore:
             )
             if session is None:
                 raise RunNotFoundError("Turn not found")
-            if (
-                row.status != "running"
-                or row.claim_owner != str(run._claim.value)
-                or row.base_checkpoint_version != run._claim.base_checkpoint_version
-                or session.checkpoint_version != run._claim.base_checkpoint_version
-            ):
-                raise RunStateError("Turn claim or Checkpoint is stale")
+            _validate_sql_claim(
+                status=row.status,
+                claim_owner=row.claim_owner,
+                base_checkpoint_version=row.base_checkpoint_version,
+                session_checkpoint_version=session.checkpoint_version,
+                claim=run._claim,
+            )
             last_sequence = int(
                 await db.scalar(
                     select(func.coalesce(func.max(TurnRow.sequence), 0)).where(TurnRow.session_id == run.session_id)
@@ -581,16 +570,23 @@ class SqlAlchemyRunStateStore:
             stale_terminal = (
                 isinstance(command, CompleteSettlement) and row.status == "failed" and row.failure_code == "stale_claim"
             )
-            if not isinstance(command, RevokeClaim) and not stale_terminal and row.claim_owner != str(run._claim.value):
+            if (
+                not isinstance(command, RevokeClaim)
+                and not stale_terminal
+                and not _claim_owner_matches(row.claim_owner, run._claim)
+            ):
                 raise RunStateError("Turn claim is invalid")
             try:
                 decision = decide_claim_transition(_row_claim_state(row), command)
             except InvalidClaimTransitionError as exc:
                 raise RunStateError(str(exc)) from exc
             if isinstance(command, HeartbeatClaim):
-                if not decision.heartbeat_allowed or row.claim_owner != str(run._claim.value):
+                if _heartbeat_unavailable(
+                    heartbeat_allowed=decision.heartbeat_allowed,
+                    claim_owned=_claim_owner_matches(row.claim_owner, run._claim),
+                ):
                     raise RunStateError("Turn claim is invalid")
-                row.claim_heartbeat_at = datetime.now(UTC)
+                _touch_claim_heartbeat(row)
                 return None
             transition = decision.transition
             if transition is None:
@@ -611,44 +607,12 @@ class SqlAlchemyRunStateStore:
                 elif isinstance(command, (BeginSettlement, RevokeClaim)):
                     row.recovery_metadata_json = {"cleanup": "pending"}
                 if transition.next_state.status == "cancelled":
-                    await self._persist_cancel_tombstone(db, row, run.input)
+                    await _persist_cancel_tombstone(db, row, run.input)
             return _transition_receipt(row.id, transition)
-
-    @staticmethod
-    async def _persist_cancel_tombstone(db: AsyncSession, run: RunRow, turn_input: TurnInput | None) -> None:
-        """Persist the bounded D2 tombstone atomically with the cancelled terminal transition.
-
-        Settle-time callers pass the claimed Turn input; startup recovery has no
-        input snapshot and persists the assistant tombstone alone.
-        """
-        last_sequence = int(
-            await db.scalar(
-                select(func.coalesce(func.max(TurnRow.sequence), 0)).where(TurnRow.session_id == run.session_id)
-            )
-            or 0
-        )
-        db.add_all(_cancel_tombstone_rows(run=run, turn_input=turn_input, next_sequence=last_sequence + 1))
 
     async def request_cancel(self, access: TurnAccess, run_id: UUID) -> CancelResult:
         async with self._sessions() as db, db.begin():
-            run = await db.scalar(
-                select(RunRow)
-                .join(SessionRow, SessionRow.id == RunRow.session_id)
-                .where(
-                    RunRow.id == run_id,
-                    SessionRow.user_id == access.user_id,
-                    SessionRow.workspace_id == access.workspace_id,
-                )
-                .with_for_update()
-            )
-            if run is None:
-                raise RunNotFoundError("Turn not found")
-            if run.status != "running":
-                return "already_terminal"
-            if run.cancel_requested_at is not None:
-                return "already_requested"
-            run.cancel_requested_at = datetime.now(UTC)
-            return "requested"
+            return await _mark_cancel_requested(db, access, run_id)
 
     async def _replay(self, db: AsyncSession, run: RunRow) -> CommittedRunReplay:
         receipt = await self._receipt(db, run)
@@ -708,7 +672,8 @@ class SqlAlchemyRunStateStore:
                     budget_exhausted = True
                     break
                 continue
-            if await self._complete_recovery(pending_run, recovery_owner):
+            completed = await self._complete_recovery(pending_run, recovery_owner)
+            if completed:
                 recovered += 1
             else:
                 skipped += 1
@@ -721,48 +686,14 @@ class SqlAlchemyRunStateStore:
         )
 
     async def _load_recovery_candidates(self) -> list[RunRow]:
-        """Load bounded nonterminal claims that require startup ownership recovery."""
+        """Load bounded recovery candidates through the facade-owned session."""
         async with self._sessions() as db:
-            return list(
-                (
-                    await db.scalars(
-                        select(RunRow)
-                        .where(
-                            RunRow.status.in_(("running", "settling")),
-                            RunRow.claim_owner.is_not(None),
-                            RunRow.claim_heartbeat_at.is_not(None),
-                        )
-                        .order_by(RunRow.claim_heartbeat_at, RunRow.created_at)
-                        .limit(self._RECOVERY_BATCH_SIZE)
-                    )
-                ).all()
-            )
+            return await _load_recovery_candidates(db, batch_size=self._RECOVERY_BATCH_SIZE)
 
     async def _claim_recovery_owner(self, pending_run: RunRow) -> str | None:
-        """Take conditional ownership before any provider call is awaited."""
-        owner = pending_run.claim_owner
-        heartbeat = pending_run.claim_heartbeat_at
-        if owner is None or heartbeat is None:
-            return None
-        recovery_owner = f"recovery:{uuid4()}"
+        """Take recovery ownership in one facade-owned transaction."""
         async with self._sessions() as db, db.begin():
-            await db.execute(
-                update(RunRow)
-                .where(
-                    RunRow.id == pending_run.id,
-                    RunRow.status == pending_run.status,
-                    RunRow.claim_owner == owner,
-                    RunRow.claim_heartbeat_at == heartbeat,
-                )
-                .values(claim_owner=recovery_owner)
-            )
-            claimed_id = await db.scalar(
-                select(RunRow.id).where(
-                    RunRow.id == pending_run.id,
-                    RunRow.claim_owner == recovery_owner,
-                )
-            )
-        return recovery_owner if claimed_id is not None else None
+            return await _claim_recovery_owner(db, pending_run)
 
     async def _restore_after_fence_failure(
         self,
@@ -771,59 +702,19 @@ class SqlAlchemyRunStateStore:
         *,
         original_owner: str | None,
     ) -> None:
-        """Restore the prior owner and record retry metadata after a fence failure."""
+        """Restore ownership in one facade-owned transaction."""
         async with self._sessions() as db, db.begin():
-            run = await db.get(RunRow, pending_run.id, with_for_update=True)
-            if run is None or run.status != pending_run.status or run.claim_owner != recovery_owner:
-                return
-            metadata = dict(run.recovery_metadata_json or {})
-            recovery = dict(metadata.get("recovery") or {})
-            prior_attempts = recovery.get("attempts", 0)
-            if not isinstance(prior_attempts, int) or isinstance(prior_attempts, bool):
-                prior_attempts = 0
-            recovery["attempts"] = max(0, prior_attempts) + 1
-            recovery["last_error"] = "provider_fence_failed"
-            metadata["recovery"] = recovery
-            run.recovery_metadata_json = metadata
-            run.claim_owner = original_owner
+            await _restore_after_fence_failure(
+                db,
+                pending_run,
+                recovery_owner,
+                original_owner=original_owner,
+            )
 
     async def _complete_recovery(self, pending_run: RunRow, recovery_owner: str) -> bool:
-        """Apply the stale-claim transition and release recovery ownership atomically."""
+        """Complete recovery in one facade-owned transaction."""
         async with self._sessions() as db, db.begin():
-            run = await db.get(RunRow, pending_run.id, with_for_update=True)
-            if run is None or run.status != pending_run.status or run.claim_owner != recovery_owner:
-                return False
-            if run.status == "running":
-                stale = ClaimFailure("failed", "stale_claim", "Turn failed")
-                revocation = decide_claim_transition(_row_claim_state(run), RevokeClaim(stale)).transition
-                if revocation is None or revocation.next_state is None:
-                    return False
-                _apply_row_next_state(
-                    run,
-                    revocation.next_state,
-                    public_message=revocation.public_message,
-                )
-                decision = decide_claim_transition(revocation.next_state, CompleteSettlement()).transition
-            else:
-                try:
-                    decision = decide_claim_transition(_row_claim_state(run), CompleteSettlement()).transition
-                except InvalidClaimTransitionError:
-                    return False
-            if decision is None or decision.next_state is None:
-                return False
-            _apply_row_next_state(
-                run,
-                decision.next_state,
-                public_message=decision.public_message,
-            )
-            run.finished_at = datetime.now(UTC)
-            run.claim_owner = None
-            run.claim_heartbeat_at = None
-            run.recovery_metadata_json = None
-            if decision.next_state.status == "cancelled":
-                # Flush the cancelled terminal shape before the tombstone reads.
-                await self._persist_cancel_tombstone(db, run, None)
-            return True
+            return await _complete_recovery(db, pending_run, recovery_owner)
 
     async def _receipt(self, db: AsyncSession, run: RunRow) -> CommittedTurnReceipt:
         row = await db.scalar(select(TurnRow).where(TurnRow.run_id == run.id, TurnRow.role == "assistant"))

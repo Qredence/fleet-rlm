@@ -89,8 +89,11 @@ JSON-compatible common input annotations.
 - `daytona/` is the exclusive Daytona SDK boundary.
 - `persistence/` implements domain repository interfaces; Alembic owns the live
   schema. `persistence/repositories/run_codec.py` centralizes ORM/domain and
-  durable JSON conversion inside the deep Run facade, while in-memory and SQL
-  Run state stores retain lock-backed and transaction-backed atomicity and the
+  durable JSON conversion inside the deep Run facade, while
+  `run_claim_decisions.py` groups idempotency/active-Run fencing and
+  `run_liveness.py` groups heartbeat, recovery ownership, provider fencing,
+  cancellation marking, and tombstone persistence. The in-memory and SQL Run
+  state stores retain lock-backed and transaction-backed atomicity and the
   pure Run Claim transition policy.
 
 ## Skills
