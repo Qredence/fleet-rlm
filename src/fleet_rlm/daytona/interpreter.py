@@ -7,6 +7,9 @@ Host-tool / SUBMIT mediation (B1):
 - In-process backends bind host callables directly (offline seam).
 - Daytona sandbox backends use an HTTP-in-sandbox broker + host poll
   (Daytona-appropriate channel; mirrors DSPy host-tool + FinalOutput outcomes).
+
+Public per-step output projection (stdout delta replay, stream closure, final
+flush, repair-feedback privacy) lives in ``interpreter_output.py``.
 """
 
 from __future__ import annotations
@@ -25,10 +28,8 @@ from uuid import uuid4
 import dspy
 
 from fleet_rlm.daytona.broker_source import (
-    FINAL_OUTPUT_MARKER,
     build_submit_setup_code,
     extract_final_payload,
-    final_output_frame,
 )
 from fleet_rlm.daytona.errors import (
     DaytonaAdapterError,
@@ -36,6 +37,15 @@ from fleet_rlm.daytona.errors import (
     sanitize_provider_message,
 )
 from fleet_rlm.daytona.http_broker import DEFAULT_BROKER_PORT, FleetFinalOutputError
+from fleet_rlm.daytona.interpreter_output import (
+    OutputCallback,
+    _close_output_stream,
+    _emit_output_delta,
+    _flush_step_output,
+    _OutputStreamState,
+    _PublicStdoutProjector,
+    _RepairFeedback,
+)
 from fleet_rlm.files.workspace_tools import WorkspaceToolError
 from fleet_rlm.observability.turn_tracing import trace_preview_limit, turn_phase_span
 from fleet_rlm.rlm.dspy_interpreter_contract import (
@@ -59,7 +69,6 @@ DEFAULT_EXECUTION_OUTPUT_CHARS = 4_000
 DEFAULT_EXECUTION_TIMEOUT_S = 120
 DEFAULT_INTERMEDIATE_CODE_CHARS = 12_000
 _MAX_CAPTURED_OUTPUT_CHARS = 64 * 1024
-OutputCallback = Callable[[str], None]
 
 
 @dataclass(frozen=True, slots=True)
@@ -243,17 +252,6 @@ class InterpreterBackend(Protocol):
     def run(self, code: str, variables: dict[str, object] | None = None) -> str | BackendExecutionResult: ...
 
     def close(self) -> None: ...
-
-
-class _RepairFeedback(str):
-    """Detailed interpreter feedback returned to RLM but not public projection."""
-
-    category: str
-
-    def __new__(cls, value: str, *, category: str = "execution_error") -> _RepairFeedback:
-        result = super().__new__(cls, value)
-        result.category = category
-        return result
 
 
 def _result_kind(result: Any) -> str:
@@ -554,67 +552,6 @@ class _SandboxProcessBackend:
         return None
 
 
-class _PublicStdoutProjector:
-    """Forward ordinary stdout while hiding the known SUBMIT stdout frame.
-
-    The marker may also occur in ordinary user stdout, so a marker alone is not
-    treated as a control frame. The private frame is removed only when it exactly
-    matches the final payload returned by the execution backend.
-    """
-
-    def __init__(self, emit: OutputCallback) -> None:
-        self._emit = emit
-        self._marker = FINAL_OUTPUT_MARKER
-        self._buffer = ""
-
-    def feed(self, value: str) -> None:
-        if not value:
-            return
-        pending = self._buffer + value
-        self._buffer = ""
-        start = pending.find(self._marker)
-        if start >= 0:
-            if start:
-                self._emit(pending[:start])
-            self._buffer = pending[start:]
-            return
-        suffix = self._marker_prefix_suffix(pending)
-        if suffix:
-            self._emit(pending[: -len(suffix)])
-            self._buffer = suffix
-        else:
-            self._emit(pending)
-
-    def finish(self, *, expected_final: Mapping[str, Any] | None = None) -> None:
-        pending = self._buffer
-        self._buffer = ""
-        if not pending:
-            return
-        if expected_final is None:
-            self._emit(pending)
-            return
-
-        frame = final_output_frame(expected_final, marker=self._marker)
-        offset = 0
-        while True:
-            start = pending.find(frame, offset)
-            if start < 0:
-                self._emit(pending[offset:])
-                return
-            self._emit(pending[offset:start])
-            offset = start + len(frame)
-            if pending.startswith("\r\n", offset):
-                offset += 2
-            elif pending.startswith(("\n", "\r"), offset):
-                offset += 1
-
-    def _marker_prefix_suffix(self, value: str) -> str:
-        for length in range(min(len(value), len(self._marker) - 1), 0, -1):
-            if value.endswith(self._marker[:length]):
-                return value[-length:]
-        return ""
-
-
 class DaytonaCodeInterpreter:
     """CodeInterpreter-compatible adapter with host-tool / SUBMIT mediation."""
 
@@ -708,77 +645,6 @@ class DaytonaCodeInterpreter:
             return "Execution error"
         return truncate_public_text(str(result or ""), max_len=self._observation_max_chars)
 
-    def _emit_output_delta(
-        self,
-        value: str,
-        *,
-        step: int,
-        stream_id: str,
-        emitted_chars: list[int],
-        streamed_chunks: list[str],
-        stream_closed: list[bool],
-    ) -> None:
-        if stream_closed[0] or not value:
-            # A step's terminal output frame (e.g. the "FINAL submitted" label
-            # or an error frame) closes its stream; late stdout from a
-            # straggler backend callback must not emit after it (RC-4b).
-            return
-        remaining = self._observation_max_chars - emitted_chars[0]
-        if remaining <= 0:
-            return
-        chunk = value[:remaining]
-        emitted_chars[0] += len(chunk)
-        if chunk:
-            streamed_chunks.append(chunk)
-            self._observe(RLMOutput(chunk, step, stream_id, True, False))
-
-    def _close_output_stream(self, text: str, *, step: int, stream_id: str, stream_closed: list[bool]) -> None:
-        stream_closed[0] = True
-        self._observe(RLMOutput(text, step, stream_id, False, True))
-
-    def _flush_step_output(
-        self,
-        result: Any,
-        *,
-        step: int,
-        stream_id: str,
-        streamed_chunks: list[str],
-        stream_closed: list[bool],
-    ) -> None:
-        """Close one step's output stream without repeating streamed content.
-
-        RC-4b: stdout deltas are tracked in ``streamed_chunks`` so the final
-        flush is idempotent. When deltas already cover the full public output
-        no closing frame is emitted — the TUI contract
-        (tools/fleet-tui/src/tui/projection.ts `projectRlm`) does not require
-        a terminal ``is_final`` frame per rlm-output stream
-        (``fleet-turn-stream.ts`` lifecycle only tracks reasoning/text/tool
-        streams, and ``store.ts`` settles leftover streaming cards at the run
-        terminal), and an empty non-delta frame would REPLACE the accumulated
-        content with "" both in the TUI and in the durable
-        ``turn_detail_policy`` projection. A partially streamed step emits
-        only the unsent tail as a closing delta (a non-delta tail frame would
-        replace the stream with just the tail). Distinct terminal texts — the
-        SUBMIT label and repair feedback — still replace the stream with one
-        canonical non-delta final frame.
-        """
-        if stream_closed[0]:
-            return
-        public = self._public_output(result)
-        if is_final_output(result) or isinstance(result, _RepairFeedback):
-            self._close_output_stream(public, step=step, stream_id=stream_id, stream_closed=stream_closed)
-            return
-        streamed = "".join(streamed_chunks)
-        if public == streamed:
-            stream_closed[0] = True
-            return
-        if public.startswith(streamed):
-            tail = public[len(streamed) :]
-            stream_closed[0] = True
-            self._observe(RLMOutput(tail, step, stream_id, True, True))
-            return
-        self._close_output_stream(public, step=step, stream_id=stream_id, stream_closed=stream_closed)
-
     def _run_backend(
         self,
         code: str,
@@ -856,17 +722,15 @@ class DaytonaCodeInterpreter:
         self._observation_step += 1
         step = self._observation_step
         output_stream_id = f"interpreter:{self._observation_namespace}:output:{step}"
-        emitted_chars = [0]
-        streamed_chunks: list[str] = []
-        stream_closed = [False]
+        output_state = _OutputStreamState()
         stdout_projector = _PublicStdoutProjector(
-            lambda value: self._emit_output_delta(
+            lambda value: _emit_output_delta(
                 value,
                 step=step,
                 stream_id=output_stream_id,
-                emitted_chars=emitted_chars,
-                streamed_chunks=streamed_chunks,
-                stream_closed=stream_closed,
+                state=output_state,
+                max_chars=self._observation_max_chars,
+                observe=self._observe,
             )
         )
         step_started = time.perf_counter()
@@ -920,12 +784,13 @@ class DaytonaCodeInterpreter:
                 execute_ms = int((time.perf_counter() - execute_started) * 1_000)
                 self._reject_repeated_no_progress(normalized_code, result)
                 stdout_projector.finish(expected_final=_submitted_payload(result))
-                self._flush_step_output(
+                _flush_step_output(
                     result,
                     step=step,
                     stream_id=output_stream_id,
-                    streamed_chunks=streamed_chunks,
-                    stream_closed=stream_closed,
+                    state=output_state,
+                    public_output=self._public_output,
+                    observe=self._observe,
                 )
                 outputs: dict[str, Any] = {
                     "path": "http_broker" if self._http_broker is not None else type(self._backend).__name__,
@@ -950,21 +815,21 @@ class DaytonaCodeInterpreter:
                 return result
             except TurnTerminalError:
                 stdout_projector.finish()
-                self._close_output_stream(
-                    "Execution failed", step=step, stream_id=output_stream_id, stream_closed=stream_closed
+                _close_output_stream(
+                    "Execution failed", step=step, stream_id=output_stream_id, state=output_state, observe=self._observe
                 )
                 raise
             except DaytonaAdapterError:
                 stdout_projector.finish()
-                self._close_output_stream(
-                    "Execution failed", step=step, stream_id=output_stream_id, stream_closed=stream_closed
+                _close_output_stream(
+                    "Execution failed", step=step, stream_id=output_stream_id, state=output_state, observe=self._observe
                 )
                 raise
             except Exception as exc:
                 mapped = map_provider_error(exc)
                 stdout_projector.finish()
-                self._close_output_stream(
-                    "Execution failed", step=step, stream_id=output_stream_id, stream_closed=stream_closed
+                _close_output_stream(
+                    "Execution failed", step=step, stream_id=output_stream_id, state=output_state, observe=self._observe
                 )
                 raise mapped from exc
             finally:

@@ -284,6 +284,46 @@ committed assistant Turns persist deterministic UIMessage parts; SSE bytes are
 not themselves durable records.
 _Avoid_: Runtime Event, raw event-log persistence
 
+## Module map
+
+### Workspace namespace disambiguation
+
+Five modules carry "workspace" names with different roles; do not conflate
+them. The volume-side gateway also lives in `daytona/workspace_gateway.py`
+(bounded Workspace Volume Tree reads and orphan byte cleanup state); no
+separate `workspace_volume*` module exists.
+
+| Module | Role | Primary callers |
+| --- | --- | --- |
+| `daytona/workspace_fs.py` | Session Workspace FS implementation: `AsyncDaytonaSessionWorkspaceFS` async source of truth, `DaytonaSessionWorkspaceFS` synchronous worker-thread bridge over it, plus the Volume byte adapters (`AsyncDaytonaVolumeFS`, `DaytonaSandboxVolumeFs`) | Turn capability preparation in `daytona/run_environment.py`; `daytona/workspace_gateway.py` |
+| `daytona/workspace_gateway.py` | REST-facing gateway that opens purpose-labelled ephemeral mounted Sandboxes for independent Workspace file/volume access | `files/workspace_access.py` via `composition/daytona.py` |
+| `files/workspace_access.py` | Public service boundary for the `/api/files` Workspace namespace | `api/routes/workspace_files.py`, composition |
+| `files/workspace_tools.py` | RLM Tool host binding Session Workspace operations as Host-Mediated Tools | `daytona/run_environment.py` |
+| `files/project_tools.py` | RLM Tool host for the durable projects-root namespace | `daytona/run_environment.py` |
+| `daytona/workspace_memory.py` | Workspace Memory store implementation over one mounted agent round trip | `daytona/run_environment.py` |
+| `daytona/workspace_agent.py` | Emitted stdlib-only Sandbox workspace agent code plus host run/decode adapters | `daytona/workspace_fs.py`, `daytona/workspace_memory.py` |
+
+### `daytona/` package one-liners
+
+- `__init__.py` — ownership package: curated re-exports of the Daytona adapter surface.
+- `bindings.py` — compatibility re-exports for Sandbox bindings.
+- `broker_source.py` — pure source-string generation for the in-sandbox host-tool broker.
+- `diagnostics.py` — opt-in disposable provider/mount probes (`fleet doctor daytona`).
+- `errors.py` — Fleet-facing error types and sanitized mapping for Daytona failures.
+- `http_broker.py` — HTTP-in-sandbox broker executing host tools and SUBMIT polls over localhost.
+- `interpreter.py` — `DaytonaCodeInterpreter`: DSPy RLM interpreter adapter (execution, observation, SUBMIT mediation, sync bridge).
+- `interpreter_output.py` — public per-step output projection: marker-hiding stdout replay, capped deltas, stream-closed tracking, final flush.
+- `optimization_evaluator.py` — disposable no-volume lifecycle for the offline signature-optimization lane.
+- `platform.py` — live SandboxPlatform and VolumeClient adapters over the Daytona SDK.
+- `provisioning.py` — strict async Sandbox, Volume, mount, and layout provisioning.
+- `recursive_child_runtime.py` — dedicated disposable runtimes for native DSPy recursive children.
+- `run_environment.py` — Run environment inventory and exact Turn capability preparation.
+- `session_manager.py` — interpreter lease acquire/release and Sandbox binding lifecycle.
+- `workspace_agent.py` — emitted Sandbox workspace agent source and its host execution adapter.
+- `workspace_fs.py` — Session Workspace FS implementation (see disambiguation above).
+- `workspace_gateway.py` — ephemeral mounted-Sandbox gateway (see disambiguation above).
+- `workspace_memory.py` — Workspace Memory store implementation (see disambiguation above).
+
 ## Out of this context (for now)
 
 These shared or live terms are **not** clean product claims until promoted:

@@ -66,11 +66,11 @@ Each PR: branch → focused suite → full gate (make check incl. TUI via pnpm 1
 - [x] Tests: fs delete/patch, API contract, guards
 - [x] Live replay: write→edit→read→delete→list on session+project roots
 
-## PR-H — chore(backend): `src/fleet_rlm` readability (mechanical, last) — `codex/backend-readability`
-- [ ] `daytona/workspace_fs.py`: single async FS core + thin sync bridge (~−300 LOC)
-- [ ] `daytona/interpreter.py`: extract output projection → `daytona/interpreter_output.py` (~−150 LOC)
-- [ ] `src/fleet_rlm/CONTEXT.md`: workspace-module naming map (fs/gateway/access/tools) + daytona/ module one-liners
-- [ ] Gate: `check-codebase-tree` + full make check green; zero behavior change
+## PR-H — chore(backend): `src/fleet_rlm` readability (mechanical, last) — `codex/backend-readability`  ✅ done (-93 net daytona LOC, interpreter_output.py extracted, CONTEXT.md module map)
+- [x] `daytona/workspace_fs.py`: single async FS core + thin sync bridge (~−300 LOC)
+- [x] `daytona/interpreter.py`: extract output projection → `daytona/interpreter_output.py` (~−150 LOC)
+- [x] `src/fleet_rlm/CONTEXT.md`: workspace-module naming map (fs/gateway/access/tools) + daytona/ module one-liners
+- [x] Gate: `check-codebase-tree` + full make check green; zero behavior change
 
 
 ## RC-8 — fix(chat): committed terminal must win over post-commit claim revoke  ✅ done in `040d957dc`
@@ -91,3 +91,10 @@ Each PR: branch → focused suite → full gate (make check incl. TUI via pnpm 1
 - [ ] Symptom: after 4 concurrent live turns incl. 1 recursive child (~16 min of throttled LLM rounds) and 3 client disconnects within seconds, the ASGI server froze completely: frozen log, `/openapi.json` (static) unresponsive >15 min. macOS `sample`: main thread spinning in uvloop idle → async_gen_asend chains = runaway coroutine starving the loop.
 - [ ] Controlled repro so far: 3 mid-run client disconnects alone do NOT wedge (server stayed healthy; orphaned turn completed server-side). Suspects: recursive child runtime settlement, settlement-on-disconnect path with in-flight recursive child, or a no-await loop in cleanup/drain under lease pressure. Needs faulthandler+SIGUSR1 reproduction with the recursion lane included (harness: /tmp/fleet-dogfood/fault_server.py, threaddump.txt path).
 - [ ] Fix owner: after PR-A merges; add to TODOS when scheduled.
+
+
+## ENDGAME
+- [ ] PR-H readability refactor (in flight: phaseH-impl)
+- [ ] RC-11 volume-tree listing emptiness (deferred: file with fix route: daytona/workspace_fs.list_files filter for the tree gateway)
+- [ ] Full `make check` + check-security + build/check-release + `git diff --check` (note: one foreign `ty` diagnostic at workspace_memory.py:244 from the active third-writer WIP currently blocks the repo-wide typecheck leg)
+- [ ] Push codex/tool-surface-revival and open PR -> dev-0.7 (phases A,B,C,D,E,F,G + RC-8 + RC-7), babysit, merge
