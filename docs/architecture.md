@@ -171,8 +171,11 @@ public rows.
 Session Workspace files are immediate private state under the Session Volume
 path. Daytona exposes bounded list/read pagination, append and in-place unique
 fragment edits, whole-file replacement, and strict delete (files and empty
-directories only; no recursion, no force flag). Edits and deletes accept
-optional SHA-256 preconditions and never follow symlinks. Existing Workspace documents can be staged as
+directories only; no recursion, no force flag). Writes, appends, edits, and
+deletes accept optional SHA-256 preconditions and never follow symlinks. For
+write and append, checksum comparison and mutation execute inside one mounted
+Workspace agent operation with target locking and inode revalidation across
+I/O Sandboxes; the host does not recheck after a separate read. Existing Workspace documents can be staged as
 private Artifact Candidates without resending their bodies; Turn Commit remains
 the only publication boundary. Workspace files survive failed Runs and Sandbox
 replacement independently of the commit-gated result snapshot and Artifact

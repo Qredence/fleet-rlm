@@ -110,13 +110,19 @@ class _DaytonaWorkspaceFileSession:
         overwrite: bool,
         expected_sha256: str | None,
     ) -> WorkspaceFileEntry:
-        await self._check_precondition(path, expected_sha256)
+        # The provider-side agent compares and mutates in one mounted
+        # operation; a host read would reopen the TOCTOU window across I/O
+        # Sandboxes.
         entry = await self._workspace.write_text(
             path,
             content,
             overwrite=overwrite,
+            expected_sha256=expected_sha256,
         )
-        return _public_entry(entry, hashlib.sha256(content.encode("utf-8")).hexdigest())
+        return _public_entry(
+            entry,
+            entry.checksum_sha256 or hashlib.sha256(content.encode("utf-8")).hexdigest(),
+        )
 
     async def append_text(
         self,
@@ -125,11 +131,15 @@ class _DaytonaWorkspaceFileSession:
         *,
         expected_sha256: str | None,
     ) -> WorkspaceFileEntry:
-        current = await self._read_current(path)
-        self._assert_precondition(current, expected_sha256)
-        entry = await self._workspace.append_text(path, content)
-        final = (current or "") + content
-        return _public_entry(entry, hashlib.sha256(final.encode("utf-8")).hexdigest())
+        entry = await self._workspace.append_text(
+            path,
+            content,
+            expected_sha256=expected_sha256,
+        )
+        return _public_entry(
+            entry,
+            entry.checksum_sha256,
+        )
 
     async def delete_path(
         self,
@@ -154,27 +164,6 @@ class _DaytonaWorkspaceFileSession:
         # carries the agent-computed checksum of the exact bytes published.
         entry = await self._workspace.patch_text(path, old, new, expected_sha256=expected_sha256)
         return _public_entry(entry, entry.checksum_sha256)
-
-    async def _check_precondition(self, path: str, expected_sha256: str | None) -> None:
-        if expected_sha256 is None:
-            return
-        self._assert_precondition(await self._read_current(path), expected_sha256)
-
-    async def _read_current(self, path: str) -> str | None:
-        entry = await self._workspace.stat(path)
-        if entry is None:
-            return None
-        if entry.kind != "file":
-            raise IsADirectoryError(path)
-        return await self._workspace.read_text(path, max_bytes=self._max_file_bytes)
-
-    @staticmethod
-    def _assert_precondition(current: str | None, expected_sha256: str | None) -> None:
-        if expected_sha256 is None:
-            return
-        actual = hashlib.sha256(current.encode("utf-8")).hexdigest() if current is not None else None
-        if actual != expected_sha256:
-            raise WorkspaceFileConflictError("Workspace file checksum precondition failed")
 
 
 class _DaytonaWorkspaceVolumeSession:

@@ -116,9 +116,12 @@ routes or public events.
   `sessions/{session_id}/workspace/`. Paged reads, bounded immediate-child
   listings, append, replacement writes, unique-fragment edits, and file or
   empty-directory deletes are immediate private state, not Turn-commit
-  candidates. Edits/deletes accept optional SHA-256 preconditions, never
-  recurse or follow symlinks, and direct Workspace Artifact publication only
-  stages a private candidate.
+  candidates. Writes, appends, edits, and deletes accept optional SHA-256
+  preconditions. Write/append compare-and-mutate runs inside one mounted
+  Workspace agent operation with target locks and inode revalidation across
+  I/O Sandboxes, without a distributed lock service or a separate host read.
+  All mutations never recurse or follow symlinks, and direct Workspace Artifact
+  publication only stages a private candidate.
 - Daytona Workspace Memory is distinct workspace-wide immediate state. Its only
   target is `memory/MEMORIES.md` under the already mounted
   `workspaces/<workspace_id>` Volume subpath (legacy root `MEMORIES.md` is

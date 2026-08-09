@@ -43,7 +43,9 @@ contracts, and tracked docs remain authoritative.
   deviation: delete/edit target regular files (delete also removes EMPTY
   directories; never recurses, never follows symlinks, FIFOs and other
   non-regular nodes fail closed), with optional `expected_sha256` checksum
-  preconditions. Workspace Memory is
+  preconditions. Write/append preconditions compare and mutate inside one
+  mounted Workspace agent operation using target locks plus inode revalidation;
+  no separate host read introduces a cross-Sandbox TOCTOU window. Workspace Memory is
   the `memory/MEMORIES.md` log (migrated from the legacy root `MEMORIES.md`),
   not Session History. Listed rows always have one addressable id: v2 stores a
   fresh id and v1 derives one from canonical text plus occurrence; duplicate ids fail closed, while an

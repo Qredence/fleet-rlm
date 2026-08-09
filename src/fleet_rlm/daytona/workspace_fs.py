@@ -765,11 +765,24 @@ class AsyncDaytonaSessionWorkspaceFS:
             raise ValueError("workspace file exceeds read bound")
         return page.content
 
-    async def write_text(self, path: str, content: str, *, overwrite: bool) -> WorkspaceEntry:
-        return await self._mutate("write", path, content, overwrite=overwrite)
+    async def write_text(
+        self,
+        path: str,
+        content: str,
+        *,
+        overwrite: bool,
+        expected_sha256: str | None = None,
+    ) -> WorkspaceEntry:
+        return await self._mutate("write", path, content, overwrite=overwrite, expected_sha256=expected_sha256)
 
-    async def append_text(self, path: str, content: str) -> WorkspaceEntry:
-        return await self._mutate("append", path, content, overwrite=False)
+    async def append_text(
+        self,
+        path: str,
+        content: str,
+        *,
+        expected_sha256: str | None = None,
+    ) -> WorkspaceEntry:
+        return await self._mutate("append", path, content, overwrite=False, expected_sha256=expected_sha256)
 
     async def delete_path(self, path: str, *, expected_sha256: str | None = None) -> None:
         relative = normalize_workspace_path(path)
@@ -807,7 +820,9 @@ class AsyncDaytonaSessionWorkspaceFS:
             raise RuntimeError("workspace patch returned invalid entry")
         return _entry_from_payload(cast(Mapping[str, object], entry))
 
-    async def _mutate(self, operation: str, path: str, content: str, *, overwrite: bool) -> WorkspaceEntry:
+    async def _mutate(
+        self, operation: str, path: str, content: str, *, overwrite: bool, expected_sha256: str | None
+    ) -> WorkspaceEntry:
         relative = normalize_workspace_path(path)
         if not isinstance(content, str):
             raise ValueError("workspace content must be text")
@@ -821,6 +836,8 @@ class AsyncDaytonaSessionWorkspaceFS:
             max_bytes=self._max_file_bytes,
             overwrite=overwrite,
             content_b64=base64.b64encode(data).decode("ascii"),
+            checksum=bool(expected_sha256),
+            expected_sha256=_normalize_expected_sha256(expected_sha256),
         )
         raw_warnings = payload.get("warnings")
         self._last_warnings = (
@@ -931,11 +948,24 @@ class DaytonaSessionWorkspaceFS:
         """Compatibility adapter for internal callers that need a bounded whole read."""
         return _run_blocking(self._core.read_text(path, max_bytes=max_bytes))
 
-    def write_text(self, path: str, content: str, *, overwrite: bool) -> WorkspaceEntry:
-        return _run_blocking(self._core.write_text(path, content, overwrite=overwrite))
+    def write_text(
+        self,
+        path: str,
+        content: str,
+        *,
+        overwrite: bool,
+        expected_sha256: str | None = None,
+    ) -> WorkspaceEntry:
+        return _run_blocking(self._core.write_text(path, content, overwrite=overwrite, expected_sha256=expected_sha256))
 
-    def append_text(self, path: str, content: str) -> WorkspaceEntry:
-        return _run_blocking(self._core.append_text(path, content))
+    def append_text(
+        self,
+        path: str,
+        content: str,
+        *,
+        expected_sha256: str | None = None,
+    ) -> WorkspaceEntry:
+        return _run_blocking(self._core.append_text(path, content, expected_sha256=expected_sha256))
 
     def delete_path(self, path: str, *, expected_sha256: str | None = None) -> None:
         _run_blocking(self._core.delete_path(path, expected_sha256=expected_sha256))
