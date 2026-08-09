@@ -1,4 +1,4 @@
-PYTHON_SOURCES = src/fleet_rlm tests/unit/backend tests/unit/scripts tests/contracts/backend tests/e2e scripts/openapi_tools.py scripts/db_init.py scripts/live_daytona_verify.py scripts/daytona_snapshot.py scripts/benchmark_daytona_lifecycle.py scripts/benchmarks scripts/optimize migrations
+PYTHON_SOURCES = src/fleet_rlm tests/unit/backend tests/unit/scripts tests/contracts/backend tests/e2e scripts/openapi_tools.py scripts/db_init.py scripts/live_daytona_verify.py scripts/generate_profile_matrix.py scripts/codex_feedback_loop.py scripts/daytona_snapshot.py scripts/benchmark_daytona_lifecycle.py scripts/benchmarks scripts/optimize migrations
 PYTEST_FAST_MARKERS = not live_llm and not live_daytona and not benchmark and not db
 PYTEST := uv run --no-sync pytest
 PYTEST_ISOLATED := env \
@@ -20,7 +20,7 @@ PYTEST_PARALLEL := -n auto --maxprocesses=$(PYTEST_XDIST_MAX_WORKERS)
 	clean cli precommit-install precommit-run precommit \
 	sync sync-dev sync-all metadata-check docs-check security-check dependency-check release-artifacts cli-help \
 	cloud-preflight \
-	daytona-snapshot-create daytona-snapshot-check \
+	daytona-snapshot-create daytona-snapshot-check profile-matrix \
 	benchmark-oolong benchmark-native-long-context
 
 help:
@@ -68,6 +68,7 @@ help:
 	@echo "Utility:"
 	@echo "  make daytona-snapshot-create - Create or validate the immutable Daytona Snapshot"
 	@echo "  make daytona-snapshot-check  - Check the immutable Daytona Snapshot contract"
+	@echo "  make profile-matrix          - Regenerate the TOML-derived provider/profile matrix"
 	@echo "  make clean            - Remove caches and local generated artifacts"
 	@echo "  make precommit-install - Install pre-commit and pre-push git hooks"
 	@echo "  make precommit-run    - Run pre-commit on all files"
@@ -136,6 +137,9 @@ daytona-snapshot-create:
 daytona-snapshot-check:
 	uv run python scripts/daytona_snapshot.py check --name $(DAYTONA_SNAPSHOT_NAME)
 
+profile-matrix:
+	uv run python scripts/generate_profile_matrix.py generate
+
 tui-check:
 	$(MAKE) api-check
 	$(MAKE) stream-check
@@ -157,6 +161,7 @@ check-release:
 	uv run python scripts/check_agents_md_freshness.py
 
 check-docs:
+	uv run python scripts/generate_profile_matrix.py check
 	uv run python scripts/check_docs_quality.py
 	uv run python scripts/check_harness_engineering.py
 
