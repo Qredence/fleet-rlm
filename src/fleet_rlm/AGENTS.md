@@ -33,11 +33,24 @@ contracts, and tracked docs remain authoritative.
   native `rlm.acall(interpreter, ...)`. Custom Skill Signatures retain JSON-compatible common
   input annotations and declared output schemas.
 - Runtime-specific Session Workspace availability is bounded inside context;
-  Daytona registers list/stat/paged-read/write/append workspace Tools plus
-  direct Workspace Artifact Candidate publication and the on-demand
-  `read_workspace_memory`/`update_workspace_memory` Tools. Session Workspace is
-  append/update-only; there is no delete Tool. Workspace Memory is the fixed
-  root `MEMORIES.md` log, not Session History or a Turn-start prompt payload.
+  Daytona registers list/stat/paged-read/write/append/delete/edit workspace
+  Tools (`delete_workspace_path`, `edit_workspace_text`, and the
+  `delete_project_path`/`edit_project_text` pairs on the projects root) plus
+  direct Workspace Artifact Candidate publication and the Workspace Memory
+  Tools (`read_workspace_memory`, `remember`, `list_memories`, `edit_memory`,
+  `forget`, plus the `update_workspace_memory` back-compat alias). The former
+  append/update-only "no delete Tool" invariant ended by user-approved WS-7
+  deviation: delete/edit target regular files (delete also removes EMPTY
+  directories; never recurses, never follows symlinks, FIFOs and other
+  non-regular nodes fail closed), with optional `expected_sha256` checksum
+  preconditions. Workspace Memory is
+  the `memory/MEMORIES.md` log (migrated from the legacy root `MEMORIES.md`),
+  not Session History. Listed rows always have one addressable id: v2 stores a
+  fresh id and v1 derives one from canonical text plus occurrence; duplicate ids fail closed, while an
+  edit upgrades v1 to v2 preserving that id and timestamp. `remember` is
+  idempotent for the same record, and edit/forget perform one mounted-agent
+  read-modify-publish operation. Each Turn additionally receives its bounded
+  4 KiB `workspace_memory tail` digest inside `session_context`.
 - Resolve zero to four exact Skill selections against the immutable bundled
   catalog. Skill instructions and resources load progressively; bundled Skills
   never register executable tools. Runtime execution uses a typed
@@ -70,10 +83,12 @@ contracts, and tracked docs remain authoritative.
   `sessions/{session_id}/workspace/`. They survive failed Runs and Sandbox
   replacement independently of Turn Commit. Use paged reads for large files,
   `append_workspace_text` for incremental output, and
-  `write_workspace_text(..., overwrite=True)` for replacement. Direct
-  Workspace Artifact publication stages bytes privately; deletion is not
-  exposed as a Tool. Workspace Memory appends are immediate workspace-wide
-  state under the fixed `MEMORIES.md` root and are independent of Turn Commit;
+  `write_workspace_text(..., overwrite=True)` for replacement;
+  `delete_workspace_path` and `edit_workspace_text` mutate the same scope
+  (WS-7 deviation; strict file-and-empty-directory semantics). Direct
+  Workspace Artifact publication stages bytes privately; no Tool deletes or
+  edits Attachments or Artifacts. Workspace Memory appends are immediate workspace-wide
+  state under `memory/MEMORIES.md` and are independent of Turn Commit;
   the Daytona-only `/api/volume/tree` route exposes only a bounded read-only
   logical path view, not a general-purpose filesystem browser.
   Deployment contract: append serialization is process-local to one Fleet

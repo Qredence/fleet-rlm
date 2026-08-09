@@ -18,6 +18,8 @@ The generated source of truth is [`openapi.yaml`](../../openapi.yaml).
 | `GET` | `/api/files/content` | Read one bounded UTF-8 page |
 | `PUT` | `/api/files/content` | Create or explicitly overwrite a UTF-8 file |
 | `POST` | `/api/files/append` | Append UTF-8 text |
+| `PATCH` | `/api/files/content` | Replace one unique `old` fragment with `new` |
+| `DELETE` | `/api/files/content` | Delete one file or one empty directory |
 | `GET` | `/api/volume/tree` | List relative file paths from the mounted Workspace Volume |
 | `GET` | `/api/skills` | List bounded system Skill Cards |
 | `GET` | `/api/skills/{skill_id}` | Read one bounded system Skill Card |
@@ -35,20 +37,60 @@ are authoritative for that Turn and are included in its idempotency
 fingerprint. Omitting `skill_selections` still supplies the bounded catalog
 Cards and permits the RLM to load up to four advertised Skills progressively.
 Providing selections preloads those exact versions and restricts loading to
-that set. Missing, unauthorized, or version-mismatched selections fail before
-SSE begins with the generic
-`invalid_skill_selection` response; the response does not reveal hidden
-catalog entries.
+that set. Structurally malformed selections still fail pre-stream with a 422
+`invalid_skill_selection` JSON response. Catalog-rejected selections (missing,
+unauthorized, or version-mismatched) resolve during in-stream Turn opening and
+answer with the same generic `Invalid Skill selection` message as a stream
+`error` chunk; both contracts avoid revealing hidden catalog entries.
 
-Attachment ownership and explicit Skill selections are validated before SSE
-begins. Provider exceptions, credentials, Skill instructions, resource bodies,
-and storage paths never enter public responses or Skill lifecycle projections.
+## Turn streaming contract
+
+`POST /api/sessions/{session_id}/turns` begins the AI SDK UI message stream
+immediately instead of holding headers until preparation finishes. While the
+Turn claim and preparation resolve, the server emits a transient
+`data-status` chunk
+(`{"type": "data-status", "data": {"phase": "preparation", "status": "running", "message": null}, "transient": true}`)
+at once, then again every `runtime.heartbeat_seconds` until
+`coordinator.open` completes. Prelude chunks are a client-facing keep-alive
+only: they never enter the durable Turn history or the event log, they may
+repeat, and consumers must not key state on their count.
+
+After opening, one of three closings applies:
+
+- Success streams Runtime Events and ends with `finish` then `[DONE]`.
+- Claim or preparation failures end the stream with the closed `error` +
+  `finish` chunks the previous prepare-before-headers boundary used to map to
+  HTTP statuses (`Session not found`, `A Turn is already running`,
+  `Idempotency key input mismatch`, `Invalid Skill selection`,
+  `Turn preparation timed out`, `Turn is unavailable`, `Invalid request`),
+  followed by `[DONE]`. Transport/status 200 therefore no longer implies a
+  successful Turn; the Run id lives in the `start` chunk metadata, not in
+  response headers.
+- Run cancellation ends the live stream with one terminal `abort` chunk and
+  nothing after it (no `finish`, `data-usage`, or checkpoint metadata). Once
+  settlement completes, the cancelled attempt persists a bounded tombstone in
+  committed history so `GET /api/sessions/{id}/turns` shows the attempt: the
+  original user input plus one assistant message carrying only a
+  `data-status` part
+  (`{"type": "data-status", "data": {"phase": "cancelled", "status": "cancelled", "message": null}}`),
+  observed usage, and the closed text "Turn cancelled" — never reasoning,
+  code, output, or Tool evidence parts.
+
+Attachment ownership and explicit Skill selection structure are validated by
+FastAPI before SSE begins; provider exceptions, credentials, Skill
+instructions, resource bodies, and storage paths never enter public responses
+or Skill lifecycle projections.
 
 The files API always resolves the process-local Workspace. Callers cannot
 select a Workspace or address Daytona Volume, mount, Sandbox, Attachment,
 Artifact, Session, or Run identifiers. It exposes only the durable `files/`
-root, has no delete or rename operation, and accepts an optional current
-SHA-256 on overwrite/append; stale preconditions return `409`.
+root, has no rename operation, and accepts an optional current
+SHA-256 on overwrite/append/delete/patch; stale preconditions return `409`.
+`DELETE /api/files/content` removes one file or one empty directory
+(non-empty directories return `409`), and `PATCH /api/files/content`
+applies one unique find/replace whose old text must occur exactly once
+(absent or ambiguous matches return `409`); PATCH returns the fresh
+content checksum for precondition chaining.
 
 `POST /api/artifacts` does not exist. Artifacts become public only through Turn
 Commit after host-mediated `create_artifact` produces a private candidate.

@@ -77,6 +77,22 @@ class WorkspaceFileSession(Protocol):
         expected_sha256: str | None,
     ) -> WorkspaceFileEntry: ...
 
+    async def delete_path(
+        self,
+        path: str,
+        *,
+        expected_sha256: str | None,
+    ) -> None: ...
+
+    async def patch_text(
+        self,
+        path: str,
+        old: str,
+        new: str,
+        *,
+        expected_sha256: str | None,
+    ) -> WorkspaceFileEntry: ...
+
 
 class WorkspaceAccessGateway(Protocol):
     """Mount Workspace Volume Scope and expose only its public files root."""
@@ -110,7 +126,7 @@ class WorkspaceFileService:
             return await files.list_entries(normalized, limit=limit, after=after)
 
     async def stat(self, workspace_id: UUID, path: str) -> WorkspaceFileEntry | None:
-        normalized = normalize_workspace_path(path)
+        normalized = normalize_workspace_path(path, allow_root=True)
         async with self._gateway.open_workspace(workspace_id, purpose="workspace-files-stat") as files:
             return await files.stat(normalized)
 
@@ -163,6 +179,35 @@ class WorkspaceFileService:
             return await files.append_text(
                 normalized,
                 content,
+                expected_sha256=expected_sha256,
+            )
+
+    async def delete(
+        self,
+        workspace_id: UUID,
+        path: str,
+        *,
+        expected_sha256: str | None,
+    ) -> None:
+        normalized = normalize_workspace_path(path)
+        async with self._gateway.open_workspace(workspace_id, purpose="workspace-files-delete") as files:
+            await files.delete_path(normalized, expected_sha256=expected_sha256)
+
+    async def patch(
+        self,
+        workspace_id: UUID,
+        path: str,
+        old: str,
+        new: str,
+        *,
+        expected_sha256: str | None,
+    ) -> WorkspaceFileEntry:
+        normalized = normalize_workspace_path(path)
+        async with self._gateway.open_workspace(workspace_id, purpose="workspace-files-patch") as files:
+            return await files.patch_text(
+                normalized,
+                old,
+                new,
                 expected_sha256=expected_sha256,
             )
 
@@ -238,7 +283,7 @@ class _HostWorkspaceFileSession:
         )
 
     async def stat(self, path: str) -> WorkspaceFileEntry | None:
-        target = self._path(path)
+        target = self._path(path, allow_root=True)
         if not target.exists():
             return None
         return self._entry(target, path, checksum=target.is_file())
@@ -313,6 +358,62 @@ class _HostWorkspaceFileSession:
                 stream.write(addition)
                 stream.flush()
                 os.fsync(stream.fileno())
+            return self._entry(target, path, checksum=True)
+
+    async def delete_path(
+        self,
+        path: str,
+        *,
+        expected_sha256: str | None,
+    ) -> None:
+        # Regular files and empty directories only, mirroring the Daytona
+        # agent's strict ``delete`` contract (symlinks rejected by ``_path``).
+        target = self._path(path)
+        async with self._lock:
+            if target.is_symlink():
+                raise ValueError("Workspace files path is unsafe")
+            if not target.exists():
+                raise FileNotFoundError(path)
+            if target.is_dir():
+                if expected_sha256 is not None:
+                    raise WorkspaceFileConflictError("Workspace file checksum precondition failed")
+                try:
+                    target.rmdir()
+                except OSError:
+                    raise WorkspaceFileConflictError("Workspace directory is not empty") from None
+                return
+            current = target.read_bytes()
+            self._check_precondition(current, expected_sha256)
+            target.unlink()
+
+    async def patch_text(
+        self,
+        path: str,
+        old: str,
+        new: str,
+        *,
+        expected_sha256: str | None,
+    ) -> WorkspaceFileEntry:
+        target = self._path(path)
+        if target.is_dir():
+            raise IsADirectoryError(path)
+        async with self._lock:
+            current = target.read_bytes()  # raises FileNotFoundError when absent
+            self._check_precondition(current, expected_sha256)
+            try:
+                text = current.decode("utf-8")
+            except UnicodeDecodeError:
+                raise ValueError("Workspace files value is not valid UTF-8") from None
+            occurrences = text.count(old)
+            if occurrences != 1:
+                raise WorkspaceFileConflictError("Workspace file edit text must occur exactly once")
+            data = text.replace(old, new, 1).encode("utf-8")
+            if len(data) > self._max_file_bytes:
+                raise ValueError("Workspace files value exceeds maximum size")
+            self._reject_parent_symlinks(target)
+            temporary = target.with_name(f".fleet-write-{os.getpid()}-{id(data)}")
+            temporary.write_bytes(data)
+            os.replace(temporary, target)
             return self._entry(target, path, checksum=True)
 
     @staticmethod

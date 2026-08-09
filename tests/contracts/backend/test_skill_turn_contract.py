@@ -19,6 +19,7 @@ from fleet_rlm.api.schemas import CreateTurnRequest
 from fleet_rlm.chat.commands import OpenTurnCommand
 from fleet_rlm.chat.turn_lifecycle import ExecuteTurn, _TurnClaimToken
 from fleet_rlm.composition.inventory import RuntimeInventory
+from fleet_rlm.config import Settings
 from fleet_rlm.files.models import AttachmentRef, PreparedAttachments, StagedAttachment
 from fleet_rlm.rlm.dspy_contract import RLMOptions
 from fleet_rlm.rlm.events import EventRecorder, RuntimeEvent
@@ -57,6 +58,7 @@ class _Coordinator:
 
 def _turn_client(coordinator: _Coordinator) -> TestClient:
     app = FastAPI()
+    app.state.settings = Settings()
     app.state.composition_ready = True
     app.state.runtime_inventory = RuntimeInventory(turn_coordinator=coordinator)
     install_error_handlers(app)
@@ -123,7 +125,7 @@ def test_turn_request_accepts_zero_to_four_unique_exact_skill_selections() -> No
         )
 
 
-def test_invalid_exact_selection_is_generic_before_stream_headers() -> None:
+def test_invalid_exact_selection_is_generic_inside_the_stream() -> None:
     supplied_version = "private-version-detail"
     coordinator = _Coordinator(InvalidSkillSelectionError())
     with _turn_client(coordinator) as client:
@@ -136,9 +138,15 @@ def test_invalid_exact_selection_is_generic_before_stream_headers() -> None:
             headers={"Idempotency-Key": "invalid-skill"},
         )
 
-    assert response.status_code == 422
-    assert response.headers["content-type"] == "application/json"
-    assert response.json() == {"code": "invalid_skill_selection", "message": "Invalid Skill selection"}
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/event-stream")
+    frames = [line.removeprefix("data: ") for line in response.text.splitlines() if line.startswith("data: ")]
+    chunks = [json.loads(value) for value in frames if value != "[DONE]"]
+    assert frames[-1] == "[DONE]"
+    assert chunks[-2:] == [
+        {"type": "error", "errorText": "Invalid Skill selection"},
+        {"type": "finish", "finishReason": "error"},
+    ]
     assert supplied_version not in response.text
 
 

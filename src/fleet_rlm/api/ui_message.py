@@ -13,6 +13,7 @@ from fleet_rlm.sessions.committed_turn import (
     OutputPart,
     ReasoningPart,
     SkillPart,
+    StatusPart,
     StepPart,
     StructuredResultPart,
     TextPart,
@@ -73,6 +74,11 @@ def _assistant_part(part: CommittedPart) -> dict[str, Any]:
         }
     if isinstance(part, WarningPart):
         return {"type": "data-warning", "data": {"message": part.message, "code": part.code}}
+    if isinstance(part, StatusPart):
+        return {
+            "type": "data-status",
+            "data": {"phase": part.phase, "status": part.status, "message": part.message},
+        }
     if isinstance(part, ArtifactPart):
         return {
             "type": "data-artifact",

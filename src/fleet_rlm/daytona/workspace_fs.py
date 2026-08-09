@@ -1,19 +1,29 @@
-"""Daytona-backed implementation of the Session Workspace port."""
+"""Daytona-backed implementation of the Session Workspace port.
+
+The async adapters are the single source of truth for every operation. The
+synchronous ``DaytonaSessionWorkspaceFS`` is a thin bridge for DSPy
+worker-thread host tools: it facades the caller-provided synchronous sandbox
+view (``_SyncDaytonaSandbox`` or a test double) into the async shape and
+drives each delegation coroutine to completion inline, since the underlying
+synchronous bridge calls already block.
+"""
 
 from __future__ import annotations
 
 import base64
 import contextlib
 import json
+import re
 import time
-from collections.abc import Mapping
+from collections.abc import Coroutine, Mapping
+from datetime import UTC, datetime
 from fnmatch import fnmatchcase
 from pathlib import PurePosixPath
 from threading import Lock
-from typing import Any, cast
+from typing import Any, TypeVar, cast
 
 from fleet_rlm.daytona.errors import is_sandbox_not_found, map_provider_error
-from fleet_rlm.daytona.workspace_agent import WorkspaceAgentStorageError, run_workspace_agent, run_workspace_agent_async
+from fleet_rlm.daytona.workspace_agent import WorkspaceAgentStorageError, run_workspace_agent_async
 from fleet_rlm.files.volume_paths import DEFAULT_VOLUME_MOUNT_PATH, as_posix, validate_mount_path
 from fleet_rlm.files.volume_storage import VolumeFile
 from fleet_rlm.files.workspace_models import WorkspaceEntry, WorkspaceListResult, WorkspaceTextPage
@@ -58,7 +68,23 @@ def _list_cache_key(root: str, *, max_depth: int, max_files: int) -> str:
     return f"list:{root}:depth={max_depth}:count={max_files}"
 
 
+# Daytona ``FileInfo.mod_time`` strings: ``2026-07-30 00:05:20.290395882
+# +0000 UTC`` (nanoseconds allowed) and ISO-8601 variants.
+_MOD_TIME_TEXT = re.compile(r"^\s*(?P<date>\d{4}-\d{2}-\d{2})[T ](?P<time>\d{2}:\d{2}:\d{2})(?:\.(?P<frac>\d{1,6}))?")
+
+
 def _modified_timestamp(value: Any) -> float | None:
+    if isinstance(value, str):
+        match = _MOD_TIME_TEXT.match(value)
+        if match is None:
+            return None
+        try:
+            frac = match["frac"]
+            micro = int((frac + "000000")[:6]) if frac else 0
+            parsed = datetime.strptime(match["date"] + " " + match["time"], "%Y-%m-%d %H:%M:%S")
+            return parsed.replace(microsecond=micro, tzinfo=UTC).timestamp()
+        except (TypeError, ValueError):
+            return None
     if hasattr(value, "timestamp"):
         try:
             value = value.timestamp()
@@ -510,6 +536,7 @@ def _normalize_list_cursor(path: str, after: str | None) -> str | None:
 def _entry_from_payload(raw: Mapping[str, object]) -> WorkspaceEntry:
     byte_size = raw.get("byte_size")
     modified_at = raw.get("modified_at")
+    checksum = raw.get("checksum")
     parsed_byte_size: int | None
     if byte_size is None:
         parsed_byte_size = None
@@ -522,7 +549,25 @@ def _entry_from_payload(raw: Mapping[str, object]) -> WorkspaceEntry:
         kind="directory" if raw.get("kind") == "directory" else "file",
         byte_size=parsed_byte_size,
         modified_at=str(modified_at) if modified_at else None,
+        checksum_sha256=str(checksum) if isinstance(checksum, str) else None,
     )
+
+
+def _normalize_expected_sha256(value: str | None) -> str:
+    """Normalize one optional SHA-256 precondition for the workspace agent."""
+    if value is None:
+        return ""
+    candidate = value.strip().lower()
+    if len(candidate) != 64 or any(char not in "0123456789abcdef" for char in candidate):
+        raise ValueError("workspace checksum precondition is invalid")
+    return candidate
+
+
+def _warnings_from_payload(payload: Mapping[str, object]) -> tuple[dict[str, object], ...]:
+    raw = payload.get("warnings")
+    if not isinstance(raw, list):
+        return ()
+    return tuple(cast(dict[str, object], item) for item in raw if isinstance(item, dict))
 
 
 def _is_relative_to(path: PurePosixPath, root: PurePosixPath) -> bool:
@@ -533,269 +578,93 @@ def _is_relative_to(path: PurePosixPath, root: PurePosixPath) -> bool:
         return False
 
 
-class DaytonaSessionWorkspaceFS:
-    """Bind safe Session-relative text operations to one mounted Sandbox."""
+def _validated_workspace_roots(volume_root: str, root: str, max_file_bytes: int) -> tuple[str, str]:
+    """Normalize and validate Session Workspace roots under the trusted volume."""
+    if max_file_bytes < 1:
+        raise ValueError("workspace file bound must be positive")
+    volume_path = PurePosixPath(volume_root)
+    root_path = PurePosixPath(root)
+    if (
+        not volume_path.is_absolute()
+        or not root_path.is_absolute()
+        or ".." in volume_path.parts
+        or ".." in root_path.parts
+    ):
+        raise ValueError("workspace root must be under trusted volume")
+    try:
+        root_path.relative_to(volume_path)
+    except ValueError as exc:
+        raise ValueError("workspace root must be under trusted volume") from exc
+    if root_path == volume_path:
+        raise ValueError("workspace root must be distinct from trusted volume")
+    for reserved in ("attachments", "artifacts"):
+        reserved_path = volume_path / reserved
+        if root_path == reserved_path or _is_relative_to(root_path, reserved_path):
+            raise ValueError("workspace root must not use attachment or artifact storage")
+    return str(volume_path), str(root_path)
 
-    def __init__(
-        self,
-        sandbox: Any,
-        *,
-        volume_root: str,
-        root: str,
-        max_file_bytes: int,
-    ) -> None:
-        if max_file_bytes < 1:
-            raise ValueError("workspace file bound must be positive")
-        volume_path = PurePosixPath(volume_root)
-        root_path = PurePosixPath(root)
-        if (
-            not volume_path.is_absolute()
-            or not root_path.is_absolute()
-            or ".." in volume_path.parts
-            or ".." in root_path.parts
-        ):
-            raise ValueError("workspace root must be under trusted volume")
-        try:
-            root_path.relative_to(volume_path)
-        except ValueError as exc:
-            raise ValueError("workspace root must be under trusted volume") from exc
-        if root_path == volume_path:
-            raise ValueError("workspace root must be distinct from trusted volume")
-        for reserved in ("attachments", "artifacts"):
-            reserved_path = volume_path / reserved
-            if root_path == reserved_path or _is_relative_to(root_path, reserved_path):
-                raise ValueError("workspace root must not use attachment or artifact storage")
+
+class _SyncProcessFacade:
+    """Awaitable ``process`` wrapper over one synchronous sandbox bridge.
+
+    The wrapped ``code_run`` already blocks the worker thread
+    (``_SyncDaytonaSandbox`` routing onto the bridge service loop, or a
+    synchronous test double), so coroutines built on it never truly suspend.
+    """
+
+    def __init__(self, process: Any) -> None:
+        self._process = process
+
+    async def code_run(self, code: str) -> Any:
+        return self._process.code_run(code)
+
+
+class _SyncSandboxFacade:
+    """Async-shaped sandbox view over one synchronous sandbox bridge."""
+
+    def __init__(self, sandbox: Any) -> None:
         self._sandbox = sandbox
-        self._volume_root = str(volume_path)
-        self._root = str(root_path)
-        self._max_file_bytes = int(max_file_bytes)
-        self._last_warnings: tuple[dict[str, object], ...] = ()
 
     @property
-    def root(self) -> str:
-        return self._root
+    def process(self) -> _SyncProcessFacade:
+        # Lazy: root validation must be able to reject before the sandbox
+        # shape is ever inspected (validation runs with arbitrary doubles).
+        return _SyncProcessFacade(self._sandbox.process)
 
-    @property
-    def last_warnings(self) -> tuple[dict[str, object], ...]:
-        return self._last_warnings
 
-    def list_entries(
-        self,
-        path: str,
-        *,
-        limit: int = 100,
-        after: str | None = None,
-    ) -> WorkspaceListResult:
-        relative = normalize_workspace_path(path, allow_root=True)
-        if limit < 1 or limit > 100:
-            raise ValueError("workspace list limit must be between 1 and 100")
-        normalized_after = _normalize_list_cursor(relative, after)
-        payload = self._atomic_run(
-            operation="list",
-            relative=relative,
-            allow_missing=relative == ".",
-            max_bytes=0,
-            limit=limit,
-            overwrite=False,
-            content_b64="",
-            after=normalized_after or "",
-            offset=0,
-            max_chars=0,
-        )
-        raw_entries = payload.get("entries")
-        entries: list[WorkspaceEntry] = []
-        if isinstance(raw_entries, list):
-            for item in raw_entries:
-                if isinstance(item, dict):
-                    entries.append(_entry_from_payload(cast(Mapping[str, object], item)))
-        next_cursor = payload.get("next_cursor")
-        return WorkspaceListResult(
-            entries=tuple(entries),
-            truncated=bool(payload.get("truncated")),
-            next_cursor=str(next_cursor) if isinstance(next_cursor, str) else None,
-        )
+_T = TypeVar("_T")
 
-    def stat(self, path: str) -> WorkspaceEntry | None:
-        relative = normalize_workspace_path(path, allow_root=True)
-        payload = self._atomic_run(
-            operation="stat",
-            relative=relative,
-            allow_missing=True,
-            max_bytes=0,
-            limit=0,
-            overwrite=False,
-            content_b64="",
-            after="",
-            offset=0,
-            max_chars=0,
-        )
-        if payload.get("entry") is None:
-            if relative == ".":
-                return WorkspaceEntry(".", "directory", None, None)
-            return None
-        entry = payload["entry"]
-        if not isinstance(entry, dict):
-            raise RuntimeError("workspace stat returned invalid entry")
-        return _entry_from_payload(cast(Mapping[str, object], entry))
 
-    def read_text_page(
-        self,
-        path: str,
-        *,
-        cursor: str | None,
-        max_chars: int,
-        max_bytes: int,
-    ) -> WorkspaceTextPage:
-        relative = normalize_workspace_path(path)
-        bound = min(self._max_file_bytes, int(max_bytes))
-        if bound < 1 or max_chars < 1:
-            raise ValueError("workspace read bound must be positive")
-        if max_chars > 10_000:
-            raise ValueError("workspace read character bound is invalid")
-        offset = 0
-        if cursor is not None:
-            stat = self.stat(relative)
-            if stat is None or stat.byte_size is None:
-                raise ValueError("workspace cursor is invalid")
-            offset = _decode_text_cursor(cursor, relative, stat.byte_size)
-        payload = self._atomic_run(
-            operation="read_page",
-            relative=relative,
-            allow_missing=False,
-            max_bytes=bound,
-            limit=0,
-            overwrite=False,
-            content_b64="",
-            after="",
-            offset=offset,
-            max_chars=max_chars,
-        )
-        content = payload.get("content")
-        if not isinstance(content, str):
-            raise RuntimeError("workspace read returned invalid content")
-        byte_size = payload.get("byte_size")
-        next_offset = payload.get("next_offset")
-        eof = bool(payload.get("eof"))
-        if not isinstance(byte_size, int) or not isinstance(next_offset, int):
-            raise RuntimeError("workspace read returned invalid page metadata")
-        next_cursor = None if eof else _encode_text_cursor(relative, next_offset)
-        return WorkspaceTextPage(content, next_cursor, byte_size, eof)
+def _run_blocking(coroutine: Coroutine[Any, Any, _T]) -> _T:
+    """Drive one workspace coroutine that never truly suspends to completion.
 
-    def read_text(self, path: str, *, max_bytes: int) -> str:
-        """Compatibility adapter for internal callers that need a bounded whole read."""
-        page = self.read_text_page(path, cursor=None, max_chars=max_bytes, max_bytes=max_bytes)
-        if not page.eof:
-            raise ValueError("workspace file exceeds read bound")
-        return page.content
-
-    def write_text(self, path: str, content: str, *, overwrite: bool) -> WorkspaceEntry:
-        relative = normalize_workspace_path(path)
-        if not isinstance(content, str):
-            raise ValueError("workspace content must be text")
-        data = content.encode("utf-8")
-        if len(data) > self._max_file_bytes:
-            raise ValueError("workspace file exceeds maximum size")
-        payload = self._atomic_run(
-            operation="write",
-            relative=relative,
-            allow_missing=True,
-            max_bytes=self._max_file_bytes,
-            limit=0,
-            overwrite=overwrite,
-            content_b64=base64.b64encode(data).decode("ascii"),
-            after="",
-            offset=0,
-            max_chars=0,
-        )
-        raw_warnings = payload.get("warnings")
-        self._last_warnings = (
-            tuple(cast(dict[str, object], item) for item in raw_warnings if isinstance(item, dict))
-            if isinstance(raw_warnings, list)
-            else ()
-        )
-        entry = payload.get("entry")
-        if not isinstance(entry, dict):
-            raise RuntimeError("workspace write returned invalid entry")
-        return _entry_from_payload(cast(Mapping[str, object], entry))
-
-    def append_text(self, path: str, content: str) -> WorkspaceEntry:
-        relative = normalize_workspace_path(path)
-        if not isinstance(content, str):
-            raise ValueError("workspace content must be text")
-        data = content.encode("utf-8")
-        if len(data) > self._max_file_bytes:
-            raise ValueError("workspace file exceeds maximum size")
-        payload = self._atomic_run(
-            operation="append",
-            relative=relative,
-            allow_missing=True,
-            max_bytes=self._max_file_bytes,
-            limit=0,
-            overwrite=False,
-            content_b64=base64.b64encode(data).decode("ascii"),
-            after="",
-            offset=0,
-            max_chars=0,
-        )
-        raw_warnings = payload.get("warnings")
-        self._last_warnings = (
-            tuple(cast(dict[str, object], item) for item in raw_warnings if isinstance(item, dict))
-            if isinstance(raw_warnings, list)
-            else ()
-        )
-        entry = payload.get("entry")
-        if not isinstance(entry, dict):
-            raise RuntimeError("workspace append returned invalid entry")
-        return _entry_from_payload(cast(Mapping[str, object], entry))
-
-    def _atomic_run(
-        self,
-        *,
-        operation: str,
-        relative: str,
-        allow_missing: bool,
-        max_bytes: int,
-        limit: int,
-        overwrite: bool,
-        content_b64: str,
-        after: str,
-        offset: int,
-        max_chars: int,
-    ) -> dict[str, object]:
-        try:
-            return run_workspace_agent(
-                self._sandbox,
-                volume_root=self._volume_root,
-                root=self._root,
-                operation=operation,
-                relative=relative,
-                allow_missing=allow_missing,
-                max_bytes=max_bytes,
-                limit=limit,
-                overwrite=overwrite,
-                content_b64=content_b64,
-                after=after,
-                offset=offset,
-                max_chars=max_chars,
-            )
-        except WorkspaceAgentStorageError as exc:
-            raise WorkspaceStorageError(*exc.args) from exc
+    The async implementation only awaits the facaded sandbox round trip (and
+    its own helpers); the facade performs the blocking call inline, so the
+    coroutine always finishes on the first drive. A real suspension would
+    mean the synchronous adapter received a genuinely asynchronous sandbox,
+    which is a wiring error, not a supported configuration.
+    """
+    try:
+        coroutine.send(None)
+    except StopIteration as stop:
+        return stop.value
+    coroutine.close()
+    raise RuntimeError("sync Session Workspace bridge coroutine suspended unexpectedly")
 
 
 class AsyncDaytonaSessionWorkspaceFS:
-    """Native async Session Workspace adapter for FastAPI-facing access."""
+    """Native async Session Workspace adapter for FastAPI-facing access.
+
+    Single source of truth for every Session Workspace operation; validation
+    is shared with the synchronous bridge via :func:`_validated_workspace_roots`.
+    """
 
     def __init__(self, sandbox: Any, *, volume_root: str, root: str, max_file_bytes: int) -> None:
-        validated = DaytonaSessionWorkspaceFS(
-            sandbox,
-            volume_root=volume_root,
-            root=root,
-            max_file_bytes=max_file_bytes,
-        )
+        validated_volume_root, validated_root = _validated_workspace_roots(volume_root, root, max_file_bytes)
         self._sandbox = sandbox
-        self._volume_root = validated._volume_root
-        self._root = validated._root
-        self._max_file_bytes = max_file_bytes
+        self._volume_root = validated_volume_root
+        self._root = validated_root
+        self._max_file_bytes = int(max_file_bytes)
         self._last_warnings: tuple[dict[str, object], ...] = ()
 
     @property
@@ -834,9 +703,15 @@ class AsyncDaytonaSessionWorkspaceFS:
             next_cursor=str(cursor) if isinstance(cursor, str) else None,
         )
 
-    async def stat(self, path: str) -> WorkspaceEntry | None:
+    async def stat(self, path: str, *, include_checksum: bool = False) -> WorkspaceEntry | None:
         relative = normalize_workspace_path(path, allow_root=True)
-        payload = await self._atomic_run(operation="stat", relative=relative, allow_missing=True)
+        payload = await self._atomic_run(
+            operation="stat",
+            relative=relative,
+            allow_missing=True,
+            max_bytes=self._max_file_bytes if include_checksum else 0,
+            checksum=include_checksum,
+        )
         entry = payload.get("entry")
         if entry is None:
             return WorkspaceEntry(".", "directory", None, None) if relative == "." else None
@@ -896,6 +771,42 @@ class AsyncDaytonaSessionWorkspaceFS:
     async def append_text(self, path: str, content: str) -> WorkspaceEntry:
         return await self._mutate("append", path, content, overwrite=False)
 
+    async def delete_path(self, path: str, *, expected_sha256: str | None = None) -> None:
+        relative = normalize_workspace_path(path)
+        payload = await self._atomic_run(
+            operation="delete",
+            relative=relative,
+            max_bytes=self._max_file_bytes,
+            expected_sha256=_normalize_expected_sha256(expected_sha256),
+        )
+        self._last_warnings = _warnings_from_payload(payload)
+
+    async def patch_text(
+        self,
+        path: str,
+        old: str,
+        new: str,
+        *,
+        expected_sha256: str | None = None,
+    ) -> WorkspaceEntry:
+        relative = normalize_workspace_path(path)
+        if not isinstance(old, str) or not old or not isinstance(new, str):
+            raise ValueError("workspace patch text arguments are invalid")
+        if len(old.encode("utf-8")) > self._max_file_bytes or len(new.encode("utf-8")) > self._max_file_bytes:
+            raise ValueError("workspace file exceeds maximum size")
+        payload = await self._atomic_run(
+            operation="patch",
+            relative=relative,
+            max_bytes=self._max_file_bytes,
+            content_b64=base64.b64encode(json.dumps({"old": old, "new": new}).encode("utf-8")).decode("ascii"),
+            expected_sha256=_normalize_expected_sha256(expected_sha256),
+        )
+        self._last_warnings = _warnings_from_payload(payload)
+        entry = payload.get("entry")
+        if not isinstance(entry, dict):
+            raise RuntimeError("workspace patch returned invalid entry")
+        return _entry_from_payload(cast(Mapping[str, object], entry))
+
     async def _mutate(self, operation: str, path: str, content: str, *, overwrite: bool) -> WorkspaceEntry:
         relative = normalize_workspace_path(path)
         if not isinstance(content, str):
@@ -935,6 +846,8 @@ class AsyncDaytonaSessionWorkspaceFS:
         after: str = "",
         offset: int = 0,
         max_chars: int = 0,
+        checksum: bool = False,
+        expected_sha256: str = "",
     ) -> dict[str, object]:
         try:
             return await run_workspace_agent_async(
@@ -951,6 +864,88 @@ class AsyncDaytonaSessionWorkspaceFS:
                 after=after,
                 offset=offset,
                 max_chars=max_chars,
+                checksum=checksum,
+                expected_sha256=expected_sha256,
             )
         except WorkspaceAgentStorageError as exc:
             raise WorkspaceStorageError(*exc.args) from exc
+
+
+class DaytonaSessionWorkspaceFS:
+    """Synchronous Session Workspace adapter for DSPy worker-thread host tools.
+
+    Thin delegation bridge: :class:`AsyncDaytonaSessionWorkspaceFS` is the
+    single source of truth for every operation. The caller-provided
+    synchronous sandbox bridge is facaded into the async shape and each
+    delegation coroutine is driven to completion without an event loop,
+    because the underlying synchronous bridge calls already block.
+    """
+
+    def __init__(
+        self,
+        sandbox: Any,
+        *,
+        volume_root: str,
+        root: str,
+        max_file_bytes: int,
+    ) -> None:
+        self._sandbox = sandbox
+        self._core = AsyncDaytonaSessionWorkspaceFS(
+            _SyncSandboxFacade(sandbox),
+            volume_root=volume_root,
+            root=root,
+            max_file_bytes=max_file_bytes,
+        )
+
+    @property
+    def root(self) -> str:
+        return self._core._root
+
+    @property
+    def last_warnings(self) -> tuple[dict[str, object], ...]:
+        return self._core.last_warnings
+
+    def list_entries(
+        self,
+        path: str,
+        *,
+        limit: int = 100,
+        after: str | None = None,
+    ) -> WorkspaceListResult:
+        return _run_blocking(self._core.list_entries(path, limit=limit, after=after))
+
+    def stat(self, path: str, *, include_checksum: bool = False) -> WorkspaceEntry | None:
+        return _run_blocking(self._core.stat(path, include_checksum=include_checksum))
+
+    def read_text_page(
+        self,
+        path: str,
+        *,
+        cursor: str | None,
+        max_chars: int,
+        max_bytes: int,
+    ) -> WorkspaceTextPage:
+        return _run_blocking(self._core.read_text_page(path, cursor=cursor, max_chars=max_chars, max_bytes=max_bytes))
+
+    def read_text(self, path: str, *, max_bytes: int) -> str:
+        """Compatibility adapter for internal callers that need a bounded whole read."""
+        return _run_blocking(self._core.read_text(path, max_bytes=max_bytes))
+
+    def write_text(self, path: str, content: str, *, overwrite: bool) -> WorkspaceEntry:
+        return _run_blocking(self._core.write_text(path, content, overwrite=overwrite))
+
+    def append_text(self, path: str, content: str) -> WorkspaceEntry:
+        return _run_blocking(self._core.append_text(path, content))
+
+    def delete_path(self, path: str, *, expected_sha256: str | None = None) -> None:
+        _run_blocking(self._core.delete_path(path, expected_sha256=expected_sha256))
+
+    def patch_text(
+        self,
+        path: str,
+        old: str,
+        new: str,
+        *,
+        expected_sha256: str | None = None,
+    ) -> WorkspaceEntry:
+        return _run_blocking(self._core.patch_text(path, old, new, expected_sha256=expected_sha256))

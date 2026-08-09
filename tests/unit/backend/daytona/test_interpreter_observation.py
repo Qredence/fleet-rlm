@@ -6,7 +6,12 @@ import pytest
 
 from fleet_rlm.daytona.broker_source import FINAL_OUTPUT_MARKER
 from fleet_rlm.daytona.errors import DaytonaAdapterError
-from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend, sandbox_backend
+from fleet_rlm.daytona.interpreter import (
+    BackendExecutionResult,
+    DaytonaCodeInterpreter,
+    InProcessInterpreterBackend,
+    sandbox_backend,
+)
 from fleet_rlm.rlm.errors import TurnNoProgressError
 from fleet_rlm.rlm.events import RLMCode, RLMOutput, StepFinished, StepStarted, ToolCompleted, ToolStarted
 
@@ -38,7 +43,8 @@ def test_interpreter_observes_ordered_stateful_steps() -> None:
     )
 
 
-def test_interpreter_streams_stdout_deltas_and_finishes_with_one_canonical_output() -> None:
+def test_interpreter_streams_stdout_deltas_without_a_duplicate_final_frame() -> None:
+    """RC-4b: a fully streamed step emits no full-content final re-emit."""
     observed: list[object] = []
     interpreter = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())
     interpreter.bind_observer(observed.append, max_chars=1_000)
@@ -46,16 +52,14 @@ def test_interpreter_streams_stdout_deltas_and_finishes_with_one_canonical_outpu
     result = interpreter.execute('print("first", flush=True)\nprint("second", flush=True)')
 
     outputs = [item for item in observed if isinstance(item, RLMOutput)]
-    deltas = [item for item in outputs if item.is_delta]
-    finals = [item for item in outputs if not item.is_delta]
     assert result == "first\nsecond\n"
-    assert deltas
-    assert "first" in "".join(item.output for item in deltas)
-    assert "second" in "".join(item.output for item in deltas)
-    assert finals == [outputs[-1]]
-    assert finals[0].is_final is True
-    assert finals[0].stream_id == outputs[0].stream_id
-    assert finals[0].output == result
+    assert outputs
+    # Every streamed chunk arrived as a delta; the deltas concatenate to the
+    # complete public output, so the step-final flush stays silent.
+    assert all(item.is_delta for item in outputs)
+    assert "".join(item.output for item in outputs) == result
+    assert {item.stream_id for item in outputs} == {outputs[0].stream_id}
+    assert all(item.step == 1 for item in outputs)
 
 
 def test_interpreter_hides_private_submit_marker_from_stdout_deltas() -> None:
@@ -90,6 +94,80 @@ def test_interpreter_preserves_literal_marker_before_hiding_submit_frame() -> No
     deltas = [item.output for item in outputs if item.is_delta]
     assert "".join(deltas) == f"before {FINAL_OUTPUT_MARKER} ordinary\n"
     assert outputs[-1].output == "FINAL submitted"
+
+
+def test_interpreter_final_flush_emits_only_the_unsent_tail() -> None:
+    """RC-4b: a partially streamed step flushes just the missing tail."""
+
+    class PartialStreamingBackend:
+        def run(self, code, variables=None, *, on_stdout=None):
+            del code, variables
+            assert on_stdout is not None
+            on_stdout("partial ")
+            return BackendExecutionResult(stdout="partial tail")
+
+        def close(self) -> None:
+            return None
+
+    observed: list[object] = []
+    interpreter = DaytonaCodeInterpreter(backend=PartialStreamingBackend())
+    interpreter.bind_observer(observed.append, max_chars=1_000)
+
+    result = interpreter.execute("print('partial tail')")
+
+    assert result == "partial tail"
+    outputs = [item for item in observed if isinstance(item, RLMOutput)]
+    assert [item.output for item in outputs] == ["partial ", "tail"]
+    assert (outputs[0].is_delta, outputs[0].is_final) == (True, False)
+    # The tail closes the stream as a delta: a non-delta tail frame would
+    # replace the accumulated content with just the tail in the TUI.
+    assert (outputs[1].is_delta, outputs[1].is_final) == (True, True)
+    assert outputs[1].stream_id == outputs[0].stream_id
+    assert outputs[1].step == outputs[0].step
+
+
+def test_interpreter_suppresses_output_after_the_submit_final_frame() -> None:
+    """RC-4b: no RLMOutput for a step once its SUBMIT final frame is out."""
+
+    class StragglerBackend:
+        def __init__(self) -> None:
+            self.late_stdout = None
+
+        def run(self, code, variables=None, *, on_stdout=None):
+            del code, variables
+            assert on_stdout is not None
+            on_stdout("before submit\n")
+            self.late_stdout = on_stdout
+            return BackendExecutionResult(stdout="before submit\n", final={"answer": "ok"})
+
+        def close(self) -> None:
+            return None
+
+    backend = StragglerBackend()
+    observed: list[object] = []
+    interpreter = DaytonaCodeInterpreter(
+        backend=backend,
+        output_fields=[{"name": "answer", "type": "str"}],
+    )
+    interpreter.bind_observer(observed.append, max_chars=1_000)
+
+    result = interpreter.execute('print("before submit")\nSUBMIT(answer="ok")')
+
+    assert result.output == {"answer": "ok"}
+    outputs = [item for item in observed if isinstance(item, RLMOutput)]
+    deltas = [item for item in outputs if item.is_delta]
+    assert "".join(item.output for item in deltas) == "before submit\n"
+    assert outputs[-1].output == "FINAL submitted"
+    assert (outputs[-1].is_delta, outputs[-1].is_final) == (False, True)
+
+    # A straggler stdout callback arriving AFTER the SUBMIT final frame (the
+    # broker poll race observed live) must not emit any more output frames
+    # for that step.
+    assert backend.late_stdout is not None
+    backend.late_stdout("late straggler output\n")
+
+    outputs_after = [item for item in observed if isinstance(item, RLMOutput)]
+    assert outputs_after == outputs
 
 
 def test_interpreter_semantic_code_and_output_are_verbatim_until_truncated() -> None:

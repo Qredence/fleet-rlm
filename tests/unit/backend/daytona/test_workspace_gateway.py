@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import hashlib
+from contextlib import redirect_stdout, suppress
+from io import StringIO
+from pathlib import Path
 from types import SimpleNamespace
 from uuid import uuid4
 
@@ -132,3 +136,115 @@ async def test_bytes_survive_across_two_different_deleted_io_sandboxes() -> None
 
     assert len(platform.created) == 2
     assert platform.deleted == ["sandbox-1", "sandbox-2"]
+
+
+class _LocalProcess:
+    """Exec the generated workspace-agent code against a local tmp volume."""
+
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+
+    async def code_run(self, code: str):
+        self.calls.append(code)
+        output = StringIO()
+        with redirect_stdout(output), suppress(SystemExit):
+            exec(code, {})
+        return SimpleNamespace(exit_code=0, result=output.getvalue().strip())
+
+
+def _workspace_session(root: Path):
+    from fleet_rlm.daytona.workspace_fs import AsyncDaytonaSessionWorkspaceFS
+    from fleet_rlm.daytona.workspace_gateway import _DaytonaWorkspaceFileSession
+
+    process = _LocalProcess()
+    workspace = AsyncDaytonaSessionWorkspaceFS(
+        SimpleNamespace(process=process),
+        volume_root=str(root.parents[2]),
+        root=str(root),
+        max_file_bytes=1024,
+    )
+    return _DaytonaWorkspaceFileSession(workspace, max_file_bytes=1024), process
+
+
+@pytest.mark.asyncio
+async def test_stat_returns_agent_side_checksum_in_one_round_trip(tmp_path: Path) -> None:
+    root = tmp_path / "volume" / "sessions" / "session" / "workspace"
+    root.mkdir(parents=True)
+    content = b"hello checksum"
+    (root / "note.txt").write_bytes(content)
+    (root / "notes").mkdir()
+    session, process = _workspace_session(root)
+
+    file_entry = await session.stat("note.txt")
+
+    assert file_entry is not None
+    assert file_entry.path == "note.txt"
+    assert file_entry.kind == "file"
+    assert file_entry.byte_size == len(content)
+    assert file_entry.checksum_sha256 == hashlib.sha256(content).hexdigest()
+    assert len(process.calls) == 1
+
+    directory_entry = await session.stat("notes")
+    assert directory_entry is not None
+    assert directory_entry.kind == "directory"
+    assert directory_entry.checksum_sha256 is None
+
+    root_entry = await session.stat(".")
+    assert root_entry is not None
+    assert root_entry.path == "."
+    assert root_entry.kind == "directory"
+    assert root_entry.checksum_sha256 is None
+
+    assert await session.stat("missing.txt") is None
+
+
+@pytest.mark.asyncio
+async def test_delete_and_patch_run_agent_side_in_one_round_trip(tmp_path: Path) -> None:
+    root = tmp_path / "volume" / "sessions" / "session" / "workspace"
+    root.mkdir(parents=True)
+    (root / "note.txt").write_bytes(b"hello world")
+    (root / "notes").mkdir()
+    session, process = _workspace_session(root)
+
+    patched = await session.patch_text(
+        "note.txt", "world", "fleet", expected_sha256=hashlib.sha256(b"hello world").hexdigest()
+    )
+    assert patched is not None
+    assert patched.kind == "file"
+    assert patched.byte_size == len(b"hello fleet")
+    assert patched.checksum_sha256 == hashlib.sha256(b"hello fleet").hexdigest()
+    assert len(process.calls) == 1  # read+compose+publish stayed in one agent run
+    assert (root / "note.txt").read_bytes() == b"hello fleet"
+
+    deleted_sha = await session.stat("note.txt")
+    assert deleted_sha is not None
+    await session.delete_path("note.txt", expected_sha256=deleted_sha.checksum_sha256)
+    assert len(process.calls) == 3  # patch + stat + delete; precondition ran agent-side
+    assert not (root / "note.txt").exists()
+
+    await session.delete_path("notes", expected_sha256=None)  # empty dir, no precondition
+    assert not (root / "notes").exists()
+
+
+@pytest.mark.asyncio
+async def test_delete_and_patch_conflicts_surface_as_public_conflict_error(tmp_path: Path) -> None:
+    from fleet_rlm.files.workspace_models import WorkspaceConflictError
+
+    root = tmp_path / "volume" / "sessions" / "session" / "workspace"
+    root.mkdir(parents=True)
+    (root / "note.txt").write_bytes(b"hello world")
+    session, _process = _workspace_session(root)
+
+    with pytest.raises(WorkspaceConflictError) as checksum:
+        await session.delete_path("note.txt", expected_sha256="0" * 64)
+    assert checksum.value.detail == "checksum_mismatch"
+    assert (root / "note.txt").exists()
+
+    with pytest.raises(WorkspaceConflictError) as ambiguous:
+        await session.patch_text("note.txt", "o", "0", expected_sha256=None)
+    assert ambiguous.value.detail == "ambiguous"
+
+    with pytest.raises(FileNotFoundError):
+        await session.delete_path("missing.txt", expected_sha256=None)
+    with pytest.raises(FileNotFoundError):
+        await session.patch_text("missing.txt", "a", "b", expected_sha256=None)

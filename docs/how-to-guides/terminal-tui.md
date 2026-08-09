@@ -64,10 +64,10 @@ Resize, hydration, and clear may replay the screen and return to the live bottom
 
 During a Turn, the activity rail shows phase, safe backend detail, elapsed time,
 SSE-derived started/completed step counts, Tool count, and `Ctrl+C`
-cancellation. `PREPARING` means the client is waiting for Fleet's
-prepare-before-headers Turn opening; after the stream starts, the rail uses the
-backend's transient status phase and safe detail. Code and interpreter output
-remain evidence and never infer step completion.
+cancellation. The SSE stream opens immediately with transient `preparation`
+status heartbeats while Fleet claims and prepares the Turn; the rail uses those
+transient status phases and safe detail from the first byte. Code and
+interpreter output remain evidence and never infer step completion.
 
 The editor remains writable while a Turn runs, but Enter cannot submit a second
 Turn until the active one settles. The footer labels Session token totals and

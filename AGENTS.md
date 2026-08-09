@@ -119,13 +119,13 @@ Run `make check-docs` when docs, commands, Codex config, generated contracts, or
 - `create_app()` installs handlers, routers, and the static in-memory bundled Skill catalog (including `dspy-rlm`, which defines `dspy.RLM` as Recursive LM/REPL — never RAG/`dspy.Retrieve`). FastAPI lifespan installs one complete Daytona inventory through `composition/`; private tests inject their own inventory and routes retrieve composed runtime modules.
 - The maintained terminal uses pi-tui only. `fleet-turn-stream.ts` owns strict stream lifecycle, `sse.ts` owns frame/chunk validation, `tui/projection.ts` owns live/reload projection, and `tui/store.ts` owns atomic hydration. The monochrome operator timeline renders all evidence statically expanded in native terminal scrollback; Fleet does not capture the mouse or maintain a transcript viewport. Live evidence includes DSPy callback reasoning, Tools, and Daytona interpreter code/output; the completed native trajectory reconciles gaps or corrections. `dspy.RLM(verbose=…)` remains host-logger-only.
 - Live Daytona MVP proof (`tests/live/backend/`, `scripts/live_daytona_verify.py`) loads repo `.env` via `python-dotenv` with `override=False`; existing process exports still win.
-- Daytona SDK imports are confined to `fleet_rlm.daytona`. Durable Attachments
-  and Artifacts use Workspace Volume Scope; Session Workspace is
-  append/update-only (list/stat/read/write with overwrite; no delete Tool).
-  Long operator reports should write Session Workspace then `SUBMIT` a short
-  summary; oversized `SUBMIT` fails with public Turn output budget errors.
-  Volume backends that reject atomic `os.replace` use a non-atomic overwrite
-  fallback (keep new content if only file `fsync` fails).
+- Daytona SDK imports are confined to `fleet_rlm.daytona`. Durable Attachments and Artifacts use Workspace Volume Scope;
+  Session Workspace + `projects/` add `delete/edit` workspace tools (`delete_workspace_path`, `edit_workspace_text`,
+  `delete_project_path`, `edit_project_text`): files + EMPTY dirs only, optional `expected_sha256` (WS-7 ended the
+  no-delete invariant). Workspace Memory is `memory/MEMORIES.md`: fresh v2 ids persist, v1 ids include a canonical-row
+  occurrence, duplicates fail closed; same-record `remember` idempotent; edit/forget one operation; each Turn gets a 4 KiB digest; the read projection never lowers the configured cap.
+  Long operator reports should write Session Workspace then `SUBMIT` a short summary; oversized `SUBMIT` fails with public Turn output budget errors.
+  Volume backends that reject atomic `os.replace` use a non-atomic overwrite fallback (keep new content if only file `fsync` fails).
   `TurnLifecycle.finish()` promotes Artifact Candidates and owns atomic Turn
   Commit, while `TurnCoordinator` owns stream settlement, terminal ordering,
   and cleanup.

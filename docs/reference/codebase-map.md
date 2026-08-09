@@ -14,7 +14,7 @@ compatibility runtime and parallel foundation package no longer exist.
 | `rlm/` | DSPy Signature, model roles, fresh RLM construction, options, events, runner | DSPy and domain values |
 | `daytona/` | exclusive SDK boundary: async platform/provisioning, provider-only Session ownership, DSPy-only sync interpreter seam, pure broker source plus transport, diagnostics, Session Workspace gateways, and the mounted Workspace Memory adapter | Daytona SDK and domain values |
 | `sessions/` | Session catalog, Turn input/history, versioned Committed Turn | domain values |
-| `files/`, `artifacts/` | Attachment staging, paged/append Session Workspace tools, workspace-wide Memory values/tools, direct Workspace Artifact Candidate staging, Artifact promotion/read | storage interfaces and safe paths |
+| `files/`, `artifacts/` | Attachment staging, paged/full-lifecycle Session Workspace and Project tools, workspace-wide Memory values/tools, direct Workspace Artifact Candidate staging, Artifact promotion/read | storage interfaces and safe paths |
 | `skills/` | bundled catalog, authorization, progressive loading, capability seam, Tool construction | domain values and package resources |
 | `persistence/` | SQLAlchemy models and repository adapters, including named startup-recovery phases | Session/file/Artifact interfaces |
 | `observability/` | sanitized failure diagnostics; opt-in Databricks MLflow DSPy tracing | domain errors, Settings |
@@ -53,8 +53,13 @@ compatibility runtime and parallel foundation package no longer exist.
   five-minute idle policy and restarted on the next acquisition.
 - Independent Workspace access mounts exactly `workspaces/<workspace_id>` in a
   purpose-labelled ephemeral I/O Sandbox and exposes only its `files/` root.
-- During Daytona Turn execution, Workspace Memory uses the fixed `MEMORIES.md`
-  at the root of the already workspace-scoped mount. It is distinct from
+- During Daytona Turn execution, Workspace Memory uses the fixed
+  `memory/MEMORIES.md` under the already workspace-scoped mount (legacy root
+  `MEMORIES.md` migrates on first open). v2 ids are fresh and persist; v1 ids
+  are synthesized from canonical text plus valid-record occurrence for paging
+  and upgrade to v2 on edit. Duplicate persisted ids fail closed, and
+  edit/forget run their read-modify-publish rewrite in one mounted agent
+  operation. It is distinct from
   Session Workspace under `sessions/{session_id}/workspace/` and Run state under
   `sessions/{session_id}/runs/{run_id}/`.
 - In-memory and SQL repositories apply the pure `chat/turn_claim.py` transition

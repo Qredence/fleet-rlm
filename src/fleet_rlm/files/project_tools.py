@@ -1,4 +1,11 @@
-"""Explicit bounded dspy.Tools for one Session Workspace."""
+"""Browsable durable Project deliverable Tools bound to the Volume projects root.
+
+The model names one Project slug explicitly (``projects/<slug>/``); the backend
+sanitizes only. Project Tools share the Session Workspace filesystem machinery
+through one ``SessionWorkspaceFS`` bound at ``projects/``, so writes stay
+atomic and immediately durable independently of Turn Commit. Scratch belongs in
+the Session Workspace; durable deliverables belong in a Project.
+"""
 
 from __future__ import annotations
 
@@ -9,29 +16,27 @@ from typing import Any, NoReturn, cast
 
 import dspy
 
+from fleet_rlm.files.volume_paths import UnsafePathError, validate_project_slug
 from fleet_rlm.files.workspace_models import SessionWorkspaceFS, WorkspaceEntry
+from fleet_rlm.files.workspace_tools import MAX_WORKSPACE_READ_CHARS, WorkspaceToolError
 from fleet_rlm.files.workspace_validation import WorkspacePathError, normalize_workspace_path
 from fleet_rlm.rlm.events import JsonValue
 from fleet_rlm.rlm.tool_observer import ToolEventView, bound_event_text
 
-MAX_WORKSPACE_READ_CHARS = 10_000
-SESSION_WORKSPACE_NAMESPACE = "session_workspace"
+MAX_PROJECT_READ_CHARS = MAX_WORKSPACE_READ_CHARS
+PROJECT_WORKSPACE_NAMESPACE = "project_workspace"
 
 
-class WorkspaceToolError(RuntimeError):
-    """Safe, actionable failure returned to generated workspace-tool callers."""
+class ProjectToolError(WorkspaceToolError):
+    """Safe, actionable failure returned to generated project-tool callers.
 
-    def __init__(self, code: str, message: str) -> None:
-        super().__init__(message)
-        self.code = code
-        self.public_message = message
+    Subclasses ``WorkspaceToolError`` so the interpreter bridge keeps rendering
+    structured ``{"ok": False, "error": code}`` results for project tools.
+    """
 
 
 def _entry(entry: WorkspaceEntry) -> dict[str, object]:
     result = asdict(entry)
-    # The LLM-facing tool result keeps its established 4-key entry shape; the
-    # checksum is an opt-in workspace-fs capability that REPL stat/list never
-    # requests, so an absent checksum adds no key.
     if result.get("checksum_sha256") is None:
         result.pop("checksum_sha256")
     return result
@@ -41,67 +46,98 @@ def _raise_tool_error(exc: BaseException) -> NoReturn:
     if isinstance(exc, WorkspaceToolError):
         raise exc
     if getattr(exc, "code", None) == "unsupported_storage":
-        raise WorkspaceToolError(
+        raise ProjectToolError(
             "unsupported_storage",
-            "Session Workspace storage does not support this mutation",
+            "Project storage does not support this mutation",
         ) from None
     if isinstance(exc, FileNotFoundError):
-        raise WorkspaceToolError("not_found", "Session Workspace file was not found") from None
+        raise ProjectToolError("not_found", "Project file was not found") from None
     if isinstance(exc, FileExistsError):
         detail = getattr(exc, "detail", "")
         if detail == "checksum_mismatch":
-            raise WorkspaceToolError(
-                "conflict",
-                "Session Workspace checksum precondition did not match the current file content",
+            raise ProjectToolError(
+                "conflict", "Project checksum precondition did not match the current file content"
             ) from None
         if detail == "not_empty":
-            raise WorkspaceToolError(
-                "conflict", "Session Workspace directory is not empty; delete its contents first"
-            ) from None
+            raise ProjectToolError("conflict", "Project directory is not empty; delete its contents first") from None
         if detail == "ambiguous":
-            raise WorkspaceToolError(
-                "conflict", "Session Workspace edit text occurs more than once; make it unique"
-            ) from None
+            raise ProjectToolError("conflict", "Project edit text occurs more than once; make it unique") from None
         if detail == "missing":
-            raise WorkspaceToolError("conflict", "Session Workspace edit text was not found in the file") from None
-        raise WorkspaceToolError(
-            "conflict", "Session Workspace file already exists; use overwrite=True to replace it"
-        ) from None
+            raise ProjectToolError("conflict", "Project edit text was not found in the file") from None
+        raise ProjectToolError("conflict", "Project file already exists; use overwrite=True to replace it") from None
     if isinstance(exc, IsADirectoryError):
-        raise WorkspaceToolError("is_directory", "Session Workspace path is a directory") from None
+        raise ProjectToolError("is_directory", "Project path is a directory") from None
     if isinstance(exc, NotADirectoryError):
-        raise WorkspaceToolError("invalid_path", "Session Workspace path has a non-directory parent") from None
+        raise ProjectToolError("invalid_path", "Project path has a non-directory parent") from None
     if isinstance(exc, ValueError):
         message = str(exc)
         if "cursor" in message:
-            raise WorkspaceToolError("invalid_cursor", "Session Workspace cursor is invalid") from None
+            raise ProjectToolError("invalid_cursor", "Project cursor is invalid") from None
         if "size" in message or "bound" in message:
-            raise WorkspaceToolError("too_large", "Session Workspace file exceeds its size bound") from None
-        raise WorkspaceToolError("invalid_path", "Session Workspace request is invalid") from None
-    raise WorkspaceToolError("unavailable", "Session Workspace is unavailable") from None
+            raise ProjectToolError("too_large", "Project file exceeds its size bound") from None
+        raise ProjectToolError("invalid_path", "Project request is invalid") from None
+    raise ProjectToolError("unavailable", "Project storage is unavailable") from None
 
 
-class WorkspaceToolHost:
-    """Bind one authorized Session Workspace into stable synchronous tools."""
+def _normalize_project_path(path: str, *, allow_root: bool = False) -> str:
+    """Return one projects-root-relative path with a validated first-segment slug.
+
+    A redundant leading ``projects/`` segment is tolerated so the canonical
+    volume-relative convention (``projects/<slug>/<path>``) and guard-target
+    language map onto the same rooted tools. ``"."`` (the projects root) is
+    only valid when ``allow_root``.
+    """
+    if not allow_root and path in {".", "projects"}:
+        raise ProjectToolError("invalid_path", "Project path cannot target the projects root")
+    normalized = normalize_workspace_path(path, allow_root=allow_root)
+    if normalized == "projects" or normalized.startswith("projects/"):
+        normalized = normalized.removeprefix("projects").lstrip("/") or "."
+    if normalized == ".":
+        return normalized
+    first = normalized.split("/", 1)[0]
+    try:
+        validate_project_slug(first)
+    except UnsafePathError as exc:
+        raise ProjectToolError("invalid_path", f"Project path is invalid: {exc}") from None
+    return normalized
+
+
+def _project_file_path(path: str) -> str:
+    """Return one validated ``<slug>/<file...>`` path below the projects root."""
+    normalized = _normalize_project_path(path)
+    if "/" not in normalized:
+        raise ProjectToolError(
+            "invalid_path",
+            "Project path must name a file inside a project: projects/<slug>/<path>",
+        )
+    return normalized
+
+
+class ProjectToolHost:
+    """Bind the browsable projects root into stable synchronous tools."""
 
     def __init__(self, workspace: SessionWorkspaceFS, *, max_file_bytes: int) -> None:
         self._workspace = workspace
         self._max_file_bytes = max(1, int(max_file_bytes))
 
     def as_tools(self) -> tuple[dspy.Tool, ...]:
-        def list_workspace_files(
+        def list_project_files(
             path: str = ".",
             limit: int = 100,
             after: str | None = None,
         ) -> dict[str, object]:
-            """List immediate entries in this Session's durable workspace."""
+            """List immediate entries in one Project or the projects root."""
             try:
                 if limit < 1 or limit > 100:
-                    raise WorkspaceToolError("invalid_path", "Session Workspace list bound is invalid")
-                listing = self._workspace.list_entries(path, limit=limit, after=after)
+                    raise ProjectToolError("invalid_path", "Project list bound is invalid")
+                listing = self._workspace.list_entries(
+                    _normalize_project_path(path, allow_root=True),
+                    limit=limit,
+                    after=after,
+                )
                 return {
                     "ok": True,
-                    "namespace": SESSION_WORKSPACE_NAMESPACE,
+                    "namespace": PROJECT_WORKSPACE_NAMESPACE,
                     "path": path,
                     "count": len(listing.entries),
                     "truncated": listing.truncated,
@@ -111,29 +147,29 @@ class WorkspaceToolHost:
             except Exception as exc:
                 _raise_tool_error(exc)
 
-        def stat_workspace_file(path: str) -> dict[str, object]:
-            """Return bounded metadata for one workspace path."""
+        def stat_project_file(path: str) -> dict[str, object]:
+            """Return bounded metadata for one Project path."""
             try:
-                entry = self._workspace.stat(path)
+                entry = self._workspace.stat(_normalize_project_path(path, allow_root=True))
                 if entry is None:
-                    raise WorkspaceToolError("not_found", "Session Workspace file was not found")
-                return {"ok": True, "namespace": SESSION_WORKSPACE_NAMESPACE, "entry": _entry(entry)}
+                    raise ProjectToolError("not_found", "Project file was not found")
+                return {"ok": True, "namespace": PROJECT_WORKSPACE_NAMESPACE, "entry": _entry(entry)}
             except WorkspaceToolError:
                 raise
             except Exception as exc:
                 _raise_tool_error(exc)
 
-        def read_workspace_text(
+        def read_project_text(
             path: str,
             cursor: str | None = None,
-            max_chars: int = MAX_WORKSPACE_READ_CHARS,
+            max_chars: int = MAX_PROJECT_READ_CHARS,
         ) -> dict[str, object]:
-            """Read one UTF-8 workspace page without returning more than max_chars."""
-            if max_chars < 1 or max_chars > MAX_WORKSPACE_READ_CHARS:
-                raise WorkspaceToolError("invalid_path", "Session Workspace read bound is invalid")
+            """Read one UTF-8 Project file page without returning more than max_chars."""
+            if max_chars < 1 or max_chars > MAX_PROJECT_READ_CHARS:
+                raise ProjectToolError("invalid_path", "Project read bound is invalid")
             try:
                 page = self._workspace.read_text_page(
-                    path,
+                    _project_file_path(path),
                     cursor=cursor,
                     max_chars=max_chars,
                     max_bytes=self._max_file_bytes,
@@ -142,7 +178,7 @@ class WorkspaceToolHost:
                 _raise_tool_error(exc)
             return {
                 "ok": True,
-                "namespace": SESSION_WORKSPACE_NAMESPACE,
+                "namespace": PROJECT_WORKSPACE_NAMESPACE,
                 "path": path,
                 "content": page.content,
                 "next_cursor": page.next_cursor,
@@ -150,21 +186,21 @@ class WorkspaceToolHost:
                 "eof": page.eof,
             }
 
-        def write_workspace_text(
+        def write_project_text(
             path: str,
             content: str,
             overwrite: bool = False,
         ) -> dict[str, object]:
-            """Write one UTF-8 file immediately into this Session's durable workspace."""
+            """Write one UTF-8 deliverable immediately under projects/<slug>/."""
             if not isinstance(content, str):
-                raise WorkspaceToolError("invalid_path", "Session Workspace content must be text")
+                raise ProjectToolError("invalid_path", "Project content must be text")
             if len(content.encode("utf-8")) > self._max_file_bytes:
-                raise WorkspaceToolError("too_large", "Session Workspace file exceeds the maximum size")
+                raise ProjectToolError("too_large", "Project file exceeds the maximum size")
             try:
                 result = {
                     "ok": True,
-                    "namespace": SESSION_WORKSPACE_NAMESPACE,
-                    **_entry(self._workspace.write_text(path, content, overwrite=overwrite)),
+                    "namespace": PROJECT_WORKSPACE_NAMESPACE,
+                    **_entry(self._workspace.write_text(_project_file_path(path), content, overwrite=overwrite)),
                 }
                 warnings = getattr(self._workspace, "last_warnings", None)
                 if isinstance(warnings, tuple) and warnings:
@@ -173,33 +209,15 @@ class WorkspaceToolHost:
             except Exception as exc:
                 _raise_tool_error(exc)
 
-        def append_workspace_text(path: str, content: str) -> dict[str, object]:
-            """Append UTF-8 text immediately into this Session's durable workspace."""
-            if not isinstance(content, str):
-                raise WorkspaceToolError("invalid_path", "Session Workspace content must be text")
-            if len(content.encode("utf-8")) > self._max_file_bytes:
-                raise WorkspaceToolError("too_large", "Session Workspace file exceeds the maximum size")
+        def delete_project_path(path: str, expected_sha256: str | None = None) -> dict[str, object]:
+            """Delete one file or empty directory immediately under projects/<slug>/."""
             try:
-                result = {
-                    "ok": True,
-                    "namespace": SESSION_WORKSPACE_NAMESPACE,
-                    **_entry(self._workspace.append_text(path, content)),
-                }
-                warnings = getattr(self._workspace, "last_warnings", None)
-                if isinstance(warnings, tuple) and warnings:
-                    result["warnings"] = [dict(item) for item in warnings if isinstance(item, Mapping)]
-                return result
-            except Exception as exc:
-                _raise_tool_error(exc)
-
-        def delete_workspace_path(path: str, expected_sha256: str | None = None) -> dict[str, object]:
-            """Delete one file or empty directory immediately from this Session's durable workspace."""
-            try:
-                normalized = normalize_workspace_path(path)
+                # "." (the projects root) is refused by normalization itself.
+                normalized = _normalize_project_path(path)
                 self._workspace.delete_path(normalized, expected_sha256=expected_sha256)
                 result: dict[str, object] = {
                     "ok": True,
-                    "namespace": SESSION_WORKSPACE_NAMESPACE,
+                    "namespace": PROJECT_WORKSPACE_NAMESPACE,
                     "path": normalized,
                 }
                 warnings = getattr(self._workspace, "last_warnings", None)
@@ -209,26 +227,26 @@ class WorkspaceToolHost:
             except Exception as exc:
                 _raise_tool_error(exc)
 
-        def edit_workspace_text(
+        def edit_project_text(
             path: str,
             old: str,
             new: str,
             expected_sha256: str | None = None,
         ) -> dict[str, object]:
-            """Replace exactly one unique occurrence of old with new in one UTF-8 workspace file."""
+            """Replace exactly one unique occurrence of old with new in one UTF-8 Project file."""
             if not isinstance(old, str) or not old or not isinstance(new, str):
-                raise WorkspaceToolError("invalid_path", "Session Workspace edit requires non-empty old and new text")
+                raise ProjectToolError("invalid_path", "Project edit requires non-empty old and new text")
             if len(old.encode("utf-8")) > self._max_file_bytes or len(new.encode("utf-8")) > self._max_file_bytes:
-                raise WorkspaceToolError("too_large", "Session Workspace file exceeds the maximum size")
+                raise ProjectToolError("too_large", "Project file exceeds the maximum size")
             try:
-                normalized = normalize_workspace_path(path)
+                normalized = _project_file_path(path)
                 entry = _entry(self._workspace.patch_text(normalized, old, new, expected_sha256=expected_sha256))
                 # The LLM-facing result keeps its established 4-key entry
                 # shape; the precondition checksum is a transport concern.
                 entry.pop("checksum_sha256", None)
                 result: dict[str, object] = {
                     "ok": True,
-                    "namespace": SESSION_WORKSPACE_NAMESPACE,
+                    "namespace": PROJECT_WORKSPACE_NAMESPACE,
                     **entry,
                 }
                 warnings = getattr(self._workspace, "last_warnings", None)
@@ -240,11 +258,11 @@ class WorkspaceToolHost:
 
         return (
             dspy.Tool(
-                list_workspace_files,
-                name="list_workspace_files",
+                list_project_files,
+                name="list_project_files",
                 desc=(
-                    "List immediate entries in this Session's durable Workspace only when existing durable "
-                    "state is relevant; do not explore it for a self-contained request."
+                    "List immediate entries under projects/<slug>/ (or the projects root) only when existing "
+                    "durable Project deliverables are relevant; do not explore them for a self-contained request."
                 ),
                 args={
                     "path": {"type": "string"},
@@ -253,17 +271,17 @@ class WorkspaceToolHost:
                 },
             ),
             dspy.Tool(
-                stat_workspace_file,
-                name="stat_workspace_file",
-                desc="Read bounded metadata for a relevant durable Session Workspace path.",
+                stat_project_file,
+                name="stat_project_file",
+                desc="Read bounded metadata for a relevant durable Project deliverable path under projects/<slug>/.",
                 args={"path": {"type": "string"}},
             ),
             dspy.Tool(
-                read_workspace_text,
-                name="read_workspace_text",
+                read_project_text,
+                name="read_project_text",
                 desc=(
-                    "Read one relevant UTF-8 durable Workspace page with max_chars in 1..10000. Continue with "
-                    "next_cursor until eof."
+                    "Read one relevant UTF-8 Project deliverable page with max_chars in 1..10000 using a "
+                    "projects/<slug>/<path> target. Continue with next_cursor until eof."
                 ),
                 args={
                     "path": {"type": "string"},
@@ -271,16 +289,17 @@ class WorkspaceToolHost:
                     "max_chars": {
                         "type": "integer",
                         "minimum": 1,
-                        "maximum": MAX_WORKSPACE_READ_CHARS,
+                        "maximum": MAX_PROJECT_READ_CHARS,
                     },
                 },
             ),
             dspy.Tool(
-                write_workspace_text,
-                name="write_workspace_text",
+                write_project_text,
+                name="write_project_text",
                 desc=(
-                    "Write UTF-8 text immediately into this Session's durable Workspace when the result must "
-                    "survive the Run; this durability is independent of Turn Commit."
+                    "Write UTF-8 text immediately as a durable deliverable under projects/<slug>/ when the "
+                    "result must stay browsable across Sessions; choose a short repo/task-derived slug and "
+                    "keep scratch in the Session Workspace. This durability is independent of Turn Commit."
                 ),
                 args={
                     "path": {"type": "string"},
@@ -289,24 +308,12 @@ class WorkspaceToolHost:
                 },
             ),
             dspy.Tool(
-                append_workspace_text,
-                name="append_workspace_text",
+                delete_project_path,
+                name="delete_project_path",
                 desc=(
-                    "Append UTF-8 text immediately into this Session's durable Workspace when incremental "
-                    "state must survive the Run; this durability is independent of Turn Commit."
-                ),
-                args={
-                    "path": {"type": "string"},
-                    "content": {"type": "string"},
-                },
-            ),
-            dspy.Tool(
-                delete_workspace_path,
-                name="delete_workspace_path",
-                desc=(
-                    "Delete one file or one empty directory immediately from this Session's durable "
-                    "Workspace; non-empty directories are refused, and a supplied expected_sha256 guards "
-                    "against deleting changed content. This durability is independent of Turn Commit."
+                    "Delete one file or one empty directory immediately under projects/<slug>/; non-empty "
+                    "directories are refused, and a supplied expected_sha256 guards against deleting "
+                    "changed content. This durability is independent of Turn Commit."
                 ),
                 args={
                     "path": {"type": "string"},
@@ -314,13 +321,13 @@ class WorkspaceToolHost:
                 },
             ),
             dspy.Tool(
-                edit_workspace_text,
-                name="edit_workspace_text",
+                edit_project_text,
+                name="edit_project_text",
                 desc=(
-                    "Replace exactly one unique occurrence of old with new in one UTF-8 Session Workspace "
-                    "file; the edit fails when old is absent or occurs more than once, and a supplied "
-                    "expected_sha256 guards against editing changed content. Read the file first and keep "
-                    "old short and unique. This durability is independent of Turn Commit."
+                    "Replace exactly one unique occurrence of old with new in one UTF-8 Project file under "
+                    "projects/<slug>/; the edit fails when old is absent or occurs more than once, and a "
+                    "supplied expected_sha256 guards against editing changed content. Read the file first "
+                    "and keep old short and unique. This durability is independent of Turn Commit."
                 ),
                 args={
                     "path": {"type": "string"},
@@ -332,7 +339,7 @@ class WorkspaceToolHost:
         )
 
     def event_views(self) -> Mapping[str, ToolEventView]:
-        """Return bounded metadata-only projections for Workspace Tools."""
+        """Return bounded metadata-only projections for Project Tools."""
 
         def fields(
             arguments: Mapping[str, Any],
@@ -347,8 +354,8 @@ class WorkspaceToolHost:
                 value = arguments[name]
                 if name == "path":
                     try:
-                        value = normalize_workspace_path(str(value), allow_root=allow_root)
-                    except WorkspacePathError:
+                        value = _normalize_project_path(str(value), allow_root=allow_root)
+                    except (WorkspacePathError, WorkspaceToolError):
                         continue
                 projected[name] = bound_event_text(value) if isinstance(value, str) else cast(JsonValue, value)
             return projected
@@ -393,13 +400,6 @@ class WorkspaceToolHost:
                 "content_chars": len(str(content or "")),
             }
 
-        def append_input(arguments: Mapping[str, Any]) -> JsonValue:
-            content = arguments.get("content")
-            return {
-                **fields(arguments, ("path",)),
-                "content_chars": len(str(content or "")),
-            }
-
         def edit_input(arguments: Mapping[str, Any]) -> JsonValue:
             # Edit fragments stay private; only their sizes are observable.
             return {
@@ -417,7 +417,7 @@ class WorkspaceToolHost:
 
         return MappingProxyType(
             {
-                "list_workspace_files": ToolEventView(
+                "list_project_files": ToolEventView(
                     input_projection=lambda arguments: fields(
                         arguments,
                         ("path", "limit", "after"),
@@ -428,11 +428,11 @@ class WorkspaceToolHost:
                         ("ok", "error", "path", "count", "truncated", "next_cursor"),
                     ),
                 ),
-                "stat_workspace_file": ToolEventView(
-                    input_projection=lambda arguments: fields(arguments, ("path",)),
+                "stat_project_file": ToolEventView(
+                    input_projection=lambda arguments: fields(arguments, ("path",), allow_root=True),
                     output_projection=stat_output,
                 ),
-                "read_workspace_text": ToolEventView(
+                "read_project_text": ToolEventView(
                     input_projection=lambda arguments: fields(arguments, ("path", "cursor", "max_chars")),
                     output_projection=lambda result: output(
                         result,
@@ -440,28 +440,21 @@ class WorkspaceToolHost:
                     ),
                     allow_repeated_identical=True,
                 ),
-                "write_workspace_text": ToolEventView(
+                "write_project_text": ToolEventView(
                     input_projection=write_input,
                     output_projection=lambda result: output(
                         result,
                         ("ok", "namespace", "path", "byte_size", "warnings"),
                     ),
                 ),
-                "append_workspace_text": ToolEventView(
-                    input_projection=append_input,
-                    output_projection=lambda result: output(
-                        result,
-                        ("ok", "namespace", "path", "byte_size", "warnings"),
-                    ),
-                ),
-                "delete_workspace_path": ToolEventView(
+                "delete_project_path": ToolEventView(
                     input_projection=delete_input,
                     output_projection=lambda result: output(
                         result,
                         ("ok", "namespace", "path", "warnings"),
                     ),
                 ),
-                "edit_workspace_text": ToolEventView(
+                "edit_project_text": ToolEventView(
                     input_projection=edit_input,
                     output_projection=lambda result: output(
                         result,

@@ -1,19 +1,52 @@
 ---
 name: workspace-files
-description: Use when a Turn must inspect, create, or update durable Session files, consume an authorized Attachment, or return a downloadable Artifact.
-compatibility: Durable Session Workspace writes and Artifact promotion require the Daytona run environment.
+description: Use when a Turn must inspect, create, or update durable Session files or Project deliverables, consume an authorized Attachment, or return a downloadable Artifact.
+compatibility: Durable Project and Session Workspace writes and Artifact promotion require the Daytona run environment.
 metadata:
-  version: "1.0.0"
-allowed-tools: list_workspace_files stat_workspace_file read_workspace_text write_workspace_text append_workspace_text publish_workspace_artifact read_attachment create_artifact
+  version: "1.2.0"
+allowed-tools: list_project_files stat_project_file read_project_text write_project_text delete_project_path edit_project_text list_workspace_files stat_workspace_file read_workspace_text write_workspace_text append_workspace_text delete_workspace_path edit_workspace_text publish_workspace_artifact read_attachment create_artifact
 ---
 
 # Workspace files
 
 Use Fleet's bound tools instead of inventing host paths. The Turn context reports whether durable workspace tools are available.
 
-## Session Workspace
+## Projects (durable deliverables)
 
-Workspace paths are canonical POSIX-relative paths rooted at `.`. Session Workspace is tool-only: it is not visible to Python `open()`, `os`, or `pathlib`, and a sandbox-local file never satisfies a Session Workspace request. List or inspect before writing, use `overwrite=true` only when replacement is intended, and handle a tool error before trying a different operation. Session Workspace is append/update-only: there is no delete Tool; replace content with `write_workspace_text(..., overwrite=True)`.
+Finished deliverables the user should keep belong in a browsable Project on
+the shared Volume at `projects/<slug>/`, not under
+`sessions/<uuid>/workspace/`. You name the slug explicitly: pick a short,
+repo/task-derived value (for example `fleet-rlm`) matching
+`^[a-z0-9][a-z0-9._-]{0,63}$`; the backend sanitizes only and never invents a
+slug for you. Reserved Volume roots (`sessions`, `files`, `artifacts`,
+`attachments`, `memory`) cannot be slugs. Project paths are canonical
+POSIX-relative paths whose first segment is the slug; `projects/` itself is
+implicit and nested subdirectories are allowed. Project writes are immediate
+private state; they survive a failed or cancelled Run and are not published as
+Artifacts.
+
+```python
+listing = list_project_files(path="fleet-rlm", limit=100)
+saved = write_project_text(path="fleet-rlm/reports/review.md", content=report, overwrite=False)
+page = read_project_text(path="fleet-rlm/reports/review.md", max_chars=10000)
+assert saved["ok"] is True
+```
+
+`write_project_text` requires `overwrite=True` to replace an existing file;
+the read page contract (`max_chars` 1 through 10,000 characters, `next_cursor`
+until `eof`), list cursors, and byte-size checks match the Session Workspace
+tools below. There is no append Project Tool; replace larger stretches with
+`write_project_text(..., overwrite=True)`. For a small, exactly-located
+change, call `edit_project_text(path, old, new)`: it fails unless `old`
+occurs exactly once, so keep the fragment short and unique. Call
+`delete_project_path(path)` to remove one file or one empty directory;
+non-empty directories are always refused (there is no force/recursive
+delete), and each of these calls accepts an optional `expected_sha256`
+checksum precondition.
+
+## Session Workspace (scratch)
+
+Session Workspace paths are canonical POSIX-relative paths rooted at `.`. Session Workspace is tool-only: it is not visible to Python `open()`, `os`, or `pathlib`, and a sandbox-local file never satisfies a Session Workspace request. List or inspect before writing, use `overwrite=true` only when replacement is intended, and handle a tool error before trying a different operation. Session Workspace supports full file lifecycle: in addition to write/append, `edit_workspace_text(path, old, new)` replaces one exactly-located fragment (it fails when `old` is absent or ambiguous) and `delete_workspace_path(path)` removes one file or one empty directory (non-empty directories are refused; there is no recursive delete). Both accept an optional `expected_sha256` checksum precondition; pass the `checksum_sha256` from a prior REST stat or re-read when guarding against concurrent change.
 
 ```python
 listing = list_workspace_files(path=".", limit=100)
@@ -42,7 +75,7 @@ through `create_artifact`. Turn Commit remains the only publication boundary.
 
 Workspace writes are immediate private Session state. They survive a failed or cancelled Run and are not published as Artifacts.
 
-Never report a workspace operation as successful unless its tool call succeeds
+Never report a workspace or project operation as successful unless its tool call succeeds
 and the applicable page iteration, append receipt, or metadata confirmation
 completes. Do not retry a deterministic tool error unchanged.
 
@@ -65,6 +98,6 @@ that publication completed.
 candidate = create_artifact(kind="markdown", content=report, title="Analysis")
 ```
 
-Writing a workspace file or a sandbox file directly never creates a public Artifact.
+Writing a workspace file, project file, or sandbox file directly never creates a public Artifact.
 
 Read `references/filesystem-contract.md` only when exact durability, layout, or path-boundary details are needed.

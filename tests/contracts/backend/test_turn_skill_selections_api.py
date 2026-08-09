@@ -1,7 +1,8 @@
-"""Version-pinned Skill selections at the prepare-before-headers API boundary."""
+"""Version-pinned Skill selections at the in-stream Turn-open API boundary."""
 
 from __future__ import annotations
 
+import json
 from collections.abc import AsyncIterator
 from uuid import UUID, uuid4
 
@@ -14,6 +15,7 @@ from fleet_rlm.api.routes.turns import router
 from fleet_rlm.api.schemas import CreateTurnRequest
 from fleet_rlm.chat.commands import OpenTurnCommand
 from fleet_rlm.composition.inventory import RuntimeInventory
+from fleet_rlm.config import Settings
 from fleet_rlm.rlm.events import RuntimeEvent
 from fleet_rlm.skills.errors import InvalidSkillSelectionError
 
@@ -47,6 +49,7 @@ class _CapturingCoordinator:
 
 def _client(coordinator: _CapturingCoordinator) -> TestClient:
     app = FastAPI()
+    app.state.settings = Settings()
     app.state.composition_ready = True
     app.state.runtime_inventory = RuntimeInventory(turn_coordinator=coordinator)
     install_error_handlers(app)
@@ -109,7 +112,7 @@ def test_turn_route_passes_exact_selections_into_persisted_input() -> None:
     ]
 
 
-def test_invalid_skill_selection_is_a_generic_pre_header_422() -> None:
+def test_invalid_skill_selection_is_a_generic_in_stream_failure() -> None:
     secret = "private-version-detail"
     coordinator = _CapturingCoordinator(InvalidSkillSelectionError())
 
@@ -123,12 +126,17 @@ def test_invalid_skill_selection_is_a_generic_pre_header_422() -> None:
             headers={"Idempotency-Key": "invalid-skill-selection"},
         )
 
-    assert response.status_code == 422
-    assert response.headers["content-type"] == "application/json"
-    assert response.json() == {
-        "code": "invalid_skill_selection",
-        "message": "Invalid Skill selection",
-    }
+    # Exact-selection catalog rejections resolve inside the SSE stream: the HTTP
+    # status stays 200 and the closed generic message arrives as error + finish.
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/event-stream")
+    frames = [line.removeprefix("data: ") for line in response.text.splitlines() if line.startswith("data: ")]
+    chunks = [json.loads(value) for value in frames if value != "[DONE]"]
+    assert frames[-1] == "[DONE]"
+    assert chunks[-2:] == [
+        {"type": "error", "errorText": "Invalid Skill selection"},
+        {"type": "finish", "finishReason": "error"},
+    ]
     assert secret not in response.text
 
 

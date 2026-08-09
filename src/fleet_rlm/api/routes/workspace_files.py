@@ -10,8 +10,11 @@ from fleet_rlm.api.dependencies import LocalScopeDep, WorkspaceFileServiceDep
 from fleet_rlm.api.errors import http_error
 from fleet_rlm.api.schemas import (
     WorkspaceFileAppendRequest,
+    WorkspaceFileDeleteRequest,
+    WorkspaceFileDeleteResponse,
     WorkspaceFileEntryResponse,
     WorkspaceFileListResponse,
+    WorkspaceFilePatchRequest,
     WorkspaceFileReadResponse,
     WorkspaceFileWriteRequest,
 )
@@ -158,6 +161,52 @@ async def append_workspace_file(
             identity.workspace_id,
             body.path,
             body.content,
+            expected_sha256=body.expected_sha256,
+        )
+    except Exception as exc:
+        _raise_public_error(exc)
+    return _entry(value)
+
+
+@router.delete(
+    "/content",
+    response_model=WorkspaceFileDeleteResponse,
+    operation_id="delete_workspace_file_api",
+)
+async def delete_workspace_file(
+    body: WorkspaceFileDeleteRequest,
+    identity: LocalScopeDep,
+    service: WorkspaceFileServiceDep,
+) -> WorkspaceFileDeleteResponse:
+    # Endpoint mirrors the delete Tool and keeps mutation semantics aligned
+    # between the REST and RLM surfaces.
+    try:
+        await service.delete(
+            identity.workspace_id,
+            body.path,
+            expected_sha256=body.expected_sha256,
+        )
+    except Exception as exc:
+        _raise_public_error(exc)
+    return WorkspaceFileDeleteResponse(path=body.path)
+
+
+@router.patch(
+    "/content",
+    response_model=WorkspaceFileEntryResponse,
+    operation_id="patch_workspace_file_api",
+)
+async def patch_workspace_file(
+    body: WorkspaceFilePatchRequest,
+    identity: LocalScopeDep,
+    service: WorkspaceFileServiceDep,
+) -> WorkspaceFileEntryResponse:
+    try:
+        value = await service.patch(
+            identity.workspace_id,
+            body.path,
+            body.old,
+            body.new,
             expected_sha256=body.expected_sha256,
         )
     except Exception as exc:

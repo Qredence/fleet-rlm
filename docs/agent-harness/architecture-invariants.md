@@ -62,11 +62,18 @@ exist.
   bounded Attachment metadata to the default Fleet Signature. Custom Task
   Contracts receive only declared host-bounded inputs. Keep older history behind
   `read_session_history` and call `await rlm.acall(**named_inputs)`.
-- Attachment ownership and Skill selection validation finish before SSE begins.
+- The Turn stream opens immediately with transient `data-status` preparation
+  heartbeats (never recorded); claim, preparation, Attachment-ownership, and
+  Skill-selection failures then resolve as closed `error` + `finish` chunks
+  inside the stream instead of HTTP error statuses, while request-schema
+  validation and composition readiness still answer 422/503 pre-headers.
 - Artifact Candidates remain private until byte promotion and atomic Turn Commit
   succeed.
 - Success ordering is `artifact.created*` then exactly one `run.completed`.
-  Failure produces exactly one sanitized terminal and no history advance.
+  Failure produces exactly one sanitized terminal and no history advance;
+  cancellation produces one `abort` terminal (no `finish`/usage/checkpoint) and
+  its settled attempt persists a bounded `data-status {phase="cancelled"}`
+  tombstone pair in committed history.
 - Hold an Interpreter Lease through finalization; release it during coordinator
   cleanup even after cancellation or repeated caller cancellation.
 
@@ -87,14 +94,17 @@ routes or public events.
   serialized Tools, or Signatures.
 - Tool event views are host-owned bounded allowlists. No declared view means no
   public arguments or results.
-- Daytona alone registers `read_workspace_memory` and
-  `update_workspace_memory`. Memory is loaded only when the RLM calls the read
-  Tool; it is never injected at Turn start. The update Tool permits an append
-  only for an explicit user request. This is an auditable Tool-use policy, not a
-  filesystem ACL, because the Daytona interpreter sees the mounted Volume.
+- Daytona alone registers the Workspace Memory Tools: `read_workspace_memory`,
+  `remember`, `list_memories`, `edit_memory`, `forget` (plus the back-compat
+  alias `update_workspace_memory`). The newest 4 KiB tail of `MEMORIES.md` is
+  also injected into the Turn's `session_context` as
+  `workspace_memory tail` (bounded, tolerant, missing-store-safe); full history
+  stays behind the read/list Tools. The append Tool permits a write only for an
+  explicit user request. This is an auditable Tool-use policy, not a filesystem
+  ACL, because the Daytona interpreter sees the mounted Volume.
 - Workspace Memory uses generic Tool events only. Their allowlisted metadata
-  never exposes the learning body, provider path, or raw error, and there is no
-  dedicated memory Runtime Event.
+  never exposes the learning body, provider path, or raw error (ids, categories,
+  byte counts only), and there is no dedicated memory Runtime Event.
 
 ## Persistence and storage
 
@@ -103,17 +113,30 @@ routes or public events.
 - Durable Attachment and Artifact bytes live in Workspace Volume Scope.
 - Daytona Session Workspace text lives under
   `sessions/{session_id}/workspace/`. Paged reads, bounded immediate-child
-  listings, append, and replacement writes are immediate private state, not
-  Turn-commit candidates; direct Workspace Artifact publication only stages a
-  private candidate.
+  listings, append, replacement writes, unique-fragment edits, and file or
+  empty-directory deletes are immediate private state, not Turn-commit
+  candidates. Edits/deletes accept optional SHA-256 preconditions, never
+  recurse or follow symlinks, and direct Workspace Artifact publication only
+  stages a private candidate.
 - Daytona Workspace Memory is distinct workspace-wide immediate state. Its only
-  target is the root `MEMORIES.md` of the already mounted
-  `workspaces/<workspace_id>` Volume subpath; Session and Run paths remain
+  target is `memory/MEMORIES.md` under the already mounted
+  `workspaces/<workspace_id>` Volume subpath (legacy root `MEMORIES.md` is
+  migrated on first open, never losing content); Session and Run paths remain
   nested below that root.
-- Memory updates are append-only, complete UTC-timestamped records of at most
-  4 KiB formatted UTF-8. They become durable independently of Turn Commit and
-  survive failed or cancelled Turns and Sandbox replacement. Reads return the
-  newest complete records within the fixed 256 KiB read budget.
+- Memory updates are id-addressed complete UTC-timestamped records of at most
+  4 KiB formatted UTF-8: appends write v2 records
+  (`- [ts] **Category** <!-- id:8hex -->: learning`) with fresh ids and are
+  idempotent for the same normalized record. v1 rows derive a deterministic id
+  from their canonical text plus valid-record occurrence, so duplicate legacy
+  rows remain separately pageable; duplicate persisted ids fail closed. `edit_memory`
+  upgrades v1 to v2 or replaces one v2 line while preserving id and timestamp,
+  and `forget` removes exactly one entry. Both mutations perform their
+  read-modify-fsync-publish rewrite in one mounted-agent operation. Records
+  become durable independently of Turn Commit and survive failed or cancelled
+  Turns and Sandbox replacement. Reads are tolerant: humans edit this file, so
+  malformed lines are skipped with a bounded warning count; strict validation
+  still governs what Tools write. Reads return the newest complete records
+  within the fixed 256 KiB read budget.
   `max_upload_bytes` caps the complete file; appends against full or torn state
   and access to unsafe or invalid storage fail closed, with no automatic
   compaction, deletion, or repair.

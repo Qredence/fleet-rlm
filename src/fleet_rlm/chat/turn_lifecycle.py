@@ -59,6 +59,10 @@ class TurnStateError(TurnLifecycleError):
     pass
 
 
+class TurnAlreadyCompletedError(TurnStateError):
+    """The Run already committed; late claim work targeting it is a benign no-op."""
+
+
 class TurnIntegrityError(TurnLifecycleError):
     pass
 

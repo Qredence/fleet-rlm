@@ -1,12 +1,16 @@
 from __future__ import annotations
 
+import json
 import time
+import urllib.request
 from collections.abc import Callable
 
 import dspy
 import pytest
+from dspy.predict.rlm import RLM
 
 from fleet_rlm.chat.run_authority import RunAuthority
+from fleet_rlm.daytona.http_broker import DaytonaHttpToolBroker
 from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
 from fleet_rlm.daytona.recursive_child_runtime import ChildRuntimeLease
 from fleet_rlm.rlm.events import Status, ToolCompleted, ToolFailed, ToolStarted
@@ -270,3 +274,48 @@ def test_recursive_tool_discards_result_when_authority_is_revoked_after_executio
     assert len(failed) == 1
     assert failed[0].message is not None
     assert "failure_category=unauthorized" in failed[0].message
+
+
+def test_rlm_query_wrapper_forwards_kwargs_only(monkeypatch: pytest.MonkeyPatch) -> None:
+    """RC-1: the recursive ``rlm_query`` sandbox wrapper forwards prompts by name."""
+    executor = _executor([{"reasoning": "submit", "code": "SUBMIT(answer='ok')"}])
+    tool = executor.tool
+    rlm = RLM("prompt -> answer", max_iters=1)
+    invoke = rlm._make_interpreter_tool(tool)
+
+    # The pinned DSPy interpreter tool accepts keyword arguments only.
+    with pytest.raises(TypeError, match="positional"):
+        invoke("delegate this slice")
+
+    broker = DaytonaHttpToolBroker(sandbox=object())
+    namespace: dict[str, object] = {}
+    exec(broker._tool_wrapper_source("rlm_query", invoke), namespace, namespace)
+    wrapper = namespace["rlm_query"]
+
+    class _StubbedResponse:
+        def read(self) -> bytes:
+            return json.dumps({"result": "child-ok"}).encode("utf-8")
+
+        def __enter__(self) -> _StubbedResponse:
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+    captured: list[dict[str, object]] = []
+
+    def fake_urlopen(request: urllib.request.Request, timeout: float = 0) -> _StubbedResponse:
+        del timeout
+        captured.append(json.loads(bytes(request.data).decode("utf-8")))
+        return _StubbedResponse()
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+
+    # Sandbox-side ergonomics stay positional, exactly as model code writes them.
+    assert wrapper("delegate this slice") == "child-ok"
+
+    assert len(captured) == 1
+    payload = captured[0]
+    assert payload["tool_name"] == "rlm_query"
+    assert payload["args"] == []
+    assert payload["kwargs"] == {"prompt": "delegate this slice"}

@@ -34,6 +34,15 @@ _UUID_RE = re.compile(
     r"|[0-9a-fA-F]{32})$"
 )
 
+# Project slugs: model-chosen durable deliverable roots under ``projects/``.
+# The agent names the slug explicitly; the backend sanitizes only.
+_PROJECT_SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
+
+# Reserved slugs mirror the Volume's system roots so a Project root can never
+# shadow ``sessions/``, ``files/``, ``artifacts/``, ``attachments/``, or
+# ``memory/`` in operator browsing or guard-target language.
+_RESERVED_PROJECT_SLUGS = frozenset({"sessions", "files", "artifacts", "attachments", "memory"})
+
 
 class UnsafePathError(ValueError):
     """Raised when a path id or join would escape the Fleet volume root."""
@@ -90,6 +99,26 @@ def validate_path_id(token: str | UUID, *, label: str = "id") -> str:
         raise UnsafePathError(f"{label} must be a UUID") from exc
 
 
+def validate_project_slug(slug: str, *, label: str = "project slug") -> str:
+    """Accept one canonical Project slug; reject reserved roots and traversal.
+
+    The slug shape is exact: ``^[a-z0-9][a-z0-9._-]{0,63}$``. Path separators
+    and traversal are impossible under that shape and are re-checked through
+    ``resolve_under_root`` when the slug joins the layout.
+    """
+    if not isinstance(slug, str) or not slug or slug != slug.strip():
+        raise UnsafePathError(f"{label} is empty or blank")
+    if "\x00" in slug:
+        raise UnsafePathError(f"{label} must not contain NUL")
+    if any(sep in slug for sep in ("/", "\\")):
+        raise UnsafePathError(f"{label} must not contain path separators")
+    if _PROJECT_SLUG_RE.fullmatch(slug) is None:
+        raise UnsafePathError(f"{label} must match ^[a-z0-9][a-z0-9._-]{{0,63}}$")
+    if slug in _RESERVED_PROJECT_SLUGS:
+        raise UnsafePathError(f"{label} is a reserved Volume root name")
+    return slug
+
+
 def resolve_under_root(root: PurePosixPath | str, *parts: str) -> PurePosixPath:
     """Join parts under root; raise if the result escapes root."""
     base = PurePosixPath(root) if not isinstance(root, PurePosixPath) else root
@@ -142,11 +171,26 @@ class VolumePaths:
         return self.artifacts_root()
 
     @property
+    def projects(self) -> PurePosixPath:
+        return self.projects_root()
+
+    @property
     def runs(self) -> PurePosixPath:
         return resolve_under_root(self.mount_path, "runs")
 
     @property
+    def memory_dir(self) -> PurePosixPath:
+        """Browsable memory root: memory/."""
+        return resolve_under_root(self.mount_path, "memory")
+
+    @property
     def memory_file(self) -> PurePosixPath:
+        """Canonical Workspace Memory log: memory/MEMORIES.md."""
+        return resolve_under_root(self.mount_path, "memory", "MEMORIES.md")
+
+    @property
+    def legacy_memory_file(self) -> PurePosixPath:
+        """Pre-migration Workspace Memory log at the volume root."""
         return resolve_under_root(self.mount_path, "MEMORIES.md")
 
     def artifacts_root(self) -> PurePosixPath:
@@ -161,6 +205,15 @@ class VolumePaths:
     def files_root(self) -> PurePosixPath:
         """Public independent Workspace files, isolated from Fleet-managed roots."""
         return resolve_under_root(self.mount_path, "files")
+
+    def projects_root(self) -> PurePosixPath:
+        """Browsable durable Project deliverables root: projects/."""
+        return resolve_under_root(self.mount_path, "projects")
+
+    def project_dir(self, slug: str) -> PurePosixPath:
+        """One model-named deliverable root: projects/<slug>/."""
+        value = validate_project_slug(slug)
+        return resolve_under_root(self.projects_root(), value)
 
     def session_dir(self, session_id: str | UUID) -> PurePosixPath:
         sid = validate_path_id(session_id, label="session_id")

@@ -31,23 +31,37 @@ provide models, Signatures, or executable capabilities.
   `dspy.Prediction`. Fleet projects that Prediction into chat text, an optional
   structured result, and a commit-gated private `result.json` snapshot.
 - Session Workspace files are immediate private Volume state. They survive
-  later Runs and Sandbox replacement; interpreter globals do not.
-- Daytona Workspace Memory is separate workspace-wide immediate state at the
-  fixed root `MEMORIES.md` of the already mounted
-  `workspaces/<workspace_id>` Volume subpath. The RLM recalls it on demand with
-  `read_workspace_memory`; Fleet does not inject it at Turn start.
-- `update_workspace_memory` appends one complete UTC-timestamped record, limited
-  to 4 KiB of formatted UTF-8, only when the user explicitly requests memory. A
-  completed append is immediately durable outside Turn Commit, so it survives
-  failed or cancelled Turns and Sandbox replacement. The explicit-request rule
-  is Tool audit policy, not a filesystem ACL, because the Daytona interpreter
-  can see the mounted Volume. Append serialization is process-local; separate
-  Fleet processes are not coordinated, so concurrent cross-process append is
-  not guaranteed.
-- Memory reads return the newest complete records up to 256 KiB.
-  `max_upload_bytes` caps the total file; appends against full or torn state and
-  access to unsafe or invalid storage fail closed without automatic compaction,
-  deletion, or repair. Generic Tool events expose metadata only, never the
+  later Runs and Sandbox replacement; interpreter globals do not. The host
+  exposes list/stat/paged-read, write/append, unique-fragment edit, and
+  file-or-empty-directory delete; edits/deletes are optional-checksum guarded,
+  never recursive, and never follow symlinks.
+- Daytona Workspace Memory is separate workspace-wide immediate state at
+  `memory/MEMORIES.md` under the already mounted
+  `workspaces/<workspace_id>` Volume subpath (the legacy root `MEMORIES.md`
+  migrates on first open, never losing content). The RLM recalls it on demand
+  with `read_workspace_memory` or `list_memories`; every Turn also receives a
+  bounded, tolerant <= 4 KiB `workspace_memory tail` digest of the newest
+  records inside `session_context` (cached per Volume root for 30 s).
+- `remember` (or its back-compat alias `update_workspace_memory`) appends one
+  complete UTC-timestamped v2 record (`<!-- id:8hex -->`), limited to 4 KiB of
+  formatted UTF-8, only when the user explicitly requests memory. Repeating
+  the same record is idempotent. A completed append is immediately durable
+  outside Turn Commit, so it survives failed or cancelled Turns and Sandbox
+  replacement. v1 rows derive a deterministic id when listed and upgrade to v2
+  on edit; duplicate ids fail closed. `edit_memory` preserves an entry's id and
+  timestamp, `forget` removes exactly one entry, and both execute one mounted
+  agent read-modify-fsync-publish operation. The explicit-request rule is Tool
+  audit policy, not a filesystem ACL, because the Daytona interpreter can see
+  the mounted Volume. Append serialization is process-local; separate Fleet
+  processes are not coordinated, so concurrent cross-process append is not
+  guaranteed.
+- Memory reads are tolerant: human edits that break a line are skipped with a
+  bounded warning count, while writes stay strictly validated. Reads return the
+  newest complete records up to 256 KiB.
+  `min(max_upload_bytes, 256 KiB)` caps the total file; appends against full or
+  torn state and access to unsafe or invalid storage fail closed without
+  automatic compaction, deletion, or repair. Generic Tool events expose
+  metadata only, never the
   learning body, provider path, or raw error; there is no dedicated memory
   event.
 - Fleet scopes the stock `dspy.JSONAdapter()` to each Turn alongside the Root

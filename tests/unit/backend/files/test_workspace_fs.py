@@ -862,3 +862,106 @@ def test_provider_guard_rejects_symlinks_below_the_trusted_volume(
 
     with pytest.raises(ValueError, match="unsafe"):
         workspace.stat(relative)
+
+
+def test_sync_workspace_fs_delete_path_round_trip_and_conflicts(tmp_path: Path) -> None:
+    workspace, _sandbox, root, process = _workspace(tmp_path, max_file_bytes=1024)
+    from fleet_rlm.files.workspace_models import WorkspaceConflictError
+
+    workspace.write_text("notes/stale.txt", "stale", overwrite=False)
+    calls_before = len(process.calls)
+    workspace.delete_path("notes/stale.txt")
+    assert not (root / "notes" / "stale.txt").exists()
+    assert "delete" in process.calls[-1]
+    assert len(process.calls) == calls_before + 1  # one mounted round trip
+
+    with pytest.raises(FileNotFoundError):
+        workspace.delete_path("notes/stale.txt")
+
+    (root / "filled").mkdir()
+    (root / "filled" / "kept.txt").write_text("kept", encoding="utf-8")
+    with pytest.raises(WorkspaceConflictError) as not_empty:
+        workspace.delete_path("filled")
+    assert not_empty.value.detail == "not_empty"
+
+    (root / "empty").mkdir()
+    workspace.delete_path("empty")
+    assert not (root / "empty").exists()
+
+    with pytest.raises(ValueError, match="checksum precondition"):
+        workspace.delete_path("filled/kept.txt", expected_sha256="not-a-sha")
+
+
+def test_sync_workspace_fs_patch_text_round_trip_and_conflicts(tmp_path: Path) -> None:
+    import hashlib
+
+    workspace, _sandbox, root, process = _workspace(tmp_path, max_file_bytes=1024)
+    from fleet_rlm.files.workspace_models import WorkspaceConflictError
+
+    entry = workspace.write_text("notes/report.txt", "hello world", overwrite=False)
+    assert entry is not None
+
+    patched = workspace.patch_text("notes/report.txt", "world", "fleet")
+    assert patched.path == "notes/report.txt"
+    assert patched.byte_size == len("hello fleet")
+    # The write fall-through reports the sha of the exact bytes published.
+    assert patched.checksum_sha256 == hashlib.sha256(b"hello fleet").hexdigest()
+    assert (root / "notes" / "report.txt").read_text(encoding="utf-8") == "hello fleet"
+    assert "patch" in process.calls[-2] or "patch" in process.calls[-1]
+
+    with pytest.raises(WorkspaceConflictError) as ambiguous:
+        workspace.patch_text("notes/report.txt", "l", "L")
+    assert ambiguous.value.detail == "ambiguous"
+
+    with pytest.raises(WorkspaceConflictError) as missing:
+        workspace.patch_text("notes/report.txt", "zzz", "L")
+    assert missing.value.detail == "missing"
+
+    with pytest.raises(WorkspaceConflictError) as checksum:
+        workspace.patch_text("notes/report.txt", "fleet", "x", expected_sha256="f" * 64)
+    assert checksum.value.detail == "checksum_mismatch"
+
+    good = hashlib.sha256(b"hello fleet").hexdigest()
+    ok = workspace.patch_text("notes/report.txt", "fleet", "world", expected_sha256=good)
+    assert ok.checksum_sha256 == hashlib.sha256(b"hello world").hexdigest()
+
+    with pytest.raises(ValueError, match="checksum precondition"):
+        workspace.patch_text("notes/report.txt", "a", "b", expected_sha256="bad")
+
+
+@pytest.mark.asyncio
+async def test_async_workspace_fs_delete_and_patch_passthrough(tmp_path: Path) -> None:
+    import hashlib
+
+    from fleet_rlm.daytona.workspace_fs import AsyncDaytonaSessionWorkspaceFS
+
+    volume_root = tmp_path / "volume"
+    root = volume_root / "sessions" / "session" / "workspace"
+    root.mkdir(parents=True)
+
+    class AsyncLocalProcess(LocalProcess):
+        async def code_run(self, code: str):
+            return super().code_run(code)
+
+    process = AsyncLocalProcess()
+    workspace = AsyncDaytonaSessionWorkspaceFS(
+        SimpleNamespace(process=process),
+        volume_root=str(volume_root),
+        root=str(root),
+        max_file_bytes=1024,
+    )
+
+    await workspace.write_text("notes/report.txt", "one two one", overwrite=False)
+    patched = await workspace.patch_text("notes/report.txt", "two", "three")
+    assert patched.checksum_sha256 == hashlib.sha256(b"one three one").hexdigest()
+    assert (root / "notes" / "report.txt").read_text(encoding="utf-8") == "one three one"
+
+    from fleet_rlm.files.workspace_models import WorkspaceConflictError
+
+    with pytest.raises(WorkspaceConflictError):
+        await workspace.patch_text("notes/report.txt", "one", "x")
+
+    await workspace.delete_path("notes/report.txt")
+    assert not (root / "notes" / "report.txt").exists()
+    with pytest.raises(FileNotFoundError):
+        await workspace.delete_path("notes/report.txt")

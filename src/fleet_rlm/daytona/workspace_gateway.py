@@ -68,13 +68,10 @@ class _DaytonaWorkspaceFileSession:
         )
 
     async def stat(self, path: str) -> WorkspaceFileEntry | None:
-        entry = await self._workspace.stat(path)
+        entry = await self._workspace.stat(path, include_checksum=True)
         if entry is None:
             return None
-        checksum = None
-        if entry.kind == "file":
-            content = await self._workspace.read_text(path, max_bytes=self._max_file_bytes)
-            checksum = hashlib.sha256(content.encode("utf-8")).hexdigest()
+        checksum = entry.checksum_sha256 if entry.kind == "file" else None
         return _public_entry(entry, checksum)
 
     async def read_text_page(
@@ -119,6 +116,30 @@ class _DaytonaWorkspaceFileSession:
         entry = await self._workspace.append_text(path, content)
         final = (current or "") + content
         return _public_entry(entry, hashlib.sha256(final.encode("utf-8")).hexdigest())
+
+    async def delete_path(
+        self,
+        path: str,
+        *,
+        expected_sha256: str | None,
+    ) -> None:
+        # The agent enforces the optional checksum precondition inside the
+        # same mounted operation as the unlink/rmdir (one round trip, no
+        # stat/read TOCTOU window across sandbox calls).
+        await self._workspace.delete_path(path, expected_sha256=expected_sha256)
+
+    async def patch_text(
+        self,
+        path: str,
+        old: str,
+        new: str,
+        *,
+        expected_sha256: str | None,
+    ) -> WorkspaceFileEntry:
+        # Same single-operation contract as delete; the patched-file entry
+        # carries the agent-computed checksum of the exact bytes published.
+        entry = await self._workspace.patch_text(path, old, new, expected_sha256=expected_sha256)
+        return _public_entry(entry, entry.checksum_sha256)
 
     async def _check_precondition(self, path: str, expected_sha256: str | None) -> None:
         if expected_sha256 is None:

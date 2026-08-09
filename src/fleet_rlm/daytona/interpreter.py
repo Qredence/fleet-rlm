@@ -7,6 +7,9 @@ Host-tool / SUBMIT mediation (B1):
 - In-process backends bind host callables directly (offline seam).
 - Daytona sandbox backends use an HTTP-in-sandbox broker + host poll
   (Daytona-appropriate channel; mirrors DSPy host-tool + FinalOutput outcomes).
+
+Public per-step output projection (stdout delta replay, stream closure, final
+flush, repair-feedback privacy) lives in ``interpreter_output.py``.
 """
 
 from __future__ import annotations
@@ -25,10 +28,8 @@ from uuid import uuid4
 import dspy
 
 from fleet_rlm.daytona.broker_source import (
-    FINAL_OUTPUT_MARKER,
     build_submit_setup_code,
     extract_final_payload,
-    final_output_frame,
 )
 from fleet_rlm.daytona.errors import (
     DaytonaAdapterError,
@@ -36,6 +37,15 @@ from fleet_rlm.daytona.errors import (
     sanitize_provider_message,
 )
 from fleet_rlm.daytona.http_broker import DEFAULT_BROKER_PORT, FleetFinalOutputError
+from fleet_rlm.daytona.interpreter_output import (
+    OutputCallback,
+    _close_output_stream,
+    _emit_output_delta,
+    _flush_step_output,
+    _OutputStreamState,
+    _PublicStdoutProjector,
+    _RepairFeedback,
+)
 from fleet_rlm.files.workspace_tools import WorkspaceToolError
 from fleet_rlm.observability.turn_tracing import trace_preview_limit, turn_phase_span
 from fleet_rlm.rlm.dspy_interpreter_contract import (
@@ -59,7 +69,6 @@ DEFAULT_EXECUTION_OUTPUT_CHARS = 4_000
 DEFAULT_EXECUTION_TIMEOUT_S = 120
 DEFAULT_INTERMEDIATE_CODE_CHARS = 12_000
 _MAX_CAPTURED_OUTPUT_CHARS = 64 * 1024
-OutputCallback = Callable[[str], None]
 
 
 @dataclass(frozen=True, slots=True)
@@ -245,17 +254,6 @@ class InterpreterBackend(Protocol):
     def close(self) -> None: ...
 
 
-class _RepairFeedback(str):
-    """Detailed interpreter feedback returned to RLM but not public projection."""
-
-    category: str
-
-    def __new__(cls, value: str, *, category: str = "execution_error") -> _RepairFeedback:
-        result = super().__new__(cls, value)
-        result.category = category
-        return result
-
-
 def _result_kind(result: Any) -> str:
     """Bounded outcome classification for span metadata (never content)."""
     if is_final_output(result):
@@ -283,12 +281,110 @@ def _repair_category(error: str) -> str:
     return prefix if prefix in allowed else "execution_error"
 
 
-def _sync_await(awaitable: Any, loop: asyncio.AbstractEventLoop) -> Any:
+_BRIDGE_SERVICE_POLL_S = 0.5
+
+_bridge_service_loop: asyncio.AbstractEventLoop | None = None
+
+
+def set_bridge_service_loop(loop: asyncio.AbstractEventLoop | None) -> None:
+    """Register the composition-wide loop that services sync-bridge SDK coroutines.
+
+    Daytona SDK objects (client, Sandbox, FileSystem; their aiohttp session)
+    are loop-affine to the loop that created them — the composition/uvicorn
+    loop — and fail with "attached to a different loop" elsewhere, so every
+    ``_Sync*`` bridge posts its SDK coroutines to this one registered loop.
+    That loop also carries the RC-7 safety property: it never performs nested
+    synchronous waits (those live only on RLM worker threads and broker
+    fulfill threads), so a posted coroutine always gets serviced and the
+    worker↔bridge circular wait cannot form.
+    """
+    global _bridge_service_loop
+    _bridge_service_loop = loop
+
+
+def bridge_service_loop() -> asyncio.AbstractEventLoop | None:
+    """Return the registered composition-wide bridge service loop, if any."""
+    return _bridge_service_loop
+
+
+class _SyncBridgeLoop:
+    """Service-loop routing and close state for one synchronous Daytona bridge.
+
+    Posted SDK coroutines run on the registered composition-wide service loop
+    (see :func:`set_bridge_service_loop`); when no service loop is registered
+    (e.g. private-test compositions that never install the Daytona inventory)
+    the bridge falls back to its caller-captured loop, matching legacy
+    behavior. The bridge owns no threads, so Turns cannot leak daemon threads;
+    :meth:`close` tombstones the bridge so late calls fail typed-fast instead
+    of posting to a service loop after lease release.
+    """
+
+    def __init__(self, *, caller_loop: asyncio.AbstractEventLoop | None) -> None:
+        self._caller_loop = caller_loop
+        self._closed = False
+
+    def _bridge_error(self, message: str) -> DaytonaAdapterError:
+        return DaytonaAdapterError(message=message, cause_type="InterpreterBridgeError")
+
+    def close(self) -> None:
+        """Tombstone the bridge; further calls fail fast until start()."""
+        self._closed = True
+
+    def start(self) -> None:
+        """Clear the close tombstone (survives close/reopen)."""
+        self._closed = False
+
+    def service_loop(self) -> asyncio.AbstractEventLoop | None:
+        """Resolve the loop servicing this bridge: registered service loop first."""
+        registered = bridge_service_loop()
+        return registered if registered is not None else self._caller_loop
+
+    def run(self, awaitable: Any) -> Any:
+        """Post one awaitable on the service loop and block until it settles."""
+        if self._closed:
+            if inspect.iscoroutine(awaitable):
+                awaitable.close()
+            raise self._bridge_error("synchronous Daytona bridge is closed")
+        loop = self.service_loop()
+        if loop is None or loop.is_closed():
+            if inspect.iscoroutine(awaitable):
+                awaitable.close()
+            raise self._bridge_error("synchronous Daytona bridge service loop is unavailable")
+        try:
+            future = asyncio.run_coroutine_threadsafe(awaitable, loop)
+        except RuntimeError as exc:
+            if inspect.iscoroutine(awaitable):
+                awaitable.close()
+            raise self._bridge_error("synchronous Daytona bridge service loop is unavailable") from exc
+        while True:
+            try:
+                return future.result(timeout=_BRIDGE_SERVICE_POLL_S)
+            except TimeoutError:
+                if loop.is_closed() or not loop.is_running():
+                    future.cancel()
+                    if inspect.iscoroutine(awaitable):
+                        with contextlib.suppress(Exception):
+                            awaitable.close()
+                    raise self._bridge_error("synchronous Daytona bridge service loop stopped") from None
+
+
+def _sync_await(
+    awaitable: Any,
+    owner: _SyncBridgeLoop,
+    guard_loop: asyncio.AbstractEventLoop | None = None,
+) -> Any:
+    """Run one async SDK operation on the composition-wide bridge service loop.
+
+    ``guard_loop`` anchors the legacy fail-fast contract: the loop a bridge
+    was declared against (and the resolved service loop itself) may never call
+    the bridge synchronously, because that loop's thread is the one that would
+    have to service the call.
+    """
     try:
         current_loop = asyncio.get_running_loop()
     except RuntimeError:
         current_loop = None
-    if current_loop is loop:
+    if current_loop is not None and (current_loop is guard_loop or current_loop is owner.service_loop()):
         if inspect.iscoroutine(awaitable):
             awaitable.close()
         raise DaytonaAdapterError(
@@ -300,75 +396,111 @@ def _sync_await(awaitable: Any, loop: asyncio.AbstractEventLoop) -> Any:
             message="synchronous Daytona bridge requires an async SDK operation",
             cause_type="InterpreterBridgeContractError",
         )
-    return asyncio.run_coroutine_threadsafe(awaitable, loop).result()
+    return owner.run(awaitable)
 
 
 class _SyncCodeInterpreter:
-    def __init__(self, service: Any, loop: asyncio.AbstractEventLoop) -> None:
+    def __init__(
+        self,
+        service: Any,
+        owner: _SyncBridgeLoop,
+        guard_loop: asyncio.AbstractEventLoop | None = None,
+    ) -> None:
         self._service = service
-        self._loop = loop
+        self._owner = owner
+        self._guard_loop = guard_loop
 
     def create_context(self, **kwargs: Any) -> Any:
-        return _sync_await(self._service.create_context(**kwargs), self._loop)
+        return _sync_await(self._service.create_context(**kwargs), self._owner, self._guard_loop)
 
     def run_code(self, code: str, **kwargs: Any) -> Any:
-        return _sync_await(self._service.run_code(code, **kwargs), self._loop)
+        return _sync_await(self._service.run_code(code, **kwargs), self._owner, self._guard_loop)
 
     def delete_context(self, context: Any, **kwargs: Any) -> None:
-        _sync_await(self._service.delete_context(context, **kwargs), self._loop)
+        _sync_await(self._service.delete_context(context, **kwargs), self._owner, self._guard_loop)
 
 
 class _SyncProcess:
-    def __init__(self, service: Any, loop: asyncio.AbstractEventLoop) -> None:
+    def __init__(
+        self,
+        service: Any,
+        owner: _SyncBridgeLoop,
+        guard_loop: asyncio.AbstractEventLoop | None = None,
+    ) -> None:
         self._service = service
-        self._loop = loop
+        self._owner = owner
+        self._guard_loop = guard_loop
 
     def code_run(self, code: str, **kwargs: Any) -> Any:
-        return _sync_await(self._service.code_run(code, **kwargs), self._loop)
+        return _sync_await(self._service.code_run(code, **kwargs), self._owner, self._guard_loop)
 
     def create_session(self, session_id: str, **kwargs: Any) -> Any:
-        return _sync_await(self._service.create_session(session_id, **kwargs), self._loop)
+        return _sync_await(self._service.create_session(session_id, **kwargs), self._owner, self._guard_loop)
 
     def execute_session_command(self, session_id: str, request: Any, **kwargs: Any) -> Any:
-        return _sync_await(self._service.execute_session_command(session_id, request, **kwargs), self._loop)
+        return _sync_await(
+            self._service.execute_session_command(session_id, request, **kwargs), self._owner, self._guard_loop
+        )
 
     def delete_session(self, session_id: str, **kwargs: Any) -> Any:
-        return _sync_await(self._service.delete_session(session_id, **kwargs), self._loop)
+        return _sync_await(self._service.delete_session(session_id, **kwargs), self._owner, self._guard_loop)
 
 
 class _SyncFileSystem:
-    def __init__(self, service: Any, loop: asyncio.AbstractEventLoop) -> None:
+    def __init__(
+        self,
+        service: Any,
+        owner: _SyncBridgeLoop,
+        guard_loop: asyncio.AbstractEventLoop | None = None,
+    ) -> None:
         self._service = service
-        self._loop = loop
+        self._owner = owner
+        self._guard_loop = guard_loop
 
     def upload_file(self, content: bytes, path: str, **kwargs: Any) -> Any:
-        return _sync_await(self._service.upload_file(content, path, **kwargs), self._loop)
+        return _sync_await(self._service.upload_file(content, path, **kwargs), self._owner, self._guard_loop)
 
     def download_file(self, path: str, **kwargs: Any) -> bytes:
-        return _sync_await(self._service.download_file(path, **kwargs), self._loop)
+        return _sync_await(self._service.download_file(path, **kwargs), self._owner, self._guard_loop)
 
     def delete_file(self, path: str, **kwargs: Any) -> Any:
-        return _sync_await(self._service.delete_file(path, **kwargs), self._loop)
+        return _sync_await(self._service.delete_file(path, **kwargs), self._owner, self._guard_loop)
 
     def list_files(self, path: str, **kwargs: Any) -> Any:
-        return _sync_await(self._service.list_files(path, **kwargs), self._loop)
+        return _sync_await(self._service.list_files(path, **kwargs), self._owner, self._guard_loop)
 
 
 class _SyncDaytonaSandbox:
-    """Explicit synchronous Daytona view used only by DSPy worker execution."""
+    """Explicit synchronous Daytona view used only by DSPy worker execution.
+
+    Routes SDK coroutines through the composition-wide bridge service loop
+    (see :func:`set_bridge_service_loop`); the ``loop`` constructor argument
+    anchors the fail-fast owning-loop guard and is the fallback target only
+    when no service loop is registered.
+    """
 
     def __init__(self, sandbox: Any, loop: asyncio.AbstractEventLoop) -> None:
+        owner = _SyncBridgeLoop(caller_loop=loop)
         if hasattr(sandbox, "code_interpreter"):
-            self.code_interpreter = _SyncCodeInterpreter(sandbox.code_interpreter, loop)
+            self.code_interpreter = _SyncCodeInterpreter(sandbox.code_interpreter, owner, loop)
         if hasattr(sandbox, "process"):
-            self.process = _SyncProcess(sandbox.process, loop)
+            self.process = _SyncProcess(sandbox.process, owner, loop)
         if hasattr(sandbox, "fs"):
-            self.fs = _SyncFileSystem(sandbox.fs, loop)
+            self.fs = _SyncFileSystem(sandbox.fs, owner, loop)
         self._sandbox = sandbox
         self._loop = loop
+        self._owner = owner
 
     def get_preview_link(self, port: int, **kwargs: Any) -> Any:
-        return _sync_await(self._sandbox.get_preview_link(port, **kwargs), self._loop)
+        return _sync_await(self._sandbox.get_preview_link(port, **kwargs), self._owner, self._loop)
+
+    def close(self) -> None:
+        """Tombstone the bridge; further calls fail fast until start()."""
+        self._owner.close()
+
+    def start(self) -> None:
+        """Clear the close tombstone after close()."""
+        self._owner.start()
 
 
 def sync_sandbox(sandbox: Any, loop: asyncio.AbstractEventLoop) -> Any:
@@ -412,68 +544,12 @@ class _SandboxProcessBackend:
         )
 
     def close(self) -> None:
+        sandbox = self._sandbox
+        if isinstance(sandbox, _SyncDaytonaSandbox):
+            # Tombstone the bridge so late calls fail typed-fast after lease
+            # release; the shared service loop outlives individual Turns.
+            sandbox.close()
         return None
-
-
-class _PublicStdoutProjector:
-    """Forward ordinary stdout while hiding the known SUBMIT stdout frame.
-
-    The marker may also occur in ordinary user stdout, so a marker alone is not
-    treated as a control frame. The private frame is removed only when it exactly
-    matches the final payload returned by the execution backend.
-    """
-
-    def __init__(self, emit: OutputCallback) -> None:
-        self._emit = emit
-        self._marker = FINAL_OUTPUT_MARKER
-        self._buffer = ""
-
-    def feed(self, value: str) -> None:
-        if not value:
-            return
-        pending = self._buffer + value
-        self._buffer = ""
-        start = pending.find(self._marker)
-        if start >= 0:
-            if start:
-                self._emit(pending[:start])
-            self._buffer = pending[start:]
-            return
-        suffix = self._marker_prefix_suffix(pending)
-        if suffix:
-            self._emit(pending[: -len(suffix)])
-            self._buffer = suffix
-        else:
-            self._emit(pending)
-
-    def finish(self, *, expected_final: Mapping[str, Any] | None = None) -> None:
-        pending = self._buffer
-        self._buffer = ""
-        if not pending:
-            return
-        if expected_final is None:
-            self._emit(pending)
-            return
-
-        frame = final_output_frame(expected_final, marker=self._marker)
-        offset = 0
-        while True:
-            start = pending.find(frame, offset)
-            if start < 0:
-                self._emit(pending[offset:])
-                return
-            self._emit(pending[offset:start])
-            offset = start + len(frame)
-            if pending.startswith("\r\n", offset):
-                offset += 2
-            elif pending.startswith(("\n", "\r"), offset):
-                offset += 1
-
-    def _marker_prefix_suffix(self, value: str) -> str:
-        for length in range(min(len(value), len(self._marker) - 1), 0, -1):
-            if value.endswith(self._marker[:length]):
-                return value[-length:]
-        return ""
 
 
 class DaytonaCodeInterpreter:
@@ -569,17 +645,6 @@ class DaytonaCodeInterpreter:
             return "Execution error"
         return truncate_public_text(str(result or ""), max_len=self._observation_max_chars)
 
-    def _emit_output_delta(self, value: str, *, step: int, stream_id: str, emitted_chars: list[int]) -> None:
-        if not value:
-            return
-        remaining = self._observation_max_chars - emitted_chars[0]
-        if remaining <= 0:
-            return
-        chunk = value[:remaining]
-        emitted_chars[0] += len(chunk)
-        if chunk:
-            self._observe(RLMOutput(chunk, step, stream_id, True, False))
-
     def _run_backend(
         self,
         code: str,
@@ -657,13 +722,15 @@ class DaytonaCodeInterpreter:
         self._observation_step += 1
         step = self._observation_step
         output_stream_id = f"interpreter:{self._observation_namespace}:output:{step}"
-        emitted_chars = [0]
+        output_state = _OutputStreamState()
         stdout_projector = _PublicStdoutProjector(
-            lambda value: self._emit_output_delta(
+            lambda value: _emit_output_delta(
                 value,
                 step=step,
                 stream_id=output_stream_id,
-                emitted_chars=emitted_chars,
+                state=output_state,
+                max_chars=self._observation_max_chars,
+                observe=self._observe,
             )
         )
         step_started = time.perf_counter()
@@ -717,7 +784,14 @@ class DaytonaCodeInterpreter:
                 execute_ms = int((time.perf_counter() - execute_started) * 1_000)
                 self._reject_repeated_no_progress(normalized_code, result)
                 stdout_projector.finish(expected_final=_submitted_payload(result))
-                self._observe(RLMOutput(self._public_output(result), step, output_stream_id, False, True))
+                _flush_step_output(
+                    result,
+                    step=step,
+                    stream_id=output_stream_id,
+                    state=output_state,
+                    public_output=self._public_output,
+                    observe=self._observe,
+                )
                 outputs: dict[str, Any] = {
                     "path": "http_broker" if self._http_broker is not None else type(self._backend).__name__,
                     "result_kind": _result_kind(result),
@@ -741,16 +815,22 @@ class DaytonaCodeInterpreter:
                 return result
             except TurnTerminalError:
                 stdout_projector.finish()
-                self._observe(RLMOutput("Execution failed", step, output_stream_id, False, True))
+                _close_output_stream(
+                    "Execution failed", step=step, stream_id=output_stream_id, state=output_state, observe=self._observe
+                )
                 raise
             except DaytonaAdapterError:
                 stdout_projector.finish()
-                self._observe(RLMOutput("Execution failed", step, output_stream_id, False, True))
+                _close_output_stream(
+                    "Execution failed", step=step, stream_id=output_stream_id, state=output_state, observe=self._observe
+                )
                 raise
             except Exception as exc:
                 mapped = map_provider_error(exc)
                 stdout_projector.finish()
-                self._observe(RLMOutput("Execution failed", step, output_stream_id, False, True))
+                _close_output_stream(
+                    "Execution failed", step=step, stream_id=output_stream_id, state=output_state, observe=self._observe
+                )
                 raise mapped from exc
             finally:
                 duration_ms = int((time.perf_counter() - step_started) * 1_000)
@@ -848,6 +928,10 @@ class DaytonaCodeInterpreter:
                 msg = f"unknown tool: {name}"
                 raise DaytonaAdapterError(message=msg, cause_type="UnknownToolError")
             try:
+                # Host contract is kwargs-only: DSPy 3.3.x interpreter tools are
+                # ``def invoke(**kwargs)`` callables behind spoofed signatures,
+                # so broker payloads forward every parameter by name. ``args``
+                # is retained only for POSITIONAL_ONLY completeness.
                 return fn(*args, **kwargs)
             except WorkspaceToolError as exc:
                 return {

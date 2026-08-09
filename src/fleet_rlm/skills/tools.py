@@ -35,7 +35,14 @@ def skill_loaded_public_payload(skill: SkillDefinition) -> dict[str, Any]:
 
 
 class SkillToolHost:
-    """Turn-bound progressive tools over one immutable catalog."""
+    """Turn-bound progressive tools over one immutable catalog.
+
+    Lock discipline (RC-7): ``self._lock`` guards book-keeping only
+    (``_loaded_ids``/``_installed_ids``/``_pending_events``). It is never held
+    across brokered sandbox calls — a host lock held over a posted
+    ``write_text`` deadlocks against the service loop's own synchronous
+    ``drain_public_events`` on the same lock.
+    """
 
     def __init__(
         self,
@@ -65,18 +72,24 @@ class SkillToolHost:
         install only surfaces them at `skills/<name>/<path>` so generated code
         can read or execute them. All-or-nothing: a write failure skips the
         install (resources remain readable via `read_skill_resource`).
+
+        Lock discipline (RC-7): the brokered sandbox ``write_text`` calls run
+        LOCK-FREE — the lock only guards the ``_installed_ids`` bookkeeping.
+        Overwrite-identical content keeps concurrent duplicate installs safe.
         """
         workspace = self._workspace
         if workspace is None or not skill.resources:
             return ()
-        if skill.card.id in self._installed_ids:
-            return self._installed_paths(skill)
+        with self._lock:
+            if skill.card.id in self._installed_ids:
+                return self._installed_paths(skill)
         for path, resource in zip(self._installed_paths(skill), skill.resources.values(), strict=True):
             try:
                 workspace.write_text(path, resource.content, overwrite=True)
             except Exception:
                 return ()
-        self._installed_ids.add(skill.card.id)
+        with self._lock:
+            self._installed_ids.add(skill.card.id)
         return self._installed_paths(skill)
 
     @property
@@ -112,8 +125,12 @@ class SkillToolHost:
                 return
             if len(self._loaded_ids) >= self._max_loaded_skills:
                 raise ValueError("too many loaded Skills")
+            # Registration itself is the install guard (RC-7): the brokered
+            # sandbox writes below run lock-free so the service loop can never
+            # block on this lock while a Fulfill thread waits on the post.
             self._loaded_ids.add(skill.card.id)
-            self._install_resources(skill)
+        self._install_resources(skill)
+        with self._lock:
             self._pending_events.extend((skill_activated_public_payload(skill), skill_loaded_public_payload(skill)))
 
     def load_skill(self, skill_id: str, expected_version: str | None = None) -> dict[str, Any]:
@@ -121,11 +138,15 @@ class SkillToolHost:
         if error or skill is None:
             return {"ok": False, "error": error or "skill_not_found"}
         with self._lock:
-            if skill.card.id not in self._loaded_ids:
+            already_registered = skill.card.id in self._loaded_ids
+            if not already_registered:
                 if len(self._loaded_ids) >= self._max_loaded_skills:
                     return {"ok": False, "error": "skill_limit_exceeded"}
-                self.mark_preloaded(skill)
-            installed_paths = self._install_resources(skill)
+                self._loaded_ids.add(skill.card.id)
+        installed_paths = self._install_resources(skill)
+        if not already_registered:
+            with self._lock:
+                self._pending_events.extend((skill_activated_public_payload(skill), skill_loaded_public_payload(skill)))
         card = skill.card
         result: dict[str, Any] = {
             "ok": True,

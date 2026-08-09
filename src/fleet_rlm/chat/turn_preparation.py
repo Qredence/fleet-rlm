@@ -13,6 +13,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from fleet_rlm.artifacts.promotion import RunArtifactSink
 from fleet_rlm.chat.session_context import build_session_context_manifest
 from fleet_rlm.chat.turn_lifecycle import ExecuteTurn
+from fleet_rlm.files.memory_models import WORKSPACE_MEMORY_INJECTION_TAIL_BYTES
 from fleet_rlm.files.models import (
     AttachmentAccess,
     AttachmentRun,
@@ -92,6 +93,14 @@ class PreparedTurn:
 
     async def aclose(self) -> None:
         await self._resources.aclose()
+
+
+def _workspace_memory_digest(capabilities: PreparedCapabilities) -> str:
+    """Bounded defensive projection of the capability digest; never fails a Turn."""
+    digest = getattr(capabilities, "workspace_memory_digest", "")
+    if not isinstance(digest, str) or len(digest.encode("utf-8")) > WORKSPACE_MEMORY_INJECTION_TAIL_BYTES:
+        return ""
+    return digest
 
 
 class TurnPreparation(Protocol):
@@ -290,6 +299,7 @@ class DefaultTurnPreparer:
                 ),
                 attachment_context=attachment_context,
                 preparation_notices=tuple(getattr(capabilities, "preparation_notices", ())),
+                workspace_memory_digest=_workspace_memory_digest(capabilities),
             ),
             execution=ExecutionRuntime(
                 models=self._models,

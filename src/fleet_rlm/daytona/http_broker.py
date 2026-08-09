@@ -12,6 +12,7 @@ import hashlib
 import inspect
 import json
 import keyword
+import logging
 import re
 import secrets
 import time
@@ -42,6 +43,8 @@ from fleet_rlm.daytona.errors import (
 
 if TYPE_CHECKING:
     from fleet_rlm.daytona.interpreter import BackendExecutionResult
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_BROKER_PORT = 3000
 _PREVIEW_LINK_RETRY_DELAYS = (0.25, 0.5)
@@ -566,10 +569,14 @@ class DaytonaHttpToolBroker:
             result = tool_executor(name, args, kwargs)
             body: dict[str, Any] = {"id": call_id, "lease_token": lease, "result": result}
         except Exception as exc:
+            message = sanitize_provider_message(str(exc))
+            # One sanitized WARNING per host-tool failure; never log args,
+            # kwargs, or tool content.
+            logger.warning("host tool %s failed: %s", name or "<unknown>", message)
             body = {
                 "id": call_id,
                 "lease_token": lease,
-                "error": sanitize_provider_message(str(exc)),
+                "error": message,
             }
         try:
             self._http().post(
@@ -604,12 +611,16 @@ class DaytonaHttpToolBroker:
                 sig_parts.append(name)
             else:
                 sig_parts.append(f"{name}={param.default!r}")
-            if param.kind == inspect.Parameter.KEYWORD_ONLY or (
-                param.default is not inspect.Parameter.empty and param.kind != inspect.Parameter.POSITIONAL_ONLY
-            ):
-                kwargs_parts.append(f'"{name}": {name}')
-            else:
+            # Host Tools are kwargs-only callables: DSPy 3.3.x
+            # ``RLM._make_interpreter_tool`` wraps every user tool in
+            # ``def invoke(**kwargs)`` while spoofing this signature, so every
+            # parameter must cross the wire by name. ``args`` is reserved for
+            # POSITIONAL_ONLY parameters, which cannot be forwarded by name
+            # (none exist on the current host tool surface).
+            if param.kind == inspect.Parameter.POSITIONAL_ONLY:
                 args_list.append(name)
+            else:
+                kwargs_parts.append(f'"{name}": {name}')
         return TOOL_WRAPPER_TEMPLATE.format(
             tool_name=tool_name,
             signature=", ".join(sig_parts),

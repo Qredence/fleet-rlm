@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
+from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
@@ -30,6 +31,7 @@ class _OpenedStream:
 @pytest.mark.asyncio
 async def test_native_runtime_deltas_reach_fastapi_sse_before_done() -> None:
     from fleet_rlm.api.routes.turns import create_turn
+    from fleet_rlm.api.schemas import CreateTurnRequest
 
     recorder = EventRecorder(uuid4(), uuid4())
     opened = _OpenedStream(
@@ -41,9 +43,26 @@ async def test_native_runtime_deltas_reach_fastapi_sse_before_done() -> None:
         )
     )
 
-    frames = [frame async for frame in create_turn(opened)]
+    class _Coordinator:
+        async def open(self, _command: object) -> _OpenedStream:
+            return opened
+
+    frames = [
+        frame
+        async for frame in create_turn(
+            uuid4(),
+            CreateTurnRequest(text="hello"),
+            SimpleNamespace(headers={}),
+            SimpleNamespace(user_id=uuid4(), workspace_id=uuid4()),
+            _Coordinator(),
+            SimpleNamespace(run_heartbeat_seconds=10),
+            "vertical-slice",
+            None,
+        )
+    ]
 
     assert [frame.data["type"] for frame in frames[:-1]] == [
+        "data-status",
         "start",
         "reasoning-start",
         "reasoning-delta",
@@ -51,5 +70,10 @@ async def test_native_runtime_deltas_reach_fastapi_sse_before_done() -> None:
         "reasoning-end",
         "finish",
     ]
+    assert frames[0].data == {
+        "type": "data-status",
+        "data": {"phase": "preparation", "status": "running", "message": None},
+        "transient": True,
+    }
     assert frames[-1].raw_data == "[DONE]"
     assert opened.closed

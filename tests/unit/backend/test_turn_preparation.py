@@ -1,7 +1,8 @@
-"""Prepare-before-stream resource ownership and cleanup."""
+"""Prepare-before-stream resource ownership, cleanup, and SSE preparation prelude."""
 
 from __future__ import annotations
 
+import itertools
 from types import SimpleNamespace
 from uuid import uuid4
 
@@ -336,3 +337,243 @@ async def test_capsule_validation_failure_releases_all_prepared_resources() -> N
         ).prepare(turn, deadline=float("inf"))
 
     assert operations == ["remove-attachment", "close-capabilities", "release-environment"]
+
+
+# ---------------------------------------------------------------------------
+# PR-D: preparation prelude emitted by the Turn SSE generator
+# ---------------------------------------------------------------------------
+
+_PRELUDE_DATA = {
+    "type": "data-status",
+    "data": {"phase": "preparation", "status": "running", "message": None},
+    "transient": True,
+}
+
+
+def _route_kwargs(coordinator, heartbeat_seconds=10, **overrides):
+    from types import SimpleNamespace
+    from uuid import uuid4
+
+    from fleet_rlm.api.schemas import CreateTurnRequest
+
+    values = {
+        "session_id": uuid4(),
+        "body": CreateTurnRequest(text="hello"),
+        "request": SimpleNamespace(headers={}),
+        "identity": SimpleNamespace(user_id=uuid4(), workspace_id=uuid4()),
+        "coordinator": coordinator,
+        "settings": SimpleNamespace(run_heartbeat_seconds=heartbeat_seconds),
+        "idempotency_key": f"prelude-{uuid4()}",
+        "_headers": None,
+    }
+    values.update(overrides)
+    return values
+
+
+@pytest.mark.asyncio
+async def test_prelude_heartbeats_are_transient_repeat_at_cadence_and_stop_when_open_resolves() -> None:
+    import asyncio
+    from uuid import uuid4
+
+    from fleet_rlm.api.routes.turns import create_turn
+    from fleet_rlm.rlm.events import EventRecorder, RunCompleted, RunStarted
+
+    gate = asyncio.Event()
+    loop = asyncio.get_running_loop()
+    loop.call_later(0.09, gate.set)
+    run_id = uuid4()
+    recorder = EventRecorder(run_id, uuid4())
+
+    class Opened:
+        def __init__(self):
+            self.run_id = run_id
+            self.closed = 0
+
+        def __aiter__(self):
+            return self._events()
+
+        async def _events(self):
+            yield recorder.record(RunStarted("live"))
+            yield recorder.record(RunCompleted(1, "live"))
+
+        async def aclose(self):
+            self.closed += 1
+
+    opened = Opened()
+
+    class Coordinator:
+        def __init__(self):
+            self.open_calls = 0
+
+        async def open(self, _command):
+            self.open_calls += 1
+            await gate.wait()
+            return opened
+
+    coordinator = Coordinator()
+    timestamps: list[float] = []
+    frames = []
+    async for frame in create_turn(**_route_kwargs(coordinator, heartbeat_seconds=0.02)):
+        frames.append(frame)
+        if frame.data == _PRELUDE_DATA:
+            timestamps.append(loop.time())
+
+    # heatbeats repeated while open was gated, then stopped the moment it resolved
+    assert len(timestamps) >= 3
+    assert all(later - earlier >= 0.015 for earlier, later in itertools.pairwise(timestamps))
+    data_types = [frame.data["type"] for frame in frames if frame.data]
+    first_evidence = data_types.index("start")
+    assert set(data_types[:first_evidence]) == {"data-status"}
+    assert data_types[first_evidence:] == ["start", "finish"]
+    assert frames[-1].raw_data == "[DONE]"
+    assert coordinator.open_calls == 1
+    assert opened.closed == 1
+
+
+@pytest.mark.asyncio
+async def test_prelude_emits_once_before_instant_open_and_failure_maps_to_error_finish() -> None:
+    from types import SimpleNamespace
+
+    from fleet_rlm.api.routes.turns import create_turn
+    from fleet_rlm.chat.turn_lifecycle import TurnNotFoundError
+
+    class Coordinator:
+        async def open(self, _command):
+            raise TurnNotFoundError("claim says no")
+
+    frames = [frame async for frame in create_turn(**_route_kwargs(Coordinator(), request=SimpleNamespace(headers={})))]
+
+    chunks = [frame.data for frame in frames if frame.data]
+    assert next(iter(chunks)) == _PRELUDE_DATA
+    assert chunks[1:] == [
+        {"type": "error", "errorText": "Session not found"},
+        {"type": "finish", "finishReason": "error"},
+    ]
+    assert frames[-1].raw_data == "[DONE]"
+
+
+@pytest.mark.asyncio
+async def test_preparation_cancel_projects_single_abort_frame() -> None:
+    from types import SimpleNamespace
+
+    from fleet_rlm.api.routes.turns import create_turn
+    from fleet_rlm.chat.turn_preparation import TurnPreparationCancelledError
+
+    class Coordinator:
+        async def open(self, _command):
+            raise TurnPreparationCancelledError("Turn cancelled")
+
+    frames = [frame async for frame in create_turn(**_route_kwargs(Coordinator(), request=SimpleNamespace(headers={})))]
+
+    chunks = [frame.data for frame in frames if frame.data]
+    assert chunks == [_PRELUDE_DATA, {"type": "abort", "reason": "Turn cancelled"}]
+    assert frames[-1].raw_data == "[DONE]"
+
+
+@pytest.mark.asyncio
+async def test_disconnect_before_open_resolves_settles_cancelled_and_persists_tombstone() -> None:
+    import asyncio
+    from uuid import uuid4
+
+    from fleet_rlm.api.routes.turns import create_turn
+    from fleet_rlm.chat.turn_cleanup import TurnCleanupSupervisor
+    from fleet_rlm.chat.turn_coordinator import TurnCoordinator
+    from fleet_rlm.chat.turn_lifecycle import TurnLifecycleService
+    from fleet_rlm.persistence.repositories import InMemorySessionCatalog, InMemoryTurnStateStore
+    from fleet_rlm.rlm.events import EventRecorder, RunStarted, RuntimeEvent
+    from fleet_rlm.sessions.models import TurnAccess
+
+    access = TurnAccess(uuid4(), uuid4())
+    store = InMemoryTurnStateStore()
+    session = await InMemorySessionCatalog(store).create(
+        user_id=access.user_id,
+        workspace_id=access.workspace_id,
+        title="disconnect during preparation",
+    )
+    release_preparation = asyncio.Event()
+    cleanup = TurnCleanupSupervisor()
+    prepared_run_ids: list[object] = []
+
+    class Preparation:
+        async def prepare(self, turn, *, deadline):
+            del deadline
+            await release_preparation.wait()
+            prepared_run_ids.append(turn.run_id)
+
+            class Prepared:
+                execution = object()
+                artifact_sink = None
+                result_snapshot_sink = None
+
+                async def aclose(self):
+                    return None
+
+            return Prepared()
+
+    class Stream:
+        outcome = None
+
+        def __init__(self):
+            recorder = EventRecorder(prepared_run_ids[0], session.id)
+            self._events: list[RuntimeEvent] = [recorder.record(RunStarted("live"))]
+
+        def __aiter__(self):
+            return self
+
+        async def __anext__(self):
+            if self._events:
+                return self._events.pop(0)
+            await asyncio.Event().wait()
+            raise StopAsyncIteration
+
+        async def aclose(self):
+            return None
+
+        async def wait_owned(self):
+            return None
+
+    class Runner:
+        def stream(self, _execution):
+            return Stream()
+
+    coordinator = TurnCoordinator(
+        lifecycle=TurnLifecycleService(store, max_artifact_bytes=1024),
+        preparation=Preparation(),
+        runner=Runner(),
+        cleanup=cleanup,
+    )
+    from types import SimpleNamespace
+
+    generator = create_turn(
+        **_route_kwargs(
+            coordinator,
+            session_id=session.id,
+            identity=SimpleNamespace(user_id=access.user_id, workspace_id=access.workspace_id),
+        )
+    )
+    first = await generator.__anext__()
+    assert first.data == _PRELUDE_DATA
+
+    pending = asyncio.create_task(generator.__anext__())
+    await asyncio.sleep(0.05)  # the generator is parked in the heartbeat wait with open gated
+    pending.cancel()  # the transport cancellation lands mid-prelude
+    release_preparation.set()  # the shielded open still completes; settlement follows
+    with pytest.raises(asyncio.CancelledError):
+        await pending
+
+    # Closing a started-but-suspended Run stream settles via the async-generator
+    # finalizer a few loop ticks later, exactly like the existing transport close.
+    assert len(prepared_run_ids) == 1
+    run = store._runs[prepared_run_ids[0]]
+    for _ in range(200):
+        await asyncio.sleep(0.01)
+        if run.status == "cancelled":
+            break
+    await cleanup.shutdown(drain_seconds=1)
+    assert (run.status, run.failure_code) == ("cancelled", "cancelled")
+    records = await store.turn_records(session.id, access)
+    assert [type(record).__name__ for record in records] == ["UserTurnRecord", "AssistantTurnRecord"]
+    assert records[0].input.text == "hello"
+    assert [part.type for part in records[1].committed.parts] == ["status", "usage", "text"]
+    assert records[1].committed.text == "Turn cancelled"
+    assert records[0].sequence + 1 == records[1].sequence

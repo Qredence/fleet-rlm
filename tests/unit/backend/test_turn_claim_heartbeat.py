@@ -510,3 +510,348 @@ async def test_invalid_heartbeat_revokes_run_fences_before_releasing_claim() -> 
 
     replacement = await authoritative.begin(BeginTurn(access, session.id, TurnInput("next"), "next", uuid4()))
     assert isinstance(replacement, ExecuteTurn)
+
+
+@pytest.mark.asyncio
+async def test_post_commit_heartbeat_does_not_fail_committed_turn(caplog) -> None:
+    """RC-8 regression: a heartbeat racing post-commit must never fail the live stream."""
+    import logging
+
+    from fleet_rlm.chat.commands import OpenTurnCommand
+    from fleet_rlm.chat.turn_cleanup import TurnCleanupSupervisor
+    from fleet_rlm.chat.turn_coordinator import TurnCoordinator
+    from fleet_rlm.chat.turn_lifecycle import TurnLifecycleService
+    from fleet_rlm.persistence.repositories import InMemorySessionCatalog, InMemoryTurnStateStore
+    from fleet_rlm.rlm.dspy_contract import PredictionResult
+    from fleet_rlm.rlm.events import EventRecorder, RunCompleted, RunFailed, RunStarted
+    from fleet_rlm.rlm.outcome import RLMOutcome
+    from fleet_rlm.sessions.models import TurnAccess, TurnInput
+
+    authoritative = InMemoryTurnStateStore()
+    access = TurnAccess(uuid4(), uuid4())
+    session = await InMemorySessionCatalog(authoritative).create(
+        user_id=access.user_id,
+        workspace_id=access.workspace_id,
+        title="commit beats heartbeat",
+    )
+    run_id = uuid4()
+    snapshot_gate = asyncio.Event()
+
+    class SnapshotSink:
+        def result_path(self, session_id, requested_run_id):
+            return f"/snapshots/{session_id}/{requested_run_id}.json"
+
+        async def write(self, _location, _value):
+            # Hold finalization open after the durable commit, exactly like the
+            # overlapped volume round-trip in the incident.
+            await snapshot_gate.wait()
+
+        async def remove(self, _location):
+            return None
+
+    class Prepared:
+        execution = SimpleNamespace(run_id=run_id, session_id=session.id)
+        artifact_sink = None
+        result_snapshot_sink = SnapshotSink()
+
+        async def aclose(self):
+            return None
+
+    class Preparation:
+        async def prepare(self, _turn, *, deadline):
+            del deadline
+            return Prepared()
+
+    class Stream:
+        outcome = RLMOutcome(
+            "completed",
+            PredictionResult("done", {"answer": "done"}, "fleet.default", "1"),
+        )
+
+        def __init__(self):
+            self._sent = False
+
+        async def __anext__(self):
+            if not self._sent:
+                self._sent = True
+                return EventRecorder(run_id, session.id).record(RunStarted(delivery="live"))
+            raise StopAsyncIteration
+
+        async def aclose(self):
+            return None
+
+        async def wait_owned(self):
+            return None
+
+    class Runner:
+        def stream(self, _execution):
+            return Stream()
+
+    cleanup = TurnCleanupSupervisor()
+    coordinator = TurnCoordinator(
+        lifecycle=TurnLifecycleService(
+            authoritative,
+            max_artifact_bytes=100,
+            heartbeat_seconds=0.01,
+            stale_after_seconds=5,
+        ),
+        preparation=Preparation(),
+        runner=Runner(),
+        cleanup=cleanup,
+    )
+
+    with caplog.at_level(logging.INFO):
+        stream = await coordinator.open(
+            OpenTurnCommand(access, session.id, TurnInput("hello"), "commit-beats-heartbeat", run_id)
+        )
+
+        async def drain():
+            return [event async for event in stream]
+
+        drain_task = asyncio.ensure_future(drain())
+        for _ in range(200):
+            if authoritative._runs[run_id].status == "completed":
+                break
+            await asyncio.sleep(0.005)
+        assert authoritative._runs[run_id].status == "completed"
+        # Several heartbeat ticks now land on the already-committed row.
+        await asyncio.sleep(0.1)
+        snapshot_gate.set()
+        events = await asyncio.wait_for(drain_task, 5)
+    await cleanup.shutdown(drain_seconds=1)
+
+    assert isinstance(events[-1].detail, RunCompleted)
+    assert not any(isinstance(event.detail, RunFailed) for event in events)
+    assert authoritative._runs[run_id].status == "completed"
+    assert "claim heartbeat stopped after commit" in caplog.text
+    assert "detached Turn cleanup failed" not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_claim_loss_cleanup_after_commit_is_a_benign_no_op(caplog) -> None:
+    """Claim-loss cleanup racing a committed Turn logs and no-ops; commit state is untouched."""
+    import logging
+
+    from fleet_rlm.chat.turn_cleanup import TurnCleanupSupervisor
+    from fleet_rlm.chat.turn_coordinator import TurnCoordinator
+    from fleet_rlm.chat.turn_execution import _ClaimHeartbeat
+    from fleet_rlm.chat.turn_lifecycle import (
+        BeginTurn,
+        CommittedTurnReceipt,
+        ExecuteTurn,
+        TurnAlreadyCompletedError,
+        TurnFailure,
+        TurnLifecycleService,
+        TurnStateError,
+    )
+    from fleet_rlm.persistence.repositories import InMemorySessionCatalog, InMemoryTurnStateStore
+    from fleet_rlm.rlm.dspy_contract import PredictionResult, empty_rlm_usage
+    from fleet_rlm.rlm.outcome import RLMOutcome
+    from fleet_rlm.sessions.models import TurnAccess, TurnInput
+
+    assert issubclass(TurnAlreadyCompletedError, TurnStateError)
+
+    authoritative = InMemoryTurnStateStore()
+    access = TurnAccess(uuid4(), uuid4())
+    session = await InMemorySessionCatalog(authoritative).create(
+        user_id=access.user_id,
+        workspace_id=access.workspace_id,
+        title="cleanup loses to commit",
+    )
+    lifecycle = TurnLifecycleService(authoritative, max_artifact_bytes=100)
+    start = await lifecycle.begin(BeginTurn(access, session.id, TurnInput("hello"), "begin", uuid4()))
+    assert isinstance(start, ExecuteTurn)
+    receipt = await lifecycle.finish(
+        start,
+        RLMOutcome("completed", PredictionResult("done", {"answer": "done"}, "fleet.default", "1")),
+    )
+    assert isinstance(receipt, CommittedTurnReceipt)
+
+    fenced: list[object] = []
+
+    async def fence(requested_session_id):
+        fenced.append(requested_session_id)
+
+    cleanup = TurnCleanupSupervisor()
+
+    class Preparation:
+        async def prepare(self, _turn, *, deadline):
+            del deadline
+            raise AssertionError("preparation must not start")
+
+    class Runner:
+        def stream(self, _execution):
+            raise AssertionError("execution must not start")
+
+    coordinator = TurnCoordinator(
+        lifecycle=lifecycle,
+        preparation=Preparation(),
+        runner=Runner(),
+        cleanup=cleanup,
+        claim_loss_fence=fence,
+    )
+    heartbeat = _ClaimHeartbeat(asyncio.create_task(asyncio.sleep(60)), asyncio.Event())
+    with caplog.at_level(logging.INFO):
+        coordinator._submit_claim_loss_cleanup(start, heartbeat)
+        await cleanup.shutdown(drain_seconds=1)
+
+    run = authoritative._runs[start.run_id]
+    assert (run.status, run.failure_code) == ("completed", None)
+    assert fenced == []
+    assert not start.authority.revoked
+    assert "stale-claim revocation skipped for committed Run" in caplog.text
+    assert "detached Turn cleanup failed" not in caplog.text
+
+    # The strict lifecycle path keeps refusing to revoke a committed claim.
+    with pytest.raises(TurnAlreadyCompletedError):
+        await lifecycle.revoke_claim(start, TurnFailure("failed", "stale_claim", "Turn failed", empty_rlm_usage()))
+
+
+@pytest.mark.asyncio
+async def test_revoke_claim_guard_only_relaxes_committed_runs(caplog) -> None:
+    """The guard funnel returns None for committed Runs; live claims still revoke durably."""
+    import logging
+
+    from fleet_rlm.chat.turn_coordinator import TurnCoordinator
+    from fleet_rlm.chat.turn_lifecycle import (
+        BeginTurn,
+        CommittedTurnReceipt,
+        ExecuteTurn,
+        TurnLifecycleService,
+    )
+    from fleet_rlm.persistence.repositories import InMemorySessionCatalog, InMemoryTurnStateStore
+    from fleet_rlm.rlm.dspy_contract import PredictionResult, empty_rlm_usage
+    from fleet_rlm.rlm.outcome import RLMOutcome
+    from fleet_rlm.sessions.models import TurnAccess, TurnInput
+
+    authoritative = InMemoryTurnStateStore()
+    access = TurnAccess(uuid4(), uuid4())
+    session = await InMemorySessionCatalog(authoritative).create(
+        user_id=access.user_id,
+        workspace_id=access.workspace_id,
+        title="guard funnel",
+    )
+    lifecycle = TurnLifecycleService(authoritative, max_artifact_bytes=100)
+
+    class Preparation:
+        async def prepare(self, _turn, *, deadline):
+            del deadline
+            raise AssertionError("preparation must not start")
+
+    class Runner:
+        def stream(self, _execution):
+            raise AssertionError("execution must not start")
+
+    coordinator = TurnCoordinator(lifecycle=lifecycle, preparation=Preparation(), runner=Runner())
+
+    committed = await lifecycle.begin(BeginTurn(access, session.id, TurnInput("first"), "first", uuid4()))
+    assert isinstance(committed, ExecuteTurn)
+    receipt = await lifecycle.finish(
+        committed,
+        RLMOutcome("completed", PredictionResult("done", {"answer": "done"}, "fleet.default", "1")),
+    )
+    assert isinstance(receipt, CommittedTurnReceipt)
+
+    with caplog.at_level(logging.INFO):
+        guarded = await coordinator._revoke_claim(committed, empty_rlm_usage())
+    assert guarded is None
+    assert "stale-claim revocation skipped for committed Run" in caplog.text
+    assert (authoritative._runs[committed.run_id].status) == "completed"
+
+    live = await lifecycle.begin(BeginTurn(access, session.id, TurnInput("second"), "second", uuid4()))
+    assert isinstance(live, ExecuteTurn)
+    revoked = await coordinator._revoke_claim(live, empty_rlm_usage())
+    assert revoked is not None
+    assert (revoked.terminal_status, revoked.failure_code, revoked.durable) == ("failed", "stale_claim", False)
+    run = authoritative._runs[live.run_id]
+    assert (run.status, run.failure_code) == ("settling", "stale_claim")
+    released = await lifecycle.complete_settling(live)
+    assert (released.terminal_status, released.durable) == ("failed", True)
+
+
+@pytest.mark.asyncio
+async def test_driver_claim_loss_cleanup_skips_settlement_release_after_commit(caplog) -> None:
+    """Driver cleanup with claim_lost still closes resources but never settles a committed Run."""
+    import logging
+
+    from fleet_rlm.chat.committed_turn_events import CommittedTurnEventProjector
+    from fleet_rlm.chat.turn_cleanup import TurnCleanupSupervisor
+    from fleet_rlm.chat.turn_execution import TurnExecutionDriver
+    from fleet_rlm.chat.turn_lifecycle import (
+        BeginTurn,
+        CommittedTurnReceipt,
+        ExecuteTurn,
+        TurnAlreadyCompletedError,
+        TurnFailure,
+        TurnLifecycleService,
+    )
+    from fleet_rlm.persistence.repositories import InMemorySessionCatalog, InMemoryTurnStateStore
+    from fleet_rlm.rlm.dspy_contract import PredictionResult, empty_rlm_usage
+    from fleet_rlm.rlm.outcome import RLMOutcome
+    from fleet_rlm.sessions.models import TurnAccess, TurnInput
+
+    authoritative = InMemoryTurnStateStore()
+    access = TurnAccess(uuid4(), uuid4())
+    session = await InMemorySessionCatalog(authoritative).create(
+        user_id=access.user_id,
+        workspace_id=access.workspace_id,
+        title="driver cleanup loses to commit",
+    )
+    lifecycle = TurnLifecycleService(authoritative, max_artifact_bytes=100)
+    start = await lifecycle.begin(BeginTurn(access, session.id, TurnInput("hello"), "begin", uuid4()))
+    assert isinstance(start, ExecuteTurn)
+    receipt = await lifecycle.finish(
+        start,
+        RLMOutcome("completed", PredictionResult("done", {"answer": "done"}, "fleet.default", "1")),
+    )
+    assert isinstance(receipt, CommittedTurnReceipt)
+
+    fenced: list[object] = []
+
+    async def fence(requested_session_id):
+        fenced.append(requested_session_id)
+
+    async def revoke_late(turn, usage):
+        del usage
+        failure = TurnFailure("failed", "stale_claim", "Turn failed", empty_rlm_usage())
+        try:
+            return await lifecycle.revoke_claim(turn, failure)
+        except TurnAlreadyCompletedError:
+            return None
+
+    closed: list[str] = []
+
+    class Prepared:
+        async def aclose(self):
+            closed.append("prepared")
+
+    async def finalize() -> CommittedTurnReceipt:
+        return receipt
+
+    cleanup = TurnCleanupSupervisor()
+    driver = TurnExecutionDriver(
+        lifecycle=lifecycle,
+        runner=None,  # type: ignore[arg-type] - cleanup never touches the runner
+        projector=CommittedTurnEventProjector(),
+        cleanup=cleanup,
+        claim_loss_fence=fence,
+        turn_timeout_seconds=60,
+        revoke_claim=revoke_late,
+    )
+    with caplog.at_level(logging.INFO):
+        driver._submit_cleanup(
+            start,
+            None,
+            Prepared(),
+            None,
+            asyncio.ensure_future(finalize()),
+            claim_lost=True,
+            claim_loss_usage=empty_rlm_usage(),
+        )
+        await cleanup.shutdown(drain_seconds=1)
+
+    run = authoritative._runs[start.run_id]
+    assert (run.status, run.failure_code) == ("completed", None)
+    assert fenced == []
+    assert closed == ["prepared"]
+    assert "detached Turn cleanup failed" not in caplog.text

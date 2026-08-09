@@ -45,7 +45,7 @@ async def list_volume_tree(
     paths = sorted({file.path.removeprefix(prefix) for file in files})
     directories: list[str] = []
     if requested == PurePosixPath("."):
-        directories = ["artifacts", "attachments", "files", "sessions"]
+        directories = ["artifacts", "attachments", "files", "projects", "sessions"]
     return VolumeTreeResponse(
         paths=paths,
         directories=directories,

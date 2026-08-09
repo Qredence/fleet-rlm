@@ -57,6 +57,9 @@ _Avoid_: Turn (when meaning the user message), Sandbox
 An authorized request to stop a specific in-flight Run. Distinct from timeout.
 Ownership is re-checked. Outcome is one terminal Runtime
 Event and never a successful Committed Turn for work that did not complete.
+Once settlement completes, the cancelled attempt still persists a bounded
+tombstone Committed Turn (status marker, observed usage, closed text) so
+committed history shows the attempt without evidence parts.
 _Avoid_: disconnect alone, kill Sandbox (as the product act), Turn Cancellation
 
 **Turn Claim**:
@@ -156,13 +159,26 @@ Binding must be able to reattach this scope on acquire.
 _Avoid_: tenant Workspace alone, whole shared Volume root, Sandbox Workspace
 
 **Workspace Memory**:
-Daytona-only workspace-wide immediate state at the fixed `MEMORIES.md` root of
-the already workspace-scoped Volume mount. `read_workspace_memory` loads the
-newest bounded complete records only when the RLM calls it; `update_workspace_memory`
-appends one normalized record only for an explicit user request. Appends are
-durable independently of Turn Commit and survive failed or cancelled Runs and
-Sandbox replacement.
-_Avoid_: Session History, automatic prompt injection, unbounded learned state
+Daytona-only workspace-wide immediate state at `memory/MEMORIES.md` under the
+already workspace-scoped Volume mount (legacy root `MEMORIES.md` migrates on
+first open; content is never lost). Records are canonical v1/v2 lines; new
+appends are v2 (`- [ts] **Category** <!-- id:8hex -->: learning`) with fresh
+ids. v1 rows derive a deterministic id from canonical text plus valid-record
+occurrence when read, so duplicate legacy rows remain separately addressable;
+duplicate persisted ids fail closed rather than selecting an arbitrary row.
+Reads are tolerant (humans edit the file): malformed lines are skipped with a
+bounded warning count while writes stay strictly validated.
+`read_workspace_memory` loads the newest bounded complete records on demand;
+`remember` (alias `update_workspace_memory`) appends one normalized record only
+for an explicit user request and is idempotent for the same record;
+`list_memories` pages id-addressed entries; `edit_memory` upgrades v1 to v2 or
+rewrites v2 while preserving id and timestamp; `forget` removes exactly one
+entry. Edit and forget use one mounted-agent read-modify-publish operation.
+Each Turn's `session_context` also carries a bounded <= 4 KiB
+`workspace_memory tail` digest (30 s per-root process cache) so recent
+learnings are visible without a Tool call. Records are durable independently
+of Turn Commit and survive failed or cancelled Runs and Sandbox replacement.
+_Avoid_: Session History, unbounded learned state
 
 **Workspace Volume Tree**:
 The Daytona-only bounded read-only HTTP/TUI projection of relative paths from
@@ -174,9 +190,11 @@ _Avoid_: Volume mount, Sandbox filesystem browser, public storage path
 
 **Session Workspace**:
 Private durable working files owned by one Session within Workspace Volume
-Scope. Successful writes persist immediately across Turns, failed or cancelled
-Runs, and Sandbox replacement; they are not Session History, commit-gated
-Artifacts, or Code-Interpreter Context.
+Scope. Successful writes, unique-fragment edits, and file-or-empty-directory
+deletes persist immediately across Turns, failed or cancelled Runs, and Sandbox
+replacement; they are not Session History, commit-gated Artifacts, or
+Code-Interpreter Context. Edits/deletes never recurse or follow symlinks and
+accept optional SHA-256 preconditions.
 Replacement continuity applies to the mounted bytes only, never interpreter
 globals or an Interpreter Lease.
 _Avoid_: Sandbox Workspace, Artifact, Attachment, durable REPL variables
@@ -265,6 +283,46 @@ AI SDK UI 7 v1 SSE projection of Runtime Events for `useChat`. Successful
 committed assistant Turns persist deterministic UIMessage parts; SSE bytes are
 not themselves durable records.
 _Avoid_: Runtime Event, raw event-log persistence
+
+## Module map
+
+### Workspace namespace disambiguation
+
+Five modules carry "workspace" names with different roles; do not conflate
+them. The volume-side gateway also lives in `daytona/workspace_gateway.py`
+(bounded Workspace Volume Tree reads and orphan byte cleanup state); no
+separate `workspace_volume*` module exists.
+
+| Module | Role | Primary callers |
+| --- | --- | --- |
+| `daytona/workspace_fs.py` | Session Workspace FS implementation: `AsyncDaytonaSessionWorkspaceFS` async source of truth, `DaytonaSessionWorkspaceFS` synchronous worker-thread bridge over it, plus the Volume byte adapters (`AsyncDaytonaVolumeFS`, `DaytonaSandboxVolumeFs`) | Turn capability preparation in `daytona/run_environment.py`; `daytona/workspace_gateway.py` |
+| `daytona/workspace_gateway.py` | REST-facing gateway that opens purpose-labelled ephemeral mounted Sandboxes for independent Workspace file/volume access | `files/workspace_access.py` via `composition/daytona.py` |
+| `files/workspace_access.py` | Public service boundary for the `/api/files` Workspace namespace | `api/routes/workspace_files.py`, composition |
+| `files/workspace_tools.py` | RLM Tool host binding Session Workspace operations as Host-Mediated Tools | `daytona/run_environment.py` |
+| `files/project_tools.py` | RLM Tool host for the durable projects-root namespace | `daytona/run_environment.py` |
+| `daytona/workspace_memory.py` | Workspace Memory store implementation over one mounted agent round trip | `daytona/run_environment.py` |
+| `daytona/workspace_agent.py` | Emitted stdlib-only Sandbox workspace agent code plus host run/decode adapters | `daytona/workspace_fs.py`, `daytona/workspace_memory.py` |
+
+### `daytona/` package one-liners
+
+- `__init__.py` — ownership package: curated re-exports of the Daytona adapter surface.
+- `bindings.py` — compatibility re-exports for Sandbox bindings.
+- `broker_source.py` — pure source-string generation for the in-sandbox host-tool broker.
+- `diagnostics.py` — opt-in disposable provider/mount probes (`fleet doctor daytona`).
+- `errors.py` — Fleet-facing error types and sanitized mapping for Daytona failures.
+- `http_broker.py` — HTTP-in-sandbox broker executing host tools and SUBMIT polls over localhost.
+- `interpreter.py` — `DaytonaCodeInterpreter`: DSPy RLM interpreter adapter (execution, observation, SUBMIT mediation, sync bridge).
+- `interpreter_output.py` — public per-step output projection: marker-hiding stdout replay, capped deltas, stream-closed tracking, final flush.
+- `optimization_evaluator.py` — disposable no-volume lifecycle for the offline signature-optimization lane.
+- `platform.py` — live SandboxPlatform and VolumeClient adapters over the Daytona SDK.
+- `provisioning.py` — strict async Sandbox, Volume, mount, and layout provisioning.
+- `recursive_child_runtime.py` — dedicated disposable runtimes for native DSPy recursive children.
+- `run_environment.py` — Run environment inventory and exact Turn capability preparation.
+- `session_manager.py` — interpreter lease acquire/release and Sandbox binding lifecycle.
+- `workspace_agent.py` — emitted Sandbox workspace agent source and its host execution adapter.
+- `workspace_fs.py` — Session Workspace FS implementation (see disambiguation above).
+- `workspace_gateway.py` — ephemeral mounted-Sandbox gateway (see disambiguation above).
+- `workspace_memory.py` — Workspace Memory store implementation (see disambiguation above).
 
 ## Out of this context (for now)
 

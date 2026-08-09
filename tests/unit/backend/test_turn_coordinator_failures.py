@@ -171,7 +171,16 @@ async def test_open_non_success_has_one_last_terminal_and_never_promotes(
     run = store._runs[run_id]
     assert (run.status, run.failure_code) == (status, status)
     assert cleanup.active_jobs == 0
-    assert await store.turn_records(session.id, access) == ()
+    if status == "cancelled":
+        # D2: a cancelled Run persists a bounded tombstone pair; other terminal
+        # failures still leave the listing untouched.
+        records = await store.turn_records(session.id, access)
+        assert [type(record).__name__ for record in records] == ["UserTurnRecord", "AssistantTurnRecord"]
+        assert records[0].input.text == status
+        assert records[1].committed.text == "Turn cancelled"
+        assert [part.type for part in records[1].committed.parts] == ["status", "usage", "text"]
+    else:
+        assert await store.turn_records(session.id, access) == ()
 
 
 @pytest.mark.asyncio

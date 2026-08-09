@@ -6,12 +6,28 @@ from dataclasses import dataclass
 from typing import Literal, Protocol
 
 
+class WorkspaceConflictError(FileExistsError):
+    """A workspace mutation conflict carrying one stable machine-readable detail.
+
+    ``detail`` vocabulary: ``checksum_mismatch`` (the optional SHA-256
+    precondition did not match current bytes), ``not_empty`` (delete on a
+    non-empty directory), ``ambiguous`` (patch text occurs more than once),
+    and ``missing`` (patch text never occurs). The empty string marks the
+    legacy create/overwrite conflict with no further detail.
+    """
+
+    def __init__(self, path: str, *, detail: str = "") -> None:
+        super().__init__(path)
+        self.detail = detail
+
+
 @dataclass(frozen=True, slots=True)
 class WorkspaceEntry:
     path: str
     kind: Literal["file", "directory"]
     byte_size: int | None
     modified_at: str | None
+    checksum_sha256: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -86,3 +102,14 @@ class SessionWorkspaceFS(Protocol):
     def write_text(self, path: str, content: str, *, overwrite: bool) -> WorkspaceEntry: ...
 
     def append_text(self, path: str, content: str) -> WorkspaceEntry: ...
+
+    def delete_path(self, path: str, *, expected_sha256: str | None = None) -> None: ...
+
+    def patch_text(
+        self,
+        path: str,
+        old: str,
+        new: str,
+        *,
+        expected_sha256: str | None = None,
+    ) -> WorkspaceEntry: ...

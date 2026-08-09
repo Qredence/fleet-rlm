@@ -8,7 +8,7 @@ paths:
       tags:
       - turns
       summary: Create Turn
-      description: Project one prepared Turn through FastAPI's native SSE transport.
+      description: Stream one Turn, opening claim and preparation inside the SSE generator.
       operationId: create_turn
       parameters:
       - name: session_id
@@ -34,7 +34,11 @@ paths:
               $ref: '#/components/schemas/CreateTurnRequest'
       responses:
         '200':
-          description: AI SDK UI v1 UIMessage SSE stream
+          description: 'AI SDK UI v1 UIMessage SSE stream. It opens immediately with
+            a transient data-status prelude (phase=preparation) that repeats every
+            runtime heartbeat until the Turn is claimed and prepared. Claim or preparation
+            failures no longer change the HTTP status: they project closed error +
+            finish chunks inside the stream, and cancellation projects one abort chunk.'
           content:
             text/event-stream:
               itemSchema:
@@ -63,22 +67,6 @@ paths:
             x-vercel-ai-ui-message-stream:
               schema:
                 type: string
-            X-Fleet-Run-ID:
-              schema:
-                type: string
-                format: uuid
-        '404':
-          description: Session not found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        '409':
-          description: Turn conflict
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
         '422':
           description: Invalid request
           content:
@@ -86,13 +74,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         '503':
-          description: Turn unavailable
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        '504':
-          description: Turn preparation timed out
+          description: Turn unavailable while composition installs dependencies
           content:
             application/json:
               schema:
@@ -661,6 +643,54 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/WorkspaceFileWriteRequest'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkspaceFileEntryResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    delete:
+      tags:
+      - workspace-files
+      summary: Delete Workspace File
+      operationId: delete_workspace_file_api
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WorkspaceFileDeleteRequest'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkspaceFileDeleteResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    patch:
+      tags:
+      - workspace-files
+      summary: Patch Workspace File
+      operationId: patch_workspace_file_api
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WorkspaceFilePatchRequest'
       responses:
         '200':
           description: Successful Response
@@ -1356,6 +1386,39 @@ components:
       - path
       - content
       title: WorkspaceFileAppendRequest
+    WorkspaceFileDeleteRequest:
+      properties:
+        path:
+          type: string
+          maxLength: 1024
+          minLength: 1
+          title: Path
+        expected_sha256:
+          anyOf:
+          - type: string
+            maxLength: 64
+            minLength: 64
+            pattern: ^[0-9a-f]{64}$
+          - type: 'null'
+          title: Expected Sha256
+      additionalProperties: false
+      type: object
+      required:
+      - path
+      title: WorkspaceFileDeleteRequest
+    WorkspaceFileDeleteResponse:
+      properties:
+        ok:
+          type: boolean
+          title: Ok
+          default: true
+        path:
+          type: string
+          title: Path
+      type: object
+      required:
+      - path
+      title: WorkspaceFileDeleteResponse
     WorkspaceFileEntryResponse:
       properties:
         path:
@@ -1407,6 +1470,35 @@ components:
       required:
       - entries
       title: WorkspaceFileListResponse
+    WorkspaceFilePatchRequest:
+      properties:
+        path:
+          type: string
+          maxLength: 1024
+          minLength: 1
+          title: Path
+        old:
+          type: string
+          minLength: 1
+          title: Old
+        new:
+          type: string
+          title: New
+        expected_sha256:
+          anyOf:
+          - type: string
+            maxLength: 64
+            minLength: 64
+            pattern: ^[0-9a-f]{64}$
+          - type: 'null'
+          title: Expected Sha256
+      additionalProperties: false
+      type: object
+      required:
+      - path
+      - old
+      - new
+      title: WorkspaceFilePatchRequest
     WorkspaceFileReadResponse:
       properties:
         path:

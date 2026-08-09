@@ -16,7 +16,7 @@ export interface paths {
         put?: never;
         /**
          * Create Turn
-         * @description Project one prepared Turn through FastAPI's native SSE transport.
+         * @description Stream one Turn, opening claim and preparation inside the SSE generator.
          */
         post: operations["create_turn"];
         delete?: never;
@@ -247,10 +247,12 @@ export interface paths {
         /** Write Workspace File */
         put: operations["write_workspace_file_api"];
         post?: never;
-        delete?: never;
+        /** Delete Workspace File */
+        delete: operations["delete_workspace_file_api"];
         options?: never;
         head?: never;
-        patch?: never;
+        /** Patch Workspace File */
+        patch: operations["patch_workspace_file_api"];
         trace?: never;
     };
     "/api/files/append": {
@@ -623,6 +625,23 @@ export interface components {
             /** Expected Sha256 */
             expected_sha256?: string | null;
         };
+        /** WorkspaceFileDeleteRequest */
+        WorkspaceFileDeleteRequest: {
+            /** Path */
+            path: string;
+            /** Expected Sha256 */
+            expected_sha256?: string | null;
+        };
+        /** WorkspaceFileDeleteResponse */
+        WorkspaceFileDeleteResponse: {
+            /**
+             * Ok
+             * @default true
+             */
+            ok: boolean;
+            /** Path */
+            path: string;
+        };
         /** WorkspaceFileEntryResponse */
         WorkspaceFileEntryResponse: {
             /** Path */
@@ -650,6 +669,17 @@ export interface components {
             truncated: boolean;
             /** Next Cursor */
             next_cursor?: string | null;
+        };
+        /** WorkspaceFilePatchRequest */
+        WorkspaceFilePatchRequest: {
+            /** Path */
+            path: string;
+            /** Old */
+            old: string;
+            /** New */
+            new: string;
+            /** Expected Sha256 */
+            expected_sha256?: string | null;
         };
         /** WorkspaceFileReadResponse */
         WorkspaceFileReadResponse: {
@@ -953,35 +983,16 @@ export interface operations {
             };
         };
         responses: {
-            /** @description AI SDK UI v1 UIMessage SSE stream */
+            /** @description AI SDK UI v1 UIMessage SSE stream. It opens immediately with a transient data-status prelude (phase=preparation) that repeats every runtime heartbeat until the Turn is claimed and prepared. Claim or preparation failures no longer change the HTTP status: they project closed error + finish chunks inside the stream, and cancellation projects one abort chunk. */
             200: {
                 headers: {
                     "Cache-Control"?: string;
                     "X-Accel-Buffering"?: string;
                     "x-vercel-ai-ui-message-stream"?: string;
-                    "X-Fleet-Run-ID"?: string;
                     [name: string]: unknown;
                 };
                 content: {
                     "text/event-stream": string;
-                };
-            };
-            /** @description Session not found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Turn conflict */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
             /** @description Invalid request */
@@ -993,17 +1004,8 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description Turn unavailable */
+            /** @description Turn unavailable while composition installs dependencies */
             503: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Turn preparation timed out */
-            504: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -1549,6 +1551,72 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["WorkspaceFileWriteRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspaceFileEntryResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    delete_workspace_file_api: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WorkspaceFileDeleteRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspaceFileDeleteResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    patch_workspace_file_api: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WorkspaceFilePatchRequest"];
             };
         };
         responses: {
