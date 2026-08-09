@@ -34,10 +34,17 @@ contracts, and tracked docs remain authoritative.
   input annotations and declared output schemas.
 - Runtime-specific Session Workspace availability is bounded inside context;
   Daytona registers list/stat/paged-read/write/append workspace Tools plus
-  direct Workspace Artifact Candidate publication and the on-demand
-  `read_workspace_memory`/`update_workspace_memory` Tools. Session Workspace is
-  append/update-only; there is no delete Tool. Workspace Memory is the fixed
-  root `MEMORIES.md` log, not Session History or a Turn-start prompt payload.
+  direct Workspace Artifact Candidate publication and the Workspace Memory
+  Tools (`read_workspace_memory`, `remember`, `list_memories`, `edit_memory`,
+  `forget`, plus the `update_workspace_memory` back-compat alias). Session
+  Workspace is append/update-only; there is no delete Tool. Workspace Memory is
+  the `memory/MEMORIES.md` log (migrated from the legacy root `MEMORIES.md`),
+  not Session History. Listed rows always have one addressable id: v2 stores it
+  and v1 derives it from canonical text; duplicate ids fail closed, while an
+  edit upgrades v1 to v2 preserving that id and timestamp. `remember` is
+  idempotent for the same record, and edit/forget perform one mounted-agent
+  read-modify-publish operation. Each Turn additionally receives its bounded
+  4 KiB `workspace_memory tail` digest inside `session_context`.
 - Resolve zero to four exact Skill selections against the immutable bundled
   catalog. Skill instructions and resources load progressively; bundled Skills
   never register executable tools. Runtime execution uses a typed
@@ -73,7 +80,7 @@ contracts, and tracked docs remain authoritative.
   `write_workspace_text(..., overwrite=True)` for replacement. Direct
   Workspace Artifact publication stages bytes privately; deletion is not
   exposed as a Tool. Workspace Memory appends are immediate workspace-wide
-  state under the fixed `MEMORIES.md` root and are independent of Turn Commit;
+  state under `memory/MEMORIES.md` and are independent of Turn Commit;
   the Daytona-only `/api/volume/tree` route exposes only a bounded read-only
   logical path view, not a general-purpose filesystem browser.
   Deployment contract: append serialization is process-local to one Fleet

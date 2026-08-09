@@ -1,26 +1,51 @@
-"""Daytona mounted-sandbox implementation of the Workspace Memory port."""
+"""Daytona mounted-sandbox implementation of the Workspace Memory port.
+
+The canonical store is ``memory/MEMORIES.md`` under the mounted Workspace
+Volume root (migrated on first open from the legacy root ``MEMORIES.md``).
+Reads are tolerant (malformed lines are skipped with a bounded warning count);
+writes stay strict and serialized process-locally; every durable mutation is
+one fsync'd rewrite through the mounted Workspace agent machinery.
+"""
 
 from __future__ import annotations
 
+import base64
+import hashlib
+import json
 import threading
+import time
 from collections import OrderedDict
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
+from dataclasses import dataclass
 from typing import Any
 
 from fleet_rlm.daytona.workspace_agent import WorkspaceAgentStorageError, run_workspace_agent
 from fleet_rlm.files.memory_models import (
     WORKSPACE_MEMORY_BYTE_BUDGET,
+    WORKSPACE_MEMORY_HEADER,
+    WORKSPACE_MEMORY_INJECTION_TAIL_BYTES,
+    WORKSPACE_MEMORY_MAX_LIST_LIMIT,
     WorkspaceMemoryAppendResult,
+    WorkspaceMemoryEntryNotFoundError,
+    WorkspaceMemoryListResult,
     WorkspaceMemoryReadResult,
+    WorkspaceMemoryRecordError,
     WorkspaceMemoryStoreFullError,
     WorkspaceMemoryStoreUnavailableError,
-    validate_workspace_memory_content,
+    build_workspace_memory_digest,
+    count_workspace_memory_warnings,
+    normalize_workspace_memory_category,
+    normalize_workspace_memory_id,
+    normalize_workspace_memory_learning,
+    parse_workspace_memory_lines,
     validate_workspace_memory_record,
 )
 from fleet_rlm.files.volume_paths import VolumePaths, as_posix
 
+_MEMORY_DIR_NAME = "memory"
 _MEMORY_NAME = "MEMORIES.md"
+_HEADER_BYTES = (WORKSPACE_MEMORY_HEADER + "\n").encode("utf-8")
 _MAX_IDLE_MEMORY_FILE_PARENT_LOCKS = 128
 
 
@@ -36,7 +61,7 @@ _memory_file_parent_locks_guard = threading.Lock()
 
 @contextmanager
 def _memory_file_parent_append_lock(memory_file_parent: str) -> Iterator[None]:
-    """Serialize local-process appends while retaining only a bounded idle lock cache."""
+    """Serialize local-process memory writes with a bounded idle lock cache."""
     with _memory_file_parent_locks_guard:
         entry = _memory_file_parent_locks.get(memory_file_parent)
         if entry is None:
@@ -62,8 +87,86 @@ def _memory_file_parent_append_lock(memory_file_parent: str) -> Iterator[None]:
                 _memory_file_parent_locks.pop(idle_parent)
 
 
+_migrated_memory_dirs: OrderedDict[str, None] = OrderedDict()
+_migrated_memory_dirs_guard = threading.Lock()
+_MAX_MIGRATED_MEMORY_DIRS = 128
+
+
+def _memory_dir_is_marked_migrated(memory_dir: str) -> bool:
+    with _migrated_memory_dirs_guard:
+        return memory_dir in _migrated_memory_dirs
+
+
+def _mark_memory_dir_migrated(memory_dir: str) -> None:
+    with _migrated_memory_dirs_guard:
+        _migrated_memory_dirs[memory_dir] = None
+        _migrated_memory_dirs.move_to_end(memory_dir)
+        while len(_migrated_memory_dirs) > _MAX_MIGRATED_MEMORY_DIRS:
+            _migrated_memory_dirs.popitem(last=False)
+
+
+# Per-turn Workspace Memory tail digest cache: one bounded read is reused for a
+# 30 s process TTL keyed by Volume root; an unchanged tail fingerprint (byte
+# size + content hash, the mtime-like signal) refreshes the TTL without paying
+# reprocessing, and in-process memory mutations invalidate eagerly.
+_MEMORY_DIGEST_CACHE_TTL_S = 30.0
+_MAX_DIGEST_CACHE_ENTRIES = 128
+
+
+@dataclass
+class _DigestCacheEntry:
+    fetched_at: float
+    fingerprint: str
+    digest: str
+
+
+_digest_cache: OrderedDict[str, _DigestCacheEntry] = OrderedDict()
+_digest_cache_guard = threading.Lock()
+
+
+def invalidate_workspace_memory_digest(volume_root: str) -> None:
+    """Drop the cached turn-injection digest for one Volume root."""
+    with _digest_cache_guard:
+        _digest_cache.pop(volume_root, None)
+
+
+def read_workspace_memory_injection_digest(
+    store: DaytonaWorkspaceMemoryStore,
+    *,
+    clock: Callable[[], float] = time.monotonic,
+) -> str:
+    """Return the <= 4 KiB tolerant Workspace Memory tail digest for one Turn.
+
+    Cached per Volume root for 30 s so rapid successive Turns avoid an extra
+    sandbox round trip; a changed tail fingerprint forces reprocessing.
+    Storage failures propagate to the caller, which degrades to no injection.
+    """
+    volume_root = store.volume_root_posix
+    now = clock()
+    with _digest_cache_guard:
+        cached = _digest_cache.get(volume_root)
+        if cached is not None and now - cached.fetched_at < _MEMORY_DIGEST_CACHE_TTL_S:
+            _digest_cache.move_to_end(volume_root)
+            return cached.digest
+    result = store.read_tail(byte_budget=WORKSPACE_MEMORY_INJECTION_TAIL_BYTES)
+    fingerprint = f"{result.total_bytes}:{hashlib.sha256(result.content.encode('utf-8')).hexdigest()}"
+    with _digest_cache_guard:
+        cached = _digest_cache.get(volume_root)
+        if cached is not None and cached.fingerprint == fingerprint:
+            cached.fetched_at = now
+            _digest_cache.move_to_end(volume_root)
+            return cached.digest
+    digest, _warnings = build_workspace_memory_digest(result.content)
+    with _digest_cache_guard:
+        _digest_cache[volume_root] = _DigestCacheEntry(now, fingerprint, digest)
+        _digest_cache.move_to_end(volume_root)
+        while len(_digest_cache) > _MAX_DIGEST_CACHE_ENTRIES:
+            _digest_cache.popitem(last=False)
+    return digest
+
+
 class DaytonaWorkspaceMemoryStore:
-    """Use the mounted Workspace Volume root's fixed ``MEMORIES.md`` file only."""
+    """Use the mounted Workspace Volume's canonical ``memory/MEMORIES.md`` file only."""
 
     def __init__(
         self,
@@ -74,49 +177,37 @@ class DaytonaWorkspaceMemoryStore:
     ) -> None:
         if max_upload_bytes < 1:
             raise ValueError("Workspace Memory capacity must be positive")
-        expected_file = volume_paths.root / _MEMORY_NAME
+        expected_file = volume_paths.memory_dir / _MEMORY_NAME
         if volume_paths.memory_file != expected_file:
             raise ValueError("Workspace Memory must use the configured volume root")
         self._sandbox = sandbox
         self._volume_root = as_posix(volume_paths.root)
         self._memory_file_parent = as_posix(expected_file.parent)
-        self._max_upload_bytes = int(max_upload_bytes)
+        self._max_file_bytes = int(max_upload_bytes)
+
+    @property
+    def volume_root_posix(self) -> str:
+        return self._volume_root
 
     def read_tail(self, *, byte_budget: int) -> WorkspaceMemoryReadResult:
         if type(byte_budget) is not int or not 0 < byte_budget <= WORKSPACE_MEMORY_BYTE_BUDGET:
             raise WorkspaceMemoryStoreUnavailableError()
+        self._ensure_migrated()
         try:
-            payload = self._run(
-                operation="tail_read",
-                max_bytes=byte_budget,
-                total_file_bytes=self._max_upload_bytes,
+            payload = self._read_tail_payload(byte_budget=byte_budget)
+            content, truncated, total_bytes, _remote_bytes = self._checked_tail_payload(
+                payload,
+                byte_budget=byte_budget,
             )
-            content = payload.get("content")
-            truncated = payload.get("truncated")
-            total_bytes = payload.get("total_bytes")
-            bytes_returned = payload.get("bytes_returned")
-            if (
-                not isinstance(content, str)
-                or type(truncated) is not bool
-                or type(total_bytes) is not int
-                or type(bytes_returned) is not int
-            ):
-                raise ValueError("invalid memory response")
-            if (
-                bytes_returned < 0
-                or bytes_returned > byte_budget
-                or total_bytes < bytes_returned
-                or total_bytes > self._max_upload_bytes
-                or bytes_returned != len(content.encode("utf-8"))
-            ):
-                raise ValueError("invalid memory response")
-            validate_workspace_memory_content(content)
+            lines = parse_workspace_memory_lines(content)
+            filtered = "".join(line.raw for line in lines if line.entry is not None)
             return WorkspaceMemoryReadResult(
-                content=content,
+                content=filtered,
                 truncated=truncated,
-                bytes_returned=bytes_returned,
+                bytes_returned=len(filtered.encode("utf-8")),
                 byte_budget=byte_budget,
                 total_bytes=total_bytes,
+                warnings=count_workspace_memory_warnings(lines),
             )
         except Exception as exc:
             if isinstance(exc, WorkspaceMemoryStoreUnavailableError):
@@ -131,22 +222,25 @@ class DaytonaWorkspaceMemoryStore:
             data = record.encode("utf-8")
         except (UnicodeError, ValueError) as exc:
             raise WorkspaceMemoryStoreUnavailableError() from exc
-        if not data or len(data) > self._max_upload_bytes:
+        if not data or len(data) > self._max_file_bytes - len(_HEADER_BYTES):
             raise WorkspaceMemoryStoreFullError()
+        self._ensure_migrated()
         try:
             with _memory_file_parent_append_lock(self._memory_file_parent):
                 payload = self._run(
+                    root=self._memory_file_parent,
                     operation="memory_append",
-                    max_bytes=self._max_upload_bytes,
-                    total_file_bytes=self._max_upload_bytes,
+                    max_bytes=self._max_file_bytes,
+                    total_file_bytes=self._max_file_bytes,
                     content=data,
                 )
             entry = payload.get("entry")
             if not isinstance(entry, dict):
                 raise ValueError("invalid memory response")
             total_bytes = entry.get("byte_size")
-            if type(total_bytes) is not int or not len(data) <= total_bytes <= self._max_upload_bytes:
+            if type(total_bytes) is not int or not len(data) <= total_bytes <= self._max_file_bytes:
                 raise ValueError("invalid memory response")
+            invalidate_workspace_memory_digest(self._volume_root)
             return WorkspaceMemoryAppendResult(entry_bytes=len(data), total_bytes=total_bytes)
         except Exception as exc:
             if isinstance(exc, WorkspaceMemoryStoreFullError):
@@ -155,29 +249,290 @@ class DaytonaWorkspaceMemoryStore:
                 raise WorkspaceMemoryStoreFullError() from exc
             raise WorkspaceMemoryStoreUnavailableError() from exc
 
+    def list_entries(
+        self,
+        *,
+        after: str | None = None,
+        limit: int,
+        category: str | None = None,
+    ) -> WorkspaceMemoryListResult:
+        if type(limit) is not int or not 1 <= limit <= WORKSPACE_MEMORY_MAX_LIST_LIMIT:
+            raise WorkspaceMemoryStoreUnavailableError()
+        if after is not None:
+            normalize_workspace_memory_id(after)
+        if category is not None:
+            category = normalize_workspace_memory_category(category)
+        self._ensure_migrated()
+        content = self._read_full_content()
+        lines = parse_workspace_memory_lines(content)
+        entries = [line.entry for line in lines if line.entry is not None]
+        warnings = count_workspace_memory_warnings(lines)
+        if len({entry.memory_id for entry in entries}) != len(entries):
+            # A cursor must name one physical row. Human edits can still forge
+            # duplicate ids, so fail closed rather than skip or target an
+            # arbitrary row while paging or mutating.
+            raise WorkspaceMemoryStoreUnavailableError()
+        if after is not None:
+            matches = [index for index, entry in enumerate(entries) if entry.memory_id == after]
+            if not matches:
+                raise WorkspaceMemoryEntryNotFoundError(after)
+            entries = entries[matches[0] + 1 :]
+        if category is not None:
+            entries = [entry for entry in entries if entry.category == category]
+        page = tuple(entries[:limit])
+        truncated = len(entries) > limit
+        next_cursor = page[-1].memory_id if truncated and page else None
+        return WorkspaceMemoryListResult(
+            entries=page,
+            truncated=truncated,
+            next_cursor=next_cursor,
+            warnings=warnings,
+        )
+
+    def delete_entry(self, memory_id: str) -> bool:
+        normalize_workspace_memory_id(memory_id)
+        self._ensure_migrated()
+        try:
+            with _memory_file_parent_append_lock(self._memory_file_parent):
+                self._run(
+                    root=self._memory_file_parent,
+                    operation="memory_delete",
+                    allow_missing=False,
+                    max_bytes=self._max_file_bytes,
+                    total_file_bytes=self._max_file_bytes,
+                    memory_id=memory_id,
+                )
+        except FileNotFoundError:
+            return False
+        except Exception as exc:
+            if isinstance(exc, WorkspaceMemoryStoreUnavailableError):
+                raise
+            raise WorkspaceMemoryStoreUnavailableError() from exc
+        invalidate_workspace_memory_digest(self._volume_root)
+        return True
+
+    def edit_entry(
+        self,
+        memory_id: str,
+        key_learning: str,
+        *,
+        category: str | None = None,
+    ) -> str:
+        normalize_workspace_memory_id(memory_id)
+        learning = normalize_workspace_memory_learning(key_learning)
+        normalized_category = normalize_workspace_memory_category(category) if category is not None else None
+        self._ensure_migrated()
+        request = json.dumps(
+            {"learning": learning, "category": normalized_category},
+            separators=(",", ":"),
+        ).encode("utf-8")
+        try:
+            with _memory_file_parent_append_lock(self._memory_file_parent):
+                payload = self._run(
+                    root=self._memory_file_parent,
+                    operation="memory_edit",
+                    allow_missing=False,
+                    max_bytes=self._max_file_bytes,
+                    total_file_bytes=self._max_file_bytes,
+                    memory_id=memory_id,
+                    content=request,
+                )
+        except FileNotFoundError as exc:
+            raise WorkspaceMemoryEntryNotFoundError(memory_id) from exc
+        except ValueError as exc:
+            if str(exc) == "workspace memory record is invalid":
+                raise WorkspaceMemoryRecordError from exc
+            raise WorkspaceMemoryStoreUnavailableError() from exc
+        except Exception as exc:
+            if isinstance(exc, WorkspaceMemoryStoreUnavailableError):
+                raise
+            raise WorkspaceMemoryStoreUnavailableError() from exc
+        record = payload.get("record")
+        if not isinstance(record, str):
+            raise WorkspaceMemoryStoreUnavailableError()
+        try:
+            validate_workspace_memory_record(record)
+            parsed = parse_workspace_memory_lines(record)
+            if len(parsed) != 1 or parsed[0].entry is None or parsed[0].entry.memory_id != memory_id:
+                raise WorkspaceMemoryRecordError
+        except WorkspaceMemoryRecordError as exc:
+            raise WorkspaceMemoryStoreUnavailableError() from exc
+        invalidate_workspace_memory_digest(self._volume_root)
+        return record
+
+    # -- internals -------------------------------------------------------------
+
+    def _ensure_migrated(self) -> None:
+        """Migrate the legacy root store exactly once per process (never loses content)."""
+        if _memory_dir_is_marked_migrated(self._memory_file_parent):
+            return
+        try:
+            with _memory_file_parent_append_lock(self._memory_file_parent):
+                if _memory_dir_is_marked_migrated(self._memory_file_parent):
+                    return
+                self._migrate_legacy_store()
+                _mark_memory_dir_migrated(self._memory_file_parent)
+        except Exception as exc:
+            if isinstance(
+                exc,
+                (WorkspaceMemoryStoreUnavailableError, WorkspaceMemoryStoreFullError),
+            ):
+                raise
+            raise WorkspaceMemoryStoreUnavailableError() from exc
+
+    def _migrate_legacy_store(self) -> None:
+        """Move a legacy root ``MEMORIES.md`` into ``memory/MEMORIES.md`` once.
+
+        The legacy file is removed only after the new store (header + legacy
+        bytes) is durably published; any conflict, unsafe type, undecodable
+        content, or over-cap legacy file fails closed with both files intact.
+        """
+        try:
+            legacy_stat = self._run(
+                root=self._volume_root,
+                operation="stat",
+                relative=_MEMORY_NAME,
+                allow_missing=True,
+            )
+        except FileNotFoundError:
+            legacy_stat = {"entry": None}
+        legacy_entry = legacy_stat.get("entry")
+        if legacy_entry is None:
+            return
+        if (
+            not isinstance(legacy_entry, dict)
+            or legacy_entry.get("kind") != "file"
+            or legacy_entry.get("is_regular_file") is False
+        ):
+            raise WorkspaceMemoryStoreUnavailableError()
+        try:
+            new_stat = self._run(
+                root=self._volume_root,
+                operation="stat",
+                relative=f"{_MEMORY_DIR_NAME}/{_MEMORY_NAME}",
+                allow_missing=True,
+            )
+            new_entry = new_stat.get("entry")
+        except FileNotFoundError:
+            new_entry = None
+        if new_entry is not None:
+            return
+        # ``read`` (not ``tail_read``): migration must copy every byte of the
+        # legacy body, including a torn final line; ``tail_read`` is record-
+        # oriented and trims unterminated tails by design.
+        legacy = self._run(
+            root=self._volume_root,
+            operation="read",
+            relative=_MEMORY_NAME,
+            max_bytes=max(self._max_file_bytes - len(_HEADER_BYTES), 1),
+        )
+        content = legacy.get("content")
+        if not isinstance(content, str):
+            raise WorkspaceMemoryStoreUnavailableError()
+        body = content.encode("utf-8")
+        if body and not body.endswith(b"\n"):
+            body += b"\n"
+        self._run(
+            root=self._memory_file_parent,
+            operation="write",
+            relative=_MEMORY_NAME,
+            overwrite=False,
+            max_bytes=self._max_file_bytes,
+            total_file_bytes=self._max_file_bytes,
+            content=_HEADER_BYTES + body,
+        )
+        self._run(
+            root=self._volume_root,
+            operation="unlink",
+            relative=_MEMORY_NAME,
+        )
+        invalidate_workspace_memory_digest(self._volume_root)
+
+    def _read_full_content(self) -> str:
+        """Read the entire store body (bounded by the file cap), untransformed."""
+        try:
+            payload = self._read_tail_payload(byte_budget=self._max_file_bytes)
+            content, _truncated, _total_bytes, _remote_bytes = self._checked_tail_payload(
+                payload,
+                byte_budget=self._max_file_bytes,
+            )
+            # ``tail_read`` also marks a complete-cap file as truncated when it
+            # drops an unterminated final line. The payload checker has already
+            # rejected a true over-cap response, so retain the complete records
+            # and let the tolerant parser skip that malformed tail.
+            return content
+        except Exception as exc:
+            if isinstance(exc, WorkspaceMemoryStoreUnavailableError):
+                raise
+            raise WorkspaceMemoryStoreUnavailableError() from exc
+
+    def _read_tail_payload(self, *, byte_budget: int) -> dict[str, object]:
+        try:
+            return self._run(
+                root=self._memory_file_parent,
+                operation="tail_read",
+                max_bytes=byte_budget,
+                total_file_bytes=self._max_file_bytes,
+            )
+        except FileNotFoundError:
+            # A missing ``memory/`` root is an empty store (the agent's
+            # allow_missing only covers a missing file below an existing root).
+            return {"ok": True, "content": "", "truncated": False, "bytes_returned": 0, "total_bytes": 0}
+
+    def _checked_tail_payload(
+        self,
+        payload: dict[str, object],
+        *,
+        byte_budget: int,
+    ) -> tuple[str, bool, int, int]:
+        content = payload.get("content")
+        truncated = payload.get("truncated")
+        total_bytes = payload.get("total_bytes")
+        bytes_returned = payload.get("bytes_returned")
+        if (
+            not isinstance(content, str)
+            or type(truncated) is not bool
+            or type(total_bytes) is not int
+            or type(bytes_returned) is not int
+        ):
+            raise ValueError("invalid memory response")
+        if (
+            bytes_returned < 0
+            or bytes_returned > byte_budget
+            or total_bytes < bytes_returned
+            or total_bytes > self._max_file_bytes
+            or bytes_returned != len(content.encode("utf-8"))
+        ):
+            raise ValueError("invalid memory response")
+        return content, truncated, total_bytes, bytes_returned
+
     def _run(
         self,
         *,
+        root: str,
         operation: str,
-        max_bytes: int,
-        total_file_bytes: int,
+        relative: str = _MEMORY_NAME,
+        allow_missing: bool = True,
+        max_bytes: int = 1,
+        total_file_bytes: int = 1,
+        overwrite: bool = False,
         content: bytes = b"",
+        memory_id: str = "",
     ) -> dict[str, object]:
-        import base64
-
         try:
             return run_workspace_agent(
                 self._sandbox,
                 volume_root=self._volume_root,
-                root=self._memory_file_parent,
+                root=root,
                 operation=operation,
-                relative=_MEMORY_NAME,
-                allow_missing=True,
+                relative=relative,
+                allow_missing=allow_missing,
                 max_bytes=max_bytes,
                 total_file_bytes=total_file_bytes,
                 limit=0,
-                overwrite=False,
+                overwrite=overwrite,
                 content_b64=base64.b64encode(content).decode("ascii"),
+                memory_id=memory_id,
             )
         except WorkspaceAgentStorageError as exc:
             raise WorkspaceMemoryStoreUnavailableError() from exc

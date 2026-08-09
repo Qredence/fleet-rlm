@@ -7,6 +7,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from fleet_rlm.files.memory_models import WORKSPACE_MEMORY_INJECTION_TAIL_BYTES
+
 
 class FleetInputModel(BaseModel):
     """Immutable, closed DTO shared only by the RLM input boundary."""
@@ -30,12 +32,23 @@ class WorkspaceCapabilityInput(FleetInputModel):
     instructions: str
 
 
+class WorkspaceMemoryInput(FleetInputModel):
+    """Bounded untrusted Workspace Memory tail injected at Turn start.
+
+    ``tail`` holds the newest curated memory/MEMORIES.md records (``workspace_memory
+    tail``); it is operator/user-managed context, never authoritative evidence.
+    """
+
+    tail: str = Field(min_length=1, max_length=WORKSPACE_MEMORY_INJECTION_TAIL_BYTES)
+
+
 class SessionContextInput(FleetInputModel):
     session_id: UUID
     checkpoint_version: int = Field(ge=0)
     message_count: int = Field(ge=0)
     recent: tuple[TurnPreviewInput, ...] = Field(max_length=6)
     workspace: WorkspaceCapabilityInput
+    workspace_memory: WorkspaceMemoryInput | None = None
 
 
 class SkillCardInput(FleetInputModel):
@@ -64,4 +77,5 @@ __all__ = [
     "SkillCardInput",
     "TurnPreviewInput",
     "WorkspaceCapabilityInput",
+    "WorkspaceMemoryInput",
 ]

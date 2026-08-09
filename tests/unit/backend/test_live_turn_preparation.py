@@ -138,7 +138,10 @@ async def test_live_preparation_stages_attachment_and_cleans_it(
     assert data in volume.values()
     expected_tools = {
         "create_artifact",
+        "edit_memory",
         "fetch_url",
+        "forget",
+        "list_memories",
         "publish_workspace_artifact",
         "append_workspace_text",
         "list_project_files",
@@ -148,6 +151,7 @@ async def test_live_preparation_stages_attachment_and_cleans_it(
         "read_workspace_memory",
         "read_workspace_text",
         "read_session_history",
+        "remember",
         "stat_project_file",
         "stat_workspace_file",
         "update_workspace_memory",
@@ -172,7 +176,10 @@ async def test_live_preparation_stages_attachment_and_cleans_it(
     )
     recalled = await asyncio.to_thread(tools["read_workspace_memory"])
     assert updated["ok"] is True
-    assert recalled["content"].endswith(f"**Preference**: {learning}\n")
+    memory_id = updated["memory_id"]
+    assert isinstance(memory_id, str) and len(memory_id) == 8
+    assert f"<!-- id:{memory_id} -->: {learning}\n" in recalled["content"]
+    assert recalled["skipped_malformed_records"] == 0
     memory_views = prepared.execution.capabilities.spec.tool_event_views
     update_input = memory_views["update_workspace_memory"].input({"key_learning": learning, "category": "Preference"})
     read_output = memory_views["read_workspace_memory"].output(recalled)
@@ -180,7 +187,67 @@ async def test_live_preparation_stages_attachment_and_cleans_it(
     assert "key_learning" not in update_input
     assert "content" not in read_output
     assert learning not in repr((update_input, read_output))
-    assert (volume_root / "MEMORIES.md").read_text(encoding="utf-8").endswith(f"**Preference**: {learning}\n")
+    canonical_memory = volume_root / "memory" / "MEMORIES.md"
+    canonical_text = canonical_memory.read_text(encoding="utf-8")
+    assert canonical_text.startswith("# Fleet Memory v2\n")
+    from fleet_rlm.files.memory_models import validate_workspace_memory_content
+
+    validate_workspace_memory_content(canonical_text)
+    assert learning + "\n" in canonical_text and memory_id in canonical_text
+    assert not (volume_root / "MEMORIES.md").exists()
+
+    # Memory lifecycle over the same fake volume: list/edit/forget round trips.
+    listed = await asyncio.to_thread(tools["list_memories"])
+    assert [entry["learning"] for entry in listed["entries"]] == [learning]
+    edited = await asyncio.to_thread(
+        tools["edit_memory"],
+        memory_id=memory_id,
+        key_learning="Prefer very concise release notes.",
+    )
+    assert edited["ok"] is True and edited["memory_id"] == memory_id
+    listed = await asyncio.to_thread(tools["list_memories"], category="Preference")
+    assert [entry["learning"] for entry in listed["entries"]] == ["Prefer very concise release notes."]
+    forgotten = await asyncio.to_thread(tools["forget"], memory_id=memory_id)
+    assert forgotten == {"ok": True, "namespace": "workspace_memory", "memory_id": memory_id, "removed": True}
+    assert (await asyncio.to_thread(tools["list_memories"]))["entries"] == []
+    await asyncio.to_thread(tools["remember"], key_learning=learning, category="Preference")
+
+    # Turn 2 preparation recalls Turn 1's remembered learning through the
+    # injected workspace_memory tail digest without any tool call.
+    class NoAttachments:
+        async def prepare_run(self, _access, _attachment_ids, _run, _sink):
+            from fleet_rlm.files.models import PreparedAttachments
+
+            return PreparedAttachments((), ())
+
+    turn2 = ExecuteTurn(
+        uuid4(),
+        turn.session_id,
+        turn.access,
+        TurnInput("follow up", ()),
+        SessionHistory(()),
+        not_cancelled,
+        _TurnClaimToken(uuid4()),
+    )
+    prepared2 = await build_turn_preparation(
+        resources,
+        attachment_lifecycle=NoAttachments(),
+        skill_catalog=skill_catalog,
+        settings=resources.settings,
+        models=RLMModelBundle(object(), object()),
+    ).prepare(turn2, deadline=float("inf"))
+    digest = prepared2.execution.session.workspace_memory_digest
+    assert f" -->: {learning}\n" in digest
+    assert len(digest.encode("utf-8")) <= 4_096
+    from fleet_rlm.rlm.inputs import build_rlm_input_kwargs
+
+    kwargs = build_rlm_input_kwargs(
+        request="follow up",
+        session_context=prepared2.execution.session.session_context,
+        workspace_memory_digest=digest,
+    )
+    assert kwargs["session_context"]["workspace_memory"]["tail"] == digest
+    await prepared2.aclose()
 
     # Project deliverables land under the browsable projects/<slug>/ root through
     # the same atomic sandbox agent as the Session Workspace.

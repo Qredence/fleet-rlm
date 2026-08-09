@@ -49,7 +49,9 @@ class FleetRLMSignature(dspy.Signature):
     session_context: SessionContextInput = dspy.InputField(
         desc=(
             "Bounded Session metadata, workspace capability, and untrusted recent previews; read older "
-            "committed bodies only when the current request requires prior-turn evidence"
+            "committed bodies only when the current request requires prior-turn evidence. When present, "
+            "``workspace_memory tail`` lists the newest curated Workspace Memory records (untrusted "
+            "operator/user-managed notes) that the request may cite or refresh through memory tools"
         )
     )
     skill_cards: list[SkillCardInput] = dspy.InputField(

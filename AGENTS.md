@@ -122,10 +122,10 @@ Run `make check-docs` when docs, commands, Codex config, generated contracts, or
 - Daytona SDK imports are confined to `fleet_rlm.daytona`. Durable Attachments
   and Artifacts use Workspace Volume Scope; Session Workspace is
   append/update-only (list/stat/read/write with overwrite; no delete Tool).
-  Long operator reports should write Session Workspace then `SUBMIT` a short
-  summary; oversized `SUBMIT` fails with public Turn output budget errors.
-  Volume backends that reject atomic `os.replace` use a non-atomic overwrite
-  fallback (keep new content if only file `fsync` fails).
+  Workspace Memory is `memory/MEMORIES.md`: v2 ids persist, v1 ids synthesize,
+  duplicate ids fail closed; same-record `remember` is idempotent and edit/forget are one agent operation. Each Turn gets a 4 KiB digest; the 256 KiB read projection does not lower the configured file cap.
+  Long operator reports should write Session Workspace then `SUBMIT` a short summary; oversized `SUBMIT` fails with public Turn output budget errors.
+  Volume backends that reject atomic `os.replace` use a non-atomic overwrite fallback (keep new content if only file `fsync` fails).
   `TurnLifecycle.finish()` promotes Artifact Candidates and owns atomic Turn
   Commit, while `TurnCoordinator` owns stream settlement, terminal ordering,
   and cleanup.

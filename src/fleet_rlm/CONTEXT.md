@@ -159,13 +159,25 @@ Binding must be able to reattach this scope on acquire.
 _Avoid_: tenant Workspace alone, whole shared Volume root, Sandbox Workspace
 
 **Workspace Memory**:
-Daytona-only workspace-wide immediate state at the fixed `MEMORIES.md` root of
-the already workspace-scoped Volume mount. `read_workspace_memory` loads the
-newest bounded complete records only when the RLM calls it; `update_workspace_memory`
-appends one normalized record only for an explicit user request. Appends are
-durable independently of Turn Commit and survive failed or cancelled Runs and
-Sandbox replacement.
-_Avoid_: Session History, automatic prompt injection, unbounded learned state
+Daytona-only workspace-wide immediate state at `memory/MEMORIES.md` under the
+already workspace-scoped Volume mount (legacy root `MEMORIES.md` migrates on
+first open; content is never lost). Records are canonical v1/v2 lines; new
+appends are v2 (`- [ts] **Category** <!-- id:8hex -->: learning`). v1 rows
+derive that same deterministic id when read, so every list entry is
+addressable; duplicate ids fail closed rather than selecting an arbitrary row.
+Reads are tolerant (humans edit the file): malformed lines are skipped with a
+bounded warning count while writes stay strictly validated.
+`read_workspace_memory` loads the newest bounded complete records on demand;
+`remember` (alias `update_workspace_memory`) appends one normalized record only
+for an explicit user request and is idempotent for the same record;
+`list_memories` pages id-addressed entries; `edit_memory` upgrades v1 to v2 or
+rewrites v2 while preserving id and timestamp; `forget` removes exactly one
+entry. Edit and forget use one mounted-agent read-modify-publish operation.
+Each Turn's `session_context` also carries a bounded <= 4 KiB
+`workspace_memory tail` digest (30 s per-root process cache) so recent
+learnings are visible without a Tool call. Records are durable independently
+of Turn Commit and survive failed or cancelled Runs and Sandbox replacement.
+_Avoid_: Session History, unbounded learned state
 
 **Workspace Volume Tree**:
 The Daytona-only bounded read-only HTTP/TUI projection of relative paths from

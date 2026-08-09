@@ -13,7 +13,11 @@ import pytest
 from fleet_rlm.chat.session_context import SessionContextManifest
 from fleet_rlm.files.memory_models import (
     WorkspaceMemoryAppendResult,
+    WorkspaceMemoryEntryNotFoundError,
+    WorkspaceMemoryListResult,
     WorkspaceMemoryReadResult,
+    parse_workspace_memory_lines,
+    reformat_workspace_memory_record,
 )
 from fleet_rlm.files.memory_tools import WorkspaceMemoryToolHost
 from fleet_rlm.files.workspace_models import (
@@ -59,6 +63,61 @@ class MemoryStore:
             entry_bytes=len(record.encode("utf-8")),
             total_bytes=total_bytes,
         )
+
+    def list_entries(
+        self,
+        *,
+        after: str | None = None,
+        limit: int,
+        category: str | None = None,
+    ) -> WorkspaceMemoryListResult:
+        lines = parse_workspace_memory_lines(self.content)
+        entries = [line.entry for line in lines if line.entry is not None]
+        if after is not None:
+            matches = [index for index, entry in enumerate(entries) if entry.memory_id == after]
+            if not matches:
+                raise WorkspaceMemoryEntryNotFoundError(after)
+            entries = entries[matches[-1] + 1 :]
+        if category is not None:
+            entries = [entry for entry in entries if entry.category == category]
+        page = tuple(entries[:limit])
+        return WorkspaceMemoryListResult(
+            entries=page,
+            truncated=len(entries) > limit,
+            next_cursor=page[-1].memory_id if len(entries) > limit and page else None,
+            warnings=0,
+        )
+
+    def delete_entry(self, memory_id: str) -> bool:
+        lines = list(parse_workspace_memory_lines(self.content))
+        targets = [
+            index for index, line in enumerate(lines) if line.entry is not None and line.entry.memory_id == memory_id
+        ]
+        if not targets:
+            return False
+        del lines[targets[-1]]
+        self.content = "".join(line.raw for line in lines)
+        return True
+
+    def edit_entry(self, memory_id: str, key_learning: str, *, category: str | None = None) -> str:
+        lines = list(parse_workspace_memory_lines(self.content))
+        targets = [
+            index for index, line in enumerate(lines) if line.entry is not None and line.entry.memory_id == memory_id
+        ]
+        if not targets:
+            raise WorkspaceMemoryEntryNotFoundError(memory_id)
+        target = targets[-1]
+        entry = lines[target].entry
+        assert entry is not None
+        record, _normalized = reformat_workspace_memory_record(
+            timestamp=entry.timestamp,
+            memory_id=entry.memory_id,
+            category=entry.category if category is None else category,
+            key_learning=key_learning,
+        )
+        lines[target] = parse_workspace_memory_lines(record)[0]
+        self.content = "".join(line.raw for line in lines)
+        return record
 
 
 class MemoryStoreRegistry:

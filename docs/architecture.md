@@ -109,9 +109,10 @@ exception text.
   Attachment staging, Session Workspace files, Workspace Memory, private result
   snapshots, and Artifact Candidate promotion.
 - The Volume layout provisions only owned namespaces: shared attachments and
-  artifacts, the root `MEMORIES.md`, Session Workspace, Run attachments and
-  candidates, committed Artifacts, and private `result.json`. Bundled Skills
-  remain host-owned and are not copied into the Volume.
+  artifacts, `memory/MEMORIES.md` (the legacy root `MEMORIES.md` migrates on
+  first open), browsable `projects/<slug>/`, Session Workspace, Run attachments
+  and candidates, committed Artifacts, and private `result.json`. Bundled
+  Skills remain host-owned and are not copied into the Volume.
 - Profiles are explicit and fail closed when prerequisites are absent. Private
   deterministic testing composition is not a public fallback profile.
 
@@ -151,27 +152,40 @@ replacement independently of the commit-gated result snapshot and Artifact
 lifecycle.
 
 Daytona Workspace Memory is separate workspace-wide immediate state. Its fixed
-`MEMORIES.md` lives at the root of the already mounted
-`workspaces/<workspace_id>` Volume subpath; Session and Run state retain their
-nested paths below that root. The RLM accesses memory only on demand through
-`read_workspace_memory` and `update_workspace_memory`; Fleet does not inject it
-at Turn start. Private deterministic tests use an unavailable Workspace
-capability unless they explicitly inject a host-owned test capability.
+`MEMORIES.md` lives at `memory/` under the already mounted
+`workspaces/<workspace_id>` Volume subpath (a pre-existing root `MEMORIES.md`
+is migrated there on first open, never losing content); Session and Run state
+retain their nested paths below that root. The RLM accesses memory through
+`read_workspace_memory`, `remember`, `list_memories`, `edit_memory`, and
+`forget` (plus the `update_workspace_memory` back-compat alias); Fleet also
+injects a bounded, tolerant <= 4 KiB `workspace_memory tail` digest of the
+newest records into the Turn's `session_context` so recent learnings are
+available without a Tool call. Private deterministic tests use an unavailable
+Workspace capability unless they explicitly inject a host-owned test
+capability.
 
-Each update appends one complete UTC-timestamped record, limited to 4 KiB of
+`remember` appends one complete UTC-timestamped v2 record, limited to 4 KiB of
 formatted UTF-8, and becomes durable immediately, independently of Turn Commit.
-A completed append therefore survives failed or cancelled Turns and Sandbox
-replacement. The update Tool permits writes only when the user explicitly
-requests memory, but that is an auditable Tool policy rather than a filesystem
-ACL: the Daytona interpreter can see the mounted Volume. Append serialization
-is process-local; separate Fleet processes are not coordinated, so concurrent
-cross-process append is not guaranteed.
+A repeated identical record is idempotent. Legacy v1 rows derive the same
+deterministic id when listed, so every cursor names one row; duplicate ids fail
+closed rather than skipping or selecting an arbitrary row. `edit_memory`
+upgrades v1 to v2 or replaces v2 while preserving the id and timestamp, and
+`forget` removes exactly one addressed row. Both mutations execute their
+read-modify-publish rewrite inside one mounted-agent operation. A completed
+append therefore survives failed or cancelled Turns and Sandbox replacement.
+The update Tool permits writes only when the user explicitly requests memory,
+but that is an auditable Tool policy rather than a filesystem ACL: the Daytona
+interpreter can see the mounted Volume. Append serialization is process-local;
+separate Fleet processes are not coordinated, so concurrent cross-process
+append is not guaranteed.
 
 Reads return the newest complete records within a fixed 256 KiB byte budget.
 The configured `max_upload_bytes` caps the whole memory file. Appends against a
 full or torn file fail closed, as does access to unsafe or invalid storage;
 reads omit an incomplete trailing record, and appends never repair or rewrite
-one. Fleet performs no automatic compaction, deletion, or Turn-start recall.
+one. Fleet performs no automatic compaction; deletion and edits require their
+explicit Tools. Every Turn receives the bounded memory digest described above,
+while full history stays behind the read/list Tools.
 Memory calls use generic Tool events whose allowlisted metadata excludes
 learning bodies, provider paths, and raw errors; there is no dedicated memory
 event. The live cross-Sandbox, cross-Session Workspace Memory proof remains

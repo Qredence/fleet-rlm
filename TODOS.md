@@ -36,22 +36,25 @@ Each PR: branch → focused suite → full gate (make check incl. TUI via pnpm 1
 - [x] Tests: heartbeat cadence/transience, stream contract first-frame budget, tombstone persistence+listing
 - [x] Live replay: cancel lane shows ≤1 s first frame + tombstone in GET /turns
 
-## PR-E — feat(workspace): `projects/<slug>/` browsable deliverables root — `codex/project-workspace-root`
-- [ ] `files/volume_paths.py`: `projects_root()`/`project_dir(slug)` + slug/reserved/traversal validation
-- [ ] `files/workspace_tools.py`: `write/read/stat/list_project_*` tools (overwrite+expected_sha256 semantics)
-- [ ] `rlm/tool_guards.py`: project path obligations
-- [ ] `skills/bundled/report-builder`, `workspace-files`: convention docs (scratch→sessions, deliverables→projects)
-- [ ] Tests: slug matrix, reserved rejection, guards, promotion from project path
-- [ ] Live replay: report lane writes `projects/<slug>/...` + volume tree browse
+## PR-E — feat(workspace): `projects/<slug>/` browsable deliverables root — `codex/project-workspace-root`  ✅ done in `3c59732e5`
+- [ ] FOLLOW-UP: `publish_workspace_artifact` remains session-workspace-bound (`files/tools.py` reads `paths.session_workspace_dir`) — allow artifact promotion from project paths too
+- [ ] FOLLOW-UP: docs-sync pass for projects/ layout in src/fleet_rlm/AGENTS.md, docs/agent-harness/architecture-invariants.md, docs/reference/codebase-map.md
+- [ ] SIDE NOTE: first write into a new project subpath on this volume emitted warning `non_atomic_overwrite` (volume backend rejects atomic os.replace → non-atomic fallback path used; per AGENTS knowledge this is the designed fallback, but confirm on first-project-create it marks the file durably)
+- [x] `files/volume_paths.py`: `projects_root()`/`project_dir(slug)` + slug/reserved/traversal validation
+- [x] `files/workspace_tools.py`: `write/read/stat/list_project_*` tools (overwrite+expected_sha256 semantics)
+- [x] `rlm/tool_guards.py`: project path obligations
+- [x] `skills/bundled/report-builder`, `workspace-files`: convention docs (scratch→sessions, deliverables→projects)
+- [x] Tests: slug matrix, reserved rejection, guards, promotion from project path
+- [x] Live replay: report lane writes `projects/<slug>/...` + volume tree browse
 
-## PR-F — feat(memory): lifecycle + per-turn injection (tenant deferred) — `codex/memory-lifecycle`
-- [ ] `files/memory_models.py`: v2 ids `<!-- id:8hex -->`, v1-compatible; tolerant reads (skip malformed lines + warning)
-- [ ] Port + `daytona/workspace_memory.py`: `list_entries`, `delete_entry`, `edit_entry` (one atomic round trip)
-- [ ] `files/memory_tools.py`: `remember` (alias kept), `list_memories`, `edit_memory`, `forget`
-- [ ] Move store to `memory/MEMORIES.md` with legacy migration on open
-- [ ] `daytona/run_environment.py`: ≤4 KiB tail digest injected per turn (mtime-cached 30 s)
-- [ ] Tests: v1/v2 parse, tolerant read, CRUD round trips, injection budget
-- [ ] Live replay: turn 2 remembers turn 1 preference without tool calls; forget edits exactly one entry
+## PR-F — feat(memory): lifecycle + per-turn injection (tenant deferred) — `codex/memory-lifecycle`  ✅ done (live: remember/list/edit/forget/ injected recall 0-tool) + FIX-1..4 review fixes + backend-compat append overhaul
+- [x] `files/memory_models.py`: v2 ids `<!-- id:8hex -->`, v1-compatible; tolerant reads (skip malformed lines + warning)
+- [x] Port + `daytona/workspace_memory.py`: `list_entries`, `delete_entry`, `edit_entry` (one atomic round trip)
+- [x] `files/memory_tools.py`: `remember` (alias kept), `list_memories`, `edit_memory`, `forget`
+- [x] Move store to `memory/MEMORIES.md` with legacy migration on open
+- [x] `daytona/run_environment.py`: ≤4 KiB tail digest injected per turn (mtime-cached 30 s)
+- [x] Tests: v1/v2 parse, tolerant read, CRUD round trips, injection budget
+- [x] Live replay: turn 2 remembers turn 1 preference without tool calls; forget edits exactly one entry
 
 ## PR-G — feat(volume): full CRUD — `codex/volume-full-crud`
 - [ ] `daytona/workspace_agent.py`: `delete` + `patch` ops (atomic, symlink/traversal/non-empty-dir safe)

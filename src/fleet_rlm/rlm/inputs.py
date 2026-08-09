@@ -14,6 +14,7 @@ import dspy
 from pydantic import ValidationError
 
 from fleet_rlm.chat.session_context import SessionContextManifest
+from fleet_rlm.files.memory_models import WORKSPACE_MEMORY_INJECTION_TAIL_BYTES
 from fleet_rlm.files.volume_paths import DEFAULT_VOLUME_MOUNT_PATH, validate_mount_path
 from fleet_rlm.files.workspace_models import UNAVAILABLE_WORKSPACE_CAPABILITY, WorkspaceCapabilityMetadata
 from fleet_rlm.rlm.errors import RLMConfigError
@@ -23,6 +24,7 @@ from fleet_rlm.rlm.input_models import (
     SkillCardInput,
     TurnPreviewInput,
     WorkspaceCapabilityInput,
+    WorkspaceMemoryInput,
 )
 
 _MAX_REQUEST_CHARS = 100_000
@@ -169,11 +171,18 @@ def build_rlm_input_kwargs(
     attachments: tuple[Any, ...] | list[Any] = (),
     attachment_context: AttachmentContextCapsule | None = None,
     workspace: WorkspaceCapabilityMetadata = UNAVAILABLE_WORKSPACE_CAPABILITY,
+    workspace_memory_digest: str = "",
 ) -> dict[str, Any]:
     """Kwargs for ``rlm.aforward`` / ``forward`` matching FleetRLMSignature."""
     if not isinstance(request, str) or not request.strip() or len(request) > _MAX_REQUEST_CHARS:
         raise RLMConfigError("Turn input metadata is invalid")
+    if (
+        not isinstance(workspace_memory_digest, str)
+        or len(workspace_memory_digest.encode("utf-8")) > WORKSPACE_MEMORY_INJECTION_TAIL_BYTES
+    ):
+        raise RLMConfigError("Turn input metadata is invalid")
     try:
+        workspace_memory = WorkspaceMemoryInput(tail=workspace_memory_digest) if workspace_memory_digest else None
         context = SessionContextInput(
             session_id=session_context.session_id,
             checkpoint_version=session_context.checkpoint_version,
@@ -191,6 +200,7 @@ def build_rlm_input_kwargs(
                 root=cast(Literal["."], workspace.root),
                 instructions=workspace.instructions,
             ),
+            workspace_memory=workspace_memory,
         )
         cards = tuple(
             SkillCardInput(
@@ -220,9 +230,12 @@ def build_rlm_input_kwargs(
     attachment_value: object = [item.model_dump(mode="json", exclude_none=True) for item in attachment_inputs]
     if attachment_context is not None:
         attachment_value = attachment_context
+    context_payload = context.model_dump(mode="json")
+    if workspace_memory is None:
+        context_payload.pop("workspace_memory", None)
     return {
         "request": request,
-        "session_context": context.model_dump(mode="json"),
+        "session_context": context_payload,
         "skill_cards": [item.model_dump(mode="json") for item in cards],
         "attachments": attachment_value,
     }

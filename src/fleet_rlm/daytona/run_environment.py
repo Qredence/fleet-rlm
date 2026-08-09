@@ -44,6 +44,7 @@ from fleet_rlm.daytona.session_manager import (
     LeaseRequest,
 )
 from fleet_rlm.daytona.workspace_fs import AsyncDaytonaVolumeFS, DaytonaSandboxVolumeFs, VolumeFSCacheState
+from fleet_rlm.files.memory_models import WORKSPACE_MEMORY_INJECTION_TAIL_BYTES
 from fleet_rlm.files.models import (
     AttachmentAccess,
     AttachmentRun,
@@ -87,6 +88,7 @@ class LivePreparedCapabilities(PreparedHostCapabilities):
         files: Any,
         skills: Any,
         preparation_notices: tuple[Any, ...] = (),
+        workspace_memory_digest: str = "",
     ) -> None:
         super().__init__(
             spec,
@@ -96,6 +98,12 @@ class LivePreparedCapabilities(PreparedHostCapabilities):
             artifact_candidates=True,
             preparation_notices=preparation_notices,
         )
+        if (
+            not isinstance(workspace_memory_digest, str)
+            or len(workspace_memory_digest.encode("utf-8")) > WORKSPACE_MEMORY_INJECTION_TAIL_BYTES
+        ):
+            workspace_memory_digest = ""
+        self.workspace_memory_digest = workspace_memory_digest
 
 
 class _DaytonaRunSink:
@@ -276,7 +284,10 @@ class _LiveCapabilityPreparer:
             LivePreparedCapabilities: Prepared capabilities and any preparation notices.
         """
         from fleet_rlm.daytona.workspace_fs import DaytonaSessionWorkspaceFS
-        from fleet_rlm.daytona.workspace_memory import DaytonaWorkspaceMemoryStore
+        from fleet_rlm.daytona.workspace_memory import (
+            DaytonaWorkspaceMemoryStore,
+            read_workspace_memory_injection_digest,
+        )
         from fleet_rlm.files.memory_tools import WorkspaceMemoryToolHost
         from fleet_rlm.files.project_tools import ProjectToolHost
         from fleet_rlm.files.tools import FileToolHost
@@ -330,13 +341,18 @@ class _LiveCapabilityPreparer:
             ),
             max_bytes=self.settings.max_url_bytes,
         )
-        memory_host = WorkspaceMemoryToolHost(
-            DaytonaWorkspaceMemoryStore(
-                volume_fs.sandbox,
-                volume_paths=paths,
-                max_upload_bytes=self.settings.max_upload_bytes,
-            )
+        memory_store = DaytonaWorkspaceMemoryStore(
+            volume_fs.sandbox,
+            volume_paths=paths,
+            max_upload_bytes=self.settings.max_upload_bytes,
         )
+        memory_host = WorkspaceMemoryToolHost(memory_store)
+        # Per-turn Workspace Memory injection: a bounded tolerant tail digest.
+        # Best-effort by contract; any storage failure degrades to no injection.
+        try:
+            memory_digest = await asyncio.to_thread(read_workspace_memory_injection_digest, memory_store)
+        except Exception:
+            memory_digest = ""
         file_tools = file_host.as_tools()
         workspace_tools = workspace_host.as_tools()
         project_tools = project_host.as_tools()
@@ -363,6 +379,7 @@ class _LiveCapabilityPreparer:
             files=file_host,
             skills=skill_host,
             preparation_notices=notices,
+            workspace_memory_digest=memory_digest,
         )
 
 

@@ -96,6 +96,7 @@ class SessionView:
     attachments: tuple[PreparedAttachment, ...]
     attachment_context: AttachmentContextCapsule | None = None
     preparation_notices: tuple[PreparationNotice, ...] = ()
+    workspace_memory_digest: str = ""
 
 
 @dataclass(frozen=True, slots=True)

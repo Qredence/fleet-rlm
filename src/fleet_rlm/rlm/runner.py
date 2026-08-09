@@ -895,6 +895,7 @@ class RLMRunner:
             attachments=context.session.attachments,
             attachment_context=context.session.attachment_context,
             workspace=spec.workspace,
+            workspace_memory_digest=context.session.workspace_memory_digest,
         )
         started = time.perf_counter()
         with (
