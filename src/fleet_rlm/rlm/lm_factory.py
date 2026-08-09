@@ -10,7 +10,7 @@ from __future__ import annotations
 import os
 import re
 from enum import StrEnum
-from typing import Any, Literal
+from typing import Any
 
 import dspy
 
@@ -86,7 +86,8 @@ def resolve_role_api_key(settings: Settings, role: LLMRoleSettings) -> str | Non
 
 def has_llm_credentials(settings: Settings) -> bool:
     """Return whether both explicit LLM roles have a configured secret."""
-    return all(resolve_role_api_key(settings, settings.llm_role(role)) for role in ("root", "sub"))
+    roles = settings.lm_roles
+    return all(resolve_role_api_key(settings, role) for role in (roles.root, roles.sub))
 
 
 def build_lm(
@@ -130,8 +131,7 @@ def build_lm(
 def build_model_bundle(settings: Settings) -> RLMModelBundle:
     """Build explicit Root and Sub Model roles from resolved Fleet policy."""
 
-    def build(role: Literal["root", "sub"]) -> dspy.LM:
-        policy = settings.llm_role(role)
+    def build(policy: LLMRoleSettings) -> dspy.LM:
         api_key = resolve_role_api_key(settings, policy)
         if not api_key:
             raise RuntimeError(f"LLM API key not configured ({policy.api_key_env})")
@@ -147,9 +147,8 @@ def build_model_bundle(settings: Settings) -> RLMModelBundle:
             num_retries=policy.num_retries,
         )
 
-    root = build("root")
-    sub = build("sub")
-    return RLMModelBundle(root_lm=root, sub_lm=sub)
+    roles = settings.lm_roles
+    return RLMModelBundle(root_lm=build(roles.root), sub_lm=build(roles.sub))
 
 
 class LMTier(StrEnum):

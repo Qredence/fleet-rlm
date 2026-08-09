@@ -52,7 +52,7 @@ def require_daytona_settings(settings: Settings) -> None:
         missing.append("configured provider API key")
     if any(
         role.api_key_env == "DATABRICKS_TOKEN" and not sanitize_base_url(role.base_url)
-        for role in (settings.llm_role("root"), settings.llm_role("sub"))
+        for role in (settings.root_lm, settings.sub_lm)
     ):
         missing.append("FLEET_DATABRICKS_AI_GATEWAY_BASE_URL")
     if not (settings.database_url or "").strip():

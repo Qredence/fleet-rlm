@@ -23,13 +23,17 @@ from fleet_rlm.rlm.events import Status
 from fleet_rlm.rlm.model_bundle import RLMModelBundle
 from fleet_rlm.rlm.tool_observer import ToolEventView, ToolObserver, observe_tool
 
+# Fleet supports exactly Root -> child RLM -> bounded Sub fallback. This is a
+# product invariant owned here, not an operator-facing policy knob.
+RLM_RECURSION_MAX_DEPTH = 2
+
 
 @dataclass(frozen=True, slots=True)
 class RecursiveRLMOptions:
     """Invocation limits for the custom recursive RLM Tool."""
 
     enabled: bool = False
-    max_depth: int = 2
+    max_depth: int = RLM_RECURSION_MAX_DEPTH
     max_calls: int = 4
     max_prompt_chars: int = 50_000
     child_max_iterations: int = 8
@@ -570,6 +574,7 @@ class RecursiveRLMExecutor:
 
 
 __all__ = [
+    "RLM_RECURSION_MAX_DEPTH",
     "ChildRuntimeFactory",
     "RecursiveCallSummary",
     "RecursiveRLMExecutor",

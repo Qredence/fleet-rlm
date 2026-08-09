@@ -258,11 +258,32 @@ def test_daytona_ignores_managed_mlflow_environment_values_when_not_selected(
     assert settings.mlflow_trace_catalog is None
 
 
-def test_recursive_depth_is_fixed_at_two_for_this_milestone() -> None:
-    with pytest.raises(ValidationError):
-        Settings(_env_file=None, rlm_recursion_max_depth=1)
+def test_recursive_depth_is_a_recursive_execution_invariant_not_a_setting() -> None:
+    from fleet_rlm.composition.common import recursive_rlm_options
+    from fleet_rlm.rlm.recursive_calls import RLM_RECURSION_MAX_DEPTH
 
-    assert Settings(_env_file=None).rlm_recursion_max_depth == 2
+    settings = Settings(_env_file=None)
+    assert not hasattr(settings, "rlm_recursion_max_depth")
+    assert recursive_rlm_options(settings).max_depth == RLM_RECURSION_MAX_DEPTH == 2
+
+
+def test_stale_recursive_depth_policy_key_fails_validation(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    import fleet_rlm.config as config
+
+    policy = tmp_path / "fleet.toml"
+    _policy(policy)
+    policy.write_text(
+        policy.read_text(encoding="utf-8").replace(
+            "verbose = true",
+            "recursion_max_depth = 2\nverbose = true",
+            1,
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(config, "_CONFIG_PATH", policy)
+
+    with pytest.raises(config.FleetConfigurationError, match="recursion_max_depth"):
+        config.load_runtime_settings()
 
 
 def test_recursive_daytona_profile_enables_only_the_recursive_tool_policy() -> None:
@@ -430,8 +451,10 @@ def test_runtime_settings_deep_merge_profile_and_keep_role_policy(
     assert settings.live_enabled is True
     assert settings.rlm_max_iterations == 3
     assert settings.max_url_bytes == 30
-    assert settings.llm_role("root").model == "openai/root"
-    assert settings.llm_role("sub").temperature == 0.2
+    assert settings.root_lm.model == "openai/root"
+    assert settings.sub_lm.temperature == 0.2
+    assert settings.lm_roles.root.model_provider_service is None
+    assert settings.lm_roles.sub.api_key_env == "SUB_KEY"
 
 
 def test_require_live_execution_honors_the_toml_switch(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

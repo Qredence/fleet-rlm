@@ -33,7 +33,6 @@ max_output_chars = 10000
 max_execution_output_chars = 4000
 execution_timeout_s = 120
 recursion_enabled = false
-recursion_max_depth = 2
 recursion_max_calls = 4
 recursion_max_prompt_chars = 50000
 recursion_child_max_iterations = 8

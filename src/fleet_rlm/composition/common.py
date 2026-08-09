@@ -16,7 +16,7 @@ from fleet_rlm.config import Settings
 from fleet_rlm.files.lifecycle import AttachmentLifecycle
 from fleet_rlm.files.volume_storage import VolumeTreeFs
 from fleet_rlm.rlm.dspy_contract import RLMOptions, assert_dspy_version
-from fleet_rlm.rlm.recursive_calls import RecursiveRLMOptions
+from fleet_rlm.rlm.recursive_calls import RLM_RECURSION_MAX_DEPTH, RecursiveRLMOptions
 from fleet_rlm.rlm.runner import RLMFactoryLike
 
 
@@ -114,7 +114,7 @@ def recursive_rlm_options(settings: Settings) -> RecursiveRLMOptions:
     """
     return RecursiveRLMOptions(
         enabled=settings.rlm_recursion_enabled,
-        max_depth=settings.rlm_recursion_max_depth,
+        max_depth=RLM_RECURSION_MAX_DEPTH,
         max_calls=settings.rlm_recursion_max_calls,
         max_prompt_chars=settings.rlm_recursion_max_prompt_chars,
         child_max_iterations=settings.rlm_recursion_child_max_iterations,

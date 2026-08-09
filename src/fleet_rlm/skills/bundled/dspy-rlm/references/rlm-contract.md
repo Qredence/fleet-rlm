@@ -86,7 +86,7 @@ keyword-only and are not routed through the native positional call contract.
   separate from `max_output_chars`, which bounds REPL output retained in
   recursive history.
 - **Daytona** (primary durable path): custom interpreter, Session Workspace tools, Artifact candidates promoted on Turn Commit.
-- Recursive child calls are bounded by the policy keys `recursion_max_depth`, `recursion_max_calls`,
+- Recursive child calls are bounded by the policy keys `recursion_max_calls`,
   `recursion_max_prompt_chars`, `recursion_child_max_iterations`,
   `recursion_child_max_llm_calls`, and `recursion_child_max_output_chars`.
 - MLflow `RLM.*_lm` spans record recursive depth, call order, bounded context-size

@@ -142,9 +142,6 @@ _FIELDS: tuple[PolicyField, ...] = (
         settings_field="rlm_recursion_enabled",
     ),
     PolicyField(
-        "rlm.recursion_max_depth", "RLM", "Recursive maximum depth", "number", settings_field="rlm_recursion_max_depth"
-    ),
-    PolicyField(
         "rlm.recursion_max_calls", "RLM", "Recursive maximum calls", "number", settings_field="rlm_recursion_max_calls"
     ),
     PolicyField(

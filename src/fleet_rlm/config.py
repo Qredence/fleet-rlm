@@ -112,6 +112,14 @@ class LLMRoleSettings(BaseModel):
         return _clean_model_provider_service(value)
 
 
+@dataclass(frozen=True, slots=True)
+class LLMRoleBundle:
+    """Explicitly resolved Root and Sub LM role settings."""
+
+    root: LLMRoleSettings
+    sub: LLMRoleSettings
+
+
 class Settings(BaseModel):
     """Fully resolved Fleet runtime settings.
 
@@ -194,7 +202,6 @@ class Settings(BaseModel):
     rlm_max_execution_output_chars: int = Field(default=4_000, gt=0)
     rlm_execution_timeout_s: int = Field(default=120, gt=0)
     rlm_recursion_enabled: bool = False
-    rlm_recursion_max_depth: Literal[2] = 2
     rlm_recursion_max_calls: int = Field(default=4, gt=0)
     rlm_recursion_max_prompt_chars: int = Field(default=50_000, gt=0)
     rlm_recursion_child_max_iterations: int = Field(default=8, gt=0)
@@ -310,6 +317,21 @@ class Settings(BaseModel):
             num_retries=getattr(self, f"{prefix}_num_retries"),
         )
 
+    @property
+    def root_lm(self) -> LLMRoleSettings:
+        """Resolved Root role settings consumed by model builders and diagnostics."""
+        return self.llm_role("root")
+
+    @property
+    def sub_lm(self) -> LLMRoleSettings:
+        """Resolved Sub role settings consumed by model builders and diagnostics."""
+        return self.llm_role("sub")
+
+    @property
+    def lm_roles(self) -> LLMRoleBundle:
+        """Resolved Root/Sub role bundle; callers no longer chase flat fields."""
+        return LLMRoleBundle(root=self.root_lm, sub=self.sub_lm)
+
 
 _TABLE_KEYS: dict[str, frozenset[str]] = {
     "application": frozenset({"name"}),
@@ -332,7 +354,6 @@ _TABLE_KEYS: dict[str, frozenset[str]] = {
             "max_execution_output_chars",
             "execution_timeout_s",
             "recursion_enabled",
-            "recursion_max_depth",
             "recursion_max_calls",
             "recursion_max_prompt_chars",
             "recursion_child_max_iterations",
@@ -541,7 +562,6 @@ def _flatten_policy(policy: Mapping[str, Any]) -> dict[str, Any]:
         "rlm_max_execution_output_chars": rlm.get("max_execution_output_chars"),
         "rlm_execution_timeout_s": rlm.get("execution_timeout_s"),
         "rlm_recursion_enabled": rlm.get("recursion_enabled", False),
-        "rlm_recursion_max_depth": rlm.get("recursion_max_depth", 2),
         "rlm_recursion_max_calls": rlm.get("recursion_max_calls", 4),
         "rlm_recursion_max_prompt_chars": rlm.get("recursion_max_prompt_chars", 50_000),
         "rlm_recursion_child_max_iterations": rlm.get("recursion_child_max_iterations", 8),
@@ -896,8 +916,8 @@ def configure_logging(settings: Settings) -> None:
 
 def redacted_policy_summary(settings: Settings, *, profile: str) -> str:
     """Return safe operator diagnostics without resolving any secret values."""
-    root = settings.llm_role("root")
-    sub = settings.llm_role("sub")
+    root = settings.root_lm
+    sub = settings.sub_lm
     return (
         f"profile={profile} environment={settings.run_environment} "
         f"root_model={root.model} sub_model={sub.model} "

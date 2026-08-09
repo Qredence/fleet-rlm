@@ -93,9 +93,12 @@ chain-of-thought or arbitrary callback payloads.
 typed Runtime Events projected through SSE or the terminal client.
 
 The `[rlm]` recursion settings include `recursion_enabled` and bound the native
-`rlm_query(prompt=prompt)` child harness: `recursion_max_depth`, `recursion_max_calls`,
+`rlm_query(prompt=prompt)` child harness: `recursion_max_calls`,
 `recursion_max_prompt_chars`, `recursion_child_max_iterations`,
 `recursion_child_max_llm_calls`, and `recursion_child_max_output_chars`.
+Recursive depth is a fixed one-child product invariant (`RLM_RECURSION_MAX_DEPTH = 2`),
+not an editable policy value. Existing policies that still set
+`rlm.recursion_max_depth` fail validation; delete the key.
 These are non-secret policy values; `.env` and ambient process variables do not
 override them. The default and `daytona` policies keep recursion disabled.
 `daytona-recursive` enables one real child level: each child receives a fresh,
