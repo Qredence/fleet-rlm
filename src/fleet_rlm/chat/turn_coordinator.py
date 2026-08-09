@@ -10,33 +10,33 @@ from uuid import UUID
 
 from fleet_rlm.chat.commands import OpenTurnCommand
 from fleet_rlm.chat.committed_turn_events import CommittedTurnEventProjector
-from fleet_rlm.chat.turn_cleanup import TurnCleanupSupervisor, TurnCleanupUnavailableError
-from fleet_rlm.chat.turn_execution import (
-    TurnEventStream,  # noqa: F401 - compatibility export
-    TurnExecutionDriver,
-    TurnRunner,
+from fleet_rlm.chat.run_cleanup import RunCleanupSupervisor, RunCleanupUnavailableError
+from fleet_rlm.chat.run_execution import (
+    RunEventStream,  # noqa: F401 - compatibility export
+    RunExecutionDriver,
+    RunRunner,
     _ClaimHeartbeat,
     _shield_cleanup,
     _stop_heartbeat,
     _terminal,  # noqa: F401 - compatibility export
     _with_trace_id,  # noqa: F401 - compatibility export
 )
-from fleet_rlm.chat.turn_lifecycle import (
-    BeginTurn,
-    ExecuteTurn,
+from fleet_rlm.chat.run_lifecycle import (
+    ClaimedRun,
+    CommittedRunReplay,
     FailedRunReceipt,
-    ReplayTurn,
-    TurnAlreadyCompletedError,
-    TurnFailure,
-    TurnLifecycle,
-    TurnLifecycleUnavailableError,
+    RunAlreadyCompletedError,
+    RunClaim,
+    RunFailure,
+    RunLifecycle,
+    RunLifecycleUnavailableError,
     TurnStateError,
 )
-from fleet_rlm.chat.turn_preparation import (
-    PreparedTurn,
-    TurnPreparation,
-    TurnPreparationCancelledError,
-    TurnPreparationTimeoutError,
+from fleet_rlm.chat.run_preparation import (
+    PreparedRun,
+    RunPreparation,
+    RunPreparationCancelledError,
+    RunPreparationTimeoutError,
 )
 from fleet_rlm.observability.turn_tracing import annotate_trace_io, turn_phase_span, turn_trace
 from fleet_rlm.rlm.dspy_contract import empty_rlm_usage
@@ -70,12 +70,12 @@ class TurnCoordinator:
     def __init__(
         self,
         *,
-        lifecycle: TurnLifecycle,
-        preparation: TurnPreparation,
-        runner: TurnRunner,
+        lifecycle: RunLifecycle,
+        preparation: RunPreparation,
+        runner: RunRunner,
         projector: CommittedTurnEventProjector | None = None,
         turn_timeout_seconds: int | float = 1800,
-        cleanup: TurnCleanupSupervisor | None = None,
+        cleanup: RunCleanupSupervisor | None = None,
         claim_loss_fence: Callable[[UUID], Awaitable[None]] | None = None,
         mlflow_tracing_enabled: bool = False,
         mlflow_expose_trace_id: bool = True,
@@ -85,11 +85,11 @@ class TurnCoordinator:
         self._runner = runner
         self._projector = projector or CommittedTurnEventProjector()
         self._turn_timeout_seconds = float(turn_timeout_seconds)
-        self._cleanup = cleanup or TurnCleanupSupervisor()
+        self._cleanup = cleanup or RunCleanupSupervisor()
         self._claim_loss_fence = claim_loss_fence
         self._mlflow_tracing_enabled = mlflow_tracing_enabled
         self._mlflow_expose_trace_id = mlflow_expose_trace_id
-        self._execution_driver = TurnExecutionDriver(
+        self._execution_driver = RunExecutionDriver(
             lifecycle=lifecycle,
             runner=runner,
             projector=self._projector,
@@ -99,7 +99,7 @@ class TurnCoordinator:
             revoke_claim=self._revoke_claim,
         )
 
-    async def _prepare_with_trace(self, start: ExecuteTurn, *, deadline: float) -> PreparedTurn:
+    async def _prepare_with_trace(self, start: ClaimedRun, *, deadline: float) -> PreparedRun:
         """Trace preparation separately because SSE begins only after it succeeds."""
         with turn_trace(
             start.session_id,
@@ -130,10 +130,10 @@ class TurnCoordinator:
         """Complete claim and preparation before a transport sends headers."""
         try:
             self._cleanup.require_capacity()
-        except TurnCleanupUnavailableError as exc:
-            raise TurnLifecycleUnavailableError("Turn cleanup capacity is unavailable") from exc
+        except RunCleanupUnavailableError as exc:
+            raise RunLifecycleUnavailableError("Turn cleanup capacity is unavailable") from exc
         deadline = asyncio.get_running_loop().time() + self._turn_timeout_seconds
-        request = BeginTurn(
+        request = RunClaim(
             command.access,
             command.session_id,
             command.input,
@@ -144,9 +144,9 @@ class TurnCoordinator:
             async with asyncio.timeout_at(deadline):
                 start = await self._lifecycle.begin(request)
         except TimeoutError:
-            raise TurnPreparationTimeoutError("Turn preparation timed out") from None
+            raise RunPreparationTimeoutError("Turn preparation timed out") from None
 
-        if isinstance(start, ReplayTurn):
+        if isinstance(start, CommittedRunReplay):
             return OpenedTurnStream(start.run_id, self._replay(start))
 
         heartbeat = self._start_heartbeat(start)
@@ -167,31 +167,31 @@ class TurnCoordinator:
                 preparation_task.cancel()
                 await asyncio.gather(preparation_task, return_exceptions=True)
                 self._submit_claim_loss_cleanup(start, heartbeat)
-                raise TurnLifecycleUnavailableError("Turn claim is no longer available")
+                raise RunLifecycleUnavailableError("Turn claim is no longer available")
             prepared = preparation_task.result()
             if heartbeat_lost is not None:
                 heartbeat_lost.cancel()
                 await asyncio.gather(heartbeat_lost, return_exceptions=True)
-        except TurnPreparationCancelledError:
+        except RunPreparationCancelledError:
             await _stop_heartbeat(heartbeat)
             await _shield_cleanup(
                 self._lifecycle.finish(
                     start,
-                    TurnFailure("cancelled", "cancelled", "Turn cancelled", empty_rlm_usage()),
+                    RunFailure("cancelled", "cancelled", "Turn cancelled", empty_rlm_usage()),
                 )
             )
             raise
-        except (TurnPreparationTimeoutError, TimeoutError) as exc:
+        except (RunPreparationTimeoutError, TimeoutError) as exc:
             await _stop_heartbeat(heartbeat)
             await _shield_cleanup(
                 self._lifecycle.finish(
                     start,
-                    TurnFailure("timeout", "timeout", "Turn preparation timed out", empty_rlm_usage()),
+                    RunFailure("timeout", "timeout", "Turn preparation timed out", empty_rlm_usage()),
                 )
             )
-            if isinstance(exc, TurnPreparationTimeoutError):
+            if isinstance(exc, RunPreparationTimeoutError):
                 raise
-            raise TurnPreparationTimeoutError("Turn preparation timed out") from None
+            raise RunPreparationTimeoutError("Turn preparation timed out") from None
         except Exception:
             if start.authority.revoked:
                 raise
@@ -199,7 +199,7 @@ class TurnCoordinator:
             await _shield_cleanup(
                 self._lifecycle.finish(
                     start,
-                    TurnFailure(
+                    RunFailure(
                         "failed",
                         "preparation_failed",
                         "Turn could not be prepared",
@@ -210,7 +210,7 @@ class TurnCoordinator:
             raise
         return OpenedTurnStream(start.run_id, self._execute(start, prepared, heartbeat))
 
-    async def _replay(self, start: ReplayTurn) -> AsyncGenerator[RuntimeEvent]:
+    async def _replay(self, start: CommittedRunReplay) -> AsyncGenerator[RuntimeEvent]:
         recorder = EventRecorder(start.run_id, start.session_id)
         yield recorder.record(RunStarted(delivery="replay"))
         yield recorder.record(Status("replay", "running", "idempotent replay"))
@@ -220,8 +220,8 @@ class TurnCoordinator:
 
     async def _execute(
         self,
-        turn: ExecuteTurn,
-        prepared: PreparedTurn,
+        turn: ClaimedRun,
+        prepared: PreparedRun,
         heartbeat: _ClaimHeartbeat | None,
     ) -> AsyncGenerator[RuntimeEvent]:
         with turn_trace(
@@ -233,7 +233,7 @@ class TurnCoordinator:
             async for event in self._execution_driver.stream(turn, prepared, heartbeat, trace_id=handle.trace_id):
                 yield event
 
-    def _start_heartbeat(self, turn: ExecuteTurn) -> _ClaimHeartbeat | None:
+    def _start_heartbeat(self, turn: ClaimedRun) -> _ClaimHeartbeat | None:
         interval = max(0.01, float(self._lifecycle.heartbeat_seconds))
         stale_after = max(interval * 3, float(self._lifecycle.stale_after_seconds))
         lost = asyncio.Event()
@@ -248,7 +248,7 @@ class TurnCoordinator:
                 try:
                     async with asyncio.timeout_at(authority_deadline):
                         await self._lifecycle.heartbeat(turn)
-                except TurnAlreadyCompletedError:
+                except RunAlreadyCompletedError:
                     # The commit released the durable claim; the heartbeat must
                     # never classify its own committed Run as claim loss.
                     logger.info(
@@ -257,7 +257,7 @@ class TurnCoordinator:
                         turn.run_id,
                     )
                     return
-                except (TurnLifecycleUnavailableError, TurnStateError):
+                except (RunLifecycleUnavailableError, TurnStateError):
                     turn.authority.revoke()
                     lost.set()
                     return
@@ -275,7 +275,7 @@ class TurnCoordinator:
 
         return _ClaimHeartbeat(asyncio.create_task(maintain_claim(), name="fleet-turn-heartbeat"), lost)
 
-    def _submit_claim_loss_cleanup(self, turn: ExecuteTurn, heartbeat: _ClaimHeartbeat) -> None:
+    def _submit_claim_loss_cleanup(self, turn: ClaimedRun, heartbeat: _ClaimHeartbeat) -> None:
         async def cleanup() -> None:
             try:
                 receipt = await self._revoke_claim(turn, empty_rlm_usage())
@@ -292,16 +292,16 @@ class TurnCoordinator:
 
         self._cleanup.submit(cleanup())
 
-    async def _revoke_claim(self, turn: ExecuteTurn, usage) -> FailedRunReceipt | None:
+    async def _revoke_claim(self, turn: ClaimedRun, usage) -> FailedRunReceipt | None:
         """Revoke the durable claim, or return None when the Run already committed.
 
         A racing commit always wins: revocation against a committed Run is a
         benign no-op logged at INFO instead of surfacing as a failure.
         """
-        failure = TurnFailure("failed", "stale_claim", "Turn failed", usage)
+        failure = RunFailure("failed", "stale_claim", "Turn failed", usage)
         try:
             return await self._lifecycle.revoke_claim(turn, failure)
-        except TurnAlreadyCompletedError:
+        except RunAlreadyCompletedError:
             logger.info(
                 "stale-claim revocation skipped for committed Run session_id=%s run_id=%s",
                 turn.session_id,
