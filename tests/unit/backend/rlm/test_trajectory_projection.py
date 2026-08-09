@@ -371,14 +371,14 @@ def test_trajectory_reconciliation_aligns_canonical_steps_after_setup_execution(
         StepFinished(1),
         StepStarted(2),
         RLMReasoning("native reasoning", 2),
-        RLMCode("SUBMIT(answer=\"ok\")", 2),
+        RLMCode('SUBMIT(answer="ok")', 2),
         RLMOutput("FINAL submitted", 2),
         StepFinished(2),
     ]
 
     emissions = _reconcile_trajectory(
         details,
-        (TrajectoryStep(1, "native reasoning", "SUBMIT(answer=\"ok\")", "FINAL: ok"),),
+        (TrajectoryStep(1, "native reasoning", 'SUBMIT(answer="ok")', "FINAL: ok"),),
         max_chars=100,
     )
 
@@ -389,7 +389,7 @@ def test_trajectory_reconciliation_aligns_canonical_steps_after_setup_execution(
         StepFinished(1),
         StepStarted(2),
         RLMReasoning("native reasoning", 2),
-        RLMCode("SUBMIT(answer=\"ok\")", 2),
+        RLMCode('SUBMIT(answer="ok")', 2),
         RLMOutput("FINAL submitted", 2),
         StepFinished(2),
     ]
