@@ -461,6 +461,91 @@ def test_redact_sensitive_masks_keys_tokens_and_bearer_headers() -> None:
     assert "Authorization: Bearer ***REDACTED***" in redacted
 
 
+def test_shutdown_mlflow_resets_poisoned_auth_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    from fleet_rlm.integrations.observability import mlflow_runtime
+    from fleet_rlm.integrations.observability.config import MlflowConfig
+
+    mlflow_runtime.reset_mlflow_runtime()
+    monkeypatch.setattr(mlflow_runtime, "_existing_trace_callback", lambda: object())
+
+    forbidden = {"active": True}
+
+    def set_experiment(*, experiment_name: str) -> None:
+        if forbidden["active"]:
+            raise RuntimeError("API request failed with 403 Forbidden")
+
+    fake_mlflow = SimpleNamespace(
+        set_tracking_uri=lambda _uri: None,
+        set_experiment=set_experiment,
+        get_experiment_by_name=lambda _name: SimpleNamespace(experiment_id="exp-1"),
+        MlflowClient=lambda: SimpleNamespace(set_experiment_tag=lambda *a, **k: None),
+        set_active_model=lambda *, name: None,
+        dspy=SimpleNamespace(autolog=lambda **k: None),
+    )
+    monkeypatch.setattr(mlflow_runtime, "_import_mlflow", lambda: fake_mlflow)
+
+    config = MlflowConfig(
+        enabled=True,
+        experiment="fleet-rlm-test",
+        enable_auto_assessment=False,
+        enable_span_processors=False,
+    )
+
+    # First attempt hits 403 and caches the auth failure.
+    assert mlflow_runtime.initialize_mlflow(config) is False
+    assert mlflow_runtime.mlflow_runtime_status() is mlflow_runtime.MlflowRuntimeStatus.UNAVAILABLE
+
+    # Auth is now valid, but the cached failure blocks retry within the lifespan.
+    forbidden["active"] = False
+    assert mlflow_runtime.initialize_mlflow(config) is False
+
+    # Shutdown resets the state so the next lifespan retries and succeeds.
+    mlflow_runtime.shutdown_mlflow()
+    assert mlflow_runtime.mlflow_runtime_status() is mlflow_runtime.MlflowRuntimeStatus.INACTIVE
+    assert mlflow_runtime.initialize_mlflow(config) is True
+    assert mlflow_runtime.mlflow_runtime_status() is mlflow_runtime.MlflowRuntimeStatus.ACTIVE
+
+    mlflow_runtime.reset_mlflow_runtime()
+
+
+def test_transient_init_failure_is_not_cached(monkeypatch: pytest.MonkeyPatch) -> None:
+    from fleet_rlm.integrations.observability import mlflow_runtime
+    from fleet_rlm.integrations.observability.config import MlflowConfig
+
+    mlflow_runtime.reset_mlflow_runtime()
+    monkeypatch.setattr(mlflow_runtime, "_existing_trace_callback", lambda: object())
+
+    transient = {"active": True}
+
+    def set_experiment(*, experiment_name: str) -> None:
+        if transient["active"]:
+            raise RuntimeError("connection refused")
+
+    fake_mlflow = SimpleNamespace(
+        set_tracking_uri=lambda _uri: None,
+        set_experiment=set_experiment,
+        get_experiment_by_name=lambda _name: SimpleNamespace(experiment_id="exp-1"),
+        MlflowClient=lambda: SimpleNamespace(set_experiment_tag=lambda *a, **k: None),
+        set_active_model=lambda *, name: None,
+        dspy=SimpleNamespace(autolog=lambda **k: None),
+    )
+    monkeypatch.setattr(mlflow_runtime, "_import_mlflow", lambda: fake_mlflow)
+
+    config = MlflowConfig(
+        enabled=True,
+        experiment="fleet-rlm-test",
+        enable_auto_assessment=False,
+        enable_span_processors=False,
+    )
+
+    # A non-auth failure is not cached, so the next call retries within the lifespan.
+    assert mlflow_runtime.initialize_mlflow(config) is False
+    transient["active"] = False
+    assert mlflow_runtime.initialize_mlflow(config) is True
+
+    mlflow_runtime.reset_mlflow_runtime()
+
+
 def test_span_processors_add_metadata_and_swallow_span_failures() -> None:
     from fleet_rlm.integrations.observability.span_processors import build_span_processors, fleet_metadata_processor
 

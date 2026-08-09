@@ -8,6 +8,7 @@ import logging
 import os
 import re
 import sys
+from enum import Enum
 from threading import Lock
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
@@ -31,12 +32,16 @@ from .mlflow_context import (
 
 logger = logging.getLogger(__name__)
 
-_CLIENT_LOCK = Lock()
 _MLFLOW_IMPORT_LOCK = Lock()
-_INIT_IDENTITY: tuple[Any, ...] | None = None
-_LAST_INIT_WAS_AUTH_FAILURE = False
-_ACTIVE_CONFIG: MlflowConfig | None = None
-_CACHED_EXPERIMENT_ID: str | None = None
+
+
+class MlflowRuntimeStatus(str, Enum):
+    """Lifecycle state of the MLflow runtime for the current lifespan."""
+
+    INACTIVE = "inactive"
+    STARTING = "starting"
+    ACTIVE = "active"
+    UNAVAILABLE = "unavailable"
 
 
 def _mlflow_identity(config: MlflowConfig) -> tuple[Any, ...]:
@@ -202,122 +207,184 @@ def _existing_trace_callback() -> FleetMlflowTraceCallback | None:
     return None
 
 
+class _MlflowRuntime:
+    """Owns MLflow init state for one FastAPI lifespan.
+
+    Replaces the former module-level init globals. The lifespan resets this on
+    shutdown (see ``shutdown_mlflow``) so an auth-forbidden failure cannot poison
+    the next lifespan when a second ``create_app`` runs in the same process.
+    """
+
+    def __init__(self) -> None:
+        self._lock = Lock()
+        self._status = MlflowRuntimeStatus.INACTIVE
+        self._init_identity: tuple[Any, ...] | None = None
+        self._last_init_was_auth_failure = False
+        self._active_config: MlflowConfig | None = None
+        self._cached_experiment_id: str | None = None
+
+    @property
+    def status(self) -> MlflowRuntimeStatus:
+        # Lock-free single-field read (atomic under the GIL); this also lets a
+        # concurrent reader observe STARTING while initialize() holds the lock.
+        return self._status
+
+    @property
+    def active_config(self) -> MlflowConfig | None:
+        return self._active_config
+
+    @property
+    def experiment_id(self) -> str | None:
+        return self._cached_experiment_id
+
+    def reset(self) -> None:
+        """Return the runtime to its inactive state for the next lifespan."""
+        with self._lock:
+            self._status = MlflowRuntimeStatus.INACTIVE
+            self._init_identity = None
+            self._last_init_was_auth_failure = False
+            self._active_config = None
+            self._cached_experiment_id = None
+
+    def initialize(self, config: MlflowConfig | None = None) -> bool:
+        """Best-effort idempotent MLflow initialization for DSPy runtimes."""
+        resolved = config or MlflowConfig.from_env()
+        identity = _mlflow_identity(resolved)
+
+        with self._lock:
+            self._active_config = resolved
+
+            # Preserve idempotency after success, and avoid hammering the same
+            # tracking endpoint after an auth-forbidden failure until auth changes.
+            if identity == self._init_identity:
+                if self._last_init_was_auth_failure or not resolved.enabled:
+                    self._cached_experiment_id = None
+                    return False
+                mlflow = _import_mlflow()
+                if mlflow is None:
+                    self._status = MlflowRuntimeStatus.UNAVAILABLE
+                    self._cached_experiment_id = None
+                    return False
+                return True
+
+            if not resolved.enabled:
+                self._status = MlflowRuntimeStatus.INACTIVE
+                self._last_init_was_auth_failure = False
+                self._init_identity = identity
+                self._cached_experiment_id = None
+                return False
+
+            self._status = MlflowRuntimeStatus.STARTING
+            mlflow = _import_mlflow()
+            if mlflow is None:
+                logger.debug("MLflow is not installed; skipping runtime initialization.")
+                self._status = MlflowRuntimeStatus.UNAVAILABLE
+                self._last_init_was_auth_failure = False
+                self._init_identity = identity
+                self._cached_experiment_id = None
+                return False
+
+            try:
+                mlflow.set_tracking_uri(resolved.tracking_uri)
+                if resolved.experiment:
+                    mlflow.set_experiment(experiment_name=resolved.experiment)
+                    try:
+                        experiment = mlflow.get_experiment_by_name(resolved.experiment)
+                        if experiment is not None:
+                            self._cached_experiment_id = str(experiment.experiment_id)
+                            client = mlflow.MlflowClient()
+                            client.set_experiment_tag(
+                                experiment.experiment_id,
+                                "mlflow.experimentKind",
+                                "genai_development",
+                            )
+                    except Exception:
+                        logger.debug("Failed to set mlflow.experimentKind tag", exc_info=True)
+                if resolved.active_model_id:
+                    mlflow.set_active_model(name=resolved.active_model_id)
+                mlflow.dspy.autolog(
+                    log_traces=True,
+                    log_traces_from_compile=resolved.dspy_log_traces_from_compile,
+                    log_traces_from_eval=resolved.dspy_log_traces_from_eval,
+                    log_compiles=resolved.dspy_log_compiles,
+                    log_evals=resolved.dspy_log_evals,
+                    disable=False,
+                    silent=True,
+                )
+
+                if resolved.enable_span_processors:
+                    try:
+                        from .span_processors import build_span_processors
+
+                        processors = build_span_processors(
+                            app_env=os.getenv("APP_ENV"),
+                            workspace_id=os.getenv("WS_DEFAULT_WORKSPACE_ID"),
+                        )
+                        mlflow.tracing.configure(span_processors=processors)
+                    except Exception:
+                        logger.debug("Failed to configure span processors", exc_info=True)
+
+                try:
+                    from .auto_assessment import configure_auto_assessment, warn_if_persisted_scorers_active
+
+                    if resolved.enable_auto_assessment:
+                        configure_auto_assessment(resolved)
+                    else:
+                        warn_if_persisted_scorers_active(resolved, mlflow=mlflow)
+                except Exception:
+                    logger.debug("Failed to inspect/configure MLflow auto-assessment", exc_info=True)
+
+                if _existing_trace_callback() is None:
+                    from .callback_registry import ensure_dspy_callbacks
+
+                    ensure_dspy_callbacks([ThinkTagStripCallback(), FleetMlflowTraceCallback()])
+
+                self._status = MlflowRuntimeStatus.ACTIVE
+                self._last_init_was_auth_failure = False
+                self._init_identity = identity
+                return True
+            except Exception as exc:
+                is_auth_failure = _is_auth_forbidden_failure(exc)
+                self._status = MlflowRuntimeStatus.UNAVAILABLE
+                self._last_init_was_auth_failure = is_auth_failure
+                self._cached_experiment_id = None
+                # Only cache auth failures to avoid hammering the endpoint with bad creds.
+                # Non-auth failures (transient errors) are not cached so the next call retries.
+                if is_auth_failure:
+                    self._init_identity = identity
+                _log_mlflow_initialization_failure(
+                    exc,
+                    tracking_uri=resolved.tracking_uri,
+                )
+                return False
+
+
+_RUNTIME = _MlflowRuntime()
+
+
 def get_mlflow_config() -> MlflowConfig:
     """Return the active MLflow config, falling back to env settings."""
-    return _ACTIVE_CONFIG or MlflowConfig.from_env()
+    return _RUNTIME.active_config or MlflowConfig.from_env()
 
 
 def get_mlflow_experiment_id() -> str | None:
     """Return the cached MLflow experiment id from the last successful init."""
-    return _CACHED_EXPERIMENT_ID
+    return _RUNTIME.experiment_id
+
+
+def mlflow_runtime_status() -> MlflowRuntimeStatus:
+    """Return the current MLflow runtime lifecycle state."""
+    return _RUNTIME.status
+
+
+def reset_mlflow_runtime() -> None:
+    """Clear MLflow init state so the next lifespan starts fresh."""
+    _RUNTIME.reset()
 
 
 def initialize_mlflow(config: MlflowConfig | None = None) -> bool:
     """Best-effort idempotent MLflow initialization for DSPy runtimes."""
-    resolved = config or MlflowConfig.from_env()
-    identity = _mlflow_identity(resolved)
-
-    global _CACHED_EXPERIMENT_ID, _LAST_INIT_WAS_AUTH_FAILURE, _INIT_IDENTITY, _ACTIVE_CONFIG
-    with _CLIENT_LOCK:
-        _ACTIVE_CONFIG = resolved
-
-        # Preserve idempotency after success, and avoid hammering the same
-        # tracking endpoint after an auth-forbidden failure until auth changes.
-        if identity == _INIT_IDENTITY:
-            if _LAST_INIT_WAS_AUTH_FAILURE or not resolved.enabled:
-                _CACHED_EXPERIMENT_ID = None
-                return False
-            mlflow = _import_mlflow()
-            if mlflow is None:
-                _CACHED_EXPERIMENT_ID = None
-                return False
-            return True
-
-        if not resolved.enabled:
-            _LAST_INIT_WAS_AUTH_FAILURE = False
-            _INIT_IDENTITY = identity
-            _CACHED_EXPERIMENT_ID = None
-            return False
-
-        mlflow = _import_mlflow()
-        if mlflow is None:
-            logger.debug("MLflow is not installed; skipping runtime initialization.")
-            _LAST_INIT_WAS_AUTH_FAILURE = False
-            _INIT_IDENTITY = identity
-            _CACHED_EXPERIMENT_ID = None
-            return False
-
-        try:
-            mlflow.set_tracking_uri(resolved.tracking_uri)
-            if resolved.experiment:
-                mlflow.set_experiment(experiment_name=resolved.experiment)
-                try:
-                    experiment = mlflow.get_experiment_by_name(resolved.experiment)
-                    if experiment is not None:
-                        _CACHED_EXPERIMENT_ID = str(experiment.experiment_id)
-                        client = mlflow.MlflowClient()
-                        client.set_experiment_tag(
-                            experiment.experiment_id,
-                            "mlflow.experimentKind",
-                            "genai_development",
-                        )
-                except Exception:
-                    logger.debug("Failed to set mlflow.experimentKind tag", exc_info=True)
-            if resolved.active_model_id:
-                mlflow.set_active_model(name=resolved.active_model_id)
-            mlflow.dspy.autolog(
-                log_traces=True,
-                log_traces_from_compile=resolved.dspy_log_traces_from_compile,
-                log_traces_from_eval=resolved.dspy_log_traces_from_eval,
-                log_compiles=resolved.dspy_log_compiles,
-                log_evals=resolved.dspy_log_evals,
-                disable=False,
-                silent=True,
-            )
-
-            if resolved.enable_span_processors:
-                try:
-                    from .span_processors import build_span_processors
-
-                    processors = build_span_processors(
-                        app_env=os.getenv("APP_ENV"),
-                        workspace_id=os.getenv("WS_DEFAULT_WORKSPACE_ID"),
-                    )
-                    mlflow.tracing.configure(span_processors=processors)
-                except Exception:
-                    logger.debug("Failed to configure span processors", exc_info=True)
-
-            try:
-                from .auto_assessment import configure_auto_assessment, warn_if_persisted_scorers_active
-
-                if resolved.enable_auto_assessment:
-                    configure_auto_assessment(resolved)
-                else:
-                    warn_if_persisted_scorers_active(resolved, mlflow=mlflow)
-            except Exception:
-                logger.debug("Failed to inspect/configure MLflow auto-assessment", exc_info=True)
-
-            if _existing_trace_callback() is None:
-                from .callback_registry import ensure_dspy_callbacks
-
-                ensure_dspy_callbacks([ThinkTagStripCallback(), FleetMlflowTraceCallback()])
-
-            _LAST_INIT_WAS_AUTH_FAILURE = False
-            _INIT_IDENTITY = identity
-            return True
-        except Exception as exc:
-            is_auth_failure = _is_auth_forbidden_failure(exc)
-            _LAST_INIT_WAS_AUTH_FAILURE = is_auth_failure
-            _CACHED_EXPERIMENT_ID = None
-            # Only cache auth failures to avoid hammering the endpoint with bad creds.
-            # Non-auth failures (transient errors) are not cached so the next call retries.
-            if is_auth_failure:
-                _INIT_IDENTITY = identity
-            _log_mlflow_initialization_failure(
-                exc,
-                tracking_uri=resolved.tracking_uri,
-            )
-            return False
+    return _RUNTIME.initialize(config)
 
 
 def flush_mlflow_traces(*, terminate: bool = False) -> None:
@@ -335,8 +402,9 @@ def flush_mlflow_traces(*, terminate: bool = False) -> None:
 
 
 def shutdown_mlflow() -> None:
-    """Flush and terminate MLflow async trace workers."""
+    """Flush trace workers and reset runtime state for the next lifespan."""
     flush_mlflow_traces(terminate=True)
+    reset_mlflow_runtime()
 
 
 def _extract_token_usage(
@@ -695,6 +763,7 @@ def search_annotated_trace_rows(
 __all__ = [
     "FleetMlflowTraceCallback",
     "ThinkTagStripCallback",
+    "MlflowRuntimeStatus",
     "MlflowTraceRequestContext",
     "capture_last_active_trace_id",
     "current_request_context",
@@ -705,7 +774,9 @@ __all__ = [
     "log_trace_feedback",
     "merge_trace_result_metadata",
     "mlflow_request_context",
+    "mlflow_runtime_status",
     "new_client_request_id",
+    "reset_mlflow_runtime",
     "resolve_trace",
     "resolve_trace_by_client_request_id",
     "search_annotated_trace_rows",

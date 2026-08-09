@@ -390,14 +390,19 @@ async def initialize_mlflow_runtime_service(
         else None
     )
 
-    from fleet_rlm.integrations.observability.mlflow_runtime import initialize_mlflow
+    from fleet_rlm.integrations.observability.mlflow_runtime import (
+        MlflowRuntimeStatus,
+        initialize_mlflow,
+        mlflow_runtime_status,
+    )
 
-    initialized = await asyncio.to_thread(initialize_mlflow, mlflow_cfg)
+    await asyncio.to_thread(initialize_mlflow, mlflow_cfg)
+    active = mlflow_runtime_status() is MlflowRuntimeStatus.ACTIVE
     startup_error = detect_local_mlflow_server_version_mismatch(
         tracking_uri=mlflow_cfg.tracking_uri,
         backend_store_uri=mlflow_cfg.local_backend_store_uri,
     )
-    if not initialized:
+    if not active:
         if startup_error is None:
             startup_error = "MLflow runtime initialization unavailable"
         if auto_start_enabled and not _mlflow_startup_socket_ready(port=tracking_port):
@@ -408,7 +413,7 @@ async def initialize_mlflow_runtime_service(
     set_optional_service_status(
         diagnostics,
         "mlflow",
-        "ready" if initialized and startup_error is None else "degraded",
+        "ready" if active and startup_error is None else "degraded",
         error=startup_error,
     )
 
