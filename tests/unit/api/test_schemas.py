@@ -47,7 +47,6 @@ ROUNDTRIP_CASES = [
             "serve_ui": True,
             "expose_docs": True,
             "agent_model": "openai/gpt-4o",
-            "rlm_max_depth": 2,
             "rlm_max_iterations": 4,
         },
     ),

@@ -98,5 +98,4 @@ class ServiceInfoResponse(BaseModel):
         default=None,
         description="Primary planner LM identifier when configured.",
     )
-    rlm_max_depth: int = Field(description="Maximum recursive RLM child delegation depth.")
     rlm_max_iterations: int = Field(description="Maximum ReAct iterations per top-level run.")

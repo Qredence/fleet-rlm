@@ -124,6 +124,14 @@ def _build_child_history_snapshot(interpreter: Any) -> str:
     return snapshot
 
 
+# ``sub_rlm`` recursion ceiling. A child RLM may recurse this many levels
+# before ``sub_rlm``/``sub_rlm_batched`` degrade to a single ``llm_query``
+# (see the depth checks in ``sub_rlm`` and ``sub_rlm_batched`` below). This is
+# a fixed runtime invariant, not a configurable knob: it is the single source
+# for the ``_sub_rlm_max_depth`` state seeded by ``initialize_sub_rlm_state``.
+SUB_RLM_MAX_DEPTH = 2
+
+
 class LLMQueryMixin:
     """Mixin providing LLM query tools for recursive LLM calls.
 

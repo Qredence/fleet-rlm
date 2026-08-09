@@ -29,7 +29,6 @@ volumes:
   name: ${oc.env:VOLUME_NAME,null}
 
 rlm_settings:
-  max_depth: 2
   max_iters: 60
   deep_max_iters: 60
   enable_adaptive_iters: true

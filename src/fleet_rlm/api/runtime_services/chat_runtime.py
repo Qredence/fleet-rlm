@@ -434,7 +434,6 @@ async def build_chat_agent_context(runtime: PreparedChatRuntime, *, pool: Any | 
             volume_name=runtime.cfg.volume_name,
             timeout=runtime.cfg.timeout,
             max_llm_calls=runtime.cfg.rlm_max_llm_calls,
-            max_recursion_depth=runtime.cfg.rlm_max_depth,
             rlm_max_iterations=runtime.cfg.rlm_max_iterations,
             child_isolation_mode=runtime.cfg.rlm_child_isolation_mode,
             child_fork_fallback=runtime.cfg.rlm_child_fork_fallback,

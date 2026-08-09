@@ -20,6 +20,7 @@ import dspy
 from fleet_rlm.runtime.content.execution_limits import execution_max_text_chars
 
 from .interpreter_protocol import ExecutionProfile
+from .llm_query import SUB_RLM_MAX_DEPTH
 
 # ---------------------------------------------------------------------------
 # Common interpreter helpers (previously interpreter_common.py)
@@ -50,7 +51,7 @@ def initialize_sub_rlm_state(
     target: Any,
     *,
     depth: int = 0,
-    max_depth: int = 2,
+    max_depth: int = SUB_RLM_MAX_DEPTH,
 ) -> None:
     """Populate recursion-depth state for sub_rlm() calls."""
     target._sub_rlm_depth = depth

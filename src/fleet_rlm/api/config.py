@@ -85,7 +85,6 @@ class AppConfig(BaseSettings):
     rlm_max_iterations: int = 30
     rlm_max_llm_calls: int = 50
     rlm_action_max_tokens: int = Field(default=2048, alias="FLEET_RLM_ACTION_MAX_TOKENS")
-    rlm_max_depth: int = 2
     rlm_child_isolation_mode: Literal["auto", "context"] = Field(default="auto", alias="RLM_CHILD_ISOLATION_MODE")
     rlm_child_fork_fallback: Literal["clean", "fail"] = Field(default="clean", alias="RLM_CHILD_FORK_FALLBACK")
     delegate_max_calls_per_turn: int = 8

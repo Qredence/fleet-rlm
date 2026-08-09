@@ -20,6 +20,7 @@ from fleet_rlm.runtime.agent import runtime_helpers as rh
 from fleet_rlm.runtime.agent import runtime_mcp, runtime_streaming
 from fleet_rlm.runtime.agent.runtime_history import maybe_refresh_summary
 from fleet_rlm.runtime.events import RuntimeEvent, RuntimeEventContext
+from fleet_rlm.runtime.execution.llm_query import SUB_RLM_MAX_DEPTH
 from fleet_rlm.runtime.tools import discover_tools
 from fleet_rlm.runtime.tools.binding import bind_runtime_tools, execute_sandbox_tool
 
@@ -176,11 +177,12 @@ class AgentRuntime:
     def _recursion_depth_state(self) -> tuple[int, int]:
         """Return ``(depth, max_depth)`` for the current runtime/interpreter.
 
-        The root runtime is depth ``0``; ``max_depth`` is the configured
-        ``sub_rlm`` recursion ceiling carried on the interpreter (default 2).
+        The root runtime is depth ``0``; ``max_depth`` is the fixed
+        ``sub_rlm`` recursion ceiling (``SUB_RLM_MAX_DEPTH``) carried on the
+        interpreter.
         """
         depth = int(getattr(self.interpreter, "_sub_rlm_depth", 0) or 0)
-        max_depth = int(getattr(self.interpreter, "_sub_rlm_max_depth", 2) or 2)
+        max_depth = int(getattr(self.interpreter, "_sub_rlm_max_depth", SUB_RLM_MAX_DEPTH) or SUB_RLM_MAX_DEPTH)
         return depth, max_depth
 
     def _runtime_event_context(self) -> RuntimeEventContext:

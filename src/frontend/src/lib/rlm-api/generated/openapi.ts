@@ -2597,11 +2597,6 @@ export interface components {
        */
       agent_model?: string | null;
       /**
-       * Rlm Max Depth
-       * @description Maximum recursive RLM child delegation depth.
-       */
-      rlm_max_depth: number;
-      /**
        * Rlm Max Iterations
        * @description Maximum ReAct iterations per top-level run.
        */

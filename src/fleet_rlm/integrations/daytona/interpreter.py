@@ -36,7 +36,7 @@ from fleet_rlm.runtime.execution.interpreter_support import (
 from fleet_rlm.runtime.execution.interpreter_support import (
     sync_exit as _sync_exit_impl,
 )
-from fleet_rlm.runtime.execution.llm_query import LLMQueryMixin
+from fleet_rlm.runtime.execution.llm_query import SUB_RLM_MAX_DEPTH, LLMQueryMixin
 
 from .bridge import DaytonaToolBridge
 from .bridge_callbacks import (
@@ -101,7 +101,7 @@ class DaytonaInterpreter(
         delete_context_on_shutdown: bool = False,
         sub_lm: Any | None = None,
         max_llm_calls: int = 50,
-        max_recursion_depth: int = 2,
+        max_recursion_depth: int = SUB_RLM_MAX_DEPTH,
         rlm_max_iterations: int = 30,
         child_isolation_mode: ChildIsolationMode | str = "auto",
         child_fork_fallback: ChildForkFallback | str = "clean",

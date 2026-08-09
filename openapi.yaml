@@ -4690,10 +4690,6 @@ components:
           - type: 'null'
           title: Agent Model
           description: Primary planner LM identifier when configured.
-        rlm_max_depth:
-          type: integer
-          title: Rlm Max Depth
-          description: Maximum recursive RLM child delegation depth.
         rlm_max_iterations:
           type: integer
           title: Rlm Max Iterations
@@ -4707,7 +4703,6 @@ components:
       - database_enabled
       - serve_ui
       - expose_docs
-      - rlm_max_depth
       - rlm_max_iterations
       title: ServiceInfoResponse
       description: 'Service capability and configuration surface returned by ``GET

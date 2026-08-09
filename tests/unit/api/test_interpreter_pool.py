@@ -17,7 +17,6 @@ def _mock_cfg(**overrides):
         "volume_name": None,
         "timeout": 900,
         "rlm_max_llm_calls": 50,
-        "rlm_max_depth": 2,
         "rlm_max_iterations": 20,
         "rlm_child_isolation_mode": "auto",
         "rlm_child_fork_fallback": "clean",

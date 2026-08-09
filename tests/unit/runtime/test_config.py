@@ -250,18 +250,18 @@ def test_get_delegate_lm_from_env_returns_none_and_warns_when_model_unset(
     assert result is None
 
 
-def test_get_planner_lm_kwargs_warns_on_missing_api_key(
+def test_resolve_lm_settings_warns_on_missing_api_key(
     clean_runtime_env: pytest.MonkeyPatch,
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """Planner kwargs returns None + warns when model is set but API key is missing."""
+    """Planner settings resolve to None + warn when model is set but API key is missing."""
     runtime_config, _ = _patch_runtime_config(monkeypatch)
     clean_runtime_env.setenv("DSPY_LM_MODEL", "openai/gpt-4o")
     # No API key set.
 
     with caplog.at_level("WARNING", logger="fleet_rlm.runtime.config"):
-        result = runtime_config._planner_lm_kwargs()
+        result = runtime_config.resolve_lm_settings("planner")
 
     assert result is None
 

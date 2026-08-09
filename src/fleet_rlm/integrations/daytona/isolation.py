@@ -24,6 +24,7 @@ from typing import Any, Literal, Protocol, cast
 from fleet_rlm.runtime.content.ingestion import read_document_content
 from fleet_rlm.runtime.execution.interpreter_protocol import ExecutionProfile
 from fleet_rlm.runtime.execution.interpreter_support import initialize_sub_rlm_state
+from fleet_rlm.runtime.execution.llm_query import SUB_RLM_MAX_DEPTH
 from fleet_rlm.utils.paths import is_local_path
 
 from .async_compat import _run_async_compat
@@ -134,7 +135,7 @@ def build_child_interpreter(
         delete_context_on_shutdown=delete_context_on_shutdown,
         sub_lm=interpreter.sub_lm,
         max_llm_calls=remaining_llm_budget,
-        max_recursion_depth=getattr(interpreter, "_sub_rlm_max_depth", 2),
+        max_recursion_depth=getattr(interpreter, "_sub_rlm_max_depth", SUB_RLM_MAX_DEPTH),
         rlm_max_iterations=getattr(interpreter, "rlm_max_iterations", 30),
         child_isolation_mode=getattr(interpreter, "child_isolation_mode", "auto"),
         child_fork_fallback=getattr(interpreter, "child_fork_fallback", "clean"),
@@ -198,7 +199,7 @@ def propagate_parent_recursion_state(child: Any, parent: Any) -> None:
     if callable(remaining_budget):
         setattr(child, "_remaining_llm_budget", remaining_budget)
     parent_depth = getattr(parent, "_sub_rlm_depth", 0)
-    parent_max = getattr(parent, "_sub_rlm_max_depth", 2)
+    parent_max = getattr(parent, "_sub_rlm_max_depth", SUB_RLM_MAX_DEPTH)
     initialize_sub_rlm_state(child, depth=parent_depth + 1, max_depth=parent_max)
 
     # Propagate host-mediated evidence bridge references to children

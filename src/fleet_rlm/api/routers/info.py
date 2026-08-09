@@ -40,6 +40,5 @@ def get_service_info(
         serve_ui=cfg.serve_ui,
         expose_docs=cfg.expose_docs,
         agent_model=cfg.agent_model,
-        rlm_max_depth=cfg.rlm_max_depth,
         rlm_max_iterations=cfg.rlm_max_iterations,
     )

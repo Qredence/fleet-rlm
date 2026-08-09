@@ -10,6 +10,7 @@ from __future__ import annotations
 import logging
 import os
 from contextlib import nullcontext
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
@@ -240,71 +241,129 @@ def build_lm_config(
     return overrides
 
 
-def _planner_lm_kwargs(
-    *,
-    model_name: str | None = None,
-) -> dict[str, Any] | None:
-    api_key = os.environ.get("DSPY_LLM_API_KEY") or os.environ.get("DSPY_LM_API_KEY")
-    model = model_name or os.environ.get("DSPY_LM_MODEL")
-    if not model:
-        logger.warning(
-            "No planner LM model configured (DSPY_LM_MODEL is unset/empty); "
-            "returning None. Set DSPY_LM_MODEL or configure a BYOK LLM profile."
-        )
-        return None
-    if not api_key:
-        logger.warning(
-            "Planner LM model '%s' is configured but no API key is available "
-            "(DSPY_LLM_API_KEY/DSPY_LM_API_KEY unset); returning None.",
-            model,
-        )
-        return None
+@dataclass(frozen=True)
+class ResolvedLmSettings:
+    """Resolved language-model settings for one runtime role.
 
-    custom_provider = (os.environ.get("DSPY_LM_CUSTOM_PROVIDER") or "").strip() or None
-    return {
-        "model": model,
-        "api_key": api_key,
-        "api_base": os.environ.get("DSPY_LM_API_BASE"),
-        "max_tokens": _resolve_max_tokens(os.environ.get("DSPY_LM_MAX_TOKENS")),
-        "custom_provider": custom_provider,
-    }
+    Holds the model id, credentials, and generation limit that the planner,
+    delegate, and small-delegate roles previously each read from the
+    environment through their own fallback chains. The field names match the
+    :func:`_build_lm` keyword arguments, so ``asdict`` feeds it directly.
+    """
+
+    model: str
+    api_key: str
+    api_base: str | None
+    max_tokens: int
+    custom_provider: str | None
 
 
-def _delegate_lm_kwargs(
-    *,
-    model_name: str | None = None,
-    default_api_key: str | None = None,
-    default_api_base: str | None = None,
-    default_max_tokens: int | str | None = None,
-) -> dict[str, Any] | None:
-    model = model_name or os.environ.get("DSPY_DELEGATE_LM_MODEL")
-    if not model:
-        logger.warning(
-            "No delegate LM model configured (DSPY_DELEGATE_LM_MODEL is unset/empty); "
-            "returning None. Callers should fall back to the planner LM."
-        )
-        return None
+# Roles resolvable from the ``DSPY_LM_*``/``DSPY_DELEGATE_LM_*`` environment.
+# Distinct from ``LmRole`` (used by :func:`resolve_lm`), which also covers the
+# derived ``reflection``/``judge`` roles that reuse these settings.
+LmSettingsRole = Literal["planner", "delegate", "delegate_small"]
 
-    api_key = (
+
+def _delegate_api_key(default_api_key: str | None) -> str | None:
+    """Resolve the API key shared by the delegate and small-delegate roles."""
+    return (
         os.environ.get("DSPY_DELEGATE_LM_API_KEY")
         or default_api_key
         or os.environ.get("DSPY_LLM_API_KEY")
         or os.environ.get("DSPY_LM_API_KEY")
     )
-    if not api_key:
-        logger.warning("Delegate LM model is configured but no API key is available; using planner fallback.")
-        return None
 
-    custom_provider = (os.environ.get("DSPY_DELEGATE_LM_CUSTOM_PROVIDER") or "").strip() or None
-    return {
-        "model": model,
-        "api_key": api_key,
-        "api_base": (
-            os.environ.get("DSPY_DELEGATE_LM_API_BASE") or default_api_base or os.environ.get("DSPY_LM_API_BASE")
-        ),
-        "max_tokens": _resolve_max_tokens(default_max_tokens),
-        "custom_provider": custom_provider,
-    }
+
+def _delegate_api_base(default_api_base: str | None) -> str | None:
+    """Resolve the API base shared by the delegate and small-delegate roles."""
+    return os.environ.get("DSPY_DELEGATE_LM_API_BASE") or default_api_base or os.environ.get("DSPY_LM_API_BASE")
+
+
+def _delegate_custom_provider() -> str | None:
+    """Resolve the custom provider hint shared by both delegate roles."""
+    return (os.environ.get("DSPY_DELEGATE_LM_CUSTOM_PROVIDER") or "").strip() or None
+
+
+def resolve_lm_settings(
+    role: LmSettingsRole,
+    *,
+    model_name: str | None = None,
+    default_api_key: str | None = None,
+    default_api_base: str | None = None,
+    default_max_tokens: int | str | None = None,
+) -> ResolvedLmSettings | None:
+    """Resolve environment-backed LM settings for a runtime role.
+
+    This is the single place that reads the ``DSPY_LM_*`` and
+    ``DSPY_DELEGATE_LM_*`` environment variables. It returns ``None`` when the
+    role has no model configured or no usable API key, so callers fall back to
+    a parent role.
+    """
+    if role == "planner":
+        model = model_name or os.environ.get("DSPY_LM_MODEL")
+        if not model:
+            logger.warning(
+                "No planner LM model configured (DSPY_LM_MODEL is unset/empty); "
+                "returning None. Set DSPY_LM_MODEL or configure a BYOK LLM profile."
+            )
+            return None
+        api_key = os.environ.get("DSPY_LLM_API_KEY") or os.environ.get("DSPY_LM_API_KEY")
+        if not api_key:
+            logger.warning(
+                "Planner LM model '%s' is configured but no API key is available "
+                "(DSPY_LLM_API_KEY/DSPY_LM_API_KEY unset); returning None.",
+                model,
+            )
+            return None
+        return ResolvedLmSettings(
+            model=model,
+            api_key=api_key,
+            api_base=os.environ.get("DSPY_LM_API_BASE"),
+            max_tokens=_resolve_max_tokens(os.environ.get("DSPY_LM_MAX_TOKENS")),
+            custom_provider=(os.environ.get("DSPY_LM_CUSTOM_PROVIDER") or "").strip() or None,
+        )
+
+    if role == "delegate":
+        model = model_name or os.environ.get("DSPY_DELEGATE_LM_MODEL")
+        if not model:
+            logger.warning(
+                "No delegate LM model configured (DSPY_DELEGATE_LM_MODEL is unset/empty); "
+                "returning None. Callers should fall back to the planner LM."
+            )
+            return None
+        api_key = _delegate_api_key(default_api_key)
+        if not api_key:
+            logger.warning("Delegate LM model is configured but no API key is available; using planner fallback.")
+            return None
+        return ResolvedLmSettings(
+            model=model,
+            api_key=api_key,
+            api_base=_delegate_api_base(default_api_base),
+            max_tokens=_resolve_max_tokens(default_max_tokens),
+            custom_provider=_delegate_custom_provider(),
+        )
+
+    if role == "delegate_small":
+        model = model_name or os.environ.get("DSPY_DELEGATE_LM_SMALL_MODEL")
+        if not model:
+            return None
+        api_key = _delegate_api_key(default_api_key)
+        if not api_key:
+            logger.warning(
+                "Small delegate LM model is configured but no API key is available; using delegate fallback."
+            )
+            return None
+        return ResolvedLmSettings(
+            model=model,
+            api_key=api_key,
+            api_base=_delegate_api_base(default_api_base),
+            max_tokens=_resolve_max_tokens(
+                default_max_tokens if default_max_tokens is not None else os.environ.get("DSPY_DELEGATE_LM_MAX_TOKENS")
+            ),
+            custom_provider=_delegate_custom_provider(),
+        )
+
+    raise ValueError(f"Unknown LM role: {role!r}")
 
 
 def get_default_dspy_adapter_from_env(*, env_file: Path | None = None) -> Any | None:
@@ -413,13 +472,13 @@ def configure_planner_from_env(*, env_file: Path | None = None) -> bool:
 
     _prepare_env(env_file=env_file)
 
-    planner_lm_kwargs = _planner_lm_kwargs()
-    if planner_lm_kwargs is None:
+    planner_settings = resolve_lm_settings("planner")
+    if planner_settings is None:
         return False
 
     dspy = _import_dspy()
     configure_dspy_cache_security(dspy)
-    planner_lm = _build_lm(**planner_lm_kwargs)
+    planner_lm = _build_lm(**asdict(planner_settings))
     configure_kwargs: dict[str, Any] = {"lm": planner_lm}
     adapter = get_default_dspy_adapter_from_env(env_file=env_file)
     if adapter is not None:
@@ -443,11 +502,11 @@ def get_planner_lm_from_env(*, env_file: Path | None = None, model_name: str | N
         A configured dspy.LM instance if configuration is available, None otherwise.
     """
     _prepare_env(env_file=env_file)
-    planner_lm_kwargs = _planner_lm_kwargs(model_name=model_name)
-    if planner_lm_kwargs is None:
+    planner_settings = resolve_lm_settings("planner", model_name=model_name)
+    if planner_settings is None:
         return None
     configure_dspy_cache_security()
-    return _build_lm(**planner_lm_kwargs)
+    return _build_lm(**asdict(planner_settings))
 
 
 LmRole = Literal["planner", "delegate", "reflection", "judge"]
@@ -504,41 +563,6 @@ def resolve_lm(
     raise ValueError(f"Unknown LM role: {role!r}")
 
 
-def _delegate_small_lm_kwargs(
-    *,
-    model_name: str | None = None,
-    default_api_key: str | None = None,
-    default_api_base: str | None = None,
-    default_max_tokens: int | str | None = None,
-) -> dict[str, Any] | None:
-    model = model_name or os.environ.get("DSPY_DELEGATE_LM_SMALL_MODEL")
-    if not model:
-        return None
-
-    api_key = (
-        os.environ.get("DSPY_DELEGATE_LM_API_KEY")
-        or default_api_key
-        or os.environ.get("DSPY_LLM_API_KEY")
-        or os.environ.get("DSPY_LM_API_KEY")
-    )
-    if not api_key:
-        logger.warning("Small delegate LM model is configured but no API key is available; using delegate fallback.")
-        return None
-
-    custom_provider = (os.environ.get("DSPY_DELEGATE_LM_CUSTOM_PROVIDER") or "").strip() or None
-    return {
-        "model": model,
-        "api_key": api_key,
-        "api_base": (
-            os.environ.get("DSPY_DELEGATE_LM_API_BASE") or default_api_base or os.environ.get("DSPY_LM_API_BASE")
-        ),
-        "max_tokens": _resolve_max_tokens(
-            default_max_tokens if default_max_tokens is not None else os.environ.get("DSPY_DELEGATE_LM_MAX_TOKENS")
-        ),
-        "custom_provider": custom_provider,
-    }
-
-
 def get_delegate_lm_from_env(
     *,
     env_file: Path | None = None,
@@ -558,7 +582,8 @@ def get_delegate_lm_from_env(
     inputs or init failures so callers can fall back to the parent planner LM.
     """
     _prepare_env(env_file=env_file)
-    delegate_lm_kwargs = _delegate_lm_kwargs(
+    delegate_settings = resolve_lm_settings(
+        "delegate",
         model_name=model_name,
         default_api_key=default_api_key,
         default_api_base=default_api_base,
@@ -566,11 +591,11 @@ def get_delegate_lm_from_env(
         if default_max_tokens is not None
         else os.environ.get("DSPY_LM_MAX_TOKENS"),
     )
-    if delegate_lm_kwargs is None:
+    if delegate_settings is None:
         return None
     try:
         configure_dspy_cache_security()
-        return _build_lm(**delegate_lm_kwargs)
+        return _build_lm(**asdict(delegate_settings))
     except Exception as exc:
         logger.warning(
             "Failed to initialize delegate LM (%s); using planner fallback.",
@@ -589,7 +614,8 @@ def get_delegate_small_lm_from_env(
 ) -> dspy.LM | None:
     """Create and return an optional small delegate DSPy LM from environment."""
     _prepare_env(env_file=env_file)
-    delegate_small_lm_kwargs = _delegate_small_lm_kwargs(
+    delegate_small_settings = resolve_lm_settings(
+        "delegate_small",
         model_name=model_name,
         default_api_key=default_api_key,
         default_api_base=default_api_base,
@@ -597,11 +623,11 @@ def get_delegate_small_lm_from_env(
         if default_max_tokens is not None
         else os.environ.get("DSPY_DELEGATE_LM_MAX_TOKENS"),
     )
-    if delegate_small_lm_kwargs is None:
+    if delegate_small_settings is None:
         return None
     try:
         configure_dspy_cache_security()
-        return _build_lm(**delegate_small_lm_kwargs)
+        return _build_lm(**asdict(delegate_small_settings))
     except Exception as exc:
         logger.warning(
             "Failed to initialize small delegate LM (%s); using delegate fallback.",

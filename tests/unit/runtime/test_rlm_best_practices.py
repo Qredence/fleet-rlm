@@ -490,7 +490,6 @@ class TestRlmSettingsDefaults:
     def test_rlm_settings_defaults(self) -> None:
         settings = RlmSettings()
 
-        assert settings.max_depth == 2
         assert settings.max_iters == 60
         assert settings.deep_max_iters == 60
         assert settings.enable_adaptive_iters is True

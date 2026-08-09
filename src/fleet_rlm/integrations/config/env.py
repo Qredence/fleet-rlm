@@ -238,10 +238,6 @@ class AgentConfig(BaseModel):
 class RlmSettings(BaseModel):
     """RLM execution settings."""
 
-    max_depth: int = Field(
-        default=2,
-        description="Maximum recursion depth for RLM subagents.",
-    )
     max_iters: int = Field(
         default=60,
         description="Maximum iterations for ReAct agent.",

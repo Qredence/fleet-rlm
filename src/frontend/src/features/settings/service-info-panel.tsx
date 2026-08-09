@@ -92,12 +92,9 @@ export function ServiceInfoPanel() {
       <Field orientation="responsive" className={PANEL_FIELD_CLASSNAME}>
         <FieldContent>
           <FieldTitle>RLM Limits</FieldTitle>
-          <FieldDescription>
-            Maximum recursive depth and ReAct iterations per top-level run.
-          </FieldDescription>
+          <FieldDescription>Maximum ReAct iterations per top-level run.</FieldDescription>
         </FieldContent>
         <div className="flex min-w-0 flex-col items-end gap-1 text-right text-xs text-muted-foreground">
-          <span>Depth: {info.rlm_max_depth}</span>
           <span>Iterations: {info.rlm_max_iterations}</span>
         </div>
       </Field>
