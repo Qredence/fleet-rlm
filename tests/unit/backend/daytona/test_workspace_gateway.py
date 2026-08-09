@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 from contextlib import redirect_stdout, suppress
 from io import StringIO
@@ -119,6 +120,33 @@ async def test_mounted_gateway_creates_and_deletes_exactly_one_ephemeral_sandbox
         }
     ]
     assert platform.deleted == ["sandbox-1"]
+
+
+@pytest.mark.asyncio
+async def test_mounted_gateway_cancels_delete_that_exceeds_grace_period(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import fleet_rlm.daytona.workspace_gateway as workspace_gateway
+
+    platform = _Platform()
+    delete_started = asyncio.Event()
+    delete_cancelled = asyncio.Event()
+
+    async def slow_delete(_sandbox: object) -> None:
+        delete_started.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            delete_cancelled.set()
+
+    monkeypatch.setattr(platform, "delete", slow_delete)
+    monkeypatch.setattr(workspace_gateway, "_SANDBOX_DELETE_GRACE_SECONDS", 0.01)
+
+    async with _core(platform).open_sandbox(uuid4(), purpose="workspace-files-read"):
+        pass
+
+    assert delete_started.is_set()
+    assert delete_cancelled.is_set()
 
 
 @pytest.mark.asyncio

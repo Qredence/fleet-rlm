@@ -50,7 +50,7 @@ database_url_env = "FLEET_DATABASE_URL"
 
 [defaults.daytona]
 api_key_env = "FLEET_DAYTONA_API_KEY"
-snapshot = "fleet-rlm-python313-v4"
+snapshot = "fleet-rlm-python313-v5"
 volume_name = "fleet-volume"
 volume_mount_path = "/home/daytona/fleet"
 
@@ -73,7 +73,7 @@ environment = "daytona"
 model = "deepseek-v4-flash"
 api_key_env = "FLEET_OPENCODE_GO_API_KEY"
 base_url_env = "FLEET_OPENCODE_GO_BASE_URL"
-max_tokens = 8000
+max_tokens = 16000
 # Streaming turns re-enter identical action prompts on retries/repeated steps;
 # a cache hit yields zero streamify deltas and reads as a frozen stream.
 cache = false
@@ -83,7 +83,7 @@ reasoning_effort = "low"
 model = "deepseek-v4-flash"
 api_key_env = "FLEET_OPENCODE_GO_API_KEY"
 base_url_env = "FLEET_OPENCODE_GO_BASE_URL"
-max_tokens = 8000
+max_tokens = 16000
 temperature = 0
 cache = false
 reasoning_effort = "low"
@@ -100,7 +100,7 @@ environment = "daytona"
 model = "deepseek-v4-flash"
 api_key_env = "FLEET_OPENCODE_GO_API_KEY"
 base_url_env = "FLEET_OPENCODE_GO_BASE_URL"
-max_tokens = 8000
+max_tokens = 16000
 cache = false
 reasoning_effort = "low"
 
@@ -108,7 +108,7 @@ reasoning_effort = "low"
 model = "deepseek-v4-flash"
 api_key_env = "FLEET_OPENCODE_GO_API_KEY"
 base_url_env = "FLEET_OPENCODE_GO_BASE_URL"
-max_tokens = 8000
+max_tokens = 16000
 temperature = 0
 cache = false
 reasoning_effort = "low"

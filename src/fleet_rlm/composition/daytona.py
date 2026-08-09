@@ -6,6 +6,7 @@ import asyncio
 import logging
 from datetime import timedelta
 from pathlib import Path
+from typing import Any
 from uuid import UUID
 
 from fastapi import FastAPI
@@ -81,6 +82,20 @@ async def _dispose_components(
         raise first_error
 
 
+async def _cancel_orphan_cleanup(task: asyncio.Task[None] | None) -> None:
+    """Cancel and settle the owned orphan sweep before disposing its resources."""
+    if task is None:
+        return
+    if not task.done():
+        task.cancel()
+    try:
+        await task
+    except asyncio.CancelledError:
+        pass
+    except Exception:
+        logger.warning("Daytona orphan cleanup failed while settling shutdown", exc_info=True)
+
+
 async def _reconcile_daytona_settling(
     turn_state: SettlingTurnStore,
     session_manager: RuntimeSessionManager,
@@ -101,6 +116,53 @@ async def _reconcile_daytona_settling(
     return await turn_state.reconcile_settling(bounded_fence, deadline=deadline)
 
 
+async def run_deferred_orphan_cleanup(
+    gateway: Any,
+    *,
+    workspace_id: UUID,
+    paths: Any,
+    artifact_catalog: Any,
+    grace_period: timedelta = timedelta(hours=1),
+) -> None:
+    """Best-effort orphan sweep that must never block startup readiness.
+
+    Runs as a tracked background task after the composition is installed; its
+    sandbox creation (cold provisioning) and deletions are deliberately kept off
+    the readiness-critical path. Failures and timeouts are logged and left for a
+    later startup.
+    """
+    from fleet_rlm.daytona.workspace_gateway import cleanup_orphan_bytes
+
+    try:
+        async with asyncio.timeout(_ORPHAN_CLEANUP_TIMEOUT_SECONDS):
+            cleanup_report = await cleanup_orphan_bytes(
+                gateway,
+                workspace_id=workspace_id,
+                paths=paths,
+                committed_storage_refs=await artifact_catalog.list_storage_refs(workspace_id=workspace_id),
+                completed_runs=await artifact_catalog.list_completed_runs(workspace_id=workspace_id),
+                active_runs=await artifact_catalog.list_active_runs(workspace_id=workspace_id),
+                grace_period=grace_period,
+            )
+    except TimeoutError:
+        logger.warning(
+            "Daytona orphan cleanup timed out phase=orphan_cleanup timeout_seconds=%.3f; left for a later startup",
+            _ORPHAN_CLEANUP_TIMEOUT_SECONDS,
+        )
+        return
+    except Exception:
+        logger.warning("Daytona orphan cleanup failed phase=orphan_cleanup", exc_info=True)
+        return
+    logger.info(
+        "Daytona orphan cleanup complete phase=orphan_cleanup scanned=%d removed=%d retained=%d "
+        "skipped_fresh=%d deferred=true",
+        cleanup_report.scanned,
+        cleanup_report.removed,
+        cleanup_report.retained,
+        cleanup_report.skipped_fresh,
+    )
+
+
 async def build_daytona_composition(settings: Settings, *, skill_catalog: SkillCatalog) -> RuntimeInventory:
     """Construct the Daytona lifespan inventory and clean partial failures."""
     from fleet_rlm.rlm.dspy_contract import assert_dspy_version
@@ -119,7 +181,6 @@ async def build_daytona_composition(settings: Settings, *, skill_catalog: SkillC
     from fleet_rlm.daytona.workspace_gateway import (
         DaytonaWorkspaceGateway,
         DaytonaWorkspaceVolumeGateway,
-        cleanup_orphan_bytes,
     )
     from fleet_rlm.files.lifecycle import AttachmentLifecycleService
     from fleet_rlm.files.local_catalog import WorkspaceAttachmentBlobGateway
@@ -145,6 +206,7 @@ async def build_daytona_composition(settings: Settings, *, skill_catalog: SkillC
     database_lifecycle: RuntimeDatabaseLifecycle | None = None
     resources: DaytonaRuntimeResources | None = None
     gateway: object | None = None
+    orphan_cleanup_task: asyncio.Task[None] | None = None
     try:
         # Fail closed on an unreachable or non-head database, inside the
         # cleanup scope so the engine above is always disposed on failure.
@@ -193,40 +255,6 @@ async def build_daytona_composition(settings: Settings, *, skill_catalog: SkillC
         local_scope = LocalScope()
         startup_started = asyncio.get_running_loop().time()
         startup_deadline = startup_started + _STARTUP_CLEANUP_RECOVERY_BUDGET_SECONDS
-        cleanup_remaining = startup_deadline - asyncio.get_running_loop().time()
-        if cleanup_remaining <= 0:
-            logger.warning("Daytona orphan cleanup skipped phase=orphan_cleanup budget_exhausted=true")
-        else:
-            cleanup_timeout = min(_ORPHAN_CLEANUP_TIMEOUT_SECONDS, cleanup_remaining)
-            try:
-                async with asyncio.timeout(cleanup_timeout):
-                    cleanup_report = await cleanup_orphan_bytes(
-                        gateway,
-                        workspace_id=local_scope.workspace_id,
-                        paths=volume_paths,
-                        committed_storage_refs=await artifact_catalog.list_storage_refs(
-                            workspace_id=local_scope.workspace_id
-                        ),
-                        completed_runs=await artifact_catalog.list_completed_runs(
-                            workspace_id=local_scope.workspace_id
-                        ),
-                        active_runs=await artifact_catalog.list_active_runs(workspace_id=local_scope.workspace_id),
-                        grace_period=timedelta(hours=1),
-                    )
-                logger.info(
-                    "Daytona orphan cleanup complete phase=orphan_cleanup scanned=%d removed=%d retained=%d "
-                    "skipped_fresh=%d timeout_seconds=%.3f",
-                    cleanup_report.scanned,
-                    cleanup_report.removed,
-                    cleanup_report.retained,
-                    cleanup_report.skipped_fresh,
-                    cleanup_timeout,
-                )
-            except TimeoutError:
-                logger.warning(
-                    "Daytona orphan cleanup timed out phase=orphan_cleanup timeout_seconds=%.3f; continuing startup",
-                    cleanup_timeout,
-                )
         turn_preparation = build_turn_preparation(
             resources,
             attachment_lifecycle=attachment_lifecycle,
@@ -270,6 +298,20 @@ async def build_daytona_composition(settings: Settings, *, skill_catalog: SkillC
                 recovery.skipped,
                 recovery.budget_exhausted,
             )
+
+        # Defer the non-critical orphan sweep until after readiness; it creates
+        # ephemeral Daytona sandboxes whose cold provisioning routinely exceeds
+        # the startup budget (see supervisor._READY_TIMEOUT_SECONDS).
+        orphan_cleanup_task = asyncio.get_running_loop().create_task(
+            run_deferred_orphan_cleanup(
+                gateway,
+                workspace_id=local_scope.workspace_id,
+                paths=volume_paths,
+                artifact_catalog=artifact_catalog,
+            ),
+            name="fleet-daytona-orphan-cleanup",
+        )
+
         coordinator = TurnCoordinator(
             lifecycle=lifecycle,
             preparation=turn_preparation,
@@ -294,8 +336,10 @@ async def build_daytona_composition(settings: Settings, *, skill_catalog: SkillC
             turn_state_store=turn_state,
             database=database_lifecycle,
             model_bundle=model_bundle,
+            orphan_cleanup_task=orphan_cleanup_task,
         )
     except Exception:
+        await _cancel_orphan_cleanup(orphan_cleanup_task)
         if resources is None and database_lifecycle is None:
             await engine.dispose()
         else:
@@ -349,10 +393,12 @@ async def install_daytona_composition(
             workspace_volume_gateway=inventory.workspace_volume_gateway,
             workspace_file_service=inventory.workspace_file_service,
             workspace_volume_mirror=inventory.workspace_volume_mirror,
+            orphan_cleanup_task=inventory.orphan_cleanup_task,
         )
         return install_runtime_inventory(app, inventory)
     except Exception:
         clear_runtime_inventory(app)
+        await _cancel_orphan_cleanup(inventory.orphan_cleanup_task)
         await _dispose_components(
             resources=inventory.run_environment_resources,
             gateway=inventory.workspace_volume_gateway,
@@ -368,6 +414,8 @@ async def dispose_daytona_composition(app: FastAPI) -> None:
     from fleet_rlm.daytona.interpreter import set_bridge_service_loop
 
     inventory = clear_runtime_inventory(app)
+    orphan_task = getattr(inventory, "orphan_cleanup_task", None)
+    await _cancel_orphan_cleanup(orphan_task)
     cleanup = getattr(inventory, "turn_cleanup_supervisor", None)
     if cleanup is not None:
         await cleanup.shutdown(drain_seconds=30)

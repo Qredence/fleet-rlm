@@ -114,6 +114,20 @@ async def test_live_platform_get_none_only_on_not_found() -> None:
 
 
 @pytest.mark.asyncio
+async def test_live_platform_stop_treats_missing_sandbox_as_already_stopped() -> None:
+    client = MagicMock()
+    client.get = AsyncMock(side_effect=DaytonaNotFoundError())
+    client.stop = AsyncMock()
+    client.delete = AsyncMock()
+    platform = LiveDaytonaPlatform(client, _SPEC)
+
+    await platform.stop("sb-missing", force=True)
+
+    client.stop.assert_not_awaited()
+    client.delete.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_live_platform_get_raises_on_auth_error() -> None:
     client = MagicMock()
     client.get = AsyncMock(side_effect=_AuthError())

@@ -214,7 +214,12 @@ class LiveDaytonaPlatform:
         await self._client.start(sandbox)
 
     async def stop(self, sandbox_id: str, *, timeout: float = 60, force: bool = False) -> None:
-        sandbox = await self._client.get(sandbox_id)
+        try:
+            sandbox = await self._client.get(sandbox_id)
+        except Exception as exc:
+            if is_sandbox_not_found(exc):
+                return
+            raise
         try:
             await self._client.stop(sandbox, timeout=timeout)
         except Exception:

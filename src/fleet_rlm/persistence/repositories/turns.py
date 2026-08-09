@@ -107,6 +107,18 @@ class ReconciliationSummary:
     budget_exhausted: bool = False
 
 
+async def _await_recovery_step(awaitable: Awaitable[Any], *, deadline: float | None) -> Any:
+    """Await one recovery operation without exceeding the shared startup deadline."""
+    if deadline is None:
+        return await awaitable
+    async with asyncio.timeout_at(deadline):
+        return await awaitable
+
+
+def _recovery_deadline_exhausted(deadline: float | None) -> bool:
+    return deadline is not None and asyncio.get_running_loop().time() >= deadline
+
+
 def _decode_failure_status(value: str) -> Literal["failed", "cancelled", "timeout"]:
     if value in {"failed", "cancelled", "timeout"}:
         return value
@@ -819,11 +831,23 @@ class SqlAlchemyTurnStateStore:
                     await fence(pending_run.session_id)
             except Exception:
                 fence_failures += 1
-                await self._restore_after_fence_failure(
-                    pending_run,
-                    recovery_owner,
-                    original_owner=pending_run.claim_owner,
-                )
+                if _recovery_deadline_exhausted(deadline):
+                    skipped += len(pending) - index - 1
+                    budget_exhausted = True
+                    break
+                try:
+                    await _await_recovery_step(
+                        self._restore_after_fence_failure(
+                            pending_run,
+                            recovery_owner,
+                            original_owner=pending_run.claim_owner,
+                        ),
+                        deadline=deadline,
+                    )
+                except TimeoutError:
+                    skipped += len(pending) - index - 1
+                    budget_exhausted = True
+                    break
                 continue
             if await self._complete_recovery(pending_run, recovery_owner):
                 recovered += 1

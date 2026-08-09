@@ -33,12 +33,18 @@ class SupervisorError(RuntimeError):
     """A user-actionable local process supervision failure."""
 
 
-# Daytona lifespan creates ephemeral Volume I/O sandboxes during orphan cleanup;
-# cold provider create/delete routinely exceeds a 30s local readiness budget.
+# Daytona startup runs settling recovery after a cold Lakebase connect; the
+# bounded worst-case path (~90s) sits at the old 90s budget, so allow headroom.
+# Every startup await is now bounded (DB connect, deferred cleanup, shielded
+# delete), so this never masks an infinite hang -- it only lets bounded-but-slow
+# startup finish instead of being killed mid-recovery.
 _READY_TIMEOUT_SECONDS = {
-    "daytona": 90.0,
+    "daytona": 150.0,
 }
 _MLFLOW_READY_TIMEOUT_SECONDS = 30.0
+# Lakebase scale-to-zero connects take ~10s when cold; bound the preflight so a
+# hung endpoint fails fast with a clear message instead of blocking the launcher.
+_DATABASE_PREFLIGHT_TIMEOUT_SECONDS = 30.0
 _LOCAL_MLFLOW_URI = "http://127.0.0.1:5001"
 _LOCAL_MLFLOW_HOST = "127.0.0.1"
 _LOCAL_MLFLOW_PORT = 5001
@@ -137,7 +143,14 @@ def _validate_daytona_database(repo_root: Path, *, settings: Settings | None = N
     if not database_url:
         raise SupervisorError("Fleet database preflight failed; verify FLEET_DATABASE_URL")
     try:
-        asyncio.run(ensure_database_compatible(database_url, repo_root=repo_root))
+        asyncio.run(
+            asyncio.wait_for(
+                ensure_database_compatible(database_url, repo_root=repo_root),
+                timeout=_DATABASE_PREFLIGHT_TIMEOUT_SECONDS,
+            )
+        )
+    except TimeoutError as exc:
+        raise SupervisorError("Fleet database preflight timed out; verify FLEET_DATABASE_URL reachability") from exc
     except Exception as exc:
         raise SupervisorError(str(exc)) from exc
 

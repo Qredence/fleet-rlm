@@ -1,1 +1,4 @@
 mpmath==1.4.1
+numpy==2.5.1
+pandas==3.0.5
+beautifulsoup4==4.15.0

@@ -87,6 +87,11 @@ def normalize_database_url(url: str) -> str:
 # bound so long-lived processes never reuse a server-closed connection.
 _POSTGRES_POOL_PRE_PING = True
 _POSTGRES_POOL_RECYCLE_SECONDS = 1800
+# Lakebase scale-to-zero cold starts routinely take ~10s to connect; bound the
+# connect so a hung endpoint fails fast with a clear error instead of blocking
+# startup (readiness checks, the supervisor preflight, and the daytona
+# composition all build engines through this helper) indefinitely.
+_POSTGRES_CONNECT_TIMEOUT_SECONDS = 30.0
 
 
 def _pool_kwargs_for_url(normalized_url: str) -> dict[str, object]:
@@ -95,6 +100,7 @@ def _pool_kwargs_for_url(normalized_url: str) -> dict[str, object]:
         return {
             "pool_pre_ping": _POSTGRES_POOL_PRE_PING,
             "pool_recycle": _POSTGRES_POOL_RECYCLE_SECONDS,
+            "connect_args": {"timeout": _POSTGRES_CONNECT_TIMEOUT_SECONDS},
         }
     return {}
 

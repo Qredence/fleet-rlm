@@ -406,13 +406,17 @@ async def test_reconcile_deadline_recovers_one_run_and_leaves_later_claim_retrya
 
         fenced: list[object] = []
 
+        # The deadline margin must comfortably exceed the latency of
+        # _load_recovery_candidates (a real DB query) that runs before the first
+        # in-loop deadline check, and the fence span must exceed that margin so
+        # the deadline is only crossed after run 0's fence completes.
         async def fence(session_id):
             fenced.append(session_id)
-            await asyncio.sleep(0.02)
+            await asyncio.sleep(1.0)
 
         summary = await store.reconcile_settling(
             fence,
-            deadline=asyncio.get_running_loop().time() + 0.01,
+            deadline=asyncio.get_running_loop().time() + 0.5,
         )
 
         assert summary.candidates == 2
@@ -516,6 +520,103 @@ async def test_reconcile_retries_failed_settling_fence_without_losing_intent() -
             assert row.recovery_metadata_json is None
     finally:
         await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_reconcile_deadline_does_not_restore_after_fence_consumes_budget(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from types import SimpleNamespace
+
+    from fleet_rlm.persistence.repositories.turns import SqlAlchemyTurnStateStore
+
+    pending_run = SimpleNamespace(
+        session_id=uuid4(),
+        claim_owner="original-owner",
+        status="running",
+    )
+    store = SqlAlchemyTurnStateStore(lambda: None)  # type: ignore[arg-type]
+    restore_calls: list[object] = []
+
+    async def load_candidates() -> list[object]:
+        return [pending_run]
+
+    async def claim_owner(_pending_run: object) -> str:
+        return "recovery-owner"
+
+    async def fence(_session_id: object) -> None:
+        # Sleep longer than the deadline margin so the budget is exhausted by
+        # the time the fence fails, and the restore step is skipped.
+        await asyncio.sleep(1.0)
+        raise TimeoutError("provider fence deadline")
+
+    async def restore(*_args: object, **_kwargs: object) -> None:
+        restore_calls.append(True)
+
+    monkeypatch.setattr(store, "_load_recovery_candidates", load_candidates)
+    monkeypatch.setattr(store, "_claim_recovery_owner", claim_owner)
+    monkeypatch.setattr(store, "_restore_after_fence_failure", restore)
+
+    summary = await store.reconcile_settling(
+        fence,
+        deadline=asyncio.get_running_loop().time() + 0.5,
+    )
+
+    assert summary.candidates == 1
+    assert summary.recovered == 0
+    assert summary.fence_failures == 1
+    assert summary.skipped == 0
+    assert summary.budget_exhausted is True
+    assert restore_calls == []
+
+
+@pytest.mark.asyncio
+async def test_reconcile_deadline_bounds_fence_failure_restore(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from types import SimpleNamespace
+
+    from fleet_rlm.persistence.repositories.turns import SqlAlchemyTurnStateStore
+
+    pending_run = SimpleNamespace(
+        session_id=uuid4(),
+        claim_owner="original-owner",
+        status="running",
+    )
+    store = SqlAlchemyTurnStateStore(lambda: None)  # type: ignore[arg-type]
+
+    async def load_candidates() -> list[object]:
+        return [pending_run]
+
+    async def claim_owner(_pending_run: object) -> str:
+        return "recovery-owner"
+
+    async def fence(_session_id: object) -> None:
+        raise RuntimeError("provider fence failed")
+
+    async def restore(*_args: object, **_kwargs: object) -> None:
+        await asyncio.sleep(60)
+
+    monkeypatch.setattr(store, "_load_recovery_candidates", load_candidates)
+    monkeypatch.setattr(store, "_claim_recovery_owner", claim_owner)
+    monkeypatch.setattr(store, "_restore_after_fence_failure", restore)
+
+    # The deadline margin must exceed the load_candidates latency so the first
+    # in-loop check passes, while the outer wait_for must exceed the margin so
+    # the bounded restore (sleep 60) has room to time out at the deadline.
+    summary = await asyncio.wait_for(
+        store.reconcile_settling(
+            fence,
+            deadline=asyncio.get_running_loop().time() + 0.2,
+        ),
+        timeout=1.0,
+    )
+
+    assert summary.candidates == 1
+    assert summary.recovered == 0
+    assert summary.fence_failures == 1
+    assert summary.skipped == 0
+    assert summary.budget_exhausted is True
 
 
 @pytest.mark.asyncio

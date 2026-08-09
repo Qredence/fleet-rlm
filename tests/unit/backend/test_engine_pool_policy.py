@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from fleet_rlm.persistence.database import (
+    _POSTGRES_CONNECT_TIMEOUT_SECONDS,
     _POSTGRES_POOL_PRE_PING,
     _POSTGRES_POOL_RECYCLE_SECONDS,
     _pool_kwargs_for_url,
@@ -8,11 +9,12 @@ from fleet_rlm.persistence.database import (
 )
 
 
-def test_pool_kwargs_postgres_enables_pre_ping_and_recycle() -> None:
+def test_pool_kwargs_postgres_enables_pre_ping_recycle_and_connect_timeout() -> None:
     kwargs = _pool_kwargs_for_url("postgresql+asyncpg://u:p@h/db")
     assert kwargs == {
         "pool_pre_ping": _POSTGRES_POOL_PRE_PING,
         "pool_recycle": _POSTGRES_POOL_RECYCLE_SECONDS,
+        "connect_args": {"timeout": _POSTGRES_CONNECT_TIMEOUT_SECONDS},
     }
 
 
