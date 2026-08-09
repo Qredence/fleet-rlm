@@ -113,9 +113,11 @@ routes or public events.
 - Durable Attachment and Artifact bytes live in Workspace Volume Scope.
 - Daytona Session Workspace text lives under
   `sessions/{session_id}/workspace/`. Paged reads, bounded immediate-child
-  listings, append, and replacement writes are immediate private state, not
-  Turn-commit candidates; direct Workspace Artifact publication only stages a
-  private candidate.
+  listings, append, replacement writes, unique-fragment edits, and file or
+  empty-directory deletes are immediate private state, not Turn-commit
+  candidates. Edits/deletes accept optional SHA-256 preconditions, never
+  recurse or follow symlinks, and direct Workspace Artifact publication only
+  stages a private candidate.
 - Daytona Workspace Memory is distinct workspace-wide immediate state. Its only
   target is `memory/MEMORIES.md` under the already mounted
   `workspaces/<workspace_id>` Volume subpath (legacy root `MEMORIES.md` is
@@ -123,9 +125,10 @@ routes or public events.
   nested below that root.
 - Memory updates are id-addressed complete UTC-timestamped records of at most
   4 KiB formatted UTF-8: appends write v2 records
-  (`- [ts] **Category** <!-- id:8hex -->: learning`) and are idempotent for the
-  same record. v1 rows derive the same deterministic id when read, so every
-  cursor identifies one physical row; duplicate ids fail closed. `edit_memory`
+  (`- [ts] **Category** <!-- id:8hex -->: learning`) with fresh ids and are
+  idempotent for the same normalized record. v1 rows derive a deterministic id
+  from their canonical text plus valid-record occurrence, so duplicate legacy
+  rows remain separately pageable; duplicate persisted ids fail closed. `edit_memory`
   upgrades v1 to v2 or replaces one v2 line while preserving id and timestamp,
   and `forget` removes exactly one entry. Both mutations perform their
   read-modify-fsync-publish rewrite in one mounted-agent operation. Records

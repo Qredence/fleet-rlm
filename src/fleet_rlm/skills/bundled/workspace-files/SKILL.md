@@ -3,8 +3,8 @@ name: workspace-files
 description: Use when a Turn must inspect, create, or update durable Session files or Project deliverables, consume an authorized Attachment, or return a downloadable Artifact.
 compatibility: Durable Project and Session Workspace writes and Artifact promotion require the Daytona run environment.
 metadata:
-  version: "1.1.0"
-allowed-tools: list_project_files stat_project_file read_project_text write_project_text list_workspace_files stat_workspace_file read_workspace_text write_workspace_text append_workspace_text publish_workspace_artifact read_attachment create_artifact
+  version: "1.2.0"
+allowed-tools: list_project_files stat_project_file read_project_text write_project_text delete_project_path edit_project_text list_workspace_files stat_workspace_file read_workspace_text write_workspace_text append_workspace_text delete_workspace_path edit_workspace_text publish_workspace_artifact read_attachment create_artifact
 ---
 
 # Workspace files
@@ -35,12 +35,18 @@ assert saved["ok"] is True
 `write_project_text` requires `overwrite=True` to replace an existing file;
 the read page contract (`max_chars` 1 through 10,000 characters, `next_cursor`
 until `eof`), list cursors, and byte-size checks match the Session Workspace
-tools below. There is no append or delete Project Tool; replace content with
-`write_project_text(..., overwrite=True)`.
+tools below. There is no append Project Tool; replace larger stretches with
+`write_project_text(..., overwrite=True)`. For a small, exactly-located
+change, call `edit_project_text(path, old, new)`: it fails unless `old`
+occurs exactly once, so keep the fragment short and unique. Call
+`delete_project_path(path)` to remove one file or one empty directory;
+non-empty directories are always refused (there is no force/recursive
+delete), and each of these calls accepts an optional `expected_sha256`
+checksum precondition.
 
 ## Session Workspace (scratch)
 
-Session Workspace paths are canonical POSIX-relative paths rooted at `.`. Session Workspace is tool-only: it is not visible to Python `open()`, `os`, or `pathlib`, and a sandbox-local file never satisfies a Session Workspace request. List or inspect before writing, use `overwrite=true` only when replacement is intended, and handle a tool error before trying a different operation. Session Workspace is append/update-only: there is no delete Tool; replace content with `write_workspace_text(..., overwrite=True)`.
+Session Workspace paths are canonical POSIX-relative paths rooted at `.`. Session Workspace is tool-only: it is not visible to Python `open()`, `os`, or `pathlib`, and a sandbox-local file never satisfies a Session Workspace request. List or inspect before writing, use `overwrite=true` only when replacement is intended, and handle a tool error before trying a different operation. Session Workspace supports full file lifecycle: in addition to write/append, `edit_workspace_text(path, old, new)` replaces one exactly-located fragment (it fails when `old` is absent or ambiguous) and `delete_workspace_path(path)` removes one file or one empty directory (non-empty directories are refused; there is no recursive delete). Both accept an optional `expected_sha256` checksum precondition; pass the `checksum_sha256` from a prior REST stat or re-read when guarding against concurrent change.
 
 ```python
 listing = list_workspace_files(path=".", limit=100)

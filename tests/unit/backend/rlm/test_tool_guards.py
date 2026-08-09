@@ -173,3 +173,50 @@ def test_project_target_strips_a_redundant_projects_prefix() -> None:
 
     guards.failed("write_project_text", {"path": "projects/fleet-rlm/review.md"})
     assert guards.integrity.unresolved == ("project_workspace:fleet-rlm/review.md",)
+
+
+def test_delete_and_edit_tools_join_guard_targets_in_both_namespaces() -> None:
+    guards = TurnToolGuards()
+
+    # Failed delete/edit mutations are tracked against the same stable
+    # namespaced targets as writes.
+    guards.failed("delete_workspace_path", {"path": "notes/stale.md"})
+    guards.failed("edit_project_text", {"path": "projects/fleet-rlm/review.md"})
+    assert guards.integrity.unresolved == (
+        "project_workspace:fleet-rlm/review.md",
+        "session_workspace:notes/stale.md",
+    )
+
+    # A successful mutation settles its obligation immediately (a deleted path
+    # cannot be read back; an edit's content is not derivable from fragments).
+    guards.completed("delete_workspace_path", {"path": "notes/stale.md"}, {"ok": True})
+    assert guards.integrity.unresolved == ("project_workspace:fleet-rlm/review.md",)
+    guards.completed("edit_project_text", {"path": "fleet-rlm/review.md", "old": "a", "new": "b"}, {"ok": True})
+    assert guards.integrity.unresolved == ()
+
+    # Session-namespace edit and project-namespace delete share the semantics.
+    guards.failed("edit_workspace_text", {"path": "notes/date.txt"})
+    guards.failed("delete_project_path", {"path": "fleet-rlm/review.md"})
+    assert guards.integrity.unresolved == (
+        "project_workspace:fleet-rlm/review.md",
+        "session_workspace:notes/date.txt",
+    )
+    guards.completed("edit_workspace_text", {"path": "notes/date.txt", "old": "a", "new": "b"}, {"ok": True})
+    guards.completed("delete_project_path", {"path": "projects/fleet-rlm/review.md"}, {"ok": True})
+    assert guards.integrity.unresolved == ()
+
+
+def test_delete_edit_targets_respect_required_target_scoping() -> None:
+    guards = TurnToolGuards(required_targets=frozenset({"session_workspace:notes/report.md"}))
+
+    guards.failed("delete_workspace_path", {"path": "notes/diagnostic.md"})
+    assert guards.integrity.unresolved == ()  # unrelated deletes stay out of scope
+
+    guards.failed("edit_workspace_text", {"path": "notes/report.md"})
+    assert guards.integrity.unresolved == ("session_workspace:notes/report.md",)
+    guards.completed(
+        "edit_workspace_text",
+        {"path": "notes/report.md", "old": "draft", "new": "final"},
+        {"ok": True},
+    )
+    assert guards.integrity.unresolved == ()

@@ -18,6 +18,8 @@ The generated source of truth is [`openapi.yaml`](../../openapi.yaml).
 | `GET` | `/api/files/content` | Read one bounded UTF-8 page |
 | `PUT` | `/api/files/content` | Create or explicitly overwrite a UTF-8 file |
 | `POST` | `/api/files/append` | Append UTF-8 text |
+| `PATCH` | `/api/files/content` | Replace one unique `old` fragment with `new` |
+| `DELETE` | `/api/files/content` | Delete one file or one empty directory |
 | `GET` | `/api/volume/tree` | List relative file paths from the mounted Workspace Volume |
 | `GET` | `/api/skills` | List bounded system Skill Cards |
 | `GET` | `/api/skills/{skill_id}` | Read one bounded system Skill Card |
@@ -82,8 +84,13 @@ or Skill lifecycle projections.
 The files API always resolves the process-local Workspace. Callers cannot
 select a Workspace or address Daytona Volume, mount, Sandbox, Attachment,
 Artifact, Session, or Run identifiers. It exposes only the durable `files/`
-root, has no delete or rename operation, and accepts an optional current
-SHA-256 on overwrite/append; stale preconditions return `409`.
+root, has no rename operation, and accepts an optional current
+SHA-256 on overwrite/append/delete/patch; stale preconditions return `409`.
+`DELETE /api/files/content` removes one file or one empty directory
+(non-empty directories return `409`), and `PATCH /api/files/content`
+applies one unique find/replace whose old text must occur exactly once
+(absent or ambiguous matches return `409`); PATCH returns the fresh
+content checksum for precondition chaining.
 
 `POST /api/artifacts` does not exist. Artifacts become public only through Turn
 Commit after host-mediated `create_artifact` produces a private candidate.

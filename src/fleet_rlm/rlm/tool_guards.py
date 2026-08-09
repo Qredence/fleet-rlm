@@ -28,13 +28,18 @@ _WORKSPACE_PATH_RE = re.compile(
 
 # Host tool name -> stable guard-target namespace. Fingerprints for existing
 # ``session_workspace:`` targets are unchanged; ``projects/<slug>/<path>``
-# targets join as ``project_workspace:<slug>/<path>``.
+# targets join as ``project_workspace:<slug>/<path>``. The delete/edit tools
+# (WS-7) track against the same targets.
 _WORKSPACE_TOOL_NAMESPACES = {
     "write_workspace_text": "session_workspace",
     "append_workspace_text": "session_workspace",
     "read_workspace_text": "session_workspace",
+    "delete_workspace_path": "session_workspace",
+    "edit_workspace_text": "session_workspace",
     "write_project_text": "project_workspace",
     "read_project_text": "project_workspace",
+    "delete_project_path": "project_workspace",
+    "edit_project_text": "project_workspace",
 }
 
 _PREFIX_NAMESPACES = (("projects/", "project_workspace"), ("workspace/", "session_workspace"))
@@ -105,6 +110,19 @@ class TurnIntegrityLedger:
                 self._expected_content[target] = sha256(content.encode("utf-8")).hexdigest()
             return
         if tool_name == "append_workspace_text":
+            self._unresolved.discard(target)
+            self._expected_content.pop(target, None)
+            return
+        if tool_name in {
+            "delete_workspace_path",
+            "delete_project_path",
+            "edit_workspace_text",
+            "edit_project_text",
+        }:
+            # A successful delete/edit settles the obligation: the mutation is
+            # atomic and immediately durable, and its receipt is the completion
+            # (a deleted path cannot be read back; an edit's full content is
+            # not derivable from its old/new fragments).
             self._unresolved.discard(target)
             self._expected_content.pop(target, None)
             return

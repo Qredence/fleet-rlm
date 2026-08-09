@@ -162,9 +162,10 @@ _Avoid_: tenant Workspace alone, whole shared Volume root, Sandbox Workspace
 Daytona-only workspace-wide immediate state at `memory/MEMORIES.md` under the
 already workspace-scoped Volume mount (legacy root `MEMORIES.md` migrates on
 first open; content is never lost). Records are canonical v1/v2 lines; new
-appends are v2 (`- [ts] **Category** <!-- id:8hex -->: learning`). v1 rows
-derive that same deterministic id when read, so every list entry is
-addressable; duplicate ids fail closed rather than selecting an arbitrary row.
+appends are v2 (`- [ts] **Category** <!-- id:8hex -->: learning`) with fresh
+ids. v1 rows derive a deterministic id from canonical text plus valid-record
+occurrence when read, so duplicate legacy rows remain separately addressable;
+duplicate persisted ids fail closed rather than selecting an arbitrary row.
 Reads are tolerant (humans edit the file): malformed lines are skipped with a
 bounded warning count while writes stay strictly validated.
 `read_workspace_memory` loads the newest bounded complete records on demand;
@@ -189,9 +190,11 @@ _Avoid_: Volume mount, Sandbox filesystem browser, public storage path
 
 **Session Workspace**:
 Private durable working files owned by one Session within Workspace Volume
-Scope. Successful writes persist immediately across Turns, failed or cancelled
-Runs, and Sandbox replacement; they are not Session History, commit-gated
-Artifacts, or Code-Interpreter Context.
+Scope. Successful writes, unique-fragment edits, and file-or-empty-directory
+deletes persist immediately across Turns, failed or cancelled Runs, and Sandbox
+replacement; they are not Session History, commit-gated Artifacts, or
+Code-Interpreter Context. Edits/deletes never recurse or follow symlinks and
+accept optional SHA-256 preconditions.
 Replacement continuity applies to the mounted bytes only, never interpreter
 globals or an Interpreter Lease.
 _Avoid_: Sandbox Workspace, Artifact, Attachment, durable REPL variables

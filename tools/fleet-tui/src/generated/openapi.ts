@@ -247,10 +247,12 @@ export interface paths {
         /** Write Workspace File */
         put: operations["write_workspace_file_api"];
         post?: never;
-        delete?: never;
+        /** Delete Workspace File */
+        delete: operations["delete_workspace_file_api"];
         options?: never;
         head?: never;
-        patch?: never;
+        /** Patch Workspace File */
+        patch: operations["patch_workspace_file_api"];
         trace?: never;
     };
     "/api/files/append": {
@@ -623,6 +625,23 @@ export interface components {
             /** Expected Sha256 */
             expected_sha256?: string | null;
         };
+        /** WorkspaceFileDeleteRequest */
+        WorkspaceFileDeleteRequest: {
+            /** Path */
+            path: string;
+            /** Expected Sha256 */
+            expected_sha256?: string | null;
+        };
+        /** WorkspaceFileDeleteResponse */
+        WorkspaceFileDeleteResponse: {
+            /**
+             * Ok
+             * @default true
+             */
+            ok: boolean;
+            /** Path */
+            path: string;
+        };
         /** WorkspaceFileEntryResponse */
         WorkspaceFileEntryResponse: {
             /** Path */
@@ -650,6 +669,17 @@ export interface components {
             truncated: boolean;
             /** Next Cursor */
             next_cursor?: string | null;
+        };
+        /** WorkspaceFilePatchRequest */
+        WorkspaceFilePatchRequest: {
+            /** Path */
+            path: string;
+            /** Old */
+            old: string;
+            /** New */
+            new: string;
+            /** Expected Sha256 */
+            expected_sha256?: string | null;
         };
         /** WorkspaceFileReadResponse */
         WorkspaceFileReadResponse: {
@@ -1521,6 +1551,72 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["WorkspaceFileWriteRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspaceFileEntryResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    delete_workspace_file_api: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WorkspaceFileDeleteRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspaceFileDeleteResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    patch_workspace_file_api: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WorkspaceFilePatchRequest"];
             };
         };
         responses: {

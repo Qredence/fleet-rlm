@@ -48,6 +48,22 @@ def _raise_tool_error(exc: BaseException) -> NoReturn:
     if isinstance(exc, FileNotFoundError):
         raise WorkspaceToolError("not_found", "Session Workspace file was not found") from None
     if isinstance(exc, FileExistsError):
+        detail = getattr(exc, "detail", "")
+        if detail == "checksum_mismatch":
+            raise WorkspaceToolError(
+                "conflict",
+                "Session Workspace checksum precondition did not match the current file content",
+            ) from None
+        if detail == "not_empty":
+            raise WorkspaceToolError(
+                "conflict", "Session Workspace directory is not empty; delete its contents first"
+            ) from None
+        if detail == "ambiguous":
+            raise WorkspaceToolError(
+                "conflict", "Session Workspace edit text occurs more than once; make it unique"
+            ) from None
+        if detail == "missing":
+            raise WorkspaceToolError("conflict", "Session Workspace edit text was not found in the file") from None
         raise WorkspaceToolError(
             "conflict", "Session Workspace file already exists; use overwrite=True to replace it"
         ) from None
@@ -176,6 +192,52 @@ class WorkspaceToolHost:
             except Exception as exc:
                 _raise_tool_error(exc)
 
+        def delete_workspace_path(path: str, expected_sha256: str | None = None) -> dict[str, object]:
+            """Delete one file or empty directory immediately from this Session's durable workspace."""
+            try:
+                normalized = normalize_workspace_path(path)
+                self._workspace.delete_path(normalized, expected_sha256=expected_sha256)
+                result: dict[str, object] = {
+                    "ok": True,
+                    "namespace": SESSION_WORKSPACE_NAMESPACE,
+                    "path": normalized,
+                }
+                warnings = getattr(self._workspace, "last_warnings", None)
+                if isinstance(warnings, tuple) and warnings:
+                    result["warnings"] = [dict(item) for item in warnings if isinstance(item, Mapping)]
+                return result
+            except Exception as exc:
+                _raise_tool_error(exc)
+
+        def edit_workspace_text(
+            path: str,
+            old: str,
+            new: str,
+            expected_sha256: str | None = None,
+        ) -> dict[str, object]:
+            """Replace exactly one unique occurrence of old with new in one UTF-8 workspace file."""
+            if not isinstance(old, str) or not old or not isinstance(new, str):
+                raise WorkspaceToolError("invalid_path", "Session Workspace edit requires non-empty old and new text")
+            if len(old.encode("utf-8")) > self._max_file_bytes or len(new.encode("utf-8")) > self._max_file_bytes:
+                raise WorkspaceToolError("too_large", "Session Workspace file exceeds the maximum size")
+            try:
+                normalized = normalize_workspace_path(path)
+                entry = _entry(self._workspace.patch_text(normalized, old, new, expected_sha256=expected_sha256))
+                # The LLM-facing result keeps its established 4-key entry
+                # shape; the precondition checksum is a transport concern.
+                entry.pop("checksum_sha256", None)
+                result: dict[str, object] = {
+                    "ok": True,
+                    "namespace": SESSION_WORKSPACE_NAMESPACE,
+                    **entry,
+                }
+                warnings = getattr(self._workspace, "last_warnings", None)
+                if isinstance(warnings, tuple) and warnings:
+                    result["warnings"] = [dict(item) for item in warnings if isinstance(item, Mapping)]
+                return result
+            except Exception as exc:
+                _raise_tool_error(exc)
+
         return (
             dspy.Tool(
                 list_workspace_files,
@@ -236,6 +298,35 @@ class WorkspaceToolHost:
                 args={
                     "path": {"type": "string"},
                     "content": {"type": "string"},
+                },
+            ),
+            dspy.Tool(
+                delete_workspace_path,
+                name="delete_workspace_path",
+                desc=(
+                    "Delete one file or one empty directory immediately from this Session's durable "
+                    "Workspace; non-empty directories are refused, and a supplied expected_sha256 guards "
+                    "against deleting changed content. This durability is independent of Turn Commit."
+                ),
+                args={
+                    "path": {"type": "string"},
+                    "expected_sha256": {"type": ["string", "null"]},
+                },
+            ),
+            dspy.Tool(
+                edit_workspace_text,
+                name="edit_workspace_text",
+                desc=(
+                    "Replace exactly one unique occurrence of old with new in one UTF-8 Session Workspace "
+                    "file; the edit fails when old is absent or occurs more than once, and a supplied "
+                    "expected_sha256 guards against editing changed content. Read the file first and keep "
+                    "old short and unique. This durability is independent of Turn Commit."
+                ),
+                args={
+                    "path": {"type": "string"},
+                    "old": {"type": "string"},
+                    "new": {"type": "string"},
+                    "expected_sha256": {"type": ["string", "null"]},
                 },
             ),
         )
@@ -309,6 +400,21 @@ class WorkspaceToolHost:
                 "content_chars": len(str(content or "")),
             }
 
+        def edit_input(arguments: Mapping[str, Any]) -> JsonValue:
+            # Edit fragments stay private; only their sizes are observable.
+            return {
+                **fields(arguments, ("path",)),
+                "old_chars": len(str(arguments.get("old") or "")),
+                "new_chars": len(str(arguments.get("new") or "")),
+                "checksum_precondition": bool(arguments.get("expected_sha256")),
+            }
+
+        def delete_input(arguments: Mapping[str, Any]) -> JsonValue:
+            return {
+                **fields(arguments, ("path",)),
+                "checksum_precondition": bool(arguments.get("expected_sha256")),
+            }
+
         return MappingProxyType(
             {
                 "list_workspace_files": ToolEventView(
@@ -343,6 +449,20 @@ class WorkspaceToolHost:
                 ),
                 "append_workspace_text": ToolEventView(
                     input_projection=append_input,
+                    output_projection=lambda result: output(
+                        result,
+                        ("ok", "namespace", "path", "byte_size", "warnings"),
+                    ),
+                ),
+                "delete_workspace_path": ToolEventView(
+                    input_projection=delete_input,
+                    output_projection=lambda result: output(
+                        result,
+                        ("ok", "namespace", "path", "warnings"),
+                    ),
+                ),
+                "edit_workspace_text": ToolEventView(
+                    input_projection=edit_input,
                     output_projection=lambda result: output(
                         result,
                         ("ok", "namespace", "path", "byte_size", "warnings"),

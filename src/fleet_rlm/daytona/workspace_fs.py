@@ -527,6 +527,23 @@ def _entry_from_payload(raw: Mapping[str, object]) -> WorkspaceEntry:
     )
 
 
+def _normalize_expected_sha256(value: str | None) -> str:
+    """Normalize one optional SHA-256 precondition for the workspace agent."""
+    if value is None:
+        return ""
+    candidate = value.strip().lower()
+    if len(candidate) != 64 or any(char not in "0123456789abcdef" for char in candidate):
+        raise ValueError("workspace checksum precondition is invalid")
+    return candidate
+
+
+def _warnings_from_payload(payload: Mapping[str, object]) -> tuple[dict[str, object], ...]:
+    raw = payload.get("warnings")
+    if not isinstance(raw, list):
+        return ()
+    return tuple(cast(dict[str, object], item) for item in raw if isinstance(item, dict))
+
+
 def _is_relative_to(path: PurePosixPath, root: PurePosixPath) -> bool:
     try:
         path.relative_to(root)
@@ -751,6 +768,57 @@ class DaytonaSessionWorkspaceFS:
             raise RuntimeError("workspace append returned invalid entry")
         return _entry_from_payload(cast(Mapping[str, object], entry))
 
+    def delete_path(self, path: str, *, expected_sha256: str | None = None) -> None:
+        relative = normalize_workspace_path(path)
+        payload = self._atomic_run(
+            operation="delete",
+            relative=relative,
+            allow_missing=False,
+            max_bytes=self._max_file_bytes,
+            limit=0,
+            overwrite=False,
+            content_b64="",
+            after="",
+            offset=0,
+            max_chars=0,
+            expected_sha256=_normalize_expected_sha256(expected_sha256),
+        )
+        self._last_warnings = _warnings_from_payload(payload)
+
+    def patch_text(
+        self,
+        path: str,
+        old: str,
+        new: str,
+        *,
+        expected_sha256: str | None = None,
+    ) -> WorkspaceEntry:
+        relative = normalize_workspace_path(path)
+        if not isinstance(old, str) or not old or not isinstance(new, str):
+            raise ValueError("workspace patch text arguments are invalid")
+        # The agent rechecks the composed result against the file cap; these
+        # cheap local bounds only avoid shipping obviously oversized payloads.
+        if len(old.encode("utf-8")) > self._max_file_bytes or len(new.encode("utf-8")) > self._max_file_bytes:
+            raise ValueError("workspace file exceeds maximum size")
+        payload = self._atomic_run(
+            operation="patch",
+            relative=relative,
+            allow_missing=False,
+            max_bytes=self._max_file_bytes,
+            limit=0,
+            overwrite=True,
+            content_b64=base64.b64encode(json.dumps({"old": old, "new": new}).encode("utf-8")).decode("ascii"),
+            after="",
+            offset=0,
+            max_chars=0,
+            expected_sha256=_normalize_expected_sha256(expected_sha256),
+        )
+        self._last_warnings = _warnings_from_payload(payload)
+        entry = payload.get("entry")
+        if not isinstance(entry, dict):
+            raise RuntimeError("workspace patch returned invalid entry")
+        return _entry_from_payload(cast(Mapping[str, object], entry))
+
     def _atomic_run(
         self,
         *,
@@ -765,6 +833,7 @@ class DaytonaSessionWorkspaceFS:
         offset: int,
         max_chars: int,
         checksum: bool = False,
+        expected_sha256: str = "",
     ) -> dict[str, object]:
         try:
             return run_workspace_agent(
@@ -782,6 +851,7 @@ class DaytonaSessionWorkspaceFS:
                 offset=offset,
                 max_chars=max_chars,
                 checksum=checksum,
+                expected_sha256=expected_sha256,
             )
         except WorkspaceAgentStorageError as exc:
             raise WorkspaceStorageError(*exc.args) from exc
@@ -907,6 +977,42 @@ class AsyncDaytonaSessionWorkspaceFS:
     async def append_text(self, path: str, content: str) -> WorkspaceEntry:
         return await self._mutate("append", path, content, overwrite=False)
 
+    async def delete_path(self, path: str, *, expected_sha256: str | None = None) -> None:
+        relative = normalize_workspace_path(path)
+        payload = await self._atomic_run(
+            operation="delete",
+            relative=relative,
+            max_bytes=self._max_file_bytes,
+            expected_sha256=_normalize_expected_sha256(expected_sha256),
+        )
+        self._last_warnings = _warnings_from_payload(payload)
+
+    async def patch_text(
+        self,
+        path: str,
+        old: str,
+        new: str,
+        *,
+        expected_sha256: str | None = None,
+    ) -> WorkspaceEntry:
+        relative = normalize_workspace_path(path)
+        if not isinstance(old, str) or not old or not isinstance(new, str):
+            raise ValueError("workspace patch text arguments are invalid")
+        if len(old.encode("utf-8")) > self._max_file_bytes or len(new.encode("utf-8")) > self._max_file_bytes:
+            raise ValueError("workspace file exceeds maximum size")
+        payload = await self._atomic_run(
+            operation="patch",
+            relative=relative,
+            max_bytes=self._max_file_bytes,
+            content_b64=base64.b64encode(json.dumps({"old": old, "new": new}).encode("utf-8")).decode("ascii"),
+            expected_sha256=_normalize_expected_sha256(expected_sha256),
+        )
+        self._last_warnings = _warnings_from_payload(payload)
+        entry = payload.get("entry")
+        if not isinstance(entry, dict):
+            raise RuntimeError("workspace patch returned invalid entry")
+        return _entry_from_payload(cast(Mapping[str, object], entry))
+
     async def _mutate(self, operation: str, path: str, content: str, *, overwrite: bool) -> WorkspaceEntry:
         relative = normalize_workspace_path(path)
         if not isinstance(content, str):
@@ -947,6 +1053,7 @@ class AsyncDaytonaSessionWorkspaceFS:
         offset: int = 0,
         max_chars: int = 0,
         checksum: bool = False,
+        expected_sha256: str = "",
     ) -> dict[str, object]:
         try:
             return await run_workspace_agent_async(
@@ -964,6 +1071,7 @@ class AsyncDaytonaSessionWorkspaceFS:
                 offset=offset,
                 max_chars=max_chars,
                 checksum=checksum,
+                expected_sha256=expected_sha256,
             )
         except WorkspaceAgentStorageError as exc:
             raise WorkspaceStorageError(*exc.args) from exc

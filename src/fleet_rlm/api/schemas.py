@@ -237,6 +237,37 @@ class WorkspaceFileAppendRequest(BaseModel):
     )
 
 
+class WorkspaceFileDeleteRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    path: str = Field(min_length=1, max_length=1_024)
+    expected_sha256: str | None = Field(
+        default=None,
+        min_length=64,
+        max_length=64,
+        pattern=r"^[0-9a-f]{64}$",
+    )
+
+
+class WorkspaceFilePatchRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    path: str = Field(min_length=1, max_length=1_024)
+    old: str = Field(min_length=1)
+    new: str
+    expected_sha256: str | None = Field(
+        default=None,
+        min_length=64,
+        max_length=64,
+        pattern=r"^[0-9a-f]{64}$",
+    )
+
+
+class WorkspaceFileDeleteResponse(BaseModel):
+    ok: bool = True
+    path: str
+
+
 # ---------------------------------------------------------------------------
 # Local settings policy (config/fleet.toml; never .env or process secrets)
 # ---------------------------------------------------------------------------

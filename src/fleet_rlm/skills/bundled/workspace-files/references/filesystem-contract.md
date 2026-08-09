@@ -42,12 +42,22 @@ namespaces; Fleet has no production writer or reader for them.
 
 Workspace, Session, Run, Attachment, and Artifact identities are UUID-shaped opaque values. The workspace tools accept relative paths such as `notes/analysis.md`. Do not pass absolute paths, backslashes, empty segments, `.` or `..` components, repeated slashes, trailing slashes, or the reserved `.fleet` component. Use `.` only as the root argument to `list_workspace_files`.
 
-Session Workspace tools are append/update-only. Fleet exposes list, stat, paged
-read, write (with `overwrite`), and append; there is no delete Tool. List pages
-continue with the returned `next_cursor`, and text pages continue with their
-opaque path-bound `next_cursor` until `eof`. To replace a file, call
+Session Workspace tools cover the full file lifecycle (the former
+append/update-only, no-delete invariant ended with the WS-7 tool-surface
+deviation). Fleet exposes list, stat, paged read, write (with `overwrite`),
+append, unique-fragment edit, and delete. List pages continue with the
+returned `next_cursor`, and text pages continue with their opaque path-bound
+`next_cursor` until `eof`. To replace a file, call
 `write_workspace_text(..., overwrite=True)`; to add incremental output, call
-`append_workspace_text`.
+`append_workspace_text`. `edit_workspace_text(path, old, new)` replaces
+exactly one occurrence—zero or ambiguous matches fail with `conflict`—and
+`delete_workspace_path(path)` removes one file or one empty directory
+(non-empty directories fail with `conflict`; symlinks and non-regular files
+fail closed). Both accept an optional `expected_sha256` checksum
+precondition that fails with `conflict` when current bytes differ. Project
+tools (`edit_project_text`, `delete_project_path`) mirror these semantics
+under `projects/<slug>/`; `attachments/` and `artifacts/` remain closed to
+workspace-path deletes and edits.
 
 The Session Workspace is a separate namespace from the Python sandbox filesystem. Use only the bound workspace tools for workspace files; Python file I/O cannot read, verify, or replace them.
 

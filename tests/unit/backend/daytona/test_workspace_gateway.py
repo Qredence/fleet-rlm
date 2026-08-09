@@ -196,3 +196,55 @@ async def test_stat_returns_agent_side_checksum_in_one_round_trip(tmp_path: Path
     assert root_entry.checksum_sha256 is None
 
     assert await session.stat("missing.txt") is None
+
+
+@pytest.mark.asyncio
+async def test_delete_and_patch_run_agent_side_in_one_round_trip(tmp_path: Path) -> None:
+    root = tmp_path / "volume" / "sessions" / "session" / "workspace"
+    root.mkdir(parents=True)
+    (root / "note.txt").write_bytes(b"hello world")
+    (root / "notes").mkdir()
+    session, process = _workspace_session(root)
+
+    patched = await session.patch_text(
+        "note.txt", "world", "fleet", expected_sha256=hashlib.sha256(b"hello world").hexdigest()
+    )
+    assert patched is not None
+    assert patched.kind == "file"
+    assert patched.byte_size == len(b"hello fleet")
+    assert patched.checksum_sha256 == hashlib.sha256(b"hello fleet").hexdigest()
+    assert len(process.calls) == 1  # read+compose+publish stayed in one agent run
+    assert (root / "note.txt").read_bytes() == b"hello fleet"
+
+    deleted_sha = await session.stat("note.txt")
+    assert deleted_sha is not None
+    await session.delete_path("note.txt", expected_sha256=deleted_sha.checksum_sha256)
+    assert len(process.calls) == 3  # patch + stat + delete; precondition ran agent-side
+    assert not (root / "note.txt").exists()
+
+    await session.delete_path("notes", expected_sha256=None)  # empty dir, no precondition
+    assert not (root / "notes").exists()
+
+
+@pytest.mark.asyncio
+async def test_delete_and_patch_conflicts_surface_as_public_conflict_error(tmp_path: Path) -> None:
+    from fleet_rlm.files.workspace_models import WorkspaceConflictError
+
+    root = tmp_path / "volume" / "sessions" / "session" / "workspace"
+    root.mkdir(parents=True)
+    (root / "note.txt").write_bytes(b"hello world")
+    session, _process = _workspace_session(root)
+
+    with pytest.raises(WorkspaceConflictError) as checksum:
+        await session.delete_path("note.txt", expected_sha256="0" * 64)
+    assert checksum.value.detail == "checksum_mismatch"
+    assert (root / "note.txt").exists()
+
+    with pytest.raises(WorkspaceConflictError) as ambiguous:
+        await session.patch_text("note.txt", "o", "0", expected_sha256=None)
+    assert ambiguous.value.detail == "ambiguous"
+
+    with pytest.raises(FileNotFoundError):
+        await session.delete_path("missing.txt", expected_sha256=None)
+    with pytest.raises(FileNotFoundError):
+        await session.patch_text("missing.txt", "a", "b", expected_sha256=None)

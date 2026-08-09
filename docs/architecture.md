@@ -144,8 +144,10 @@ the Turn. Failed metadata commits may leave GC-eligible orphan bytes, never
 public rows.
 
 Session Workspace files are immediate private state under the Session Volume
-path. Daytona exposes bounded list/read pagination, append-only text mutation,
-and whole-file replacement. Existing Workspace documents can be staged as
+path. Daytona exposes bounded list/read pagination, append and in-place unique
+fragment edits, whole-file replacement, and strict delete (files and empty
+directories only; no recursion, no force flag). Edits and deletes accept
+optional SHA-256 preconditions and never follow symlinks. Existing Workspace documents can be staged as
 private Artifact Candidates without resending their bodies; Turn Commit remains
 the only publication boundary. Workspace files survive failed Runs and Sandbox
 replacement independently of the commit-gated result snapshot and Artifact
@@ -164,11 +166,13 @@ available without a Tool call. Private deterministic tests use an unavailable
 Workspace capability unless they explicitly inject a host-owned test
 capability.
 
-`remember` appends one complete UTC-timestamped v2 record, limited to 4 KiB of
-formatted UTF-8, and becomes durable immediately, independently of Turn Commit.
-A repeated identical record is idempotent. Legacy v1 rows derive the same
-deterministic id when listed, so every cursor names one row; duplicate ids fail
-closed rather than skipping or selecting an arbitrary row. `edit_memory`
+`remember` appends one complete UTC-timestamped v2 record with a fresh id,
+limited to 4 KiB of formatted UTF-8, and becomes durable immediately,
+independently of Turn Commit. A repeated identical record is idempotent. Legacy
+v1 rows derive a deterministic id from canonical text plus valid-record
+occurrence, so duplicate legacy rows remain separately pageable; duplicate
+persisted ids fail closed rather than skipping or selecting an arbitrary row.
+`edit_memory`
 upgrades v1 to v2 or replaces v2 while preserving the id and timestamp, and
 `forget` removes exactly one addressed row. Both mutations execute their
 read-modify-publish rewrite inside one mounted-agent operation. A completed

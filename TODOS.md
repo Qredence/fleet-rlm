@@ -56,15 +56,15 @@ Each PR: branch → focused suite → full gate (make check incl. TUI via pnpm 1
 - [x] Tests: v1/v2 parse, tolerant read, CRUD round trips, injection budget
 - [x] Live replay: turn 2 remembers turn 1 preference without tool calls; forget edits exactly one entry
 
-## PR-G — feat(volume): full CRUD — `codex/volume-full-crud`
-- [ ] `daytona/workspace_agent.py`: `delete` + `patch` ops (atomic, symlink/traversal/non-empty-dir safe)
-- [ ] `daytona/workspace_fs.py`: `delete_path`, `patch_text` (sync+async) + cache invalidation
-- [ ] `files/workspace_tools.py`: `delete_workspace_path`, `edit_workspace_text` (allowlisted roots only; catalog roots rejected)
-- [ ] `api/routes/workspace_files.py`: `DELETE`/`PATCH /api/files/content` (404/409 mapping)
-- [ ] `make api-sync` (openapi.yaml + TUI generated types)
-- [ ] `rlm/tool_guards.py`: delete/edit obligations
-- [ ] Tests: fs delete/patch, API contract, guards
-- [ ] Live replay: write→edit→read→delete→list on session+project roots
+## PR-G — feat(volume): full CRUD — `codex/volume-full-crud`  ✅ done (live: write/edit/read/delete + REST DELETE/PATCH + 409/404 contracts)
+- [x] `daytona/workspace_agent.py`: `delete` + `patch` ops (atomic, symlink/traversal/non-empty-dir safe)
+- [x] `daytona/workspace_fs.py`: `delete_path`, `patch_text` (sync+async) + cache invalidation
+- [x] `files/workspace_tools.py`: `delete_workspace_path`, `edit_workspace_text` (allowlisted roots only; catalog roots rejected)
+- [x] `api/routes/workspace_files.py`: `DELETE`/`PATCH /api/files/content` (404/409 mapping)
+- [x] `make api-sync` (openapi.yaml + TUI generated types)
+- [x] `rlm/tool_guards.py`: delete/edit obligations
+- [x] Tests: fs delete/patch, API contract, guards
+- [x] Live replay: write→edit→read→delete→list on session+project roots
 
 ## PR-H — chore(backend): `src/fleet_rlm` readability (mechanical, last) — `codex/backend-readability`
 - [ ] `daytona/workspace_fs.py`: single async FS core + thin sync bridge (~−300 LOC)

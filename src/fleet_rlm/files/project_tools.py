@@ -53,6 +53,17 @@ def _raise_tool_error(exc: BaseException) -> NoReturn:
     if isinstance(exc, FileNotFoundError):
         raise ProjectToolError("not_found", "Project file was not found") from None
     if isinstance(exc, FileExistsError):
+        detail = getattr(exc, "detail", "")
+        if detail == "checksum_mismatch":
+            raise ProjectToolError(
+                "conflict", "Project checksum precondition did not match the current file content"
+            ) from None
+        if detail == "not_empty":
+            raise ProjectToolError("conflict", "Project directory is not empty; delete its contents first") from None
+        if detail == "ambiguous":
+            raise ProjectToolError("conflict", "Project edit text occurs more than once; make it unique") from None
+        if detail == "missing":
+            raise ProjectToolError("conflict", "Project edit text was not found in the file") from None
         raise ProjectToolError("conflict", "Project file already exists; use overwrite=True to replace it") from None
     if isinstance(exc, IsADirectoryError):
         raise ProjectToolError("is_directory", "Project path is a directory") from None
@@ -76,6 +87,8 @@ def _normalize_project_path(path: str, *, allow_root: bool = False) -> str:
     language map onto the same rooted tools. ``"."`` (the projects root) is
     only valid when ``allow_root``.
     """
+    if not allow_root and path in {".", "projects"}:
+        raise ProjectToolError("invalid_path", "Project path cannot target the projects root")
     normalized = normalize_workspace_path(path, allow_root=allow_root)
     if normalized == "projects" or normalized.startswith("projects/"):
         normalized = normalized.removeprefix("projects").lstrip("/") or "."
@@ -196,6 +209,53 @@ class ProjectToolHost:
             except Exception as exc:
                 _raise_tool_error(exc)
 
+        def delete_project_path(path: str, expected_sha256: str | None = None) -> dict[str, object]:
+            """Delete one file or empty directory immediately under projects/<slug>/."""
+            try:
+                # "." (the projects root) is refused by normalization itself.
+                normalized = _normalize_project_path(path)
+                self._workspace.delete_path(normalized, expected_sha256=expected_sha256)
+                result: dict[str, object] = {
+                    "ok": True,
+                    "namespace": PROJECT_WORKSPACE_NAMESPACE,
+                    "path": normalized,
+                }
+                warnings = getattr(self._workspace, "last_warnings", None)
+                if isinstance(warnings, tuple) and warnings:
+                    result["warnings"] = [dict(item) for item in warnings if isinstance(item, Mapping)]
+                return result
+            except Exception as exc:
+                _raise_tool_error(exc)
+
+        def edit_project_text(
+            path: str,
+            old: str,
+            new: str,
+            expected_sha256: str | None = None,
+        ) -> dict[str, object]:
+            """Replace exactly one unique occurrence of old with new in one UTF-8 Project file."""
+            if not isinstance(old, str) or not old or not isinstance(new, str):
+                raise ProjectToolError("invalid_path", "Project edit requires non-empty old and new text")
+            if len(old.encode("utf-8")) > self._max_file_bytes or len(new.encode("utf-8")) > self._max_file_bytes:
+                raise ProjectToolError("too_large", "Project file exceeds the maximum size")
+            try:
+                normalized = _project_file_path(path)
+                entry = _entry(self._workspace.patch_text(normalized, old, new, expected_sha256=expected_sha256))
+                # The LLM-facing result keeps its established 4-key entry
+                # shape; the precondition checksum is a transport concern.
+                entry.pop("checksum_sha256", None)
+                result: dict[str, object] = {
+                    "ok": True,
+                    "namespace": PROJECT_WORKSPACE_NAMESPACE,
+                    **entry,
+                }
+                warnings = getattr(self._workspace, "last_warnings", None)
+                if isinstance(warnings, tuple) and warnings:
+                    result["warnings"] = [dict(item) for item in warnings if isinstance(item, Mapping)]
+                return result
+            except Exception as exc:
+                _raise_tool_error(exc)
+
         return (
             dspy.Tool(
                 list_project_files,
@@ -245,6 +305,35 @@ class ProjectToolHost:
                     "path": {"type": "string"},
                     "content": {"type": "string"},
                     "overwrite": {"type": "boolean"},
+                },
+            ),
+            dspy.Tool(
+                delete_project_path,
+                name="delete_project_path",
+                desc=(
+                    "Delete one file or one empty directory immediately under projects/<slug>/; non-empty "
+                    "directories are refused, and a supplied expected_sha256 guards against deleting "
+                    "changed content. This durability is independent of Turn Commit."
+                ),
+                args={
+                    "path": {"type": "string"},
+                    "expected_sha256": {"type": ["string", "null"]},
+                },
+            ),
+            dspy.Tool(
+                edit_project_text,
+                name="edit_project_text",
+                desc=(
+                    "Replace exactly one unique occurrence of old with new in one UTF-8 Project file under "
+                    "projects/<slug>/; the edit fails when old is absent or occurs more than once, and a "
+                    "supplied expected_sha256 guards against editing changed content. Read the file first "
+                    "and keep old short and unique. This durability is independent of Turn Commit."
+                ),
+                args={
+                    "path": {"type": "string"},
+                    "old": {"type": "string"},
+                    "new": {"type": "string"},
+                    "expected_sha256": {"type": ["string", "null"]},
                 },
             ),
         )
@@ -311,6 +400,21 @@ class ProjectToolHost:
                 "content_chars": len(str(content or "")),
             }
 
+        def edit_input(arguments: Mapping[str, Any]) -> JsonValue:
+            # Edit fragments stay private; only their sizes are observable.
+            return {
+                **fields(arguments, ("path",)),
+                "old_chars": len(str(arguments.get("old") or "")),
+                "new_chars": len(str(arguments.get("new") or "")),
+                "checksum_precondition": bool(arguments.get("expected_sha256")),
+            }
+
+        def delete_input(arguments: Mapping[str, Any]) -> JsonValue:
+            return {
+                **fields(arguments, ("path",)),
+                "checksum_precondition": bool(arguments.get("expected_sha256")),
+            }
+
         return MappingProxyType(
             {
                 "list_project_files": ToolEventView(
@@ -338,6 +442,20 @@ class ProjectToolHost:
                 ),
                 "write_project_text": ToolEventView(
                     input_projection=write_input,
+                    output_projection=lambda result: output(
+                        result,
+                        ("ok", "namespace", "path", "byte_size", "warnings"),
+                    ),
+                ),
+                "delete_project_path": ToolEventView(
+                    input_projection=delete_input,
+                    output_projection=lambda result: output(
+                        result,
+                        ("ok", "namespace", "path", "warnings"),
+                    ),
+                ),
+                "edit_project_text": ToolEventView(
+                    input_projection=edit_input,
                     output_projection=lambda result: output(
                         result,
                         ("ok", "namespace", "path", "byte_size", "warnings"),
