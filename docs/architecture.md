@@ -76,6 +76,10 @@ JSON-compatible common input annotations.
   payloads through that discriminated union, while reload projection consumes
   the resulting canonical runtime parts; live SSE chunks remain separate
   transport contracts.
+- `api/ui_stream.py` owns the typed discriminated live Fleet UI chunk union.
+  `api/sse.py` validates each projected RuntimeEvent frame through those
+  models before SSE serialization, `api/openapi.py` derives OpenAPI from the
+  same models, and generated TUI types/validators remain checked artifacts.
 - `RunLifecycleService` translates lifecycle outcomes into typed Claim commands;
   the in-memory and SQL Run state stores apply the same pure policy through one
   `transition_claim()` persistence operation. Successful `commit()` and

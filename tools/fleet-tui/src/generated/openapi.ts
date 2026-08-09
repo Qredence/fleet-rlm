@@ -714,213 +714,395 @@ export interface components {
         };
         /** FleetUIMessageChunk */
         FleetUIMessageChunk: {
-            /** @constant */
+            /**
+             * Type
+             * @constant
+             */
             type: "start";
-            /** Format: uuid */
+            /**
+             * Messageid
+             * Format: uuid
+             */
             messageId: string;
+            /** Messagemetadata */
             messageMetadata: {
                 [key: string]: unknown;
             };
         } | {
-            /** @constant */
+            /**
+             * Type
+             * @constant
+             */
             type: "start-step";
         } | {
-            /** @constant */
+            /**
+             * Type
+             * @constant
+             */
             type: "finish-step";
         } | {
-            /** @constant */
+            /**
+             * Type
+             * @constant
+             */
             type: "reasoning-start";
+            /** Id */
             id: string;
         } | {
-            /** @constant */
+            /**
+             * Type
+             * @constant
+             */
             type: "reasoning-delta";
+            /** Id */
             id: string;
+            /** Delta */
             delta: string;
         } | {
-            /** @constant */
+            /**
+             * Type
+             * @constant
+             */
             type: "reasoning-end";
+            /** Id */
             id: string;
         } | {
-            /** @constant */
+            /**
+             * Type
+             * @constant
+             */
             type: "data-status";
+            /** Id */
             id?: string;
+            /** StatusData */
             data: {
+                /** Phase */
                 phase: string;
-                status?: string;
-                detail?: string;
+                /** Status */
+                status?: string | null;
+                /** Detail */
+                detail?: string | null;
+                /** Message */
                 message?: string | null;
             } & {
                 [key: string]: unknown;
             };
-            transient?: boolean;
+            /** Transient */
+            transient?: boolean | null;
         } | {
-            /** @constant */
+            /**
+             * Type
+             * @constant
+             */
             type: "data-skill";
+            /** Id */
             id?: string;
+            /** SkillData */
             data: {
+                /** Skill Id */
                 skill_id: string;
-                skillId?: string;
+                /** Name */
                 name: string;
+                /** Version */
                 version: string;
-                /** @enum {string} */
-                phase?: "activated" | "loaded";
-                trust?: string;
-                affordances?: string[];
+                /** Phase */
+                phase?: ("activated" | "loaded") | null;
+                /** Trust */
+                trust?: string | null;
+                /** Affordances */
+                affordances?: string[] | null;
+                /** Skillid */
+                skillId?: string | null;
             } & {
                 [key: string]: unknown;
             };
-            transient?: boolean;
+            /** Transient */
+            transient?: boolean | null;
         } | {
-            /** @constant */
+            /**
+             * Type
+             * @constant
+             */
             type: "data-rlm-code";
+            /** Id */
             id?: string;
+            /** RLMCodeData */
             data: {
+                /** Code */
                 code: string;
+                /** Step */
                 step?: number | null;
+                /** Stream Id */
                 stream_id?: string | null;
-                is_delta?: boolean;
-                is_final?: boolean;
+                /** Is Delta */
+                is_delta?: boolean | null;
+                /** Is Final */
+                is_final?: boolean | null;
             } & {
                 [key: string]: unknown;
             };
-            transient?: boolean;
+            /** Transient */
+            transient?: boolean | null;
         } | {
-            /** @constant */
+            /**
+             * Type
+             * @constant
+             */
             type: "data-rlm-output";
+            /** Id */
             id?: string;
+            /** RLMOutputData */
             data: {
+                /** Output */
                 output: string;
+                /** Step */
                 step?: number | null;
+                /** Stream Id */
                 stream_id?: string | null;
-                is_delta?: boolean;
-                is_final?: boolean;
+                /** Is Delta */
+                is_delta?: boolean | null;
+                /** Is Final */
+                is_final?: boolean | null;
             } & {
                 [key: string]: unknown;
             };
-            transient?: boolean;
+            /** Transient */
+            transient?: boolean | null;
         } | {
-            /** @constant */
+            /**
+             * Type
+             * @constant
+             */
             type: "tool-input-available";
+            /** Toolcallid */
             toolCallId: string;
+            /** Toolname */
             toolName: string;
+            /** Input */
             input: unknown;
-            dynamic?: boolean;
-            providerExecuted?: boolean;
+            /** Dynamic */
+            dynamic?: boolean | null;
+            /** Providerexecuted */
+            providerExecuted?: boolean | null;
         } | {
-            /** @constant */
+            /**
+             * Type
+             * @constant
+             */
             type: "tool-output-available";
+            /** Toolcallid */
             toolCallId: string;
+            /** Output */
             output: unknown;
-            dynamic?: boolean;
-            providerExecuted?: boolean;
+            /** Dynamic */
+            dynamic?: boolean | null;
+            /** Providerexecuted */
+            providerExecuted?: boolean | null;
         } | {
-            /** @constant */
+            /**
+             * Type
+             * @constant
+             */
             type: "tool-output-error";
+            /** Toolcallid */
             toolCallId: string;
+            /** Errortext */
             errorText: string;
-            dynamic?: boolean;
-            providerExecuted?: boolean;
+            /** Dynamic */
+            dynamic?: boolean | null;
+            /** Providerexecuted */
+            providerExecuted?: boolean | null;
         } | {
-            /** @constant */
+            /**
+             * Type
+             * @constant
+             */
             type: "data-attachment";
+            /** Id */
             id?: string;
+            /** AttachmentData */
             data: {
+                /**
+                 * Attachment Id
+                 * Format: uuid
+                 */
                 attachment_id: string;
-                attachmentId?: string;
-                phase?: string;
+                /** Filename */
                 filename: string;
-                byte_size?: number;
-                byteSize?: number;
+                /** Phase */
+                phase?: string | null;
+                /** Byte Size */
+                byte_size?: number | null;
+                /** Attachmentid */
+                attachmentId?: string | null;
+                /** Bytesize */
+                byteSize?: number | null;
             } & {
                 [key: string]: unknown;
             };
-            transient?: boolean;
+            /** Transient */
+            transient?: boolean | null;
         } | {
-            /** @constant */
+            /**
+             * Type
+             * @constant
+             */
             type: "data-warning";
+            /** Id */
             id?: string;
+            /** WarningData */
             data: {
+                /** Message */
                 message: string;
+                /** Code */
                 code?: string | null;
             } & {
                 [key: string]: unknown;
             };
-            transient?: boolean;
+            /** Transient */
+            transient?: boolean | null;
         } | {
-            /** @constant */
+            /**
+             * Type
+             * @constant
+             */
             type: "data-artifact";
+            /** Id */
             id?: string;
+            /** ArtifactData */
             data: {
+                /**
+                 * Artifact Id
+                 * Format: uuid
+                 */
                 artifact_id: string;
-                artifactId?: string;
-                artifact_kind?: string;
-                kind?: string;
+                /** Artifact Kind */
+                artifact_kind?: string | null;
+                /** Kind */
+                kind?: string | null;
+                /** Title */
                 title?: string | null;
-                name?: string;
-                media_type?: string;
-                mediaType?: string;
-                byte_size?: number;
-                byteSize?: number;
-                checksum_sha256?: string;
-                checksumSha256?: string;
+                /** Name */
+                name?: string | null;
+                /** Media Type */
+                media_type?: string | null;
+                /** Mediatype */
+                mediaType?: string | null;
+                /** Byte Size */
+                byte_size?: number | null;
+                /** Bytesize */
+                byteSize?: number | null;
+                /** Checksum Sha256 */
+                checksum_sha256?: string | null;
+                /** Checksumsha256 */
+                checksumSha256?: string | null;
+                /** Artifactid */
+                artifactId?: string | null;
             } & {
                 [key: string]: unknown;
             };
-            transient?: boolean;
+            /** Transient */
+            transient?: boolean | null;
         } | {
-            /** @constant */
+            /**
+             * Type
+             * @constant
+             */
             type: "data-usage";
+            /** Id */
             id?: string;
+            /** UsageData */
             data: {
+                /** Usage */
                 usage: {
                     [key: string]: unknown;
                 };
             } & {
                 [key: string]: unknown;
             };
-            transient?: boolean;
+            /** Transient */
+            transient?: boolean | null;
         } | {
-            /** @constant */
+            /**
+             * Type
+             * @constant
+             */
             type: "data-structured-result";
+            /** Id */
             id?: string;
+            /** StructuredResultData */
             data: {
+                /** Schema Id */
                 schema_id: string;
-                schemaId?: string;
+                /** Schema Version */
                 schema_version: string;
-                schemaVersion?: string;
+                /** Value */
                 value: unknown;
+                /** Schemaid */
+                schemaId?: string | null;
+                /** Schemaversion */
+                schemaVersion?: string | null;
             } & {
                 [key: string]: unknown;
             };
-            transient?: boolean;
+            /** Transient */
+            transient?: boolean | null;
         } | {
-            /** @constant */
+            /**
+             * Type
+             * @constant
+             */
             type: "text-start";
+            /** Id */
             id: string;
         } | {
-            /** @constant */
+            /**
+             * Type
+             * @constant
+             */
             type: "text-delta";
+            /** Id */
             id: string;
+            /** Delta */
             delta: string;
         } | {
-            /** @constant */
+            /**
+             * Type
+             * @constant
+             */
             type: "text-end";
+            /** Id */
             id: string;
         } | {
-            /** @constant */
+            /**
+             * Type
+             * @constant
+             */
             type: "finish";
-            /** @enum {string} */
+            /**
+             * Finishreason
+             * @enum {string}
+             */
             finishReason: "stop" | "error";
+            /** Messagemetadata */
             messageMetadata?: {
                 [key: string]: unknown;
-            };
+            } | null;
         } | {
-            /** @constant */
+            /**
+             * Type
+             * @constant
+             */
             type: "abort";
+            /** Reason */
             reason: string;
         } | {
-            /** @constant */
+            /**
+             * Type
+             * @constant
+             */
             type: "error";
+            /** Errortext */
             errorText: string;
         };
     };

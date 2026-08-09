@@ -83,6 +83,6 @@ def test_openapi_declares_typed_render_data_payloads() -> None:
     structured_data = by_type["data-structured-result"]["properties"]["data"]
 
     assert code_data["type"] == "object"
-    assert code_data["properties"]["code"] == {"type": "string"}
-    assert output_data["properties"]["output"] == {"type": "string"}
-    assert structured_data["properties"]["value"] == {}
+    assert code_data["properties"]["code"]["type"] == "string"
+    assert output_data["properties"]["output"]["type"] == "string"
+    assert "type" not in structured_data["properties"]["value"]

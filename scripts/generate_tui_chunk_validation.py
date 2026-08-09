@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Generate the TUI runtime chunk-validation tables from openapi.yaml.
 
-The AI SDK UI chunk contract stays hand-owned in exactly two places:
-``src/fleet_rlm/api/sse.py`` (runtime projector) and
-``src/fleet_rlm/api/openapi.py`` (chunk schemas). This script derives the
+The AI SDK UI chunk contract is typed in ``src/fleet_rlm/api/ui_stream.py``
+and adapted by ``src/fleet_rlm/api/sse.py`` and
+``src/fleet_rlm/api/openapi.py``. This script derives the
 third surface — the TUI's strictest runtime validator — from the OpenAPI
 ``FleetUIMessageChunk`` variants, so the strict consumer can no longer drift
 silently from the documented schema. The dual snake_case/camelCase id
@@ -40,6 +40,7 @@ _FIELD_ALTERNATIVES: dict[str, tuple[tuple[str, ...], ...]] = {
 
 def _check_name(schema: dict) -> str | None:
     """Map one OpenAPI property schema to a FieldCheck expression (or None to omit)."""
+    schema = {key: value for key, value in schema.items() if key not in {"title", "default"}}
     if "anyOf" in schema:
         parts = schema["anyOf"]
         if len(parts) == 2 and parts[1] == {"type": "null"}:
@@ -48,6 +49,10 @@ def _check_name(schema: dict) -> str | None:
                 return "isNullableString"
             if base.get("type") == "integer":
                 return "isNullableInteger"
+            if base.get("type") == "boolean":
+                return "isNullableBoolean"
+            if base.get("type") == "array" and base.get("items", {}).get("type") == "string":
+                return "isNullableStringArray"
         raise SystemExit(f"unsupported anyOf schema: {json.dumps(schema)}")
     stype = schema.get("type")
     enum = schema.get("enum")
@@ -135,6 +140,10 @@ function isNullableString(value: unknown): boolean {
   return value === null || isString(value);
 }
 
+function isNullableBoolean(value: unknown): boolean {
+  return value === null || typeof value === "boolean";
+}
+
 function isBoolean(value: unknown): value is boolean {
   return typeof value === "boolean";
 }
@@ -149,6 +158,10 @@ function isNullableInteger(value: unknown): boolean {
 
 function isStringArray(value: unknown): value is string[] {
   return Array.isArray(value) && value.every(isString);
+}
+
+function isNullableStringArray(value: unknown): boolean {
+  return value === null || isStringArray(value);
 }
 
 export function isRecord(value: unknown): value is Record<string, unknown> {

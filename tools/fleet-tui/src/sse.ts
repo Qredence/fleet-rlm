@@ -12,10 +12,10 @@ import {
  * generated consumer; the golden stream test (`tests/stream-fixture.test.ts`)
  * locks all of them:
  *
- * 1. Backend runtime projector  — src/fleet_rlm/api/sse.py (AISDKUIProjector)
- * 2. Backend reload projection  — src/fleet_rlm/api/ui_message.py
- * 3. OpenAPI hook               — src/fleet_rlm/api/openapi.py (_CHUNK_FIELD_*)
- * 4. This runtime validator     — tables REGENERATED from openapi.yaml by
+ * 1. Typed transport models    — src/fleet_rlm/api/ui_stream.py
+ * 2. Backend runtime projector — src/fleet_rlm/api/sse.py (AISDKUIProjector)
+ * 3. Backend reload projection — src/fleet_rlm/api/ui_message.py
+ * 4. This runtime validator    — tables REGENERATED from openapi.yaml by
  *    scripts/generate_tui_chunk_validation.py (imported below)
  *
  * The validator is the STRICTEST consumer: a backend emission that violates

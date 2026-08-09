@@ -36,40 +36,40 @@ export const chunkTypes = [
 export const dataFieldChecks: Record<string, Record<string, FieldCheck>> = {
   "data-status": {
     phase: isString,
-    status: isString,
-    detail: isString,
+    status: isNullableString,
+    detail: isNullableString,
     message: isNullableString,
   },
   "data-skill": {
     skill_id: isString,
-    skillId: isString,
     name: isString,
     version: isString,
-    phase: (value) => value === "activated" || value === "loaded",
-    trust: isString,
-    affordances: isStringArray,
+    phase: isNullableString,
+    trust: isNullableString,
+    affordances: isNullableStringArray,
+    skillId: isNullableString,
   },
   "data-rlm-code": {
     code: isString,
     step: isNullableInteger,
     stream_id: isNullableString,
-    is_delta: isBoolean,
-    is_final: isBoolean,
+    is_delta: isNullableBoolean,
+    is_final: isNullableBoolean,
   },
   "data-rlm-output": {
     output: isString,
     step: isNullableInteger,
     stream_id: isNullableString,
-    is_delta: isBoolean,
-    is_final: isBoolean,
+    is_delta: isNullableBoolean,
+    is_final: isNullableBoolean,
   },
   "data-attachment": {
     attachment_id: isString,
-    attachmentId: isString,
-    phase: isString,
     filename: isString,
-    byte_size: isInteger,
-    byteSize: isInteger,
+    phase: isNullableString,
+    byte_size: isNullableInteger,
+    attachmentId: isNullableString,
+    byteSize: isNullableInteger,
   },
   "data-warning": {
     message: isString,
@@ -77,35 +77,35 @@ export const dataFieldChecks: Record<string, Record<string, FieldCheck>> = {
   },
   "data-artifact": {
     artifact_id: isString,
-    artifactId: isString,
-    artifact_kind: isString,
-    kind: isString,
+    artifact_kind: isNullableString,
+    kind: isNullableString,
     title: isNullableString,
-    name: isString,
-    media_type: isString,
-    mediaType: isString,
-    byte_size: isInteger,
-    byteSize: isInteger,
-    checksum_sha256: isString,
-    checksumSha256: isString,
+    name: isNullableString,
+    media_type: isNullableString,
+    mediaType: isNullableString,
+    byte_size: isNullableInteger,
+    byteSize: isNullableInteger,
+    checksum_sha256: isNullableString,
+    checksumSha256: isNullableString,
+    artifactId: isNullableString,
   },
   "data-usage": {
     usage: isRecord,
   },
   "data-structured-result": {
     schema_id: isString,
-    schemaId: isString,
     schema_version: isString,
-    schemaVersion: isString,
+    schemaId: isNullableString,
+    schemaVersion: isNullableString,
   },
 };
 
 export const dataRequiredFields: Record<string, readonly string[]> = {
   "data-status": ["phase"],
-  "data-skill": ["name", "version", "skill_id"],
+  "data-skill": ["skill_id", "name", "version"],
   "data-rlm-code": ["code"],
   "data-rlm-output": ["output"],
-  "data-attachment": ["filename", "attachment_id"],
+  "data-attachment": ["attachment_id", "filename"],
   "data-warning": ["message"],
   "data-artifact": ["artifact_id"],
   "data-usage": ["usage"],
@@ -128,6 +128,10 @@ function isNullableString(value: unknown): boolean {
   return value === null || isString(value);
 }
 
+function isNullableBoolean(value: unknown): boolean {
+  return value === null || typeof value === "boolean";
+}
+
 function isBoolean(value: unknown): value is boolean {
   return typeof value === "boolean";
 }
@@ -142,6 +146,10 @@ function isNullableInteger(value: unknown): boolean {
 
 function isStringArray(value: unknown): value is string[] {
   return Array.isArray(value) && value.every(isString);
+}
+
+function isNullableStringArray(value: unknown): boolean {
+  return value === null || isStringArray(value);
 }
 
 export function isRecord(value: unknown): value is Record<string, unknown> {

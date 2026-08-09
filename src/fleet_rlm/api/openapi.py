@@ -2,207 +2,73 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, cast
 
 from fastapi import FastAPI
 from fastapi.openapi.utils import get_openapi
 
 from fleet_rlm.api.errors import ErrorResponse
-from fleet_rlm.api.sse import FLEET_UI_CHUNK_TYPES
 
-# The AI SDK UI chunk contract is hand-maintained in THREE places; the TUI
-# validator tables are generated from this module's schemas
-# (tests/contracts/backend/test_stream_fixture.py + the TUI golden-stream test
-# lock the copies against the runtime projector):
-#   1. src/fleet_rlm/api/sse.py            (runtime projector)
-#   2. src/fleet_rlm/api/ui_message.py     (reload projection)
-#   3. this module                          (OpenAPI chunk schemas)
-#   4. tools/fleet-tui/src/generated/fleet-ui-chunk-validation.ts
-#      (TUI validator tables via scripts/generate_tui_chunk_validation.py)
-_CHUNK_FIELD_TYPES: dict[str, dict[str, Any]] = {
-    "id": {"type": "string"},
-    "messageId": {"type": "string", "format": "uuid"},
-    "messageMetadata": {"type": "object", "additionalProperties": True},
-    "delta": {"type": "string"},
-    "toolCallId": {"type": "string"},
-    "toolName": {"type": "string"},
-    "input": {},
-    "output": {},
-    "errorText": {"type": "string"},
-    "reason": {"type": "string"},
-    "finishReason": {"type": "string", "enum": ["stop", "error"]},
-    "data": {},
-    "dynamic": {"type": "boolean"},
-    "providerExecuted": {"type": "boolean"},
-    "transient": {"type": "boolean"},
-}
-
-_CHUNK_FIELD_SPECS: dict[str, tuple[tuple[str, ...], list[str]]] = {
-    "start": (("messageId", "messageMetadata"), ["type", "messageId", "messageMetadata"]),
-    "reasoning-start": (("id",), ["type", "id"]),
-    "reasoning-end": (("id",), ["type", "id"]),
-    "reasoning-delta": (("id", "delta"), ["type", "id", "delta"]),
-    "text-start": (("id",), ["type", "id"]),
-    "text-end": (("id",), ["type", "id"]),
-    "text-delta": (("id", "delta"), ["type", "id", "delta"]),
-    "tool-input-available": (
-        ("toolCallId", "toolName", "input", "dynamic", "providerExecuted"),
-        ["type", "toolCallId", "toolName", "input"],
-    ),
-    "tool-output-available": (
-        ("toolCallId", "output", "dynamic", "providerExecuted"),
-        ["type", "toolCallId", "output"],
-    ),
-    "tool-output-error": (
-        ("toolCallId", "errorText", "dynamic", "providerExecuted"),
-        ["type", "toolCallId", "errorText"],
-    ),
-    "finish": (("finishReason", "messageMetadata"), ["type", "finishReason"]),
-    "abort": (("reason",), ["type", "reason"]),
-    "error": (("errorText",), ["type", "errorText"]),
-    "start-step": ((), ["type"]),
-    "finish-step": ((), ["type"]),
-}
-
-_DATA_STRING = {"type": "string"}
-_DATA_INTEGER = {"type": "integer"}
-_DATA_BOOLEAN = {"type": "boolean"}
-_DATA_JSON = {}
+# The AI SDK UI chunk contract is owned by typed transport models in
+# `api/ui_stream.py`; this hook derives the OpenAPI variants from that same
+# source. Generated TUI validator tables consume the OpenAPI schema, while the
+# golden-stream fixture locks runtime bytes against this documented contract.
 
 
-def _nullable(schema: dict[str, Any]) -> dict[str, Any]:
-    return {"anyOf": [schema, {"type": "null"}]}
+def _inline_fleet_ui_schema() -> dict[str, Any]:
+    """Inline one Model-derived schema without hand-maintained variant tables."""
+    from copy import deepcopy
 
+    from fleet_rlm.api.ui_stream import fleet_ui_message_chunk_json_schema
 
-def _data_object_schema(
-    properties: dict[str, dict[str, Any]],
-    *,
-    required: tuple[str, ...] = (),
-) -> dict[str, Any]:
-    schema: dict[str, Any] = {
-        "type": "object",
-        "properties": properties,
-        "additionalProperties": True,
-    }
-    if required:
-        schema["required"] = list(required)
-    return schema
+    schema = fleet_ui_message_chunk_json_schema()
+    definitions = cast(dict[str, Any], schema.pop("$defs", {}))
 
+    def resolve(node: Any) -> Any:
+        if isinstance(node, list):
+            return [resolve(item) for item in node]
+        if not isinstance(node, dict):
+            return node
+        if "$ref" in node:
+            name = str(node["$ref"]).removeprefix("#/$defs/")
+            if name not in definitions:
+                raise RuntimeError(f"unresolved Fleet UI schema reference: {node['$ref']!r}")
+            return resolve(deepcopy(definitions[name]))
+        return {key: resolve(value) for key, value in node.items()}
 
-_DATA_PAYLOAD_SCHEMAS: dict[str, dict[str, Any]] = {
-    "data-status": _data_object_schema(
-        {
-            "phase": _DATA_STRING,
-            "status": _DATA_STRING,
-            "detail": _DATA_STRING,
-            "message": _nullable(_DATA_STRING),
-        },
-        required=("phase",),
-    ),
-    "data-skill": _data_object_schema(
-        {
-            "skill_id": _DATA_STRING,
-            "skillId": _DATA_STRING,
-            "name": _DATA_STRING,
-            "version": _DATA_STRING,
-            "phase": {"type": "string", "enum": ["activated", "loaded"]},
-            "trust": _DATA_STRING,
-            "affordances": {"type": "array", "items": _DATA_STRING},
-        },
-        # The runtime projector always emits the snake_case id form; the TUI
-        # validator requires at least one id form per payload. Document the
-        # guaranteed form as required so the contract matches enforcement.
-        required=("name", "version", "skill_id"),
-    ),
-    "data-rlm-code": _data_object_schema(
-        {
-            "code": _DATA_STRING,
-            "step": _nullable(_DATA_INTEGER),
-            "stream_id": _nullable(_DATA_STRING),
-            "is_delta": _DATA_BOOLEAN,
-            "is_final": _DATA_BOOLEAN,
-        },
-        required=("code",),
-    ),
-    "data-rlm-output": _data_object_schema(
-        {
-            "output": _DATA_STRING,
-            "step": _nullable(_DATA_INTEGER),
-            "stream_id": _nullable(_DATA_STRING),
-            "is_delta": _DATA_BOOLEAN,
-            "is_final": _DATA_BOOLEAN,
-        },
-        required=("output",),
-    ),
-    "data-attachment": _data_object_schema(
-        {
-            "attachment_id": _DATA_STRING,
-            "attachmentId": _DATA_STRING,
-            "phase": _DATA_STRING,
-            "filename": _DATA_STRING,
-            "byte_size": _DATA_INTEGER,
-            "byteSize": _DATA_INTEGER,
-        },
-        required=("filename", "attachment_id"),
-    ),
-    "data-warning": _data_object_schema(
-        {"message": _DATA_STRING, "code": _nullable(_DATA_STRING)},
-        required=("message",),
-    ),
-    "data-artifact": _data_object_schema(
-        {
-            "artifact_id": _DATA_STRING,
-            "artifactId": _DATA_STRING,
-            "artifact_kind": _DATA_STRING,
-            "kind": _DATA_STRING,
-            "title": _nullable(_DATA_STRING),
-            "name": _DATA_STRING,
-            "media_type": _DATA_STRING,
-            "mediaType": _DATA_STRING,
-            "byte_size": _DATA_INTEGER,
-            "byteSize": _DATA_INTEGER,
-            "checksum_sha256": _DATA_STRING,
-            "checksumSha256": _DATA_STRING,
-        },
-        required=("artifact_id",),
-    ),
-    "data-usage": _data_object_schema(
-        {"usage": {"type": "object", "additionalProperties": True}},
-        required=("usage",),
-    ),
-    "data-structured-result": _data_object_schema(
-        {
-            "schema_id": _DATA_STRING,
-            "schemaId": _DATA_STRING,
-            "schema_version": _DATA_STRING,
-            "schemaVersion": _DATA_STRING,
-            "value": _DATA_JSON,
-        },
-        required=("schema_id", "schema_version", "value"),
-    ),
-}
+    resolved = cast(dict[str, Any], resolve(schema))
+    # Pydantic emits discriminator mappings for external `$defs`; after the
+    # OpenAPI hook inlines every variant those refs are stale and redundant.
+    resolved.pop("discriminator", None)
 
+    def strip_model_defaults(node: Any) -> Any:
+        if isinstance(node, list):
+            return [strip_model_defaults(item) for item in node]
+        if not isinstance(node, dict):
+            return node
+        return {key: strip_model_defaults(value) for key, value in node.items() if key != "default"}
 
-def _chunk_field_spec(chunk_type: str) -> tuple[tuple[str, ...], list[str]]:
-    if chunk_type in _CHUNK_FIELD_SPECS:
-        return _CHUNK_FIELD_SPECS[chunk_type]
-    if chunk_type.startswith("data-"):
-        return (("id", "data", "transient"), ["type", "data"])
-    return ((), ["type"])
-
-
-def _chunk_schema(chunk_type: str) -> dict[str, Any]:
-    fields, required = _chunk_field_spec(chunk_type)
-    properties: dict[str, Any] = {"type": {"type": "string", "const": chunk_type}}
-    properties.update({field: _CHUNK_FIELD_TYPES[field] for field in fields})
-    if chunk_type in _DATA_PAYLOAD_SCHEMAS:
-        properties["data"] = _DATA_PAYLOAD_SCHEMAS[chunk_type]
-    return {
-        "type": "object",
-        "properties": properties,
-        "required": required,
-        "additionalProperties": False,
-    }
+    resolved = strip_model_defaults(resolved)
+    assert isinstance(resolved, dict)
+    for variant in resolved.get("oneOf", []):
+        required = list(variant.get("required", []))
+        if "type" not in required:
+            required.insert(0, "type")
+        variant["required"] = required
+        part_id = variant.get("properties", {}).get("id")
+        if isinstance(part_id, dict) and part_id.get("anyOf"):
+            # Optional transport part IDs were legacy plain strings, not
+            # explicit nulls; preserve that established generated TS shape.
+            nullable_string = part_id["anyOf"]
+            if len(nullable_string) == 2 and {"type": "null"} in nullable_string:
+                base = next(item for item in nullable_string if item != {"type": "null"})
+                if base.get("type") == "string":
+                    variant["properties"]["id"] = {
+                        **base,
+                        **({"title": part_id["title"]} if "title" in part_id else {}),
+                    }
+    resolved["title"] = "FleetUIMessageChunk"
+    return resolved
 
 
 def install_openapi_contract(app: FastAPI) -> None:
@@ -216,10 +82,7 @@ def install_openapi_contract(app: FastAPI) -> None:
         components.pop("HTTPValidationError", None)
         components.pop("ValidationError", None)
         components["ErrorResponse"] = ErrorResponse.model_json_schema(ref_template="#/components/schemas/{model}")
-        components["FleetUIMessageChunk"] = {
-            "title": "FleetUIMessageChunk",
-            "oneOf": [_chunk_schema(chunk_type) for chunk_type in FLEET_UI_CHUNK_TYPES],
-        }
+        components["FleetUIMessageChunk"] = _inline_fleet_ui_schema()
 
         for path, path_item in schema.get("paths", {}).items():
             for operation in path_item.values():

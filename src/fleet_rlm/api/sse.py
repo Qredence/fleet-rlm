@@ -1,14 +1,12 @@
 """Exhaustive AI SDK UI v1 projection for typed Fleet Runtime Events."""
 
-# The AI SDK UI chunk contract is hand-maintained in THREE places; the fourth
-# surface is GENERATED from the OpenAPI hook (the golden-stream fixture in
-# scripts/generate_stream_fixture.py locks them together):
-#   1. this module (AISDKUIProjector)
-#   2. src/fleet_rlm/api/ui_message.py       (reload projection)
-#   3. src/fleet_rlm/api/openapi.py          (OpenAPI chunk schemas)
+# The live AI SDK UI transport contract is owned by typed models in
+# src/fleet_rlm/api/ui_stream.py and consumed by these explicit adapters:
+#   1. this module (RuntimeEvent -> typed chunks -> JSON)
+#   2. src/fleet_rlm/api/ui_message.py       (durable assistant Result reload)
+#   3. src/fleet_rlm/api/openapi.py          (derived OpenAPI chunk schemas)
 #   4. tools/fleet-tui/src/generated/fleet-ui-chunk-validation.ts
-#      (TUI validator tables, owned by scripts/generate_tui_chunk_validation.py
-#      via `make api-sync`)
+#      (generated TUI validator tables via `make api-sync`)
 
 from __future__ import annotations
 
@@ -17,6 +15,7 @@ from typing import Any
 from uuid import UUID
 
 from fleet_rlm.api.json_util import to_plain_json
+from fleet_rlm.api.ui_stream import fleet_ui_chunk_payload
 from fleet_rlm.rlm.events import (
     ArtifactCreated,
     AttachmentRead,
@@ -108,6 +107,10 @@ class AISDKUIProjector:
         self._reasoning_ended: set[str] = set()
 
     def project(self, event: RuntimeEvent) -> list[dict[str, Any]]:
+        """Project one RuntimeEvent and validate every frame before SSE serialization."""
+        return [fleet_ui_chunk_payload(chunk) for chunk in self._project(event)]
+
+    def _project(self, event: RuntimeEvent) -> list[dict[str, Any]]:
         detail = event.detail
         data = _detail_data(detail)
         if isinstance(detail, RunStarted):

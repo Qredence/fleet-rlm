@@ -79,7 +79,8 @@ contracts, and tracked docs remain authoritative.
 - `CommittedTurn` is the only replay source. Durable assistant content is
   validated through the closed Pydantic `AssistantPart` discriminated union in
   `sessions/assistant_parts.py`; keep that durable vocabulary separate from
-  live SSE transport chunks. A successful Daytona Run may retain one private
+  live SSE transport chunks. `api/ui_stream.py` owns the typed live transport
+  union consumed by SSE and OpenAPI. A successful Daytona Run may retain one private
   commit-gated `result.json` derivative; the derivative is not an Artifact or
   API resource.
 - Session Workspace files are immediate private state under

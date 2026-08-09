@@ -1567,492 +1567,739 @@ components:
       title: ErrorResponse
       type: object
     FleetUIMessageChunk:
-      title: FleetUIMessageChunk
       oneOf:
-      - type: object
+      - additionalProperties: false
         properties:
           type:
-            type: string
             const: start
-          messageId:
+            title: Type
             type: string
+          messageId:
             format: uuid
+            title: Messageid
+            type: string
           messageMetadata:
-            type: object
             additionalProperties: true
+            title: Messagemetadata
+            type: object
         required:
         - type
         - messageId
         - messageMetadata
-        additionalProperties: false
-      - type: object
+        title: StartChunk
+        type: object
+      - additionalProperties: false
         properties:
           type:
-            type: string
             const: start-step
+            title: Type
+            type: string
+        title: StartStepChunk
+        type: object
         required:
         - type
-        additionalProperties: false
-      - type: object
+      - additionalProperties: false
         properties:
           type:
-            type: string
             const: finish-step
+            title: Type
+            type: string
+        title: FinishStepChunk
+        type: object
         required:
         - type
-        additionalProperties: false
-      - type: object
+      - additionalProperties: false
         properties:
           type:
-            type: string
             const: reasoning-start
+            title: Type
+            type: string
           id:
+            minLength: 1
+            title: Id
             type: string
         required:
         - type
         - id
-        additionalProperties: false
-      - type: object
+        title: ReasoningStartChunk
+        type: object
+      - additionalProperties: false
         properties:
           type:
-            type: string
             const: reasoning-delta
+            title: Type
+            type: string
           id:
+            minLength: 1
+            title: Id
             type: string
           delta:
+            title: Delta
             type: string
         required:
         - type
         - id
         - delta
-        additionalProperties: false
-      - type: object
+        title: ReasoningDeltaChunk
+        type: object
+      - additionalProperties: false
         properties:
           type:
-            type: string
             const: reasoning-end
+            title: Type
+            type: string
           id:
+            minLength: 1
+            title: Id
             type: string
         required:
         - type
         - id
-        additionalProperties: false
-      - type: object
+        title: ReasoningEndChunk
+        type: object
+      - additionalProperties: false
         properties:
           type:
-            type: string
             const: data-status
+            title: Type
+            type: string
           id:
             type: string
+            title: Id
           data:
-            type: object
+            additionalProperties: true
             properties:
               phase:
+                title: Phase
                 type: string
               status:
-                type: string
+                anyOf:
+                - type: string
+                - type: 'null'
+                title: Status
               detail:
-                type: string
+                anyOf:
+                - type: string
+                - type: 'null'
+                title: Detail
               message:
                 anyOf:
                 - type: string
                 - type: 'null'
-            additionalProperties: true
+                title: Message
             required:
             - phase
+            title: StatusData
+            type: object
           transient:
-            type: boolean
+            anyOf:
+            - type: boolean
+            - type: 'null'
+            title: Transient
         required:
         - type
         - data
-        additionalProperties: false
-      - type: object
+        title: DataStatusChunk
+        type: object
+      - additionalProperties: false
         properties:
           type:
-            type: string
             const: data-skill
+            title: Type
+            type: string
           id:
             type: string
+            title: Id
           data:
-            type: object
+            additionalProperties: true
             properties:
               skill_id:
-                type: string
-              skillId:
+                title: Skill Id
                 type: string
               name:
+                title: Name
                 type: string
               version:
+                title: Version
                 type: string
               phase:
-                type: string
-                enum:
-                - activated
-                - loaded
-              trust:
-                type: string
-              affordances:
-                type: array
-                items:
+                anyOf:
+                - enum:
+                  - activated
+                  - loaded
                   type: string
-            additionalProperties: true
+                - type: 'null'
+                title: Phase
+              trust:
+                anyOf:
+                - type: string
+                - type: 'null'
+                title: Trust
+              affordances:
+                anyOf:
+                - items:
+                    type: string
+                  type: array
+                - type: 'null'
+                title: Affordances
+              skillId:
+                anyOf:
+                - type: string
+                - type: 'null'
+                title: Skillid
             required:
+            - skill_id
             - name
             - version
-            - skill_id
+            title: SkillData
+            type: object
           transient:
-            type: boolean
+            anyOf:
+            - type: boolean
+            - type: 'null'
+            title: Transient
         required:
         - type
         - data
-        additionalProperties: false
-      - type: object
+        title: DataSkillChunk
+        type: object
+      - additionalProperties: false
         properties:
           type:
-            type: string
             const: data-rlm-code
+            title: Type
+            type: string
           id:
             type: string
+            title: Id
           data:
-            type: object
+            additionalProperties: true
             properties:
               code:
+                title: Code
                 type: string
               step:
                 anyOf:
                 - type: integer
                 - type: 'null'
+                title: Step
               stream_id:
                 anyOf:
                 - type: string
                 - type: 'null'
+                title: Stream Id
               is_delta:
-                type: boolean
+                anyOf:
+                - type: boolean
+                - type: 'null'
+                title: Is Delta
               is_final:
-                type: boolean
-            additionalProperties: true
+                anyOf:
+                - type: boolean
+                - type: 'null'
+                title: Is Final
             required:
             - code
+            title: RLMCodeData
+            type: object
           transient:
-            type: boolean
+            anyOf:
+            - type: boolean
+            - type: 'null'
+            title: Transient
         required:
         - type
         - data
-        additionalProperties: false
-      - type: object
+        title: DataRLMCodeChunk
+        type: object
+      - additionalProperties: false
         properties:
           type:
-            type: string
             const: data-rlm-output
+            title: Type
+            type: string
           id:
             type: string
+            title: Id
           data:
-            type: object
+            additionalProperties: true
             properties:
               output:
+                title: Output
                 type: string
               step:
                 anyOf:
                 - type: integer
                 - type: 'null'
+                title: Step
               stream_id:
                 anyOf:
                 - type: string
                 - type: 'null'
+                title: Stream Id
               is_delta:
-                type: boolean
+                anyOf:
+                - type: boolean
+                - type: 'null'
+                title: Is Delta
               is_final:
-                type: boolean
-            additionalProperties: true
+                anyOf:
+                - type: boolean
+                - type: 'null'
+                title: Is Final
             required:
             - output
+            title: RLMOutputData
+            type: object
           transient:
-            type: boolean
+            anyOf:
+            - type: boolean
+            - type: 'null'
+            title: Transient
         required:
         - type
         - data
-        additionalProperties: false
-      - type: object
+        title: DataRLMOutputChunk
+        type: object
+      - additionalProperties: false
         properties:
           type:
-            type: string
             const: tool-input-available
+            title: Type
+            type: string
           toolCallId:
+            minLength: 1
+            title: Toolcallid
             type: string
           toolName:
+            minLength: 1
+            title: Toolname
             type: string
-          input: {}
+          input:
+            title: Input
           dynamic:
-            type: boolean
+            anyOf:
+            - type: boolean
+            - type: 'null'
+            title: Dynamic
           providerExecuted:
-            type: boolean
+            anyOf:
+            - type: boolean
+            - type: 'null'
+            title: Providerexecuted
         required:
         - type
         - toolCallId
         - toolName
         - input
-        additionalProperties: false
-      - type: object
+        title: ToolInputAvailableChunk
+        type: object
+      - additionalProperties: false
         properties:
           type:
-            type: string
             const: tool-output-available
-          toolCallId:
+            title: Type
             type: string
-          output: {}
+          toolCallId:
+            minLength: 1
+            title: Toolcallid
+            type: string
+          output:
+            title: Output
           dynamic:
-            type: boolean
+            anyOf:
+            - type: boolean
+            - type: 'null'
+            title: Dynamic
           providerExecuted:
-            type: boolean
+            anyOf:
+            - type: boolean
+            - type: 'null'
+            title: Providerexecuted
         required:
         - type
         - toolCallId
         - output
-        additionalProperties: false
-      - type: object
+        title: ToolOutputAvailableChunk
+        type: object
+      - additionalProperties: false
         properties:
           type:
-            type: string
             const: tool-output-error
+            title: Type
+            type: string
           toolCallId:
+            minLength: 1
+            title: Toolcallid
             type: string
           errorText:
+            minLength: 1
+            title: Errortext
             type: string
           dynamic:
-            type: boolean
+            anyOf:
+            - type: boolean
+            - type: 'null'
+            title: Dynamic
           providerExecuted:
-            type: boolean
+            anyOf:
+            - type: boolean
+            - type: 'null'
+            title: Providerexecuted
         required:
         - type
         - toolCallId
         - errorText
-        additionalProperties: false
-      - type: object
+        title: ToolOutputErrorChunk
+        type: object
+      - additionalProperties: false
         properties:
           type:
-            type: string
             const: data-attachment
+            title: Type
+            type: string
           id:
             type: string
+            title: Id
           data:
-            type: object
+            additionalProperties: true
             properties:
               attachment_id:
-                type: string
-              attachmentId:
-                type: string
-              phase:
+                format: uuid
+                title: Attachment Id
                 type: string
               filename:
+                title: Filename
                 type: string
+              phase:
+                anyOf:
+                - type: string
+                - type: 'null'
+                title: Phase
               byte_size:
-                type: integer
+                anyOf:
+                - type: integer
+                - type: 'null'
+                title: Byte Size
+              attachmentId:
+                anyOf:
+                - type: string
+                - type: 'null'
+                title: Attachmentid
               byteSize:
-                type: integer
-            additionalProperties: true
+                anyOf:
+                - type: integer
+                - type: 'null'
+                title: Bytesize
             required:
-            - filename
             - attachment_id
+            - filename
+            title: AttachmentData
+            type: object
           transient:
-            type: boolean
+            anyOf:
+            - type: boolean
+            - type: 'null'
+            title: Transient
         required:
         - type
         - data
-        additionalProperties: false
-      - type: object
+        title: DataAttachmentChunk
+        type: object
+      - additionalProperties: false
         properties:
           type:
-            type: string
             const: data-warning
+            title: Type
+            type: string
           id:
             type: string
+            title: Id
           data:
-            type: object
+            additionalProperties: true
             properties:
               message:
+                title: Message
                 type: string
               code:
                 anyOf:
                 - type: string
                 - type: 'null'
-            additionalProperties: true
+                title: Code
             required:
             - message
+            title: WarningData
+            type: object
           transient:
-            type: boolean
+            anyOf:
+            - type: boolean
+            - type: 'null'
+            title: Transient
         required:
         - type
         - data
-        additionalProperties: false
-      - type: object
+        title: DataWarningChunk
+        type: object
+      - additionalProperties: false
         properties:
           type:
-            type: string
             const: data-artifact
+            title: Type
+            type: string
           id:
             type: string
+            title: Id
           data:
-            type: object
+            additionalProperties: true
             properties:
               artifact_id:
-                type: string
-              artifactId:
+                format: uuid
+                title: Artifact Id
                 type: string
               artifact_kind:
-                type: string
+                anyOf:
+                - type: string
+                - type: 'null'
+                title: Artifact Kind
               kind:
-                type: string
+                anyOf:
+                - type: string
+                - type: 'null'
+                title: Kind
               title:
                 anyOf:
                 - type: string
                 - type: 'null'
+                title: Title
               name:
-                type: string
+                anyOf:
+                - type: string
+                - type: 'null'
+                title: Name
               media_type:
-                type: string
+                anyOf:
+                - type: string
+                - type: 'null'
+                title: Media Type
               mediaType:
-                type: string
+                anyOf:
+                - type: string
+                - type: 'null'
+                title: Mediatype
               byte_size:
-                type: integer
+                anyOf:
+                - type: integer
+                - type: 'null'
+                title: Byte Size
               byteSize:
-                type: integer
+                anyOf:
+                - type: integer
+                - type: 'null'
+                title: Bytesize
               checksum_sha256:
-                type: string
+                anyOf:
+                - type: string
+                - type: 'null'
+                title: Checksum Sha256
               checksumSha256:
-                type: string
-            additionalProperties: true
+                anyOf:
+                - type: string
+                - type: 'null'
+                title: Checksumsha256
+              artifactId:
+                anyOf:
+                - type: string
+                - type: 'null'
+                title: Artifactid
             required:
             - artifact_id
+            title: ArtifactData
+            type: object
           transient:
-            type: boolean
+            anyOf:
+            - type: boolean
+            - type: 'null'
+            title: Transient
         required:
         - type
         - data
-        additionalProperties: false
-      - type: object
+        title: DataArtifactChunk
+        type: object
+      - additionalProperties: false
         properties:
           type:
-            type: string
             const: data-usage
+            title: Type
+            type: string
           id:
             type: string
+            title: Id
           data:
-            type: object
+            additionalProperties: true
             properties:
               usage:
-                type: object
                 additionalProperties: true
-            additionalProperties: true
+                title: Usage
+                type: object
             required:
             - usage
+            title: UsageData
+            type: object
           transient:
-            type: boolean
+            anyOf:
+            - type: boolean
+            - type: 'null'
+            title: Transient
         required:
         - type
         - data
-        additionalProperties: false
-      - type: object
+        title: DataUsageChunk
+        type: object
+      - additionalProperties: false
         properties:
           type:
-            type: string
             const: data-structured-result
+            title: Type
+            type: string
           id:
             type: string
+            title: Id
           data:
-            type: object
+            additionalProperties: true
             properties:
               schema_id:
-                type: string
-              schemaId:
+                title: Schema Id
                 type: string
               schema_version:
+                title: Schema Version
                 type: string
+              value:
+                title: Value
+              schemaId:
+                anyOf:
+                - type: string
+                - type: 'null'
+                title: Schemaid
               schemaVersion:
-                type: string
-              value: {}
-            additionalProperties: true
+                anyOf:
+                - type: string
+                - type: 'null'
+                title: Schemaversion
             required:
             - schema_id
             - schema_version
             - value
+            title: StructuredResultData
+            type: object
           transient:
-            type: boolean
+            anyOf:
+            - type: boolean
+            - type: 'null'
+            title: Transient
         required:
         - type
         - data
-        additionalProperties: false
-      - type: object
+        title: DataStructuredResultChunk
+        type: object
+      - additionalProperties: false
         properties:
           type:
-            type: string
             const: text-start
+            title: Type
+            type: string
           id:
+            minLength: 1
+            title: Id
             type: string
         required:
         - type
         - id
-        additionalProperties: false
-      - type: object
+        title: TextStartChunk
+        type: object
+      - additionalProperties: false
         properties:
           type:
-            type: string
             const: text-delta
+            title: Type
+            type: string
           id:
+            minLength: 1
+            title: Id
             type: string
           delta:
+            title: Delta
             type: string
         required:
         - type
         - id
         - delta
-        additionalProperties: false
-      - type: object
+        title: TextDeltaChunk
+        type: object
+      - additionalProperties: false
         properties:
           type:
-            type: string
             const: text-end
+            title: Type
+            type: string
           id:
+            minLength: 1
+            title: Id
             type: string
         required:
         - type
         - id
-        additionalProperties: false
-      - type: object
+        title: TextEndChunk
+        type: object
+      - additionalProperties: false
         properties:
           type:
-            type: string
             const: finish
-          finishReason:
+            title: Type
             type: string
+          finishReason:
             enum:
             - stop
             - error
+            title: Finishreason
+            type: string
           messageMetadata:
-            type: object
-            additionalProperties: true
+            anyOf:
+            - additionalProperties: true
+              type: object
+            - type: 'null'
+            title: Messagemetadata
         required:
         - type
         - finishReason
-        additionalProperties: false
-      - type: object
+        title: FinishChunk
+        type: object
+      - additionalProperties: false
         properties:
           type:
-            type: string
             const: abort
+            title: Type
+            type: string
           reason:
+            title: Reason
             type: string
         required:
         - type
         - reason
-        additionalProperties: false
-      - type: object
+        title: AbortChunk
+        type: object
+      - additionalProperties: false
         properties:
           type:
-            type: string
             const: error
+            title: Type
+            type: string
           errorText:
+            minLength: 1
+            title: Errortext
             type: string
         required:
         - type
         - errorText
-        additionalProperties: false
+        title: ErrorChunk
+        type: object
+      title: FleetUIMessageChunk
