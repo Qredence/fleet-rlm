@@ -16,18 +16,18 @@ from fleet_rlm.api.dependencies import LocalScopeDep, SettingsDep, TurnCoordinat
 from fleet_rlm.api.schemas import CreateTurnRequest
 from fleet_rlm.api.sse import AISDKUIProjector
 from fleet_rlm.chat.commands import OpenTurnCommand
+from fleet_rlm.chat.run_lifecycle import (
+    RunIdempotencyMismatchError,
+    RunInProgressError,
+    RunLifecycleUnavailableError,
+    RunNotFoundError,
+)
+from fleet_rlm.chat.run_preparation import (
+    RunPreparationCancelledError,
+    RunPreparationTimeoutError,
+    RunPreparationUnavailableError,
+)
 from fleet_rlm.chat.turn_coordinator import OpenedTurnStream
-from fleet_rlm.chat.turn_lifecycle import (
-    TurnIdempotencyMismatchError,
-    TurnInProgressError,
-    TurnLifecycleUnavailableError,
-    TurnNotFoundError,
-)
-from fleet_rlm.chat.turn_preparation import (
-    TurnPreparationCancelledError,
-    TurnPreparationTimeoutError,
-    TurnPreparationUnavailableError,
-)
 from fleet_rlm.observability.failure_diagnostics import normalize_turn_failure
 from fleet_rlm.sessions.models import TurnAccess, TurnInput
 from fleet_rlm.skills.errors import InvalidSkillSelectionError
@@ -72,17 +72,17 @@ def _log_preparation_unavailable(correlation_id: str, exc: BaseException) -> Non
 
 def _open_failure_message(exc: BaseException) -> str | None:
     """Map one open failure to its closed public message, preserving _open_turn semantics."""
-    if isinstance(exc, TurnNotFoundError):
+    if isinstance(exc, RunNotFoundError):
         return "Session not found"
-    if isinstance(exc, TurnInProgressError):
+    if isinstance(exc, RunInProgressError):
         return "A Turn is already running"
-    if isinstance(exc, TurnIdempotencyMismatchError):
+    if isinstance(exc, RunIdempotencyMismatchError):
         return "Idempotency key input mismatch"
     if isinstance(exc, InvalidSkillSelectionError):
         return "Invalid Skill selection"
-    if isinstance(exc, TurnPreparationTimeoutError):
+    if isinstance(exc, RunPreparationTimeoutError):
         return "Turn preparation timed out"
-    if isinstance(exc, (TurnLifecycleUnavailableError, TurnPreparationUnavailableError)):
+    if isinstance(exc, (RunLifecycleUnavailableError, RunPreparationUnavailableError)):
         return "Turn is unavailable"
     if isinstance(exc, ValueError):
         return "Invalid request"
@@ -195,7 +195,7 @@ async def create_turn(
                 opened = open_task.result()
                 break
             yield _preparation_prelude()
-    except TurnPreparationCancelledError:
+    except RunPreparationCancelledError:
         yield ServerSentEvent(data={"type": "abort", "reason": "Turn cancelled"})
         yield ServerSentEvent(raw_data="[DONE]")
         return

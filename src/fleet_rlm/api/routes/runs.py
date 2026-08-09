@@ -10,7 +10,7 @@ from pydantic import BaseModel
 
 from fleet_rlm.api.dependencies import LocalScopeDep, TurnLifecycleDep
 from fleet_rlm.api.errors import http_error
-from fleet_rlm.chat.turn_lifecycle import TurnNotFoundError
+from fleet_rlm.chat.run_lifecycle import RunNotFoundError
 from fleet_rlm.sessions.models import TurnAccess
 
 router = APIRouter(prefix="/api/runs", tags=["runs"])
@@ -33,6 +33,6 @@ async def request_run_cancellation(
 ) -> CancellationResponse:
     try:
         status = await lifecycle.request_cancel(TurnAccess(identity.user_id, identity.workspace_id), run_id)
-    except TurnNotFoundError as exc:
+    except RunNotFoundError as exc:
         raise http_error(404, "run_not_found", "Run not found") from exc
     return CancellationResponse(run_id=run_id, state=status)

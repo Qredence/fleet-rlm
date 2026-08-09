@@ -14,10 +14,10 @@ import dspy
 from fastapi import FastAPI
 
 from fleet_rlm.chat.capability_preparation import PreparedHostCapabilities, prepare_host_capabilities
-from fleet_rlm.chat.turn_lifecycle import ExecuteTurn
-from fleet_rlm.chat.turn_preparation import (
-    DefaultTurnPreparer,
-    PreparedTurn,
+from fleet_rlm.chat.run_lifecycle import ClaimedRun
+from fleet_rlm.chat.run_preparation import (
+    DefaultRunPreparer,
+    PreparedRun,
     RunEnvironment,
     RunEnvironmentProvider,
 )
@@ -116,7 +116,7 @@ class _TestingVolumeFsAdapter:
 
 
 class TestingRunEnvironmentProvider(RunEnvironmentProvider):
-    async def acquire(self, turn: ExecuteTurn, *, deadline: float) -> RunEnvironment:
+    async def acquire(self, turn: ClaimedRun, *, deadline: float) -> RunEnvironment:
         del turn, deadline
         sink = TestingRunSink()
 
@@ -168,7 +168,7 @@ class TestingCapabilityPreparer:
 
     async def prepare(
         self,
-        turn: ExecuteTurn,
+        turn: ClaimedRun,
         environment: RunEnvironment,
         attachments: PreparedAttachments,
         *,
@@ -177,7 +177,7 @@ class TestingCapabilityPreparer:
         """Prepare capabilities for a turn within the specified execution environment and deadline.
 
         Parameters:
-            turn (ExecuteTurn): The turn whose capabilities are being prepared.
+            turn (ClaimedRun): The turn whose capabilities are being prepared.
             environment (RunEnvironment): The environment in which the turn will execute.
             attachments (PreparedAttachments): Attachments available to the turn.
             deadline (float): The time limit for preparation.
@@ -274,7 +274,7 @@ class DeterministicTurnPreparation:
     ) -> None:
         resolved_options = options or RLMOptions()
         models = RLMModelBundle(TestingLM("testing/root"), TestingLM("testing/sub"))
-        self._module = DefaultTurnPreparer(
+        self._module = DefaultRunPreparer(
             models=models,
             options=resolved_options,
             recursive_options=RecursiveRLMOptions(),
@@ -289,7 +289,7 @@ class DeterministicTurnPreparation:
             ),
         )
 
-    async def prepare(self, turn: ExecuteTurn, *, deadline: float) -> PreparedTurn:
+    async def prepare(self, turn: ClaimedRun, *, deadline: float) -> PreparedRun:
         return await self._module.prepare(turn, deadline=deadline)
 
 

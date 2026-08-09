@@ -9,8 +9,8 @@ from uuid import UUID
 
 import dspy
 
-from fleet_rlm.chat.turn_lifecycle import ExecuteTurn
-from fleet_rlm.chat.turn_preparation import TurnPreparationCancelledError, TurnPreparationTimeoutError
+from fleet_rlm.chat.run_lifecycle import ClaimedRun
+from fleet_rlm.chat.run_preparation import RunPreparationCancelledError, RunPreparationTimeoutError
 from fleet_rlm.files.workspace_models import SessionWorkspaceFS, WorkspaceCapabilityMetadata
 from fleet_rlm.rlm.context import PreparationNotice, RLMExecutionSpec
 from fleet_rlm.rlm.events import AttachmentRead, SkillActivated, SkillLoaded
@@ -66,7 +66,7 @@ class PreparedHostCapabilities:
             # Only canonical attachment-read payloads project here. Artifact
             # candidate notices (``artifact.workspace_publish``) carry ``path``
             # instead of ``attachment_id`` and reach the stream through the
-            # promotion path in ``TurnLifecycle.finish``.
+            # promotion path in ``RunLifecycle.finish``.
             if item.get("event_kind", "attachment.read") != "attachment.read":
                 continue
             values.append(
@@ -96,7 +96,7 @@ class PreparedHostCapabilities:
 
 async def prepare_host_capabilities(
     *,
-    turn: ExecuteTurn,
+    turn: ClaimedRun,
     skill_catalog: SkillCatalog,
     base_tools: Sequence[dspy.Tool],
     base_event_views: Mapping[str, ToolEventView],
@@ -128,9 +128,9 @@ async def prepare_host_capabilities(
 
     resolved = resolve_selected_skills(skill_catalog, selections)
     if await turn.cancellation_requested():
-        raise TurnPreparationCancelledError("Turn cancelled")
+        raise RunPreparationCancelledError("Turn cancelled")
     if asyncio.get_running_loop().time() >= deadline:
-        raise TurnPreparationTimeoutError("Turn preparation timed out")
+        raise RunPreparationTimeoutError("Turn preparation timed out")
 
     skill_host = SkillToolHost(
         skill_catalog,

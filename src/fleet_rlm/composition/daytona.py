@@ -200,9 +200,9 @@ async def build_daytona_composition(settings: Settings, *, skill_catalog: SkillC
     from fleet_rlm.api.local_scope import LocalScope
     from fleet_rlm.artifacts.reader import ArtifactReader
     from fleet_rlm.artifacts.workspace_storage import WorkspaceArtifactBlobGateway
-    from fleet_rlm.chat.turn_cleanup import TurnCleanupSupervisor
+    from fleet_rlm.chat.run_cleanup import RunCleanupSupervisor
+    from fleet_rlm.chat.run_lifecycle import RunLifecycleService
     from fleet_rlm.chat.turn_coordinator import TurnCoordinator
-    from fleet_rlm.chat.turn_lifecycle import TurnLifecycleService
     from fleet_rlm.daytona.provisioning import sandbox_spec_from_settings
     from fleet_rlm.daytona.run_environment import DaytonaRuntimeResources, build_turn_preparation, resolve_settings
     from fleet_rlm.daytona.workspace_gateway import (
@@ -243,7 +243,7 @@ async def build_daytona_composition(settings: Settings, *, skill_catalog: SkillC
         )
         session_factory = create_session_factory(engine)
         database_lifecycle = RuntimeDatabaseLifecycle(engine=engine, session_factory=session_factory)
-        cleanup = TurnCleanupSupervisor(max_jobs=8)
+        cleanup = RunCleanupSupervisor(max_jobs=8)
         bindings = SqlAlchemySandboxBindingStore(session_factory)
         model_bundle = build_model_bundle(resolved)
         resources = DaytonaRuntimeResources(
@@ -294,7 +294,7 @@ async def build_daytona_composition(settings: Settings, *, skill_catalog: SkillC
             stale_after_seconds=resolved.run_stale_after_seconds,
         )
         session_catalog = SqlAlchemySessionCatalog(session_factory)
-        lifecycle = TurnLifecycleService(
+        lifecycle = RunLifecycleService(
             turn_state,
             max_artifact_bytes=resolved.max_artifact_bytes,
             heartbeat_seconds=resolved.run_heartbeat_seconds,

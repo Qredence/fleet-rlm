@@ -10,7 +10,7 @@ from uuid import UUID
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from fleet_rlm.artifacts.reader import ArtifactReader
-from fleet_rlm.chat.turn_preparation import TurnPreparation
+from fleet_rlm.chat.run_preparation import RunPreparation
 from fleet_rlm.composition.inventory import RuntimeDatabaseLifecycle, RuntimeInventory
 from fleet_rlm.config import Settings
 from fleet_rlm.files.lifecycle import AttachmentLifecycle
@@ -129,15 +129,15 @@ def build_local_inventory(
     database: RuntimeDatabaseLifecycle,
     attachment_lifecycle: AttachmentLifecycle,
     artifact_reader: ArtifactReader,
-    preparation: TurnPreparation,
+    preparation: RunPreparation,
     rlm_factory: RLMFactoryLike,
     workspace_volume_mirror: VolumeTreeFs | None,
 ) -> RuntimeInventory:
     """Build the shared in-memory/SQL inventory for one local runtime."""
     assert_dspy_version()
-    from fleet_rlm.chat.turn_cleanup import TurnCleanupSupervisor
+    from fleet_rlm.chat.run_cleanup import RunCleanupSupervisor
+    from fleet_rlm.chat.run_lifecycle import RunLifecycleService
     from fleet_rlm.chat.turn_coordinator import TurnCoordinator
-    from fleet_rlm.chat.turn_lifecycle import TurnLifecycleService
     from fleet_rlm.config import _CONFIG_PATH, active_profile
     from fleet_rlm.config_policy import ConfigPolicyService
     from fleet_rlm.persistence.repositories import (
@@ -158,8 +158,8 @@ def build_local_inventory(
             stale_after_seconds=settings.run_stale_after_seconds,
         )
         session_catalog = SqlAlchemySessionCatalog(session_factory)
-    cleanup = TurnCleanupSupervisor(max_jobs=8)
-    lifecycle = TurnLifecycleService(
+    cleanup = RunCleanupSupervisor(max_jobs=8)
+    lifecycle = RunLifecycleService(
         turn_state,
         max_artifact_bytes=settings.max_artifact_bytes,
         heartbeat_seconds=settings.run_heartbeat_seconds,

@@ -22,10 +22,10 @@ from fastapi import FastAPI
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from fleet_rlm.artifacts.reader import ArtifactReader
-from fleet_rlm.chat.turn_cleanup import TurnCleanupSupervisor
+from fleet_rlm.chat.run_cleanup import RunCleanupSupervisor
+from fleet_rlm.chat.run_lifecycle import RunLifecycle
+from fleet_rlm.chat.run_preparation import RunPreparation
 from fleet_rlm.chat.turn_coordinator import TurnCoordinator
-from fleet_rlm.chat.turn_lifecycle import TurnLifecycle
-from fleet_rlm.chat.turn_preparation import TurnPreparation
 from fleet_rlm.config_policy import ConfigPolicyService
 from fleet_rlm.files.lifecycle import AttachmentLifecycle
 from fleet_rlm.files.volume_storage import VolumeTreeFs, WorkspaceVolumeGateway
@@ -90,9 +90,9 @@ class RuntimeInventory:
     attachment_lifecycle: AttachmentLifecycle | None = None
     artifact_reader: ArtifactReader | None = None
     session_catalog: SessionCatalog | None = None
-    turn_lifecycle: TurnLifecycle | None = None
-    turn_preparation: TurnPreparation | None = None
-    turn_cleanup_supervisor: TurnCleanupSupervisor | None = None
+    turn_lifecycle: RunLifecycle | None = None
+    turn_preparation: RunPreparation | None = None
+    turn_cleanup_supervisor: RunCleanupSupervisor | None = None
     turn_state_store: SettlingTurnStore | None = None
     config_policy: ConfigPolicyService | None = None
     database: RuntimeDatabaseLifecycle = field(default_factory=RuntimeDatabaseLifecycle)

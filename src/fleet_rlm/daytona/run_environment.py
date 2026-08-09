@@ -13,12 +13,12 @@ from fleet_rlm.chat.capability_preparation import (
     PreparedHostCapabilities,
     prepare_host_capabilities,
 )
-from fleet_rlm.chat.turn_lifecycle import ExecuteTurn
-from fleet_rlm.chat.turn_preparation import (
-    DefaultTurnPreparer,
+from fleet_rlm.chat.run_lifecycle import ClaimedRun
+from fleet_rlm.chat.run_preparation import (
+    DefaultRunPreparer,
     RunEnvironment,
-    TurnPreparationTimeoutError,
-    TurnPreparationUnavailableError,
+    RunPreparationTimeoutError,
+    RunPreparationUnavailableError,
 )
 from fleet_rlm.composition.common import recursive_rlm_options
 from fleet_rlm.config import Settings, load_runtime_settings
@@ -159,20 +159,20 @@ class _DaytonaEnvironmentProvider:
     resources: DaytonaRuntimeResources
     settings: Settings
 
-    async def acquire(self, turn: ExecuteTurn, *, deadline: float) -> RunEnvironment:
+    async def acquire(self, turn: ClaimedRun, *, deadline: float) -> RunEnvironment:
         """
         Acquire and configure a Daytona-backed run environment for a turn.
 
         Parameters:
-            turn (ExecuteTurn): Turn whose session, access, and run identifiers determine the environment.
+            turn (ClaimedRun): Turn whose session, access, and run identifiers determine the environment.
             deadline (float): Absolute time limit for environment acquisition and setup.
 
         Returns:
             RunEnvironment: Configured environment with run sinks, resource cleanup, and child-runtime creation.
 
         Raises:
-            TurnPreparationUnavailableError: If environment admission times out.
-            TurnPreparationTimeoutError: If lease acquisition or environment setup exceeds the deadline.
+            RunPreparationUnavailableError: If environment admission times out.
+            RunPreparationTimeoutError: If lease acquisition or environment setup exceeds the deadline.
         """
         try:
             lease = await self.resources.session_manager.acquire(
@@ -185,9 +185,9 @@ class _DaytonaEnvironmentProvider:
                 deadline=deadline,
             )
         except DaytonaAdmissionTimeoutError as exc:
-            raise TurnPreparationUnavailableError("Turn environment is unavailable") from exc
+            raise RunPreparationUnavailableError("Turn environment is unavailable") from exc
         except DaytonaLeaseAcquisitionTimeoutError as exc:
-            raise TurnPreparationTimeoutError("Turn preparation timed out") from exc
+            raise RunPreparationTimeoutError("Turn preparation timed out") from exc
         try:
             self.resources.track_sandbox(lease.sandbox_id)
             lookup = asyncio.create_task(self.resources.platform.get(lease.sandbox_id))
@@ -201,7 +201,7 @@ class _DaytonaEnvironmentProvider:
                 _consume_task_result(lookup)
                 if cancelled:
                     raise asyncio.CancelledError from None
-                raise TurnPreparationTimeoutError("Turn preparation timed out") from None
+                raise RunPreparationTimeoutError("Turn preparation timed out") from None
             except asyncio.CancelledError:
                 await _settle_owned_thread(lookup)
                 _consume_task_result(lookup)
@@ -268,7 +268,7 @@ class _LiveCapabilityPreparer:
 
     async def prepare(
         self,
-        turn: ExecuteTurn,
+        turn: ClaimedRun,
         environment: RunEnvironment,
         attachments: PreparedAttachments,
         *,
@@ -456,14 +456,14 @@ def build_turn_preparation(
     skill_catalog: SkillCatalog,
     settings: Settings,
     models: RLMModelBundle,
-) -> DefaultTurnPreparer:
+) -> DefaultRunPreparer:
     """Compose Daytona Turn preparation without mutating resource ownership."""
     options = RLMOptions(
         max_iterations=settings.rlm_max_iterations,
         max_llm_calls=settings.rlm_max_llm_calls,
         max_output_chars=settings.rlm_max_output_chars,
     )
-    return DefaultTurnPreparer(
+    return DefaultRunPreparer(
         models=models,
         options=options,
         recursive_options=recursive_rlm_options(settings),

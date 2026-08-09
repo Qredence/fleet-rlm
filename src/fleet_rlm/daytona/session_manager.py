@@ -16,7 +16,7 @@ from threading import Lock
 from typing import Any, Protocol
 from uuid import UUID, uuid4
 
-from fleet_rlm.chat.turn_cleanup import TurnCleanupSupervisor, TurnCleanupUnavailableError
+from fleet_rlm.chat.run_cleanup import RunCleanupSupervisor, RunCleanupUnavailableError
 from fleet_rlm.daytona.errors import (
     DaytonaAdapterError,
     ProviderRequestError,
@@ -241,7 +241,7 @@ class DaytonaSessionManager:
         bindings: BindingStoreLike,
         admission: DaytonaAdmission | None = None,
         sandbox_spec: DaytonaSandboxSpec,
-        cleanup: TurnCleanupSupervisor | None = None,
+        cleanup: RunCleanupSupervisor | None = None,
         idle_stop_seconds: float | None = None,
         execution_output_cap: int = DEFAULT_EXECUTION_OUTPUT_CHARS,
         execution_timeout_s: int = DEFAULT_EXECUTION_TIMEOUT_S,
@@ -252,7 +252,7 @@ class DaytonaSessionManager:
         self._bindings = bindings
         self._admission = admission or DaytonaAdmission()
         self._sandbox_spec = sandbox_spec
-        self._cleanup = cleanup or TurnCleanupSupervisor()
+        self._cleanup = cleanup or RunCleanupSupervisor()
         self._execution_output_cap = execution_output_cap
         self._execution_timeout_s = execution_timeout_s
         if idle_stop_seconds is not None and idle_stop_seconds <= 0:
@@ -362,7 +362,7 @@ class DaytonaSessionManager:
             deletion = self._platform.delete(lease.sandbox_id)
             try:
                 self._cleanup.submit(deletion)
-            except TurnCleanupUnavailableError:
+            except RunCleanupUnavailableError:
                 deletion.close()
                 await self._platform.delete(lease.sandbox_id)
 

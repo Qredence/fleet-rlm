@@ -10,8 +10,8 @@ from fastapi import Depends, HTTPException, Request
 from fleet_rlm.api.errors import http_error
 from fleet_rlm.api.local_scope import LocalScope, get_local_scope
 from fleet_rlm.artifacts.reader import ArtifactReader
+from fleet_rlm.chat.run_lifecycle import RunLifecycle
 from fleet_rlm.chat.turn_coordinator import TurnCoordinator
-from fleet_rlm.chat.turn_lifecycle import TurnLifecycle
 from fleet_rlm.composition.inventory import RuntimeInventory, get_runtime_inventory
 from fleet_rlm.config import Settings
 from fleet_rlm.config_policy import ConfigPolicyService
@@ -88,7 +88,7 @@ def get_session_catalog(request: Request) -> SessionCatalog:
     return catalog
 
 
-def get_turn_lifecycle(request: Request) -> TurnLifecycle:
+def get_turn_lifecycle(request: Request) -> RunLifecycle:
     lifecycle = get_ready_runtime_inventory(request).turn_lifecycle
     if lifecycle is None:
         raise _composition_unavailable()
@@ -133,7 +133,7 @@ TurnCoordinatorDep = Annotated[TurnCoordinator, Depends(get_turn_coordinator)]
 ArtifactReaderDep = Annotated[ArtifactReader, Depends(get_artifact_reader)]
 AttachmentLifecycleDep = Annotated[AttachmentLifecycle, Depends(get_attachment_lifecycle)]
 SessionCatalogDep = Annotated[SessionCatalog, Depends(get_session_catalog)]
-TurnLifecycleDep = Annotated[TurnLifecycle, Depends(get_turn_lifecycle)]
+TurnLifecycleDep = Annotated[RunLifecycle, Depends(get_turn_lifecycle)]
 SettingsDep = Annotated[Settings, Depends(get_settings)]
 SkillCatalogDep = Annotated[SkillCatalog, Depends(get_skill_catalog)]
 ConfigPolicyDep = Annotated[ConfigPolicyService, Depends(get_config_policy)]

@@ -126,7 +126,7 @@ class _WorkerOwnership:
                 task.exception()
 
 
-class TurnEventStream:
+class RunEventStream:
     """Async observation iterator with its measured outcome after completion."""
 
     def __init__(
@@ -561,11 +561,11 @@ class RLMRunner:
     def __init__(self, *, factory: RLMFactoryLike | None = None) -> None:
         self._factory = factory or RLMFactory()
 
-    def stream(self, context: RLMExecutionContext) -> TurnEventStream:
+    def stream(self, context: RLMExecutionContext) -> RunEventStream:
         outcome: list[RLMOutcome] = []
         ownership = _WorkerOwnership()
         events = self._generate(context, outcome, ownership)
-        return TurnEventStream(
+        return RunEventStream(
             events,
             # A stream closed before the generator body ever runs leaves the
             # outcome cell empty; synthesize a cancelled outcome (matching the

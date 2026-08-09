@@ -30,7 +30,7 @@ from fleet_rlm.chat.run_lifecycle import (
     RunFailure,
     RunLifecycle,
     RunLifecycleUnavailableError,
-    TurnStateError,
+    RunStateError,
 )
 from fleet_rlm.chat.run_preparation import (
     PreparedRun,
@@ -257,7 +257,7 @@ class TurnCoordinator:
                         turn.run_id,
                     )
                     return
-                except (RunLifecycleUnavailableError, TurnStateError):
+                except (RunLifecycleUnavailableError, RunStateError):
                     turn.authority.revoke()
                     lost.set()
                     return
