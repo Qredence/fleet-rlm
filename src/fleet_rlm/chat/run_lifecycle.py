@@ -532,38 +532,12 @@ class RunLifecycleService:
         return cancellation_requested
 
 
-# Compatibility aliases preserve the pre-Phase-1 Turn lifecycle imports.
-TurnLifecycleError = RunLifecycleError
-TurnNotFoundError = RunNotFoundError
-TurnInProgressError = RunInProgressError
-TurnIdempotencyMismatchError = RunIdempotencyMismatchError
-TurnValidationError = RunValidationError
-TurnStateError = RunStateError
-TurnAlreadyCompletedError = RunAlreadyCompletedError
-TurnIntegrityError = RunIntegrityError
-TurnLifecycleUnavailableError = RunLifecycleUnavailableError
-_TurnClaimToken = _RunClaimToken
-BeginTurn = RunClaim
-ExecuteTurn = ClaimedRun
-ReplayTurn = CommittedRunReplay
-TurnStart = RunStart
-FailureCode = RunFailureCode
-TurnFailure = RunFailure
-TurnFinalization = RunSettlement
-_TurnStateStore = _RunStateStore
-TurnLifecycle = RunLifecycle
-TurnLifecycleService = RunLifecycleService
-
 __all__ = [
-    "BeginTurn",
     "CancelResult",
     "ClaimedRun",
     "CommittedRunReplay",
     "CommittedTurnReceipt",
-    "ExecuteTurn",
     "FailedRunReceipt",
-    "FailureCode",
-    "ReplayTurn",
     "RunAlreadyCompletedError",
     "RunClaim",
     "RunFailure",
@@ -580,19 +554,5 @@ __all__ = [
     "RunStart",
     "RunStateError",
     "RunValidationError",
-    "TurnAlreadyCompletedError",
-    "TurnFailure",
-    "TurnFinalization",
-    "TurnIdempotencyMismatchError",
-    "TurnInProgressError",
-    "TurnIntegrityError",
-    "TurnLifecycle",
-    "TurnLifecycleError",
-    "TurnLifecycleService",
-    "TurnLifecycleUnavailableError",
-    "TurnNotFoundError",
-    "TurnStart",
-    "TurnStateError",
-    "TurnValidationError",
     "failure_code_for_terminal_status",
 ]

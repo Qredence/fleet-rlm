@@ -76,7 +76,7 @@ _Avoid_: new Run, client-side history fetch as the product name for this path
 **Turn Commit**:
 The durable application of a Run’s terminal outcome to Session History and
 Checkpoint, producing a Committed Turn when the outcome is success.
-`TurnLifecycle.finish()` owns this boundary after typed-result validation and
+`RunLifecycle.finish()` owns this boundary after typed-result validation and
 Artifact byte promotion.
 _Avoid_: flush, save, persist (as the product outcome name)
 

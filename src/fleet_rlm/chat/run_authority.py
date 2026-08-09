@@ -1,4 +1,4 @@
-"""Run-local authority revoked when the durable Turn Claim is lost."""
+"""Run-local authority revoked when the durable Run Claim is lost."""
 
 
 class RunAuthority:

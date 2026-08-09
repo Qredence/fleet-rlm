@@ -1,4 +1,4 @@
-"""Daytona Run environment inventory and exact Turn preparation adapter."""
+"""Daytona Run environment inventory and exact Run preparation adapter."""
 
 from __future__ import annotations
 
@@ -161,10 +161,10 @@ class _DaytonaEnvironmentProvider:
 
     async def acquire(self, run: ClaimedRun, *, deadline: float) -> RunEnvironment:
         """
-        Acquire and configure a Daytona-backed run environment for a turn.
+        Acquire and configure a Daytona-backed environment for a Run.
 
         Parameters:
-            turn (ClaimedRun): Turn whose session, access, and run identifiers determine the environment.
+            run (ClaimedRun): Run whose session, access, and identifiers determine the environment.
             deadline (float): Absolute time limit for environment acquisition and setup.
 
         Returns:
@@ -275,7 +275,7 @@ class _LiveCapabilityPreparer:
         deadline: float,
     ) -> LivePreparedCapabilities:
         """
-        Prepare the file, workspace, URL, and memory capabilities for a turn.
+        Prepare the file, workspace, URL, and memory capabilities for a Run.
 
         Parameters:
             deadline (float): Deadline for capability preparation.
@@ -347,7 +347,7 @@ class _LiveCapabilityPreparer:
             max_upload_bytes=self.settings.max_upload_bytes,
         )
         memory_host = WorkspaceMemoryToolHost(memory_store)
-        # Per-turn Workspace Memory injection: a bounded tolerant tail digest.
+        # Per-Run Workspace Memory injection: a bounded tolerant tail digest.
         # Best-effort by contract; any storage failure degrades to no injection.
         try:
             memory_digest = await asyncio.to_thread(read_workspace_memory_injection_digest, memory_store)
@@ -457,7 +457,7 @@ def build_run_preparation(
     settings: Settings,
     models: RLMModelBundle,
 ) -> DefaultRunPreparer:
-    """Compose Daytona Turn preparation without mutating resource ownership."""
+    """Compose Daytona Run preparation without mutating resource ownership."""
     options = RLMOptions(
         max_iterations=settings.rlm_max_iterations,
         max_llm_calls=settings.rlm_max_llm_calls,
@@ -471,7 +471,3 @@ def build_run_preparation(
         environments=_DaytonaEnvironmentProvider(resources, settings),
         capabilities=_LiveCapabilityPreparer(settings, skill_catalog),
     )
-
-
-# Compatibility alias for pre-Phase-1 composition callers.
-build_turn_preparation = build_run_preparation

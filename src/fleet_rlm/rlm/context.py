@@ -1,4 +1,4 @@
-"""Turn context assembled by TurnCoordinator and consumed by RLMRunner."""
+"""Run context assembled by TurnCoordinator and consumed by RLMRunner."""
 
 from __future__ import annotations
 
@@ -85,10 +85,6 @@ class RunIdentity:
     session_id: UUID
     access: TurnAccess
     authority: RunAuthority = field(default_factory=RunAuthority)
-
-
-# Compatibility alias preserves the pre-Run vocabulary import.
-TurnIdentity = RunIdentity
 
 
 @dataclass(frozen=True, slots=True)

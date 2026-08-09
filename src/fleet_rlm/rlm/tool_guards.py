@@ -192,8 +192,3 @@ class RunToolGuards:
 
     def failed(self, tool_name: str, arguments: Mapping[str, Any]) -> None:
         self.integrity.failed(tool_name, arguments)
-
-
-# Compatibility aliases preserve the pre-Run guard imports.
-TurnIntegrityLedger = RunIntegrityLedger
-TurnToolGuards = RunToolGuards

@@ -84,7 +84,7 @@ See the [HTTP API](docs/reference/http-api.md) and generated
 
 One Turn validates its deterministic local scope, Attachments, and exact Skill
 selections before opening SSE. `TurnCoordinator` begins and prepares execution,
-`RLMRunner` runs one fresh native `dspy.RLM`, and `TurnLifecycle.finish()` owns
+`RLMRunner` runs one fresh native `dspy.RLM`, and `RunLifecycle.finish()` owns
 result snapshot handling, Artifact publication, and atomic Turn Commit. The
 coordinator then projects the terminal suffix and cleans up Run resources.
 

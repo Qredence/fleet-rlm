@@ -35,7 +35,7 @@ commit credentials or use a Daytona API key as an API bearer token.
   `api/dependencies.py`.
 - Keep Daytona SDK imports inside `src/fleet_rlm/daytona/`.
 - Keep Runtime Events transport-neutral; `api/sse.py` owns public projection.
-- Let `TurnLifecycle.finish()` own Artifact publication and Turn Commit; keep
+- Let `RunLifecycle.finish()` own Artifact publication and Turn Commit; keep
   terminal ordering and cleanup in `TurnCoordinator`.
 - Let Alembic own live schema evolution. Do not add startup `create_all`.
 - Do not add `/api/v1`, WebSocket execution, compatibility aliases, or a

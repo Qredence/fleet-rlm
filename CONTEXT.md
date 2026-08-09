@@ -136,7 +136,7 @@ The versioned durable semantic aggregate used for Session replay.
 _Avoid_: live trajectory buffer, result snapshot
 
 **Turn Commit**:
-The atomic successful finalization performed by `TurnLifecycle.finish()` after
+The atomic successful finalization performed by `RunLifecycle.finish()` after
 result validation and Artifact byte promotion.
 _Avoid_: SSE completion, candidate creation
 

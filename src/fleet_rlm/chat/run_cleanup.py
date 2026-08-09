@@ -56,13 +56,7 @@ class RunCleanupSupervisor:
             logger.warning("Run cleanup drain expired with %d owned job(s)", len(pending))
 
 
-# Compatibility aliases preserve the pre-Phase-1 Turn cleanup imports.
-TurnCleanupUnavailableError = RunCleanupUnavailableError
-TurnCleanupSupervisor = RunCleanupSupervisor
-
 __all__ = [
     "RunCleanupSupervisor",
     "RunCleanupUnavailableError",
-    "TurnCleanupSupervisor",
-    "TurnCleanupUnavailableError",
 ]

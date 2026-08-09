@@ -36,7 +36,7 @@ It may append only when the user explicitly asks to remember something. Memory
 is distinct from Session History, survives failed or cancelled Runs and Sandbox
 replacement, and is not a Turn-commit record.
 
-Turns are durable only after `TurnLifecycle.finish()` successfully commits their
+Turns are durable only after `RunLifecycle.finish()` successfully commits their
 validated result. A failed Turn does not advance Session history or publish an
 Artifact. Workspace Memory appends become durable independently of Turn Commit
 and survive failed or cancelled Runs and Sandbox replacement. Runtime evidence

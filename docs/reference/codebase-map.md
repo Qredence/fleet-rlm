@@ -29,9 +29,9 @@ compatibility runtime and parallel foundation package no longer exist.
 - Routes retrieve runtime modules through dependency aliases. The Skills route
   may recreate only the static in-memory catalog fallback.
 - `RLMRunner` owns execution, not Turn Commit or resource release.
-  `TurnLifecycle.finish()` owns result/Artifact publication and atomic commit;
+  `RunLifecycle.finish()` owns result/Artifact publication and atomic commit;
   `TurnCoordinator` owns terminal ordering and final cleanup.
-- `TurnLifecycleService` maps outcomes to typed Claim commands, and both Turn
+- `RunLifecycleService` maps outcomes to typed Claim commands, and both Run
   repositories apply them through one `transition_claim()` seam under their
   existing lock/transaction boundaries.
 - `RuntimeInventory` publishes the complete dynamic route-facing graph only after
@@ -40,8 +40,8 @@ compatibility runtime and parallel foundation package no longer exist.
 - `DaytonaRuntimeResources` owns provider resources only;
   `composition/daytona.py` injects database, binding, model, preparation, limits,
   and cleanup ports.
-- `chat/turn_execution.py` owns the private post-preparation Turn state machine;
-  `TurnCoordinator` remains the public stream facade and `TurnLifecycle.finish()`
+- `chat/run_execution.py` owns the private post-preparation Run state machine;
+  `TurnCoordinator` remains the public stream facade and `RunLifecycle.finish()`
   remains the artifact/atomic-commit owner.
 - `daytona/broker_source.py` owns pure broker source generation;
   `http_broker.py` keeps compatibility re-exports for existing callers.
@@ -62,7 +62,7 @@ compatibility runtime and parallel foundation package no longer exist.
   operation. It is distinct from
   Session Workspace under `sessions/{session_id}/workspace/` and Run state under
   `sessions/{session_id}/runs/{run_id}/`.
-- In-memory and SQL repositories apply the pure `chat/turn_claim.py` transition
+- In-memory and SQL repositories apply the pure `chat/run_claim.py` transition
   policy inside their respective lock and transaction boundaries.
 - Alembic owns live schema evolution. `create_tables` is limited to explicit
   SQLite test/local helpers.

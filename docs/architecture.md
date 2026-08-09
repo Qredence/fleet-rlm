@@ -9,11 +9,11 @@ POST /api/sessions/{session_id}/turns + Idempotency-Key
   -> deterministic local scope and Turn input validation
   -> Attachment ownership and exact Skill selection validation
   -> TurnCoordinator.open()
-     -> TurnLifecycle.begin(): replay or atomic Run claim
-     -> DefaultTurnPreparer.prepare(): context, tools, environment resources
+     -> RunLifecycle.begin(): replay or atomic Run claim
+     -> DefaultRunPreparer.prepare(): context, tools, environment resources
   -> RLMRunner: one fresh native dspy.RLM and interpreter context
   -> Runtime Events from native trajectory, interpreter, and host-tool boundaries
-  -> TurnLifecycle.finish()
+  -> RunLifecycle.finish()
      -> validate typed result and private snapshot
      -> promote Artifact Candidate bytes (Daytona only)
      -> atomic Turn/Run/Checkpoint/Artifact commit or failure settlement
@@ -52,7 +52,7 @@ JSON-compatible common input annotations.
   from `composition` and is never installed by lifespan.
 - Routes retrieve composed runtime modules through `api/dependencies.py`; the
   Skills discovery route may recreate only its static in-memory catalog fallback.
-- `DefaultTurnPreparer` owns ordered validation, environment acquisition,
+- `DefaultRunPreparer` owns ordered validation, environment acquisition,
   bounded context, Tool construction, and reverse-order rollback.
 - `AttachmentLifecycleService` owns Attachment upload, authorization, integrity,
   and Run staging; it is not a DSPy execution Module.
@@ -69,17 +69,17 @@ JSON-compatible common input annotations.
   publishes bounded `RLMOutput` deltas with one per-step stream identity, and
   emits a final non-delta correction; trajectory reconciliation and durable
   Turn normalization retain one canonical output part.
-- `TurnLifecycle.finish()` owns private result snapshots, Artifact publication,
+- `RunLifecycle.finish()` owns private result snapshots, Artifact publication,
   atomic Turn Commit, and durable failure settlement.
-- `TurnLifecycleService` translates lifecycle outcomes into typed Claim commands;
-  the in-memory and SQL Turn stores apply the same pure policy through one
+- `RunLifecycleService` translates lifecycle outcomes into typed Claim commands;
+  the in-memory and SQL Run state stores apply the same pure policy through one
   `transition_claim()` persistence operation. Successful `commit()` and
   `request_cancel()` remain separate atomic/authorization paths.
 - `TurnCoordinator` owns stream orchestration, heartbeat coordination, terminal
   ordering, and final cleanup.
 - `daytona/` is the exclusive Daytona SDK boundary.
 - `persistence/` implements domain repository interfaces; Alembic owns the live
-  schema. Its in-memory and SQL Turn stores share the pure Turn Claim transition
+  schema. Its in-memory and SQL Run state stores share the pure Run Claim transition
   policy while retaining lock-backed and transaction-backed atomicity.
 
 ## Skills

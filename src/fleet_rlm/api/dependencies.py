@@ -134,9 +134,6 @@ ArtifactReaderDep = Annotated[ArtifactReader, Depends(get_artifact_reader)]
 AttachmentLifecycleDep = Annotated[AttachmentLifecycle, Depends(get_attachment_lifecycle)]
 SessionCatalogDep = Annotated[SessionCatalog, Depends(get_session_catalog)]
 RunLifecycleDep = Annotated[RunLifecycle, Depends(get_run_lifecycle)]
-# Compatibility aliases preserve internal callers during the vocabulary migration.
-get_turn_lifecycle = get_run_lifecycle
-TurnLifecycleDep = RunLifecycleDep
 SettingsDep = Annotated[Settings, Depends(get_settings)]
 SkillCatalogDep = Annotated[SkillCatalog, Depends(get_skill_catalog)]
 ConfigPolicyDep = Annotated[ConfigPolicyService, Depends(get_config_policy)]
@@ -154,7 +151,6 @@ __all__ = [
     "SettingsDep",
     "SkillCatalogDep",
     "TurnCoordinatorDep",
-    "TurnLifecycleDep",
     "WorkspaceFileServiceDep",
     "WorkspaceVolumeGatewayDep",
     "require_loopback_client",

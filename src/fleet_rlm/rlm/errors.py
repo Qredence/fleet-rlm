@@ -39,11 +39,3 @@ class RunNoProgressError(RunTerminalError):
 
 class RunIntegrityFailureError(RunTerminalError):
     public_message = "Turn failed because a required workspace update was not completed"
-
-
-# Compatibility aliases preserve the pre-Run execution error imports.
-TurnTerminalError = RunTerminalError
-TurnCancelledError = RunCancelledError
-TurnTimeoutError = RunTimeoutError
-TurnNoProgressError = RunNoProgressError
-TurnIntegrityFailureError = RunIntegrityFailureError

@@ -173,7 +173,7 @@ class RunExecutionDriver:
         *,
         trace_id: str | None,
     ) -> AsyncGenerator[RuntimeEvent]:
-        """Drain provider events, settle the Turn, and hand off owned cleanup."""
+        """Drain provider events, settle the Run, and hand off owned cleanup."""
         state = _ExecutionState(
             recorder=EventRecorder(run.run_id, run.session_id),
             heartbeat=heartbeat,
@@ -533,20 +533,10 @@ class RunExecutionDriver:
             )
 
 
-# Compatibility aliases keep existing Turn imports source-compatible while the
-# Run-oriented module becomes the canonical execution implementation.
-TurnEventStream = RunEventStream
-TurnExecutionDriver = RunExecutionDriver
-TurnRunner = RunRunner
-
-
 __all__ = [
     "RunEventStream",
     "RunExecutionDriver",
     "RunRunner",
-    "TurnEventStream",
-    "TurnExecutionDriver",
-    "TurnRunner",
     "_ClaimHeartbeat",
     "_shield_cleanup",
     "_stop_heartbeat",

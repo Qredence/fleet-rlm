@@ -1025,8 +1025,3 @@ class SqlAlchemyRunStateStore:
             else:
                 raise RunStateError("stored Turn shape is invalid")
         return SessionHistory(tuple(messages))
-
-
-# Compatibility aliases preserve the pre-Phase-1 Turn state-store imports.
-InMemoryTurnStateStore = InMemoryRunStateStore
-SqlAlchemyTurnStateStore = SqlAlchemyRunStateStore

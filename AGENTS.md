@@ -126,7 +126,7 @@ Run `make check-docs` when docs, commands, Codex config, generated contracts, or
   occurrence, duplicates fail closed; same-record `remember` idempotent; edit/forget one operation; each Turn gets a 4 KiB digest; the read projection never lowers the configured cap.
   Long operator reports should write Session Workspace then `SUBMIT` a short summary; oversized `SUBMIT` fails with public Turn output budget errors.
   Volume backends that reject atomic `os.replace` use a non-atomic overwrite fallback (keep new content if only file `fsync` fails).
-  `TurnLifecycle.finish()` promotes Artifact Candidates and owns atomic Turn
+  `RunLifecycle.finish()` promotes Artifact Candidates and owns atomic Turn
   Commit, while `TurnCoordinator` owns stream settlement, terminal ordering,
   and cleanup.
 - `read_session_history` enforces a fixed 256 KiB UTF-8 aggregate byte budget on

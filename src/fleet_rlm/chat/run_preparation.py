@@ -96,7 +96,7 @@ class PreparedRun:
 
 
 def _workspace_memory_digest(capabilities: PreparedCapabilities) -> str:
-    """Bounded defensive projection of the capability digest; never fails a Turn."""
+    """Bounded defensive projection of the capability digest; never fails a Run."""
     digest = getattr(capabilities, "workspace_memory_digest", "")
     if not isinstance(digest, str) or len(digest.encode("utf-8")) > WORKSPACE_MEMORY_INJECTION_TAIL_BYTES:
         return ""
@@ -165,18 +165,18 @@ class DefaultRunPreparer:
 
     async def prepare(self, run: ClaimedRun, *, deadline: float) -> PreparedRun:
         """
-        Prepare the execution context and resources required to run a turn.
+        Prepare the execution context and resources required to run a Run.
 
         Parameters:
-            turn (ClaimedRun): Turn request and execution metadata.
-            deadline (float): Absolute deadline for turn preparation.
+            run (ClaimedRun): Run request and execution metadata.
+            deadline (float): Absolute deadline for Run preparation.
 
         Returns:
             PreparedRun: Prepared execution context, artifact sinks, and managed resources.
 
         Raises:
-            RunPreparationCancelledError: If the turn is cancelled.
-            RunPreparationTimeoutError: If preparation exceeds the deadline.
+            RunPreparationCancelledError: If the Run is cancelled.
+            RunPreparationTimeoutError: If Run preparation exceeds the deadline.
             RunPreparationUnavailableError: If required preparation services or resources are unavailable.
         """
         try:
@@ -363,25 +363,11 @@ class DefaultRunPreparer:
                 continue
 
 
-# Compatibility aliases preserve the pre-Phase-1 Turn preparation imports.
-TurnPreparationError = RunPreparationError
-TurnPreparationCancelledError = RunPreparationCancelledError
-TurnPreparationTimeoutError = RunPreparationTimeoutError
-TurnPreparationValidationError = RunPreparationValidationError
-TurnPreparationIntegrityError = RunPreparationIntegrityError
-TurnPreparationUnavailableError = RunPreparationUnavailableError
-_PreparedTurnResources = _PreparedRunResources
-PreparedTurn = PreparedRun
-TurnPreparation = RunPreparation
-DefaultTurnPreparer = DefaultRunPreparer
-
 __all__ = [
     "AsyncCleanup",
     "CapabilityPreparer",
     "DefaultRunPreparer",
-    "DefaultTurnPreparer",
     "PreparedRun",
-    "PreparedTurn",
     "RunAttachmentPreparer",
     "RunEnvironment",
     "RunEnvironmentProvider",
@@ -392,11 +378,4 @@ __all__ = [
     "RunPreparationTimeoutError",
     "RunPreparationUnavailableError",
     "RunPreparationValidationError",
-    "TurnPreparation",
-    "TurnPreparationCancelledError",
-    "TurnPreparationError",
-    "TurnPreparationIntegrityError",
-    "TurnPreparationTimeoutError",
-    "TurnPreparationUnavailableError",
-    "TurnPreparationValidationError",
 ]

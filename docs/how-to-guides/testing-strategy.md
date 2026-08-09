@@ -74,7 +74,7 @@ git diff --check
 For separation-of-concerns changes, keep boundary checks close to the
 production seam: composition inventory tests live in
 `tests/unit/backend/test_live_composition.py`, Turn execution tests
-in `tests/unit/backend/chat/test_turn_execution.py`, binding repository tests
+in `tests/unit/backend/chat/test_run_execution.py`, binding repository tests
 in `tests/unit/backend/test_sandbox_binding_repository.py`, and pure broker
 source tests in `tests/unit/backend/daytona/test_broker_source.py`. Include
 the claim-heartbeat, cleanup, claim-parity, live-preparation, orphan-cleanup,

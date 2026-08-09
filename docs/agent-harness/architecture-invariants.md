@@ -35,8 +35,8 @@ exist.
   `RuntimeInventory`, publishes readiness last, and detaches it before disposal.
 - `composition/` owns complete common, Daytona, and private testing wiring.
 - `chat/` owns preparation, coordination, Turn Lifecycle, terminal ordering, and
-  cleanup. `chat/turn_execution.py` owns the private post-preparation state
-  machine; `TurnLifecycle.finish()` owns Artifact publication and atomic commit;
+  cleanup. `chat/run_execution.py` owns the private post-preparation Run state
+  machine; `RunLifecycle.finish()` owns Artifact publication and atomic commit;
   `TurnCoordinator` owns the public stream facade and resource release.
 - Turn Claim persistence has one typed `transition_claim()` operation. Its pure
   command/state policy is shared by in-memory and SQL adapters; successful
