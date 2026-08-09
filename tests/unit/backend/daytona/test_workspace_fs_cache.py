@@ -243,3 +243,14 @@ def test_lru_cache_replacement_does_not_evict_other_entries() -> None:
     assert len(cache) == 2
     assert cache.get("a") == b"3"
     assert cache.get("b") == b"2"
+
+
+def test_modified_timestamp_parses_daytona_mod_time_strings() -> None:
+    from fleet_rlm.daytona.workspace_fs import _modified_timestamp
+
+    assert _modified_timestamp("2026-08-08 21:26:10 +0000 UTC") == 1786224370.0
+    assert abs(_modified_timestamp("2026-07-30 00:05:20.290395882 +0000 UTC") - 1785369920.290395) < 1e-3
+    assert abs(_modified_timestamp("2026-08-08T21:26:10.123456+00:00") - 1786224370.123456) < 1e-6
+    assert _modified_timestamp("garbage") is None
+    assert _modified_timestamp(None) is None
+    assert _modified_timestamp(True) is None

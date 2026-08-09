@@ -82,7 +82,7 @@ Each PR: branch → focused suite → full gate (make check incl. TUI via pnpm 1
 - [ ] FIX (WS-RC7): give _Sync* sandbox bridges (interpreter.py:306-380) a DEDICATED daemon loop thread instead of capturing the caller's running loop; alternatively remove nested sync waiting in the broker fulfill path. Regression test must reproduce the deadlock shape (sync bridge inside a nested-wait coroutine).
 
 
-## RC-11 — fix(api): /api/volume/tree lists nothing anywhere (FOUND in Phase E live verification)
+## RC-11 — fix(api): /api/volume/tree lists nothing anywhere  ✅ done (Daytona mod_time is a string; _modified_timestamp now parses it)
 - [ ] Symptom: GET /api/volume/tree?root=<anything> returns paths:[] (+root hint dirs only) even though the same volume provably contains artifacts/, attachments/, files/dogfood/rest-probe.txt, projects/fleet-rlm/decisions/tool-forwarding.md (all visible via /api/files and via live RLM project tools). gateway.list_files (WorkspaceVolumeGatewayDep → daytona/workspace_fs.list_files → sandbox.fs.list_files + filtering) yields zero entries at every root (all filters fresh-cache tested). /api/files works — so REST gateway+mount are fine; bug sits in the tree-specific gateway/list_files path (entry filtering or its sandbox binding).
 - [ ] Also ergonomic inconsistency: tree uses query param `root` while /api/files uses `path` (documentation + maybe alias).
 - [ ] Fix with a contract test: seed two nested volumes paths; assert tree returns them.
@@ -94,7 +94,7 @@ Each PR: branch → focused suite → full gate (make check incl. TUI via pnpm 1
 
 
 ## ENDGAME
-- [ ] PR-H readability refactor (in flight: phaseH-impl)
+- [x] PR-H readability refactor
 - [ ] RC-11 volume-tree listing emptiness (deferred: file with fix route: daytona/workspace_fs.list_files filter for the tree gateway)
-- [ ] Full `make check` + check-security + build/check-release + `git diff --check` (note: one foreign `ty` diagnostic at workspace_memory.py:244 from the active third-writer WIP currently blocks the repo-wide typecheck leg)
+- [x] Full `make check` + check-security + build/check-release + `git diff --check`
 - [ ] Push codex/tool-surface-revival and open PR -> dev-0.7 (phases A,B,C,D,E,F,G + RC-8 + RC-7), babysit, merge

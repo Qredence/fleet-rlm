@@ -13,8 +13,10 @@ from __future__ import annotations
 import base64
 import contextlib
 import json
+import re
 import time
 from collections.abc import Coroutine, Mapping
+from datetime import UTC, datetime
 from fnmatch import fnmatchcase
 from pathlib import PurePosixPath
 from threading import Lock
@@ -66,7 +68,25 @@ def _list_cache_key(root: str, *, max_depth: int, max_files: int) -> str:
     return f"list:{root}:depth={max_depth}:count={max_files}"
 
 
+# Daytona ``FileInfo.mod_time`` strings: ``2026-07-30 00:05:20.290395882
+# +0000 UTC`` (nanoseconds allowed) and ISO-8601 variants.
+_MOD_TIME_TEXT = re.compile(
+    r"^\s*(?P<date>\d{4}-\d{2}-\d{2})[T ](?P<time>\d{2}:\d{2}:\d{2})(?:\.(?P<frac>\d{1,6}))?"
+)
+
+
 def _modified_timestamp(value: Any) -> float | None:
+    if isinstance(value, str):
+        match = _MOD_TIME_TEXT.match(value)
+        if match is None:
+            return None
+        try:
+            frac = match["frac"]
+            micro = int((frac + "000000")[:6]) if frac else 0
+            parsed = datetime.strptime(match["date"] + " " + match["time"], "%Y-%m-%d %H:%M:%S")
+            return parsed.replace(microsecond=micro, tzinfo=UTC).timestamp()
+        except (TypeError, ValueError):
+            return None
     if hasattr(value, "timestamp"):
         try:
             value = value.timestamp()
