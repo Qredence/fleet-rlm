@@ -37,8 +37,22 @@ from fleet_rlm.files.workspace_models import WorkspaceEntry, WorkspaceTextPage
 
 logger = logging.getLogger(__name__)
 
+# Bound provider deletion and cancel it on timeout so no untracked task can
+# outlive the gateway operation or race process-scoped Daytona disposal.
+_SANDBOX_DELETE_GRACE_SECONDS = 15.0
+
 
 def _public_entry(entry: WorkspaceEntry, checksum: str | None = None) -> WorkspaceFileEntry:
+    """
+    Convert an internal workspace entry into a public file-entry model.
+    
+    Parameters:
+    	entry (WorkspaceEntry): Internal workspace entry to convert.
+    	checksum (str | None): Optional SHA-256 checksum for the entry.
+    
+    Returns:
+    	WorkspaceFileEntry: Public representation of the workspace entry.
+    """
     return WorkspaceFileEntry(
         path=entry.path,
         kind=entry.kind,
@@ -298,7 +312,18 @@ class DaytonaWorkspaceGateway:
             finally:
                 if sandbox is not None:
                     try:
-                        await asyncio.shield(self._platform.delete(sandbox))
+                        await asyncio.wait_for(
+                            self._platform.delete(sandbox),
+                            timeout=_SANDBOX_DELETE_GRACE_SECONDS,
+                        )
+                    except TimeoutError:
+                        logger.warning(
+                            "Workspace I/O Sandbox deletion did not finish within grace period",
+                            extra={
+                                "workspace_id": str(workspace_id),
+                                "grace_seconds": _SANDBOX_DELETE_GRACE_SECONDS,
+                            },
+                        )
                     except Exception as exc:
                         logger.warning(
                             "Workspace I/O Sandbox deletion failed",

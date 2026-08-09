@@ -128,7 +128,7 @@ NATIVE_LONG_CONTEXT_OUTPUT ?= .scratch/benchmark-reports/native-long-context-$(s
 benchmark-native-long-context:
 	uv run python scripts/benchmarks/run_native_long_context.py --output $(NATIVE_LONG_CONTEXT_OUTPUT)
 
-DAYTONA_SNAPSHOT_NAME ?= fleet-rlm-python313-v4
+DAYTONA_SNAPSHOT_NAME ?= fleet-rlm-python313-v5
 
 daytona-snapshot-create:
 	uv run python scripts/daytona_snapshot.py create --name $(DAYTONA_SNAPSHOT_NAME)
@@ -139,10 +139,13 @@ daytona-snapshot-check:
 tui-check:
 	$(MAKE) api-check
 	$(MAKE) stream-check
-	pnpm --dir tools/fleet-tui run format:check
-	pnpm --dir tools/fleet-tui run lint
-	pnpm --dir tools/fleet-tui run typecheck
-	pnpm --dir tools/fleet-tui run test
+	# Run pnpm from inside the workspace so corepack resolves the pinned
+	# packageManager version (pnpm --dir resolves from the invocation CWD and
+	# misses it when make runs from the repo root).
+	cd tools/fleet-tui && pnpm run format:check
+	cd tools/fleet-tui && pnpm run lint
+	cd tools/fleet-tui && pnpm run typecheck
+	cd tools/fleet-tui && pnpm run test
 
 check: lint format-check typecheck test-daytona-cov api-check tui-check check-codebase-tree check-docs
 

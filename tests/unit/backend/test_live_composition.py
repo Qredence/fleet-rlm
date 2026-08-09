@@ -620,9 +620,20 @@ def test_offline_lifespan_disposes_engine_when_table_creation_fails(monkeypatch)
 
 @pytest.mark.asyncio
 async def test_live_startup_preserves_original_error_and_attempts_all_cleanup(monkeypatch) -> None:
+    """Preserve the original startup failure while completing all available cleanup."""
     import fleet_rlm.composition.daytona as composition
 
     disposed: list[str] = []
+    orphan_cleanup_cancelled = asyncio.Event()
+
+    async def run_orphan_cleanup() -> None:
+        try:
+            await asyncio.Event().wait()
+        finally:
+            orphan_cleanup_cancelled.set()
+
+    orphan_cleanup_task = asyncio.create_task(run_orphan_cleanup())
+    await asyncio.sleep(0)
 
     class Resources:
         session_manager = object()
@@ -630,6 +641,7 @@ async def test_live_startup_preserves_original_error_and_attempts_all_cleanup(mo
         engine = object()
 
         async def adispose(self) -> None:
+            assert orphan_cleanup_cancelled.is_set()
             disposed.append("resources")
 
     class Gateway:
@@ -645,6 +657,7 @@ async def test_live_startup_preserves_original_error_and_attempts_all_cleanup(mo
         attachment_lifecycle=object(),
         artifact_reader=object(),
         workspace_volume_gateway=Gateway(),
+        orphan_cleanup_task=orphan_cleanup_task,
     )
 
     async def fake_build(_settings, *, skill_catalog):
@@ -663,3 +676,4 @@ async def test_live_startup_preserves_original_error_and_attempts_all_cleanup(mo
         )
 
     assert disposed == ["resources", "gateway"]
+    assert orphan_cleanup_task.cancelled()

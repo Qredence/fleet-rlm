@@ -15,7 +15,7 @@ from fleet_rlm.daytona.errors import DaytonaAdapterError, map_provider_error
 from fleet_rlm.files.volume_paths import DEFAULT_VOLUME_MOUNT_PATH, VolumePaths, validate_mount_path
 from fleet_rlm.snapshot_contract import validate_snapshot_name
 
-DEFAULT_SNAPSHOT_NAME = "fleet-rlm-python313-v4"
+DEFAULT_SNAPSHOT_NAME = "fleet-rlm-python313-v5"
 DEFAULT_VOLUME_NAME = "rlm-volume-dspy"
 PYTHON_VERSION = "3.13.13"
 BASE_IMAGE = "python:3.13.13-slim-bookworm@sha256:f576b530293e74140ea91d262232648d5c4f45640a95ec447757701bfcacf034"
@@ -159,6 +159,22 @@ def snapshot_execution_dependencies() -> tuple[str, ...]:
     return dependencies
 
 
+_IMPORT_NAME_OVERRIDES: dict[str, str] = {"beautifulsoup4": "bs4"}
+
+
+def snapshot_dependency_import_names() -> tuple[tuple[str, str, str], ...]:
+    """Return dependency distributions, import module names, and pinned versions included in the snapshot.
+    
+    Returns:
+    	tuple[tuple[str, str, str], ...]: Triples containing each distribution name, its import module name, and its pinned version.
+    """
+    triples = []
+    for dependency in snapshot_execution_dependencies():
+        package, version = dependency.split("==", 1)
+        triples.append((package, _IMPORT_NAME_OVERRIDES.get(package, package.replace("-", "_")), version))
+    return tuple(triples)
+
+
 def snapshot_dependency_sha256() -> str:
     """Return the stable digest of the canonical Snapshot dependency contract."""
     canonical = "".join(f"{dependency}\n" for dependency in snapshot_execution_dependencies())
@@ -166,11 +182,22 @@ def snapshot_dependency_sha256() -> str:
 
 
 def build_snapshot_image(spec: DaytonaSandboxSpec) -> Any:
+    """
+    Build the Daytona image used for the configured snapshot execution environment.
+    
+    Parameters:
+    	spec (DaytonaSandboxSpec): Snapshot specification containing the base image.
+    
+    Returns:
+    	Any: Configured Daytona image with required system and Python dependencies, environment variables, working directory, and user.
+    """
     from daytona import Image
 
     return (
         Image.base(spec.base_image)
         .run_commands(
+            "apt-get update && apt-get install -y --no-install-recommends "
+            "git ca-certificates && rm -rf /var/lib/apt/lists/*",
             "groupadd --gid 1000 daytona",
             "useradd --uid 1000 --gid daytona --create-home --home-dir /home/daytona --shell /bin/bash daytona",
             "chown -R daytona:daytona /home/daytona",

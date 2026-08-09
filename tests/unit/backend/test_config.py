@@ -24,13 +24,13 @@ def test_daytona_profile_uses_specialized_bounded_model_roles() -> None:
         "daytona-bench",
         "daytona-bench-40",
     }
-    assert document["defaults"]["daytona"]["snapshot"] == "fleet-rlm-python313-v4"
+    assert document["defaults"]["daytona"]["snapshot"] == "fleet-rlm-python313-v5"
     llm = document["profiles"]["daytona"]["llm"]
     assert llm["root"] == {
         "model": "deepseek-v4-flash",
         "api_key_env": "FLEET_OPENCODE_GO_API_KEY",
         "base_url_env": "FLEET_OPENCODE_GO_BASE_URL",
-        "max_tokens": 8000,
+        "max_tokens": 16000,
         # Cache hits emit zero streamify deltas and read as a frozen stream.
         "cache": False,
         "reasoning_effort": "low",
@@ -39,7 +39,7 @@ def test_daytona_profile_uses_specialized_bounded_model_roles() -> None:
         "model": "deepseek-v4-flash",
         "api_key_env": "FLEET_OPENCODE_GO_API_KEY",
         "base_url_env": "FLEET_OPENCODE_GO_BASE_URL",
-        "max_tokens": 8000,
+        "max_tokens": 16000,
         "temperature": 0,
         "cache": False,
         "reasoning_effort": "low",
@@ -211,7 +211,7 @@ def test_daytona_profile_resolves_deepseek_root_and_sub_with_gateway_params(
     # deltas and read as a frozen stream.
     assert settings.root_llm_cache is False
     assert settings.sub_llm_cache is False
-    assert settings.root_llm_max_tokens == settings.sub_llm_max_tokens == 8000
+    assert settings.root_llm_max_tokens == settings.sub_llm_max_tokens == 16000
     assert settings.mlflow_tracing_enabled is True
     assert settings.mlflow_tracking_uri == "http://127.0.0.1:5001"
 
@@ -320,7 +320,7 @@ def test_daytona_benchmark_profiles_resolve_without_mlflow(
     assert settings.sub_model == settings.root_model
     assert settings.root_llm_model_provider_service == "uscentral.default.zencode-oai"
     assert settings.sub_llm_model_provider_service == "uscentral.default.zencode-oai"
-    assert settings.daytona_snapshot == "fleet-rlm-python313-v4"
+    assert settings.daytona_snapshot == "fleet-rlm-python313-v5"
     assert settings.root_llm_cache is False
     assert settings.sub_llm_cache is False
     assert settings.rlm_max_iterations == iterations

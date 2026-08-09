@@ -107,7 +107,38 @@ class ReconciliationSummary:
     budget_exhausted: bool = False
 
 
+async def _await_recovery_step(awaitable: Awaitable[Any], *, deadline: float | None) -> Any:
+    """Await one recovery operation without exceeding the shared startup deadline."""
+    if deadline is None:
+        return await awaitable
+    async with asyncio.timeout_at(deadline):
+        return await awaitable
+
+
+def _recovery_deadline_exhausted(deadline: float | None) -> bool:
+    """Determine whether the recovery deadline has been reached.
+    
+    Parameters:
+    	deadline (float | None): Monotonic time at which recovery must stop, or `None` for no deadline.
+    
+    Returns:
+    	`true` if the deadline has been reached, `false` otherwise.
+    """
+    return deadline is not None and asyncio.get_running_loop().time() >= deadline
+
+
 def _decode_failure_status(value: str) -> Literal["failed", "cancelled", "timeout"]:
+    """Validate and return a persisted run failure status.
+    
+    Parameters:
+    	value (str): The persisted failure status.
+    
+    Returns:
+    	The validated failure status.
+    
+    Raises:
+    	TurnStateError: If the value is not a supported failure status.
+    """
     if value in {"failed", "cancelled", "timeout"}:
         return value
     raise TurnStateError("persisted Run has an invalid failure status")
@@ -794,11 +825,14 @@ class SqlAlchemyTurnStateStore:
         *,
         deadline: float | None = None,
     ) -> ReconciliationSummary:
-        """Recover stale provider claims left by a prior process.
-
-        Recovery first claims each stale row with a conditional update, then
-        fences provider state outside the database transaction. A failed fence
-        leaves the row non-terminal and eligible for a later retry.
+        """Recover stale provider claims and report reconciliation outcomes.
+        
+        Parameters:
+            fence (Callable[[UUID], Awaitable[None]] | None): Optional callback used to verify provider state before completing recovery.
+            deadline (float | None): Optional monotonic deadline for the recovery operation.
+        
+        Returns:
+            ReconciliationSummary: Counts of candidates, recovered runs, provider fence failures, skipped runs, and whether the deadline was exhausted.
         """
         pending = await self._load_recovery_candidates()
         recovered = 0
@@ -819,11 +853,23 @@ class SqlAlchemyTurnStateStore:
                     await fence(pending_run.session_id)
             except Exception:
                 fence_failures += 1
-                await self._restore_after_fence_failure(
-                    pending_run,
-                    recovery_owner,
-                    original_owner=pending_run.claim_owner,
-                )
+                if _recovery_deadline_exhausted(deadline):
+                    skipped += len(pending) - index - 1
+                    budget_exhausted = True
+                    break
+                try:
+                    await _await_recovery_step(
+                        self._restore_after_fence_failure(
+                            pending_run,
+                            recovery_owner,
+                            original_owner=pending_run.claim_owner,
+                        ),
+                        deadline=deadline,
+                    )
+                except TimeoutError:
+                    skipped += len(pending) - index - 1
+                    budget_exhausted = True
+                    break
                 continue
             if await self._complete_recovery(pending_run, recovery_owner):
                 recovered += 1

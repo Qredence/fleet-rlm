@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import os
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -8,7 +9,7 @@ from uuid import uuid4
 import pytest
 
 from fleet_rlm.artifacts.models import CompletedRun
-from fleet_rlm.daytona.workspace_gateway import cleanup_orphan_bytes
+from fleet_rlm.daytona.workspace_gateway import OrphanCleanupReport, cleanup_orphan_bytes
 from fleet_rlm.files.host_volume import HostVolumeMirror, OfflineHostVolumeGateway
 from fleet_rlm.files.volume_paths import VolumePaths
 
@@ -172,3 +173,121 @@ def test_host_volume_listing_is_rooted_bounded_and_returns_file_mtimes(tmp_path:
     assert len(listed) == 1
     assert listed[0].path == blob
     assert listed[0].modified_at > 0
+
+
+class _FakeArtifactCatalog:
+    """Records the workspace-id scoped enumerations the sweep reads."""
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, object]] = []
+
+    async def list_storage_refs(self, *, workspace_id: object) -> list[str]:
+        """
+        Enumerate storage references for a workspace.
+        
+        Parameters:
+            workspace_id (object): Identifier of the workspace.
+        
+        Returns:
+            list[str]: Storage references associated with the workspace.
+        """
+        self.calls.append(("storage", workspace_id))
+        return ["ref-1"]
+
+    async def list_completed_runs(self, *, workspace_id: object) -> list[CompletedRun]:
+        """
+        List completed runs for a workspace.
+        
+        Parameters:
+        	workspace_id (object): Identifier of the workspace.
+        
+        Returns:
+        	list[CompletedRun]: The workspace's completed runs.
+        """
+        self.calls.append(("completed", workspace_id))
+        return []
+
+    async def list_active_runs(self, *, workspace_id: object) -> list[CompletedRun]:
+        """List active runs for a workspace.
+        
+        Parameters:
+        	workspace_id (object): Identifier of the workspace.
+        
+        Returns:
+        	list[CompletedRun]: Active runs associated with the workspace.
+        """
+        self.calls.append(("active", workspace_id))
+        return []
+
+
+@pytest.mark.asyncio
+async def test_run_deferred_orphan_cleanup_enumerates_and_reports(monkeypatch: pytest.MonkeyPatch) -> None:
+    from fleet_rlm.composition.daytona import run_deferred_orphan_cleanup
+
+    workspace_id = uuid4()
+    catalog = _FakeArtifactCatalog()
+
+    async def fake_cleanup(
+        gateway: object,
+        *,
+        workspace_id: object,
+        paths: object,  # noqa: ARG001 - fake mirrors the real cleanup_orphan_bytes signature
+        committed_storage_refs: object,
+        completed_runs: object,  # noqa: ARG001 - fake mirrors the real cleanup_orphan_bytes signature
+        active_runs: object,  # noqa: ARG001 - fake mirrors the real cleanup_orphan_bytes signature
+        grace_period: object,  # noqa: ARG001 - fake mirrors the real cleanup_orphan_bytes signature
+    ) -> OrphanCleanupReport:
+        assert committed_storage_refs == ["ref-1"]
+        assert gateway == "gateway"
+        assert workspace_id == workspace_id
+        return OrphanCleanupReport(scanned=3, removed=1, retained=1, skipped_fresh=1)
+
+    monkeypatch.setattr("fleet_rlm.daytona.workspace_gateway.cleanup_orphan_bytes", fake_cleanup)
+
+    await run_deferred_orphan_cleanup(
+        "gateway",
+        workspace_id=workspace_id,
+        paths=object(),
+        artifact_catalog=catalog,
+    )
+
+    assert [name for name, _ in catalog.calls] == ["storage", "completed", "active"]
+
+
+@pytest.mark.asyncio
+async def test_run_deferred_orphan_cleanup_swallows_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
+    from fleet_rlm.composition import daytona as composition_module
+    from fleet_rlm.composition.daytona import run_deferred_orphan_cleanup
+
+    monkeypatch.setattr(composition_module, "_ORPHAN_CLEANUP_TIMEOUT_SECONDS", 0.05)
+
+    async def hang(_gateway: object, **_kwargs: object) -> OrphanCleanupReport:
+        await asyncio.sleep(1.0)
+        raise AssertionError("cleanup timeout should have interrupted the sweep")
+
+    monkeypatch.setattr("fleet_rlm.daytona.workspace_gateway.cleanup_orphan_bytes", hang)
+
+    # Must return (not raise) when the sweep exceeds its budget.
+    await run_deferred_orphan_cleanup(
+        "gateway",
+        workspace_id=uuid4(),
+        paths=object(),
+        artifact_catalog=_FakeArtifactCatalog(),
+    )
+
+
+@pytest.mark.asyncio
+async def test_run_deferred_orphan_cleanup_swallows_provider_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    from fleet_rlm.composition.daytona import run_deferred_orphan_cleanup
+
+    async def boom(_gateway: object, **_kwargs: object) -> OrphanCleanupReport:
+        raise RuntimeError("provider down")
+
+    monkeypatch.setattr("fleet_rlm.daytona.workspace_gateway.cleanup_orphan_bytes", boom)
+
+    await run_deferred_orphan_cleanup(
+        "gateway",
+        workspace_id=uuid4(),
+        paths=object(),
+        artifact_catalog=_FakeArtifactCatalog(),
+    )

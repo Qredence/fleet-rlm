@@ -210,11 +210,31 @@ class LiveDaytonaPlatform:
         await self._client.delete(target)
 
     async def start(self, sandbox_id: str) -> None:
+        """Start the specified sandbox.
+        
+        Parameters:
+        	sandbox_id (str): The identifier of the sandbox to start.
+        """
         sandbox = await self._client.get(sandbox_id)
         await self._client.start(sandbox)
 
     async def stop(self, sandbox_id: str, *, timeout: float = 60, force: bool = False) -> None:
-        sandbox = await self._client.get(sandbox_id)
+        """
+        Stop a sandbox, optionally deleting it if stopping fails.
+        
+        Parameters:
+            sandbox_id (str): Identifier of the sandbox to stop.
+            timeout (float): Maximum time to wait for the stop operation, in seconds.
+            force (bool): Whether to delete the sandbox if stopping fails.
+        
+        A missing sandbox is treated as already stopped.
+        """
+        try:
+            sandbox = await self._client.get(sandbox_id)
+        except Exception as exc:
+            if is_sandbox_not_found(exc):
+                return
+            raise
         try:
             await self._client.stop(sandbox, timeout=timeout)
         except Exception:

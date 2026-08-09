@@ -20,7 +20,7 @@ from fleet_rlm.daytona.platform import (
 from fleet_rlm.daytona.provisioning import (
     ExpectedWorkspaceMount,
     sandbox_spec_from_settings,
-    snapshot_execution_dependencies,
+    snapshot_dependency_import_names,
     verify_sandbox_spec,
     verify_sandbox_workspace_mount,
     volume_config_from_settings,
@@ -147,19 +147,31 @@ class _ProductionDaytonaDoctorDependencies:
         verify_sandbox_spec(sandbox, self._sandbox_spec)
 
     async def execute(self, sandbox: Any) -> str:
+        """
+        Run the Daytona interpreter diagnostic in a temporary sandbox context.
+        
+        Parameters:
+            sandbox (Any): Sandbox whose code interpreter runs the diagnostic.
+        
+        Returns:
+            str: Diagnostic process output.
+        
+        Raises:
+            RuntimeError: If the interpreter reports an execution error.
+        """
         context = await sandbox.code_interpreter.create_context()
         run_error: BaseException | None = None
         try:
-            dependencies = snapshot_execution_dependencies()
+            dependencies = snapshot_dependency_import_names()
             result = await sandbox.code_interpreter.run_code(
-                "import importlib, importlib.metadata, os, sys\n"
+                "import importlib, importlib.metadata, os, shutil, sys\n"
                 "assert sys.version_info[:3] == (3, 13, 13)\n"
                 "assert os.geteuid() != 0\n"
                 "assert os.getcwd() == '/home/daytona'\n"
+                "assert shutil.which('git'), 'git toolchain missing from snapshot'\n"
                 f"dependencies = {dependencies!r}\n"
-                "for requirement in dependencies:\n"
-                "    package, expected = requirement.split('==', 1)\n"
-                "    importlib.import_module(package.replace('-', '_'))\n"
+                "for package, module, expected in dependencies:\n"
+                "    importlib.import_module(module)\n"
                 "    assert importlib.metadata.version(package) == expected\n"
                 "print('fleet-doctor-ok')",
                 context=context,

@@ -825,13 +825,13 @@ def test_supervisor_uses_longer_daytona_readiness_timeout(
     )
     backend = _Process(pid=9)
     monkeypatch.setattr(supervisor.subprocess, "Popen", lambda *_args, **_kwargs: backend)
-    # deadline = 100 + 90; second monotonic sample exceeds it without a ready probe.
-    clock = iter((100.0, 191.0))
+    # deadline = 100 + 150; second monotonic sample exceeds it without a ready probe.
+    clock = iter((100.0, 251.0))
     monkeypatch.setattr(supervisor.time, "monotonic", lambda: next(clock))
     monkeypatch.setattr(supervisor.os, "killpg", lambda *_args: None)
     monkeypatch.setattr(supervisor, "_validate_daytona_database", lambda *_args, **_kwargs: None)
 
-    with pytest.raises(supervisor.SupervisorError, match="not ready within 90s") as error:
+    with pytest.raises(supervisor.SupervisorError, match="not ready within 150s") as error:
         supervisor.supervise(
             host="127.0.0.1",
             port=8126,

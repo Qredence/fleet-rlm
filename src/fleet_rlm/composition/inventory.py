@@ -12,6 +12,7 @@ import provider modules and re-couple the test suite to Daytona.
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import ClassVar, Protocol
@@ -100,6 +101,9 @@ class RuntimeInventory:
     workspace_volume_gateway: WorkspaceVolumeGateway | None = None
     workspace_file_service: WorkspaceFileService | None = None
     workspace_volume_mirror: VolumeTreeFs | None = None
+    # Best-effort post-readiness orphan sweep; cancelled at dispose. It must
+    # never gate startup readiness, so it is tracked (not awaited) here.
+    orphan_cleanup_task: asyncio.Task[None] | None = None
 
     _REQUIRED_ROUTE_FIELDS: ClassVar[tuple[str, ...]] = (
         "turn_coordinator",
