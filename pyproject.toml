@@ -92,16 +92,7 @@ server = [
     "uvicorn[standard]>=0.47.0,<1",
 ]
 benchmark = [
-    # Direct dependency of scripts/performance_benchmarks/*; keep declared even
-    # though daytona currently pulls it in transitively.
-    "aiofiles>=24.1.0",
     "databricks-agents>=1.5",
-    "datasets>=5.0.0",
-    "jsonlines>=4.0.0",
-    "litellm>=1.88.1",
-    "python-dateutil>=2.9.0.post0",
-    "tiktoken>=0.13.0",
-    "transformers>=5.14.1",
 ]
 optimize = [
     # gepa pinned to the omni-capable commit below; see [tool.uv].
@@ -305,7 +296,5 @@ known_first_party = ["fleet_rlm"]
 
 [tool.deptry.package_module_name_map]
 pydantic-settings = "pydantic_settings"
-prompt-toolkit = "prompt_toolkit"
 python-dotenv = "dotenv"
 pyyaml = "yaml"
-scalar-fastapi = "scalar_fastapi"
