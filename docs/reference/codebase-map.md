@@ -13,7 +13,7 @@ compatibility runtime and parallel foundation package no longer exist.
 | `chat/` | Turn preparation, shared capability preparation, coordinator facade, private Turn execution driver, lifecycle finalization, shared Turn Claim policy | RLM, Sessions, Skills, files |
 | `rlm/` | DSPy Signature, model roles, fresh RLM construction, options, events, runner | DSPy and domain values |
 | `daytona/` | exclusive SDK boundary: async platform/provisioning, provider-only Session ownership, DSPy-only sync interpreter seam, pure broker source plus transport, diagnostics, Session Workspace gateways, and the mounted Workspace Memory adapter | Daytona SDK and domain values |
-| `sessions/` | Session catalog, Turn input/history, versioned Committed Turn | domain values |
+| `sessions/` | Session catalog, Turn input/history, canonical AssistantPart vocabulary, versioned Committed Turn | domain values |
 | `files/`, `artifacts/` | Attachment staging, paged/full-lifecycle Session Workspace and Project tools, workspace-wide Memory values/tools, direct Workspace Artifact Candidate staging, Artifact promotion/read | storage interfaces and safe paths |
 | `skills/` | bundled catalog, authorization, progressive loading, capability seam, Tool construction | domain values and package resources |
 | `persistence/` | SQLAlchemy models and repository adapters, including named startup-recovery phases | Session/file/Artifact interfaces |

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence, Set
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Any, Literal, TypeAlias, cast
@@ -318,239 +318,21 @@ def _expect_mapping(value: object, path: str) -> Mapping[str, object]:
     return cast(Mapping[str, object], value)
 
 
-def _expect_exact(data: Mapping[str, object], required: Set[str], optional: Set[str] = frozenset()) -> None:
-    keys = set(data)
-    if not required <= keys or keys - required - optional:
-        raise CommittedTurnValidationError("committed part has missing or unknown fields")
-
-
-def _optional_int(data: Mapping[str, object], name: str) -> int | None:
-    value = data.get(name)
-    if value is None:
-        return None
-    if not isinstance(value, int) or isinstance(value, bool):
-        raise CommittedTurnValidationError(f"{name} must be an integer")
-    return value
-
-
-def _required_str(data: Mapping[str, object], name: str) -> str:
-    value = data.get(name)
-    if not isinstance(value, str):
-        raise CommittedTurnValidationError(f"{name} must be a string")
-    return value
-
-
-def _optional_str(data: Mapping[str, object], name: str) -> str | None:
-    value = data.get(name)
-    if value is not None and not isinstance(value, str):
-        raise CommittedTurnValidationError(f"{name} must be a string or null")
-    return value
-
-
-def _required_str_list(data: Mapping[str, object], name: str) -> list[str]:
-    value = data.get(name)
-    if not isinstance(value, list) or any(not isinstance(item, str) for item in value):
-        raise CommittedTurnValidationError(f"{name} must be an array of strings")
-    return cast(list[str], value)
-
-
-def _required_uuid(data: Mapping[str, object], name: str) -> UUID:
-    try:
-        return UUID(_required_str(data, name))
-    except ValueError as exc:
-        raise CommittedTurnValidationError(f"invalid {name}") from exc
-
-
-def _decode_part(value: object) -> CommittedPart:
-    data = _expect_mapping(value, "committed part")
-    part_type = data.get("type")
-    if part_type == "reasoning":
-        _expect_exact(data, {"type", "text"}, {"step"})
-        return ReasoningPart(text=_required_str(data, "text"), step=_optional_int(data, "step"))
-    if part_type == "code":
-        _expect_exact(data, {"type", "code"}, {"step"})
-        return CodePart(code=_required_str(data, "code"), step=_optional_int(data, "step"))
-    if part_type == "output":
-        _expect_exact(data, {"type", "output"}, {"step"})
-        return OutputPart(output=_required_str(data, "output"), step=_optional_int(data, "step"))
-    if part_type == "step":
-        _expect_exact(data, {"type", "state", "step"}, {"duration_ms"})
-        state = _required_str(data, "state")
-        if state not in {"started", "finished"}:
-            raise CommittedTurnValidationError("invalid step state")
-        step = _optional_int(data, "step")
-        assert step is not None
-        return StepPart(state=cast(Any, state), step=step, duration_ms=_optional_int(data, "duration_ms"))
-    if part_type == "tool_call":
-        _expect_exact(
-            data,
-            {"type", "tool_call_id", "tool_name", "state", "input", "output", "error"},
-        )
-        state = _required_str(data, "state")
-        if state not in {"completed", "failed"}:
-            raise CommittedTurnValidationError("invalid tool call state")
-        raw_output = data.get("output")
-        return ToolCallPart(
-            tool_call_id=_required_str(data, "tool_call_id"),
-            tool_name=_required_str(data, "tool_name"),
-            state=cast(Any, state),
-            input=_freeze_json(data["input"], path="tool_call.input"),
-            output=(_freeze_json(raw_output, path="tool_call.output") if raw_output is not None else None),
-            error=_optional_str(data, "error"),
-        )
-    if part_type == "skill":
-        _expect_exact(
-            data,
-            {"type", "skill_id", "name", "phase", "version", "trust", "affordances"},
-        )
-        phase = _required_str(data, "phase")
-        if phase not in {"activated", "loaded"}:
-            raise CommittedTurnValidationError("invalid skill phase")
-        return SkillPart(
-            skill_id=_required_str(data, "skill_id"),
-            name=_required_str(data, "name"),
-            phase=cast(Any, phase),
-            version=_optional_str(data, "version"),
-            trust=_optional_str(data, "trust"),
-            affordances=tuple(_required_str_list(data, "affordances")),
-        )
-    if part_type == "attachment":
-        _expect_exact(data, {"type", "attachment_id", "phase", "filename", "byte_size"})
-        phase = _required_str(data, "phase")
-        if phase not in {"selected", "read"}:
-            raise CommittedTurnValidationError("invalid attachment phase")
-        return AttachmentPart(
-            attachment_id=_required_uuid(data, "attachment_id"),
-            phase=cast(Any, phase),
-            filename=_optional_str(data, "filename"),
-            byte_size=_optional_int(data, "byte_size"),
-        )
-    if part_type == "warning":
-        _expect_exact(data, {"type", "message", "code"})
-        return WarningPart(
-            message=_required_str(data, "message"),
-            code=_optional_str(data, "code"),
-        )
-    if part_type == "status":
-        _expect_exact(data, {"type", "phase", "status", "message"})
-        return StatusPart(
-            phase=_required_str(data, "phase"),
-            status=_required_str(data, "status"),
-            message=_optional_str(data, "message"),
-        )
-    if part_type == "artifact":
-        _expect_exact(
-            data,
-            {"type", "artifact_id", "kind", "title", "media_type", "byte_size", "checksum_sha256"},
-        )
-        kind = _required_str(data, "kind")
-        if kind not in {"text", "markdown", "json"}:
-            raise CommittedTurnValidationError("invalid artifact kind")
-        title = data.get("title")
-        if title is not None and not isinstance(title, str):
-            raise CommittedTurnValidationError("artifact title must be a string or null")
-        byte_size = _optional_int(data, "byte_size")
-        assert byte_size is not None
-        return ArtifactPart(
-            artifact_id=_required_uuid(data, "artifact_id"),
-            kind=cast(Any, kind),
-            title=title,
-            media_type=_required_str(data, "media_type"),
-            byte_size=byte_size,
-            checksum_sha256=_required_str(data, "checksum_sha256"),
-        )
-    if part_type == "usage":
-        _expect_exact(data, {"type", "value"})
-        return UsagePart(value=cast(RLMUsage, _expect_mapping(data["value"], "usage.value")))
-    if part_type == "structured_result":
-        _expect_exact(data, {"type", "schema_id", "schema_version", "value"})
-        return StructuredResultPart(
-            schema_id=_required_str(data, "schema_id"),
-            schema_version=_required_str(data, "schema_version"),
-            value=_freeze_json(data["value"], path="structured_result.value"),
-        )
-    if part_type == "text":
-        _expect_exact(data, {"type", "text"})
-        return TextPart(text=_required_str(data, "text"))
-    raise CommittedTurnValidationError(f"unknown committed part type: {part_type!r}")
-
-
-def _encode_part(part: CommittedPart) -> dict[str, Any]:
-    if isinstance(part, ReasoningPart):
-        return {"type": part.type, "text": part.text, **({"step": part.step} if part.step is not None else {})}
-    if isinstance(part, CodePart):
-        return {"type": part.type, "code": part.code, **({"step": part.step} if part.step is not None else {})}
-    if isinstance(part, OutputPart):
-        return {"type": part.type, "output": part.output, **({"step": part.step} if part.step is not None else {})}
-    if isinstance(part, StepPart):
-        result = {"type": part.type, "state": part.state, "step": part.step}
-        if part.duration_ms is not None:
-            result["duration_ms"] = part.duration_ms
-        return result
-    if isinstance(part, ToolCallPart):
-        return {
-            "type": part.type,
-            "tool_call_id": part.tool_call_id,
-            "tool_name": part.tool_name,
-            "state": part.state,
-            "input": _thaw_json(part.input),
-            "output": _thaw_json(part.output) if part.output is not None else None,
-            "error": part.error,
-        }
-    if isinstance(part, SkillPart):
-        return {
-            "type": part.type,
-            "skill_id": part.skill_id,
-            "name": part.name,
-            "phase": part.phase,
-            "version": part.version,
-            "trust": part.trust,
-            "affordances": list(part.affordances),
-        }
-    if isinstance(part, AttachmentPart):
-        return {
-            "type": part.type,
-            "attachment_id": str(part.attachment_id),
-            "phase": part.phase,
-            "filename": part.filename,
-            "byte_size": part.byte_size,
-        }
-    if isinstance(part, WarningPart):
-        return {"type": part.type, "message": part.message, "code": part.code}
-    if isinstance(part, StatusPart):
-        return {"type": part.type, "phase": part.phase, "status": part.status, "message": part.message}
-    if isinstance(part, ArtifactPart):
-        return {
-            "type": part.type,
-            "artifact_id": str(part.artifact_id),
-            "kind": part.kind,
-            "title": part.title,
-            "media_type": part.media_type,
-            "byte_size": part.byte_size,
-            "checksum_sha256": part.checksum_sha256,
-        }
-    if isinstance(part, UsagePart):
-        return {"type": part.type, "value": _thaw_json(part.value)}
-    if isinstance(part, StructuredResultPart):
-        return {
-            "type": part.type,
-            "schema_id": part.schema_id,
-            "schema_version": part.schema_version,
-            "value": _thaw_json(part.value),
-        }
-    if isinstance(part, TextPart):
-        return {"type": part.type, "text": part.text}
-    raise AssertionError(f"unhandled committed part: {type(part).__name__}")
-
-
 class CommittedTurnCodec:
-    """Strict JSON codec for the versioned aggregate."""
+    """Strict JSON codec for the versioned aggregate.
+
+    Assistant-part payloads are validated by the canonical discriminated
+    Pydantic vocabulary in `sessions.assistant_parts`; this codec only adds the
+    committed envelope and canonical band-order validation.
+    """
 
     @staticmethod
     def encode(committed: CommittedTurn) -> dict[str, Any]:
+        from fleet_rlm.sessions.assistant_parts import assistant_part_payload
+
         payload: dict[str, Any] = {
             "schema_version": committed.schema_version,
-            "parts": [_encode_part(part) for part in committed.parts],
+            "parts": [assistant_part_payload(part) for part in committed.parts],
         }
         if committed.trace_id:
             payload["trace_id"] = committed.trace_id
@@ -558,12 +340,27 @@ class CommittedTurnCodec:
 
     @staticmethod
     def decode(value: object) -> CommittedTurn:
+        from fleet_rlm.sessions.assistant_parts import assistant_part_from_payload
+
         data = _expect_mapping(value, "committed Turn")
-        _expect_exact(data, {"schema_version", "parts"}, optional={"trace_id"})
+        keys = set(data)
+        if not {"schema_version", "parts"} <= keys or keys - {"schema_version", "parts", "trace_id"}:
+            raise CommittedTurnValidationError("committed part has missing or unknown fields")
         if data.get("schema_version") != 1:
             raise CommittedTurnValidationError("unsupported committed Turn schema version")
         raw_parts = data.get("parts")
         if not isinstance(raw_parts, Sequence) or isinstance(raw_parts, (str, bytes, bytearray)):
             raise CommittedTurnValidationError("committed Turn parts must be an array")
-        trace_id = _optional_str(data, "trace_id")
-        return CommittedTurn(schema_version=1, parts=tuple(_decode_part(part) for part in raw_parts), trace_id=trace_id)
+        trace_id = data.get("trace_id")
+        if trace_id is not None and not isinstance(trace_id, str):
+            raise CommittedTurnValidationError("trace_id must be a string or null")
+        try:
+            parts = tuple(assistant_part_from_payload(part) for part in raw_parts)
+        except Exception as exc:
+            message = str(exc)
+            if "String should have at least 1 character" in message and any(
+                isinstance(part, Mapping) and part.get("type") == "text" for part in raw_parts
+            ):
+                message = "a committed Turn requires non-blank final text"
+            raise CommittedTurnValidationError(message) from exc
+        return CommittedTurn(schema_version=1, parts=parts, trace_id=trace_id)

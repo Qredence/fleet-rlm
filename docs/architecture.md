@@ -71,6 +71,11 @@ JSON-compatible common input annotations.
   Turn normalization retain one canonical output part.
 - `RunLifecycle.finish()` owns private result snapshots, Artifact publication,
   atomic Turn Commit, and durable failure settlement.
+- `sessions/assistant_parts.py` owns the closed Pydantic AssistantPart
+  vocabulary for durable assistant content. `CommittedTurnCodec` validates
+  payloads through that discriminated union, while reload projection consumes
+  the resulting canonical runtime parts; live SSE chunks remain separate
+  transport contracts.
 - `RunLifecycleService` translates lifecycle outcomes into typed Claim commands;
   the in-memory and SQL Run state stores apply the same pure policy through one
   `transition_claim()` persistence operation. Successful `commit()` and

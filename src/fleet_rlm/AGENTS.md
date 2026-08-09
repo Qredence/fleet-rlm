@@ -76,9 +76,12 @@ contracts, and tracked docs remain authoritative.
 - `RunLifecycleService` translates lifecycle outcomes into typed Claim commands;
   in-memory and SQL Run state stores share one `transition_claim()` operation and
   pure policy, while successful commit and cancellation remain separate.
-- `CommittedTurn` is the only replay source. A successful Daytona Run may retain
-  one private commit-gated `result.json` derivative; the derivative is not an
-  Artifact or API resource.
+- `CommittedTurn` is the only replay source. Durable assistant content is
+  validated through the closed Pydantic `AssistantPart` discriminated union in
+  `sessions/assistant_parts.py`; keep that durable vocabulary separate from
+  live SSE transport chunks. A successful Daytona Run may retain one private
+  commit-gated `result.json` derivative; the derivative is not an Artifact or
+  API resource.
 - Session Workspace files are immediate private state under
   `sessions/{session_id}/workspace/`. They survive failed Runs and Sandbox
   replacement independently of Turn Commit. Use paged reads for large files,
