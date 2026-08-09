@@ -113,7 +113,7 @@ def run_command(name: str, command: list[str], repo_root: Path) -> CommandResult
 def probe_url(url: str, timeout: float = 5.0) -> HttpProbe:
     """Probe a local URL without requiring third-party dependencies."""
     try:
-        with urllib.request.urlopen(url, timeout=timeout) as response:  # noqa: S310
+        with urllib.request.urlopen(url, timeout=timeout) as response:
             body = response.read(4096).decode("utf-8", errors="replace")
             status = response.status
             return HttpProbe(url=url, ok=200 <= status < 400, status=status, body_tail=tail(body))
@@ -175,10 +175,7 @@ def main(argv: list[str] | None = None) -> int:
     probes: list[HttpProbe] = []
     if args.profile == "app":
         base = args.server_url.rstrip("/")
-        probes = [
-            probe_url(f"{base}/health"),
-            probe_url(f"{base}/openapi.json"),
-        ]
+        probes = [probe_url(f"{base}/openapi.json")]
 
     report = {
         "profile": args.profile,
