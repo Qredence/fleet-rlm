@@ -63,9 +63,12 @@ contracts, and tracked docs remain authoritative.
   answer text up to configured bounds. Tool event views expose only bounded
   allowlisted metadata; Tools without a view expose no arguments or results.
   Provider failures use closed public messages.
-- Databricks MLflow (`observability/tracing.py`, `observability/turn_tracing.py`)
-  is fail-soft engineering observability controlled by the selected TOML
-  profile. It must never change Turn outcomes. When policy enables trace
+- Databricks MLflow (`observability/mlflow_runtime.py`, `tracing.py`, and
+  `turn_tracing.py`) is fail-soft engineering observability controlled by the
+  selected TOML profile. `mlflow_runtime.py` is owned by FastAPI lifespan for
+  explicit startup state and flush; `tracing.py` owns configuration and
+  sanitation; `turn_tracing.py` owns Turn spans. Tracing must never change Turn
+  outcomes. When policy enables trace
   exposure, public `traceId` may appear only as optional `messageMetadata` on
   existing `start`/`finish` chunks — never as a new RuntimeEvent kind or
   credential-bearing payload.

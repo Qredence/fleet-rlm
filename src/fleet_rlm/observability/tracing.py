@@ -34,8 +34,6 @@ from fleet_rlm.config import FleetConfigurationError
 
 logger = logging.getLogger(__name__)
 
-_TRACING_CONFIGURED = False
-_TRACING_ACTIVE = False
 _DEFAULT_TRACKING_URI = "databricks"
 _TRACE_DESTINATION_TAG = "mlflow.experiment.databricksTraceDestinationPath"
 _TRACE_CONTENT_MAX_CHARS = 10_000
@@ -257,26 +255,19 @@ def _validate_experiment_trace_location(settings: Settings) -> None:
         )
 
 
-def configure_tracing(settings: Settings) -> None:
-    """
-    Configure fail-soft MLflow tracing and DSPy inference autologging according to Fleet settings.
+def configure_tracing(settings: Settings) -> bool:
+    """Configure fail-soft MLflow tracing and return whether tracing is active.
 
-    The configuration is applied at most once. Tracing remains disabled when it is
-    disabled by policy, required settings are missing, or setup fails. Raises
-    `FleetConfigurationError` when an existing experiment's Unity Catalog trace
-    location conflicts with the configured destination; other setup failures are
-    logged and suppressed.
+    This is one explicit configuration attempt, not process-wide state. Tracing
+    remains inactive when disabled by policy, required settings are missing, or
+    setup fails. `FleetConfigurationError` still reports an intentional Unity
+    Catalog trace-location conflict; other failures are logged and suppressed.
     """
-    global _TRACING_ACTIVE, _TRACING_CONFIGURED
-    if _TRACING_CONFIGURED:
-        return
-    _TRACING_CONFIGURED = True
-    _TRACING_ACTIVE = False
     _set_trace_content_max_chars(getattr(settings, "mlflow_trace_content_max_chars", _TRACE_CONTENT_MAX_CHARS))
 
     if not settings.mlflow_tracing_enabled:
         logger.debug("MLflow tracing is disabled by Fleet policy")
-        return
+        return False
 
     tracking_uri = settings.mlflow_tracking_uri or _DEFAULT_TRACKING_URI
     required_settings = {"mlflow.experiment_name": settings.mlflow_experiment_name}
@@ -295,7 +286,7 @@ def configure_tracing(settings: Settings) -> None:
             "MLflow tracing enabled but required settings are missing; tracing disabled: %s",
             ", ".join(missing_settings),
         )
-        return
+        return False
 
     try:
         # The Databricks SDK authenticates from the process environment.
@@ -327,7 +318,7 @@ def configure_tracing(settings: Settings) -> None:
             and not _local_tracking_server_available(tracking_uri)
         ):
             logger.warning("MLflow tracking server is unavailable; continuing without traces")
-            return
+            return False
 
         # Preflight: catch trace-location mismatch before set_experiment.
         # FleetConfigurationError propagates — all other failures are soft.
@@ -373,11 +364,12 @@ def configure_tracing(settings: Settings) -> None:
             settings.mlflow_trace_sampling_ratio,
             _TRACE_CONTENT_MAX_CHARS,
         )
-        _TRACING_ACTIVE = True
+        return True
     except FleetConfigurationError:
         raise  # Configuration errors propagate clearly
     except Exception:
         logger.warning("MLflow tracing setup failed; continuing without traces", exc_info=True)
+        return False
 
 
 def flush_tracing(*, terminate: bool = True) -> None:
@@ -387,8 +379,6 @@ def flush_tracing(*, terminate: bool = True) -> None:
     Parameters:
         terminate (bool): Whether to terminate MLflow's asynchronous trace logging.
     """
-    if not _TRACING_ACTIVE:
-        return
     try:
         import mlflow
 

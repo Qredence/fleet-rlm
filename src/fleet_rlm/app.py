@@ -123,53 +123,44 @@ def create_app(
     resolved = settings if settings is not None else load_runtime_settings()
     configure_logging(resolved)
 
-    from fleet_rlm.observability.tracing import configure_tracing
-
-    configure_tracing(resolved)
-
     @asynccontextmanager
     async def lifespan(app: FastAPI):
-        """
-        Manage application startup and shutdown for the configured execution environment.
+        """Own tracing setup and provider composition for one application lifespan."""
+        from fleet_rlm.observability.mlflow_runtime import MLflowRuntime
 
-        Initializes the selected composition before yielding control to the application and
-        performs composition cleanup and tracing flushes during shutdown.
-        """
         settings_obj: Settings = app.state.settings
-        if _composition_installer is not None:
-            try:
+        mlflow_runtime = app.state.mlflow_runtime
+        if not isinstance(mlflow_runtime, MLflowRuntime):
+            mlflow_runtime = MLflowRuntime(settings_obj)
+            app.state.mlflow_runtime = mlflow_runtime
+        await mlflow_runtime.start()
+        try:
+            if _composition_installer is not None:
                 async with _local_db_lifespan(app, settings_obj, _composition_installer):
                     yield
-            finally:
-                from fleet_rlm.observability.tracing import flush_tracing
+                return
 
-                flush_tracing()
-            return
+            if settings_obj.run_environment == "daytona":
+                from fleet_rlm.composition import (
+                    dispose_daytona_composition,
+                    install_daytona_composition,
+                    require_daytona_settings,
+                )
 
-        if settings_obj.run_environment == "daytona":
-            from fleet_rlm.composition import (
-                dispose_daytona_composition,
-                install_daytona_composition,
-                require_daytona_settings,
-            )
-
-            require_daytona_settings(settings_obj)
-            installed = False
-            try:
-                await install_daytona_composition(app, settings_obj)
-                installed = True
-                yield
-            finally:
+                require_daytona_settings(settings_obj)
+                installed = False
                 try:
+                    await install_daytona_composition(app, settings_obj)
+                    installed = True
+                    yield
+                finally:
                     if installed:
                         await dispose_daytona_composition(app)
-                finally:
-                    from fleet_rlm.observability.tracing import flush_tracing
+                return
 
-                    flush_tracing()
-            return
-
-        raise RuntimeError("Fleet only supports the Daytona runtime")
+            raise RuntimeError("Fleet only supports the Daytona runtime")
+        finally:
+            await mlflow_runtime.close()
 
     app = FastAPI(
         title=resolved.app_name,
@@ -179,6 +170,9 @@ def create_app(
     app.state.settings = resolved
     app.state.composition_ready = False
     app.state.runtime_inventory = None
+    from fleet_rlm.observability.mlflow_runtime import MLflowRuntime
+
+    app.state.mlflow_runtime = MLflowRuntime(resolved)
 
     from fleet_rlm.api.errors import install_error_handlers
     from fleet_rlm.api.openapi import install_openapi_contract

@@ -64,7 +64,10 @@ default is `false`, but the shipped policy enables it). The benchmark profiles
 (`daytona-bench`, `daytona-bench-40`) explicitly keep tracing off to stay
 traceless. Fleet also enables MLflow DSPy inference autologging for the selected
 experiment, while compile and evaluator traces remain disabled for live Turn
-observability.
+observability. FastAPI lifespan owns one explicit tracing startup attempt and
+shutdown flush; application construction performs no external MLflow probe, and
+an unavailable setup marks that lifespan inactive instead of poisoning later
+lifespans.
 
 MLflow trace payloads retain bounded, readable prompts, reasoning, generated
 code, tool payloads, and responses. `mlflow.trace_content_max_chars` bounds

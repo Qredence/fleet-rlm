@@ -14,10 +14,8 @@ from fleet_rlm.config import Settings
 
 
 @pytest.fixture(autouse=True)
-def _reset_tracing_latch(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Reset the tracing configuration and activation state for a test."""
-    monkeypatch.setattr(tracing, "_TRACING_CONFIGURED", False)
-    monkeypatch.setattr(tracing, "_TRACING_ACTIVE", False)
+def _reset_trace_content_bound(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Reset the shared readable content bound for a test."""
     monkeypatch.setattr(tracing, "_TRACE_CONTENT_MAX_CHARS", 10_000)
 
 
@@ -157,8 +155,7 @@ def test_configure_tracing_disabled_skips_mlflow(monkeypatch: pytest.MonkeyPatch
         raise AssertionError("mlflow must not be imported when disabled")
 
     _install_fake_mlflow(monkeypatch, set_tracking_uri=_boom, set_experiment=_boom, autolog=_boom)
-    tracing.configure_tracing(Settings(mlflow_tracing_enabled=False))
-    assert tracing._TRACING_CONFIGURED is True
+    assert tracing.configure_tracing(Settings(mlflow_tracing_enabled=False)) is False
 
 
 def test_configure_tracing_enabled_without_workspace_settings_is_soft_disabled(
@@ -173,7 +170,7 @@ def test_configure_tracing_enabled_without_workspace_settings_is_soft_disabled(
         "FLEET_MLFLOW_TRACING_SQL_WAREHOUSE_ID",
     ):
         monkeypatch.delenv(name, raising=False)
-    tracing.configure_tracing(Settings(_env_file=None, mlflow_tracing_enabled=True))
+    assert tracing.configure_tracing(Settings(_env_file=None, mlflow_tracing_enabled=True)) is False
     assert calls.tracking_uri_args == []
     assert calls.autolog_calls == 0
 
@@ -183,7 +180,7 @@ def test_configure_tracing_enabled_sets_uri_experiment_and_autolog(
 ) -> None:
     calls = _install_fake_mlflow(monkeypatch)
     monkeypatch.delenv("MLFLOW_TRACKING_URI", raising=False)
-    tracing.configure_tracing(_enabled_settings())
+    assert tracing.configure_tracing(_enabled_settings()) is True
     assert calls.tracking_uri_args == ["databricks"]
     assert calls.experiment_args == [()]
     assert calls.experiment_kwargs[0]["experiment_name"] == "fleet-test-exp"
@@ -202,7 +199,10 @@ def test_configure_tracing_enabled_sets_uri_experiment_and_autolog(
 def test_configure_tracing_applies_sampling_policy(monkeypatch: pytest.MonkeyPatch) -> None:
     calls = _install_fake_mlflow(monkeypatch)
 
-    tracing.configure_tracing(_enabled_settings(mlflow_trace_sampling_ratio=0.25, mlflow_async_logging=False))
+    assert (
+        tracing.configure_tracing(_enabled_settings(mlflow_trace_sampling_ratio=0.25, mlflow_async_logging=False))
+        is True
+    )
 
     assert os.environ["MLFLOW_TRACE_SAMPLING_RATIO"] == "0.25"
     assert calls.async_logging_args == [False]
@@ -435,18 +435,17 @@ def test_configure_tracing_preserves_exported_databricks_auth(
 
 def test_configure_tracing_setup_failure_is_soft(monkeypatch: pytest.MonkeyPatch) -> None:
     _install_fake_mlflow(monkeypatch, raise_on_import=RuntimeError("mlflow unavailable"))
-    tracing.configure_tracing(_enabled_settings())
-    assert tracing._TRACING_CONFIGURED is True
+    assert tracing.configure_tracing(_enabled_settings()) is False
 
 
-def test_configure_tracing_is_idempotent(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_configure_tracing_allows_a_fresh_explicit_attempt(monkeypatch: pytest.MonkeyPatch) -> None:
     calls = _install_fake_mlflow(monkeypatch)
     monkeypatch.delenv("MLFLOW_TRACKING_URI", raising=False)
     settings = _enabled_settings()
-    tracing.configure_tracing(settings)
-    tracing.configure_tracing(settings)
-    assert calls.tracking_uri_args == ["databricks"]
-    assert calls.autolog_calls == 1
+    assert tracing.configure_tracing(settings) is True
+    assert tracing.configure_tracing(settings) is True
+    assert calls.tracking_uri_args == ["databricks", "databricks"]
+    assert calls.autolog_calls == 2
 
 
 def test_flush_tracing_terminates_async_exporter(monkeypatch: pytest.MonkeyPatch) -> None:
