@@ -544,7 +544,7 @@ async def test_reconcile_deadline_does_not_restore_after_fence_consumes_budget(
     async def load_candidates() -> list[object]:
         """
         Load the pending run as a reconciliation candidate.
-        
+
         Returns:
             list[object]: A list containing the pending run.
         """
@@ -597,7 +597,7 @@ async def test_reconcile_deadline_bounds_fence_failure_restore(
     async def load_candidates() -> list[object]:
         """
         Load the pending run as a reconciliation candidate.
-        
+
         Returns:
             list[object]: A list containing the pending run.
         """

@@ -70,12 +70,12 @@ async def _dispose_components(
 ) -> None:
     """
     Asynchronously disposes the available runtime components.
-    
+
     Parameters:
-    	resources (RuntimeProcessResources | None): Runtime process resources to dispose.
-    	gateway (object | None): Gateway to close.
-    	database (RuntimeDatabaseLifecycle | None): Database lifecycle to close.
-    	suppress_errors (bool): Whether to suppress disposal errors.
+        resources (RuntimeProcessResources | None): Runtime process resources to dispose.
+        gateway (object | None): Gateway to close.
+        database (RuntimeDatabaseLifecycle | None): Database lifecycle to close.
+        suppress_errors (bool): Whether to suppress disposal errors.
     """
     first_error: Exception | None = None
     for target, method_name in ((resources, "adispose"), (gateway, "close"), (database, "aclose")):
@@ -114,11 +114,11 @@ async def _reconcile_daytona_settling(
 ) -> ReconciliationSummary:
     """
     Reconcile stale settling turns using bounded session fencing.
-    
+
     Parameters:
         fence_timeout (float): Maximum time allowed to fence each session, in seconds.
         deadline (float | None): Optional monotonic-time deadline for the overall reconciliation.
-    
+
     Returns:
         ReconciliationSummary: Summary of the reconciliation results.
     """
@@ -184,13 +184,13 @@ async def run_deferred_orphan_cleanup(
 async def build_daytona_composition(settings: Settings, *, skill_catalog: SkillCatalog) -> RuntimeInventory:
     """
     Construct the Daytona runtime inventory and clean up partially initialized resources on failure.
-    
+
     Parameters:
-    	settings (Settings): Application settings used to configure the Daytona runtime.
-    	skill_catalog (SkillCatalog): Application skill catalog used to build turn preparation.
-    
+        settings (Settings): Application settings used to configure the Daytona runtime.
+        skill_catalog (SkillCatalog): Application skill catalog used to build turn preparation.
+
     Returns:
-    	RuntimeInventory: The initialized Daytona runtime services and resources.
+        RuntimeInventory: The initialized Daytona runtime services and resources.
     """
     from fleet_rlm.rlm.dspy_contract import assert_dspy_version
 
@@ -384,13 +384,13 @@ async def install_daytona_composition(
     settings: Settings,
 ) -> RuntimeInventory:
     """Install the Daytona runtime inventory on the application.
-    
+
     Parameters:
-    	app (FastAPI): Application that provides the skill catalog and receives the runtime inventory.
-    	settings (Settings): Configuration used to build the Daytona composition.
-    
+        app (FastAPI): Application that provides the skill catalog and receives the runtime inventory.
+        settings (Settings): Configuration used to build the Daytona composition.
+
     Returns:
-    	RuntimeInventory: The installed Daytona runtime inventory.
+        RuntimeInventory: The installed Daytona runtime inventory.
     """
     from fleet_rlm.daytona.interpreter import set_bridge_service_loop
 
@@ -446,8 +446,9 @@ async def install_daytona_composition(
 
 async def dispose_daytona_composition(app: FastAPI) -> None:
     """Dispose the Daytona runtime composition and release its associated resources.
-    
-    The shutdown drains pending turn cleanup before disposing runtime, gateway, and database resources, then unregisters the Daytona bridge service loop.
+
+    The shutdown drains pending turn cleanup before disposing runtime, gateway, and
+    database resources, then unregisters the Daytona bridge service loop.
     """
     from fleet_rlm.daytona.interpreter import set_bridge_service_loop
 

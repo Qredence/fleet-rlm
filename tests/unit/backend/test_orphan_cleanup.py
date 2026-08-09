@@ -184,10 +184,10 @@ class _FakeArtifactCatalog:
     async def list_storage_refs(self, *, workspace_id: object) -> list[str]:
         """
         Enumerate storage references for a workspace.
-        
+
         Parameters:
             workspace_id (object): Identifier of the workspace.
-        
+
         Returns:
             list[str]: Storage references associated with the workspace.
         """
@@ -197,24 +197,24 @@ class _FakeArtifactCatalog:
     async def list_completed_runs(self, *, workspace_id: object) -> list[CompletedRun]:
         """
         List completed runs for a workspace.
-        
+
         Parameters:
-        	workspace_id (object): Identifier of the workspace.
-        
+                workspace_id (object): Identifier of the workspace.
+
         Returns:
-        	list[CompletedRun]: The workspace's completed runs.
+                list[CompletedRun]: The workspace's completed runs.
         """
         self.calls.append(("completed", workspace_id))
         return []
 
     async def list_active_runs(self, *, workspace_id: object) -> list[CompletedRun]:
         """List active runs for a workspace.
-        
+
         Parameters:
-        	workspace_id (object): Identifier of the workspace.
-        
+                workspace_id (object): Identifier of the workspace.
+
         Returns:
-        	list[CompletedRun]: Active runs associated with the workspace.
+                list[CompletedRun]: Active runs associated with the workspace.
         """
         self.calls.append(("active", workspace_id))
         return []

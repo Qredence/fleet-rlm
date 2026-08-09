@@ -117,27 +117,27 @@ async def _await_recovery_step(awaitable: Awaitable[Any], *, deadline: float | N
 
 def _recovery_deadline_exhausted(deadline: float | None) -> bool:
     """Determine whether the recovery deadline has been reached.
-    
+
     Parameters:
-    	deadline (float | None): Monotonic time at which recovery must stop, or `None` for no deadline.
-    
+        deadline (float | None): Monotonic time at which recovery must stop, or `None` for no deadline.
+
     Returns:
-    	`true` if the deadline has been reached, `false` otherwise.
+        `true` if the deadline has been reached, `false` otherwise.
     """
     return deadline is not None and asyncio.get_running_loop().time() >= deadline
 
 
 def _decode_failure_status(value: str) -> Literal["failed", "cancelled", "timeout"]:
     """Validate and return a persisted run failure status.
-    
+
     Parameters:
-    	value (str): The persisted failure status.
-    
+        value (str): The persisted failure status.
+
     Returns:
-    	The validated failure status.
-    
+        The validated failure status.
+
     Raises:
-    	TurnStateError: If the value is not a supported failure status.
+        TurnStateError: If the value is not a supported failure status.
     """
     if value in {"failed", "cancelled", "timeout"}:
         return value
@@ -826,13 +826,15 @@ class SqlAlchemyTurnStateStore:
         deadline: float | None = None,
     ) -> ReconciliationSummary:
         """Recover stale provider claims and report reconciliation outcomes.
-        
+
         Parameters:
-            fence (Callable[[UUID], Awaitable[None]] | None): Optional callback used to verify provider state before completing recovery.
+            fence (Callable[[UUID], Awaitable[None]] | None): Optional callback used
+                to verify provider state before completing recovery.
             deadline (float | None): Optional monotonic deadline for the recovery operation.
-        
+
         Returns:
-            ReconciliationSummary: Counts of candidates, recovered runs, provider fence failures, skipped runs, and whether the deadline was exhausted.
+            ReconciliationSummary: Counts of candidates, recovered runs, provider
+                fence failures, skipped runs, and whether the deadline was exhausted.
         """
         pending = await self._load_recovery_candidates()
         recovered = 0

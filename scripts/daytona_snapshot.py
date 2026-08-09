@@ -22,9 +22,9 @@ from fleet_rlm.daytona.provisioning import DaytonaSandboxSpec, build_snapshot_im
 def _parser() -> argparse.ArgumentParser:
     """
     Create the command-line parser for snapshot creation and inspection commands.
-    
+
     Returns:
-    	argparse.ArgumentParser: Parser with required `create` and `check` subcommands and snapshot name arguments.
+        argparse.ArgumentParser: Parser with required `create` and `check` subcommands and snapshot name arguments.
     """
     parser = argparse.ArgumentParser(description="Manage the immutable Fleet Daytona Snapshot.")
     subcommands = parser.add_subparsers(dest="command", required=True)

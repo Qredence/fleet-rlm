@@ -149,13 +149,13 @@ class _ProductionDaytonaDoctorDependencies:
     async def execute(self, sandbox: Any) -> str:
         """
         Run the Daytona interpreter diagnostic in a temporary sandbox context.
-        
+
         Parameters:
             sandbox (Any): Sandbox whose code interpreter runs the diagnostic.
-        
+
         Returns:
             str: Diagnostic process output.
-        
+
         Raises:
             RuntimeError: If the interpreter reports an execution error.
         """

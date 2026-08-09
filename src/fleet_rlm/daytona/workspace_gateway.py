@@ -45,13 +45,13 @@ _SANDBOX_DELETE_GRACE_SECONDS = 15.0
 def _public_entry(entry: WorkspaceEntry, checksum: str | None = None) -> WorkspaceFileEntry:
     """
     Convert an internal workspace entry into a public file-entry model.
-    
+
     Parameters:
-    	entry (WorkspaceEntry): Internal workspace entry to convert.
-    	checksum (str | None): Optional SHA-256 checksum for the entry.
-    
+        entry (WorkspaceEntry): Internal workspace entry to convert.
+        checksum (str | None): Optional SHA-256 checksum for the entry.
+
     Returns:
-    	WorkspaceFileEntry: Public representation of the workspace entry.
+        WorkspaceFileEntry: Public representation of the workspace entry.
     """
     return WorkspaceFileEntry(
         path=entry.path,
