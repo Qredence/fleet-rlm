@@ -16,12 +16,18 @@ from typing import Any
 
 from dotenv import load_dotenv
 
-from fleet_rlm.config import FleetConfigurationError, Settings, load_runtime_settings, require_live_execution
+from fleet_rlm.config import (
+    FleetConfigurationError,
+    ProfileEnvironmentContract,
+    Settings,
+    active_profile_contract,
+    load_runtime_settings,
+    require_live_execution,
+)
 
 RECEIPT_SCHEMA = "fleet.daytona-mvp-proof/v1"
 EVIDENCE_ENV = "FLEET_LIVE_EVIDENCE_PATH"
 _LIVE_TEST = "tests/live/backend/test_fleet_rlm_daytona_mvp.py::test_complete_daytona_mvp_through_fastapi"
-_REQUIRED_ENV = ("FLEET_DAYTONA_API_KEY", "DATABRICKS_TOKEN")
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 _LIVE_ROOT_MODEL = "deepseek-v4-flash"
 _LIVE_SUB_MODEL = "deepseek-v4-flash"
@@ -642,6 +648,11 @@ def _configured_models(settings: Settings | None = None) -> dict[str, str]:
     return {"root": resolved.root_model, "sub": resolved.sub_model}
 
 
+def _required_provider_environment(contract: ProfileEnvironmentContract) -> tuple[str, ...]:
+    """Return policy-derived provider environment names without exposing values."""
+    return contract.provider_environment_names
+
+
 def _models_are_approved(models: object) -> bool:
     """Require the production Root/Sub pair while allowing DSPy normalization."""
     return bool(
@@ -664,6 +675,7 @@ def main(argv: list[str] | None = None) -> int:
     _load_repo_env()
     try:
         settings = require_live_execution()
+        contract = active_profile_contract()
     except FleetConfigurationError:
         _write_failure(
             output,
@@ -673,7 +685,8 @@ def main(argv: list[str] | None = None) -> int:
         )
         print("Live proof precondition failed.", file=sys.stderr)
         return EXIT_PRECONDITION
-    if any(not os.environ.get(name) for name in _REQUIRED_ENV):
+    required_environment = _required_provider_environment(contract)
+    if any(not os.environ.get(name) for name in required_environment):
         _write_failure(
             output,
             category="precondition_failed",

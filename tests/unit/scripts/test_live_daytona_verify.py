@@ -18,6 +18,19 @@ def _avoid_loading_repository_credentials(monkeypatch: pytest.MonkeyPatch) -> No
     monkeypatch.setattr(verifier, "_load_repo_env", lambda: None)
 
 
+def _set_provider_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Populate the selected TOML profile's provider names without real credentials."""
+    for name in verifier.active_profile_contract().provider_environment_names:
+        value = "https://gateway.example.test/v1" if name.endswith("BASE_URL") else f"secret-{name.lower()}"
+        monkeypatch.setenv(name, value)
+
+
+def _clear_provider_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Clear every provider name in the selected TOML profile."""
+    for name in verifier.active_profile_contract().provider_environment_names:
+        monkeypatch.delenv(name, raising=False)
+
+
 def _success_receipt(sha: str) -> dict[str, object]:
     return {
         "schema": verifier.RECEIPT_SCHEMA,
@@ -176,8 +189,7 @@ def test_main_records_missing_live_precondition(
     output = tmp_path / "receipt.json"
     monkeypatch.setattr(verifier, "_load_repo_env", lambda: None)
     monkeypatch.delenv("FLEET_LIVE", raising=False)
-    monkeypatch.delenv("FLEET_DAYTONA_API_KEY", raising=False)
-    monkeypatch.delenv("DATABRICKS_TOKEN", raising=False)
+    _clear_provider_environment(monkeypatch)
 
     assert verifier.main(["--output", str(output)]) == verifier.EXIT_PRECONDITION
     receipt = json.loads(output.read_text(encoding="utf-8"))
@@ -201,8 +213,7 @@ def test_main_records_disabled_toml_live_policy(
         "require_live_execution",
         lambda: (_ for _ in ()).throw(verifier.FleetConfigurationError("disabled")),
     )
-    monkeypatch.setenv("FLEET_DAYTONA_API_KEY", "secret-daytona")
-    monkeypatch.setenv("DATABRICKS_TOKEN", "secret-databricks")
+    _set_provider_environment(monkeypatch)
 
     assert verifier.main(["--output", str(output)]) == verifier.EXIT_PRECONDITION
     receipt = json.loads(output.read_text(encoding="utf-8"))
@@ -270,8 +281,7 @@ def test_first_lane_failure_skips_second_and_preserves_untracked_sentinel(
     worktree = tmp_path / "detached"
     worktree.mkdir()
     monkeypatch.setenv("FLEET_LIVE", "1")
-    monkeypatch.setenv("FLEET_DAYTONA_API_KEY", "secret-daytona")
-    monkeypatch.setenv("DATABRICKS_TOKEN", "secret-databricks")
+    _set_provider_environment(monkeypatch)
     monkeypatch.setenv("FLEET_ROOT_MODEL", verifier._LIVE_ROOT_MODEL)
     monkeypatch.setenv("FLEET_SUB_MODEL", verifier._LIVE_SUB_MODEL)
     monkeypatch.setattr(verifier, "_path_is_allowed", lambda _path: True)
@@ -302,8 +312,7 @@ def test_lane_timeout_cleans_owned_worktree(
     worktree = tmp_path / "detached"
     worktree.mkdir()
     monkeypatch.setenv("FLEET_LIVE", "1")
-    monkeypatch.setenv("FLEET_DAYTONA_API_KEY", "secret-daytona")
-    monkeypatch.setenv("DATABRICKS_TOKEN", "secret-databricks")
+    _set_provider_environment(monkeypatch)
     monkeypatch.setenv("FLEET_ROOT_MODEL", verifier._LIVE_ROOT_MODEL)
     monkeypatch.setenv("FLEET_SUB_MODEL", verifier._LIVE_SUB_MODEL)
     monkeypatch.setattr(verifier, "_path_is_allowed", lambda _path: True)
@@ -337,8 +346,7 @@ def test_main_invokes_pytest_once_and_accepts_valid_receipt(
     (worktree / "uv.lock").write_bytes(b"test lock")
     calls: list[tuple[list[str], Path, dict[str, str], int]] = []
     monkeypatch.setenv("FLEET_LIVE", "1")
-    monkeypatch.setenv("FLEET_DAYTONA_API_KEY", "secret-daytona")
-    monkeypatch.setenv("DATABRICKS_TOKEN", "secret-databricks")
+    _set_provider_environment(monkeypatch)
     monkeypatch.setenv("FLEET_ROOT_MODEL", verifier._LIVE_ROOT_MODEL)
     monkeypatch.setenv("FLEET_SUB_MODEL", verifier._LIVE_SUB_MODEL)
     monkeypatch.setattr(verifier, "_path_is_allowed", lambda _path: True)
@@ -455,8 +463,7 @@ def test_main_records_pytest_failure_without_subprocess_output(
     output = tmp_path / "receipt.json"
     sha = "4" * 40
     monkeypatch.setenv("FLEET_LIVE", "1")
-    monkeypatch.setenv("FLEET_DAYTONA_API_KEY", "secret-daytona")
-    monkeypatch.setenv("DATABRICKS_TOKEN", "secret-databricks")
+    _set_provider_environment(monkeypatch)
     monkeypatch.setattr(verifier, "_path_is_allowed", lambda _path: True)
     monkeypatch.setattr(verifier, "_candidate", lambda: (sha, "dev-0.7"))
     monkeypatch.setattr(verifier, "_git", lambda *_args, **_kwargs: str(tmp_path))
@@ -483,8 +490,7 @@ def test_main_rejects_success_without_receipt(
     output = tmp_path / "receipt.json"
     sha = "5" * 40
     monkeypatch.setenv("FLEET_LIVE", "1")
-    monkeypatch.setenv("FLEET_DAYTONA_API_KEY", "secret-daytona")
-    monkeypatch.setenv("DATABRICKS_TOKEN", "secret-databricks")
+    _set_provider_environment(monkeypatch)
     monkeypatch.setattr(verifier, "_path_is_allowed", lambda _path: True)
     monkeypatch.setattr(verifier, "_candidate", lambda: (sha, "dev-0.7"))
     monkeypatch.setattr(verifier, "_git", lambda *_args, **_kwargs: str(tmp_path))

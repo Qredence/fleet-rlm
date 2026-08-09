@@ -10,7 +10,31 @@ from pathlib import Path
 import pytest
 from pydantic import SecretStr, ValidationError
 
-from fleet_rlm.config import Settings
+from fleet_rlm.config import Settings, active_profile_contract, load_profile_environment_contracts
+
+
+def test_profile_environment_matrix_follows_selected_toml_policy() -> None:
+    contracts = {contract.name: contract for contract in load_profile_environment_contracts()}
+
+    assert active_profile_contract().name == "daytona-recursive"
+    assert contracts["daytona-recursive"].provider == "OpenCode Go"
+    assert contracts["daytona-recursive"].provider_environment_names == (
+        "FLEET_DAYTONA_API_KEY",
+        "FLEET_OPENCODE_GO_API_KEY",
+        "FLEET_OPENCODE_GO_BASE_URL",
+    )
+    assert contracts["daytona-managed"].provider == "Databricks AI Gateway"
+    assert contracts["daytona-managed"].managed_policy_environment_names == (
+        "FLEET_DAYTONA_API_KEY",
+        "DATABRICKS_TOKEN",
+        "FLEET_DATABRICKS_AI_GATEWAY_BASE_URL",
+        "FLEET_DATABASE_URL",
+        "FLEET_MLFLOW_EXPERIMENT_NAME",
+        "FLEET_MLFLOW_TRACE_CATALOG",
+        "FLEET_MLFLOW_TRACE_SCHEMA",
+        "FLEET_MLFLOW_TRACE_TABLE_PREFIX",
+        "FLEET_MLFLOW_TRACING_SQL_WAREHOUSE_ID",
+    )
 
 
 def test_daytona_profile_uses_specialized_bounded_model_roles() -> None:
@@ -31,7 +55,7 @@ def test_daytona_profile_uses_specialized_bounded_model_roles() -> None:
         "api_key_env": "FLEET_OPENCODE_GO_API_KEY",
         "base_url_env": "FLEET_OPENCODE_GO_BASE_URL",
         "max_tokens": 16000,
-        # Cache hits emit zero streamify deltas and read as a frozen stream.
+        # Cache hits provide no fresh action observation and can read as a frozen stream.
         "cache": False,
         "reasoning_effort": "low",
     }
@@ -207,8 +231,8 @@ def test_daytona_profile_resolves_deepseek_root_and_sub_with_gateway_params(
     assert settings.root_llm_reasoning_effort == "low"
     assert settings.sub_llm_reasoning_effort == "low"
     assert settings.sub_llm_temperature == 0
-    # Streaming turns disable the LM cache: a hit would emit zero streamify
-    # deltas and read as a frozen stream.
+    # Live observation turns disable the LM cache: a hit would provide no fresh
+    # action observation and read as a frozen stream.
     assert settings.root_llm_cache is False
     assert settings.sub_llm_cache is False
     assert settings.root_llm_max_tokens == settings.sub_llm_max_tokens == 16000

@@ -12,6 +12,7 @@ import re
 import tomllib
 from collections.abc import Mapping
 from copy import deepcopy
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal, cast
 
@@ -36,6 +37,51 @@ def _clean_model_provider_service(value: str | None) -> str | None:
 
 class FleetConfigurationError(ValueError):
     """Raised when the required Fleet runtime policy is invalid."""
+
+
+@dataclass(frozen=True, slots=True)
+class ProfileEnvironmentContract:
+    """Non-secret provider and profile facts derived from ``config/fleet.toml``."""
+
+    name: str
+    runtime_environment: str
+    provider: str
+    root_model: str
+    sub_model: str
+    root_api_key_env: str
+    sub_api_key_env: str
+    root_base_url_env: str | None
+    sub_base_url_env: str | None
+    root_max_tokens: int | None
+    sub_max_tokens: int | None
+    daytona_api_key_env: str
+    database_url_env: str | None
+    mlflow_tracing_enabled: bool
+    mlflow_tracking_uri: str | None
+    mlflow_environment_names: tuple[str, ...]
+    recursion_enabled: bool
+
+    @property
+    def provider_environment_names(self) -> tuple[str, ...]:
+        """Return environment names needed for provider-backed execution."""
+        return _unique_environment_names(
+            self.daytona_api_key_env,
+            self.root_api_key_env,
+            self.sub_api_key_env,
+            self.root_base_url_env,
+            self.sub_base_url_env,
+        )
+
+    @property
+    def managed_policy_environment_names(self) -> tuple[str, ...]:
+        """Return provider plus explicitly required managed-policy environment names."""
+        if self.name != "daytona-managed":
+            return self.provider_environment_names
+        return _unique_environment_names(
+            *self.provider_environment_names,
+            self.database_url_env,
+            *self.mlflow_environment_names,
+        )
 
 
 class LLMRoleSettings(BaseModel):
@@ -576,6 +622,137 @@ def _flatten_policy(policy: Mapping[str, Any]) -> dict[str, Any]:
     if missing:
         raise FleetConfigurationError(f"selected profile is missing required setting(s): {', '.join(missing)}")
     return values
+
+
+def _unique_environment_names(*values: str | None) -> tuple[str, ...]:
+    """Return non-empty environment names in declaration order without duplicates."""
+    return tuple(dict.fromkeys(value for value in values if value))
+
+
+def _profile_contract_document(path: Path) -> tuple[str | None, Mapping[str, Any], Mapping[str, Any]]:
+    """Read the non-secret profile policy used to derive provider contracts."""
+    if not path.is_file():
+        raise FleetConfigurationError(f"required Fleet configuration file is missing: {path}")
+    try:
+        document = tomllib.loads(path.read_text(encoding="utf-8"))
+    except OSError as exc:
+        raise FleetConfigurationError(f"could not read Fleet configuration: {path}") from exc
+    except tomllib.TOMLDecodeError as exc:
+        raise FleetConfigurationError(f"invalid Fleet configuration TOML: {exc}") from exc
+    root = _require_mapping(document, "root")
+    allowed_root = {"config", "defaults", "profiles"}
+    unknown = set(root).difference(allowed_root)
+    if unknown:
+        raise FleetConfigurationError(f"unknown configuration key(s): {', '.join(sorted(unknown))}")
+    config = _require_mapping(root.get("config", {}), "config")
+    if config.get("schema_version") != 1:
+        raise FleetConfigurationError("config.schema_version must be 1")
+    defaults = _require_mapping(root.get("defaults", {}), "defaults")
+    profiles = _require_mapping(root.get("profiles", {}), "profiles")
+    if not profiles:
+        raise FleetConfigurationError("config.profiles must declare at least one profile")
+    _validate_policy_table(defaults, "defaults", allow_partial_llm=True)
+    default_profile = config.get("default_profile")
+    if default_profile is not None and not isinstance(default_profile, str):
+        raise FleetConfigurationError("config.default_profile must be a string")
+    if default_profile is not None and default_profile not in profiles:
+        raise FleetConfigurationError(f"configured profile does not exist: {default_profile}")
+    return default_profile, defaults, profiles
+
+
+def _profile_contract(
+    name: str,
+    defaults: Mapping[str, Any],
+    selected: object,
+) -> ProfileEnvironmentContract:
+    """Build one non-secret contract from defaults merged with a selected profile."""
+    selected_table = _require_mapping(selected, f"profiles.{name}")
+    _validate_policy_table(selected_table, f"profiles.{name}")
+    merged = _deep_merge(defaults, selected_table)
+    _validate_policy_table(merged, f"profiles.{name}")
+
+    def table(section: str) -> Mapping[str, Any]:
+        return _require_mapping(merged.get(section, {}), f"profiles.{name}.{section}")
+
+    runtime = table("runtime")
+    llm = table("llm")
+    root = _require_mapping(llm.get("root"), f"profiles.{name}.llm.root")
+    sub = _require_mapping(llm.get("sub"), f"profiles.{name}.llm.sub")
+    daytona = table("daytona")
+    storage = table("storage")
+    mlflow = table("mlflow")
+
+    def required_text(value: object, location: str) -> str:
+        if not isinstance(value, str) or not value.strip():
+            raise FleetConfigurationError(f"{location} must be a non-blank string")
+        return value
+
+    root_api_key_env = _validate_environment_reference(root.get("api_key_env"), f"profiles.{name}.llm.root.api_key_env")
+    sub_api_key_env = _validate_environment_reference(sub.get("api_key_env"), f"profiles.{name}.llm.sub.api_key_env")
+    root_base_url_env = _validate_optional_environment_reference(
+        root.get("base_url_env"), f"profiles.{name}.llm.root.base_url_env"
+    )
+    sub_base_url_env = _validate_optional_environment_reference(
+        sub.get("base_url_env"), f"profiles.{name}.llm.sub.base_url_env"
+    )
+    daytona_api_key_env = _validate_environment_reference(
+        daytona.get("api_key_env"), f"profiles.{name}.daytona.api_key_env"
+    )
+    database_url_env = _validate_optional_environment_reference(
+        storage.get("database_url_env"), f"profiles.{name}.storage.database_url_env"
+    )
+    mlflow_environment_names = _unique_environment_names(
+        *(
+            _validate_optional_environment_reference(mlflow.get(f"{field}_env"), f"profiles.{name}.mlflow.{field}_env")
+            for field in (
+                "experiment_name",
+                "trace_catalog",
+                "trace_schema",
+                "trace_table_prefix",
+                "tracing_sql_warehouse_id",
+            )
+        )
+    )
+    key_pair = (root_api_key_env, root_base_url_env)
+    provider = {
+        ("FLEET_OPENCODE_GO_API_KEY", "FLEET_OPENCODE_GO_BASE_URL"): "OpenCode Go",
+        ("DATABRICKS_TOKEN", "FLEET_DATABRICKS_AI_GATEWAY_BASE_URL"): "Databricks AI Gateway",
+    }.get(key_pair, "custom configured gateway")
+    return ProfileEnvironmentContract(
+        name=name,
+        runtime_environment=required_text(runtime.get("environment"), f"profiles.{name}.runtime.environment"),
+        provider=provider,
+        root_model=required_text(root.get("model"), f"profiles.{name}.llm.root.model"),
+        sub_model=required_text(sub.get("model"), f"profiles.{name}.llm.sub.model"),
+        root_api_key_env=root_api_key_env,
+        sub_api_key_env=sub_api_key_env,
+        root_base_url_env=root_base_url_env,
+        sub_base_url_env=sub_base_url_env,
+        root_max_tokens=root.get("max_tokens"),
+        sub_max_tokens=sub.get("max_tokens"),
+        daytona_api_key_env=daytona_api_key_env,
+        database_url_env=database_url_env,
+        mlflow_tracing_enabled=bool(mlflow.get("tracing_enabled", False)),
+        mlflow_tracking_uri=mlflow.get("tracking_uri"),
+        mlflow_environment_names=mlflow_environment_names,
+        recursion_enabled=bool(table("rlm").get("recursion_enabled", False)),
+    )
+
+
+def load_profile_environment_contracts(path: Path | None = None) -> tuple[ProfileEnvironmentContract, ...]:
+    """Return every profile's provider/environment contract from the TOML policy."""
+    _, defaults, profiles = _profile_contract_document(path or _CONFIG_PATH)
+    return tuple(_profile_contract(name, defaults, selected) for name, selected in profiles.items())
+
+
+def active_profile_contract(path: Path | None = None) -> ProfileEnvironmentContract:
+    """Return the contract selected by TOML, never by ambient environment variables."""
+    default_profile, defaults, profiles = _profile_contract_document(path or _CONFIG_PATH)
+    if default_profile is None:
+        if len(profiles) != 1:
+            raise FleetConfigurationError("config.default_profile is required when multiple profiles exist")
+        default_profile = next(iter(profiles))
+    return _profile_contract(default_profile, defaults, profiles[default_profile])
 
 
 def _resolve_environment_value(name: str | None, dotenv: Mapping[str, str | None]) -> str | None:

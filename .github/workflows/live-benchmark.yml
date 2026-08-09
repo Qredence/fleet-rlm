@@ -26,8 +26,6 @@ jobs:
         env:
           FLEET_LIVE: "1"
           FLEET_DAYTONA_API_KEY: ${{ secrets.FLEET_DAYTONA_API_KEY }}
-          FLEET_LLM_API_KEY: ${{ secrets.FLEET_LLM_API_KEY }}
-          FLEET_LLM_BASE_URL: ${{ vars.FLEET_LLM_BASE_URL }}
-          FLEET_ROOT_MODEL: ${{ vars.FLEET_ROOT_MODEL }}
-          FLEET_SUB_MODEL: ${{ vars.FLEET_SUB_MODEL }}
+          FLEET_OPENCODE_GO_API_KEY: ${{ secrets.FLEET_OPENCODE_GO_API_KEY }}
+          FLEET_OPENCODE_GO_BASE_URL: ${{ vars.FLEET_OPENCODE_GO_BASE_URL }}
         run: uv run pytest tests/live/backend -q

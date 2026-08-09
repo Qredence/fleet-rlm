@@ -27,7 +27,12 @@ from fastapi.testclient import TestClient
 
 from fleet_rlm.api.local_scope import LocalScope
 from fleet_rlm.app import create_app
-from fleet_rlm.config import Settings, load_runtime_settings
+from fleet_rlm.config import (
+    Settings,
+    active_profile_contract,
+    load_profile_environment_contracts,
+    load_runtime_settings,
+)
 from fleet_rlm.daytona.workspace_fs import DaytonaSandboxVolumeFs
 from fleet_rlm.files.volume_paths import volume_paths_from_settings
 from fleet_rlm.rlm.tool_observer import ToolEventView
@@ -43,7 +48,9 @@ _CAPABILITY_ID = "fleet.live-daytona-mvp"
 _WORKSPACE_PATH = "notes/findings.md"
 _RECEIPT_SCHEMA = "fleet.daytona-mvp-proof/v1"
 _EVIDENCE_ENV = "FLEET_LIVE_EVIDENCE_PATH"
-_SECRET_NAMES = ("FLEET_DAYTONA_API_KEY", "DATABRICKS_TOKEN")
+_SECRET_NAMES = tuple(
+    name for contract in load_profile_environment_contracts() for name in contract.provider_environment_names
+)
 _CLEANUP_RETRY_DELAYS = (0.5, 1.0, 2.0, 4.0)
 _LIVE_ROOT_MODEL = "deepseek-v4-flash"
 _LIVE_SUB_MODEL = "deepseek-v4-flash"
@@ -193,7 +200,8 @@ def _live_settings(tmp_path: Path) -> Settings:
     _load_repo_env()
     if os.environ.get("FLEET_LIVE", "").strip().lower() not in {"1", "true", "yes"}:
         pytest.skip("Set FLEET_LIVE=1 for the complete Daytona MVP proof")
-    missing = [name for name in ("FLEET_DAYTONA_API_KEY", "DATABRICKS_TOKEN") if not os.environ.get(name)]
+    required_environment = active_profile_contract().provider_environment_names
+    missing = [name for name in required_environment if not os.environ.get(name)]
     if missing:
         pytest.fail("Live Daytona MVP proof missing required credentials: " + ", ".join(missing))
     policy = load_runtime_settings()
