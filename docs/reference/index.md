@@ -7,6 +7,7 @@
 - [Database](database.md) — canonical tables and Alembic ownership.
 - [Source layout](source-layout.md) — package and client ownership.
 - [Codebase map](codebase-map.md) — module boundaries and dependency direction.
+- [Performance budget decision](performance-budget.md) — measured Sandbox, Volume, broker, and Run overhead with the KEEP CURRENT DESIGN gate.
 
 `openapi.yaml` is authoritative for HTTP shapes; generated TUI HTTP types are
 checked alongside it by `make api-check`.
