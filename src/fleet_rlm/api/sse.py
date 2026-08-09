@@ -299,6 +299,13 @@ class AISDKUIProjector:
         data: dict[str, Any],
     ) -> list[dict[str, Any]]:
         if isinstance(detail, AttachmentRead):
+            # Keep the transport-neutral snake_case fields for existing clients while
+            # matching the reload projection's public UIMessage shape.
+            data.update(
+                attachmentId=str(detail.attachment_id),
+                phase="read",
+                byteSize=detail.byte_size,
+            )
             return [self._data("attachment", data, part_id=str(detail.attachment_id))]
         if isinstance(detail, ArtifactCreated):
             return [self._data("artifact", data, part_id=str(detail.artifact_id))]

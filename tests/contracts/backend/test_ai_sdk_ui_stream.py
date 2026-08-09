@@ -176,3 +176,28 @@ def test_projector_reuses_same_step_ids_for_trajectory_corrections() -> None:
 
     assert first_code["id"] == corrected_code["id"]
     assert first_output["id"] == corrected_output["id"]
+
+
+def test_projector_maps_attachment_reads_to_reload_compatible_ui_data() -> None:
+    from fleet_rlm.api.sse import AISDKUIProjector
+    from fleet_rlm.rlm.events import AttachmentRead, EventRecorder
+
+    attachment_id = uuid4()
+    recorder = EventRecorder(run_id=uuid4(), session_id=uuid4())
+
+    chunks = AISDKUIProjector().project(recorder.record(AttachmentRead(attachment_id, "phase1.txt", 42)))
+
+    assert chunks == [
+        {
+            "type": "data-attachment",
+            "id": str(attachment_id),
+            "data": {
+                "attachment_id": attachment_id,
+                "attachmentId": str(attachment_id),
+                "phase": "read",
+                "filename": "phase1.txt",
+                "byte_size": 42,
+                "byteSize": 42,
+            },
+        }
+    ]
