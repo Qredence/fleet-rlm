@@ -141,6 +141,7 @@ async def prepare_host_capabilities(
     spec = RLMExecutionSpec(
         skill_cards=resolved.cards,
         signature=resolved_signature(resolved),
+        skill_instructions=resolved.instructions,
         output_schema_id=schema_id,
         output_schema_version=schema_version,
         tools=(*base_tools, *history_tools, *skill_host.as_tools()),

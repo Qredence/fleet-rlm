@@ -46,23 +46,16 @@ def root_signature_for_recursion(
     signature: type[dspy.Signature],
     *,
     recursion_enabled: bool,
+    skill_instructions: tuple[str, ...] = (),
 ) -> type[dspy.Signature]:
+    """Compose Fleet operating policy for one output Signature.
+
+    The output Signature supplies declared fields/annotations only. Fleet's
+    global RLM operating fragments always stay active, recursive guidance
+    follows the actual Tool availability, and selected Skill bodies append
+    exactly once in deterministic order.
     """
-    Select the signature appropriate for the recursive execution policy.
-
-    Skill-owned signatures are preserved unchanged. The default Fleet signature
-    is recomposed from explicit fragments; recursive guidance is included only
-    when recursive querying is available.
-
-    Parameters:
-        signature (type[dspy.Signature]): Signature to select.
-        recursion_enabled (bool): Whether recursive querying is available.
-
-    Returns:
-        type[dspy.Signature]: The original signature or an adjusted default Fleet
-            signature.
-
-    """
-    if signature is not FleetRLMSignature:
-        return signature
-    return FleetRLMSignature.with_instructions(compose_rlm_instructions(recursion_enabled=recursion_enabled))
+    instructions = compose_rlm_instructions(recursion_enabled=recursion_enabled)
+    if skill_instructions:
+        instructions += "\n\n" + "\n\n".join(instructions_body for instructions_body in skill_instructions)
+    return signature.with_instructions(instructions)

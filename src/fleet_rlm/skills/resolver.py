@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from fleet_rlm.rlm.signature import FleetRLMSignature
+import dspy
+
+from fleet_rlm.rlm.signature import FleetRLMSignature, root_signature_for_recursion
 from fleet_rlm.skills.catalog import SkillCatalog
 from fleet_rlm.skills.errors import InvalidSkillSelectionError
 from fleet_rlm.skills.models import ResolvedSkills, SkillSelectionRef
@@ -40,11 +42,14 @@ def resolve_selected_skills(
     )
 
 
-def resolved_signature(resolved: ResolvedSkills):
+def resolved_signature(resolved: ResolvedSkills, *, recursion_enabled: bool = True) -> type[dspy.Signature]:
+    """Return the active output Signature with Fleet operating instructions."""
     base = resolved.signature or FleetRLMSignature
-    if not resolved.instructions:
-        return base
-    return base.with_instructions(f"{base.instructions}\n\n" + "\n\n".join(resolved.instructions))
+    return root_signature_for_recursion(
+        base,
+        recursion_enabled=recursion_enabled,
+        skill_instructions=resolved.instructions,
+    )
 
 
 def resolved_schema(resolved: ResolvedSkills) -> tuple[str, str]:

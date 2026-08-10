@@ -67,6 +67,7 @@ class RLMExecutionSpec:
 
     skill_cards: tuple[SkillCard, ...] = ()
     signature: type[dspy.Signature] = FleetRLMSignature
+    skill_instructions: tuple[str, ...] = ()
     output_schema_id: str = "fleet.default"
     output_schema_version: str = "1"
     tools: tuple[dspy.Tool, ...] = ()

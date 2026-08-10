@@ -720,6 +720,7 @@ class RLMRunner:
             signature=root_signature_for_recursion(
                 spec.signature,
                 recursion_enabled=context.delegation.recursive_options.enabled,
+                skill_instructions=spec.skill_instructions,
             ),
         )
 

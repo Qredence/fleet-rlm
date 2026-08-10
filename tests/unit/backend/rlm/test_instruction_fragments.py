@@ -35,15 +35,21 @@ def test_nonrecursive_root_signature_omits_only_the_optional_recursion_fragment(
     assert nonrecursive.endswith(DISCOVERY_RLM_INSTRUCTIONS)
 
 
-def test_skill_owned_signature_is_never_rewritten_by_fragment_composition() -> None:
+def test_custom_output_fields_stay_stable_while_fleet_policy_is_composed() -> None:
     import dspy
 
     class CustomResult(dspy.Signature):
         request: str = dspy.InputField()
         answer: str = dspy.OutputField()
 
-    assert root_signature_for_recursion(CustomResult, recursion_enabled=True) is CustomResult
-    assert root_signature_for_recursion(CustomResult, recursion_enabled=False) is CustomResult
+    recursive = root_signature_for_recursion(CustomResult, recursion_enabled=True)
+    nonrecursive = root_signature_for_recursion(CustomResult, recursion_enabled=False)
+
+    assert recursive is not CustomResult
+    assert recursive.input_fields.keys() == CustomResult.input_fields.keys()
+    assert recursive.output_fields.keys() == CustomResult.output_fields.keys()
+    assert "rlm_query(prompt=prompt)" in recursive.instructions
+    assert "rlm_query(prompt=prompt)" not in nonrecursive.instructions
 
 
 def test_fragment_composition_preserves_established_instruction_text() -> None:
