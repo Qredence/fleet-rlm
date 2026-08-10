@@ -15,7 +15,7 @@ from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInter
 from fleet_rlm.daytona.recursive_child_runtime import ChildRuntimeLease
 from fleet_rlm.rlm.events import Status, ToolCompleted, ToolFailed, ToolStarted
 from fleet_rlm.rlm.model_bundle import RLMModelBundle
-from fleet_rlm.rlm.recursive_calls import RecursiveRLMExecutor, RecursiveRLMOptions
+from fleet_rlm.rlm.recursive_calls import RLM_NATIVE_CHILD_DEPTH, RecursiveRLMExecutor, RecursiveRLMOptions
 
 
 def _executor(
@@ -73,6 +73,17 @@ def _executor(
         observer=observer,
         is_authorized=is_authorized,
     )
+
+
+def test_native_child_depth_is_a_fixed_invariant_not_an_options_surface() -> None:
+    import inspect
+
+    parameters = set(inspect.signature(RecursiveRLMOptions).parameters)
+    assert "max_depth" not in parameters
+    assert RLM_NATIVE_CHILD_DEPTH == 1
+    assert not hasattr(RecursiveRLMOptions(), "max_depth")
+    with pytest.raises(TypeError, match="max_depth"):
+        RecursiveRLMOptions(max_depth=2)  # type: ignore[call-arg]
 
 
 def test_recursive_tool_runs_fresh_native_child_and_redacts_observation() -> None:

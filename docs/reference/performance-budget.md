@@ -119,7 +119,7 @@ startup orphan-cleanup race fix:
   tests (84.60% coverage).
 
 The only intentional public/config schema delta remains removal of the fake
-`rlm.recursion_max_depth` setting. No temporary Turn/Run compatibility alias,
+`rlm.recursion_max_depth` setting. The native child boundary is `RLM_NATIVE_CHILD_DEPTH = 1`. No temporary Turn/Run compatibility alias,
 global Sandbox pool, distributed lock, event bus, repository factory, policy
 engine, RLM abstraction framework, or MLflow abstraction framework remains.
 

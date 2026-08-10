@@ -17,7 +17,7 @@ from fleet_rlm.rlm.dspy_interpreter_contract import CodeInterpreter
 from fleet_rlm.rlm.errors import RLMConfigError
 from fleet_rlm.rlm.lm_factory import build_lm, resolve_role_api_key, sanitize_base_url
 from fleet_rlm.rlm.model_bundle import RLMModelBundle
-from fleet_rlm.rlm.recursive_calls import RLM_RECURSION_MAX_DEPTH, RecursiveRLMExecutor, RecursiveRLMOptions
+from fleet_rlm.rlm.recursive_calls import RecursiveRLMExecutor, RecursiveRLMOptions
 
 ProbeInterpreterFactory = Callable[[], CodeInterpreter]
 
@@ -83,7 +83,7 @@ async def probe_root_lm(
     interpreter = interpreter_factory()
     recursive = RecursiveRLMExecutor(
         models=RLMModelBundle(root_lm=root_lm, sub_lm=root_lm),
-        options=RecursiveRLMOptions(max_depth=RLM_RECURSION_MAX_DEPTH, max_calls=1, max_prompt_chars=2_000),
+        options=RecursiveRLMOptions(max_calls=1, max_prompt_chars=2_000),
         child_runtime_factory=child_runtime_factory,
         deadline=time.monotonic() + 120,
     )

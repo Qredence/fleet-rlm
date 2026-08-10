@@ -646,7 +646,7 @@ def test_recursive_depth_fallback_span_records_mode(monkeypatch: pytest.MonkeyPa
     import time
 
     from fleet_rlm.rlm.model_bundle import RLMModelBundle
-    from fleet_rlm.rlm.recursive_calls import RecursiveRLMExecutor, RecursiveRLMOptions
+    from fleet_rlm.rlm.recursive_calls import RLM_NATIVE_CHILD_DEPTH, RecursiveRLMExecutor, RecursiveRLMOptions
 
     calls = _install_fake_mlflow(monkeypatch)
     adapter = dspy.JSONAdapter()
@@ -655,9 +655,10 @@ def test_recursive_depth_fallback_span_records_mode(monkeypatch: pytest.MonkeyPa
             dspy.utils.DummyLM([{"answer": "unused"}], adapter=adapter),
             dspy.utils.DummyLM([{"answer": "fallback-answer"}], adapter=adapter),
         ),
-        options=RecursiveRLMOptions(max_depth=1),
+        options=RecursiveRLMOptions(),
         child_runtime_factory=None,
         deadline=time.monotonic() + 30,
+        depth=RLM_NATIVE_CHILD_DEPTH,
     )
 
     with turn_trace(uuid4(), uuid4(), enabled=True):
@@ -672,7 +673,7 @@ def test_recursive_call_span_marks_failure_with_bounded_category(monkeypatch: py
     import time
 
     from fleet_rlm.rlm.model_bundle import RLMModelBundle
-    from fleet_rlm.rlm.recursive_calls import RecursiveRLMExecutor, RecursiveRLMOptions
+    from fleet_rlm.rlm.recursive_calls import RLM_NATIVE_CHILD_DEPTH, RecursiveRLMExecutor, RecursiveRLMOptions
 
     calls = _install_fake_mlflow(monkeypatch)
     adapter = dspy.JSONAdapter()
@@ -681,9 +682,10 @@ def test_recursive_call_span_marks_failure_with_bounded_category(monkeypatch: py
             dspy.utils.DummyLM([{"answer": "unused"}], adapter=adapter),
             dspy.utils.DummyLM([{"answer": "unused"}], adapter=adapter),
         ),
-        options=RecursiveRLMOptions(max_depth=1),
+        options=RecursiveRLMOptions(),
         child_runtime_factory=None,
         deadline=time.monotonic() + 30,
+        depth=RLM_NATIVE_CHILD_DEPTH,
     )
 
     def _boom(self: RecursiveRLMExecutor, prompt: str) -> str:

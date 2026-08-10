@@ -705,7 +705,7 @@ class RLMRunner:
         self._bind_context_capsule(context)
         recursive_executor = None
         if context.delegation.recursive_options.enabled:
-            if context.delegation.child_runtime_factory is None and context.delegation.recursive_options.max_depth > 1:
+            if context.delegation.child_runtime_factory is None:
                 raise RLMConfigError("recursive child runtime is unavailable")
             recursive_executor = RecursiveRLMExecutor(
                 models=context.execution.models,

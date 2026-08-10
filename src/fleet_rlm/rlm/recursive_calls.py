@@ -23,9 +23,10 @@ from fleet_rlm.rlm.events import Status
 from fleet_rlm.rlm.model_bundle import RLMModelBundle
 from fleet_rlm.rlm.tool_observer import ToolEventView, ToolObserver, observe_tool
 
-# Fleet supports exactly Root -> child RLM -> bounded Sub fallback. This is a
-# product invariant owned here, not an operator-facing policy knob.
-RLM_RECURSION_MAX_DEPTH = 2
+# Fleet supports exactly one native recursive child level followed by a
+# bounded Sub fallback. This is a product invariant owned here, not an
+# operator-facing policy knob.
+RLM_NATIVE_CHILD_DEPTH = 1
 
 
 @dataclass(frozen=True, slots=True)
@@ -33,7 +34,6 @@ class RecursiveRLMOptions:
     """Invocation limits for the custom recursive RLM Tool."""
 
     enabled: bool = False
-    max_depth: int = RLM_RECURSION_MAX_DEPTH
     max_calls: int = 4
     max_prompt_chars: int = 50_000
     child_max_iterations: int = 8
@@ -42,7 +42,6 @@ class RecursiveRLMOptions:
 
     def __post_init__(self) -> None:
         for name, value in (
-            ("max_depth", self.max_depth),
             ("max_calls", self.max_calls),
             ("max_prompt_chars", self.max_prompt_chars),
             ("child_max_iterations", self.child_max_iterations),
@@ -514,7 +513,7 @@ class RecursiveRLMExecutor:
         primary_failed = False
         try:
             self._ensure_authorized()
-            if call.child_depth >= self._options.max_depth:
+            if call.child_depth > RLM_NATIVE_CHILD_DEPTH:
                 answer, completion_outputs = self._run_depth_fallback(prompt, call)
             else:
                 cleanup_status = "not_acquired"
@@ -574,7 +573,7 @@ class RecursiveRLMExecutor:
 
 
 __all__ = [
-    "RLM_RECURSION_MAX_DEPTH",
+    "RLM_NATIVE_CHILD_DEPTH",
     "ChildRuntimeFactory",
     "RecursiveCallSummary",
     "RecursiveRLMExecutor",
