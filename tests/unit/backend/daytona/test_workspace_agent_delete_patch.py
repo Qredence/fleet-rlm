@@ -362,3 +362,47 @@ def test_patch_read_is_identity_pinned() -> None:
     assert "read_existing(" in patch_branch
     assert "expected_stat=target_stat" in patch_branch
     assert "stat.S_ISREG(target_stat.st_mode)" in patch_branch
+
+
+def test_guarded_delete_symlink_and_fifo_fail_closed(tmp_path: Path) -> None:
+    _write(tmp_path, "target.txt", b"target")
+    root = _layout(tmp_path)[1]
+    link = root / "link.txt"
+    pipe = root / "pipe"
+    link.symlink_to("target.txt")
+    os.mkfifo(pipe)
+    sandbox, _process = _sandbox()
+    expected = hashlib.sha256(b"target").hexdigest()
+
+    with pytest.raises(ValueError, match="unsafe"):
+        _run(tmp_path, sandbox, "delete", "link.txt", expected_sha256=expected)
+    with pytest.raises(ValueError, match="unsafe"):
+        _run(tmp_path, sandbox, "delete", "pipe", expected_sha256=expected)
+    assert link.is_symlink()
+    assert pipe.exists()
+    assert (root / "target.txt").read_bytes() == b"target"
+
+
+def test_guarded_delete_locks_and_revalidates_the_exact_compared_revision() -> None:
+    from fleet_rlm.daytona.workspace_agent import build_workspace_agent_code
+
+    code = build_workspace_agent_code(
+        volume_root="/home/daytona/fleet",
+        root="/home/daytona/fleet/sessions/s/workspace",
+        operation="delete",
+        relative="note.txt",
+        allow_missing=False,
+        max_bytes=1024,
+        limit=0,
+        overwrite=False,
+        content_b64="",
+        expected_sha256="0" * 64,
+    )
+    delete_branch = code[code.index("if operation == 'delete':") : code.index("if operation == 'patch':")]
+    lock_at = delete_branch.index("lock_existing(parent_fd, relative_parts[-1])")
+    compare_at = delete_branch.index("hashlib.sha256(source).hexdigest() != expected_sha256")
+    revalidate_at = delete_branch.index("current_stat = os.stat(relative_parts[-1]")
+    unlink_at = delete_branch.index("os.unlink(relative_parts[-1], dir_fd=parent_fd)")
+    assert lock_at < compare_at < revalidate_at < unlink_at
+    assert "(current_stat.st_dev, current_stat.st_ino)" in delete_branch
+    assert "if locked_fd is not None:" in delete_branch

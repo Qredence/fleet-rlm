@@ -166,19 +166,53 @@ class _SubprocessAgentProcess:
         return SimpleNamespace(exit_code=completed.returncode, result=completed.stdout)
 
 
+class _DelayedDeleteBeforeUnlinkAgentProcess:
+    """Sleep between guarded-delete checksum comparison and unlink."""
+
+    def __init__(self, coordination_path: Path) -> None:
+        self.calls = 0
+        self._barrier = asyncio.Event()
+        self._coordination_path = coordination_path
+
+    async def code_run(self, code: str) -> SimpleNamespace:
+        self.calls += 1
+        if self.calls >= 2:
+            self._barrier.set()
+        await self._barrier.wait()
+        delayed = code
+        gate = str(self._coordination_path)
+        if "operation = 'delete'" in code:
+            unlink_line = "                os.unlink(relative_parts[-1], dir_fd=parent_fd)"
+            inserted = f"                open({gate!r}, 'w').close()\n                time.sleep(0.25)\n{unlink_line}"
+            delayed = delayed.replace(unlink_line, inserted, 1)
+        if "operation = 'write'" in code:
+            branch = "    if operation == 'write':"
+            waiter = f"    while not os.path.exists({gate!r}):\n        time.sleep(0.01)\n{branch}"
+            delayed = delayed.replace(branch, waiter, 1)
+        completed = await asyncio.to_thread(
+            subprocess.run,
+            [sys.executable, "-c", delayed],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        return SimpleNamespace(exit_code=completed.returncode, result=completed.stdout)
+
+
 @dataclass(slots=True)
 class _SubprocessAgentSandbox:
     process: _SubprocessAgentProcess
 
 
 def _subprocess_sessions(
-    tmp_path: Path, *, operation: str
+    tmp_path: Path, *, operation: str | tuple[str, ...], process: object | None = None
 ) -> tuple[_DaytonaWorkspaceFileSession, _DaytonaWorkspaceFileSession]:
     volume_root = tmp_path / "volume"
     root = volume_root / "workspaces" / "shared" / "files"
     root.mkdir(parents=True)
     (root / "note.txt").write_text("alpha", encoding="utf-8")
-    process = _SubprocessAgentProcess(mutation_delay=operation)
+    if process is None:
+        process = _SubprocessAgentProcess(mutation_delay=operation)
     sandbox = _SubprocessAgentSandbox(process)
     workspace = AsyncDaytonaSessionWorkspaceFS(
         sandbox,
@@ -228,3 +262,45 @@ async def test_generated_append_agent_serializes_stale_checksum_across_processes
         "alpha-beta",
         "alpha-gamma",
     }
+
+
+@pytest.mark.asyncio
+async def test_generated_delete_agent_cannot_remove_a_newer_revision_after_a_stale_checksum(
+    tmp_path: Path,
+) -> None:
+    first, second = _subprocess_sessions(
+        tmp_path,
+        operation=("delete", "write"),
+        process=_DelayedDeleteBeforeUnlinkAgentProcess(tmp_path / "delete-compared"),
+    )
+    checksum = hashlib.sha256(b"alpha").hexdigest()
+
+    results = await asyncio.gather(
+        first.delete_path("note.txt", expected_sha256=checksum),
+        second.write_text("note.txt", "beta", overwrite=True, expected_sha256=checksum),
+        return_exceptions=True,
+    )
+
+    assert sum(not isinstance(result, Exception) for result in results) == 1
+    assert sum(isinstance(result, ProviderWorkspaceConflictError) for result in results) == 1
+    note = tmp_path / "volume" / "workspaces" / "shared" / "files" / "note.txt"
+    if isinstance(results[1], Exception):
+        assert not note.exists()
+    else:
+        assert note.read_text(encoding="utf-8") == "beta"
+
+
+@pytest.mark.asyncio
+async def test_generated_delete_agent_allows_only_one_owner_of_one_revision(tmp_path: Path) -> None:
+    first, second = _subprocess_sessions(tmp_path, operation=("delete", "delete"))
+    checksum = hashlib.sha256(b"alpha").hexdigest()
+
+    results = await asyncio.gather(
+        first.delete_path("note.txt", expected_sha256=checksum),
+        second.delete_path("note.txt", expected_sha256=checksum),
+        return_exceptions=True,
+    )
+
+    assert sum(not isinstance(result, Exception) for result in results) == 1
+    assert sum(isinstance(result, FileNotFoundError) for result in results) == 1
+    assert not (tmp_path / "volume" / "workspaces" / "shared" / "files" / "note.txt").exists()
