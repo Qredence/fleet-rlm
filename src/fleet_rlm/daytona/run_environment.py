@@ -90,6 +90,8 @@ class LivePreparedCapabilities(PreparedHostCapabilities):
         preparation_notices: tuple[Any, ...] = (),
         workspace_memory_digest: str = "",
         memory_candidates: Any = None,
+        memory_store: Any = None,
+        memory_candidate_categories: tuple[str, ...] = (),
     ) -> None:
         super().__init__(
             spec,
@@ -106,6 +108,23 @@ class LivePreparedCapabilities(PreparedHostCapabilities):
         ):
             workspace_memory_digest = ""
         self.workspace_memory_digest = workspace_memory_digest
+        self._memory_store = memory_store
+        self._memory_candidate_categories = memory_candidate_categories
+
+    def promote_memory_candidates(self, candidates: tuple[Any, ...]) -> Any:
+        """Promote accepted Run candidates against live active memory best-effort."""
+        from fleet_rlm.files.memory_candidates import MemoryCandidatePromotionResult, promote_memory_candidates
+
+        if self._memory_store is None:
+            return MemoryCandidatePromotionResult(
+                proposed_count=len(candidates),
+                reasons=("store_unavailable",) if candidates else (),
+            )
+        return promote_memory_candidates(
+            store=self._memory_store,
+            candidates=candidates,
+            allowed_categories=self._memory_candidate_categories,
+        )
 
 
 class _DaytonaRunSink:
@@ -404,6 +423,8 @@ class _LiveCapabilityPreparer:
             preparation_notices=notices,
             workspace_memory_digest=memory_digest,
             memory_candidates=memory_candidates,
+            memory_store=memory_store,
+            memory_candidate_categories=self.settings.rlm_autonomous_memory_categories,
         )
 
 

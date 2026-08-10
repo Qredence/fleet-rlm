@@ -678,3 +678,62 @@ async def test_non_success_removes_run_local_artifact_candidate_bytes(status: st
     assert isinstance(receipt, FailedRunReceipt)
     assert sink.values == {}
     assert sink.removals == [candidate.staging_path]
+
+
+@pytest.mark.asyncio
+async def test_memory_candidate_promotion_happens_after_atomic_commit_and_fails_soft() -> None:
+
+    from fleet_rlm.chat.run_lifecycle import ClaimedRun, CommittedTurnReceipt, RunLifecycleService, _RunClaimToken
+    from fleet_rlm.files.memory_candidates import MemoryCandidate
+    from fleet_rlm.rlm.dspy_contract import PredictionResult
+    from fleet_rlm.rlm.outcome import RLMOutcome
+    from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
+
+    run_id, session_id = uuid4(), uuid4()
+    access = TurnAccess(uuid4(), uuid4())
+
+    async def not_cancelled() -> bool:
+        return False
+
+    turn = ClaimedRun(
+        run_id,
+        session_id,
+        access,
+        TurnInput("promote this later"),
+        SessionHistory(),
+        not_cancelled,
+        _RunClaimToken(uuid4()),
+    )
+    candidate = MemoryCandidate(
+        candidate_id="cand00000001",
+        category="Project",
+        learning="settlement-visible learning",
+        byte_size=len(b"settlement-visible learning"),
+    )
+    order: list[str] = []
+
+    class Store:
+        async def commit(self, claimed, committed, artifacts):
+            del claimed
+            order.append("commit")
+            return CommittedTurnReceipt(run_id, 1, committed, artifacts)
+
+    class BrokenPromotion:
+        def __call__(self, candidates):
+            assert candidates == (candidate,)
+            order.append("promote")
+            raise RuntimeError("promotion storage unavailable")
+
+    receipt = await RunLifecycleService(Store(), max_artifact_bytes=1024).finish(
+        turn,
+        RLMOutcome(
+            "completed",
+            prediction=PredictionResult("answer", {"answer": "done"}, "fleet.default", "1"),
+            memory_candidates=(candidate,),
+        ),
+        memory_promotion=BrokenPromotion(),
+    )
+
+    assert order == ["commit", "promote"]
+    assert receipt.checkpoint_version == 1
+    # The turn remains durably committed; optional promotion failure is only a warning.

@@ -13,6 +13,7 @@ from typing import Any, Protocol, Self, cast
 import dspy
 from dspy.utils.exceptions import AdapterParseError
 
+from fleet_rlm.files.memory_candidates import MemoryCandidate
 from fleet_rlm.observability.failure_diagnostics import normalize_turn_failure, trace_failure_category
 from fleet_rlm.observability.turn_tracing import turn_phase_span
 from fleet_rlm.rlm.context import RLMExecutionContext, RLMExecutionSpec
@@ -63,6 +64,12 @@ from fleet_rlm.rlm.tool_observer import ToolEventView, observe_tool
 
 logger = logging.getLogger(__name__)
 _MAX_DETAIL_EVENTS = 1024
+
+
+def _drain_memory_candidates(context: RLMExecutionContext) -> tuple[Any, ...]:
+    """Drain optional Run candidates, preserving legacy custom capabilities."""
+    drain = getattr(context.capabilities, "drain_memory_candidates", None)
+    return tuple(drain()) if callable(drain) else ()
 
 
 def _recursive_summary(executor: RecursiveRLMExecutor | None) -> RecursiveCallSummary:
@@ -624,7 +631,10 @@ class RLMRunner:
                 )
             )
         finally:
+            if outcome and outcome[-1].terminal_status != "completed":
+                _drain_memory_candidates(context)
             if not outcome:
+                _drain_memory_candidates(context)
                 outcome.append(RLMOutcome(terminal_status="failed", public_error_message="Turn failed"))
 
     async def _run_success(
@@ -663,6 +673,7 @@ class RLMRunner:
                 prediction=result,
                 usage=observed_usage(prediction[-1], duration_ms=duration_ms),
                 artifact_candidates=context.capabilities.drain_artifact_candidates(),
+                memory_candidates=tuple(cast("tuple[MemoryCandidate, ...]", _drain_memory_candidates(context))),
                 execution_details=tuple(observations.details),
                 duration_ms=duration_ms,
             )

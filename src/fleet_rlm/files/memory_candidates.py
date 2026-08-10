@@ -12,18 +12,26 @@ from __future__ import annotations
 import hashlib
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from threading import Lock
 from typing import Literal
 from uuid import UUID
 
 from fleet_rlm.files.memory_models import (
+    WORKSPACE_MEMORY_MAX_LIST_LIMIT,
     WORKSPACE_MEMORY_MAX_RECORD_BYTES,
     WorkspaceMemoryCategoryError,
+    WorkspaceMemoryConflictError,
+    WorkspaceMemoryEntry,
     WorkspaceMemoryIdError,
     WorkspaceMemoryRecordError,
+    WorkspaceMemoryStore,
+    WorkspaceMemoryStoreFullError,
+    format_workspace_memory_v3_record,
     normalize_workspace_memory_category,
     normalize_workspace_memory_id,
     normalize_workspace_memory_learning,
+    workspace_memory_record_id,
 )
 
 WORKSPACE_MEMORY_CANDIDATE_NAMESPACE = "workspace_memory"
@@ -49,6 +57,170 @@ class MemoryCandidate:
     byte_size: int
     supersedes_id: str | None = None
     source: Literal["agent_candidate"] = WORKSPACE_MEMORY_CANDIDATE_SOURCE
+
+
+@dataclass(frozen=True, slots=True)
+class MemoryCandidatePromotionResult:
+    """Bounded operational outcome for one post-commit promotion batch."""
+
+    proposed_count: int = 0
+    promoted_count: int = 0
+    duplicate_count: int = 0
+    dropped_count: int = 0
+    failure_count: int = 0
+    candidate_bytes: int = 0
+    reasons: tuple[str, ...] = ()
+
+
+def promote_memory_candidates(
+    *,
+    store: WorkspaceMemoryStore,
+    candidates: Sequence[MemoryCandidate],
+    allowed_categories: Sequence[str],
+    clock: Callable[[], datetime] | None = None,
+) -> MemoryCandidatePromotionResult:
+    """Best-effort, post-commit promotion to v3 agent-candidate records.
+
+    Policy and candidate normalization happen before any store operation. One
+    bounded active-view snapshot is used for dedupe; the mounted append remains
+    the authoritative supersession/ID conflict gate for races.
+    """
+    proposed_count = len(candidates)
+    promoted_count = duplicate_count = dropped_count = failure_count = candidate_bytes = 0
+    reasons: list[str] = []
+    if proposed_count > WORKSPACE_MEMORY_CANDIDATE_MAX_COUNT:
+        return MemoryCandidatePromotionResult(
+            proposed_count=proposed_count,
+            dropped_count=proposed_count,
+            candidate_bytes=sum(item.byte_size for item in candidates),
+            reasons=("candidate_limit",),
+        )
+    try:
+        allowed = set(normalize_memory_candidate_categories(tuple(allowed_categories)))
+        if not allowed:
+            raise WorkspaceMemoryCategoryError
+    except WorkspaceMemoryCategoryError:
+        return MemoryCandidatePromotionResult(
+            proposed_count=proposed_count,
+            dropped_count=proposed_count,
+            candidate_bytes=sum(item.byte_size for item in candidates),
+            reasons=("policy_denied",),
+        )
+
+    prepared: list[tuple[str, str, str | None]] = []
+    batch_claims: set[tuple[str, str]] = set()
+    for candidate in candidates:
+        try:
+            normalized = normalize_memory_candidate_categories((candidate.category,))[0]
+            learning = normalize_workspace_memory_learning(candidate.learning)
+            supersedes_id = (
+                None if candidate.supersedes_id is None else normalize_workspace_memory_id(candidate.supersedes_id)
+            )
+            byte_size = len(learning.encode("utf-8"))
+            if byte_size > WORKSPACE_MEMORY_CANDIDATE_MAX_LEARNING_BYTES:
+                raise WorkspaceMemoryRecordError
+            if byte_size != candidate.byte_size:
+                raise WorkspaceMemoryRecordError
+            if candidate.source != WORKSPACE_MEMORY_CANDIDATE_SOURCE:
+                raise WorkspaceMemoryRecordError
+        except (WorkspaceMemoryCategoryError, WorkspaceMemoryIdError, WorkspaceMemoryRecordError):
+            dropped_count += 1
+            reasons.append("invalid_entry")
+            continue
+        if normalized not in allowed:
+            dropped_count += 1
+            reasons.append("policy_denied")
+            continue
+        candidate_bytes += byte_size
+        batch_claim = (normalized, learning)
+        if batch_claim in batch_claims:
+            duplicate_count += 1
+            continue
+        batch_claims.add(batch_claim)
+        prepared.append((normalized, learning, supersedes_id))
+
+    if prepared:
+        try:
+            active_entries = _active_memory_entries(store)
+        except Exception:
+            return MemoryCandidatePromotionResult(
+                proposed_count=proposed_count,
+                duplicate_count=duplicate_count,
+                dropped_count=dropped_count,
+                failure_count=len(prepared),
+                candidate_bytes=candidate_bytes,
+                reasons=(*reasons, "active_memory_unavailable"),
+            )
+    else:
+        active_entries = ()
+    active_content = {(entry.category, entry.learning) for entry in active_entries if entry.active}
+    active_ids = {entry.memory_id for entry in active_entries if entry.active}
+    now = clock or (lambda: datetime.now(UTC))
+    for prepared_index, (normalized, learning, supersedes_id) in enumerate(prepared):
+        if (normalized, learning) in active_content:
+            duplicate_count += 1
+            continue
+        if supersedes_id is not None and supersedes_id not in active_ids:
+            dropped_count += 1
+            reasons.append("supersedes_not_active")
+            continue
+        try:
+            promoted_at = now()
+            if promoted_at.tzinfo is None:
+                promoted_at = promoted_at.replace(tzinfo=UTC)
+            timestamp = promoted_at.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+            record = format_workspace_memory_v3_record(
+                learning,
+                normalized,
+                memory_id=workspace_memory_record_id(timestamp, normalized, learning),
+                created_at=timestamp,
+                updated_at=timestamp,
+                source=WORKSPACE_MEMORY_CANDIDATE_SOURCE,
+                supersedes_id=supersedes_id,
+            )
+        except (WorkspaceMemoryRecordError, UnicodeError, ValueError, OverflowError):
+            dropped_count += 1
+            reasons.append("invalid_entry")
+            continue
+        try:
+            store.append_record(record)
+        except WorkspaceMemoryConflictError as exc:
+            dropped_count += 1
+            reasons.append(exc.detail or "promotion_conflict")
+            continue
+        except WorkspaceMemoryStoreFullError:
+            failure_count += 1 + (len(prepared) - prepared_index - 1)
+            reasons.append("store_full")
+            break
+        except Exception:
+            failure_count += 1
+            reasons.append("promotion_failed")
+            continue
+        promoted_count += 1
+        active_content.add((normalized, learning))
+        active_ids.add(workspace_memory_record_id(timestamp, normalized, learning))
+    return MemoryCandidatePromotionResult(
+        proposed_count=proposed_count,
+        promoted_count=promoted_count,
+        duplicate_count=duplicate_count,
+        dropped_count=dropped_count,
+        failure_count=failure_count,
+        candidate_bytes=candidate_bytes,
+        reasons=tuple(reasons[:32]),
+    )
+
+
+def _active_memory_entries(store: WorkspaceMemoryStore) -> tuple[WorkspaceMemoryEntry, ...]:
+    """Read all active entries through the existing stable-ID pagination contract."""
+    entries: list[WorkspaceMemoryEntry] = []
+    cursor: str | None = None
+    for _page in range(64):
+        page = store.list_entries(after=cursor, limit=WORKSPACE_MEMORY_MAX_LIST_LIMIT)
+        entries.extend(entry for entry in page.entries if entry.active)
+        if not page.truncated or page.next_cursor is None:
+            return tuple(entries)
+        cursor = page.next_cursor
+    raise RuntimeError("active Workspace Memory enumeration exceeded its safety bound")
 
 
 class MemoryCandidateToolError(RuntimeError):
@@ -171,6 +343,8 @@ __all__ = [
     "WORKSPACE_MEMORY_CANDIDATE_SOURCE",
     "MemoryCandidate",
     "MemoryCandidateCollector",
+    "MemoryCandidatePromotionResult",
     "MemoryCandidateToolError",
     "normalize_memory_candidate_categories",
+    "promote_memory_candidates",
 ]

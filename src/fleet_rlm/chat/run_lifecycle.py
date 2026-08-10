@@ -212,6 +212,7 @@ class RunLifecycle(Protocol):
         *,
         artifact_sink: RunArtifactSink | None = None,
         result_snapshot_sink: ResultSnapshotSink | None = None,
+        memory_promotion: Any = None,
     ) -> RunSettlement: ...
 
     async def request_cancel(self, access: TurnAccess, run_id: UUID) -> CancelResult: ...
@@ -254,6 +255,7 @@ class RunLifecycleService:
         *,
         artifact_sink: RunArtifactSink | None = None,
         result_snapshot_sink: ResultSnapshotSink | None = None,
+        memory_promotion: Any = None,
     ) -> RunSettlement:
         """
         Finalize a Run with a successful outcome or record its failure.
@@ -371,8 +373,58 @@ class RunLifecycleService:
             return await self._transition_receipt(run, FailClaim(_claim_failure(failure), failure.usage))
 
         await self._reconcile_snapshot_after_commit(snapshot_task, result_snapshot_sink, snapshot_path)
+        await self._promote_memory_candidates_after_commit(resolution, memory_promotion)
         await self._settle_staging(artifact_sink, candidates)
         return receipt
+
+    async def _promote_memory_candidates_after_commit(
+        self,
+        resolution: RLMOutcome | RunFailure,
+        memory_promotion: Any,
+    ) -> None:
+        """Run one optional, metadata-bounded promotion after the durable commit."""
+        candidates = tuple(resolution.memory_candidates) if isinstance(resolution, RLMOutcome) else ()
+        if not candidates or not callable(memory_promotion):
+            return
+        with turn_phase_span(
+            "Turn.memory_candidate_promotion",
+            inputs={
+                "candidate_count": len(candidates),
+                "candidate_bytes": sum(int(getattr(item, "byte_size", 0)) for item in candidates),
+            },
+        ) as span:
+            task, task_cancelled = await _settle_owned(
+                asyncio.ensure_future(asyncio.to_thread(memory_promotion, candidates))
+            )
+            try:
+                result = task.result()
+            except BaseException as exc:
+                logger.warning(
+                    "Memory Candidate promotion failed after the Turn commit; Turn remains committed", exc_info=exc
+                )
+                # The Turn is already durable; unlike commit ownership, a post-commit
+                # optional side effect preserves the receipt rather than re-raising.
+                del task_cancelled
+                span.set_outputs({"promotion_outcome": "failed", "promoted_count": 0})
+                return
+            promoted = int(getattr(result, "promoted_count", 0))
+            duplicates = int(getattr(result, "duplicate_count", 0))
+            dropped = int(getattr(result, "dropped_count", 0))
+            failures = int(getattr(result, "failure_count", 0))
+            span.set_outputs(
+                {
+                    "promotion_outcome": "failed" if failures else "completed",
+                    "promoted_count": promoted,
+                    "duplicate_count": duplicates,
+                    "dropped_count": dropped,
+                    "failure_count": failures,
+                }
+            )
+            if failures:
+                logger.warning(
+                    "Memory Candidate promotion dropped %d candidate(s) after the Turn commit; Turn remains committed",
+                    failures,
+                )
 
     async def request_cancel(self, access: TurnAccess, run_id: UUID) -> CancelResult:
         return await self._store.request_cancel(access, run_id)

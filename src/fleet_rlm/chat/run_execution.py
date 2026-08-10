@@ -373,12 +373,20 @@ class RunExecutionDriver:
             settlement_inputs["duration_ms"] = resolution.duration_ms
             settlement_inputs["artifact_candidate_count"] = len(resolution.artifact_candidates)
             settlement_inputs["iterations"] = resolution.usage.get("iterations")
+        if isinstance(resolution, RLMOutcome):
+            settlement_inputs["memory_candidate_count"] = len(resolution.memory_candidates)
+        capabilities = getattr(prepared.execution, "capabilities", None)
+        memory_promotion = getattr(capabilities, "promote_memory_candidates", None)
+        finish_arguments: dict[str, object] = {}
+        if callable(memory_promotion):
+            finish_arguments["memory_promotion"] = memory_promotion
         with turn_phase_span("Turn.settlement", inputs=settlement_inputs):
             return await self._lifecycle.finish(
                 run,
                 resolution,
                 artifact_sink=prepared.artifact_sink,
                 result_snapshot_sink=prepared.result_snapshot_sink,
+                **finish_arguments,
             )
 
     async def _settle_cancellation(

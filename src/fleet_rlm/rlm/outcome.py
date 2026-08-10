@@ -7,6 +7,7 @@ from types import MappingProxyType
 from typing import Literal, TypeAlias
 
 from fleet_rlm.artifacts.models import ArtifactCandidate
+from fleet_rlm.files.memory_candidates import MemoryCandidate
 from fleet_rlm.rlm.dspy_contract import PredictionResult, RLMUsage, empty_rlm_usage, validate_rlm_usage
 from fleet_rlm.rlm.events import (
     AttachmentRead,
@@ -48,6 +49,7 @@ class RLMOutcome:
     prediction: PredictionResult | None = None
     usage: RLMUsage = field(default_factory=empty_rlm_usage)
     artifact_candidates: tuple[ArtifactCandidate, ...] = ()
+    memory_candidates: tuple[MemoryCandidate, ...] = ()
     execution_details: tuple[ExecutionDetail, ...] = ()
     public_error_message: str | None = None
     duration_ms: int | None = None

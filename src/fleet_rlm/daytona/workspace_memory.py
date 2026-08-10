@@ -25,6 +25,7 @@ from fleet_rlm.files.memory_models import (
     WORKSPACE_MEMORY_INJECTION_TAIL_BYTES,
     WORKSPACE_MEMORY_MAX_LIST_LIMIT,
     WorkspaceMemoryAppendResult,
+    WorkspaceMemoryConflictError,
     WorkspaceMemoryEntry,
     WorkspaceMemoryEntryNotFoundError,
     WorkspaceMemoryListResult,
@@ -41,6 +42,7 @@ from fleet_rlm.files.memory_models import (
     validate_workspace_memory_record,
 )
 from fleet_rlm.files.volume_paths import VolumePaths, as_posix
+from fleet_rlm.files.workspace_models import WorkspaceConflictError
 
 _MEMORY_DIR_NAME = "memory"
 _MEMORY_NAME = "MEMORIES.md"
@@ -279,6 +281,11 @@ class DaytonaWorkspaceMemoryStore:
                 raise ValueError("invalid memory response")
             invalidate_workspace_memory_digest(self._volume_root)
             return WorkspaceMemoryAppendResult(entry_bytes=len(data), total_bytes=total_bytes)
+        except WorkspaceConflictError as exc:
+            detail = str(getattr(exc, "detail", "") or (exc.args[1] if len(exc.args) > 1 else ""))
+            if detail in {"memory_id_collision", "supersedes_not_active"}:
+                raise WorkspaceMemoryConflictError(detail) from exc
+            raise WorkspaceMemoryStoreUnavailableError() from exc
         except Exception as exc:
             if isinstance(exc, WorkspaceMemoryStoreFullError):
                 raise

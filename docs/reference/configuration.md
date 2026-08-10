@@ -117,8 +117,9 @@ and deletes its Sandbox before Root success can commit.
 `rlm.autonomous_memory_categories` is a TOML-only list of canonical Workspace
 Memory category names and defaults to `[]`, which omits `propose_memory` from
 the Root Tool inventory entirely. A non-empty profile allowlist enables a
-Root-only, Run-scoped candidate collector; it does not grant promotion or
-change explicit-user memory behavior.
+Root-only, Run-scoped candidate collector and permits best-effort promotion only
+after a successful durable Turn commit; it does not change explicit-user memory
+behavior.
 
 All committed profiles use `deepseek-v4-flash` for both Root and Sub. The
 interactive `daytona` and `daytona-recursive` profiles route through OpenCode

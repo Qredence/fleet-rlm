@@ -501,6 +501,14 @@ class WorkspaceMemoryStoreUnavailableError(RuntimeError):
     """Workspace Memory could not safely complete its storage operation."""
 
 
+class WorkspaceMemoryConflictError(WorkspaceMemoryStoreUnavailableError):
+    """One stable mounted-memory write conflict retained for candidate promotion."""
+
+    def __init__(self, detail: str) -> None:
+        super().__init__("Workspace Memory write conflicts with current active state")
+        self.detail = detail
+
+
 class WorkspaceMemoryStore(Protocol):
     """Runtime-neutral durable Workspace Memory boundary."""
 

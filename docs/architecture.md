@@ -217,8 +217,16 @@ otherwise the Tool and event view are absent. A proposal records only an
 immutable, bounded `agent_candidate` learning plus category and optional
 memory-ID target in host Run state. It performs no Workspace Memory, Volume, or
 database write, recursive children cannot call it, and Tool events project
-category/count/byte metadata rather than learning text. Durable promotion waits
-for the separate successful post-commit settlement seam.
+category/count/byte metadata rather than learning text. Failed, cancelled,
+timed-out, or settlement-failed Runs discard the proposal without a memory
+write. After a successful durable assistant-Turn commit, lifecycle settlement
+may best-effort-promote valid candidates as v3 `source:agent_candidate` rows:
+category policy and active memory content are rechecked, exact active category
+plus learning content dedupes, and only an active durable supersession target
+is honored. Post-commit promotion failure records a bounded warning/trace
+outcome and never rolls back or edits the committed Turn. Replay does not
+re-run proposal or promotion. This delivery is post-commit best-effort, not an
+exactly-once crash-recovered side-effect ledger.
 
 `edit_memory`
 upgrades legacy rows to v3 or replaces v3 while preserving the id and

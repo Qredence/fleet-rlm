@@ -1082,6 +1082,27 @@ def test_workspace_agent_edit_preserves_v3_supersession_and_mixed_file_bytes(tmp
     assert "supersedes:aaaa" not in after
 
 
+def test_mounted_memory_conflict_details_survive_for_candidate_promotion(tmp_path: Path) -> None:
+    from fleet_rlm.files.memory_models import WorkspaceMemoryConflictError, format_workspace_memory_v3_record
+
+    store, _root, _process = _store(tmp_path)
+    store.append_record("- [2026-08-11T00:00:00Z] **Project** <!-- id:55550001 -->: existing policy\n")
+    dangling = format_workspace_memory_v3_record(
+        "uses a target that is not active",
+        "Project",
+        memory_id="aaaa0001",
+        created_at="2026-08-11T01:00:00Z",
+        updated_at="2026-08-11T01:00:00Z",
+        source="agent_candidate",
+        supersedes_id="ffff0000",
+    )
+
+    with pytest.raises(WorkspaceMemoryConflictError) as captured:
+        store.append_record(dangling)
+
+    assert captured.value.detail == "supersedes_not_active"
+
+
 def test_v3_memory_id_participates_in_append_collision_targeting(tmp_path: Path) -> None:
     from fleet_rlm.files.memory_models import format_workspace_memory_v3_record, workspace_memory_record_id
 
