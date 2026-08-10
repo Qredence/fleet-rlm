@@ -92,3 +92,40 @@ a future refactored-capacity benchmark puts recursive create + cleanup at or
 above 15% of total Run p95, or if workspace I/O lifecycle violates an explicit
 product SLO. Do not change recursive isolation or share child interpreters as
 the default optimization.
+
+## Phase 8 architecture freeze certification
+
+Certified at commit `5e2e257b`, after the P1–P7 structural changes and the
+startup orphan-cleanup race fix:
+
+- Phase 1 stream: `.scratch/phase8/daytona-phase1-stream-5e2e257b.json`
+  passed with native root DSPy RLM, Attachment access, one single semantic
+  call plus one batched call, broker cleanup, `typed SUBMIT`, and terminal
+  ordering in 102 seconds.
+- Phase 2 recursion: `.scratch/fleet-rlm-recursive-runtime/evidence/daytona-dspy-recursive-5e2e257b.json`
+  passed with one dedicated native DSPy child interpreter, no grandchild,
+  sibling-scope isolation, and strict cleanup. Turn: 59.6s; child: 13.9s.
+- Complete Daytona MVP: `.scratch/phase8/daytona-mvp-5e2e257b.json` passed
+  with Attachment preparation, Artifact publication, stateful RLM iterations,
+  fresh interpreter replacement, Workspace reload, secret audit, and cleanup
+  in 197 seconds.
+- `tests/live/backend/test_attachment_artifact_durability.py` and
+  `tests/live/backend/test_url_cache_durability.py` passed after loading the
+  repository environment.
+- `uv run fleet doctor daytona` passed repeatedly, proving policy, database,
+  Volume, snapshot, native RLM construction, scoped interpreter, and cleanup.
+- `make check` passed after the last live and composition fixes: API/stream
+  sync, Alembic, codebase tree, docs, harness, backend tests, and 192 TUI
+  tests (84.60% coverage).
+
+The only intentional public/config schema delta remains removal of the fake
+`rlm.recursion_max_depth` setting. No temporary Turn/Run compatibility alias,
+global Sandbox pool, distributed lock, event bus, repository factory, policy
+engine, RLM abstraction framework, or MLflow abstraction framework remains.
+
+One narrow production fix was required before freeze: the startup orphan sweep
+must not provision an ephemeral Daytona sandbox when the Workspace has no
+committed artifacts, completed Runs, or active Runs. That sweep is skipped in
+that empty case because it cannot improve correctness and can race the first
+live Volume acquisition.
+
