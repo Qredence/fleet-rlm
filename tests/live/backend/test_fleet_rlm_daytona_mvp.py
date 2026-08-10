@@ -819,8 +819,8 @@ def test_complete_daytona_mvp_through_fastapi(
                     headers={"Idempotency-Key": f"live-mvp-first-{uuid4()}"},
                 )
                 assert first.status_code == 200
-                first_run_id = UUID(first.headers["x-fleet-run-id"])
                 first_chunks, first_done = _sse_chunks(first)
+                first_run_id = UUID(str(next(chunk["messageId"] for chunk in first_chunks if chunk["type"] == "start")))
                 assert first_delta_probe.first_delta_at is not None, _sse_finish_diagnostic(first_chunks)
                 first_delta_ms = int((first_delta_probe.first_delta_at - first_started) * 1000)
                 _assert_skill_lifecycle(first_chunks, skill_id=skill.card.id, version=skill.card.version)
@@ -931,8 +931,10 @@ def test_complete_daytona_mvp_through_fastapi(
                     headers={"Idempotency-Key": f"live-mvp-second-{uuid4()}"},
                 )
                 assert second.status_code == 200
-                second_run_id = UUID(second.headers["x-fleet-run-id"])
                 second_chunks, second_done = _sse_chunks(second)
+                second_run_id = UUID(
+                    str(next(chunk["messageId"] for chunk in second_chunks if chunk["type"] == "start"))
+                )
                 first_stream_count, first_stream_fields = _streaming_evidence(first_chunks)
                 second_stream_count, second_stream_fields = _streaming_evidence(second_chunks)
                 _assert_skill_lifecycle(second_chunks, skill_id=skill.card.id, version=skill.card.version)
