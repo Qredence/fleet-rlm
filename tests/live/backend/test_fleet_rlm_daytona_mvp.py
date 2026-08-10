@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+import asyncio
 import hashlib
 import importlib.metadata
 import json
@@ -543,41 +544,42 @@ def _sandbox_environment_names(sandbox: Any) -> set[str]:
     return set(json.loads(result.result.strip()))
 
 
-def _retry_cleanup(operation: Any) -> bool:
+async def _retry_cleanup(operation: Any) -> bool:
     for attempt, delay in enumerate((0.0, *_CLEANUP_RETRY_DELAYS)):
         try:
-            operation()
+            await operation()
             return True
         except Exception:
             if attempt == len(_CLEANUP_RETRY_DELAYS):
                 return False
             if delay:
-                time.sleep(delay)
+                await asyncio.sleep(delay)
     return False
 
 
-def _strict_cleanup(resources: Any, sandbox_ids: set[str], volume_name: str) -> tuple[str, ...]:
+async def _strict_cleanup(resources: Any, sandbox_ids: set[str], volume_name: str) -> tuple[str, ...]:
     failures: list[str] = []
     tracked_ids = sandbox_ids | set(resources._sandbox_ids)
     for sandbox_id in sorted(tracked_ids):
 
-        def delete_sandbox(sandbox_id: str = sandbox_id) -> None:
-            sandbox = resources.platform.get(sandbox_id)
+        async def delete_sandbox(sandbox_id: str = sandbox_id) -> None:
+            sandbox = await resources.platform.get(sandbox_id)
             if sandbox is not None:
-                resources.platform.delete(sandbox)
+                await resources.platform.delete(sandbox)
 
-        if not _retry_cleanup(delete_sandbox):
+        if not await _retry_cleanup(delete_sandbox):
             failures.append("sandbox")
     try:
         resources.forget_sandboxes()
     except Exception:
         failures.append("tracking")
 
-    def delete_volume() -> None:
-        volume = resources.client.volume.get(volume_name, create=False)
-        resources.client.volume.delete(volume)
+    async def delete_volume() -> None:
+        volume = await resources.client.volume.get(volume_name, create=False)
+        if volume is not None:
+            await resources.client.volume.delete(volume)
 
-    if not _retry_cleanup(delete_volume):
+    if not await _retry_cleanup(delete_volume):
         failures.append("volume")
     return tuple(failures)
 
@@ -677,9 +679,9 @@ def test_direct_pi_digit_uses_deterministic_repl_without_optional_capabilities(t
             assert binding is not None
             assert binding.sandbox_id is not None
             sandbox_ids.add(binding.sandbox_id)
-            assert resources.platform.get(binding.sandbox_id) is not None
+            assert portal.call(resources.platform.get, binding.sandbox_id) is not None
         finally:
-            cleanup_failures = _strict_cleanup(resources, sandbox_ids, settings.volume_name)
+            cleanup_failures = portal.call(_strict_cleanup, resources, sandbox_ids, settings.volume_name)
     assert cleanup_failures == ()
 
 
@@ -875,7 +877,7 @@ def test_complete_daytona_mvp_through_fastapi(
                 assert binding.sandbox_id is not None
                 assert binding.volume_id is not None
                 sandbox_ids.add(binding.sandbox_id)
-                first_sandbox = resources.platform.get(binding.sandbox_id)
+                first_sandbox = portal.call(resources.platform.get, binding.sandbox_id)
                 assert first_sandbox is not None
                 first_fs = DaytonaSandboxVolumeFs(first_sandbox)
                 paths = volume_paths_from_settings(settings)
@@ -968,7 +970,7 @@ def test_complete_daytona_mvp_through_fastapi(
                 assert len(assistants) == 2
                 assert assistants[0] == first_assistant
                 assert _structured_part(assistants[0]) == first_structured
-                replacement_sandbox = resources.platform.get(replacement.sandbox_id)
+                replacement_sandbox = portal.call(resources.platform.get, replacement.sandbox_id)
                 assert replacement_sandbox is not None
                 replacement_env_names = _sandbox_environment_names(replacement_sandbox)
                 assert not set(_SECRET_NAMES) & replacement_env_names
@@ -1044,7 +1046,7 @@ def test_complete_daytona_mvp_through_fastapi(
             finally:
                 failed_phase = phase
                 phase = "cleanup"
-                cleanup_failures = _strict_cleanup(resources, sandbox_ids, settings.volume_name)
+                cleanup_failures = portal.call(_strict_cleanup, resources, sandbox_ids, settings.volume_name)
                 if scenario_passed and not cleanup_failures:
                     assert success_receipt is not None
                     assertions = success_receipt["assertions"]
