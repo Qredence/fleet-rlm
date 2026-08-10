@@ -285,3 +285,29 @@ the closed categories `precondition_failed`, `proof_failed`, `cleanup_failed`,
 The receipt is local release evidence, not deployment authorization. Full
 source-candidate promotion still requires the matching CI, local release-gate,
 and human-review evidence defined by the release process.
+
+
+## Routing evaluation
+
+`src/fleet_rlm/rlm/routing_eval.py` owns a bounded routes benchmark that measures
+cost rather than inspecting private model reasoning. The curated classes are:
+
+1. `python_native` for deterministic Python/REPL work.
+2. `semantic_single` for one bounded `llm_query` judgment.
+3. `semantic_batched` for independent `llm_query_batched` judgments.
+4. `recursive_child` for a selected self-contained subproblem that truly needs
+   iterative Python exploration.
+5. `recursive_depth_fallback` for a child attempting one more delegation beyond
+   `RLM_NATIVE_CHILD_DEPTH`; the bounded plain Sub LM answers it and no second
+   child Sandbox is allocated.
+
+The deterministic lane uses dummy models and in-process interpreters; public
+Tool observations, recursive summaries, answer text, child-runtime creation
+counts, and latency are the only evidence. The same `run_routing_scenario` lane
+may be invoked with provider-backed caller-owned interpreters and child
+runtime factories for optional live comparisons. Live runs are isolated from
+normal Session persistence by construction: they do not create durable Turn
+rows, and optional engineering tracing remains fail-soft/operator-owned.
+`RoutingScore.routing_efficiency` is intentionally independent from final
+answer correctness so an expensive recursive child cannot hide behind a
+correct answer.

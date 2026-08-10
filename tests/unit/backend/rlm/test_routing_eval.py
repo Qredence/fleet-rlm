@@ -1,0 +1,192 @@
+"""Public-evidence RLM routing evaluation contracts."""
+
+from __future__ import annotations
+
+import time
+
+import dspy
+import pytest
+
+from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
+from fleet_rlm.daytona.recursive_child_runtime import ChildRuntimeLease
+from fleet_rlm.rlm.events import ToolCompleted, ToolStarted
+from fleet_rlm.rlm.model_bundle import RLMModelBundle
+from fleet_rlm.rlm.recursive_calls import RecursiveRLMExecutor, RecursiveRLMOptions
+from fleet_rlm.rlm.routing_eval import (
+    CURATED_ROUTING_SCENARIOS,
+    RoutingFacts,
+    RoutingScenario,
+    classify_routing_facts,
+    facts_from_execution_details,
+    facts_from_recursive_summary,
+    routing_decision_tree,
+    run_routing_scenario,
+    score_routing_execution,
+    summarize_scores,
+)
+
+
+def test_curated_scenarios_cover_the_five_owned_routes() -> None:
+    assert [scenario.expected_route for scenario in CURATED_ROUTING_SCENARIOS] == [
+        "python_native",
+        "semantic_single",
+        "semantic_batched",
+        "recursive_child",
+        "recursive_depth_fallback",
+    ]
+    assert all(scenario.prompt for scenario in CURATED_ROUTING_SCENARIOS)
+    assert "Python/REPL code" in routing_decision_tree()
+    assert "lm" in routing_decision_tree().lower()
+
+
+def test_routing_classifier_maps_each_public_route_shape() -> None:
+    assert classify_routing_facts(RoutingFacts()) == "python_native"
+    assert classify_routing_facts(RoutingFacts(tool_counts={"llm_query": 1})) == "semantic_single"
+    assert classify_routing_facts(RoutingFacts(tool_counts={"llm_query_batched": 1})) == "semantic_batched"
+    assert classify_routing_facts(RoutingFacts(native_child_count=2, max_native_child_depth=1)) == "recursive_child"
+    assert classify_routing_facts(RoutingFacts(depth_fallback_count=1)) == "recursive_depth_fallback"
+
+
+def test_scoring_separates_final_answer_quality_from_routing_efficiency() -> None:
+    scenario = RoutingScenario("semantic case", "judge one bounded label", "semantic_single", "positive")
+
+    expensive_but_correct = score_routing_execution(
+        scenario,
+        answer="positive",
+        facts=RoutingFacts(tool_counts={"rlm_query": 1}, native_child_count=1),
+    )
+
+    assert expensive_but_correct.answer_correct is True
+    assert expensive_but_correct.routing_match is False
+    assert expensive_but_correct.routing_efficiency == 0.0
+    assert "routing_mismatch" in expensive_but_correct.rationale
+
+    summary = summarize_scores((expensive_but_correct,))
+    assert summary["answer_correct_count"] == 1
+    assert summary["routing_match_count"] == 0
+
+
+def test_public_execution_details_feed_the_classifier() -> None:
+    details = (
+        ToolStarted("call-1", "rlm_query", {"prompt_count": 1, "prompt_chars": 42}),
+        ToolCompleted(
+            "call-1",
+            "rlm_query",
+            {"status": "completed", "recursive_depth": 1, "child_iterations": 2, "termination_mode": "typed_submit"},
+        ),
+    )
+
+    facts = facts_from_execution_details(details, latency_ms=12, sandbox_count=1)
+
+    assert classify_routing_facts(facts) == "recursive_child"
+    assert facts.max_native_child_depth == 1
+    assert facts.child_iterations == 2
+    assert facts.recursive_prompt_chars == 42
+    assert facts.sandbox_count == 1
+
+
+def test_live_scoring_supports_normalized_containment_and_run_indexes() -> None:
+    scenario = RoutingScenario("semantic case", "judge one label", "semantic_single", "positive")
+
+    score = score_routing_execution(
+        scenario,
+        answer="The judgment is positive, with qualification.",
+        facts=RoutingFacts(tool_counts={"llm_query": 1}),
+        run_index=3,
+        allow_contains=True,
+    )
+
+    assert score.run_index == 3
+    assert score.answer_correct is True
+    assert len(score.answer_sha256) == 64
+    assert "positive" not in score.answer_sha256
+    summary = summarize_scores((score,))
+    assert summary["expected_routes"] == ["semantic_single"]
+    assert summary["run_indexes"] == [3]
+
+
+def test_native_child_to_sub_lm_fallback_has_no_second_sandbox() -> None:
+    """The deterministic harness lane proves the fixed boundary with no provider."""
+    adapter = dspy.JSONAdapter()
+    created: list[DaytonaCodeInterpreter] = []
+
+    def factory(call_index: int) -> ChildRuntimeLease:
+        interpreter = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())
+        created.append(interpreter)
+        return ChildRuntimeLease(
+            interpreter,
+            f"routing-child-{call_index}",
+            "routing-test-volume",
+            f"recursive/routing/test/{call_index}",
+            interpreter.shutdown,
+        )
+
+    executor = RecursiveRLMExecutor(
+        models=RLMModelBundle(
+            dspy.utils.DummyLM(
+                [
+                    {"reasoning": "delegate from child", "code": "inner = rlm_query(prompt='inner slice')"},
+                    {"reasoning": "complete child", "code": "SUBMIT(answer=inner)"},
+                ],
+                adapter=adapter,
+            ),
+            dspy.utils.DummyLM([{"answer": "fallback element"}], adapter=adapter),
+        ),
+        options=RecursiveRLMOptions(),
+        child_runtime_factory=factory,
+        deadline=time.monotonic() + 30,
+    )
+
+    assert executor.tool(prompt="outer recursive classification") == "fallback element"
+    facts = facts_from_recursive_summary(
+        executor.summary(),
+        latency_ms=1,
+        tool_counts={"rlm_query": 2},
+        sandbox_count=len(created),
+    )
+
+    assert len(created) == 1
+    assert facts.depth_fallback_count == 1
+    assert facts.native_child_count == 1
+    assert facts.max_native_child_depth == 1
+    assert classify_routing_facts(facts) == "recursive_depth_fallback"
+    assert created[0]._shutdown
+
+
+@pytest.mark.asyncio
+async def test_harness_runs_an_isolated_fake_lm_python_scenario() -> None:
+    adapter = dspy.JSONAdapter()
+    root = dspy.utils.DummyLM(
+        [{"reasoning": "compute in Python", "code": "value = 18434 + 92786\nSUBMIT(answer=str(value))"}],
+        adapter=adapter,
+    )
+    sub = dspy.utils.DummyLM([{"answer": "unused"}], adapter=adapter)
+    child_calls = 0
+
+    def child_factory(call_index: int):
+        nonlocal child_calls
+        child_calls += 1
+        interpreter = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())
+        return ChildRuntimeLease(
+            interpreter,
+            f"routing-child-{call_index}",
+            "routing-test-volume",
+            f"recursive/routing/scenario/{call_index}",
+            interpreter.shutdown,
+        )
+
+    scenario = next(item for item in CURATED_ROUTING_SCENARIOS if item.expected_route == "python_native")
+    scores = await run_routing_scenario(
+        scenario,
+        root_lm=root,
+        sub_lm=sub,
+        root_interpreter_factory=lambda: DaytonaCodeInterpreter(backend=InProcessInterpreterBackend()),
+        child_runtime_factory=child_factory,
+    )
+
+    assert len(scores) == 1
+    assert scores[0].answer_correct is True
+    assert scores[0].routing_match is True
+    assert classify_routing_facts(scores[0].facts) == "python_native"
+    assert child_calls == 0
+    assert scores[0].facts.sandbox_count == 0
