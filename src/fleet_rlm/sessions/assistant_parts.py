@@ -190,6 +190,8 @@ class ArtifactAssistantPart(AssistantPartModel):
     @field_validator("checksum_sha256", mode="before")
     @classmethod
     def _normalize_checksum(cls, value: str) -> str:
+        if not isinstance(value, str):
+            raise ValueError("checksum_sha256 must be a string")
         candidate = value.lower()
         if len(candidate) != 64 or any(character not in "0123456789abcdef" for character in candidate):
             raise ValueError("checksum_sha256 must contain 64 hexadecimal characters")

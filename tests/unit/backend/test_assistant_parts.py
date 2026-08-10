@@ -226,6 +226,20 @@ def test_identity_and_message_fields_reject_whitespace_only_values(payload: dict
         _ADAPTER.validate_python(payload, strict=False)
 
 
+def test_artifact_checksum_rejects_non_string_values_as_validation_errors() -> None:
+    payload = {
+        "type": "artifact",
+        "artifact_id": str(uuid4()),
+        "kind": "json",
+        "title": None,
+        "media_type": "application/json",
+        "byte_size": 12,
+        "checksum_sha256": 0,
+    }
+    with pytest.raises(ValidationError, match="checksum_sha256 must be a string"):
+        _ADAPTER.validate_python(payload, strict=False)
+
+
 def test_artifact_checksum_is_normalized_at_the_canonical_boundary() -> None:
     checksum = "A1B2c3D4" * 8
     payload = {
