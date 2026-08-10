@@ -149,17 +149,30 @@ async def run_deferred_orphan_cleanup(
     the readiness-critical path. Failures and timeouts are logged and left for a
     later startup.
     """
-    from fleet_rlm.daytona.workspace_gateway import cleanup_orphan_bytes
+    from fleet_rlm.daytona.workspace_gateway import OrphanCleanupReport, cleanup_orphan_bytes
 
+    committed_storage_refs = await artifact_catalog.list_storage_refs(workspace_id=workspace_id)
+    completed_runs = await artifact_catalog.list_completed_runs(workspace_id=workspace_id)
+    active_runs = await artifact_catalog.list_active_runs(workspace_id=workspace_id)
+    if not committed_storage_refs and not completed_runs and not active_runs:
+        # The fresh startup sweep has no durable candidates. Do not provision
+        # an ephemeral sandbox just to discover an empty Volume; that extra
+        # mount call races the first Turn's Volume creation/readiness work.
+        cleanup_report = OrphanCleanupReport(scanned=0, removed=0, retained=0, skipped_fresh=0)
+        logger.info(
+            "Daytona orphan cleanup complete phase=orphan_cleanup scanned=0 removed=0 retained=0 "
+            "skipped_fresh=0 deferred=true"
+        )
+        return
     try:
         async with asyncio.timeout(_ORPHAN_CLEANUP_TIMEOUT_SECONDS):
             cleanup_report = await cleanup_orphan_bytes(
                 gateway,
                 workspace_id=workspace_id,
                 paths=paths,
-                committed_storage_refs=await artifact_catalog.list_storage_refs(workspace_id=workspace_id),
-                completed_runs=await artifact_catalog.list_completed_runs(workspace_id=workspace_id),
-                active_runs=await artifact_catalog.list_active_runs(workspace_id=workspace_id),
+                committed_storage_refs=committed_storage_refs,
+                completed_runs=completed_runs,
+                active_runs=active_runs,
                 grace_period=grace_period,
             )
     except TimeoutError:

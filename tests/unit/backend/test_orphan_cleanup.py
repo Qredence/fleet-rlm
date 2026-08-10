@@ -75,6 +75,31 @@ async def test_cleanup_removes_only_stale_uncommitted_bytes_and_is_idempotent(tm
 
 
 @pytest.mark.asyncio
+async def test_startup_orphan_cleanup_skips_provisioning_for_empty_workspace(monkeypatch: pytest.MonkeyPatch) -> None:
+    from fleet_rlm.composition.daytona import run_deferred_orphan_cleanup
+
+    async def fail_if_called(*_args: object, **_kwargs: object) -> OrphanCleanupReport:
+        raise AssertionError("empty startup cleanup must not provision a sandbox")
+
+    class EmptyCatalog(_FakeArtifactCatalog):
+        def __init__(self) -> None:
+            self.calls = []
+
+        async def list_storage_refs(self, *, workspace_id: object) -> list[str]:
+            self.calls.append(("storage", workspace_id))
+            return []
+
+    monkeypatch.setattr("fleet_rlm.daytona.workspace_gateway.cleanup_orphan_bytes", fail_if_called)
+
+    await run_deferred_orphan_cleanup(
+        object(),
+        workspace_id=uuid4(),
+        paths=object(),
+        artifact_catalog=EmptyCatalog(),
+    )
+
+
+@pytest.mark.asyncio
 async def test_cleanup_removes_stale_run_staging_but_preserves_active_run_bytes(tmp_path: Path) -> None:
     paths = VolumePaths.from_mount()
     mirror = HostVolumeMirror(tmp_path, volume_paths=paths)
