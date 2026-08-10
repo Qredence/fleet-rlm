@@ -4,7 +4,15 @@ description: Use when analyzing, explaining, or implementing dspy.RLM (Recursive
 compatibility: Requires Fleet RLM with a Python interpreter. Durable long reports use Daytona Session Workspace.
 metadata:
   version: "1.0.0"
+  affordances:
+    - interpreter
+    - llm_query
 allowed-tools: read_skill_resource
+
+resources:
+  - path: references/rlm-contract.md
+    media_type: text/markdown
+
 ---
 
 # DSPy RLM (Recursive Language Model)

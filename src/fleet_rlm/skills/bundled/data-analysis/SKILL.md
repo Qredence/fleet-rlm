@@ -4,7 +4,13 @@ description: Compute and verify descriptive statistics, trends, and qualified an
 compatibility: Requires Fleet RLM variable mode with a Python interpreter.
 metadata:
   version: "1.0.0"
+  affordances:
+    - artifacts.publish
+    - llm_query_batched
 allowed-tools: read_attachment
+
+resources: []
+
 ---
 
 # Data analysis

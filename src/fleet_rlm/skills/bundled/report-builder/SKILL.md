@@ -4,7 +4,13 @@ description: Create, save, read back, and verify reports from trusted source dat
 compatibility: Durable Project and Session Workspace writes and Artifact promotion require the Daytona run environment.
 metadata:
   version: "1.1.0"
+  affordances:
+    - workspace.files
+    - artifacts.publish
 allowed-tools: list_project_files stat_project_file read_project_text write_project_text list_workspace_files stat_workspace_file read_workspace_text write_workspace_text append_workspace_text publish_workspace_artifact create_artifact
+
+resources: []
+
 ---
 
 # Report builder

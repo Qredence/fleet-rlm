@@ -4,7 +4,15 @@ description: Use when a Turn must inspect, create, or update durable Session fil
 compatibility: Durable Project and Session Workspace writes and Artifact promotion require the Daytona run environment.
 metadata:
   version: "1.2.0"
+  affordances:
+    - workspace.files
+    - artifacts.publish
 allowed-tools: list_project_files stat_project_file read_project_text write_project_text delete_project_path edit_project_text list_workspace_files stat_workspace_file read_workspace_text write_workspace_text append_workspace_text delete_workspace_path edit_workspace_text publish_workspace_artifact read_attachment create_artifact
+
+resources:
+  - path: references/filesystem-contract.md
+    media_type: text/markdown
+
 ---
 
 # Workspace files

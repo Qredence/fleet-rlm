@@ -4,7 +4,20 @@ description: Use when a document, codebase, transcript, or dataset is too large 
 compatibility: Requires Fleet RLM variable mode with a Python interpreter.
 metadata:
   version: "2.0.0"
+  affordances:
+    - fetch_url
+    - llm_query_batched
+    - workspace.files
 allowed-tools: read_skill_resource
+
+resources:
+  - path: scripts/semantic_chunk.py
+    media_type: text/x-python
+  - path: scripts/rank_chunks.py
+    media_type: text/x-python
+  - path: references/chunking-strategies.md
+    media_type: text/markdown
+
 ---
 
 # Long-context analysis

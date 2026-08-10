@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-from importlib.resources import files
+from importlib.resources import as_file, files
 from types import MappingProxyType
 from uuid import UUID, uuid5
 
@@ -112,24 +112,73 @@ class UnavailableSkillCatalog(SkillCatalog):
 
 
 def build_bundled_skill_catalog() -> SkillCatalog:
+    from fleet_rlm.skills.manifest import parse_bundled_skill_manifest
+
     root = files("fleet_rlm.skills").joinpath("bundled")
     definitions: list[SkillDefinition] = []
-    for spec in _BUNDLED_SPECS:
-        directory = root.joinpath(spec.name)
-        instructions = directory.joinpath("SKILL.md").read_text(encoding="utf-8")
-        resources = {
-            path: SkillResource(path, media_type, directory.joinpath(path).read_text(encoding="utf-8"))
-            for path, media_type in spec.resources
-        }
-        if spec.signature is not None:
-            validate_skill_signature(spec.signature)
-        card = SkillCard(
-            stable_skill_id(spec.name),
-            spec.name,
-            spec.description,
-            spec.version,
-            bool(resources),
-            spec.affordances,
-        )
-        definitions.append(SkillDefinition(card, instructions, resources, spec.signature))
+    with as_file(root) as root_path:
+        for spec in _BUNDLED_SPECS:
+            directory = root_path.joinpath(spec.name)
+            # Expand-phase authority boundary: parse/validate Skill-owned
+            # metadata at build time, but keep the existing host declaration
+            # as the runtime selection value so pinned Turn inputs do not
+            # move in this ticket. Drift is compared by diagnostics below.
+            parse_bundled_skill_manifest(directory)
+            instructions = directory.joinpath("SKILL.md").read_text(encoding="utf-8")
+            resources = {
+                path: SkillResource(path, media_type, directory.joinpath(path).read_text(encoding="utf-8"))
+                for path, media_type in spec.resources
+            }
+            if spec.signature is not None:
+                validate_skill_signature(spec.signature)
+            card = SkillCard(
+                stable_skill_id(spec.name),
+                spec.name,
+                spec.description,
+                spec.version,
+                bool(resources),
+                spec.affordances,
+            )
+            definitions.append(SkillDefinition(card, instructions, resources, spec.signature))
     return SkillCatalog(tuple(definitions))
+
+
+def bundled_skill_manifest_diagnostics() -> tuple[str, ...]:
+    """Compare parsed Skill manifests to the current host catalog declarations.
+
+    The host catalog remains the runtime source for QRE-122; diagnostics make
+    drift explicit before the later contract swaps the authority.
+    """
+    from fleet_rlm.skills.manifest import parse_bundled_skill_manifest
+
+    root = files("fleet_rlm.skills").joinpath("bundled")
+    diagnostics: list[str] = []
+    with as_file(root) as root_path:
+        for spec in _BUNDLED_SPECS:
+            directory = root_path.joinpath(spec.name)
+            try:
+                manifest = parse_bundled_skill_manifest(directory)
+            except Exception as exc:
+                diagnostics.append(f"{spec.name}: manifest parse failed: {exc}")
+                continue
+            expected = {
+                "name": spec.name,
+                "description": spec.description,
+                "version": spec.version,
+                "affordances": spec.affordances,
+                "resources": spec.resources,
+            }
+            actual = {
+                "name": manifest.name,
+                "description": manifest.description,
+                "version": manifest.version,
+                "affordances": manifest.affordances,
+                "resources": tuple((resource.path, resource.media_type) for resource in manifest.resources),
+            }
+            for field, expected_value in expected.items():
+                if actual[field] != expected_value:
+                    diagnostics.append(
+                        f"{spec.name}: manifest {field} differs from host catalog "
+                        f"({actual[field]!r} != {expected_value!r})"
+                    )
+    return tuple(diagnostics)
