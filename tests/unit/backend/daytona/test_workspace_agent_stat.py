@@ -67,7 +67,9 @@ def test_stat_checksum_flag_is_repr_embedded_like_other_operation_params() -> No
 
     assert "checksum = False" in build_workspace_agent_code(**base)
     assert "checksum = True" in build_workspace_agent_code(**base, checksum=True)
-    assert "import base64, errno, fcntl, hashlib, json, os, re, stat, time" in build_workspace_agent_code(**base)
+    assert "import base64, datetime, errno, fcntl, hashlib, json, os, re, stat, time" in build_workspace_agent_code(
+        **base
+    )
 
 
 def test_stat_with_checksum_hashes_regular_file_bytes(tmp_path: Path) -> None:

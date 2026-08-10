@@ -173,7 +173,7 @@ bounded warning count while writes stay strictly validated.
 for an explicit user request and is idempotent for the same record;
 `list_memories` pages id-addressed entries; `search_memories` deterministically
 ranks older relevant entries by bounded lexical score instead of relying on
-recency alone; `edit_memory` upgrades v1 to v2 or rewrites v2 while preserving
+recency alone; `edit_memory` upgrades legacy rows to v3 or rewrites v3 while preserving
 id and timestamp; `forget` removes exactly one entry. Edit and forget use one
 mounted-agent read-modify-publish operation.
 Each Turn's `session_context` also carries a bounded <= 4 KiB

@@ -195,17 +195,16 @@ and recent learnings are available without a Tool call. Private deterministic te
 Workspace capability unless they explicitly inject a host-owned test
 capability.
 
-`remember` appends one complete UTC-timestamped v2 record with a fresh id,
+`remember` appends one complete provenance-aware v3 record with a fresh id,
 limited to 4 KiB of formatted UTF-8, and becomes durable immediately,
 independently of Turn Commit. A repeated identical record is idempotent. Legacy
 v1 rows derive a deterministic id from canonical text plus valid-record
 occurrence, so duplicate legacy rows remain separately pageable; duplicate
 persisted ids fail closed rather than skipping or selecting an arbitrary row.
 Expansion parsing also admits provenance-aware v3 rows (`id/source/updated` and
-optional `supersedes` metadata) while normal writes remain v2 until the writer
-migration ticket; invalid v3 metadata stays malformed under tolerant reads.
+optional `supersedes` metadata). Explicit-user `remember` writes are now v3, while historical v1/v2 remain readable; invalid v3 metadata stays malformed under tolerant reads.
 `edit_memory`
-upgrades v1 to v2 or replaces v2 while preserving the id and timestamp, and
+upgrades legacy rows to v3 or replaces v3 while preserving the id and timestamp, and
 `forget` removes exactly one addressed row. Both mutations execute their
 read-modify-publish rewrite inside one mounted-agent operation. A completed
 append therefore survives failed or cancelled Turns and Sandbox replacement.

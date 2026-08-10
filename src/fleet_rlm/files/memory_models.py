@@ -5,7 +5,7 @@ open from the legacy root ``MEMORIES.md``). The file is a human-browsable log:
 
 - an optional first header line ``# Fleet Memory v2`` marks the migrated store
   (the header line is exempt from record validation), and
-- each following line is one record in the canonical v1 or v2 shape::
+- each following line is one record in the canonical v1, v2, or v3 shape::
 
       - [ISO-UTC] **Category**: one-line learning                      (v1)
       - [ISO-UTC] **Category** <!-- id:8hex -->: one-line learning     (v2)
@@ -13,21 +13,21 @@ open from the legacy root ``MEMORIES.md``). The file is a human-browsable log:
 Provenance-aware v3 records keep that shape while adding fixed-order
 ``id/source/updated`` metadata and optional ``supersedes`` metadata. Legacy
 v1/v2 rows project as ``legacy_unknown`` with ``updated_at`` falling back to
-creation time; normal writes remain v2 during the expand phase.
+creation time; normal explicit-user writes become v3 while historical v1/v2 remain human-editable.
 
-New appends always write v2 records. The v2 ``id`` is
+New explicit-user appends write provenance-aware v3 records. The stable ``id`` is
 ``sha256(record-without-id)[:8]`` computed over the v1 text
 ``- [ts] **Category**: learning`` (without the trailing newline) at creation;
 edits preserve both the id and the timestamp, so validators check the id's
 *shape* (exactly 8 lowercase hex digits), never a content hash.
 Legacy v1 rows receive that same deterministic id when read, so every listed
-entry is addressable; editing a v1 row upgrades it to v2 while preserving the
+entry is addressable; editing a v1/v2 row upgrades it to v3 while preserving the
 synthesized id and original timestamp.
 
 Humans edit this file, so reads are *tolerant*: malformed lines are skipped
 with a bounded warning count instead of poisoning the whole read. Writes stay
 strict: :func:`validate_workspace_memory_record` and
-:func:`validate_workspace_memory_content` reject anything outside the v1/v2
+:func:`validate_workspace_memory_content` reject anything outside the v1/v2/v3
 shapes plus optional header.
 """
 
@@ -108,7 +108,7 @@ def normalize_workspace_memory_category(category: str) -> str:
 
 
 def normalize_workspace_memory_id(memory_id: str) -> str:
-    """Return one valid v2 record id (exactly 8 lowercase hex digits)."""
+    """Return one valid stable memory record id (exactly 8 lowercase hex digits)."""
     if not isinstance(memory_id, str) or _MEMORY_ID.fullmatch(memory_id) is None:
         raise WorkspaceMemoryIdError
     return memory_id
@@ -149,7 +149,10 @@ def format_workspace_memory_record(
         raise WorkspaceMemoryRecordError
     timestamp_text = timestamp.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
     memory_id = workspace_memory_record_id(timestamp_text, normalized_category, learning)
-    record = f"- [{timestamp_text}] **{normalized_category}** <!-- id:{memory_id} -->: {learning}\n"
+    record = (
+        f"- [{timestamp_text}] **{normalized_category}** <!-- id:{memory_id} source:user_explicit "
+        f"updated:{timestamp_text} -->: {learning}\n"
+    )
     validate_workspace_memory_record(record)
     return record, normalized_category
 
@@ -163,28 +166,42 @@ def reformat_workspace_memory_record(
     memory_id: str,
     category: str,
     key_learning: str,
+    source: WorkspaceMemorySource = "legacy_unknown",
+    updated_at: str | None = None,
+    supersedes_id: str | None = None,
 ) -> tuple[str, str]:
-    """Rebuild one record preserving its identity (edit path).
+    """Rebuild one canonical v3 record preserving identity and provenance.
 
-    The timestamp and effective id are preserved verbatim. Editing a legacy v1
-    row therefore upgrades it to v2 without re-identifying that row.
+    The creation timestamp and effective id are preserved verbatim. Legacy v1
+    and v2 rows upgrade in place to v3 with ``legacy_unknown`` provenance;
+    provenance and supersession metadata are carried forward rather than
+    silently re-identifying the memory.
     """
     if not isinstance(timestamp, str) or _TIMESTAMP_TEXT.fullmatch(timestamp) is None:
         raise WorkspaceMemoryRecordError
     try:
         datetime.strptime(timestamp, "%Y-%m-%dT%H:%M:%SZ")
+        update_text = updated_at or timestamp
+        datetime.strptime(update_text, "%Y-%m-%dT%H:%M:%SZ")
     except ValueError as exc:
         raise WorkspaceMemoryRecordError from exc
     learning = normalize_workspace_memory_learning(key_learning)
     normalized_category = normalize_workspace_memory_category(category)
     normalize_workspace_memory_id(memory_id)
-    record = f"- [{timestamp}] **{normalized_category}** <!-- id:{memory_id} -->: {learning}\n"
+    normalize_workspace_memory_source(source)
+    if supersedes_id is not None:
+        normalize_workspace_memory_id(supersedes_id)
+    supersession = f" supersedes:{supersedes_id}" if supersedes_id is not None else ""
+    record = (
+        f"- [{timestamp}] **{normalized_category}** <!-- id:{memory_id} source:{source} "
+        f"updated:{update_text}{supersession} -->: {learning}\n"
+    )
     validate_workspace_memory_record(record)
     return record, normalized_category
 
 
 def validate_workspace_memory_record(record: str) -> None:
-    """Reject anything other than one complete canonical v1 or v2 record."""
+    """Reject anything other than one complete canonical v1, v2, or v3 record."""
     if not isinstance(record, str):
         raise WorkspaceMemoryRecordError
     try:
@@ -225,7 +242,7 @@ def validate_workspace_memory_record(record: str) -> None:
 def validate_workspace_memory_content(content: str) -> None:
     """Strictly validate a whole memory file body for writes.
 
-    Accepts zero or more complete v1/v2 records with at most one leading
+    Accepts zero or more complete v1/v2/v3 records with at most one leading
     :data:`WORKSPACE_MEMORY_HEADER` line; rejects blank and malformed lines.
     """
     if not isinstance(content, str):
@@ -352,7 +369,7 @@ def count_workspace_memory_warnings(lines: tuple[WorkspaceMemoryParsedLine, ...]
 def build_workspace_memory_digest(content: str) -> tuple[str, int]:
     """Project memory content into a bounded turn-injection digest.
 
-    Returns ``(digest, warnings)``: the digest keeps complete v1/v2 record lines
+    Returns ``(digest, warnings)``: the digest keeps complete v1/v2/v3 record lines
     only (header, blanks, and malformed lines dropped), bounded to at most
     :data:`WORKSPACE_MEMORY_INJECTION_TAIL_BYTES` UTF-8 bytes taken from the
     tail on whole-record boundaries; ``warnings`` is the bounded malformed-line

@@ -49,7 +49,7 @@ contracts, and tracked docs remain authoritative.
   the `memory/MEMORIES.md` log (migrated from the legacy root `MEMORIES.md`),
   not Session History. Listed rows always have one addressable id: v2 stores a
   fresh id and v1 derives one from canonical text plus occurrence; duplicate ids fail closed, while an
-  edit upgrades v1 to v2 preserving that id and timestamp. `remember` is
+  edit upgrades legacy rows to v3 preserving that id and timestamp. `remember` is
   idempotent for the same record, and edit/forget perform one mounted-agent
   read-modify-publish operation. Each Turn additionally receives its bounded
   4 KiB relevant+recent `workspace_memory tail` digest inside

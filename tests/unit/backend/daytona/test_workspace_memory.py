@@ -20,6 +20,7 @@ from fleet_rlm.files.memory_models import (
     WorkspaceMemoryEntryNotFoundError,
     WorkspaceMemoryRecordError,
     WorkspaceMemoryStoreUnavailableError,
+    parse_workspace_memory_lines,
     workspace_memory_record_id,
 )
 from fleet_rlm.files.volume_paths import VolumePaths
@@ -706,13 +707,28 @@ def test_edit_entry_replaces_one_line_preserving_id_and_timestamp(tmp_path: Path
 
     record = store.edit_entry("bbbb0002", "  two   revised ", category="Ops")
 
-    assert record == "- [2026-07-27T11:14:06Z] **Ops** <!-- id:bbbb0002 -->: two revised\n"
+    edited = parse_workspace_memory_lines(record)[0].entry
+    assert edited is not None
+    assert edited.memory_id == "bbbb0002"
+    assert edited.timestamp == "2026-07-27T11:14:06Z"
+    assert edited.category == "Ops"
+    assert edited.learning == "two revised"
+    assert edited.source == "legacy_unknown"
+    assert edited.record_version == 3
+    assert str(edited.updated_at) >= edited.timestamp
     target = root / "memory" / "MEMORIES.md"
     assert target.read_text(encoding="utf-8") == HEADER + R1 + "human note\n" + record + R3
 
-    # category is optional; identity stays stable across edits
+    # category is optional; identity and provenance stay stable across edits
     record = store.edit_entry("bbbb0002", "two final")
-    assert record == "- [2026-07-27T11:14:06Z] **Ops** <!-- id:bbbb0002 -->: two final\n"
+    edited = parse_workspace_memory_lines(record)[0].entry
+    assert edited is not None
+    assert edited.memory_id == "bbbb0002"
+    assert edited.timestamp == "2026-07-27T11:14:06Z"
+    assert edited.category == "Ops"
+    assert edited.learning == "two final"
+    assert edited.source == "legacy_unknown"
+    assert edited.record_version == 3
 
     with pytest.raises(WorkspaceMemoryRecordError):
         store.edit_entry("bbbb0002", " ")
@@ -720,7 +736,7 @@ def test_edit_entry_replaces_one_line_preserving_id_and_timestamp(tmp_path: Path
         store.edit_entry("bbbb0002", "x" * 4_096)
 
 
-def test_v1_rows_are_pageable_and_upgrade_to_v2_when_edited(tmp_path: Path) -> None:
+def test_v1_rows_are_pageable_and_upgrade_to_v3_when_edited(tmp_path: Path) -> None:
     v1 = "- [2026-07-27T11:14:09Z] **General**: legacy row\n"
     legacy_id = workspace_memory_record_id("2026-07-27T11:14:09Z", "General", "legacy row")
     store, root = _lifecycle_store(tmp_path, v1 + R1)
@@ -731,7 +747,13 @@ def test_v1_rows_are_pageable_and_upgrade_to_v2_when_edited(tmp_path: Path) -> N
     assert [entry.memory_id for entry in store.list_entries(after=legacy_id, limit=1).entries] == ["aaaa0001"]
 
     updated = store.edit_entry(legacy_id, "legacy revised")
-    assert updated == f"- [2026-07-27T11:14:09Z] **General** <!-- id:{legacy_id} -->: legacy revised\n"
+    edited = parse_workspace_memory_lines(updated)[0].entry
+    assert edited is not None
+    assert edited.memory_id == legacy_id
+    assert edited.timestamp == "2026-07-27T11:14:09Z"
+    assert edited.source == "legacy_unknown"
+    assert edited.record_version == 3
+    assert updated.endswith(" -->: legacy revised\n")
     assert store.delete_entry(legacy_id) is True
     assert (root / "memory" / "MEMORIES.md").read_text(encoding="utf-8") == HEADER + R1
 
@@ -867,6 +889,29 @@ def test_relevance_injection_search_list_edit_forget_agree_on_valid_records(tmp_
     assert old_id not in read_workspace_memory_injection_digest(store, request="polars dataframe joins")
 
 
+def test_append_writes_v3_over_historical_v1_and_v2_without_rewriting_old_rows(tmp_path: Path) -> None:
+    from datetime import UTC, datetime
+
+    from fleet_rlm.files.memory_models import format_workspace_memory_record
+
+    store, root, _process = _store(tmp_path)  # type: ignore[name-defined]
+    v1 = "- [2026-07-20T09:00:00Z] **General**: old operator note\n"
+    _write_store_file((HEADER + v1 + R1).encode("utf-8"), root)
+    record, category = format_workspace_memory_record(
+        "New explicit preference", "Preference", timestamp=datetime.now(UTC)
+    )
+
+    result = store.append_record(record)
+    body = (root / "memory" / "MEMORIES.md").read_text(encoding="utf-8")
+
+    assert category == "Preference"
+    assert result.entry_bytes == len(record.encode("utf-8"))
+    assert body == HEADER + v1 + R1 + record
+    parsed = parse_workspace_memory_lines(body)
+    assert [line.entry.record_version for line in parsed if line.entry is not None] == [1, 2, 3]
+    assert parsed[-1].entry.source == "user_explicit"
+
+
 def test_v3_relevant_injection_preserves_provenance_and_legacy_version_ratings(tmp_path: Path) -> None:
     from fleet_rlm.daytona.workspace_memory import read_workspace_memory_injection_digest
     from fleet_rlm.files.memory_models import format_workspace_memory_v3_record
@@ -889,7 +934,7 @@ def test_v3_relevant_injection_preserves_provenance_and_legacy_version_ratings(t
     assert "updated:2026-07-27T10:30:00Z" in digest
 
 
-def test_workspace_agent_can_delete_v3_but_refuses_to_downgrade_it_by_edit(tmp_path: Path) -> None:
+def test_workspace_agent_edits_and_deletes_v3_without_losing_provenance(tmp_path: Path) -> None:
     from fleet_rlm.files.memory_models import format_workspace_memory_v3_record
 
     v3 = format_workspace_memory_v3_record(
@@ -903,11 +948,47 @@ def test_workspace_agent_can_delete_v3_but_refuses_to_downgrade_it_by_edit(tmp_p
     store, root, _process = _store(tmp_path)
     _write_store_file((HEADER + v3).encode("utf-8"), root)
 
-    with pytest.raises(WorkspaceMemoryRecordError):
-        store.edit_entry("dddd0004", "must not downgrade")
-    assert (root / "memory" / "MEMORIES.md").read_text(encoding="utf-8") == HEADER + v3
+    updated = store.edit_entry("dddd0004", "must not downgrade")
+    edited = parse_workspace_memory_lines(updated)[0].entry
+    assert edited is not None
+    assert edited.timestamp == "2026-07-19T09:00:00Z"
+    assert edited.source == "operator_import"
+    assert edited.record_version == 3
+    assert str(edited.updated_at) >= edited.timestamp
     assert store.delete_entry("dddd0004") is True
     assert "dddd0004" not in (root / "memory" / "MEMORIES.md").read_text(encoding="utf-8")
+
+
+def test_workspace_agent_edit_preserves_v3_supersession_and_mixed_file_bytes(tmp_path: Path) -> None:
+    from fleet_rlm.files.memory_models import format_workspace_memory_v3_record
+
+    older_id = workspace_memory_record_id("2026-07-18T08:00:00Z", "Policy", "older policy")
+    v2 = "- [2026-07-20T09:00:00Z] **General** <!-- id:bbbb0002 -->: historical v2\n"
+    v3 = format_workspace_memory_v3_record(
+        "Superseding memory with an update link",
+        "Policy",
+        memory_id="dddd0004",
+        created_at="2026-07-19T09:00:00Z",
+        updated_at="2026-07-27T10:30:00Z",
+        source="operator_import",
+        supersedes_id=older_id,
+    )
+    store, root, _process = _store(tmp_path)
+    before = HEADER + v2 + v3
+    _write_store_file(before.encode("utf-8"), root)
+
+    updated = store.edit_entry("dddd0004", "Superseding memory with a preserved link")
+    edited = parse_workspace_memory_lines(updated)[0].entry
+
+    assert edited is not None
+    assert edited.timestamp == "2026-07-19T09:00:00Z"
+    assert edited.source == "operator_import"
+    assert edited.supersedes_id == older_id
+    assert str(edited.updated_at) > "2026-07-27T10:30:00Z"
+    after = (root / "memory" / "MEMORIES.md").read_text(encoding="utf-8")
+    assert after.startswith(HEADER + v2)
+    assert edited.learning in after
+    assert "supersedes:aaaa" not in after
 
 
 def test_v3_memory_id_participates_in_append_collision_targeting(tmp_path: Path) -> None:

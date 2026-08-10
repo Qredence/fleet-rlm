@@ -131,12 +131,12 @@ routes or public events.
   migrated on first open, never losing content); Session and Run paths remain
   nested below that root.
 - Memory updates are id-addressed complete UTC-timestamped records of at most
-  4 KiB formatted UTF-8: appends write v2 records
+  4 KiB formatted UTF-8: explicit-user appends write v3 records
   (`- [ts] **Category** <!-- id:8hex -->: learning`) with fresh ids and are
   idempotent for the same normalized record. v1 rows derive a deterministic id
   from their canonical text plus valid-record occurrence, so duplicate legacy
   rows remain separately pageable; duplicate persisted ids fail closed. `edit_memory`
-  upgrades v1 to v2 or replaces one v2 line while preserving id and timestamp,
+  upgrades legacy rows to v3 or replaces one v3 line while preserving id and timestamp,
   and `forget` removes exactly one entry. Both mutations perform their
   read-modify-fsync-publish rewrite in one mounted-agent operation. Records
   become durable independently of Turn Commit and survive failed or cancelled

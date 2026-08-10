@@ -45,7 +45,7 @@ provide models, Signatures, or executable capabilities.
   inside `session_context` (composed per Turn request, never query-stale
   cached).
 - `remember` (or its back-compat alias `update_workspace_memory`) appends one
-  complete UTC-timestamped v2 record (`<!-- id:8hex -->`), limited to 4 KiB of
+  complete provenance-aware v3 record (`<!-- id:8hex -->`), limited to 4 KiB of
   formatted UTF-8, only when the user explicitly requests memory. Repeating
   the same record is idempotent. A completed append is immediately durable
   outside Turn Commit, so it survives failed or cancelled Turns and Sandbox

@@ -40,13 +40,13 @@ def test_v2_id_is_stable_and_derived_from_the_id_less_record() -> None:
     assert len(first) == 8 and all(char in "0123456789abcdef" for char in first)
 
 
-def test_format_always_writes_v2_and_validators_accept_v1_and_v2() -> None:
+def test_format_always_writes_v3_and_validators_accept_v1_v2_and_v3() -> None:
     record, category = format_workspace_memory_record("  keep\n\t release   notes short ", "General", timestamp=STAMP)
 
     assert record == (
         "- [2026-07-27T11:14:05Z] **General** <!-- id:"
         + workspace_memory_record_id("2026-07-27T11:14:05Z", "General", "keep release notes short")
-        + " -->: keep release notes short\n"
+        + " source:user_explicit updated:2026-07-27T11:14:05Z -->: keep release notes short\n"
     )
     assert category == "General"
     validate_workspace_memory_record(record)  # v2 accepted
@@ -158,7 +158,11 @@ def test_reformat_preserves_identity_and_shape_on_edit() -> None:
         category="Preference",
         key_learning="  prefers   polars ",
     )
-    assert record == "- [2026-07-27T11:14:05Z] **Preference** <!-- id:d2c1b7a1 -->: prefers polars\n"
+    assert record == (
+        "- [2026-07-27T11:14:05Z] **Preference** <-- id:d2c1b7a1 -->: prefers polars\n".replace(
+            " <-- id:d2c1b7a1 -->", " <!-- id:d2c1b7a1 source:legacy_unknown updated:2026-07-27T11:14:05Z -->"
+        )
+    )
     assert category == "Preference"
 
     upgraded_record, _ = reformat_workspace_memory_record(
@@ -170,7 +174,7 @@ def test_reformat_preserves_identity_and_shape_on_edit() -> None:
     assert upgraded_record == (
         "- [2026-07-27T11:14:05Z] **General** <!-- id:"
         + workspace_memory_record_id("2026-07-27T11:14:05Z", "General", "still legacy")
-        + " -->: still legacy\n"
+        + " source:legacy_unknown updated:2026-07-27T11:14:05Z -->: still legacy\n"
     )
 
     with pytest.raises(WorkspaceMemoryRecordError):

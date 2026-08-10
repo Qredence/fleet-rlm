@@ -61,7 +61,7 @@ def build_workspace_agent_code(
 ) -> str:
     code = "\n".join(
         (
-            "import base64, errno, fcntl, hashlib, json, os, re, stat, time",
+            "import base64, datetime, errno, fcntl, hashlib, json, os, re, stat, time",
             f"volume_root = {volume_root!r}",
             f"root = {root!r}",
             f"relative = {relative!r}",
@@ -761,6 +761,12 @@ def build_workspace_agent_code(
             "                fail('cursor')",
             "            learning = update.get('learning') if isinstance(update, dict) else None",
             "            requested_category = update.get('category') if isinstance(update, dict) else None",
+            "            updated_at = update.get('updated_at') if isinstance(update, dict) else None",
+            "            try:",
+            "                updated_text = str(updated_at)",
+            "                datetime.datetime.strptime(updated_text, '%Y-%m-%dT%H:%M:%SZ')",
+            "            except (TypeError, ValueError):",
+            "                fail('cursor')",
             "            if not isinstance(learning, str) or requested_category is not None and not isinstance(requested_category, str):",  # noqa: E501 - emitted sandbox code is intentionally one line
             "                fail('cursor')",
             "        fallback_overwrite = False",
@@ -794,10 +800,13 @@ def build_workspace_agent_code(
             "                fail('conflict')",
             "            target, target_match = targets[0]",
             "            if operation == 'memory_edit':",
-            "                if target_match.group('source') is not None:",
-            "                    fail('invalid_record')",
             "                category = requested_category if requested_category is not None else target_match.group('category')",  # noqa: E501 - emitted sandbox code is intentionally one line
-            "                replacement = f\"- [{target_match.group('timestamp')}] **{category}** <!-- id:{memory_id} -->: {learning}\\n\"",  # noqa: E501 - emitted sandbox code is intentionally one line
+            "                source = target_match.group('source') or 'legacy_unknown'",
+            "                supersedes = target_match.group('supersedes_id')",
+            "                supersession = f' supersedes:{supersedes}' if supersedes is not None else ''",
+            "                replacement = (",
+            "                    f\"- [{target_match.group('timestamp')}] **{category}** <!-- id:{memory_id} source:{source} updated:{updated_text}{supersession} -->: {learning}\\n\"",  # noqa: E501 - emitted sandbox code is intentionally one line
+            "                )",
             "                if len(replacement.encode('utf-8')) > 4096:",
             "                    fail('invalid_record')",
             "                lines[target] = replacement",

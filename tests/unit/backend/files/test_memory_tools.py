@@ -24,9 +24,10 @@ from fleet_rlm.rlm.tool_observer import observe_tool
 STAMP = datetime(2026, 7, 27, 11, 14, 5, tzinfo=UTC)
 # Deterministic golden v2 record for STAMP + "User Preference"; id =
 # sha256("- [2026-07-27T11:14:05Z] **User Preference**: Prefers polars for dataframes.")[:8]
-EXPECTED_V2_ID = "6bef3b36"
-EXPECTED_V2_RECORD = (
-    f"- [2026-07-27T11:14:05Z] **User Preference** <!-- id:{EXPECTED_V2_ID} -->: Prefers polars for dataframes.\n"
+EXPECTED_V3_ID = "6bef3b36"
+EXPECTED_V3_RECORD = (
+    f"- [2026-07-27T11:14:05Z] **User Preference** <!-- id:{EXPECTED_V3_ID} source:user_explicit "
+    f"updated:2026-07-27T11:14:05Z -->: Prefers polars for dataframes.\n"
 )
 
 
@@ -95,13 +96,9 @@ class FakeMemoryStore:
         if not matches:
             raise WorkspaceMemoryEntryNotFoundError(memory_id)
         entry = matches[-1]
-        record, normalized = _reformat(entry, key_learning, category)
-        self.entries = tuple(
-            WorkspaceMemoryEntry(entry.memory_id, entry.timestamp, normalized, _parsed(record).learning)
-            if item is entry
-            else item
-            for item in self.entries
-        )
+        record, _normalized = _reformat(entry, key_learning, category)
+        updated_entry = _parsed(record)
+        self.entries = tuple(updated_entry if item is entry else item for item in self.entries)
         return record
 
 
@@ -194,11 +191,11 @@ def test_remember_and_alias_record_identical_v2_entries() -> None:
     tools = _tools(host)
 
     remembered = tools["remember"](key_learning="  Prefers\n\tpolars   for  dataframes. ", category="User Preference")
-    assert store.appended == [EXPECTED_V2_RECORD]
+    assert store.appended == [EXPECTED_V3_RECORD]
     assert remembered == {
         "ok": True,
         "namespace": "workspace_memory",
-        "memory_id": EXPECTED_V2_ID,
+        "memory_id": EXPECTED_V3_ID,
         "category": "User Preference",
         "entry_bytes": 86,
         "total_bytes": 104,
@@ -208,7 +205,7 @@ def test_remember_and_alias_record_identical_v2_entries() -> None:
         key_learning="  Prefers\n\tpolars   for  dataframes. ",
         category="User Preference",
     )
-    assert store.appended == [EXPECTED_V2_RECORD, EXPECTED_V2_RECORD]
+    assert store.appended == [EXPECTED_V3_RECORD, EXPECTED_V3_RECORD]
     assert aliased == remembered
 
 
@@ -328,7 +325,13 @@ def test_edit_memory_replaces_in_place_and_reports_not_found() -> None:
         "namespace": "workspace_memory",
         "memory_id": "bbbb0002",
         "category": "Ops",
-        "entry_bytes": len(b"- [2026-07-27T11:14:06Z] **Ops** <!-- id:bbbb0002 -->: two revised\n"),
+        "source": "legacy_unknown",
+        "record_version": 3,
+        "updated_at": "2026-07-27T11:14:06Z",
+        "entry_bytes": len(
+            b"- [2026-07-27T11:14:06Z] **Ops** <!-- id:bbbb0002 source:legacy_unknown "
+            b"updated:2026-07-27T11:14:06Z -->: two revised\n"
+        ),
     }
     edited = [entry for entry in store.entries if entry.memory_id == "bbbb0002"]
     assert edited and edited[0].learning == "two revised" and edited[0].timestamp == "2026-07-27T11:14:06Z"
@@ -622,7 +625,13 @@ def test_lifecycle_event_views_expose_only_memory_metadata() -> None:
         "namespace": "workspace_memory",
         "memory_id": "bbbb0002",
         "category": "Ops",
-        "entry_bytes": len(b"- [2026-07-27T11:14:06Z] **Ops** <!-- id:bbbb0002 -->: secret learning rewritten\n"),
+        "source": "legacy_unknown",
+        "record_version": 3,
+        "updated_at": "2026-07-27T11:14:06Z",
+        "entry_bytes": len(
+            b"- [2026-07-27T11:14:06Z] **Ops** <!-- id:bbbb0002 source:legacy_unknown "
+            b"updated:2026-07-27T11:14:06Z -->: secret learning rewritten\n"
+        ),
     }
     assert observed[4].input == {"memory_id": "aaaa0001"}
     assert observed[5].output == {"ok": True, "namespace": "workspace_memory", "memory_id": "aaaa0001", "removed": True}

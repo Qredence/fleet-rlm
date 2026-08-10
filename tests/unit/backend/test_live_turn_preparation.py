@@ -183,7 +183,7 @@ async def test_live_preparation_stages_attachment_and_cleans_it(
     assert updated["ok"] is True
     memory_id = updated["memory_id"]
     assert isinstance(memory_id, str) and len(memory_id) == 8
-    assert f"<!-- id:{memory_id} -->: {learning}\n" in recalled["content"]
+    assert f"<!-- id:{memory_id} source:user_explicit" in recalled["content"] and learning in recalled["content"]
     assert recalled["skipped_malformed_records"] == 0
     memory_views = prepared.execution.capabilities.spec.tool_event_views
     update_input = memory_views["update_workspace_memory"].input({"key_learning": learning, "category": "Preference"})

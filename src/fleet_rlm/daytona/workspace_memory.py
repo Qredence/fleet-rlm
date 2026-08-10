@@ -15,6 +15,7 @@ import threading
 from collections import OrderedDict
 from collections.abc import Iterator
 from contextlib import contextmanager
+from datetime import UTC, datetime
 from typing import Any
 
 from fleet_rlm.daytona.workspace_agent import WorkspaceAgentStorageError, run_workspace_agent
@@ -357,8 +358,9 @@ class DaytonaWorkspaceMemoryStore:
         learning = normalize_workspace_memory_learning(key_learning)
         normalized_category = normalize_workspace_memory_category(category) if category is not None else None
         self._ensure_migrated()
+        updated_at = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
         request = json.dumps(
-            {"learning": learning, "category": normalized_category},
+            {"learning": learning, "category": normalized_category, "updated_at": updated_at},
             separators=(",", ":"),
         ).encode("utf-8")
         try:

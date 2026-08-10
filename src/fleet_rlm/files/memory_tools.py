@@ -330,6 +330,9 @@ class WorkspaceMemoryToolHost:
                 "namespace": WORKSPACE_MEMORY_NAMESPACE,
                 "memory_id": normalized_id,
                 "category": entry.category if entry is not None else category,
+                "source": entry.source if entry is not None else "legacy_unknown",
+                "record_version": entry.record_version if entry is not None else 3,
+                "updated_at": entry.updated_at if entry is not None else None,
                 "entry_bytes": len(record.encode("utf-8")),
             }
 
@@ -514,7 +517,10 @@ class WorkspaceMemoryToolHost:
             return projected
 
         def edit_output(result: object) -> JsonValue:
-            return _output(result, ("ok", "namespace", "memory_id", "category", "entry_bytes"))
+            return _output(
+                result,
+                ("ok", "namespace", "memory_id", "category", "source", "record_version", "updated_at", "entry_bytes"),
+            )
 
         def forget_input(arguments: Mapping[str, Any]) -> JsonValue:
             return {"memory_id": _event_id(arguments.get("memory_id"))}
