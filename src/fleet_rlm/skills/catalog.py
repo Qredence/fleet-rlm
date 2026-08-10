@@ -11,63 +11,14 @@ from uuid import UUID, uuid5
 import dspy
 
 from fleet_rlm.skills.errors import SkillNotFoundError
+from fleet_rlm.skills.manifest import SkillManifest, parse_bundled_skill_manifest
 from fleet_rlm.skills.models import SkillCard, SkillDefinition, SkillResource
 from fleet_rlm.skills.signatures import DataAnalysisSignature, validate_skill_signature
 
 _BUNDLED_SKILL_NAMESPACE = UUID("6f1e0c2a-9b3d-4e5f-8a1b-2c3d4e5f6071")
-
-
-@dataclass(frozen=True, slots=True)
-class _BundledSpec:
-    name: str
-    description: str
-    version: str
-    resources: tuple[tuple[str, str], ...] = ()
-    signature: type[dspy.Signature] | None = None
-    affordances: tuple[str, ...] = ()
-
-
-_BUNDLED_SPECS = (
-    _BundledSpec(
-        "dspy-rlm",
-        "Use when analyzing, explaining, or implementing dspy.RLM "
-        "(Recursive Language Model / REPL code agent). Not for RAG or dspy.Retrieve.",
-        "1.0.0",
-        (("references/rlm-contract.md", "text/markdown"),),
-        affordances=("interpreter", "llm_query"),
-    ),
-    _BundledSpec(
-        "long-context",
-        "Use bounded retrieval to analyze large documents, transcripts, code, or datasets.",
-        "2.0.0",
-        (
-            ("scripts/semantic_chunk.py", "text/x-python"),
-            ("scripts/rank_chunks.py", "text/x-python"),
-            ("references/chunking-strategies.md", "text/markdown"),
-        ),
-        affordances=("fetch_url", "llm_query_batched", "workspace.files"),
-    ),
-    _BundledSpec(
-        "workspace-files",
-        "Use durable Session Workspace, Project, Attachment, and Artifact tools correctly.",
-        "1.1.0",
-        (("references/filesystem-contract.md", "text/markdown"),),
-        affordances=("workspace.files", "artifacts.publish"),
-    ),
-    _BundledSpec(
-        "data-analysis",
-        "Compute and verify descriptive statistics, trends, and qualified anomalies.",
-        "1.0.0",
-        signature=DataAnalysisSignature,
-        affordances=("artifacts.publish", "llm_query_batched"),
-    ),
-    _BundledSpec(
-        "report-builder",
-        "Create, save, read back, and verify reports from trusted source data.",
-        "1.1.0",
-        affordances=("workspace.files", "artifacts.publish"),
-    ),
-)
+# Host-only executable extension bindings. Discovery, identity, behavior
+# metadata, and resources are owned by each validated SKILL.md manifest.
+_SIGNATURE_BINDINGS: Mapping[str, type[dspy.Signature]] = MappingProxyType({"data-analysis": DataAnalysisSignature})
 
 
 def stable_skill_id(name: str) -> UUID:
@@ -111,74 +62,63 @@ class UnavailableSkillCatalog(SkillCatalog):
         super().__init__(())
 
 
-def build_bundled_skill_catalog() -> SkillCatalog:
-    from fleet_rlm.skills.manifest import parse_bundled_skill_manifest
+def load_bundled_skill_manifests() -> tuple[SkillManifest, ...]:
+    """Parse all bundled manifests deterministically."""
 
     root = files("fleet_rlm.skills").joinpath("bundled")
-    definitions: list[SkillDefinition] = []
     with as_file(root) as root_path:
-        for spec in _BUNDLED_SPECS:
-            directory = root_path.joinpath(spec.name)
-            # Expand-phase authority boundary: parse/validate Skill-owned
-            # metadata at build time, but keep the existing host declaration
-            # as the runtime selection value so pinned Turn inputs do not
-            # move in this ticket. Drift is compared by diagnostics below.
-            parse_bundled_skill_manifest(directory)
-            instructions = directory.joinpath("SKILL.md").read_text(encoding="utf-8")
-            resources = {
-                path: SkillResource(path, media_type, directory.joinpath(path).read_text(encoding="utf-8"))
-                for path, media_type in spec.resources
-            }
-            if spec.signature is not None:
-                validate_skill_signature(spec.signature)
-            card = SkillCard(
-                stable_skill_id(spec.name),
-                spec.name,
-                spec.description,
-                spec.version,
-                bool(resources),
-                spec.affordances,
+        directories = tuple(
+            sorted(
+                (path for path in root_path.iterdir() if path.is_dir() and path.joinpath("SKILL.md").is_file()),
+                key=lambda path: path.name,
             )
-            definitions.append(SkillDefinition(card, instructions, resources, spec.signature))
+        )
+        manifests = []
+        for directory in directories:
+            manifest = parse_bundled_skill_manifest(directory)
+            if manifest.name != directory.name:
+                raise ValueError(f"Skill manifest name does not match bundle directory: {directory.name}")
+            manifests.append(manifest)
+        return tuple(manifests)
+
+
+def build_bundled_skill_catalog() -> SkillCatalog:
+    manifests = load_bundled_skill_manifests()
+    manifest_names = {manifest.name for manifest in manifests}
+    unexpected_bindings = set(_SIGNATURE_BINDINGS) - manifest_names
+    if unexpected_bindings:
+        raise ValueError(f"host Signature bindings reference unknown Skills: {sorted(unexpected_bindings)}")
+    definitions: list[SkillDefinition] = []
+    for manifest in manifests:
+        signature = _SIGNATURE_BINDINGS.get(manifest.name)
+        if signature is not None:
+            validate_skill_signature(signature)
+        card = SkillCard(
+            stable_skill_id(manifest.name),
+            manifest.name,
+            manifest.description,
+            manifest.version,
+            bool(manifest.resources),
+            manifest.affordances,
+        )
+        resources = {
+            resource.path: SkillResource(resource.path, resource.media_type, resource.content)
+            for resource in manifest.resources
+        }
+        definitions.append(SkillDefinition(card, manifest.instructions, resources, signature))
     return SkillCatalog(tuple(definitions))
 
 
-def bundled_skill_manifest_diagnostics() -> tuple[str, ...]:
-    """Compare parsed Skill manifests to the current host catalog declarations.
-
-    The host catalog remains the runtime source for QRE-122; diagnostics make
-    drift explicit before the later contract swaps the authority.
-    """
-    from fleet_rlm.skills.manifest import parse_bundled_skill_manifest
+def bundled_skill_readme_diagnostics() -> tuple[str, ...]:
+    """Verify the human catalog table was generated from canonical manifests."""
 
     root = files("fleet_rlm.skills").joinpath("bundled")
-    diagnostics: list[str] = []
     with as_file(root) as root_path:
-        for spec in _BUNDLED_SPECS:
-            directory = root_path.joinpath(spec.name)
-            try:
-                manifest = parse_bundled_skill_manifest(directory)
-            except Exception as exc:
-                diagnostics.append(f"{spec.name}: manifest parse failed: {exc}")
-                continue
-            expected = {
-                "name": spec.name,
-                "description": spec.description,
-                "version": spec.version,
-                "affordances": spec.affordances,
-                "resources": spec.resources,
-            }
-            actual = {
-                "name": manifest.name,
-                "description": manifest.description,
-                "version": manifest.version,
-                "affordances": manifest.affordances,
-                "resources": tuple((resource.path, resource.media_type) for resource in manifest.resources),
-            }
-            for field, expected_value in expected.items():
-                if actual[field] != expected_value:
-                    diagnostics.append(
-                        f"{spec.name}: manifest {field} differs from host catalog "
-                        f"({actual[field]!r} != {expected_value!r})"
-                    )
-    return tuple(diagnostics)
+        readme = root_path.joinpath("README.md").read_text(encoding="utf-8")
+    expected_table = "| Skill | Version | Description |\n|---|---:|---|\n" + "".join(
+        f"| `{manifest.name}` | {manifest.version} | {manifest.description} |\n"
+        for manifest in load_bundled_skill_manifests()
+    ).rstrip("\n")
+    if f"Fleet ships five runtime Skills:\n\n{expected_table}" not in readme:
+        return (f"README table differs from canonical manifests:\n{expected_table}",)
+    return ()

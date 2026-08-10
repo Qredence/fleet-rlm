@@ -6,7 +6,12 @@ from pathlib import Path
 
 import pytest
 
-from fleet_rlm.skills.catalog import build_bundled_skill_catalog, bundled_skill_manifest_diagnostics, stable_skill_id
+from fleet_rlm.skills.catalog import (
+    build_bundled_skill_catalog,
+    bundled_skill_readme_diagnostics,
+    load_bundled_skill_manifests,
+    stable_skill_id,
+)
 from fleet_rlm.skills.manifest import SkillManifestResource, parse_bundled_skill_manifest, parse_skill_manifest
 
 
@@ -60,7 +65,7 @@ def test_every_current_bundled_skill_parses_into_one_validated_manifest() -> Non
         "scripts/rank_chunks.py",
         "references/chunking-strategies.md",
     ]
-    assert by_name["workspace-files"].version == "1.2.0"
+    assert by_name["workspace-files"].version == "1.1.0"
     assert by_name["report-builder"].resources == ()
     assert all(manifest.compatibility.strip() for manifest in manifests)
     assert all(manifest.instructions.startswith("# ") for manifest in manifests)
@@ -150,16 +155,25 @@ def test_bundle_parser_rejects_symlink_resource_bodies(tmp_path: Path) -> None:
         parse_bundled_skill_manifest(root)
 
 
-def test_manifest_host_catalog_parity_detects_workspace_files_version_drift() -> None:
-    diagnostics = bundled_skill_manifest_diagnostics()
+def test_catalog_uses_one_manifest_authority_for_metadata_and_resources() -> None:
+    catalog = build_bundled_skill_catalog()
+    manifests = {manifest.name: manifest for manifest in load_bundled_skill_manifests()}
 
-    assert len(diagnostics) == 3
-    assert any("long-context: manifest description differs" in item for item in diagnostics)
-    assert any("workspace-files: manifest description differs" in item for item in diagnostics)
-    assert any(
-        item.startswith("workspace-files: manifest version differs") and "'1.2.0' != '1.1.0'" in item
-        for item in diagnostics
-    )
+    for card in catalog.cards():
+        manifest = manifests[card.name]
+        assert card.id == stable_skill_id(card.name)
+        assert card.description == manifest.description
+        assert card.version == manifest.version
+        assert card.affordances == manifest.affordances
+        assert card.resources_available == bool(manifest.resources)
+        definition = catalog.require(card.id)
+        assert tuple(definition.resources) == tuple(resource.path for resource in manifest.resources)
+        assert not definition.instructions.startswith("---")
+        assert "allowed-tools:" not in definition.instructions
+
+
+def test_human_documentation_consumes_the_same_manifest_rows() -> None:
+    assert bundled_skill_readme_diagnostics() == ()
 
 
 def test_custom_signature_binding_stays_code_owned_and_outside_the_manifest() -> None:

@@ -1,6 +1,6 @@
 ---
 name: long-context
-description: Use when a document, codebase, transcript, or dataset is too large to inspect reliably in one model context, especially for exact retrieval or evidence synthesis.
+description: Use bounded retrieval to analyze large documents, transcripts, code, or datasets.
 compatibility: Requires Fleet RLM variable mode with a Python interpreter.
 metadata:
   version: "2.0.0"

@@ -1,9 +1,9 @@
 ---
 name: workspace-files
-description: Use when a Turn must inspect, create, or update durable Session files or Project deliverables, consume an authorized Attachment, or return a downloadable Artifact.
+description: Use durable Session Workspace, Project, Attachment, and Artifact tools correctly.
 compatibility: Durable Project and Session Workspace writes and Artifact promotion require the Daytona run environment.
 metadata:
-  version: "1.2.0"
+  version: "1.1.0"
   affordances:
     - workspace.files
     - artifacts.publish

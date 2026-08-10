@@ -117,3 +117,82 @@ def test_bundled_cards_advertise_bounded_capability_affordances() -> None:
     assert by_name["dspy-rlm"].affordances == ("interpreter", "llm_query")
     assert all(isinstance(card.affordances, tuple) for card in catalog.cards())
     assert all(len(card.affordances) <= 8 for card in catalog.cards())
+
+
+def test_manifest_derived_catalog_snapshot_preserves_public_skill_contract() -> None:
+    catalog = build_bundled_skill_catalog()
+    snapshot = tuple(
+        (
+            str(card.id),
+            card.name,
+            card.version,
+            card.description,
+            card.resources_available,
+            card.affordances,
+            tuple(catalog.require(card.id).resources),
+            catalog.require(card.id).signature is DataAnalysisSignature,
+        )
+        for card in catalog.cards()
+    )
+    assert snapshot == (
+        (
+            "f4d260fa-a663-5ef9-835f-eac46c10c1bf",
+            "data-analysis",
+            "1.0.0",
+            "Compute and verify descriptive statistics, trends, and qualified anomalies.",
+            False,
+            ("artifacts.publish", "llm_query_batched"),
+            (),
+            True,
+        ),
+        (
+            "83f7de82-1fea-5bc0-90e0-795631f3d5d0",
+            "dspy-rlm",
+            "1.0.0",
+            "Use when analyzing, explaining, or implementing dspy.RLM "
+            "(Recursive Language Model / REPL code agent). Not for RAG or dspy.Retrieve.",
+            True,
+            ("interpreter", "llm_query"),
+            ("references/rlm-contract.md",),
+            False,
+        ),
+        (
+            "015a133e-7b90-50c7-bb61-4b2772f57c1c",
+            "long-context",
+            "2.0.0",
+            "Use bounded retrieval to analyze large documents, transcripts, code, or datasets.",
+            True,
+            ("fetch_url", "llm_query_batched", "workspace.files"),
+            ("scripts/semantic_chunk.py", "scripts/rank_chunks.py", "references/chunking-strategies.md"),
+            False,
+        ),
+        (
+            "90bd89fb-66c8-558d-acdb-55c59ba7106c",
+            "report-builder",
+            "1.1.0",
+            "Create, save, read back, and verify reports from trusted source data.",
+            False,
+            ("workspace.files", "artifacts.publish"),
+            (),
+            False,
+        ),
+        (
+            "94eedfa7-4b0c-5316-96af-5e3924e128e7",
+            "workspace-files",
+            "1.1.0",
+            "Use durable Session Workspace, Project, Attachment, and Artifact tools correctly.",
+            True,
+            ("workspace.files", "artifacts.publish"),
+            ("references/filesystem-contract.md",),
+            False,
+        ),
+    )
+
+
+def test_unavailable_catalog_fixture_keeps_empty_degradation_explicit() -> None:
+    from fleet_rlm.skills.catalog import UnavailableSkillCatalog
+
+    unavailable = UnavailableSkillCatalog()
+    assert unavailable.cards() == ()
+    assert unavailable.get(uuid4()) is None
+    assert unavailable.unavailable is True
