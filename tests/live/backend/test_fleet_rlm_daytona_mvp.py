@@ -34,6 +34,7 @@ from fleet_rlm.config import (
     load_profile_environment_contracts,
     load_runtime_settings,
 )
+from fleet_rlm.daytona.interpreter import sync_sandbox
 from fleet_rlm.daytona.workspace_fs import DaytonaSandboxVolumeFs
 from fleet_rlm.files.volume_paths import volume_paths_from_settings
 from fleet_rlm.rlm.tool_observer import ToolEventView
@@ -535,8 +536,8 @@ def _session_volume_files(sandbox: Any, session_dir: str) -> list[bytes]:
 
 
 def _sandbox_environment_names(sandbox: Any) -> set[str]:
-    result = sandbox.process.exec(
-        "python -c 'import json,os; print(json.dumps(sorted(os.environ)))'",
+    result = sandbox.process.code_run(
+        "import json, os\nprint(json.dumps(sorted(os.environ)))",
         timeout=30,
     )
     if result.exit_code != 0:
@@ -805,6 +806,7 @@ def test_complete_daytona_mvp_through_fastapi(
             )
             portal = client.portal
             assert portal is not None
+            portal_loop = portal.call(lambda: asyncio.get_running_loop())
             try:
                 phase = "first_turn"
                 created = client.post("/api/sessions", json={"title": "Live Daytona MVP proof"})
@@ -877,7 +879,7 @@ def test_complete_daytona_mvp_through_fastapi(
                 assert binding.sandbox_id is not None
                 assert binding.volume_id is not None
                 sandbox_ids.add(binding.sandbox_id)
-                first_sandbox = portal.call(resources.platform.get, binding.sandbox_id)
+                first_sandbox = sync_sandbox(portal.call(resources.platform.get, binding.sandbox_id), portal_loop)
                 assert first_sandbox is not None
                 first_fs = DaytonaSandboxVolumeFs(first_sandbox)
                 paths = volume_paths_from_settings(settings)
@@ -970,7 +972,9 @@ def test_complete_daytona_mvp_through_fastapi(
                 assert len(assistants) == 2
                 assert assistants[0] == first_assistant
                 assert _structured_part(assistants[0]) == first_structured
-                replacement_sandbox = portal.call(resources.platform.get, replacement.sandbox_id)
+                replacement_sandbox = sync_sandbox(
+                    portal.call(resources.platform.get, replacement.sandbox_id), portal_loop
+                )
                 assert replacement_sandbox is not None
                 replacement_env_names = _sandbox_environment_names(replacement_sandbox)
                 assert not set(_SECRET_NAMES) & replacement_env_names
