@@ -98,7 +98,7 @@ routes or public events.
 - Tool event views are host-owned bounded allowlists. No declared view means no
   public arguments or results.
 - Daytona alone registers the Workspace Memory Tools: `read_workspace_memory`,
-  `remember`, `list_memories`, `edit_memory`, `forget` (plus the back-compat
+  `remember`, `list_memories`, `search_memories`, `edit_memory`, `forget` (plus the back-compat
   alias `update_workspace_memory`). The newest 4 KiB tail of `MEMORIES.md` is
   also injected into the Turn's `session_context` as
   `workspace_memory tail` (bounded, tolerant, missing-store-safe); full history

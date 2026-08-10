@@ -156,6 +156,7 @@ async def test_live_preparation_stages_attachment_and_cleans_it(
         "read_workspace_text",
         "read_session_history",
         "remember",
+        "search_memories",
         "stat_project_file",
         "stat_workspace_file",
         "update_workspace_memory",

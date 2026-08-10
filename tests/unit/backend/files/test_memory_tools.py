@@ -39,6 +39,7 @@ class FakeMemoryStore:
     appended: list[str] | None = None
     entries: tuple[WorkspaceMemoryEntry, ...] = ()
     failure: BaseException | None = None
+    warnings: int = 0
 
     def read_tail(self, *, byte_budget: int) -> WorkspaceMemoryReadResult:
         assert byte_budget == 262_144
@@ -76,7 +77,7 @@ class FakeMemoryStore:
             entries=page,
             truncated=len(entries) > limit,
             next_cursor=page[-1].memory_id if len(entries) > limit and page else None,
-            warnings=0,
+            warnings=self.warnings,
         )
 
     def delete_entry(self, memory_id: str) -> bool:
@@ -142,6 +143,7 @@ def test_exposes_exact_memory_tool_contracts() -> None:
         "remember",
         "update_workspace_memory",
         "list_memories",
+        "search_memories",
         "edit_memory",
         "forget",
     )
@@ -159,11 +161,16 @@ def test_exposes_exact_memory_tool_contracts() -> None:
         "category": {"type": ["string", "null"]},
     }
     assert tools[4].args == {
+        "query": {"type": "string"},
+        "category": {"type": ["string", "null"]},
+        "limit": {"type": "integer"},
+    }
+    assert tools[5].args == {
         "memory_id": {"type": "string"},
         "key_learning": {"type": "string"},
         "category": {"type": ["string", "null"]},
     }
-    assert tools[5].args == {"memory_id": {"type": "string"}}
+    assert tools[6].args == {"memory_id": {"type": "string"}}
 
 
 def test_reads_missing_memory_as_successful_empty_result() -> None:
@@ -418,6 +425,135 @@ def test_event_views_expose_only_memory_metadata() -> None:
         update(key_learning="private learning", category="/home/daytona/private")
     assert observed[0].input == {"category": "invalid", "key_learning_bytes": 16}
     assert "/home/daytona" not in str(observed)
+
+
+def _search_entries_fixture() -> tuple[WorkspaceMemoryEntry, ...]:
+    return (
+        _parsed("- [2026-07-27T11:00:01Z] **Preference** <!-- id:aaaa0001 -->: Prefers polars for dataframe joins.\n"),
+        _parsed(
+            "- [2026-07-27T11:00:02Z] **General** <!-- id:bbbb0002 -->: Ordered lunch after the benchmark meeting.\n"
+        ),
+        _parsed(
+            "- [2026-07-27T11:00:03Z] **Preference** <!-- id:cccc0003 -->: Uses DuckDB for local analytical joins.\n"
+        ),
+        _parsed(
+            "- [2026-07-27T11:00:04Z] **Research** <!-- id:dddd0004 -->: "
+            "Dataframe vectorization skimmed polars notes.\n"
+        ),
+    )
+
+
+def test_search_memories_ranks_older_relevant_learning_above_newer_irrelevant_learning() -> None:
+    store = FakeMemoryStore(entries=_search_entries_fixture())
+    result = _tools(_host(store))["search_memories"](query="polars dataframe joins", limit=4)
+
+    assert result["ok"] is True
+    assert result["category"] is None
+    assert result["count"] == 3
+    assert result["truncated"] is False
+    ranked = [(entry["id"], entry["learning"], entry["score"], entry["rank"]) for entry in result["entries"]]
+    assert ranked[0][0] == "aaaa0001"
+    assert ranked[0][1] == "Prefers polars for dataframe joins."
+    assert ranked[0][2] > ranked[1][2]
+    assert ranked[0][3] == 1
+    assert "Ordered lunch" not in {entry["learning"] for entry in result["entries"]}
+
+
+def test_search_memories_applies_optional_category_filter() -> None:
+    store = FakeMemoryStore(entries=_search_entries_fixture())
+    result = _tools(_host(store))["search_memories"](query="polars dataframe joins", category="Research")
+
+    assert result["category"] == "Research"
+    assert [entry["id"] for entry in result["entries"]] == ["dddd0004"]
+    assert result["count"] == 1
+
+
+def test_search_memories_normalizes_unicode_and_repeated_ranking_order() -> None:
+    store = FakeMemoryStore(
+        entries=(
+            _parsed("- [2026-07-27T11:00:01Z] **Research** <!-- id:aaaa0001 -->: Analyse café context handling.\n"),
+            _parsed("- [2026-07-27T11:00:02Z] **Research** <!-- id:bbbb0002 -->: Cafe context handling comparison.\n"),
+        )
+    )
+    tool = _tools(_host(store))["search_memories"]
+    first = tool(query="  analyser   café context  ", limit=2)
+    second = tool(query="analyser café context", limit=2)
+
+    assert first == second
+    assert [entry["id"] for entry in first["entries"]] == ["aaaa0001", "bbbb0002"]
+    assert [entry["rank"] for entry in first["entries"]] == [1, 2]
+
+
+def test_search_memories_tie_breaks_deterministically_by_score_timestamp_and_identity() -> None:
+    store = FakeMemoryStore(
+        entries=(
+            _parsed("- [2026-07-27T11:00:01Z] **General** <!-- id:bbbb0002 -->: Exact phrase.\n"),
+            _parsed("- [2026-07-27T11:00:02Z] **General** <!-- id:aaaa0001 -->: Exact phrase.\n"),
+        )
+    )
+    result = _tools(_host(store))["search_memories"](query="exact", limit=2)
+
+    assert [entry["id"] for entry in result["entries"]] == ["bbbb0002", "aaaa0001"]
+    assert all(item["score"] == result["entries"][0]["score"] for item in result["entries"][1:])
+
+
+def test_search_memories_limits_results_and_reports_bounded_malformed_skips() -> None:
+    store = FakeMemoryStore(entries=_search_entries_fixture(), warnings=64)
+    result = _tools(_host(store))["search_memories"](query="polars", limit=1)
+
+    assert result["count"] == 1
+    assert len(result["entries"]) == 1
+    assert result["skipped_malformed_records"] == 64
+
+
+def test_search_memories_rejects_invalid_query_filter_and_limit() -> None:
+    from fleet_rlm.files.memory_tools import MemoryToolError
+
+    tool = _tools(_host(FakeMemoryStore()))["search_memories"]
+    with pytest.raises(MemoryToolError, match="Workspace Memory entry is invalid"):
+        tool(query="  ")
+    with pytest.raises(MemoryToolError, match="Workspace Memory entry is invalid"):
+        tool(query="x" * 257)
+    with pytest.raises(MemoryToolError, match="Workspace Memory entry is invalid"):
+        tool(query="polars", limit=33)
+    with pytest.raises(MemoryToolError, match="Workspace Memory category is invalid"):
+        tool(query="polars", category="**bad**")
+
+
+def test_search_memories_empty_result_remains_bounded() -> None:
+    result = _tools(_host(FakeMemoryStore(entries=_search_entries_fixture())))["search_memories"](
+        query="nonexistent token", limit=4
+    )
+
+    assert result["ok"] is True
+    assert result["entries"] == []
+    assert result["count"] == 0
+    assert result["truncated"] is False
+
+
+def test_search_event_view_projects_metadata_without_learning_or_query_text() -> None:
+    secret = "private polar query and memory"
+    store = FakeMemoryStore(
+        entries=(_parsed(f"- [2026-07-27T11:00:01Z] **Preference** <!-- id:aaaa0001 -->: {secret}\n"),)
+    )
+    host = _host(store)
+    tools = _tools(host)
+    views = host.event_views()
+    observed: list[object] = []
+    observed_tool = observe_tool(tools["search_memories"], observed.append, views["search_memories"])
+
+    observed_tool(query=secret, category="Preference", limit=1)
+
+    assert observed[0].input == {"query_bytes": len(secret.encode()), "limit": 1, "category": "Preference"}
+    assert observed[1].output == {
+        "ok": True,
+        "namespace": "workspace_memory",
+        "count": 1,
+        "truncated": False,
+        "skipped_malformed_records": 0,
+        "top_memory_ids": ("aaaa0001",),
+    }
+    assert secret not in str(observed)
 
 
 def test_lifecycle_event_views_expose_only_memory_metadata() -> None:

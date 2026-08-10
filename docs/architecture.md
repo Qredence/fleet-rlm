@@ -187,7 +187,7 @@ Daytona Workspace Memory is separate workspace-wide immediate state. Its fixed
 `workspaces/<workspace_id>` Volume subpath (a pre-existing root `MEMORIES.md`
 is migrated there on first open, never losing content); Session and Run state
 retain their nested paths below that root. The RLM accesses memory through
-`read_workspace_memory`, `remember`, `list_memories`, `edit_memory`, and
+`read_workspace_memory`, `remember`, `list_memories`, `search_memories`, `edit_memory`, and
 `forget` (plus the `update_workspace_memory` back-compat alias); Fleet also
 injects a bounded, tolerant <= 4 KiB `workspace_memory tail` digest of the
 newest records into the Turn's `session_context` so recent learnings are

@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+import math
+import unicodedata
+from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from types import MappingProxyType
 from typing import Any, cast
@@ -29,6 +32,9 @@ from fleet_rlm.rlm.tool_observer import ToolEventView, bound_event_text
 
 WORKSPACE_MEMORY_NAMESPACE = "workspace_memory"
 _LIST_MEMORIES_DEFAULT_LIMIT = 50
+SEARCH_MEMORIES_MAX_LIMIT = 32
+_SEARCH_QUERY_MAX_BYTES = 256
+_SEARCH_PAGE_LIMIT = WORKSPACE_MEMORY_MAX_LIST_LIMIT
 
 
 class MemoryToolError(RuntimeError):
@@ -71,6 +77,86 @@ def _entry_payload(entry: WorkspaceMemoryEntry) -> dict[str, object]:
         "category": entry.category,
         "learning": entry.learning,
     }
+
+
+@dataclass(frozen=True, slots=True)
+class _ScoredMemoryEntry:
+    entry: WorkspaceMemoryEntry
+    score: float
+    ordinal: int
+
+
+def _normalize_lexical_text(value: str) -> str:
+    text = unicodedata.normalize("NFKD", value).casefold()
+    text = "".join(
+        character if character.isspace() or character.isalnum() or character == "_" else " " for character in text
+    )
+    return " ".join(text.split())
+
+
+def _normalize_search_query(query: str) -> str:
+    if not isinstance(query, str) or len(query.encode("utf-8")) > _SEARCH_QUERY_MAX_BYTES:
+        raise _invalid_entry()
+    normalized = _normalize_lexical_text(" ".join(query.split()))
+    if not normalized:
+        raise _invalid_entry()
+    return normalized
+
+
+def _lexical_tokens(text: str) -> tuple[str, ...]:
+    return tuple(token for token in text.split() if token)
+
+
+def _search_entries(
+    store: WorkspaceMemoryStore,
+    *,
+    normalized_query: str,
+    category: str | None,
+) -> tuple[tuple[_ScoredMemoryEntry, ...], int]:
+    query_tokens = _lexical_tokens(normalized_query)
+    if not query_tokens:
+        raise _invalid_entry()
+    after: str | None = None
+    entries: list[WorkspaceMemoryEntry] = []
+    warnings = 0
+    while True:
+        page = store.list_entries(after=after, limit=_SEARCH_PAGE_LIMIT, category=category)
+        entries.extend(page.entries)
+        warnings = max(warnings, page.warnings)
+        if not page.truncated or page.next_cursor is None:
+            break
+        after = page.next_cursor
+    if not entries:
+        return (), warnings
+
+    document_texts = tuple(_normalize_lexical_text(f"{entry.category} {entry.learning}") for entry in entries)
+    document_tokens = tuple(set(_lexical_tokens(text)) for text in document_texts)
+    document_counts: dict[str, int] = {}
+    for tokens in document_tokens:
+        for token in tokens:
+            document_counts[token] = document_counts.get(token, 0) + 1
+    scored: list[_ScoredMemoryEntry] = []
+    for ordinal, (entry, text, tokens) in enumerate(zip(entries, document_texts, document_tokens, strict=True)):
+        score = 0.0
+        for token in dict.fromkeys(query_tokens):
+            if token in tokens:
+                score += 1.0 + math.log2((1 + len(entries)) / (1 + document_counts[token]))
+        if set(dict.fromkeys(query_tokens)) <= tokens:
+            score += 1.0
+        if normalized_query in text:
+            score += 3.0
+        if score > 0:
+            scored.append(_ScoredMemoryEntry(entry, round(score, 6), ordinal))
+    scored.sort(
+        key=lambda item: (
+            -item.score,
+            tuple(-int(part) for part in item.entry.timestamp[:10].split("-")),
+            item.entry.timestamp,
+            item.entry.memory_id,
+            item.ordinal,
+        )
+    )
+    return tuple(scored), warnings
 
 
 class WorkspaceMemoryToolHost:
@@ -159,6 +245,50 @@ class WorkspaceMemoryToolHost:
                 "truncated": result.truncated,
                 "next_cursor": result.next_cursor,
                 "skipped_malformed_records": result.warnings,
+            }
+
+        def search_memories(
+            query: str,
+            category: str | None = None,
+            limit: int = 8,
+        ) -> dict[str, object]:
+            """Search valid Workspace Memory entries with deterministic lexical ranking."""
+            normalized_query = _normalize_search_query(query)
+            if type(limit) is not int or not 1 <= limit <= SEARCH_MEMORIES_MAX_LIMIT:
+                raise _invalid_entry()
+            normalized_category: str | None
+            if category is None:
+                normalized_category = None
+            else:
+                try:
+                    normalized_category = normalize_workspace_memory_category(category)
+                except WorkspaceMemoryCategoryError as exc:
+                    raise _invalid_category() from exc
+            try:
+                scored, warnings = _search_entries(
+                    self._store,
+                    normalized_query=normalized_query,
+                    category=normalized_category,
+                )
+            except Exception as exc:
+                raise _unavailable() from exc
+            selected = scored[:limit]
+            return {
+                "ok": True,
+                "namespace": WORKSPACE_MEMORY_NAMESPACE,
+                "query": " ".join(query.split()),
+                "category": normalized_category,
+                "entries": [
+                    {
+                        **_entry_payload(item.entry),
+                        "score": item.score,
+                        "rank": index + 1,
+                    }
+                    for index, item in enumerate(selected)
+                ],
+                "count": len(selected),
+                "truncated": len(scored) > limit,
+                "skipped_malformed_records": warnings,
             }
 
         def edit_memory(
@@ -255,6 +385,19 @@ class WorkspaceMemoryToolHost:
                 },
             ),
             dspy.Tool(
+                search_memories,
+                name="search_memories",
+                desc=(
+                    "Search durable Workspace Memory for an older relevant learning by a bounded query, using "
+                    "deterministic lexical ranking; pass category only to constrain recall."
+                ),
+                args={
+                    "query": {"type": "string"},
+                    "category": {"type": ["string", "null"]},
+                    "limit": {"type": "integer"},
+                },
+            ),
+            dspy.Tool(
                 edit_memory,
                 name="edit_memory",
                 desc=(
@@ -319,6 +462,33 @@ class WorkspaceMemoryToolHost:
                 ("ok", "namespace", "count", "truncated", "next_cursor", "skipped_malformed_records"),
             )
 
+        def search_input(arguments: Mapping[str, Any]) -> JsonValue:
+            query = arguments.get("query")
+            projected: dict[str, JsonValue] = {
+                "query_bytes": len(query.encode("utf-8")) if isinstance(query, str) else 0,
+                "limit": arguments.get("limit") if type(arguments.get("limit")) is int else None,
+            }
+            if arguments.get("category") is not None:
+                projected["category"] = _event_category(arguments.get("category"))
+            return projected
+
+        def search_output(result: object) -> JsonValue:
+            if not isinstance(result, Mapping):
+                return {}
+            entries = result.get("entries")
+            top_ids: list[str] = []
+            if isinstance(entries, Sequence) and not isinstance(entries, (str, bytes, bytearray)):
+                for item in list(entries)[:8]:
+                    if isinstance(item, Mapping):
+                        raw_id = item.get("id")
+                        if isinstance(raw_id, str):
+                            top_ids.append(raw_id)
+            projected = cast(
+                Mapping[str, JsonValue],
+                _output(result, ("ok", "namespace", "count", "truncated", "skipped_malformed_records")),
+            )
+            return {**dict(projected), "top_memory_ids": top_ids}
+
         def edit_input(arguments: Mapping[str, Any]) -> JsonValue:
             learning = arguments.get("key_learning")
             projected: dict[str, JsonValue] = {
@@ -352,6 +522,10 @@ class WorkspaceMemoryToolHost:
                 "list_memories": ToolEventView(
                     input_projection=list_input,
                     output_projection=list_output,
+                ),
+                "search_memories": ToolEventView(
+                    input_projection=search_input,
+                    output_projection=search_output,
                 ),
                 "edit_memory": ToolEventView(
                     input_projection=edit_input,

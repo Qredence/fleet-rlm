@@ -37,8 +37,8 @@ contracts, and tracked docs remain authoritative.
   Tools (`delete_workspace_path`, `edit_workspace_text`, and the
   `delete_project_path`/`edit_project_text` pairs on the projects root) plus
   direct Workspace Artifact Candidate publication and the Workspace Memory
-  Tools (`read_workspace_memory`, `remember`, `list_memories`, `edit_memory`,
-  `forget`, plus the `update_workspace_memory` back-compat alias). The former
+  Tools (`read_workspace_memory`, `remember`, `list_memories`, `search_memories`,
+  `edit_memory`, `forget`, plus the `update_workspace_memory` back-compat alias). The former
   append/update-only "no delete Tool" invariant ended by user-approved WS-7
   deviation: delete/edit target regular files (delete also removes EMPTY
   directories; never recurses, never follows symlinks, FIFOs and other

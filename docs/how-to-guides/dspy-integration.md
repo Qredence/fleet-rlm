@@ -39,7 +39,8 @@ provide models, Signatures, or executable capabilities.
   `memory/MEMORIES.md` under the already mounted
   `workspaces/<workspace_id>` Volume subpath (the legacy root `MEMORIES.md`
   migrates on first open, never losing content). The RLM recalls it on demand
-  with `read_workspace_memory` or `list_memories`; every Turn also receives a
+  with `read_workspace_memory`, `list_memories`, or `search_memories`; every Turn
+  also receives a
   bounded, tolerant <= 4 KiB `workspace_memory tail` digest of the newest
   records inside `session_context` (cached per Volume root for 30 s).
 - `remember` (or its back-compat alias `update_workspace_memory`) appends one
