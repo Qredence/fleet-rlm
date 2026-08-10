@@ -13,7 +13,7 @@ from collections.abc import Mapping, Sequence
 from typing import Annotated, Any, Literal, assert_never, cast
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from fleet_rlm.rlm.dspy_contract import RLMUsage
 from fleet_rlm.sessions.committed_turn import (
@@ -31,6 +31,7 @@ from fleet_rlm.sessions.committed_turn import (
     ToolCallPart,
     UsagePart,
     WarningPart,
+    _freeze_json,
 )
 
 
@@ -38,6 +39,24 @@ class AssistantPartModel(BaseModel):
     """Strict base for every durable assistant semantic part."""
 
     model_config = ConfigDict(extra="forbid", strict=True)
+
+
+def _require_nonblank(value: str, field_name: str) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"{field_name} is required")
+    return value
+
+
+def _validated_json_value(value: object, *, path: str) -> Any:
+    # The canonical Pydantic boundary admits exactly the DTO payloads the
+    # defensive runtime aggregate already accepts, then returns normal JSON
+    # containers for inexpensive round-trip serialization.
+    frozen = _freeze_json(value, path=path)
+    if isinstance(frozen, Mapping):
+        return {key: _validated_json_value(item, path=path) for key, item in frozen.items()}
+    if isinstance(frozen, tuple):
+        return [_validated_json_value(item, path=path) for item in frozen]
+    return frozen
 
 
 class StepAssistantPart(AssistantPartModel):
@@ -74,6 +93,31 @@ class ToolCallAssistantPart(AssistantPartModel):
     output: Any = None
     error: str | None = None
 
+    @field_validator("tool_call_id", "tool_name")
+    @classmethod
+    def _required_identity(cls, value: str) -> str:
+        return _require_nonblank(value, "tool call identity")
+
+    @field_validator("input")
+    @classmethod
+    def _required_json_input(cls, value: Any) -> Any:
+        return _validated_json_value(value, path="tool_call.input")
+
+    @field_validator("output")
+    @classmethod
+    def _optional_json_output(cls, value: Any) -> Any:
+        if value is None:
+            return None
+        return _validated_json_value(value, path="tool_call.output")
+
+    @model_validator(mode="after")
+    def _validate_terminal_state(self) -> ToolCallAssistantPart:
+        if self.state == "completed" and self.error is not None:
+            raise ValueError("completed tool calls cannot contain an error")
+        if self.state == "failed" and (self.error is None or not self.error.strip()):
+            raise ValueError("failed tool calls require a non-blank error")
+        return self
+
 
 class SkillAssistantPart(AssistantPartModel):
     type: Literal["skill"] = "skill"
@@ -83,6 +127,19 @@ class SkillAssistantPart(AssistantPartModel):
     version: str | None = None
     trust: str | None = None
     affordances: list[str] = Field(default_factory=list)
+
+    @field_validator("skill_id", "name")
+    @classmethod
+    def _required_identity(cls, value: str) -> str:
+        return _require_nonblank(value, "skill identity")
+
+    @model_validator(mode="after")
+    def _validate_phase_semantics(self) -> SkillAssistantPart:
+        if self.phase == "activated" and (self.trust is None or not self.trust.strip()):
+            raise ValueError("activated skills require non-blank trust metadata")
+        if self.phase == "loaded" and (self.trust is not None or bool(self.affordances)):
+            raise ValueError("loaded skills cannot contain activation metadata")
+        return self
 
 
 class AttachmentAssistantPart(AssistantPartModel):
@@ -98,12 +155,22 @@ class WarningAssistantPart(AssistantPartModel):
     message: str = Field(min_length=1)
     code: str | None = None
 
+    @field_validator("message")
+    @classmethod
+    def _required_message(cls, value: str) -> str:
+        return _require_nonblank(value, "warning message")
+
 
 class StatusAssistantPart(AssistantPartModel):
     type: Literal["status"] = "status"
     phase: str = Field(min_length=1)
     status: str = Field(min_length=1)
     message: str | None = None
+
+    @field_validator("phase", "status")
+    @classmethod
+    def _required_state(cls, value: str) -> str:
+        return _require_nonblank(value, "status semantics")
 
 
 class ArtifactAssistantPart(AssistantPartModel):
@@ -115,10 +182,34 @@ class ArtifactAssistantPart(AssistantPartModel):
     byte_size: int = Field(ge=0)
     checksum_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
 
+    @field_validator("media_type")
+    @classmethod
+    def _required_media_type(cls, value: str) -> str:
+        return _require_nonblank(value, "artifact media_type")
+
+    @field_validator("checksum_sha256", mode="before")
+    @classmethod
+    def _normalize_checksum(cls, value: str) -> str:
+        candidate = value.lower()
+        if len(candidate) != 64 or any(character not in "0123456789abcdef" for character in candidate):
+            raise ValueError("checksum_sha256 must contain 64 hexadecimal characters")
+        return candidate
+
 
 class UsageAssistantPart(AssistantPartModel):
     type: Literal["usage"] = "usage"
     value: Mapping[str, Any]
+
+    @field_validator("value")
+    @classmethod
+    def _validate_usage(cls, value: Mapping[str, Any]) -> Mapping[str, Any]:
+        try:
+            from fleet_rlm.rlm.dspy_contract import validate_rlm_usage
+
+            usage = validate_rlm_usage(value)
+            return _validated_json_value(usage, path="usage.value")
+        except ValueError as exc:
+            raise ValueError(str(exc)) from exc
 
 
 class StructuredResultAssistantPart(AssistantPartModel):
@@ -127,10 +218,25 @@ class StructuredResultAssistantPart(AssistantPartModel):
     schema_version: str = Field(min_length=1)
     value: Any
 
+    @field_validator("schema_id", "schema_version")
+    @classmethod
+    def _required_schema_identity(cls, value: str) -> str:
+        return _require_nonblank(value, "structured result schema identity")
+
+    @field_validator("value")
+    @classmethod
+    def _validated_result_value(cls, value: Any) -> Any:
+        return _validated_json_value(value, path="structured_result.value")
+
 
 class TextAssistantPart(AssistantPartModel):
     type: Literal["text"] = "text"
     text: str = Field(min_length=1)
+
+    @field_validator("text")
+    @classmethod
+    def _validated_final_text(cls, value: str) -> str:
+        return _require_nonblank(value, "final text")
 
 
 AssistantPart = Annotated[
