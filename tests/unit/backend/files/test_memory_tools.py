@@ -365,6 +365,32 @@ def test_forget_removes_one_entry_and_reports_not_found() -> None:
         tool(memory_id="../../etc")
 
 
+def test_list_and_search_project_v3_provenance_without_bound_change() -> None:
+    from fleet_rlm.files.memory_models import format_workspace_memory_v3_record
+
+    record = format_workspace_memory_v3_record(
+        "Superseded release policy with provenance",
+        "Policy",
+        memory_id="dddd0004",
+        created_at="2026-07-19T09:00:00Z",
+        updated_at="2026-07-27T10:30:00Z",
+        source="operator_import",
+        supersedes_id=workspace_memory_record_id("2026-07-19T08:00:00Z", "Policy", "older policy"),
+    )
+    store = FakeMemoryStore(entries=(_parsed(record),))
+    tools = _tools(_host(store))
+
+    listed = tools["list_memories"](limit=1)
+    searched = tools["search_memories"](query="provenance", limit=1)
+
+    for payload in (listed["entries"][0], searched["entries"][0]):
+        assert payload["source"] == "operator_import"
+        assert payload["updated_at"] == "2026-07-27T10:30:00Z"
+        assert isinstance(payload["supersedes_id"], str)
+        assert payload["record_version"] == 3
+    assert listed["count"] == searched["count"] == 1
+
+
 def test_event_views_expose_only_memory_metadata() -> None:
     from fleet_rlm.files.memory_tools import MemoryToolError
 

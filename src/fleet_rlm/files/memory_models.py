@@ -10,6 +10,11 @@ open from the legacy root ``MEMORIES.md``). The file is a human-browsable log:
       - [ISO-UTC] **Category**: one-line learning                      (v1)
       - [ISO-UTC] **Category** <!-- id:8hex -->: one-line learning     (v2)
 
+Provenance-aware v3 records keep that shape while adding fixed-order
+``id/source/updated`` metadata and optional ``supersedes`` metadata. Legacy
+v1/v2 rows project as ``legacy_unknown`` with ``updated_at`` falling back to
+creation time; normal writes remain v2 during the expand phase.
+
 New appends always write v2 records. The v2 ``id`` is
 ``sha256(record-without-id)[:8]`` computed over the v1 text
 ``- [ts] **Category**: learning`` (without the trailing newline) at creation;
@@ -32,7 +37,7 @@ import hashlib
 import re
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Protocol
+from typing import Literal, Protocol
 
 WORKSPACE_MEMORY_BYTE_BUDGET = 262_144
 WORKSPACE_MEMORY_MAX_RECORD_BYTES = 4_096
@@ -55,6 +60,19 @@ _MEMORY_RECORD = re.compile(
     r"- \[(?P<timestamp>\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z)\] "
     r"\*\*(?P<category>[A-Za-z0-9][A-Za-z0-9 _-]*)\*\*"
     r"(?: <!-- id:(?P<memory_id>[0-9a-f]{8}) -->)?: "
+    r"(?P<learning>[^\r\n]+)\n"
+)
+
+_WORKSPACE_MEMORY_SOURCES = frozenset(("user_explicit", "agent_candidate", "operator_import", "legacy_unknown"))
+WorkspaceMemorySource = Literal["user_explicit", "agent_candidate", "operator_import", "legacy_unknown"]
+
+_MEMORY_RECORD_V3 = re.compile(
+    r"- \[(?P<timestamp>\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z)\] "
+    r"\*\*(?P<category>[A-Za-z0-9][A-Za-z0-9 _-]*)\*\*"
+    r" <!-- id:(?P<memory_id>[0-9a-f]{8})"
+    r" source:(?P<source>[a-z_]+)"
+    r" updated:(?P<updated_at>\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z)"
+    r"(?: supersedes:(?P<supersedes_id>[0-9a-f]{8}))? -->: "
     r"(?P<learning>[^\r\n]+)\n"
 )
 
@@ -94,6 +112,12 @@ def normalize_workspace_memory_id(memory_id: str) -> str:
     if not isinstance(memory_id, str) or _MEMORY_ID.fullmatch(memory_id) is None:
         raise WorkspaceMemoryIdError
     return memory_id
+
+
+def normalize_workspace_memory_source(source: str) -> WorkspaceMemorySource:
+    if source in _WORKSPACE_MEMORY_SOURCES:
+        return source  # type: ignore[return-value]
+    raise WorkspaceMemoryRecordError
 
 
 def workspace_memory_record_id(timestamp: str, category: str, learning: str) -> str:
@@ -169,7 +193,7 @@ def validate_workspace_memory_record(record: str) -> None:
         raise WorkspaceMemoryRecordError from exc
     if not encoded or len(encoded) > WORKSPACE_MEMORY_MAX_RECORD_BYTES:
         raise WorkspaceMemoryRecordError
-    match = _MEMORY_RECORD.fullmatch(record)
+    match = _MEMORY_RECORD.fullmatch(record) or _MEMORY_RECORD_V3.fullmatch(record)
     if match is None:
         raise WorkspaceMemoryRecordError
     try:
@@ -182,6 +206,20 @@ def validate_workspace_memory_record(record: str) -> None:
     learning = match["learning"]
     if learning != " ".join(learning.split()) or "\x00" in learning:
         raise WorkspaceMemoryRecordError
+    if match.re is _MEMORY_RECORD_V3:
+        try:
+            normalize_workspace_memory_source(match["source"])
+            datetime.strptime(match["updated_at"], "%Y-%m-%dT%H:%M:%SZ")
+            supersedes_id = match["supersedes_id"]
+        except (KeyError, ValueError) as exc:
+            raise WorkspaceMemoryRecordError from exc
+        if match["updated_at"] < match["timestamp"] or supersedes_id == match["memory_id"]:
+            raise WorkspaceMemoryRecordError
+        if supersedes_id is not None:
+            try:
+                normalize_workspace_memory_id(supersedes_id)
+            except WorkspaceMemoryIdError as exc:
+                raise WorkspaceMemoryRecordError from exc
 
 
 def validate_workspace_memory_content(content: str) -> None:
@@ -199,6 +237,39 @@ def validate_workspace_memory_content(content: str) -> None:
         validate_workspace_memory_record(record)
 
 
+def format_workspace_memory_v3_record(
+    key_learning: str,
+    category: str,
+    *,
+    memory_id: str,
+    created_at: str,
+    updated_at: str,
+    source: WorkspaceMemorySource,
+    supersedes_id: str | None = None,
+) -> str:
+    """Format one canonical provenance-aware v3 record."""
+    learning = normalize_workspace_memory_learning(key_learning)
+    normalized_category = normalize_workspace_memory_category(category)
+    normalize_workspace_memory_id(memory_id)
+    normalize_workspace_memory_source(source)
+    try:
+        datetime.strptime(created_at, "%Y-%m-%dT%H:%M:%SZ")
+        datetime.strptime(updated_at, "%Y-%m-%dT%H:%M:%SZ")
+    except ValueError as exc:
+        raise WorkspaceMemoryRecordError from exc
+    if updated_at < created_at or supersedes_id == memory_id:
+        raise WorkspaceMemoryRecordError
+    if supersedes_id is not None:
+        normalize_workspace_memory_id(supersedes_id)
+    supersession = f" supersedes:{supersedes_id}" if supersedes_id is not None else ""
+    record = (
+        f"- [{created_at}] **{normalized_category}** <!-- id:{memory_id} source:{source} "
+        f"updated:{updated_at}{supersession} -->: {learning}\n"
+    )
+    validate_workspace_memory_record(record)
+    return record
+
+
 @dataclass(frozen=True, slots=True)
 class WorkspaceMemoryEntry:
     """One parsed Workspace Memory record with a stable, addressable id.
@@ -211,6 +282,14 @@ class WorkspaceMemoryEntry:
     timestamp: str
     category: str
     learning: str
+    source: WorkspaceMemorySource = "legacy_unknown"
+    updated_at: str | None = None
+    supersedes_id: str | None = None
+    record_version: Literal[1, 2, 3] = 2
+
+    def __post_init__(self) -> None:
+        if self.updated_at is None:
+            object.__setattr__(self, "updated_at", self.timestamp)
 
 
 @dataclass(frozen=True, slots=True)
@@ -246,7 +325,7 @@ def parse_workspace_memory_lines(content: str) -> tuple[WorkspaceMemoryParsedLin
         except WorkspaceMemoryRecordError:
             parsed.append(WorkspaceMemoryParsedLine(raw, None, False, False, True))
             continue
-        match = _MEMORY_RECORD.fullmatch(raw)
+        match = _MEMORY_RECORD.fullmatch(raw) or _MEMORY_RECORD_V3.fullmatch(raw)
         assert match is not None  # validate_workspace_memory_record accepted
         entry = WorkspaceMemoryEntry(
             memory_id=match["memory_id"]
@@ -254,6 +333,12 @@ def parse_workspace_memory_lines(content: str) -> tuple[WorkspaceMemoryParsedLin
             timestamp=match["timestamp"],
             category=match["category"],
             learning=match["learning"],
+            source=normalize_workspace_memory_source(match["source"])
+            if match.re is _MEMORY_RECORD_V3
+            else "legacy_unknown",
+            updated_at=match["updated_at"] if match.re is _MEMORY_RECORD_V3 else match["timestamp"],
+            supersedes_id=match["supersedes_id"] if match.re is _MEMORY_RECORD_V3 else None,
+            record_version=3 if match.re is _MEMORY_RECORD_V3 else (2 if match["memory_id"] is not None else 1),
         )
         parsed.append(WorkspaceMemoryParsedLine(raw, entry, False, False, False))
     return tuple(parsed)

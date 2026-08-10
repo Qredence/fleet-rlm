@@ -128,6 +128,18 @@ def _injection_query(request: str) -> str:
 
 
 def _canonical_memory_record(entry: WorkspaceMemoryEntry) -> bytes:
+    if entry.record_version == 3:
+        from fleet_rlm.files.memory_models import format_workspace_memory_v3_record
+
+        return format_workspace_memory_v3_record(
+            entry.learning,
+            entry.category,
+            memory_id=entry.memory_id,
+            created_at=entry.timestamp,
+            updated_at=entry.updated_at or entry.timestamp,
+            source=entry.source,
+            supersedes_id=entry.supersedes_id,
+        ).encode("utf-8")
     return (f"- [{entry.timestamp}] **{entry.category}** <!-- id:{entry.memory_id} -->: {entry.learning}\n").encode()
 
 

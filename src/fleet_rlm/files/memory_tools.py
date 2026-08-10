@@ -86,6 +86,10 @@ def _entry_payload(entry: WorkspaceMemoryEntry) -> dict[str, object]:
         "timestamp": entry.timestamp,
         "category": entry.category,
         "learning": entry.learning,
+        "source": entry.source,
+        "updated_at": entry.updated_at or entry.timestamp,
+        "supersedes_id": entry.supersedes_id,
+        "record_version": entry.record_version,
     }
 
 

@@ -867,6 +867,72 @@ def test_relevance_injection_search_list_edit_forget_agree_on_valid_records(tmp_
     assert old_id not in read_workspace_memory_injection_digest(store, request="polars dataframe joins")
 
 
+def test_v3_relevant_injection_preserves_provenance_and_legacy_version_ratings(tmp_path: Path) -> None:
+    from fleet_rlm.daytona.workspace_memory import read_workspace_memory_injection_digest
+    from fleet_rlm.files.memory_models import format_workspace_memory_v3_record
+
+    old = format_workspace_memory_v3_record(
+        "Superseding release policy",
+        "Policy",
+        memory_id="dddd0004",
+        created_at="2026-07-19T09:00:00Z",
+        updated_at="2026-07-27T10:30:00Z",
+        source="operator_import",
+    )
+    store, root, _process = _store(tmp_path)
+    _write_store_file((HEADER + old).encode("utf-8"), root)
+
+    digest = read_workspace_memory_injection_digest(store, request="superseding release policy")
+
+    assert old in digest
+    assert "source:operator_import" in digest
+    assert "updated:2026-07-27T10:30:00Z" in digest
+
+
+def test_workspace_agent_can_delete_v3_but_refuses_to_downgrade_it_by_edit(tmp_path: Path) -> None:
+    from fleet_rlm.files.memory_models import format_workspace_memory_v3_record
+
+    v3 = format_workspace_memory_v3_record(
+        "Keep provenance through targeting",
+        "Policy",
+        memory_id="dddd0004",
+        created_at="2026-07-19T09:00:00Z",
+        updated_at="2026-07-27T10:30:00Z",
+        source="operator_import",
+    )
+    store, root, _process = _store(tmp_path)
+    _write_store_file((HEADER + v3).encode("utf-8"), root)
+
+    with pytest.raises(WorkspaceMemoryRecordError):
+        store.edit_entry("dddd0004", "must not downgrade")
+    assert (root / "memory" / "MEMORIES.md").read_text(encoding="utf-8") == HEADER + v3
+    assert store.delete_entry("dddd0004") is True
+    assert "dddd0004" not in (root / "memory" / "MEMORIES.md").read_text(encoding="utf-8")
+
+
+def test_v3_memory_id_participates_in_append_collision_targeting(tmp_path: Path) -> None:
+    from fleet_rlm.files.memory_models import format_workspace_memory_v3_record, workspace_memory_record_id
+
+    created = "2026-07-19T09:00:00Z"
+    learning = "Shared id collision check"
+    old_id = workspace_memory_record_id(created, "Policy", learning)
+    v3 = format_workspace_memory_v3_record(
+        learning,
+        "Policy",
+        memory_id=old_id,
+        created_at=created,
+        updated_at="2026-07-27T10:30:00Z",
+        source="user_explicit",
+    )
+    store, root, _process = _store(tmp_path)
+    _write_store_file((HEADER + v3).encode("utf-8"), root)
+    v2 = f"- [{created}] **Policy** <!-- id:{old_id} -->: {learning} changed\n"
+
+    with pytest.raises(WorkspaceMemoryStoreUnavailableError):
+        store.append_record(v2)
+    assert (root / "memory" / "MEMORIES.md").read_text(encoding="utf-8") == HEADER + v3
+
+
 def test_search_failure_or_no_match_uses_the_recency_only_fallback(tmp_path: Path) -> None:
     from fleet_rlm.daytona.workspace_memory import read_workspace_memory_injection_digest
 

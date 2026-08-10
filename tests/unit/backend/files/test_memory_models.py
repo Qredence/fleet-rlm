@@ -16,6 +16,7 @@ from fleet_rlm.files.memory_models import (
     build_workspace_memory_digest,
     count_workspace_memory_warnings,
     format_workspace_memory_record,
+    format_workspace_memory_v3_record,
     normalize_workspace_memory_id,
     parse_workspace_memory_lines,
     reformat_workspace_memory_record,
@@ -204,3 +205,65 @@ def test_id_normalization_shape() -> None:
 
 def test_entry_not_found_is_a_key_error() -> None:
     assert issubclass(WorkspaceMemoryEntryNotFoundError, KeyError)
+
+
+def test_v3_records_parse_provenance_and_legacy_records_project_unknown_fallback() -> None:
+    old_id = workspace_memory_record_id("2026-07-27T11:14:05Z", "General", "older policy")
+    updated = format_workspace_memory_v3_record(
+        "keep release notes short",
+        "Policy",
+        memory_id="dddd0004",
+        created_at="2026-07-19T09:00:00Z",
+        updated_at="2026-07-27T10:30:00Z",
+        source="operator_import",
+        supersedes_id=old_id,
+    )
+    lines = parse_workspace_memory_lines(V1_RECORD + V2_RECORD + updated)
+
+    legacy_v1, legacy_v2, provenance = (line.entry for line in lines if line.entry is not None)
+    assert legacy_v1.source == "legacy_unknown" == legacy_v2.source
+    assert legacy_v1.updated_at == legacy_v1.timestamp
+    assert legacy_v2.updated_at == legacy_v2.timestamp
+    assert legacy_v1.supersedes_id is None == legacy_v2.supersedes_id
+    assert provenance.source == "operator_import"
+    assert provenance.timestamp == "2026-07-19T09:00:00Z"
+    assert provenance.updated_at == "2026-07-27T10:30:00Z"
+    assert provenance.supersedes_id == old_id
+    assert provenance.memory_id == "dddd0004"
+    validate_workspace_memory_record(updated)
+    validate_workspace_memory_content(V1_RECORD + V2_RECORD + updated)
+
+
+@pytest.mark.parametrize(
+    "record",
+    [
+        "- [2026-07-27T11:14:05Z] **General** <!-- id:aaaa0001 source:agent updated:2026-07-27T11:14:05Z -->: bad source\n"  # noqa: E501,
+        "- [2026-07-27T11:14:05Z] **General** <!-- id:aaaa0001 source:user_explicit updated:not-a-date -->: bad update\n"  # noqa: E501,
+        "- [2026-07-27T11:14:05Z] **General** <!-- id:aaaa0001 source:user_explicit updated:2026-07-27T11:14:05Z supersedes:NOPE -->: bad supersede\n"  # noqa: E501,
+        "- [2026-07-27T11:14:05Z] **General** <!-- source:user_explicit updated:2026-07-27T11:14:05Z -->: missing id\n"
+        "- [2026-07-27T11:14:05Z] **General** <!-- id:aaaa0001 updated:2026-07-27T11:14:05Z source:user_explicit -->: wrong order\n"  # noqa: E501,
+        "- [2026-07-27T11:14:05Z] **General** <!-- id:aaaa0001 source:user_explicit updated:2026-07-20T09:00:00Z -->: update before creation\n"  # noqa: E501,
+        "- [2026-07-27T11:14:05Z] **General** <!-- id:aaaa0001 source:user_explicit updated:2026-07-28T11:14:05Z supersedes:aaaa0001 -->: self supersession\n"  # noqa: E501,
+    ],
+)
+def test_invalid_v3_metadata_is_malformed_under_tolerance_not_partially_trusted(record: str) -> None:
+    line = parse_workspace_memory_lines(record)[0]
+    assert line.entry is None and line.malformed is True
+    with pytest.raises(WorkspaceMemoryRecordError):
+        validate_workspace_memory_record(record)
+
+
+def test_v1_v2_writer_contract_stays_unchanged_during_v3_expand() -> None:
+    record = parse_workspace_memory_lines(
+        V2_RECORD
+        + format_workspace_memory_v3_record(
+            "canonical v3",
+            "General",
+            memory_id="eeee0005",
+            created_at="2026-07-19T09:00:00Z",
+            updated_at="2026-07-20T10:00:00Z",
+            source="user_explicit",
+        )
+    )
+    assert record[0].entry.source == "legacy_unknown"
+    assert record[1].entry.source == "user_explicit"

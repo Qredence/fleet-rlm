@@ -101,7 +101,7 @@ def build_workspace_agent_code(
             "        data.decode('utf-8')",
             "    except UnicodeDecodeError:",
             "        raise StorageError(errno.EILSEQ)",
-            "memory_record = re.compile(r'- \\[(?P<timestamp>\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z)\\] \\*\\*(?P<category>[A-Za-z0-9][A-Za-z0-9 _-]*)\\*\\*(?: <!-- id:(?P<memory_id>[0-9a-f]{8}) -->)?: (?P<learning>[^\\r\\n]+)\\n')",  # noqa: E501 - emitted sandbox code is intentionally one line
+            "memory_record = re.compile(r'- \\[(?P<timestamp>\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z)\\] \\*\\*(?P<category>[A-Za-z0-9][A-Za-z0-9 _-]*)\\*\\*(?: <!-- id:(?P<memory_id>[0-9a-f]{8})(?: source:(?P<source>user_explicit|agent_candidate|operator_import|legacy_unknown) updated:(?P<updated_at>\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z)(?: supersedes:(?P<supersedes_id>[0-9a-f]{8}))?)? -->)?: (?P<learning>[^\\r\\n]+)\\n')",  # noqa: E501 - emitted sandbox code is intentionally one line
             "def effective_memory_id(match, ordinal=0):",
             "    persisted = match.group('memory_id')",
             "    if persisted is not None:",
@@ -794,6 +794,8 @@ def build_workspace_agent_code(
             "                fail('conflict')",
             "            target, target_match = targets[0]",
             "            if operation == 'memory_edit':",
+            "                if target_match.group('source') is not None:",
+            "                    fail('invalid_record')",
             "                category = requested_category if requested_category is not None else target_match.group('category')",  # noqa: E501 - emitted sandbox code is intentionally one line
             "                replacement = f\"- [{target_match.group('timestamp')}] **{category}** <!-- id:{memory_id} -->: {learning}\\n\"",  # noqa: E501 - emitted sandbox code is intentionally one line
             "                if len(replacement.encode('utf-8')) > 4096:",

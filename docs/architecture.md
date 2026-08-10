@@ -201,6 +201,9 @@ independently of Turn Commit. A repeated identical record is idempotent. Legacy
 v1 rows derive a deterministic id from canonical text plus valid-record
 occurrence, so duplicate legacy rows remain separately pageable; duplicate
 persisted ids fail closed rather than skipping or selecting an arbitrary row.
+Expansion parsing also admits provenance-aware v3 rows (`id/source/updated` and
+optional `supersedes` metadata) while normal writes remain v2 until the writer
+migration ticket; invalid v3 metadata stays malformed under tolerant reads.
 `edit_memory`
 upgrades v1 to v2 or replaces v2 while preserving the id and timestamp, and
 `forget` removes exactly one addressed row. Both mutations execute their
