@@ -784,8 +784,6 @@ export interface components {
                 detail?: string | null;
                 /** Message */
                 message?: string | null;
-            } & {
-                [key: string]: unknown;
             };
             /** Transient */
             transient?: boolean | null;
@@ -813,8 +811,6 @@ export interface components {
                 affordances?: string[] | null;
                 /** Skillid */
                 skillId?: string | null;
-            } & {
-                [key: string]: unknown;
             };
             /** Transient */
             transient?: boolean | null;
@@ -838,8 +834,6 @@ export interface components {
                 is_delta?: boolean | null;
                 /** Is Final */
                 is_final?: boolean | null;
-            } & {
-                [key: string]: unknown;
             };
             /** Transient */
             transient?: boolean | null;
@@ -863,8 +857,6 @@ export interface components {
                 is_delta?: boolean | null;
                 /** Is Final */
                 is_final?: boolean | null;
-            } & {
-                [key: string]: unknown;
             };
             /** Transient */
             transient?: boolean | null;
@@ -937,8 +929,6 @@ export interface components {
                 attachmentId?: string | null;
                 /** Bytesize */
                 byteSize?: number | null;
-            } & {
-                [key: string]: unknown;
             };
             /** Transient */
             transient?: boolean | null;
@@ -956,8 +946,6 @@ export interface components {
                 message: string;
                 /** Code */
                 code?: string | null;
-            } & {
-                [key: string]: unknown;
             };
             /** Transient */
             transient?: boolean | null;
@@ -998,8 +986,6 @@ export interface components {
                 checksumSha256?: string | null;
                 /** Artifactid */
                 artifactId?: string | null;
-            } & {
-                [key: string]: unknown;
             };
             /** Transient */
             transient?: boolean | null;
@@ -1017,8 +1003,6 @@ export interface components {
                 usage: {
                     [key: string]: unknown;
                 };
-            } & {
-                [key: string]: unknown;
             };
             /** Transient */
             transient?: boolean | null;
@@ -1042,8 +1026,6 @@ export interface components {
                 schemaId?: string | null;
                 /** Schemaversion */
                 schemaVersion?: string | null;
-            } & {
-                [key: string]: unknown;
             };
             /** Transient */
             transient?: boolean | null;

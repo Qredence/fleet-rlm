@@ -1667,7 +1667,7 @@ components:
             type: string
             title: Id
           data:
-            additionalProperties: true
+            additionalProperties: false
             properties:
               phase:
                 title: Phase
@@ -1711,7 +1711,7 @@ components:
             type: string
             title: Id
           data:
-            additionalProperties: true
+            additionalProperties: false
             properties:
               skill_id:
                 title: Skill Id
@@ -1773,7 +1773,7 @@ components:
             type: string
             title: Id
           data:
-            additionalProperties: true
+            additionalProperties: false
             properties:
               code:
                 title: Code
@@ -1822,7 +1822,7 @@ components:
             type: string
             title: Id
           data:
-            additionalProperties: true
+            additionalProperties: false
             properties:
               output:
                 title: Output
@@ -1962,7 +1962,7 @@ components:
             type: string
             title: Id
           data:
-            additionalProperties: true
+            additionalProperties: false
             properties:
               attachment_id:
                 format: uuid
@@ -2016,7 +2016,7 @@ components:
             type: string
             title: Id
           data:
-            additionalProperties: true
+            additionalProperties: false
             properties:
               message:
                 title: Message
@@ -2050,7 +2050,7 @@ components:
             type: string
             title: Id
           data:
-            additionalProperties: true
+            additionalProperties: false
             properties:
               artifact_id:
                 format: uuid
@@ -2135,7 +2135,7 @@ components:
             type: string
             title: Id
           data:
-            additionalProperties: true
+            additionalProperties: false
             properties:
               usage:
                 additionalProperties: true
@@ -2165,7 +2165,7 @@ components:
             type: string
             title: Id
           data:
-            additionalProperties: true
+            additionalProperties: false
             properties:
               schema_id:
                 title: Schema Id

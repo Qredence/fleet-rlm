@@ -1,24 +1,24 @@
 {"type": "start", "messageId": "11111111-1111-1111-1111-111111111111", "messageMetadata": {"schemaVersion": 1, "runId": "11111111-1111-1111-1111-111111111111", "sessionId": "00000000-0000-0000-0000-000000000000", "createdAt": "2026-01-01T00:00:00+00:00", "delivery": "live"}}
 {"type": "data-status", "data": {"phase": "execution", "status": "running", "message": "preparing skills"}, "transient": true}
-{"type": "data-skill", "data": {"skill_id": "skill-inspect", "name": "inspect", "version": "1.0.0", "trust": "system", "affordances": ["read"], "phase": "activated"}, "id": "skill-inspect"}
-{"type": "data-skill", "data": {"skill_id": "skill-exec", "name": "exec", "version": "1.2.0", "phase": "loaded"}, "id": "skill-exec"}
+{"type": "data-skill", "id": "skill-inspect", "data": {"skill_id": "skill-inspect", "name": "inspect", "version": "1.0.0", "phase": "activated", "trust": "system", "affordances": ["read"]}}
+{"type": "data-skill", "id": "skill-exec", "data": {"skill_id": "skill-exec", "name": "exec", "version": "1.2.0", "phase": "loaded"}}
 {"type": "start-step"}
 {"type": "reasoning-start", "id": "reasoning-11111111-1111-1111-1111-111111111111-1"}
 {"type": "reasoning-delta", "id": "reasoning-11111111-1111-1111-1111-111111111111-1", "delta": "Let me think"}
 {"type": "reasoning-delta", "id": "reasoning-11111111-1111-1111-1111-111111111111-1", "delta": "Let me think through the steps"}
 {"type": "reasoning-end", "id": "reasoning-11111111-1111-1111-1111-111111111111-1"}
-{"type": "data-rlm-code", "data": {"code": "print(1)", "step": 1, "stream_id": null, "is_delta": false, "is_final": true}, "id": "code-11111111-1111-1111-1111-111111111111-1"}
-{"type": "data-rlm-output", "data": {"output": "1", "step": 1, "stream_id": null, "is_delta": false, "is_final": true}, "id": "output-11111111-1111-1111-1111-111111111111-1"}
+{"type": "data-rlm-code", "id": "code-11111111-1111-1111-1111-111111111111-1", "data": {"code": "print(1)", "step": 1, "is_delta": false, "is_final": true}}
+{"type": "data-rlm-output", "id": "output-11111111-1111-1111-1111-111111111111-1", "data": {"output": "1", "step": 1, "is_delta": false, "is_final": true}}
 {"type": "finish-step"}
 {"type": "start-step"}
-{"type": "tool-input-available", "toolCallId": "tool-1", "toolName": "shell", "input": {"cmd": "ls"}, "providerExecuted": true, "dynamic": true}
-{"type": "tool-output-available", "toolCallId": "tool-1", "output": {"exit_code": 0}, "providerExecuted": true, "dynamic": true}
-{"type": "tool-input-available", "toolCallId": "tool-2", "toolName": "shell", "input": {"cmd": "missing"}, "providerExecuted": true, "dynamic": true}
-{"type": "tool-output-error", "toolCallId": "tool-2", "errorText": "command not found", "providerExecuted": true, "dynamic": true}
-{"type": "data-attachment", "data": {"attachment_id": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa", "filename": "input.txt", "byte_size": 2, "attachmentId": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa", "phase": "read", "byteSize": 2}, "id": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"}
-{"type": "data-artifact", "data": {"artifact_id": "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb", "artifact_kind": "markdown", "title": "report", "media_type": "text/markdown", "byte_size": 3, "checksum_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}, "id": "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"}
-{"type": "data-usage", "data": {"usage": {"iterations": 2, "observed_lm_usage": {}, "duration_ms": 10}}, "id": "usage-11111111-1111-1111-1111-111111111111"}
-{"type": "data-structured-result", "data": {"schema_id": "answer", "schema_version": "1", "value": 7}, "id": "result-11111111-1111-1111-1111-111111111111"}
+{"type": "tool-input-available", "toolCallId": "tool-1", "toolName": "shell", "input": {"cmd": "ls"}, "dynamic": true, "providerExecuted": true}
+{"type": "tool-output-available", "toolCallId": "tool-1", "output": {"exit_code": 0}, "dynamic": true, "providerExecuted": true}
+{"type": "tool-input-available", "toolCallId": "tool-2", "toolName": "shell", "input": {"cmd": "missing"}, "dynamic": true, "providerExecuted": true}
+{"type": "tool-output-error", "toolCallId": "tool-2", "errorText": "command not found", "dynamic": true, "providerExecuted": true}
+{"type": "data-attachment", "id": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa", "data": {"attachment_id": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa", "filename": "input.txt", "phase": "read", "byte_size": 2, "attachmentId": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa", "byteSize": 2}}
+{"type": "data-artifact", "id": "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb", "data": {"artifact_id": "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb", "artifact_kind": "markdown", "title": "report", "media_type": "text/markdown", "byte_size": 3, "checksum_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}}
+{"type": "data-usage", "id": "usage-11111111-1111-1111-1111-111111111111", "data": {"usage": {"iterations": 2, "observed_lm_usage": {}, "duration_ms": 10}}}
+{"type": "data-structured-result", "id": "result-11111111-1111-1111-1111-111111111111", "data": {"schema_id": "answer", "schema_version": "1", "value": 7}}
 {"type": "data-warning", "data": {"message": "deprecated option", "code": "warn-1"}}
 {"type": "text-start", "id": "text-11111111-1111-1111-1111-111111111111"}
 {"type": "text-delta", "id": "text-11111111-1111-1111-1111-111111111111", "delta": "hello"}

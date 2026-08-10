@@ -192,7 +192,7 @@ def test_projector_maps_attachment_reads_to_reload_compatible_ui_data() -> None:
             "type": "data-attachment",
             "id": str(attachment_id),
             "data": {
-                "attachment_id": attachment_id,
+                "attachment_id": str(attachment_id),
                 "attachmentId": str(attachment_id),
                 "phase": "read",
                 "filename": "phase1.txt",

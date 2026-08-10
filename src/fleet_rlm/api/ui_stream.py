@@ -25,9 +25,14 @@ class FleetUIChunkModel(BaseModel):
 
 
 class FleetUIDataModel(BaseModel):
-    """Bounded data payload model with declared compatibility fields."""
+    """Closed data payload model for declared public/compatibility fields.
 
-    model_config = ConfigDict(extra="allow", populate_by_name=True)
+    Extensibility is explicit: dynamic tool input/output, message metadata,
+    structured-result ``value``, and usage records declare their own JSON-value
+    boundaries. Unknown nested fields are not silently admitted.
+    """
+
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
 
 class StatusData(FleetUIDataModel):
@@ -286,10 +291,18 @@ FleetUIMessageChunkAdapter: TypeAdapter[FleetUIMessageChunk] = TypeAdapter(Fleet
 
 
 def fleet_ui_chunk_payload(value: object) -> dict[str, Any]:
-    """Validate one live transport frame and return its exact JSON payload."""
+    """Validate one live transport frame and return its canonical JSON payload."""
     payload = to_plain_json(value)
-    FleetUIMessageChunkAdapter.validate_python(payload, strict=False)
-    return payload
+    validated = FleetUIMessageChunkAdapter.validate_python(payload, strict=False)
+    dumped = FleetUIMessageChunkAdapter.dump_python(
+        validated,
+        mode="json",
+        by_alias=True,
+        exclude_none=True,
+    )
+    if not isinstance(dumped, dict):
+        raise TypeError("Fleet UI chunks must serialize to JSON objects")
+    return dumped
 
 
 def fleet_ui_message_chunk_json_schema() -> dict[str, Any]:
