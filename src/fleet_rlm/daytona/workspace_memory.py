@@ -10,14 +10,11 @@ one fsync'd rewrite through the mounted Workspace agent machinery.
 from __future__ import annotations
 
 import base64
-import hashlib
 import json
 import threading
-import time
 from collections import OrderedDict
-from collections.abc import Callable, Iterator
+from collections.abc import Iterator
 from contextlib import contextmanager
-from dataclasses import dataclass
 from typing import Any
 
 from fleet_rlm.daytona.workspace_agent import WorkspaceAgentStorageError, run_workspace_agent
@@ -27,13 +24,13 @@ from fleet_rlm.files.memory_models import (
     WORKSPACE_MEMORY_INJECTION_TAIL_BYTES,
     WORKSPACE_MEMORY_MAX_LIST_LIMIT,
     WorkspaceMemoryAppendResult,
+    WorkspaceMemoryEntry,
     WorkspaceMemoryEntryNotFoundError,
     WorkspaceMemoryListResult,
     WorkspaceMemoryReadResult,
     WorkspaceMemoryRecordError,
     WorkspaceMemoryStoreFullError,
     WorkspaceMemoryStoreUnavailableError,
-    build_workspace_memory_digest,
     count_workspace_memory_warnings,
     normalize_workspace_memory_category,
     normalize_workspace_memory_id,
@@ -105,64 +102,90 @@ def _mark_memory_dir_migrated(memory_dir: str) -> None:
             _migrated_memory_dirs.popitem(last=False)
 
 
-# Per-turn Workspace Memory tail digest cache: one bounded read is reused for a
-# 30 s process TTL keyed by Volume root; an unchanged tail fingerprint (byte
-# size + content hash, the mtime-like signal) refreshes the TTL without paying
-# reprocessing, and in-process memory mutations invalidate eagerly.
-_MEMORY_DIGEST_CACHE_TTL_S = 30.0
-_MAX_DIGEST_CACHE_ENTRIES = 128
-
-
-@dataclass
-class _DigestCacheEntry:
-    fetched_at: float
-    fingerprint: str
-    digest: str
-
-
-_digest_cache: OrderedDict[str, _DigestCacheEntry] = OrderedDict()
-_digest_cache_guard = threading.Lock()
+# Query-independent caching of a Workspace Memory digest is unsafe once the
+# composition depends on the current request. Turn preparation therefore
+# composes on demand and uses mutations only as ordinary immediate writes.
 
 
 def invalidate_workspace_memory_digest(volume_root: str) -> None:
-    """Drop the cached turn-injection digest for one Volume root."""
-    with _digest_cache_guard:
-        _digest_cache.pop(volume_root, None)
+    """Cache-free compatibility point for existing mutation call sites."""
+    del volume_root
+
+
+_INJECTION_RELEVANT_LIMIT = 4
+_INJECTION_RECENT_COUNT = 4
+
+
+def _injection_query(request: str) -> str:
+    """Use only the current user request, bounded to the search-tool limit."""
+    if not isinstance(request, str):
+        return ""
+    body = request.strip()
+    if not body:
+        return ""
+    encoded = body.encode("utf-8")[-256:]
+    return encoded.decode("utf-8", errors="ignore")
+
+
+def _canonical_memory_record(entry: WorkspaceMemoryEntry) -> bytes:
+    return (f"- [{entry.timestamp}] **{entry.category}** <!-- id:{entry.memory_id} -->: {entry.learning}\n").encode()
+
+
+def _relevant_recent_workspace_memory_digest(store: DaytonaWorkspaceMemoryStore, *, request: str) -> str:
+    """Compose scored relevant entries plus newest complete memory records."""
+    fallback_result = store.read_tail(byte_budget=WORKSPACE_MEMORY_INJECTION_TAIL_BYTES)
+    recent_lines = parse_workspace_memory_lines(fallback_result.content)
+    recent_entries = [line.entry for line in recent_lines if line.entry is not None]
+    # With one populated page, repeated matching composition costs one tail read
+    # plus one indexed list read (2 mounted-agent calls); no stale query cache.
+    fallback = "".join(line.raw for line in recent_lines if line.entry is not None)
+    query = _injection_query(request)
+    if not query:
+        return fallback
+    try:
+        from fleet_rlm.files.memory_tools import search_workspace_memory_entries
+
+        scored, _warnings = search_workspace_memory_entries(store, normalized_query=_injection_query(request))
+    except Exception:
+        return fallback
+    if not scored:
+        return fallback
+    selected: list[bytes] = []
+    seen: set[str] = set()
+    used = 0
+    for item in scored[:_INJECTION_RELEVANT_LIMIT]:
+        entry = item.entry
+        record = _canonical_memory_record(entry)
+        if entry.memory_id in seen or used + len(record) > WORKSPACE_MEMORY_INJECTION_TAIL_BYTES:
+            continue
+        seen.add(entry.memory_id)
+        selected.append(record)
+        used += len(record)
+    # Relevant scores order first; the latest canonical records then follow in
+    # store order, deduplicated by stable id. Both segments are deterministic.
+    for entry in recent_entries[-_INJECTION_RECENT_COUNT:]:
+        record = _canonical_memory_record(entry)
+        if entry.memory_id in seen or used + len(record) > WORKSPACE_MEMORY_INJECTION_TAIL_BYTES:
+            continue
+        seen.add(entry.memory_id)
+        selected.append(record)
+        used += len(record)
+    return b"".join(selected).decode("utf-8") if selected else fallback
 
 
 def read_workspace_memory_injection_digest(
     store: DaytonaWorkspaceMemoryStore,
     *,
-    clock: Callable[[], float] = time.monotonic,
+    request: str = "",
 ) -> str:
-    """Return the <= 4 KiB tolerant Workspace Memory tail digest for one Turn.
+    """Return the <= 4 KiB query-sensitive tolerant memory digest for one Turn.
 
-    Cached per Volume root for 30 s so rapid successive Turns avoid an extra
-    sandbox round trip; a changed tail fingerprint forces reprocessing.
-    Storage failures propagate to the caller, which degrades to no injection.
+    The digest contains whole canonical records only: relevant matches first,
+    then newest active records, deduplicated by id. Search/storage failures
+    degrade to the same recency-only digest already allowed by preparation.
     """
-    volume_root = store.volume_root_posix
-    now = clock()
-    with _digest_cache_guard:
-        cached = _digest_cache.get(volume_root)
-        if cached is not None and now - cached.fetched_at < _MEMORY_DIGEST_CACHE_TTL_S:
-            _digest_cache.move_to_end(volume_root)
-            return cached.digest
-    result = store.read_tail(byte_budget=WORKSPACE_MEMORY_INJECTION_TAIL_BYTES)
-    fingerprint = f"{result.total_bytes}:{hashlib.sha256(result.content.encode('utf-8')).hexdigest()}"
-    with _digest_cache_guard:
-        cached = _digest_cache.get(volume_root)
-        if cached is not None and cached.fingerprint == fingerprint:
-            cached.fetched_at = now
-            _digest_cache.move_to_end(volume_root)
-            return cached.digest
-    digest, _warnings = build_workspace_memory_digest(result.content)
-    with _digest_cache_guard:
-        _digest_cache[volume_root] = _DigestCacheEntry(now, fingerprint, digest)
-        _digest_cache.move_to_end(volume_root)
-        while len(_digest_cache) > _MAX_DIGEST_CACHE_ENTRIES:
-            _digest_cache.popitem(last=False)
-    return digest
+    # Query-sensitive composition is intentionally not cached.
+    return _relevant_recent_workspace_memory_digest(store, request=request)
 
 
 class DaytonaWorkspaceMemoryStore:

@@ -347,10 +347,16 @@ class _LiveCapabilityPreparer:
             max_upload_bytes=self.settings.max_upload_bytes,
         )
         memory_host = WorkspaceMemoryToolHost(memory_store)
-        # Per-Run Workspace Memory injection: a bounded tolerant tail digest.
-        # Best-effort by contract; any storage failure degrades to no injection.
+        # Per-Run Workspace Memory injection: relevant matches first, then the
+        # newest complete records. Best-effort by contract; search/storage
+        # failures degrade to no injection, and search failure degrades to
+        # the recency-only fallback.
         try:
-            memory_digest = await asyncio.to_thread(read_workspace_memory_injection_digest, memory_store)
+            memory_digest = await asyncio.to_thread(
+                read_workspace_memory_injection_digest,
+                memory_store,
+                request=run.input.text,
+            )
         except Exception:
             memory_digest = ""
         file_tools = file_host.as_tools()

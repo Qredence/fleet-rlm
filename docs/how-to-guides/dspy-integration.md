@@ -41,8 +41,9 @@ provide models, Signatures, or executable capabilities.
   migrates on first open, never losing content). The RLM recalls it on demand
   with `read_workspace_memory`, `list_memories`, or `search_memories`; every Turn
   also receives a
-  bounded, tolerant <= 4 KiB `workspace_memory tail` digest of the newest
-  records inside `session_context` (cached per Volume root for 30 s).
+  bounded, tolerant <= 4 KiB relevant+recent `workspace_memory tail` digest
+  inside `session_context` (composed per Turn request, never query-stale
+  cached).
 - `remember` (or its back-compat alias `update_workspace_memory`) appends one
   complete UTC-timestamped v2 record (`<!-- id:8hex -->`), limited to 4 KiB of
   formatted UTF-8, only when the user explicitly requests memory. Repeating

@@ -70,6 +70,16 @@ def _full() -> MemoryToolError:
     return MemoryToolError("full", "Workspace Memory is full")
 
 
+def search_workspace_memory_entries(
+    store: WorkspaceMemoryStore,
+    *,
+    normalized_query: str,
+    category: str | None = None,
+) -> tuple[tuple[_ScoredMemoryEntry, ...], int]:
+    """Search valid entries through the shared deterministic lexical helper."""
+    return _search_entries(store, normalized_query=normalized_query, category=category)
+
+
 def _entry_payload(entry: WorkspaceMemoryEntry) -> dict[str, object]:
     return {
         "id": entry.memory_id,
@@ -265,7 +275,7 @@ class WorkspaceMemoryToolHost:
                 except WorkspaceMemoryCategoryError as exc:
                     raise _invalid_category() from exc
             try:
-                scored, warnings = _search_entries(
+                scored, warnings = search_workspace_memory_entries(
                     self._store,
                     normalized_query=normalized_query,
                     category=normalized_category,

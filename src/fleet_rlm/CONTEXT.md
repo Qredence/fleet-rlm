@@ -177,7 +177,7 @@ recency alone; `edit_memory` upgrades v1 to v2 or rewrites v2 while preserving
 id and timestamp; `forget` removes exactly one entry. Edit and forget use one
 mounted-agent read-modify-publish operation.
 Each Turn's `session_context` also carries a bounded <= 4 KiB
-`workspace_memory tail` digest (30 s per-root process cache) so recent
+`workspace_memory tail` digest so relevant and recent
 learnings are visible without a Tool call. Records are durable independently
 of Turn Commit and survive failed or cancelled Runs and Sandbox replacement.
 _Avoid_: Session History, unbounded learned state

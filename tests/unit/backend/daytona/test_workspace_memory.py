@@ -763,14 +763,13 @@ def test_edit_and_delete_under_a_missing_store_are_empty_not_found(tmp_path: Pat
 # -- per-turn injection digest -------------------------------------------
 
 
-def test_injection_digest_is_bounded_tolerant_and_cached_30_seconds(tmp_path: Path) -> None:
+def test_injection_digest_is_bounded_tolerant_deterministic_and_query_sensitive(tmp_path: Path) -> None:
     from fleet_rlm.daytona.workspace_memory import read_workspace_memory_injection_digest
 
     store, root, process = _store(tmp_path)
     _write_store_file((HEADER + R1 + "human note\n" + R2).encode("utf-8"), root)
-    now = [1_000.0]
 
-    digest = read_workspace_memory_injection_digest(store, clock=lambda: now[0])
+    digest = read_workspace_memory_injection_digest(store, request="first two")
     calls_after_first = len(process.calls)
     assert calls_after_first > 0
     assert "one" in digest and "two two" in digest
@@ -778,22 +777,69 @@ def test_injection_digest_is_bounded_tolerant_and_cached_30_seconds(tmp_path: Pa
     assert HEADER not in digest
     assert len(digest.encode("utf-8")) <= 4_096
 
-    # within the 30 s TTL no further sandbox round trip happens
-    again = read_workspace_memory_injection_digest(store, clock=lambda: now[0] + 29.9)
+    again = read_workspace_memory_injection_digest(store, request="first two")
     assert again == digest
-    assert len(process.calls) == calls_after_first
+    assert len(process.calls) > calls_after_first  # no query-stale root digest cache
 
-    # an unchanged tail fingerprint after TTL expiry re-reads without reprocessing
-    third = read_workspace_memory_injection_digest(store, clock=lambda: now[0] + 31)
-    assert third == digest
-    assert len(process.calls) == calls_after_first + 1
-
-    # a mutation invalidates the cache eagerly even inside the TTL window
     store.append_record(R3)
-    calls_after_append = len(process.calls)
-    fresh = read_workspace_memory_injection_digest(store, clock=lambda: now[0] + 31.1)
-    assert len(process.calls) > calls_after_append
+    fresh = read_workspace_memory_injection_digest(store, request="three")
     assert "three" in fresh
+
+
+def test_relevant_old_memory_is_injected_with_recent_context_under_the_budget(tmp_path: Path) -> None:
+    """A preferred older record survives outside the newest 4 KiB tail."""
+    from fleet_rlm.daytona.workspace_memory import read_workspace_memory_injection_digest
+    from fleet_rlm.files.memory_models import workspace_memory_record_id
+
+    old_ts = "2026-07-20T10:00:00Z"
+    old_category = "Preference"
+    old_learning = "Prefers polars for large dataframe joins."
+    old_id = workspace_memory_record_id(old_ts, old_category, old_learning)
+    old_record = f"- [{old_ts}] **{old_category}** <!-- id:{old_id} -->: {old_learning}\n"
+    recent_records = []
+    for index in range(80):
+        ts = f"2026-07-27T12:{index // 60:02d}:{index % 60:02d}Z"
+        learning = f"Routine unassociated workspace note {index:03d}."
+        rid = workspace_memory_record_id(ts, "Ops", learning)
+        recent_records.append(f"- [{ts}] **Ops** <!-- id:{rid} -->: {learning}\n")
+    store, root, process = _store(tmp_path)
+    _write_store_file((HEADER + old_record + "".join(recent_records)).encode("utf-8"), root)
+    recent_fallback = store.read_tail(byte_budget=4_096).content
+
+    matching = read_workspace_memory_injection_digest(store, request="Which dataframe engine should we use for joins?")
+    unrelated = read_workspace_memory_injection_digest(store, request="Summarize the deployment log.")
+    calls_before_repeat = len(process.calls)
+    repeated = read_workspace_memory_injection_digest(store, request="Which dataframe engine should we use for joins?")
+
+    assert len(process.calls) - calls_before_repeat == 2
+    assert old_record in matching
+    assert old_record not in recent_fallback
+    assert old_record not in unrelated
+    assert recent_records[-1] in matching
+    assert repeated == matching
+    assert len(matching.encode("utf-8")) <= 4_096
+    assert old_id in matching
+    assert process.calls
+
+
+def test_search_failure_or_no_match_uses_the_recency_only_fallback(tmp_path: Path) -> None:
+    from fleet_rlm.daytona.workspace_memory import read_workspace_memory_injection_digest
+
+    store, root, _process = _store(tmp_path)
+    _write_store_file((HEADER + R1 + R2).encode("utf-8"), root)
+    fallback = read_workspace_memory_injection_digest(store, request="nothing matches this unique phrase")
+    assert "one" in fallback and "two two" in fallback
+
+    class _FailingSearchStore:
+        def __getattr__(self, name: str) -> object:
+            return getattr(store, name)
+
+        def list_entries(self, **kwargs: object) -> object:
+            del kwargs
+            raise RuntimeError("search unavailable")
+
+    degraded = read_workspace_memory_injection_digest(_FailingSearchStore(), request="polars")
+    assert degraded == fallback
 
 
 def test_injection_digest_is_empty_for_missing_or_empty_stores(tmp_path: Path) -> None:

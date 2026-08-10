@@ -52,7 +52,8 @@ contracts, and tracked docs remain authoritative.
   edit upgrades v1 to v2 preserving that id and timestamp. `remember` is
   idempotent for the same record, and edit/forget perform one mounted-agent
   read-modify-publish operation. Each Turn additionally receives its bounded
-  4 KiB `workspace_memory tail` digest inside `session_context`.
+  4 KiB relevant+recent `workspace_memory tail` digest inside
+  `session_context`.
 - Resolve zero to four exact Skill selections against the immutable bundled
   catalog. Skill instructions and resources load progressively; bundled Skills
   never register executable tools. Runtime execution uses a typed

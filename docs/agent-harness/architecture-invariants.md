@@ -99,10 +99,11 @@ routes or public events.
   public arguments or results.
 - Daytona alone registers the Workspace Memory Tools: `read_workspace_memory`,
   `remember`, `list_memories`, `search_memories`, `edit_memory`, `forget` (plus the back-compat
-  alias `update_workspace_memory`). The newest 4 KiB tail of `MEMORIES.md` is
-  also injected into the Turn's `session_context` as
+  alias `update_workspace_memory`). Relevant plus newest complete records from
+  `MEMORIES.md` are also injected into the Turn's `session_context` as a
   `workspace_memory tail` (bounded, tolerant, missing-store-safe); full history
-  stays behind the read/list Tools. The append Tool permits a write only for an
+  and search stay behind the read/list/search Tools. The append Tool permits a
+  write only for an
   explicit user request. This is an auditable Tool-use policy, not a filesystem
   ACL, because the Daytona interpreter sees the mounted Volume.
 - Workspace Memory uses generic Tool events only. Their allowlisted metadata

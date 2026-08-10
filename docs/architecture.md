@@ -189,9 +189,9 @@ is migrated there on first open, never losing content); Session and Run state
 retain their nested paths below that root. The RLM accesses memory through
 `read_workspace_memory`, `remember`, `list_memories`, `search_memories`, `edit_memory`, and
 `forget` (plus the `update_workspace_memory` back-compat alias); Fleet also
-injects a bounded, tolerant <= 4 KiB `workspace_memory tail` digest of the
-newest records into the Turn's `session_context` so recent learnings are
-available without a Tool call. Private deterministic tests use an unavailable
+injects a bounded, tolerant <= 4 KiB `workspace_memory tail` digest of
+relevant plus newest records into the Turn's `session_context` so query-relevant
+and recent learnings are available without a Tool call. Private deterministic tests use an unavailable
 Workspace capability unless they explicitly inject a host-owned test
 capability.
 
