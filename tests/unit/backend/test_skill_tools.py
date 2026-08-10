@@ -154,10 +154,48 @@ def test_install_failure_degrades_to_resource_tool_reads_only() -> None:
 
     assert result["ok"] is True
     assert result["installed_paths"] == []
+    assert result["resource_install"] == {"declared": 3, "installed": 0, "complete": False}
     assert workspace.written == {}
     # Resources stay reachable through the read tool after a failed install.
     path = next(iter(skill.resources))
     assert host.read_skill_resource(str(skill.card.id), path)["ok"] is True
+
+
+class _PartialRecordingWorkspace(_RecordingWorkspace):
+    def __init__(self, *, fail_after: int) -> None:
+        super().__init__()
+        self.fail_after = fail_after
+
+    def write_text(self, path: str, content: str, *, overwrite: bool) -> None:
+        if len(self.calls) >= self.fail_after:
+            self.calls.append(path)
+            raise OSError("volume write failed")
+        super().write_text(path, content, overwrite=overwrite)
+
+
+def test_mid_install_failure_reports_exact_successes_and_retries_best_effort() -> None:
+    catalog = build_bundled_skill_catalog()
+    skill = catalog.require(stable_skill_id("long-context"))
+    workspace = _PartialRecordingWorkspace(fail_after=1)
+    host = SkillToolHost(catalog, workspace=workspace)
+
+    first = host.load_skill(str(skill.card.id), skill.card.version)
+    second = host.load_skill(str(skill.card.id), skill.card.version)
+
+    successful_paths = list(workspace.written)
+    assert len(successful_paths) == 1
+    assert first == second
+    assert first["ok"] is True
+    assert first["installed_paths"] == successful_paths
+    assert first["resource_install"] == {"declared": 3, "installed": 1, "complete": False}
+    remaining = "skills/long-context/references/chunking-strategies.md"
+    assert remaining not in workspace.written
+    resource = host.read_skill_resource(str(skill.card.id), "references/chunking-strategies.md", skill.card.version)
+    assert resource["ok"] is True
+    assert resource["content"].startswith("# Deterministic chunking helpers")
+
+    assert [event["kind"] for event in host.drain_public_events()] == ["skill.activated", "skill.loaded"]
+    assert host.drain_public_events() == []
 
 
 def test_no_workspace_means_no_install_surface() -> None:
@@ -169,6 +207,7 @@ def test_no_workspace_means_no_install_surface() -> None:
     second = host.load_skill(str(skill.card.id), skill.card.version)
 
     assert "installed_paths" not in first
+    assert first["resource_install"] == {"declared": 3, "installed": 0, "complete": False}
     assert first == second
 
 

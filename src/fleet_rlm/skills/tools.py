@@ -38,7 +38,8 @@ class SkillToolHost:
     """Turn-bound progressive tools over one immutable catalog.
 
     Lock discipline (RC-7): ``self._lock`` guards book-keeping only
-    (``_loaded_ids``/``_installed_ids``/``_pending_events``). It is never held
+    (``_loaded_ids``/``_installed_ids``/``_known_installed_paths``/
+    ``_pending_events``). It is never held
     across brokered sandbox calls — a host lock held over a posted
     ``write_text`` deadlocks against the service loop's own synchronous
     ``drain_public_events`` on the same lock.
@@ -58,6 +59,7 @@ class SkillToolHost:
         self._workspace = workspace
         self._loaded_ids: set[UUID] = set()
         self._installed_ids: set[UUID] = set()
+        self._known_installed_paths: dict[UUID, set[str]] = {}
         self._pending_events: list[dict[str, Any]] = []
         self._lock = RLock()
 
@@ -66,31 +68,42 @@ class SkillToolHost:
         return tuple(f"skills/{skill.card.name}/{resource.path}" for resource in skill.resources.values())
 
     def _install_resources(self, skill: SkillDefinition) -> tuple[str, ...]:
-        """Persist loaded Skill resources as addressable Session Workspace files.
+        """Best-effort projection of declared resources into Session Workspace.
 
-        Resources stay read-only UTF-8 text owned by the bundled catalog; the
-        install only surfaces them at `skills/<name>/<path>` so generated code
-        can read or execute them. All-or-nothing: a write failure skips the
-        install (resources remain readable via `read_skill_resource`).
+        Resources stay read-only UTF-8 text owned by the bundled catalog. A
+        partial Workspace failure does not unload the Skill, and the exact
+        paths returned here are the writes known to have succeeded across this
+        Turn's current or earlier install attempts. ``read_skill_resource``
+        remains the canonical fallback for
+        every declared resource, including ones not visible in Workspace.
 
         Lock discipline (RC-7): the brokered sandbox ``write_text`` calls run
         LOCK-FREE — the lock only guards the ``_installed_ids`` bookkeeping.
-        Overwrite-identical content keeps concurrent duplicate installs safe.
+        An ID is marked installed only after every declared write succeeds,
+        so later retries can recover a partial installation.
         """
         workspace = self._workspace
-        if workspace is None or not skill.resources:
+        if workspace is None:
             return ()
+        declared_paths = self._installed_paths(skill)
         with self._lock:
+            known = set(self._known_installed_paths.get(skill.card.id, ()))
             if skill.card.id in self._installed_ids:
-                return self._installed_paths(skill)
-        for path, resource in zip(self._installed_paths(skill), skill.resources.values(), strict=True):
+                return declared_paths
+        for path, resource in zip(declared_paths, skill.resources.values(), strict=True):
+            if path in known:
+                continue
             try:
                 workspace.write_text(path, resource.content, overwrite=True)
             except Exception:
-                return ()
+                break
+            with self._lock:
+                known.add(path)
+                self._known_installed_paths.setdefault(skill.card.id, set()).add(path)
         with self._lock:
-            self._installed_ids.add(skill.card.id)
-        return self._installed_paths(skill)
+            if skill.resources and len(known) == len(skill.resources):
+                self._installed_ids.add(skill.card.id)
+            return tuple(path for path in declared_paths if path in known)
 
     @property
     def loaded_skill_ids(self) -> frozenset[UUID]:
@@ -167,6 +180,11 @@ class SkillToolHost:
         }
         if self._workspace is not None:
             result["installed_paths"] = list(installed_paths)
+        result["resource_install"] = {
+            "declared": len(skill.resources),
+            "installed": len(installed_paths),
+            "complete": len(installed_paths) >= len(skill.resources),
+        }
         return result
 
     def read_skill_resource(

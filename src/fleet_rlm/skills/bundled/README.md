@@ -30,5 +30,7 @@ Bundled Skills contain model-facing product workflows only. Repository maintenan
 - While a Turn has Session Workspace capability, loading a Skill (explicit
   selection preload or progressive `load_skill`) installs its resources at
   `skills/<name>/<path>` in the Session Workspace so generated code can read or
-  execute them. Installs are idempotent per Turn, all-or-nothing on failure,
-  and resources remain readable through `read_skill_resource` regardless.
+  execute them. Installs are idempotent per Turn and best-effort: a partial
+  Workspace write returns only the paths known to have installed, without
+  unloading the Skill. `read_skill_resource` remains the canonical fallback
+  for every declared resource.
