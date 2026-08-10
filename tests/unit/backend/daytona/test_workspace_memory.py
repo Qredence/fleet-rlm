@@ -53,7 +53,7 @@ class BoundedSubprocess:
                 check=False,
                 capture_output=True,
                 text=True,
-                timeout=0.5,
+                timeout=2.0,
             )
         except subprocess.TimeoutExpired:
             self.timed_out = True
@@ -129,8 +129,9 @@ def test_migrates_a_legacy_root_memories_file_once(tmp_path: Path) -> None:
     legacy.write_bytes(b"- [2026-07-27T11:14:05Z] **General**: legacy\n- [torn final")
     from fleet_rlm.daytona.workspace_memory import DaytonaWorkspaceMemoryStore
 
+    process = LocalProcess()
     store = DaytonaWorkspaceMemoryStore(
-        SimpleNamespace(process=LocalProcess()),
+        SimpleNamespace(process=process),
         volume_paths=VolumePaths.from_mount(str(root)),
         max_upload_bytes=262_144,
     )
@@ -146,9 +147,61 @@ def test_migrates_a_legacy_root_memories_file_once(tmp_path: Path) -> None:
         HEADER + "- [2026-07-27T11:14:05Z] **General**: legacy\n- [torn final\n"
     )
 
+    # The mounted migrate op re-reads the legacy source inside its lock.
+    assert not any("operation = 'read'" in code for code in process.calls)
+
     # already migrated: a second read performs no further moves
     store.read_tail(byte_budget=512)
     assert target.exists() and not legacy.exists()
+
+
+def test_memory_lock_is_a_stable_control_sidecar_outside_the_memory_log(tmp_path: Path) -> None:
+    from fleet_rlm.files.memory_models import format_workspace_memory_v3_record
+
+    store, root, _process = _store(tmp_path)
+    first = format_workspace_memory_v3_record(
+        "sidecar is not a record",
+        "Policy",
+        memory_id="aaaa0001",
+        created_at="2026-07-19T09:00:00Z",
+        updated_at="2026-07-19T09:00:00Z",
+        source="user_explicit",
+    )
+    second = format_workspace_memory_v3_record(
+        "a stale lock inode remains reusable",
+        "Policy",
+        memory_id="bbbb0002",
+        created_at="2026-07-19T09:01:00Z",
+        updated_at="2026-07-19T09:01:00Z",
+        source="user_explicit",
+    )
+
+    store.append_record(first)
+    sidecar = root / "MEMORIES.md.lock"
+    assert sidecar.is_file() and sidecar.stat().st_size == 0
+    assert not (root / "memory" / "MEMORIES.md.lock").exists()
+
+    # A lock left by an interrupted runner is metadata, not memory content.
+    store.append_record(second)
+    entries = store.list_entries(limit=WORKSPACE_MEMORY_MAX_LIST_LIMIT).entries
+    assert [entry.memory_id for entry in entries] == ["aaaa0001", "bbbb0002"]
+    log = (root / "memory" / "MEMORIES.md").read_text(encoding="utf-8")
+    assert first in log and second in log and ".lock" not in log
+
+
+@pytest.mark.parametrize("sidecar_kind", ["symlink", "directory"])
+def test_a_tampered_memory_lock_fails_closed_without_touching_the_log(tmp_path: Path, sidecar_kind: str) -> None:
+    store, root, _process = _store(tmp_path)
+    target = root / "memory" / "MEMORIES.md"
+    if sidecar_kind == "symlink":
+        (root / "MEMORIES.md.lock").symlink_to(target)
+    else:
+        (root / "MEMORIES.md.lock").mkdir()
+
+    with pytest.raises(WorkspaceMemoryStoreUnavailableError):
+        store.append_record("- [2026-07-27T11:14:05Z] **General** <!-- id:aaaa0001 -->: bounded\n")
+
+    assert not target.exists()
 
 
 def test_migration_leaves_an_existing_new_store_and_legacy_file_untouched(tmp_path: Path) -> None:
@@ -162,6 +215,20 @@ def test_migration_leaves_an_existing_new_store_and_legacy_file_untouched(tmp_pa
     # both files exist: never migrate over a canonical store, never lose content
     assert read.content.endswith(": current\n") and "legacy" not in read.content
     assert legacy.read_text(encoding="utf-8").endswith(": legacy\n")
+
+
+def test_identical_preexisting_store_converges_and_removes_the_legacy_root(tmp_path: Path) -> None:
+    store, root, _process = _store(tmp_path)
+    legacy = root / "MEMORIES.md"
+    body = "- [2026-07-27T11:14:05Z] **General** <!-- id:aaaa0001 -->: duplicate migration\n"
+    legacy.write_text(body, encoding="utf-8")
+    target = _write_store_file((HEADER + body).encode("utf-8"), root)
+
+    read = store.read_tail(byte_budget=512)
+
+    assert read.content == body
+    assert not legacy.exists()
+    assert target.read_text(encoding="utf-8") == HEADER + body
 
 
 def test_migrates_a_zero_byte_legacy_file(tmp_path: Path) -> None:
@@ -495,6 +562,29 @@ def test_appends_survive_a_human_malformed_line_and_preserve_it(tmp_path: Path) 
     content = memory.read_text(encoding="utf-8")
     assert content.startswith(HEADER + "not a memory record\n")
     assert content.endswith(": later\n")
+
+
+def test_append_fails_closed_over_a_dangling_existing_supersession(tmp_path: Path) -> None:
+    from fleet_rlm.files.memory_models import format_workspace_memory_v3_record
+
+    dangling = format_workspace_memory_v3_record(
+        "preexisting stale branch",
+        "Policy",
+        memory_id="bbbb0002",
+        created_at="2026-07-19T09:00:00Z",
+        updated_at="2026-07-19T09:00:00Z",
+        source="operator_import",
+        supersedes_id="ffff0000",
+    )
+    store, root, _process = _store(tmp_path)
+    _write_store_file((HEADER + dangling).encode("utf-8"), root)
+
+    with pytest.raises(WorkspaceMemoryStoreUnavailableError):
+        store.append_record("- [2026-07-19T09:01:00Z] **Policy** <!-- id:cccc0003 -->: strict write boundary\n")
+
+    # Tolerant reads still hide the malformed row, but writes do not repair it silently.
+    assert store.list_entries(limit=WORKSPACE_MEMORY_MAX_LIST_LIMIT).entries == ()
+    assert (root / "memory" / "MEMORIES.md").read_text(encoding="utf-8") == HEADER + dangling
 
 
 def test_rejects_remote_append_response_over_the_configured_cap(

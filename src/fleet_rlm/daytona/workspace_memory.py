@@ -436,9 +436,9 @@ class DaytonaWorkspaceMemoryStore:
     def _migrate_legacy_store(self) -> None:
         """Move a legacy root ``MEMORIES.md`` into ``memory/MEMORIES.md`` once.
 
-        The legacy file is removed only after the new store (header + legacy
-        bytes) is durably published; any conflict, unsafe type, undecodable
-        content, or over-cap legacy file fails closed with both files intact.
+        A cheap missing-file probe keeps established stores inexpensive; when a
+        legacy file exists, the mounted agent owns the complete
+        lock/read/validate/publish/remove sequence across independent hosts.
         """
         try:
             legacy_stat = self._run(
@@ -448,7 +448,7 @@ class DaytonaWorkspaceMemoryStore:
                 allow_missing=True,
             )
         except FileNotFoundError:
-            legacy_stat = {"entry": None}
+            return
         legacy_entry = legacy_stat.get("entry")
         if legacy_entry is None:
             return
@@ -458,46 +458,12 @@ class DaytonaWorkspaceMemoryStore:
             or legacy_entry.get("is_regular_file") is False
         ):
             raise WorkspaceMemoryStoreUnavailableError()
-        try:
-            new_stat = self._run(
-                root=self._volume_root,
-                operation="stat",
-                relative=f"{_MEMORY_DIR_NAME}/{_MEMORY_NAME}",
-                allow_missing=True,
-            )
-            new_entry = new_stat.get("entry")
-        except FileNotFoundError:
-            new_entry = None
-        if new_entry is not None:
-            return
-        # ``read`` (not ``tail_read``): migration must copy every byte of the
-        # legacy body, including a torn final line; ``tail_read`` is record-
-        # oriented and trims unterminated tails by design.
-        legacy = self._run(
-            root=self._volume_root,
-            operation="read",
-            relative=_MEMORY_NAME,
-            max_bytes=max(self._max_file_bytes - len(_HEADER_BYTES), 1),
-        )
-        content = legacy.get("content")
-        if not isinstance(content, str):
-            raise WorkspaceMemoryStoreUnavailableError()
-        body = content.encode("utf-8")
-        if body and not body.endswith(b"\n"):
-            body += b"\n"
         self._run(
-            root=self._memory_file_parent,
-            operation="write",
+            root=self._volume_root,
+            operation="memory_migrate",
             relative=_MEMORY_NAME,
-            overwrite=False,
             max_bytes=self._max_file_bytes,
             total_file_bytes=self._max_file_bytes,
-            content=_HEADER_BYTES + body,
-        )
-        self._run(
-            root=self._volume_root,
-            operation="unlink",
-            relative=_MEMORY_NAME,
         )
         invalidate_workspace_memory_digest(self._volume_root)
 

@@ -210,15 +210,20 @@ and cannot self-reference or cycle. Chronological history remains visible, but
 record can hide its superseded target without deleting history; forgetting a
 superseder reactivates the old active memory.
 `edit_memory`
-upgrades legacy rows to v3 or replaces v3 while preserving the id and timestamp, and
-`forget` removes exactly one addressed row. Both mutations execute their
-read-modify-publish rewrite inside one mounted-agent operation. A completed
-append therefore survives failed or cancelled Turns and Sandbox replacement.
-The update Tool permits writes only when the user explicitly requests memory,
-but that is an auditable Tool policy rather than a filesystem ACL: the Daytona
-interpreter can see the mounted Volume. Append serialization is process-local;
-separate Fleet processes are not coordinated, so concurrent cross-process
-append is not guaranteed.
+upgrades legacy rows to v3 or replaces v3 while preserving the id and
+timestamp, and `forget` removes exactly one addressed row. `remember`, edit,
+delete, and legacy migration run their read/validate/compose/publish sequence
+inside one mounted-agent operation behind a stable, zero-byte Volume-root
+`MEMORIES.md.lock` advisory lock and inode/path revalidation. The host
+process-local thread lock is only an optimization; independent host processes
+whose mounted agents execute on one lock-honoring Sandbox kernel coordinate
+through that mounted lock. Cross-Sandbox FUSE lock semantics remain part of
+the live P16 certification surface and receive no stronger claim here. The
+sidecar is control metadata, never a memory record or digest input. A
+completed append therefore survives failed or cancelled Turns and Sandbox
+replacement. The update Tool permits writes only when the user explicitly
+requests memory, but that is an auditable Tool policy rather than a filesystem
+ACL: the Daytona interpreter can see the mounted Volume.
 
 Reads return the newest complete records within a fixed 256 KiB byte budget.
 The configured `max_upload_bytes` caps the whole memory file. Appends against a
