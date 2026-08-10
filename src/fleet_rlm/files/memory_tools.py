@@ -90,6 +90,8 @@ def _entry_payload(entry: WorkspaceMemoryEntry) -> dict[str, object]:
         "updated_at": entry.updated_at or entry.timestamp,
         "supersedes_id": entry.supersedes_id,
         "record_version": entry.record_version,
+        "active": entry.active,
+        "superseded_by_id": entry.superseded_by_id,
     }
 
 
@@ -135,7 +137,7 @@ def _search_entries(
     warnings = 0
     while True:
         page = store.list_entries(after=after, limit=_SEARCH_PAGE_LIMIT, category=category)
-        entries.extend(page.entries)
+        entries.extend(entry for entry in page.entries if entry.active)
         warnings = max(warnings, page.warnings)
         if not page.truncated or page.next_cursor is None:
             break

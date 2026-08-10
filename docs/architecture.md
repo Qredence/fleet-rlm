@@ -202,7 +202,13 @@ v1 rows derive a deterministic id from canonical text plus valid-record
 occurrence, so duplicate legacy rows remain separately pageable; duplicate
 persisted ids fail closed rather than skipping or selecting an arbitrary row.
 Expansion parsing also admits provenance-aware v3 rows (`id/source/updated` and
-optional `supersedes` metadata). Explicit-user `remember` writes are now v3, while historical v1/v2 remain readable; invalid v3 metadata stays malformed under tolerant reads.
+optional `supersedes` metadata). Explicit-user `remember` writes are now v3,
+while historical v1/v2 remain readable; invalid v3 metadata stays malformed
+under tolerant reads. A valid edge can target only one existing active memory
+and cannot self-reference or cycle. Chronological history remains visible, but
+`search_memories` and the automatic digest use the active-memory view, so a new
+record can hide its superseded target without deleting history; forgetting a
+superseder reactivates the old active memory.
 `edit_memory`
 upgrades legacy rows to v3 or replaces v3 while preserving the id and timestamp, and
 `forget` removes exactly one addressed row. Both mutations execute their

@@ -35,7 +35,7 @@ from __future__ import annotations
 
 import hashlib
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from typing import Literal, Protocol
 
@@ -252,6 +252,8 @@ def validate_workspace_memory_content(content: str) -> None:
         lines = lines[1:]
     for record in lines:
         validate_workspace_memory_record(record)
+    if any(line.malformed for line in parse_workspace_memory_lines(content)):
+        raise WorkspaceMemoryRecordError
 
 
 def format_workspace_memory_v3_record(
@@ -287,6 +289,26 @@ def format_workspace_memory_v3_record(
     return record
 
 
+def parse_workspace_memory_record(record: str) -> WorkspaceMemoryEntry:
+    """Parse one shape-valid record without requiring whole-file graph context."""
+    validate_workspace_memory_record(record)
+    match = _MEMORY_RECORD.fullmatch(record) or _MEMORY_RECORD_V3.fullmatch(record)
+    assert match is not None
+    return WorkspaceMemoryEntry(
+        memory_id=match["memory_id"]
+        or workspace_memory_record_id(match["timestamp"], match["category"], match["learning"]),
+        timestamp=match["timestamp"],
+        category=match["category"],
+        learning=match["learning"],
+        source=normalize_workspace_memory_source(match["source"])
+        if match.re is _MEMORY_RECORD_V3
+        else "legacy_unknown",
+        updated_at=match["updated_at"] if match.re is _MEMORY_RECORD_V3 else match["timestamp"],
+        supersedes_id=match["supersedes_id"] if match.re is _MEMORY_RECORD_V3 else None,
+        record_version=3 if match.re is _MEMORY_RECORD_V3 else (2 if match["memory_id"] is not None else 1),
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class WorkspaceMemoryEntry:
     """One parsed Workspace Memory record with a stable, addressable id.
@@ -302,11 +324,63 @@ class WorkspaceMemoryEntry:
     source: WorkspaceMemorySource = "legacy_unknown"
     updated_at: str | None = None
     supersedes_id: str | None = None
+    superseded_by_id: str | None = None
+    active: bool = True
     record_version: Literal[1, 2, 3] = 2
 
     def __post_init__(self) -> None:
         if self.updated_at is None:
             object.__setattr__(self, "updated_at", self.timestamp)
+
+
+def _annotate_supersession_graph(
+    parsed: tuple[WorkspaceMemoryParsedLine, ...], *, complete: bool
+) -> tuple[WorkspaceMemoryParsedLine, ...]:
+    """Validate supersession geometry and project active state.
+
+    ``complete=False`` is for bounded suffix reads: a target before the window
+    is treated as satisfied because the store body owns the complete graph.
+    """
+    rows = list(parsed)
+    active_ids: set[str] = set()
+    superseded: set[str] = set()
+    superseded_by: dict[str, str] = {}
+    for index, line in enumerate(rows):
+        entry = line.entry
+        if entry is None:
+            continue
+        if entry.memory_id in active_ids:
+            rows[index] = WorkspaceMemoryParsedLine(line.raw, None, False, False, True)
+            continue
+        if (
+            complete
+            and entry.supersedes_id is not None
+            and (entry.supersedes_id not in active_ids or entry.supersedes_id in superseded)
+        ):
+            rows[index] = WorkspaceMemoryParsedLine(line.raw, None, False, False, True)
+            continue
+        if entry.supersedes_id is not None:
+            superseded.add(entry.supersedes_id)
+            superseded_by[entry.supersedes_id] = entry.memory_id
+        active_ids.add(entry.memory_id)
+    return tuple(
+        WorkspaceMemoryParsedLine(
+            line.raw,
+            (
+                replace(
+                    line.entry,
+                    superseded_by_id=superseded_by.get(line.entry.memory_id),
+                    active=line.entry.memory_id not in superseded_by,
+                )
+                if line.entry is not None
+                else None
+            ),
+            line.header,
+            line.blank,
+            line.malformed,
+        )
+        for line in rows
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -320,7 +394,9 @@ class WorkspaceMemoryParsedLine:
     malformed: bool
 
 
-def parse_workspace_memory_lines(content: str) -> tuple[WorkspaceMemoryParsedLine, ...]:
+def parse_workspace_memory_lines(
+    content: str, *, complete_memory_graph: bool = True
+) -> tuple[WorkspaceMemoryParsedLine, ...]:
     """Tolerantly parse every line of the memory file; never raises on content.
 
     Records validate against the strict v1/v2 shapes; the first-line header and
@@ -358,7 +434,7 @@ def parse_workspace_memory_lines(content: str) -> tuple[WorkspaceMemoryParsedLin
             record_version=3 if match.re is _MEMORY_RECORD_V3 else (2 if match["memory_id"] is not None else 1),
         )
         parsed.append(WorkspaceMemoryParsedLine(raw, entry, False, False, False))
-    return tuple(parsed)
+    return _annotate_supersession_graph(tuple(parsed), complete=complete_memory_graph)
 
 
 def count_workspace_memory_warnings(lines: tuple[WorkspaceMemoryParsedLine, ...]) -> int:

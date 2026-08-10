@@ -37,6 +37,7 @@ from fleet_rlm.files.memory_models import (
     normalize_workspace_memory_id,
     normalize_workspace_memory_learning,
     parse_workspace_memory_lines,
+    parse_workspace_memory_record,
     validate_workspace_memory_record,
 )
 from fleet_rlm.files.volume_paths import VolumePaths, as_posix
@@ -147,11 +148,11 @@ def _canonical_memory_record(entry: WorkspaceMemoryEntry) -> bytes:
 def _relevant_recent_workspace_memory_digest(store: DaytonaWorkspaceMemoryStore, *, request: str) -> str:
     """Compose scored relevant entries plus newest complete memory records."""
     fallback_result = store.read_tail(byte_budget=WORKSPACE_MEMORY_INJECTION_TAIL_BYTES)
-    recent_lines = parse_workspace_memory_lines(fallback_result.content)
-    recent_entries = [line.entry for line in recent_lines if line.entry is not None]
+    recent_lines = parse_workspace_memory_lines(fallback_result.content, complete_memory_graph=False)
+    recent_entries = [line.entry for line in recent_lines if line.entry is not None and line.entry.active]
     # With one populated page, repeated matching composition costs one tail read
     # plus one indexed list read (2 mounted-agent calls); no stale query cache.
-    fallback = "".join(line.raw for line in recent_lines if line.entry is not None)
+    fallback = "".join(line.raw for line in recent_lines if line.entry is not None and line.entry.active)
     query = _injection_query(request)
     if not query:
         return fallback
@@ -235,7 +236,7 @@ class DaytonaWorkspaceMemoryStore:
                 payload,
                 byte_budget=byte_budget,
             )
-            lines = parse_workspace_memory_lines(content)
+            lines = parse_workspace_memory_lines(content, complete_memory_graph=False)
             filtered = "".join(line.raw for line in lines if line.entry is not None)
             return WorkspaceMemoryReadResult(
                 content=filtered,
@@ -301,6 +302,19 @@ class DaytonaWorkspaceMemoryStore:
         self._ensure_migrated()
         content = self._read_full_content()
         lines = parse_workspace_memory_lines(content)
+        # A graph-invalid duplicate stays malformed for tolerant reads, but a
+        # human-edited persisted duplicate must still fail closed before page
+        # construction. Re-check each shape-valid row independently for this
+        # durable fail-closed signal.
+        shape_ids: list[str] = []
+        for line in lines:
+            if line.raw.strip():
+                try:
+                    shape_ids.append(parse_workspace_memory_record(line.raw).memory_id)
+                except WorkspaceMemoryRecordError:
+                    continue
+        if len(set(shape_ids)) != len(shape_ids):
+            raise WorkspaceMemoryStoreUnavailableError()
         entries = [line.entry for line in lines if line.entry is not None]
         warnings = count_workspace_memory_warnings(lines)
         if len({entry.memory_id for entry in entries}) != len(entries):
@@ -389,8 +403,10 @@ class DaytonaWorkspaceMemoryStore:
             raise WorkspaceMemoryStoreUnavailableError()
         try:
             validate_workspace_memory_record(record)
-            parsed = parse_workspace_memory_lines(record)
-            if len(parsed) != 1 or parsed[0].entry is None or parsed[0].entry.memory_id != memory_id:
+            from fleet_rlm.files.memory_models import parse_workspace_memory_record
+
+            parsed_entry = parse_workspace_memory_record(record)
+            if parsed_entry.memory_id != memory_id:
                 raise WorkspaceMemoryRecordError
         except WorkspaceMemoryRecordError as exc:
             raise WorkspaceMemoryStoreUnavailableError() from exc

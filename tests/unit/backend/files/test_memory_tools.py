@@ -16,7 +16,6 @@ from fleet_rlm.files.memory_models import (
     WorkspaceMemoryReadResult,
     WorkspaceMemoryStoreFullError,
     WorkspaceMemoryStoreUnavailableError,
-    parse_workspace_memory_lines,
     workspace_memory_record_id,
 )
 from fleet_rlm.rlm.tool_observer import observe_tool
@@ -103,9 +102,9 @@ class FakeMemoryStore:
 
 
 def _parsed(record: str) -> WorkspaceMemoryEntry:
-    entry = parse_workspace_memory_lines(record)[0].entry
-    assert entry is not None
-    return entry
+    from fleet_rlm.files.memory_models import parse_workspace_memory_record
+
+    return parse_workspace_memory_record(record)
 
 
 def _reformat(entry: WorkspaceMemoryEntry, key_learning: str, category: str | None) -> tuple[str, str]:
@@ -371,6 +370,8 @@ def test_forget_removes_one_entry_and_reports_not_found() -> None:
 def test_list_and_search_project_v3_provenance_without_bound_change() -> None:
     from fleet_rlm.files.memory_models import format_workspace_memory_v3_record
 
+    target_id = workspace_memory_record_id("2026-07-19T08:00:00Z", "Policy", "older policy")
+    target = f"- [2026-07-19T08:00:00Z] **Policy** <!-- id:{target_id} -->: older policy\n"
     record = format_workspace_memory_v3_record(
         "Superseded release policy with provenance",
         "Policy",
@@ -378,20 +379,21 @@ def test_list_and_search_project_v3_provenance_without_bound_change() -> None:
         created_at="2026-07-19T09:00:00Z",
         updated_at="2026-07-27T10:30:00Z",
         source="operator_import",
-        supersedes_id=workspace_memory_record_id("2026-07-19T08:00:00Z", "Policy", "older policy"),
+        supersedes_id=target_id,
     )
-    store = FakeMemoryStore(entries=(_parsed(record),))
+    store = FakeMemoryStore(entries=(_parsed(target), _parsed(record)))
     tools = _tools(_host(store))
 
-    listed = tools["list_memories"](limit=1)
+    listed = tools["list_memories"](limit=2)
     searched = tools["search_memories"](query="provenance", limit=1)
 
-    for payload in (listed["entries"][0], searched["entries"][0]):
+    for payload in (listed["entries"][1], searched["entries"][0]):
         assert payload["source"] == "operator_import"
         assert payload["updated_at"] == "2026-07-27T10:30:00Z"
         assert isinstance(payload["supersedes_id"], str)
         assert payload["record_version"] == 3
-    assert listed["count"] == searched["count"] == 1
+    assert listed["count"] == 2
+    assert searched["count"] == 1
 
 
 def test_event_views_expose_only_memory_metadata() -> None:
@@ -472,6 +474,38 @@ def _search_entries_fixture() -> tuple[WorkspaceMemoryEntry, ...]:
     )
 
 
+def test_search_uses_active_entries_while_chronological_list_shows_history_status() -> None:
+    store = FakeMemoryStore(
+        entries=(
+            WorkspaceMemoryEntry(
+                "aaaa0001",
+                "2026-07-19T09:00:00Z",
+                "Policy",
+                "old preference",
+                active=False,
+                superseded_by_id="bbbb0002",
+            ),
+            WorkspaceMemoryEntry(
+                "bbbb0002", "2026-07-20T09:00:00Z", "Policy", "new preference", supersedes_id="aaaa0001"
+            ),
+        )
+    )
+    tools = _tools(_host(store))
+
+    history = tools["list_memories"](limit=2)
+    searched = tools["search_memories"](query="preference", limit=2)
+
+    assert [(entry["id"], entry["active"], entry["superseded_by_id"]) for entry in history["entries"]] == [
+        ("aaaa0001", False, "bbbb0002"),
+        ("bbbb0002", True, None),
+    ]
+    assert [entry["id"] for entry in searched["entries"]] == ["bbbb0002"]
+    assert {entry["id"]: entry["active"] for entry in history["entries"]} == {
+        "aaaa0001": False,
+        "bbbb0002": True,
+    }
+
+
 def test_search_memories_ranks_older_relevant_learning_above_newer_irrelevant_learning() -> None:
     store = FakeMemoryStore(entries=_search_entries_fixture())
     result = _tools(_host(store))["search_memories"](query="polars dataframe joins", limit=4)
@@ -524,6 +558,22 @@ def test_search_memories_tie_breaks_deterministically_by_score_timestamp_and_ide
 
     assert [entry["id"] for entry in result["entries"]] == ["bbbb0002", "aaaa0001"]
     assert all(item["score"] == result["entries"][0]["score"] for item in result["entries"][1:])
+
+
+def test_active_graph_is_computed_before_optional_category_filtering() -> None:
+    first = WorkspaceMemoryEntry("aaaa0001", "2026-07-19T09:00:00Z", "Ops", "ops memory")
+    second = WorkspaceMemoryEntry(
+        "bbbb0002",
+        "2026-07-20T09:00:00Z",
+        "Preference",
+        "new preference",
+        supersedes_id="aaaa0001",
+    )
+    store = FakeMemoryStore(entries=(first, second))
+    result = _tools(_host(store))["search_memories"](query="preference", category="Preference")
+
+    assert [entry["id"] for entry in result["entries"]] == ["bbbb0002"]
+    assert second.supersedes_id == "aaaa0001"
 
 
 def test_search_memories_limits_results_and_reports_bounded_malformed_skips() -> None:

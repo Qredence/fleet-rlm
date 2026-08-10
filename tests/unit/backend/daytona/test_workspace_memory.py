@@ -17,10 +17,12 @@ import pytest
 from fleet_rlm.files.memory_models import (
     WORKSPACE_MEMORY_BYTE_BUDGET,
     WORKSPACE_MEMORY_HEADER,
+    WORKSPACE_MEMORY_MAX_LIST_LIMIT,
     WorkspaceMemoryEntryNotFoundError,
     WorkspaceMemoryRecordError,
     WorkspaceMemoryStoreUnavailableError,
     parse_workspace_memory_lines,
+    parse_workspace_memory_record,
     workspace_memory_record_id,
 )
 from fleet_rlm.files.volume_paths import VolumePaths
@@ -963,6 +965,7 @@ def test_workspace_agent_edit_preserves_v3_supersession_and_mixed_file_bytes(tmp
     from fleet_rlm.files.memory_models import format_workspace_memory_v3_record
 
     older_id = workspace_memory_record_id("2026-07-18T08:00:00Z", "Policy", "older policy")
+    target_policy = f"- [2026-07-18T08:00:00Z] **Policy** <!-- id:{older_id} -->: older policy\n"
     v2 = "- [2026-07-20T09:00:00Z] **General** <!-- id:bbbb0002 -->: historical v2\n"
     v3 = format_workspace_memory_v3_record(
         "Superseding memory with an update link",
@@ -974,19 +977,17 @@ def test_workspace_agent_edit_preserves_v3_supersession_and_mixed_file_bytes(tmp
         supersedes_id=older_id,
     )
     store, root, _process = _store(tmp_path)
-    before = HEADER + v2 + v3
+    before = HEADER + target_policy + v2 + v3
     _write_store_file(before.encode("utf-8"), root)
 
     updated = store.edit_entry("dddd0004", "Superseding memory with a preserved link")
-    edited = parse_workspace_memory_lines(updated)[0].entry
-
-    assert edited is not None
+    edited = parse_workspace_memory_record(updated)
     assert edited.timestamp == "2026-07-19T09:00:00Z"
     assert edited.source == "operator_import"
     assert edited.supersedes_id == older_id
     assert str(edited.updated_at) > "2026-07-27T10:30:00Z"
     after = (root / "memory" / "MEMORIES.md").read_text(encoding="utf-8")
-    assert after.startswith(HEADER + v2)
+    assert after.startswith(HEADER + target_policy + v2)
     assert edited.learning in after
     assert "supersedes:aaaa" not in after
 
@@ -1012,6 +1013,105 @@ def test_v3_memory_id_participates_in_append_collision_targeting(tmp_path: Path)
     with pytest.raises(WorkspaceMemoryStoreUnavailableError):
         store.append_record(v2)
     assert (root / "memory" / "MEMORIES.md").read_text(encoding="utf-8") == HEADER + v3
+
+
+def test_active_supersession_filters_search_and_injection_and_forgetting_reactivates(tmp_path: Path) -> None:
+    from fleet_rlm.daytona.workspace_memory import read_workspace_memory_injection_digest
+    from fleet_rlm.files.memory_models import format_workspace_memory_v3_record
+    from fleet_rlm.files.memory_tools import WorkspaceMemoryToolHost
+
+    old = format_workspace_memory_v3_record(
+        "Old dataframe preference",
+        "Preference",
+        memory_id="aaaa0001",
+        created_at="2026-07-19T09:00:00Z",
+        updated_at="2026-07-19T09:00:00Z",
+        source="operator_import",
+    )
+    new = format_workspace_memory_v3_record(
+        "New dataframe preference",
+        "Preference",
+        memory_id="bbbb0002",
+        created_at="2026-07-20T09:00:00Z",
+        updated_at="2026-07-20T09:00:00Z",
+        source="agent_candidate",
+        supersedes_id="aaaa0001",
+    )
+    store, root, _process = _store(tmp_path)
+    _write_store_file((HEADER + old + new).encode("utf-8"), root)
+    host = WorkspaceMemoryToolHost(store)
+
+    history = store.list_entries(limit=WORKSPACE_MEMORY_MAX_LIST_LIMIT)
+    assert [(entry.memory_id, entry.active, entry.superseded_by_id) for entry in history.entries] == [
+        ("aaaa0001", False, "bbbb0002"),
+        ("bbbb0002", True, None),
+    ]
+    search = {str(tool.name): tool for tool in host.as_tools()}["search_memories"]
+    search_result = search(query="dataframe preference", limit=2)
+    assert [entry["id"] for entry in search_result["entries"]] == ["bbbb0002"]
+    injected = read_workspace_memory_injection_digest(store, request="dataframe preference")
+    assert new in injected and old not in injected
+
+    assert store.delete_entry("bbbb0002") is True
+    reactivated = read_workspace_memory_injection_digest(store, request="dataframe preference")
+    assert old in reactivated and new not in reactivated
+    assert store.list_entries(limit=WORKSPACE_MEMORY_MAX_LIST_LIMIT).entries[0].active is True
+
+
+def test_windowed_tail_keeps_a_valid_row_whose_target_is_before_the_window(tmp_path: Path) -> None:
+    from fleet_rlm.files.memory_models import format_workspace_memory_v3_record
+
+    older = "- [2026-07-18T08:00:00Z] **Preference** <!-- id:aaaa0001 -->: older preference\n"
+    new = format_workspace_memory_v3_record(
+        "newer active preference",
+        "Preference",
+        memory_id="bbbb0002",
+        created_at="2026-07-19T09:00:00Z",
+        updated_at="2026-07-20T09:00:00Z",
+        source="operator_import",
+        supersedes_id="aaaa0001",
+    )
+    filler = "".join(
+        f"- [2026-07-20T09:{index // 60:02d}:{index % 60:02d}Z] **Ops** <!-- id:{index:08x} -->: {'x' * 120}\n"
+        for index in range(60)
+    )
+    store, root, _process = _store(tmp_path)
+    _write_store_file((HEADER + older + filler + new).encode("utf-8"), root)
+
+    tail = store.read_tail(byte_budget=4_096)
+
+    assert new in tail.content
+    assert "older preference" not in tail.content
+
+
+def test_forgetting_an_inactive_superseder_still_removes_it_and_reactivates_the_target(tmp_path: Path) -> None:
+    from fleet_rlm.daytona.workspace_memory import read_workspace_memory_injection_digest
+    from fleet_rlm.files.memory_models import format_workspace_memory_v3_record
+
+    first = format_workspace_memory_v3_record(
+        "superseded once",
+        "Policy",
+        memory_id="aaaa0001",
+        created_at="2026-07-19T09:00:00Z",
+        updated_at="2026-07-19T09:00:00Z",
+        source="operator_import",
+    )
+    second = format_workspace_memory_v3_record(
+        "superseder",
+        "Policy",
+        memory_id="bbbb0002",
+        created_at="2026-07-20T09:00:00Z",
+        updated_at="2026-07-20T09:00:00Z",
+        source="agent_candidate",
+        supersedes_id="aaaa0001",
+    )
+    store, root, _process = _store(tmp_path)
+    _write_store_file((HEADER + first + second).encode("utf-8"), root)
+
+    assert read_workspace_memory_injection_digest(store).find("superseded once") < 0
+    assert store.delete_entry("bbbb0002") is True
+    digest = read_workspace_memory_injection_digest(store)
+    assert "superseded once" in digest
 
 
 def test_search_failure_or_no_match_uses_the_recency_only_fallback(tmp_path: Path) -> None:

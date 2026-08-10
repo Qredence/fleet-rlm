@@ -222,9 +222,12 @@ def test_v3_records_parse_provenance_and_legacy_records_project_unknown_fallback
         source="operator_import",
         supersedes_id=old_id,
     )
-    lines = parse_workspace_memory_lines(V1_RECORD + V2_RECORD + updated)
+    target = f"- [2026-07-27T11:14:05Z] **General** <!-- id:{old_id} -->: older policy\n"
+    lines = parse_workspace_memory_lines(V1_RECORD + V2_RECORD + target + updated)
 
-    legacy_v1, legacy_v2, provenance = (line.entry for line in lines if line.entry is not None)
+    legacy_v1, legacy_v2, target_entry, provenance = (line.entry for line in lines if line.entry is not None)
+    assert target_entry is not None and target_entry.active is False
+    assert target_entry.superseded_by_id == "dddd0004"
     assert legacy_v1.source == "legacy_unknown" == legacy_v2.source
     assert legacy_v1.updated_at == legacy_v1.timestamp
     assert legacy_v2.updated_at == legacy_v2.timestamp
@@ -235,7 +238,7 @@ def test_v3_records_parse_provenance_and_legacy_records_project_unknown_fallback
     assert provenance.supersedes_id == old_id
     assert provenance.memory_id == "dddd0004"
     validate_workspace_memory_record(updated)
-    validate_workspace_memory_content(V1_RECORD + V2_RECORD + updated)
+    validate_workspace_memory_content(V1_RECORD + V2_RECORD + target + updated)
 
 
 @pytest.mark.parametrize(
@@ -271,3 +274,39 @@ def test_v1_v2_writer_contract_stays_unchanged_during_v3_expand() -> None:
     )
     assert record[0].entry.source == "legacy_unknown"
     assert record[1].entry.source == "user_explicit"
+
+
+def _v3(memory_id: str, learning: str, *, supersedes_id: str | None = None) -> str:
+    return format_workspace_memory_v3_record(
+        learning,
+        "Policy",
+        memory_id=memory_id,
+        created_at="2026-07-19T09:00:00Z",
+        updated_at="2026-07-19T09:00:00Z",
+        source="operator_import",
+        supersedes_id=supersedes_id,
+    )
+
+
+def test_supersession_graph_marks_active_state_and_rejects_invalid_geometry() -> None:
+    first_record = _v3("aaaa0001", "old policy")
+    second_record = _v3("bbbb0002", "new policy", supersedes_id="aaaa0001")
+    third_record = _v3("cccc0003", "newest policy", supersedes_id="bbbb0002")
+
+    lines = parse_workspace_memory_lines(first_record + second_record + third_record)
+    entries = [line.entry for line in lines if line.entry is not None]
+
+    assert [entry.active for entry in entries] == [False, False, True]
+    assert entries[0].superseded_by_id == "bbbb0002"
+    assert entries[1].superseded_by_id == "cccc0003"
+    assert entries[2].superseded_by_id is None
+    validate_workspace_memory_content(first_record + second_record + third_record)
+
+    for invalid_content in (
+        second_record,  # missing target
+        _v3("aaaa0001", "a", supersedes_id="bbbb0002") + _v3("bbbb0002", "b", supersedes_id="aaaa0001"),
+        first_record + second_record + _v3("dddd0004", "duplicate target", supersedes_id="aaaa0001"),
+        first_record + _v3("aaaa0001", "duplicate record id"),
+    ):
+        with pytest.raises(WorkspaceMemoryRecordError):
+            validate_workspace_memory_content(invalid_content)
