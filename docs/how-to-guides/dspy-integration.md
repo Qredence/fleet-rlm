@@ -311,3 +311,20 @@ rows, and optional engineering tracing remains fail-soft/operator-owned.
 `RoutingScore.routing_efficiency` is intentionally independent from final
 answer correctness so an expensive recursive child cannot hide behind a
 correct answer.
+
+
+### Running the routing matrix
+
+Use the offline reducer and plan receipts in normal validation, and invoke the opt-in
+live lane only when the selected Fleet profile and Daytona credentials are available:
+
+```bash
+uv run python scripts/benchmarks/run_routing_eval.py   --output .scratch/p12/routing-plan.json
+
+uv run python scripts/benchmarks/run_routing_eval.py --live --repeat 3   --timeout-seconds 1800   --output .scratch/p12/routing-live.json
+```
+
+The live runner boots a temporary SQLite database and unique Daytona Volume per
+run, uses public SSE facts only, and writes answer hashes rather than model or
+provider payloads. A repeated recursive-child route miss is evidence, while an
+unnecessary child for a simple deterministic calculation remains a routing miss.

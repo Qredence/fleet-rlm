@@ -56,6 +56,7 @@ class RoutingScenario:
     prompt: str
     expected_route: RoutingClass
     expected_answer: str
+    expected_fragments: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -109,6 +110,7 @@ CURATED_ROUTING_SCENARIOS: tuple[RoutingScenario, ...] = (
         "batched independent semantic judgment, then return the three labels as object/action/color.",
         "semantic_batched",
         "object/action/color",
+        ("object", "action", "color"),
     ),
     RoutingScenario(
         "recursive-iterative-subproblem",
@@ -120,9 +122,9 @@ CURATED_ROUTING_SCENARIOS: tuple[RoutingScenario, ...] = (
     ),
     RoutingScenario(
         "recursive-depth-fallback",
-        "From within a native child, ask for one more bounded classification of the label "
-        "'phosphorus' as an element and "
-        "return the fallback answer.",
+        "Call rlm_query with this self-contained child instruction: 'Call rlm_query(prompt=\"Classify "
+        'the label phosphorus as an element; return only element or not element") and return its fallback '
+        "answer'. Use the returned answer as the final answer.",
         "recursive_depth_fallback",
         "element",
     ),
@@ -225,7 +227,12 @@ def score_routing_execution(
     observed = classify_routing_facts(facts)
     normalized_answer = " ".join(answer.strip().lower().split())
     expected_answer = " ".join(scenario.expected_answer.strip().lower().split())
-    answer_correct = expected_answer in normalized_answer if allow_contains else normalized_answer == expected_answer
+    if scenario.expected_fragments:
+        answer_correct = all(fragment.lower() in normalized_answer for fragment in scenario.expected_fragments)
+    else:
+        answer_correct = (
+            expected_answer in normalized_answer if allow_contains else normalized_answer == expected_answer
+        )
     answer_sha256 = hashlib.sha256(answer.encode("utf-8")).hexdigest()
     match = observed == scenario.expected_route
     efficiency = 1.0 if match else 0.0
