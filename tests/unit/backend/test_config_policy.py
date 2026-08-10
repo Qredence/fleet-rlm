@@ -140,6 +140,25 @@ def test_policy_rejects_a_change_that_invalidates_the_selected_profile(tmp_path:
         )
 
 
+def test_memory_candidate_policy_is_toml_validated_but_not_settings_editable(tmp_path: Path) -> None:
+    service, policy = _service(tmp_path)
+    before = service.read()
+    assert all(
+        item["path"] != "rlm.autonomous_memory_categories" for scope in before.scopes for item in scope["fields"]
+    )
+
+    after = service.update(
+        scope="defaults",
+        path="rlm.max_iterations",
+        value=22,
+        revision=before.revision,
+    )
+
+    content = policy.read_text(encoding="utf-8")
+    assert "autonomous_memory_categories = []" in content
+    assert _field(after, "defaults", "rlm.max_iterations")["value"] == 22
+
+
 def test_set_default_profile_persists_and_surfaces_in_snapshot(tmp_path: Path) -> None:
     service, policy = _service(tmp_path)
     before = service.read()

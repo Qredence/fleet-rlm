@@ -701,3 +701,45 @@ def test_settings_does_not_read_runtime_environment(monkeypatch: pytest.MonkeyPa
 def test_turn_timeout_must_be_positive(value: int) -> None:
     with pytest.raises(ValidationError):
         Settings(_env_file=None, turn_timeout_seconds=value)
+
+
+def test_autonomous_memory_candidate_categories_default_off() -> None:
+    policy_path = Path(__file__).resolve().parents[3] / "config" / "fleet.toml"
+    document = tomllib.loads(policy_path.read_text(encoding="utf-8"))
+
+    assert Settings(_env_file=None).rlm_autonomous_memory_categories == ()
+    assert document["defaults"]["rlm"]["autonomous_memory_categories"] == []
+
+
+def test_autonomous_memory_candidate_categories_resolve_from_toml(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    import fleet_rlm.config as config
+
+    policy = tmp_path / "fleet.toml"
+    _policy(policy)
+    policy.write_text(
+        policy.read_text(encoding="utf-8").replace(
+            "verbose = true",
+            "autonomous_memory_categories = [' Project ', 'Project', 'Workflow']".replace("'", '"')
+            + chr(10)
+            + "verbose = true",
+            1,
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(config, "_CONFIG_PATH", policy)
+
+    settings = config.load_runtime_settings()
+
+    assert settings.rlm_autonomous_memory_categories == ("Project", "Workflow")
+
+
+def test_autonomous_memory_candidate_categories_fail_closed() -> None:
+    with pytest.raises(ValidationError, match="rlm_autonomous_memory_categories"):
+        Settings(_env_file=None, rlm_autonomous_memory_categories=("Bad Category!",))
+
+
+def test_autonomous_memory_candidate_category_policy_is_bounded() -> None:
+    with pytest.raises(ValidationError, match="rlm_autonomous_memory_categories"):
+        Settings(_env_file=None, rlm_autonomous_memory_categories=tuple(f"Category {index}" for index in range(17)))

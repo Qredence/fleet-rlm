@@ -52,12 +52,14 @@ class PreparedHostCapabilities:
         close_files: bool,
         artifact_candidates: bool,
         preparation_notices: tuple[PreparationNotice, ...] = (),
+        memory_candidates: Any = None,
     ) -> None:
         self.spec = spec
         self._files = files
         self._skills = skills
         self._close_files = close_files
         self._artifact_candidates = artifact_candidates
+        self._memory_candidates = memory_candidates
         self.preparation_notices = preparation_notices
 
     def drain_public_details(self) -> tuple[AttachmentRead | SkillActivated | SkillLoaded, ...]:
@@ -83,6 +85,12 @@ class PreparedHostCapabilities:
         if not self._artifact_candidates:
             return ()
         return self._files.drain_artifact_candidates()
+
+    def drain_memory_candidates(self) -> Any:
+        """Drain Run-scoped memory proposals; empty when the policy did not expose them."""
+        if self._memory_candidates is None:
+            return ()
+        return self._memory_candidates.drain()
 
     def record_attachment_accesses(self, attachment_ids: tuple[str, ...]) -> None:
         recorder = getattr(self._files, "record_attachment_accesses", None)

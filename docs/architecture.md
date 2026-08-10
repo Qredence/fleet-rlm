@@ -209,6 +209,17 @@ and cannot self-reference or cycle. Chronological history remains visible, but
 `search_memories` and the automatic digest use the active-memory view, so a new
 record can hide its superseded target without deleting history; forgetting a
 superseder reactivates the old active memory.
+
+Autonomous learning is disabled by default through
+`rlm.autonomous_memory_categories = []`. When the selected policy explicitly
+allows one or more canonical categories, the Root may see `propose_memory`;
+otherwise the Tool and event view are absent. A proposal records only an
+immutable, bounded `agent_candidate` learning plus category and optional
+memory-ID target in host Run state. It performs no Workspace Memory, Volume, or
+database write, recursive children cannot call it, and Tool events project
+category/count/byte metadata rather than learning text. Durable promotion waits
+for the separate successful post-commit settlement seam.
+
 `edit_memory`
 upgrades legacy rows to v3 or replaces v3 while preserving the id and
 timestamp, and `forget` removes exactly one addressed row. `remember`, edit,

@@ -89,6 +89,7 @@ class LivePreparedCapabilities(PreparedHostCapabilities):
         skills: Any,
         preparation_notices: tuple[Any, ...] = (),
         workspace_memory_digest: str = "",
+        memory_candidates: Any = None,
     ) -> None:
         super().__init__(
             spec,
@@ -97,6 +98,7 @@ class LivePreparedCapabilities(PreparedHostCapabilities):
             close_files=True,
             artifact_candidates=True,
             preparation_notices=preparation_notices,
+            memory_candidates=memory_candidates,
         )
         if (
             not isinstance(workspace_memory_digest, str)
@@ -347,6 +349,20 @@ class _LiveCapabilityPreparer:
             max_upload_bytes=self.settings.max_upload_bytes,
         )
         memory_host = WorkspaceMemoryToolHost(memory_store)
+        memory_candidates = None
+        candidate_tools: tuple[Any, ...] = ()
+        candidate_views: dict[str, Any] = {}
+        if self.settings.rlm_autonomous_memory_categories:
+            from fleet_rlm.files.memory_candidate_tools import MemoryCandidateToolHost
+            from fleet_rlm.files.memory_candidates import MemoryCandidateCollector
+
+            memory_candidates = MemoryCandidateCollector(
+                run_id=run.run_id,
+                allowed_categories=self.settings.rlm_autonomous_memory_categories,
+            )
+            candidate_host = MemoryCandidateToolHost(memory_candidates)
+            candidate_tools = candidate_host.as_tools()
+            candidate_views = dict(candidate_host.event_views())
         # Per-Run Workspace Memory injection: relevant matches first, then the
         # newest complete records. Best-effort by contract; search/storage
         # failures degrade to no injection, and search failure degrades to
@@ -369,12 +385,13 @@ class _LiveCapabilityPreparer:
             **workspace_host.event_views(),
             **project_host.event_views(),
             **memory_host.event_views(),
+            **candidate_views,
             **url_host.event_views(),
         }
         spec, skill_host, notices = await prepare_host_capabilities(
             turn=run,
             skill_catalog=self.skill_catalog,
-            base_tools=(*file_tools, *workspace_tools, *project_tools, *memory_tools, *url_tools),
+            base_tools=(*file_tools, *workspace_tools, *project_tools, *memory_tools, *candidate_tools, *url_tools),
             base_event_views=base_views,
             workspace=DAYTONA_WORKSPACE_CAPABILITY,
             workspace_fs=session_workspace,
@@ -386,6 +403,7 @@ class _LiveCapabilityPreparer:
             skills=skill_host,
             preparation_notices=notices,
             workspace_memory_digest=memory_digest,
+            memory_candidates=memory_candidates,
         )
 
 

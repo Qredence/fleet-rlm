@@ -114,6 +114,11 @@ ID mounted at `recursive/<workspace-id>/<run-id>/<call-index>`. That private
 sibling scope cannot reach the Root `workspaces/<workspace-id>` mount. The
 child receives no Fleet Tools or credentials; strict cleanup purges its scope
 and deletes its Sandbox before Root success can commit.
+`rlm.autonomous_memory_categories` is a TOML-only list of canonical Workspace
+Memory category names and defaults to `[]`, which omits `propose_memory` from
+the Root Tool inventory entirely. A non-empty profile allowlist enables a
+Root-only, Run-scoped candidate collector; it does not grant promotion or
+change explicit-user memory behavior.
 
 All committed profiles use `deepseek-v4-flash` for both Root and Sub. The
 interactive `daytona` and `daytona-recursive` profiles route through OpenCode

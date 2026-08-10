@@ -524,6 +524,7 @@ def test_dspy_imports_stay_out_of_deterministic_backend_layers() -> None:
         "files/url_tool.py",
         "files/workspace_tools.py",
         "files/memory_tools.py",
+        "files/memory_candidate_tools.py",
         "files/project_tools.py",
     }
     offenders: list[str] = []

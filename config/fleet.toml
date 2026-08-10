@@ -34,6 +34,8 @@ recursion_max_prompt_chars = 50000
 recursion_child_max_iterations = 8
 recursion_child_max_llm_calls = 12
 recursion_child_max_output_chars = 4000
+# Root-only Memory Candidate category allowlist; empty disables autonomous proposals.
+autonomous_memory_categories = []
 verbose = true
 
 [defaults.storage]
