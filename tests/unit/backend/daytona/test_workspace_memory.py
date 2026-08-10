@@ -822,6 +822,51 @@ def test_relevant_old_memory_is_injected_with_recent_context_under_the_budget(tm
     assert process.calls
 
 
+def test_relevance_injection_search_list_edit_forget_agree_on_valid_records(tmp_path: Path) -> None:
+    """P13 deterministic corpus: old relevant preference plus noise and malformed rows."""
+    from fleet_rlm.daytona.workspace_memory import read_workspace_memory_injection_digest
+    from fleet_rlm.files.memory_models import WORKSPACE_MEMORY_MAX_LIST_LIMIT, workspace_memory_record_id
+    from fleet_rlm.files.memory_tools import WorkspaceMemoryToolHost
+
+    old_ts = "2026-07-19T09:00:00Z"
+    older = "Prefers polars for dataframe joins and concise reports."
+    old_id = workspace_memory_record_id(old_ts, "Preference", older)
+    old_record = f"- [{old_ts}] **Preference** <!-- id:{old_id} -->: {older}\n"
+    records = [old_record]
+    for index in range(48):
+        ts = f"2026-07-26T14:{index // 60:02d}:{index % 60:02d}Z"
+        learning = f"Unrelated deployment and UI note {index:03d}."
+        rid = workspace_memory_record_id(ts, "Ops", learning)
+        records.append(f"- [{ts}] **Ops** <!-- id:{rid} -->: {learning}\n")
+    body = HEADER + "".join(records) + "garbage human edit\n"
+    store, root, _process = _store(tmp_path)
+    _write_store_file(body.encode("utf-8"), root)
+    host = WorkspaceMemoryToolHost(store)
+    tools = {str(tool.name): tool for tool in host.as_tools()}
+
+    search = tools["search_memories"](query="polars dataframe joins", category="Preference", limit=2)
+    assert [entry["id"] for entry in search["entries"]] == [old_id]
+    recent_fallback = store.read_tail(byte_budget=4_096)
+    assert older not in recent_fallback.content
+    inject = read_workspace_memory_injection_digest(store, request="How should the dataframe join be written?")
+    assert old_record in inject
+    assert "garbage human edit" not in inject
+    assert records[-1] in inject
+
+    listed = store.list_entries(limit=WORKSPACE_MEMORY_MAX_LIST_LIMIT)
+    assert len(listed.entries) == len(records)
+    assert listed.warnings == 1
+    edited = tools["edit_memory"](
+        memory_id=old_id, key_learning="Prefers polars for dataframe joins and shorter reports."
+    )
+    assert edited["ok"] is True
+    mutated = read_workspace_memory_injection_digest(store, request="polars dataframe joins")
+    assert "shorter reports." in mutated
+    forgotten = tools["forget"](memory_id=old_id)
+    assert forgotten["removed"] is True
+    assert old_id not in read_workspace_memory_injection_digest(store, request="polars dataframe joins")
+
+
 def test_search_failure_or_no_match_uses_the_recency_only_fallback(tmp_path: Path) -> None:
     from fleet_rlm.daytona.workspace_memory import read_workspace_memory_injection_digest
 
