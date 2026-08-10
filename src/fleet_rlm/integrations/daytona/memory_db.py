@@ -7,16 +7,28 @@ session from :func:`~fleet_rlm.integrations.daytona.sdk_ops.ensure_daytona_volum
 
 from __future__ import annotations
 
+import contextlib
+import fcntl
 import logging
+import os
 import shutil
 import sqlite3
 import tempfile
 import textwrap
+import threading
+from collections.abc import Iterator
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
 MEMORY_SCHEMA_VERSION = 2
+
+# Per-process record of DBs migrated to the current schema, keyed by absolute
+# ``core.db`` path.  The value is a filesystem fingerprint of the DB at the last
+# known-current state, so migration runs once per session instead of on every
+# read and write.  Guarded by ``_MIGRATION_STATE_LOCK`` for thread safety.
+_MIGRATION_STATE_LOCK = threading.Lock()
+_migrated_fingerprints: dict[str, tuple[int, int]] = {}
 
 _MEMORY_TABLE_DDL = """
 CREATE TABLE IF NOT EXISTS memory (
@@ -94,6 +106,72 @@ def apply_memory_migrations(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
+@contextlib.contextmanager
+def memory_db_lock(db_path: str | Path) -> Iterator[None]:
+    """Hold an exclusive advisory lock while touching ``core.db``.
+
+    Uses a ``<db_path>.lock`` sidecar so the lock survives atomic swaps of the
+    DB file itself.  Mirrors the ``flock`` seam in
+    :mod:`fleet_rlm.integrations.daytona.sandbox_executor` so every cross-process
+    memory mutation is serialized.
+    """
+    lock_path = f"{db_path}.lock"
+    fd = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o600)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        yield
+    finally:
+        fcntl.flock(fd, fcntl.LOCK_UN)
+        os.close(fd)
+
+
+def _db_fingerprint(db_path: Path) -> tuple[int, int] | None:
+    try:
+        stat = db_path.stat()
+    except OSError:
+        return None
+    return (stat.st_mtime_ns, stat.st_size)
+
+
+def note_memory_db_written(db_path: str | Path) -> None:
+    """Refresh the session migration fingerprint after an in-place write.
+
+    A write changes the DB mtime, so without this a following read would treat
+    the schema as stale and re-run migration.  The caller must already hold
+    :func:`memory_db_lock`.
+    """
+    fingerprint = _db_fingerprint(Path(db_path))
+    if fingerprint is None:
+        return
+    with _MIGRATION_STATE_LOCK:
+        _migrated_fingerprints[str(db_path)] = fingerprint
+
+
+def _migrate_locked(db_path: Path) -> None:
+    """Migrate ``core.db`` in place, staging via a same-directory temp file.
+
+    The staged copy is swapped in with :func:`os.replace`, an atomic rename on
+    the volume filesystem, so a concurrent reader never sees a half-written
+    file.  The temp file must live in the memories directory (not ``/tmp``) so
+    the rename stays on one filesystem.  The caller must hold
+    :func:`memory_db_lock`.
+    """
+    tmp_fd, tmp_name = tempfile.mkstemp(prefix=".core.db.", suffix=".tmp", dir=str(db_path.parent))
+    os.close(tmp_fd)
+    tmp_db = Path(tmp_name)
+    try:
+        if db_path.exists():
+            shutil.copyfile(db_path, tmp_db)
+        conn = sqlite3.connect(str(tmp_db))
+        try:
+            apply_memory_migrations(conn)
+        finally:
+            conn.close()
+        os.replace(tmp_db, db_path)
+    finally:
+        tmp_db.unlink(missing_ok=True)
+
+
 def init_memory_db(volume_mount_path: str) -> None:
     """Ensure ``memories/core.db`` exists with the canonical schema.
 
@@ -112,21 +190,43 @@ def init_memory_db(volume_mount_path: str) -> None:
 
     db_path = memories_dir / "core.db"
     try:
-        with tempfile.TemporaryDirectory(prefix="fleet-rlm-memory-db-") as tmp_dir_name:
-            tmp_db = Path(tmp_dir_name) / "core.db"
-            if db_path.exists():
-                shutil.copyfile(db_path, tmp_db)
-
-            conn = sqlite3.connect(str(tmp_db))
-            try:
-                apply_memory_migrations(conn)
-            finally:
-                conn.close()
-
-            shutil.copyfile(tmp_db, db_path)
+        with memory_db_lock(db_path):
+            _migrate_locked(db_path)
+        note_memory_db_written(db_path)
         logger.info("memory_db: initialized/migrated core.db at %s", db_path)
     except Exception as exc:
         logger.warning("memory_db: could not initialize core.db at %s: %s", db_path, exc)
+
+
+def ensure_memory_db(volume_mount_path: str) -> Path | None:
+    """Migrate ``core.db`` once per session and return its path.
+
+    Skips the migration when this process already migrated the DB and its
+    fingerprint is unchanged, so ``remember`` and ``recall`` no longer pay the
+    copy-out/migrate/copy-back cost on every call.  Returns ``None`` when the
+    memories directory is absent.
+    """
+    memories_dir = Path(volume_mount_path) / "memories"
+    if not memories_dir.exists():
+        return None
+
+    db_path = memories_dir / "core.db"
+    fingerprint = _db_fingerprint(db_path)
+    with _MIGRATION_STATE_LOCK:
+        cached = _migrated_fingerprints.get(str(db_path))
+    if fingerprint is not None and cached == fingerprint:
+        return db_path
+
+    with memory_db_lock(db_path):
+        _migrate_locked(db_path)
+    note_memory_db_written(db_path)
+    return db_path
+
+
+def reset_memory_db_session_cache() -> None:
+    """Forget which DBs were migrated this session (for tests)."""
+    with _MIGRATION_STATE_LOCK:
+        _migrated_fingerprints.clear()
 
 
 def memory_db_bootstrap_script(mounted_root: str) -> str:
@@ -134,8 +234,11 @@ def memory_db_bootstrap_script(mounted_root: str) -> str:
     return textwrap.dedent(
         f"""
         from pathlib import Path
+        import fcntl
+        import os
         import shutil
         import sqlite3
+        import tempfile
 
         MEMORY_SCHEMA_VERSION = {MEMORY_SCHEMA_VERSION}
         MEMORY_TABLE_DDL = {_MEMORY_TABLE_DDL!r}
@@ -179,19 +282,26 @@ def memory_db_bootstrap_script(mounted_root: str) -> str:
         memories_dir = root / "memories"
         memories_dir.mkdir(parents=True, exist_ok=True)
         db_path = memories_dir / "core.db"
-        tmp_dir = Path("/tmp/fleet-rlm-memory-bootstrap")
-        tmp_dir.mkdir(parents=True, exist_ok=True)
-        tmp_db = tmp_dir / "core.db"
-        if db_path.exists():
-            shutil.copyfile(db_path, tmp_db)
-        elif tmp_db.exists():
-            tmp_db.unlink()
-        conn = sqlite3.connect(str(tmp_db))
+        lock_fd = os.open(str(db_path) + ".lock", os.O_CREAT | os.O_RDWR, 0o600)
         try:
-            apply_migrations(conn)
+            fcntl.flock(lock_fd, fcntl.LOCK_EX)
+            tmp_fd, tmp_name = tempfile.mkstemp(prefix=".core.db.", suffix=".tmp", dir=str(memories_dir))
+            os.close(tmp_fd)
+            tmp_db = Path(tmp_name)
+            try:
+                if db_path.exists():
+                    shutil.copyfile(db_path, tmp_db)
+                conn = sqlite3.connect(str(tmp_db))
+                try:
+                    apply_migrations(conn)
+                finally:
+                    conn.close()
+                os.replace(tmp_db, db_path)
+            finally:
+                tmp_db.unlink(missing_ok=True)
         finally:
-            conn.close()
-        shutil.copyfile(tmp_db, db_path)
+            fcntl.flock(lock_fd, fcntl.LOCK_UN)
+            os.close(lock_fd)
         """
     )
 
@@ -208,6 +318,10 @@ __all__ = [
     "ainit_memory_db",
     "apply_memory_migrations",
     "configure_memory_connection",
+    "ensure_memory_db",
     "init_memory_db",
     "memory_db_bootstrap_script",
+    "memory_db_lock",
+    "note_memory_db_written",
+    "reset_memory_db_session_cache",
 ]
