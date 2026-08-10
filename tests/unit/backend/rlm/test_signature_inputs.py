@@ -111,6 +111,71 @@ def test_manifest_skill_affordances_reach_the_model_unchanged() -> None:
     assert by_name["report-builder"]["affordances"] == ["workspace.files", "artifacts.publish"]
 
 
+def test_model_visible_skill_discovery_snapshot_matches_the_bundled_catalog() -> None:
+    from fleet_rlm.skills.catalog import build_bundled_skill_catalog
+
+    catalog = build_bundled_skill_catalog()
+    payload = build_rlm_input_kwargs(
+        request="Inspect relevant Skills",
+        session_context=SessionContextManifest(SESSION_ID, 0, 0, ()),
+        skill_cards=catalog.cards(),
+    )
+
+    assert payload["skill_cards"] == [
+        {
+            "id": "f4d260fa-a663-5ef9-835f-eac46c10c1bf",
+            "name": "data-analysis",
+            "description": "Compute and verify descriptive statistics, trends, and qualified anomalies.",
+            "scope": "system",
+            "version": "1.0.0",
+            "trust": "system",
+            "affordances": ["artifacts.publish", "llm_query_batched"],
+            "resources_available": False,
+        },
+        {
+            "id": "83f7de82-1fea-5bc0-90e0-795631f3d5d0",
+            "name": "dspy-rlm",
+            "description": "Use when analyzing, explaining, or implementing dspy.RLM "
+            "(Recursive Language Model / REPL code agent). Not for RAG or dspy.Retrieve.",
+            "scope": "system",
+            "version": "1.0.0",
+            "trust": "system",
+            "affordances": ["interpreter", "llm_query"],
+            "resources_available": True,
+        },
+        {
+            "id": "015a133e-7b90-50c7-bb61-4b2772f57c1c",
+            "name": "long-context",
+            "description": "Use bounded retrieval to analyze large documents, transcripts, code, or datasets.",
+            "scope": "system",
+            "version": "2.0.0",
+            "trust": "system",
+            "affordances": ["fetch_url", "llm_query_batched", "workspace.files"],
+            "resources_available": True,
+        },
+        {
+            "id": "90bd89fb-66c8-558d-acdb-55c59ba7106c",
+            "name": "report-builder",
+            "description": "Create, save, read back, and verify reports from trusted source data.",
+            "scope": "system",
+            "version": "1.1.0",
+            "trust": "system",
+            "affordances": ["workspace.files", "artifacts.publish"],
+            "resources_available": False,
+        },
+        {
+            "id": "94eedfa7-4b0c-5316-96af-5e3924e128e7",
+            "name": "workspace-files",
+            "description": "Use durable Session Workspace, Project, Attachment, and Artifact tools correctly.",
+            "scope": "system",
+            "version": "1.1.0",
+            "trust": "system",
+            "affordances": ["workspace.files", "artifacts.publish"],
+            "resources_available": True,
+        },
+    ]
+
+
 def test_custom_skill_payload_matches_dspy_rlm_declared_inputs() -> None:
     from fleet_rlm.skills.signatures import DataAnalysisSignature
 

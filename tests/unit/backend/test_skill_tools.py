@@ -255,6 +255,28 @@ async def test_prepare_host_capabilities_installs_preloaded_skill_resources() ->
     assert "skills/long-context/references/chunking-strategies.md" in workspace.written
 
 
+def test_tool_event_view_projections_keep_skill_and_resource_bodies_private() -> None:
+    catalog = build_bundled_skill_catalog()
+    skill = catalog.require(stable_skill_id("long-context"))
+    host = SkillToolHost(catalog)
+    loaded = host.load_skill(str(skill.card.id), skill.card.version)
+    resource_path = next(iter(skill.resources))
+    resource = host.read_skill_resource(str(skill.card.id), resource_path, skill.card.version)
+    views = host.event_views()
+
+    load_projection = views["load_skill"].output_projection(loaded)
+    resource_projection = views["read_skill_resource"].output_projection(resource)
+
+    assert set(load_projection) == {"ok", "skill_id", "name", "version"}
+    assert set(resource_projection) == {"ok", "skill_id", "path", "encoding", "media_type", "byte_size"}
+    assert "skill_markdown" not in repr(load_projection)
+    assert "installed_paths" not in repr(load_projection)
+    assert "resources" not in repr(load_projection)
+    assert "content" not in repr(resource_projection)
+    assert skill.instructions not in repr(load_projection)
+    assert resource["content"] not in repr(resource_projection)
+
+
 def test_lock_is_never_held_across_brokered_workspace_writes() -> None:
     """RC-7 three-way shape: drains proceed while a tool call parks in I/O.
 

@@ -271,6 +271,9 @@ async def test_data_analysis_signature_and_report_builder_selection_use_host_too
         max_artifact_bytes=1024,
     ).prepare(turn, environment, PreparedAttachments((attachment,), (staged,)), deadline=float("inf"))
 
+    assert prepared.spec.skill_cards == (data_analysis.card, report_builder.card)
+    tools_by_name = {str(tool.name): tool for tool in prepared.spec.tools}
+    assert tools_by_name["load_skill"](skill_id=str(stable_skill_id("long-context")))["error"] == "skill_not_found"
     assert prepared.spec.output_schema_id == "skill.data-analysis"
     assert prepared.spec.output_schema_version == "1.0.0"
     assert prepared.spec.signature.output_fields["answer"].annotation is str
