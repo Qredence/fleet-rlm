@@ -31,8 +31,9 @@ def resolve_selected_skills(
             signatures.append(skill.signature)
     if len(signatures) > 1:
         raise InvalidSkillSelectionError()
+    authorized_cards = tuple(skill.card for skill in selected)
     return ResolvedSkills(
-        cards=catalog.cards(),
+        cards=catalog.cards() if not values else authorized_cards,
         selected=tuple(selected),
         instructions=tuple(skill.instructions for skill in selected),
         signature=signatures[0] if signatures else None,

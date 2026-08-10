@@ -27,6 +27,20 @@ def test_resolver_accepts_exact_ordered_selection() -> None:
     assert resolved.instructions == tuple(skill.instructions for skill in resolved.selected)
 
 
+def test_explicit_selection_advertises_only_the_authorized_selected_cards() -> None:
+    catalog = build_bundled_skill_catalog()
+    selected = tuple(card for card in catalog.cards() if card.name in {"data-analysis", "long-context"})
+    assert len(selected) == 2
+
+    resolved = resolve_selected_skills(
+        catalog,
+        tuple(SkillSelectionRef(card.id, card.version) for card in selected),
+    )
+
+    assert resolved.cards == selected
+    assert {card.name for card in resolved.cards} == {"data-analysis", "long-context"}
+
+
 def test_resolver_rejects_unknown_duplicate_overflow_and_version_mismatch() -> None:
     catalog = build_bundled_skill_catalog()
     card = catalog.cards()[0]

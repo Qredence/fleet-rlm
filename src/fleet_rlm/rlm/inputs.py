@@ -210,7 +210,7 @@ def build_rlm_input_kwargs(
                 scope="system",
                 version=card.version,
                 trust="system",
-                affordances=(),
+                affordances=tuple(card.affordances),
                 resources_available=card.resources_available,
             )
             for card in skill_cards

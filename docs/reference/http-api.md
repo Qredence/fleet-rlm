@@ -34,8 +34,10 @@ Turn creation requires an `Idempotency-Key` header. Its JSON body accepts
 `text`, `attachment_ids`, and up to four unique `skill_selections` entries,
 each containing an exact Skill `id` and `expected_version`. Explicit selections
 are authoritative for that Turn and are included in its idempotency
-fingerprint. Omitting `skill_selections` still supplies the bounded catalog
-Cards and permits the RLM to load up to four advertised Skills progressively.
+fingerprint. Omitting `skill_selections` supplies the full bounded catalog
+Cards and permits the RLM to load up to four advertised Skills progressively;
+exact selections advertise only the authorized selected Cards and enforce the
+same IDs/versions during progressive `load_skill` calls.
 Providing selections preloads those exact versions and restricts loading to
 that set. Structurally malformed selections still fail pre-stream with a 422
 `invalid_skill_selection` JSON response. Catalog-rejected selections (missing,

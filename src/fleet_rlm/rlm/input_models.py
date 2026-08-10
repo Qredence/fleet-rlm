@@ -58,7 +58,7 @@ class SkillCardInput(FleetInputModel):
     scope: Literal["system"]
     version: str = Field(min_length=1, max_length=64)
     trust: Literal["system"]
-    affordances: tuple[str, ...] = Field(max_length=16)
+    affordances: tuple[str, ...] = Field(max_length=8)
     resources_available: bool
 
 

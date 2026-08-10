@@ -93,6 +93,24 @@ def test_default_input_payload_contains_only_bounded_metadata() -> None:
     }
 
 
+def test_manifest_skill_affordances_reach_the_model_unchanged() -> None:
+    from fleet_rlm.skills.catalog import build_bundled_skill_catalog
+
+    catalog = build_bundled_skill_catalog()
+    payload = build_rlm_input_kwargs(
+        request="Inspect relevant Skills",
+        session_context=SessionContextManifest(SESSION_ID, 0, 0, ()),
+        skill_cards=catalog.cards(),
+    )
+
+    by_name = {card["name"]: card for card in payload["skill_cards"]}  # type: ignore[attr-defined]
+    assert by_name["dspy-rlm"]["affordances"] == ["interpreter", "llm_query"]
+    assert by_name["long-context"]["affordances"] == ["fetch_url", "llm_query_batched", "workspace.files"]
+    assert by_name["workspace-files"]["affordances"] == ["workspace.files", "artifacts.publish"]
+    assert by_name["data-analysis"]["affordances"] == ["artifacts.publish", "llm_query_batched"]
+    assert by_name["report-builder"]["affordances"] == ["workspace.files", "artifacts.publish"]
+
+
 def test_custom_skill_payload_matches_dspy_rlm_declared_inputs() -> None:
     from fleet_rlm.skills.signatures import DataAnalysisSignature
 

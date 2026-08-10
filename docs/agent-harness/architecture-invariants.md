@@ -89,7 +89,9 @@ routes or public events.
 ## Skills and host tools
 
 - Bundled Skills are versioned instruction/resource packages with progressive
-  loading. They never register host executables.
+  loading. Unrestricted Turns discover the full catalog; exact pinned Turns
+  discover only their authorized selected set. They never register host
+  executables.
 - Runtime composition owns the explicit `dspy.Tool` objects for each Turn.
 - HTTP may select up to four exact Skills but may not provide Python, callables,
   serialized Tools, or Signatures.

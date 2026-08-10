@@ -168,7 +168,8 @@ async def test_private_progressive_tools_preload_exact_selection_and_keep_events
     ).prepare(turn, environment, PreparedAttachments((), ()), deadline=float("inf"))
 
     tools = {str(tool.name): tool for tool in prepared.spec.tools}
-    assert len(prepared.spec.skill_cards) == 5
+    assert prepared.spec.skill_cards == (selected.card,)
+    assert other.card not in prepared.spec.skill_cards
     assert {"load_skill", "read_skill_resource"} <= tools.keys()
     assert tools["load_skill"](skill_id=str(other.card.id))["error"] == "skill_not_found"
     loaded = tools["load_skill"](skill_id=str(selected.card.id), expected_version=selected.card.version)
