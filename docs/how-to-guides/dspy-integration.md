@@ -2,20 +2,21 @@
 
 Fleet executes every primary Turn through a fresh native `dspy.RLM`. The Root
 Model generates iterative Python, while the Sub Model answers `llm_query()` and
-ordered `llm_query_batched()` calls. Only the `daytona-recursive` policy also
-lets the Root call `rlm_query(prompt=prompt)` for one bounded subproblem through
-a fresh child `dspy.RLM`. Both model roles are host-configured; API clients cannot
-provide models, Signatures, or executable capabilities.
+ordered `llm_query_batched()` calls. The `daytona-recursive` policy also lets
+Root call `rlm_query(prompt=prompt)` or the Root-only ordered
+`rlm_query_batched(prompts=prompts)` for isolated iterative subproblems through
+fresh child `dspy.RLM` runtimes. Both model roles are host-configured; API
+clients cannot provide models, Signatures, or executable capabilities.
 
 ## Execution contract
 
 - One Run owns one Code-Interpreter Context. Variables, imports, and functions
   persist across RLM iterations in that Run only.
-- `rlm_query(prompt=prompt)` is the only recursive primitive and is absent from the
-  normal `daytona` policy. Under `daytona-recursive`, Root code keeps large
-  input-specific data in REPL variables and passes only the smallest sufficient
-  slice to a child; the parent retains authority over public output and final
-  `SUBMIT`.
+- `rlm_query(prompt=prompt)` and Root-only `rlm_query_batched(prompts=prompts)`
+  are the recursive primitives and are absent from the normal `daytona` policy.
+  Under `daytona-recursive`, Root code keeps large input-specific data in REPL
+  variables and passes only the smallest sufficient slice to a child; the
+  parent retains authority over public output and final `SUBMIT`.
 - A real child uses a dedicated, disposable Daytona Sandbox with ordinary
   Daytona network policy. It mounts the same Volume ID only at the private
   sibling scope `recursive/<workspace-id>/<run-id>/<call-index>`, never at the
@@ -49,7 +50,7 @@ provide models, Signatures, or executable capabilities.
   formatted UTF-8, only when the user explicitly requests memory. Repeating
   the same record is idempotent. A completed append is immediately durable
   outside Turn Commit, so it survives failed or cancelled Turns and Sandbox
-  replacement. v1 rows derive a deterministic id when listed and upgrade to v2
+  replacement. v1 rows derive a deterministic id when listed and upgrade to v3
   on edit; duplicate ids fail closed. `edit_memory` preserves an entry's id and
   timestamp, `forget` removes exactly one entry, and both execute one mounted
   agent read-modify-fsync-publish operation. The explicit-request rule is Tool
@@ -132,11 +133,17 @@ subcalls are not token-streamed to operators.
 ## Recursive harness limits
 
 `[defaults.rlm] recursion_enabled = false`, so normal `daytona` exposes no
-recursive Tool or instruction. `[profiles.daytona-recursive.rlm]` enables the
-native child path with two levels, four child calls per Turn, a 50,000-character
-delegated prompt bound, eight child iterations, twelve child LM calls, and
-4,000 child output characters. At depth two, DSPy uses one bounded plain Sub
-Model query instead of creating a grandchild Sandbox.
+recursive Tool or instruction. `[profiles.daytona-recursive.rlm]` enables one
+native child level with four reserved child calls per Turn, a 50,000-character
+delegated prompt bound, eight child iterations, twelve child LM calls, 4,000
+child output characters, and at most two child workers concurrently. A child
+request beyond `RLM_NATIVE_CHILD_DEPTH = 1` uses one bounded plain Sub Model
+query instead of creating a grandchild Sandbox.
+
+`rlm_query_batched` validates and reserves every prompt before starting work,
+preserves input ordering, and uses all-or-nothing failure semantics. Fleet may
+run independent siblings concurrently up to `recursion_max_parallel_children`;
+the model chooses the decomposition, while Fleet controls concurrency.
 
 Child prompts, answers, reasoning, generated code, and provider responses are
 never copied into public Runtime Events. Root traces retain the normal bounded
@@ -157,19 +164,23 @@ inheritance is acceptable for prompt-only judgments because the Root's own
 generated code already executes in the same Sandbox.
 
 The opt-in isolation lane is the dedicated child Sandbox exposed as `rlm_query`
-only when `[defaults.rlm] recursion_enabled = true` (the
-`[profiles.daytona-recursive]` profile). Each delegation provisions its own
-ephemeral Sandbox running a full native RLM, mounted at the sibling Volume
-scope `recursive/<workspace>/<run>/<call-index>` with no Fleet capabilities,
-credentials, history, or broker state; strict child cleanup gates Root success.
+and Root-only `rlm_query_batched` when `[defaults.rlm] recursion_enabled = true`
+(the `[profiles.daytona-recursive]` profile). Each logical delegation provisions
+its own ephemeral Sandbox running a full native RLM, mounted at the sibling
+Volume scope `recursive/<workspace>/<run>/<call-index>` with no Fleet
+capabilities, credentials, history, or broker state; strict child cleanup gates
+Root success. Child Root/Sub DSPy runtimes are copied per sibling to isolate
+mutable model histories and callback bookkeeping.
 Cross-sandbox child runtimes are a Fleet feature, not something DSPy 3.3
 provides, so their cost is sandbox provisioning, broker/interpreter startup,
 and the child's own iteration budget — see `scripts/benchmark_daytona_lifecycle.py`
 for measured spin-up numbers.
 
 Choose the sub-LM lane for prompt-only extraction, counting, classification,
-and judgment. Reserve the child lane for sub-problems that need iterative,
-code-executing, file-touching lifecycles in isolation.
+and judgment. Use native batching for independent semantic judgments. Reserve
+the child lane for sub-problems that need iterative, code-executing, file-touching
+lifecycles in isolation, and use recursive batching only when every independent
+subproblem individually justifies a child RLM.
 
 ## Typed startup inputs
 
@@ -299,7 +310,9 @@ cost rather than inspecting private model reasoning. The curated classes are:
 3. `semantic_batched` for independent `llm_query_batched` judgments.
 4. `recursive_child` for a selected self-contained subproblem that truly needs
    iterative Python exploration.
-5. `recursive_depth_fallback` for a child attempting one more delegation beyond
+5. `recursive_batch` for independent subproblems where each needs iterative
+   Python exploration in its own child Sandbox.
+6. `recursive_depth_fallback` for a child attempting one more delegation beyond
    `RLM_NATIVE_CHILD_DEPTH`; the bounded plain Sub LM answers it and no second
    child Sandbox is allocated.
 

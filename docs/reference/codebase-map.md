@@ -10,8 +10,8 @@ compatibility runtime and parallel foundation package no longer exist.
 | `app.py`, `main.py` | FastAPI factory, handlers/routers, static Skill catalog, lifespan selection, ASGI entrypoint | composition, API routers, Skill catalog |
 | `composition/` | common inventory plus explicit Daytona and private testing wiring | domain modules and adapters |
 | `api/` | HTTP translation, local scope, dependency aliases, OpenAPI/SSE projection, UIMessage reload | domain interfaces and composed modules |
-| `chat/` | Turn preparation, shared capability preparation, coordinator facade, private Turn execution driver, lifecycle finalization, shared Turn Claim policy | RLM, Sessions, Skills, files |
-| `rlm/` | DSPy Signature, model roles, fresh RLM construction, options, events, runner | DSPy and domain values |
+| `chat/` | Turn preparation, shared capability preparation, coordinator facade, private Turn execution driver, lifecycle finalization, owned post-commit Memory promotion, shared Turn Claim policy | RLM, Sessions, Skills, files |
+| `rlm/` | DSPy Signature, Root/Sub model roles, fresh RLM construction, delegation metrics, routing evaluation, fixed-depth child executor, options, events, runner | DSPy and domain values |
 | `daytona/` | exclusive SDK boundary: async platform/provisioning, provider-only Session ownership, DSPy-only sync interpreter seam, pure broker source plus transport, diagnostics, Session Workspace gateways, and the mounted Workspace Memory adapter | Daytona SDK and domain values |
 | `sessions/` | Session catalog, Turn input/history, canonical AssistantPart vocabulary, versioned Committed Turn | domain values |
 | `files/`, `artifacts/` | Attachment staging, paged/full-lifecycle Session Workspace and Project tools, workspace-wide Memory values/tools, direct Workspace Artifact Candidate staging, Artifact promotion/read | storage interfaces and safe paths |
@@ -55,9 +55,9 @@ compatibility runtime and parallel foundation package no longer exist.
   purpose-labelled ephemeral I/O Sandbox and exposes only its `files/` root.
 - During Daytona Turn execution, Workspace Memory uses the fixed
   `memory/MEMORIES.md` under the already workspace-scoped mount (legacy root
-  `MEMORIES.md` migrates on first open). v2 ids are fresh and persist; v1 ids
+  `MEMORIES.md` migrates on first open). v3 ids are fresh and persist; v1 ids
   are synthesized from canonical text plus valid-record occurrence for paging
-  and upgrade to v2 on edit. Duplicate persisted ids fail closed, and
+  and upgrade to v3 on edit. Duplicate persisted ids fail closed, and
   edit/forget run their read-modify-publish rewrite in one mounted agent
   operation. It is distinct from
   Session Workspace under `sessions/{session_id}/workspace/` and Run state under

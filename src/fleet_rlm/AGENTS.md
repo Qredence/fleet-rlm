@@ -25,6 +25,10 @@ contracts, and tracked docs remain authoritative.
   `await rlm.acall(interpreter, **named_inputs)` surface; deterministic testing
   doubles remain keyword-only. Fleet owns shutdown for caller-provided
   interpreters.
+- `RecursiveRLMExecutor` owns bounded child delegation. Root receives
+  `rlm_query` and ordered `rlm_query_batched`; a child receives only `rlm_query`
+  plus native semantic sub-LM tools. The shared call budget is reserved under a
+  lock, child LM runtimes are copied, and each child owns a fresh Sandbox lease.
 - Every Signature receives request text, bounded `session_context`, bounded
   `skill_cards`, and bounded Attachment metadata. Older committed messages
   remain behind the Session-scoped `read_session_history` Tool.
@@ -47,7 +51,7 @@ contracts, and tracked docs remain authoritative.
   mounted Workspace agent operation using target locks plus inode revalidation;
   no separate host read introduces a cross-Sandbox TOCTOU window. Workspace Memory is
   the `memory/MEMORIES.md` log (migrated from the legacy root `MEMORIES.md`),
-  not Session History. Listed rows always have one addressable id: v2 stores a
+  not Session History. Listed rows always have one addressable id: v3 stores a
   fresh id and v1 derives one from canonical text plus occurrence; duplicate ids fail closed, while an
   edit upgrades legacy rows to v3 preserving that id and timestamp. `remember` is
   idempotent for the same record, and edit/forget perform one mounted-agent
@@ -84,6 +88,9 @@ contracts, and tracked docs remain authoritative.
   pure policy, while successful commit and cancellation remain separate. Internal
   persistence mapping, claim/liveness, final-state, and query helpers stay behind
   the same facade; only facades own locks, AsyncSessions, and transactions.
+- `OwnedPostCommitMemoryPromotion` keeps a started promotion task owned until it
+  settles before Run resources release; its wait has a bounded post-commit
+  deadline, but it never detaches work that still needs the Run lease.
 - `CommittedTurn` is the only replay source. Durable assistant content is
   validated through the closed Pydantic `AssistantPart` discriminated union in
   `sessions/assistant_parts.py`; keep that durable vocabulary separate from

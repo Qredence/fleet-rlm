@@ -39,9 +39,11 @@ make api-sync              # OpenAPI + generated TUI types (openapi_tools.py)
   quality-loop scripts and GEPA execution retain their explicit
   `FLEET_LIVE=1` gate until that lane is migrated as its own phase.
 - Never hardcode or log credentials; read from env after dotenv load.
-- `scripts/benchmarks/` owns benchmark and Databricks quality-loop helpers
-  (including the shared Fleet judge definitions); `scripts/optimize/` remains
-  the trusted-host signature-optimization lane.
+- `scripts/benchmarks/` owns routing/lifecycle benchmarks and Databricks
+  quality-loop helpers (including shared Fleet judge definitions);
+  `run_routing_eval.py` measures the Python → Sub-LM → child-RLM delegation
+  ladder from public evidence. `scripts/optimize/` remains the trusted-host
+  signature-optimization lane.
 
 ## Quality-Gate Scripts
 

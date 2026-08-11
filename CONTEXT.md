@@ -145,6 +145,26 @@ The Run-scoped ownership handle for a Daytona interpreter/Sandbox binding. It is
 held through finalization and released during coordinator cleanup.
 _Avoid_: Session-owned Sandbox, reusable global interpreter
 
+**Delegation Ladder**:
+The Root chooses the cheapest sufficient mechanism: Python for deterministic
+work, native `llm_query`/`llm_query_batched` for bounded semantic work, and
+`rlm_query`/`rlm_query_batched` for isolated iterative subproblems. The Root
+remains responsible for verification, synthesis, and `SUBMIT`.
+_Avoid_: automatic delegation, hidden agent swarm
+
+**Recursive Child**:
+A one-level native RLM specialist with a fresh Daytona Sandbox, child-scoped
+Volume path, copied Root/Sub DSPy runtimes, and its own cleanup. Children do
+not receive Fleet Tools, credentials, history, or recursive batch capability.
+_Avoid_: Child Session, shared interpreter, grandchild
+
+**Recursive Batch**:
+A Root-only ordered collection of independent Recursive Children. Fleet reserves
+the shared recursive budget atomically, bounds sibling concurrency by policy,
+and uses all-or-nothing settlement; child results are evidence for Root
+synthesis, not final authority.
+_Avoid_: recursive swarm, unordered partial result
+
 ## Reserved, not current product behavior
 
 The following terms describe possible future work and must not be presented as

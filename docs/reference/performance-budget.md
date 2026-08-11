@@ -4,9 +4,19 @@ Candidate: `9b1067ca` on `dev-0.7`, measured 2026-08-09/10 with
 `fleet-rlm-python313-v5`, DSPy 3.3.0, and Daytona 0.202.0. The receipts below
 are local ignored evidence; this page records the decision and bounded numbers.
 
-**Decision: KEEP CURRENT DESIGN.** Do not add a global Sandbox pool, shared
-recursive interpreter, recursive multi-child Sandbox, or speculative workspace
-lease layer.
+**Decision: KEEP ISOLATED CHILD DESIGN.** Bounded sibling fan-out is now
+supported without adding a global Sandbox pool, shared recursive interpreter,
+or speculative workspace lease layer. Each logical child still owns its own
+Sandbox, interpreter, LM runtimes, admission permit, and cleanup.
+
+## Current bounded fan-out policy
+
+`recursion_max_parallel_children = 2` is the shipped concurrency cap. The Root
+selects `rlm_query_batched`; Fleet atomically reserves the shared recursive call
+budget, preserves input ordering, and settles the batch all-or-nothing. The
+existing single-child lifecycle measurements remain the per-child cost basis;
+the routing benchmark records observed peak sibling concurrency and latency for
+batch workloads.
 
 ## Measurements
 
@@ -128,4 +138,3 @@ must not provision an ephemeral Daytona sandbox when the Workspace has no
 committed artifacts, completed Runs, or active Runs. That sweep is skipped in
 that empty case because it cannot improve correctness and can race the first
 live Volume acquisition.
-

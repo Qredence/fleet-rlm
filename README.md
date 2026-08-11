@@ -88,6 +88,11 @@ selections before opening SSE. `TurnCoordinator` begins and prepares execution,
 result snapshot handling, Artifact publication, and atomic Turn Commit. The
 coordinator then projects the terminal suffix and cleans up Run resources.
 
+The Root uses Python, native Sub-LM queries, or isolated child RLMs according to
+the cheapest-sufficient delegation ladder. Recursive children remain one native
+level deep; Root-only `rlm_query_batched` provides ordered, bounded sibling
+fan-out, and Root verifies and synthesizes their evidence before `SUBMIT`.
+
 Daytona Turns acquire a fresh Interpreter Lease and use Workspace Volume Scope.
 Each Turn receives a bounded newest-record digest of Workspace Memory in its
 `session_context`; the full `memory/MEMORIES.md` log remains behind the

@@ -133,6 +133,21 @@ Run (e.g. bounded `llm_query`-style calls), distinct from the Root Model role
 even when both use the same provider configuration.
 _Avoid_: Root Model, helper model (vague), utility model (optional third role)
 
+**Delegation Metrics**:
+Run-scoped, content-free measurements of Root/Sub LM calls by role and depth,
+token totals, latency, recursive calls, child settlement, depth fallback, and
+peak sibling concurrency. They are internal observability, benchmark, and trace
+data rather than public Turn schema.
+_Avoid_: billing record, hidden prompt capture, public answer quality
+
+**Recursive Child / Recursive Batch**:
+The Root may call `rlm_query` for one isolated iterative specialist or
+`rlm_query_batched` for ordered independent specialists. A batch is Root-only,
+reserves the shared call budget atomically, bounds concurrency, and settles
+all-or-nothing. Each child has a fresh Sandbox and copied DSPy LM runtimes; a
+child may use native semantic queries but cannot create another child batch.
+_Avoid_: Child Session, recursive swarm, shared LM history
+
 **Code-Interpreter Context**:
 Python REPL state for one Run inside a Sandbox. Fleet RLM backend uses **per-Run**
 Context only: it does not survive across Runs. Continuity between Runs is
@@ -161,8 +176,8 @@ _Avoid_: tenant Workspace alone, whole shared Volume root, Sandbox Workspace
 **Workspace Memory**:
 Daytona-only workspace-wide immediate state at `memory/MEMORIES.md` under the
 already workspace-scoped Volume mount (legacy root `MEMORIES.md` migrates on
-first open; content is never lost). Records are canonical v1/v2 lines; new
-appends are v2 (`- [ts] **Category** <!-- id:8hex -->: learning`) with fresh
+first open; content is never lost). Records are canonical v1/v3 lines; new
+appends are v3 (`- [ts] **Category** <!-- id:8hex -->: learning`) with fresh
 ids. v1 rows derive a deterministic id from canonical text plus valid-record
 occurrence when read, so duplicate legacy rows remain separately addressable;
 duplicate persisted ids fail closed rather than selecting an arbitrary row.
@@ -305,6 +320,12 @@ separate `workspace_volume*` module exists.
 | `daytona/workspace_memory.py` | Workspace Memory store implementation over one mounted agent round trip | `daytona/run_environment.py` |
 | `daytona/workspace_agent.py` | Emitted stdlib-only Sandbox workspace agent code plus host run/decode adapters | `daytona/workspace_fs.py`, `daytona/workspace_memory.py` |
 
+### `rlm/` package one-liner
+
+`rlm/` owns the DSPy contract, Root/Sub model roles, delegation metrics,
+routing evaluation, and fixed-depth recursive child executor. Root-only batch
+delegation uses ordered, bounded sibling execution.
+
 ### `daytona/` package one-liners
 
 - `__init__.py` — ownership package: curated re-exports of the Daytona adapter surface.
@@ -332,7 +353,7 @@ These shared or live terms are **not** clean product claims until promoted:
 
 - **Automatic or unbounded Memory** beyond the fixed Daytona Workspace Memory
   Tool contract
-- **Child Session** / host delegation fan-out
+- **Child Session**
 - **Execution Mode** client switch (`simple` vs `rlm`)
 - **Managed Target**, GEPA selection, and promotion artifacts
 - Warm multi-run **Code-Interpreter Context** (clean is per-Run only)

@@ -50,7 +50,7 @@ treat this file as a deploy, push, or merge instruction.
 - [x] Live replay: report lane writes `projects/<slug>/...` + volume tree browse
 
 ## PR-F — feat(memory): lifecycle + per-turn injection (tenant deferred) — `codex/memory-lifecycle`  ✅ done (live: remember/list/edit/forget/ injected recall 0-tool) + FIX-1..4 review fixes + backend-compat append overhaul
-- [x] `files/memory_models.py`: v2 ids `<!-- id:8hex -->`, v1-compatible; tolerant reads (skip malformed lines + warning)
+- [x] `files/memory_models.py`: v3 ids `<!-- id:8hex -->`, v1-compatible; tolerant reads (skip malformed lines + warning)
 - [x] Port + `daytona/workspace_memory.py`: `list_entries`, `delete_entry`, `edit_entry` (one atomic round trip)
 - [x] `files/memory_tools.py`: `remember` (alias kept), `list_memories`, `edit_memory`, `forget`
 - [x] Move store to `memory/MEMORIES.md` with legacy migration on open

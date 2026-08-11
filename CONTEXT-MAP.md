@@ -7,8 +7,8 @@
   Volume language.
 - [Backend runtime](./src/fleet_rlm/CONTEXT.md) — the canonical RLM-native
   FastAPI backend: Turns, Runs, Interpreter Leases, Skill Cards, progressive
-  loading, staged Attachments, Workspace Memory, Artifact Candidates, and Turn
-  Commit.
+  loading, staged Attachments, Workspace Memory, Root/Sub delegation, bounded
+  recursive child batches, Artifact Candidates, and Turn Commit.
 
 ## Relationships
 

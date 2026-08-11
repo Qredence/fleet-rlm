@@ -44,6 +44,14 @@ REPL, tool, optional recursion, verification, and bounded-context guidance are
 composed directly; disabling recursion no longer deletes text from one large
 monolithic Signature docstring.
 
+The Root follows a bounded delegation ladder: Python for deterministic work,
+native `llm_query`/`llm_query_batched` for semantic work, `rlm_query` for one
+iterative isolated subproblem, and Root-only `rlm_query_batched` for ordered
+independent child RLMs. Recursive children remain one native level deep, receive
+copied DSPy Root/Sub runtimes, and return evidence for Root verification and
+synthesis. Fleet reserves the shared recursive budget atomically and controls
+sibling concurrency through `recursion_max_parallel_children`.
+
 ## Composition and ownership
 
 - `app.create_app()` creates the FastAPI application, installs handlers and
@@ -75,7 +83,9 @@ monolithic Signature docstring.
   emits a final non-delta correction; trajectory reconciliation and durable
   Turn normalization retain one canonical output part.
 - `RunLifecycle.finish()` owns private result snapshots, Artifact publication,
-  atomic Turn Commit, and durable failure settlement.
+  atomic Turn Commit, durable failure settlement, and the bounded handoff to
+  owned post-commit Memory promotion. Promotion is settled before the Run lease
+  and mounted resources release.
 - `sessions/assistant_parts.py` owns the closed Pydantic AssistantPart
   vocabulary for durable assistant content. `CommittedTurnCodec` validates
   payloads through that discriminated union, while reload projection consumes

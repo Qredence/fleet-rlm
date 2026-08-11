@@ -122,7 +122,7 @@ Run `make check-docs` when docs, commands, Codex config, generated contracts, or
 - Daytona SDK imports are confined to `fleet_rlm.daytona`. Durable Attachments and Artifacts use Workspace Volume Scope;
   Session Workspace + `projects/` add `delete/edit` workspace tools (`delete_workspace_path`, `edit_workspace_text`,
   `delete_project_path`, `edit_project_text`): files + EMPTY dirs only, optional `expected_sha256` (WS-7 ended the
-  no-delete invariant). Workspace Memory is `memory/MEMORIES.md`: fresh v2 ids persist, v1 ids include a canonical-row
+  no-delete invariant). Workspace Memory is `memory/MEMORIES.md`: fresh v3 ids persist, v1 ids include a canonical-row
   occurrence, duplicates fail closed; same-record `remember` idempotent; edit/forget one operation; each Turn gets a 4 KiB digest; the read projection never lowers the configured cap.
   Long operator reports should write Session Workspace then `SUBMIT` a short summary; oversized `SUBMIT` fails with public Turn output budget errors.
   Volume backends that reject atomic `os.replace` use a non-atomic overwrite fallback (keep new content if only file `fsync` fails).
@@ -143,8 +143,8 @@ Run `make check-docs` when docs, commands, Codex config, generated contracts, or
   HTTP types; a future graphical client is separate work.
 - Under pinned DSPy 3.3.0, every `dspy.LM` model must resolve a provider; model
   roles/defaults come from the selected TOML profile, and bare compatible-base
-  IDs use `normalize_model_id`. Prefer stock LMs with stateless overrides.
-  Fleet retains `max_iterations` and maps it to DSPy's `max_iters`; native RLMs
-  use a fail-closed `interpreter_factory`, take the caller-owned interpreter
-  positionally, and are shut down by Fleet or the child lease. Keep DSPy private
-  protocol knowledge in `rlm.dspy_contract` and `rlm.dspy_interpreter_contract`.
+  IDs use `normalize_model_id`. Prefer stock LMs with stateless overrides; Fleet
+  maps `max_iterations` to DSPy's `max_iters`. Root may use native
+  `llm_query`/`llm_query_batched`, while Root-only `rlm_query_batched` reserves
+  ordered, isolated child RLMs under a fixed native depth of one.
+- Native RLMs use a fail-closed interpreter factory and caller-owned positional interpreters; Fleet or child leases own shutdown.

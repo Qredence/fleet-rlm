@@ -10,7 +10,8 @@ by whether it makes one of the following substantially better; if it does not,
 question it:
 
 - the conversational RLM agent — one fresh `dspy.RLM` per Turn; DSPy primitives
-  support that agent, they are not peer execution modes
+  support that agent, while bounded child RLM siblings provide controlled width
+  at a fixed native depth
 - Session continuity — a Session is a context boundary: new Sessions start
   cold, continuity exists only inside one Session; cross-session persistence
   happens through workspace-scope state (Attachments, Artifacts, and Workspace
@@ -42,7 +43,8 @@ exist.
   command/state policy is shared by in-memory and SQL adapters; successful
   commit and cancellation requests remain separate.
 - `rlm/` owns model roles, Signature inputs, fresh native RLM construction,
-  options, Runtime Events, cancellation, and execution.
+  options, Runtime Events, delegation metrics, routing evaluation, cancellation,
+  and fixed-depth child execution.
 - `daytona/` is the exclusive SDK boundary and owns provider-error normalization.
   `DaytonaRuntimeResources` remains provider-only; composition injects database,
   binding, model, preparation, limits, and cleanup ports.
@@ -77,6 +79,16 @@ exist.
   tombstone pair in committed history.
 - Hold an Interpreter Lease through finalization; release it during coordinator
   cleanup even after cancellation or repeated caller cancellation.
+- Root-only `rlm_query_batched` reserves all child call indexes and prompt bytes
+  atomically, preserves input order, and settles all-or-nothing. Its bounded
+  sibling workers each own a copied DSPy Root/Sub runtime, tracing context, fresh
+  Daytona Sandbox, Interpreter Lease, and cleanup. A child may use native
+  `llm_query`/`llm_query_batched`, but cannot create another recursive batch.
+- One absolute Turn deadline governs child admission, provider calls, batch join,
+  and useful work. On expiry, authority is revoked and queued work is cancelled;
+  running workers retain ownership until their deadline-bound cleanup settles.
+  No executor shutdown, future, promotion task, or child lease may outlive the
+  owner responsible for settling it.
 
 - Startup recovery claims eligible nonterminal rows by owner before awaiting a
   provider fence. Daytona requires a bounded fence; deterministic compositions
@@ -147,6 +159,10 @@ routes or public events.
   `max_upload_bytes` caps the complete file; appends against full or torn state
   and access to unsafe or invalid storage fail closed, with no automatic
   compaction, deletion, or repair.
+- Autonomous Memory candidates, when enabled by policy, are promoted only after
+  successful Turn Commit. The promotion task remains owned until it settles
+  before the Run's lease and mounted resources release; its post-commit wait is
+  bounded and does not detach work from those resources.
 - Memory append serialization is process-local. Separate Fleet processes are
   not coordinated, so concurrent cross-process append is not guaranteed. The
   live cross-Sandbox, cross-Session proof remains gated and has not been run.
@@ -162,6 +178,9 @@ routes or public events.
 - Runtime settings resolve only environment names explicitly referenced by the
   selected TOML policy; ambient selectors and unreferenced variables are
   ignored. The canonical public Run Environment is `daytona`.
+- `RLM_NATIVE_CHILD_DEPTH = 1` is a product invariant. The policy
+  `recursion_max_parallel_children` bounds sibling workers; it does not expose
+  concurrency or depth controls to the model and does not permit child fan-out.
 - There is no `/api/v1`, WebSocket execution, dual serve, legacy migration,
   runtime-admin, optimization/evaluation API, or public Artifact creation.
 - The maintained client is pi-tui. A graphical/Web client is separate future
