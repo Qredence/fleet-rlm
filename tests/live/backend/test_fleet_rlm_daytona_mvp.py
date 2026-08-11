@@ -786,8 +786,10 @@ def test_complete_daytona_mvp_through_fastapi(
                     json={
                         "text": (
                             "FIRST: execute the complete recursive Daytona MVP proof."
-                            " 3 iterations; do not improvise or retry."
-                            " 1) Once: iteration_token = issue_iteration_token();"
+                            " Use exactly 3 iterations; do not improvise, explore, print for inspection,"
+                            " or retry. Ignore generic explore-first habits: this request is fully specified."
+                            " 1) The FIRST code cell must immediately call, once:"
+                            " iteration_token = issue_iteration_token();"
                             ' accumulator = [iteration_token]; print("FIRST_ITERATION_READY").'
                             ' 2) Reuse it: run single_result = llm_query("Return exactly ROOT") and'
                             ' batch_results = llm_query_batched(["Return exactly ALPHA", "Return exactly BETA",'
