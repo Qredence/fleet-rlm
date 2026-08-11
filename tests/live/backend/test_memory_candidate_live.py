@@ -300,12 +300,22 @@ def test_live_memory_candidate_promotes_after_commit_and_retrieves_on_next_turn(
                 search_inputs, search_outputs, search_errors = _paired_tool_chunks(second_chunks, "search_memories")
                 assert search_errors == []
                 assert len(search_inputs) == len(search_outputs) == 1
-                assert memory_id in search_outputs[0]["output"].get("top_memory_ids", ())
+                search_output = search_outputs[0]["output"]
+                assert memory_id in search_output.get("top_memory_ids", ())
+                matched_entries = [
+                    entry
+                    for entry in search_output.get("entries", ())
+                    if isinstance(entry, dict) and entry.get("id") == memory_id
+                ]
+                assert len(matched_entries) == 1
+                # Authoritative product-surface provenance: the search Tool output
+                # carries source=agent_candidate (independent of model prose).
+                assert matched_entries[0].get("source") == "agent_candidate"
+                assert matched_entries[0].get("category") == "operator preference"
                 final_text = "".join(
                     str(chunk.get("delta", "")) for chunk in second_chunks if chunk.get("type") == "text-delta"
                 )
                 assert memory_id in final_text
-                assert "agent_candidate" in final_text
 
                 phase = "injection_readback"
                 digest = read_workspace_memory_injection_digest(
