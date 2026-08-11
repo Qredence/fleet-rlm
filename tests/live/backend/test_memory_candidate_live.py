@@ -188,6 +188,9 @@ def _live_qre140_settings(tmp_path: Path) -> Settings:
             "turn_timeout_seconds": 560,
             "run_heartbeat_seconds": 10,
             "run_stale_after_seconds": 600,
+            # Tracing is outside this proof's certification surface; the local
+            # trace server may be down and its retry storm slows startup.
+            "mlflow_tracing_enabled": False,
         }
     )
     database_url = f"sqlite+aiosqlite:///{(tmp_path / 'live-qre140.db').resolve()}"
