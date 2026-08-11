@@ -249,7 +249,7 @@ def test_interpreter_bounds_details_and_finishes_failed_steps() -> None:
     assert "/home/daytona" not in observed[2].output
 
 
-def test_empty_code_returns_direct_feedback_then_repetition_stops_the_turn() -> None:
+def test_empty_code_returns_one_repair_feedback_then_stops_the_turn() -> None:
     class Backend:
         def __init__(self) -> None:
             self.calls = 0
@@ -271,6 +271,13 @@ def test_empty_code_returns_direct_feedback_then_repetition_stops_the_turn() -> 
 
     assert first == "[Error] No executable code was provided; execute useful Python or call SUBMIT."
     assert backend.calls == 0
+    second = interpreter.execute("")
+
+    assert second == (
+        "[Error] Repeated interpreter action produced no progress. "
+        "Choose a different action, use the existing output, or call SUBMIT."
+    )
+    assert backend.calls == 0
     with pytest.raises(RunNoProgressError, match="repeated tool calls made no progress"):
         interpreter.execute("")
 
@@ -284,9 +291,29 @@ def test_empty_code_returns_direct_feedback_then_repetition_stops_the_turn() -> 
         RLMCode,
         RLMOutput,
         StepFinished,
+        StepStarted,
+        RLMCode,
+        RLMOutput,
+        StepFinished,
     ]
     assert observed[2].output == "Execution error"
-    assert observed[6].output == "Execution failed"
+    assert observed[6].output == "Execution error"
+    assert observed[10].output == "Execution failed"
+
+
+def test_repeated_interpreter_action_allows_one_bounded_repair() -> None:
+    interpreter = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())
+    interpreter.bind_observer(lambda _detail: None)
+
+    assert interpreter.execute("_out = 'same'") == "same"
+    repair = interpreter.execute("_out = 'same'")
+
+    assert repair == (
+        "[Error] Repeated interpreter action produced no progress. "
+        "Choose a different action, use the existing output, or call SUBMIT."
+    )
+    with pytest.raises(RunNoProgressError, match="repeated tool calls made no progress"):
+        interpreter.execute("_out = 'same'")
 
 
 def test_f_string_backslash_syntax_error_gets_focused_native_repair_feedback() -> None:

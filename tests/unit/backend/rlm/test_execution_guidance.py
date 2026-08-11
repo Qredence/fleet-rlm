@@ -32,6 +32,7 @@ def test_default_signature_orders_capabilities_before_semantic_calls() -> None:
     assert "SUBMIT(answer=answer)" in instructions
     assert "Once sufficient verification exists, the next action must contain ``SUBMIT``" in normalized_instructions
     assert "Never spend an iteration only restating a verified result or emitting empty code" in normalized_instructions
+    assert "Never repeat an identical interpreter action" in normalized_instructions
 
 
 def test_default_signature_marks_discovery_inputs_as_conditional_metadata() -> None:

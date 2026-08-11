@@ -176,6 +176,33 @@ async def test_native_json_rlm_computes_and_submits_verified_pi_digit_without_re
 
 
 @pytest.mark.asyncio
+async def test_native_rlm_allows_one_repair_after_a_repeated_interpreter_action() -> None:
+    class Actions:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def acall(self, **_kwargs: Any) -> dspy.Prediction:
+            self.calls += 1
+            if self.calls < 3:
+                return dspy.Prediction(reasoning="inspect", code="_out = 'same'")
+            return dspy.Prediction(reasoning="submit repaired result", code="SUBMIT(answer='recovered')")
+
+    actions = Actions()
+    interpreter = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())
+    rlm = dspy.RLM("request -> answer: str", max_iters=3)
+    rlm.generate_action = actions
+
+    try:
+        prediction = await rlm.acall(interpreter, request="recover")
+    finally:
+        interpreter.shutdown()
+
+    assert prediction.answer == "recovered"
+    assert actions.calls == 3
+    assert "Repeated interpreter action produced no progress" in prediction.trajectory[1]["output"]
+
+
+@pytest.mark.asyncio
 async def test_pinned_async_rlm_creates_fresh_native_history_and_honors_output_bound() -> None:
     from dspy.primitives.repl_types import REPLHistory
 

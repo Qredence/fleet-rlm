@@ -47,6 +47,18 @@ All notable changes to this project are documented in this file.
   Daytona verifier now resolve credentials from the selected policy instead of
   assuming one provider.
 
+- **Change:** Bounded the repeated-action no-progress stop in the Daytona
+  interpreter: a repeated identical interpreter action that makes no progress
+  now returns one bounded repair feedback ("Repeated interpreter action produced
+  no progress…") instead of immediately terminating, and only a second
+  consecutive identical repeat raises `RunNoProgressError`. Empty and oversized
+  intermediate code keep their direct repair messages; any different action
+  resets the counter, and the Tool instructions now direct the model never to
+  repeat an identical interpreter action.
+  **Outcome:** Models gain one bounded recovery step on repetitive loops before
+  the Turn is stopped, reducing spurious terminal failures while retaining the
+  hard stop for genuine no-progress loops.
+
 ## [0.7.0] - 2026-07-17
 
 ### Added

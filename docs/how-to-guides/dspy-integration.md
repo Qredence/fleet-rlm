@@ -130,6 +130,22 @@ reconciles missing or corrected observations into complete per-iteration
 live evidence and completed trajectory in terminal scrollback. DSPy semantic
 subcalls are not token-streamed to operators.
 
+## Interpreter corrective feedback
+
+Fleet's interpreter gives the RLM bounded corrective feedback at the execution
+boundary instead of a hard stop on recoverable mistakes. Empty or oversized
+intermediate code returns a direct repair message with no backend execution, and
+the model is expected to fix the action.
+
+A repeated identical interpreter action that yields the same result is treated
+as no progress: the first repeat returns one bounded repair message —
+"Repeated interpreter action produced no progress. Choose a different action,
+use the existing output, or call `SUBMIT`" — and only a second consecutive
+identical repeat terminates the Turn with `RunNoProgressError`. Any different
+action resets the counter, so the model always keeps at least one bounded
+recovery step before the Turn is stopped. The Tool instructions already direct
+the model never to repeat an identical interpreter action.
+
 ## Recursive harness limits
 
 `[defaults.rlm] recursion_enabled = false`, so normal `daytona` exposes no

@@ -581,6 +581,7 @@ class DaytonaCodeInterpreter:
         self._observation_step = 0
         self._observation_namespace = uuid4().hex
         self._last_execution: tuple[str, str] | None = None
+        self._no_progress_repair_used = False
         self._context_accesses: list[str] = []
         self._context_binding: tuple[str, str] | None = None
 
@@ -600,6 +601,7 @@ class DaytonaCodeInterpreter:
         self._observation_max_chars = max(1, int(max_chars))
         self._observation_step = 0
         self._last_execution = None
+        self._no_progress_repair_used = False
 
     def bind_context_capsule(self, capsule: Any) -> None:
         """Bind one host-created context capsule before DSPy starts the RLM."""
@@ -782,7 +784,9 @@ class DaytonaCodeInterpreter:
                             self._raise_context_injection_error(code, raw)
                         result = self._finalize(raw)
                 execute_ms = int((time.perf_counter() - execute_started) * 1_000)
-                self._reject_repeated_no_progress(normalized_code, result)
+                repair = self._reject_repeated_no_progress(normalized_code, result)
+                if repair is not None:
+                    result = repair
                 stdout_projector.finish(expected_final=_submitted_payload(result))
                 _flush_step_output(
                     result,
@@ -1004,14 +1008,24 @@ class DaytonaCodeInterpreter:
     def _normalize_code(code: str) -> str:
         return "\n".join(line.rstrip() for line in code.splitlines()).strip()
 
-    def _reject_repeated_no_progress(self, normalized_code: str, result: Any) -> None:
+    def _reject_repeated_no_progress(self, normalized_code: str, result: Any) -> _RepairFeedback | None:
         if is_final_output(result):
             self._last_execution = None
-            return
+            self._no_progress_repair_used = False
+            return None
         current = (normalized_code, str(result))
         if current == self._last_execution:
+            if not self._no_progress_repair_used:
+                self._no_progress_repair_used = True
+                return _RepairFeedback(
+                    "[Error] Repeated interpreter action produced no progress. "
+                    "Choose a different action, use the existing output, or call SUBMIT.",
+                    category="no_progress",
+                )
             raise RunNoProgressError
         self._last_execution = current
+        self._no_progress_repair_used = False
+        return None
 
 
 def sandbox_backend(

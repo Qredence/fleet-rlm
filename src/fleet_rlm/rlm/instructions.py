@@ -22,7 +22,8 @@ REPL_RLM_INSTRUCTIONS = """Follow this order and stop as soon as the request is 
 
 TOOL_RLM_INSTRUCTIONS = """1. Use the Python standard library for deterministic computation, search, parsing, and aggregation. Keep each
    intermediate code action concise (prefer a few thousand characters; never paste a long report or repeat the
-   full request in code). Store large values in variables or Session Workspace. If the request contains a
+   full request in code). Never repeat an identical interpreter action: use its output, choose a different action, or
+   call ``SUBMIT`` when sufficient. Store large values in variables or Session Workspace. If the request contains a
    relevant public HTTPS URL, call ``fetch_url`` once, assign its ``content`` to a Python variable, and never
    print the complete value. Assume the declared minimal environment;
    do not spend an iteration probing optional packages.

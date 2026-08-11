@@ -66,6 +66,11 @@ contracts, and tracked docs remain authoritative.
   AI SDK UI v1 stream. Observe live code/output at the interpreter boundary and
   host-tool activity through fresh wrapped Tools; use the completed native
   trajectory only to fill observation gaps.
+- The interpreter returns bounded corrective feedback instead of stopping on
+  recoverable mistakes: empty or oversized code returns a direct repair message,
+  and a repeated identical action that makes no progress returns one bounded
+  repair before a second consecutive identical repeat raises `RunNoProgressError`
+  and terminates the Turn. Any different action resets the counter.
 - Preserve explicit public reasoning, generated code, output, and successful
   answer text up to configured bounds. Tool event views expose only bounded
   allowlisted metadata; Tools without a view expose no arguments or results.
