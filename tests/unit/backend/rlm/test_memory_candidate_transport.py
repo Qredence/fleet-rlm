@@ -11,7 +11,7 @@ import dspy
 import pytest
 
 
-def _context(*, drain_calls: list[int], returned_candidates=()):
+def _context(*, drain_calls: list[int], returned_candidates=(), cancelled: bool = False):
     from fleet_rlm.chat.session_context import SessionContextManifest
     from fleet_rlm.rlm.context import ExecutionRuntime, RLMExecutionContext, RLMExecutionSpec, RunIdentity, SessionView
     from fleet_rlm.rlm.dspy_contract import RLMOptions
@@ -33,8 +33,8 @@ def _context(*, drain_calls: list[int], returned_candidates=()):
         async def aclose(self):
             return None
 
-    async def not_cancelled() -> bool:
-        return False
+    async def cancellation_probe() -> bool:
+        return cancelled
 
     return RLMExecutionContext(
         identity=RunIdentity(run_id=uuid4(), session_id=uuid4(), access=TurnAccess(uuid4(), uuid4())),
@@ -49,7 +49,7 @@ def _context(*, drain_calls: list[int], returned_candidates=()):
             options=RLMOptions(),
             deadline=asyncio.get_running_loop().time() + 10,
             interpreter=None,
-            cancellation_requested=not_cancelled,
+            cancellation_requested=cancellation_probe,
         ),
         capabilities=cast("Any", Capabilities()),
     )
@@ -96,5 +96,37 @@ async def test_runner_discards_memory_candidates_on_execution_failure() -> None:
     _ = [event async for event in stream]
 
     assert stream.outcome is not None and stream.outcome.terminal_status == "failed"
+    assert stream.outcome.memory_candidates == ()
+    assert drains == [1]
+
+
+def test_non_completed_outcome_rejects_memory_candidates() -> None:
+    from fleet_rlm.files.memory_candidates import MemoryCandidate
+    from fleet_rlm.rlm.outcome import RLMOutcome
+
+    candidate = MemoryCandidate(candidate_id="cand00000001", category="Project", learning="durable", byte_size=7)
+
+    for terminal in ("cancelled", "timeout", "failed"):
+        with pytest.raises(ValueError, match="Memory Candidates"):
+            RLMOutcome(
+                terminal,  # type: ignore[arg-type]
+                public_error_message="Turn failed",
+                memory_candidates=(candidate,),
+            )
+
+
+@pytest.mark.asyncio
+async def test_runner_discards_memory_candidates_when_execution_is_cancelled() -> None:
+    from fleet_rlm.files.memory_candidates import MemoryCandidate
+    from fleet_rlm.rlm.runner import RLMRunner
+
+    candidate = MemoryCandidate(candidate_id="cand00000001", category="Project", learning="durable", byte_size=7)
+    drains: list[int] = []
+    context = _context(drain_calls=drains, returned_candidates=(candidate,), cancelled=True)
+    stream = RLMRunner(factory=SimpleNamespace(create=lambda **_kwargs: object())).stream(context)
+
+    _ = [event async for event in stream]
+
+    assert stream.outcome is not None and stream.outcome.terminal_status == "cancelled"
     assert stream.outcome.memory_candidates == ()
     assert drains == [1]

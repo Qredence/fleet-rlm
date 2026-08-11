@@ -61,6 +61,8 @@ class RLMOutcome:
             raise ValueError("a successful outcome cannot contain a public error")
         if (self.terminal_status == "completed") != (self.prediction is not None):
             raise ValueError("only a successful outcome must contain a prediction")
+        if self.terminal_status != "completed" and self.memory_candidates:
+            raise ValueError("only a successful outcome may carry Memory Candidates")
 
     @property
     def succeeded(self) -> bool:
