@@ -33,6 +33,12 @@ from fleet_rlm.rlm.tool_observer import ToolEventView, ToolObserver, observe_too
 # operator-facing policy knob.
 RLM_NATIVE_CHILD_DEPTH = 1
 
+# Wait bound for detached child workers retained after batch settlement. A
+# provider, LM call, or interpreter that never returns becomes a cleanup
+# failure instead of an unbounded root-cleanup hang; when the worker later
+# unwinds, its lease close still runs through the factory's late-cleanup lane.
+_PENDING_BATCH_WAIT_TIMEOUT_S = 60.0
+
 
 @dataclass(frozen=True, slots=True)
 class RecursiveRLMOptions:
@@ -315,6 +321,40 @@ class RecursiveRLMExecutor:
             raise ChildRuntimeCleanupError("recursive child cleanup failed") from fatal_cleanup_error
         if cleanup_pending:
             raise ChildRuntimeCleanupError("recursive child cleanup is still pending")
+        factory_check = getattr(self._child_runtime_factory, "raise_if_cleanup_failed", None)
+        if callable(factory_check):
+            factory_check()
+
+    def wait_owned(self) -> None:
+        """Wait for every detached child worker retained after batch settlement.
+
+        A timed-out or failed batch can return control to the Root RLM while a
+        running sibling still owns a child lease.  The Root worker is not a
+        sufficient ownership boundary in that case: its task may finish before
+        the sibling does.  Run cleanup calls this blocking seam off the event
+        loop before releasing the parent Run resources.
+        """
+        wait_deadline = time.monotonic() + _PENDING_BATCH_WAIT_TIMEOUT_S
+        while True:
+            with self._state.lock:
+                pending = tuple(future for future in self._state.pending_batch_futures if not future.done())
+            if not pending:
+                break
+            remaining = max(0.0, wait_deadline - time.monotonic())
+            _, still_pending = wait(pending, timeout=remaining)
+            if not still_pending:
+                continue
+            with self._state.lock:
+                if self._state.fatal_cleanup_error is None:
+                    self._state.fatal_cleanup_error = TimeoutError("recursive child worker quarantine timed out")
+            raise ChildRuntimeCleanupError("recursive child cleanup failed") from self._state.fatal_cleanup_error
+
+        # A Daytona factory adopts timed-out provider acquisitions so a late
+        # Sandbox/permit cannot be orphaned.  Keep that ownership under the
+        # same cleanup boundary when the optional hook is available.
+        factory_wait_owned = getattr(self._child_runtime_factory, "wait_owned", None)
+        if callable(factory_wait_owned):
+            factory_wait_owned()
 
     def _retain_pending_batch_futures(self, futures: set[Future[str]]) -> None:
         pending = [future for future in futures if not future.done()]
@@ -372,6 +412,16 @@ class RecursiveRLMExecutor:
         if batch_cancelled is not None and batch_cancelled.is_set():
             raise ChildRuntimeAuthorizationError("recursive child batch is no longer authorized")
         self._ensure_authorized()
+
+    def _ensure_no_pending_batch_workers(self) -> None:
+        """Prevent new work while prior child ownership is still unsettled."""
+        with self._state.lock:
+            fatal_cleanup_error = self._state.fatal_cleanup_error
+            pending = any(not future.done() for future in self._state.pending_batch_futures)
+        if fatal_cleanup_error is not None:
+            raise ChildRuntimeCleanupError("recursive child cleanup failed") from fatal_cleanup_error
+        if pending:
+            raise ChildRuntimeCleanupError("recursive child cleanup is still pending")
 
     def _emit_progress(
         self,
@@ -643,6 +693,7 @@ class RecursiveRLMExecutor:
         if time.monotonic() >= self._deadline:
             raise TimeoutError("recursive call deadline exceeded")
         self._ensure_authorized()
+        self._ensure_no_pending_batch_workers()
         call = self._begin_call(prompt)
         return self._run_reserved_call(prompt, call)
 
@@ -746,27 +797,36 @@ class RecursiveRLMExecutor:
         if time.monotonic() >= self._deadline:
             raise TimeoutError("recursive call deadline exceeded")
         self._ensure_authorized()
+        self._ensure_no_pending_batch_workers()
         self._metrics.record_recursive_batch()
         calls = self._begin_batch(normalized)
         workers = min(self._options.max_parallel_children, len(calls))
         results: list[str | None] = [None] * len(calls)
         batch_cancelled = Event()
         pool = ThreadPoolExecutor(max_workers=workers, thread_name_prefix="fleet-rlm-child")
-        futures = [
-            pool.submit(
-                copy_context().run,
-                self._run_reserved_call,
-                prompt,
-                call,
-                batch_cancelled,
-            )
-            for prompt, call in zip(normalized, calls, strict=True)
-        ]
+        futures: list[Future[str]] = []
         try:
+            try:
+                for prompt, call in zip(normalized, calls, strict=True):
+                    submitted = pool.submit(
+                        copy_context().run,
+                        self._run_reserved_call,
+                        prompt,
+                        call,
+                        batch_cancelled,
+                    )
+                    futures.append(cast(Future[str], submitted))
+            except BaseException:
+                batch_cancelled.set()
+                pending = {future for future in futures if not future.done()}
+                for future in pending:
+                    future.cancel()
+                self._retain_pending_batch_futures(pending)
+                raise
             remaining = max(0.0, self._deadline - time.monotonic())
             raw_done, raw_not_done = wait(futures, timeout=remaining, return_when=FIRST_EXCEPTION)
-            done = cast(set[Future[str]], raw_done)
-            not_done = cast(set[Future[str]], raw_not_done)
+            done = raw_done
+            not_done = raw_not_done
             failures = _future_failures(done)
             if failures or not_done:
                 batch_cancelled.set()
@@ -781,13 +841,13 @@ class RecursiveRLMExecutor:
                 if failures:
                     raise RecursiveBatchError() from failures[0]
                 raise TimeoutError("recursive child batch deadline exceeded")
+            if failures:
+                raise RecursiveBatchError() from failures[0]
             for index, future in enumerate(futures):
-                results[index] = cast(str, future.result(timeout=0))
+                results[index] = future.result(timeout=0)
         finally:
             pool.shutdown(wait=False, cancel_futures=True)
         self.raise_if_cleanup_failed()
-        if failures:
-            raise RecursiveBatchError() from failures[0]
         if any(answer is None for answer in results):
             raise RecursiveBatchError()
         return [answer for answer in results if answer is not None]

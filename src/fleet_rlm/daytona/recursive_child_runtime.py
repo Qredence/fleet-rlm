@@ -3,16 +3,23 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import time
 from collections.abc import Callable
+from concurrent.futures import Future, wait
 from dataclasses import dataclass, field
 from pathlib import PurePosixPath
+from threading import Lock, Thread
 from typing import Any
 from uuid import UUID
 
 from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, sandbox_backend
 from fleet_rlm.daytona.provisioning import SandboxPlatform, recursive_child_volume_subpath
-from fleet_rlm.daytona.session_manager import DaytonaAdmission, DaytonaAdmissionPermit
+from fleet_rlm.daytona.session_manager import (
+    DaytonaAdmission,
+    DaytonaAdmissionPermit,
+    DaytonaAdmissionTimeoutError,
+)
 from fleet_rlm.rlm.child_runtime import (
     ChildRuntimeAuthorizationError,
     ChildRuntimeCleanupError,
@@ -75,6 +82,107 @@ def build_child_runtime_factory(
         ChildRuntimeFactory: A factory that accepts a call index and returns a leased child runtime.
     """
 
+    late_lock = Lock()
+    late_cleanup: set[Future[Any]] = set()
+    late_cleanup_error: BaseException | None = None
+
+    def record_late_cleanup_error(exc: BaseException) -> None:
+        nonlocal late_cleanup_error
+        with late_lock:
+            if late_cleanup_error is None:
+                late_cleanup_error = exc
+
+    def _late_cleanup_state() -> tuple[BaseException | None, bool]:
+        """Observe completed futures before exposing cleanup ownership as settled."""
+        nonlocal late_cleanup_error
+        with late_lock:
+            for future in tuple(late_cleanup):
+                if not future.done():
+                    continue
+                try:
+                    error = future.exception()
+                except BaseException as exc:
+                    error = exc
+                if error is not None and late_cleanup_error is None:
+                    late_cleanup_error = error
+                late_cleanup.discard(future)
+            return late_cleanup_error, any(not future.done() for future in late_cleanup)
+
+    def retain_late_cleanup(cleanup: Future[Any]) -> None:
+        with late_lock:
+            late_cleanup.add(cleanup)
+
+        def settled(done: Future[Any]) -> None:
+            try:
+                error = done.exception()
+            except BaseException as exc:
+                record_late_cleanup_error(exc)
+            else:
+                if error is not None:
+                    record_late_cleanup_error(error)
+            with late_lock:
+                late_cleanup.discard(done)
+
+        cleanup.add_done_callback(settled)
+
+    def adopt_late_acquisition(acquisition: Future[ChildRuntimeLease]) -> None:
+        """Close a late lease from a synchronous callback, independent of loop lifetime."""
+        marker: Future[None] = Future()
+        retain_late_cleanup(marker)
+
+        def close_late(done: Future[ChildRuntimeLease]) -> None:
+            try:
+                lease = done.result()
+            except ChildRuntimeCleanupError as exc:
+                record_late_cleanup_error(exc)
+                marker.set_result(None)
+                return
+            except BaseException:
+                marker.set_result(None)
+                return
+
+            def close() -> None:
+                try:
+                    lease.close()
+                except BaseException as close_error:
+                    record_late_cleanup_error(close_error)
+                finally:
+                    marker.set_result(None)
+
+            thread = Thread(target=close, name="fleet-late-child-cleanup", daemon=True)
+            try:
+                thread.start()
+            except BaseException as thread_error:
+                record_late_cleanup_error(thread_error)
+                # A thread-start failure has no safe asynchronous owner left;
+                # make one best-effort synchronous close before recording the
+                # marker so admission cleanup is still attempted.
+                close()
+
+        acquisition.add_done_callback(close_late)
+
+    def raise_if_cleanup_failed() -> None:
+        error, pending = _late_cleanup_state()
+        if error is not None:
+            raise ChildRuntimeCleanupError("recursive child cleanup failed") from error
+        if pending:
+            raise ChildRuntimeCleanupError("recursive child cleanup is still pending")
+
+    def wait_owned() -> None:
+        """Wait for late acquisition cleanup under a bounded quarantine window."""
+        wait_deadline = time.monotonic() + max(_CHILD_CLEANUP_RESULT_TIMEOUT_S, 1.0)
+        while True:
+            with late_lock:
+                pending = tuple(future for future in late_cleanup if not future.done())
+            if not pending:
+                break
+            remaining = max(0.0, wait_deadline - time.monotonic())
+            _, still_pending = wait(pending, timeout=remaining)
+            if still_pending:
+                record_late_cleanup_error(TimeoutError("recursive child cleanup quarantine timed out"))
+                break
+        raise_if_cleanup_failed()
+
     def create(call_index: int) -> ChildRuntimeLease:
         """
         Acquire a disposable child runtime lease for a recursive call.
@@ -85,30 +193,52 @@ def build_child_runtime_factory(
         Returns:
             ChildRuntimeLease: Lease for the acquired child runtime.
         """
-        future = asyncio.run_coroutine_threadsafe(
-            _acquire_child_runtime(
-                loop=loop,
-                platform=platform,
-                admission=admission,
-                volume_id=volume_id,
-                mount_path=mount_path,
-                workspace_id=workspace_id,
-                run_id=run_id,
-                call_index=call_index,
-                deadline=deadline,
-                execution_timeout_s=execution_timeout_s,
-                execution_output_cap=execution_output_cap,
-                is_authorized=is_authorized,
-            ),
-            loop,
+        acquisition_coroutine = _acquire_child_runtime(
+            loop=loop,
+            platform=platform,
+            admission=admission,
+            volume_id=volume_id,
+            mount_path=mount_path,
+            workspace_id=workspace_id,
+            run_id=run_id,
+            call_index=call_index,
+            deadline=deadline,
+            execution_timeout_s=execution_timeout_s,
+            execution_output_cap=execution_output_cap,
+            is_authorized=is_authorized,
+            retain_pending_cleanup=retain_late_cleanup,
         )
         try:
-            return future.result(timeout=max(0.0, deadline - time.monotonic()))
+            acquisition = asyncio.run_coroutine_threadsafe(acquisition_coroutine, loop)
+        except BaseException as exc:
+            acquisition_coroutine.close()
+            raise ChildRuntimeCleanupError("recursive child runtime acquisition failed") from exc
+        try:
+            return acquisition.result(timeout=max(0.0, deadline - time.monotonic()))
+        except DaytonaAdmissionTimeoutError:
+            raise TimeoutError("recursive child runtime acquisition deadline exceeded") from None
         except TimeoutError:
-            future.cancel()
+            # The provider future can complete in the race between result()
+            # timing out and this handler.  Adopt it unconditionally: a late
+            # exception is harmless, while a late lease must still be closed.
+            # Do not cancel provider work that may already have crossed the
+            # acquisition boundary or its Sandbox/permit could be orphaned.
+            adopt_late_acquisition(acquisition)
             raise TimeoutError("recursive child runtime acquisition deadline exceeded") from None
 
-    return create
+    class Factory:
+        """Callable child-runtime factory with late-acquisition ownership."""
+
+        def __call__(self, call_index: int) -> ChildRuntimeLease:
+            return create(call_index)
+
+        def wait_owned(self) -> None:
+            wait_owned()
+
+        def raise_if_cleanup_failed(self) -> None:
+            raise_if_cleanup_failed()
+
+    return Factory()
 
 
 async def _acquire_child_runtime(
@@ -125,6 +255,7 @@ async def _acquire_child_runtime(
     execution_timeout_s: int,
     execution_output_cap: int,
     is_authorized: Callable[[], bool] | None = None,
+    retain_pending_cleanup: Callable[[Future[Any]], None] | None = None,
 ) -> ChildRuntimeLease:
     """
     Acquire a disposable runtime lease for a recursive child execution.
@@ -170,6 +301,7 @@ async def _acquire_child_runtime(
                 mount_path=mount_path,
                 interpreter=interpreter,
                 permit=permit,
+                retain_pending_cleanup=retain_pending_cleanup,
             )
 
         return ChildRuntimeLease(interpreter, child_sandbox_id, volume_id, subpath, close)
@@ -190,6 +322,7 @@ def _close_child_runtime_sync(
     mount_path: str,
     interpreter: DaytonaCodeInterpreter,
     permit: DaytonaAdmissionPermit,
+    retain_pending_cleanup: Callable[[Future[Any]], None] | None = None,
 ) -> None:
     """
     Close a child runtime and release its associated sandbox resources.
@@ -198,36 +331,165 @@ def _close_child_runtime_sync(
         ChildRuntimeCleanupError: If interpreter shutdown or resource cleanup fails.
     """
     first_error: BaseException | None = None
+
+    def schedule_cleanup() -> tuple[Future[None], Any | None]:
+        cleanup = _cleanup_child_runtime_async(
+            platform=platform,
+            sandbox=sandbox,
+            sandbox_id=sandbox_id,
+            mount_path=mount_path,
+            permit=permit,
+        )
+        try:
+            return asyncio.run_coroutine_threadsafe(cleanup, loop), cleanup
+        except BaseException:
+            cleanup.close()
+
+        # The owner loop may close during late acquisition handoff. Run the
+        # provider cleanup on a disposable loop so the permit's ``finally``
+        # still executes even when run_coroutine_threadsafe is unavailable.
+        fallback: Future[None] = Future()
+
+        def run_fallback_cleanup() -> None:
+            try:
+                asyncio.run(
+                    _cleanup_child_runtime_async(
+                        platform=platform,
+                        sandbox=sandbox,
+                        sandbox_id=sandbox_id,
+                        mount_path=mount_path,
+                        permit=permit,
+                    )
+                )
+            except BaseException as exc:
+                if not fallback.done():
+                    fallback.set_exception(exc)
+            else:
+                if not fallback.done():
+                    fallback.set_result(None)
+
+        fallback_thread = Thread(target=run_fallback_cleanup, name="fleet-child-cleanup-fallback", daemon=True)
+        try:
+            fallback_thread.start()
+        except BaseException as exc:
+            # A thread-start failure cannot safely run provider I/O. Release
+            # admission synchronously and surface the unresolved deletion.
+            with contextlib.suppress(BaseException):
+                permit.release()
+            fallback.set_exception(exc)
+        return fallback, None
+
+    shutdown_result: Future[None] = Future()
+    deferred_cleanup = False
+
+    def run_shutdown() -> None:
+        try:
+            interpreter.shutdown(strict_broker_cleanup=True)
+        except BaseException as exc:
+            shutdown_result.set_exception(exc)
+        else:
+            shutdown_result.set_result(None)
+
+    shutdown_thread = Thread(target=run_shutdown, name="fleet-child-interpreter-shutdown", daemon=True)
     try:
-        interpreter.shutdown(strict_broker_cleanup=True)
+        shutdown_thread.start()
     except BaseException as exc:
         first_error = exc
-    # The cleanup coroutine must stay on the caller-captured loop: it releases
-    # the DaytonaAdmission permit, a loop-bound asyncio.Semaphore. The wait is
-    # bounded so a stalled owner loop surfaces a typed cleanup error instead of
-    # the pre-RC-7 unbounded Future.result() hang.
-    cleanup = _cleanup_child_runtime_async(
-        platform=platform,
-        sandbox=sandbox,
-        sandbox_id=sandbox_id,
-        mount_path=mount_path,
-        permit=permit,
-    )
-    try:
+    else:
         try:
-            future = asyncio.run_coroutine_threadsafe(cleanup, loop)
-        except BaseException:
-            cleanup.close()
-            raise
-        try:
-            future.result(timeout=_CHILD_CLEANUP_RESULT_TIMEOUT_S)
-        except BaseException:
-            future.cancel()
-            cleanup.close()
-            raise
-    except BaseException as exc:
-        if first_error is None:
+            shutdown_result.result(timeout=_CHILD_CLEANUP_RESULT_TIMEOUT_S)
+        except TimeoutError as exc:
+            # A synchronous broker/provider shutdown cannot be force-cancelled.
+            # Quarantine the remainder under the factory owner instead of
+            # blocking the child worker or releasing its permit early.
+            marker: Future[None] | None = None
+            if retain_pending_cleanup is not None:
+                marker = Future()
+                retain_pending_cleanup(marker)
+
+            def finish_quarantine() -> None:
+                quarantine_error: BaseException | None = None
+                marker_pending = False
+                try:
+                    shutdown_result.result()
+                except BaseException as shutdown_error:
+                    quarantine_error = shutdown_error
+                try:
+                    cleanup_future, cleanup_coroutine = schedule_cleanup()
+                    try:
+                        cleanup_future.result(timeout=_CHILD_CLEANUP_RESULT_TIMEOUT_S)
+                    except TimeoutError:
+                        marker_pending = marker is not None
+
+                        def finish_marker(done: Future[None]) -> None:
+                            error = quarantine_error
+                            try:
+                                cleanup_error = done.exception()
+                            except BaseException as done_error:
+                                cleanup_error = done_error
+                            if error is None:
+                                error = cleanup_error
+                            if marker is not None:
+                                if error is None:
+                                    marker.set_result(None)
+                                else:
+                                    marker.set_exception(error)
+
+                        cleanup_future.add_done_callback(finish_marker)
+                    except BaseException:
+                        cleanup_future.cancel()
+                        if cleanup_coroutine is not None:
+                            with contextlib.suppress(BaseException):
+                                cleanup_coroutine.close()
+                        raise
+                except BaseException as cleanup_error:
+                    quarantine_error = quarantine_error or cleanup_error
+                if marker is not None and not marker_pending:
+                    if quarantine_error is None:
+                        marker.set_result(None)
+                    else:
+                        marker.set_exception(quarantine_error)
+
+            quarantine_thread = Thread(
+                target=finish_quarantine,
+                name="fleet-child-runtime-quarantine",
+                daemon=True,
+            )
+            try:
+                quarantine_thread.start()
+            except BaseException as thread_error:
+                if marker is not None:
+                    marker.set_exception(thread_error)
+                deferred_cleanup = True
+                first_error = exc
+            else:
+                deferred_cleanup = True
+                first_error = exc
+        except BaseException as exc:
             first_error = exc
+
+    if not deferred_cleanup:
+        future: Future[None] | None = None
+        cleanup_coroutine: Any | None = None
+        try:
+            future, cleanup_coroutine = schedule_cleanup()
+            future.result(timeout=_CHILD_CLEANUP_RESULT_TIMEOUT_S)
+        except TimeoutError as exc:
+            if future is not None and retain_pending_cleanup is not None:
+                retain_pending_cleanup(future)
+            elif future is not None:
+                future.cancel()
+                if cleanup_coroutine is not None:
+                    cleanup_coroutine.close()
+            first_error = first_error or exc
+        except BaseException as exc:
+            first_error = first_error or exc
+            if future is not None:
+                future.cancel()
+            if cleanup_coroutine is not None:
+                with contextlib.suppress(BaseException):
+                    cleanup_coroutine.close()
+
     if first_error is not None:
         raise ChildRuntimeCleanupError("recursive child cleanup failed") from first_error
 

@@ -57,13 +57,35 @@ class _ClaimHeartbeat:
 
 
 async def _shield_cleanup(awaitable: Awaitable[object]) -> None:
-    """Complete owned settlement/cleanup even if the caller is cancelled."""
-    task = asyncio.ensure_future(awaitable)
+    """Complete owned settlement/cleanup even if the caller is repeatedly cancelled."""
     try:
-        await asyncio.shield(task)
-    except asyncio.CancelledError:
-        await asyncio.shield(task)
+        task = asyncio.ensure_future(awaitable)
+    except BaseException:
+        close = getattr(awaitable, "close", None)
+        if callable(close):
+            with contextlib.suppress(BaseException):
+                close()
         raise
+    cancelled = False
+    while not task.done():
+        try:
+            await asyncio.shield(task)
+        except asyncio.CancelledError:
+            cancelled = True
+    if task.cancelled():
+        raise asyncio.CancelledError
+    try:
+        task.result()
+    except BaseException:
+        raise
+    if cancelled:
+        raise asyncio.CancelledError
+
+
+def _consume_task_exception(task: asyncio.Task[Any]) -> None:
+    if not task.cancelled():
+        with contextlib.suppress(BaseException):
+            task.exception()
 
 
 async def _stop_heartbeat(heartbeat: _ClaimHeartbeat | None) -> None:
@@ -71,6 +93,16 @@ async def _stop_heartbeat(heartbeat: _ClaimHeartbeat | None) -> None:
         return
     heartbeat.task.cancel()
     await asyncio.gather(heartbeat.task, return_exceptions=True)
+
+
+async def _wait_stream_owned(stream: RunEventStream) -> None:
+    wait_owned = getattr(stream, "wait_owned", None)
+    if callable(wait_owned):
+        await wait_owned()
+
+
+def _heartbeat_claim_lost(state: _ExecutionState) -> bool:
+    return state.heartbeat is not None and state.heartbeat.lost.is_set()
 
 
 def _terminal(
@@ -236,7 +268,7 @@ class RunExecutionDriver:
                 if next_event.done():
                     state.pending_event = None
             if isinstance(result, _ClaimLost):
-                await self._handoff_cleanup(
+                await self._handoff_cleanup_or_drain(
                     run,
                     prepared,
                     state,
@@ -282,16 +314,45 @@ class RunExecutionDriver:
     ) -> RunSettlement | _ClaimLost:
         if outcome.terminal_status in {"timeout", "cancelled"}:
             status = "timeout" if outcome.terminal_status == "timeout" else "cancelled"
-            receipt = await self._lifecycle.settle(
-                run,
-                RunFailure(
-                    status,
-                    status,
-                    outcome.public_error_message or ("Turn timed out" if status == "timeout" else "Turn cancelled"),
-                    outcome.usage,
-                ),
+            failure = RunFailure(
+                status,
+                status,
+                outcome.public_error_message or ("Turn timed out" if status == "timeout" else "Turn cancelled"),
+                outcome.usage,
             )
-            await self._handoff_cleanup(run, prepared, state)
+            # Revoke the in-memory fence before durable settlement so detached
+            # recursive workers cannot acquire new child runtimes while cleanup
+            # is still waiting for already-running work to finish.
+            run.authority.revoke()
+            receipt: FailedRunReceipt | None = None
+            claim_lost = _heartbeat_claim_lost(state)
+            if not claim_lost:
+                try:
+                    receipt = await self._lifecycle.settle(run, failure)
+                except BaseException:
+                    if not _heartbeat_claim_lost(state):
+                        raise
+                    claim_lost = True
+                else:
+                    claim_lost = _heartbeat_claim_lost(state)
+            if claim_lost:
+                await self._handoff_cleanup_or_drain(
+                    run,
+                    prepared,
+                    state,
+                    claim_lost=True,
+                    claim_loss_usage=outcome.usage,
+                    finalization_task=state.finalization_task,
+                )
+                state.settled = True
+                return _ClaimLost()
+            assert receipt is not None
+            await self._handoff_cleanup_or_drain(
+                run,
+                prepared,
+                state,
+                finalization_task=state.finalization_task,
+            )
             await asyncio.sleep(0)
             return receipt
 
@@ -307,9 +368,14 @@ class RunExecutionDriver:
             )
         )
         remaining = max(0.0, execution_deadline - asyncio.get_running_loop().time())
-        result = await self._wait_for_finalization(state.finalization_task, state.claim_loss_waiter, remaining)
+        result = await self._wait_for_finalization(
+            state.finalization_task,
+            state.claim_loss_waiter,
+            remaining,
+            is_authority_revoked=lambda: run.authority.revoked,
+        )
         if isinstance(result, _ClaimLost):
-            await self._handoff_cleanup(
+            await self._handoff_cleanup_or_drain(
                 run,
                 prepared,
                 state,
@@ -322,17 +388,22 @@ class RunExecutionDriver:
             return result
         if result is None:
             await self._stop_claim_waiter(state)
-            receipt = await self._lifecycle.settle(
-                run,
-                RunFailure("timeout", "timeout", "Turn timed out", outcome.usage),
-            )
-            await self._handoff_cleanup(
-                run,
-                prepared,
-                state,
-                finalization_task=state.finalization_task,
-            )
-            await asyncio.sleep(0)
+            run.authority.revoke()
+            try:
+                receipt = await self._lifecycle.settle(
+                    run,
+                    RunFailure("timeout", "timeout", "Turn timed out", outcome.usage),
+                )
+            finally:
+                # A persistence timeout must not bypass ownership of the
+                # still-running finalization task or recursive workers.
+                await self._handoff_cleanup_or_drain(
+                    run,
+                    prepared,
+                    state,
+                    finalization_task=state.finalization_task,
+                )
+                await asyncio.sleep(0)
             return receipt
         await self._stop_claim_waiter(state)
         return result
@@ -342,6 +413,8 @@ class RunExecutionDriver:
         finalization_task: asyncio.Task[RunSettlement],
         claim_loss_waiter: asyncio.Task[bool] | None,
         remaining: float,
+        *,
+        is_authority_revoked: Callable[[], bool] | None = None,
     ) -> _FinalizationWait:
         waiters: set[asyncio.Future[Any]] = {finalization_task}
         if claim_loss_waiter is not None:
@@ -351,9 +424,20 @@ class RunExecutionDriver:
             timeout=remaining,
             return_when=asyncio.FIRST_COMPLETED,
         )
-        # A completed finalization wins a simultaneous claim-loss race.
+        # A successful finalization wins a simultaneous claim-loss race. If
+        # finalization failed after authority was revoked, the durable claim
+        # loss must own cleanup instead of falling through generic recovery.
         if finalization_task in done:
-            return finalization_task.result()
+            try:
+                return finalization_task.result()
+            except BaseException:
+                claim_lost = bool(is_authority_revoked and is_authority_revoked())
+                if claim_loss_waiter is not None and claim_loss_waiter.done() and not claim_loss_waiter.cancelled():
+                    with contextlib.suppress(BaseException):
+                        claim_lost = claim_lost or bool(claim_loss_waiter.result())
+                if claim_lost:
+                    return _ClaimLost()
+                raise
         if claim_loss_waiter is not None and claim_loss_waiter in done:
             return _ClaimLost()
         return None
@@ -403,18 +487,38 @@ class RunExecutionDriver:
     ) -> None:
         if state.settled:
             return
-        try:
-            await self._cancel_pending_event(state)
-            await asyncio.shield(
-                self._lifecycle.settle(
-                    run,
-                    RunFailure("cancelled", "cancelled", "Turn cancelled", empty_rlm_usage()),
-                )
+
+        async def settle_owned_cancellation() -> None:
+            # Caller cancellation is an immediate loss of execution authority;
+            # the durable settling transition and detached cleanup may lag.
+            run.authority.revoke()
+            with contextlib.suppress(BaseException):
+                await self._cancel_pending_event(state)
+            claim_lost = _heartbeat_claim_lost(state)
+            if not claim_lost:
+                with contextlib.suppress(BaseException):
+                    await self._lifecycle.settle(
+                        run,
+                        RunFailure("cancelled", "cancelled", "Turn cancelled", empty_rlm_usage()),
+                    )
+                claim_lost = _heartbeat_claim_lost(state)
+            # Cleanup handoff is independent of durable settlement success. The
+            # owned stream must still drain recursive workers before Run
+            # resources are released when persistence itself is unavailable.
+            await self._handoff_cleanup_or_drain(
+                run,
+                prepared,
+                state,
+                claim_lost=claim_lost,
+                claim_loss_usage=empty_rlm_usage() if claim_lost else None,
+                finalization_task=state.finalization_task,
             )
-            await self._handoff_cleanup(run, prepared, state)
             await asyncio.sleep(0)
-        except Exception:
-            pass
+
+        # A second cancellation must not interrupt the handoff between durable
+        # settlement and ownership transfer; otherwise the outer finally could
+        # close PreparedRun while a recursive worker still owns its resources.
+        await _shield_cleanup(settle_owned_cancellation())
 
     async def _recover_failure(
         self,
@@ -457,13 +561,114 @@ class RunExecutionDriver:
         await self._stop_claim_waiter(state)
         state.heartbeat = None
 
+    async def _handoff_cleanup_or_drain(
+        self,
+        run: ClaimedRun,
+        prepared: PreparedRun,
+        state: _ExecutionState,
+        *,
+        claim_lost: bool = False,
+        claim_loss_usage: RLMUsage | None = None,
+        finalization_task: asyncio.Task[RunSettlement] | None = None,
+    ) -> None:
+        """Preserve ownership if the detached cleanup queue cannot accept a job."""
+        try:
+            await self._handoff_cleanup(
+                run,
+                prepared,
+                state,
+                claim_lost=claim_lost,
+                claim_loss_usage=claim_loss_usage,
+                finalization_task=finalization_task,
+            )
+            return
+        except BaseException:
+            # A successful submission owns the resources even if stopping the
+            # claim waiter is interrupted afterward; never drain the same
+            # stream from two cleanup paths.
+            if state.cleanup_handed_off:
+                return
+            # Capacity is checked before a Turn opens, but a shutdown race can
+            # still reject submission.  Never fall through to PreparedRun.aclose
+            # while an owned worker remains active; drain the ownership inline.
+            state.cleanup_handed_off = True
+
+            async def inline_cleanup() -> None:
+                cleanup_error = False
+                claim_cleanup_settled = not claim_lost
+                try:
+                    with contextlib.suppress(BaseException):
+                        await self._stop_claim_waiter(state)
+                    with contextlib.suppress(BaseException):
+                        await _stop_heartbeat(state.heartbeat)
+                    state.heartbeat = None
+                    if claim_lost:
+                        try:
+                            receipt = await self._revoke_claim(run, claim_loss_usage or empty_rlm_usage())
+                        except BaseException:
+                            receipt = None
+                            cleanup_error = True
+                        claim_cleanup_settled = receipt is not None
+                        if receipt is not None and self._claim_loss_fence is not None:
+                            try:
+                                await self._claim_loss_fence(run.session_id)
+                            except BaseException:
+                                cleanup_error = True
+                                claim_cleanup_settled = False
+                    stream = state.stream
+                    if stream is not None:
+                        try:
+                            await stream.aclose()
+                        except BaseException:
+                            cleanup_error = True
+                        try:
+                            await _wait_stream_owned(stream)
+                        except BaseException:
+                            cleanup_error = True
+                    if finalization_task is not None:
+                        # The finalization task is owned until it settles; a
+                        # post-revocation lifecycle error is expected here.
+                        with contextlib.suppress(BaseException):
+                            await _shield_cleanup(finalization_task)
+                    try:
+                        await prepared.aclose()
+                    except BaseException:
+                        cleanup_error = True
+                    if not cleanup_error and claim_cleanup_settled:
+                        with contextlib.suppress(BaseException):
+                            await self._lifecycle.complete_settling(run)
+                finally:
+                    with contextlib.suppress(BaseException):
+                        await self._stop_claim_waiter(state)
+                    with contextlib.suppress(BaseException):
+                        await _stop_heartbeat(state.heartbeat)
+                    state.heartbeat = None
+
+            await _shield_cleanup(inline_cleanup())
+
     async def _close_execution(self, prepared: PreparedRun, state: _ExecutionState) -> None:
         with turn_phase_span("Turn.cleanup", inputs={"cleanup_owned": not state.cleanup_handed_off}):
             await self._cancel_pending_event(state)
             await self._stop_claim_waiter(state)
             await _stop_heartbeat(state.heartbeat)
             if not state.cleanup_handed_off:
-                await _shield_cleanup(prepared.aclose())
+                cleanup_error: BaseException | None = None
+                stream = state.stream
+                if stream is not None:
+                    try:
+                        await stream.aclose()
+                    except BaseException as exc:
+                        cleanup_error = exc
+                    try:
+                        await _wait_stream_owned(stream)
+                    except BaseException as exc:
+                        cleanup_error = cleanup_error or exc
+                try:
+                    await _shield_cleanup(prepared.aclose())
+                except BaseException as exc:
+                    cleanup_error = cleanup_error or exc
+                if cleanup_error is not None:
+                    raise cleanup_error
 
     @staticmethod
     async def _cancel_pending_event(state: _ExecutionState) -> None:
@@ -495,29 +700,83 @@ class RunExecutionDriver:
         claim_loss_usage: RLMUsage | None = None,
     ) -> None:
         async def cleanup() -> None:
-            try:
-                committed = False
-                if claim_lost:
+            committed = False
+            cleanup_error: BaseException | None = None
+            effective_claim_lost = claim_lost
+            claim_cleanup_attempted = False
+
+            async def apply_claim_loss() -> None:
+                nonlocal committed, claim_cleanup_attempted, effective_claim_lost
+                if claim_cleanup_attempted:
+                    return
+                claim_cleanup_attempted = True
+                effective_claim_lost = True
+                try:
                     receipt = await self._revoke_claim(run, claim_loss_usage or empty_rlm_usage())
-                    # A racing commit wins: no fence and no settlement release
-                    # against a committed Run, but owned resources still close.
-                    committed = receipt is None
-                    if not committed and self._claim_loss_fence is not None:
+                except BaseException as exc:
+                    remember(exc)
+                    return
+                # A racing commit wins: no fence and no settlement release
+                # against a committed Run.
+                committed = receipt is None
+                if receipt is not None and self._claim_loss_fence is not None:
+                    try:
                         await self._claim_loss_fence(run.session_id)
+                    except BaseException as exc:
+                        remember(exc)
+
+            def remember(exc: BaseException) -> None:
+                nonlocal cleanup_error
+                if cleanup_error is None:
+                    cleanup_error = exc
+
+            try:
+                # Stop the heartbeat before the final durable transition. This
+                # closes the window in which claim loss can be observed after a
+                # local settlement decision but before complete_settling.
+                await _stop_heartbeat(heartbeat)
+                if heartbeat is not None:
+                    effective_claim_lost = effective_claim_lost or heartbeat.lost.is_set()
+                if effective_claim_lost:
+                    await apply_claim_loss()
                 if stream is not None:
-                    with contextlib.suppress(BaseException):
+                    try:
                         await stream.aclose()
-                    await stream.wait_owned()
+                    except BaseException as exc:
+                        remember(exc)
+                    try:
+                        await _wait_stream_owned(stream)
+                    except BaseException as exc:
+                        remember(exc)
                 if finalization_task is not None:
+                    # A timeout/cancellation revokes authority before this
+                    # task settles; its expected RunLifecycleUnavailableError
+                    # is not a child-ownership failure. Waiting for the task
+                    # is the ownership proof, regardless of its result.
                     with contextlib.suppress(BaseException):
-                        await asyncio.shield(finalization_task)
-                await prepared.aclose()
-                if not committed:
-                    await self._lifecycle.complete_settling(run)
+                        await _shield_cleanup(finalization_task)
+                try:
+                    await prepared.aclose()
+                except BaseException as exc:
+                    remember(exc)
+                if heartbeat is not None and heartbeat.lost.is_set() and not effective_claim_lost:
+                    await apply_claim_loss()
+                if cleanup_error is None and not committed:
+                    try:
+                        await self._lifecycle.complete_settling(run)
+                    except BaseException as exc:
+                        remember(exc)
             finally:
                 await _stop_heartbeat(heartbeat)
+            if cleanup_error is not None:
+                raise cleanup_error
 
-        self._cleanup.submit(cleanup())
+        cleanup_awaitable = cleanup()
+        try:
+            self._cleanup.submit(cleanup_awaitable)
+        except BaseException:
+            cleanup_awaitable.close()
+            raise
 
     @staticmethod
     def _trace_request(prepared: PreparedRun) -> str:

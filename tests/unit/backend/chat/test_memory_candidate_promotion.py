@@ -413,9 +413,11 @@ async def test_driver_settles_timed_out_and_cancelled_outcomes_without_memory_pr
     lifecycle = _DriverLifecycle()
     prepared = _DriverPrepared(spy, deadline=asyncio.get_running_loop().time() + 10)
     driver, cleanup = _streaming_driver(lifecycle, stream)
+    run = _turn()
 
-    events = [event async for event in driver.stream(_turn(), prepared, None, trace_id=None)]
+    events = [event async for event in driver.stream(run, prepared, None, trace_id=None)]
     await cleanup.shutdown(drain_seconds=1)
+    assert run.authority.revoked
 
     expected_detail = RunTimedOut if terminal == "timeout" else RunCancelled
     assert isinstance(events[-1].detail, expected_detail)

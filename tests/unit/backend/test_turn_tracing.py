@@ -568,6 +568,46 @@ def test_recursive_child_span_records_bounded_metadata(monkeypatch: pytest.Monke
     assert "child-ok" not in str(recursive_outputs)
 
 
+def test_recursive_batch_spans_finish_with_active_mlflow(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import time
+
+    import fleet_rlm.rlm.recursive_calls as recursive_calls
+    from fleet_rlm.rlm.model_bundle import RLMModelBundle
+    from fleet_rlm.rlm.recursive_calls import RecursiveRLMExecutor, RecursiveRLMOptions
+
+    class Child:
+        def __call__(self, _interpreter: object, *, prompt: str) -> dspy.Prediction:
+            del prompt
+            return dspy.Prediction(answer="child-ok", trajectory=[])
+
+    calls = _install_fake_mlflow(monkeypatch)
+    monkeypatch.setattr(recursive_calls, "build_native_rlm", lambda **_kwargs: Child())
+    adapter = dspy.JSONAdapter()
+    executor = RecursiveRLMExecutor(
+        models=RLMModelBundle(
+            dspy.utils.DummyLM(
+                [{"reasoning": "submit", "code": "SUBMIT(answer='child-ok')"}],
+                adapter=adapter,
+            ),
+            dspy.utils.DummyLM([{"answer": "fallback"}], adapter=adapter),
+        ),
+        options=RecursiveRLMOptions(max_calls=2, max_parallel_children=2),
+        child_runtime_factory=_in_process_child_runtime,
+        deadline=time.monotonic() + 30,
+    )
+
+    with turn_trace(uuid4(), uuid4(), enabled=True):
+        assert executor.batched_tool(prompts=["first", "second"]) == ["child-ok", "child-ok"]
+
+    assert calls.start_span_names[0] == "fleet_turn"
+    assert calls.start_span_names.count("RLM.recursive_call") == 2
+    recursive_outputs = [payload for payload in calls.span_outputs if payload.get("termination_mode")]
+    assert len(recursive_outputs) == 2
+    assert all(payload["phase_status"] == "completed" for payload in recursive_outputs)
+
+
 def test_recursive_child_span_marks_shutdown_failure(monkeypatch: pytest.MonkeyPatch) -> None:
     import time
 

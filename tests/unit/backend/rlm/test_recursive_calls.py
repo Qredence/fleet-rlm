@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import json
+import threading
 import time
 import urllib.request
 from collections.abc import Callable
+from concurrent.futures import Future
 
 import dspy
 import pytest
@@ -13,9 +15,15 @@ from fleet_rlm.chat.run_authority import RunAuthority
 from fleet_rlm.daytona.http_broker import DaytonaHttpToolBroker
 from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
 from fleet_rlm.daytona.recursive_child_runtime import ChildRuntimeLease
+from fleet_rlm.rlm.child_runtime import ChildRuntimeCleanupError
 from fleet_rlm.rlm.events import Status, ToolCompleted, ToolFailed, ToolStarted
 from fleet_rlm.rlm.model_bundle import RLMModelBundle
-from fleet_rlm.rlm.recursive_calls import RLM_NATIVE_CHILD_DEPTH, RecursiveRLMExecutor, RecursiveRLMOptions
+from fleet_rlm.rlm.recursive_calls import (
+    RLM_NATIVE_CHILD_DEPTH,
+    RecursiveBatchError,
+    RecursiveRLMExecutor,
+    RecursiveRLMOptions,
+)
 
 
 def _executor(
@@ -506,3 +514,342 @@ def test_recursive_child_receives_only_rlm_query_again(monkeypatch: pytest.Monke
     assert len(captured) == 1
     tools = tuple(str(tool.name) for tool in captured[0]["tools"])
     assert tools == ("rlm_query",)
+
+
+def test_recursive_batch_preserves_order_when_workers_finish_out_of_order(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import fleet_rlm.rlm.recursive_calls as recursive_calls
+
+    adapter = dspy.JSONAdapter()
+    root = dspy.utils.DummyLM([{"answer": "unused"}], adapter=adapter)
+    sub = dspy.utils.DummyLM([{"answer": "unused"}], adapter=adapter)
+    finish_order: list[str] = []
+    created: list[ChildRuntimeLease] = []
+    delays = {"A": 0.10, "B": 0.01, "C": 0.05}
+
+    class Child:
+        def __call__(self, _interpreter: object, *, prompt: str) -> dspy.Prediction:
+            time.sleep(delays[prompt])
+            finish_order.append(prompt)
+            return dspy.Prediction(answer=prompt, trajectory=[])
+
+    monkeypatch.setattr(recursive_calls, "build_native_rlm", lambda **_kwargs: Child())
+
+    def factory(call_index: int) -> ChildRuntimeLease:
+        interpreter = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())
+        lease = ChildRuntimeLease(
+            interpreter,
+            f"child-{call_index}",
+            "test-volume",
+            f"recursive/test-workspace/test-run/{call_index}",
+            interpreter.shutdown,
+        )
+        created.append(lease)
+        return lease
+
+    executor = RecursiveRLMExecutor(
+        models=RLMModelBundle(root, sub),
+        options=RecursiveRLMOptions(max_calls=3, max_parallel_children=3),
+        child_runtime_factory=factory,
+        deadline=time.monotonic() + 5,
+    )
+
+    assert executor.batched_tool(prompts=["A", "B", "C"]) == ["A", "B", "C"]
+    assert finish_order == ["B", "C", "A"]
+    assert all(lease.interpreter._shutdown for lease in created)
+    assert executor.summary().recursive_children_completed == 3
+
+
+def test_recursive_batch_wraps_failure_when_all_children_are_done(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import fleet_rlm.rlm.recursive_calls as recursive_calls
+
+    adapter = dspy.JSONAdapter()
+    root = dspy.utils.DummyLM([{"answer": "unused"}], adapter=adapter)
+    sub = dspy.utils.DummyLM([{"answer": "unused"}], adapter=adapter)
+    created: list[ChildRuntimeLease] = []
+
+    class Child:
+        def __call__(self, _interpreter: object, *, prompt: str) -> dspy.Prediction:
+            if prompt == "fail":
+                raise ValueError("provider failure")
+            return dspy.Prediction(answer="ok", trajectory=[])
+
+    monkeypatch.setattr(recursive_calls, "build_native_rlm", lambda **_kwargs: Child())
+    real_wait = recursive_calls.wait
+
+    def wait_for_all(futures, *, timeout=None, **_kwargs):
+        return real_wait(futures, timeout=timeout)
+
+    monkeypatch.setattr(recursive_calls, "wait", wait_for_all)
+
+    def factory(call_index: int) -> ChildRuntimeLease:
+        interpreter = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())
+        lease = ChildRuntimeLease(
+            interpreter,
+            f"child-{call_index}",
+            "test-volume",
+            f"recursive/test-workspace/test-run/{call_index}",
+            interpreter.shutdown,
+        )
+        created.append(lease)
+        return lease
+
+    executor = RecursiveRLMExecutor(
+        models=RLMModelBundle(root, sub),
+        options=RecursiveRLMOptions(max_calls=2, max_parallel_children=2),
+        child_runtime_factory=factory,
+        deadline=time.monotonic() + 5,
+    )
+
+    with pytest.raises(RecursiveBatchError) as raised:
+        executor.batched_tool(prompts=["fail", "ok"])
+    assert isinstance(raised.value.__cause__, ValueError)
+    executor.wait_owned()
+    assert all(lease.interpreter._shutdown for lease in created)
+    assert executor.summary().recursive_children_completed == 2
+
+
+def test_recursive_batch_failure_returns_before_running_sibling_and_cleanup_waits(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import fleet_rlm.rlm.recursive_calls as recursive_calls
+
+    adapter = dspy.JSONAdapter()
+    root = dspy.utils.DummyLM([{"answer": "unused"}], adapter=adapter)
+    sub = dspy.utils.DummyLM([{"answer": "unused"}], adapter=adapter)
+    a_started = threading.Event()
+    b_started = threading.Event()
+    release_b = threading.Event()
+    created: list[ChildRuntimeLease] = []
+
+    class Child:
+        def __call__(self, _interpreter: object, *, prompt: str) -> dspy.Prediction:
+            if prompt == "A":
+                a_started.set()
+                assert b_started.wait(1)
+                raise ValueError("A failed")
+            b_started.set()
+            release_b.wait(2)
+            return dspy.Prediction(answer="B", trajectory=[])
+
+    monkeypatch.setattr(recursive_calls, "build_native_rlm", lambda **_kwargs: Child())
+
+    def factory(call_index: int) -> ChildRuntimeLease:
+        interpreter = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())
+        lease = ChildRuntimeLease(
+            interpreter,
+            f"child-{call_index}",
+            "test-volume",
+            f"recursive/test-workspace/test-run/{call_index}",
+            interpreter.shutdown,
+        )
+        created.append(lease)
+        return lease
+
+    executor = RecursiveRLMExecutor(
+        models=RLMModelBundle(root, sub),
+        options=RecursiveRLMOptions(max_calls=2, max_parallel_children=2),
+        child_runtime_factory=factory,
+        deadline=time.monotonic() + 5,
+    )
+    result: dict[str, BaseException] = {}
+
+    def run_batch() -> None:
+        try:
+            executor.batched_tool(prompts=["A", "B"])
+        except BaseException as exc:
+            result["error"] = exc
+
+    worker = threading.Thread(target=run_batch)
+    worker.start()
+    assert a_started.wait(1)
+    assert b_started.wait(1)
+    worker.join(1)
+    assert not worker.is_alive()
+    assert isinstance(result.get("error"), RecursiveBatchError)
+    assert any(not lease.interpreter._shutdown for lease in created)
+    with pytest.raises(RuntimeError, match="cleanup is still pending"):
+        executor.raise_if_cleanup_failed()
+
+    release_b.set()
+    executor.wait_owned()
+    assert all(lease.interpreter._shutdown for lease in created)
+    executor.raise_if_cleanup_failed()
+
+
+def test_recursive_batch_submit_failure_retains_already_submitted_worker(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import fleet_rlm.rlm.recursive_calls as recursive_calls
+
+    release = threading.Event()
+    started = threading.Event()
+    closed = threading.Event()
+    real_pool = recursive_calls.ThreadPoolExecutor(max_workers=1)
+
+    class FailingPool:
+        submits = 0
+
+        def submit(self, *args: object, **kwargs: object):
+            self.submits += 1
+            if self.submits == 1:
+                future = real_pool.submit(*args, **kwargs)
+                assert started.wait(1)
+                return future
+            raise RuntimeError("child worker submit failed")
+
+        def shutdown(self, *, wait: bool, cancel_futures: bool) -> None:
+            real_pool.shutdown(wait=wait, cancel_futures=cancel_futures)
+
+    monkeypatch.setattr(recursive_calls, "ThreadPoolExecutor", lambda **_kwargs: FailingPool())
+
+    class BlockingChild:
+        def __call__(self, _interpreter: object, *, prompt: str) -> dspy.Prediction:
+            del prompt
+            started.set()
+            release.wait(2)
+            return dspy.Prediction(answer="late", trajectory=[])
+
+    monkeypatch.setattr(recursive_calls, "build_native_rlm", lambda **_kwargs: BlockingChild())
+
+    def factory(call_index: int) -> ChildRuntimeLease:
+        interpreter = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())
+
+        def close() -> None:
+            interpreter.shutdown()
+            closed.set()
+
+        return ChildRuntimeLease(
+            interpreter,
+            f"submit-child-{call_index}",
+            "test-volume",
+            f"recursive/test-workspace/test-run/{call_index}",
+            close,
+        )
+
+    adapter = dspy.JSONAdapter()
+    executor = RecursiveRLMExecutor(
+        models=RLMModelBundle(
+            dspy.utils.DummyLM([{"answer": "unused"}], adapter=adapter),
+            dspy.utils.DummyLM([{"answer": "unused"}], adapter=adapter),
+        ),
+        options=RecursiveRLMOptions(max_calls=2, max_parallel_children=1),
+        child_runtime_factory=factory,
+        deadline=time.monotonic() + 10,
+    )
+
+    try:
+        with pytest.raises(RuntimeError, match="submit failed"):
+            executor.batched_tool(prompts=["first", "second"])
+        assert started.wait(1)
+        assert not closed.is_set()
+    finally:
+        release.set()
+        executor.wait_owned()
+
+    assert closed.is_set()
+
+
+def test_executor_wait_owned_times_out_when_child_worker_never_completes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import fleet_rlm.rlm.recursive_calls as recursive_calls
+
+    adapter = dspy.JSONAdapter()
+    executor = RecursiveRLMExecutor(
+        models=RLMModelBundle(
+            dspy.utils.DummyLM([{"answer": "unused"}], adapter=adapter),
+            dspy.utils.DummyLM([{"answer": "unused"}], adapter=adapter),
+        ),
+        options=RecursiveRLMOptions(max_calls=1, max_parallel_children=1),
+        child_runtime_factory=lambda call_index: ChildRuntimeLease(
+            DaytonaCodeInterpreter(backend=InProcessInterpreterBackend()),
+            f"child-{call_index}",
+            "test-volume",
+            f"recursive/test-workspace/test-run/{call_index}",
+            lambda: None,
+        ),
+        deadline=time.monotonic() + 10,
+    )
+    never_done: Future[str] = Future()
+    executor._retain_pending_batch_futures({never_done})
+    monkeypatch.setattr(recursive_calls, "_PENDING_BATCH_WAIT_TIMEOUT_S", 0.05)
+
+    started = time.monotonic()
+    with pytest.raises(ChildRuntimeCleanupError, match="recursive child cleanup failed"):
+        executor.wait_owned()
+    assert time.monotonic() - started < 2
+
+
+def test_recursive_batch_cancels_queued_children_before_they_acquire_a_lease(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import fleet_rlm.rlm.recursive_calls as recursive_calls
+
+    adapter = dspy.JSONAdapter()
+    root = dspy.utils.DummyLM([{"answer": "unused"}], adapter=adapter)
+    sub = dspy.utils.DummyLM([{"answer": "unused"}], adapter=adapter)
+    started = threading.Event()
+    release = threading.Event()
+    call_indexes: list[int] = []
+    created: list[ChildRuntimeLease] = []
+
+    class BlockingChild:
+        def __call__(self, _interpreter: object, *, prompt: str) -> dspy.Prediction:
+            del prompt
+            started.set()
+            release.wait(2)
+            return dspy.Prediction(answer="late", trajectory=[])
+
+    monkeypatch.setattr(recursive_calls, "build_native_rlm", lambda **_kwargs: BlockingChild())
+    real_wait = recursive_calls.wait
+
+    def early_wait(futures, *, timeout=None, return_when=None):
+        bounded = 0.05 if timeout is None else min(timeout, 0.05)
+        if return_when is None:
+            return real_wait(futures, timeout=bounded)
+        return real_wait(futures, timeout=bounded, return_when=return_when)
+
+    monkeypatch.setattr(recursive_calls, "wait", early_wait)
+
+    def factory(call_index: int) -> ChildRuntimeLease:
+        call_indexes.append(call_index)
+        interpreter = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())
+        lease = ChildRuntimeLease(
+            interpreter,
+            f"child-{call_index}",
+            "test-volume",
+            f"recursive/test-workspace/test-run/{call_index}",
+            interpreter.shutdown,
+        )
+        created.append(lease)
+        return lease
+
+    executor = RecursiveRLMExecutor(
+        models=RLMModelBundle(root, sub),
+        options=RecursiveRLMOptions(max_calls=3, max_parallel_children=1),
+        child_runtime_factory=factory,
+        deadline=time.monotonic() + 1,
+    )
+
+    try:
+        with pytest.raises(TimeoutError, match="batch deadline exceeded"):
+            executor.batched_tool(prompts=["A", "B", "C"])
+        assert started.wait(1)
+        assert call_indexes == [1]
+        assert len(created) == 1
+        with pytest.raises(RuntimeError, match="cleanup is still pending"):
+            executor.raise_if_cleanup_failed()
+        with pytest.raises(ChildRuntimeCleanupError, match="cleanup is still pending"):
+            executor.tool(prompt="retry")
+    finally:
+        release.set()
+        executor.wait_owned()
+
+    assert all(lease.interpreter._shutdown for lease in created)
+    assert executor.summary().call_count == 3
+    assert executor.summary().recursive_children_started == 1
+    assert executor.summary().recursive_children_completed == 1

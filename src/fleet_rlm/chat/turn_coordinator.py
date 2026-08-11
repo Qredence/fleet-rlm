@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable
-from typing import Self
+from typing import Any, Self
 from uuid import UUID
 
 from fleet_rlm.chat.commands import OpenTurnCommand
@@ -16,6 +17,7 @@ from fleet_rlm.chat.run_execution import (
     RunExecutionDriver,
     RunRunner,
     _ClaimHeartbeat,
+    _consume_task_exception,
     _shield_cleanup,
     _stop_heartbeat,
     _terminal,  # noqa: F401 - compatibility export
@@ -43,6 +45,29 @@ from fleet_rlm.rlm.dspy_contract import empty_rlm_usage
 from fleet_rlm.rlm.events import EventRecorder, RunCompleted, RunStarted, RuntimeEvent, Status
 
 logger = logging.getLogger(__name__)
+
+_PREPARATION_CLEANUP_TIMEOUT_S = 1.0
+
+
+async def _wait_late_preparation_task(task: asyncio.Task[Any]) -> None:
+    with contextlib.suppress(BaseException):
+        await task
+
+
+async def _shield_cleanup_result(awaitable: Awaitable[Any]) -> Any:
+    task = asyncio.ensure_future(awaitable)
+    cancelled = False
+    while not task.done():
+        try:
+            await asyncio.shield(task)
+        except asyncio.CancelledError:
+            cancelled = True
+    if task.cancelled():
+        raise asyncio.CancelledError
+    result = task.result()
+    if cancelled:
+        raise asyncio.CancelledError
+    return result
 
 
 class OpenedTurnStream:
@@ -150,6 +175,88 @@ class TurnCoordinator:
             return OpenedTurnStream(start.run_id, self._replay(start))
 
         heartbeat = self._start_heartbeat(start)
+        preparation_task: asyncio.Task[PreparedRun] | None = None
+        heartbeat_lost: asyncio.Task[bool] | None = None
+        preparation_quarantine: set[asyncio.Task[Any]] = set()
+        preparation_cleanup_error: BaseException | None = None
+
+        def record_preparation_cleanup_error(exc: BaseException) -> None:
+            nonlocal preparation_cleanup_error
+            if preparation_cleanup_error is None:
+                preparation_cleanup_error = exc
+
+        def claim_lost() -> bool:
+            return heartbeat is not None and (heartbeat.lost.is_set() or start.authority.revoked)
+
+        async def drain_late_preparation(task: asyncio.Task[PreparedRun]) -> None:
+            try:
+                late_prepared = await task
+            except BaseException:
+                return
+            try:
+                await _shield_cleanup(late_prepared.aclose())
+            except BaseException as exc:
+                record_preparation_cleanup_error(exc)
+                logger.exception("late Turn preparation cleanup failed", extra={"run_id": str(start.run_id)})
+
+        def retain_preparation_quarantine(task: asyncio.Task[Any]) -> None:
+            preparation_quarantine.add(task)
+            task.add_done_callback(preparation_quarantine.discard)
+
+        async def cancel_preparation_tasks() -> bool:
+            for task in (preparation_task, heartbeat_lost):
+                if task is not None and not task.done():
+                    task.cancel()
+            tasks = tuple(task for task in (preparation_task, heartbeat_lost) if task is not None)
+            if not tasks:
+                return False
+            done, pending = await asyncio.wait(tasks, timeout=_PREPARATION_CLEANUP_TIMEOUT_S)
+            if preparation_task is not None and preparation_task in pending:
+                quarantine = asyncio.create_task(
+                    drain_late_preparation(preparation_task),
+                    name="fleet-late-preparation-cleanup",
+                )
+                retain_preparation_quarantine(quarantine)
+            if heartbeat_lost is not None and heartbeat_lost in pending:
+                quarantine = asyncio.create_task(
+                    _wait_late_preparation_task(heartbeat_lost),
+                    name="fleet-late-heartbeat-cleanup",
+                )
+                retain_preparation_quarantine(quarantine)
+            if preparation_task is not None and preparation_task in done and not preparation_task.cancelled():
+                try:
+                    late_prepared = preparation_task.result()
+                except BaseException:
+                    pass
+                else:
+                    try:
+                        await _shield_cleanup(late_prepared.aclose())
+                    except BaseException as exc:
+                        record_preparation_cleanup_error(exc)
+                        logger.exception("late Turn preparation cleanup failed", extra={"run_id": str(start.run_id)})
+            return bool(pending) or preparation_cleanup_error is not None
+
+        async def drain_preparation_quarantine() -> None:
+            quarantine_tasks = tuple(preparation_quarantine)
+            if quarantine_tasks:
+                results = await asyncio.gather(*quarantine_tasks, return_exceptions=True)
+                for result in results:
+                    if isinstance(result, BaseException):
+                        record_preparation_cleanup_error(result)
+            if preparation_cleanup_error is not None:
+                raise RuntimeError("late Turn preparation cleanup failed") from preparation_cleanup_error
+
+        async def drain_preparation_and_complete_settling() -> None:
+            await drain_preparation_quarantine()
+            await self._lifecycle.complete_settling(start)
+
+        async def handoff_preparation_cleanup() -> None:
+            cleanup = drain_preparation_and_complete_settling()
+            try:
+                self._cleanup.submit(cleanup)
+            except BaseException:
+                cleanup.close()
+                await _shield_cleanup(drain_preparation_and_complete_settling())
 
         try:
             preparation = self._prepare_with_trace(start, deadline=deadline)
@@ -164,49 +271,97 @@ class TurnCoordinator:
                 assert heartbeat is not None
                 if not heartbeat.lost.is_set():
                     raise AssertionError("heartbeat loss waiter completed without claim loss")
-                preparation_task.cancel()
-                await asyncio.gather(preparation_task, return_exceptions=True)
-                self._submit_claim_loss_cleanup(start, heartbeat)
-                raise RunLifecycleUnavailableError("Turn claim is no longer available")
+                start.authority.revoke()
+                preparation_pending = await _shield_cleanup_result(cancel_preparation_tasks())
+                await self._submit_claim_loss_cleanup_or_drain(
+                    start,
+                    heartbeat,
+                    preparation_cleanup=drain_preparation_quarantine if preparation_pending else None,
+                )
+                raise RunLifecycleUnavailableError("Turn claim is no longer available") from None
             prepared = preparation_task.result()
             if heartbeat_lost is not None:
                 heartbeat_lost.cancel()
                 await asyncio.gather(heartbeat_lost, return_exceptions=True)
-        except RunPreparationCancelledError:
-            await _stop_heartbeat(heartbeat)
-            await _shield_cleanup(
-                self._lifecycle.finish(
+        except (RunPreparationCancelledError, asyncio.CancelledError):
+            claim_was_lost = heartbeat is not None and (heartbeat.lost.is_set() or start.authority.revoked)
+            preparation_pending = await _shield_cleanup_result(cancel_preparation_tasks())
+            claim_was_lost = claim_was_lost or (heartbeat is not None and heartbeat.lost.is_set())
+            if claim_was_lost:
+                assert heartbeat is not None
+                await self._submit_claim_loss_cleanup_or_drain(
                     start,
-                    RunFailure("cancelled", "cancelled", "Turn cancelled", empty_rlm_usage()),
+                    heartbeat,
+                    preparation_cleanup=drain_preparation_quarantine if preparation_pending else None,
                 )
-            )
+                raise RunLifecycleUnavailableError("Turn claim is no longer available") from None
+            await _stop_heartbeat(heartbeat)
+            failure = RunFailure("cancelled", "cancelled", "Turn cancelled", empty_rlm_usage())
+            if preparation_pending:
+                start.authority.revoke()
+                try:
+                    await _shield_cleanup(self._lifecycle.settle(start, failure))
+                finally:
+                    await _shield_cleanup(handoff_preparation_cleanup())
+            else:
+                try:
+                    await _shield_cleanup(self._lifecycle.finish(start, failure))
+                finally:
+                    start.authority.revoke()
             raise
         except (RunPreparationTimeoutError, TimeoutError) as exc:
-            await _stop_heartbeat(heartbeat)
-            await _shield_cleanup(
-                self._lifecycle.finish(
+            claim_was_lost = heartbeat is not None and (heartbeat.lost.is_set() or start.authority.revoked)
+            preparation_pending = await _shield_cleanup_result(cancel_preparation_tasks())
+            claim_was_lost = claim_was_lost or (heartbeat is not None and heartbeat.lost.is_set())
+            if claim_was_lost:
+                assert heartbeat is not None
+                await self._submit_claim_loss_cleanup_or_drain(
                     start,
-                    RunFailure("timeout", "timeout", "Turn preparation timed out", empty_rlm_usage()),
+                    heartbeat,
+                    preparation_cleanup=drain_preparation_quarantine if preparation_pending else None,
                 )
-            )
+                raise RunLifecycleUnavailableError("Turn claim is no longer available") from None
+            await _stop_heartbeat(heartbeat)
+            failure = RunFailure("timeout", "timeout", "Turn preparation timed out", empty_rlm_usage())
+            if preparation_pending:
+                start.authority.revoke()
+                try:
+                    await _shield_cleanup(self._lifecycle.settle(start, failure))
+                finally:
+                    await _shield_cleanup(handoff_preparation_cleanup())
+            else:
+                try:
+                    await _shield_cleanup(self._lifecycle.finish(start, failure))
+                finally:
+                    start.authority.revoke()
             if isinstance(exc, RunPreparationTimeoutError):
                 raise
             raise RunPreparationTimeoutError("Turn preparation timed out") from None
         except Exception:
-            if start.authority.revoked:
-                raise
-            await _stop_heartbeat(heartbeat)
-            await _shield_cleanup(
-                self._lifecycle.finish(
+            preparation_pending = await _shield_cleanup_result(cancel_preparation_tasks())
+            if claim_lost():
+                assert heartbeat is not None
+                await self._submit_claim_loss_cleanup_or_drain(
                     start,
-                    RunFailure(
-                        "failed",
-                        "preparation_failed",
-                        "Turn could not be prepared",
-                        empty_rlm_usage(),
-                    ),
+                    heartbeat,
+                    preparation_cleanup=drain_preparation_quarantine if preparation_pending else None,
                 )
+                raise RunLifecycleUnavailableError("Turn claim is no longer available") from None
+            await _stop_heartbeat(heartbeat)
+            failure = RunFailure(
+                "failed",
+                "preparation_failed",
+                "Turn could not be prepared",
+                empty_rlm_usage(),
             )
+            if preparation_pending:
+                start.authority.revoke()
+                try:
+                    await _shield_cleanup(self._lifecycle.settle(start, failure))
+                finally:
+                    await _shield_cleanup(handoff_preparation_cleanup())
+            else:
+                await _shield_cleanup(self._lifecycle.finish(start, failure))
             raise
         return OpenedTurnStream(start.run_id, self._execute(start, prepared, heartbeat))
 
@@ -275,22 +430,55 @@ class TurnCoordinator:
 
         return _ClaimHeartbeat(asyncio.create_task(maintain_claim(), name="fleet-turn-heartbeat"), lost)
 
-    def _submit_claim_loss_cleanup(self, run: ClaimedRun, heartbeat: _ClaimHeartbeat) -> None:
-        async def cleanup() -> None:
+    async def _claim_loss_cleanup(
+        self,
+        run: ClaimedRun,
+        heartbeat: _ClaimHeartbeat,
+        preparation_cleanup: Callable[[], Awaitable[None]] | None = None,
+    ) -> None:
+        receipt: FailedRunReceipt | None = None
+        try:
+            await _stop_heartbeat(heartbeat)
             try:
                 receipt = await self._revoke_claim(run, empty_rlm_usage())
-                if receipt is None:
-                    # The Run committed before the revocation attempt: the
-                    # commit owns the terminal state, so there is nothing to
-                    # fence or release.
-                    return
-                if self._claim_loss_fence is not None:
+                if receipt is not None and self._claim_loss_fence is not None:
                     await self._claim_loss_fence(run.session_id)
-                await self._lifecycle.complete_settling(run)
             finally:
-                await _stop_heartbeat(heartbeat)
+                if preparation_cleanup is not None:
+                    await preparation_cleanup()
+            if receipt is None:
+                # The Run committed before the revocation attempt: the
+                # commit owns the terminal state, so there is nothing to
+                # fence or release.
+                return
+            await self._lifecycle.complete_settling(run)
+        finally:
+            await _stop_heartbeat(heartbeat)
 
-        self._cleanup.submit(cleanup())
+    def _submit_claim_loss_cleanup(self, run: ClaimedRun, heartbeat: _ClaimHeartbeat) -> None:
+        """Submit claim-loss cleanup for compatibility with synchronous callers."""
+        cleanup_awaitable = self._claim_loss_cleanup(run, heartbeat)
+        try:
+            self._cleanup.submit(cleanup_awaitable)
+        except BaseException:
+            cleanup_awaitable.close()
+            task = asyncio.create_task(self._claim_loss_cleanup(run, heartbeat), name="fleet-claim-loss-cleanup")
+            task.add_done_callback(_consume_task_exception)
+
+    async def _submit_claim_loss_cleanup_or_drain(
+        self,
+        run: ClaimedRun,
+        heartbeat: _ClaimHeartbeat,
+        *,
+        preparation_cleanup: Callable[[], Awaitable[None]] | None = None,
+    ) -> None:
+        cleanup_awaitable = self._claim_loss_cleanup(run, heartbeat, preparation_cleanup)
+        try:
+            self._cleanup.submit(cleanup_awaitable)
+        except BaseException:
+            cleanup_awaitable.close()
+            with contextlib.suppress(BaseException):
+                await _shield_cleanup(self._claim_loss_cleanup(run, heartbeat, preparation_cleanup))
 
     async def _revoke_claim(self, run: ClaimedRun, usage) -> FailedRunReceipt | None:
         """Revoke the durable claim, or return None when the Run already committed.

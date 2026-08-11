@@ -90,7 +90,9 @@ class _CleanupLifecycle:
         self.settle_calls += 1
         from fleet_rlm.chat.run_lifecycle import FailedRunReceipt
 
-        return FailedRunReceipt(uuid4(), "cancelled", "cancelled", "Turn cancelled", True)
+        status = self.outcome.terminal_status
+        message = "Turn cancelled" if status == "cancelled" else "Turn timed out"
+        return FailedRunReceipt(uuid4(), status, status, message, True)
 
     async def revoke_claim(self, turn, failure):
         del turn, failure
@@ -196,6 +198,94 @@ async def test_disconnect_cancels_provider_wait_and_orders_detached_cleanup() ->
     assert order == ["stream_closed", "worker_stopped"]
     assert prepared.closed.is_set()
     assert lifecycle.complete_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_finalization_failure_after_claim_loss_routes_to_claim_loss_cleanup() -> None:
+    from fleet_rlm.chat.run_cleanup import RunCleanupSupervisor
+    from fleet_rlm.chat.run_execution import _ClaimLost
+
+    lifecycle = _CleanupLifecycle(outcome=None)
+    driver = _driver(lifecycle, object(), RunCleanupSupervisor())
+    claim_lost = asyncio.Event()
+    claim_lost.set()
+    claim_waiter = asyncio.create_task(claim_lost.wait())
+
+    async def fail_finalization() -> None:
+        raise RuntimeError("authority revoked")
+
+    finalization = asyncio.create_task(fail_finalization())
+    await asyncio.sleep(0)
+    result = await driver._wait_for_finalization(
+        finalization,
+        claim_waiter,
+        remaining=1,
+        is_authority_revoked=lambda: True,
+    )
+    claim_waiter.cancel()
+    await asyncio.gather(claim_waiter, return_exceptions=True)
+
+    assert isinstance(result, _ClaimLost)
+
+
+@pytest.mark.asyncio
+async def test_normal_failure_waits_for_recursive_ownership_before_prepared_close() -> None:
+    from fleet_rlm.chat.run_cleanup import RunCleanupSupervisor
+    from fleet_rlm.rlm.outcome import RLMOutcome
+
+    lifecycle = _CleanupLifecycle(outcome=RLMOutcome("failed", public_error_message="Turn failed"))
+    release = asyncio.Event()
+    ownership_started = asyncio.Event()
+
+    class BlockingOwnedStream(_Stream):
+        async def wait_owned(self) -> None:
+            ownership_started.set()
+            await release.wait()
+
+    stream = BlockingOwnedStream(outcome=lifecycle.outcome, blocking=False)
+    prepared = _Prepared(deadline=asyncio.get_running_loop().time() + 10)
+    runner = type("Runner", (), {"stream": lambda _self, _execution: stream})()
+    cleanup = RunCleanupSupervisor()
+    turn = _turn()
+    task = asyncio.create_task(_collect(_driver(lifecycle, runner, cleanup), turn, prepared, None))
+
+    await ownership_started.wait()
+    assert not task.done()
+    assert not prepared.closed.is_set()
+
+    release.set()
+    await task
+    await cleanup.shutdown(drain_seconds=1)
+    assert prepared.closed.is_set()
+
+
+@pytest.mark.asyncio
+async def test_cleanup_capacity_fallback_settles_after_owned_stream_drains() -> None:
+    from fleet_rlm.chat.run_cleanup import RunCleanupSupervisor
+    from fleet_rlm.rlm.outcome import RLMOutcome
+
+    lifecycle = _CleanupLifecycle(outcome=RLMOutcome("timeout", public_error_message="Turn timed out"))
+    stream = _Stream(outcome=lifecycle.outcome, blocking=False)
+    cleanup = RunCleanupSupervisor(max_jobs=1)
+    release_blocker = asyncio.Event()
+
+    async def blocker() -> None:
+        await release_blocker.wait()
+
+    cleanup.submit(blocker())
+    turn = _turn()
+    prepared = _Prepared(deadline=asyncio.get_running_loop().time() + 10)
+    runner = type("Runner", (), {"stream": lambda _self, _execution: stream})()
+    events = await _collect(_driver(lifecycle, runner, cleanup), turn, prepared, None)
+
+    assert events[-1].detail.__class__.__name__ == "RunTimedOut"
+    assert turn.authority.revoked
+    assert prepared.closed.is_set()
+    assert lifecycle.settle_calls == 1
+    assert lifecycle.complete_calls == 1
+
+    release_blocker.set()
+    await cleanup.shutdown(drain_seconds=1)
 
 
 async def _collect(driver, turn, prepared, heartbeat):

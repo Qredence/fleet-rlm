@@ -131,21 +131,47 @@ class RLMFactoryLike(Protocol):
 class _WorkerOwnership:
     def __init__(self) -> None:
         self.task: asyncio.Task[Any] | None = None
+        self._blocking_waiters: list[Callable[[], None]] = []
+
+    def add_blocking_waiter(self, waiter: Callable[[], None]) -> None:
+        """Register synchronous resource ownership that outlives the RLM task."""
+        self._blocking_waiters.append(waiter)
 
     async def wait(self) -> None:
         task = self.task
-        if task is None:
-            return
-        while not task.done():
-            try:
-                await asyncio.shield(task)
-            except asyncio.CancelledError:
-                continue
-            except BaseException:
-                break
-        if task.done() and not task.cancelled():
-            with contextlib.suppress(BaseException):
-                task.exception()
+        if task is not None:
+            while not task.done():
+                try:
+                    await asyncio.shield(task)
+                except asyncio.CancelledError:
+                    continue
+                except BaseException:
+                    break
+            if task.done() and not task.cancelled():
+                with contextlib.suppress(BaseException):
+                    task.exception()
+
+        # Recursive batch workers run in a separate ThreadPoolExecutor.  A
+        # Root task can finish after a batch has failed while those workers
+        # still own child leases, so wait for each ownership callback off the
+        # event loop before Run resources are released.
+        waiter_errors: list[BaseException] = []
+        for waiter in tuple(self._blocking_waiters):
+            owned = asyncio.create_task(asyncio.to_thread(waiter))
+            while not owned.done():
+                try:
+                    await asyncio.shield(owned)
+                except asyncio.CancelledError:
+                    continue
+                except BaseException:
+                    break
+            if owned.done() and not owned.cancelled():
+                try:
+                    owned.result()
+                except BaseException as exc:
+                    waiter_errors.append(exc)
+        if waiter_errors:
+            raise waiter_errors[0]
 
 
 class RunEventStream:
@@ -664,8 +690,10 @@ class RLMRunner:
         async for event in self._initial_events(context, observations):
             yield event
         spec = context.capabilities.spec
-        spec, relay, guards, task = self._start_worker(context)
+        spec, relay, guards, task, recursive_executor = self._start_worker(context)
         ownership.task = task
+        if recursive_executor is not None:
+            ownership.add_blocking_waiter(recursive_executor.wait_owned)
         monitor = _WorkerMonitor(task, relay, context, lambda: self._drain_capability_details(context))
         async for event in self._worker_events(context, observations, relay, monitor):
             yield event
@@ -710,7 +738,7 @@ class RLMRunner:
 
     def _start_worker(
         self, context: RLMExecutionContext
-    ) -> tuple[RLMExecutionSpec, _DetailRelay, RunToolGuards, asyncio.Task[Any]]:
+    ) -> tuple[RLMExecutionSpec, _DetailRelay, RunToolGuards, asyncio.Task[Any], RecursiveRLMExecutor | None]:
         """
         Prepare the RLM worker and supporting execution state for a turn.
 
@@ -788,6 +816,7 @@ class RLMRunner:
             relay,
             guards,
             asyncio.create_task(self._execute_rlm_in_worker(rlm, context, spec, recursive_executor, relay)),
+            recursive_executor,
         )
 
     async def _worker_events(

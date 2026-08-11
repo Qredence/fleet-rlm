@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+import threading
 import time
 from uuid import uuid4
 
@@ -361,3 +363,96 @@ async def test_failed_child_cleanup_prevents_successful_root_outcome() -> None:
 
     assert stream.outcome is not None
     assert stream.outcome.terminal_status == "failed"
+
+
+@pytest.mark.asyncio
+async def test_runner_wait_owned_retains_pending_recursive_workers_until_child_lease_closes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A failed Root batch must not release Run resources before its sibling settles."""
+    adapter = dspy.JSONAdapter()
+    root = dspy.utils.DummyLM(
+        [
+            {"reasoning": "batch", "code": "answers = rlm_query_batched(prompts=['blocked'])"},
+            {"reasoning": "submit", "code": "SUBMIT(answer='root')"},
+        ],
+        adapter=adapter,
+    )
+    sub = dspy.utils.DummyLM([{"answer": "unused"}], adapter=adapter)
+    child_started = threading.Event()
+    release_child = threading.Event()
+    child_closed = threading.Event()
+
+    class BlockingChild:
+        def __call__(self, _interpreter: object, *, prompt: str) -> dspy.Prediction:
+            del prompt
+            child_started.set()
+            release_child.wait(2)
+            return dspy.Prediction(answer="late", trajectory=[])
+
+    import fleet_rlm.rlm.recursive_calls as recursive_calls
+
+    monkeypatch.setattr(recursive_calls, "build_native_rlm", lambda **_kwargs: BlockingChild())
+
+    def child_factory(call_index: int) -> ChildRuntimeLease:
+        interpreter = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())
+
+        def close() -> None:
+            interpreter.shutdown()
+            child_closed.set()
+
+        return ChildRuntimeLease(
+            interpreter,
+            f"child-{call_index}",
+            "test-volume",
+            f"recursive/test-workspace/test-run/{call_index}",
+            close,
+        )
+
+    class Capabilities:
+        spec = RLMExecutionSpec()
+
+        def drain_public_details(self):
+            return ()
+
+        def drain_artifact_candidates(self):
+            return ()
+
+    async def not_cancelled() -> bool:
+        return False
+
+    context = RLMExecutionContext(
+        identity=RunIdentity(run_id=uuid4(), session_id=uuid4(), access=TurnAccess(uuid4(), uuid4())),
+        session=SessionView(
+            request="answer",
+            session_context=SessionContextManifest(uuid4(), 0, 0, ()),
+            attachments=(),
+        ),
+        execution=ExecutionRuntime(
+            models=RLMModelBundle(root, sub),
+            options=RLMOptions(max_iterations=4, max_llm_calls=4),
+            deadline=time.monotonic() + 0.15,
+            interpreter=DaytonaCodeInterpreter(backend=InProcessInterpreterBackend()),
+            cancellation_requested=not_cancelled,
+        ),
+        delegation=DelegationPolicy(
+            recursive_options=RecursiveRLMOptions(enabled=True, max_calls=1),
+            child_runtime_factory=child_factory,
+        ),
+        capabilities=Capabilities(),
+    )
+
+    stream = RLMRunner().stream(context)
+    _events = [event async for event in stream]
+
+    assert stream.outcome is not None
+    assert stream.outcome.terminal_status == "timeout"
+    assert child_started.wait(1)
+    owned = asyncio.create_task(stream.wait_owned())
+    await asyncio.sleep(0.05)
+    assert not owned.done()
+    assert not child_closed.is_set()
+
+    release_child.set()
+    await asyncio.wait_for(owned, timeout=2)
+    assert child_closed.is_set()
