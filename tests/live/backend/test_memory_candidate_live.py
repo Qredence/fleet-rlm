@@ -9,7 +9,6 @@ import json
 import os
 import subprocess
 import sys
-from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
@@ -40,48 +39,6 @@ pytestmark = [pytest.mark.live_daytona, pytest.mark.timeout(1200)]
 _RECEIPT_SCHEMA = "fleet.qre140-memory-candidate-proof/v1"
 _EVIDENCE_ENV = "FLEET_LIVE_EVIDENCE_PATH"
 _PROBE_LEARNING = "operator prefers certified receipts under .scratch/p15 (probe ZEPHYR-4582)"
-_PROPOSE_SCENARIO = f"""
-ONLY this exact sequence is permitted, one step per iteration. Use exactly 2 iterations.
-The exact category string is "operator preference": never "preference", "preferences",
-"workflow", "project", "general", or any other value. Do not inspect scenario wording,
-improvise, retry, or call llm_query/rlm_query.
-Iteration 1: the code cell must contain ONLY this call and its print; SUBMIT is strictly
-FORBIDDEN in iteration 1 and must never share a code cell with propose_memory:
-proposal = propose_memory(key_learning={_PROBE_LEARNING!r}, category="operator preference").
-Require proposal["ok"] is True, then print("PROPOSAL_READY").
-Iteration 2: read the iteration-1 observation, set a non-empty summary sentence, and the code
-cell must contain ONLY the single call SUBMIT(answer=summary) with keywords. No fallback,
-no other tools, never more than one SUBMIT across the entire run.
-""".strip()
-_VERIFY_SCENARIO = """
-ONLY this exact sequence is permitted, one step per iteration. Use exactly 2 iterations;
-do not retry or call llm_query/rlm_query. propose_memory is FORBIDDEN in this Turn:
-the candidate was already proposed and promoted before this Turn started.
-Iteration 1: the code cell must contain ONLY this call and its prints; SUBMIT is strictly
-FORBIDDEN in iteration 1 and must never share a code cell with search_memories:
-result = search_memories(query="ZEPHYR-4582 certified receipts", limit=8).
-Require result["ok"] and result["count"] >= 1. From result["entries"][0] read its "id",
-"source", and "category". Require source == "agent_candidate", then print("SEARCH_READY").
-Iteration 2: read the iteration-1 observation and set one short sentence that contains,
-verbatim, BOTH the exact entry id string from result["entries"][0]["id"] AND the exact
-source value from result["entries"][0]["source"] (i.e. the literal characters
-agent_candidate). Omitting either string invalidates the run. The code cell must contain
-ONLY the single call SUBMIT(answer=summary) with keywords. No other tools, never more
-than one SUBMIT across the entire run.
-""".strip()
-
-
-@dataclass(slots=True)
-class _QRE140CapabilityPreparer:
-    delegate: Any
-
-    async def prepare(self, turn: Any, environment: Any, attachments: Any, *, deadline: float) -> Any:
-        prepared = await self.delegate.prepare(turn, environment, attachments, deadline=deadline)
-        from dataclasses import replace
-
-        scenario = _VERIFY_SCENARIO if str(turn.input.text).startswith("VERIFY") else _PROPOSE_SCENARIO
-        prepared.spec = replace(prepared.spec, signature=prepared.spec.signature.with_instructions(scenario))
-        return prepared
 
 
 class _TrackingCleanup(SimpleNamespace):
@@ -230,7 +187,6 @@ def test_live_memory_candidate_promotes_after_commit_and_retrieves_on_next_turn(
             resources = app.state.runtime_inventory.run_environment_resources
             preparation = app.state.runtime_inventory.run_preparation
             assert resources is not None and preparation is not None
-            preparation._capabilities = _QRE140CapabilityPreparer(preparation._capabilities)
             portal = client.portal
             assert portal is not None
             portal_loop = portal.call(lambda: asyncio.get_running_loop())

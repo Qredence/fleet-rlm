@@ -69,40 +69,6 @@ class LiveDaytonaMVPResult(dspy.Signature):
     findings: list[dict[str, str]] = dspy.OutputField()
 
 
-_FIRST_SCENARIO = """
-3 iterations; do not inspect `scenario`, improvise, or retry. 1) Once:
-`iteration_token = issue_iteration_token(); accumulator = [iteration_token]; print("FIRST_ITERATION_READY")`.
-2) Reuse it. Run `single_result = llm_query("Return exactly ROOT")` and
-`batch_results = llm_query_batched(["Return exactly ALPHA", "Return exactly BETA", "Return exactly GAMMA"])`.
-Reject `[ERROR]`; extend with `[single_result, *batch_results]`. Call once, no
-casts/copies/positional args:
-`verification = verify_semantic_work(iteration_token=iteration_token,
-single_result=single_result, batch_results=batch_results,
-accumulator=accumulator)`.
-Append `notes/findings.md` with results and `verification["checksum"]` via
-`append_workspace_text(path="notes/findings.md", content=content)`; require
-`workspace_result["ok"]`. Publish the existing Workspace document without
-resending its body via `publish_workspace_artifact(path="notes/findings.md",
-kind="markdown", title="Findings")`; require `artifact_result["ok"]`; print
-`SECOND_ITERATION_READY`. 3) Set
-non-empty string-only `summary`/`findings`; call exactly
-`SUBMIT(answer=summary, findings=findings)` with keywords. No fallback.
-""".strip()
-
-_SECOND_SCENARIO = """
-Exactly two RLM iterations; do not create `accumulator`, explore, parse, or
-retry. 1) Set `accumulator_present = "accumulator" in globals()`, then call
-`workspace_result = read_workspace_text(path="notes/findings.md", max_chars=10000)`.
-Require dictionary key `workspace_result["ok"]`; call exactly once
-`reload_verification = verify_workspace_reload(
-workspace_content=workspace_result["content"],
-accumulator_present=accumulator_present)`;
-require `reload_verification["ok"]`, set `workspace_checksum`, and print
-`RELOAD_ITERATION_READY`. 2) Set non-empty string-only `summary` and `findings`,
-then call exactly `SUBMIT(answer=summary, findings=findings)` with keywords.
-""".strip()
-
-
 @dataclass(slots=True)
 class _ProofCapabilityPreparer:
     delegate: Any
@@ -111,10 +77,11 @@ class _ProofCapabilityPreparer:
 
     async def prepare(self, turn: Any, environment: Any, attachments: Any, *, deadline: float) -> Any:
         prepared = await self.delegate.prepare(turn, environment, attachments, deadline=deadline)
-        scenario = _SECOND_SCENARIO if str(turn.input.text).startswith("SECOND") else _FIRST_SCENARIO
+        # Signature instructions are recomposed from Fleet fragments and skill
+        # bodies at worker start; live steering rides the Turn request text.
         prepared.spec = replace(
             prepared.spec,
-            signature=LiveDaytonaMVPResult.with_instructions(scenario),
+            signature=LiveDaytonaMVPResult,
             output_schema_id=_CONTRACT_ID,
             output_schema_version="1",
             tools=(*prepared.spec.tools, *self.tools),
@@ -817,7 +784,27 @@ def test_complete_daytona_mvp_through_fastapi(
                 first = client.post(
                     f"/api/sessions/{session_id}/turns",
                     json={
-                        "text": "FIRST: execute the complete recursive Daytona MVP proof.",
+                        "text": (
+                            "FIRST: execute the complete recursive Daytona MVP proof."
+                            " 3 iterations; do not improvise or retry."
+                            " 1) Once: iteration_token = issue_iteration_token();"
+                            ' accumulator = [iteration_token]; print("FIRST_ITERATION_READY").'
+                            ' 2) Reuse it: run single_result = llm_query("Return exactly ROOT") and'
+                            ' batch_results = llm_query_batched(["Return exactly ALPHA", "Return exactly BETA",'
+                            ' "Return exactly GAMMA"]); reject any result starting with [ERROR]; extend the'
+                            " accumulator with [single_result, *batch_results]; call exactly once with keywords,"
+                            " no casts/copies/positional args:"
+                            " verification = verify_semantic_work(iteration_token=iteration_token,"
+                            " single_result=single_result, batch_results=batch_results, accumulator=accumulator)."
+                            ' Append "notes/findings.md" with the results and verification["checksum"] via'
+                            ' append_workspace_text(path="notes/findings.md", content=content);'
+                            ' require workspace_result["ok"]. Publish the existing Workspace document without'
+                            ' resending its body via publish_workspace_artifact(path="notes/findings.md",'
+                            ' kind="markdown", title="Findings"); require artifact_result["ok"];'
+                            ' print("SECOND_ITERATION_READY").'
+                            " 3) Set non-empty string-only summary/findings; call exactly"
+                            " SUBMIT(answer=summary, findings=findings) with keywords. No fallback."
+                        ),
                         "skill_selections": [{"id": str(skill.card.id), "expected_version": skill.card.version}],
                     },
                     headers={"Idempotency-Key": f"live-mvp-first-{uuid4()}"},
@@ -929,7 +916,20 @@ def test_complete_daytona_mvp_through_fastapi(
                 second = client.post(
                     f"/api/sessions/{session_id}/turns",
                     json={
-                        "text": "SECOND: verify fresh interpreter state and durable workspace reload.",
+                        "text": (
+                            "SECOND: verify fresh interpreter state and durable workspace reload."
+                            " Exactly two RLM iterations; do not create accumulator, explore, parse, or retry."
+                            ' 1) Set accumulator_present = "accumulator" in globals(), then call'
+                            ' workspace_result = read_workspace_text(path="notes/findings.md", max_chars=10000).'
+                            ' Require dictionary key workspace_result["ok"]; call exactly once'
+                            " reload_verification = verify_workspace_reload("
+                            ' workspace_content=workspace_result["content"],'
+                            " accumulator_present=accumulator_present);"
+                            ' require reload_verification["ok"], set workspace_checksum, and'
+                            ' print("RELOAD_ITERATION_READY").'
+                            " 2) Set non-empty string-only summary and findings, then call exactly"
+                            " SUBMIT(answer=summary, findings=findings) with keywords."
+                        ),
                         "skill_selections": [{"id": str(skill.card.id), "expected_version": skill.card.version}],
                     },
                     headers={"Idempotency-Key": f"live-mvp-second-{uuid4()}"},

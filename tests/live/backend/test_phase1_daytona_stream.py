@@ -48,19 +48,6 @@ class Phase1Result(dspy.Signature):
     evidence: str = dspy.OutputField()
 
 
-_SCENARIO = """
-Do exactly one bounded Daytona proof. In the first iteration, read
-`attachment_text = attachments[0]["data"]`; do not use a file Tool. Then call
-`single_result = llm_query("Return exactly ROOT")` and
-`batch_results = llm_query_batched(["Return exactly ALPHA", "Return exactly BETA"])`.
-Reject any result beginning with `[ERROR]`. Call exactly once:
-`verification = verify_phase1(attachment_text=attachment_text, single_result=single_result,
-batch_results=batch_results)`. Require `verification["ok"]`. Finally, call exactly
-`SUBMIT(answer="phase1 complete", evidence="native Daytona stream")` with keyword
-arguments. Do not call rlm_query, do not retry, and do not use extraction fallback.
-""".strip()
-
-
 @dataclass(slots=True)
 class _ProofCapabilityPreparer:
     delegate: Any
@@ -70,20 +57,21 @@ class _ProofCapabilityPreparer:
     async def prepare(self, turn: Any, environment: Any, attachments: Any, *, deadline: float) -> Any:
         """
         Prepare a turn with the Phase 1 result signature, output contract, verification tools, and event views.
-        
+
         Parameters:
-        	turn (Any): The turn to prepare.
-        	environment (Any): The execution environment.
-        	attachments (Any): Attachments available to the turn.
-        	deadline (float): The preparation deadline.
-        
+                turn (Any): The turn to prepare.
+                environment (Any): The execution environment.
+                attachments (Any): Attachments available to the turn.
+                deadline (float): The preparation deadline.
+
         Returns:
-        	Any: The prepared turn configured for Phase 1 execution.
+                Any: The prepared turn configured for Phase 1 execution.
         """
         prepared = await self.delegate.prepare(turn, environment, attachments, deadline=deadline)
         prepared.spec = replace(
             prepared.spec,
-            signature=Phase1Result.with_instructions(_SCENARIO),
+            # Instructions are recomposed from Fleet fragments at worker start; steering rides the request text.
+            signature=Phase1Result,
             output_schema_id=_CONTRACT_ID,
             output_schema_version="1",
             tools=(*prepared.spec.tools, *self.tools),
@@ -100,17 +88,18 @@ class _ProofLedger:
     def verify_phase1(self, attachment_text: str, single_result: str, batch_results: list[str]) -> dict[str, bool]:
         """
         Validate the Phase 1 attachment and semantic-query results.
-        
+
         Parameters:
             attachment_text (str): Materialized attachment content to validate.
             single_result (str): Result from the single semantic query.
             batch_results (list[str]): Ordered results from the batched semantic query.
-        
+
         Returns:
             dict[str, bool]: A mapping containing `{"ok": True}` when validation succeeds.
-        
+
         Raises:
-            ValueError: If the verifier is called more than once or any expected attachment or semantic-query result is invalid.
+            ValueError: If the verifier is called more than once or any expected attachment or semantic-query
+                result is invalid.
         """
         self.calls += 1
         if self.calls != 1:
@@ -134,7 +123,7 @@ class _FirstStreamDeltaProbe:
     def observe_body(self, body: bytes) -> None:
         """
         Record the timestamp of the first reasoning or RLM-code streaming event found in a response body.
-        
+
         Parameters:
             body (bytes): Response body containing newline-delimited SSE data.
         """
@@ -187,16 +176,16 @@ class _FirstStreamDeltaMiddleware:
 def _load_live_settings(tmp_path: Path) -> Settings:
     """
     Load and validate live Phase 1 streaming test settings.
-    
+
     Parameters:
-    	tmp_path (Path): Temporary directory for the test database.
-    
+        tmp_path (Path): Temporary directory for the test database.
+
     Returns:
-    	Settings: Validated Daytona settings with an upgraded temporary database and bounded execution limits.
-    
+        Settings: Validated Daytona settings with an upgraded temporary database and bounded execution limits.
+
     Raises:
-    	pytest.skip: If the evidence-path environment variable is not configured.
-    	pytest.fail: If live execution, the Daytona profile, required models, or provider credentials are unavailable.
+        pytest.skip: If the evidence-path environment variable is not configured.
+        pytest.fail: If live execution, the Daytona profile, required models, or provider credentials are unavailable.
     """
     if not os.environ.get(_EVIDENCE_ENV):
         pytest.skip("Run this credentialed canary via scripts/live_phase1_stream_verify.py")
@@ -227,12 +216,12 @@ def _load_live_settings(tmp_path: Path) -> Settings:
 def _sse_chunks(response: Any) -> tuple[list[dict[str, Any]], int]:
     """
     Parse server-sent event data from an HTTP response.
-    
+
     Parameters:
-    	response (Any): Response containing newline-delimited SSE data.
-    
+        response (Any): Response containing newline-delimited SSE data.
+
     Returns:
-    	tuple[list[dict[str, Any]], int]: Parsed JSON event chunks and the number of `[DONE]` markers.
+        tuple[list[dict[str, Any]], int]: Parsed JSON event chunks and the number of `[DONE]` markers.
     """
     chunks: list[dict[str, Any]] = []
     done = 0
@@ -250,13 +239,13 @@ def _sse_chunks(response: Any) -> tuple[list[dict[str, Any]], int]:
 def _streaming_evidence(chunks: list[dict[str, Any]]) -> tuple[int, list[str]]:
     """
     Summarize reasoning and code streaming evidence from parsed SSE chunks.
-    
+
     Parameters:
-    	chunks (list[dict[str, Any]]): Parsed streaming chunks to inspect.
-    
+        chunks (list[dict[str, Any]]): Parsed streaming chunks to inspect.
+
     Returns:
-    	tuple[int, list[str]]: The number of relevant delta events and the sorted
-    	names of streaming fields observed.
+        tuple[int, list[str]]: The number of relevant delta events and the sorted
+        names of streaming fields observed.
     """
     fields: set[str] = set()
     count = 0
@@ -273,11 +262,11 @@ def _streaming_evidence(chunks: list[dict[str, Any]]) -> tuple[int, list[str]]:
 def _call_shapes(chunks: list[dict[str, Any]], call_name: str) -> list[dict[str, object]]:
     """
     Extracts argument shapes for calls with the specified name from streamed RLM code chunks.
-    
+
     Parameters:
         chunks (list[dict[str, Any]]): Streamed event chunks containing RLM code.
         call_name (str): Function name to match.
-    
+
     Returns:
         list[dict[str, object]]: Argument counts and keyword names for each matching call.
     """
@@ -301,12 +290,12 @@ def _call_shapes(chunks: list[dict[str, Any]], call_name: str) -> list[dict[str,
 
 async def _retry_cleanup(operation: Any) -> bool:
     """Retry an asynchronous cleanup operation until it succeeds or all configured attempts fail.
-    
+
     Parameters:
-    	operation (Any): Asynchronous cleanup operation to execute.
-    
+        operation (Any): Asynchronous cleanup operation to execute.
+
     Returns:
-    	bool: `True` if the operation succeeds, `False` after all attempts fail.
+        bool: `True` if the operation succeeds, `False` after all attempts fail.
     """
     for delay in (*_CLEANUP_RETRY_DELAYS, None):
         try:
@@ -322,21 +311,22 @@ async def _retry_cleanup(operation: Any) -> bool:
 async def _strict_cleanup(resources: Any, volume_name: str) -> tuple[str, ...]:
     """
     Delete tracked sandboxes and the owned volume, returning labels for cleanup failures.
-    
+
     Parameters:
         resources (Any): Resource manager containing tracked sandboxes and cleanup clients.
         volume_name (str): Name of the volume to delete.
-    
+
     Returns:
         tuple[str, ...]: Cleanup failure labels, including "sandbox", "tracking", or "volume".
     """
     failures: list[str] = []
     for sandbox_id in sorted(set(resources._sandbox_ids)):
+
         async def delete_sandbox(sandbox_id: str = sandbox_id) -> None:
             """Delete the specified Daytona sandbox if it exists.
-            
+
             Parameters:
-            	sandbox_id (str): Identifier of the sandbox to delete.
+                sandbox_id (str): Identifier of the sandbox to delete.
             """
             sandbox = await resources.platform.get(sandbox_id)
             if sandbox is not None:
@@ -363,9 +353,9 @@ async def _strict_cleanup(resources: Any, volume_name: str) -> tuple[str, ...]:
 def _write_receipt(payload: dict[str, object]) -> None:
     """
     Write a JSON proof receipt to the configured evidence path using an atomic replacement.
-    
+
     Parameters:
-    	payload (dict[str, object]): Receipt data to serialize.
+        payload (dict[str, object]): Receipt data to serialize.
     """
     output = Path(os.environ[_EVIDENCE_ENV]).expanduser().resolve()
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -435,7 +425,20 @@ def test_phase1_daytona_stream_through_fastapi(tmp_path: Path) -> None:
             response = client.post(
                 f"/api/sessions/{session_id}/turns",
                 json={
-                    "text": "Execute the narrow native DSPy Phase 1 stream proof.",
+                    "text": (
+                        "Execute the narrow native DSPy Phase 1 stream proof. Do exactly one bounded"
+                        " Daytona proof. In the first iteration read attachment_text ="
+                        ' attachments[0]["data"]; do not use a file Tool. Then call'
+                        ' single_result = llm_query("Return exactly ROOT") and'
+                        ' batch_results = llm_query_batched(["Return exactly ALPHA", "Return exactly BETA"]).'
+                        " Reject any result beginning with [ERROR]. Call exactly once:"
+                        " verification = verify_phase1(attachment_text=attachment_text,"
+                        " single_result=single_result, batch_results=batch_results)."
+                        ' Require verification["ok"]. Finally call exactly'
+                        ' SUBMIT(answer="phase1 complete", evidence="native Daytona stream")'
+                        " with keyword arguments. Do not call rlm_query, do not retry, and do not"
+                        " use extraction fallback."
+                    ),
                     "attachment_ids": [attachment_id],
                 },
                 headers={"Idempotency-Key": f"phase1-daytona-stream-{uuid4()}"},

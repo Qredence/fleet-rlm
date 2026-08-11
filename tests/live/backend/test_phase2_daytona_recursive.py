@@ -46,17 +46,6 @@ class Phase2Result(dspy.Signature):
     evidence: str = dspy.OutputField()
 
 
-_SCENARIO = """
-Run exactly one recursive Daytona proof. First set `root_marker = "root-only"`. Then make exactly one
-`child_result = rlm_query(prompt=...)` call. The child prompt must tell the fresh child interpreter to determine whether
-the Python name `root_marker` exists, return exactly `absent` when it does not, and use typed
-`SUBMIT(answer="absent")`; do not call rlm_query inside the child. After return, assert that root_marker is still
-`root-only` and child_result is exactly `absent`. Call verify_phase2 exactly once with those values and require
-its `ok` result. Finally issue exactly one typed `SUBMIT(answer="phase2 complete", evidence="native recursive child")`.
-Do not retry, do not call llm_query, and do not use extraction fallback.
-""".strip()
-
-
 @dataclass(slots=True)
 class _ProofCapabilityPreparer:
     delegate: Any
@@ -66,17 +55,18 @@ class _ProofCapabilityPreparer:
     async def prepare(self, turn: Any, environment: Any, attachments: Any, *, deadline: float) -> Any:
         """
         Prepare a turn with the Phase 2 recursive execution specification.
-        
+
         Parameters:
             deadline (float): Maximum time allowed for preparation.
-        
+
         Returns:
             Any: The prepared turn with the Phase 2 signature, contract metadata, tools, and event views.
         """
         prepared = await self.delegate.prepare(turn, environment, attachments, deadline=deadline)
         prepared.spec = replace(
             prepared.spec,
-            signature=Phase2Result.with_instructions(_SCENARIO),
+            # Instructions are recomposed from Fleet fragments at worker start; steering rides the request text.
+            signature=Phase2Result,
             output_schema_id=_CONTRACT_ID,
             output_schema_version="1",
             tools=(*prepared.spec.tools, *self.tools),
@@ -94,16 +84,16 @@ class _ProofLedger:
     def verify_phase2(self, child_result: str, root_marker: str) -> dict[str, bool]:
         """
         Verify child isolation and root-state continuity for the Phase 2 recursion proof.
-        
+
         Parameters:
-        	child_result (str): Child-submitted value expected to be "absent".
-        	root_marker (str): Root marker expected to be "root-only".
-        
+                child_result (str): Child-submitted value expected to be "absent".
+                root_marker (str): Root marker expected to be "root-only".
+
         Returns:
-        	dict[str, bool]: A result containing `{"ok": True}` when both checks pass.
-        
+                dict[str, bool]: A result containing `{"ok": True}` when both checks pass.
+
         Raises:
-        	ValueError: If the verifier is called more than once or either check fails.
+                ValueError: If the verifier is called more than once or either check fails.
         """
         self.calls += 1
         if self.calls != 1:
@@ -127,13 +117,13 @@ class _ChildEvidence:
 def _load_live_settings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Settings:
     """
     Load and validate live settings for the Phase 2 recursive canary.
-    
+
     Parameters:
-    	tmp_path (Path): Temporary directory for the copied policy and SQLite database.
-    	monkeypatch (pytest.MonkeyPatch): Pytest fixture used to apply the temporary configuration path.
-    
+        tmp_path (Path): Temporary directory for the copied policy and SQLite database.
+        monkeypatch (pytest.MonkeyPatch): Pytest fixture used to apply the temporary configuration path.
+
     Returns:
-    	Settings: Validated settings configured for the Daytona recursive canary.
+        Settings: Validated settings configured for the Daytona recursive canary.
     """
     if not os.environ.get(_EVIDENCE_ENV):
         pytest.skip("Run this credentialed canary via scripts/live_phase2_recursive_verify.py")
@@ -181,12 +171,13 @@ def _install_child_evidence(monkeypatch: pytest.MonkeyPatch, evidence: _ChildEvi
     async def observed(**kwargs: object) -> recursive_child_runtime.ChildRuntimeLease:
         """
         Wrap child-runtime acquisition to record creation, recursive sibling scope, cleanup success, and duration.
-        
+
         Parameters:
-        	**kwargs (object): Child-runtime acquisition arguments, including workspace, run, call, and volume identifiers.
-        
+                **kwargs (object): Child-runtime acquisition arguments, including workspace, run, call, and
+                    volume identifiers.
+
         Returns:
-        	recursive_child_runtime.ChildRuntimeLease: The acquired child-runtime lease.
+                recursive_child_runtime.ChildRuntimeLease: The acquired child-runtime lease.
         """
         evidence.started_at = time.perf_counter()
         lease = await original(**kwargs)  # type: ignore[arg-type]
@@ -218,12 +209,12 @@ def _install_child_evidence(monkeypatch: pytest.MonkeyPatch, evidence: _ChildEvi
 def _sse_chunks(response: Any) -> tuple[list[dict[str, Any]], int]:
     """
     Parse Server-Sent Event data from a response.
-    
+
     Parameters:
-    	response (Any): Response whose text contains SSE lines.
-    
+        response (Any): Response whose text contains SSE lines.
+
     Returns:
-    	tuple[list[dict[str, Any]], int]: Parsed JSON event chunks and the number of `[DONE]` markers.
+        tuple[list[dict[str, Any]], int]: Parsed JSON event chunks and the number of `[DONE]` markers.
     """
     chunks: list[dict[str, Any]] = []
     done = 0
@@ -240,12 +231,12 @@ def _sse_chunks(response: Any) -> tuple[list[dict[str, Any]], int]:
 
 def _recursive_completion(chunks: list[dict[str, Any]]) -> dict[str, object] | None:
     """Finds the completed recursive tool output in a sequence of event chunks.
-    
+
     Parameters:
-    	chunks (list[dict[str, Any]]): Event chunks to inspect.
-    
+        chunks (list[dict[str, Any]]): Event chunks to inspect.
+
     Returns:
-    	dict[str, object] | None: The first completed recursive output, or `None` if no matching output is found.
+        dict[str, object] | None: The first completed recursive output, or `None` if no matching output is found.
     """
     for chunk in chunks:
         if chunk.get("type") != "tool-output-available":
@@ -283,10 +274,10 @@ def _write_receipt(payload: dict[str, object]) -> None:
 def test_phase2_daytona_recursive_through_fastapi(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """
     Run the live Daytona recursive canary through the FastAPI application.
-    
+
     Parameters:
-    	tmp_path (Path): Temporary directory used to create the live test database.
-    	monkeypatch (pytest.MonkeyPatch): Pytest fixture for patching runtime behavior and environment settings.
+        tmp_path (Path): Temporary directory used to create the live test database.
+        monkeypatch (pytest.MonkeyPatch): Pytest fixture for patching runtime behavior and environment settings.
     """
     settings = _load_live_settings(tmp_path, monkeypatch)
     ledger = _ProofLedger()
@@ -322,7 +313,21 @@ def test_phase2_daytona_recursive_through_fastapi(tmp_path: Path, monkeypatch: p
             session_id = UUID(created.json()["id"])
             response = client.post(
                 f"/api/sessions/{session_id}/turns",
-                json={"text": "Execute the narrow native DSPy Phase 2 recursive proof."},
+                json={
+                    "text": (
+                        "Execute the narrow native DSPy Phase 2 recursive proof. Run exactly one recursive"
+                        ' Daytona proof. First set root_marker = "root-only". Then make exactly one'
+                        " child_result = rlm_query(prompt=...) call; the child prompt must tell the fresh"
+                        " child interpreter to determine whether the Python name root_marker exists, return"
+                        " exactly absent when it does not, and use typed SUBMIT(answer="
+                        '"absent"); do not call rlm_query inside the child. After return, assert that'
+                        " root_marker is still root-only and child_result is exactly absent. Call"
+                        " verify_phase2 exactly once with those values and require its ok result. Finally"
+                        ' issue exactly one typed SUBMIT(answer="phase2 complete", evidence='
+                        '"native recursive child"). Do not retry, do not call llm_query, and do not use'
+                        " extraction fallback."
+                    ),
+                },
                 headers={"Idempotency-Key": f"phase2-daytona-recursive-{uuid4()}"},
             )
             assert response.status_code == 200
