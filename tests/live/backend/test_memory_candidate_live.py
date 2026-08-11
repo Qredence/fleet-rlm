@@ -151,6 +151,31 @@ def _tool_chunks(chunks: list[dict[str, Any]], tool_name: str, chunk_type: str) 
     return [chunk for chunk in chunks if chunk.get("type") == chunk_type and chunk.get("toolName") == tool_name]
 
 
+def _paired_tool_chunks(
+    chunks: list[dict[str, Any]], tool_name: str
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
+    """Pair one tool's input chunks with their output/error chunks by toolCallId.
+
+    The SSE projection carries ``toolName`` only on ``tool-input-available`` frames
+    (matching both the in-repo ``ToolOutputAvailable`` model and the AI SDK stream
+    protocol); outputs pair to their tool strictly through ``toolCallId``.
+    """
+
+    inputs = _tool_chunks(chunks, tool_name, "tool-input-available")
+    call_ids = {str(chunk.get("toolCallId")) for chunk in inputs}
+    outputs = [
+        chunk
+        for chunk in chunks
+        if chunk.get("type") == "tool-output-available" and str(chunk.get("toolCallId")) in call_ids
+    ]
+    errors = [
+        chunk
+        for chunk in chunks
+        if chunk.get("type") == "tool-output-error" and str(chunk.get("toolCallId")) in call_ids
+    ]
+    return inputs, outputs, errors
+
+
 def _live_qre140_settings(tmp_path: Path) -> Settings:
     settings = _live_settings(tmp_path).model_copy(
         update={
@@ -219,8 +244,8 @@ def test_live_memory_candidate_promotes_after_commit_and_retrieves_on_next_turn(
                 _assert_sse_stop(first_chunks, label="qre140_propose_turn")
                 usage_gathered.extend(chunk for chunk in first_chunks if chunk.get("type") == "data-usage")
 
-                proposal_inputs = _tool_chunks(first_chunks, "propose_memory", "tool-input-available")
-                proposal_outputs = _tool_chunks(first_chunks, "propose_memory", "tool-output-available")
+                proposal_inputs, proposal_outputs, proposal_errors = _paired_tool_chunks(first_chunks, "propose_memory")
+                assert proposal_errors == []
                 assert len(proposal_inputs) == len(proposal_outputs) == 1
                 assert proposal_inputs[0]["input"]["category"] == "operator preference"
                 assert proposal_inputs[0]["input"]["supersedes"] is False
@@ -270,8 +295,8 @@ def test_live_memory_candidate_promotes_after_commit_and_retrieves_on_next_turn(
                 _assert_sse_stop(second_chunks, label="qre140_verify_turn")
                 usage_gathered.extend(chunk for chunk in second_chunks if chunk.get("type") == "data-usage")
 
-                search_inputs = _tool_chunks(second_chunks, "search_memories", "tool-input-available")
-                search_outputs = _tool_chunks(second_chunks, "search_memories", "tool-output-available")
+                search_inputs, search_outputs, search_errors = _paired_tool_chunks(second_chunks, "search_memories")
+                assert search_errors == []
                 assert len(search_inputs) == len(search_outputs) == 1
                 assert memory_id in search_outputs[0]["output"].get("top_memory_ids", ())
                 final_text = "".join(

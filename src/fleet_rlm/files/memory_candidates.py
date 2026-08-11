@@ -10,6 +10,7 @@ and are revalidated only at promotion.
 from __future__ import annotations
 
 import hashlib
+import logging
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -36,6 +37,8 @@ from fleet_rlm.files.memory_models import (
 
 WORKSPACE_MEMORY_CANDIDATE_NAMESPACE = "workspace_memory"
 WORKSPACE_MEMORY_CANDIDATE_SOURCE: Literal["agent_candidate"] = "agent_candidate"
+
+logger = logging.getLogger(__name__)
 WORKSPACE_MEMORY_CANDIDATE_MAX_COUNT = 16
 # Preserve enough canonical-record envelope for the maximum category, source,
 # timestamps, candidate ID, and supersession metadata during QRE-138 promotion.
@@ -192,9 +195,10 @@ def promote_memory_candidates(
             failure_count += 1 + (len(prepared) - prepared_index - 1)
             reasons.append("store_full")
             break
-        except Exception:
+        except Exception as exc:
             failure_count += 1
             reasons.append("promotion_failed")
+            logger.warning("Memory Candidate promotion append failed (%s)", type(exc).__name__, exc_info=exc)
             continue
         promoted_count += 1
         active_content.add((normalized, learning))
