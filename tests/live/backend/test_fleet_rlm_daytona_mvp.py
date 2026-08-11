@@ -919,7 +919,9 @@ def test_complete_daytona_mvp_through_fastapi(
                         "text": (
                             "SECOND: verify fresh interpreter state and durable workspace reload."
                             " Exactly two RLM iterations; do not create accumulator, explore, parse, or retry."
-                            ' 1) Set accumulator_present = "accumulator" in globals(), then call'
+                            ' 1) First evaluate the boolean expression "accumulator" in globals() and store'
+                            " the result as accumulator_present. It MUST be that boolean outcome — never the"
+                            ' literal string "accumulator", never a hardcoded True or False. Then call'
                             ' workspace_result = read_workspace_text(path="notes/findings.md", max_chars=10000).'
                             ' Require dictionary key workspace_result["ok"]; call exactly once'
                             " reload_verification = verify_workspace_reload("
