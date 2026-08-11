@@ -110,16 +110,26 @@ def _chunk_histogram(chunks: list[dict[str, Any]]) -> dict[str, object]:
 
     by_type: dict[str, int] = {}
     tool_events: dict[str, int] = {}
+    tool_calls: list[dict[str, str | None]] = []
     for chunk in chunks:
         kind = str(chunk.get("type") or "unknown")
         by_type[kind] = by_type.get(kind, 0) + 1
         name = chunk.get("toolName")
         if name:
             tool_events[str(name)] = tool_events.get(str(name), 0) + 1
+        if kind.startswith("tool-"):
+            tool_calls.append(
+                {
+                    "type": kind,
+                    "toolName": str(name) if name else None,
+                    "toolCallId": str(chunk.get("toolCallId")) if chunk.get("toolCallId") else None,
+                }
+            )
     return {
         "chunk_count": len(chunks),
         "by_type": dict(sorted(by_type.items())),
         "tool_events": dict(sorted(tool_events.items())),
+        "tool_calls": tool_calls,
     }
 
 
