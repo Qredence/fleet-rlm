@@ -41,22 +41,30 @@ _RECEIPT_SCHEMA = "fleet.qre140-memory-candidate-proof/v1"
 _EVIDENCE_ENV = "FLEET_LIVE_EVIDENCE_PATH"
 _PROBE_LEARNING = "operator prefers certified receipts under .scratch/p15 (probe ZEPHYR-4582)"
 _PROPOSE_SCENARIO = f"""
-ONLY this sequence is permitted. The exact category string is "operator preference".
-2 iterations; do not inspect scenario wording, improvise, retry, call llm_query/rlm_query,
-or choose another category. Use category="operator preference" verbatim, never "preference",
-"preferences", "workflow", "project", "general", or any other value.
-1) Call exactly once: proposal = propose_memory(key_learning={_PROBE_LEARNING!r},
-category="operator preference"). Require proposal["ok"] and print "PROPOSAL_READY".
-2) Set a non-empty summary and call exactly SUBMIT(answer=summary) with keywords. No fallback,
-no other tools.
+ONLY this exact sequence is permitted, one step per iteration. Use exactly 2 iterations.
+The exact category string is "operator preference": never "preference", "preferences",
+"workflow", "project", "general", or any other value. Do not inspect scenario wording,
+improvise, retry, or call llm_query/rlm_query.
+Iteration 1: the code cell must contain ONLY this call and its print; SUBMIT is strictly
+FORBIDDEN in iteration 1 and must never share a code cell with propose_memory:
+proposal = propose_memory(key_learning={_PROBE_LEARNING!r}, category="operator preference").
+Require proposal["ok"] is True, then print("PROPOSAL_READY").
+Iteration 2: read the iteration-1 observation, set a non-empty summary sentence, and the code
+cell must contain ONLY the single call SUBMIT(answer=summary) with keywords. No fallback,
+no other tools, never more than one SUBMIT across the entire run.
 """.strip()
 _VERIFY_SCENARIO = """
-2 iterations; do not retry or call llm_query/rlm_query.
-1) Call exactly once: result = search_memories(query="ZEPHYR-4582 certified receipts", limit=8).
-Require result["ok"] and result["count"] >= 1. From result["entries"][0] read memory_id,
-source, and category. Require source == "agent_candidate" and print "SEARCH_READY".
-2) Set summary containing result["entries"][0]["id"] and the literal "agent_candidate", then call
-exactly SUBMIT(answer=summary) with keywords. No other tools.
+ONLY this exact sequence is permitted, one step per iteration. Use exactly 2 iterations;
+do not retry or call llm_query/rlm_query.
+Iteration 1: the code cell must contain ONLY this call and its prints; SUBMIT is strictly
+FORBIDDEN in iteration 1 and must never share a code cell with search_memories:
+result = search_memories(query="ZEPHYR-4582 certified receipts", limit=8).
+Require result["ok"] and result["count"] >= 1. From result["entries"][0] read its "id",
+"source", and "category". Require source == "agent_candidate", then print("SEARCH_READY").
+Iteration 2: read the iteration-1 observation, set summary containing the exact memory id
+string from result["entries"][0]["id"] and the literal "agent_candidate", and the code cell
+must contain ONLY the single call SUBMIT(answer=summary) with keywords. No other tools,
+never more than one SUBMIT across the entire run.
 """.strip()
 
 
@@ -169,9 +177,11 @@ def test_live_memory_candidate_promotes_after_commit_and_retrieves_on_next_turn(
                     f"/api/sessions/{session_id}/turns",
                     json={
                         "text": (
-                            "Use propose_memory exactly once with"
-                            f' key_learning={_PROBE_LEARNING!r} and category="operator preference".'
-                            " Then SUBMIT(a short answer). Use no other tools."
+                            "First call propose_memory exactly once with"
+                            f' key_learning={_PROBE_LEARNING!r} and category="operator preference"'
+                            " in one code cell without any SUBMIT."
+                            " Only after reading that observation, SUBMIT(a short answer)"
+                            " alone in the next code cell. Use no other tools."
                         )
                     },
                     headers={"Idempotency-Key": f"live-qre140-first-{uuid4()}"},
