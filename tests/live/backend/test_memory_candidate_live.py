@@ -61,10 +61,12 @@ FORBIDDEN in iteration 1 and must never share a code cell with search_memories:
 result = search_memories(query="ZEPHYR-4582 certified receipts", limit=8).
 Require result["ok"] and result["count"] >= 1. From result["entries"][0] read its "id",
 "source", and "category". Require source == "agent_candidate", then print("SEARCH_READY").
-Iteration 2: read the iteration-1 observation, set summary containing the exact memory id
-string from result["entries"][0]["id"] and the literal "agent_candidate", and the code cell
-must contain ONLY the single call SUBMIT(answer=summary) with keywords. No other tools,
-never more than one SUBMIT across the entire run.
+Iteration 2: read the iteration-1 observation and set one short sentence that contains,
+verbatim, BOTH the exact entry id string from result["entries"][0]["id"] AND the exact
+source value from result["entries"][0]["source"] (i.e. the literal characters
+agent_candidate). Omitting either string invalidates the run. The code cell must contain
+ONLY the single call SUBMIT(answer=summary) with keywords. No other tools, never more
+than one SUBMIT across the entire run.
 """.strip()
 
 
