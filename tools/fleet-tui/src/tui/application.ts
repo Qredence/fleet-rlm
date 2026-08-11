@@ -10,6 +10,7 @@ import type { FleetApiClient, FleetSession } from "../fleet-api-client.js";
 import { FleetAutocompleteProvider } from "./autocomplete.js";
 import { PiCommandPresenter } from "./command-presenter.js";
 import { parseInput, type CommandContext } from "./commands.js";
+import type { DraftStore, DraftState } from "./draft-store.js";
 import { RunController } from "./runner.js";
 import { FleetScreen, isBusy } from "./screen.js";
 import { ConversationStore, type StoreEvent } from "./store.js";
@@ -28,6 +29,8 @@ export type FleetTuiOptions = {
   initialEvents: StoreEvent[];
   terminal?: Terminal;
   queryColorScheme?: boolean;
+  /** Optional local draft persistence; omitted disables it (tests stay hermetic). */
+  draftStore?: DraftStore;
 };
 
 export function createFleetTui(options: FleetTuiOptions): FleetTuiApplication {
@@ -70,6 +73,7 @@ class FleetTuiApplicationImpl implements FleetTuiApplication {
     this.screen = new FleetScreen(this.store, this.editor, this.terminal, this.ui);
     this.ui.addChild(this.screen);
     this.configureEditor();
+    void this.restoreDraft();
   }
 
   start(): Promise<void> {
@@ -132,6 +136,7 @@ class FleetTuiApplicationImpl implements FleetTuiApplication {
       if (isBusy(this.store.getState().run)) {
         await this.controller.cancelAndWait(1_000);
       }
+      await this.persistDraft();
       this.unsubscribe?.();
       this.screen.dispose();
       this.terminal.setProgress(false);
@@ -163,17 +168,26 @@ class FleetTuiApplicationImpl implements FleetTuiApplication {
         });
         return;
       }
-      const pending = this.store.getState().pendingSkillSelections;
-      this.controller.start(parsed.text, {
-        skillSelections: pending.map((selection) => ({
-          id: selection.id,
-          expected_version: selection.expectedVersion,
-        })),
-        onStreamOpen: () =>
-          this.store.dispatch({ type: "skill-selection/consume", selections: pending }),
-        onPreStreamFailure: (draft) => this.editor.setText(draft),
-      });
+      this.submitText(parsed.text);
     };
+  }
+
+  private submitText(text: string): void {
+    const state = this.store.getState();
+    const pending = state.pendingSkillSelections;
+    const pendingAttachments = state.pendingAttachments;
+    this.controller.start(text, {
+      attachmentIds: pendingAttachments.map((attachment) => attachment.id),
+      skillSelections: pending.map((selection) => ({
+        id: selection.id,
+        expected_version: selection.expectedVersion,
+      })),
+      onStreamOpen: () => {
+        this.store.dispatch({ type: "skill-selection/consume", selections: pending });
+        this.store.dispatch({ type: "attachment/consume", attachments: pendingAttachments });
+      },
+      onPreStreamFailure: (draft) => this.editor.setText(draft),
+    });
   }
 
   private suspend(): void {
@@ -195,6 +209,7 @@ class FleetTuiApplicationImpl implements FleetTuiApplication {
       exit: () => {
         void this.stop();
       },
+      submit: (text) => this.submitText(text),
       presenter: new PiCommandPresenter(this.ui, this.editor, this.store),
     };
   }
@@ -203,6 +218,54 @@ class FleetTuiApplicationImpl implements FleetTuiApplication {
     const busy = isBusy(this.store.getState().run);
     this.editor.disableSubmit = busy;
     this.terminal.setProgress(busy);
+    this.persistDraftDebounced();
     this.ui.requestRender();
+  }
+
+  private draftState(): DraftState | null {
+    const session = this.store.getState().session;
+    if (!session) return null;
+    const state = this.store.getState();
+    return {
+      draft: this.editor.getText(),
+      pendingSkills: state.pendingSkillSelections,
+      pendingAttachments: state.pendingAttachments,
+      lastPrompt: state.lastPrompt,
+    };
+  }
+
+  private persistDraftDebounced(): void {
+    const store = this.options.draftStore;
+    const state = this.draftState();
+    if (!store || !state) return;
+    store.schedule(state ? this.store.getState().session!.id : "", state);
+  }
+
+  private async persistDraft(): Promise<void> {
+    const store = this.options.draftStore;
+    const state = this.draftState();
+    if (!store || !state) return;
+    await store.flush();
+  }
+
+  private async restoreDraft(): Promise<void> {
+    const store = this.options.draftStore;
+    const session = this.store.getState().session;
+    if (!store || !session) return;
+    const restored = await store.load(session.id);
+    if (!restored) return;
+    if (restored.draft) this.editor.setText(restored.draft);
+    if (restored.pendingSkills.length > 0) {
+      this.store.dispatch({ type: "skill-selection/replace", selections: restored.pendingSkills });
+    }
+    if (restored.pendingAttachments.length > 0) {
+      this.store.dispatch({
+        type: "attachment/replace",
+        attachments: restored.pendingAttachments,
+      });
+    }
+    if (restored.lastPrompt && !this.store.getState().lastPrompt) {
+      this.store.dispatch({ type: "user/prompt-restore", text: restored.lastPrompt });
+    }
   }
 }

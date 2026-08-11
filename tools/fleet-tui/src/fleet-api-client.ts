@@ -8,6 +8,10 @@ export type FleetSkillCard = components["schemas"]["SkillCardResponse"];
 export type FleetSettingsPolicy = components["schemas"]["SettingsPolicyResponse"];
 export type FleetSettingsPatch = components["schemas"]["SettingsPolicyPatchRequest"];
 export type FleetVolumeTree = components["schemas"]["VolumeTreeResponse"];
+export type FleetAttachment = components["schemas"]["AttachmentResponse"];
+export type FleetWorkspaceFileList = components["schemas"]["WorkspaceFileListResponse"];
+export type FleetWorkspaceFileEntry = components["schemas"]["WorkspaceFileEntryResponse"];
+export type FleetWorkspaceFileRead = components["schemas"]["WorkspaceFileReadResponse"];
 
 export type FleetSkillSelection = {
   id: string;
@@ -122,11 +126,61 @@ export class FleetApiClient {
     return this.requestJson<FleetVolumeTree>(`/api/volume/tree${suffix ? `?${suffix}` : ""}`);
   }
 
+  /** Upload one Attachment through the lifecycle-owned multipart endpoint. */
+  async uploadAttachment(file: {
+    name: string;
+    bytes: Uint8Array;
+    contentType?: string;
+  }): Promise<FleetAttachment> {
+    const form = new FormData();
+    form.append(
+      "attachment",
+      new Blob([file.bytes as unknown as BlobPart], {
+        type: file.contentType ?? "application/octet-stream",
+      }),
+      file.name,
+    );
+    const response = await this.fetch(`${this.baseUrl}/api/attachments`, {
+      method: "POST",
+      body: form,
+    });
+    if (!response.ok) throw await this.toApiError(response);
+    return (await response.json()) as FleetAttachment;
+  }
+
+  /** List Session Workspace entries under a Workspace-relative path. */
+  async listWorkspaceFiles(
+    params: { path?: string; limit?: number; after?: string } = {},
+  ): Promise<FleetWorkspaceFileList> {
+    const query = new URLSearchParams();
+    if (params.path) query.set("path", params.path);
+    if (params.limit !== undefined) query.set("limit", String(params.limit));
+    if (params.after) query.set("after", params.after);
+    const suffix = query.toString();
+    return this.requestJson<FleetWorkspaceFileList>(`/api/files${suffix ? `?${suffix}` : ""}`);
+  }
+
+  /** Stat one Session Workspace entry. */
+  async statWorkspaceFile(path: string): Promise<FleetWorkspaceFileEntry> {
+    return this.requestJson<FleetWorkspaceFileEntry>(
+      `/api/files/stat?path=${encodeURIComponent(path)}`,
+    );
+  }
+
+  /** Read one Session Workspace text page (server caps max_chars at 10 000). */
+  async readWorkspaceFile(path: string, maxChars?: number): Promise<FleetWorkspaceFileRead> {
+    const query = new URLSearchParams();
+    query.set("path", path);
+    if (maxChars !== undefined) query.set("max_chars", String(maxChars));
+    return this.requestJson<FleetWorkspaceFileRead>(`/api/files/content?${query.toString()}`);
+  }
+
   async streamTurn({
     message,
     sessionId,
     idempotencyKey,
     skillSelections = [],
+    attachmentIds = [],
     onStreamOpen,
     signal,
   }: {
@@ -134,6 +188,7 @@ export class FleetApiClient {
     sessionId: string;
     idempotencyKey: string;
     skillSelections?: readonly FleetSkillSelection[];
+    attachmentIds?: readonly string[];
     onStreamOpen?: () => void;
     signal?: AbortSignal;
   }): Promise<Response> {
@@ -147,7 +202,7 @@ export class FleetApiClient {
         },
         body: JSON.stringify({
           text: message,
-          attachment_ids: [],
+          attachment_ids: attachmentIds,
           skill_selections: skillSelections,
         }),
         signal,

@@ -72,6 +72,7 @@ export class RunController {
         sessionId: session.id,
         message: text,
         skillSelections: options.skillSelections,
+        attachmentIds: options.attachmentIds,
         onStreamOpen: () => {
           streamOpened = true;
           options.onStreamOpen?.();
@@ -159,6 +160,7 @@ type RunExecution = {
 
 export type RunStartOptions = {
   skillSelections?: readonly FleetSkillSelection[];
+  attachmentIds?: readonly string[];
   onStreamOpen?: () => void;
   onPreStreamFailure?: (draft: string) => void;
 };

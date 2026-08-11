@@ -146,11 +146,21 @@ export type PendingSkillSelection = {
   displayName: string;
 };
 
+export type PendingAttachment = {
+  id: string;
+  filename: string;
+  bytes: number;
+  contentType?: string;
+};
+
 export type State = {
   session: Session | null;
   messages: Message[];
   run: Run;
   pendingSkillSelections: PendingSkillSelection[];
+  pendingAttachments: PendingAttachment[];
+  /** Last locally submitted prompt, retained for /redo across view resets. */
+  lastPrompt: string | null;
 };
 
 let messageCounter = 0;
@@ -184,6 +194,8 @@ function initialState(): State {
       traceId: null,
     },
     pendingSkillSelections: [],
+    pendingAttachments: [],
+    lastPrompt: null,
   };
 }
 
@@ -191,6 +203,7 @@ type Event =
   | { type: "session/init"; session: Session }
   | { type: "session/hydrate"; session: Session; events: Event[] }
   | { type: "user/submit"; text: string }
+  | { type: "user/prompt-restore"; text: string }
   | {
       type: "run/start";
       runId: string;
@@ -216,6 +229,10 @@ type Event =
   | { type: "skill-selection/clear" }
   | { type: "skill-selection/replace"; selections: PendingSkillSelection[] }
   | { type: "skill-selection/consume"; selections: PendingSkillSelection[] }
+  | { type: "attachment/pin"; attachment: PendingAttachment }
+  | { type: "attachment/clear" }
+  | { type: "attachment/replace"; attachments: PendingAttachment[] }
+  | { type: "attachment/consume"; attachments: PendingAttachment[] }
   | { type: "clear" }
   | { type: "reset" };
 
@@ -311,9 +328,12 @@ function reduce(state: State, event: Event): State {
       return {
         ...state,
         messages: [...state.messages, userMessage],
+        lastPrompt: event.text,
         run: { ...initialState().run, phase: "submitting", startedAt: Date.now() },
       };
     }
+    case "user/prompt-restore":
+      return state.lastPrompt === event.text ? state : { ...state, lastPrompt: event.text };
     case "run/start":
       return {
         ...state,
@@ -476,6 +496,34 @@ function reduce(state: State, event: Event): State {
       return pendingSkillSelections.length === state.pendingSkillSelections.length
         ? state
         : { ...state, pendingSkillSelections };
+    }
+    case "attachment/pin": {
+      const existing = state.pendingAttachments.findIndex(
+        (attachment) => attachment.id === event.attachment.id,
+      );
+      if (existing >= 0) {
+        const pendingAttachments = state.pendingAttachments.slice();
+        pendingAttachments[existing] = event.attachment;
+        return { ...state, pendingAttachments };
+      }
+      if (state.pendingAttachments.length >= 8) return state;
+      return {
+        ...state,
+        pendingAttachments: [...state.pendingAttachments, event.attachment],
+      };
+    }
+    case "attachment/clear":
+      return state.pendingAttachments.length === 0 ? state : { ...state, pendingAttachments: [] };
+    case "attachment/replace":
+      return { ...state, pendingAttachments: event.attachments.slice(0, 8) };
+    case "attachment/consume": {
+      const consumed = new Set(event.attachments.map((attachment) => attachment.id));
+      const pendingAttachments = state.pendingAttachments.filter(
+        (attachment) => !consumed.has(attachment.id),
+      );
+      return pendingAttachments.length === state.pendingAttachments.length
+        ? state
+        : { ...state, pendingAttachments };
     }
     case "clear":
       return {

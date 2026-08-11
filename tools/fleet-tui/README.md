@@ -62,6 +62,27 @@ durable Run cancellation. Escape cancels an active Run while preserving the unse
 draft. Ctrl+C clears the editor and exits when pressed twice while empty;
 Ctrl+D keeps its forward-delete behavior and exits only from an empty editor.
 
+Attachments and Session Workspace files are first-class inputs/outputs of the
+backend Turn contract, so the TUI can move files in both directions:
+
+- `/attach <path>…` uploads local files through `POST /api/attachments` and pins
+  them to the next Turn (up to eight); `/attach list` and `/attach clear` manage
+  the pins. The RLM receives them as Attachment metadata on the Turn body.
+- `/files [path]` lists Session Workspace entries and `/file <path>` previews
+  text; `/file <path> save <local>` pages the full content and writes it
+  atomically to a local path.
+- `/artifact <id> <local>` downloads a committed Artifact with content-length
+  and SHA-256 verification and saves it atomically; `/artifacts` lists Artifact
+  ids from the current conversation for copy-paste.
+- `/redo` resubmits the last prompt with a fresh idempotency key (e.g. after a
+  stream interruption); `/reload` re-fetches committed Turns for the current
+  Session; `/trace` prints the full MLflow trace ID.
+
+The editor draft, pinned Skills/Attachments, and the last prompt persist per
+Session to `~/.local/share/fleet/tui/<session-id>.json` (override with
+`FLEET_TUI_STATE_DIR`) and are restored on the next start; a failed write never
+blocks the TUI.
+
 ## Artifact download
 
 ```bash

@@ -1,5 +1,9 @@
 /** Slash command registry for the Fleet TUI. */
 
+import { readFile, stat } from "node:fs/promises";
+import { basename } from "node:path";
+
+import { saveArtifact, writeFileAtomic } from "../cli-core.js";
 import type {
   FleetApiClient,
   FleetSession,
@@ -13,7 +17,7 @@ import {
   type Message,
   type PendingSkillSelection,
 } from "./store.js";
-import { formatTokens } from "./format.js";
+import { formatBytes, formatTokens, shortId } from "./format.js";
 import { committedTokenCounts } from "./usage-summary.js";
 
 export type CommandContext = {
@@ -21,6 +25,8 @@ export type CommandContext = {
   client: FleetApiClient;
   cancelActiveRun: () => Promise<void> | void;
   exit: () => void;
+  /** Submit a prompt as if typed in the editor (used by /redo). */
+  submit?: (text: string) => void;
   presenter?: CommandPresenter;
 };
 
@@ -440,6 +446,243 @@ registerCommand({
 });
 
 registerCommand({
+  name: "attach",
+  description: "Upload local files as Attachments pinned to the next Turn",
+  usage: "/attach <path>… | clear | list",
+  handler: async (args, ctx) => {
+    if (args.length === 0 || args[0] === "list") {
+      const pending = ctx.store.getState().pendingAttachments;
+      if (pending.length === 0) {
+        appendSystem(ctx.store, "No Attachments pinned for the next Turn.");
+        return;
+      }
+      const lines = pending
+        .map(
+          (attachment, index) =>
+            `  ${String(index + 1).padStart(2)}. ${attachment.filename}  ${formatBytes(attachment.bytes)}  ${shortId(attachment.id)}`,
+        )
+        .join("\n");
+      appendSystem(ctx.store, `Pinned Attachments for the next Turn\n\n${lines}`);
+      return;
+    }
+    if (args[0] === "clear") {
+      ctx.store.dispatch({ type: "attachment/clear" });
+      appendSystem(ctx.store, "Pending Attachments cleared.");
+      return;
+    }
+    for (const arg of args) {
+      try {
+        const info = await stat(arg);
+        if (!info.isFile()) {
+          appendSystem(ctx.store, `${arg} is not a regular file.`);
+          continue;
+        }
+        const bytes = await readFile(arg);
+        const ref = await ctx.client.uploadAttachment({
+          name: basename(arg),
+          bytes,
+          contentType: contentTypeFor(arg),
+        });
+        ctx.store.dispatch({
+          type: "attachment/pin",
+          attachment: {
+            id: ref.id,
+            filename: ref.filename,
+            bytes: ref.byte_size,
+            contentType: ref.content_type ?? undefined,
+          },
+        });
+        appendSystem(
+          ctx.store,
+          `Attached ${ref.filename} (${formatBytes(ref.byte_size)}) for the next Turn.`,
+        );
+      } catch (error) {
+        appendSystem(ctx.store, `Failed to attach ${arg}: ${errorMessage(error)}`);
+      }
+    }
+  },
+});
+
+registerCommand({
+  name: "files",
+  description: "List Session Workspace files under a Workspace-relative path",
+  usage: "/files [path]",
+  handler: async (args, ctx) => {
+    if (args.length > 1) {
+      appendSystem(ctx.store, "Usage: /files [path]");
+      return;
+    }
+    try {
+      const listing = await ctx.client.listWorkspaceFiles({ path: args[0] ?? "." });
+      if (listing.entries.length === 0) {
+        appendSystem(ctx.store, `No Session Workspace entries under “${args[0] ?? "."}”.`);
+        return;
+      }
+      const lines = listing.entries
+        .map((entry) =>
+          entry.kind === "directory"
+            ? `  ${entry.path}/`
+            : `  ${entry.path}  ${entry.byte_size == null ? "—" : formatBytes(entry.byte_size)}`,
+        )
+        .join("\n");
+      appendSystem(
+        ctx.store,
+        `Session Workspace${args[0] ? ` (${args[0]})` : ""}\n\n${lines}${listing.truncated ? "\n\n…listing truncated; use /files <path> to narrow." : ""}`,
+      );
+    } catch (error) {
+      appendSystem(ctx.store, `Failed to list Session Workspace: ${errorMessage(error)}`);
+    }
+  },
+});
+
+registerCommand({
+  name: "file",
+  description: "Show or save one Session Workspace file",
+  usage: "/file <path> [save <localPath>]",
+  handler: async (args, ctx) => {
+    const path = args[0];
+    if (!path) {
+      appendSystem(ctx.store, "Usage: /file <path> [save <localPath>]");
+      return;
+    }
+    if (args[1] === "save") {
+      const localPath = args[2];
+      if (!localPath) {
+        appendSystem(ctx.store, "Usage: /file <path> save <localPath>");
+        return;
+      }
+      try {
+        let content = "";
+        let cursor: string | undefined;
+        let pages = 0;
+        do {
+          const page = await ctx.client.readWorkspaceFile(path, cursor ? undefined : 8_000);
+          content += page.content;
+          cursor = page.next_cursor ?? undefined;
+          pages += 1;
+          if (pages > 1_000) throw new Error("Session Workspace file is too large to save");
+        } while (cursor);
+        await writeFileAtomic(localPath, Buffer.from(content, "utf8"));
+        appendSystem(ctx.store, `Saved Session Workspace file to ${localPath}.`);
+      } catch (error) {
+        appendSystem(ctx.store, `Failed to save ${path}: ${errorMessage(error)}`);
+      }
+      return;
+    }
+    if (args.length > 1) {
+      appendSystem(ctx.store, "Usage: /file <path> [save <localPath>]");
+      return;
+    }
+    try {
+      const page = await ctx.client.readWorkspaceFile(path, 8_000);
+      const preview = page.content.slice(0, 8_000);
+      const lines = preview
+        .split("\n")
+        .map((line) => `  ${line}`)
+        .join("\n");
+      appendSystem(
+        ctx.store,
+        `Session Workspace file ${path} (${formatBytes(page.byte_size)})\n\n${lines}${page.content.length >= 8_000 ? "\n\n…preview truncated; use /file <path> save <localPath> for the full file." : ""}`,
+      );
+    } catch (error) {
+      appendSystem(ctx.store, `Failed to read ${path}: ${errorMessage(error)}`);
+    }
+  },
+});
+
+registerCommand({
+  name: "artifact",
+  description: "Download and verify an Artifact to a local path",
+  usage: "/artifact <artifactId> <localPath>",
+  handler: async (args, ctx) => {
+    const [artifactId, localPath] = args;
+    if (!artifactId || !localPath || args.length !== 2) {
+      appendSystem(ctx.store, "Usage: /artifact <artifactId> <localPath>");
+      return;
+    }
+    try {
+      await saveArtifact(ctx.client, artifactId, localPath);
+      appendSystem(ctx.store, `Saved verified Artifact to ${localPath}.`);
+    } catch (error) {
+      appendSystem(ctx.store, `Failed to save Artifact: ${errorMessage(error)}`);
+    }
+  },
+});
+
+registerCommand({
+  name: "artifacts",
+  description: "List Artifacts committed in this conversation",
+  usage: "/artifacts",
+  handler: (_args, ctx) => {
+    const artifacts = ctx.store
+      .getState()
+      .messages.filter(
+        (message): message is Extract<Message, { kind: "artifact" }> => message.kind === "artifact",
+      );
+    if (artifacts.length === 0) {
+      appendSystem(ctx.store, "No Artifacts in this conversation.");
+      return;
+    }
+    const lines = artifacts
+      .map(
+        (artifact, index) =>
+          `  ${String(index + 1).padStart(2)}. ${artifact.artifactId}  ${artifact.name}  ${formatBytes(artifact.bytes)}  (${artifact.artifactKind})`,
+      )
+      .join("\n");
+    appendSystem(
+      ctx.store,
+      `Artifacts\n\n${lines}\n\nUse /artifact <id> <localPath> to download and verify.`,
+    );
+  },
+});
+
+registerCommand({
+  name: "redo",
+  description: "Resubmit the last prompt with a fresh idempotency key",
+  usage: "/redo",
+  handler: (_args, ctx) => {
+    const state = ctx.store.getState();
+    if (["submitting", "running", "cancelling"].includes(state.run.phase)) {
+      appendSystem(ctx.store, "A Run is in progress; cancel it before redoing.");
+      return;
+    }
+    const prompt = state.lastPrompt;
+    if (!prompt) {
+      appendSystem(ctx.store, "No prompt to redo in this TUI session.");
+      return;
+    }
+    ctx.submit?.(prompt);
+  },
+});
+
+registerCommand({
+  name: "reload",
+  description: "Re-fetch committed Turns for the current Session",
+  usage: "/reload",
+  handler: async (_args, ctx) => {
+    const session = ctx.store.getState().session;
+    if (!session) {
+      appendSystem(ctx.store, "No active Session to reload.");
+      return;
+    }
+    await loadSession(ctx, session.id, "Reloaded");
+  },
+});
+
+registerCommand({
+  name: "trace",
+  description: "Show the full MLflow trace ID for the current Run",
+  usage: "/trace",
+  handler: (_args, ctx) => {
+    const traceId = ctx.store.getState().run.traceId;
+    appendSystem(
+      ctx.store,
+      traceId ? `Trace: ${traceId}` : "No trace ID recorded for the current Run.",
+    );
+  },
+});
+
+registerCommand({
   name: "exit",
   description: "Exit the TUI",
   usage: "/exit",
@@ -454,6 +697,10 @@ function errorMessage(error: unknown): string {
 }
 
 async function resumeSession(id: string, ctx: CommandContext): Promise<void> {
+  await loadSession(ctx, id, "Resumed");
+}
+
+async function loadSession(ctx: CommandContext, id: string, verb: string): Promise<void> {
   try {
     const pendingSkillSelections = ctx.store.getState().pendingSkillSelections;
     const [session, turns] = await Promise.all([
@@ -470,10 +717,10 @@ async function resumeSession(id: string, ctx: CommandContext): Promise<void> {
     }
     appendSystem(
       ctx.store,
-      turns.length ? `Resumed session ${id}.` : `Resumed session ${id} (no prior turns).`,
+      turns.length ? `${verb} session ${id}.` : `${verb} session ${id} (no prior turns).`,
     );
   } catch (error) {
-    appendSystem(ctx.store, `Failed to resume: ${errorMessage(error)}`);
+    appendSystem(ctx.store, `Failed to ${verb.toLowerCase()} session: ${errorMessage(error)}`);
   }
 }
 
@@ -545,4 +792,26 @@ export function formatVolumeTree(paths: readonly string[]): string {
 
 function formatObservedTokens(value: number | null): string {
   return value === null ? "—" : formatTokens(value);
+}
+
+const TEXT_EXTENSIONS = new Set([
+  "csv",
+  "html",
+  "js",
+  "json",
+  "log",
+  "md",
+  "py",
+  "sh",
+  "toml",
+  "ts",
+  "txt",
+  "xml",
+  "yaml",
+  "yml",
+]);
+
+function contentTypeFor(path: string): string {
+  const extension = basename(path).split(".").pop()?.toLowerCase();
+  return extension && TEXT_EXTENSIONS.has(extension) ? "text/plain" : "application/octet-stream";
 }

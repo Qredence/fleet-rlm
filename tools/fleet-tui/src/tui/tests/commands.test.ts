@@ -1,8 +1,23 @@
+import { createHash } from "node:crypto";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
 import { describe, expect, it, vi } from "vitest";
 
 import type { FleetApiClient } from "../../fleet-api-client.js";
 import { ConversationStore } from "../store.js";
 import { formatVolumeTree, listCommands, parseInput, type CommandContext } from "../commands.js";
+
+async function makeTempFile(
+  name: string,
+  content: string,
+): Promise<{ path: string; cleanup: () => Promise<void> }> {
+  const dir = await mkdtemp(join(tmpdir(), "fleet-command-"));
+  const path = join(dir, name);
+  await writeFile(path, content, "utf8");
+  return { path, cleanup: () => rm(dir, { recursive: true, force: true }) };
+}
 
 function makeContext(): { ctx: CommandContext; exits: { count: number } } {
   const store = new ConversationStore();
@@ -448,5 +463,303 @@ describe("command handlers", () => {
     }
 
     expect(ctx.client.setProfile).not.toHaveBeenCalled();
+  });
+});
+
+describe("attachment commands", () => {
+  it("/attach uploads a local file and pins it for the next Turn", async () => {
+    const { ctx } = makeContext();
+    const { path, cleanup } = await makeTempFile("notes.md", "hello fleet");
+    try {
+      ctx.client.uploadAttachment = vi.fn().mockResolvedValue({
+        id: "00000000-0000-4000-8000-0000000000aa",
+        filename: "notes.md",
+        content_type: "text/plain",
+        byte_size: 12,
+        checksum_sha256: "abc",
+      });
+      const attach = listCommands().find((c) => c.name === "attach");
+      if (attach) await attach.handler([path], ctx);
+
+      expect(ctx.client.uploadAttachment).toHaveBeenCalledWith(
+        expect.objectContaining({ name: "notes.md", contentType: "text/plain" }),
+      );
+      expect(ctx.store.getState().pendingAttachments).toEqual([
+        {
+          id: "00000000-0000-4000-8000-0000000000aa",
+          filename: "notes.md",
+          bytes: 12,
+          contentType: "text/plain",
+        },
+      ]);
+      const last = ctx.store.getState().messages.at(-1);
+      expect(last).toMatchObject({ kind: "text", role: "system" });
+      if (last?.kind === "text") expect(last.text).toContain("Attached notes.md");
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it("/attach reports a missing file without pinning", async () => {
+    const { ctx } = makeContext();
+    ctx.client.uploadAttachment = vi.fn();
+    const attach = listCommands().find((c) => c.name === "attach");
+    if (attach) await attach.handler(["/no/such/file.txt"], ctx);
+
+    expect(ctx.client.uploadAttachment).not.toHaveBeenCalled();
+    expect(ctx.store.getState().pendingAttachments).toEqual([]);
+  });
+
+  it("/attach clear and list manage pinned Attachments", async () => {
+    const { ctx } = makeContext();
+    ctx.store.dispatch({
+      type: "attachment/pin",
+      attachment: { id: "a-1", filename: "f.txt", bytes: 3 },
+    });
+    const attach = listCommands().find((c) => c.name === "attach");
+    if (attach) {
+      await attach.handler(["list"], ctx);
+      const listed = ctx.store.getState().messages.at(-1);
+      expect(listed).toMatchObject({ kind: "text", role: "system" });
+      if (listed?.kind === "text") expect(listed.text).toContain("f.txt");
+
+      await attach.handler(["clear"], ctx);
+    }
+    expect(ctx.store.getState().pendingAttachments).toEqual([]);
+  });
+});
+
+describe("Session Workspace file commands", () => {
+  it("/files lists Session Workspace entries with sizes", async () => {
+    const { ctx } = makeContext();
+    ctx.client.listWorkspaceFiles = vi.fn().mockResolvedValue({
+      entries: [
+        {
+          path: "report.md",
+          kind: "file",
+          byte_size: 2048,
+          modified_at: null,
+          checksum_sha256: null,
+        },
+        {
+          path: "notes",
+          kind: "directory",
+          byte_size: null,
+          modified_at: null,
+          checksum_sha256: null,
+        },
+      ],
+      truncated: false,
+      next_cursor: null,
+    });
+    const files = listCommands().find((c) => c.name === "files");
+    if (files) await files.handler([], ctx);
+
+    expect(ctx.client.listWorkspaceFiles).toHaveBeenCalledWith({ path: "." });
+    const last = ctx.store.getState().messages.at(-1);
+    expect(last).toMatchObject({ kind: "text", role: "system" });
+    if (last?.kind === "text") {
+      expect(last.text).toContain("report.md");
+      expect(last.text).toContain("notes/");
+      expect(last.text).toContain("2.0KB");
+    }
+  });
+
+  it("/file previews a bounded read", async () => {
+    const { ctx } = makeContext();
+    ctx.client.readWorkspaceFile = vi.fn().mockResolvedValue({
+      path: "report.md",
+      content: "line one\nline two",
+      next_cursor: null,
+      byte_size: 18,
+      eof: true,
+    });
+    const file = listCommands().find((c) => c.name === "file");
+    if (file) await file.handler(["report.md"], ctx);
+
+    expect(ctx.client.readWorkspaceFile).toHaveBeenCalledWith("report.md", 8_000);
+    const last = ctx.store.getState().messages.at(-1);
+    expect(last).toMatchObject({ kind: "text", role: "system" });
+    if (last?.kind === "text") expect(last.text).toContain("line two");
+  });
+
+  it("/file save pages to eof and writes atomically", async () => {
+    const { ctx } = makeContext();
+    ctx.client.readWorkspaceFile = vi
+      .fn()
+      .mockResolvedValueOnce({
+        path: "big.txt",
+        content: "first page",
+        next_cursor: "cur-2",
+        byte_size: 21,
+        eof: false,
+      })
+      .mockResolvedValueOnce({
+        path: "big.txt",
+        content: "second page",
+        next_cursor: null,
+        byte_size: 21,
+        eof: true,
+      });
+    const dir = await mkdtemp(join(tmpdir(), "fleet-file-save-"));
+    try {
+      const target = join(dir, "out.txt");
+      const file = listCommands().find((c) => c.name === "file");
+      if (file) await file.handler(["big.txt", "save", target], ctx);
+
+      expect(ctx.client.readWorkspaceFile).toHaveBeenCalledTimes(2);
+      expect(await readFile(target, "utf8")).toBe("first pagesecond page");
+      const last = ctx.store.getState().messages.at(-1);
+      if (last?.kind === "text") expect(last.text).toContain("Saved");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("artifact commands", () => {
+  it("/artifacts lists committed Artifacts from the conversation", () => {
+    const { ctx } = makeContext();
+    ctx.store.dispatch({
+      type: "message/upsert",
+      message: {
+        id: "art-1",
+        kind: "artifact",
+        runId: "run-1",
+        artifactId: "00000000-0000-4000-8000-0000000000bb",
+        name: "result.bin",
+        artifactKind: "file",
+        bytes: 42,
+        ts: 1,
+      },
+    });
+    const artifacts = listCommands().find((c) => c.name === "artifacts");
+    if (artifacts) artifacts.handler([], ctx);
+
+    const last = ctx.store.getState().messages.at(-1);
+    expect(last).toMatchObject({ kind: "text", role: "system" });
+    if (last?.kind === "text") {
+      expect(last.text).toContain("00000000-0000-4000-8000-0000000000bb");
+      expect(last.text).toContain("result.bin");
+    }
+  });
+
+  it("/artifact downloads with integrity verification to a local path", async () => {
+    const { ctx } = makeContext();
+    const payload = new TextEncoder().encode("artifact bytes");
+    const digest = createHash("sha256").update(payload).digest("hex");
+    ctx.client.downloadArtifact = vi.fn().mockResolvedValue(
+      new Response(payload, {
+        headers: {
+          "content-length": String(payload.length),
+          etag: `"${digest}"`,
+        },
+      }),
+    );
+    const dir = await mkdtemp(join(tmpdir(), "fleet-artifact-"));
+    try {
+      const target = join(dir, "out.bin");
+      const artifact = listCommands().find((c) => c.name === "artifact");
+      if (artifact) await artifact.handler(["art-1", target], ctx);
+
+      expect(await readFile(target)).toEqual(Buffer.from(payload));
+      const last = ctx.store.getState().messages.at(-1);
+      if (last?.kind === "text") expect(last.text).toContain("Saved verified Artifact");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("redo / reload / trace", () => {
+  it("/redo resubmits the last prompt through ctx.submit", () => {
+    const { ctx } = makeContext();
+    const submit = vi.fn();
+    ctx.submit = submit;
+    ctx.store.dispatch({ type: "user/submit", text: "retry me" });
+    ctx.store.dispatch({ type: "run/start", runId: "run-1", delivery: "live" });
+    ctx.store.dispatch({
+      type: "run/finish",
+      finishReason: "stop",
+      error: null,
+      durationMs: 5,
+      checkpointVersion: 1,
+    });
+    const redo = listCommands().find((c) => c.name === "redo");
+    if (redo) redo.handler([], ctx);
+
+    expect(submit).toHaveBeenCalledWith("retry me");
+  });
+
+  it("/redo refuses while a Run is in progress", () => {
+    const { ctx } = makeContext();
+    const submit = vi.fn();
+    ctx.submit = submit;
+    ctx.store.dispatch({ type: "user/submit", text: "busy" });
+    ctx.store.dispatch({ type: "run/start", runId: "run-1", delivery: "live" });
+    const redo = listCommands().find((c) => c.name === "redo");
+    if (redo) redo.handler([], ctx);
+
+    expect(submit).not.toHaveBeenCalled();
+  });
+
+  it("/redo reports when no prompt was submitted in this session", () => {
+    const { ctx } = makeContext();
+    const redo = listCommands().find((c) => c.name === "redo");
+    if (redo) redo.handler([], ctx);
+
+    const last = ctx.store.getState().messages.at(-1);
+    expect(last).toMatchObject({ kind: "text", role: "system" });
+    if (last?.kind === "text") expect(last.text).toContain("No prompt to redo");
+  });
+
+  it("/reload re-fetches durable Turns for the current Session", async () => {
+    const { ctx } = makeContext();
+    ctx.store.dispatch({
+      type: "session/init",
+      session: { id: "session-1", title: "T", status: "active", resumed: true },
+    });
+    ctx.client.getSession = vi.fn().mockResolvedValue({
+      id: "session-1",
+      title: "T",
+      status: "active",
+      checkpoint_version: 2,
+      created_at: null,
+      updated_at: null,
+    });
+    ctx.client.listTurns = vi.fn().mockResolvedValue([
+      {
+        id: "turn-1",
+        session_id: "session-1",
+        role: "assistant",
+        sequence: 1,
+        status: "completed",
+        parts: [{ type: "data-structured-result", data: { value: { answer: "ok" } } }],
+        metadata: {},
+      },
+    ]);
+    const reload = listCommands().find((c) => c.name === "reload");
+    if (reload) await reload.handler([], ctx);
+
+    expect(ctx.client.listTurns).toHaveBeenCalledWith("session-1");
+    const last = ctx.store.getState().messages.at(-1);
+    expect(last).toMatchObject({ kind: "text", role: "system" });
+    if (last?.kind === "text") expect(last.text).toContain("Reloaded session session-1.");
+  });
+
+  it("/trace shows the full MLflow trace ID", () => {
+    const { ctx } = makeContext();
+    ctx.store.dispatch({
+      type: "run/start",
+      runId: "run-1",
+      delivery: "live",
+      traceId: "trace:abc123",
+    });
+    const trace = listCommands().find((c) => c.name === "trace");
+    if (trace) trace.handler([], ctx);
+
+    const last = ctx.store.getState().messages.at(-1);
+    expect(last).toMatchObject({ kind: "text", role: "system" });
+    if (last?.kind === "text") expect(last.text).toContain("trace:abc123");
   });
 });

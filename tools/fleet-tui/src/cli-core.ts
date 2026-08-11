@@ -100,6 +100,22 @@ export async function saveArtifact(
   }
 }
 
+/** Atomically write bytes to a local path (temp file + fsync + rename). */
+export async function writeFileAtomic(outputPath: string, data: Uint8Array): Promise<void> {
+  const temporaryPath = join(dirname(outputPath), `.${basename(outputPath)}.${randomUUID()}.part`);
+  const file = await open(temporaryPath, "wx");
+  try {
+    await file.write(data);
+    await file.sync();
+    await file.close();
+    await rename(temporaryPath, outputPath);
+  } catch (error) {
+    await file.close().catch(() => undefined);
+    await rm(temporaryPath, { force: true });
+    throw error;
+  }
+}
+
 export async function runArtifactDownload(options: CliOptions): Promise<boolean> {
   if (!options.artifactId || !options.outputPath) {
     return false;

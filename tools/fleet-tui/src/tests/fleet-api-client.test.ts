@@ -9,6 +9,106 @@ afterEach(() => {
 });
 
 describe("FleetApiClient", () => {
+  it("sends pinned Attachment ids with the Turn body", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response("data: [DONE]\n\n", {
+        headers: { "x-vercel-ai-ui-message-stream": "v1" },
+      }),
+    );
+    globalThis.fetch = fetchMock;
+    const client = new FleetApiClient({ baseUrl: "http://fleet.test" });
+
+    await client.streamTurn({
+      message: "hello",
+      sessionId: "session-id",
+      idempotencyKey: "turn-key",
+      attachmentIds: ["00000000-0000-4000-8000-0000000000aa"],
+    });
+
+    expect(JSON.parse(fetchMock.mock.calls[0]?.[1]?.body as string)).toEqual({
+      text: "hello",
+      attachment_ids: ["00000000-0000-4000-8000-0000000000aa"],
+      skill_selections: [],
+    });
+  });
+
+  it("uploads an Attachment through multipart and returns its metadata", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          id: "00000000-0000-4000-8000-0000000000aa",
+          filename: "notes.md",
+          content_type: "text/plain",
+          byte_size: 12,
+          checksum_sha256: "abc",
+        }),
+        { headers: { "content-type": "application/json" } },
+      ),
+    );
+    globalThis.fetch = fetchMock;
+    const client = new FleetApiClient({ baseUrl: "http://fleet.test" });
+
+    const ref = await client.uploadAttachment({
+      name: "notes.md",
+      bytes: new TextEncoder().encode("hello fleet"),
+      contentType: "text/plain",
+    });
+
+    expect(ref.filename).toBe("notes.md");
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("http://fleet.test/api/attachments");
+    expect(init.method).toBe("POST");
+    expect(init.body).toBeInstanceOf(FormData);
+    // No manual content-type: fetch must set the multipart boundary itself.
+    expect(init.headers).toBeUndefined();
+  });
+
+  it("lists, stats, and reads Session Workspace files", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          entries: [
+            {
+              path: "report.md",
+              kind: "file",
+              byte_size: 2048,
+              modified_at: null,
+              checksum_sha256: null,
+            },
+          ],
+          truncated: false,
+          next_cursor: null,
+        }),
+        { headers: { "content-type": "application/json" } },
+      ),
+    );
+    globalThis.fetch = fetchMock;
+    const client = new FleetApiClient({ baseUrl: "http://fleet.test" });
+
+    await client.listWorkspaceFiles({ path: "." });
+    expect(fetchMock).toHaveBeenCalledWith("http://fleet.test/api/files?path=.", expect.anything());
+
+    const readMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          path: "report.md",
+          content: "hi",
+          next_cursor: null,
+          byte_size: 2,
+          eof: true,
+        }),
+        { headers: { "content-type": "application/json" } },
+      ),
+    );
+    globalThis.fetch = readMock;
+    const page = await client.readWorkspaceFile("report.md", 8_000);
+    expect(page.content).toBe("hi");
+    expect(readMock).toHaveBeenCalledWith(
+      "http://fleet.test/api/files/content?path=report.md&max_chars=8000",
+      expect.anything(),
+    );
+  });
+
   it("creates a session as JSON", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({ id: "session-id", title: "New Session" }), {

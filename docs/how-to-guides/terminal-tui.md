@@ -86,11 +86,24 @@ operator state and are not inserted into durable transcript messages.
 ## Commands and Skills
 
 Use `/help` for the current slash-command list. Important commands include
-`/sessions`, `/rename`, `/resume`, `/status`, `/settings`, `/profiles`,
-`/volume`, `/cancel`, `/clear`, `/skills`, `/skill`, and `/exit`. `/settings`
+`/sessions`, `/rename`, `/resume`, `/reload`, `/status`, `/settings`,
+`/profiles`, `/volume`, `/files`, `/file`, `/attach`, `/artifact`,
+`/artifacts`, `/redo`, `/cancel`, `/clear`, `/skills`, `/skill`, `/trace`,
+and `/exit`. `/settings`
 is a local-only TOML policy editor; `/profiles` switches the selected profile;
 `/volume [root]` shows the read-only Workspace Volume tree. Saved policy
 settings take effect after restarting Fleet.
+
+`/attach <path>…` uploads local files through the lifecycle-owned Attachment
+endpoint and pins them (up to eight) to the next Turn; `/attach list` and
+`/attach clear` manage the pins. `/files [path]` lists Session Workspace
+entries and `/file <path>` previews text; `/file <path> save <local>` writes
+paged content atomically to a local path. `/artifact <id> <local>` downloads a
+committed Artifact with content-length and SHA-256 verification;
+`/artifacts` lists Artifact ids in the conversation. `/redo` resubmits the last
+prompt with a fresh idempotency key, and `/reload` re-fetches committed Turns
+for the current Session without switching Sessions. `/trace` prints the full
+MLflow trace ID of the current Run.
 
 `/clear` resets only the current local presentation. It does not delete or
 rewrite durable Session History; resuming the Session restores committed Turns.

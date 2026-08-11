@@ -8,6 +8,7 @@ import {
   type CliOptions,
 } from "./cli-core.js";
 import { createFleetTui } from "./tui/application.js";
+import { DraftStore } from "./tui/draft-store.js";
 import { projectDurableTurns } from "./tui/projection.js";
 
 export { parseArgs, type CliOptions };
@@ -26,7 +27,13 @@ export async function run(options: CliOptions): Promise<void> {
   const initialEvents = resumed ? projectDurableTurns(await client.listTurns(session.id)) : [];
 
   process.stdout.write(`Fleet session: ${session.id}\n`);
-  await createFleetTui({ client, session, resumed, initialEvents }).start();
+  await createFleetTui({
+    client,
+    session,
+    resumed,
+    initialEvents,
+    draftStore: new DraftStore(),
+  }).start();
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {

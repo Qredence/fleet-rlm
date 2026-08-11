@@ -7,6 +7,7 @@ export type StreamFleetTurnOptions = {
   message: string;
   idempotencyKey?: string;
   skillSelections?: readonly FleetSkillSelection[];
+  attachmentIds?: readonly string[];
   onStreamOpen?: () => void;
   /** Fires with the backend's X-Fleet-Run-ID once stream headers are accepted. */
   onRunId?: (runId: string) => void;
@@ -19,13 +20,14 @@ export async function* streamFleetTurn({
   message,
   idempotencyKey = crypto.randomUUID(),
   skillSelections = [],
+  attachmentIds = [],
   onStreamOpen,
   onRunId,
   signal,
 }: StreamFleetTurnOptions): AsyncGenerator<FleetUIMessageChunk> {
   const response = await openWithOneNetworkRetry(
     client,
-    { message, sessionId, idempotencyKey, skillSelections, onStreamOpen, signal },
+    { message, sessionId, idempotencyKey, skillSelections, attachmentIds, onStreamOpen, signal },
     signal,
   );
 

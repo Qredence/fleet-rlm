@@ -14,6 +14,7 @@ pi-tui-only terminal client. No web frontend, no React, no browser runtime.
 | `src/tui/projection.ts` | Live and reload durable-turn projection |
 | `src/tui/store.ts` | Atomic hydration; all state via `dispatch` + pure `reduce` |
 | `src/tui/commands.ts` | Slash commands, including loopback-only TOML policy editing |
+| `src/tui/draft-store.ts` | Debounced per-Session draft/selection persistence (`FLEET_TUI_STATE_DIR`) |
 | `src/generated/openapi.ts` | **Generated** — do not hand-edit; use `make api-sync` |
 | `src/generated/fleet-ui-chunk-validation.ts` | **Generated** — do not hand-edit; use `make api-sync` (`scripts/generate_tui_chunk_validation.py`) |
 

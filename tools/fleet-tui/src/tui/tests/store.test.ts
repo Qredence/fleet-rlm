@@ -503,3 +503,48 @@ describe("ConversationStore", () => {
     ]);
   });
 });
+
+describe("pending attachments and lastPrompt", () => {
+  it("pins up to eight Attachments and consumes them by id", () => {
+    const store = makeStore();
+    for (let index = 1; index <= 9; index += 1) {
+      store.dispatch({
+        type: "attachment/pin",
+        attachment: { id: `a-${index}`, filename: `f-${index}.txt`, bytes: index },
+      });
+    }
+    expect(store.getState().pendingAttachments).toHaveLength(8);
+    expect(store.getState().pendingAttachments[0]?.id).toBe("a-1");
+
+    store.dispatch({
+      type: "attachment/consume",
+      attachments: [{ id: "a-1", filename: "f-1.txt", bytes: 1 }],
+    });
+    expect(store.getState().pendingAttachments.map((a) => a.id)).not.toContain("a-1");
+
+    store.dispatch({ type: "attachment/clear" });
+    expect(store.getState().pendingAttachments).toEqual([]);
+  });
+
+  it("keeps the last submitted prompt for /redo", () => {
+    const store = makeStore();
+    store.dispatch({ type: "user/submit", text: "first" });
+    store.dispatch({ type: "user/submit", text: "second" });
+    expect(store.getState().lastPrompt).toBe("second");
+
+    store.dispatch({ type: "user/prompt-restore", text: "restored" });
+    expect(store.getState().lastPrompt).toBe("restored");
+  });
+
+  it("clears attachments and lastPrompt state on reset", () => {
+    const store = makeStore();
+    store.dispatch({
+      type: "attachment/pin",
+      attachment: { id: "a-1", filename: "f.txt", bytes: 1 },
+    });
+    store.dispatch({ type: "user/submit", text: "x" });
+    store.dispatch({ type: "reset" });
+    expect(store.getState().pendingAttachments).toEqual([]);
+    expect(store.getState().lastPrompt).toBeNull();
+  });
+});
