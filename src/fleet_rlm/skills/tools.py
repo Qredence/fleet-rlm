@@ -168,6 +168,7 @@ class SkillToolHost:
             "description": card.description,
             "version": card.version,
             "skill_markdown": skill.instructions,
+            "allowed_tools": list(skill.allowed_tools),
             "resources": [
                 {
                     "path": resource.path,
@@ -216,8 +217,9 @@ class SkillToolHost:
                 name="load_skill",
                 desc=(
                     "Load an authorized Skill only when its advertised Skill Card is relevant to the current "
-                    "request. Returns a dictionary with ok, skill_markdown, and resources on success, or error "
-                    "on failure; do not load Skills speculatively."
+                    "request. Returns a dictionary with ok, skill_markdown, allowed_tools, and resources on "
+                    "success, or error on failure; allowed_tools are model guidance, not authorization; do not "
+                    "load Skills speculatively."
                 ),
             ),
             dspy.Tool(

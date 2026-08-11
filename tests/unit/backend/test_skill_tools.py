@@ -18,7 +18,7 @@ def test_tools_are_exactly_two_and_resources_require_load() -> None:
     tools = host.as_tools()
     assert tuple(str(tool.name) for tool in tools) == ("load_skill", "read_skill_resource")
     assert "dictionary" in tools[0].desc
-    assert all(field in tools[0].desc for field in ("ok", "skill_markdown", "resources", "error"))
+    assert all(field in tools[0].desc for field in ("ok", "skill_markdown", "allowed_tools", "resources", "error"))
     assert "advertised Skill Card is relevant" in tools[0].desc
     assert "do not load Skills speculatively" in tools[0].desc
     assert "dictionary" in tools[1].desc
@@ -29,6 +29,7 @@ def test_tools_are_exactly_two_and_resources_require_load() -> None:
     loaded = host.load_skill(str(skill.card.id), skill.card.version)
     assert loaded["ok"] is True
     assert loaded["skill_markdown"] == skill.instructions
+    assert loaded["allowed_tools"] == list(skill.allowed_tools)
     assert all("content" not in resource for resource in loaded["resources"])
     assert (
         host.read_skill_resource(str(skill.card.id), path, skill.card.version)["content"]

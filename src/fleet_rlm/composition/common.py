@@ -119,6 +119,7 @@ def recursive_rlm_options(settings: Settings) -> RecursiveRLMOptions:
         child_max_iterations=settings.rlm_recursion_child_max_iterations,
         child_max_llm_calls=settings.rlm_recursion_child_max_llm_calls,
         child_max_output_chars=settings.rlm_recursion_child_max_output_chars,
+        max_parallel_children=settings.rlm_recursion_max_parallel_children,
     )
 
 

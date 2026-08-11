@@ -7,6 +7,7 @@ import contextlib
 import logging
 from collections.abc import Sequence
 from dataclasses import dataclass
+from functools import partial
 from typing import Any, cast
 from uuid import UUID
 
@@ -14,6 +15,7 @@ from fleet_rlm.chat.capability_preparation import (
     PreparedHostCapabilities,
     prepare_host_capabilities,
 )
+from fleet_rlm.chat.post_commit_memory import OwnedPostCommitMemoryPromotion
 from fleet_rlm.chat.run_lifecycle import ClaimedRun
 from fleet_rlm.chat.run_preparation import (
     DefaultRunPreparer,
@@ -61,6 +63,38 @@ from fleet_rlm.skills.catalog import SkillCatalog
 logger = logging.getLogger(__name__)
 
 
+def _promote_memory_candidates(
+    store: Any,
+    candidates: tuple[Any, ...],
+    *,
+    allowed_categories: tuple[str, ...],
+) -> Any:
+    """Run the bounded post-commit Memory effect outside execution capabilities."""
+    from fleet_rlm.files.memory_candidates import MemoryCandidatePromotionResult, promote_memory_candidates
+
+    if store is None:
+        result = MemoryCandidatePromotionResult(
+            proposed_count=len(candidates),
+            reasons=("store_unavailable",) if candidates else (),
+        )
+    else:
+        result = promote_memory_candidates(
+            store=store,
+            candidates=candidates,
+            allowed_categories=allowed_categories,
+        )
+    if candidates and (result.promoted_count or result.duplicate_count or result.dropped_count or result.failure_count):
+        logger.info(
+            "Memory Candidate promotion outcome promoted=%d duplicates=%d dropped=%d failed=%d reasons=%s",
+            result.promoted_count,
+            result.duplicate_count,
+            result.dropped_count,
+            result.failure_count,
+            ",".join(result.reasons) or "-",
+        )
+    return result
+
+
 async def _settle_owned_thread(task: asyncio.Task[Any]) -> bool:
     """Wait through repeated caller cancellation until owned thread work exits."""
     cancellation_requested = False
@@ -93,8 +127,6 @@ class LivePreparedCapabilities(PreparedHostCapabilities):
         preparation_notices: tuple[Any, ...] = (),
         workspace_memory_digest: str = "",
         memory_candidates: Any = None,
-        memory_store: Any = None,
-        memory_candidate_categories: tuple[str, ...] = (),
     ) -> None:
         super().__init__(
             spec,
@@ -111,38 +143,6 @@ class LivePreparedCapabilities(PreparedHostCapabilities):
         ):
             workspace_memory_digest = ""
         self.workspace_memory_digest = workspace_memory_digest
-        self._memory_store = memory_store
-        self._memory_candidate_categories = memory_candidate_categories
-
-    def promote_memory_candidates(self, candidates: tuple[Any, ...]) -> Any:
-        """Promote accepted Run candidates against live active memory best-effort."""
-        from fleet_rlm.files.memory_candidates import MemoryCandidatePromotionResult, promote_memory_candidates
-
-        if self._memory_store is None:
-            result = MemoryCandidatePromotionResult(
-                proposed_count=len(candidates),
-                reasons=("store_unavailable",) if candidates else (),
-            )
-        else:
-            result = promote_memory_candidates(
-                store=self._memory_store,
-                candidates=candidates,
-                allowed_categories=self._memory_candidate_categories,
-            )
-        if candidates and (
-            result.promoted_count or result.duplicate_count or result.dropped_count or result.failure_count
-        ):
-            # Bounded operational visibility: counts and failure categories only,
-            # never candidate content (QRE-140 bounded observability).
-            logger.info(
-                "Memory Candidate promotion outcome promoted=%d duplicates=%d dropped=%d failed=%d reasons=%s",
-                result.promoted_count,
-                result.duplicate_count,
-                result.dropped_count,
-                result.failure_count,
-                ",".join(result.reasons) or "-",
-            )
-        return result
 
 
 class _DaytonaRunSink:
@@ -247,11 +247,27 @@ class _DaytonaEnvironmentProvider:
                 raise
             if sandbox is None:
                 raise RuntimeError("acquired Sandbox is unavailable")
+            from fleet_rlm.daytona.workspace_memory import DaytonaWorkspaceMemoryStore
+
+            paths = volume_paths_from_settings(self.settings)
             sink = _DaytonaRunSink(
                 sandbox,
                 loop=asyncio.get_running_loop(),
                 max_read_bytes=self.settings.max_upload_bytes,
-                paths=volume_paths_from_settings(self.settings),
+                paths=paths,
+            )
+            assert sink.volume_fs is not None
+            memory_store = DaytonaWorkspaceMemoryStore(
+                sink.volume_fs.sandbox,
+                volume_paths=paths,
+                max_upload_bytes=self.settings.max_upload_bytes,
+            )
+            memory_promotion = OwnedPostCommitMemoryPromotion(
+                partial(
+                    _promote_memory_candidates,
+                    memory_store,
+                    allowed_categories=self.settings.rlm_autonomous_memory_categories,
+                )
             )
 
             async def release() -> None:
@@ -279,7 +295,9 @@ class _DaytonaEnvironmentProvider:
                 release=release,
                 result_snapshot_sink=sink,
                 child_runtime_factory=child_runtime_factory,
-                context_mount_path=str(volume_paths_from_settings(self.settings).mount_path),
+                context_mount_path=str(paths.mount_path),
+                workspace_memory_store=memory_store,
+                post_commit_memory_promotion=memory_promotion,
             )
         except BaseException:
             await asyncio.shield(self.resources.session_manager.release(lease))
@@ -380,11 +398,15 @@ class _LiveCapabilityPreparer:
             ),
             max_bytes=self.settings.max_url_bytes,
         )
-        memory_store = DaytonaWorkspaceMemoryStore(
-            volume_fs.sandbox,
-            volume_paths=paths,
-            max_upload_bytes=self.settings.max_upload_bytes,
-        )
+        memory_store = getattr(environment, "workspace_memory_store", None)
+        if memory_store is None:
+            # Direct capability-preparation tests may provide only a minimal
+            # RunEnvironment; production acquisition owns this store.
+            memory_store = DaytonaWorkspaceMemoryStore(
+                volume_fs.sandbox,
+                volume_paths=paths,
+                max_upload_bytes=self.settings.max_upload_bytes,
+            )
         memory_host = WorkspaceMemoryToolHost(memory_store)
         memory_candidates = None
         candidate_tools: tuple[Any, ...] = ()
@@ -441,8 +463,6 @@ class _LiveCapabilityPreparer:
             preparation_notices=notices,
             workspace_memory_digest=memory_digest,
             memory_candidates=memory_candidates,
-            memory_store=memory_store,
-            memory_candidate_categories=self.settings.rlm_autonomous_memory_categories,
         )
 
 

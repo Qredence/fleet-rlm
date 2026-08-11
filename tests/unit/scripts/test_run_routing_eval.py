@@ -61,6 +61,24 @@ def test_public_sse_chunks_reduce_native_child_and_depth_fallback() -> None:
     assert runner.answer_from_public_chunks(chunks) == "204"
 
 
+def test_public_sse_chunks_reduce_recursive_batch_width() -> None:
+    chunks = [
+        {"type": "tool-input-available", "toolName": "rlm_query_batched", "input": {"prompt_count": 3}},
+        {
+            "type": "tool-output-available",
+            "toolCallId": "call-batch",
+            "output": {"status": "completed", "answer_count": 3, "peak_child_concurrency": 2},
+        },
+        {"type": "data-structured-result", "data": {"value": {"answer": "2,4,6"}}},
+    ]
+
+    facts = runner.facts_from_public_chunks(chunks)
+
+    assert runner.classify_routing_facts(facts) == "recursive_batch"
+    assert facts.recursive_batch_calls == 1
+    assert facts.peak_child_concurrency == 2
+
+
 def test_receipt_validator_reclassifies_stored_facts_and_rejects_drift() -> None:
     receipt = runner._base_receipt(
         [

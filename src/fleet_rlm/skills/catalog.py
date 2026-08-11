@@ -105,7 +105,15 @@ def build_bundled_skill_catalog() -> SkillCatalog:
             resource.path: SkillResource(resource.path, resource.media_type, resource.content)
             for resource in manifest.resources
         }
-        definitions.append(SkillDefinition(card, manifest.instructions, resources, signature))
+        definitions.append(
+            SkillDefinition(
+                card,
+                manifest.instructions,
+                resources,
+                signature,
+                manifest.allowed_tools,
+            )
+        )
     return SkillCatalog(tuple(definitions))
 
 

@@ -72,7 +72,7 @@ def _drain_memory_candidates(context: RLMExecutionContext) -> tuple[Any, ...]:
     return tuple(drain()) if callable(drain) else ()
 
 
-def _recursive_summary(executor: RecursiveRLMExecutor | None) -> RecursiveCallSummary:
+def _recursive_summary(executor: RecursiveRLMExecutor | None, metrics: Any | None = None) -> RecursiveCallSummary:
     """
     Return recursive execution metrics, or zero-valued metrics when recursion is disabled.
 
@@ -84,6 +84,21 @@ def _recursive_summary(executor: RecursiveRLMExecutor | None) -> RecursiveCallSu
     """
     if executor is not None:
         return executor.summary()
+    if metrics is not None and callable(getattr(metrics, "snapshot", None)):
+        snapshot = metrics.snapshot()
+        return RecursiveCallSummary(
+            0,
+            0,
+            0,
+            0,
+            snapshot.depth_fallback_calls,
+            (),
+            recursive_batch_calls=snapshot.recursive_batch_calls,
+            recursive_children_started=snapshot.recursive_children_started,
+            recursive_children_completed=snapshot.recursive_children_completed,
+            peak_child_concurrency=snapshot.peak_child_concurrency,
+            delegation_metrics=snapshot,
+        )
     return RecursiveCallSummary(0, 0, 0, 0, 0, ())
 
 
@@ -723,6 +738,7 @@ class RLMRunner:
                 options=context.delegation.recursive_options,
                 child_runtime_factory=context.delegation.child_runtime_factory,
                 deadline=context.execution.deadline,
+                metrics=context.delegation.metrics,
                 observer=relay.publish,
                 is_authorized=lambda: not context.identity.authority.revoked,
             )
@@ -751,7 +767,10 @@ class RLMRunner:
             )
             for tool in spec.tools
         )
-        all_tools = (*observed_tools, *((recursive_executor.tool,) if recursive_executor is not None else ()))
+        recursive_tools = (
+            (recursive_executor.tool, recursive_executor.batched_tool) if recursive_executor is not None else ()
+        )
+        all_tools = (*observed_tools, *recursive_tools)
         rlm = self._factory.create(
             models=context.execution.models,
             options=context.execution.options,
@@ -880,9 +899,10 @@ class RLMRunner:
         phase: Any,
         started: float,
         recursive_executor: RecursiveRLMExecutor | None,
+        metrics: Any,
         exc: BaseException,
     ) -> None:
-        recursive_summary = _recursive_summary(recursive_executor)
+        recursive_summary = _recursive_summary(recursive_executor, metrics)
         phase.set_outputs(
             {
                 "elapsed_ms": int((time.perf_counter() - started) * 1000),
@@ -891,6 +911,7 @@ class RLMRunner:
                 "recursive_call_count": recursive_summary.call_count,
                 "recursive_prompt_chars": recursive_summary.delegated_prompt_chars,
                 "recursive_depth_fallback_count": recursive_summary.depth_fallback_count,
+                "delegation_metrics": recursive_summary.delegation_metrics.as_dict(),
             }
         )
 
@@ -900,13 +921,14 @@ class RLMRunner:
         prediction: Any,
         started: float,
         recursive_executor: RecursiveRLMExecutor | None,
+        metrics: Any,
     ) -> Any:
         final_reasoning = getattr(prediction, "final_reasoning", None)
         termination_mode = (
             "native_extraction_fallback" if final_reasoning == "Extract forced final output" else "typed_submit"
         )
         usage = observed_usage(prediction, duration_ms=int((time.perf_counter() - started) * 1000))
-        recursive_summary = _recursive_summary(recursive_executor)
+        recursive_summary = _recursive_summary(recursive_executor, metrics)
         phase.set_outputs(
             {
                 "iterations": usage["iterations"],
@@ -917,6 +939,7 @@ class RLMRunner:
                 "recursive_call_count": recursive_summary.call_count,
                 "recursive_prompt_chars": recursive_summary.delegated_prompt_chars,
                 "recursive_depth_fallback_count": recursive_summary.depth_fallback_count,
+                "delegation_metrics": recursive_summary.delegation_metrics.as_dict(),
             }
         )
         return prediction
@@ -962,7 +985,11 @@ class RLMRunner:
                 # DSPy 3.3.x combines context callbacks with instance
                 # callbacks around LM requests (dspy/utils/callback.py:258-288).
                 callbacks=[
-                    _RLMTraceCallback(root_lm=context.execution.models.root_lm, sub_lm=context.execution.models.sub_lm)
+                    _RLMTraceCallback(
+                        root_lm=context.execution.models.root_lm,
+                        sub_lm=context.execution.models.sub_lm,
+                        metrics=context.delegation.metrics,
+                    )
                 ],
                 # Keep the pinned DSPy JSON action protocol authoritative. A
                 # provider-native token stream is an adapter failure, not a
@@ -976,11 +1003,17 @@ class RLMRunner:
                 if recursive_executor is not None:
                     recursive_executor.raise_if_cleanup_failed()
             except BaseException as exc:
-                self._record_phase_failure(phase, started, recursive_executor, exc)
+                self._record_phase_failure(phase, started, recursive_executor, context.delegation.metrics, exc)
                 raise
             finally:
                 self._record_attachment_accesses(context)
-            return self._record_phase_success(phase, prediction, started, recursive_executor)
+            return self._record_phase_success(
+                phase,
+                prediction,
+                started,
+                recursive_executor,
+                context.delegation.metrics,
+            )
 
     async def _execute_rlm_in_worker(
         self,

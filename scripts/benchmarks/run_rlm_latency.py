@@ -434,6 +434,8 @@ def run_turn(
     iterations = 0
     batch_calls = 0
     recursive_calls = 0
+    recursive_batch_calls = 0
+    peak_child_concurrency = 0
     requested_attachment_ids = {str(value) for value in attachment_ids}
     attachment_accessed = False
     trajectory = {"codes": [], "outputs": []}
@@ -471,6 +473,11 @@ def run_turn(
                 tool_name = chunk.get("toolName")
                 batch_calls += int(tool_name == "llm_query_batched")
                 recursive_calls += int(tool_name == "rlm_query")
+                recursive_batch_calls += int(tool_name == "rlm_query_batched")
+            elif chunk_type == "tool-output-available" and isinstance(chunk.get("output"), Mapping):
+                raw_peak = chunk["output"].get("peak_child_concurrency")
+                if isinstance(raw_peak, int) and not isinstance(raw_peak, bool):
+                    peak_child_concurrency = max(peak_child_concurrency, raw_peak)
             elif chunk_type == "data-attachment" and isinstance(chunk.get("data"), Mapping):
                 data = chunk["data"]
                 accessed_id = data.get("attachment_id", data.get("attachmentId"))
@@ -493,6 +500,8 @@ def run_turn(
         "iterations": iterations,
         "batch_calls": batch_calls,
         "recursive_calls": recursive_calls,
+        "recursive_batch_calls": recursive_batch_calls,
+        "peak_child_concurrency": peak_child_concurrency,
         "termination_mode": termination_mode,
         "attachment_accessed": attachment_accessed,
         "trajectory": trajectory,
@@ -691,6 +700,10 @@ def _aggregate(rows: Sequence[Mapping[str, Any]], *, workload_id: str = EVIDENCE
         "iterations": sum(int(row.get("iterations", 0)) for row in successes),
         "batch_calls": sum(int(row.get("batch_calls", 0)) for row in successes),
         "recursive_calls": sum(int(row.get("recursive_calls", 0)) for row in successes),
+        "recursive_batch_calls": sum(int(row.get("recursive_batch_calls", 0)) for row in successes),
+        "peak_child_concurrency": max(int(row.get("peak_child_concurrency", 0)) for row in successes)
+        if successes
+        else 0,
         "typed_submit_count": sum(row.get("termination_mode") == "typed_submit" for row in successes),
         "token_totals": usage,
         "trace_ids": [row["trace_id"] for row in successes if row.get("trace_id")],

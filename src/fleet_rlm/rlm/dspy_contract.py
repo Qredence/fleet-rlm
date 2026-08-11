@@ -24,6 +24,7 @@ from pydantic import TypeAdapter
 from pydantic_core import PydanticSerializationError
 
 from fleet_rlm.json_types import JsonValue as JsonValue
+from fleet_rlm.rlm.delegation_metrics import DelegationMetrics, normalize_lm_token_usage
 from fleet_rlm.rlm.errors import RLMConfigError
 from fleet_rlm.rlm.sanitize import truncate_public_text, validate_declared_public_value
 
@@ -435,9 +436,17 @@ class _RLMTraceCallback(BaseCallback):
     callbacks are honored by its settings context (``dspy/dsp/utils/settings.py:216-235``).
     """
 
-    def __init__(self, *, root_lm: Any, sub_lm: Any, recursive_depth: int = 0) -> None:
+    def __init__(
+        self,
+        *,
+        root_lm: Any,
+        sub_lm: Any,
+        recursive_depth: int = 0,
+        metrics: DelegationMetrics | None = None,
+    ) -> None:
         self._roles = {id(root_lm): "root", id(sub_lm): "sub"}
         self._recursive_depth = max(0, int(recursive_depth))
+        self._metrics = metrics
         self._call_index = 0
         self._spans: dict[str, tuple[Any, Any, int | None, int, float]] = {}
 
@@ -446,14 +455,20 @@ class _RLMTraceCallback(BaseCallback):
         role = self._roles.get(id(instance))
         if role is None:
             return
+        model = "unknown"
+        history_length: int | None = None
+        self._call_index += 1
+        call_index = self._call_index
         try:
-            from fleet_rlm.observability.turn_tracing import start_turn_span
-
             model = getattr(instance, "model", "unknown")
             history = getattr(instance, "history", None)
             history_length = len(history) if isinstance(history, Sequence) else None
-            self._call_index += 1
-            call_index = self._call_index
+        except Exception:
+            pass
+        span = None
+        try:
+            from fleet_rlm.observability.turn_tracing import start_turn_span
+
             span = start_turn_span(
                 f"RLM.{role}_lm",
                 span_type="LLM",
@@ -468,9 +483,9 @@ class _RLMTraceCallback(BaseCallback):
                     "recursive_depth": self._recursive_depth,
                 },
             )
-            self._spans[call_id] = (instance, span, history_length, call_index, time.perf_counter())
         except Exception:
-            return
+            pass
+        self._spans[call_id] = (instance, span, history_length, call_index, time.perf_counter())
 
     def on_lm_end(
         self,
@@ -490,10 +505,17 @@ class _RLMTraceCallback(BaseCallback):
         if state is None:
             return
         instance, span, history_length, call_index, started_at = state
-        usage, provider = _latest_lm_telemetry(instance, history_length)
+        role = self._roles.get(id(instance), "unknown")
+        try:
+            usage, provider = _latest_lm_telemetry(instance, history_length, outputs)
+        except Exception:
+            usage, provider = {}, {}
         standard_usage = _mlflow_token_usage(usage)
         attributes = {"mlflow.chat.tokenUsage": standard_usage} if standard_usage else None
-        response_details = _lm_output_profile(outputs, include_previews=self._recursive_depth == 0)
+        try:
+            response_details = _lm_output_profile(outputs, include_previews=self._recursive_depth == 0)
+        except Exception:
+            response_details = {}
         response_details.update(
             {
                 "call_index": call_index,
@@ -501,6 +523,15 @@ class _RLMTraceCallback(BaseCallback):
                 **provider,
             }
         )
+        if self._metrics is not None:
+            self._metrics.record_lm_call(
+                role,
+                self._recursive_depth,
+                duration_ms=(time.perf_counter() - started_at) * 1000,
+                usage=usage,
+            )
+        if span is None:
+            return
         if exception is None:
             span.finish(
                 phase_status="completed",
@@ -611,6 +642,7 @@ def _lm_output_profile(
 def _latest_lm_telemetry(
     instance: Any,
     history_length: int | None,
+    outputs: object = None,
 ) -> tuple[dict[str, JsonValue], dict[str, JsonValue]]:
     """
     Retrieve sanitized usage and provider telemetry for the latest completed language-model call.
@@ -626,9 +658,13 @@ def _latest_lm_telemetry(
     if not isinstance(history, Sequence) or isinstance(history, (str, bytes, bytearray)):
         return {}, {}
     start = history_length if history_length is not None else max(0, len(history) - 1)
-    for entry in reversed(history[start:]):
-        if not isinstance(entry, Mapping):
-            continue
+    candidates = [entry for entry in history[start:] if isinstance(entry, Mapping)]
+    matching = [entry for entry in candidates if _history_entry_matches_outputs(entry, outputs)]
+    # Concurrent LM calls may append several entries after the same starting
+    # index. Attribute telemetry only to the callback's exact returned object;
+    # use the sole new entry as a compatibility fallback for synthetic LMs.
+    selected = matching if matching else candidates if len(candidates) == 1 else []
+    for entry in reversed(selected):
         usage = entry.get("usage")
         if not isinstance(usage, Mapping):
             dump = getattr(usage, "model_dump", None)
@@ -645,6 +681,15 @@ def _latest_lm_telemetry(
         if safe_usage or provider:
             return safe_usage, provider
     return {}, {}
+
+
+def _history_entry_matches_outputs(entry: Mapping[str, Any], outputs: object) -> bool:
+    """Match DSPy legacy and typed history entries to one callback return value."""
+    if outputs is None:
+        return False
+    if entry.get("response") is outputs:
+        return True
+    return entry.get("outputs") is outputs
 
 
 def _provider_response_telemetry(response: object) -> dict[str, JsonValue]:
@@ -697,23 +742,7 @@ def _mlflow_token_usage(usage: Mapping[str, JsonValue]) -> dict[str, JsonValue]:
     Returns:
         dict[str, JsonValue]: Token usage values keyed by MLflow's standard aggregate names.
     """
-    aliases = {
-        "input_tokens": ("input_tokens", "prompt_tokens"),
-        "output_tokens": ("output_tokens", "completion_tokens"),
-        "total_tokens": ("total_tokens",),
-        "cache_read_tokens": (
-            "cache_read_tokens",
-            "cache_read_input_tokens",
-            "prompt_cache_hit_tokens",
-        ),
-        "cache_creation_tokens": ("cache_creation_tokens", "cache_creation_input_tokens"),
-    }
-    result: dict[str, JsonValue] = {}
-    for target, sources in aliases.items():
-        value = next((usage.get(source) for source in sources if isinstance(usage.get(source), int)), None)
-        if isinstance(value, int) and not isinstance(value, bool):
-            result[target] = value
-    return result
+    return cast(dict[str, JsonValue], normalize_lm_token_usage(usage))
 
 
 def _trace_failure_category(exc: BaseException) -> str:

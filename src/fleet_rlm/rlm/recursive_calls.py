@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+import contextlib
 import time
 from collections.abc import Callable, Mapping
+from concurrent.futures import FIRST_EXCEPTION, Future, ThreadPoolExecutor, wait
+from contextvars import copy_context
 from dataclasses import dataclass, field
-from typing import Any
+from threading import Event, RLock
+from typing import Any, cast
 
 import dspy
 
@@ -17,6 +21,7 @@ from fleet_rlm.rlm.child_runtime import (
     ChildRuntimeFactory,
     ChildRuntimeLease,
 )
+from fleet_rlm.rlm.delegation_metrics import DelegationMetrics, DelegationMetricsSnapshot
 from fleet_rlm.rlm.dspy_contract import RLMOptions, _RLMTraceCallback, build_native_rlm, prediction_result
 from fleet_rlm.rlm.errors import RLMConfigError
 from fleet_rlm.rlm.events import Status
@@ -39,6 +44,7 @@ class RecursiveRLMOptions:
     child_max_iterations: int = 8
     child_max_llm_calls: int = 12
     child_max_output_chars: int = 4_000
+    max_parallel_children: int = 2
 
     def __post_init__(self) -> None:
         for name, value in (
@@ -47,9 +53,12 @@ class RecursiveRLMOptions:
             ("child_max_iterations", self.child_max_iterations),
             ("child_max_llm_calls", self.child_max_llm_calls),
             ("child_max_output_chars", self.child_max_output_chars),
+            ("max_parallel_children", self.max_parallel_children),
         ):
             if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
                 raise RLMConfigError(f"{name} must be a positive integer, got {value!r}")
+        if self.max_parallel_children > 8:
+            raise RLMConfigError("max_parallel_children must not exceed 8")
 
 
 @dataclass(frozen=True, slots=True)
@@ -62,10 +71,16 @@ class RecursiveCallSummary:
     child_iterations: int
     depth_fallback_count: int
     termination_modes: tuple[str, ...]
+    recursive_batch_calls: int = 0
+    recursive_children_started: int = 0
+    recursive_children_completed: int = 0
+    peak_child_concurrency: int = 0
+    delegation_metrics: DelegationMetricsSnapshot = field(default_factory=DelegationMetricsSnapshot)
 
 
 @dataclass(slots=True)
 class _RecursiveState:
+    lock: RLock = field(default_factory=RLock, repr=False)
     call_count: int = 0
     delegated_prompt_chars: int = 0
     maximum_prompt_chars: int = 0
@@ -73,6 +88,8 @@ class _RecursiveState:
     depth_fallback_count: int = 0
     termination_modes: list[str] = field(default_factory=list)
     fatal_cleanup_error: BaseException | None = None
+    pending_batch_futures: list[Future[str]] = field(default_factory=list, repr=False)
+    metrics: DelegationMetrics = field(default_factory=DelegationMetrics, repr=False)
 
 
 class RecursiveSubtaskSignature(dspy.Signature):
@@ -145,6 +162,12 @@ def _validate_recursive_prompt(prompt: object, *, max_chars: int) -> str:
 
 
 @dataclass(frozen=True, slots=True)
+class _RecursiveReservation:
+    call_index: int
+    child_depth: int
+
+
+@dataclass(frozen=True, slots=True)
 class _RecursiveCall:
     call_index: int
     child_depth: int
@@ -183,6 +206,7 @@ class RecursiveRLMExecutor:
         deadline: float,
         depth: int = 0,
         state: _RecursiveState | None = None,
+        metrics: DelegationMetrics | None = None,
         observer: ToolObserver | None = None,
         is_authorized: Callable[[], bool] | None = None,
     ) -> None:
@@ -205,6 +229,9 @@ class RecursiveRLMExecutor:
         self._deadline = deadline
         self._depth = depth
         self._state = state or _RecursiveState()
+        if metrics is not None:
+            self._state.metrics = metrics
+        self._metrics = self._state.metrics
         self._observer = observer
         self._is_authorized = is_authorized
         self._last_completion: dict[str, object] | None = None
@@ -225,33 +252,112 @@ class RecursiveRLMExecutor:
             )
         else:
             self._tool = raw_tool
+        raw_batch_tool = dspy.Tool(
+            self._call_batched,
+            name="rlm_query_batched",
+            desc=(
+                "Solve multiple independent bounded subproblems with isolated child RLMs. "
+                "Inputs and outputs preserve order; use only when every item needs iterative exploration."
+            ),
+        )
+        if observer is not None or is_authorized is not None:
+            self._batched_tool = observe_tool(
+                raw_batch_tool,
+                observer or (lambda _detail: None),
+                ToolEventView(
+                    input_projection=self._recursive_batch_input,
+                    output_projection=self._recursive_batch_output,
+                ),
+                is_authorized=is_authorized,
+            )
+        else:
+            self._batched_tool = raw_batch_tool
 
     @property
     def tool(self) -> dspy.Tool:
         """Return the custom Tool accepted by the native RLM constructor."""
         return self._tool
 
+    @property
+    def batched_tool(self) -> dspy.Tool:
+        """Return the Root-only batched recursive Tool."""
+        return self._batched_tool
+
+    @property
+    def metrics(self) -> DelegationMetrics:
+        """Return the shared run-scoped delegation accumulator."""
+        return self._metrics
+
     def summary(self) -> RecursiveCallSummary:
         """Return bounded aggregate recursion metadata without content."""
-        return RecursiveCallSummary(
-            call_count=self._state.call_count,
-            delegated_prompt_chars=self._state.delegated_prompt_chars,
-            maximum_prompt_chars=self._state.maximum_prompt_chars,
-            child_iterations=self._state.child_iterations,
-            depth_fallback_count=self._state.depth_fallback_count,
-            termination_modes=tuple(self._state.termination_modes),
-        )
+        with self._state.lock:
+            snapshot = self._metrics.snapshot()
+            return RecursiveCallSummary(
+                call_count=self._state.call_count,
+                delegated_prompt_chars=self._state.delegated_prompt_chars,
+                maximum_prompt_chars=self._state.maximum_prompt_chars,
+                child_iterations=self._state.child_iterations,
+                depth_fallback_count=self._state.depth_fallback_count,
+                termination_modes=tuple(self._state.termination_modes),
+                recursive_batch_calls=snapshot.recursive_batch_calls,
+                recursive_children_started=snapshot.recursive_children_started,
+                recursive_children_completed=snapshot.recursive_children_completed,
+                peak_child_concurrency=snapshot.peak_child_concurrency,
+                delegation_metrics=snapshot,
+            )
 
     def raise_if_cleanup_failed(self) -> None:
         """Raise a runtime error when recursive child cleanup has failed."""
-        if self._state.fatal_cleanup_error is not None:
-            raise ChildRuntimeCleanupError("recursive child cleanup failed") from self._state.fatal_cleanup_error
+        with self._state.lock:
+            fatal_cleanup_error = self._state.fatal_cleanup_error
+            cleanup_pending = any(not future.done() for future in self._state.pending_batch_futures)
+        if fatal_cleanup_error is not None:
+            raise ChildRuntimeCleanupError("recursive child cleanup failed") from fatal_cleanup_error
+        if cleanup_pending:
+            raise ChildRuntimeCleanupError("recursive child cleanup is still pending")
+
+    def _retain_pending_batch_futures(self, futures: set[Future[str]]) -> None:
+        pending = [future for future in futures if not future.done()]
+        if not pending:
+            return
+        with self._state.lock:
+            self._state.pending_batch_futures.extend(pending)
+
+        def settled(future: Future[str]) -> None:
+            if not future.cancelled():
+                with contextlib.suppress(BaseException):
+                    future.exception()
+            with self._state.lock:
+                if future in self._state.pending_batch_futures:
+                    self._state.pending_batch_futures.remove(future)
+
+        for future in pending:
+            future.add_done_callback(settled)
 
     def _recursive_output(self, _result: Any) -> dict[str, object]:
         """Return metadata for the most recent recursive completion."""
         if self._last_completion is None:
             return {"status": "completed"}
         return dict(self._last_completion)
+
+    @staticmethod
+    def _recursive_batch_input(arguments: Mapping[str, Any]) -> dict[str, int]:
+        prompts = arguments.get("prompts")
+        if not isinstance(prompts, list):
+            return {"prompt_count": 0, "prompt_chars": 0}
+        return {
+            "prompt_count": len(prompts),
+            "prompt_chars": sum(len(item) for item in prompts if isinstance(item, str)),
+        }
+
+    def _recursive_batch_output(self, result: Any) -> dict[str, object]:
+        if isinstance(result, list):
+            return {
+                "status": "completed",
+                "answer_count": len(result),
+                "peak_child_concurrency": self._metrics.snapshot().peak_child_concurrency,
+            }
+        return {"status": "completed"}
 
     def _ensure_authorized(self) -> None:
         """Ensure the current recursive child execution remains authorized.
@@ -261,6 +367,11 @@ class RecursiveRLMExecutor:
         """
         if self._is_authorized is not None and not self._is_authorized():
             raise ChildRuntimeAuthorizationError("Turn is no longer authorized")
+
+    def _ensure_call_authorized(self, batch_cancelled: Event | None) -> None:
+        if batch_cancelled is not None and batch_cancelled.is_set():
+            raise ChildRuntimeAuthorizationError("recursive child batch is no longer authorized")
+        self._ensure_authorized()
 
     def _emit_progress(
         self,
@@ -307,25 +418,50 @@ class RecursiveRLMExecutor:
         except Exception:
             return
 
-    def _begin_call(self, prompt: str) -> _RecursiveCall:
-        self._state.call_count += 1
-        call_index = self._state.call_count
-        self._state.delegated_prompt_chars += len(prompt)
-        self._state.maximum_prompt_chars = max(self._state.maximum_prompt_chars, len(prompt))
-        child_depth = self._depth + 1
+    def _begin_call(self, prompt: str) -> _RecursiveReservation:
+        return self._make_reservation(self._reserve_call_indexes((prompt,))[0])
+
+    def _begin_batch(self, prompts: tuple[str, ...]) -> tuple[_RecursiveReservation, ...]:
+        indexes = self._reserve_call_indexes(prompts)
+        return tuple(self._make_reservation(index) for index in indexes)
+
+    def _reserve_call_indexes(self, prompts: tuple[str, ...]) -> tuple[int, ...]:
+        if not prompts:
+            return ()
+        with self._state.lock:
+            if self._state.call_count + len(prompts) > self._options.max_calls:
+                raise RuntimeError("recursive call budget exhausted")
+            start = self._state.call_count + 1
+            self._state.call_count += len(prompts)
+            self._state.delegated_prompt_chars += sum(len(prompt) for prompt in prompts)
+            self._state.maximum_prompt_chars = max(
+                self._state.maximum_prompt_chars,
+                *(len(prompt) for prompt in prompts),
+            )
+        for _prompt in prompts:
+            self._metrics.record_recursive_call()
+        return tuple(range(start, start + len(prompts)))
+
+    def _make_reservation(self, call_index: int) -> _RecursiveReservation:
+        return _RecursiveReservation(call_index, self._depth + 1)
+
+    @staticmethod
+    def _start_call(prompt: str, reservation: _RecursiveReservation) -> _RecursiveCall:
         started_at = time.monotonic()
         span = start_turn_span(
             "RLM.recursive_call",
             inputs={
-                "recursive_depth": child_depth,
-                "call_index": call_index,
+                "recursive_depth": reservation.child_depth,
+                "call_index": reservation.call_index,
                 "prompt_chars": len(prompt),
             },
         )
-        return _RecursiveCall(call_index, child_depth, started_at, span)
+        return _RecursiveCall(reservation.call_index, reservation.child_depth, started_at, span)
 
     def _run_depth_fallback(self, prompt: str, call: _RecursiveCall) -> tuple[str, dict[str, object]]:
-        self._state.depth_fallback_count += 1
+        with self._state.lock:
+            self._state.depth_fallback_count += 1
+        self._metrics.record_depth_fallback()
         answer = self._plain_sub_lm(prompt)
         self._ensure_authorized()
         completion_outputs = self._record_completion(
@@ -347,17 +483,23 @@ class RecursiveRLMExecutor:
         prompt: str,
         call: _RecursiveCall,
         lease: ChildRuntimeLease,
+        batch_cancelled: Event | None = None,
     ) -> tuple[str, dict[str, object]]:
-        self._ensure_authorized()
+        self._ensure_call_authorized(batch_cancelled)
+        child_models = self._models.fork_for_child(deadline=self._deadline)
         child_executor = RecursiveRLMExecutor(
-            models=self._models,
+            models=child_models,
             options=self._options,
             child_runtime_factory=self._child_runtime_factory,
             deadline=self._deadline,
             depth=call.child_depth,
             state=self._state,
+            metrics=self._metrics,
             observer=self._observer,
-            is_authorized=self._is_authorized,
+            is_authorized=lambda: (
+                (batch_cancelled is None or not batch_cancelled.is_set())
+                and (self._is_authorized is None or self._is_authorized())
+            ),
         )
         child = build_native_rlm(
             signature=RecursiveSubtaskSignature,
@@ -367,18 +509,19 @@ class RecursiveRLMExecutor:
                 max_output_chars=self._options.child_max_output_chars,
             ),
             tools=[child_executor.tool],
-            sub_lm=self._models.sub_lm,
+            sub_lm=child_models.sub_lm,
             verbose=False,
         )
-        self._ensure_authorized()
+        self._ensure_call_authorized(batch_cancelled)
         with dspy.context(
-            lm=self._models.root_lm,
+            lm=child_models.root_lm,
             adapter=dspy.JSONAdapter(),
             callbacks=[
                 _RLMTraceCallback(
-                    root_lm=self._models.root_lm,
-                    sub_lm=self._models.sub_lm,
+                    root_lm=child_models.root_lm,
+                    sub_lm=child_models.sub_lm,
                     recursive_depth=call.child_depth,
+                    metrics=self._metrics,
                 )
             ],
             track_usage=True,
@@ -391,7 +534,7 @@ class RecursiveRLMExecutor:
             schema_version="1",
             max_output_chars=self._options.child_max_output_chars,
         )
-        self._ensure_authorized()
+        self._ensure_call_authorized(batch_cancelled)
         trajectory = getattr(prediction, "trajectory", ())
         child_iterations = len(trajectory) if isinstance(trajectory, list) else 0
         mode = (
@@ -410,8 +553,9 @@ class RecursiveRLMExecutor:
         child_iterations: int,
         include_child_iterations: bool = True,
     ) -> dict[str, object]:
-        self._state.child_iterations += child_iterations
-        self._state.termination_modes.append(mode)
+        with self._state.lock:
+            self._state.child_iterations += child_iterations
+            self._state.termination_modes.append(mode)
         completion_outputs: dict[str, object] = {"termination_mode": mode}
         if include_child_iterations:
             completion_outputs["child_iterations"] = child_iterations
@@ -426,9 +570,12 @@ class RecursiveRLMExecutor:
 
     def _record_primary_failure(self, call: _RecursiveCall, exc: BaseException) -> str:
         failure_category = _recursive_failure_category(exc)
-        if isinstance(exc, ChildRuntimeCleanupError) and self._state.fatal_cleanup_error is None:
-            self._state.fatal_cleanup_error = exc
-        self._state.termination_modes.append("child_error")
+        if isinstance(exc, ChildRuntimeCleanupError):
+            with self._state.lock:
+                if self._state.fatal_cleanup_error is None:
+                    self._state.fatal_cleanup_error = exc
+        with self._state.lock:
+            self._state.termination_modes.append("child_error")
         call.span.finish(
             phase_status="failed",
             outputs={"failure_category": trace_failure_category(exc)},
@@ -454,8 +601,9 @@ class RecursiveRLMExecutor:
             except BaseException as exc:
                 cleanup_error = _as_cleanup_error(exc)
                 cleanup_status = "failed"
-                if self._state.fatal_cleanup_error is None:
-                    self._state.fatal_cleanup_error = cleanup_error
+                with self._state.lock:
+                    if self._state.fatal_cleanup_error is None:
+                        self._state.fatal_cleanup_error = cleanup_error
         if cleanup_error is not None and not primary_failed:
             failed = True
             failure_category = "cleanup_failed"
@@ -492,13 +640,20 @@ class RecursiveRLMExecutor:
             TimeoutError: If the recursive call deadline has expired.
         """
         prompt = _validate_recursive_prompt(prompt, max_chars=self._options.max_prompt_chars)
-        if self._state.call_count >= self._options.max_calls:
-            raise RuntimeError("recursive call budget exhausted")
         if time.monotonic() >= self._deadline:
             raise TimeoutError("recursive call deadline exceeded")
         self._ensure_authorized()
-
         call = self._begin_call(prompt)
+        return self._run_reserved_call(prompt, call)
+
+    def _run_reserved_call(
+        self,
+        prompt: str,
+        reservation: _RecursiveReservation,
+        batch_cancelled: Event | None = None,
+    ) -> str:
+        """Run one already-reserved child call and always settle its lease."""
+        call = self._start_call(prompt, reservation)
         self._emit_progress(
             "child_started",
             call_index=call.call_index,
@@ -511,16 +666,19 @@ class RecursiveRLMExecutor:
         cleanup_status = "not_required"
         failure_category: str | None = None
         primary_failed = False
+        child_started = False
         try:
-            self._ensure_authorized()
+            self._ensure_call_authorized(batch_cancelled)
             if call.child_depth > RLM_NATIVE_CHILD_DEPTH:
                 answer, completion_outputs = self._run_depth_fallback(prompt, call)
             else:
                 cleanup_status = "not_acquired"
                 lease = self._acquire_child_lease(call.call_index)
                 cleanup_status = "acquired"
-                self._ensure_authorized()
-                answer, completion_outputs = self._run_native_child(prompt, call, lease)
+                self._metrics.child_started()
+                child_started = True
+                self._ensure_call_authorized(batch_cancelled)
+                answer, completion_outputs = self._run_native_child(prompt, call, lease, batch_cancelled)
             return answer
         except BaseException as exc:
             failed = True
@@ -528,15 +686,19 @@ class RecursiveRLMExecutor:
             failure_category = self._record_primary_failure(call, exc)
             raise
         finally:
-            self._finalize_call(
-                call,
-                lease,
-                cleanup_status=cleanup_status,
-                failed=failed,
-                primary_failed=primary_failed,
-                completion_outputs=completion_outputs,
-                failure_category=failure_category,
-            )
+            try:
+                self._finalize_call(
+                    call,
+                    lease,
+                    cleanup_status=cleanup_status,
+                    failed=failed,
+                    primary_failed=primary_failed,
+                    completion_outputs=completion_outputs,
+                    failure_category=failure_category,
+                )
+            finally:
+                if child_started:
+                    self._metrics.child_completed()
 
     def _plain_sub_lm(self, prompt: str) -> str:
         """
@@ -557,6 +719,7 @@ class RecursiveRLMExecutor:
                     root_lm=self._models.root_lm,
                     sub_lm=self._models.sub_lm,
                     recursive_depth=self._depth + 1,
+                    metrics=self._metrics,
                 )
             ],
             track_usage=True,
@@ -571,10 +734,91 @@ class RecursiveRLMExecutor:
         )
         return result.display_text
 
+    def _call_batched(self, prompts: list[str]) -> list[str]:
+        """Execute independent recursive child calls with bounded fan-out."""
+        if not isinstance(prompts, list):
+            raise ValueError("rlm_query_batched prompts must be a list")
+        normalized = tuple(
+            _validate_recursive_prompt(prompt, max_chars=self._options.max_prompt_chars) for prompt in prompts
+        )
+        if not normalized:
+            raise ValueError("rlm_query_batched prompts must not be empty")
+        if time.monotonic() >= self._deadline:
+            raise TimeoutError("recursive call deadline exceeded")
+        self._ensure_authorized()
+        self._metrics.record_recursive_batch()
+        calls = self._begin_batch(normalized)
+        workers = min(self._options.max_parallel_children, len(calls))
+        results: list[str | None] = [None] * len(calls)
+        batch_cancelled = Event()
+        pool = ThreadPoolExecutor(max_workers=workers, thread_name_prefix="fleet-rlm-child")
+        futures = [
+            pool.submit(
+                copy_context().run,
+                self._run_reserved_call,
+                prompt,
+                call,
+                batch_cancelled,
+            )
+            for prompt, call in zip(normalized, calls, strict=True)
+        ]
+        try:
+            remaining = max(0.0, self._deadline - time.monotonic())
+            raw_done, raw_not_done = wait(futures, timeout=remaining, return_when=FIRST_EXCEPTION)
+            done = cast(set[Future[str]], raw_done)
+            not_done = cast(set[Future[str]], raw_not_done)
+            failures = _future_failures(done)
+            if failures or not_done:
+                batch_cancelled.set()
+                for future in not_done:
+                    future.cancel()
+            if not_done:
+                # Running Python threads cannot be force-cancelled. Each worker
+                # retains its own lease until its deadline-bound LM call exits;
+                # queued work is cancelled and executor teardown never performs
+                # a second unbounded join on the Root worker.
+                self._retain_pending_batch_futures(not_done)
+                if failures:
+                    raise RecursiveBatchError() from failures[0]
+                raise TimeoutError("recursive child batch deadline exceeded")
+            for index, future in enumerate(futures):
+                results[index] = cast(str, future.result(timeout=0))
+        finally:
+            pool.shutdown(wait=False, cancel_futures=True)
+        self.raise_if_cleanup_failed()
+        if failures:
+            raise RecursiveBatchError() from failures[0]
+        if any(answer is None for answer in results):
+            raise RecursiveBatchError()
+        return [answer for answer in results if answer is not None]
+
+
+def _future_failures(futures: set[Future[str]]) -> list[BaseException]:
+    failures: list[BaseException] = []
+    for future in futures:
+        if future.cancelled():
+            continue
+        try:
+            failure = future.exception(timeout=0)
+        except BaseException as exc:
+            failures.append(exc)
+        else:
+            if failure is not None:
+                failures.append(failure)
+    return failures
+
+
+class RecursiveBatchError(RuntimeError):
+    """Bounded all-or-nothing failure for one recursive batch."""
+
+    def __init__(self) -> None:
+        super().__init__("recursive child batch failed")
+
 
 __all__ = [
     "RLM_NATIVE_CHILD_DEPTH",
     "ChildRuntimeFactory",
+    "RecursiveBatchError",
     "RecursiveCallSummary",
     "RecursiveRLMExecutor",
     "RecursiveRLMOptions",

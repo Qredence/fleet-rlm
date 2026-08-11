@@ -683,6 +683,7 @@ async def test_non_success_removes_run_local_artifact_candidate_bytes(status: st
 @pytest.mark.asyncio
 async def test_memory_candidate_promotion_happens_after_atomic_commit_and_fails_soft() -> None:
 
+    from fleet_rlm.chat.post_commit_memory import OwnedPostCommitMemoryPromotion
     from fleet_rlm.chat.run_lifecycle import ClaimedRun, CommittedTurnReceipt, RunLifecycleService, _RunClaimToken
     from fleet_rlm.files.memory_candidates import MemoryCandidate
     from fleet_rlm.rlm.dspy_contract import PredictionResult
@@ -731,7 +732,7 @@ async def test_memory_candidate_promotion_happens_after_atomic_commit_and_fails_
             prediction=PredictionResult("answer", {"answer": "done"}, "fleet.default", "1"),
             memory_candidates=(candidate,),
         ),
-        memory_promotion=BrokenPromotion(),
+        memory_promotion=OwnedPostCommitMemoryPromotion(BrokenPromotion()),
     )
 
     assert order == ["commit", "promote"]
@@ -743,6 +744,7 @@ async def test_memory_candidate_promotion_happens_after_atomic_commit_and_fails_
 async def test_memory_candidate_promotion_never_runs_after_a_commit_failure() -> None:
     from uuid import uuid4
 
+    from fleet_rlm.chat.post_commit_memory import OwnedPostCommitMemoryPromotion
     from fleet_rlm.chat.run_lifecycle import ClaimedRun, FailedRunReceipt, RunLifecycleService, _RunClaimToken
     from fleet_rlm.files.memory_candidates import MemoryCandidate
     from fleet_rlm.rlm.dspy_contract import PredictionResult
@@ -797,7 +799,7 @@ async def test_memory_candidate_promotion_never_runs_after_a_commit_failure() ->
                 ),
             ),
         ),
-        memory_promotion=promotion,
+        memory_promotion=OwnedPostCommitMemoryPromotion(promotion),
     )
 
     assert seen == []
@@ -809,6 +811,7 @@ async def test_memory_candidate_promotion_trace_never_copies_learning(monkeypatc
     import contextlib
     from uuid import uuid4
 
+    from fleet_rlm.chat.post_commit_memory import OwnedPostCommitMemoryPromotion
     from fleet_rlm.chat.run_lifecycle import ClaimedRun, CommittedTurnReceipt, RunLifecycleService, _RunClaimToken
     from fleet_rlm.files.memory_candidates import MemoryCandidate, MemoryCandidatePromotionResult
     from fleet_rlm.rlm.dspy_contract import PredictionResult
@@ -871,7 +874,7 @@ async def test_memory_candidate_promotion_trace_never_copies_learning(monkeypatc
                 ),
             ),
         ),
-        memory_promotion=promotion,
+        memory_promotion=OwnedPostCommitMemoryPromotion(promotion),
     )
 
     assert any(name == "Turn.memory_candidate_promotion" for name, _inputs, _outputs in spans)
@@ -884,6 +887,7 @@ async def test_memory_candidate_promotion_trace_never_copies_learning(monkeypatc
 async def test_memory_candidate_promotion_is_unreachable_for_failure_resolution(terminal: str) -> None:
     from uuid import uuid4
 
+    from fleet_rlm.chat.post_commit_memory import OwnedPostCommitMemoryPromotion
     from fleet_rlm.chat.run_lifecycle import ClaimedRun, RunFailure, RunLifecycleService, _RunClaimToken
     from fleet_rlm.rlm.dspy_contract import empty_rlm_usage
     from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
@@ -929,7 +933,7 @@ async def test_memory_candidate_promotion_is_unreachable_for_failure_resolution(
             terminal,
             empty_rlm_usage(),
         ),
-        memory_promotion=promotion,
+        memory_promotion=OwnedPostCommitMemoryPromotion(promotion),
     )
 
     assert seen == []

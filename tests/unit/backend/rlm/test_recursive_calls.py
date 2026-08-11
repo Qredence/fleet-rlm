@@ -168,6 +168,159 @@ def test_recursive_tool_enforces_shared_call_budget() -> None:
         executor.tool(prompt="second")
 
 
+def test_recursive_batched_tool_preserves_order_and_bounds_child_concurrency() -> None:
+    adapter = dspy.JSONAdapter()
+    root = dspy.utils.DummyLM(
+        {
+            "FANOUT-A": {"reasoning": "a", "code": "SUBMIT(answer='A')"},
+            "FANOUT-B": {"reasoning": "b", "code": "SUBMIT(answer='B')"},
+            "FANOUT-C": {"reasoning": "c", "code": "SUBMIT(answer='C')"},
+        },
+        adapter=adapter,
+    )
+    sub = dspy.utils.DummyLM([{"answer": "unused"}], adapter=adapter)
+    created: list[DaytonaCodeInterpreter] = []
+    events: list[object] = []
+
+    def factory(call_index: int) -> ChildRuntimeLease:
+        interpreter = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())
+        created.append(interpreter)
+        return ChildRuntimeLease(
+            interpreter,
+            f"batch-child-{call_index}",
+            "test-volume",
+            f"recursive/test-workspace/test-run/{call_index}",
+            interpreter.shutdown,
+        )
+
+    executor = RecursiveRLMExecutor(
+        models=RLMModelBundle(root, sub),
+        options=RecursiveRLMOptions(max_calls=3, max_parallel_children=2),
+        child_runtime_factory=factory,
+        deadline=time.monotonic() + 30,
+        observer=events.append,
+    )
+
+    assert executor.batched_tool(prompts=["FANOUT-A", "FANOUT-B", "FANOUT-C"]) == ["A", "B", "C"]
+    summary = executor.summary()
+    assert summary.recursive_batch_calls == 1
+    assert summary.recursive_children_started == 3
+    assert summary.recursive_children_completed == 3
+    assert 1 <= summary.peak_child_concurrency <= 2
+    assert summary.delegation_metrics.child_root_lm_calls_depth_1 == 3
+    assert all(interpreter._shutdown for interpreter in created)
+    batch_completed = next(event for event in events if isinstance(event, ToolCompleted))
+    assert batch_completed.output["answer_count"] == 3
+    assert 1 <= batch_completed.output["peak_child_concurrency"] <= 2
+
+
+def test_recursive_batch_starts_each_trace_span_in_its_worker(monkeypatch: pytest.MonkeyPatch) -> None:
+    import threading
+
+    import fleet_rlm.rlm.recursive_calls as recursive_calls
+
+    parent_thread = threading.get_ident()
+    span_threads: list[int] = []
+
+    class Span:
+        def finish(self, **_kwargs: object) -> None:
+            return None
+
+    def start_span(_name: str, *, inputs: object) -> Span:
+        del inputs
+        span_threads.append(threading.get_ident())
+        return Span()
+
+    monkeypatch.setattr(recursive_calls, "start_turn_span", start_span)
+    executor = _executor(
+        {
+            "first": {"reasoning": "first", "code": "SUBMIT(answer='first')"},
+            "second": {"reasoning": "second", "code": "SUBMIT(answer='second')"},
+        },  # type: ignore[arg-type]
+        options=RecursiveRLMOptions(max_calls=2, max_parallel_children=2),
+    )
+
+    assert executor.batched_tool(prompts=["first", "second"]) == ["first", "second"]
+    assert len(span_threads) == 2
+    assert all(thread_id != parent_thread for thread_id in span_threads)
+
+
+def test_recursive_batch_join_stops_at_turn_deadline_and_worker_retains_lease(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import threading
+
+    import fleet_rlm.rlm.recursive_calls as recursive_calls
+
+    release = threading.Event()
+    started = threading.Event()
+    closed = threading.Event()
+
+    class Child:
+        def __call__(self, _interpreter: object, *, prompt: str) -> dspy.Prediction:
+            del prompt
+            started.set()
+            release.wait(1)
+            return dspy.Prediction(answer="late", trajectory=[])
+
+    monkeypatch.setattr(recursive_calls, "build_native_rlm", lambda **_kwargs: Child())
+
+    def factory(call_index: int) -> ChildRuntimeLease:
+        interpreter = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())
+
+        def close() -> None:
+            interpreter.shutdown()
+            closed.set()
+
+        return ChildRuntimeLease(
+            interpreter,
+            f"deadline-child-{call_index}",
+            "test-volume",
+            f"recursive/test-workspace/test-run/{call_index}",
+            close,
+        )
+
+    adapter = dspy.JSONAdapter()
+    executor = RecursiveRLMExecutor(
+        models=RLMModelBundle(
+            dspy.utils.DummyLM([{"answer": "unused"}], adapter=adapter),
+            dspy.utils.DummyLM([{"answer": "unused"}], adapter=adapter),
+        ),
+        options=RecursiveRLMOptions(max_calls=1, max_parallel_children=1),
+        child_runtime_factory=factory,
+        deadline=time.monotonic() + 0.05,
+    )
+
+    began = time.monotonic()
+    try:
+        with pytest.raises(TimeoutError, match="batch deadline exceeded"):
+            executor.batched_tool(prompts=["blocked"])
+        assert time.monotonic() - began < 0.5
+        assert started.is_set()
+        assert not closed.is_set()
+        with pytest.raises(RuntimeError, match="cleanup is still pending"):
+            executor.raise_if_cleanup_failed()
+    finally:
+        release.set()
+
+    assert closed.wait(1)
+    executor.raise_if_cleanup_failed()
+
+
+def test_recursive_batched_tool_reserves_the_shared_budget_atomically() -> None:
+    created: list[DaytonaCodeInterpreter] = []
+    executor = _executor(
+        [{"reasoning": "unused", "code": "SUBMIT(answer='unused')"}],
+        options=RecursiveRLMOptions(max_calls=2),
+        factory_calls=created,
+    )
+
+    with pytest.raises(RuntimeError, match="budget exhausted"):
+        executor.batched_tool(prompts=["first", "second", "third"])
+    assert created == []
+    assert executor.summary().call_count == 0
+
+
 def test_recursive_tool_rejects_revoked_authority_before_child_creation() -> None:
     authority = RunAuthority()
     created: list[DaytonaCodeInterpreter] = []

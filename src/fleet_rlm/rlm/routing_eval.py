@@ -16,7 +16,7 @@ from typing import Any, Literal, cast
 
 import dspy
 
-from fleet_rlm.rlm.dspy_contract import RLMOptions, build_native_rlm
+from fleet_rlm.rlm.dspy_contract import RLMOptions, _RLMTraceCallback, build_native_rlm
 from fleet_rlm.rlm.events import ObservationDetail, ToolCompleted, ToolFailed, ToolStarted
 from fleet_rlm.rlm.model_bundle import RLMModelBundle
 from fleet_rlm.rlm.recursive_calls import RecursiveCallSummary, RecursiveRLMExecutor, RecursiveRLMOptions
@@ -27,6 +27,7 @@ RoutingClass = Literal[
     "semantic_single",
     "semantic_batched",
     "recursive_child",
+    "recursive_batch",
     "recursive_depth_fallback",
 ]
 
@@ -35,6 +36,7 @@ _EXPECTED_ORDER: tuple[RoutingClass, ...] = (
     "semantic_single",
     "semantic_batched",
     "recursive_child",
+    "recursive_batch",
     "recursive_depth_fallback",
 )
 
@@ -43,7 +45,8 @@ _ROUTE_DECISION_TREE = """Decision tree:
 2. Use llm_query for one bounded semantic judgment Python cannot decide.
 3. Use llm_query_batched for two or more independent bounded judgments.
 4. Use rlm_query only for a self-contained subproblem that needs iterative Python exploration.
-5. A recursive child request beyond RLM_NATIVE_CHILD_DEPTH uses
+5. Use rlm_query_batched for independent subproblems where each needs iterative Python exploration.
+6. A recursive child request beyond RLM_NATIVE_CHILD_DEPTH uses
    the bounded Sub-LM fallback; it never allocates another child Sandbox.
 """
 
@@ -72,6 +75,8 @@ class RoutingFacts:
     latency_ms: int = 0
     sandbox_count: int = 0
     total_tool_calls: int = 0
+    recursive_batch_calls: int = 0
+    peak_child_concurrency: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -128,6 +133,14 @@ CURATED_ROUTING_SCENARIOS: tuple[RoutingScenario, ...] = (
         "recursive_depth_fallback",
         "element",
     ),
+    RoutingScenario(
+        "recursive-independent-batch",
+        "Use rlm_query_batched for three independent iterative subproblems: compute 1+1, 2+2, and 3+3. "
+        "Return the ordered answers as 2,4,6.",
+        "recursive_batch",
+        "2,4,6",
+        ("2", "4", "6"),
+    ),
 )
 
 
@@ -141,6 +154,8 @@ def classify_routing_facts(facts: RoutingFacts) -> RoutingClass:
     counts = {str(key): int(value) for key, value in facts.tool_counts.items()}
     if facts.depth_fallback_count > 0:
         return "recursive_depth_fallback"
+    if counts.get("rlm_query_batched", 0) > 0 or facts.recursive_batch_calls > 0:
+        return "recursive_batch"
     if counts.get("rlm_query", 0) > 0 or facts.native_child_count > 0 or facts.max_native_child_depth > 0:
         return "recursive_child"
     if counts.get("llm_query_batched", 0) > 0:
@@ -163,11 +178,13 @@ def facts_from_recursive_summary(
         native_child_count=summary.call_count - summary.depth_fallback_count,
         max_native_child_depth=1 if summary.call_count > summary.depth_fallback_count else 0,
         depth_fallback_count=summary.depth_fallback_count,
+        recursive_batch_calls=summary.recursive_batch_calls,
         child_iterations=summary.child_iterations,
         recursive_prompt_chars=summary.maximum_prompt_chars,
         latency_ms=latency_ms,
         sandbox_count=sandbox_count,
         total_tool_calls=sum(int(value) for value in (tool_counts or {}).values()),
+        peak_child_concurrency=summary.peak_child_concurrency,
     )
 
 
@@ -183,9 +200,13 @@ def facts_from_execution_details(
     prompt_chars = 0
     child_iterations = 0
     depth_fallback_count = 0
+    recursive_batch_calls = 0
+    peak_child_concurrency = 0
     for detail in details:
         if isinstance(detail, ToolStarted):
             counts[detail.tool_name] = counts.get(detail.tool_name, 0) + 1
+            if detail.tool_name == "rlm_query_batched":
+                recursive_batch_calls += 1
             input_value = detail.input
             if isinstance(input_value, Mapping):
                 raw_prompt_chars = input_value.get("prompt_chars", 0)
@@ -199,6 +220,9 @@ def facts_from_execution_details(
                 if isinstance(depth, int) and not isinstance(depth, bool):
                     max_depth = max(max_depth, depth)
                 child_iterations += int(output.get("child_iterations", 0) or 0)
+                raw_peak = output.get("peak_child_concurrency", 0)
+                if isinstance(raw_peak, int) and not isinstance(raw_peak, bool):
+                    peak_child_concurrency = max(peak_child_concurrency, raw_peak)
                 if output.get("termination_mode") == "depth_fallback":
                     depth_fallback_count += 1
     native_child_count = max_depth > 0
@@ -212,6 +236,8 @@ def facts_from_execution_details(
         latency_ms=latency_ms,
         sandbox_count=sandbox_count,
         total_tool_calls=sum(counts.values()),
+        recursive_batch_calls=recursive_batch_calls,
+        peak_child_concurrency=peak_child_concurrency,
     )
 
 
@@ -273,6 +299,8 @@ def summarize_scores(scores: tuple[RoutingScore, ...]) -> dict[str, object]:
         "max_recursive_prompt_chars": max(score.facts.recursive_prompt_chars for score in scores),
         "max_child_iterations": max(score.facts.child_iterations for score in scores),
         "max_sandbox_count": max(score.facts.sandbox_count for score in scores),
+        "max_recursive_batch_calls": max(score.facts.recursive_batch_calls for score in scores),
+        "max_peak_child_concurrency": max(score.facts.peak_child_concurrency for score in scores),
         "detail_tree": routing_decision_tree(),
     }
 
@@ -331,14 +359,25 @@ async def run_routing_scenario(
             observer=captured.append,
         )
         signature = root_signature_for_recursion(_RoutingScenarioSignature, recursion_enabled=recursion_enabled)
-        tools = (recursive.tool,) if recursion_enabled else None
-        rlm = build_native_rlm(signature=signature, options=RLMOptions(), tools=tools, verbose=False)
+        tools = (recursive.tool, recursive.batched_tool) if recursion_enabled else None
+        rlm = build_native_rlm(
+            signature=signature,
+            options=RLMOptions(),
+            tools=tools,
+            sub_lm=sub_lm,
+            verbose=False,
+        )
         root_interpreter = await _maybe_await(root_interpreter_factory())
         try:
             bind_observer = getattr(root_interpreter, "bind_observer", None)
             if callable(bind_observer):
                 bind_observer(captured.append, max_chars=2_000)
-            with dspy.context(lm=root_lm, adapter=dspy.JSONAdapter(), track_usage=True):
+            with dspy.context(
+                lm=root_lm,
+                adapter=dspy.JSONAdapter(),
+                callbacks=[_RLMTraceCallback(root_lm=root_lm, sub_lm=sub_lm, metrics=recursive.metrics)],
+                track_usage=True,
+            ):
                 prediction = await rlm.acall(root_interpreter, prompt=scenario.prompt)
         finally:
             shutdown = getattr(root_interpreter, "shutdown", None)
@@ -347,19 +386,22 @@ async def run_routing_scenario(
         details = tuple(cast(ObservationDetail, detail) for detail in captured if isinstance(detail, ObservationDetail))
         details_facts = facts_from_execution_details(details, latency_ms=int((time.perf_counter() - started) * 1000))
         counts = dict(details_facts.tool_counts)
-        if recursive.summary().call_count:
-            counts["rlm_query"] = counts.get("rlm_query", 0) + recursive.summary().call_count
+        summary = recursive.summary()
+        if summary.call_count:
+            counts["rlm_query"] = counts.get("rlm_query", 0) + summary.call_count
+        if summary.recursive_batch_calls:
+            counts["rlm_query_batched"] = counts.get("rlm_query_batched", 0) + summary.recursive_batch_calls
         facts = RoutingFacts(
             tool_counts=counts,
-            native_child_count=recursive.summary().call_count - recursive.summary().depth_fallback_count,
-            max_native_child_depth=1
-            if recursive.summary().call_count > recursive.summary().depth_fallback_count
-            else 0,
-            depth_fallback_count=recursive.summary().depth_fallback_count,
-            child_iterations=recursive.summary().child_iterations,
-            recursive_prompt_chars=recursive.summary().maximum_prompt_chars,
+            native_child_count=summary.call_count - summary.depth_fallback_count,
+            max_native_child_depth=1 if summary.call_count > summary.depth_fallback_count else 0,
+            depth_fallback_count=summary.depth_fallback_count,
+            child_iterations=summary.child_iterations,
+            recursive_prompt_chars=summary.maximum_prompt_chars,
             latency_ms=details_facts.latency_ms,
             sandbox_count=created_children,
+            recursive_batch_calls=summary.recursive_batch_calls,
+            peak_child_concurrency=summary.peak_child_concurrency,
         )
         scenarios.append(
             score_routing_execution(

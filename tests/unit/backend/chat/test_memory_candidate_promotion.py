@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import threading
+import time
 from types import SimpleNamespace
 from typing import Any, cast
 from uuid import uuid4
@@ -48,6 +50,7 @@ def _prepared(capabilities):
         execution=SimpleNamespace(capabilities=capabilities),
         artifact_sink=None,
         result_snapshot_sink=None,
+        post_commit_memory_promotion=getattr(capabilities, "promote_memory_candidates", None),
     )
 
 
@@ -203,6 +206,88 @@ def test_memory_promotion_failure_preserves_the_committed_receipt() -> None:
     assert receipt.checkpoint_version == 1
 
 
+@pytest.mark.asyncio
+async def test_post_commit_memory_promotion_has_a_bounded_wait(monkeypatch) -> None:
+    from fleet_rlm.chat import run_lifecycle as lifecycle_module
+    from fleet_rlm.chat.post_commit_memory import OwnedPostCommitMemoryPromotion
+    from fleet_rlm.chat.run_lifecycle import RunLifecycleService
+
+    monkeypatch.setattr(lifecycle_module, "_POST_COMMIT_MEMORY_PROMOTION_TIMEOUT_S", 0.01)
+    started = threading.Event()
+    finished = threading.Event()
+    release = threading.Event()
+
+    def blocked_promotion(candidates):
+        del candidates
+        started.set()
+        release.wait(1)
+        finished.set()
+        return SimpleNamespace(promoted_count=1, duplicate_count=0, dropped_count=0, failure_count=0)
+
+    candidate = MemoryCandidate(
+        candidate_id="cand00000001",
+        category="Project",
+        learning="bounded post-commit effect",
+        byte_size=29,
+    )
+    service = RunLifecycleService(object(), max_artifact_bytes=1024)
+    promotion = OwnedPostCommitMemoryPromotion(blocked_promotion)
+    owned: asyncio.Task[None] | None = None
+    began = time.perf_counter()
+    try:
+        await service._promote_memory_candidates_after_commit(_outcome(candidate), promotion)
+        assert finished.is_set() is False
+        owned = asyncio.create_task(promotion.wait_owned())
+        await asyncio.sleep(0)
+        assert owned.done() is False
+    finally:
+        release.set()
+        await asyncio.to_thread(finished.wait, 1)
+        if owned is not None:
+            await owned
+
+    assert await asyncio.to_thread(started.wait, 0) is True
+    assert time.perf_counter() - began < 0.5
+
+
+@pytest.mark.asyncio
+async def test_prepared_run_retains_resources_until_timed_out_promotion_settles() -> None:
+    from fleet_rlm.chat.post_commit_memory import OwnedPostCommitMemoryPromotion
+    from fleet_rlm.chat.run_preparation import PreparedRun, _PreparedRunResources
+
+    started = threading.Event()
+    release_promotion = threading.Event()
+    resources_released = asyncio.Event()
+
+    def blocked_promotion(_candidates: tuple[object, ...]) -> object:
+        started.set()
+        release_promotion.wait(1)
+        return object()
+
+    async def release_resources() -> None:
+        resources_released.set()
+
+    promotion = OwnedPostCommitMemoryPromotion(blocked_promotion)
+    attempt = await promotion.promote((object(),), timeout_s=0.01)
+    assert attempt.status == "deadline_exceeded"
+    assert started.is_set()
+
+    prepared = PreparedRun(
+        execution=cast("Any", object()),
+        artifact_sink=cast("Any", object()),
+        _resources=_PreparedRunResources((release_resources,)),
+        post_commit_memory_promotion=promotion,
+    )
+    close = asyncio.create_task(prepared.aclose())
+    await asyncio.sleep(0)
+    assert not close.done()
+    assert not resources_released.is_set()
+
+    release_promotion.set()
+    await close
+    assert resources_released.is_set()
+
+
 class _PromotionSpy:
     """Capability stand-in recording any autonomous Memory Candidate promotion."""
 
@@ -251,6 +336,7 @@ class _DriverPrepared:
             deadline=deadline,
             capabilities=capabilities,
         )
+        self.post_commit_memory_promotion = getattr(capabilities, "promote_memory_candidates", None)
         self.closed = asyncio.Event()
 
     async def aclose(self) -> None:

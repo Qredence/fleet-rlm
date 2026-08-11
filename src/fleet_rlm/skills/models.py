@@ -116,6 +116,9 @@ class SkillDefinition:
     instructions: str = field(repr=False)
     resources: Mapping[str, SkillResource] = field(default_factory=lambda: MappingProxyType({}), repr=False)
     signature: type[dspy.Signature] | None = None
+    # Manifest-declared tools are capability guidance for the model. Runtime
+    # authorization remains host-owned and is never derived from this list.
+    allowed_tools: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if not isinstance(self.instructions, str) or not self.instructions.strip():
@@ -124,6 +127,7 @@ class SkillDefinition:
         if any(path != resource.path for path, resource in values.items()):
             raise ValueError("skill resource key does not match its path")
         object.__setattr__(self, "resources", MappingProxyType(values))
+        object.__setattr__(self, "allowed_tools", tuple(self.allowed_tools))
         if self.card.resources_available != bool(values):
             raise ValueError("skill card resource flag does not match resources")
 

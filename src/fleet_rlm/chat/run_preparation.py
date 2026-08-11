@@ -5,12 +5,13 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
-from typing import Protocol
+from typing import Any, Protocol
 from uuid import UUID
 
 from sqlalchemy.exc import SQLAlchemyError
 
 from fleet_rlm.artifacts.promotion import RunArtifactSink
+from fleet_rlm.chat.post_commit_memory import OwnedPostCommitMemoryPromotion
 from fleet_rlm.chat.run_lifecycle import ClaimedRun
 from fleet_rlm.chat.session_context import build_session_context_manifest
 from fleet_rlm.files.memory_models import WORKSPACE_MEMORY_INJECTION_TAIL_BYTES
@@ -40,6 +41,7 @@ from fleet_rlm.rlm.model_bundle import RLMModelBundle
 from fleet_rlm.rlm.recursive_calls import RecursiveRLMOptions
 
 AsyncCleanup = Callable[[], Awaitable[None]]
+PostCommitMemoryPromotion = OwnedPostCommitMemoryPromotion
 
 
 class RunPreparationError(RuntimeError):
@@ -90,8 +92,11 @@ class PreparedRun:
     artifact_sink: RunArtifactSink
     _resources: _PreparedRunResources
     result_snapshot_sink: ResultSnapshotSink | None = None
+    post_commit_memory_promotion: PostCommitMemoryPromotion | None = None
 
     async def aclose(self) -> None:
+        if self.post_commit_memory_promotion is not None:
+            await self.post_commit_memory_promotion.wait_owned()
         await self._resources.aclose()
 
 
@@ -116,6 +121,8 @@ class RunEnvironment:
     result_snapshot_sink: ResultSnapshotSink | None = None
     child_runtime_factory: ChildRuntimeFactory | None = None
     context_mount_path: str | None = None
+    workspace_memory_store: Any | None = None
+    post_commit_memory_promotion: PostCommitMemoryPromotion | None = None
 
 
 class RunEnvironmentProvider(Protocol):
@@ -320,6 +327,7 @@ class DefaultRunPreparer:
             environment.artifact_sink,
             resources,
             environment.result_snapshot_sink,
+            environment.post_commit_memory_promotion,
         )
 
     async def _prepare_capabilities(

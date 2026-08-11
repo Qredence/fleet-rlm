@@ -103,6 +103,9 @@ The `[rlm]` recursion settings include `recursion_enabled` and bound the native
 `rlm_query(prompt=prompt)` child harness: `recursion_max_calls`,
 `recursion_max_prompt_chars`, `recursion_child_max_iterations`,
 `recursion_child_max_llm_calls`, and `recursion_child_max_output_chars`.
+`recursion_max_parallel_children` bounds the number of independent child RLMs
+that Fleet may run concurrently; it defaults to `2` and is not a model-facing
+concurrency control.
 The native recursive-child boundary is a fixed product invariant (`RLM_NATIVE_CHILD_DEPTH = 1`),
 not an editable policy value. Existing policies that still set
 `rlm.recursion_max_depth` fail validation; delete the key.

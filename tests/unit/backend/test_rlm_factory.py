@@ -7,6 +7,23 @@ from unittest.mock import MagicMock
 import pytest
 
 
+class _CopyableLM:
+    def __init__(self) -> None:
+        self.history: list[object] = []
+        self.kwargs: dict[str, object] = {"timeout": 60.0}
+        self.calls: list[dict[str, object]] = []
+        self.num_retries: int | None = None
+
+    def copy(self, **kwargs: object) -> _CopyableLM:
+        copied = _CopyableLM()
+        copied.num_retries = kwargs.get("num_retries")  # type: ignore[assignment]
+        return copied
+
+    def forward(self, **kwargs: object) -> object:
+        self.calls.append(dict(kwargs))
+        return object()
+
+
 def host_echo(value: str = "ok") -> str:
     """Host tool with a valid Python identifier name."""
     return value
@@ -33,6 +50,44 @@ def test_model_bundle_rejects_missing_roles() -> None:
         RLMModelBundle(root_lm=None, sub_lm=MagicMock())  # type: ignore[arg-type]
     with pytest.raises(RLMModelBundleError):
         RLMModelBundle(root_lm=MagicMock(), sub_lm=None)  # type: ignore[arg-type]
+
+
+def test_model_bundle_forks_isolated_deadline_bound_child_lms() -> None:
+    import time
+
+    from fleet_rlm.rlm.model_bundle import RLMModelBundle
+
+    root = _CopyableLM()
+    sub = _CopyableLM()
+    bundle = RLMModelBundle(root, sub)
+    deadline = time.monotonic() + 5
+
+    first = bundle.fork_for_child(deadline=deadline)
+    second = bundle.fork_for_child(deadline=deadline)
+
+    assert first.root_lm is not root
+    assert first.sub_lm is not sub
+    assert first.root_lm is not second.root_lm
+    assert first.sub_lm is not second.sub_lm
+    assert first.root_lm.history is not second.root_lm.history
+    assert first.root_lm.num_retries == 0
+    assert first.sub_lm.num_retries == 0
+
+    first.root_lm.forward(prompt="bounded child")
+    timeout = first.root_lm.calls[-1]["timeout"]
+    assert isinstance(timeout, float)
+    assert 0 < timeout <= 5
+
+
+def test_model_bundle_child_lm_rejects_calls_after_turn_deadline() -> None:
+    import time
+
+    from fleet_rlm.rlm.model_bundle import RLMModelBundle
+
+    child = RLMModelBundle(_CopyableLM(), _CopyableLM()).fork_for_child(deadline=time.monotonic() - 1)
+
+    with pytest.raises(TimeoutError, match="recursive child LM deadline exceeded"):
+        child.root_lm.forward(prompt="late")
 
 
 def test_invalid_options_fail_before_construction() -> None:

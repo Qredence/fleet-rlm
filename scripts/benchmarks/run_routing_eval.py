@@ -88,6 +88,7 @@ def facts_from_public_chunks(chunks: Sequence[Mapping[str, Any]]) -> RoutingFact
     depth_fallback_count = 0
     cleanup_completed = 0
     latency_ms = 0
+    peak_child_concurrency = 0
     for chunk in chunks:
         chunk_type = chunk.get("type")
         if chunk_type == "tool-input-available":
@@ -113,6 +114,9 @@ def facts_from_public_chunks(chunks: Sequence[Mapping[str, Any]]) -> RoutingFact
                     output.get("child_iterations"), bool
                 ):
                     child_iterations += int(output["child_iterations"])
+                raw_peak = output.get("peak_child_concurrency")
+                if isinstance(raw_peak, int) and not isinstance(raw_peak, bool):
+                    peak_child_concurrency = max(peak_child_concurrency, raw_peak)
                 mode = output.get("termination_mode")
                 if mode == "depth_fallback":
                     depth_fallback_count += 1
@@ -146,6 +150,8 @@ def facts_from_public_chunks(chunks: Sequence[Mapping[str, Any]]) -> RoutingFact
         latency_ms=latency_ms,
         sandbox_count=native_child_completions,
         total_tool_calls=sum(counts.values()),
+        recursive_batch_calls=counts.get("rlm_query_batched", 0),
+        peak_child_concurrency=peak_child_concurrency,
     )
 
 
@@ -207,6 +213,8 @@ def _run_live_turn(
             latency_ms=int((time.perf_counter() - started) * 1000),
             sandbox_count=facts.sandbox_count,
             total_tool_calls=facts.total_tool_calls,
+            recursive_batch_calls=facts.recursive_batch_calls,
+            peak_child_concurrency=facts.peak_child_concurrency,
         )
     return answer_from_public_chunks(chunks), facts
 
@@ -237,6 +245,8 @@ def validate_receipt(payload: Mapping[str, Any]) -> Mapping[str, Any]:
             latency_ms=int(run.get("latency_ms", 0)),
             sandbox_count=int(run.get("sandbox_count", 0)),
             total_tool_calls=int(run.get("total_tool_calls", 0)),
+            recursive_batch_calls=int(run.get("recursive_batch_calls", 0)),
+            peak_child_concurrency=int(run.get("peak_child_concurrency", 0)),
         )
         if classify_routing_facts(facts) != run.get("observed_route"):
             raise RoutingEvalError("routing receipt classifier drift is present")
@@ -339,6 +349,8 @@ def _run_live(args: argparse.Namespace, scenarios: tuple[RoutingScenario, ...]) 
                             "latency_ms": facts.latency_ms,
                             "sandbox_count": facts.sandbox_count,
                             "total_tool_calls": facts.total_tool_calls,
+                            "recursive_batch_calls": facts.recursive_batch_calls,
+                            "peak_child_concurrency": facts.peak_child_concurrency,
                         }
                     )
         return _base_receipt(runs, live=True, repeats=args.repeat)

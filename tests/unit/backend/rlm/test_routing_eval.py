@@ -26,13 +26,14 @@ from fleet_rlm.rlm.routing_eval import (
 )
 
 
-def test_curated_scenarios_cover_the_five_owned_routes() -> None:
+def test_curated_scenarios_cover_the_six_owned_routes() -> None:
     assert [scenario.expected_route for scenario in CURATED_ROUTING_SCENARIOS] == [
         "python_native",
         "semantic_single",
         "semantic_batched",
         "recursive_child",
         "recursive_depth_fallback",
+        "recursive_batch",
     ]
     assert all(scenario.prompt for scenario in CURATED_ROUTING_SCENARIOS)
     assert "Python/REPL code" in routing_decision_tree()
@@ -44,6 +45,7 @@ def test_routing_classifier_maps_each_public_route_shape() -> None:
     assert classify_routing_facts(RoutingFacts(tool_counts={"llm_query": 1})) == "semantic_single"
     assert classify_routing_facts(RoutingFacts(tool_counts={"llm_query_batched": 1})) == "semantic_batched"
     assert classify_routing_facts(RoutingFacts(native_child_count=2, max_native_child_depth=1)) == "recursive_child"
+    assert classify_routing_facts(RoutingFacts(recursive_batch_calls=1)) == "recursive_batch"
     assert classify_routing_facts(RoutingFacts(depth_fallback_count=1)) == "recursive_depth_fallback"
 
 
@@ -83,6 +85,23 @@ def test_public_execution_details_feed_the_classifier() -> None:
     assert facts.child_iterations == 2
     assert facts.recursive_prompt_chars == 42
     assert facts.sandbox_count == 1
+
+
+def test_public_execution_details_capture_recursive_batch_width() -> None:
+    details = (
+        ToolStarted("call-1", "rlm_query_batched", {"prompt_count": 3, "prompt_chars": 42}),
+        ToolCompleted(
+            "call-1",
+            "rlm_query_batched",
+            {"status": "completed", "answer_count": 3, "peak_child_concurrency": 2},
+        ),
+    )
+
+    facts = facts_from_execution_details(details, latency_ms=12, sandbox_count=3)
+
+    assert classify_routing_facts(facts) == "recursive_batch"
+    assert facts.recursive_batch_calls == 1
+    assert facts.peak_child_concurrency == 2
 
 
 def test_live_scoring_supports_normalized_containment_and_run_indexes() -> None:
@@ -190,3 +209,76 @@ async def test_harness_runs_an_isolated_fake_lm_python_scenario() -> None:
     assert classify_routing_facts(scores[0].facts) == "python_native"
     assert child_calls == 0
     assert scores[0].facts.sandbox_count == 0
+
+
+@pytest.mark.asyncio
+async def test_harness_routes_one_native_semantic_call_to_configured_sub_lm() -> None:
+    adapter = dspy.JSONAdapter()
+    root = dspy.utils.DummyLM(
+        [
+            {
+                "reasoning": "one bounded semantic judgment",
+                "code": "judgment = llm_query('Is photosynthesis a biological process?')\nSUBMIT(answer=judgment)",
+            }
+        ],
+        adapter=adapter,
+    )
+    sub = dspy.utils.DummyLM([{"answer": "yes"}], adapter=adapter)
+    scenario = next(item for item in CURATED_ROUTING_SCENARIOS if item.expected_route == "semantic_single")
+
+    def unexpected_child(_call_index: int) -> None:
+        raise AssertionError("semantic routing must not allocate a child runtime")
+
+    scores = await run_routing_scenario(
+        scenario,
+        root_lm=root,
+        sub_lm=sub,
+        root_interpreter_factory=lambda: DaytonaCodeInterpreter(backend=InProcessInterpreterBackend()),
+        child_runtime_factory=unexpected_child,
+    )
+
+    assert scores[0].answer_correct is True
+    assert scores[0].routing_match is True
+    assert scores[0].facts.tool_counts["llm_query"] == 1
+    assert len(sub.history) == 1
+
+
+@pytest.mark.asyncio
+async def test_harness_routes_native_semantic_batch_to_configured_sub_lm() -> None:
+    adapter = dspy.JSONAdapter()
+    root = dspy.utils.DummyLM(
+        [
+            {
+                "reasoning": "independent bounded semantic judgments",
+                "code": (
+                    "labels = llm_query_batched(['ballast', 'stroll', 'cobalt'])\nSUBMIT(answer='/'.join(labels))"
+                ),
+            }
+        ],
+        adapter=adapter,
+    )
+    sub = dspy.utils.DummyLM(
+        {
+            "ballast": {"answer": "object"},
+            "stroll": {"answer": "action"},
+            "cobalt": {"answer": "color"},
+        },
+        adapter=adapter,
+    )
+    scenario = next(item for item in CURATED_ROUTING_SCENARIOS if item.expected_route == "semantic_batched")
+
+    def unexpected_child(_call_index: int) -> None:
+        raise AssertionError("semantic routing must not allocate a child runtime")
+
+    scores = await run_routing_scenario(
+        scenario,
+        root_lm=root,
+        sub_lm=sub,
+        root_interpreter_factory=lambda: DaytonaCodeInterpreter(backend=InProcessInterpreterBackend()),
+        child_runtime_factory=unexpected_child,
+    )
+
+    assert scores[0].answer_correct is True
+    assert scores[0].routing_match is True
+    assert scores[0].facts.tool_counts["llm_query_batched"] == 1
+    assert len(sub.history) == 3

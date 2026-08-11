@@ -1,0 +1,167 @@
+"""Thread-safe internal delegation metrics for one Fleet RLM invocation."""
+
+from __future__ import annotations
+
+from collections.abc import Mapping
+from dataclasses import dataclass
+from threading import Lock
+from typing import Any
+
+_TOKEN_USAGE_ALIASES: dict[str, tuple[str, ...]] = {
+    "input_tokens": ("input_tokens", "prompt_tokens"),
+    "output_tokens": ("output_tokens", "completion_tokens"),
+    "total_tokens": ("total_tokens",),
+    "cache_read_tokens": (
+        "cache_read_tokens",
+        "cache_read_input_tokens",
+        "prompt_cache_hit_tokens",
+    ),
+    "cache_creation_tokens": ("cache_creation_tokens", "cache_creation_input_tokens"),
+}
+
+
+@dataclass(frozen=True, slots=True)
+class DelegationMetricsSnapshot:
+    """Bounded, content-free delegation measurements."""
+
+    root_lm_calls_depth_0: int = 0
+    sub_lm_calls_depth_0: int = 0
+    child_root_lm_calls_depth_1: int = 0
+    child_sub_lm_calls_depth_1: int = 0
+    recursive_child_calls: int = 0
+    recursive_batch_calls: int = 0
+    recursive_children_started: int = 0
+    recursive_children_completed: int = 0
+    depth_fallback_calls: int = 0
+    peak_child_concurrency: int = 0
+    lm_call_counts: tuple[tuple[str, int, int], ...] = ()
+    lm_latency_ms: tuple[tuple[str, int, float], ...] = ()
+    lm_token_totals: tuple[tuple[str, int, int], ...] = ()
+
+    def as_dict(self) -> dict[str, object]:
+        """Return a bounded JSON/MLflow-safe representation."""
+        return {
+            "root_lm_calls_depth_0": self.root_lm_calls_depth_0,
+            "sub_lm_calls_depth_0": self.sub_lm_calls_depth_0,
+            "child_root_lm_calls_depth_1": self.child_root_lm_calls_depth_1,
+            "child_sub_lm_calls_depth_1": self.child_sub_lm_calls_depth_1,
+            "recursive_child_calls": self.recursive_child_calls,
+            "recursive_batch_calls": self.recursive_batch_calls,
+            "recursive_children_started": self.recursive_children_started,
+            "recursive_children_completed": self.recursive_children_completed,
+            "depth_fallback_calls": self.depth_fallback_calls,
+            "peak_child_concurrency": self.peak_child_concurrency,
+            "lm_call_counts": [
+                {"role": role, "recursive_depth": depth, "count": count} for role, depth, count in self.lm_call_counts
+            ],
+            "lm_latency_ms": [
+                {"role": role, "recursive_depth": depth, "total_ms": round(total, 3)}
+                for role, depth, total in self.lm_latency_ms
+            ],
+            "lm_token_totals": [
+                {"role": role, "recursive_depth": depth, "tokens": tokens}
+                for role, depth, tokens in self.lm_token_totals
+            ],
+        }
+
+
+class DelegationMetrics:
+    """Accumulate role/depth and bounded recursive fan-out metrics safely."""
+
+    def __init__(self) -> None:
+        self._lock = Lock()
+        self._lm_calls: dict[tuple[str, int], int] = {}
+        self._lm_latency_ms: dict[tuple[str, int], float] = {}
+        self._lm_tokens: dict[tuple[str, int], int] = {}
+        self._recursive_child_calls = 0
+        self._recursive_batch_calls = 0
+        self._recursive_children_started = 0
+        self._recursive_children_completed = 0
+        self._depth_fallback_calls = 0
+        self._active_children = 0
+        self._peak_child_concurrency = 0
+
+    def record_lm_call(
+        self,
+        role: str,
+        recursive_depth: int,
+        *,
+        duration_ms: float = 0.0,
+        usage: Mapping[str, Any] | None = None,
+    ) -> None:
+        """Record one completed or failed LM request without retaining content."""
+        normalized_role = role if role in {"root", "sub"} else "unknown"
+        key = (normalized_role, max(0, int(recursive_depth)))
+        tokens = normalize_lm_token_usage(usage).get("total_tokens", 0)
+        with self._lock:
+            self._lm_calls[key] = self._lm_calls.get(key, 0) + 1
+            self._lm_latency_ms[key] = self._lm_latency_ms.get(key, 0.0) + max(0.0, float(duration_ms))
+            self._lm_tokens[key] = self._lm_tokens.get(key, 0) + tokens
+
+    def record_recursive_call(self) -> None:
+        with self._lock:
+            self._recursive_child_calls += 1
+
+    def record_recursive_batch(self) -> None:
+        with self._lock:
+            self._recursive_batch_calls += 1
+
+    def record_depth_fallback(self) -> None:
+        with self._lock:
+            self._depth_fallback_calls += 1
+
+    def child_started(self) -> None:
+        with self._lock:
+            self._recursive_children_started += 1
+            self._active_children += 1
+            self._peak_child_concurrency = max(self._peak_child_concurrency, self._active_children)
+
+    def child_completed(self) -> None:
+        with self._lock:
+            self._recursive_children_completed += 1
+            self._active_children = max(0, self._active_children - 1)
+
+    def snapshot(self) -> DelegationMetricsSnapshot:
+        with self._lock:
+            calls = tuple(sorted((role, depth, count) for (role, depth), count in self._lm_calls.items()))
+            latency = tuple(sorted((role, depth, total) for (role, depth), total in self._lm_latency_ms.items()))
+            tokens = tuple(sorted((role, depth, total) for (role, depth), total in self._lm_tokens.items()))
+            return DelegationMetricsSnapshot(
+                root_lm_calls_depth_0=self._lm_calls.get(("root", 0), 0),
+                sub_lm_calls_depth_0=self._lm_calls.get(("sub", 0), 0),
+                child_root_lm_calls_depth_1=self._lm_calls.get(("root", 1), 0),
+                child_sub_lm_calls_depth_1=self._lm_calls.get(("sub", 1), 0),
+                recursive_child_calls=self._recursive_child_calls,
+                recursive_batch_calls=self._recursive_batch_calls,
+                recursive_children_started=self._recursive_children_started,
+                recursive_children_completed=self._recursive_children_completed,
+                depth_fallback_calls=self._depth_fallback_calls,
+                peak_child_concurrency=self._peak_child_concurrency,
+                lm_call_counts=calls,
+                lm_latency_ms=latency,
+                lm_token_totals=tokens,
+            )
+
+
+def normalize_lm_token_usage(usage: Mapping[str, Any] | None) -> dict[str, int]:
+    """Map supported provider token aliases onto one canonical usage shape."""
+    if not isinstance(usage, Mapping):
+        return {}
+    normalized: dict[str, int] = {}
+    for target, aliases in _TOKEN_USAGE_ALIASES.items():
+        value = next(
+            (
+                candidate
+                for alias in aliases
+                if isinstance((candidate := usage.get(alias)), (int, float)) and not isinstance(candidate, bool)
+            ),
+            None,
+        )
+        if value is not None:
+            normalized[target] = max(0, int(value))
+    if "total_tokens" not in normalized and ("input_tokens" in normalized or "output_tokens" in normalized):
+        normalized["total_tokens"] = normalized.get("input_tokens", 0) + normalized.get("output_tokens", 0)
+    return normalized
+
+
+__all__ = ["DelegationMetrics", "DelegationMetricsSnapshot", "normalize_lm_token_usage"]

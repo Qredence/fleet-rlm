@@ -98,6 +98,14 @@ _FIELDS: tuple[PolicyField, ...] = (
     PolicyField("llm.root.temperature", "Root LLM", "Temperature", "number", settings_field="root_llm_temperature"),
     PolicyField("llm.root.cache", "Root LLM", "Cache", "boolean", settings_field="root_llm_cache"),
     PolicyField("llm.root.num_retries", "Root LLM", "Retries", "number", settings_field="root_llm_num_retries"),
+    PolicyField(
+        "llm.root.reasoning_effort",
+        "Root LLM",
+        "Reasoning effort",
+        "single_choice",
+        ("none", "low", "medium", "high"),
+        settings_field="root_llm_reasoning_effort",
+    ),
     PolicyField("llm.sub.model", "Sub LLM", "Model", "text", settings_field="sub_model"),
     PolicyField(
         "llm.sub.model_provider_service",
@@ -115,6 +123,14 @@ _FIELDS: tuple[PolicyField, ...] = (
     PolicyField("llm.sub.temperature", "Sub LLM", "Temperature", "number", settings_field="sub_llm_temperature"),
     PolicyField("llm.sub.cache", "Sub LLM", "Cache", "boolean", settings_field="sub_llm_cache"),
     PolicyField("llm.sub.num_retries", "Sub LLM", "Retries", "number", settings_field="sub_llm_num_retries"),
+    PolicyField(
+        "llm.sub.reasoning_effort",
+        "Sub LLM",
+        "Reasoning effort",
+        "single_choice",
+        ("none", "low", "medium", "high"),
+        settings_field="sub_llm_reasoning_effort",
+    ),
     PolicyField("rlm.max_iterations", "RLM", "Maximum iterations", "number", settings_field="rlm_max_iterations"),
     PolicyField("rlm.max_llm_calls", "RLM", "Maximum LLM calls", "number", settings_field="rlm_max_llm_calls"),
     PolicyField(
@@ -171,6 +187,13 @@ _FIELDS: tuple[PolicyField, ...] = (
         "Child maximum output characters",
         "number",
         settings_field="rlm_recursion_child_max_output_chars",
+    ),
+    PolicyField(
+        "rlm.recursion_max_parallel_children",
+        "RLM",
+        "Maximum parallel child RLMs",
+        "number",
+        settings_field="rlm_recursion_max_parallel_children",
     ),
     PolicyField("rlm.verbose", "RLM", "DSPy host verbose logging", "boolean", settings_field="rlm_verbose"),
     PolicyField("storage.data_root", "Storage", "Data root", "text", settings_field="data_root"),

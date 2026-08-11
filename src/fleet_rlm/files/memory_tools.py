@@ -110,13 +110,18 @@ def _normalize_lexical_text(value: str) -> str:
     return " ".join(text.split())
 
 
-def _normalize_search_query(query: str) -> str:
+def normalize_memory_search_query(query: str) -> str:
+    """Normalize one bounded Memory search query for every search caller."""
     if not isinstance(query, str) or len(query.encode("utf-8")) > _SEARCH_QUERY_MAX_BYTES:
         raise _invalid_entry()
     normalized = _normalize_lexical_text(" ".join(query.split()))
     if not normalized:
         raise _invalid_entry()
     return normalized
+
+
+# Keep the private name for local callers that have not yet migrated.
+_normalize_search_query = normalize_memory_search_query
 
 
 def _lexical_tokens(text: str) -> tuple[str, ...]:
@@ -269,7 +274,7 @@ class WorkspaceMemoryToolHost:
             limit: int = 8,
         ) -> dict[str, object]:
             """Search valid Workspace Memory entries with deterministic lexical ranking."""
-            normalized_query = _normalize_search_query(query)
+            normalized_query = normalize_memory_search_query(query)
             if type(limit) is not int or not 1 <= limit <= SEARCH_MEMORIES_MAX_LIMIT:
                 raise _invalid_entry()
             normalized_category: str | None

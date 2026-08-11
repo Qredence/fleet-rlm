@@ -12,6 +12,7 @@ from uuid import UUID
 
 from fleet_rlm.artifacts.models import ArtifactAccess, ArtifactCandidate, ArtifactRef
 from fleet_rlm.artifacts.promotion import ArtifactPromotion, PromotedArtifact, RunArtifactSink
+from fleet_rlm.chat.post_commit_memory import OwnedPostCommitMemoryPromotion
 from fleet_rlm.chat.run_authority import RunAuthority
 from fleet_rlm.chat.run_claim import (
     BeginSettlement,
@@ -33,6 +34,7 @@ from fleet_rlm.sessions.committed_turn import CommittedTurn
 from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
 
 logger = logging.getLogger(__name__)
+_POST_COMMIT_MEMORY_PROMOTION_TIMEOUT_S = 2.0
 
 
 class RunLifecycleError(RuntimeError):
@@ -212,7 +214,7 @@ class RunLifecycle(Protocol):
         *,
         artifact_sink: RunArtifactSink | None = None,
         result_snapshot_sink: ResultSnapshotSink | None = None,
-        memory_promotion: Any = None,
+        memory_promotion: OwnedPostCommitMemoryPromotion | None = None,
     ) -> RunSettlement: ...
 
     async def request_cancel(self, access: TurnAccess, run_id: UUID) -> CancelResult: ...
@@ -255,7 +257,7 @@ class RunLifecycleService:
         *,
         artifact_sink: RunArtifactSink | None = None,
         result_snapshot_sink: ResultSnapshotSink | None = None,
-        memory_promotion: Any = None,
+        memory_promotion: OwnedPostCommitMemoryPromotion | None = None,
     ) -> RunSettlement:
         """
         Finalize a Run with a successful outcome or record its failure.
@@ -380,11 +382,11 @@ class RunLifecycleService:
     async def _promote_memory_candidates_after_commit(
         self,
         resolution: RLMOutcome | RunFailure,
-        memory_promotion: Any,
+        memory_promotion: OwnedPostCommitMemoryPromotion | None,
     ) -> None:
         """Run one optional, metadata-bounded promotion after the durable commit."""
         candidates = tuple(resolution.memory_candidates) if isinstance(resolution, RLMOutcome) else ()
-        if not candidates or not callable(memory_promotion):
+        if not candidates or memory_promotion is None:
             return
         with turn_phase_span(
             "Turn.memory_candidate_promotion",
@@ -393,20 +395,36 @@ class RunLifecycleService:
                 "candidate_bytes": sum(int(getattr(item, "byte_size", 0)) for item in candidates),
             },
         ) as span:
-            task, task_cancelled = await _settle_owned(
-                asyncio.ensure_future(asyncio.to_thread(memory_promotion, candidates))
+            attempt = await memory_promotion.promote(
+                candidates,
+                timeout_s=_POST_COMMIT_MEMORY_PROMOTION_TIMEOUT_S,
             )
-            try:
-                result = task.result()
-            except BaseException as exc:
+            if attempt.status == "deadline_exceeded":
                 logger.warning(
-                    "Memory Candidate promotion failed after the Turn commit; Turn remains committed", exc_info=exc
+                    "Memory Candidate promotion exceeded the bounded post-commit deadline; "
+                    "owned cleanup will retain the Run lease"
                 )
+                span.set_outputs(
+                    {
+                        "promotion_outcome": "deadline_exceeded",
+                        "promoted_count": 0,
+                        "deadline_ms": int(_POST_COMMIT_MEMORY_PROMOTION_TIMEOUT_S * 1000),
+                    }
+                )
+                return
+            if attempt.status == "interrupted":
+                logger.warning(
+                    "Memory Candidate promotion was interrupted after the Turn commit; owned cleanup retained"
+                )
+                span.set_outputs({"promotion_outcome": "interrupted", "promoted_count": 0})
+                return
+            if attempt.status == "failed":
+                logger.warning("Memory Candidate promotion failed after the Turn commit; Turn remains committed")
                 # The Turn is already durable; unlike commit ownership, a post-commit
                 # optional side effect preserves the receipt rather than re-raising.
-                del task_cancelled
                 span.set_outputs({"promotion_outcome": "failed", "promoted_count": 0})
                 return
+            result = attempt.result
             promoted = int(getattr(result, "promoted_count", 0))
             duplicates = int(getattr(result, "duplicate_count", 0))
             dropped = int(getattr(result, "dropped_count", 0))

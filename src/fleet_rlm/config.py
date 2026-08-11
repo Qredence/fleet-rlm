@@ -207,6 +207,7 @@ class Settings(BaseModel):
     rlm_recursion_child_max_iterations: int = Field(default=8, gt=0)
     rlm_recursion_child_max_llm_calls: int = Field(default=12, gt=0)
     rlm_recursion_child_max_output_chars: int = Field(default=4_000, gt=0)
+    rlm_recursion_max_parallel_children: int = Field(default=2, gt=0, le=8)
     rlm_autonomous_memory_categories: tuple[str, ...] = Field(default=())
     run_heartbeat_seconds: int = Field(default=10, gt=0)
     run_stale_after_seconds: int = Field(default=60, gt=0)
@@ -372,6 +373,7 @@ _TABLE_KEYS: dict[str, frozenset[str]] = {
             "recursion_child_max_iterations",
             "recursion_child_max_llm_calls",
             "recursion_child_max_output_chars",
+            "recursion_max_parallel_children",
             "autonomous_memory_categories",
             "verbose",
         }
@@ -581,6 +583,7 @@ def _flatten_policy(policy: Mapping[str, Any]) -> dict[str, Any]:
         "rlm_recursion_child_max_iterations": rlm.get("recursion_child_max_iterations", 8),
         "rlm_recursion_child_max_llm_calls": rlm.get("recursion_child_max_llm_calls", 12),
         "rlm_recursion_child_max_output_chars": rlm.get("recursion_child_max_output_chars", 4_000),
+        "rlm_recursion_max_parallel_children": rlm.get("recursion_max_parallel_children", 2),
         "rlm_autonomous_memory_categories": rlm.get("autonomous_memory_categories", ()),
         "rlm_verbose": rlm.get("verbose"),
         "data_root": storage.get("data_root"),

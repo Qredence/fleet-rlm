@@ -6,7 +6,7 @@ import asyncio
 import contextlib
 from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, replace
-from typing import Any, Protocol, TypeAlias
+from typing import Any, Protocol, TypeAlias, cast
 from uuid import UUID
 
 from fleet_rlm.chat.committed_turn_events import CommittedTurnEventProjector
@@ -19,7 +19,7 @@ from fleet_rlm.chat.run_lifecycle import (
     RunLifecycle,
     RunSettlement,
 )
-from fleet_rlm.chat.run_preparation import PreparedRun
+from fleet_rlm.chat.run_preparation import PostCommitMemoryPromotion, PreparedRun
 from fleet_rlm.observability.turn_tracing import annotate_trace_io, turn_phase_span
 from fleet_rlm.rlm.context import RLMExecutionContext
 from fleet_rlm.rlm.dspy_contract import RLMUsage, empty_rlm_usage
@@ -375,18 +375,24 @@ class RunExecutionDriver:
             settlement_inputs["iterations"] = resolution.usage.get("iterations")
         if isinstance(resolution, RLMOutcome):
             settlement_inputs["memory_candidate_count"] = len(resolution.memory_candidates)
-        capabilities = getattr(prepared.execution, "capabilities", None)
-        memory_promotion = getattr(capabilities, "promote_memory_candidates", None)
-        finish_arguments: dict[str, object] = {}
-        if callable(memory_promotion):
-            finish_arguments["memory_promotion"] = memory_promotion
+        memory_promotion = cast(
+            PostCommitMemoryPromotion | None,
+            getattr(prepared, "post_commit_memory_promotion", None),
+        )
         with turn_phase_span("Turn.settlement", inputs=settlement_inputs):
+            if memory_promotion is None:
+                return await self._lifecycle.finish(
+                    run,
+                    resolution,
+                    artifact_sink=prepared.artifact_sink,
+                    result_snapshot_sink=prepared.result_snapshot_sink,
+                )
             return await self._lifecycle.finish(
                 run,
                 resolution,
                 artifact_sink=prepared.artifact_sink,
                 result_snapshot_sink=prepared.result_snapshot_sink,
-                **finish_arguments,
+                memory_promotion=memory_promotion,
             )
 
     async def _settle_cancellation(

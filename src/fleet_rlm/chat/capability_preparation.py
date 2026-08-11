@@ -92,12 +92,6 @@ class PreparedHostCapabilities:
             return ()
         return self._memory_candidates.drain()
 
-    def promote_memory_candidates(self, candidates: tuple[Any, ...]) -> Any:
-        """Default no-op result for private compositions without a memory store."""
-        from fleet_rlm.files.memory_candidates import MemoryCandidatePromotionResult
-
-        return MemoryCandidatePromotionResult(proposed_count=len(candidates))
-
     def record_attachment_accesses(self, attachment_ids: tuple[str, ...]) -> None:
         recorder = getattr(self._files, "record_attachment_accesses", None)
         if callable(recorder):

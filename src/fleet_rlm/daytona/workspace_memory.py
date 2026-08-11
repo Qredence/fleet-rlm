@@ -121,14 +121,20 @@ _INJECTION_RECENT_COUNT = 4
 
 
 def _injection_query(request: str) -> str:
-    """Use only the current user request, bounded to the search-tool limit."""
+    """Use the same bounded lexical normalization as ``search_memories``."""
     if not isinstance(request, str):
         return ""
     body = request.strip()
     if not body:
         return ""
     encoded = body.encode("utf-8")[-256:]
-    return encoded.decode("utf-8", errors="ignore")
+    bounded = encoded.decode("utf-8", errors="ignore")
+    try:
+        from fleet_rlm.files.memory_tools import normalize_memory_search_query
+
+        return normalize_memory_search_query(bounded)
+    except Exception:
+        return ""
 
 
 def _canonical_memory_record(entry: WorkspaceMemoryEntry) -> bytes:
