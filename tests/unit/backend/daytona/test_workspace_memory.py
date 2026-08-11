@@ -177,9 +177,9 @@ def test_memory_lock_is_a_stable_control_sidecar_outside_the_memory_log(tmp_path
     )
 
     store.append_record(first)
-    sidecar = root / "MEMORIES.md.lock"
+    sidecar = root / "memory" / "MEMORIES.md.lock"
     assert sidecar.is_file() and sidecar.stat().st_size == 0
-    assert not (root / "memory" / "MEMORIES.md.lock").exists()
+    assert not (root / "MEMORIES.md.lock").exists()
 
     # A lock left by an interrupted runner is metadata, not memory content.
     store.append_record(second)
@@ -193,10 +193,12 @@ def test_memory_lock_is_a_stable_control_sidecar_outside_the_memory_log(tmp_path
 def test_a_tampered_memory_lock_fails_closed_without_touching_the_log(tmp_path: Path, sidecar_kind: str) -> None:
     store, root, _process = _store(tmp_path)
     target = root / "memory" / "MEMORIES.md"
+    (root / "memory").mkdir()
+    lock_path = root / "memory" / "MEMORIES.md.lock"
     if sidecar_kind == "symlink":
-        (root / "MEMORIES.md.lock").symlink_to(target)
+        lock_path.symlink_to(target)
     else:
-        (root / "MEMORIES.md.lock").mkdir()
+        lock_path.mkdir()
 
     with pytest.raises(WorkspaceMemoryStoreUnavailableError):
         store.append_record("- [2026-07-27T11:14:05Z] **General** <!-- id:aaaa0001 -->: bounded\n")

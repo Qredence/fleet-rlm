@@ -232,8 +232,7 @@ exactly-once crash-recovered side-effect ledger.
 upgrades legacy rows to v3 or replaces v3 while preserving the id and
 timestamp, and `forget` removes exactly one addressed row. `remember`, edit,
 delete, and legacy migration run their read/validate/compose/publish sequence
-inside one mounted-agent operation behind a stable, zero-byte Volume-root
-`MEMORIES.md.lock` advisory lock and inode/path revalidation. The host
+inside one mounted-agent operation behind a stable, zero-byte `memory/MEMORIES.md.lock` advisory lock and inode/path revalidation. The host
 process-local thread lock is only an optimization; independent host processes
 whose mounted agents execute on one lock-honoring Sandbox kernel coordinate
 through that mounted lock. Cross-Sandbox FUSE lock semantics remain part of
