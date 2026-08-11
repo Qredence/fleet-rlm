@@ -230,10 +230,6 @@ class DaytonaWorkspaceMemoryStore:
         self._memory_file_parent = as_posix(expected_file.parent)
         self._max_file_bytes = int(max_upload_bytes)
 
-    @property
-    def volume_root_posix(self) -> str:
-        return self._volume_root
-
     def read_tail(self, *, byte_budget: int) -> WorkspaceMemoryReadResult:
         if type(byte_budget) is not int or not 0 < byte_budget <= WORKSPACE_MEMORY_BYTE_BUDGET:
             raise WorkspaceMemoryStoreUnavailableError()

@@ -228,18 +228,6 @@ class StrictEvaluationProof:
         if not _label_value(self.proof_id):
             raise OptimizationSandboxPolicyError("strict evaluator proof identifier is required")
 
-    def require_verified(self) -> None:
-        """
-        Require verified read-only input delivery and gateway/broker policy.
-
-        Raises:
-            StrictEvaluationCapabilityError: If either required verification is absent.
-        """
-        if not self.readonly_input_boundary_verified:
-            raise StrictEvaluationCapabilityError("strict evaluator requires verified read-only input delivery")
-        if not self.gateway_broker_verified:
-            raise StrictEvaluationCapabilityError("strict evaluator requires verified gateway and broker policy")
-
 
 @dataclass(frozen=True, slots=True)
 class StrictEvaluationModels:

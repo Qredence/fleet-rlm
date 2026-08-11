@@ -43,10 +43,6 @@ async def test_prepared_rlm_kwargs_bound_a_large_session_to_recent_previews() ->
             del location
             return None
 
-        async def read_private(self, location):
-            del location
-            return b""
-
         async def write_private(self, location, data):
             del location, data
             return None

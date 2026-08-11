@@ -141,7 +141,6 @@ async def test_live_daytona_sink_commit_failure_deletes_snapshot_through_adapter
     paths = VolumePaths.from_mount()
     sink = _DaytonaRunSink(
         type("Sandbox", (), {"fs": Fs()})(),
-        max_read_bytes=1024,
         paths=paths,
     )
     access, session_id, run_id = TurnAccess(uuid4(), uuid4()), uuid4(), uuid4()

@@ -86,9 +86,6 @@ class TestingRunSink:
     async def remove(self, location: str) -> None:
         self.values.pop(location, None)
 
-    async def read_private(self, logical_path: str) -> bytes:
-        return await self.read(logical_path, max_bytes=2**31 - 1)
-
     async def write_private(self, logical_path: str, data: bytes) -> None:
         await self.write(logical_path, data)
 

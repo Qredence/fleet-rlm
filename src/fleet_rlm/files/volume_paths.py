@@ -255,9 +255,6 @@ class VolumePaths:
     def attachment_blob_path(self, attachment_id: str | UUID) -> PurePosixPath:
         return resolve_under_root(self.attachment_dir(attachment_id), "blob")
 
-    def attachment_meta_path(self, attachment_id: str | UUID) -> PurePosixPath:
-        return resolve_under_root(self.attachment_dir(attachment_id), "meta.json")
-
     def run_attachment_file(
         self,
         session_id: str | UUID,

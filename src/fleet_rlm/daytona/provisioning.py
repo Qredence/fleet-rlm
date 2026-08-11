@@ -3,10 +3,8 @@
 from __future__ import annotations
 
 import hashlib
-import time
 from collections.abc import Iterable
 from dataclasses import dataclass
-from datetime import UTC, datetime
 from importlib.resources import files
 from typing import Any, Protocol
 from uuid import UUID
@@ -595,14 +593,9 @@ class SandboxProvisioner:
         labels: dict[str, str],
         ephemeral: bool,
     ) -> Any:
-        """Create a sandbox with timing instrumentation for performance profiling."""
-        start_time = time.perf_counter()
-        timeline = {
-            "init_timestamp": datetime.now(UTC).isoformat(),
-        }
-
+        """Create one sandbox under the strict provisioning policy."""
         try:
-            result = await self._platform.create(
+            return await self._platform.create(
                 volume_id=expected.volume_id,
                 mount_path=str(expected.mount_path),
                 volume_subpath=require_scoped_volume_subpath(
@@ -612,30 +605,8 @@ class SandboxProvisioner:
                 labels=labels,
                 ephemeral=ephemeral,
             )
-
-            # Record successful creation timing
-            total_time_ms = (time.perf_counter() - start_time) * 1000
-            timeline["total_time_ms"] = round(total_time_ms, 3)
-            timeline["status"] = "success"
-
-            # Add timing metadata to result object if possible
-            if hasattr(result, "__dict__"):
-                result._provisioning_timeline = timeline
-
-            return result
         except Exception as exc:
-            # Record failure timing
-            total_time_ms = (time.perf_counter() - start_time) * 1000
-            timeline["total_time_ms"] = round(total_time_ms, 3)
-            timeline["status"] = "failed"
-            timeline["error_type"] = type(exc).__name__
-
-            # Expose the failure timeline through the same telemetry path as
-            # successful creation: an attribute on the raised object.
-            mapped = map_provider_error(exc)
-            if hasattr(mapped, "__dict__"):
-                setattr(mapped, "_provisioning_timeline", timeline)  # noqa: B010
-            raise mapped from exc
+            raise map_provider_error(exc) from exc
 
     def verify(self, sandbox: Any, expected: ExpectedWorkspaceMount) -> None:
         verify_sandbox_workspace_mount(sandbox, expected)

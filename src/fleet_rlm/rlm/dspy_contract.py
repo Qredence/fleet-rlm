@@ -28,8 +28,6 @@ from fleet_rlm.rlm.delegation_metrics import DelegationMetrics, normalize_lm_tok
 from fleet_rlm.rlm.errors import RLMConfigError
 from fleet_rlm.rlm.sanitize import truncate_public_text, validate_declared_public_value
 
-DSPY_VERSION = "3.3.x"
-
 ReasoningObserver: TypeAlias = Callable[[Any], None]
 
 

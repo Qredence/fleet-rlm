@@ -82,19 +82,6 @@ def _detail_data(detail: object) -> dict[str, Any]:
     }
 
 
-def _event_to_public_dict(event: RuntimeEvent) -> dict[str, Any]:
-    return {
-        "schema_version": event.schema_version,
-        "event_id": event.event_id,
-        "run_id": event.run_id,
-        "session_id": event.session_id,
-        "sequence": event.sequence,
-        "timestamp": event.timestamp,
-        "kind": event.kind,
-        "payload": _detail_data(event.detail),
-    }
-
-
 class AISDKUIProjector:
     """Stateful typed Runtime Event to AI SDK UI message chunk projector."""
 

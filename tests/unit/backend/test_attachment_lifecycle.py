@@ -69,9 +69,6 @@ class _Sink:
     stored: dict[str, bytes] = field(default_factory=dict)
     fail_after: int | None = None
 
-    async def read_private(self, logical_path: str) -> bytes:
-        return self.stored[logical_path]
-
     async def write_private(self, logical_path: str, data: bytes) -> None:
         completed = sum(name == "stage" for name, _ in self.calls)
         if self.fail_after is not None and completed >= self.fail_after:

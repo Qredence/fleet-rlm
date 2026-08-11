@@ -13,7 +13,6 @@ from fleet_rlm.chat.commands import OpenTurnCommand
 from fleet_rlm.chat.committed_turn_events import CommittedTurnEventProjector
 from fleet_rlm.chat.run_cleanup import RunCleanupSupervisor, RunCleanupUnavailableError
 from fleet_rlm.chat.run_execution import (
-    RunEventStream,  # noqa: F401 - compatibility export
     RunExecutionDriver,
     RunRunner,
     _ClaimHeartbeat,
@@ -21,7 +20,6 @@ from fleet_rlm.chat.run_execution import (
     _shield_cleanup,
     _stop_heartbeat,
     _terminal,  # noqa: F401 - compatibility export
-    _with_trace_id,  # noqa: F401 - compatibility export
 )
 from fleet_rlm.chat.run_lifecycle import (
     ClaimedRun,

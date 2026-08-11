@@ -151,7 +151,6 @@ class _DaytonaRunSink:
         sandbox: Any,
         *,
         loop: asyncio.AbstractEventLoop | None = None,
-        max_read_bytes: int,
         paths: VolumePaths,
     ) -> None:
         self._sandbox = sandbox
@@ -165,7 +164,6 @@ class _DaytonaRunSink:
             if loop is not None
             else None
         )
-        self._max_read_bytes = max_read_bytes
         self._paths = paths
 
     def result_path(self, session_id: UUID, run_id: UUID) -> str:
@@ -182,9 +180,6 @@ class _DaytonaRunSink:
 
     async def remove(self, location: str) -> None:
         await self._files.remove(location)
-
-    async def read_private(self, logical_path: str) -> bytes:
-        return await self.read(logical_path, max_bytes=self._max_read_bytes)
 
     async def write_private(self, logical_path: str, data: bytes) -> None:
         await self.write(logical_path, data)
@@ -253,7 +248,6 @@ class _DaytonaEnvironmentProvider:
             sink = _DaytonaRunSink(
                 sandbox,
                 loop=asyncio.get_running_loop(),
-                max_read_bytes=self.settings.max_upload_bytes,
                 paths=paths,
             )
             assert sink.volume_fs is not None

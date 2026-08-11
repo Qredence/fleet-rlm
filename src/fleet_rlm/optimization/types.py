@@ -39,10 +39,6 @@ class DatasetSplit:
     seed: int
 
     @property
-    def all_record_ids(self) -> tuple[str, ...]:
-        return tuple(record.record_id for record in (*self.train, *self.selection, *self.sealed_test))
-
-    @property
     def public_manifest(self) -> dict[str, Any]:
         """Return a manifest that does not disclose sealed-test payloads."""
         return {

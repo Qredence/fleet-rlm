@@ -34,10 +34,6 @@ async def test_preparation_bounds_history_and_closes_in_dependency_order() -> No
             del location
             operations.append("remove-artifact")
 
-        async def read_private(self, location):
-            del location
-            return b""
-
         async def write_private(self, location, data):
             del location, data
             return None

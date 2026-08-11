@@ -211,8 +211,6 @@ class VolumeFSCacheState:
 class AsyncDaytonaVolumeFS:
     """Native async byte I/O over one mounted Workspace Volume Scope."""
 
-    CACHEABLE_PATTERNS = _CACHEABLE_PATTERNS
-
     def __init__(
         self,
         sandbox: Any,
@@ -358,8 +356,6 @@ class AsyncDaytonaVolumeFS:
 
 class DaytonaSandboxVolumeFs:
     """Synchronous mounted-byte view used only by DSPy host tools."""
-
-    CACHEABLE_PATTERNS = _CACHEABLE_PATTERNS
 
     def __init__(
         self,

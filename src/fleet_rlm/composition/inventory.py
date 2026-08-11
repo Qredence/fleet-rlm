@@ -132,10 +132,6 @@ class RuntimeInventory:
             return None
         return self.run_environment_resources.session_manager
 
-    @property
-    def rlm_model_bundle(self) -> RLMModelBundle | None:
-        return self.model_bundle
-
 
 def get_runtime_inventory(app: FastAPI) -> RuntimeInventory | None:
     """Return the currently attached runtime inventory, if any."""

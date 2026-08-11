@@ -35,9 +35,6 @@ class _Sink:
     def __init__(self, mirror: HostVolumeMirror) -> None:
         self.mirror = mirror
 
-    async def read_private(self, logical_path: str) -> bytes:
-        return self.mirror.read_bytes(logical_path)
-
     async def write_private(self, logical_path: str, data: bytes) -> None:
         self.mirror.write_bytes(logical_path, data)
 

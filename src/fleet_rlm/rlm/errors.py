@@ -28,11 +28,6 @@ class RunCancelledError(RunTerminalError):
     public_message = "Turn cancelled"
 
 
-class RunTimeoutError(RunTerminalError):
-    status = "timeout"
-    public_message = "Turn timed out"
-
-
 class RunNoProgressError(RunTerminalError):
     public_message = "Turn stopped after repeated tool calls made no progress"
 
