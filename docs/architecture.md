@@ -235,7 +235,15 @@ delete, and legacy migration run their read/validate/compose/publish sequence
 inside one mounted-agent operation behind a stable, zero-byte `memory/MEMORIES.md.lock` advisory lock and inode/path revalidation. The host
 process-local thread lock is only an optimization; independent host processes
 whose mounted agents execute on one lock-honoring Sandbox kernel coordinate
-through that mounted lock. Cross-Sandbox FUSE lock semantics remain part of
+through that mounted lock (the lock inode opens `O_RDWR|O_CREAT`; read-only
+lock creates are rejected EPERM on WORM-like Volume backends). Mutation
+publication degrades in capability order: atomic `os.replace` publish,
+direct `O_TRUNC` overwrite, then unlink-and-recreate for Volume backends that
+reject both rename/link and every in-place write-open on existing files
+(Fall 2026 live probe: EPERM on `O_WRONLY`/`O_RDWR`/`O_APPEND`/`O_TRUNC` opens
+of existing entries; ENOSYS on rename/link). A failed recreate restores the
+previous bytes before the bounded error surfaces, so a failed mutation never
+silently destroys the log. Cross-Sandbox FUSE lock semantics remain part of
 the live P16 certification surface and receive no stronger claim here. The
 sidecar is control metadata, never a memory record or digest input. A
 completed append therefore survives failed or cancelled Turns and Sandbox

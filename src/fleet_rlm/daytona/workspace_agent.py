@@ -20,6 +20,17 @@ _UNSUPPORTED_REPLACE_ERRNOS = frozenset(
         95,
     }
 )
+# Errnos for which in-place direct overwrite may be rejected by a WORM-like
+# Volume backend; the final fallback recreates the entry with fresh bytes.
+_WORM_RECREATE_ERRNOS = frozenset(
+    {
+        errno.EPERM,
+        errno.EBADF,
+        errno.ENOSYS,
+        errno.EOPNOTSUPP,
+        getattr(errno, "ENOTSUP", errno.EOPNOTSUPP),
+    }
+)
 
 
 class WorkspaceAgentStorageError(OSError):
@@ -352,7 +363,8 @@ def build_workspace_agent_code(
             "    while True:",
             "        fd = None",
             "        try:",
-            "            fd = os.open(lock_name, os.O_RDONLY | os.O_CREAT | getattr(os, 'O_NOFOLLOW', 0) | getattr(os, 'O_NONBLOCK', 0), 0o600, dir_fd=parent_fd)",  # noqa: E501 - emitted sandbox code is intentionally one line
+            # O_RDONLY|O_CREAT lock opens fail EPERM on WORM-like Volume backends; O_RDWR|O_CREAT is accepted.
+            "            fd = os.open(lock_name, os.O_RDWR | os.O_CREAT | getattr(os, 'O_NOFOLLOW', 0) | getattr(os, 'O_NONBLOCK', 0), 0o600, dir_fd=parent_fd)",  # noqa: E501 - emitted sandbox code is intentionally one line
             "            fcntl.flock(fd, fcntl.LOCK_EX)",
             "            locked_stat = os.fstat(fd)",
             "            current_stat = os.stat(lock_name, dir_fd=parent_fd, follow_symlinks=False)",
@@ -420,6 +432,61 @@ def build_workspace_agent_code(
             "    finally:",
             "        if fd is not None:",
             "            os.close(fd)",
+            "    try:",
+            "        fsync_directory(parent_fd)",
+            "    except StorageError as exc:",
+            "        cleanup_errno = exc.errno",
+            "    return os.stat(name, dir_fd=parent_fd, follow_symlinks=False), cleanup_errno",
+            "def recreate_existing(parent_fd, name, payload, previous):",
+            "    # WORM-like Volume backends reject every atomic rename/link and",
+            "    # every in-place write-open on existing files (EPERM); unlink and",
+            "    # O_EXCL recreate is the only accepted mutation. A failed mutation",
+            "    # restores the previous bytes best-effort so the log is never",
+            "    # silently destroyed.",
+            "    def create_fresh(data):",
+            "        created = None",
+            "        attempts = 0",
+            "        while created is None:",
+            "            attempts += 1",
+            "            try:",
+            "                created = os.open(name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, 'O_NOFOLLOW', 0), 0o600, dir_fd=parent_fd)",  # noqa: E501 - emitted sandbox code is intentionally one line
+            "            except FileNotFoundError:",
+            "                if attempts >= 25:",
+            "                    raise StorageError(errno.ENOENT)",
+            "                time.sleep(0.02)",
+            "        try:",
+            "            write_all(created, data)",
+            "            os.fsync(created)",
+            "        except BaseException:",
+            "            try:",
+            "                os.close(created)",
+            "            except OSError:",
+            "                pass",
+            "            try:",
+            "                os.unlink(name, dir_fd=parent_fd)",
+            "            except OSError:",
+            "                pass",
+            "            raise",
+            "        os.close(created)",
+            "        try:",
+            "            fsync_directory(parent_fd)",
+            "        except StorageError:",
+            "            pass",
+            "    cleanup_errno = None",
+            "    try:",
+            "        os.unlink(name, dir_fd=parent_fd)",
+            "    except FileNotFoundError:",
+            "        pass",
+            "    try:",
+            "        create_fresh(payload)",
+            "    except BaseException as exc:",
+            "        try:",
+            "            create_fresh(previous)",
+            "        except BaseException:",
+            "            pass",
+            "        if isinstance(exc, StorageError):",
+            "            raise",
+            "        raise StorageError(exc.errno if isinstance(exc, OSError) else errno.EIO) from exc",
             "    try:",
             "        fsync_directory(parent_fd)",
             "    except StorageError as exc:",
@@ -925,7 +992,15 @@ def build_workspace_agent_code(
             "            try:",
             "                written_stat = replace_existing(parent_fd, relative_parts[-1], payload)",
             "            except ReplacementUnsupported:",
-            "                written_stat = overwrite_existing_direct(parent_fd, relative_parts[-1], payload, source)",
+            "                previous = read_existing(",
+            "                    parent_fd, relative_parts[-1], max_bytes, expected_stat=target_stat",
+            "                )",
+            "                try:",
+            "                    written_stat = overwrite_existing_direct(parent_fd, relative_parts[-1], payload, previous)",  # noqa: E501 - emitted sandbox code is intentionally one line
+            "                except StorageError as direct_exc:",
+            f"                    if direct_exc.errno not in {sorted(_WORM_RECREATE_ERRNOS)!r}:",
+            "                        raise",
+            "                    written_stat = recreate_existing(parent_fd, relative_parts[-1], payload, previous)",
             "                fallback_overwrite = True",
             "        finally:",
             "            if locked_fd is not None:",
@@ -1119,7 +1194,12 @@ def build_workspace_agent_code(
             "                    previous = read_existing(",
             "                        parent_fd, relative_parts[-1], max_bytes, expected_stat=existing_stat",
             "                    )",
-            "                    written_stat = overwrite_existing_direct(parent_fd, relative_parts[-1], payload, previous)",  # noqa: E501 - emitted sandbox code is intentionally one line
+            "                    try:",
+            "                        written_stat = overwrite_existing_direct(parent_fd, relative_parts[-1], payload, previous)",  # noqa: E501 - emitted sandbox code is intentionally one line
+            "                    except StorageError as direct_exc:",
+            f"                        if direct_exc.errno not in {sorted(_WORM_RECREATE_ERRNOS)!r}:",
+            "                            raise",
+            "                        written_stat = recreate_existing(parent_fd, relative_parts[-1], payload, previous)",  # noqa: E501 - emitted sandbox code is intentionally one line
             "                    fallback_overwrite = True",
             "            else:",
             "                written_stat = publish_new(parent_fd, relative_parts[-1], payload)",

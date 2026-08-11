@@ -1253,3 +1253,194 @@ def test_injection_digest_is_empty_for_missing_or_empty_stores(tmp_path: Path) -
     store, _root, _process = _store(tmp_path)
 
     assert read_workspace_memory_injection_digest(store) == ""
+
+
+_WORM_PRELUDE = r"""
+import os as _worm_os
+
+_real_open = _worm_os.open
+_real_close = _worm_os.close
+_worm_open_paths = {}
+_worm_fail_once_name = None
+_worm_fail_count = 0
+
+
+def _worm_resolve(file, dir_fd):
+    if dir_fd is None:
+        base = file if _worm_os.path.isabs(file) else _worm_os.path.abspath(file)
+    else:
+        base = _worm_os.path.join(_worm_open_paths.get(dir_fd, ""), file)
+    return _worm_os.path.normpath(base)
+
+
+def _worm_open(file, flags, mode=0o777, *, dir_fd=None):
+    global _worm_fail_count
+    path = _worm_resolve(file, dir_fd)
+    exists = _worm_os.path.lexists(path)
+    writing = bool(flags & (_worm_os.O_WRONLY | _worm_os.O_RDWR | _worm_os.O_APPEND))
+    creating = bool(flags & _worm_os.O_CREAT)
+    is_dir = bool(flags & getattr(_worm_os, "O_DIRECTORY", 0))
+    if (
+        creating
+        and writing
+        and _worm_fail_once_name is not None
+        and _worm_os.path.basename(path) == _worm_fail_once_name
+        and _worm_fail_count < 1
+    ):
+        _worm_fail_count += 1
+        raise OSError(5, "simulated transient create failure")
+    if not is_dir:
+        if exists and writing and not creating:
+            raise OSError(1, "simulated WORM volume rejects in-place writes")
+        if not exists and creating and not writing:
+            raise OSError(1, "simulated WORM volume rejects read-only creates")
+    fd = _real_open(file, flags, mode, dir_fd=dir_fd)
+    _worm_open_paths[fd] = path
+    return fd
+
+
+def _worm_close(fd):
+    _worm_open_paths.pop(fd, None)
+    _real_close(fd)
+
+
+def _worm_replace(*args, **kwargs):
+    raise OSError(38, "simulated WORM volume rejects rename")
+
+
+def _worm_link(*args, **kwargs):
+    raise OSError(1, "simulated WORM volume rejects links")
+
+
+_worm_os.open = _worm_open
+_worm_os.close = _worm_close
+_worm_os.replace = _worm_replace
+_worm_os.rename = _worm_replace
+_worm_os.link = _worm_link
+"""
+
+
+class _WormSubprocess:
+    """Run the mounted-agent code against a local Volume with WORM semantics."""
+
+    def __init__(self, *, fail_first_exclusive_create: str | None = None) -> None:
+        self.calls: list[str] = []
+        self._fail_once_name = fail_first_exclusive_create
+
+    def code_run(self, code: str):
+        self.calls.append(code)
+        prelude = _WORM_PRELUDE
+        if self._fail_once_name is not None:
+            prelude = prelude.replace("_worm_fail_once_name = None", f"_worm_fail_once_name = {self._fail_once_name!r}")
+        completed = subprocess.run(
+            [sys.executable, "-c", prelude + code],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=20.0,
+        )
+        return SimpleNamespace(exit_code=completed.returncode, result=completed.stdout.strip())
+
+
+def test_worm_volume_backends_mutate_memory_via_unlink_and_recreate(tmp_path: Path) -> None:
+    """Sep 2026 probe-certified ladder: rename ENOSYS, write-open EPERM, recreate wins."""
+    from fleet_rlm.files.memory_models import format_workspace_memory_v3_record
+
+    root = tmp_path / "volume"
+    root.mkdir()
+    process = _WormSubprocess()
+    from fleet_rlm.daytona.workspace_memory import DaytonaWorkspaceMemoryStore
+
+    store = DaytonaWorkspaceMemoryStore(
+        SimpleNamespace(process=process),
+        volume_paths=VolumePaths.from_mount(str(root)),
+        max_upload_bytes=262_144,
+    )
+    record_first = format_workspace_memory_v3_record(
+        "first learning",
+        "General",
+        memory_id="aaaa0001",
+        created_at="2026-08-11T01:15:00Z",
+        updated_at="2026-08-11T01:15:00Z",
+        source="user_explicit",
+    )
+    record_second = format_workspace_memory_v3_record(
+        "second learning",
+        "General",
+        memory_id="bbbb0002",
+        created_at="2026-08-11T01:16:00Z",
+        updated_at="2026-08-11T01:16:00Z",
+        source="agent_candidate",
+    )
+
+    first = store.append_record(record_first)
+    second = store.append_record(record_second)
+
+    assert second.total_bytes > first.total_bytes
+    memory_file = root / "memory" / "MEMORIES.md"
+    raw = memory_file.read_text(encoding="utf-8")
+    assert "first learning" in raw and "second learning" in raw
+    assert (root / "memory" / "MEMORIES.md.lock").is_file()
+
+    edited = store.edit_entry("bbbb0002", "second learning revised")
+    assert "second learning revised" in edited
+    raw_after_edit = memory_file.read_text(encoding="utf-8")
+    assert "first learning" in raw_after_edit
+    assert "second learning revised" in raw_after_edit
+    assert "second learning\n" not in raw_after_edit.replace("second learning revised", "")
+
+    assert store.delete_entry("aaaa0001") is True
+    raw_after_delete = memory_file.read_text(encoding="utf-8")
+    assert "first learning" not in raw_after_delete
+    assert "second learning revised" in raw_after_delete
+    entries = store.list_entries(limit=16).entries
+    assert [entry.memory_id for entry in entries] == ["bbbb0002"]
+
+
+def test_worm_volume_recreate_restores_previous_bytes_when_the_new_write_fails(tmp_path: Path) -> None:
+    """A failed recreate must never silently destroy the prior log bytes."""
+    from fleet_rlm.files.memory_models import format_workspace_memory_v3_record
+
+    root = tmp_path / "volume"
+    root.mkdir()
+    store = __import__(
+        "fleet_rlm.daytona.workspace_memory", fromlist=["DaytonaWorkspaceMemoryStore"]
+    ).DaytonaWorkspaceMemoryStore(
+        SimpleNamespace(process=_WormSubprocess()),
+        volume_paths=VolumePaths.from_mount(str(root)),
+        max_upload_bytes=262_144,
+    )
+    store.append_record(
+        format_workspace_memory_v3_record(
+            "durable learning",
+            "General",
+            memory_id="aaaa0001",
+            created_at="2026-08-11T01:15:00Z",
+            updated_at="2026-08-11T01:15:00Z",
+            source="user_explicit",
+        )
+    )
+
+    # The next mutation's recreate create fails once (EIO): the prior bytes must
+    # be restored and the store must surface a bounded unavailable failure.
+    failing_store = __import__(
+        "fleet_rlm.daytona.workspace_memory", fromlist=["DaytonaWorkspaceMemoryStore"]
+    ).DaytonaWorkspaceMemoryStore(
+        SimpleNamespace(process=_WormSubprocess(fail_first_exclusive_create="MEMORIES.md")),
+        volume_paths=VolumePaths.from_mount(str(root)),
+        max_upload_bytes=262_144,
+    )
+    with pytest.raises(WorkspaceMemoryStoreUnavailableError):
+        failing_store.append_record(
+            format_workspace_memory_v3_record(
+                "follow-up learning",
+                "General",
+                memory_id="bbbb0002",
+                created_at="2026-08-11T01:16:00Z",
+                updated_at="2026-08-11T01:16:00Z",
+                source="agent_candidate",
+            )
+        )
+    raw = (root / "memory" / "MEMORIES.md").read_text(encoding="utf-8")
+    assert "durable learning" in raw
+    assert "follow-up learning" not in raw
