@@ -55,7 +55,8 @@ no other tools, never more than one SUBMIT across the entire run.
 """.strip()
 _VERIFY_SCENARIO = """
 ONLY this exact sequence is permitted, one step per iteration. Use exactly 2 iterations;
-do not retry or call llm_query/rlm_query.
+do not retry or call llm_query/rlm_query. propose_memory is FORBIDDEN in this Turn:
+the candidate was already proposed and promoted before this Turn started.
 Iteration 1: the code cell must contain ONLY this call and its prints; SUBMIT is strictly
 FORBIDDEN in iteration 1 and must never share a code cell with search_memories:
 result = search_memories(query="ZEPHYR-4582 certified receipts", limit=8).
@@ -300,7 +301,15 @@ def test_live_memory_candidate_promotes_after_commit_and_retrieves_on_next_turn(
                 phase = "second_turn"
                 second = client.post(
                     f"/api/sessions/{session_id}/turns",
-                    json={"text": "VERIFY ZEPHYR-4582 candidate memory"},
+                    json={
+                        "text": (
+                            "VERIFY ZEPHYR-4582 candidate memory. Do NOT call propose_memory again —"
+                            " it was already done. Call search_memories once with"
+                            ' query="ZEPHYR-4582 certified receipts" and limit=8, read the observation,'
+                            " then SUBMIT an answer that quotes the 8-character memory id from"
+                            " the search result and the entry source value."
+                        )
+                    },
                     headers={"Idempotency-Key": f"live-qre140-second-{uuid4()}"},
                 )
                 assert second.status_code == 200
