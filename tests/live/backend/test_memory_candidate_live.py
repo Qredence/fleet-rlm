@@ -103,12 +103,38 @@ def _candidate_metadata(settings: Settings) -> dict[str, object]:
     }
 
 
-def _failure_receipt(candidate: dict[str, object], *, started_at: str, category: str, phase: str) -> dict[str, object]:
+def _chunk_histogram(chunks: list[dict[str, Any]]) -> dict[str, object]:
+    """Bounded metadata-only stream summary for live failure triage."""
+
+    by_type: dict[str, int] = {}
+    tool_events: dict[str, int] = {}
+    for chunk in chunks:
+        kind = str(chunk.get("type") or "unknown")
+        by_type[kind] = by_type.get(kind, 0) + 1
+        name = chunk.get("toolName")
+        if name:
+            tool_events[str(name)] = tool_events.get(str(name), 0) + 1
+    return {
+        "chunk_count": len(chunks),
+        "by_type": dict(sorted(by_type.items())),
+        "tool_events": dict(sorted(tool_events.items())),
+    }
+
+
+def _failure_receipt(
+    candidate: dict[str, object],
+    *,
+    started_at: str,
+    category: str,
+    phase: str,
+    stream: dict[str, object] | None = None,
+) -> dict[str, object]:
     return {
         "schema": _RECEIPT_SCHEMA,
         "candidate": {key: candidate[key] for key in ("sha", "branch", "tracked_tree_clean")},
         "timing": {"started_at": started_at, "finished_at": datetime.now(UTC).isoformat()},
         "failure": {"category": category, "phase": phase},
+        "stream": stream or {},
         "passed": False,
     }
 
@@ -279,7 +305,18 @@ def test_live_memory_candidate_promotes_after_commit_and_retrieves_on_next_turn(
                 if sandbox_ids:
                     cleanup_failures = portal.call(_strict_cleanup, resources, sandbox_ids, settings.volume_name)
     except Exception as exc:
-        _write_receipt(_failure_receipt(candidate, started_at=started_at, category="proof_failed", phase=phase))
+        _write_receipt(
+            _failure_receipt(
+                candidate,
+                started_at=started_at,
+                category="proof_failed",
+                phase=phase,
+                stream={
+                    "first_turn": _chunk_histogram(first_chunks),
+                    "second_turn": _chunk_histogram(second_chunks),
+                },
+            )
+        )
         raise exc
 
     assert cleanup_failures == (), cleanup_failures

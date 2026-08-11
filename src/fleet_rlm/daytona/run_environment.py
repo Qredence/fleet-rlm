@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import logging
 from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any, cast
@@ -56,6 +57,8 @@ from fleet_rlm.rlm.context import RLMExecutionSpec
 from fleet_rlm.rlm.dspy_contract import RLMOptions
 from fleet_rlm.rlm.model_bundle import RLMModelBundle
 from fleet_rlm.skills.catalog import SkillCatalog
+
+logger = logging.getLogger(__name__)
 
 
 async def _settle_owned_thread(task: asyncio.Task[Any]) -> bool:
@@ -116,15 +119,30 @@ class LivePreparedCapabilities(PreparedHostCapabilities):
         from fleet_rlm.files.memory_candidates import MemoryCandidatePromotionResult, promote_memory_candidates
 
         if self._memory_store is None:
-            return MemoryCandidatePromotionResult(
+            result = MemoryCandidatePromotionResult(
                 proposed_count=len(candidates),
                 reasons=("store_unavailable",) if candidates else (),
             )
-        return promote_memory_candidates(
-            store=self._memory_store,
-            candidates=candidates,
-            allowed_categories=self._memory_candidate_categories,
-        )
+        else:
+            result = promote_memory_candidates(
+                store=self._memory_store,
+                candidates=candidates,
+                allowed_categories=self._memory_candidate_categories,
+            )
+        if candidates and (
+            result.promoted_count or result.duplicate_count or result.dropped_count or result.failure_count
+        ):
+            # Bounded operational visibility: counts and failure categories only,
+            # never candidate content (QRE-140 bounded observability).
+            logger.info(
+                "Memory Candidate promotion outcome promoted=%d duplicates=%d dropped=%d failed=%d reasons=%s",
+                result.promoted_count,
+                result.duplicate_count,
+                result.dropped_count,
+                result.failure_count,
+                ",".join(result.reasons) or "-",
+            )
+        return result
 
 
 class _DaytonaRunSink:
