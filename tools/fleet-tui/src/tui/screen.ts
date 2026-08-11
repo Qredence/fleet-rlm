@@ -9,12 +9,12 @@ import {
 } from "@earendil-works/pi-tui";
 
 import { formatDuration, formatTokens, shortTraceId } from "./format.js";
-import { summarizeExecution } from "./execution-summary.js";
+import { summarizeExecution, type ExecutionSummary } from "./execution-summary.js";
 import { terminalSafeLine } from "./terminal-text.js";
 import type { ConversationStore, Run, State } from "./store.js";
 import { theme } from "./theme.js";
 import { TranscriptComponent } from "./transcript.js";
-import { committedTokenCounts } from "./usage-summary.js";
+import { committedTokenCounts, type ObservedTokenCounts } from "./usage-summary.js";
 
 export class FleetScreen extends Container {
   private readonly activity: ActivityComponent;
@@ -102,6 +102,21 @@ class ActivityComponent implements Component {
 }
 
 class FooterComponent implements Component {
+  // Footer metrics scan every message (token sums + execution summary). Memoize
+  // them on the messages array reference and run id: the store creates a new
+  // array on every message change and leaves it untouched for status/heartbeat
+  // dispatches, so keystrokes and loader ticks cost O(1) instead of O(n).
+  private metricsMessages: readonly import("./store.js").Message[] | null = null;
+  private metricsRunId: string | null = null;
+  private metricsUsage: ObservedTokenCounts = { input: null, output: null };
+  private metricsExecution: ExecutionSummary = {
+    iterations: null,
+    subLmCalls: null,
+    hostCapabilityCalls: null,
+    interpreterErrors: null,
+    durationMs: null,
+  };
+
   constructor(
     private readonly store: ConversationStore,
     private readonly terminal: Terminal,
@@ -109,7 +124,14 @@ class FooterComponent implements Component {
   invalidate(): void {}
   render(width: number): string[] {
     const state = this.store.getState();
-    const usage = committedTokenCounts(state.messages);
+    if (state.messages !== this.metricsMessages || state.run.id !== this.metricsRunId) {
+      this.metricsMessages = state.messages;
+      this.metricsRunId = state.run.id;
+      this.metricsUsage = committedTokenCounts(state.messages);
+      this.metricsExecution = summarizeExecution(state.messages, state.run.id);
+    }
+    const usage = this.metricsUsage;
+    const execution = this.metricsExecution;
     const compact = this.terminal.rows < 14 || width < 60;
     const lines = compact
       ? []
@@ -121,7 +143,6 @@ class FooterComponent implements Component {
           ),
         ];
     const run = state.run;
-    const execution = summarizeExecution(state.messages, run.id);
 
     const metricsParts: string[] = [];
     if (execution.iterations !== null) metricsParts.push(`${execution.iterations} iter`);

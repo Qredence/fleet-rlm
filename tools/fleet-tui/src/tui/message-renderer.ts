@@ -353,12 +353,18 @@ function codeLines(value: string, width: number): string[] {
   return value.split("\n").flatMap((line) => wrapTextWithAnsi(line || " ", Math.max(1, width)));
 }
 
+/** Bounded tool-payload preview: large JSON never floods scrollback or re-wrap cost. */
+const TOOL_PAYLOAD_PREVIEW_CHARS = 4_000;
+
 function jsonLines(value: unknown, width: number): string[] {
   let serialized: string;
   try {
     serialized = JSON.stringify(redact(value), null, 2);
   } catch {
     serialized = String(value);
+  }
+  if (serialized.length > TOOL_PAYLOAD_PREVIEW_CHARS) {
+    serialized = `${serialized.slice(0, TOOL_PAYLOAD_PREVIEW_CHARS)}\n… ${formatBytes(serialized.length - TOOL_PAYLOAD_PREVIEW_CHARS)} more`;
   }
   return codeLines(terminalSafeText(serialized), width);
 }

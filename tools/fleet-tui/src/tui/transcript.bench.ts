@@ -3,33 +3,18 @@ import { performance } from "node:perf_hooks";
 import { ConversationStore } from "./store.js";
 import { TranscriptComponent } from "./transcript.js";
 
-const retainedLines = 10_000;
 const updatesPerSample = 300;
 const simulatedEventsPerSecond = 30;
 const samples = 20;
+// Sweep history sizes so per-update frame cost stays flat as sessions grow.
+const historySizes = [1_000, 10_000, 50_000];
 
-const durations = Array.from({ length: samples }, () => runSample()).sort(
-  (left, right) => left - right,
-);
-const p50 = percentile(durations, 0.5);
-const p95 = percentile(durations, 0.95);
+function percentile(values: number[], quantile: number): number {
+  const index = Math.min(values.length - 1, Math.max(0, Math.ceil(values.length * quantile) - 1));
+  return Number((values[index] ?? 0).toFixed(3));
+}
 
-process.stdout.write(
-  `${JSON.stringify(
-    {
-      retainedLines,
-      updatesPerSample,
-      simulatedEventsPerSecond,
-      samples,
-      scenarioMs: { p50, p95 },
-      updateMs: { p50: p50 / updatesPerSample, p95: p95 / updatesPerSample },
-    },
-    null,
-    2,
-  )}\n`,
-);
-
-function runSample(): number {
+function runSample(retainedLines: number): number {
   const store = new ConversationStore();
   store.dispatch({
     type: "message/upsert",
@@ -94,7 +79,21 @@ function runSample(): number {
   return performance.now() - startedAt;
 }
 
-function percentile(values: number[], quantile: number): number {
-  const index = Math.min(values.length - 1, Math.max(0, Math.ceil(values.length * quantile) - 1));
-  return Number((values[index] ?? 0).toFixed(3));
-}
+const results = historySizes.map((retainedLines) => {
+  const durations = Array.from({ length: samples }, () => runSample(retainedLines)).sort(
+    (left, right) => left - right,
+  );
+  return {
+    retainedLines,
+    updatesPerSample,
+    simulatedEventsPerSecond,
+    samples,
+    scenarioMs: { p50: percentile(durations, 0.5), p95: percentile(durations, 0.95) },
+    updateMs: {
+      p50: percentile(durations, 0.5) / updatesPerSample,
+      p95: percentile(durations, 0.95) / updatesPerSample,
+    },
+  };
+});
+
+process.stdout.write(`${JSON.stringify(results, null, 2)}\n`);

@@ -2,7 +2,7 @@ import { truncateToWidth, type Component } from "@earendil-works/pi-tui";
 
 import { MessageRenderCache, renderMessage } from "./message-renderer.js";
 import { terminalSafeLine } from "./terminal-text.js";
-import type { ConversationStore, Message } from "./store.js";
+import type { ConversationStore, Message, State } from "./store.js";
 import { theme } from "./theme.js";
 
 type MessageRenderer = (message: Message, width: number, cache: MessageRenderCache) => string[];
@@ -16,6 +16,15 @@ type CachedMessage = {
 export class TranscriptComponent implements Component {
   private readonly cache = new Map<string, CachedMessage>();
   private readonly renderCache = new MessageRenderCache();
+  // Flat render fast path: the store only replaces the messages array on
+  // actual message changes, so frames that touch no message (keystrokes,
+  // loader ticks, status heartbeats) return the previous render O(1) instead
+  // of re-concatenating the whole transcript every frame.
+  private cachedLines: string[] = [];
+  private cachedWidth = 0;
+  private cachedMessages: readonly Message[] | null = null;
+  private cachedSession: State["session"] = null;
+  private cachedSkills: State["pendingSkillSelections"] | null = null;
 
   constructor(
     private readonly store: ConversationStore,
@@ -25,11 +34,31 @@ export class TranscriptComponent implements Component {
   invalidate(): void {
     this.cache.clear();
     this.renderCache.clear();
+    this.cachedMessages = null;
+    this.cachedSkills = null;
   }
 
   render(width: number): string[] {
     const safeWidth = Math.max(1, width);
     const state = this.store.getState();
+    if (
+      safeWidth === this.cachedWidth &&
+      state.messages === this.cachedMessages &&
+      state.session === this.cachedSession &&
+      state.pendingSkillSelections === this.cachedSkills
+    ) {
+      return this.cachedLines;
+    }
+    const lines = this.buildLines(state, safeWidth);
+    this.cachedWidth = safeWidth;
+    this.cachedMessages = state.messages;
+    this.cachedSession = state.session;
+    this.cachedSkills = state.pendingSkillSelections;
+    this.cachedLines = lines;
+    return lines;
+  }
+
+  private buildLines(state: State, safeWidth: number): string[] {
     const session = state.session;
     const lines = [theme.fg("accent", theme.bold("FLEET"))];
     lines.push(

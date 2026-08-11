@@ -413,6 +413,49 @@ describe("renderMessage", () => {
   });
 });
 
+describe("bounded tool payloads", () => {
+  it("caps large tool JSON previews with a remaining-bytes marker", () => {
+    const tool: Message = {
+      id: "big-tool",
+      kind: "tool",
+      runId: "run",
+      toolCallId: "call",
+      name: "write_file",
+      input: {},
+      output: { payload: "x".repeat(50_000) },
+      startedAt: 0,
+      endedAt: 1,
+      status: "success",
+      ts: 2,
+    };
+    const rendered = stripAnsi(renderMessage(tool, 100).join("\n"));
+    expect(rendered).toContain("more");
+    expect(rendered).toContain("KB");
+    // The full 50k payload must not be rendered inline.
+    expect(rendered.length).toBeLessThan(10_000);
+  });
+
+  it("keeps small tool payloads complete", () => {
+    const tool: Message = {
+      id: "small-tool",
+      kind: "tool",
+      runId: "run",
+      toolCallId: "call",
+      name: "inspect",
+      input: { path: "x" },
+      output: { ok: true },
+      startedAt: 0,
+      endedAt: 1,
+      status: "success",
+      ts: 2,
+    };
+    const rendered = stripAnsi(renderMessage(tool, 100).join("\n"));
+    expect(rendered).toContain('"ok"');
+    expect(rendered).toContain("true");
+    expect(rendered).not.toContain("more");
+  });
+});
+
 function stripAnsi(value: string): string {
   return value.replaceAll(new RegExp(`${String.fromCharCode(27)}\\[[\\d;]*m`, "g"), "");
 }

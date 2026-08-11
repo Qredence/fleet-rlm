@@ -170,3 +170,54 @@ describe("TranscriptComponent", () => {
     expect(render).toHaveBeenCalledTimes(5);
   });
 });
+
+describe("TranscriptComponent render fast path", () => {
+  it("returns the previous line array while no message changed", () => {
+    const store = new ConversationStore();
+    store.dispatch({
+      type: "session/init",
+      session: { id: "session-1", title: "Session", status: "active", resumed: false },
+    });
+    store.dispatch({ type: "message/upsert", message: message("one", "one") });
+    const transcript = new TranscriptComponent(store);
+
+    const first = transcript.render(80);
+    // A status-only dispatch (heartbeat/loader frame) must not rebuild lines.
+    store.dispatch({ type: "run/status", phase: "execution", detail: "working" });
+    const second = transcript.render(80);
+    expect(second).toBe(first);
+
+    // A width change rebuilds.
+    const wider = transcript.render(120);
+    expect(wider).not.toBe(first);
+    expect(wider.join("\n")).toContain("one");
+
+    // A message change rebuilds into a fresh array.
+    store.dispatch({ type: "message/upsert", message: message("two", "two") });
+    const grown = transcript.render(120);
+    expect(grown).not.toBe(wider);
+    expect(grown.join("\n")).toContain("two");
+  });
+
+  it("rebuilds when the Session or pending Skill selections change", () => {
+    const store = new ConversationStore();
+    store.dispatch({
+      type: "session/init",
+      session: { id: "s", title: "T", status: "active", resumed: false },
+    });
+    const transcript = new TranscriptComponent(store);
+    const before = transcript.render(80);
+
+    store.dispatch({
+      type: "session/init",
+      session: { id: "s", title: "Renamed", status: "active", resumed: false },
+    });
+    expect(transcript.render(80)).not.toBe(before);
+
+    store.dispatch({
+      type: "skill-selection/pin",
+      selection: { id: "sk", expectedVersion: "1.0.0", displayName: "skill" },
+    });
+    expect(transcript.render(80).join("\n")).toContain("next Turn Skills");
+  });
+});
