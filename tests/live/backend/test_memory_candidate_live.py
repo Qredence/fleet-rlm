@@ -314,17 +314,10 @@ def test_live_memory_candidate_promotes_after_commit_and_retrieves_on_next_turn(
                 assert search_errors == []
                 assert len(search_inputs) == len(search_outputs) == 1
                 search_output = search_outputs[0]["output"]
+                # The bounded search event view intentionally carries ids only (no
+                # learning/query/source on the wire); provenance is certified on the
+                # store readback and the injection digest below.
                 assert memory_id in search_output.get("top_memory_ids", ())
-                matched_entries = [
-                    entry
-                    for entry in search_output.get("entries", ())
-                    if isinstance(entry, dict) and entry.get("id") == memory_id
-                ]
-                assert len(matched_entries) == 1
-                # Authoritative product-surface provenance: the search Tool output
-                # carries source=agent_candidate (independent of model prose).
-                assert matched_entries[0].get("source") == "agent_candidate"
-                assert matched_entries[0].get("category") == "operator preference"
                 final_text = "".join(
                     str(chunk.get("delta", "")) for chunk in second_chunks if chunk.get("type") == "text-delta"
                 )
