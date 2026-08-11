@@ -330,3 +330,26 @@ def test_rlm_query_wrapper_forwards_kwargs_only(monkeypatch: pytest.MonkeyPatch)
     assert payload["tool_name"] == "rlm_query"
     assert payload["args"] == []
     assert payload["kwargs"] == {"prompt": "delegate this slice"}
+
+
+def test_recursive_child_receives_only_rlm_query_again(monkeypatch: pytest.MonkeyPatch) -> None:
+    import fleet_rlm.rlm.recursive_calls as recursive_calls
+
+    captured: list[dict[str, object]] = []
+
+    class Child:
+        def __call__(self, _interpreter, *, prompt):
+            del prompt
+            return dspy.Prediction(answer="child-ok", trajectory=[])
+
+    def capture_build(**kwargs):
+        captured.append(dict(kwargs))
+        return Child()
+
+    monkeypatch.setattr(recursive_calls, "build_native_rlm", capture_build)
+    executor = _executor([{"reasoning": "unused", "code": "SUBMIT(answer='unused')"}])
+
+    assert executor.tool(prompt="memory tools stay in the root") == "child-ok"
+    assert len(captured) == 1
+    tools = tuple(str(tool.name) for tool in captured[0]["tools"])
+    assert tools == ("rlm_query",)

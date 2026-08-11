@@ -737,3 +737,199 @@ async def test_memory_candidate_promotion_happens_after_atomic_commit_and_fails_
     assert order == ["commit", "promote"]
     assert receipt.checkpoint_version == 1
     # The turn remains durably committed; optional promotion failure is only a warning.
+
+
+@pytest.mark.asyncio
+async def test_memory_candidate_promotion_never_runs_after_a_commit_failure() -> None:
+    from uuid import uuid4
+
+    from fleet_rlm.chat.run_lifecycle import ClaimedRun, FailedRunReceipt, RunLifecycleService, _RunClaimToken
+    from fleet_rlm.files.memory_candidates import MemoryCandidate
+    from fleet_rlm.rlm.dspy_contract import PredictionResult
+    from fleet_rlm.rlm.outcome import RLMOutcome
+    from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
+
+    run_id, session_id = uuid4(), uuid4()
+
+    async def not_cancelled() -> bool:
+        return False
+
+    turn = ClaimedRun(
+        run_id,
+        session_id,
+        TurnAccess(uuid4(), uuid4()),
+        TurnInput("commit must fail"),
+        SessionHistory(),
+        not_cancelled,
+        _RunClaimToken(uuid4()),
+    )
+    seen: list[str] = []
+
+    class Store:
+        async def commit(self, claimed, committed, artifacts):
+            del claimed, committed, artifacts
+            raise RuntimeError("commit backend unavailable")
+
+        async def transition_claim(self, claimed, command):
+            del claimed, command
+            return FailedRunReceipt(
+                run_id=run_id,
+                terminal_status="failed",
+                failure_code="commit_failed",
+                public_message="Turn could not be committed",
+                durable=True,
+            )
+
+    def promotion(candidates):
+        seen.extend(candidates)
+
+    receipt = await RunLifecycleService(Store(), max_artifact_bytes=1024).finish(
+        turn,
+        RLMOutcome(
+            "completed",
+            prediction=PredictionResult("answer", {"answer": "done"}, "fleet.default", "1"),
+            memory_candidates=(
+                MemoryCandidate(
+                    candidate_id="cand00000001",
+                    category="Project",
+                    learning="must not promote",
+                    byte_size=18,
+                ),
+            ),
+        ),
+        memory_promotion=promotion,
+    )
+
+    assert seen == []
+    assert receipt.failure_code == "commit_failed"
+
+
+@pytest.mark.asyncio
+async def test_memory_candidate_promotion_trace_never_copies_learning(monkeypatch: pytest.MonkeyPatch) -> None:
+    import contextlib
+    from uuid import uuid4
+
+    from fleet_rlm.chat.run_lifecycle import ClaimedRun, CommittedTurnReceipt, RunLifecycleService, _RunClaimToken
+    from fleet_rlm.files.memory_candidates import MemoryCandidate, MemoryCandidatePromotionResult
+    from fleet_rlm.rlm.dspy_contract import PredictionResult
+    from fleet_rlm.rlm.outcome import RLMOutcome
+    from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
+
+    run_id, session_id = uuid4(), uuid4()
+
+    async def not_cancelled() -> bool:
+        return False
+
+    turn = ClaimedRun(
+        run_id,
+        session_id,
+        TurnAccess(uuid4(), uuid4()),
+        TurnInput("promote privately"),
+        SessionHistory(),
+        not_cancelled,
+        _RunClaimToken(uuid4()),
+    )
+    spans: list[tuple[str, dict[str, object], dict[str, object]]] = []
+
+    @contextlib.contextmanager
+    def fake_span(name, *, inputs):
+        outputs: dict[str, object] = {}
+        spans.append((name, dict(inputs), outputs))
+
+        class Handle:
+            def set_outputs(self, value):
+                outputs.update(value)
+
+        yield Handle()
+
+    monkeypatch.setattr("fleet_rlm.chat.run_lifecycle.turn_phase_span", fake_span)
+
+    class Store:
+        async def commit(self, claimed, committed, artifacts):
+            del claimed
+            return CommittedTurnReceipt(run_id, 1, committed, artifacts)
+
+    def promotion(candidates):
+        return MemoryCandidatePromotionResult(
+            proposed_count=len(candidates),
+            promoted_count=len(candidates),
+            candidate_bytes=sum(item.byte_size for item in candidates),
+        )
+
+    secret = "secret autonomous promotion learning"
+    await RunLifecycleService(Store(), max_artifact_bytes=1024).finish(
+        turn,
+        RLMOutcome(
+            "completed",
+            prediction=PredictionResult("answer", {"answer": "done"}, "fleet.default", "1"),
+            memory_candidates=(
+                MemoryCandidate(
+                    candidate_id="cand00000001",
+                    category="Project",
+                    learning=secret,
+                    byte_size=len(secret.encode()),
+                ),
+            ),
+        ),
+        memory_promotion=promotion,
+    )
+
+    assert any(name == "Turn.memory_candidate_promotion" for name, _inputs, _outputs in spans)
+    assert secret not in str(spans)
+    assert all(isinstance(value, (int, str, bool, tuple)) for _n, _i, outputs in spans for value in outputs.values())
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("terminal", ["failed", "cancelled", "timeout"])
+async def test_memory_candidate_promotion_is_unreachable_for_failure_resolution(terminal: str) -> None:
+    from uuid import uuid4
+
+    from fleet_rlm.chat.run_lifecycle import ClaimedRun, RunFailure, RunLifecycleService, _RunClaimToken
+    from fleet_rlm.rlm.dspy_contract import empty_rlm_usage
+    from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
+
+    run_id, session_id = uuid4(), uuid4()
+
+    async def not_cancelled() -> bool:
+        return False
+
+    turn = ClaimedRun(
+        run_id,
+        session_id,
+        TurnAccess(uuid4(), uuid4()),
+        TurnInput("do not promote"),
+        SessionHistory(),
+        not_cancelled,
+        _RunClaimToken(uuid4()),
+    )
+    seen: list[str] = []
+
+    class Store:
+        async def transition_claim(self, claimed, command):
+            del claimed, command
+
+            from fleet_rlm.chat.run_lifecycle import FailedRunReceipt
+
+            return FailedRunReceipt(
+                run_id=run_id,
+                terminal_status=terminal,  # type: ignore[arg-type]
+                failure_code=terminal if terminal != "failed" else "execution_failed",  # type: ignore[arg-type]
+                public_message=terminal,
+                durable=True,
+            )
+
+    def promotion(candidates):
+        seen.extend(candidates)
+
+    await RunLifecycleService(Store(), max_artifact_bytes=1024).finish(
+        turn,
+        RunFailure(
+            terminal,  # type: ignore[arg-type]
+            terminal if terminal != "failed" else "execution_failed",  # type: ignore[arg-type]
+            terminal,
+            empty_rlm_usage(),
+        ),
+        memory_promotion=promotion,
+    )
+
+    assert seen == []
