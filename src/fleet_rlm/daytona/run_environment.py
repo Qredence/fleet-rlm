@@ -47,6 +47,7 @@ from fleet_rlm.daytona.session_manager import (
     LeaseRequest,
 )
 from fleet_rlm.daytona.workspace_fs import AsyncDaytonaVolumeFS, DaytonaSandboxVolumeFs, VolumeFSCacheState
+from fleet_rlm.files.memory_candidates import MemoryCandidateCollector
 from fleet_rlm.files.memory_models import WORKSPACE_MEMORY_INJECTION_TAIL_BYTES
 from fleet_rlm.files.models import (
     AttachmentAccess,
@@ -126,7 +127,7 @@ class LivePreparedCapabilities(PreparedHostCapabilities):
         skills: Any,
         preparation_notices: tuple[Any, ...] = (),
         workspace_memory_digest: str = "",
-        memory_candidates: Any = None,
+        memory_candidates: MemoryCandidateCollector | None = None,
     ) -> None:
         super().__init__(
             spec,

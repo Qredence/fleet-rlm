@@ -10,33 +10,23 @@ from uuid import uuid4
 import dspy
 import pytest
 
-
 @pytest.mark.asyncio
 async def test_runner_returns_promptly_and_retains_blocking_worker_for_cleanup() -> None:
     from fleet_rlm.chat.session_context import SessionContextManifest
     from fleet_rlm.rlm.context import (
         ExecutionRuntime,
         RLMExecutionContext,
-        RLMExecutionSpec,
         RunIdentity,
         SessionView,
     )
     from fleet_rlm.rlm.dspy_contract import RLMOptions
     from fleet_rlm.rlm.runner import RLMRunner
     from fleet_rlm.sessions.models import TurnAccess
+    from tests.unit.backend.rlm.fakes import EmptyCapabilities
 
     entered = threading.Event()
     release = threading.Event()
     cancel_requested = False
-
-    class Capabilities:
-        spec = RLMExecutionSpec()
-
-        def drain_public_details(self):
-            return ()
-
-        def drain_artifact_candidates(self):
-            return ()
 
     class Factory:
         def create(self, **_kwargs):
@@ -67,7 +57,7 @@ async def test_runner_returns_promptly_and_retains_blocking_worker_for_cleanup()
             interpreter=None,
             cancellation_requested=cancellation_probe,
         ),
-        capabilities=Capabilities(),
+        capabilities=EmptyCapabilities(),
     )
     stream = RLMRunner(factory=Factory()).stream(context)
 
@@ -87,32 +77,22 @@ async def test_runner_returns_promptly_and_retains_blocking_worker_for_cleanup()
     release.set()
     await asyncio.wait_for(stream.wait_owned(), timeout=2)
 
-
 @pytest.mark.asyncio
 async def test_runner_transfers_blocking_worker_after_caller_cancellation() -> None:
     from fleet_rlm.chat.session_context import SessionContextManifest
     from fleet_rlm.rlm.context import (
         ExecutionRuntime,
         RLMExecutionContext,
-        RLMExecutionSpec,
         RunIdentity,
         SessionView,
     )
     from fleet_rlm.rlm.dspy_contract import RLMOptions
     from fleet_rlm.rlm.runner import RLMRunner
     from fleet_rlm.sessions.models import TurnAccess
+    from tests.unit.backend.rlm.fakes import EmptyCapabilities
 
     entered = threading.Event()
     release = threading.Event()
-
-    class Capabilities:
-        spec = RLMExecutionSpec()
-
-        def drain_public_details(self):
-            return ()
-
-        def drain_artifact_candidates(self):
-            return ()
 
     class Factory:
         def create(self, **_kwargs):
@@ -143,7 +123,7 @@ async def test_runner_transfers_blocking_worker_after_caller_cancellation() -> N
             interpreter=None,
             cancellation_requested=not_cancelled,
         ),
-        capabilities=Capabilities(),
+        capabilities=EmptyCapabilities(),
     )
     stream = RLMRunner(factory=Factory()).stream(context)
 

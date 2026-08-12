@@ -199,6 +199,9 @@ class Capabilities:
     def drain_artifact_candidates(self):
         return ()
 
+    def drain_memory_candidates(self):
+        return ()
+
 
 class Interpreter:
     def __init__(self) -> None:

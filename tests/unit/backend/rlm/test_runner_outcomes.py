@@ -16,25 +16,13 @@ async def test_runner_retains_prediction_usage_when_typed_output_is_invalid() ->
     from fleet_rlm.rlm.context import (
         ExecutionRuntime,
         RLMExecutionContext,
-        RLMExecutionSpec,
         RunIdentity,
         SessionView,
     )
     from fleet_rlm.rlm.dspy_contract import RLMOptions
     from fleet_rlm.rlm.runner import RLMRunner
     from fleet_rlm.sessions.models import TurnAccess
-
-    class Capabilities:
-        spec = RLMExecutionSpec()
-
-        def drain_public_details(self):
-            return ()
-
-        def drain_artifact_candidates(self):
-            return ()
-
-        async def aclose(self):
-            return None
+    from tests.unit.backend.rlm.fakes import EmptyCapabilities
 
     class Factory:
         def create(self, **_kwargs):
@@ -70,7 +58,7 @@ async def test_runner_retains_prediction_usage_when_typed_output_is_invalid() ->
             interpreter=None,
             cancellation_requested=not_cancelled,
         ),
-        capabilities=Capabilities(),
+        capabilities=EmptyCapabilities(),
     )
     stream = RLMRunner(factory=Factory()).stream(context)
     _ = [event async for event in stream]
@@ -90,25 +78,13 @@ async def test_runner_reports_turn_output_too_large_for_oversized_answer() -> No
     from fleet_rlm.rlm.context import (
         ExecutionRuntime,
         RLMExecutionContext,
-        RLMExecutionSpec,
         RunIdentity,
         SessionView,
     )
     from fleet_rlm.rlm.dspy_contract import RLMOptions
     from fleet_rlm.rlm.runner import RLMRunner
     from fleet_rlm.sessions.models import TurnAccess
-
-    class Capabilities:
-        spec = RLMExecutionSpec()
-
-        def drain_public_details(self):
-            return ()
-
-        def drain_artifact_candidates(self):
-            return ()
-
-        async def aclose(self):
-            return None
+    from tests.unit.backend.rlm.fakes import EmptyCapabilities
 
     class Factory:
         def create(self, **_kwargs):
@@ -147,7 +123,7 @@ async def test_runner_reports_turn_output_too_large_for_oversized_answer() -> No
             interpreter=None,
             cancellation_requested=not_cancelled,
         ),
-        capabilities=Capabilities(),
+        capabilities=EmptyCapabilities(),
     )
     stream = RLMRunner(factory=Factory()).stream(context)
     _ = [event async for event in stream]
@@ -163,7 +139,6 @@ async def test_runner_emits_preloaded_skill_events_before_later_output_failure()
     from fleet_rlm.rlm.context import (
         ExecutionRuntime,
         RLMExecutionContext,
-        RLMExecutionSpec,
         RunIdentity,
         SessionView,
     )
@@ -171,11 +146,11 @@ async def test_runner_emits_preloaded_skill_events_before_later_output_failure()
     from fleet_rlm.rlm.events import SkillActivated, SkillLoaded
     from fleet_rlm.rlm.runner import RLMRunner
     from fleet_rlm.sessions.models import TurnAccess
+    from tests.unit.backend.rlm.fakes import EmptyCapabilities
 
-    class Capabilities:
-        spec = RLMExecutionSpec()
-
+    class Capabilities(EmptyCapabilities):
         def __init__(self) -> None:
+            super().__init__()
             self.details = [
                 SkillActivated("skill-id", "long-context", "2.0.0", "system", ("load",)),
                 SkillLoaded("skill-id", "long-context", "2.0.0"),
@@ -185,9 +160,6 @@ async def test_runner_emits_preloaded_skill_events_before_later_output_failure()
             values = tuple(self.details)
             self.details.clear()
             return values
-
-        def drain_artifact_candidates(self):
-            return ()
 
     class Factory:
         def create(self, **_kwargs):
@@ -237,7 +209,6 @@ async def test_runner_emits_preloaded_skill_events_before_cancel_or_timeout(term
     from fleet_rlm.rlm.context import (
         ExecutionRuntime,
         RLMExecutionContext,
-        RLMExecutionSpec,
         RunIdentity,
         SessionView,
     )
@@ -245,11 +216,11 @@ async def test_runner_emits_preloaded_skill_events_before_cancel_or_timeout(term
     from fleet_rlm.rlm.events import SkillActivated, SkillLoaded
     from fleet_rlm.rlm.runner import RLMRunner
     from fleet_rlm.sessions.models import TurnAccess
+    from tests.unit.backend.rlm.fakes import EmptyCapabilities
 
-    class Capabilities:
-        spec = RLMExecutionSpec()
-
+    class Capabilities(EmptyCapabilities):
         def __init__(self) -> None:
+            super().__init__()
             self.details = [
                 SkillActivated("skill-id", "long-context", "2.0.0", "system", ("load",)),
                 SkillLoaded("skill-id", "long-context", "2.0.0"),
@@ -259,9 +230,6 @@ async def test_runner_emits_preloaded_skill_events_before_cancel_or_timeout(term
             values = tuple(self.details)
             self.details.clear()
             return values
-
-        def drain_artifact_candidates(self):
-            return ()
 
     class Factory:
         def create(self, **_kwargs):
@@ -323,25 +291,13 @@ async def test_stream_closed_before_iteration_synthesizes_cancelled_outcome() ->
     from fleet_rlm.rlm.context import (
         ExecutionRuntime,
         RLMExecutionContext,
-        RLMExecutionSpec,
         RunIdentity,
         SessionView,
     )
     from fleet_rlm.rlm.dspy_contract import RLMOptions
     from fleet_rlm.rlm.runner import RLMRunner
     from fleet_rlm.sessions.models import TurnAccess
-
-    class Capabilities:
-        spec = RLMExecutionSpec()
-
-        def drain_public_details(self):
-            return ()
-
-        def drain_artifact_candidates(self):
-            return ()
-
-        async def aclose(self):
-            return None
+    from tests.unit.backend.rlm.fakes import EmptyCapabilities
 
     class Factory:
         def create(self, **_kwargs):
@@ -366,7 +322,7 @@ async def test_stream_closed_before_iteration_synthesizes_cancelled_outcome() ->
             interpreter=None,
             cancellation_requested=not_cancelled,
         ),
-        capabilities=Capabilities(),
+        capabilities=EmptyCapabilities(),
     )
     stream = RLMRunner(factory=Factory()).stream(context)
     await stream.aclose()

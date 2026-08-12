@@ -96,6 +96,9 @@ def _make_preparer(*, environments: Any = None) -> Any:
         def drain_artifact_candidates(self) -> tuple[Any, ...]:
             return ()
 
+        def drain_memory_candidates(self) -> tuple[Any, ...]:
+            return ()
+
         async def aclose(self) -> None:
             return None
 

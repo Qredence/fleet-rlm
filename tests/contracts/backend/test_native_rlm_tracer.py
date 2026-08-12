@@ -367,6 +367,9 @@ async def test_runner_completes_native_repair_and_extract_as_prediction_result(f
         def drain_artifact_candidates(self):
             return ()
 
+        def drain_memory_candidates(self):
+            return ()
+
     class NativeFactory:
         def create(self, **kwargs):
             rlm = RLMFactory().create(**kwargs)

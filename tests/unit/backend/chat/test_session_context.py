@@ -65,6 +65,9 @@ async def test_prepared_rlm_kwargs_bound_a_large_session_to_recent_previews() ->
         def drain_artifact_candidates(self):
             return ()
 
+        def drain_memory_candidates(self):
+            return ()
+
         async def aclose(self):
             return None
 

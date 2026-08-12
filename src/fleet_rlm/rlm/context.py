@@ -13,6 +13,7 @@ import dspy
 from fleet_rlm.artifacts.models import ArtifactCandidate
 from fleet_rlm.chat.run_authority import RunAuthority
 from fleet_rlm.chat.session_context import SessionContextManifest
+from fleet_rlm.files.memory_candidates import MemoryCandidate
 from fleet_rlm.files.models import PreparedAttachment
 from fleet_rlm.files.workspace_models import UNAVAILABLE_WORKSPACE_CAPABILITY, WorkspaceCapabilityMetadata
 from fleet_rlm.rlm.child_runtime import ChildRuntimeFactory
@@ -57,7 +58,7 @@ class PreparedCapabilities(Protocol):
 
     def drain_artifact_candidates(self) -> tuple[ArtifactCandidate, ...]: ...
 
-    def drain_memory_candidates(self) -> tuple[Any, ...]: ...
+    def drain_memory_candidates(self) -> tuple[MemoryCandidate, ...]: ...
 
     def record_attachment_accesses(self, attachment_ids: tuple[str, ...]) -> None: ...
 

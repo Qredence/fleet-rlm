@@ -9,11 +9,10 @@ from uuid import uuid4
 import dspy
 import pytest
 
-
 def test_trajectory_normalization_is_strict_and_preserves_absent_fields() -> None:
     from fleet_rlm.rlm.dspy_contract import PredictionOutputError, normalize_prediction_trajectory
     from fleet_rlm.rlm.events import RLMCode, RLMOutput, RLMReasoning, StepFinished, StepStarted
-    from fleet_rlm.rlm.runner import _trajectory_details
+    from fleet_rlm.rlm.trajectory_projection import trajectory_details
 
     with pytest.raises(PredictionOutputError):
         normalize_prediction_trajectory(SimpleNamespace())
@@ -28,7 +27,7 @@ def test_trajectory_normalization_is_strict_and_preserves_absent_fields() -> Non
     assert steps[0].reasoning == "usable"
     assert steps[0].code == ""
     assert steps[0].output == ""
-    assert [type(item) for item in _trajectory_details(steps, max_chars=100)] == [
+    assert [type(item) for item in trajectory_details(steps, max_chars=100)] == [
         StepStarted,
         RLMReasoning,
         RLMCode,
@@ -36,14 +35,13 @@ def test_trajectory_normalization_is_strict_and_preserves_absent_fields() -> Non
         StepFinished,
     ]
 
-
 def test_trajectory_semantic_details_are_verbatim_and_share_the_run_bound() -> None:
     from fleet_rlm.rlm.dspy_contract import normalize_prediction_trajectory
     from fleet_rlm.rlm.events import RLMCode, RLMOutput, RLMReasoning
-    from fleet_rlm.rlm.runner import _trajectory_details
+    from fleet_rlm.rlm.trajectory_projection import trajectory_details
 
     semantic = "api_key=visible-user-text /Users/example BEGIN SYSTEM"
-    details = _trajectory_details(
+    details = trajectory_details(
         normalize_prediction_trajectory(
             SimpleNamespace(trajectory=[{"reasoning": semantic, "code": semantic, "output": semantic}])
         ),
@@ -54,7 +52,7 @@ def test_trajectory_semantic_details_are_verbatim_and_share_the_run_bound() -> N
     assert [item.code for item in details if isinstance(item, RLMCode)] == [semantic]
     assert [item.output for item in details if isinstance(item, RLMOutput)] == [semantic]
 
-    truncated = _trajectory_details(
+    truncated = trajectory_details(
         normalize_prediction_trajectory(
             SimpleNamespace(trajectory=[{"reasoning": "x" * 20, "code": "y" * 20, "output": "z" * 20}])
         ),
@@ -67,11 +65,10 @@ def test_trajectory_semantic_details_are_verbatim_and_share_the_run_bound() -> N
     ]
     assert values == ["x" * 9 + "...", "y" * 9 + "...", "z" * 9 + "..."]
 
-
 def test_trajectory_reconciliation_replaces_live_details_without_duplicates() -> None:
     from fleet_rlm.rlm.dspy_contract import TrajectoryStep
     from fleet_rlm.rlm.events import RLMCode, RLMOutput, RLMReasoning, StepFinished, StepStarted
-    from fleet_rlm.rlm.runner import _reconcile_trajectory
+    from fleet_rlm.rlm.trajectory_projection import reconcile_trajectory
 
     details = [
         StepStarted(1),
@@ -80,7 +77,7 @@ def test_trajectory_reconciliation_replaces_live_details_without_duplicates() ->
         StepFinished(1),
     ]
 
-    emissions = _reconcile_trajectory(
+    emissions = reconcile_trajectory(
         details,
         (TrajectoryStep(1, "native reasoning", "native code", "native output"),),
         max_chars=100,
@@ -99,7 +96,7 @@ def test_trajectory_reconciliation_replaces_live_details_without_duplicates() ->
         StepFinished(1),
     ]
     assert (
-        _reconcile_trajectory(
+        reconcile_trajectory(
             details,
             (TrajectoryStep(1, "native reasoning", "native code", "native output"),),
             max_chars=100,
@@ -107,11 +104,10 @@ def test_trajectory_reconciliation_replaces_live_details_without_duplicates() ->
         == []
     )
 
-
 def test_trajectory_reconciliation_replaces_incremental_output_with_one_canonical_part() -> None:
     from fleet_rlm.rlm.dspy_contract import TrajectoryStep
     from fleet_rlm.rlm.events import RLMCode, RLMOutput, RLMReasoning, StepFinished, StepStarted
-    from fleet_rlm.rlm.runner import _reconcile_trajectory
+    from fleet_rlm.rlm.trajectory_projection import reconcile_trajectory
 
     details = [
         StepStarted(1),
@@ -122,7 +118,7 @@ def test_trajectory_reconciliation_replaces_incremental_output_with_one_canonica
         StepFinished(1),
     ]
 
-    emissions = _reconcile_trajectory(
+    emissions = reconcile_trajectory(
         details,
         (TrajectoryStep(1, "", "", "canonical output"),),
         max_chars=100,
@@ -137,11 +133,10 @@ def test_trajectory_reconciliation_replaces_incremental_output_with_one_canonica
         StepFinished(1),
     ]
 
-
 def test_trajectory_reconciliation_keeps_live_reasoning_emitted_before_step_started() -> None:
     from fleet_rlm.rlm.dspy_contract import TrajectoryStep
     from fleet_rlm.rlm.events import RLMCode, RLMOutput, RLMReasoning, StepFinished, StepStarted
-    from fleet_rlm.rlm.runner import _reconcile_trajectory
+    from fleet_rlm.rlm.trajectory_projection import reconcile_trajectory
 
     details = [
         RLMReasoning("native reasoning", 1),
@@ -152,7 +147,7 @@ def test_trajectory_reconciliation_keeps_live_reasoning_emitted_before_step_star
     ]
 
     assert (
-        _reconcile_trajectory(
+        reconcile_trajectory(
             details,
             (TrajectoryStep(1, "native reasoning", "native code", "native output"),),
             max_chars=100,
@@ -167,11 +162,10 @@ def test_trajectory_reconciliation_keeps_live_reasoning_emitted_before_step_star
         StepFinished(1),
     ]
 
-
 def test_trajectory_reconciliation_updates_pre_step_live_reasoning_when_canonical_differs() -> None:
     from fleet_rlm.rlm.dspy_contract import TrajectoryStep
     from fleet_rlm.rlm.events import RLMCode, RLMOutput, RLMReasoning, StepFinished, StepStarted
-    from fleet_rlm.rlm.runner import _reconcile_trajectory
+    from fleet_rlm.rlm.trajectory_projection import reconcile_trajectory
 
     details = [
         RLMReasoning("stale reasoning", 1),
@@ -181,7 +175,7 @@ def test_trajectory_reconciliation_updates_pre_step_live_reasoning_when_canonica
         StepFinished(1),
     ]
 
-    emissions = _reconcile_trajectory(
+    emissions = reconcile_trajectory(
         details,
         (TrajectoryStep(1, "native reasoning", "native code", "native output"),),
         max_chars=100,
@@ -190,14 +184,12 @@ def test_trajectory_reconciliation_updates_pre_step_live_reasoning_when_canonica
     assert emissions == [RLMReasoning("native reasoning", 1)]
     assert details[0] == RLMReasoning("native reasoning", 1)
 
-
 @pytest.mark.asyncio
 async def test_runner_deduplicates_final_reasoning_against_nonadjacent_normalized_trajectory() -> None:
     from fleet_rlm.chat.session_context import SessionContextManifest
     from fleet_rlm.rlm.context import (
         ExecutionRuntime,
         RLMExecutionContext,
-        RLMExecutionSpec,
         RunIdentity,
         SessionView,
     )
@@ -206,17 +198,9 @@ async def test_runner_deduplicates_final_reasoning_against_nonadjacent_normalize
     from fleet_rlm.rlm.runner import RLMRunner
     from fleet_rlm.rlm.sanitize import truncate_public_text
     from fleet_rlm.sessions.models import TurnAccess
+    from tests.unit.backend.rlm.fakes import EmptyCapabilities
 
     repeated = "reasoning requiring public truncation"
-
-    class Capabilities:
-        spec = RLMExecutionSpec()
-
-        def drain_public_details(self):
-            return ()
-
-        def drain_artifact_candidates(self):
-            return ()
 
     class Factory:
         def create(self, **_kwargs):
@@ -251,7 +235,7 @@ async def test_runner_deduplicates_final_reasoning_against_nonadjacent_normalize
             interpreter=None,
             cancellation_requested=not_cancelled,
         ),
-        capabilities=Capabilities(),
+        capabilities=EmptyCapabilities(),
     )
 
     events = [event async for event in RLMRunner(factory=Factory()).stream(context)]
@@ -261,12 +245,11 @@ async def test_runner_deduplicates_final_reasoning_against_nonadjacent_normalize
         truncate_public_text(repeated, max_len=16),
     ]
 
-
 def test_trajectory_reconciliation_silently_upserts_flag_drifted_identical_streams() -> None:
     """RC-4a: live deltas equal to the canonical text emit nothing at turn end."""
     from fleet_rlm.rlm.dspy_contract import TrajectoryStep
     from fleet_rlm.rlm.events import RLMCode, RLMOutput, RLMReasoning, StepFinished, StepStarted
-    from fleet_rlm.rlm.runner import _reconcile_trajectory
+    from fleet_rlm.rlm.trajectory_projection import reconcile_trajectory
 
     details = [
         StepStarted(1),
@@ -277,7 +260,7 @@ def test_trajectory_reconciliation_silently_upserts_flag_drifted_identical_strea
         StepFinished(1),
     ]
 
-    emissions = _reconcile_trajectory(
+    emissions = reconcile_trajectory(
         details,
         (TrajectoryStep(1, "why", "print(1)", "native output"),),
         max_chars=100,
@@ -294,12 +277,11 @@ def test_trajectory_reconciliation_silently_upserts_flag_drifted_identical_strea
         StepFinished(1),
     ]
 
-
 def test_trajectory_reconciliation_treats_submit_label_and_live_terminal_frame_as_identical() -> None:
     """RC-4a: the pre-fix live log (delta + full final frame) reconciles silently."""
     from fleet_rlm.rlm.dspy_contract import TrajectoryStep
     from fleet_rlm.rlm.events import RLMCode, RLMOutput, RLMReasoning, StepFinished, StepStarted
-    from fleet_rlm.rlm.runner import _reconcile_trajectory
+    from fleet_rlm.rlm.trajectory_projection import reconcile_trajectory
 
     details = [
         StepStarted(1),
@@ -310,7 +292,7 @@ def test_trajectory_reconciliation_treats_submit_label_and_live_terminal_frame_a
         StepFinished(1),
     ]
 
-    emissions = _reconcile_trajectory(
+    emissions = reconcile_trajectory(
         details,
         (TrajectoryStep(1, "done", "SUBMIT(answer='ok')", 'FINAL: {"answer": "ok"}'),),
         max_chars=100,
@@ -327,12 +309,11 @@ def test_trajectory_reconciliation_treats_submit_label_and_live_terminal_frame_a
         StepFinished(1),
     ]
 
-
 def test_trajectory_reconciliation_re_emits_once_for_a_true_correction() -> None:
     """RC-4a: corrected text still emits exactly one canonical replacement."""
     from fleet_rlm.rlm.dspy_contract import TrajectoryStep
     from fleet_rlm.rlm.events import RLMCode, RLMOutput, RLMReasoning, StepFinished, StepStarted
-    from fleet_rlm.rlm.runner import _reconcile_trajectory
+    from fleet_rlm.rlm.trajectory_projection import reconcile_trajectory
 
     details = [
         StepStarted(1),
@@ -343,7 +324,7 @@ def test_trajectory_reconciliation_re_emits_once_for_a_true_correction() -> None
         StepFinished(1),
     ]
 
-    emissions = _reconcile_trajectory(
+    emissions = reconcile_trajectory(
         details,
         (TrajectoryStep(1, "why", "print(1)", "corrected output"),),
         max_chars=100,
@@ -358,12 +339,11 @@ def test_trajectory_reconciliation_re_emits_once_for_a_true_correction() -> None
         StepFinished(1),
     ]
 
-
 def test_trajectory_reconciliation_aligns_canonical_steps_after_setup_execution() -> None:
     """A context setup execution must not cause a duplicate canonical action stream."""
     from fleet_rlm.rlm.dspy_contract import TrajectoryStep
     from fleet_rlm.rlm.events import RLMCode, RLMOutput, RLMReasoning, StepFinished, StepStarted
-    from fleet_rlm.rlm.runner import _reconcile_trajectory
+    from fleet_rlm.rlm.trajectory_projection import reconcile_trajectory
 
     details = [
         StepStarted(1),
@@ -376,7 +356,7 @@ def test_trajectory_reconciliation_aligns_canonical_steps_after_setup_execution(
         StepFinished(2),
     ]
 
-    emissions = _reconcile_trajectory(
+    emissions = reconcile_trajectory(
         details,
         (TrajectoryStep(1, "native reasoning", 'SUBMIT(answer="ok")', "FINAL: ok"),),
         max_chars=100,

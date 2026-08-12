@@ -50,6 +50,9 @@ async def test_native_rlm_retrieves_older_content_absent_from_initial_kwargs() -
         def drain_artifact_candidates(self):
             return ()
 
+        def drain_memory_candidates(self):
+            return ()
+
     class Actions:
         calls = 0
 
@@ -143,6 +146,9 @@ async def test_native_rlm_continues_history_across_truncated_pages() -> None:
             return ()
 
         def drain_artifact_candidates(self):
+            return ()
+
+        def drain_memory_candidates(self):
             return ()
 
     class Actions:

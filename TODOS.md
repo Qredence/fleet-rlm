@@ -373,7 +373,7 @@ uv run pytest tests/unit/backend -q -k 'turn_coordinator or run_execution or pre
 ### Mission 07 — Extract pure trajectory reconciliation from `RLMRunner`
 
 - **Tier:** `recommended`
-- **Status:** `open`
+- **Status:** `done`
 - **Depends on:** Mission 06
 - **Narrative:** `IMPLEMENTATION_PHASES.md` §PR 7
 
@@ -411,9 +411,9 @@ uv run pytest tests/unit/backend/rlm -q
 
 **Acceptance:**
 
-- [ ] Helpers live in `trajectory_projection.py`
-- [ ] Existing trajectory tests rewired and green
-- [ ] `drain_memory_candidates` typed; no dynamic legacy path
+- [x] Helpers live in `trajectory_projection.py`
+- [x] Existing trajectory tests rewired and green
+- [x] `drain_memory_candidates` typed; no dynamic legacy path
 
 ---
 

@@ -11,6 +11,7 @@ import dspy
 
 from fleet_rlm.chat.run_lifecycle import ClaimedRun
 from fleet_rlm.chat.run_preparation import RunPreparationCancelledError, RunPreparationTimeoutError
+from fleet_rlm.files.memory_candidates import MemoryCandidate, MemoryCandidateCollector
 from fleet_rlm.files.workspace_models import SessionWorkspaceFS, WorkspaceCapabilityMetadata
 from fleet_rlm.rlm.context import PreparationNotice, RLMExecutionSpec
 from fleet_rlm.rlm.events import AttachmentRead, SkillActivated, SkillLoaded
@@ -52,7 +53,7 @@ class PreparedHostCapabilities:
         close_files: bool,
         artifact_candidates: bool,
         preparation_notices: tuple[PreparationNotice, ...] = (),
-        memory_candidates: Any = None,
+        memory_candidates: MemoryCandidateCollector | None = None,
     ) -> None:
         self.spec = spec
         self._files = files
@@ -86,7 +87,7 @@ class PreparedHostCapabilities:
             return ()
         return self._files.drain_artifact_candidates()
 
-    def drain_memory_candidates(self) -> Any:
+    def drain_memory_candidates(self) -> tuple[MemoryCandidate, ...]:
         """Drain Run-scoped memory proposals; empty when the policy did not expose them."""
         if self._memory_candidates is None:
             return ()

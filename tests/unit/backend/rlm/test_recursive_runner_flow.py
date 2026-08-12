@@ -16,7 +16,6 @@ from fleet_rlm.rlm.context import (
     DelegationPolicy,
     ExecutionRuntime,
     RLMExecutionContext,
-    RLMExecutionSpec,
     RunIdentity,
     SessionView,
 )
@@ -27,7 +26,7 @@ from fleet_rlm.rlm.model_bundle import RLMModelBundle
 from fleet_rlm.rlm.recursive_calls import RecursiveRLMOptions
 from fleet_rlm.rlm.runner import RLMRunner
 from fleet_rlm.sessions.models import TurnAccess
-
+from tests.unit.backend.rlm.fakes import EmptyCapabilities
 
 @pytest.mark.asyncio
 async def test_root_child_root_flow_preserves_parent_repl_and_typed_submit() -> None:
@@ -53,15 +52,6 @@ async def test_root_child_root_flow_preserves_parent_repl_and_typed_submit() -> 
     )
     sub = dspy.utils.DummyLM([{"answer": "unused"}], adapter=adapter)
 
-    class Capabilities:
-        spec = RLMExecutionSpec()
-
-        def drain_public_details(self):
-            return ()
-
-        def drain_artifact_candidates(self):
-            return ()
-
     async def not_cancelled() -> bool:
         return False
 
@@ -84,7 +74,7 @@ async def test_root_child_root_flow_preserves_parent_repl_and_typed_submit() -> 
             recursive_options=RecursiveRLMOptions(enabled=True, max_calls=2),
             child_runtime_factory=lambda call_index: _child_lease(call_index),
         ),
-        capabilities=Capabilities(),
+        capabilities=EmptyCapabilities(),
     )
 
     stream = RLMRunner().stream(context)
@@ -113,7 +103,6 @@ async def test_root_child_root_flow_preserves_parent_repl_and_typed_submit() -> 
     assert all("root-complete" not in (event.detail.message or "") for event in statuses)
     assert all(not isinstance(detail, Status) for detail in stream.outcome.execution_details)
 
-
 def _child_lease(call_index: int) -> ChildRuntimeLease:
     """Create a child runtime lease for a recursive test invocation.
 
@@ -132,7 +121,6 @@ def _child_lease(call_index: int) -> ChildRuntimeLease:
         interpreter.shutdown,
     )
 
-
 @pytest.mark.asyncio
 async def test_runner_rejects_recursive_tool_after_authority_revocation() -> None:
     """Verify that recursive execution is rejected when run authority has been revoked before the run starts."""
@@ -145,21 +133,6 @@ async def test_runner_rejects_recursive_tool_after_authority_revocation() -> Non
     authority = RunAuthority()
     authority.revoke()
     created: list[int] = []
-
-    class Capabilities:
-        spec = RLMExecutionSpec()
-
-        def drain_public_details(self):
-            return ()
-
-        def drain_artifact_candidates(self):
-            """
-            Drain pending artifact candidates.
-
-            Returns:
-                tuple: An empty tuple.
-            """
-            return ()
 
     async def not_cancelled() -> bool:
         """Indicate that cancellation has not been requested.
@@ -202,7 +175,7 @@ async def test_runner_rejects_recursive_tool_after_authority_revocation() -> Non
         delegation=DelegationPolicy(
             recursive_options=RecursiveRLMOptions(enabled=True, max_calls=1), child_runtime_factory=child_factory
         ),
-        capabilities=Capabilities(),
+        capabilities=EmptyCapabilities(),
     )
 
     stream = RLMRunner().stream(context)
@@ -211,7 +184,6 @@ async def test_runner_rejects_recursive_tool_after_authority_revocation() -> Non
     assert stream.outcome is not None
     assert stream.outcome.terminal_status == "failed"
     assert created == []
-
 
 @pytest.mark.asyncio
 async def test_normal_daytona_policy_omits_recursive_tool_and_guidance() -> None:
@@ -230,21 +202,6 @@ async def test_normal_daytona_policy_omits_recursive_tool_and_guidance() -> None
             """
             captured.update(kwargs)
             return RLMFactory().create(**kwargs)
-
-    class Capabilities:
-        spec = RLMExecutionSpec()
-
-        def drain_public_details(self):
-            return ()
-
-        def drain_artifact_candidates(self):
-            """
-            Drain pending artifact candidates.
-
-            Returns:
-                tuple: An empty tuple.
-            """
-            return ()
 
     async def not_cancelled() -> bool:
         """Indicate that cancellation has not been requested.
@@ -270,7 +227,7 @@ async def test_normal_daytona_policy_omits_recursive_tool_and_guidance() -> None
             cancellation_requested=not_cancelled,
         ),
         delegation=DelegationPolicy(recursive_options=RecursiveRLMOptions(enabled=False)),
-        capabilities=Capabilities(),
+        capabilities=EmptyCapabilities(),
     )
 
     stream = RLMRunner(factory=Factory()).stream(context)
@@ -279,7 +236,6 @@ async def test_normal_daytona_policy_omits_recursive_tool_and_guidance() -> None
     assert stream.outcome is not None and stream.outcome.succeeded
     assert captured["tools"] is None
     assert "rlm_query" not in captured["signature"].instructions
-
 
 @pytest.mark.asyncio
 async def test_failed_child_cleanup_prevents_successful_root_outcome() -> None:
@@ -296,21 +252,6 @@ async def test_failed_child_cleanup_prevents_successful_root_outcome() -> None:
         adapter=adapter,
     )
     sub = dspy.utils.DummyLM([{"answer": "unused"}], adapter=adapter)
-
-    class Capabilities:
-        spec = RLMExecutionSpec()
-
-        def drain_public_details(self):
-            return ()
-
-        def drain_artifact_candidates(self):
-            """
-            Drain pending artifact candidates.
-
-            Returns:
-                tuple: An empty tuple.
-            """
-            return ()
 
     async def not_cancelled() -> bool:
         """Indicate that cancellation has not been requested.
@@ -355,7 +296,7 @@ async def test_failed_child_cleanup_prevents_successful_root_outcome() -> None:
         delegation=DelegationPolicy(
             recursive_options=RecursiveRLMOptions(enabled=True, max_calls=2), child_runtime_factory=failed_lease
         ),
-        capabilities=Capabilities(),
+        capabilities=EmptyCapabilities(),
     )
 
     stream = RLMRunner().stream(context)
@@ -363,7 +304,6 @@ async def test_failed_child_cleanup_prevents_successful_root_outcome() -> None:
 
     assert stream.outcome is not None
     assert stream.outcome.terminal_status == "failed"
-
 
 @pytest.mark.asyncio
 async def test_runner_wait_owned_retains_pending_recursive_workers_until_child_lease_closes(
@@ -409,15 +349,6 @@ async def test_runner_wait_owned_retains_pending_recursive_workers_until_child_l
             close,
         )
 
-    class Capabilities:
-        spec = RLMExecutionSpec()
-
-        def drain_public_details(self):
-            return ()
-
-        def drain_artifact_candidates(self):
-            return ()
-
     async def not_cancelled() -> bool:
         return False
 
@@ -439,7 +370,7 @@ async def test_runner_wait_owned_retains_pending_recursive_workers_until_child_l
             recursive_options=RecursiveRLMOptions(enabled=True, max_calls=1),
             child_runtime_factory=child_factory,
         ),
-        capabilities=Capabilities(),
+        capabilities=EmptyCapabilities(),
     )
 
     stream = RLMRunner().stream(context)

@@ -50,6 +50,9 @@ class _Capabilities:
     def drain_artifact_candidates(self):
         return ()
 
+    def drain_memory_candidates(self):
+        return ()
+
     async def aclose(self) -> None:
         return None
 

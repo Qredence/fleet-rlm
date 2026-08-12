@@ -13,13 +13,11 @@ from typing import Any, Protocol, Self, cast
 import dspy
 from dspy.utils.exceptions import AdapterParseError
 
-from fleet_rlm.files.memory_candidates import MemoryCandidate
 from fleet_rlm.observability.failure_diagnostics import normalize_turn_failure, trace_failure_category
 from fleet_rlm.observability.turn_tracing import turn_phase_span
 from fleet_rlm.rlm.context import RLMExecutionContext, RLMExecutionSpec
 from fleet_rlm.rlm.dspy_contract import (
     PredictionOutputError,
-    TrajectoryStep,
     _RLMTraceCallback,
     bind_native_rlm_observer,
     empty_rlm_usage,
@@ -36,9 +34,6 @@ from fleet_rlm.rlm.errors import (
 from fleet_rlm.rlm.events import (
     AttachmentRead,
     EventRecorder,
-    ObservationDetail,
-    RLMCode,
-    RLMOutput,
     RLMReasoning,
     RunStarted,
     RuntimeEvent,
@@ -61,15 +56,10 @@ from fleet_rlm.rlm.sanitize import truncate_public_text
 from fleet_rlm.rlm.signature import root_signature_for_recursion
 from fleet_rlm.rlm.tool_guards import RunToolGuards, workspace_obligations
 from fleet_rlm.rlm.tool_observer import ToolEventView, observe_tool
+from fleet_rlm.rlm.trajectory_projection import has_reasoning, reconcile_trajectory
 
 logger = logging.getLogger(__name__)
 _MAX_DETAIL_EVENTS = 1024
-
-
-def _drain_memory_candidates(context: RLMExecutionContext) -> tuple[Any, ...]:
-    """Drain optional Run candidates, preserving legacy custom capabilities."""
-    drain = getattr(context.capabilities, "drain_memory_candidates", None)
-    return tuple(drain()) if callable(drain) else ()
 
 
 def _recursive_summary(executor: RecursiveRLMExecutor | None, metrics: Any | None = None) -> RecursiveCallSummary:
@@ -276,222 +266,6 @@ class _DetailRelay:
                 return values
 
 
-def _trajectory_details(steps: Sequence[TrajectoryStep], *, max_chars: int) -> list[ObservationDetail]:
-    """Project strictly normalized DSPy trajectory steps into public details."""
-    details: list[ObservationDetail] = []
-    for step in steps:
-        output = step.output
-        if output.startswith("FINAL:"):
-            output = "FINAL submitted"
-        details.extend(
-            (
-                StepStarted(step.index),
-                RLMReasoning(truncate_public_text(step.reasoning, max_len=max_chars), step.index),
-                RLMCode(truncate_public_text(step.code, max_len=max_chars), step.index),
-                RLMOutput(truncate_public_text(output, max_len=max_chars), step.index),
-                StepFinished(step.index),
-            )
-        )
-    return details
-
-
-def _preserve_stream_id(target: ObservationDetail, details: Sequence[ExecutionDetail], step: int) -> ObservationDetail:
-    """Keep one live stream identity when canonical trajectory data is emitted."""
-    if not isinstance(target, (RLMReasoning, RLMCode, RLMOutput)):
-        return target
-    stream_id = next(
-        (
-            getattr(detail, "stream_id", None)
-            for detail in details
-            if type(detail) is type(target)
-            and getattr(detail, "step", None) == step
-            and isinstance(getattr(detail, "stream_id", None), str)
-            and bool(getattr(detail, "stream_id", None))
-        ),
-        None,
-    )
-    if stream_id is None:
-        return target
-    return replace(target, stream_id=stream_id, is_delta=False, is_final=True)
-
-
-_STREAM_TEXT_FIELDS: dict[type, str] = {
-    RLMReasoning: "text",
-    RLMCode: "code",
-    RLMOutput: "output",
-}
-
-
-def _stream_text(detail: ExecutionDetail) -> str:
-    field = _STREAM_TEXT_FIELDS.get(type(detail))
-    return str(getattr(detail, field, "") or "") if field is not None else ""
-
-
-def _align_trajectory_detail(
-    details: Sequence[ExecutionDetail],
-    target: ObservationDetail,
-    *,
-    used_positions: set[int],
-) -> ObservationDetail:
-    """Align canonical text with a live observation when setup consumed a step.
-
-    The interpreter may execute a host context/bootstrap capsule before DSPy's
-    first trajectory action.  That setup observation owns an earlier step number
-    even though DSPy's canonical trajectory starts at action one.  Matching the
-    exact public payload across steps lets reconciliation update the real live
-    action rather than emitting a duplicate canonical action stream.
-    """
-    text = _stream_text(target)
-    if not text:
-        return target
-    for index, detail in enumerate(details):
-        if index in used_positions or type(detail) is not type(target) or _stream_text(detail) != text:
-            continue
-        observed_step = getattr(detail, "step", None)
-        if isinstance(observed_step, int) and observed_step != getattr(target, "step", None):
-            target = replace(target, step=observed_step)
-        used_positions.add(index)
-        return target
-    return target
-
-
-def _same_stream_payload(
-    details: Sequence[ExecutionDetail],
-    positions: Sequence[int],
-    target: ObservationDetail,
-) -> bool:
-    """Payload identity between live rows and one canonical trajectory detail.
-
-    Live deltas and the canonical full-text trajectory row describe the same
-    stream content when (type, step, stream_id, public text) match, ignoring
-    ``is_delta``/``is_final`` flag drift (RC-4a). The live public text is the
-    in-order stream projection: delta rows concatenate; a non-delta row
-    replaces the content accumulated so far.
-    """
-    text = ""
-    stream_id: str | None = None
-    for position in positions:
-        detail = details[position]
-        if type(detail) is not type(target) or getattr(detail, "step", None) != getattr(target, "step", None):
-            return False
-        row_stream_id = getattr(detail, "stream_id", None) or None
-        if stream_id is None:
-            stream_id = row_stream_id
-        elif row_stream_id is not None and row_stream_id != stream_id:
-            return False
-        value = _stream_text(detail)
-        text = text + value if getattr(detail, "is_delta", False) else value
-    return stream_id == (getattr(target, "stream_id", None) or None) and text == _stream_text(target)
-
-
-def _detail_position(details: Sequence[ExecutionDetail], detail_type: type[object], step: int) -> int | None:
-    return next(
-        (
-            index
-            for index, detail in enumerate(details)
-            if isinstance(detail, detail_type) and getattr(detail, "step", None) == step
-        ),
-        None,
-    )
-
-
-def _outside_reasoning_position(details: Sequence[ExecutionDetail], target: ObservationDetail, step: int) -> int | None:
-    if not isinstance(target, RLMReasoning):
-        return None
-    return _detail_position(details, RLMReasoning, step)
-
-
-def _trajectory_insertion(details: Sequence[ExecutionDetail], target: ObservationDetail, step: int, finish: int) -> int:
-    if isinstance(target, RLMReasoning):
-        start = _detail_position(details, StepStarted, step)
-        assert start is not None
-        return start + 1
-    if isinstance(target, RLMCode):
-        reasoning = _detail_position(details, RLMReasoning, step)
-        if reasoning is not None:
-            return reasoning + 1
-        start = _detail_position(details, StepStarted, step)
-        assert start is not None
-        return start + 1
-    return finish
-
-
-def _reconcile_trajectory(
-    details: list[ExecutionDetail],
-    trajectory: Sequence[TrajectoryStep],
-    *,
-    max_chars: int,
-) -> list[ObservationDetail]:
-    """Reconcile completed DSPy trajectory details with live observations.
-
-    Observations with an identical public payload (type, step, stream_id, and
-    projected text) keep their position: the durable row is upserted to the
-    canonical flags without any re-emission. A differing same-step RLM detail
-    is replaced in the durable list and re-emitted with the same stable step
-    ID so live TUI projection upserts it rather than appending a second card.
-    """
-    emissions: list[ObservationDetail] = []
-    aligned_positions: set[int] = set()
-    for trajectory_step in trajectory:
-        step = trajectory_step.index
-        step_details = _trajectory_details((trajectory_step,), max_chars=max_chars)
-        start = _detail_position(details, StepStarted, step)
-        finish = _detail_position(details, StepFinished, step)
-        if start is None or finish is None or start >= finish:
-            details.extend(step_details)
-            emissions.extend(step_details)
-            continue
-
-        canonical = step_details[1:-1]
-        for raw_target in canonical:
-            target = _align_trajectory_detail(details, raw_target, used_positions=aligned_positions)
-            target_step = getattr(target, "step", None)
-            target = _preserve_stream_id(target, details, target_step if isinstance(target_step, int) else step)
-            target_step = getattr(target, "step", None)
-            if isinstance(target_step, int) and target_step != step:
-                aligned_start = _detail_position(details, StepStarted, target_step)
-                aligned_finish = _detail_position(details, StepFinished, target_step)
-                if aligned_start is not None and aligned_finish is not None and aligned_start < aligned_finish:
-                    step = target_step
-                    start, finish = aligned_start, aligned_finish
-            target_type = type(target)
-            existing_positions = [
-                index
-                for index in range(start + 1, finish)
-                if isinstance(details[index], target_type) and getattr(details[index], "step", None) == step
-            ]
-            if existing_positions:
-                first = existing_positions[0]
-                # Identical public payload upserts the canonical flags
-                # (is_delta=False, is_final=True) into the durable row without
-                # re-emitting already-delivered content; a true correction is
-                # still re-emitted so the TUI upserts the same stream.
-                if not _same_stream_payload(details, existing_positions, target):
-                    emissions.append(target)
-                details[first] = target
-                for duplicate in reversed(existing_positions[1:]):
-                    del details[duplicate]
-                start = _detail_position(details, StepStarted, step)
-                finish = _detail_position(details, StepFinished, step)
-                assert start is not None and finish is not None
-                continue
-
-            # Live observation may publish reasoning before interpreter StepStarted.
-            outside = _outside_reasoning_position(details, target, step)
-            if outside is not None:
-                if not _same_stream_payload(details, (outside,), target):
-                    emissions.append(target)
-                details[outside] = target
-                continue
-            insertion = _trajectory_insertion(details, target, step, finish)
-            details.insert(insertion, target)
-            emissions.append(target)
-            start = _detail_position(details, StepStarted, step)
-            finish = _detail_position(details, StepFinished, step)
-            assert start is not None and finish is not None
-    return emissions
-
-
 def _terminal_status(exc: BaseException) -> TerminalStatus:
     if isinstance(exc, RunTerminalError):
         return cast(TerminalStatus, exc.status)
@@ -673,9 +447,9 @@ class RLMRunner:
             )
         finally:
             if outcome and outcome[-1].terminal_status != "completed":
-                _drain_memory_candidates(context)
+                context.capabilities.drain_memory_candidates()
             if not outcome:
-                _drain_memory_candidates(context)
+                context.capabilities.drain_memory_candidates()
                 outcome.append(RLMOutcome(terminal_status="failed", public_error_message="Turn failed"))
 
     async def _run_success(
@@ -716,7 +490,7 @@ class RLMRunner:
                 prediction=result,
                 usage=observed_usage(prediction[-1], duration_ms=duration_ms),
                 artifact_candidates=context.capabilities.drain_artifact_candidates(),
-                memory_candidates=tuple(cast("tuple[MemoryCandidate, ...]", _drain_memory_candidates(context))),
+                memory_candidates=context.capabilities.drain_memory_candidates(),
                 execution_details=tuple(observations.details),
                 duration_ms=duration_ms,
             )
@@ -842,14 +616,14 @@ class RLMRunner:
         prediction: Any,
     ) -> AsyncIterator[RuntimeEvent]:
         trajectory = normalize_prediction_trajectory(prediction)
-        for item in _reconcile_trajectory(
+        for item in reconcile_trajectory(
             observations.details, trajectory, max_chars=context.execution.options.max_output_chars
         ):
             yield observations.recorder.record(item)
         final_reasoning = getattr(prediction, "final_reasoning", None)
         if isinstance(final_reasoning, str) and final_reasoning.strip():
             public_reasoning = truncate_public_text(final_reasoning, max_len=context.execution.options.max_output_chars)
-            if not self._has_reasoning(
+            if not has_reasoning(
                 observations.details, public_reasoning, context.execution.options.max_output_chars
             ):
                 item = RLMReasoning(public_reasoning)
@@ -884,13 +658,6 @@ class RLMRunner:
         bind = getattr(target, "bind_observer", None)
         if callable(bind):
             bind(relay.publish, max_chars=max_chars)
-
-    @staticmethod
-    def _has_reasoning(details: Sequence[ExecutionDetail], text: str, max_chars: int) -> bool:
-        return any(
-            isinstance(detail, RLMReasoning) and truncate_public_text(detail.text, max_len=max_chars) == text
-            for detail in details
-        )
 
     @staticmethod
     def _native_call_args(rlm: Any, context: RLMExecutionContext) -> tuple[Any, ...]:

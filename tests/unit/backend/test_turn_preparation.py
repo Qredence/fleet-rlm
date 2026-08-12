@@ -56,6 +56,9 @@ async def test_preparation_bounds_history_and_closes_in_dependency_order() -> No
         def drain_artifact_candidates(self):
             return ()
 
+        def drain_memory_candidates(self):
+            return ()
+
         async def aclose(self):
             operations.append("close-capabilities")
 
@@ -300,6 +303,9 @@ async def test_capsule_validation_failure_releases_all_prepared_resources() -> N
             return ()
 
         def drain_artifact_candidates(self):
+            return ()
+
+        def drain_memory_candidates(self):
             return ()
 
         async def aclose(self) -> None:

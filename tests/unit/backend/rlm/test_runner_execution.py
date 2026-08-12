@@ -12,7 +12,6 @@ from uuid import uuid4
 import dspy
 import pytest
 
-
 @pytest.mark.asyncio
 async def test_detail_relay_keeps_1024_ordinary_events_and_lifecycle_details() -> None:
     from fleet_rlm.rlm.events import RLMOutput, SkillLoaded
@@ -30,7 +29,6 @@ async def test_detail_relay_keeps_1024_ordinary_events_and_lifecycle_details() -
     assert any(isinstance(detail, SkillLoaded) for detail in details)
     assert relay.overflowed is True
 
-
 @pytest.mark.asyncio
 async def test_detail_relay_retains_step_lifecycle_when_ordinary_queue_is_full() -> None:
     from fleet_rlm.rlm.events import RLMOutput, StepFinished, StepStarted
@@ -46,29 +44,19 @@ async def test_detail_relay_retains_step_lifecycle_when_ordinary_queue_is_full()
     assert relay.drain() == [StepStarted(1), StepFinished(1)]
     assert relay.overflowed is True
 
-
 @pytest.mark.asyncio
 async def test_runner_uses_native_path_for_plain_greeting() -> None:
     from fleet_rlm.chat.session_context import SessionContextManifest
     from fleet_rlm.rlm.context import (
         ExecutionRuntime,
         RLMExecutionContext,
-        RLMExecutionSpec,
         RunIdentity,
         SessionView,
     )
     from fleet_rlm.rlm.dspy_contract import RLMOptions
     from fleet_rlm.rlm.runner import RLMRunner
     from fleet_rlm.sessions.models import TurnAccess
-
-    class Capabilities:
-        spec = RLMExecutionSpec()
-
-        def drain_public_details(self):
-            return ()
-
-        def drain_artifact_candidates(self):
-            return ()
+    from tests.unit.backend.rlm.fakes import EmptyCapabilities
 
     class Program:
         async def acall(self, **_kwargs):
@@ -108,7 +96,7 @@ async def test_runner_uses_native_path_for_plain_greeting() -> None:
             interpreter=None,
             cancellation_requested=not_cancelled,
         ),
-        capabilities=Capabilities(),
+        capabilities=EmptyCapabilities(),
     )
 
     factory = Factory()
@@ -130,7 +118,6 @@ async def test_runner_uses_native_path_for_plain_greeting() -> None:
     assert stream.outcome.prediction.display_text == "Hi! How can I help you today?"
     assert stream.outcome.usage["iterations"] == 1
 
-
 @pytest.mark.asyncio
 async def test_runner_uses_supported_async_call_and_returns_typed_outcome(
     monkeypatch: pytest.MonkeyPatch,
@@ -149,20 +136,7 @@ async def test_runner_uses_supported_async_call_and_returns_typed_outcome(
     from fleet_rlm.rlm.runner import RLMRunner
     from fleet_rlm.sessions.models import TurnAccess
     from fleet_rlm.skills.models import SkillCard
-
-    class Capabilities:
-        spec = RLMExecutionSpec(
-            workspace=WorkspaceCapabilityMetadata(True, ".", "Use durable workspace tools."),
-        )
-
-        def drain_public_details(self):
-            return ()
-
-        def drain_artifact_candidates(self):
-            return ()
-
-        async def aclose(self):
-            return None
+    from tests.unit.backend.rlm.fakes import EmptyCapabilities
 
     class Factory:
         options = None
@@ -230,6 +204,11 @@ async def test_runner_uses_supported_async_call_and_returns_typed_outcome(
 
     factory = Factory()
     interpreter = Interpreter()
+    capabilities = EmptyCapabilities(
+        spec=RLMExecutionSpec(
+            workspace=WorkspaceCapabilityMetadata(True, ".", "Use durable workspace tools."),
+        )
+    )
     skill_id = uuid4()
     main_thread = threading.get_ident()
     contexts: list[dict[str, object]] = []
@@ -263,10 +242,10 @@ async def test_runner_uses_supported_async_call_and_returns_typed_outcome(
             interpreter=interpreter,
             cancellation_requested=not_cancelled,
         ),
-        capabilities=Capabilities(),
+        capabilities=capabilities,
     )
     stream = RLMRunner(factory=factory).stream(context)
-    Capabilities.spec = RLMExecutionSpec(
+    capabilities.spec = RLMExecutionSpec(
         skill_cards=(
             SkillCard(
                 skill_id,
@@ -320,13 +299,11 @@ async def test_runner_uses_supported_async_call_and_returns_typed_outcome(
         )
     ]
 
-
 def test_runner_uses_stock_json_adapter_without_protocol_salvage() -> None:
     adapter = dspy.JSONAdapter()
 
     assert type(adapter) is dspy.JSONAdapter
     assert adapter.use_native_function_calling is True
-
 
 @pytest.mark.asyncio
 async def test_runner_passes_prepared_attachment_context_to_rlm() -> None:
@@ -334,7 +311,6 @@ async def test_runner_passes_prepared_attachment_context_to_rlm() -> None:
     from fleet_rlm.rlm.context import (
         ExecutionRuntime,
         RLMExecutionContext,
-        RLMExecutionSpec,
         RunIdentity,
         SessionView,
     )
@@ -342,6 +318,7 @@ async def test_runner_passes_prepared_attachment_context_to_rlm() -> None:
     from fleet_rlm.rlm.inputs import AttachmentContextCapsule, AttachmentContextEntry
     from fleet_rlm.rlm.runner import RLMRunner
     from fleet_rlm.sessions.models import TurnAccess
+    from tests.unit.backend.rlm.fakes import EmptyCapabilities
 
     class Program:
         async def acall(self, **call_kwargs):
@@ -351,15 +328,6 @@ async def test_runner_passes_prepared_attachment_context_to_rlm() -> None:
     class Factory:
         def create(self, **_kwargs):
             return Program()
-
-    class Capabilities:
-        spec = RLMExecutionSpec()
-
-        def drain_public_details(self):
-            return ()
-
-        def drain_artifact_candidates(self):
-            return ()
 
     async def not_cancelled() -> bool:
         return False
@@ -393,14 +361,13 @@ async def test_runner_passes_prepared_attachment_context_to_rlm() -> None:
             interpreter=None,
             cancellation_requested=not_cancelled,
         ),
-        capabilities=Capabilities(),
+        capabilities=EmptyCapabilities(),
     )
 
     stream = RLMRunner(factory=Factory()).stream(context)
     _events = [event async for event in stream]
 
     assert stream.outcome is not None and stream.outcome.succeeded
-
 
 @pytest.mark.asyncio
 async def test_runner_validates_host_metadata_before_provider_execution() -> None:
@@ -414,6 +381,7 @@ async def test_runner_validates_host_metadata_before_provider_execution() -> Non
     from fleet_rlm.rlm.dspy_contract import RLMOptions
     from fleet_rlm.rlm.runner import RLMRunner
     from fleet_rlm.sessions.models import TurnAccess
+    from tests.unit.backend.rlm.fakes import EmptyCapabilities
 
     class Program:
         acall_calls = 0
@@ -428,15 +396,6 @@ async def test_runner_validates_host_metadata_before_provider_execution() -> Non
 
         def create(self, **_kwargs):
             return self.program
-
-    class Capabilities:
-        spec = SimpleNamespace(tools=(), tool_event_views={}, skill_cards=(), signature=None, workspace=None)
-
-        def drain_public_details(self):
-            return ()
-
-        def drain_artifact_candidates(self):
-            return ()
 
     async def not_cancelled() -> bool:
         return False
@@ -459,7 +418,9 @@ async def test_runner_validates_host_metadata_before_provider_execution() -> Non
             interpreter=None,
             cancellation_requested=not_cancelled,
         ),
-        capabilities=Capabilities(),
+        capabilities=EmptyCapabilities(
+            spec=SimpleNamespace(tools=(), tool_event_views={}, skill_cards=(), signature=None, workspace=None)
+        ),
     )
     factory = Factory()
     stream = RLMRunner(factory=factory).stream(context)
@@ -469,7 +430,6 @@ async def test_runner_validates_host_metadata_before_provider_execution() -> Non
     assert stream.outcome is not None
     assert stream.outcome.terminal_status == "failed"
     assert stream.outcome.public_error_message == "Turn failed"
-
 
 @pytest.mark.asyncio
 async def test_runner_loads_two_skills_reads_python_resource_and_completes_submit() -> None:
