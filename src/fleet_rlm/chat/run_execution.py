@@ -19,6 +19,7 @@ from fleet_rlm.chat.run_lifecycle import (
     RunLifecycle,
     RunSettlement,
 )
+from fleet_rlm.chat.run_ownership import ClaimHeartbeat, shield_cleanup, stop_heartbeat
 from fleet_rlm.chat.run_preparation import PostCommitMemoryPromotion, PreparedRun
 from fleet_rlm.observability.turn_tracing import annotate_trace_io, turn_phase_span
 from fleet_rlm.rlm.context import RLMExecutionContext
@@ -50,67 +51,13 @@ class RunRunner(Protocol):
     def stream(self, context: RLMExecutionContext) -> RunEventStream: ...
 
 
-@dataclass(slots=True)
-class _ClaimHeartbeat:
-    task: asyncio.Task[None]
-    lost: asyncio.Event
-
-
-async def _shield_cleanup(awaitable: Awaitable[object]) -> None:
-    """Complete owned settlement/cleanup even if the caller is repeatedly cancelled."""
-    try:
-        task = asyncio.ensure_future(awaitable)
-    except BaseException:
-        close = getattr(awaitable, "close", None)
-        if callable(close):
-            with contextlib.suppress(BaseException):
-                close()
-        raise
-    cancelled = False
-    while not task.done():
-        try:
-            await asyncio.shield(task)
-        except asyncio.CancelledError:
-            cancelled = True
-    if task.cancelled():
-        raise asyncio.CancelledError
-    try:
-        task.result()
-    except BaseException:
-        raise
-    if cancelled:
-        raise asyncio.CancelledError
-
-
-def _consume_task_exception(task: asyncio.Task[Any]) -> None:
-    if not task.cancelled():
-        with contextlib.suppress(BaseException):
-            task.exception()
-
-
-async def _stop_heartbeat(heartbeat: _ClaimHeartbeat | None) -> None:
-    if heartbeat is None:
-        return
-    heartbeat.task.cancel()
-    await asyncio.gather(heartbeat.task, return_exceptions=True)
-
-
-async def _wait_stream_owned(stream: RunEventStream) -> None:
-    wait_owned = getattr(stream, "wait_owned", None)
-    if callable(wait_owned):
-        await wait_owned()
-
-
-def _heartbeat_claim_lost(state: _ExecutionState) -> bool:
-    return state.heartbeat is not None and state.heartbeat.lost.is_set()
-
-
-def _terminal(
+def terminal(
     recorder: EventRecorder,
     receipt: CommittedTurnReceipt | FailedRunReceipt,
     *,
     trace_id: str | None = None,
 ) -> RuntimeEvent:
+    """Project a durable receipt into the live terminal RuntimeEvent."""
     if isinstance(receipt, CommittedTurnReceipt):
         return recorder.record(
             RunCompleted(
@@ -135,6 +82,16 @@ def _terminal(
     else:
         public_message = "Turn failed"
     return recorder.record(RunFailed(code="execution_failed", message=public_message))
+
+
+async def _wait_stream_owned(stream: RunEventStream) -> None:
+    wait_owned = getattr(stream, "wait_owned", None)
+    if callable(wait_owned):
+        await wait_owned()
+
+
+def _heartbeat_claim_lost(state: _ExecutionState) -> bool:
+    return state.heartbeat is not None and state.heartbeat.lost.is_set()
 
 
 def _with_trace_id(event: RuntimeEvent, trace_id: str | None) -> RuntimeEvent:
@@ -166,7 +123,7 @@ _FinalizationWait: TypeAlias = RunSettlement | _ClaimLost | None
 @dataclass(slots=True)
 class _ExecutionState:
     recorder: EventRecorder
-    heartbeat: _ClaimHeartbeat | None
+    heartbeat: ClaimHeartbeat | None
     claim_loss_waiter: asyncio.Task[bool] | None
     pending_event: asyncio.Task[RuntimeEvent] | None = None
     stream: RunEventStream | None = None
@@ -201,7 +158,7 @@ class RunExecutionDriver:
         self,
         run: ClaimedRun,
         prepared: PreparedRun,
-        heartbeat: _ClaimHeartbeat | None,
+        heartbeat: ClaimHeartbeat | None,
         *,
         trace_id: str | None,
     ) -> AsyncGenerator[RuntimeEvent]:
@@ -234,7 +191,7 @@ class RunExecutionDriver:
             if isinstance(receipt, CommittedTurnReceipt):
                 for event in self._projector.project(receipt.committed_turn, state.recorder, mode="live_suffix"):
                     yield event
-            yield _terminal(state.recorder, receipt, trace_id=trace_id)
+            yield terminal(state.recorder, receipt, trace_id=trace_id)
         except (GeneratorExit, asyncio.CancelledError):
             await self._settle_cancellation(run, prepared, state)
             raise
@@ -243,7 +200,7 @@ class RunExecutionDriver:
                 receipt = await self._recover_failure(run, prepared, trace_request)
                 if receipt is not None:
                     state.settled = True
-                    yield _terminal(state.recorder, receipt, trace_id=trace_id)
+                    yield terminal(state.recorder, receipt, trace_id=trace_id)
                 else:
                     yield state.recorder.record(RunFailed(code="unavailable", message="Turn failed"))
         finally:
@@ -518,7 +475,7 @@ class RunExecutionDriver:
         # A second cancellation must not interrupt the handoff between durable
         # settlement and ownership transfer; otherwise the outer finally could
         # close PreparedRun while a recursive worker still owns its resources.
-        await _shield_cleanup(settle_owned_cancellation())
+        await shield_cleanup(settle_owned_cancellation())
 
     async def _recover_failure(
         self,
@@ -600,7 +557,7 @@ class RunExecutionDriver:
                     with contextlib.suppress(BaseException):
                         await self._stop_claim_waiter(state)
                     with contextlib.suppress(BaseException):
-                        await _stop_heartbeat(state.heartbeat)
+                        await stop_heartbeat(state.heartbeat)
                     state.heartbeat = None
                     if claim_lost:
                         try:
@@ -629,7 +586,7 @@ class RunExecutionDriver:
                         # The finalization task is owned until it settles; a
                         # post-revocation lifecycle error is expected here.
                         with contextlib.suppress(BaseException):
-                            await _shield_cleanup(finalization_task)
+                            await shield_cleanup(finalization_task)
                     try:
                         await prepared.aclose()
                     except BaseException:
@@ -641,16 +598,16 @@ class RunExecutionDriver:
                     with contextlib.suppress(BaseException):
                         await self._stop_claim_waiter(state)
                     with contextlib.suppress(BaseException):
-                        await _stop_heartbeat(state.heartbeat)
+                        await stop_heartbeat(state.heartbeat)
                     state.heartbeat = None
 
-            await _shield_cleanup(inline_cleanup())
+            await shield_cleanup(inline_cleanup())
 
     async def _close_execution(self, prepared: PreparedRun, state: _ExecutionState) -> None:
         with turn_phase_span("Turn.cleanup", inputs={"cleanup_owned": not state.cleanup_handed_off}):
             await self._cancel_pending_event(state)
             await self._stop_claim_waiter(state)
-            await _stop_heartbeat(state.heartbeat)
+            await stop_heartbeat(state.heartbeat)
             if not state.cleanup_handed_off:
                 cleanup_error: BaseException | None = None
                 stream = state.stream
@@ -664,7 +621,7 @@ class RunExecutionDriver:
                     except BaseException as exc:
                         cleanup_error = cleanup_error or exc
                 try:
-                    await _shield_cleanup(prepared.aclose())
+                    await shield_cleanup(prepared.aclose())
                 except BaseException as exc:
                     cleanup_error = cleanup_error or exc
                 if cleanup_error is not None:
@@ -693,7 +650,7 @@ class RunExecutionDriver:
         run: ClaimedRun,
         stream: RunEventStream | None,
         prepared: PreparedRun,
-        heartbeat: _ClaimHeartbeat | None,
+        heartbeat: ClaimHeartbeat | None,
         finalization_task: asyncio.Task[RunSettlement] | None = None,
         *,
         claim_lost: bool = False,
@@ -734,7 +691,7 @@ class RunExecutionDriver:
                 # Stop the heartbeat before the final durable transition. This
                 # closes the window in which claim loss can be observed after a
                 # local settlement decision but before complete_settling.
-                await _stop_heartbeat(heartbeat)
+                await stop_heartbeat(heartbeat)
                 if heartbeat is not None:
                     effective_claim_lost = effective_claim_lost or heartbeat.lost.is_set()
                 if effective_claim_lost:
@@ -754,7 +711,7 @@ class RunExecutionDriver:
                     # is not a child-ownership failure. Waiting for the task
                     # is the ownership proof, regardless of its result.
                     with contextlib.suppress(BaseException):
-                        await _shield_cleanup(finalization_task)
+                        await shield_cleanup(finalization_task)
                 try:
                     await prepared.aclose()
                 except BaseException as exc:
@@ -767,7 +724,7 @@ class RunExecutionDriver:
                     except BaseException as exc:
                         remember(exc)
             finally:
-                await _stop_heartbeat(heartbeat)
+                await stop_heartbeat(heartbeat)
             if cleanup_error is not None:
                 raise cleanup_error
 
@@ -810,9 +767,6 @@ __all__ = [
     "RunEventStream",
     "RunExecutionDriver",
     "RunRunner",
-    "_ClaimHeartbeat",
-    "_shield_cleanup",
-    "_stop_heartbeat",
-    "_terminal",
+    "terminal",
     "_with_trace_id",
 ]

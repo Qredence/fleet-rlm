@@ -322,7 +322,7 @@ uv run pytest tests/unit/backend tests/contracts/backend -q
 ### Mission 06 — Give Turn preparation one explicit owner
 
 - **Tier:** `blocker`
-- **Status:** `open`
+- **Status:** `done`
 - **Depends on:** Mission 05
 - **Narrative:** `IMPLEMENTATION_PHASES.md` §PR 6
 
@@ -362,9 +362,9 @@ uv run pytest tests/unit/backend -q -k 'turn_coordinator or run_execution or pre
 
 **Acceptance:**
 
-- [ ] No private sibling-module imports for ownership helpers
-- [ ] Preparation attempt ownership is explicit
-- [ ] Behavior tests green; Run state machine unchanged
+- [x] No private sibling-module imports for ownership helpers
+- [x] Preparation attempt ownership is explicit
+- [x] Behavior tests green; Run state machine unchanged
 
 ---
 

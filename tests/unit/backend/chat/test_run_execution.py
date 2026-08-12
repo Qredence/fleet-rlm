@@ -124,7 +124,7 @@ def _driver(lifecycle, runner, cleanup):
 @pytest.mark.asyncio
 async def test_finalization_wins_simultaneous_claim_loss() -> None:
     from fleet_rlm.chat.run_cleanup import RunCleanupSupervisor
-    from fleet_rlm.chat.run_execution import _ClaimHeartbeat
+    from fleet_rlm.chat.run_ownership import ClaimHeartbeat
     from fleet_rlm.rlm.events import RunFailed
     from fleet_rlm.rlm.outcome import RLMOutcome
 
@@ -135,7 +135,7 @@ async def test_finalization_wins_simultaneous_claim_loss() -> None:
     )
     stream = _Stream(outcome=lifecycle.outcome, blocking=False)
     heartbeat_task = asyncio.create_task(asyncio.Event().wait())
-    heartbeat = _ClaimHeartbeat(heartbeat_task, asyncio.Event())
+    heartbeat = ClaimHeartbeat(heartbeat_task, asyncio.Event())
     cleanup = RunCleanupSupervisor()
 
     class Runner:
@@ -161,14 +161,14 @@ async def test_finalization_wins_simultaneous_claim_loss() -> None:
 @pytest.mark.asyncio
 async def test_disconnect_cancels_provider_wait_and_orders_detached_cleanup() -> None:
     from fleet_rlm.chat.run_cleanup import RunCleanupSupervisor
-    from fleet_rlm.chat.run_execution import _ClaimHeartbeat
+    from fleet_rlm.chat.run_ownership import ClaimHeartbeat
     from fleet_rlm.rlm.outcome import RLMOutcome
 
     order: list[str] = []
     lifecycle = _CleanupLifecycle(outcome=RLMOutcome("failed", public_error_message="Turn failed"))
     stream = _Stream(outcome=lifecycle.outcome, order=order)
     heartbeat_task = asyncio.create_task(asyncio.Event().wait())
-    heartbeat = _ClaimHeartbeat(heartbeat_task, asyncio.Event())
+    heartbeat = ClaimHeartbeat(heartbeat_task, asyncio.Event())
     cleanup = RunCleanupSupervisor()
 
     class Runner:

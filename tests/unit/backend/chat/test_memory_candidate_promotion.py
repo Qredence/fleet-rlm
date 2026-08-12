@@ -432,7 +432,7 @@ async def test_driver_settles_timed_out_and_cancelled_outcomes_without_memory_pr
 
 @pytest.mark.asyncio
 async def test_driver_claim_lost_handoff_never_promotes_memory_candidates() -> None:
-    from fleet_rlm.chat.run_execution import _ClaimHeartbeat
+    from fleet_rlm.chat.run_ownership import ClaimHeartbeat
     from fleet_rlm.chat.run_lifecycle import FailedRunReceipt
     from fleet_rlm.rlm.events import RunFailed
 
@@ -442,7 +442,7 @@ async def test_driver_claim_lost_handoff_never_promotes_memory_candidates() -> N
     lifecycle = _DriverLifecycle()
     prepared = _DriverPrepared(spy, deadline=asyncio.get_running_loop().time() + 10)
     heartbeat_task = asyncio.create_task(asyncio.Event().wait())
-    heartbeat = _ClaimHeartbeat(heartbeat_task, asyncio.Event())
+    heartbeat = ClaimHeartbeat(heartbeat_task, asyncio.Event())
     revoke_calls: list[object] = []
 
     async def revoke(run, usage):

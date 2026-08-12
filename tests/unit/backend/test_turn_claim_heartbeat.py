@@ -633,7 +633,7 @@ async def test_claim_loss_cleanup_after_commit_is_a_benign_no_op(caplog) -> None
     import logging
 
     from fleet_rlm.chat.run_cleanup import RunCleanupSupervisor
-    from fleet_rlm.chat.run_execution import _ClaimHeartbeat
+    from fleet_rlm.chat.run_ownership import ClaimHeartbeat
     from fleet_rlm.chat.run_lifecycle import (
         ClaimedRun,
         CommittedTurnReceipt,
@@ -690,7 +690,7 @@ async def test_claim_loss_cleanup_after_commit_is_a_benign_no_op(caplog) -> None
         cleanup=cleanup,
         claim_loss_fence=fence,
     )
-    heartbeat = _ClaimHeartbeat(asyncio.create_task(asyncio.sleep(60)), asyncio.Event())
+    heartbeat = ClaimHeartbeat(asyncio.create_task(asyncio.sleep(60)), asyncio.Event())
     with caplog.at_level(logging.INFO):
         coordinator._submit_claim_loss_cleanup(start, heartbeat)
         await cleanup.shutdown(drain_seconds=1)

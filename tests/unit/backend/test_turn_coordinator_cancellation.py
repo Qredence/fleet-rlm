@@ -284,7 +284,7 @@ async def test_cancellation_resistant_preparation_completes_settling_after_late_
                 await release.wait()
             return Prepared()
 
-    monkeypatch.setattr("fleet_rlm.chat.turn_coordinator._PREPARATION_CLEANUP_TIMEOUT_S", 0.01)
+    monkeypatch.setattr("fleet_rlm.chat.preparation_attempt._PREPARATION_CLEANUP_TIMEOUT_S", 0.01)
     store = Store()
     coordinator = TurnCoordinator(
         lifecycle=RunLifecycleService(store, max_artifact_bytes=1024),
@@ -370,7 +370,7 @@ async def test_late_preparation_close_failure_blocks_settlement_release(
                 await release.wait()
             return Prepared()
 
-    monkeypatch.setattr("fleet_rlm.chat.turn_coordinator._PREPARATION_CLEANUP_TIMEOUT_S", 0.01)
+    monkeypatch.setattr("fleet_rlm.chat.preparation_attempt._PREPARATION_CLEANUP_TIMEOUT_S", 0.01)
     store = Store()
     coordinator = TurnCoordinator(
         lifecycle=RunLifecycleService(store, max_artifact_bytes=1024),
@@ -470,7 +470,7 @@ async def test_inline_preparation_close_failure_fails_closed_on_claim_loss(
                 return Prepared()
             return Prepared()
 
-    monkeypatch.setattr("fleet_rlm.chat.turn_coordinator._PREPARATION_CLEANUP_TIMEOUT_S", 1.0)
+    monkeypatch.setattr("fleet_rlm.chat.preparation_attempt._PREPARATION_CLEANUP_TIMEOUT_S", 1.0)
     store = Store()
     coordinator = TurnCoordinator(
         lifecycle=RunLifecycleService(store, max_artifact_bytes=1024, heartbeat_seconds=0.01, stale_after_seconds=0.01),
