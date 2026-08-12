@@ -27,7 +27,7 @@ Narrative detail stays in that document; **this file is the work queue**.
 
 - **Branch:** `dev-0.7`
 - **Audit SHA:** `c34e7d84d8dd753e94d08dc987fef686f1f65e62` (matches `IMPLEMENTATION_PHASES.md`)
-- **Verified against:** `src/fleet_rlm/` and `tools/fleet-tui/` (static audit; Mission 03 Workspace Agent timeout landed; Mission 04 live batch canary pending; Mission 14 remains the full RC live gate)
+- **Verified against:** `src/fleet_rlm/` and `tools/fleet-tui/` (static audit; Mission 04 live two-child batch canary executed; Mission 14 remains the full RC live gate)
 
 ### Corrections vs `IMPLEMENTATION_PHASES.md`
 
@@ -226,7 +226,7 @@ uv run pytest tests/unit/backend/daytona/test_workspace_agent_stat.py \
 ### Mission 04 — Live two-child `rlm_query_batched` certification
 
 - **Tier:** `blocker`
-- **Status:** `open`
+- **Status:** `done`
 - **Depends on:** Mission 03
 - **Narrative:** `IMPLEMENTATION_PHASES.md` §PR 4
 
@@ -264,9 +264,9 @@ FLEET_LIVE=1 uv run pytest tests/live/backend/test_daytona_recursive_batch.py -q
 
 **Acceptance:**
 
-- [ ] Two-child live canary green
-- [ ] Cleanup invariants proven
-- [ ] No new runtime knobs
+- [x] Two-child live canary green
+- [x] Cleanup invariants proven
+- [x] No new runtime knobs
 
 ---
 
