@@ -1,8 +1,8 @@
 import type { components } from "./generated/openapi.js";
 
 export type FleetSession = components["schemas"]["SessionDetailResponse"];
-export type FleetTurnPart = components["schemas"]["UIMessagePart"];
 export type FleetTurn = components["schemas"]["UIMessageResponse"];
+export type FleetTurnPart = FleetTurn["parts"][number];
 type FleetTurnPage = components["schemas"]["SessionTurnPageResponse"];
 export type FleetSkillCard = components["schemas"]["SkillCardResponse"];
 export type FleetSettingsPolicy = components["schemas"]["SettingsPolicyResponse"];

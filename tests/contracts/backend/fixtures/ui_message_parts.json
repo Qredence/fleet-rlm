@@ -1,0 +1,132 @@
+[
+  {
+    "type": "text",
+    "text": "hello",
+    "state": "done"
+  },
+  {
+    "type": "reasoning",
+    "text": "inspect the bounded corpus",
+    "state": "done"
+  },
+  {
+    "type": "step-start"
+  },
+  {
+    "type": "dynamic-tool",
+    "toolName": "read_project_text",
+    "toolCallId": "call-1",
+    "input": {
+      "path": "notes.md"
+    },
+    "providerExecuted": true,
+    "state": "output-available",
+    "output": {
+      "content": "notes"
+    }
+  },
+  {
+    "type": "dynamic-tool",
+    "toolName": "read_project_text",
+    "toolCallId": "call-2",
+    "input": {
+      "path": "missing.md"
+    },
+    "providerExecuted": true,
+    "state": "output-error",
+    "errorText": "not found"
+  },
+  {
+    "type": "data-status",
+    "data": {
+      "phase": "execution",
+      "status": "running",
+      "message": "go"
+    }
+  },
+  {
+    "type": "data-step",
+    "data": {
+      "state": "started",
+      "step": 1,
+      "durationMs": null
+    }
+  },
+  {
+    "type": "data-step",
+    "data": {
+      "state": "finished",
+      "step": 1,
+      "durationMs": 8
+    }
+  },
+  {
+    "type": "data-rlm-code",
+    "data": {
+      "code": "print(1)",
+      "step": 1
+    }
+  },
+  {
+    "type": "data-rlm-output",
+    "data": {
+      "output": "1",
+      "step": 1
+    }
+  },
+  {
+    "type": "data-skill",
+    "id": "dspy-rlm",
+    "data": {
+      "skillId": "dspy-rlm",
+      "name": "DSPy RLM",
+      "phase": "activated",
+      "version": null,
+      "trust": "system",
+      "affordances": []
+    }
+  },
+  {
+    "type": "data-attachment",
+    "data": {
+      "attachmentId": "00000000-0000-4000-8000-000000000001",
+      "phase": "selected"
+    }
+  },
+  {
+    "type": "data-warning",
+    "data": {
+      "message": "some evidence omitted",
+      "code": "detail_overflow"
+    }
+  },
+  {
+    "type": "data-artifact",
+    "data": {
+      "artifactId": "00000000-0000-4000-8000-000000000002",
+      "kind": "markdown",
+      "title": "Report",
+      "mediaType": "text/markdown",
+      "byteSize": 7,
+      "checksumSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    }
+  },
+  {
+    "type": "data-usage",
+    "data": {
+      "iterations": 1,
+      "observed_lm_usage": {},
+      "duration_ms": 8
+    }
+  },
+  {
+    "type": "data-structured-result",
+    "data": {
+      "schemaId": "fleet.default",
+      "schemaVersion": "1",
+      "value": {
+        "answer": "1"
+      }
+    }
+  }
+]

@@ -556,7 +556,7 @@ make check-release
 ### Mission 11 — Reload `UIMessagePart` discriminated union
 
 - **Tier:** `recommended`
-- **Status:** `open`
+- **Status:** `done`
 - **Depends on:** Mission 10
 - **Narrative:** `IMPLEMENTATION_PHASES.md` §PR 11
 
@@ -594,9 +594,9 @@ uv run pytest tests/contracts/backend -q
 
 **Acceptance:**
 
-- [ ] Discriminated union in schemas
-- [ ] Wire JSON unchanged vs fixtures
-- [ ] `make api-check` green; TUI generated types updated only via sync
+- [x] Discriminated union in schemas
+- [x] Wire JSON unchanged vs fixtures
+- [x] `make api-check` green; TUI generated types updated only via sync
 
 ---
 

@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Annotated, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
+from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_serializer, model_validator
 
 from fleet_rlm.artifacts.models import ArtifactKind
 
@@ -130,37 +130,115 @@ class SessionListResponse(BaseModel):
     has_more: bool
 
 
-class UIMessagePart(BaseModel):
-    """Closed reload part vocabulary; variant-specific values remain bounded JSON."""
+class UIMessagePartModel(BaseModel):
+    """Strict base for one reload UIMessage part variant.
+
+    Top-level ``None`` fields are omitted on dump so HTTP reload JSON matches
+    the lean producer dicts in ``ui_message.py`` (no variant-local null padding).
+    Nested ``data`` payloads may still contain explicit nulls.
+    """
 
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
-    type: Literal[
-        "text",
-        "reasoning",
-        "dynamic-tool",
-        "step-start",
-        "data-status",
-        "data-step",
-        "data-rlm-code",
-        "data-rlm-output",
-        "data-skill",
-        "data-attachment",
-        "data-warning",
-        "data-artifact",
-        "data-usage",
-        "data-structured-result",
-    ]
-    text: str | None = None
+    @model_serializer(mode="wrap")
+    def _omit_top_level_none(self, handler):  # noqa: ANN001
+        payload = handler(self)
+        return {key: value for key, value in payload.items() if value is not None}
+
+
+class TextContentUIMessagePart(UIMessagePartModel):
+    text: str
     state: str | None = None
-    id: str | None = None
-    tool_name: str | None = Field(default=None, alias="toolName")
-    tool_call_id: str | None = Field(default=None, alias="toolCallId")
-    input: JsonValue = None
+
+
+class TextUIMessagePart(TextContentUIMessagePart):
+    type: Literal["text"] = "text"
+
+
+class ReasoningUIMessagePart(TextContentUIMessagePart):
+    type: Literal["reasoning"] = "reasoning"
+
+
+class DynamicToolUIMessagePart(UIMessagePartModel):
+    type: Literal["dynamic-tool"] = "dynamic-tool"
+    tool_name: str = Field(alias="toolName")
+    tool_call_id: str = Field(alias="toolCallId")
+    state: str
+    input: JsonValue
     output: JsonValue = None
     error_text: str | None = Field(default=None, alias="errorText")
     provider_executed: bool | None = Field(default=None, alias="providerExecuted")
-    data: JsonValue = None
+
+
+class StepStartUIMessagePart(UIMessagePartModel):
+    type: Literal["step-start"] = "step-start"
+
+
+class DataUIMessagePart(UIMessagePartModel):
+    data: JsonValue
+
+
+class IdentifiedDataUIMessagePart(DataUIMessagePart):
+    id: str | None = None
+
+
+class DataStatusUIMessagePart(DataUIMessagePart):
+    type: Literal["data-status"] = "data-status"
+
+
+class DataStepUIMessagePart(DataUIMessagePart):
+    type: Literal["data-step"] = "data-step"
+
+
+class DataRLMCodeUIMessagePart(DataUIMessagePart):
+    type: Literal["data-rlm-code"] = "data-rlm-code"
+
+
+class DataRLMOutputUIMessagePart(DataUIMessagePart):
+    type: Literal["data-rlm-output"] = "data-rlm-output"
+
+
+class DataSkillUIMessagePart(IdentifiedDataUIMessagePart):
+    type: Literal["data-skill"] = "data-skill"
+
+
+class DataAttachmentUIMessagePart(IdentifiedDataUIMessagePart):
+    type: Literal["data-attachment"] = "data-attachment"
+
+
+class DataWarningUIMessagePart(DataUIMessagePart):
+    type: Literal["data-warning"] = "data-warning"
+
+
+class DataArtifactUIMessagePart(IdentifiedDataUIMessagePart):
+    type: Literal["data-artifact"] = "data-artifact"
+
+
+class DataUsageUIMessagePart(DataUIMessagePart):
+    type: Literal["data-usage"] = "data-usage"
+
+
+class DataStructuredResultUIMessagePart(DataUIMessagePart):
+    type: Literal["data-structured-result"] = "data-structured-result"
+
+
+UIMessagePart = Annotated[
+    TextUIMessagePart
+    | ReasoningUIMessagePart
+    | DynamicToolUIMessagePart
+    | StepStartUIMessagePart
+    | DataStatusUIMessagePart
+    | DataStepUIMessagePart
+    | DataRLMCodeUIMessagePart
+    | DataRLMOutputUIMessagePart
+    | DataSkillUIMessagePart
+    | DataAttachmentUIMessagePart
+    | DataWarningUIMessagePart
+    | DataArtifactUIMessagePart
+    | DataUsageUIMessagePart
+    | DataStructuredResultUIMessagePart,
+    Field(discriminator="type"),
+]
 
 
 class UIMessageResponse(BaseModel):

@@ -376,7 +376,135 @@ export interface components {
             /** Skill Selections */
             skill_selections?: components["schemas"]["SkillSelectionRequest"][];
         };
+        /** DataArtifactUIMessagePart */
+        DataArtifactUIMessagePart: {
+            data: components["schemas"]["JsonValue"];
+            /** Id */
+            id?: string | null;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "data-artifact";
+        };
+        /** DataAttachmentUIMessagePart */
+        DataAttachmentUIMessagePart: {
+            data: components["schemas"]["JsonValue"];
+            /** Id */
+            id?: string | null;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "data-attachment";
+        };
+        /** DataRLMCodeUIMessagePart */
+        DataRLMCodeUIMessagePart: {
+            data: components["schemas"]["JsonValue"];
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "data-rlm-code";
+        };
+        /** DataRLMOutputUIMessagePart */
+        DataRLMOutputUIMessagePart: {
+            data: components["schemas"]["JsonValue"];
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "data-rlm-output";
+        };
+        /** DataSkillUIMessagePart */
+        DataSkillUIMessagePart: {
+            data: components["schemas"]["JsonValue"];
+            /** Id */
+            id?: string | null;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "data-skill";
+        };
+        /** DataStatusUIMessagePart */
+        DataStatusUIMessagePart: {
+            data: components["schemas"]["JsonValue"];
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "data-status";
+        };
+        /** DataStepUIMessagePart */
+        DataStepUIMessagePart: {
+            data: components["schemas"]["JsonValue"];
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "data-step";
+        };
+        /** DataStructuredResultUIMessagePart */
+        DataStructuredResultUIMessagePart: {
+            data: components["schemas"]["JsonValue"];
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "data-structured-result";
+        };
+        /** DataUsageUIMessagePart */
+        DataUsageUIMessagePart: {
+            data: components["schemas"]["JsonValue"];
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "data-usage";
+        };
+        /** DataWarningUIMessagePart */
+        DataWarningUIMessagePart: {
+            data: components["schemas"]["JsonValue"];
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "data-warning";
+        };
+        /** DynamicToolUIMessagePart */
+        DynamicToolUIMessagePart: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "dynamic-tool";
+            /** Toolname */
+            toolName: string;
+            /** Toolcallid */
+            toolCallId: string;
+            /** State */
+            state: string;
+            input: components["schemas"]["JsonValue"];
+            output?: components["schemas"]["JsonValue"];
+            /** Errortext */
+            errorText?: string | null;
+            /** Providerexecuted */
+            providerExecuted?: boolean | null;
+        };
         JsonValue: unknown;
+        /** ReasoningUIMessagePart */
+        ReasoningUIMessagePart: {
+            /** Text */
+            text: string;
+            /** State */
+            state?: string | null;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "reasoning";
+        };
         /** SessionCreateRequest */
         SessionCreateRequest: {
             /** Title */
@@ -557,33 +685,25 @@ export interface components {
             /** Expected Version */
             expected_version: string;
         };
-        /**
-         * UIMessagePart
-         * @description Closed reload part vocabulary; variant-specific values remain bounded JSON.
-         */
-        UIMessagePart: {
+        /** StepStartUIMessagePart */
+        StepStartUIMessagePart: {
             /**
-             * Type
+             * @description discriminator enum property added by openapi-typescript
              * @enum {string}
              */
-            type: "text" | "reasoning" | "dynamic-tool" | "step-start" | "data-status" | "data-step" | "data-rlm-code" | "data-rlm-output" | "data-skill" | "data-attachment" | "data-warning" | "data-artifact" | "data-usage" | "data-structured-result";
+            type: "step-start";
+        };
+        /** TextUIMessagePart */
+        TextUIMessagePart: {
             /** Text */
-            text?: string | null;
+            text: string;
             /** State */
             state?: string | null;
-            /** Id */
-            id?: string | null;
-            /** Toolname */
-            toolName?: string | null;
-            /** Toolcallid */
-            toolCallId?: string | null;
-            input?: components["schemas"]["JsonValue"];
-            output?: components["schemas"]["JsonValue"];
-            /** Errortext */
-            errorText?: string | null;
-            /** Providerexecuted */
-            providerExecuted?: boolean | null;
-            data?: components["schemas"]["JsonValue"];
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "text";
         };
         /** UIMessageResponse */
         UIMessageResponse: {
@@ -595,7 +715,7 @@ export interface components {
              */
             role: "user" | "assistant";
             /** Parts */
-            parts: components["schemas"]["UIMessagePart"][];
+            parts: (components["schemas"]["TextUIMessagePart"] | components["schemas"]["ReasoningUIMessagePart"] | components["schemas"]["DynamicToolUIMessagePart"] | components["schemas"]["StepStartUIMessagePart"] | components["schemas"]["DataStatusUIMessagePart"] | components["schemas"]["DataStepUIMessagePart"] | components["schemas"]["DataRLMCodeUIMessagePart"] | components["schemas"]["DataRLMOutputUIMessagePart"] | components["schemas"]["DataSkillUIMessagePart"] | components["schemas"]["DataAttachmentUIMessagePart"] | components["schemas"]["DataWarningUIMessagePart"] | components["schemas"]["DataArtifactUIMessagePart"] | components["schemas"]["DataUsageUIMessagePart"] | components["schemas"]["DataStructuredResultUIMessagePart"])[];
             /** Metadata */
             metadata?: {
                 [key: string]: components["schemas"]["JsonValue"];

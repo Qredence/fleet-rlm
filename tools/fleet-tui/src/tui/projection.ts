@@ -306,20 +306,25 @@ export function projectDurableTurns(turns: FleetTurn[], clock: Clock = Date.now)
     }
     const resultIndex = turn.parts.findIndex((part) => part.type === "data-structured-result");
     const narrative = turn.parts
-      .filter((part) => part.type === "text")
-      .map((part) => (part.type === "text" ? (part.text ?? "") : ""))
+      .filter(
+        (part): part is Extract<(typeof turn.parts)[number], { type: "text" }> =>
+          part.type === "text",
+      )
+      .map((part) => part.text)
       .join("");
     let currentStep = 0;
     for (const [index, part] of turn.parts.entries()) {
       const id = `${turn.id}:${index}`;
-      const value = data(part.data);
       switch (part.type) {
         case "step-start":
           break;
-        case "data-step":
+        case "data-step": {
+          const value = data(part.data);
           currentStep = number(value.step, currentStep);
           break;
-        case "data-structured-result":
+        }
+        case "data-structured-result": {
+          const value = data(part.data);
           messages.push(
             result(
               id,
@@ -332,21 +337,22 @@ export function projectDurableTurns(turns: FleetTurn[], clock: Clock = Date.now)
             ),
           );
           break;
+        }
         case "text":
           if (resultIndex < 0) {
-            messages.push(text(id, turn.role as Role, part.text ?? "", false, clock));
+            messages.push(text(id, turn.role as Role, part.text, false, clock));
           }
           break;
         case "reasoning":
-          messages.push(thinking(id, runId, currentStep || index + 1, part.text ?? "", clock));
+          messages.push(thinking(id, runId, currentStep || index + 1, part.text, clock));
           break;
         case "dynamic-tool":
           messages.push(
             tool(
               id,
               runId,
-              part.toolCallId ?? id,
-              part.toolName ?? "tool",
+              part.toolCallId,
+              part.toolName,
               part.input,
               part.output,
               part.errorText ?? undefined,
@@ -356,6 +362,7 @@ export function projectDurableTurns(turns: FleetTurn[], clock: Clock = Date.now)
           break;
         case "data-rlm-code":
         case "data-rlm-output": {
+          const value = data(part.data);
           const step = number(value.step, currentStep || index + 1);
           const content = string(part.type === "data-rlm-code" ? value.code : value.output);
           if (!content) break;
@@ -369,23 +376,33 @@ export function projectDurableTurns(turns: FleetTurn[], clock: Clock = Date.now)
         }
         case "data-status":
           break;
-        case "data-skill":
+        case "data-skill": {
+          const value = data(part.data);
           messages.push(skill(id, runId, part.id ?? undefined, value, clock));
           break;
-        case "data-attachment":
+        }
+        case "data-attachment": {
+          const value = data(part.data);
           messages.push(attachment(id, runId, part.id ?? undefined, value, clock));
           break;
-        case "data-warning":
+        }
+        case "data-warning": {
+          const value = data(part.data);
           messages.push(warning(id, runId, value, clock));
           break;
-        case "data-artifact":
+        }
+        case "data-artifact": {
+          const value = data(part.data);
           messages.push(artifact(id, runId, part.id ?? undefined, value, clock));
           break;
-        case "data-usage":
+        }
+        case "data-usage": {
+          const value = data(part.data);
           messages.push(usage(id, runId, value, clock));
           break;
+        }
         default:
-          assertNever(part.type);
+          assertNever(part);
       }
     }
   }

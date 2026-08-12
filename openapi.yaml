@@ -905,7 +905,220 @@ components:
       - text
       title: CreateTurnRequest
       description: Canonical body for POST /api/sessions/{session_id}/turns.
+    DataArtifactUIMessagePart:
+      properties:
+        data:
+          $ref: '#/components/schemas/JsonValue'
+        id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Id
+        type:
+          type: string
+          const: data-artifact
+          title: Type
+          default: data-artifact
+      additionalProperties: false
+      type: object
+      required:
+      - data
+      title: DataArtifactUIMessagePart
+    DataAttachmentUIMessagePart:
+      properties:
+        data:
+          $ref: '#/components/schemas/JsonValue'
+        id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Id
+        type:
+          type: string
+          const: data-attachment
+          title: Type
+          default: data-attachment
+      additionalProperties: false
+      type: object
+      required:
+      - data
+      title: DataAttachmentUIMessagePart
+    DataRLMCodeUIMessagePart:
+      properties:
+        data:
+          $ref: '#/components/schemas/JsonValue'
+        type:
+          type: string
+          const: data-rlm-code
+          title: Type
+          default: data-rlm-code
+      additionalProperties: false
+      type: object
+      required:
+      - data
+      title: DataRLMCodeUIMessagePart
+    DataRLMOutputUIMessagePart:
+      properties:
+        data:
+          $ref: '#/components/schemas/JsonValue'
+        type:
+          type: string
+          const: data-rlm-output
+          title: Type
+          default: data-rlm-output
+      additionalProperties: false
+      type: object
+      required:
+      - data
+      title: DataRLMOutputUIMessagePart
+    DataSkillUIMessagePart:
+      properties:
+        data:
+          $ref: '#/components/schemas/JsonValue'
+        id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Id
+        type:
+          type: string
+          const: data-skill
+          title: Type
+          default: data-skill
+      additionalProperties: false
+      type: object
+      required:
+      - data
+      title: DataSkillUIMessagePart
+    DataStatusUIMessagePart:
+      properties:
+        data:
+          $ref: '#/components/schemas/JsonValue'
+        type:
+          type: string
+          const: data-status
+          title: Type
+          default: data-status
+      additionalProperties: false
+      type: object
+      required:
+      - data
+      title: DataStatusUIMessagePart
+    DataStepUIMessagePart:
+      properties:
+        data:
+          $ref: '#/components/schemas/JsonValue'
+        type:
+          type: string
+          const: data-step
+          title: Type
+          default: data-step
+      additionalProperties: false
+      type: object
+      required:
+      - data
+      title: DataStepUIMessagePart
+    DataStructuredResultUIMessagePart:
+      properties:
+        data:
+          $ref: '#/components/schemas/JsonValue'
+        type:
+          type: string
+          const: data-structured-result
+          title: Type
+          default: data-structured-result
+      additionalProperties: false
+      type: object
+      required:
+      - data
+      title: DataStructuredResultUIMessagePart
+    DataUsageUIMessagePart:
+      properties:
+        data:
+          $ref: '#/components/schemas/JsonValue'
+        type:
+          type: string
+          const: data-usage
+          title: Type
+          default: data-usage
+      additionalProperties: false
+      type: object
+      required:
+      - data
+      title: DataUsageUIMessagePart
+    DataWarningUIMessagePart:
+      properties:
+        data:
+          $ref: '#/components/schemas/JsonValue'
+        type:
+          type: string
+          const: data-warning
+          title: Type
+          default: data-warning
+      additionalProperties: false
+      type: object
+      required:
+      - data
+      title: DataWarningUIMessagePart
+    DynamicToolUIMessagePart:
+      properties:
+        type:
+          type: string
+          const: dynamic-tool
+          title: Type
+          default: dynamic-tool
+        toolName:
+          type: string
+          title: Toolname
+        toolCallId:
+          type: string
+          title: Toolcallid
+        state:
+          type: string
+          title: State
+        input:
+          $ref: '#/components/schemas/JsonValue'
+        output:
+          $ref: '#/components/schemas/JsonValue'
+        errorText:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Errortext
+        providerExecuted:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+          title: Providerexecuted
+      additionalProperties: false
+      type: object
+      required:
+      - toolName
+      - toolCallId
+      - state
+      - input
+      title: DynamicToolUIMessagePart
     JsonValue: {}
+    ReasoningUIMessagePart:
+      properties:
+        text:
+          type: string
+          title: Text
+        state:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: State
+        type:
+          type: string
+          const: reasoning
+          title: Type
+          default: reasoning
+      additionalProperties: false
+      type: object
+      required:
+      - text
+      title: ReasoningUIMessagePart
     SessionCreateRequest:
       properties:
         title:
@@ -1245,74 +1458,36 @@ components:
       - expected_version
       title: SkillSelectionRequest
       description: One exact version-pinned Skill requested for the next Turn.
-    UIMessagePart:
+    StepStartUIMessagePart:
       properties:
         type:
           type: string
-          enum:
-          - text
-          - reasoning
-          - dynamic-tool
-          - step-start
-          - data-status
-          - data-step
-          - data-rlm-code
-          - data-rlm-output
-          - data-skill
-          - data-attachment
-          - data-warning
-          - data-artifact
-          - data-usage
-          - data-structured-result
+          const: step-start
           title: Type
+          default: step-start
+      additionalProperties: false
+      type: object
+      title: StepStartUIMessagePart
+    TextUIMessagePart:
+      properties:
         text:
-          anyOf:
-          - type: string
-          - type: 'null'
+          type: string
           title: Text
         state:
           anyOf:
           - type: string
           - type: 'null'
           title: State
-        id:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Id
-        toolName:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Toolname
-        toolCallId:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Toolcallid
-        input:
-          $ref: '#/components/schemas/JsonValue'
-        output:
-          $ref: '#/components/schemas/JsonValue'
-        errorText:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Errortext
-        providerExecuted:
-          anyOf:
-          - type: boolean
-          - type: 'null'
-          title: Providerexecuted
-        data:
-          $ref: '#/components/schemas/JsonValue'
+        type:
+          type: string
+          const: text
+          title: Type
+          default: text
       additionalProperties: false
       type: object
       required:
-      - type
-      title: UIMessagePart
-      description: Closed reload part vocabulary; variant-specific values remain bounded
-        JSON.
+      - text
+      title: TextUIMessagePart
     UIMessageResponse:
       properties:
         id:
@@ -1326,7 +1501,38 @@ components:
           title: Role
         parts:
           items:
-            $ref: '#/components/schemas/UIMessagePart'
+            oneOf:
+            - $ref: '#/components/schemas/TextUIMessagePart'
+            - $ref: '#/components/schemas/ReasoningUIMessagePart'
+            - $ref: '#/components/schemas/DynamicToolUIMessagePart'
+            - $ref: '#/components/schemas/StepStartUIMessagePart'
+            - $ref: '#/components/schemas/DataStatusUIMessagePart'
+            - $ref: '#/components/schemas/DataStepUIMessagePart'
+            - $ref: '#/components/schemas/DataRLMCodeUIMessagePart'
+            - $ref: '#/components/schemas/DataRLMOutputUIMessagePart'
+            - $ref: '#/components/schemas/DataSkillUIMessagePart'
+            - $ref: '#/components/schemas/DataAttachmentUIMessagePart'
+            - $ref: '#/components/schemas/DataWarningUIMessagePart'
+            - $ref: '#/components/schemas/DataArtifactUIMessagePart'
+            - $ref: '#/components/schemas/DataUsageUIMessagePart'
+            - $ref: '#/components/schemas/DataStructuredResultUIMessagePart'
+            discriminator:
+              propertyName: type
+              mapping:
+                data-artifact: '#/components/schemas/DataArtifactUIMessagePart'
+                data-attachment: '#/components/schemas/DataAttachmentUIMessagePart'
+                data-rlm-code: '#/components/schemas/DataRLMCodeUIMessagePart'
+                data-rlm-output: '#/components/schemas/DataRLMOutputUIMessagePart'
+                data-skill: '#/components/schemas/DataSkillUIMessagePart'
+                data-status: '#/components/schemas/DataStatusUIMessagePart'
+                data-step: '#/components/schemas/DataStepUIMessagePart'
+                data-structured-result: '#/components/schemas/DataStructuredResultUIMessagePart'
+                data-usage: '#/components/schemas/DataUsageUIMessagePart'
+                data-warning: '#/components/schemas/DataWarningUIMessagePart'
+                dynamic-tool: '#/components/schemas/DynamicToolUIMessagePart'
+                reasoning: '#/components/schemas/ReasoningUIMessagePart'
+                step-start: '#/components/schemas/StepStartUIMessagePart'
+                text: '#/components/schemas/TextUIMessagePart'
           type: array
           title: Parts
         metadata:
