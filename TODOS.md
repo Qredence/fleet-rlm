@@ -731,10 +731,15 @@ Plus:
 - [x] Architecture frozen (no further extractions; RC bugfixes only)
 - [x] All deterministic gates green
 - [x] Compat 3.11/3.12/3.13 green (CI-matching unit+contract lane)
-- [ ] Live Daytona receipt green (requires clean tree after RC commit)
+- [x] Live Daytona receipt green (`.scratch/rc/live-daytona-receipt.json`, `passed: true`; durability + MVP lanes)
 - [x] Public transport deterministic gates (api-check, stream-check, TUI projection tests)
 - [x] Wheel/hygiene gates via `make build-release` + `make check-release`
-- [ ] One RC commit identified
+- [x] RC commits identified: freeze `834145f71` + post-freeze heartbeat fix `6cb836c0e`
+
+**RC commits:**
+
+- Freeze: `834145f71` — RC certification hygiene and compat bugfixes
+- Follow-up RC bugfix: `6cb836c0e` — keep dead local MLflow from starving Turn claim heartbeats
 
 **RC bugfixes included in the freeze commit:**
 
@@ -744,45 +749,11 @@ Plus:
 - Lint/format/`ty` leftovers; unused test `**kwargs` renames
 - TUI tests pin `COLORTERM=truecolor` for deterministic truecolor assertions
 
-- **Depends on:** Missions 01–13 (recommended replacement cut); **minimum** cut may proceed after 01–06 only if product accepts higher clarity debt
-- **Narrative:** `IMPLEMENTATION_PHASES.md` §6
+**Still open inside Mission 14 (beyond bounded verifier receipt):**
 
-**Purpose:** Stop architecture changes and prove the branch with one RC commit across deterministic, Python-compat, persistence, live Daytona, public transport, and wheel gates.
-
-**Non-goals:**
-
-- Further module extractions during RC
-- Comparing against `main` databases
-- Requiring identical internal live vs durable transport events (semantic equivalence only)
-
-**Compatibility:** Freeze module ownership listed in phase §9; only bugfixes allowed after freeze.
-
-**Validation gate (all required):**
-
-```bash
-make check
-make check-security
-make build-release
-make check-release
-make api-check
-make stream-check
-git diff --check
-```
-
-Plus:
-
-- Python compatibility lanes green for **3.11 / 3.12 / 3.13**
-- Persistence: clean DB `alembic upgrade head` + Session→Turn→Result; representative **dev-0.7** DB upgrade + reload + new Turn
-- Live Daytona checklist: ordinary Root Turn; Workspace R/W/edit/delete; attachment read; artifact commit; explicit Memory CRUD; post-commit Memory promotion; single recursive child; **M04 two-child canary**; cancel during execution; deadline/timeout cleanup — then no leaked permits/Sandboxes/interpreters/owned background tasks
-- Public transport: same semantic Turn via live SSE, replay SSE, durable reload, TUI live projection, TUI durable projection
-- Wheel: required payloads present (incl. Workspace Agent runtime source after M10); TestPyPI installed-wheel smoke as in release workflow
-
-**Acceptance:**
-
-- [ ] Architecture frozen
-- [ ] All deterministic gates green
-- [ ] Compat + persistence + live + transport + wheel gates green
-- [ ] One RC commit identified
+- Persistence: representative **dev-0.7** DB upgrade + reload + new Turn (if not already evidenced)
+- Broader live Daytona checklist items not fully covered by the bounded MVP/durability receipt (explicit Memory CRUD live, post-commit Memory promotion live, **M04 two-child canary** re-run, cancel/deadline cleanup proof)
+- External promotion / human approval on the receipt (`ci` / `human_approval` still `pending`)
 
 ---
 
