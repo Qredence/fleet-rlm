@@ -752,8 +752,13 @@ Plus:
 **Still open inside Mission 14 (beyond bounded verifier receipt):**
 
 - Persistence: representative **dev-0.7** DB upgrade + reload + new Turn (if not already evidenced)
-- Broader live Daytona checklist items not fully covered by the bounded MVP/durability receipt (explicit Memory CRUD live, post-commit Memory promotion live, **M04 two-child canary** re-run, cancel/deadline cleanup proof)
+- Broader live Daytona checklist items not fully covered by the bounded MVP/durability receipt (explicit Memory CRUD live, post-commit Memory promotion live, cancel/deadline cleanup proof)
 - External promotion / human approval on the receipt (`ci` / `human_approval` still `pending`)
+
+**Optional live extras after receipt green (this session):**
+
+- [x] M04 two-child recursive batch canary re-run (`tests/live/backend/test_daytona_recursive_batch.py`, ~74s)
+- [x] Memory candidate promotion live (`tests/live/backend/test_memory_candidate_live.py`, ~174s)
 
 ---
 
