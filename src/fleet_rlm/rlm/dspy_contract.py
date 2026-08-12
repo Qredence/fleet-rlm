@@ -176,40 +176,44 @@ def _nonnegative_integer(value: object, *, field: str) -> int:
     return value
 
 
-_SAFE_USAGE_KEYS = frozenset({
-    "prompt_tokens",
-    "completion_tokens",
-    "total_tokens",
-    "input_tokens",
-    "output_tokens",
-    "reasoning_tokens",
-    "cached_tokens",
-    "cache_read_input_tokens",
-    "cache_creation_input_tokens",
-    "cache_read_tokens",
-    "cache_creation_tokens",
-    "prompt_cache_hit_tokens",
-    "prompt_cache_miss_tokens",
-    "cost",
-    "input_cost",
-    "output_cost",
-    "cached",
-    "prompt_tokens_details",
-    "completion_tokens_details",
-    "input_tokens_details",
-    "output_tokens_details",
-})
-_SAFE_USAGE_DETAIL_KEYS = frozenset({
-    "audio_tokens",
-    "cached_tokens",
-    "reasoning_tokens",
-    "accepted_prediction_tokens",
-    "rejected_prediction_tokens",
-    "text_tokens",
-    "image_tokens",
-    "cache_read_input_tokens",
-    "cache_creation_input_tokens",
-})
+_SAFE_USAGE_KEYS = frozenset(
+    {
+        "prompt_tokens",
+        "completion_tokens",
+        "total_tokens",
+        "input_tokens",
+        "output_tokens",
+        "reasoning_tokens",
+        "cached_tokens",
+        "cache_read_input_tokens",
+        "cache_creation_input_tokens",
+        "cache_read_tokens",
+        "cache_creation_tokens",
+        "prompt_cache_hit_tokens",
+        "prompt_cache_miss_tokens",
+        "cost",
+        "input_cost",
+        "output_cost",
+        "cached",
+        "prompt_tokens_details",
+        "completion_tokens_details",
+        "input_tokens_details",
+        "output_tokens_details",
+    }
+)
+_SAFE_USAGE_DETAIL_KEYS = frozenset(
+    {
+        "audio_tokens",
+        "cached_tokens",
+        "reasoning_tokens",
+        "accepted_prediction_tokens",
+        "rejected_prediction_tokens",
+        "text_tokens",
+        "image_tokens",
+        "cache_read_input_tokens",
+        "cache_creation_input_tokens",
+    }
+)
 
 
 def _observed_scalar(value: object, *, path: str) -> JsonValue:
@@ -510,11 +514,13 @@ class _RLMTraceCallback(BaseCallback):
             response_details = _lm_output_profile(outputs, include_previews=self._recursive_depth == 0)
         except Exception:
             response_details = {}
-        response_details.update({
-            "call_index": call_index,
-            "wall_time_ms": round((time.perf_counter() - started_at) * 1000, 3),
-            **provider,
-        })
+        response_details.update(
+            {
+                "call_index": call_index,
+                "wall_time_ms": round((time.perf_counter() - started_at) * 1000, 3),
+                **provider,
+            }
+        )
         if self._metrics is not None:
             self._metrics.record_lm_call(
                 role,
@@ -819,8 +825,10 @@ def observed_usage(prediction: Any, *, duration_ms: int) -> RLMUsage:
     if isinstance(raw_usage, Mapping):
         with contextlib.suppress(ValueError):
             observed_lm_usage = _safe_observed_usage(raw_usage, filter_unknown=True)
-    return validate_rlm_usage({
-        "iterations": iterations,
-        "observed_lm_usage": observed_lm_usage,
-        "duration_ms": duration_ms,
-    })
+    return validate_rlm_usage(
+        {
+            "iterations": iterations,
+            "observed_lm_usage": observed_lm_usage,
+            "duration_ms": duration_ms,
+        }
+    )

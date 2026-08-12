@@ -432,8 +432,8 @@ async def test_driver_settles_timed_out_and_cancelled_outcomes_without_memory_pr
 
 @pytest.mark.asyncio
 async def test_driver_claim_lost_handoff_never_promotes_memory_candidates() -> None:
-    from fleet_rlm.chat.run_ownership import ClaimHeartbeat
     from fleet_rlm.chat.run_lifecycle import FailedRunReceipt
+    from fleet_rlm.chat.run_ownership import ClaimHeartbeat
     from fleet_rlm.rlm.events import RunFailed
 
     spy = _PromotionSpy()

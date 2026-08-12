@@ -227,8 +227,8 @@ async def test_sync_sandbox_exposes_only_explicit_async_services() -> None:
 
 @pytest.mark.asyncio
 async def test_sync_sandbox_rejects_calls_from_owning_loop() -> None:
-    from fleet_rlm.daytona.errors import DaytonaAdapterError
     from fleet_rlm.daytona.dspy_sync_bridge import sync_sandbox
+    from fleet_rlm.daytona.errors import DaytonaAdapterError
 
     class Fs:
         async def download_file(self, path: str) -> bytes:

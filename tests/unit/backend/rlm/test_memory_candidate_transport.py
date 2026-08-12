@@ -10,12 +10,12 @@ from uuid import uuid4
 import dspy
 import pytest
 
+
 def _context(*, drain_calls: list[int], returned_candidates=(), cancelled: bool = False):
     from fleet_rlm.chat.session_context import SessionContextManifest
     from fleet_rlm.rlm.context import ExecutionRuntime, RLMExecutionContext, RunIdentity, SessionView
     from fleet_rlm.rlm.dspy_contract import RLMOptions
     from fleet_rlm.sessions.models import TurnAccess
-
     from tests.unit.backend.rlm.fakes import EmptyCapabilities
 
     class Capabilities(EmptyCapabilities):
@@ -44,6 +44,7 @@ def _context(*, drain_calls: list[int], returned_candidates=(), cancelled: bool 
         capabilities=cast("Any", Capabilities()),
     )
 
+
 @pytest.mark.asyncio
 async def test_runner_attaches_drained_memory_candidates_only_to_completed_outcome() -> None:
     from fleet_rlm.files.memory_candidates import MemoryCandidate
@@ -69,6 +70,7 @@ async def test_runner_attaches_drained_memory_candidates_only_to_completed_outco
     assert stream.outcome.memory_candidates == (candidate,)
     assert drains == [1]
 
+
 @pytest.mark.asyncio
 async def test_runner_discards_memory_candidates_on_execution_failure() -> None:
     from fleet_rlm.rlm.runner import RLMRunner
@@ -87,6 +89,7 @@ async def test_runner_discards_memory_candidates_on_execution_failure() -> None:
     assert stream.outcome.memory_candidates == ()
     assert drains == [1]
 
+
 def test_non_completed_outcome_rejects_memory_candidates() -> None:
     from fleet_rlm.files.memory_candidates import MemoryCandidate
     from fleet_rlm.rlm.outcome import RLMOutcome
@@ -100,6 +103,7 @@ def test_non_completed_outcome_rejects_memory_candidates() -> None:
                 public_error_message="Turn failed",
                 memory_candidates=(candidate,),
             )
+
 
 @pytest.mark.asyncio
 async def test_runner_discards_memory_candidates_when_execution_is_cancelled() -> None:

@@ -42,7 +42,7 @@ async def _run_member(
         from fleet_rlm.files.volume_paths import VolumePaths
 
         class RaceProcess:
-            def code_run(self, code: str, **kwargs):
+            def code_run(self, code: str, **_kwargs):
                 markers = {{
                     "write": "    if operation == 'write':",
                     "edit_compose": "            payload = ''.join(lines).encode('utf-8')",
@@ -112,7 +112,7 @@ def _listed(volume: Path):
     from fleet_rlm.daytona.workspace_memory import DaytonaWorkspaceMemoryStore
 
     class LocalProcess:
-        def code_run(self, code: str, **kwargs):
+        def code_run(self, code: str, **_kwargs):
             completed = subprocess.run([sys.executable, "-c", code], check=False, capture_output=True, text=True)
             return SimpleNamespace(exit_code=completed.returncode, result=completed.stdout)
 

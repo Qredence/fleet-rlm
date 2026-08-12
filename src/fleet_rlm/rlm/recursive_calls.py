@@ -471,9 +471,7 @@ class RecursiveRLMExecutor:
 
     def _begin_batch(self, prompts: tuple[str, ...]) -> tuple[RecursiveCallReservation, ...]:
         indexes = self._reserve_call_indexes(prompts)
-        return tuple(
-            self._make_reservation(prompt, index) for prompt, index in zip(prompts, indexes, strict=True)
-        )
+        return tuple(self._make_reservation(prompt, index) for prompt, index in zip(prompts, indexes, strict=True))
 
     def _reserve_call_indexes(self, prompts: tuple[str, ...]) -> tuple[int, ...]:
         if not prompts:

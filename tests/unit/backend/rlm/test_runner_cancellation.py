@@ -10,6 +10,7 @@ from uuid import uuid4
 import dspy
 import pytest
 
+
 @pytest.mark.asyncio
 async def test_runner_returns_promptly_and_retains_blocking_worker_for_cleanup() -> None:
     from fleet_rlm.chat.session_context import SessionContextManifest
@@ -76,6 +77,7 @@ async def test_runner_returns_promptly_and_retains_blocking_worker_for_cleanup()
 
     release.set()
     await asyncio.wait_for(stream.wait_owned(), timeout=2)
+
 
 @pytest.mark.asyncio
 async def test_runner_transfers_blocking_worker_after_caller_cancellation() -> None:

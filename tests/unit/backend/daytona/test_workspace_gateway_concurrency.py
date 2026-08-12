@@ -146,7 +146,7 @@ class _SubprocessAgentProcess:
         self._barrier = asyncio.Event()
         self._mutation_delay = mutation_delay
 
-    async def code_run(self, code: str, **kwargs) -> SimpleNamespace:
+    async def code_run(self, code: str, **_kwargs) -> SimpleNamespace:
         self.calls += 1
         if self.calls >= 2:
             self._barrier.set()
@@ -174,7 +174,7 @@ class _DelayedDeleteBeforeUnlinkAgentProcess:
         self._barrier = asyncio.Event()
         self._coordination_path = coordination_path
 
-    async def code_run(self, code: str, **kwargs) -> SimpleNamespace:
+    async def code_run(self, code: str, **_kwargs) -> SimpleNamespace:
         self.calls += 1
         if self.calls >= 2:
             self._barrier.set()

@@ -28,6 +28,7 @@ from fleet_rlm.rlm.runner import RLMRunner
 from fleet_rlm.sessions.models import TurnAccess
 from tests.unit.backend.rlm.fakes import EmptyCapabilities
 
+
 @pytest.mark.asyncio
 async def test_root_child_root_flow_preserves_parent_repl_and_typed_submit() -> None:
     adapter = dspy.JSONAdapter()
@@ -103,6 +104,7 @@ async def test_root_child_root_flow_preserves_parent_repl_and_typed_submit() -> 
     assert all("root-complete" not in (event.detail.message or "") for event in statuses)
     assert all(not isinstance(detail, Status) for detail in stream.outcome.execution_details)
 
+
 def _child_lease(call_index: int) -> ChildRuntimeLease:
     """Create a child runtime lease for a recursive test invocation.
 
@@ -120,6 +122,7 @@ def _child_lease(call_index: int) -> ChildRuntimeLease:
         f"recursive/test-workspace/test-run/{call_index}",
         interpreter.shutdown,
     )
+
 
 @pytest.mark.asyncio
 async def test_runner_rejects_recursive_tool_after_authority_revocation() -> None:
@@ -185,6 +188,7 @@ async def test_runner_rejects_recursive_tool_after_authority_revocation() -> Non
     assert stream.outcome.terminal_status == "failed"
     assert created == []
 
+
 @pytest.mark.asyncio
 async def test_normal_daytona_policy_omits_recursive_tool_and_guidance() -> None:
     adapter = dspy.JSONAdapter()
@@ -236,6 +240,7 @@ async def test_normal_daytona_policy_omits_recursive_tool_and_guidance() -> None
     assert stream.outcome is not None and stream.outcome.succeeded
     assert captured["tools"] is None
     assert "rlm_query" not in captured["signature"].instructions
+
 
 @pytest.mark.asyncio
 async def test_failed_child_cleanup_prevents_successful_root_outcome() -> None:
@@ -304,6 +309,7 @@ async def test_failed_child_cleanup_prevents_successful_root_outcome() -> None:
 
     assert stream.outcome is not None
     assert stream.outcome.terminal_status == "failed"
+
 
 @pytest.mark.asyncio
 async def test_runner_wait_owned_retains_pending_recursive_workers_until_child_lease_closes(

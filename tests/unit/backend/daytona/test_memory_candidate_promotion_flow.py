@@ -12,7 +12,7 @@ from fleet_rlm.files.volume_paths import VolumePaths
 
 
 class _GeneratedWorkspaceProcess:
-    def code_run(self, code: str, **kwargs):
+    def code_run(self, code: str, **_kwargs):
         completed = subprocess.run(
             [sys.executable, "-c", code],
             check=False,

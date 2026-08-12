@@ -8,7 +8,7 @@
   },
   "scripts": {
     "start": "tsx src/cli.ts",
-    "test": "vitest run",
+    "test": "env COLORTERM=truecolor vitest run",
     "bench:tui": "tsx src/tui/transcript.bench.ts",
     "typecheck": "tsc --noEmit",
     "format": "biome format --write src",

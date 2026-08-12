@@ -141,7 +141,7 @@ class UIMessagePartModel(BaseModel):
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
     @model_serializer(mode="wrap")
-    def _omit_top_level_none(self, handler):  # noqa: ANN001
+    def _omit_top_level_none(self, handler):
         payload = handler(self)
         return {key: value for key, value in payload.items() if value is not None}
 

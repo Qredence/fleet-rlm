@@ -66,7 +66,8 @@ def _preserve_stream_id(target: ObservationDetail, details: Sequence[ExecutionDe
         (
             detail.stream_id
             for detail in details
-            if type(detail) is type(target)
+            if isinstance(detail, _StreamDetail)
+            and type(detail) is type(target)
             and detail.step == step
             and isinstance(detail.stream_id, str)
             and bool(detail.stream_id)

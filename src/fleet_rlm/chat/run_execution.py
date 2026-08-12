@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncGenerator, Awaitable, Callable
 from dataclasses import dataclass, replace
-from typing import Any, Protocol, TypeAlias, cast
+from typing import Any, Protocol, Self, TypeAlias, cast
 from uuid import UUID
 
 from fleet_rlm.chat.committed_turn_events import CommittedTurnEventProjector
@@ -38,7 +38,17 @@ from fleet_rlm.rlm.events import (
 from fleet_rlm.rlm.outcome import RLMOutcome
 
 
-class RunEventStream(AsyncIterator[RuntimeEvent], Protocol):
+class RunEventStream(Protocol):
+    """Async observation stream with settlement accessors (3.11-safe Protocol).
+
+    Do not inherit from ``AsyncIterator``: on Python 3.11 a Protocol may only
+    subclass other Protocols, and ``collections.abc.AsyncIterator`` is not one.
+    """
+
+    def __aiter__(self) -> Self: ...
+
+    async def __anext__(self) -> RuntimeEvent: ...
+
     @property
     def outcome(self) -> RLMOutcome | None: ...
 
@@ -767,6 +777,6 @@ __all__ = [
     "RunEventStream",
     "RunExecutionDriver",
     "RunRunner",
-    "terminal",
     "_with_trace_id",
+    "terminal",
 ]

@@ -692,7 +692,58 @@ uv run pytest tests/unit/backend/composition tests/unit/backend -q -k 'compositi
 ### Mission 14 — Release-candidate certification freeze
 
 - **Tier:** `rc`
-- **Status:** `open`
+- **Status:** `in_progress`
+- **Depends on:** Missions 01–13 (recommended replacement cut); **minimum** cut may proceed after 01–06 only if product accepts higher clarity debt
+- **Narrative:** `IMPLEMENTATION_PHASES.md` §6
+
+**Purpose:** Stop architecture changes and prove the branch with one RC commit across deterministic, Python-compat, persistence, live Daytona, public transport, and wheel gates.
+
+**Non-goals:**
+
+- Further module extractions during RC
+- Comparing against `main` databases
+- Requiring identical internal live vs durable transport events (semantic equivalence only)
+
+**Compatibility:** Freeze module ownership listed in phase §9; only bugfixes allowed after freeze.
+
+**Validation gate (all required):**
+
+```bash
+make check
+make check-security
+make build-release
+make check-release
+make api-check
+make stream-check
+git diff --check
+```
+
+Plus:
+
+- Python compatibility lanes green for **3.11 / 3.12 / 3.13**
+- Persistence: clean DB `alembic upgrade head` + Session→Turn→Result; representative **dev-0.7** DB upgrade + reload + new Turn
+- Live Daytona checklist: ordinary Root Turn; Workspace R/W/edit/delete; attachment read; artifact commit; explicit Memory CRUD; post-commit Memory promotion; single recursive child; **M04 two-child canary**; cancel during execution; deadline/timeout cleanup — then no leaked permits/Sandboxes/interpreters/owned background tasks
+- Public transport: same semantic Turn via live SSE, replay SSE, durable reload, TUI live projection, TUI durable projection
+- Wheel: required payloads present (incl. Workspace Agent runtime source after M10); TestPyPI installed-wheel smoke as in release workflow
+
+**Acceptance:**
+
+- [x] Architecture frozen (no further extractions; RC bugfixes only)
+- [x] All deterministic gates green
+- [x] Compat 3.11/3.12/3.13 green (CI-matching unit+contract lane)
+- [ ] Live Daytona receipt green (requires clean tree after RC commit)
+- [x] Public transport deterministic gates (api-check, stream-check, TUI projection tests)
+- [x] Wheel/hygiene gates via `make build-release` + `make check-release`
+- [ ] One RC commit identified
+
+**RC bugfixes included in the freeze commit:**
+
+- `RunEventStream` Protocol no longer subclasses `AsyncIterator` (Python 3.11)
+- `recursive_batch` submit-time `copy_context` + typed worker wrapper
+- `preparation_attempt` `Coroutine` typing; trajectory `isinstance` narrowing; memory `Literal` version
+- Lint/format/`ty` leftovers; unused test `**kwargs` renames
+- TUI tests pin `COLORTERM=truecolor` for deterministic truecolor assertions
+
 - **Depends on:** Missions 01–13 (recommended replacement cut); **minimum** cut may proceed after 01–06 only if product accepts higher clarity debt
 - **Narrative:** `IMPLEMENTATION_PHASES.md` §6
 

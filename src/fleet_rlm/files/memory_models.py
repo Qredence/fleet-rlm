@@ -126,7 +126,7 @@ def workspace_memory_record_id(timestamp: str, category: str, learning: str) -> 
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:8]
 
 
-def _workspace_memory_record_version(match: re.Match[str]) -> int:
+def _workspace_memory_record_version(match: re.Match[str]) -> Literal[1, 2, 3]:
     if match.re is _MEMORY_RECORD_V3:
         return 3
     if match["memory_id"] is not None:

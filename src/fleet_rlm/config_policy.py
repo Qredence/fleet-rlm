@@ -390,15 +390,17 @@ class ConfigPolicyService:
                 value = self._lookup(inherited, field.path)
             if value is _MISSING:
                 continue
-            values.append({
-                "path": field.path,
-                "group": field.group,
-                "label": field.label,
-                "value": value,
-                "editor": field.editor,
-                "choices": list(field.choices),
-                "environment_overridden": False,
-            })
+            values.append(
+                {
+                    "path": field.path,
+                    "group": field.group,
+                    "label": field.label,
+                    "value": value,
+                    "editor": field.editor,
+                    "choices": list(field.choices),
+                    "environment_overridden": False,
+                }
+            )
         return {"name": name, "fields": values}
 
     def _scope_table(self, document: TOMLDocument, scope: str) -> dict[str, Any]:

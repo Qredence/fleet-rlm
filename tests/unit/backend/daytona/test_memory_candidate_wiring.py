@@ -15,7 +15,7 @@ from fleet_rlm.files.models import PreparedAttachments
 
 
 class _GeneratedAgentProcess:
-    def code_run(self, code: str, **kwargs):
+    def code_run(self, code: str, **_kwargs):
         completed = subprocess.run(
             [sys.executable, "-c", code],
             check=False,

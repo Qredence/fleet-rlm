@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Coroutine
 from typing import Any, Literal, Protocol
 
 from fleet_rlm.chat.run_cleanup import RunCleanupSupervisor
@@ -41,7 +41,7 @@ class PreparationAttempt:
         *,
         run: ClaimedRun,
         heartbeat: ClaimHeartbeat | None,
-        prepare: Awaitable[PreparedRun],
+        prepare: Coroutine[Any, Any, PreparedRun],
         lifecycle: RunLifecycle,
         cleanup: RunCleanupSupervisor,
         deadline: float,
@@ -60,15 +60,11 @@ class PreparationAttempt:
         self._preparation_cleanup_error: BaseException | None = None
 
     def claim_lost(self) -> bool:
-        return self._heartbeat is not None and (
-            self._heartbeat.lost.is_set() or self._run.authority.revoked
-        )
+        return self._heartbeat is not None and (self._heartbeat.lost.is_set() or self._run.authority.revoked)
 
     async def wait(self) -> PreparedRun:
         self._preparation_task = asyncio.create_task(self._prepare)
-        self._heartbeat_lost = (
-            asyncio.create_task(self._heartbeat.lost.wait()) if self._heartbeat is not None else None
-        )
+        self._heartbeat_lost = asyncio.create_task(self._heartbeat.lost.wait()) if self._heartbeat is not None else None
         waiters = {self._preparation_task}
         if self._heartbeat_lost is not None:
             waiters.add(self._heartbeat_lost)
@@ -130,13 +126,9 @@ class PreparationAttempt:
 
     async def cancel_and_settle(self, failure: RunFailure) -> Literal["claim_lost", "settled"]:
         """Cancel/timeout path: sample claim loss before and after cancel; revoke after finish."""
-        claim_was_lost = self._heartbeat is not None and (
-            self._heartbeat.lost.is_set() or self._run.authority.revoked
-        )
+        claim_was_lost = self._heartbeat is not None and (self._heartbeat.lost.is_set() or self._run.authority.revoked)
         preparation_pending = await shield_cleanup(self.cancel())
-        claim_was_lost = claim_was_lost or (
-            self._heartbeat is not None and self._heartbeat.lost.is_set()
-        )
+        claim_was_lost = claim_was_lost or (self._heartbeat is not None and self._heartbeat.lost.is_set())
         if claim_was_lost:
             assert self._heartbeat is not None
             await self._submit_claim_loss_with_cleanup(preparation_pending)

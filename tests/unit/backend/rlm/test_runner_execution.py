@@ -12,6 +12,7 @@ from uuid import uuid4
 import dspy
 import pytest
 
+
 @pytest.mark.asyncio
 async def test_detail_relay_keeps_1024_ordinary_events_and_lifecycle_details() -> None:
     from fleet_rlm.rlm.events import RLMOutput, SkillLoaded
@@ -29,6 +30,7 @@ async def test_detail_relay_keeps_1024_ordinary_events_and_lifecycle_details() -
     assert any(isinstance(detail, SkillLoaded) for detail in details)
     assert relay.overflowed is True
 
+
 @pytest.mark.asyncio
 async def test_detail_relay_retains_step_lifecycle_when_ordinary_queue_is_full() -> None:
     from fleet_rlm.rlm.events import RLMOutput, StepFinished, StepStarted
@@ -43,6 +45,7 @@ async def test_detail_relay_retains_step_lifecycle_when_ordinary_queue_is_full()
 
     assert relay.drain() == [StepStarted(1), StepFinished(1)]
     assert relay.overflowed is True
+
 
 @pytest.mark.asyncio
 async def test_runner_uses_native_path_for_plain_greeting() -> None:
@@ -117,6 +120,7 @@ async def test_runner_uses_native_path_for_plain_greeting() -> None:
     assert stream.outcome.prediction is not None
     assert stream.outcome.prediction.display_text == "Hi! How can I help you today?"
     assert stream.outcome.usage["iterations"] == 1
+
 
 @pytest.mark.asyncio
 async def test_runner_uses_supported_async_call_and_returns_typed_outcome(
@@ -299,11 +303,13 @@ async def test_runner_uses_supported_async_call_and_returns_typed_outcome(
         )
     ]
 
+
 def test_runner_uses_stock_json_adapter_without_protocol_salvage() -> None:
     adapter = dspy.JSONAdapter()
 
     assert type(adapter) is dspy.JSONAdapter
     assert adapter.use_native_function_calling is True
+
 
 @pytest.mark.asyncio
 async def test_runner_passes_prepared_attachment_context_to_rlm() -> None:
@@ -369,6 +375,7 @@ async def test_runner_passes_prepared_attachment_context_to_rlm() -> None:
 
     assert stream.outcome is not None and stream.outcome.succeeded
 
+
 @pytest.mark.asyncio
 async def test_runner_validates_host_metadata_before_provider_execution() -> None:
     from fleet_rlm.chat.session_context import SessionContextManifest, TurnPreview
@@ -430,6 +437,7 @@ async def test_runner_validates_host_metadata_before_provider_execution() -> Non
     assert stream.outcome is not None
     assert stream.outcome.terminal_status == "failed"
     assert stream.outcome.public_error_message == "Turn failed"
+
 
 @pytest.mark.asyncio
 async def test_runner_loads_two_skills_reads_python_resource_and_completes_submit() -> None:

@@ -172,7 +172,7 @@ class _LocalProcess:
     def __init__(self) -> None:
         self.calls: list[str] = []
 
-    async def code_run(self, code: str, **kwargs):
+    async def code_run(self, code: str, **_kwargs):
         self.calls.append(code)
         output = StringIO()
         with redirect_stdout(output), suppress(SystemExit):

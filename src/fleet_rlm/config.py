@@ -801,9 +801,7 @@ def _profile_contract(
 def load_profile_environment_contracts(path: Path | None = None) -> tuple[ProfileEnvironmentContract, ...]:
     """Return every profile's provider/environment contract from the TOML policy."""
     document = _read_policy_document(path or _CONFIG_PATH)
-    return tuple(
-        _profile_contract(name, document.defaults, selected) for name, selected in document.profiles.items()
-    )
+    return tuple(_profile_contract(name, document.defaults, selected) for name, selected in document.profiles.items())
 
 
 def active_profile_contract(path: Path | None = None) -> ProfileEnvironmentContract:

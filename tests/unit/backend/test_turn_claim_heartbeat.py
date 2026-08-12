@@ -633,7 +633,6 @@ async def test_claim_loss_cleanup_after_commit_is_a_benign_no_op(caplog) -> None
     import logging
 
     from fleet_rlm.chat.run_cleanup import RunCleanupSupervisor
-    from fleet_rlm.chat.run_ownership import ClaimHeartbeat
     from fleet_rlm.chat.run_lifecycle import (
         ClaimedRun,
         CommittedTurnReceipt,
@@ -643,6 +642,7 @@ async def test_claim_loss_cleanup_after_commit_is_a_benign_no_op(caplog) -> None
         RunLifecycleService,
         RunStateError,
     )
+    from fleet_rlm.chat.run_ownership import ClaimHeartbeat
     from fleet_rlm.chat.turn_coordinator import TurnCoordinator
     from fleet_rlm.persistence.repositories import InMemoryRunStateStore, InMemorySessionCatalog
     from fleet_rlm.rlm.dspy_contract import PredictionResult, empty_rlm_usage

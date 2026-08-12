@@ -9,6 +9,7 @@ from uuid import uuid4
 import dspy
 import pytest
 
+
 def test_trajectory_normalization_is_strict_and_preserves_absent_fields() -> None:
     from fleet_rlm.rlm.dspy_contract import PredictionOutputError, normalize_prediction_trajectory
     from fleet_rlm.rlm.events import RLMCode, RLMOutput, RLMReasoning, StepFinished, StepStarted
@@ -34,6 +35,7 @@ def test_trajectory_normalization_is_strict_and_preserves_absent_fields() -> Non
         RLMOutput,
         StepFinished,
     ]
+
 
 def test_trajectory_semantic_details_are_verbatim_and_share_the_run_bound() -> None:
     from fleet_rlm.rlm.dspy_contract import normalize_prediction_trajectory
@@ -64,6 +66,7 @@ def test_trajectory_semantic_details_are_verbatim_and_share_the_run_bound() -> N
         if isinstance(item, (RLMReasoning, RLMCode, RLMOutput))
     ]
     assert values == ["x" * 9 + "...", "y" * 9 + "...", "z" * 9 + "..."]
+
 
 def test_trajectory_reconciliation_replaces_live_details_without_duplicates() -> None:
     from fleet_rlm.rlm.dspy_contract import TrajectoryStep
@@ -104,6 +107,7 @@ def test_trajectory_reconciliation_replaces_live_details_without_duplicates() ->
         == []
     )
 
+
 def test_trajectory_reconciliation_replaces_incremental_output_with_one_canonical_part() -> None:
     from fleet_rlm.rlm.dspy_contract import TrajectoryStep
     from fleet_rlm.rlm.events import RLMCode, RLMOutput, RLMReasoning, StepFinished, StepStarted
@@ -132,6 +136,7 @@ def test_trajectory_reconciliation_replaces_incremental_output_with_one_canonica
         RLMOutput("canonical output", 1, "output-1", False, True),
         StepFinished(1),
     ]
+
 
 def test_trajectory_reconciliation_keeps_live_reasoning_emitted_before_step_started() -> None:
     from fleet_rlm.rlm.dspy_contract import TrajectoryStep
@@ -162,6 +167,7 @@ def test_trajectory_reconciliation_keeps_live_reasoning_emitted_before_step_star
         StepFinished(1),
     ]
 
+
 def test_trajectory_reconciliation_updates_pre_step_live_reasoning_when_canonical_differs() -> None:
     from fleet_rlm.rlm.dspy_contract import TrajectoryStep
     from fleet_rlm.rlm.events import RLMCode, RLMOutput, RLMReasoning, StepFinished, StepStarted
@@ -183,6 +189,7 @@ def test_trajectory_reconciliation_updates_pre_step_live_reasoning_when_canonica
 
     assert emissions == [RLMReasoning("native reasoning", 1)]
     assert details[0] == RLMReasoning("native reasoning", 1)
+
 
 @pytest.mark.asyncio
 async def test_runner_deduplicates_final_reasoning_against_nonadjacent_normalized_trajectory() -> None:
@@ -245,6 +252,7 @@ async def test_runner_deduplicates_final_reasoning_against_nonadjacent_normalize
         truncate_public_text(repeated, max_len=16),
     ]
 
+
 def test_trajectory_reconciliation_silently_upserts_flag_drifted_identical_streams() -> None:
     """RC-4a: live deltas equal to the canonical text emit nothing at turn end."""
     from fleet_rlm.rlm.dspy_contract import TrajectoryStep
@@ -276,6 +284,7 @@ def test_trajectory_reconciliation_silently_upserts_flag_drifted_identical_strea
         RLMOutput("native output", 1, "output-1", False, True),
         StepFinished(1),
     ]
+
 
 def test_trajectory_reconciliation_treats_submit_label_and_live_terminal_frame_as_identical() -> None:
     """RC-4a: the pre-fix live log (delta + full final frame) reconciles silently."""
@@ -309,6 +318,7 @@ def test_trajectory_reconciliation_treats_submit_label_and_live_terminal_frame_a
         StepFinished(1),
     ]
 
+
 def test_trajectory_reconciliation_re_emits_once_for_a_true_correction() -> None:
     """RC-4a: corrected text still emits exactly one canonical replacement."""
     from fleet_rlm.rlm.dspy_contract import TrajectoryStep
@@ -338,6 +348,7 @@ def test_trajectory_reconciliation_re_emits_once_for_a_true_correction() -> None
         RLMOutput("corrected output", 1, "output-1", False, True),
         StepFinished(1),
     ]
+
 
 def test_trajectory_reconciliation_aligns_canonical_steps_after_setup_execution() -> None:
     """A context setup execution must not cause a duplicate canonical action stream."""

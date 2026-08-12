@@ -5,7 +5,7 @@ from __future__ import annotations
 import time
 from collections.abc import Callable, Sequence
 from concurrent.futures import FIRST_EXCEPTION, Future, ThreadPoolExecutor, wait
-from contextvars import copy_context
+from contextvars import Context, copy_context
 from dataclasses import dataclass
 from threading import Event
 
@@ -51,13 +51,18 @@ def run_reserved_batch(
     try:
         try:
             for reservation in reservations:
-                future: Future[str] = pool.submit(
-                    copy_context().run,
-                    execute,
-                    reservation,
-                    batch_cancelled,
-                )
-                futures.append(future)
+                # Capture the submitter ContextVar state (MLflow turn span, etc.)
+                # before the worker starts; copy_context() inside the worker would
+                # see an empty thread-local context.
+                ctx = copy_context()
+
+                def _run(
+                    reserved: RecursiveCallReservation = reservation,
+                    context: Context = ctx,
+                ) -> str:
+                    return context.run(execute, reserved, batch_cancelled)
+
+                futures.append(pool.submit(_run))
         except BaseException:
             batch_cancelled.set()
             pending = {future for future in futures if not future.done()}

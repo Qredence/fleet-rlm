@@ -623,9 +623,7 @@ class RLMRunner:
         final_reasoning = getattr(prediction, "final_reasoning", None)
         if isinstance(final_reasoning, str) and final_reasoning.strip():
             public_reasoning = truncate_public_text(final_reasoning, max_len=context.execution.options.max_output_chars)
-            if not has_reasoning(
-                observations.details, public_reasoning, context.execution.options.max_output_chars
-            ):
+            if not has_reasoning(observations.details, public_reasoning, context.execution.options.max_output_chars):
                 item = RLMReasoning(public_reasoning)
                 yield observations.record(item)
         for item in self._drain_capability_details(context):
