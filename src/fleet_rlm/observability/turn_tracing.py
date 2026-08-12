@@ -16,6 +16,8 @@ from importlib.metadata import version as package_version
 from typing import Any, cast
 from uuid import UUID
 
+from fleet_rlm.observability.tracing import is_tracing_active
+
 logger = logging.getLogger(__name__)
 
 _MAX_TRACE_TEXT_CHARS = 1_000
@@ -323,6 +325,12 @@ def turn_trace(
             otherwise, a no-op handle.
     """
     if not enabled:
+        yield TraceHandle(trace_id=None)
+        return
+    if not is_tracing_active():
+        # Policy may still request tracing after configure_tracing failed soft
+        # (for example a dead local tracking URI). Opening spans would enter
+        # MLflow's HTTP retry loop and starve claim heartbeats.
         yield TraceHandle(trace_id=None)
         return
 

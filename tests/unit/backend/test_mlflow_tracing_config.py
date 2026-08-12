@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import sys
+from pathlib import Path
 from types import ModuleType, SimpleNamespace
 from typing import Any
 
@@ -17,6 +18,7 @@ from fleet_rlm.config import Settings
 def _reset_trace_content_bound(monkeypatch: pytest.MonkeyPatch) -> None:
     """Reset the shared readable content bound for a test."""
     monkeypatch.setattr(tracing, "_TRACE_CONTENT_MAX_CHARS", 10_000)
+    tracing.set_tracing_active_for_tests(False)
 
 
 def _install_fake_mlflow(
@@ -171,8 +173,33 @@ def test_configure_tracing_enabled_without_workspace_settings_is_soft_disabled(
     ):
         monkeypatch.delenv(name, raising=False)
     assert tracing.configure_tracing(Settings(_env_file=None, mlflow_tracing_enabled=True)) is False
+    assert tracing.is_tracing_active() is False
     assert calls.tracking_uri_args == []
     assert calls.autolog_calls == 0
+
+
+def test_unavailable_local_tracking_uri_does_not_activate_turn_spans(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Dead HTTP tracking must not leave Turn spans armed for MLflow retries."""
+    fake = ModuleType("mlflow")
+    fake.__file__ = str(Path(__file__).resolve())
+    monkeypatch.setitem(sys.modules, "mlflow", fake)
+    monkeypatch.setitem(sys.modules, "mlflow.dspy", ModuleType("mlflow.dspy"))
+    monkeypatch.setattr(tracing, "_local_tracking_server_available", lambda _uri: False)
+
+    assert (
+        tracing.configure_tracing(
+            Settings(
+                _env_file=None,
+                mlflow_tracing_enabled=True,
+                mlflow_experiment_name="fleet-rlm-eval",
+                mlflow_tracking_uri="http://127.0.0.1:5001",
+            )
+        )
+        is False
+    )
+    assert tracing.is_tracing_active() is False
 
 
 def test_configure_tracing_enabled_sets_uri_experiment_and_autolog(
@@ -181,6 +208,7 @@ def test_configure_tracing_enabled_sets_uri_experiment_and_autolog(
     calls = _install_fake_mlflow(monkeypatch)
     monkeypatch.delenv("MLFLOW_TRACKING_URI", raising=False)
     assert tracing.configure_tracing(_enabled_settings()) is True
+    assert tracing.is_tracing_active() is True
     assert calls.tracking_uri_args == ["databricks"]
     assert calls.experiment_args == [()]
     assert calls.experiment_kwargs[0]["experiment_name"] == "fleet-test-exp"

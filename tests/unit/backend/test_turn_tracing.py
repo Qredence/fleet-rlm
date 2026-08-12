@@ -31,9 +31,11 @@ def _activate_fleet_trace_context(monkeypatch: pytest.MonkeyPatch) -> Iterator[N
     from fleet_rlm.observability import tracing
 
     monkeypatch.setattr(tracing, "_TRACE_CONTENT_MAX_CHARS", 10_000)
+    tracing.set_tracing_active_for_tests(True)
     token = turn_tracing._fleet_trace_active.set(True)
     yield
     turn_tracing._fleet_trace_active.reset(token)
+    tracing.set_tracing_active_for_tests(False)
 
 
 def _install_fake_mlflow(

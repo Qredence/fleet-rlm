@@ -37,6 +37,23 @@ logger = logging.getLogger(__name__)
 _DEFAULT_TRACKING_URI = "databricks"
 _TRACE_DESTINATION_TAG = "mlflow.experiment.databricksTraceDestinationPath"
 _TRACE_CONTENT_MAX_CHARS = 10_000
+# Set only after configure_tracing succeeds. Policy may request tracing while the
+# tracking backend is absent; Turn spans must not enter MLflow's HTTP retry loop
+# and starve claim heartbeats.
+_TRACING_ACTIVE = False
+
+
+def is_tracing_active() -> bool:
+    """Return whether configure_tracing successfully activated Turn spans."""
+    return _TRACING_ACTIVE
+
+
+def set_tracing_active_for_tests(active: bool) -> None:
+    """Test-only override for Turn-span gate without a real tracking backend."""
+    global _TRACING_ACTIVE
+    _TRACING_ACTIVE = active
+
+
 _CREDENTIAL_KEYS = frozenset({"api_key", "authorization", "credential", "password", "secret", "token"})
 _OPERATIONAL_TEXT_KEYS = frozenset(
     {
@@ -263,6 +280,8 @@ def configure_tracing(settings: Settings) -> bool:
     setup fails. `FleetConfigurationError` still reports an intentional Unity
     Catalog trace-location conflict; other failures are logged and suppressed.
     """
+    global _TRACING_ACTIVE
+    _TRACING_ACTIVE = False
     _set_trace_content_max_chars(getattr(settings, "mlflow_trace_content_max_chars", _TRACE_CONTENT_MAX_CHARS))
 
     if not settings.mlflow_tracing_enabled:
@@ -301,17 +320,10 @@ def configure_tracing(settings: Settings) -> bool:
         import mlflow
         import mlflow.dspy
 
-        mlflow.set_tracking_uri(tracking_uri)
-
-        # MLflow 3.15's sampler is process-global. Set it from the selected
-        # Fleet policy so an ambient environment variable cannot change the
-        # effective trace volume.
-        os.environ["MLFLOW_TRACE_SAMPLING_RATIO"] = str(settings.mlflow_trace_sampling_ratio)
-
-        # A local MLflow server is optional engineering observability. Avoid
-        # entering MLflow's retry loop when the configured local endpoint is
-        # absent; this keeps FastAPI app construction and OpenAPI generation
-        # bounded while preserving tracing when the server is available.
+        # A local MLflow server is optional engineering observability. Probe
+        # before set_tracking_uri so a dead HTTP endpoint never becomes the
+        # process-global tracking target for later Turn spans. Skip the probe
+        # for non-installed/fake mlflow modules (no ``__file__``) used in tests.
         if (
             tracking_uri.startswith(("http://", "https://"))
             and getattr(mlflow, "__file__", None)
@@ -319,6 +331,13 @@ def configure_tracing(settings: Settings) -> bool:
         ):
             logger.warning("MLflow tracking server is unavailable; continuing without traces")
             return False
+
+        mlflow.set_tracking_uri(tracking_uri)
+
+        # MLflow 3.15's sampler is process-global. Set it from the selected
+        # Fleet policy so an ambient environment variable cannot change the
+        # effective trace volume.
+        os.environ["MLFLOW_TRACE_SAMPLING_RATIO"] = str(settings.mlflow_trace_sampling_ratio)
 
         # Preflight: catch trace-location mismatch before set_experiment.
         # FleetConfigurationError propagates — all other failures are soft.
@@ -364,6 +383,7 @@ def configure_tracing(settings: Settings) -> bool:
             settings.mlflow_trace_sampling_ratio,
             _TRACE_CONTENT_MAX_CHARS,
         )
+        _TRACING_ACTIVE = True
         return True
     except FleetConfigurationError:
         raise  # Configuration errors propagate clearly

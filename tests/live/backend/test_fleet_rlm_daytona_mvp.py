@@ -185,6 +185,10 @@ def _live_settings(tmp_path: Path) -> Settings:
             "rlm_max_iterations": 8,
             "rlm_max_llm_calls": 12,
             "turn_timeout_seconds": 840,
+            # Live product evidence is RuntimeEvents → SSE → TUI. Keep optional
+            # MLflow out of the MVP lane so a dead local tracking URI cannot
+            # starve claim heartbeats during preparation.
+            "mlflow_tracing_enabled": False,
         }
     )
 
