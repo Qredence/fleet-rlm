@@ -218,6 +218,8 @@ exclude = [
     "build",
     "dist",
     ".egg-info",
+    # Remote Daytona Workspace Agent program (loaded as text, not host-styled).
+    "src/fleet_rlm/daytona/workspace_agent_runtime.py",
 ]
 
 [tool.ruff.lint]
@@ -280,6 +282,8 @@ exclude = [
     "tests/",
     "scripts/",
     "notebooks/",
+    # Remote agent entrypoint expects host-injected parameters; not host-typed.
+    "src/fleet_rlm/daytona/workspace_agent_runtime.py",
 ]
 
 [tool.deptry]

@@ -508,7 +508,7 @@ uv run python scripts/check_codebase_tree.py
 ### Mission 10 — Workspace Agent as real Python source
 
 - **Tier:** `recommended`
-- **Status:** `open`
+- **Status:** `done`
 - **Depends on:** Mission 09
 - **Narrative:** `IMPLEMENTATION_PHASES.md` §PR 10
 
@@ -547,9 +547,9 @@ make check-release
 
 **Acceptance:**
 
-- [ ] Remote agent is readable Python source in the package/wheel
-- [ ] Golden protocol tests green before and after
-- [ ] Wheel required-file assertion includes the runtime module
+- [x] Remote agent is readable Python source in the package/wheel
+- [x] Golden protocol tests green before and after
+- [x] Wheel required-file assertion includes the runtime module
 
 ---
 
