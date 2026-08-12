@@ -43,5 +43,7 @@
   "claudeCode.hideOnboarding": true,
   "claudeCode.respectGitIgnore": false,
   "claudeCode.useTerminal": true,
-  "python.terminal.useEnvFile": true
+  "python.terminal.useEnvFile": true,
+  "jupyter.interactiveWindow.cellMarker.codeRegex": "^# COMMAND ----------|^# Databricks notebook source|^(#\\s*%%|#\\s*\\<codecell\\>|#\\s*In\\[\\d*?\\]|#\\s*In\\[ \\])",
+  "jupyter.interactiveWindow.cellMarker.default": "# COMMAND ----------"
 }
