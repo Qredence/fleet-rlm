@@ -66,7 +66,7 @@ describe("renderMessage", () => {
     }
   });
 
-  it("uses distinct pi surfaces for pending, successful, and failed Tools", () => {
+  it("uses one panel surface with distinct status glyph colors for Tools", () => {
     const base = {
       id: "tool",
       kind: "tool" as const,
@@ -83,10 +83,99 @@ describe("renderMessage", () => {
       { ...base, status: "error", error: "failed safely", endedAt: 1 },
       48,
     ).join("\n");
+    // Every tool card shares the panel background so the block reads as one unit.
     const backgrounds = [running, success, failed].map((output) => firstAnsi(output, "48"));
     expect(backgrounds.every(Boolean)).toBe(true);
-    expect(new Set(backgrounds).size).toBe(3);
+    expect(new Set(backgrounds).size).toBe(1);
+    // Status text uses the semantic success/error colors per state.
+    expect(success).toContain("\x1b[38;2;181;189;104m"); // success #b5bd68
+    expect(failed).toContain("\x1b[38;2;204;102;102m"); // error #cc6666
     expect(failed).toContain("failed safely");
+  });
+
+  it("collapses multi-line tool errors to their summary with an expand hint", () => {
+    const tool: Message = {
+      id: "err-tool",
+      kind: "tool",
+      runId: "run",
+      toolCallId: "call",
+      name: "bash",
+      input: { command: "ls" },
+      error: 'Traceback (most recent call last):\n  File "x.py", line 1\nValueError: boom',
+      startedAt: 0,
+      endedAt: 1,
+      status: "error",
+      ts: 2,
+    };
+    const collapsed = stripAnsi(renderMessage(tool, 90).join("\n"));
+    expect(collapsed).toContain("ValueError: boom");
+    expect(collapsed).toContain("to expand");
+    expect(collapsed).not.toContain("Traceback (most recent call last)");
+
+    const expanded = stripAnsi(renderMessage({ ...tool, collapsed: false }, 90).join("\n"));
+    expect(expanded).toContain("Traceback (most recent call last)");
+  });
+
+  it("renders folded code/output cards as one hint line", () => {
+    const code: Message = {
+      id: "code-fold",
+      kind: "code",
+      runId: "run",
+      step: 1,
+      code: "a = 1\nb = 2",
+      collapsed: true,
+      ts: 1,
+    };
+    const output: Message = {
+      id: "out-fold",
+      kind: "output",
+      runId: "run",
+      step: 1,
+      output: "x\ny",
+      collapsed: true,
+      ts: 1,
+    };
+    const codeRendered = stripAnsi(renderMessage(code, 60).join("\n"));
+    expect(codeRendered).toContain("2 lines");
+    expect(codeRendered).toContain("to expand");
+    const outputRendered = stripAnsi(renderMessage(output, 60).join("\n"));
+    expect(outputRendered).toContain("2 lines");
+  });
+
+  it("renders all code and output after an explicit expansion", () => {
+    const code: Message = {
+      id: "large-code",
+      kind: "code",
+      runId: "run",
+      step: 1,
+      code: Array.from({ length: 205 }, (_, index) => `code_line_${index}`).join("\n"),
+      ts: 1,
+    };
+    const output: Message = {
+      id: "large-output",
+      kind: "output",
+      runId: "run",
+      step: 1,
+      output: Array.from({ length: 205 }, (_, index) => `output_line_${index}`).join("\n"),
+      ts: 2,
+    };
+
+    const preview = stripAnsi(
+      [...renderMessage(code, 80), ...renderMessage(output, 80)].join("\n"),
+    );
+    expect(preview).toContain("more lines");
+    expect(preview).not.toContain("code_line_204");
+    expect(preview).not.toContain("output_line_0");
+
+    const expanded = stripAnsi(
+      [
+        ...renderMessage({ ...code, collapsed: false }, 80),
+        ...renderMessage({ ...output, collapsed: false }, 80),
+      ].join("\n"),
+    );
+    expect(expanded).toContain("code_line_204");
+    expect(expanded).toContain("output_line_0");
+    expect(expanded).toContain("output_line_204");
   });
 
   it("uses semantic warning and error colors without hiding their diagnostics", () => {

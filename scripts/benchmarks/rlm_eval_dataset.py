@@ -159,6 +159,123 @@ def _static_records(args: argparse.Namespace) -> list[dict[str, Any]]:
     return records
 
 
+def _parse_dataset_tags(text: str | None) -> dict[str, str]:
+    """
+    Parse ``--dataset-tags`` ``key=value,key=value`` text into a tag mapping.
+
+    Parameters:
+        text (str | None): Comma-separated ``key=value`` pairs, or `None`.
+
+    Returns:
+        dict[str, str]: Parsed dataset-level tags.
+
+    Raises:
+        DatasetError: If any entry is malformed or empty.
+    """
+    if not text:
+        return {}
+    tags: dict[str, str] = {}
+    for pair in text.split(","):
+        pair = pair.strip()
+        if not pair:
+            continue
+        if "=" not in pair:
+            raise DatasetError(f"--dataset-tags entry must be key=value: {pair!r}")
+        key, value = pair.split("=", 1)
+        key, value = key.strip(), value.strip()
+        if not key or not value:
+            raise DatasetError(f"--dataset-tags entry must be key=value: {pair!r}")
+        tags[key] = value
+    return tags
+
+
+def _apply_dataset_tags(args: argparse.Namespace, dataset: Any) -> dict[str, str]:
+    """Parse and stamp dataset-level tags, returning the applied tag mapping."""
+    tags = _parse_dataset_tags(args.dataset_tags)
+    if tags:
+        from mlflow.genai import datasets
+
+        datasets.set_dataset_tags(str(dataset.dataset_id), tags)
+    return tags
+
+
+def history(args: argparse.Namespace) -> dict[str, Any]:
+    """
+    List managed datasets with bounded per-dataset metadata and tags.
+
+    Parameters:
+        args (argparse.Namespace): MLflow connection, name filter, and limit options.
+
+    Returns:
+        dict[str, Any]: History receipt with bounded dataset rows.
+    """
+    _require_live()
+    _configure_mlflow(args)
+    from mlflow.genai import datasets
+
+    filter_string = f"name LIKE '{args.name_prefix}%'" if args.name_prefix else None
+    items = datasets.search_datasets(
+        experiment_ids=[args.experiment_id] if args.experiment_id else None,
+        filter_string=filter_string,
+        max_results=args.limit,
+    )
+    rows: list[dict[str, Any]] = []
+    for item in items:
+        tags = getattr(item, "tags", None) or {}
+        has_records = getattr(item, "has_records", False)
+        if callable(has_records):
+            has_records = has_records()
+        rows.append(
+            {
+                "dataset_id": str(getattr(item, "dataset_id", "") or ""),
+                "name": str(getattr(item, "name", "") or ""),
+                "created_time": getattr(item, "created_time", None),
+                "has_records": bool(has_records),
+                "tags": {str(key): str(value) for key, value in list(tags.items())[:32]},
+            }
+        )
+    return {"command": "history", "filter_string": filter_string, "count": len(rows), "datasets": rows}
+
+
+def tag_dataset(args: argparse.Namespace) -> dict[str, Any]:
+    """
+    Set or delete a dataset-level tag on the managed dataset.
+
+    Parameters:
+        args (argparse.Namespace): MLflow connection, tag key/value, and --delete options.
+
+    Returns:
+        dict[str, Any]: Tag receipt with the applied action.
+
+    Raises:
+        DatasetError: If the tag key or value is missing.
+    """
+    _require_live()
+    _configure_mlflow(args)
+    if not args.tag_key:
+        raise DatasetError("tag requires --tag-key")
+    from mlflow.genai import datasets
+
+    dataset = _get_dataset(args)
+    dataset_id = str(dataset.dataset_id)
+    if args.delete:
+        datasets.delete_dataset_tag(dataset_id, args.tag_key)
+        action = "deleted"
+    else:
+        if args.tag_value is None:
+            raise DatasetError("tag requires --tag-value unless --delete is set")
+        datasets.set_dataset_tags(dataset_id, {args.tag_key: args.tag_value})
+        action = "set"
+    return {
+        "command": "tag",
+        "dataset_id": dataset_id,
+        "dataset_name": args.dataset_name,
+        "action": action,
+        "tag_key": args.tag_key,
+        "tag_value": args.tag_value,
+    }
+
+
 def ingest_static(args: argparse.Namespace) -> dict[str, Any]:
     """
     Create the dataset when missing and merge the static expectation records.
@@ -187,6 +304,7 @@ def ingest_static(args: argparse.Namespace) -> dict[str, Any]:
     if current == 0 or args.force:
         dataset.merge_records(records)
         merged = len(records)
+    dataset_tags = _apply_dataset_tags(args, dataset)
     return {
         "command": "ingest-static",
         "dataset_id": dataset.dataset_id,
@@ -194,6 +312,7 @@ def ingest_static(args: argparse.Namespace) -> dict[str, Any]:
         "created": created,
         "merged": merged,
         "records": len(dataset.to_df()),
+        "dataset_tags": dataset_tags,
     }
 
 
@@ -268,6 +387,7 @@ def ingest_traces(args: argparse.Namespace) -> dict[str, Any]:
 
     if records:
         dataset.merge_records(records)
+    dataset_tags = _apply_dataset_tags(args, dataset)
     return {
         "command": "ingest-traces",
         "dataset_id": dataset.dataset_id,
@@ -276,6 +396,7 @@ def ingest_traces(args: argparse.Namespace) -> dict[str, Any]:
         "merged": len(records),
         "skipped": skipped,
         "records": len(dataset.to_df()),
+        "dataset_tags": dataset_tags,
     }
 
 
@@ -313,7 +434,10 @@ def build_parser() -> argparse.ArgumentParser:
         connection, and ingestion options.
     """
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=("show", "ingest-static", "ingest-traces", "export"))
+    parser.add_argument(
+        "command",
+        choices=("show", "ingest-static", "ingest-traces", "export", "history", "tag"),
+    )
     parser.add_argument("--mlflow-url", default=DEFAULT_MLFLOW_URL)
     parser.add_argument("--experiment-id", default="")
     parser.add_argument("--dataset-name", default=_dataset_name_default(), help=DATASET_NAME)
@@ -322,6 +446,16 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--expectations-json", type=Path, default=None)
     parser.add_argument("--force", action="store_true", help="Re-merge static records into a non-empty dataset")
     parser.add_argument("--export-out", type=Path, default=None, help="Export destination records JSON")
+    parser.add_argument(
+        "--dataset-tags",
+        default="",
+        help="Comma-separated dataset-level key=value tags stamped after ingestion",
+    )
+    parser.add_argument("--name-prefix", default="", help="History filter on dataset name prefix")
+    parser.add_argument("--limit", type=int, default=100, help="Maximum datasets in history (default: 100)")
+    parser.add_argument("--tag-key", default="", help="Tag key to set or delete")
+    parser.add_argument("--tag-value", default=None, help="Tag value to set")
+    parser.add_argument("--delete", action="store_true", help="Delete the dataset tag instead of setting it")
     parser.add_argument("--output", type=Path, required=True)
     return parser
 
@@ -348,8 +482,14 @@ def main(argv: Sequence[str] | None = None) -> int:
             receipt = export_records(args)
         elif args.command == "ingest-static":
             receipt = ingest_static(args)
-        else:
+        elif args.command == "ingest-traces":
             receipt = ingest_traces(args)
+        elif args.command == "history":
+            if not 1 <= args.limit <= 500:
+                raise DatasetError("--limit must be in [1, 500]")
+            receipt = history(args)
+        else:
+            receipt = tag_dataset(args)
     except Exception as exc:
         receipt = {
             "schema": RECEIPT_SCHEMA,

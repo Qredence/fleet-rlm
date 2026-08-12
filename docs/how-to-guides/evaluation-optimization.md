@@ -15,6 +15,9 @@ behind `FLEET_LIVE=1` with Databricks auth from the environment
 | Production monitoring | `scripts/benchmarks/enable_monitoring.py` | `fleet.monitoring-config/v1` |
 | Judge alignment | `scripts/benchmarks/align_judges.py` | `fleet.judge-alignment/v1` |
 | Signature optimization | `scripts/optimize/optimize_signature_omni.py` | `fleet.signature-optimization/v1` |
+| Trace attribute annotation | `scripts/benchmarks/annotate_traces.py` | `fleet.trace-annotation/v1` |
+| Prompt registry + trace linking | `scripts/benchmarks/manage_prompts.py` | `fleet.prompt-registry/v1` |
+| Evaluation scorers | `scripts/benchmarks/scorers.py` (via `run_rlm_latency.py evaluate --scorers`) | `fleet.rlm-latency/v1` |
 
 Prerequisites: the `benchmark` extra (`uv sync --extra benchmark`) provides
 `databricks-agents` for UC-managed datasets; the `optimize` extra provides
@@ -45,7 +48,7 @@ detached ephemeral lane and consume exported records in the 3.13 lane:
 uv run --no-project --python 3.12 \
   --with 'mlflow[genai]>=3.15' --with 'databricks-agents>=1.11' \
   --with 'databricks-connect==18.0.0' --with httpx --with python-dotenv \
-  python scripts/benchmarks/rlm_eval_dataset.py <ingest-static|ingest-traces|show|export> ...
+  python scripts/benchmarks/rlm_eval_dataset.py <ingest-static|ingest-traces|show|export|history|tag> ...
 ```
 
 Use `export --export-out records.json` to materialize records for
@@ -79,6 +82,11 @@ FLEET_LIVE=1 uv run --no-project --python 3.12 \
   every merged record needs an entry in the expectations mapping
   (`{"trace_id": {"expected_response": ..., "required_evidence": [...], ...}}`),
   and trace ids already present are skipped so the command is idempotent.
+- Both ingest commands accept `--dataset-tags "key=value,key=value"` to stamp
+  dataset-level tags after the merge (e.g. `fleet.source=static,fleet.version=v2.1`).
+- `history --name-prefix <prefix>` lists managed datasets with id, name, created
+  time, record presence, and up to 32 tags; `tag --tag-key <k> --tag-value <v>`
+  sets a dataset-level tag and `tag --tag-key <k> --delete` removes one.
 - Records keep the strict shape `{"inputs": {"query": ...},
   "expectations": {...}}`; trace-origin records carry
   `expectations.source_trace_id` for lineage.
@@ -201,6 +209,12 @@ FLEET_LIVE=1 uv run python scripts/optimize/optimize_signature_omni.py \
   `.scratch/optimization/candidate-*.txt`. **Promotion is manual**: a human
   reviews the diff and edits `src/fleet_rlm/rlm/signature.py`; the runtime
   never consumes optimizer output directly.
+- `--register-prompt` (with `--prompt-name`, `--prompt-alias`,
+  `--prompt-commit-message`) registers the best candidate as a versioned MLflow
+  prompt through the shared prompt-registry core; the receipt records
+  `prompt_registry.prompt_version` for lineage. Registration never changes the
+  manual promotion rule — the runtime still only consumes
+  `src/fleet_rlm/rlm/signature.py`.
 - The default executor runs candidate REPL code in-process; run optimization
   only on trusted hosts.
 
@@ -272,6 +286,79 @@ Production remains blocked until the actual stable trusted gateway FQDN is
 tested under its exact policy and Daytona confirms that organization-tier
 essential-service exceptions cannot provide a general exfiltration path.
 
+## 5. Trace annotation, prompt registry, and evaluation scorers
+
+### 5.1 Trace attribute annotation (`annotate_traces.py`)
+
+Persisted `fleet_turn` traces carry rich span structure but only a small fixed
+set of runtime tags. `annotate` walks traces and stamps derived, non-content
+`fleet.*` trace tags — `fleet.turn_status`, `fleet.latency_ms`,
+`fleet.models`, `fleet.providers`, `fleet.tools`, `fleet.total_tokens`,
+`fleet.span_types` — so the MLflow UI and `search_traces(filter_string=...)`
+can select by model, provider, tool, latency, or token usage. Values are
+bounded aggregates; prompts, responses, and span content are never exported.
+
+```bash
+FLEET_LIVE=1 uv run python scripts/benchmarks/annotate_traces.py annotate \
+  --experiment-name fleet-rlm --limit 100 \
+  --tag fleet_eval_candidate \
+  --output .scratch/evals/annotate.json
+```
+
+Optional `--tag <key>` restricts annotation to traces carrying
+`tag.<key>='true'` (e.g. the eval-candidate tag). This is a post-hoc,
+scripts-only tagger: it never changes span emission in
+`src/fleet_rlm/observability/turn_tracing.py`.
+
+### 5.2 Prompt registry and trace linking (`manage_prompts.py`)
+
+`register` versions the `FleetRLMSignature` instruction text (or a
+`--text-file`) as an MLflow prompt tagged with `fleet.source` and
+`fleet.signature_sha256`; `link-traces` maps tagged traces to a registered
+version for lineage; `list` / `set-alias` wrap `search_prompts` /
+`set_prompt_alias`.
+
+```bash
+FLEET_LIVE=1 uv run python scripts/benchmarks/manage_prompts.py register \
+  --experiment-name fleet-rlm --prompt-name fleet-rlm-signature \
+  --alias latest --output .scratch/evals/prompt-register.json
+FLEET_LIVE=1 uv run python scripts/benchmarks/manage_prompts.py link-traces \
+  --experiment-name fleet-rlm --prompt-name fleet-rlm-signature --version 1 \
+  --tag fleet_eval_candidate --output .scratch/evals/prompt-link.json
+FLEET_LIVE=1 uv run python scripts/benchmarks/manage_prompts.py list \
+  --output .scratch/evals/prompt-list.json
+```
+
+The optimizer's `--register-prompt` reuses the same core
+(`manage_prompts.register_prompt_text`), so promoted GEPA candidates and
+manually registered signatures land in one registry. Linking to the experiment
+is best-effort and backend-dependent; registration succeeds regardless.
+
+### 5.3 Evaluation scorers (`scorers.py`)
+
+`scorers.py` adds deterministic custom scorers and MLflow built-ins on top of
+the `correctness` / `evidence_coverage` judges:
+
+- `response_present` — the response is a non-empty answer string.
+- `tool_evidence_used` — the trace's tool spans cover every
+  `expectations.required_evidence` item (strict: returns `False` when no trace
+  is available).
+- `guidelines` (built-in) and `retrieval_groundedness` (built-in) — LLM-based,
+  require the `--judge-model` URI.
+
+Wire them into the quality gate without changing default behavior:
+
+```bash
+FLEET_LIVE=1 uv run python scripts/benchmarks/run_rlm_latency.py evaluate \
+  --experiment-id 1 --mlflow-url http://127.0.0.1:5001 \
+  --scorers response_present,tool_evidence_used,guidelines \
+  --guidelines 'The response must stay within the requested scope.' \
+  --output .scratch/evals/quality-scorers.json
+```
+
+`--scorers` is additive; omitting it keeps the current two-judge default, and
+the receipt lists the applied `scorers` by name.
+
 ## Failure and budget guardrails
 
 - Every script writes a bounded JSON receipt and exits non-zero on failure;
@@ -289,5 +376,8 @@ uv run pytest tests/unit/optimization tests/unit/scripts/test_align_judges.py \
   tests/unit/scripts/test_enable_monitoring.py \
   tests/unit/scripts/test_rlm_eval_dataset.py \
   tests/unit/scripts/test_optimize_signature_gepa.py \
-  tests/unit/scripts/test_optimize_signature_omni.py -q
+  tests/unit/scripts/test_optimize_signature_omni.py \
+  tests/unit/scripts/test_annotate_traces.py \
+  tests/unit/scripts/test_manage_prompts.py \
+  tests/unit/scripts/test_scorers.py -q
 ```

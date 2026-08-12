@@ -3,7 +3,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { FleetApiClient } from "../../fleet-api-client.js";
 import { ConversationStore } from "../store.js";
@@ -761,5 +761,41 @@ describe("redo / reload / trace", () => {
     const last = ctx.store.getState().messages.at(-1);
     expect(last).toMatchObject({ kind: "text", role: "system" });
     if (last?.kind === "text") expect(last.text).toContain("trace:abc123");
+  });
+});
+
+describe("theme command", () => {
+  beforeEach(() => vi.stubEnv("FLEET_TUI_STATE_DIR", tmpdir()));
+  afterEach(() => vi.unstubAllEnvs());
+
+  it("/theme lists builtin themes with the current one marked", async () => {
+    const { ctx } = makeContext();
+    const theme = listCommands().find((c) => c.name === "theme");
+    if (theme) await theme.handler([], ctx);
+    const last = ctx.store.getState().messages.at(-1);
+    expect(last).toMatchObject({ kind: "text", role: "system" });
+    if (last?.kind === "text") {
+      expect(last.text).toContain("dark");
+      expect(last.text).toContain("light");
+    }
+  });
+
+  it("/theme sets a builtin theme by name", async () => {
+    const { ctx } = makeContext();
+    const theme = listCommands().find((c) => c.name === "theme");
+    if (theme) await theme.handler(["light"], ctx);
+    const last = ctx.store.getState().messages.at(-1);
+    expect(last).toMatchObject({ kind: "text", role: "system" });
+    if (last?.kind === "text") expect(last.text).toContain("Theme set to 'light'.");
+    if (theme) await theme.handler(["dark"], ctx);
+  });
+
+  it("/theme rejects unknown names", async () => {
+    const { ctx } = makeContext();
+    const theme = listCommands().find((c) => c.name === "theme");
+    if (theme) await theme.handler(["nope"], ctx);
+    const last = ctx.store.getState().messages.at(-1);
+    expect(last).toMatchObject({ kind: "text", role: "system" });
+    if (last?.kind === "text") expect(last.text).toContain("Unknown theme");
   });
 });

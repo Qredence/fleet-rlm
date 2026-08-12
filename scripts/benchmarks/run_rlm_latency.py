@@ -988,14 +988,20 @@ def run_evaluation(args: argparse.Namespace) -> dict[str, Any]:
             return str(run_turn(client, query, nonce=f"quality-{uuid4()}")["answer"])
 
     run_name = args.run_name or f"quality-{datetime.now(UTC).strftime('%Y%m%dT%H%M%SZ')}"
+    scorers: list[Any] = [
+        get_scorer(name="correctness", experiment_id=args.experiment_id),
+        get_scorer(name="evidence_coverage", experiment_id=args.experiment_id),
+    ]
+    if args.scorers:
+        from scripts.benchmarks.scorers import build_scorers
+
+        requested = [name.strip() for name in args.scorers.split(",") if name.strip()]
+        scorers.extend(build_scorers(requested, judge_model=args.judge_model, guidelines=args.guidelines or None))
     with mlflow.start_run(run_name=run_name) as run:
         result = mlflow.genai.evaluate(
             data=frame,
             predict_fn=predict_fn,
-            scorers=[
-                get_scorer(name="correctness", experiment_id=args.experiment_id),
-                get_scorer(name="evidence_coverage", experiment_id=args.experiment_id),
-            ],
+            scorers=scorers,
         )
         run_id = run.info.run_id
     metrics = {str(key): value for key, value in result.metrics.items()}
@@ -1006,6 +1012,7 @@ def run_evaluation(args: argparse.Namespace) -> dict[str, Any]:
         "run_name": run_name,
         "dry_run": args.dry_run,
         "records": len(frame),
+        "scorers": [getattr(scorer, "name", None) for scorer in scorers],
         "metrics": metrics,
     }
     receipt["quality_complete"] = quality_gate(receipt)
@@ -1037,6 +1044,19 @@ def build_parser() -> argparse.ArgumentParser:
         help="MLflow-supported judge URI (default: the probe-verified qwen serving endpoint)",
     )
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument(
+        "--scorers",
+        default="",
+        help=(
+            "Comma-separated extra scorers beyond correctness/evidence_coverage: "
+            "response_present, tool_evidence_used, guidelines, retrieval_groundedness"
+        ),
+    )
+    parser.add_argument(
+        "--guidelines",
+        default="",
+        help="Guideline text for the guidelines scorer",
+    )
     parser.add_argument(
         "--run-name",
         default="",

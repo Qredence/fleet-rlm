@@ -2,7 +2,7 @@ import { visibleWidth } from "@earendil-works/pi-tui";
 import { describe, expect, it, vi } from "vitest";
 
 import type { FleetSettingsPolicy, FleetSkillCard } from "../../fleet-api-client.js";
-import { SettingsSelector, SkillSelector } from "../command-presenter.js";
+import { MultiChoiceEditor, SkillSelector, TextSettingEditor } from "../command-presenter.js";
 
 const skills = Array.from({ length: 14 }, (_, index) => ({
   id: `skill-${index}`,
@@ -37,25 +37,52 @@ const settings = {
   ],
 } satisfies FleetSettingsPolicy;
 
-describe("SettingsSelector", () => {
-  it("navigates scope, field, boolean choice, and confirmation without a form", () => {
+describe("TextSettingEditor", () => {
+  it("edits text values (pre-filled with the current value) and confirms with Enter", () => {
+    const field = settings.scopes[0]!.fields[0]!;
     const finish = vi.fn();
-    const selector = new SettingsSelector(settings, finish);
+    const editor = new TextSettingEditor({ ...field, value: "old", editor: "text" }, finish);
 
-    selector.handleInput("\r");
-    selector.handleInput("\r");
-    expect(stripAnsi(selector.render(60).join("\n"))).toContain("Current: true");
-    selector.handleInput("\x1b[B");
-    selector.handleInput("\r");
-    expect(stripAnsi(selector.render(60).join("\n"))).toContain("true → false");
-    selector.handleInput("\r");
+    editor.handleInput("new");
+    expect(stripAnsi(editor.render(40).join("\n"))).toContain("oldnew");
+    editor.handleInput("\r");
+    expect(finish).toHaveBeenCalledWith("oldnew");
+  });
 
-    expect(finish).toHaveBeenCalledWith({
-      revision: "a".repeat(64),
-      scope: "defaults",
-      path: "rlm.verbose",
-      value: false,
-    });
+  it("cancels with Escape and refuses empty values", () => {
+    const field = settings.scopes[0]!.fields[0]!;
+    const finish = vi.fn();
+    const editor = new TextSettingEditor({ ...field, value: "", editor: "text" }, finish);
+
+    editor.handleInput("\x1b");
+    expect(finish).toHaveBeenCalledWith(undefined);
+
+    const second = new TextSettingEditor({ ...field, value: "", editor: "text" }, finish);
+    second.handleInput("\r");
+    expect(finish).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("MultiChoiceEditor", () => {
+  it("toggles choices with Space and confirms the joined selection", () => {
+    const field = {
+      ...settings.scopes[0]!.fields[0]!,
+      editor: "multi_choice" as const,
+      value: ["a"],
+      choices: ["a", "b", "c"],
+    };
+    const finish = vi.fn();
+    const editor = new MultiChoiceEditor(field, finish);
+
+    editor.handleInput(" ");
+    expect(stripAnsi(editor.render(40).join("\n"))).toContain("[ ] a");
+
+    editor.handleInput("\x1b[B");
+    editor.handleInput(" ");
+    expect(stripAnsi(editor.render(40).join("\n"))).toContain("[x] b");
+
+    editor.handleInput("\r");
+    expect(finish).toHaveBeenCalledWith("b");
   });
 });
 

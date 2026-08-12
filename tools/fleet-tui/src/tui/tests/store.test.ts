@@ -423,6 +423,30 @@ describe("ConversationStore", () => {
     expect(state.run.toolCount).toBe(1);
   });
 
+  it("expands an implicitly collapsed multi-line tool error on the first toggle", () => {
+    const store = makeStore();
+    store.dispatch({
+      type: "message/upsert",
+      message: {
+        id: "error-tool",
+        kind: "tool",
+        runId: "run",
+        toolCallId: "call",
+        name: "execute",
+        input: {},
+        error: "Traceback\nValueError: failed",
+        startedAt: 0,
+        endedAt: 1,
+        status: "error",
+        ts: 1,
+      },
+    });
+
+    store.dispatch({ type: "message/toggle-fold", id: "error-tool" });
+
+    expect(store.getState().messages[0]).toMatchObject({ id: "error-tool", collapsed: false });
+  });
+
   it("retains each operator timeline variant without inferring step metrics", () => {
     const store = makeStore();
     const messages = [

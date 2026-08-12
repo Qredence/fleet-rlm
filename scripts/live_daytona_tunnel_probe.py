@@ -701,9 +701,7 @@ def _validated_https_origin(origin: str) -> str:
     return f"https://{parsed.hostname.lower()}"
 
 
-def _start_named_tunnel(
-    configuration: _NamedTunnelConfiguration, controller_url: str
-) -> _Tunnel:
+def _start_named_tunnel(configuration: _NamedTunnelConfiguration, controller_url: str) -> _Tunnel:
     """
     Start a configured Cloudflare named tunnel that routes both probe origins to the controller.
 
@@ -989,15 +987,12 @@ def main(argv: list[str] | None = None) -> int:
             if not allowed_health.startswith("http-2") or not denied_health.startswith("http-2"):
                 raise TunnelProbeError("Cloudflare named tunnel HTTPS health preflight failed")
 
-        child_env: dict[str, str] = {
-            key: value
-            for key, value in os.environ.items()
-        }
+        child_env: dict[str, str] = {key: value for key, value in os.environ.items()}
         child_env.update(
             {
-            "RUN_LIVE_DAYTONA_STRICT_SMOKE": "1",
-            "FLEET_OPTIMIZATION_PROBE_CONTROLLER_URL": controller.controller_url,
-            "FLEET_OPTIMIZATION_PROBE_CONTROLLER_TOKEN": state.token,
+                "RUN_LIVE_DAYTONA_STRICT_SMOKE": "1",
+                "FLEET_OPTIMIZATION_PROBE_CONTROLLER_URL": controller.controller_url,
+                "FLEET_OPTIMIZATION_PROBE_CONTROLLER_TOKEN": state.token,
             }
         )
         for environment_name in _NAMED_TUNNEL_ENVIRONMENT:

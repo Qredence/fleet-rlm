@@ -80,7 +80,32 @@ describe("FleetTuiApplication", () => {
     await finished;
   });
 
-  it("renders one flat native-scrollback transcript and restores terminal state on exit", async () => {
+  it("keeps an explicit light theme when the terminal reports dark", async () => {
+    vi.stubEnv("FLEET_TUI_THEME", "light");
+    setTerminalColorScheme("dark");
+    const terminal = new FakeTerminal();
+    const app = createFleetTui({
+      terminal,
+      client: new FleetApiClient({ baseUrl: "http://fleet.test" }),
+      session,
+      resumed: false,
+      initialEvents: [],
+    });
+
+    const finished = app.start();
+    try {
+      await vi.waitFor(() => expect(terminal.writes).toContain("\x1b[?996n"));
+      terminal.send("\x1b[?997;1n");
+      await vi.waitFor(() => expect(getTerminalColorScheme()).toBe("light"));
+      expect(theme.fg("accent", "x")).toContain("38;2;90;128;128");
+    } finally {
+      await app.stop();
+      await finished;
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it("renders the transcript in the alternate-screen viewport and restores terminal state on exit", async () => {
     const terminal = new FakeTerminal();
     const initialEvents: StoreEvent[] = [
       {
@@ -110,18 +135,19 @@ describe("FleetTuiApplication", () => {
     );
     const terminalOutput = terminal.writes.join("");
     expect(terminalOutput).toContain("FLEET");
-    expect(terminalOutput).toContain("\x1b[?2026h");
-    expect(terminalOutput).not.toContain("\x1b[?1049h");
-    for (const mode of [1000, 1002, 1003, 1006]) {
-      expect(terminal.writes.join("")).not.toContain(`${String.fromCharCode(27)}[?${mode}h`);
-    }
+    // The transcript now renders inside the alternate-screen viewport.
+    expect(terminalOutput).toContain("\x1b[?1049h");
+    // SGR mouse modes are enabled: the wheel scrolls and drag selects text.
+    expect(terminalOutput).toContain("\x1b[?1000h");
+    expect(terminalOutput).toContain("\x1b[?1006h");
 
     terminal.send("\x04");
     await finished;
+    expect(terminal.writes.join("")).toContain("\x1b[?1049l");
     expect(terminal.progress.at(-1)).toBe(false);
   });
 
-  it("renders all 10,000 retained rows instead of clipping to terminal height", async () => {
+  it("clips the transcript to the viewport and follows the end", async () => {
     const terminal = new FakeTerminal();
     const body = Array.from({ length: 10_000 }, (_, index) => `row-${index}`).join("\n");
     const app = createFleetTui({
@@ -142,7 +168,8 @@ describe("FleetTuiApplication", () => {
     await vi.waitFor(() => expect(terminal.writes.join("")).toContain("row-9999"), {
       timeout: 2_000,
     });
-    expect(terminal.writes.join("")).toContain("row-0");
+    // The viewport follows the end: early rows are clipped, not painted.
+    expect(terminal.writes.join("")).not.toContain("row-0");
     await app.stop();
     await finished;
   });

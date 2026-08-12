@@ -1,10 +1,4 @@
-import {
-  Editor,
-  ProcessTerminal,
-  TuiMainScreen,
-  type TUI,
-  type Terminal,
-} from "@earendil-works/pi-tui";
+import { Editor, ProcessTerminal, TuiAltScreen, type Terminal } from "@earendil-works/pi-tui";
 
 import type { FleetApiClient, FleetSession } from "../fleet-api-client.js";
 import { FleetAutocompleteProvider } from "./autocomplete.js";
@@ -14,7 +8,15 @@ import type { DraftStore, DraftState } from "./draft-store.js";
 import { RunController } from "./runner.js";
 import { FleetScreen, isBusy } from "./screen.js";
 import { ConversationStore, type StoreEvent } from "./store.js";
-import { editorTheme, setTerminalColorScheme } from "./theme.js";
+import {
+  editorTheme,
+  hasExplicitThemeOverride,
+  initTheme,
+  onThemeChange,
+  setTerminalBackground,
+  setTerminalColorScheme,
+  stopThemeMonitoring,
+} from "./theme.js";
 import { fleetKeybindings } from "./keybindings.js";
 
 export type FleetTuiApplication = {
@@ -39,7 +41,9 @@ export function createFleetTui(options: FleetTuiOptions): FleetTuiApplication {
 
 class FleetTuiApplicationImpl implements FleetTuiApplication {
   private readonly terminal: Terminal;
-  private readonly ui: TUI;
+  private readonly ui: TuiAltScreen;
+  /** Theme initialization (persisted selection load) — color queries wait on it. */
+  private readonly themeReady: Promise<void>;
   private readonly store = new ConversationStore();
   private readonly controller: RunController;
   private readonly editor: Editor;
@@ -55,8 +59,14 @@ class FleetTuiApplicationImpl implements FleetTuiApplication {
 
   constructor(private readonly options: FleetTuiOptions) {
     setTerminalColorScheme("dark");
+    this.themeReady = initTheme(process.env.FLEET_TUI_THEME);
     this.terminal = options.terminal ?? new ProcessTerminal();
-    this.ui = new TuiMainScreen(this.terminal);
+    // Alternate-screen viewport: the transcript is app-owned, so the wheel
+    // scrolls it (and drag selects text for copy) instead of doing nothing.
+    this.ui = new TuiAltScreen(this.terminal, undefined, undefined, {
+      mouse: true,
+      wheelScrollLines: 3,
+    });
     this.controller = new RunController(this.store, options.client);
     this.editor = new Editor(this.ui, editorTheme, { paddingX: 1, autocompleteMaxVisible: 8 });
     this.editor.setAutocompleteProvider(new FleetAutocompleteProvider(options.client));
@@ -71,7 +81,7 @@ class FleetTuiApplicationImpl implements FleetTuiApplication {
       events: options.initialEvents,
     });
     this.screen = new FleetScreen(this.store, this.editor, this.terminal, this.ui);
-    this.ui.addChild(this.screen);
+    this.ui.setLayoutRoot(this.screen);
     this.configureEditor();
     void this.restoreDraft();
   }
@@ -107,6 +117,12 @@ class FleetTuiApplicationImpl implements FleetTuiApplication {
         this.lastCtrlCAt = now;
         return { consume: true };
       }
+      if (fleetKeybindings.matches(data, "fleet.toggleFold")) {
+        this.lastCtrlCAt = 0;
+        if (this.ui.hasOverlay()) return undefined;
+        this.toggleLatestFold();
+        return { consume: true };
+      }
       if (fleetKeybindings.matches(data, "fleet.exit")) {
         this.lastCtrlCAt = 0;
         if (this.ui.hasOverlay() || this.editor.getText()) return undefined;
@@ -116,16 +132,32 @@ class FleetTuiApplicationImpl implements FleetTuiApplication {
       this.lastCtrlCAt = 0;
       return undefined;
     });
+    onThemeChange(() => {
+      this.ui.invalidate();
+      this.ui.requestRender(true);
+    });
     this.ui.setFocus(this.editor);
     this.ui.start();
     this.onStateChange();
     if (this.options.queryColorScheme !== false) {
-      void this.ui.queryTerminalColorScheme({ timeoutMs: 150 }).then((scheme) => {
-        if (!scheme) return;
-        if (!setTerminalColorScheme(scheme)) return;
-        this.ui.invalidate();
-        this.ui.requestRender(true);
-      });
+      void this.themeReady.then(() =>
+        this.ui.queryTerminalColorScheme({ timeoutMs: 150 }).then((scheme) => {
+          if (scheme) {
+            if (!hasExplicitThemeOverride() && setTerminalColorScheme(scheme)) {
+              this.ui.invalidate();
+              this.ui.requestRender(true);
+            }
+          }
+          // Deferred: the OSC 11 consumer swallows any input while a background
+          // query is pending, so the scheme reply must settle first.
+          void this.ui.queryTerminalBackgroundColor({ timeoutMs: 150 }).then((rgb) => {
+            if (!rgb) return;
+            setTerminalBackground({ r: rgb.r, g: rgb.g, b: rgb.b });
+            this.ui.invalidate();
+            this.ui.requestRender(true);
+          });
+        }),
+      );
     }
     return this.finished;
   }
@@ -138,6 +170,7 @@ class FleetTuiApplicationImpl implements FleetTuiApplication {
       }
       await this.persistDraft();
       this.unsubscribe?.();
+      stopThemeMonitoring();
       this.screen.dispose();
       this.terminal.setProgress(false);
       this.ui.stop();
@@ -170,6 +203,22 @@ class FleetTuiApplicationImpl implements FleetTuiApplication {
       }
       this.submitText(parsed.text);
     };
+  }
+
+  /** Toggle fold state of the most recent foldable card (tool/code/output). */
+  private toggleLatestFold(): void {
+    const messages = this.store.getState().messages;
+    for (let index = messages.length - 1; index >= 0; index -= 1) {
+      const message = messages[index];
+      if (
+        message &&
+        (message.kind === "tool" || message.kind === "code" || message.kind === "output")
+      ) {
+        if (message.kind === "tool" && message.status === "running") return;
+        this.store.dispatch({ type: "message/toggle-fold", id: message.id });
+        return;
+      }
+    }
   }
 
   private submitText(text: string): void {

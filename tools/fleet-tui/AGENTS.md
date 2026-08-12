@@ -11,10 +11,15 @@ pi-tui-only terminal client. No web frontend, no React, no browser runtime.
 |------|---------------|
 | `src/fleet-turn-stream.ts` | Strict SSE stream lifecycle (start → … → terminal → [DONE]) |
 | `src/sse.ts` | Frame/chunk validation against `FleetUIMessageChunk` union |
-| `src/tui/projection.ts` | Live and reload durable-turn projection |
+| `src/tui/screen.ts` | Alternate-screen layout: transcript `ScrollView` (follow-end), activity strip, editor, footer |
+| `src/tui/transcript.ts` | Live and reload durable-turn projection |
 | `src/tui/store.ts` | Atomic hydration; all state via `dispatch` + pure `reduce` |
 | `src/tui/commands.ts` | Slash commands, including loopback-only TOML policy editing |
 | `src/tui/draft-store.ts` | Debounced per-Session draft/selection persistence (`FLEET_TUI_STATE_DIR`) |
+| `src/tui/themes/palette.ts` | Theme token types, builtin dark/light palettes, custom JSON themes + watcher |
+| `src/tui/theme.ts` | Theme engine: adaptive surfaces, selection, `initTheme`/`setTheme`, pi-tui theme factories |
+| `src/tui/keybinding-hints.ts` | Formatted key hints (Esc/↑↓/PgUp) for footers and fold hints |
+| `src/tui/working-icon.ts` | Shared `◇ ◈ ◆ ◈` still-working pulse frames |
 | `src/generated/openapi.ts` | **Generated** — do not hand-edit; use `make api-sync` |
 | `src/generated/fleet-ui-chunk-validation.ts` | **Generated** — do not hand-edit; use `make api-sync` (`scripts/generate_tui_chunk_validation.py`) |
 
@@ -28,7 +33,9 @@ Individual lanes: `pnpm test`, `pnpm typecheck`, `pnpm lint`, `pnpm format:check
 
 ## Constraints
 
-- Monochrome operator timeline; no mouse capture, no transcript viewport.
+- Alternate-screen viewport: the transcript is a follow-end `ScrollView` inside
+  `TuiAltScreen`; PgUp/PgDn scroll a page, Home/End jump top/bottom, the mouse
+  wheel scrolls, drag selects text for copy, and new output re-follows the end.
 - Single client protocol: the AI SDK UI v1 stream projected by
   `src/fleet_rlm/api/sse.py`, with HTTP types owned by `make api-sync`. Do not
   design a second client protocol unless a second client exists.
@@ -42,4 +49,7 @@ Individual lanes: `pnpm test`, `pnpm typecheck`, `pnpm lint`, `pnpm format:check
 - `/profiles` switches the active Fleet profile by PATCHing
   `config.default_profile` to the same loopback policy; it opens a dropdown of
   available profiles and requires a Fleet restart to take effect.
+- Themes: builtins are `themes/palette.ts`; custom JSON themes live in
+  `$FLEET_TUI_STATE_DIR/themes/*.json` (token overrides with optional `vars`),
+  hot-reload via watcher, selected name persisted to `$FLEET_TUI_STATE_DIR/theme`.
 - Requires Node ≥ 22.19.0 and pnpm.

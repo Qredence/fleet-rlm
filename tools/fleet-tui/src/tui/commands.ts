@@ -18,6 +18,7 @@ import {
   type PendingSkillSelection,
 } from "./store.js";
 import { formatBytes, formatTokens, shortId } from "./format.js";
+import { getAvailableThemes, getThemeName, setTheme } from "./theme.js";
 import { committedTokenCounts } from "./usage-summary.js";
 
 export type CommandContext = {
@@ -45,6 +46,7 @@ export interface CommandPresenter {
     current: PendingSkillSelection[],
   ): Promise<PendingSkillSelection[] | null>;
   chooseSetting(settings: FleetSettingsPolicy): Promise<SettingsUpdate | null>;
+  chooseTheme(themes: string[], current: string | undefined): Promise<string | null>;
   chooseProfile(
     profiles: string[],
     active: string | undefined,
@@ -678,6 +680,47 @@ registerCommand({
     appendSystem(
       ctx.store,
       traceId ? `Trace: ${traceId}` : "No trace ID recorded for the current Run.",
+    );
+  },
+});
+
+registerCommand({
+  name: "theme",
+  description: "List or switch the TUI color theme",
+  usage: "/theme [name]",
+  handler: async (args, ctx) => {
+    const themes = await getAvailableThemes();
+    const current = getThemeName();
+    if (args.length === 0) {
+      if (ctx.presenter) {
+        const selected = await ctx.presenter.chooseTheme(themes, current);
+        if (!selected || selected === current) return;
+        const result = await setTheme(selected);
+        appendSystem(
+          ctx.store,
+          result.success ? `Theme set to '${selected}'.` : (result.error ?? "Failed to set theme."),
+        );
+        return;
+      }
+      const lines = themes
+        .map((name) => `  ${name}${name === current ? " (current)" : ""}`)
+        .join("\n");
+      appendSystem(ctx.store, `Themes\n\n${lines}\n\nUse /theme <name> to switch.`);
+      return;
+    }
+    if (args.length !== 1) {
+      appendSystem(ctx.store, "Usage: /theme [name]");
+      return;
+    }
+    const name = args[0] ?? "";
+    if (!themes.includes(name)) {
+      appendSystem(ctx.store, `Unknown theme: ${name}`);
+      return;
+    }
+    const result = await setTheme(name);
+    appendSystem(
+      ctx.store,
+      result.success ? `Theme set to '${name}'.` : (result.error ?? "Failed to set theme."),
     );
   },
 });

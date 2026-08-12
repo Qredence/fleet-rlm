@@ -8,11 +8,14 @@ import pytest
 
 from scripts.benchmarks.rlm_eval_dataset import (
     DatasetError,
+    _parse_dataset_tags,
     build_parser,
     dataset_examples,
+    history,
     ingest_static,
     ingest_traces,
     main,
+    tag_dataset,
 )
 from scripts.benchmarks.run_rlm_latency import QUALITY_RECORDS
 
@@ -33,11 +36,24 @@ class _Frame:
 
 
 class _FakeDataset:
-    def __init__(self, name: str, experiment_id: str, records: list[dict] | None = None) -> None:
+    def __init__(
+        self,
+        name: str,
+        experiment_id: str,
+        records: list[dict] | None = None,
+        *,
+        created_time: int = 0,
+        tags: dict[str, str] | None = None,
+    ) -> None:
         self.name = name
         self.experiment_id = experiment_id
         self.dataset_id = f"ds-{name}"
+        self.created_time = created_time
+        self.tags = dict(tags or {})
         self._records = list(records or [])
+
+    def has_records(self) -> bool:
+        return bool(self._records)
 
     def to_df(self) -> _Frame:
         return _Frame([dict(record) for record in self._records])
@@ -47,7 +63,7 @@ class _FakeDataset:
 
 
 def _install_fake_mlflow(monkeypatch: pytest.MonkeyPatch, *, existing: list | None = None) -> SimpleNamespace:
-    calls = SimpleNamespace(created=[], traces_filter=[])
+    calls = SimpleNamespace(created=[], traces_filter=[], dataset_tags=[])
     datasets_by_name = {dataset.name: dataset for dataset in (existing or [])}
     datasets_by_id = {dataset.dataset_id: dataset for dataset in (existing or [])}
 
@@ -58,6 +74,14 @@ def _install_fake_mlflow(monkeypatch: pytest.MonkeyPatch, *, existing: list | No
         calls.created.append((name, experiment_id))
         return dataset
 
+    def set_dataset_tags(dataset_id: str, tags: dict[str, str]) -> None:
+        calls.dataset_tags.append((dataset_id, dict(tags)))
+        datasets_by_id[dataset_id].tags.update(tags)
+
+    def delete_dataset_tag(dataset_id: str, key: str) -> None:
+        calls.dataset_tags.append((dataset_id, {key: None}))
+        datasets_by_id[dataset_id].tags.pop(key, None)
+
     mlflow = ModuleType("mlflow")
     mlflow.set_tracking_uri = lambda *_args, **_kwargs: None  # type: ignore[attr-defined]
     mlflow.set_experiment = lambda *_args, **_kwargs: None  # type: ignore[attr-defined]
@@ -66,8 +90,10 @@ def _install_fake_mlflow(monkeypatch: pytest.MonkeyPatch, *, existing: list | No
     genai = ModuleType("mlflow.genai")
     genai.datasets = SimpleNamespace(  # type: ignore[attr-defined]
         create_dataset=create_dataset,
-        search_datasets=lambda _ids: list(datasets_by_name.values()),
+        search_datasets=lambda *_args, **_kwargs: list(datasets_by_name.values()),
         get_dataset=lambda name: datasets_by_name[name],
+        set_dataset_tags=set_dataset_tags,
+        delete_dataset_tag=delete_dataset_tag,
     )
     mlflow.genai = genai  # type: ignore[attr-defined]
 
@@ -184,3 +210,132 @@ def test_main_writes_bounded_failure_receipt_without_live_opt_in(
         "status": "failed",
         "error_category": "DatasetError",
     }
+
+
+def test_ingest_static_stamps_dataset_tags(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+    monkeypatch.setenv("FLEET_LIVE", "1")
+    fake = _install_fake_mlflow(monkeypatch)
+
+    receipt = ingest_static(
+        _args(
+            [
+                "ingest-static",
+                "--experiment-id",
+                "42",
+                "--dataset-name",
+                "fleet-rlm-quality-v2",
+                "--dataset-tags",
+                "fleet.source=static,fleet.version=v2.1",
+            ],
+            tmp_path,
+        )
+    )
+
+    assert receipt["dataset_tags"] == {"fleet.source": "static", "fleet.version": "v2.1"}
+    assert fake.calls.dataset_tags == [("ds-fleet-rlm-quality-v2", {"fleet.source": "static", "fleet.version": "v2.1"})]
+
+
+def test_ingest_traces_stamps_dataset_tags(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+    monkeypatch.setenv("FLEET_LIVE", "1")
+    existing = _FakeDataset("fleet-rlm-quality-v2", "42")
+    fake = _install_fake_mlflow(monkeypatch, existing=[existing])
+    fake.mlflow.search_traces = lambda **_kwargs: _Frame(  # type: ignore[attr-defined]
+        [{"trace_id": "t1", "request": {"request": "new question"}}]
+    )
+    mapping = tmp_path / "expectations.json"
+    mapping.write_text(json.dumps({"t1": {"expected_response": "answer"}}))
+
+    receipt = ingest_traces(
+        _args(
+            [
+                "ingest-traces",
+                "--dataset-name",
+                "fleet-rlm-quality-v2",
+                "--expectations-json",
+                str(mapping),
+                "--dataset-tags",
+                "fleet.source=trace,fleet.version=v2.1",
+            ],
+            tmp_path,
+        )
+    )
+
+    assert receipt["merged"] == 1
+    assert receipt["dataset_tags"] == {"fleet.source": "trace", "fleet.version": "v2.1"}
+    assert fake.calls.dataset_tags == [("ds-fleet-rlm-quality-v2", {"fleet.source": "trace", "fleet.version": "v2.1"})]
+
+
+def test_parse_dataset_tags_rejects_malformed_entries() -> None:
+    assert _parse_dataset_tags("") == {}
+    assert _parse_dataset_tags("a=1, b=2") == {"a": "1", "b": "2"}
+    with pytest.raises(DatasetError, match="key=value"):
+        _parse_dataset_tags("broken")
+    with pytest.raises(DatasetError, match="key=value"):
+        _parse_dataset_tags("a=")
+
+
+def test_history_lists_bounded_dataset_rows(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+    monkeypatch.setenv("FLEET_LIVE", "1")
+    existing = _FakeDataset(
+        "fleet-rlm-quality-v2",
+        "42",
+        records=[{"inputs": {"query": "q"}}],
+        created_time=12345,
+        tags={"fleet.source": "static"},
+    )
+    _install_fake_mlflow(monkeypatch, existing=[existing])
+
+    receipt = history(_args(["history", "--name-prefix", "fleet-rlm", "--experiment-id", "42"], tmp_path))
+
+    assert receipt["filter_string"] == "name LIKE 'fleet-rlm%'"
+    assert receipt["count"] == 1
+    row = receipt["datasets"][0]
+    assert row["dataset_id"] == "ds-fleet-rlm-quality-v2"
+    assert row["name"] == "fleet-rlm-quality-v2"
+    assert row["has_records"] is True
+    assert row["tags"] == {"fleet.source": "static"}
+
+
+def test_history_reports_empty_datasets_without_records(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+    monkeypatch.setenv("FLEET_LIVE", "1")
+    existing = _FakeDataset("fleet-rlm-empty", "42")
+    _install_fake_mlflow(monkeypatch, existing=[existing])
+
+    receipt = history(_args(["history", "--name-prefix", "fleet-rlm", "--experiment-id", "42"], tmp_path))
+
+    assert receipt["datasets"][0]["has_records"] is False
+
+
+def test_tag_dataset_sets_and_deletes_tag(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+    monkeypatch.setenv("FLEET_LIVE", "1")
+    existing = _FakeDataset("fleet-rlm-quality-v2", "42")
+    fake = _install_fake_mlflow(monkeypatch, existing=[existing])
+
+    set_receipt = tag_dataset(
+        _args(
+            ["tag", "--dataset-name", "fleet-rlm-quality-v2", "--tag-key", "fleet.promoted", "--tag-value", "v2"],
+            tmp_path,
+        )
+    )
+    assert set_receipt["action"] == "set"
+    assert existing.tags == {"fleet.promoted": "v2"}
+
+    delete_receipt = tag_dataset(
+        _args(["tag", "--dataset-name", "fleet-rlm-quality-v2", "--tag-key", "fleet.promoted", "--delete"], tmp_path)
+    )
+    assert delete_receipt["action"] == "deleted"
+    assert existing.tags == {}
+    assert fake.calls.dataset_tags == [
+        ("ds-fleet-rlm-quality-v2", {"fleet.promoted": "v2"}),
+        ("ds-fleet-rlm-quality-v2", {"fleet.promoted": None}),
+    ]
+
+
+def test_tag_dataset_requires_key_and_value(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+    monkeypatch.setenv("FLEET_LIVE", "1")
+    _install_fake_mlflow(monkeypatch, existing=[_FakeDataset("fleet-rlm-quality-v2", "42")])
+
+    with pytest.raises(DatasetError, match="tag-key"):
+        tag_dataset(_args(["tag", "--dataset-name", "fleet-rlm-quality-v2"], tmp_path))
+    with pytest.raises(DatasetError, match="tag-value"):
+        tag_dataset(_args(["tag", "--dataset-name", "fleet-rlm-quality-v2", "--tag-key", "fleet.promoted"], tmp_path))

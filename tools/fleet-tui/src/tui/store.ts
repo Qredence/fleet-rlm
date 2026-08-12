@@ -36,6 +36,7 @@ export type Message =
       startedAt: number;
       endedAt?: number;
       status: "pending" | "running" | "success" | "error";
+      collapsed?: boolean;
       ts: number;
     }
   | {
@@ -46,6 +47,7 @@ export type Message =
       code: string;
       language?: string;
       streaming?: boolean;
+      collapsed?: boolean;
       ts: number;
     }
   | {
@@ -55,6 +57,7 @@ export type Message =
       step: number;
       output: string;
       streaming?: boolean;
+      collapsed?: boolean;
       ts: number;
     }
   | {
@@ -225,6 +228,7 @@ type Event =
   | { type: "run/cancelled"; reason: string }
   | { type: "run/interrupted"; error: string }
   | { type: "message/upsert"; message: Message }
+  | { type: "message/toggle-fold"; id: string }
   | { type: "skill-selection/pin"; selection: PendingSkillSelection }
   | { type: "skill-selection/clear" }
   | { type: "skill-selection/replace"; selections: PendingSkillSelection[] }
@@ -465,6 +469,24 @@ function reduce(state: State, event: Event): State {
       }
       return { ...state, messages: [...state.messages, incoming], run };
     }
+    case "message/toggle-fold": {
+      const index = state.messages.findIndex((message) => message.id === event.id);
+      const message = state.messages[index];
+      if (index < 0 || !message) return state;
+      if (message.kind !== "tool" && message.kind !== "code" && message.kind !== "output") {
+        return state;
+      }
+      const messages = state.messages.slice();
+      const implicitlyCollapsed =
+        message.kind === "tool" &&
+        message.status === "error" &&
+        hasMultipleLines(message.error ?? "Tool failed");
+      messages[index] = {
+        ...message,
+        collapsed: !(message.collapsed ?? implicitlyCollapsed),
+      };
+      return { ...state, messages };
+    }
     case "skill-selection/pin": {
       const existing = state.pendingSkillSelections.findIndex(
         (selection) => selection.id === event.selection.id,
@@ -537,4 +559,9 @@ function reduce(state: State, event: Event): State {
       return state;
   }
 }
+
+function hasMultipleLines(value: string): boolean {
+  return value.replace(/\r\n/g, "\n").replace(/\r/g, "\n").trimEnd().split("\n").length > 1;
+}
+
 export type { Event as StoreEvent };

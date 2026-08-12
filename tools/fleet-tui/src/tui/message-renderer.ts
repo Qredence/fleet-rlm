@@ -16,10 +16,11 @@ import {
   shortId,
 } from "./format.js";
 import { formatExecutionMetric } from "./execution-summary.js";
+import { keyText } from "./keybinding-hints.js";
 import type { Message, Role } from "./store.js";
 import { highlightCode } from "./syntax-highlight.js";
 import { terminalSafeText } from "./terminal-text.js";
-import { markdownTheme, theme, type ThemeBackground } from "./theme.js";
+import { markdownTheme, statusGlyph, theme, type ThemeBackground } from "./theme.js";
 
 export class MessageRenderCache {
   private readonly markdownComponents = new Map<
@@ -105,26 +106,9 @@ export function renderMessage(
     case "tool":
       return renderTool(message, safeWidth);
     case "code":
-      return card(
-        "CODE",
-        `step ${message.step}${message.streaming ? " · streaming" : ""}`,
-        highlightedLines(
-          terminalSafeText(message.code),
-          safeWidth - 4,
-          message.language ?? "python",
-          message.streaming === true,
-        ),
-        safeWidth,
-      );
+      return renderCode(message, safeWidth);
     case "output":
-      return card(
-        "OUTPUT",
-        `step ${message.step}${message.streaming ? " · streaming" : ""}`,
-        codeLines(terminalSafeText(message.output), safeWidth - 4).map((line) =>
-          theme.fg("toolOutput", line),
-        ),
-        safeWidth,
-      );
+      return renderOutput(message, safeWidth);
     case "result":
       return renderResult(message, safeWidth, cache);
     case "skill":
@@ -194,7 +178,7 @@ function renderText(
       `text:${id}:user`,
       id,
     ).map((line) => ` ${line}`);
-    return surface(["", ...body, ""], width, "userMessageBg");
+    return surface(["", ...body, ""], width, theme.userMessageBackground());
   }
 
   if (role === "assistant") {
@@ -227,13 +211,15 @@ function renderText(
   return card("SYSTEM", "", body, width, "accent");
 }
 
+const TOOL_STATUS = {
+  pending: { glyph: statusGlyph.idle, color: "dim", label: "pending" },
+  running: { glyph: statusGlyph.running, color: "accent", label: "running" },
+  success: { glyph: statusGlyph.success, color: "success", label: "success" },
+  error: { glyph: statusGlyph.error, color: "error", label: "error" },
+} as const;
+
 function renderTool(message: Extract<Message, { kind: "tool" }>, width: number): string[] {
-  const statuses = {
-    pending: ["· pending", "toolPendingBg"],
-    running: ["… running", "toolPendingBg"],
-    success: ["✓ success", "toolSuccessBg"],
-    error: ["× error", "toolErrorBg"],
-  } as const satisfies Record<typeof message.status, readonly [string, ThemeBackground]>;
+  const status = TOOL_STATUS[message.status];
   // Running tools tick at 5s granularity: a mid-transcript card whose line
   // content changes every render drags the differential renderer's
   // firstChanged upward and rewrites everything below it per frame. The
@@ -241,23 +227,82 @@ function renderTool(message: Extract<Message, { kind: "tool" }>, width: number):
   const elapsed = message.endedAt
     ? formatDuration(message.endedAt - message.startedAt)
     : formatDuration(Math.floor((Date.now() - message.startedAt) / 5000) * 5000);
-  const output =
-    message.status === "error"
-      ? terminalSafeText(message.error ?? "Tool failed")
-      : (message.output ?? "(running…)");
-  const [status, background] = statuses[message.status];
+  const statusText = theme.fg(status.color, `${status.glyph} ${status.label} · ${elapsed}`);
+  const header = `${theme.fg("accent", theme.bold("◆"))} ${theme.fg("toolTitle", theme.bold(terminalSafeText(message.name)))}  ${muted(statusText)}`;
+
+  const errorDetails = message.status === "error" ? (message.error ?? "Tool failed") : null;
+  // Multi-line tool errors collapse to their summary by default; everything
+  // else stays expanded until the operator folds it with ctrl+o.
+  const collapsed =
+    message.collapsed === true ||
+    (message.collapsed === undefined &&
+      errorDetails !== null &&
+      shouldCollapseErrorDetails(errorDetails));
+  if (collapsed) {
+    const summary = errorDetails !== null ? summarizeErrorDetails(errorDetails) : "";
+    const suffix = summary ? `  ${theme.fg("error", terminalSafeText(summary))}` : "";
+    return panel(
+      [` ${header}${suffix}  ${dim(`${keyText("fleet.toggleFold")} to expand`)}`],
+      width,
+    );
+  }
+
   const body = [
-    `${theme.fg("toolTitle", theme.bold(terminalSafeText(message.name)))}  ${muted(`${status} · ${elapsed}`)}`,
+    ` ${header}`,
     "",
-    muted("input"),
+    ` ${muted("input")}`,
     ...jsonLines(message.input ?? "(no input)", width - 4),
     "",
-    muted("output"),
-    ...jsonLines(output, width - 4).map((line) =>
-      message.status === "error" ? theme.fg("error", line) : theme.fg("toolOutput", line),
-    ),
-  ].map((line) => ` ${line}`);
-  return surface(["", ...body, ""], width, background);
+  ];
+  if (errorDetails !== null) {
+    body.push(` ${muted("error")}`);
+    body.push(...jsonLines(errorDetails, width - 4).map((line) => theme.fg("error", line)));
+  } else {
+    body.push(` ${muted("output")}`);
+    body.push(
+      ...jsonLines(message.output ?? "(running…)", width - 4).map((line) =>
+        theme.fg("toolOutput", line),
+      ),
+    );
+  }
+  return panel(body, width);
+}
+
+function renderCode(message: Extract<Message, { kind: "code" }>, width: number): string[] {
+  const detail = `step ${message.step}${message.streaming ? " · streaming" : ""}`;
+  if (message.collapsed) {
+    const count = message.code.split("\n").length;
+    return card(
+      "CODE",
+      detail,
+      [dim(`${count} line${count === 1 ? "" : "s"} · ${keyText("fleet.toggleFold")} to expand`)],
+      width,
+    );
+  }
+  const lines = highlightedLines(
+    terminalSafeText(message.code),
+    width - 4,
+    message.language ?? "python",
+    message.streaming === true,
+  );
+  return card("CODE", detail, message.collapsed === false ? lines : capLinesHead(lines), width);
+}
+
+function renderOutput(message: Extract<Message, { kind: "output" }>, width: number): string[] {
+  const detail = `step ${message.step}${message.streaming ? " · streaming" : ""}`;
+  if (message.collapsed) {
+    const count = message.output.split("\n").length;
+    return card(
+      "OUTPUT",
+      detail,
+      [dim(`${count} line${count === 1 ? "" : "s"} · ${keyText("fleet.toggleFold")} to expand`)],
+      width,
+    );
+  }
+  const lines = codeLines(terminalSafeText(message.output), width - 4).map((line) =>
+    theme.fg("toolOutput", line),
+  );
+  return card("OUTPUT", detail, message.collapsed === false ? lines : capLinesTail(lines), width);
 }
 
 function renderResult(
@@ -369,12 +414,99 @@ function jsonLines(value: unknown, width: number): string[] {
   return codeLines(terminalSafeText(serialized), width);
 }
 
-function surface(lines: string[], width: number, background: ThemeBackground): string[] {
+function surface(
+  lines: string[],
+  width: number,
+  background: ThemeBackground | ((text: string) => string),
+): string[] {
+  const bg =
+    typeof background === "function" ? background : (text: string) => theme.bg(background, text);
   return lines.map((line) => {
     const clipped = truncateToWidth(line, width, "");
     const padded = `${clipped}${" ".repeat(Math.max(0, width - visibleWidth(clipped)))}`;
-    return theme.bg(background, padded);
+    return bg(padded);
   });
+}
+
+/** One full-width tool panel block: every line on the panel background. */
+function panel(lines: string[], width: number): string[] {
+  const safeWidth = Math.max(1, width);
+  const bg = theme.surface("toolPanelBg");
+  return lines.map((line) => {
+    const clipped = truncateToWidth(line, safeWidth - 2, "");
+    const padded = `${clipped}${" ".repeat(Math.max(0, safeWidth - 2 - visibleWidth(clipped)))}`;
+    return bg(` ${padded} `);
+  });
+}
+
+/** Keep the first N wrapped lines and mark the skipped tail. */
+function capLinesHead(lines: readonly string[]): string[] {
+  const cap = 200;
+  if (lines.length <= cap) return [...lines];
+  const skipped = lines.length - cap;
+  return [
+    ...lines.slice(0, cap),
+    theme.fg(
+      "dim",
+      `… ${skipped} more line${skipped === 1 ? "" : "s"} · ${keyText("fleet.toggleFold")} to expand`,
+    ),
+  ];
+}
+
+/** Keep the last N wrapped lines and mark the skipped head. */
+function capLinesTail(lines: readonly string[]): string[] {
+  const cap = 200;
+  if (lines.length <= cap) return [...lines];
+  const skipped = lines.length - cap;
+  return [
+    theme.fg(
+      "dim",
+      `… ${skipped} more line${skipped === 1 ? "" : "s"} above · ${keyText("fleet.toggleFold")} to expand`,
+    ),
+    ...lines.slice(-cap),
+  ];
+}
+
+function errorDetailLines(text: string): Array<{ raw: string; trimmed: string }> {
+  return text
+    .replace(/\r\n/g, "\n")
+    .replace(/\r/g, "\n")
+    .trimEnd()
+    .split("\n")
+    .map((raw) => ({ raw, trimmed: raw.trim() }))
+    .filter((line) => line.trimmed.length > 0);
+}
+
+function startsStackContext(line: { trimmed: string }): boolean {
+  return (
+    line.trimmed.startsWith("Traceback ") ||
+    (line.trimmed.startsWith("File ") && line.trimmed.includes(", line ")) ||
+    (line.trimmed.startsWith("Cell In[") && line.trimmed.includes(", line ")) ||
+    line.trimmed.startsWith("---->")
+  );
+}
+
+function isStackContextLine(line: { raw: string; trimmed: string }): boolean {
+  if (startsStackContext(line)) return true;
+  return line.raw.startsWith(" ") || line.raw.startsWith("\t");
+}
+
+/** Summarize a multi-line error/stack trace to its last meaningful line. */
+export function summarizeErrorDetails(text: string): string {
+  const lines = errorDetailLines(text);
+  if (lines.length === 0) return "Error";
+  if (lines.length > 1 && startsStackContext(lines[0] ?? { trimmed: "" })) {
+    for (let index = lines.length - 1; index >= 0; index -= 1) {
+      const line = lines[index];
+      if (line && !isStackContextLine(line)) return line.trimmed;
+    }
+    return "Error";
+  }
+  return lines[0]?.trimmed ?? "Error";
+}
+
+function shouldCollapseErrorDetails(text: string): boolean {
+  return text.replace(/\r\n/g, "\n").replace(/\r/g, "\n").trimEnd().split("\n").length > 1;
 }
 
 function wrapStyled(
@@ -395,6 +527,10 @@ function wrappedLine(value: string, width: number): string[] {
 
 function muted(value: string): string {
   return theme.fg("muted", value);
+}
+
+function dim(value: string): string {
+  return theme.fg("dim", value);
 }
 
 function appendStreamingCursor(line: string, width: number): string {

@@ -81,9 +81,9 @@ class ReceiptError(ValueError):
 def build_parser() -> argparse.ArgumentParser:
     """
     Create the command-line argument parser for the Phase 1 stream-canary CLI.
-    
+
     Returns:
-    	argparse.ArgumentParser: Parser for the required receipt output path and pytest timeout.
+        argparse.ArgumentParser: Parser for the required receipt output path and pytest timeout.
     """
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, required=True, help="Ignored or out-of-repository JSON receipt path.")
@@ -93,12 +93,12 @@ def build_parser() -> argparse.ArgumentParser:
 
 def pytest_command(timeout_seconds: int) -> list[str]:
     """Build the command used to run the live streaming canary test.
-    
+
     Parameters:
-    	timeout_seconds (int): Maximum duration allowed for the test.
-    
+        timeout_seconds (int): Maximum duration allowed for the test.
+
     Returns:
-    	list[str]: Command-line arguments for invoking the test with the specified timeout.
+        list[str]: Command-line arguments for invoking the test with the specified timeout.
     """
     return ["uv", "run", "pytest", _LIVE_TEST, "-q", "-n", "0", f"--timeout={timeout_seconds}"]
 
@@ -119,12 +119,12 @@ def _git(*args: str) -> str:
 def _candidate() -> tuple[str, str]:
     """
     Validate the current Git state and identify the eligible candidate revision.
-    
+
     Returns:
-    	tuple[str, str]: The current commit SHA and branch name.
-    
+        tuple[str, str]: The current commit SHA and branch name.
+
     Raises:
-    	RuntimeError: If the branch is ineligible, tracked files are uncommitted, or required canary files are not committed.
+        RuntimeError: If the branch is ineligible, tracked files are uncommitted, or required canary files are not committed.
     """
     sha = _git("rev-parse", "HEAD")
     branch = _git("branch", "--show-current")
@@ -178,12 +178,12 @@ def _load_repo_env() -> None:
 def _installed_versions(_env: dict[str, str]) -> dict[str, str]:
     """
     Return the installed versions of Python, DSPy, and Daytona.
-    
+
     Parameters:
-    	_env (dict[str, str]): Environment configuration reserved for version collection.
-    
+        _env (dict[str, str]): Environment configuration reserved for version collection.
+
     Returns:
-    	dict[str, str]: A mapping containing the installed Python, DSPy, and Daytona versions.
+        dict[str, str]: A mapping containing the installed Python, DSPy, and Daytona versions.
     """
     return {
         "python": sys.version.split()[0],
@@ -194,9 +194,9 @@ def _installed_versions(_env: dict[str, str]) -> dict[str, str]:
 
 def _lockfile_sha256() -> str:
     """Return the SHA-256 digest of the repository's `uv.lock` file.
-    
+
     Raises:
-    	RuntimeError: If `uv.lock` is missing.
+        RuntimeError: If `uv.lock` is missing.
     """
     lockfile = _REPO_ROOT / "uv.lock"
     if not lockfile.is_file():
@@ -207,7 +207,7 @@ def _lockfile_sha256() -> str:
 def _atomic_write(path: Path, payload: dict[str, object]) -> None:
     """
     Atomically write a JSON payload to a file.
-    
+
     Parameters:
         path (Path): Destination path for the JSON file.
         payload (dict[str, object]): JSON-serializable content to write.
@@ -231,19 +231,19 @@ def _failure_receipt(
 ) -> dict[str, object]:
     """
     Create a bounded failure receipt for a specified execution phase and failure category.
-    
+
     Parameters:
-    	category (str): Allowed failure category for the receipt.
-    	phase (str): Allowed execution phase associated with the failure.
-    	started_at (str): UTC timestamp marking the start of the operation.
-    	sha (str | None): Candidate commit SHA, if available.
-    	branch (str | None): Candidate branch name, if available.
-    
+        category (str): Allowed failure category for the receipt.
+        phase (str): Allowed execution phase associated with the failure.
+        started_at (str): UTC timestamp marking the start of the operation.
+        sha (str | None): Candidate commit SHA, if available.
+        branch (str | None): Candidate branch name, if available.
+
     Returns:
-    	dict[str, object]: Failure receipt containing candidate metadata, timing, failure details, and a failed status.
-    
+        dict[str, object]: Failure receipt containing candidate metadata, timing, failure details, and a failed status.
+
     Raises:
-    	ValueError: If the category or phase is outside the receipt contract.
+        ValueError: If the category or phase is outside the receipt contract.
     """
     if category not in _FAILURE_CATEGORIES or phase not in _FAILURE_PHASES:
         raise ValueError("failure receipt is outside the bounded contract")
@@ -264,15 +264,15 @@ def _write_failure(output: Path, **kwargs: object) -> None:
 def _read_json(path: Path) -> dict[str, Any]:
     """
     Read a JSON evidence file and return its object value.
-    
+
     Parameters:
-    	path (Path): Path to the JSON file.
-    
+        path (Path): Path to the JSON file.
+
     Returns:
-    	dict[str, Any]: The decoded JSON object.
-    
+        dict[str, Any]: The decoded JSON object.
+
     Raises:
-    	ReceiptError: If the file cannot be read, contains invalid JSON, or does not contain a JSON object.
+        ReceiptError: If the file cannot be read, contains invalid JSON, or does not contain a JSON object.
     """
     try:
         value = json.loads(path.read_text(encoding="utf-8"))
@@ -286,15 +286,15 @@ def _read_json(path: Path) -> dict[str, Any]:
 def validate_test_receipt(receipt: object) -> dict[str, Any]:
     """
     Validate the sanitized receipt emitted by the live pytest scenario.
-    
+
     Parameters:
-    	receipt (object): Receipt data to validate.
-    
+        receipt (object): Receipt data to validate.
+
     Returns:
-    	dict[str, Any]: The validated receipt.
-    
+        dict[str, Any]: The validated receipt.
+
     Raises:
-    	ReceiptError: If the receipt does not match the required schema or contains invalid status, timing, streaming, assertion, or resource data.
+        ReceiptError: If the receipt does not match the required schema or contains invalid status, timing, streaming, assertion, or resource data.
     """
     if not isinstance(receipt, dict) or set(receipt) != _TEST_SUCCESS_FIELDS:
         raise ReceiptError("receipt_fields")
@@ -323,8 +323,10 @@ def validate_test_receipt(receipt: object) -> dict[str, Any]:
         or any(field not in {"reasoning", "code"} for field in fields)
     ):
         raise ReceiptError("receipt_streaming")
-    if not isinstance(assertions, dict) or set(assertions) != _REQUIRED_ASSERTIONS or not all(
-        value is True for value in assertions.values()
+    if (
+        not isinstance(assertions, dict)
+        or set(assertions) != _REQUIRED_ASSERTIONS
+        or not all(value is True for value in assertions.values())
     ):
         raise ReceiptError("receipt_assertions")
     if (
@@ -343,15 +345,15 @@ def validate_test_receipt(receipt: object) -> dict[str, Any]:
 def _policy(settings: Any) -> dict[str, str]:
     """
     Validate and return the required live execution policy.
-    
+
     Parameters:
-    	settings (Any): Configuration containing the active profile, environment, root model, and sub-model.
-    
+        settings (Any): Configuration containing the active profile, environment, root model, and sub-model.
+
     Returns:
-    	dict[str, str]: The validated execution policy.
-    
+        dict[str, str]: The validated execution policy.
+
     Raises:
-    	ReceiptError: If the configured execution policy does not match the required Daytona settings.
+        ReceiptError: If the configured execution policy does not match the required Daytona settings.
     """
     profile = active_profile(settings)
     policy = {
@@ -380,14 +382,14 @@ def _success_receipt(
 ) -> dict[str, object]:
     """
     Build a successful stream-canary receipt from validated test evidence and candidate metadata.
-    
+
     Parameters:
         test_receipt (dict[str, Any]): Evidence produced by the live test scenario.
         sha (str): Commit SHA associated with the candidate.
         branch (str): Git branch associated with the candidate.
         policy (dict[str, str]): Execution policy used by the canary.
         child_env (dict[str, str]): Environment variables used for dependency version detection.
-    
+
     Returns:
         dict[str, object]: A validated success receipt containing candidate, policy, timing, streaming, assertion, and resource information.
     """
@@ -417,12 +419,12 @@ def _success_receipt(
 def main(argv: list[str] | None = None) -> int:
     """
     Run the Phase 1 Daytona streaming canary and write a bounded JSON receipt.
-    
+
     Parameters:
-    	argv (list[str] | None): Optional command-line arguments to parse instead of the process arguments.
-    
+        argv (list[str] | None): Optional command-line arguments to parse instead of the process arguments.
+
     Returns:
-    	int: `0` on success, `2` for precondition failures, `3` for proof or receipt I/O failures, `4` for invalid evidence, and `130` if the scenario is interrupted.
+        int: `0` on success, `2` for precondition failures, `3` for proof or receipt I/O failures, `4` for invalid evidence, and `130` if the scenario is interrupted.
     """
     args = build_parser().parse_args(argv)
     output = args.output.expanduser().resolve()

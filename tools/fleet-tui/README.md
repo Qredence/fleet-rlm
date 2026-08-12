@@ -37,20 +37,30 @@ documented in [`../../docs/reference/configuration.md`](../../docs/reference/con
 
 ## Operator timeline
 
-pi-tui renders one white-and-gray execution timeline. Text, reasoning, code,
-interpreter output, Tools, Skills, errors, Results, Artifacts, and usage remain
-chronological, complete, static, and expanded. Live and reloaded Turns share one
-projection and renderer-neutral store.
+pi-tui renders one white-and-gray execution timeline in an alternate-screen
+viewport. Text, reasoning, code, interpreter output, Tools, Skills, errors,
+Results, Artifacts, and usage remain chronological, complete, and expanded
+unless the operator folds them. Live and reloaded Turns share one projection
+and renderer-neutral store.
 
-Fleet does not capture the mouse, clip old messages, or maintain a transcript
-viewport. Use native terminal scrollback. Assistant, user, reasoning, and Result
-narrative text is rendered as pi-tui Markdown, including lists, links,
-blockquotes, fenced code, and tables. Partial text, generated code, and
-interpreter output retain stable stream cards until the Turn settles. The live
-activity loader names the current
-preparation, RLM step, Tool, replay, or cancellation action. The footer reports
-observed committed input/output tokens, Turn steps, Tools, and outcome; absent
-provider telemetry displays as `—` rather than an estimated zero.
+The transcript viewport follows the newest output: PgUp/PgDn scroll a page,
+Home/End jump to the top/bottom, the mouse wheel scrolls, drag selects text
+for copy, and new output re-follows the end. Tool, code, and output cards
+fold with Ctrl+O (multi-line tool errors collapse to their summary by
+default); the latest card shows a dim key hint.
+
+Assistant, user, reasoning, and Result narrative text is rendered as pi-tui
+Markdown, including lists, links, blockquotes, fenced code, and tables. Tool
+cards share one panel surface (input/output previews bounded to 4k chars,
+long bodies capped with a skip marker). User messages render on an adaptive
+surface that keeps contrast against the actual terminal background. The live
+activity strip borders a pulse indicator and names the current preparation,
+RLM step, Tool, replay, or cancellation action. The footer reports observed
+committed input/output tokens, Turn steps, Tools, and outcome; absent provider
+telemetry displays as `—` rather than an estimated zero.
+
+Use `/help` for commands. `/theme [name]` lists and switches the builtin
+(`dark`/`light`) or custom JSON themes (see below).
 
 Use `/help` for commands. `/rename <title>` names the current Session;
 `/sessions [title search]` opens the active Session selector. Switching Sessions
@@ -82,6 +92,23 @@ The editor draft, pinned Skills/Attachments, and the last prompt persist per
 Session to `~/.local/share/fleet/tui/<session-id>.json` (override with
 `FLEET_TUI_STATE_DIR`) and are restored on the next start; a failed write never
 blocks the TUI.
+
+## Themes
+
+Builtin `dark` and `light` themes are compiled in; custom themes are JSON files
+in `$FLEET_TUI_STATE_DIR/themes/*.json` that may override any token by name and
+reference `vars`:
+
+```json
+{ "name": "solar", "vars": { "accent": "#ff8800" }, "colors": { "accent": "accent", "border": "#123456" } }
+```
+
+Missing tokens fall back to the dark builtin; malformed files are ignored.
+`/theme [name]` lists and switches themes, the selection persists to
+`$FLEET_TUI_STATE_DIR/theme`, `FLEET_TUI_THEME` overrides it at startup, and an
+active custom theme hot-reloads when its file changes. Surfaces and selections
+are blended adaptively against the terminal's reported background color so
+contrast holds on light and dark terminals alike.
 
 ## Artifact download
 

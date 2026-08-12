@@ -34,6 +34,7 @@ if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 from scripts.benchmarks.judges import DEFAULT_JUDGE_MODEL, JUDGE_NAMES, build_judges
+from scripts.benchmarks.manage_prompts import DEFAULT_PROMPT_NAME, register_prompt_text
 from scripts.benchmarks.rlm_eval_dataset import _dataset_name_default, dataset_examples
 
 RECEIPT_SCHEMA = "fleet.signature-optimization/v1"
@@ -715,6 +716,35 @@ def _load_examples(args: argparse.Namespace) -> tuple[list[dict[str, Any]], list
     return dataset_examples(dataset.to_df().to_dict("records"), val_fraction=args.val_fraction, seed=args.dataset_seed)
 
 
+def _register_best_candidate(args: argparse.Namespace, candidate: str) -> dict[str, Any]:
+    """
+    Register the optimized best candidate as a versioned MLflow prompt.
+
+    Parameters:
+        args (argparse.Namespace): Connection, prompt name, and alias options.
+        candidate (str): Optimized instruction text to register.
+
+    Returns:
+        dict[str, Any]: Bounded prompt registry metadata for the receipt.
+    """
+    receipt = register_prompt_text(
+        template=candidate,
+        prompt_name=args.prompt_name,
+        mlflow_url=args.mlflow_url,
+        experiment_id=args.experiment_id,
+        experiment_name=args.registry_experiment_name,
+        source="optimizer",
+        commit_message=args.prompt_commit_message or None,
+        alias=args.prompt_alias or "",
+    )
+    return {
+        "prompt_name": receipt["prompt_name"],
+        "prompt_version": receipt["version"],
+        "prompt_alias": receipt["prompt_alias"],
+        "signature_sha256": receipt["signature_sha256"],
+    }
+
+
 def optimize(args: argparse.Namespace) -> dict[str, Any]:
     """
     Run one optimization command and return its receipt payload.
@@ -826,6 +856,11 @@ def optimize(args: argparse.Namespace) -> dict[str, Any]:
     candidate_path.write_text(best_candidate, encoding="utf-8")
     _progress_event("receipt_written", candidate_out=str(candidate_path))
 
+    prompt_registry: dict[str, Any] | None = None
+    if args.register_prompt:
+        prompt_registry = _register_best_candidate(args, best_candidate)
+        _progress_event("prompt_registered", **prompt_registry)
+
     reported = {key: value for key, value in result.items() if key != "best_candidate"}
     return {
         **reported,
@@ -844,6 +879,7 @@ def optimize(args: argparse.Namespace) -> dict[str, Any]:
         "best_candidate_sha256": hashlib.sha256(best_candidate.encode("utf-8")).hexdigest(),
         "best_candidate_preview": best_candidate[:500],
         "candidate_out": str(candidate_path),
+        "prompt_registry": prompt_registry,
     }
 
 
@@ -897,6 +933,19 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--objective", default=DEFAULT_OBJECTIVE)
     parser.add_argument("--background", default=DEFAULT_BACKGROUND)
     parser.add_argument("--candidate-out", type=Path, default=None)
+    parser.add_argument(
+        "--register-prompt",
+        action="store_true",
+        help="Register the optimized best candidate as a versioned MLflow prompt",
+    )
+    parser.add_argument("--prompt-name", default=DEFAULT_PROMPT_NAME, help="MLflow prompt name for --register-prompt")
+    parser.add_argument("--prompt-alias", default="", help="Alias for the registered prompt version")
+    parser.add_argument("--prompt-commit-message", default="", help="Commit message for the registered prompt version")
+    parser.add_argument(
+        "--experiment-id",
+        default="",
+        help="Explicit experiment id for prompt registration (defaults to --registry-experiment-name)",
+    )
     parser.add_argument(
         "--progress-stream",
         choices=("off", "ndjson"),

@@ -6,6 +6,7 @@ declare module "@earendil-works/pi-tui" {
     "fleet.clearOrExit": true;
     "fleet.exit": true;
     "fleet.suspend": true;
+    "fleet.toggleFold": true;
   }
 }
 
@@ -17,4 +18,8 @@ export const fleetKeybindings = new KeybindingsManager({
   },
   "fleet.exit": { defaultKeys: "ctrl+d", description: "Exit Fleet when the editor is empty" },
   "fleet.suspend": { defaultKeys: "ctrl+z", description: "Suspend Fleet" },
+  "fleet.toggleFold": {
+    defaultKeys: "ctrl+o",
+    description: "Toggle the latest tool/code/output card",
+  },
 });

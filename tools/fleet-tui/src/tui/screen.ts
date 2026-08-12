@@ -1,7 +1,8 @@
 import {
-  Container,
   Loader,
+  ScrollView,
   truncateToWidth,
+  VStack,
   type Component,
   type Editor,
   type Terminal,
@@ -9,23 +10,48 @@ import {
 } from "@earendil-works/pi-tui";
 
 import { formatDuration, formatTokens, shortTraceId } from "./format.js";
+import { keyHint } from "./keybinding-hints.js";
 import { summarizeExecution, type ExecutionSummary } from "./execution-summary.js";
 import { terminalSafeLine } from "./terminal-text.js";
-import type { ConversationStore, Run, State } from "./store.js";
-import { theme } from "./theme.js";
+import type { ConversationStore, Message, Run, State } from "./store.js";
+import { statusGlyph, theme } from "./theme.js";
 import { TranscriptComponent } from "./transcript.js";
 import { committedTokenCounts, type ObservedTokenCounts } from "./usage-summary.js";
+import { WORKING_ICON_FRAMES } from "./working-icon.js";
 
-export class FleetScreen extends Container {
+/**
+ * Screen layout for the alternate-screen viewport TUI:
+ *
+ *   ─ transcript ScrollView (follows end; PgUp/PgDn/Home/End scroll) ─
+ *   ─ activity strip (bordered loader + pulse) ─
+ *   ─ editor ─
+ *   ─ footer ─
+ *
+ * The transcript viewport grows into every free row; the activity strip,
+ * editor, and footer are pinned with shrink 0 so they never compress.
+ */
+export class FleetScreen extends VStack {
+  readonly transcriptView: ScrollView;
   private readonly activity: ActivityComponent;
 
   constructor(store: ConversationStore, editor: Editor, terminal: Terminal, ui: TUI) {
     super();
+    this.transcriptView = new ScrollView(new TranscriptComponent(store), {
+      follow: "end",
+      primary: true,
+      scrollbar: "auto",
+      scrollbarStyle: (text) => theme.surface("toolPanelBg")(text),
+    });
+    this.addChild(this.transcriptView, { grow: 1, shrink: 1, minSize: 1 });
     this.activity = new ActivityComponent(store, ui);
-    this.addChild(new TranscriptComponent(store));
-    this.addChild(this.activity);
-    this.addChild(editor);
-    this.addChild(new FooterComponent(store, terminal));
+    this.addChild(this.activity, { shrink: 0 });
+    this.addChild(editor, { shrink: 0 });
+    this.addChild(new FooterComponent(store, terminal), { shrink: 0 });
+  }
+
+  invalidate(): void {
+    super.invalidate();
+    this.transcriptView.invalidate();
   }
 
   dispose(): void {
@@ -37,6 +63,7 @@ class ActivityComponent implements Component {
   private readonly loader: Loader;
   private active = false;
   private message = "";
+  private frame = 0;
 
   constructor(
     private readonly store: ConversationStore,
@@ -65,7 +92,10 @@ class ActivityComponent implements Component {
     }
 
     const elapsed = run.startedAt ? formatDuration(Date.now() - run.startedAt) : "0:00";
-    const message = `${activityAction(state)} ${dim(`· ${elapsed}`)}`;
+    const pulse = isBusy(run)
+      ? WORKING_ICON_FRAMES[(this.frame >> 2) % WORKING_ICON_FRAMES.length]
+      : "";
+    const message = `${pulse} ${activityAction(state)} ${dim(`· ${elapsed}`)}`;
     if (message !== this.message) {
       this.message = message;
       this.loader.setMessage(message);
@@ -74,6 +104,7 @@ class ActivityComponent implements Component {
       this.active = true;
       this.loader.start();
     }
+    this.frame += 1;
 
     const secondaryParts = [
       `${run.completedSteps}/${run.startedSteps} steps`,
@@ -83,7 +114,9 @@ class ActivityComponent implements Component {
     ]
       .filter((part): part is string => part !== null)
       .join(" · ");
+    const border = theme.fg("borderMuted", "─".repeat(Math.max(1, width)));
     return [
+      border,
       ...this.loader.render(width),
       truncateToWidth(`${theme.fg("borderMuted", "│")} ${dim(secondaryParts)}`, width, ""),
     ];
@@ -106,7 +139,7 @@ class FooterComponent implements Component {
   // them on the messages array reference and run id: the store creates a new
   // array on every message change and leaves it untouched for status/heartbeat
   // dispatches, so keystrokes and loader ticks cost O(1) instead of O(n).
-  private metricsMessages: readonly import("./store.js").Message[] | null = null;
+  private metricsMessages: readonly Message[] | null = null;
   private metricsRunId: string | null = null;
   private metricsUsage: ObservedTokenCounts = { input: null, output: null };
   private metricsExecution: ExecutionSummary = {
@@ -138,8 +171,8 @@ class FooterComponent implements Component {
       : [
           dim(
             isBusy(state.run)
-              ? "Esc cancel · draft stays unsent · Ctrl+D exits only when empty"
-              : "Enter send · Shift+Enter newline · / commands · Ctrl+D exit when empty",
+              ? `${keyHint("fleet.interrupt", "cancel")} · draft stays unsent`
+              : "Enter send · Shift+Enter newline · / commands",
           ),
         ];
     const run = state.run;
@@ -154,7 +187,9 @@ class FooterComponent implements Component {
     if (execution.durationMs !== null) metricsParts.push(formatDuration(execution.durationMs));
 
     const metrics = metricsParts.length > 0 ? ` · ${metricsParts.join(" · ")}` : "";
-    const outcome = run.outcome ? ` · ${theme.fg(outcomeColor(run.outcome), run.outcome)}` : "";
+    const outcome = run.outcome
+      ? ` · ${theme.fg(outcomeColor(run.outcome), `${statusGlyph[outcomeGlyph(run.outcome)]} ${run.outcome}`)}`
+      : "";
     const replay = run.delivery === "replay" ? " · replay" : "";
     lines.push(
       truncateToWidth(
@@ -202,6 +237,12 @@ function terminalSafeStatus(value: string): string {
 
 function formatObservedTokens(value: number | null): string {
   return value === null ? "—" : formatTokens(value);
+}
+
+function outcomeGlyph(outcome: NonNullable<Run["outcome"]>): keyof typeof statusGlyph {
+  if (outcome === "completed") return "success";
+  if (outcome === "cancelled") return "warning";
+  return "error";
 }
 
 function outcomeColor(outcome: NonNullable<Run["outcome"]>): "success" | "warning" | "error" {

@@ -105,14 +105,11 @@ def test_no_direct_litellm_usage(py_file: Path) -> None:
 def test_no_direct_lm_forward_calls() -> None:
     """Fleet calls stock DSPy LMs through __call__/acall, never forward directly."""
     violations = [
-        violation
-        for py_file in _iter_python_files(_SRC_ROOT)
-        for violation in _directly_calls_lm_forward(py_file)
+        violation for py_file in _iter_python_files(_SRC_ROOT) for violation in _directly_calls_lm_forward(py_file)
     ]
     assert not violations, (
         "fleet-rlm must not bypass DSPy's normalized LM compatibility boundary. "
-        "Call dspy.LM through its public __call__/acall surface. Found violations:\n  "
-        + "\n  ".join(violations)
+        "Call dspy.LM through its public __call__/acall surface. Found violations:\n  " + "\n  ".join(violations)
     )
 
 

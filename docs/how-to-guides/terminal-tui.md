@@ -87,11 +87,12 @@ operator state and are not inserted into durable transcript messages.
 
 Use `/help` for the current slash-command list. Important commands include
 `/sessions`, `/rename`, `/resume`, `/reload`, `/status`, `/settings`,
-`/profiles`, `/volume`, `/files`, `/file`, `/attach`, `/artifact`,
+`/profiles`, `/theme`, `/volume`, `/files`, `/file`, `/attach`, `/artifact`,
 `/artifacts`, `/redo`, `/cancel`, `/clear`, `/skills`, `/skill`, `/trace`,
 and `/exit`. `/settings`
 is a local-only TOML policy editor; `/profiles` switches the selected profile;
-`/volume [root]` shows the read-only Workspace Volume tree. Saved policy
+`/volume [root]` shows the read-only Workspace Volume tree; `/theme [name]`
+lists and switches the builtin or custom color themes. Saved policy
 settings take effect after restarting Fleet.
 
 `/attach <path>…` uploads local files through the lifecycle-owned Attachment

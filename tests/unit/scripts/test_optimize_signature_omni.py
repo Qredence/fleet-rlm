@@ -365,7 +365,14 @@ def test_optimize_refuses_native_omni_engines_only_when_the_registry_is_missing(
         optimize_module.optimize(args)
 
     args = optimize_module.build_parser().parse_args(
-        ["--engine", "gepa", "--cost-penalty-per-iteration", "2.0", "--output", str(tmp_path / "r.json")]
+        [
+            "--engine",
+            "gepa",
+            "--cost-penalty-per-iteration",
+            "2.0",
+            "--output",
+            str(tmp_path / "r.json"),
+        ]
     )
     with pytest.raises(optimize_module.OptimizationError, match="cost-penalty"):
         optimize_module.optimize(args)
@@ -438,3 +445,89 @@ def test_progress_stream_defaults_to_silent(monkeypatch: pytest.MonkeyPatch, cap
     monkeypatch.setattr(optimize_module, "_PROGRESS_STREAM", "off")
     optimize_module._progress_event("job_start", engine="auto")
     assert capsys.readouterr().out == ""
+
+
+def test_register_best_candidate_delegates_to_shared_registry(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+    import scripts.optimize.optimize_signature_omni as optimize_module
+
+    calls = SimpleNamespace(registered=[])
+
+    def fake_register_prompt_text(
+        *,
+        template,
+        prompt_name,
+        mlflow_url,
+        experiment_id,
+        experiment_name,
+        source,
+        commit_message,
+        alias,
+    ):
+        calls.registered.append(
+            {
+                "template": template,
+                "prompt_name": prompt_name,
+                "mlflow_url": mlflow_url,
+                "experiment_id": experiment_id,
+                "experiment_name": experiment_name,
+                "source": source,
+                "commit_message": commit_message,
+                "alias": alias,
+            }
+        )
+        return {
+            "prompt_name": prompt_name,
+            "version": 7,
+            "prompt_alias": alias,
+            "signature_sha256": "abc123",
+        }
+
+    monkeypatch.setattr(optimize_module, "register_prompt_text", fake_register_prompt_text)
+    monkeypatch.setenv("FLEET_MLFLOW_EXPERIMENT_NAME", "fleet-rlm")
+    args = optimize_module.build_parser().parse_args(
+        [
+            "--register-prompt",
+            "--prompt-name",
+            "fleet-rlm-signature",
+            "--prompt-alias",
+            "champion",
+            "--prompt-commit-message",
+            "omni v7",
+            "--experiment-id",
+            "exp-9",
+            "--output",
+            str(tmp_path / "r.json"),
+        ]
+    )
+
+    registry = optimize_module._register_best_candidate(args, "optimized instructions")
+
+    assert registry == {
+        "prompt_name": "fleet-rlm-signature",
+        "prompt_version": 7,
+        "prompt_alias": "champion",
+        "signature_sha256": "abc123",
+    }
+    assert calls.registered == [
+        {
+            "template": "optimized instructions",
+            "prompt_name": "fleet-rlm-signature",
+            "mlflow_url": "databricks",
+            "experiment_id": "exp-9",
+            "experiment_name": "fleet-rlm",
+            "source": "optimizer",
+            "commit_message": "omni v7",
+            "alias": "champion",
+        }
+    ]
+
+
+def test_parser_exposes_register_prompt_options(tmp_path) -> None:
+    import scripts.optimize.optimize_signature_omni as optimize_module
+
+    args = optimize_module.build_parser().parse_args(["--output", str(tmp_path / "r.json")])
+    assert args.register_prompt is False
+    assert args.prompt_name == "fleet-rlm-signature"
+    assert args.prompt_alias == ""
+    assert args.prompt_commit_message == ""
+    assert args.experiment_id == ""
