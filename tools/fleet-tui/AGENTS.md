@@ -12,7 +12,10 @@ pi-tui-only terminal client. No web frontend, no React, no browser runtime.
 | `src/fleet-turn-stream.ts` | Strict SSE stream lifecycle (start → … → terminal → [DONE]) |
 | `src/sse.ts` | Frame/chunk validation against `FleetUIMessageChunk` union |
 | `src/tui/screen.ts` | Alternate-screen layout: transcript `ScrollView` (follow-end), activity strip, editor, footer |
-| `src/tui/transcript.ts` | Live and reload durable-turn projection |
+| `src/tui/live-projection.ts` | Live SSE chunk → store events (`LiveTurnProjector`) |
+| `src/tui/durable-projection.ts` | Durable reload turns → store events (`projectDurableTurns`) |
+| `src/tui/projection-helpers.ts` | Shared pure helpers / message builders for projection |
+| `src/tui/transcript.ts` | Transcript rendering of projected messages |
 | `src/tui/store.ts` | Atomic hydration; all state via `dispatch` + pure `reduce` |
 | `src/tui/commands.ts` | Slash commands, including loopback-only TOML policy editing |
 | `src/tui/draft-store.ts` | Debounced per-Session draft/selection persistence (`FLEET_TUI_STATE_DIR`) |

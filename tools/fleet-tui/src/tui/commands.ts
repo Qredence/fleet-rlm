@@ -10,8 +10,8 @@ import type {
   FleetSettingsPolicy,
   FleetSkillCard,
 } from "../fleet-api-client.js";
+import { projectDurableTurns } from "./durable-projection.js";
 import { formatBytes, formatTokens, shortId } from "./format.js";
-import { projectDurableTurns } from "./projection.js";
 import {
   type ConversationStore,
   type Message,

@@ -161,8 +161,9 @@ FastAPI HTTP/SSE contract.
 
 `fleet-turn-stream.ts` owns strict request/retry/stream lifecycle and part
 ordering; `sse.ts` owns framing and generated-chunk validation; `tui/runner.ts`
-owns active Run and cancellation control; `projection.ts` owns live/durable
-parity and stream accumulation; `store.ts` owns atomic hydration and terminal
+owns active Run and cancellation control; `live-projection.ts` /
+`durable-projection.ts` own live SSE and durable reload projection (shared
+helpers in `projection-helpers.ts`); `store.ts` owns atomic hydration and terminal
 stream settlement. The application, screen, message renderer, commands,
 presenters, and autocomplete own interaction and static presentation.
 

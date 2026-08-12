@@ -1,8 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-
-import { FleetApiClient, FleetApiError } from "../../fleet-api-client.js";
 import type { FleetTurn } from "../../fleet-api-client.js";
-import { projectDurableTurns } from "../projection.js";
+import { FleetApiClient, FleetApiError } from "../../fleet-api-client.js";
+import { projectDurableTurns } from "../durable-projection.js";
 import { RunController } from "../runner.js";
 import { ConversationStore, type Message } from "../store.js";
 

@@ -1,17 +1,17 @@
 #!/usr/bin/env node
 
 import {
+  type CliOptions,
   createFleetClient,
   parseArgs,
   runArtifactDownload,
   tuiUsage,
-  type CliOptions,
 } from "./cli-core.js";
 import { createFleetTui } from "./tui/application.js";
 import { DraftStore } from "./tui/draft-store.js";
-import { projectDurableTurns } from "./tui/projection.js";
+import { projectDurableTurns } from "./tui/durable-projection.js";
 
-export { parseArgs, type CliOptions };
+export { type CliOptions, parseArgs };
 
 export async function run(options: CliOptions): Promise<void> {
   if (await runArtifactDownload(options)) return;

@@ -156,7 +156,7 @@ def _flush_step_output(
     RC-4b: stdout deltas are tracked in the step's stream state so the final
     flush is idempotent. When deltas already cover the full public output
     no closing frame is emitted — the TUI contract
-    (tools/fleet-tui/src/tui/projection.ts `projectRlm`) does not require
+    (tools/fleet-tui/src/tui/live-projection.ts `projectRlm`) does not require
     a terminal ``is_final`` frame per rlm-output stream
     (``fleet-turn-stream.ts`` lifecycle only tracks reasoning/text/tool
     streams, and ``store.ts`` settles leftover streaming cards at the run

@@ -603,7 +603,7 @@ uv run pytest tests/contracts/backend -q
 ### Mission 12 — Split TUI live vs durable projection
 
 - **Tier:** `recommended`
-- **Status:** `open`
+- **Status:** `done`
 - **Depends on:** Mission 11
 - **Narrative:** `IMPLEMENTATION_PHASES.md` §PR 12
 
@@ -638,10 +638,10 @@ cd tools/fleet-tui && pnpm exec biome check .
 
 **Acceptance:**
 
-- [ ] Live and durable projection live in separate modules
-- [ ] Stream grammar and store reducer untouched in semantics
-- [ ] Dual-field reads preserved
-- [ ] AGENTS.md ownership corrected
+- [x] Live and durable projection live in separate modules
+- [x] Stream grammar and store reducer untouched in semantics
+- [x] Dual-field reads preserved
+- [x] AGENTS.md ownership corrected
 
 ---
 
