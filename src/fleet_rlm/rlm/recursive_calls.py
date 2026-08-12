@@ -5,11 +5,10 @@ from __future__ import annotations
 import contextlib
 import time
 from collections.abc import Callable, Mapping
-from concurrent.futures import FIRST_EXCEPTION, Future, ThreadPoolExecutor, wait
-from contextvars import copy_context
+from concurrent.futures import Future, wait
 from dataclasses import dataclass, field
 from threading import Event, RLock
-from typing import Any, cast
+from typing import Any
 
 import dspy
 
@@ -26,6 +25,11 @@ from fleet_rlm.rlm.dspy_contract import RLMOptions, _RLMTraceCallback, build_nat
 from fleet_rlm.rlm.errors import RLMConfigError
 from fleet_rlm.rlm.events import Status
 from fleet_rlm.rlm.model_bundle import RLMModelBundle
+from fleet_rlm.rlm.recursive_batch import (
+    RecursiveBatchError,
+    RecursiveCallReservation,
+    run_reserved_batch,
+)
 from fleet_rlm.rlm.tool_observer import ToolEventView, ToolObserver, observe_tool
 
 # Fleet supports exactly one native recursive child level followed by a
@@ -87,7 +91,7 @@ class RecursiveCallSummary:
 @dataclass(slots=True)
 class _RecursiveState:
     lock: RLock = field(default_factory=RLock, repr=False)
-    call_count: int = 0
+    reserved_call_count: int = 0
     delegated_prompt_chars: int = 0
     maximum_prompt_chars: int = 0
     child_iterations: int = 0
@@ -165,12 +169,6 @@ def _validate_recursive_prompt(prompt: object, *, max_chars: int) -> str:
     if len(prompt) > max_chars:
         raise ValueError("rlm_query prompt exceeds the configured character bound")
     return prompt
-
-
-@dataclass(frozen=True, slots=True)
-class _RecursiveReservation:
-    call_index: int
-    child_depth: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -299,7 +297,7 @@ class RecursiveRLMExecutor:
         with self._state.lock:
             snapshot = self._metrics.snapshot()
             return RecursiveCallSummary(
-                call_count=self._state.call_count,
+                call_count=self._state.reserved_call_count,
                 delegated_prompt_chars=self._state.delegated_prompt_chars,
                 maximum_prompt_chars=self._state.maximum_prompt_chars,
                 child_iterations=self._state.child_iterations,
@@ -468,21 +466,23 @@ class RecursiveRLMExecutor:
         except Exception:
             return
 
-    def _begin_call(self, prompt: str) -> _RecursiveReservation:
-        return self._make_reservation(self._reserve_call_indexes((prompt,))[0])
+    def _begin_call(self, prompt: str) -> RecursiveCallReservation:
+        return self._make_reservation(prompt, self._reserve_call_indexes((prompt,))[0])
 
-    def _begin_batch(self, prompts: tuple[str, ...]) -> tuple[_RecursiveReservation, ...]:
+    def _begin_batch(self, prompts: tuple[str, ...]) -> tuple[RecursiveCallReservation, ...]:
         indexes = self._reserve_call_indexes(prompts)
-        return tuple(self._make_reservation(index) for index in indexes)
+        return tuple(
+            self._make_reservation(prompt, index) for prompt, index in zip(prompts, indexes, strict=True)
+        )
 
     def _reserve_call_indexes(self, prompts: tuple[str, ...]) -> tuple[int, ...]:
         if not prompts:
             return ()
         with self._state.lock:
-            if self._state.call_count + len(prompts) > self._options.max_calls:
+            if self._state.reserved_call_count + len(prompts) > self._options.max_calls:
                 raise RuntimeError("recursive call budget exhausted")
-            start = self._state.call_count + 1
-            self._state.call_count += len(prompts)
+            start = self._state.reserved_call_count + 1
+            self._state.reserved_call_count += len(prompts)
             self._state.delegated_prompt_chars += sum(len(prompt) for prompt in prompts)
             self._state.maximum_prompt_chars = max(
                 self._state.maximum_prompt_chars,
@@ -492,18 +492,18 @@ class RecursiveRLMExecutor:
             self._metrics.record_recursive_call()
         return tuple(range(start, start + len(prompts)))
 
-    def _make_reservation(self, call_index: int) -> _RecursiveReservation:
-        return _RecursiveReservation(call_index, self._depth + 1)
+    def _make_reservation(self, prompt: str, call_index: int) -> RecursiveCallReservation:
+        return RecursiveCallReservation(prompt=prompt, call_index=call_index, child_depth=self._depth + 1)
 
     @staticmethod
-    def _start_call(prompt: str, reservation: _RecursiveReservation) -> _RecursiveCall:
+    def _start_call(reservation: RecursiveCallReservation) -> _RecursiveCall:
         started_at = time.monotonic()
         span = start_turn_span(
             "RLM.recursive_call",
             inputs={
                 "recursive_depth": reservation.child_depth,
                 "call_index": reservation.call_index,
-                "prompt_chars": len(prompt),
+                "prompt_chars": len(reservation.prompt),
             },
         )
         return _RecursiveCall(reservation.call_index, reservation.child_depth, started_at, span)
@@ -694,17 +694,17 @@ class RecursiveRLMExecutor:
             raise TimeoutError("recursive call deadline exceeded")
         self._ensure_authorized()
         self._ensure_no_pending_batch_workers()
-        call = self._begin_call(prompt)
-        return self._run_reserved_call(prompt, call)
+        reservation = self._begin_call(prompt)
+        return self._run_reserved_call(reservation)
 
     def _run_reserved_call(
         self,
-        prompt: str,
-        reservation: _RecursiveReservation,
+        reservation: RecursiveCallReservation,
         batch_cancelled: Event | None = None,
     ) -> str:
         """Run one already-reserved child call and always settle its lease."""
-        call = self._start_call(prompt, reservation)
+        prompt = reservation.prompt
+        call = self._start_call(reservation)
         self._emit_progress(
             "child_started",
             call_index=call.call_index,
@@ -799,80 +799,16 @@ class RecursiveRLMExecutor:
         self._ensure_authorized()
         self._ensure_no_pending_batch_workers()
         self._metrics.record_recursive_batch()
-        calls = self._begin_batch(normalized)
-        workers = min(self._options.max_parallel_children, len(calls))
-        results: list[str | None] = [None] * len(calls)
-        batch_cancelled = Event()
-        pool = ThreadPoolExecutor(max_workers=workers, thread_name_prefix="fleet-rlm-child")
-        futures: list[Future[str]] = []
-        try:
-            try:
-                for prompt, call in zip(normalized, calls, strict=True):
-                    submitted = pool.submit(
-                        copy_context().run,
-                        self._run_reserved_call,
-                        prompt,
-                        call,
-                        batch_cancelled,
-                    )
-                    futures.append(cast(Future[str], submitted))
-            except BaseException:
-                batch_cancelled.set()
-                pending = {future for future in futures if not future.done()}
-                for future in pending:
-                    future.cancel()
-                self._retain_pending_batch_futures(pending)
-                raise
-            remaining = max(0.0, self._deadline - time.monotonic())
-            raw_done, raw_not_done = wait(futures, timeout=remaining, return_when=FIRST_EXCEPTION)
-            done = raw_done
-            not_done = raw_not_done
-            failures = _future_failures(done)
-            if failures or not_done:
-                batch_cancelled.set()
-                for future in not_done:
-                    future.cancel()
-            if not_done:
-                # Running Python threads cannot be force-cancelled. Each worker
-                # retains its own lease until its deadline-bound LM call exits;
-                # queued work is cancelled and executor teardown never performs
-                # a second unbounded join on the Root worker.
-                self._retain_pending_batch_futures(not_done)
-                if failures:
-                    raise RecursiveBatchError() from failures[0]
-                raise TimeoutError("recursive child batch deadline exceeded")
-            if failures:
-                raise RecursiveBatchError() from failures[0]
-            for index, future in enumerate(futures):
-                results[index] = future.result(timeout=0)
-        finally:
-            pool.shutdown(wait=False, cancel_futures=True)
+        reservations = self._begin_batch(normalized)
+        results = run_reserved_batch(
+            reservations,
+            execute=self._run_reserved_call,
+            deadline_monotonic=self._deadline,
+            max_parallel=self._options.max_parallel_children,
+            on_retain_running=self._retain_pending_batch_futures,
+        )
         self.raise_if_cleanup_failed()
-        if any(answer is None for answer in results):
-            raise RecursiveBatchError()
-        return [answer for answer in results if answer is not None]
-
-
-def _future_failures(futures: set[Future[str]]) -> list[BaseException]:
-    failures: list[BaseException] = []
-    for future in futures:
-        if future.cancelled():
-            continue
-        try:
-            failure = future.exception(timeout=0)
-        except BaseException as exc:
-            failures.append(exc)
-        else:
-            if failure is not None:
-                failures.append(failure)
-    return failures
-
-
-class RecursiveBatchError(RuntimeError):
-    """Bounded all-or-nothing failure for one recursive batch."""
-
-    def __init__(self) -> None:
-        super().__init__("recursive child batch failed")
+        return results
 
 
 __all__ = [

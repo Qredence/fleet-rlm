@@ -564,6 +564,7 @@ def test_recursive_batch_preserves_order_when_workers_finish_out_of_order(
 def test_recursive_batch_wraps_failure_when_all_children_are_done(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    import fleet_rlm.rlm.recursive_batch as recursive_batch
     import fleet_rlm.rlm.recursive_calls as recursive_calls
 
     adapter = dspy.JSONAdapter()
@@ -578,12 +579,12 @@ def test_recursive_batch_wraps_failure_when_all_children_are_done(
             return dspy.Prediction(answer="ok", trajectory=[])
 
     monkeypatch.setattr(recursive_calls, "build_native_rlm", lambda **_kwargs: Child())
-    real_wait = recursive_calls.wait
+    real_wait = recursive_batch.wait
 
     def wait_for_all(futures, *, timeout=None, **_kwargs):
         return real_wait(futures, timeout=timeout)
 
-    monkeypatch.setattr(recursive_calls, "wait", wait_for_all)
+    monkeypatch.setattr(recursive_batch, "wait", wait_for_all)
 
     def factory(call_index: int) -> ChildRuntimeLease:
         interpreter = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())
@@ -683,12 +684,13 @@ def test_recursive_batch_failure_returns_before_running_sibling_and_cleanup_wait
 def test_recursive_batch_submit_failure_retains_already_submitted_worker(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    import fleet_rlm.rlm.recursive_batch as recursive_batch
     import fleet_rlm.rlm.recursive_calls as recursive_calls
 
     release = threading.Event()
     started = threading.Event()
     closed = threading.Event()
-    real_pool = recursive_calls.ThreadPoolExecutor(max_workers=1)
+    real_pool = recursive_batch.ThreadPoolExecutor(max_workers=1)
 
     class FailingPool:
         submits = 0
@@ -704,7 +706,7 @@ def test_recursive_batch_submit_failure_retains_already_submitted_worker(
         def shutdown(self, *, wait: bool, cancel_futures: bool) -> None:
             real_pool.shutdown(wait=wait, cancel_futures=cancel_futures)
 
-    monkeypatch.setattr(recursive_calls, "ThreadPoolExecutor", lambda **_kwargs: FailingPool())
+    monkeypatch.setattr(recursive_batch, "ThreadPoolExecutor", lambda **_kwargs: FailingPool())
 
     class BlockingChild:
         def __call__(self, _interpreter: object, *, prompt: str) -> dspy.Prediction:
@@ -787,6 +789,7 @@ def test_executor_wait_owned_times_out_when_child_worker_never_completes(
 def test_recursive_batch_cancels_queued_children_before_they_acquire_a_lease(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    import fleet_rlm.rlm.recursive_batch as recursive_batch
     import fleet_rlm.rlm.recursive_calls as recursive_calls
 
     adapter = dspy.JSONAdapter()
@@ -805,7 +808,7 @@ def test_recursive_batch_cancels_queued_children_before_they_acquire_a_lease(
             return dspy.Prediction(answer="late", trajectory=[])
 
     monkeypatch.setattr(recursive_calls, "build_native_rlm", lambda **_kwargs: BlockingChild())
-    real_wait = recursive_calls.wait
+    real_wait = recursive_batch.wait
 
     def early_wait(futures, *, timeout=None, return_when=None):
         bounded = 0.05 if timeout is None else min(timeout, 0.05)
@@ -813,7 +816,7 @@ def test_recursive_batch_cancels_queued_children_before_they_acquire_a_lease(
             return real_wait(futures, timeout=bounded)
         return real_wait(futures, timeout=bounded, return_when=return_when)
 
-    monkeypatch.setattr(recursive_calls, "wait", early_wait)
+    monkeypatch.setattr(recursive_batch, "wait", early_wait)
 
     def factory(call_index: int) -> ChildRuntimeLease:
         call_indexes.append(call_index)

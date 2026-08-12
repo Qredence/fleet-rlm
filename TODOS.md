@@ -420,7 +420,7 @@ uv run pytest tests/unit/backend/rlm -q
 ### Mission 08 — Separate batched scheduling from recursive child semantics
 
 - **Tier:** `recommended`
-- **Status:** `open`
+- **Status:** `done`
 - **Depends on:** Mission 07
 - **Narrative:** `IMPLEMENTATION_PHASES.md` §PR 8
 
@@ -455,9 +455,9 @@ uv run pytest tests/unit/backend/rlm/test_recursive_calls.py -q
 
 **Acceptance:**
 
-- [ ] Batch scheduling isolated in `recursive_batch.py`
-- [ ] All current batch tests green
-- [ ] Ambiguous counter naming cleaned up if present
+- [x] Batch scheduling isolated in `recursive_batch.py`
+- [x] All current batch tests green
+- [x] Ambiguous counter naming cleaned up if present
 
 ---
 
