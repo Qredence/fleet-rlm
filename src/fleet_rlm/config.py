@@ -671,16 +671,17 @@ def _unique_environment_names(*values: str | None) -> tuple[str, ...]:
     return tuple(dict.fromkeys(value for value in values if value))
 
 
-def _profile_contract_document(path: Path) -> tuple[str | None, Mapping[str, Any], Mapping[str, Any]]:
-    """Read the non-secret profile policy used to derive provider contracts."""
-    if not path.is_file():
-        raise FleetConfigurationError(f"required Fleet configuration file is missing: {path}")
-    try:
-        document = tomllib.loads(path.read_text(encoding="utf-8"))
-    except OSError as exc:
-        raise FleetConfigurationError(f"could not read Fleet configuration: {path}") from exc
-    except tomllib.TOMLDecodeError as exc:
-        raise FleetConfigurationError(f"invalid Fleet configuration TOML: {exc}") from exc
+@dataclass(frozen=True, slots=True)
+class PolicyDocument:
+    """Root ``config/fleet.toml`` document without secret/environment resolution."""
+
+    default_profile: str | None
+    defaults: Mapping[str, Any]
+    profiles: Mapping[str, Any]
+
+
+def _policy_document_from_mapping(document: Mapping[str, Any]) -> PolicyDocument:
+    """Validate and normalize one loaded Fleet policy root table."""
     root = _require_mapping(document, "root")
     allowed_root = {"config", "defaults", "profiles"}
     unknown = set(root).difference(allowed_root)
@@ -689,17 +690,33 @@ def _profile_contract_document(path: Path) -> tuple[str | None, Mapping[str, Any
     config = _require_mapping(root.get("config", {}), "config")
     if config.get("schema_version") != 1:
         raise FleetConfigurationError("config.schema_version must be 1")
+    unknown_config = set(config).difference({"schema_version", "default_profile"})
+    if unknown_config:
+        raise FleetConfigurationError(f"unknown configuration key(s) at config: {', '.join(sorted(unknown_config))}")
+    default_profile = config.get("default_profile")
+    if default_profile is not None and not isinstance(default_profile, str):
+        raise FleetConfigurationError("config.default_profile must be a string")
     defaults = _require_mapping(root.get("defaults", {}), "defaults")
     profiles = _require_mapping(root.get("profiles", {}), "profiles")
     if not profiles:
         raise FleetConfigurationError("config.profiles must declare at least one profile")
     _validate_policy_table(defaults, "defaults", allow_partial_llm=True)
-    default_profile = config.get("default_profile")
-    if default_profile is not None and not isinstance(default_profile, str):
-        raise FleetConfigurationError("config.default_profile must be a string")
     if default_profile is not None and default_profile not in profiles:
         raise FleetConfigurationError(f"configured profile does not exist: {default_profile}")
-    return default_profile, defaults, profiles
+    return PolicyDocument(default_profile, defaults, profiles)
+
+
+def _read_policy_document(path: Path) -> PolicyDocument:
+    """Read and validate the non-secret Fleet policy document at ``path``."""
+    if not path.is_file():
+        raise FleetConfigurationError(f"required Fleet configuration file is missing: {path}")
+    try:
+        document = tomllib.loads(path.read_text(encoding="utf-8"))
+    except OSError as exc:
+        raise FleetConfigurationError(f"could not read Fleet configuration: {path}") from exc
+    except tomllib.TOMLDecodeError as exc:
+        raise FleetConfigurationError(f"invalid Fleet configuration TOML: {exc}") from exc
+    return _policy_document_from_mapping(document)
 
 
 def _profile_contract(
@@ -783,18 +800,21 @@ def _profile_contract(
 
 def load_profile_environment_contracts(path: Path | None = None) -> tuple[ProfileEnvironmentContract, ...]:
     """Return every profile's provider/environment contract from the TOML policy."""
-    _, defaults, profiles = _profile_contract_document(path or _CONFIG_PATH)
-    return tuple(_profile_contract(name, defaults, selected) for name, selected in profiles.items())
+    document = _read_policy_document(path or _CONFIG_PATH)
+    return tuple(
+        _profile_contract(name, document.defaults, selected) for name, selected in document.profiles.items()
+    )
 
 
 def active_profile_contract(path: Path | None = None) -> ProfileEnvironmentContract:
     """Return the contract selected by TOML, never by ambient environment variables."""
-    default_profile, defaults, profiles = _profile_contract_document(path or _CONFIG_PATH)
+    document = _read_policy_document(path or _CONFIG_PATH)
+    default_profile = document.default_profile
     if default_profile is None:
-        if len(profiles) != 1:
+        if len(document.profiles) != 1:
             raise FleetConfigurationError("config.default_profile is required when multiple profiles exist")
-        default_profile = next(iter(profiles))
-    return _profile_contract(default_profile, defaults, profiles[default_profile])
+        default_profile = next(iter(document.profiles))
+    return _profile_contract(default_profile, document.defaults, document.profiles[default_profile])
 
 
 def _resolve_environment_value(name: str | None, dotenv: Mapping[str, str | None]) -> str | None:
@@ -850,39 +870,15 @@ def load_runtime_settings() -> Settings:
             or unsupported settings.
     """
     dotenv = dotenv_values(".env")
-    if not _CONFIG_PATH.is_file():
-        raise FleetConfigurationError(f"required Fleet configuration file is missing: {_CONFIG_PATH}")
-    try:
-        document = tomllib.loads(_CONFIG_PATH.read_text(encoding="utf-8"))
-    except tomllib.TOMLDecodeError as exc:
-        raise FleetConfigurationError(f"invalid Fleet configuration TOML: {exc}") from exc
-    root = _require_mapping(document, "root")
-    allowed_root = {"config", "defaults", "profiles"}
-    unknown = set(root).difference(allowed_root)
-    if unknown:
-        raise FleetConfigurationError(f"unknown configuration key(s): {', '.join(sorted(unknown))}")
-    config = _require_mapping(root.get("config", {}), "config")
-    if config.get("schema_version") != 1:
-        raise FleetConfigurationError("config.schema_version must be 1")
-    unknown_config = set(config).difference({"schema_version", "default_profile"})
-    if unknown_config:
-        raise FleetConfigurationError(f"unknown configuration key(s) at config: {', '.join(sorted(unknown_config))}")
-    default_profile = config.get("default_profile")
-    if default_profile is not None and not isinstance(default_profile, str):
-        raise FleetConfigurationError("config.default_profile must be a string")
-    defaults = _require_mapping(root.get("defaults", {}), "defaults")
-    profiles = _require_mapping(root.get("profiles", {}), "profiles")
-    _validate_policy_table(defaults, "defaults", allow_partial_llm=True)
-    if not profiles:
-        raise FleetConfigurationError("config.profiles must declare at least one profile")
-    profile = config.get("default_profile")
+    document = _read_policy_document(_CONFIG_PATH)
+    defaults = document.defaults
+    profiles = document.profiles
+    profile = document.default_profile
     if profile is None:
         if len(profiles) == 1:
             profile = next(iter(profiles))
         else:
             raise FleetConfigurationError("config.default_profile is required when multiple profiles exist")
-    if profile not in profiles:
-        raise FleetConfigurationError(f"configured profile does not exist: {profile}")
     selected = _require_mapping(profiles[profile], f"profiles.{profile}")
     _validate_policy_table(selected, f"profiles.{profile}")
     values = _flatten_policy(_deep_merge(defaults, selected))

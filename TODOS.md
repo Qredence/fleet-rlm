@@ -114,7 +114,7 @@ cd tools/fleet-tui && pnpm exec vitest run src/tui/tests/projection.test.ts
 ### Mission 02 — Make configuration policy one coherent contract
 
 - **Tier:** `blocker`
-- **Status:** `open`
+- **Status:** `done`
 - **Depends on:** Mission 01
 - **Narrative:** `IMPLEMENTATION_PHASES.md` §PR 2
 
@@ -132,17 +132,17 @@ cd tools/fleet-tui && pnpm exec vitest run src/tui/tests/projection.test.ts
 
 | Action | Path |
 |--------|------|
-| EDIT | `src/fleet_rlm/config.py` — extract shared `PolicyDocument` / `_read_policy_document` |
-| EDIT | `src/fleet_rlm/config_policy.py` — add free-form/list field for `rlm.autonomous_memory_categories` → `rlm_autonomous_memory_categories` |
-| EDIT | `tests/unit/backend/test_config.py` |
-| EDIT | `tests/unit/backend/test_config_policy.py` |
+| EDIT | `src/fleet_rlm/config.py` — `PolicyDocument` / `_read_policy_document` / `_policy_document_from_mapping` |
+| EDIT | `src/fleet_rlm/config_policy.py` — `string_list` editor + `rlm.autonomous_memory_categories` field |
+| EDIT | `src/fleet_rlm/api/schemas.py` — editor Literal includes `string_list` |
+| REGEN | `openapi.yaml`, `tools/fleet-tui/src/generated/openapi.ts` |
+| EDIT | `tools/fleet-tui/src/tui/command-presenter.ts` — string_list editing |
+| EDIT | `tests/unit/backend/test_config_policy.py` — editable + inventory tests |
 
 **Implementation notes:**
 
-- Today: `Settings.rlm_autonomous_memory_categories` exists (`config.py` ~211, validator ~281–291, flatten ~377/587) but `ConfigPolicyService._FIELDS` RLM block ends at `rlm.verbose` with **zero** `autonomous_memory` matches.
-- Categories are open strings normalized via `normalize_memory_candidate_categories` / `normalize_workspace_memory_category` (`files/memory_candidates.py`, `files/memory_models.py`). Prefer extending `EditorKind` with a list/text representation (e.g. text list) rather than inventing `MEMORY_CANDIDATE_CATEGORIES`.
-- Inventory invariant: every `ConfigPolicyService` field is accepted by the TOML schema; every explicitly editable non-secret runtime field is represented in `ConfigPolicyService`.
-- Keep env-var / secret resolution separate from `PolicyDocument` parsing.
+- Categories remain open regex-validated strings via `normalize_memory_candidate_categories` — editor is `string_list`, not closed `multi_choice`.
+- Inventory invariant: every PolicyField path is TOML-schema-valid; every flattened non-`*_env` Settings key has a `settings_field` PolicyField entry.
 
 **Tests:**
 
@@ -154,15 +154,16 @@ cd tools/fleet-tui && pnpm exec vitest run src/tui/tests/projection.test.ts
 **Validation gate:**
 
 ```bash
+make api-check
 uv run pytest tests/unit/backend/test_config.py tests/unit/backend/test_config_policy.py -q
 ```
 
 **Acceptance:**
 
-- [ ] Field visible/editable on policy surface
-- [ ] Inventory invariant tests land and pass
-- [ ] `PolicyDocument` helper removes duplicated root parsing without behavior change
-- [ ] No secret leakage; no `Settings` public behavior change
+- [x] Field visible/editable on policy surface
+- [x] Inventory invariant tests land and pass
+- [x] `PolicyDocument` helper removes duplicated root parsing without behavior change
+- [x] No secret leakage; no `Settings` public behavior change
 
 ---
 

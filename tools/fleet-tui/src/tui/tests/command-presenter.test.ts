@@ -61,6 +61,17 @@ describe("TextSettingEditor", () => {
     second.handleInput("\r");
     expect(finish).toHaveBeenCalledTimes(1);
   });
+
+  it("allows empty Enter when allowEmpty is set", () => {
+    const field = settings.scopes[0]!.fields[0]!;
+    const finish = vi.fn();
+    const editor = new TextSettingEditor({ ...field, value: "", editor: "text" }, finish, {
+      allowEmpty: true,
+    });
+
+    editor.handleInput("\r");
+    expect(finish).toHaveBeenCalledWith("");
+  });
 });
 
 describe("MultiChoiceEditor", () => {

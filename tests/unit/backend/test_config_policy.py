@@ -140,23 +140,69 @@ def test_policy_rejects_a_change_that_invalidates_the_selected_profile(tmp_path:
         )
 
 
-def test_memory_candidate_policy_is_toml_validated_but_not_settings_editable(tmp_path: Path) -> None:
+def test_autonomous_memory_categories_are_settings_editable(tmp_path: Path) -> None:
     service, policy = _service(tmp_path)
     before = service.read()
-    assert all(
-        item["path"] != "rlm.autonomous_memory_categories" for scope in before.scopes for item in scope["fields"]
-    )
+    field = _field(before, "defaults", "rlm.autonomous_memory_categories")
+    assert field["editor"] == "string_list"
+    assert field["value"] == []
 
     after = service.update(
         scope="defaults",
-        path="rlm.max_iterations",
-        value=22,
+        path="rlm.autonomous_memory_categories",
+        value=[" Project ", "Project", "Workflow"],
         revision=before.revision,
     )
 
+    updated = _field(after, "defaults", "rlm.autonomous_memory_categories")
+    assert updated["value"] == ["Project", "Workflow"]
     content = policy.read_text(encoding="utf-8")
-    assert "autonomous_memory_categories = []" in content
-    assert _field(after, "defaults", "rlm.max_iterations")["value"] == 22
+    assert "autonomous_memory_categories" in content
+    assert "Project" in content
+    assert "Workflow" in content
+
+
+def test_autonomous_memory_categories_reject_invalid_entries(tmp_path: Path) -> None:
+    service, _ = _service(tmp_path)
+    before = service.read()
+
+    with pytest.raises(FleetConfigurationError, match="invalid Workspace Memory category"):
+        service.update(
+            scope="defaults",
+            path="rlm.autonomous_memory_categories",
+            value=["Bad Category!"],
+            revision=before.revision,
+        )
+
+
+def test_policy_inventory_fields_match_toml_schema() -> None:
+    from fleet_rlm.config import _ROLE_KEYS, _TABLE_KEYS
+    from fleet_rlm.config_policy import _FIELDS
+
+    for field in _FIELDS:
+        parts = field.path.split(".")
+        assert parts[0] in _TABLE_KEYS, field.path
+        if parts[0] == "llm":
+            assert len(parts) == 3, field.path
+            assert parts[1] in _TABLE_KEYS["llm"], field.path
+            assert parts[2] in _ROLE_KEYS, field.path
+            continue
+        assert len(parts) == 2, field.path
+        assert parts[1] in _TABLE_KEYS[parts[0]], field.path
+
+
+def test_policy_inventory_covers_flattened_non_secret_settings(tmp_path: Path) -> None:
+    from fleet_rlm.config import _deep_merge, _flatten_policy, _read_policy_document
+    from fleet_rlm.config_policy import _FIELDS
+
+    policy = tmp_path / "fleet.toml"
+    shutil.copy(Path("config/fleet.toml"), policy)
+    document = _read_policy_document(policy)
+    profile = document.default_profile or next(iter(document.profiles))
+    flattened = _flatten_policy(_deep_merge(document.defaults, document.profiles[profile]))
+    covered = {field.settings_field for field in _FIELDS if field.settings_field}
+    missing = sorted(key for key in flattened if not key.endswith("_env") and key not in covered)
+    assert missing == [], f"editable Settings fields missing from ConfigPolicyService: {missing}"
 
 
 def test_set_default_profile_persists_and_surfaces_in_snapshot(tmp_path: Path) -> None:

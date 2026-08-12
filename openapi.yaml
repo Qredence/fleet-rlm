@@ -1071,6 +1071,7 @@ components:
           - boolean
           - single_choice
           - multi_choice
+          - string_list
           title: Editor
         choices:
           items:

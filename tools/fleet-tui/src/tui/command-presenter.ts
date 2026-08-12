@@ -319,6 +319,16 @@ function fieldItem(field: SettingsField): SettingItem {
       submenu: (_current, done) => new MultiChoiceEditor(field, done),
     };
   }
+  if (field.editor === "string_list") {
+    const display = Array.isArray(field.value)
+      ? field.value.filter((item): item is string => typeof item === "string").join(", ")
+      : String(field.value ?? "");
+    return {
+      ...base,
+      submenu: (_current, done) =>
+        new TextSettingEditor({ ...field, value: display }, done, { allowEmpty: true }),
+    };
+  }
   return {
     ...base,
     submenu: (_current, done) => new TextSettingEditor(field, done),
@@ -337,8 +347,11 @@ function applyFieldValue(
     value = raw === "true";
   } else if (field.editor === "number") {
     value = Number(raw);
-  } else if (field.editor === "multi_choice") {
-    value = raw.split(",").filter(Boolean);
+  } else if (field.editor === "multi_choice" || field.editor === "string_list") {
+    value = raw
+      .split(",")
+      .map((item) => item.trim())
+      .filter(Boolean);
   } else {
     value = raw;
   }
@@ -353,12 +366,15 @@ function applyFieldValue(
 /** Minimal keyboard text editor for text/number settings. */
 export class TextSettingEditor implements Component {
   private value: string;
+  private readonly allowEmpty: boolean;
 
   constructor(
     private readonly field: SettingsField,
     private readonly finish: (value?: string) => void,
+    options: { allowEmpty?: boolean } = {},
   ) {
     this.value = String(field.value);
+    this.allowEmpty = options.allowEmpty === true;
   }
 
   invalidate(): void {}
@@ -377,7 +393,7 @@ export class TextSettingEditor implements Component {
     if (matchesKey(data, "escape")) {
       this.finish(undefined);
     } else if (matchesKey(data, "enter")) {
-      if (this.value.trim()) this.finish(this.value);
+      if (this.allowEmpty || this.value.trim()) this.finish(this.value);
     } else if (matchesKey(data, "backspace")) {
       this.value = Array.from(this.value).slice(0, -1).join("");
     } else {

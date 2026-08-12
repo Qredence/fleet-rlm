@@ -278,7 +278,7 @@ class SettingsFieldResponse(BaseModel):
     group: str
     label: str
     value: JsonValue
-    editor: Literal["text", "number", "boolean", "single_choice", "multi_choice"]
+    editor: Literal["text", "number", "boolean", "single_choice", "multi_choice", "string_list"]
     choices: list[str] = Field(default_factory=list)
     environment_overridden: bool = False
 

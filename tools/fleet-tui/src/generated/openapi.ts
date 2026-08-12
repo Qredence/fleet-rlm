@@ -467,7 +467,7 @@ export interface components {
              * Editor
              * @enum {string}
              */
-            editor: "text" | "number" | "boolean" | "single_choice" | "multi_choice";
+            editor: "text" | "number" | "boolean" | "single_choice" | "multi_choice" | "string_list";
             /** Choices */
             choices?: string[];
             /**

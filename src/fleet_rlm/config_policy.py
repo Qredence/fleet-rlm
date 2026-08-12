@@ -24,11 +24,14 @@ from fleet_rlm.config import (
     Settings,
     _deep_merge,
     _flatten_policy,
+    _policy_document_from_mapping,
     _require_mapping,
     _validate_policy_table,
 )
+from fleet_rlm.files.memory_candidates import normalize_memory_candidate_categories
+from fleet_rlm.files.memory_models import WorkspaceMemoryCategoryError
 
-EditorKind = Literal["text", "number", "boolean", "single_choice", "multi_choice"]
+EditorKind = Literal["text", "number", "boolean", "single_choice", "multi_choice", "string_list"]
 
 
 class PolicyConflictError(ValueError):
@@ -194,6 +197,13 @@ _FIELDS: tuple[PolicyField, ...] = (
         "Maximum parallel child RLMs",
         "number",
         settings_field="rlm_recursion_max_parallel_children",
+    ),
+    PolicyField(
+        "rlm.autonomous_memory_categories",
+        "RLM",
+        "Autonomous Memory categories",
+        "string_list",
+        settings_field="rlm_autonomous_memory_categories",
     ),
     PolicyField("rlm.verbose", "RLM", "DSPy host verbose logging", "boolean", settings_field="rlm_verbose"),
     PolicyField("storage.data_root", "Storage", "Data root", "text", settings_field="data_root"),
@@ -380,17 +390,15 @@ class ConfigPolicyService:
                 value = self._lookup(inherited, field.path)
             if value is _MISSING:
                 continue
-            values.append(
-                {
-                    "path": field.path,
-                    "group": field.group,
-                    "label": field.label,
-                    "value": value,
-                    "editor": field.editor,
-                    "choices": list(field.choices),
-                    "environment_overridden": False,
-                }
-            )
+            values.append({
+                "path": field.path,
+                "group": field.group,
+                "label": field.label,
+                "value": value,
+                "editor": field.editor,
+                "choices": list(field.choices),
+                "environment_overridden": False,
+            })
         return {"name": name, "fields": values}
 
     def _scope_table(self, document: TOMLDocument, scope: str) -> dict[str, Any]:
@@ -450,40 +458,32 @@ class ConfigPolicyService:
             if not isinstance(value, list) or any(item not in field.choices for item in value):
                 raise FleetConfigurationError("settings value contains an invalid choice")
             return value
+        if field.editor == "string_list":
+            if isinstance(value, str):
+                items = [item.strip() for item in value.split(",") if item.strip()]
+            elif isinstance(value, list):
+                if any(not isinstance(item, str) for item in value):
+                    raise FleetConfigurationError("settings value must be a list of text categories")
+                items = value
+            else:
+                raise FleetConfigurationError("settings value must be a category list")
+            try:
+                return list(normalize_memory_candidate_categories(items))
+            except WorkspaceMemoryCategoryError as exc:
+                raise FleetConfigurationError("settings value contains an invalid Workspace Memory category") from exc
         raise AssertionError(f"unsupported editor {field.editor}")
 
     def _validate(self, raw: str) -> None:
-        """
-        Validate Fleet policy TOML and its profile configurations.
-
-        Parameters:
-                raw (str): TOML content containing the Fleet policy.
-
-        Raises:
-                FleetConfigurationError: If the TOML is malformed or contains unsupported or invalid
-                    configuration values.
-        """
+        """Validate Fleet policy TOML and its profile configurations."""
         try:
-            root = _require_mapping(tomllib.loads(raw), "root")
+            root = tomllib.loads(raw)
         except tomllib.TOMLDecodeError as exc:
             raise FleetConfigurationError("invalid Fleet configuration TOML") from exc
-        if set(root).difference({"config", "defaults", "profiles"}):
-            raise FleetConfigurationError("unknown configuration key")
-        config_table = _require_mapping(root.get("config", {}), "config")
-        if set(config_table).difference({"schema_version", "default_profile"}):
-            raise FleetConfigurationError("unknown configuration key")
-        if config_table.get("schema_version") != 1:
-            raise FleetConfigurationError("config.schema_version must be 1")
-        default_profile = config_table.get("default_profile")
-        if default_profile is not None and not isinstance(default_profile, str):
-            raise FleetConfigurationError("config.default_profile must be a string")
-        defaults = _require_mapping(root.get("defaults", {}), "defaults")
-        profiles = _require_mapping(root.get("profiles", {}), "profiles")
-        _validate_policy_table(defaults, "defaults", allow_partial_llm=True)
-        for profile, value in profiles.items():
+        document = _policy_document_from_mapping(root)
+        for profile, value in document.profiles.items():
             selected = _require_mapping(value, f"profiles.{profile}")
             _validate_policy_table(selected, f"profiles.{profile}")
-            values = _flatten_policy(_deep_merge(defaults, selected))
+            values = _flatten_policy(_deep_merge(document.defaults, selected))
             try:
                 Settings.model_validate(values)
             except ValueError as exc:
