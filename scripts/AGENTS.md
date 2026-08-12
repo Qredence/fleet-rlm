@@ -26,7 +26,7 @@ scripts import the installed `fleet_rlm` package; the backend never imports scri
 ## Validation
 
 ```bash
-make check-codebase-tree   # AST boundary enforcement (imports check_codebase_tree.py)
+make check-codebase-tree   # AST boundaries + nested-ternary clarity (check_codebase_tree.py)
 make check-docs            # Docs quality (check_docs_quality.py)
 make api-sync              # OpenAPI + generated TUI types (openapi_tools.py)
 ```
@@ -49,7 +49,7 @@ make api-sync              # OpenAPI + generated TUI types (openapi_tools.py)
 
 | Script | Gate |
 |--------|------|
-| `check_codebase_tree.py` | Daytona SDK isolation + route injection boundary |
+| `check_codebase_tree.py` | Daytona SDK isolation + route injection boundary + nested `IfExp` clarity |
 | `check_docs_quality.py` | Canonical doc presence and freshness |
 | `check_harness_engineering.py` | Agent-harness engineering invariants |
 | `check_agents_md_freshness.py` | AGENTS.md drift detection |

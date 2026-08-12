@@ -126,6 +126,14 @@ def workspace_memory_record_id(timestamp: str, category: str, learning: str) -> 
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:8]
 
 
+def _workspace_memory_record_version(match: re.Match[str]) -> int:
+    if match.re is _MEMORY_RECORD_V3:
+        return 3
+    if match["memory_id"] is not None:
+        return 2
+    return 1
+
+
 def normalize_workspace_memory_learning(key_learning: str) -> str:
     """Return one valid, single-line learning using the current Tool contract."""
     if not isinstance(key_learning, str) or "\x00" in key_learning:
@@ -305,7 +313,7 @@ def parse_workspace_memory_record(record: str) -> WorkspaceMemoryEntry:
         else "legacy_unknown",
         updated_at=match["updated_at"] if match.re is _MEMORY_RECORD_V3 else match["timestamp"],
         supersedes_id=match["supersedes_id"] if match.re is _MEMORY_RECORD_V3 else None,
-        record_version=3 if match.re is _MEMORY_RECORD_V3 else (2 if match["memory_id"] is not None else 1),
+        record_version=_workspace_memory_record_version(match),
     )
 
 
@@ -431,7 +439,7 @@ def parse_workspace_memory_lines(
             else "legacy_unknown",
             updated_at=match["updated_at"] if match.re is _MEMORY_RECORD_V3 else match["timestamp"],
             supersedes_id=match["supersedes_id"] if match.re is _MEMORY_RECORD_V3 else None,
-            record_version=3 if match.re is _MEMORY_RECORD_V3 else (2 if match["memory_id"] is not None else 1),
+            record_version=_workspace_memory_record_version(match),
         )
         parsed.append(WorkspaceMemoryParsedLine(raw, entry, False, False, False))
     return _annotate_supersession_graph(tuple(parsed), complete=complete_memory_graph)

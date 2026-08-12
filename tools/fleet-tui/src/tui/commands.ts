@@ -10,14 +10,14 @@ import type {
   FleetSettingsPolicy,
   FleetSkillCard,
 } from "../fleet-api-client.js";
+import { formatBytes, formatTokens, shortId } from "./format.js";
 import { projectDurableTurns } from "./projection.js";
 import {
-  newMessageId,
   type ConversationStore,
   type Message,
+  newMessageId,
   type PendingSkillSelection,
 } from "./store.js";
-import { formatBytes, formatTokens, shortId } from "./format.js";
 import { getAvailableThemes, getThemeName, setTheme } from "./theme.js";
 import { committedTokenCounts } from "./usage-summary.js";
 
@@ -385,14 +385,14 @@ registerCommand({
         else if (name === selectedForRestart) suffix = " (selected)";
         return `  ${name}${suffix}`;
       });
-      const state =
-        active && selectedForRestart && active !== selectedForRestart
-          ? ` (running: ${active}; selected: ${selectedForRestart})`
-          : active
-            ? ` (current: ${active})`
-            : selectedForRestart
-              ? ` (selected: ${selectedForRestart})`
-              : "";
+      let state = "";
+      if (active && selectedForRestart && active !== selectedForRestart) {
+        state = ` (running: ${active}; selected: ${selectedForRestart})`;
+      } else if (active) {
+        state = ` (current: ${active})`;
+      } else if (selectedForRestart) {
+        state = ` (selected: ${selectedForRestart})`;
+      }
       appendSystem(
         ctx.store,
         `Fleet profiles${state} (restart to apply)\n\n${lines.join("\n")}\n\nSwitch with /profiles in the interactive TUI, or /settings to edit policy values.`,

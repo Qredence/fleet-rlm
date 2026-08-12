@@ -16,6 +16,7 @@
         "noBannedTypes": "off"
       },
       "style": {
+        "noNestedTernary": "error",
         "noNonNullAssertion": "off"
       }
     }

@@ -1,14 +1,14 @@
 import {
-  decodeKittyPrintable,
-  fuzzyFilter,
-  SelectList,
-  SettingsList,
-  matchesKey,
-  truncateToWidth,
   type Component,
+  decodeKittyPrintable,
   type Editor,
+  fuzzyFilter,
+  matchesKey,
+  SelectList,
   type SettingItem,
+  SettingsList,
   type TUI,
+  truncateToWidth,
 } from "@earendil-works/pi-tui";
 
 import type { FleetSession, FleetSettingsPolicy, FleetSkillCard } from "../fleet-api-client.js";
@@ -143,25 +143,26 @@ export class PiCommandPresenter implements CommandPresenter {
       profiles.map((profile) => {
         const isActive = profile === active;
         const isSelected = profile === selected;
-        const state =
-          isActive && isSelected
-            ? "current"
-            : isActive
-              ? "running"
-              : isSelected
-                ? "selected"
-                : null;
+        let state: "current" | "running" | "selected" | null = null;
+        if (isActive && isSelected) {
+          state = "current";
+        } else if (isActive) {
+          state = "running";
+        } else if (isSelected) {
+          state = "selected";
+        }
+        let description = "select for next restart";
+        if (state === "current") {
+          description = "active and selected";
+        } else if (state === "running") {
+          description = "select to keep on restart";
+        } else if (state === "selected") {
+          description = "restart to apply";
+        }
         return {
           value: profile,
           label: state ? `${profile} (${state})` : profile,
-          description:
-            state === "current"
-              ? "active and selected"
-              : state === "running"
-                ? "select to keep on restart"
-                : state === "selected"
-                  ? "restart to apply"
-                  : "select for next restart",
+          description,
         };
       }),
     );
@@ -300,14 +301,16 @@ function fieldItem(field: SettingsField): SettingItem {
     currentValue: displayValue(field.value),
   };
   if (field.editor === "boolean" || field.editor === "single_choice") {
+    let values: string[];
+    if (field.editor === "boolean") {
+      values = ["false", "true"];
+    } else {
+      const choices = choicesOf(field);
+      values = choices.length > 0 ? choices : [displayValue(field.value)];
+    }
     return {
       ...base,
-      values:
-        field.editor === "boolean"
-          ? ["false", "true"]
-          : choicesOf(field).length > 0
-            ? choicesOf(field)
-            : [displayValue(field.value)],
+      values,
     };
   }
   if (field.editor === "multi_choice") {
@@ -329,14 +332,16 @@ function applyFieldValue(
   raw: string,
   finish: (update: SettingsUpdate | null) => void,
 ): void {
-  const value =
-    field.editor === "boolean"
-      ? raw === "true"
-      : field.editor === "number"
-        ? Number(raw)
-        : field.editor === "multi_choice"
-          ? raw.split(",").filter(Boolean)
-          : raw;
+  let value: string | number | boolean | string[];
+  if (field.editor === "boolean") {
+    value = raw === "true";
+  } else if (field.editor === "number") {
+    value = Number(raw);
+  } else if (field.editor === "multi_choice") {
+    value = raw.split(",").filter(Boolean);
+  } else {
+    value = raw;
+  }
   finish({
     revision: settings.revision,
     scope,

@@ -1,8 +1,8 @@
 import {
-  CombinedAutocompleteProvider,
   type AutocompleteItem,
   type AutocompleteProvider,
   type AutocompleteSuggestions,
+  CombinedAutocompleteProvider,
   type SlashCommand,
 } from "@earendil-works/pi-tui";
 
@@ -14,16 +14,17 @@ export class FleetAutocompleteProvider implements AutocompleteProvider {
   private readonly delegate: CombinedAutocompleteProvider;
 
   constructor(client: FleetApiClient) {
+    const argumentCompletions: Partial<
+      Record<string, NonNullable<SlashCommand["getArgumentCompletions"]>>
+    > = {
+      resume: async (prefix) => sessionItems(client, prefix),
+      skill: async (prefix) => skillItems(client, prefix),
+    };
     const commands: SlashCommand[] = listCommands().map((spec) => ({
       name: spec.name,
       description: spec.description,
       argumentHint: spec.usage.replace(`/${spec.name}`, "").trim() || undefined,
-      getArgumentCompletions:
-        spec.name === "resume"
-          ? async (prefix) => sessionItems(client, prefix)
-          : spec.name === "skill"
-            ? async (prefix) => skillItems(client, prefix)
-            : undefined,
+      getArgumentCompletions: argumentCompletions[spec.name],
     }));
     this.delegate = new CombinedAutocompleteProvider(commands, process.cwd(), null);
   }

@@ -210,14 +210,14 @@ export class LiveTurnProjector {
       }
       return [];
     }
-    const priorContent =
-      field === "code"
-        ? prior?.kind === "code"
-          ? prior.code
-          : ""
-        : prior?.kind === "output"
-          ? prior.output
-          : "";
+    let priorContent = "";
+    if (field === "code") {
+      if (prior?.kind === "code") {
+        priorContent = prior.code;
+      }
+    } else if (prior?.kind === "output") {
+      priorContent = prior.output;
+    }
     const nextContent = isDelta ? `${priorContent}${content}` : content;
     return this.save(
       field === "code"
@@ -436,6 +436,12 @@ function tool(
   startedAt = clock(),
 ): Message {
   const ended = output !== undefined || error !== undefined;
+  let status: "error" | "success" | "running" = "running";
+  if (error !== undefined) {
+    status = "error";
+  } else if (output !== undefined) {
+    status = "success";
+  }
   return {
     id,
     kind: "tool",
@@ -447,7 +453,7 @@ function tool(
     ...(error !== undefined ? { error } : {}),
     startedAt,
     ...(ended ? { endedAt: clock() } : {}),
-    status: error !== undefined ? "error" : output !== undefined ? "success" : "running",
+    status,
     ts: clock(),
   };
 }
@@ -539,12 +545,14 @@ function skill(
   value: Record<string, unknown>,
   clock: Clock,
 ): Message {
-  const phase =
-    value.phase === "activated" || value.phase === "loaded"
-      ? value.phase
-      : value.trust !== undefined && value.trust !== null
-        ? "activated"
-        : "loaded";
+  let phase: "activated" | "loaded";
+  if (value.phase === "activated" || value.phase === "loaded") {
+    phase = value.phase;
+  } else if (value.trust !== undefined && value.trust !== null) {
+    phase = "activated";
+  } else {
+    phase = "loaded";
+  }
   const trust = optionalString(value.trust);
   const affordances = Array.isArray(value.affordances)
     ? value.affordances.filter((item): item is string => typeof item === "string")

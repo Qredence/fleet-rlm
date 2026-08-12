@@ -1,112 +1,808 @@
-# Fleet RLM — TODOS
+# Replacement-readiness TODOS (`dev-0.7`)
 
-Program: backend release and volume follow-ups on `dev-0.7`.
-The historical tool-surface plan and dogfood evidence remain ignored/local references;
-current code, tests, policy, and the status items below are authoritative. Do not
-treat this file as a deploy, push, or merge instruction.
+Executable mission checklist derived from [`IMPLEMENTATION_PHASES.md`](IMPLEMENTATION_PHASES.md).
+Narrative detail stays in that document; **this file is the work queue**.
 
-## PR-A — fix(rlm): kwargs-only tool forwarding + error surfacing (critical) — `codex/broker-kwargs-only-tools`  ✅ done in `1a2f3ea1e` (+ latent drain fix)
-- [x] `daytona/http_broker.py` `_tool_wrapper_source`: forward all params as kwargs (args only for POSITIONAL_ONLY); assert no positional-only params on current surface
-- [x] `daytona/http_broker.py`: module logger + WARNING per host tool failure (name + sanitized message only)
-- [x] `daytona/broker_source.py` `TOOL_WRAPPER_TEMPLATE`: read HTTPError body, raise `RuntimeError("Tool call failed: <safe message>")`
-- [x] `daytona/interpreter.py`: kwargs-only contract comment at `tool_executor`
-- [x] Tests: broker wrapper wire-payload (stubbed urlopen), kwargs-only executor regression via real pinned DSPy `_make_interpreter_tool`, `rlm_query` payload
-- [x] Live replay: lanes fetch/write/recursion/report green; report turn commits artifact
+## How to use
 
-## PR-B — fix(turns): no-progress guard terminal event + stream dedupe (critical) — `codex/turn-guard-terminal-event`  ✅ done in `40d4a34d5`
-- [x] Verify TUI strict-lifecycle requirement for terminal `is_final` per output stream (`tools/fleet-tui/src/sse.ts`, `tui/projection.ts`) — decides flush shape
-- [x] `rlm/tool_observer.py`: emit `ToolFailed` before `TurnNoProgressError` raise
-- [x] `rlm/runner.py` `_reconcile_trajectory`: payload-identity comparison; identical content never re-emitted; corrections still upsert same stream_id
-- [x] `daytona/interpreter.py`: final output flush = unsent tail only (use `emitted_chars`); no output after SUBMIT
-- [x] Tests: observer sequence, commit policy with no-progress history, trajectory dedupe, interpreter flush
-- [x] Live replay: zero duplicate `data-rlm-output` frames per capture; guard-storm turn commits
+- Run **one mission at a time** (`create seam → preserve behavior → migrate one concern → validate → repeat`).
+- Claim a mission by setting `Status: in_progress` before editing code.
+- Mark `Status: done` only after the validation gate and acceptance checkboxes pass.
+- Do not bundle multiple missions in one PR/session.
+- Public HTTP routes, SSE framing, durable Result shapes, Workspace semantics, DB semantics, wheel contents, and TUI behavior stay stable unless the mission explicitly fixes a proven bug.
 
-## PR-C — fix(api): workspace stat checksum + root stat — `codex/workspace-stat-checksum`  ✅ done in `b856bf4e3`
-- [ ] FOLLOW-UP (from Phase C review): `_DaytonaWorkspaceFileSession._read_current` (write/append expected_sha256 preconditions) still reads full text → same >10_000 400 class on big files; switch to checksum-enabled stat like the PR-C fix.
-- [x] `daytona/workspace_agent.py`: optional sandbox-side `checksum` on stat op
-- [x] `daytona/workspace_fs.py`: flag pass-through (sync+async)
-- [x] `daytona/workspace_gateway.py`: stat via flag; drop full-content read
-- [x] `files/workspace_access.py`: `allow_root=True` for stat
-- [x] Tests: gateway stat file/dir/missing; `/api/files/stat` contract tests
-- [x] Live replay: root+nested stat 200 with sha256
+**Status values:** `open` | `in_progress` | `done`
 
-## PR-D — feat(api): preparation heartbeats + cancel tombstone — `codex/pre-run-heartbeat`  ✅ done in this commit (live: first frame 32 ms, tombstone persisted)
-- [x] `api/routes/turns.py`: generator-spanning open(); transient `data-status{phase:"preparation"}` at ~1 s then every `heartbeat_seconds`; prelude never recorded
-- [x] `chat/turn_lifecycle.py` + `turn_detail_policy.py`: cancelled-turn tombstone part persisted (D2)
-- [x] Docs: `abort` frame semantics (D3)
-- [x] Tests: heartbeat cadence/transience, stream contract first-frame budget, tombstone persistence+listing
-- [x] Live replay: cancel lane shows ≤1 s first frame + tombstone in GET /turns
+**Tier values:**
 
-## PR-E — feat(workspace): `projects/<slug>/` browsable deliverables root — `codex/project-workspace-root`  ✅ done in `3c59732e5`
-- [ ] FOLLOW-UP: `publish_workspace_artifact` remains session-workspace-bound (`files/tools.py` reads `paths.session_workspace_dir`) — allow artifact promotion from project paths too
-- [ ] FOLLOW-UP: docs-sync pass for projects/ layout in src/fleet_rlm/AGENTS.md, docs/agent-harness/architecture-invariants.md, docs/reference/codebase-map.md
-- [ ] SIDE NOTE: first write into a new project subpath on this volume emitted warning `non_atomic_overwrite` (volume backend rejects atomic os.replace → non-atomic fallback path used; per AGENTS knowledge this is the designed fallback, but confirm on first-project-create it marks the file durably)
-- [x] `files/volume_paths.py`: `projects_root()`/`project_dir(slug)` + slug/reserved/traversal validation
-- [x] `files/workspace_tools.py`: `write/read/stat/list_project_*` tools (overwrite+expected_sha256 semantics)
-- [x] `rlm/tool_guards.py`: project path obligations
-- [x] `skills/bundled/report-builder`, `workspace-files`: convention docs (scratch→sessions, deliverables→projects)
-- [x] Tests: slug matrix, reserved rejection, guards, and project namespace
-  read/write behavior; project-path Artifact promotion remains the follow-up above.
-- [x] Live replay: report lane writes `projects/<slug>/...` + volume tree browse
+| Tier | Meaning |
+|------|---------|
+| `blocker` | Required before default-branch replacement (missions 01–06) |
+| `recommended` | Complete for a long-lived canonical codebase (missions 07–13) |
+| `rc` | Freeze + full certification (mission 14) |
+| `cutover` | Post-rebase GitHub protection (mission 15) |
+| `defer` | Explicitly after replacement — do not pull into this program |
 
-## PR-F — feat(memory): lifecycle + per-turn injection (tenant deferred) — `codex/memory-lifecycle`  ✅ done (live: remember/list/edit/forget/ injected recall 0-tool) + FIX-1..4 review fixes + backend-compat append overhaul
-- [x] `files/memory_models.py`: v3 ids `<!-- id:8hex -->`, v1-compatible; tolerant reads (skip malformed lines + warning)
-- [x] Port + `daytona/workspace_memory.py`: `list_entries`, `delete_entry`, `edit_entry` (one atomic round trip)
-- [x] `files/memory_tools.py`: `remember` (alias kept), `list_memories`, `edit_memory`, `forget`
-- [x] Move store to `memory/MEMORIES.md` with legacy migration on open
-- [x] `daytona/run_environment.py`: ≤4 KiB tail digest injected per turn (mtime-cached 30 s)
-- [x] Tests: v1/v2 parse, tolerant read, CRUD round trips, injection budget
-- [x] Live replay: turn 2 remembers turn 1 preference without tool calls; forget edits exactly one entry
+## Baseline
 
-## PR-G — feat(volume): full CRUD — `codex/volume-full-crud`  ✅ done (live: write/edit/read/delete + REST DELETE/PATCH + 409/404 contracts)
-- [x] `daytona/workspace_agent.py`: `delete` + `patch` ops (atomic, symlink/traversal/non-empty-dir safe)
-- [x] `daytona/workspace_fs.py`: `delete_path`, `patch_text` (sync+async) + cache invalidation
-- [x] `files/workspace_tools.py`: `delete_workspace_path`, `edit_workspace_text` (allowlisted roots only; catalog roots rejected)
-- [x] `api/routes/workspace_files.py`: `DELETE`/`PATCH /api/files/content` (404/409 mapping)
-- [x] `make api-sync` (openapi.yaml + TUI generated types)
-- [x] `rlm/tool_guards.py`: delete/edit obligations
-- [x] Tests: fs delete/patch, API contract, guards
-- [x] Live replay: write→edit→read→delete→list on session+project roots
+- **Branch:** `dev-0.7`
+- **Audit SHA:** `c34e7d84d8dd753e94d08dc987fef686f1f65e62` (matches `IMPLEMENTATION_PHASES.md`)
+- **Verified against:** `src/fleet_rlm/` and `tools/fleet-tui/` (static audit; live Daytona gates remain unexecuted until mission 04 / 14)
 
-## PR-H — chore(backend): `src/fleet_rlm` readability (mechanical, last) — `codex/backend-readability`  ✅ done (-93 net daytona LOC, interpreter_output.py extracted, CONTEXT.md module map)
-- [x] `daytona/workspace_fs.py`: single async FS core + thin sync bridge (~−300 LOC)
-- [x] `daytona/interpreter.py`: extract output projection → `daytona/interpreter_output.py` (~−150 LOC)
-- [x] `src/fleet_rlm/CONTEXT.md`: workspace-module naming map (fs/gateway/access/tools) + daytona/ module one-liners
-- [x] Gate: `check-codebase-tree` + full make check green; zero behavior change
+### Corrections vs `IMPLEMENTATION_PHASES.md`
 
+| Topic | Use this instead of the phase-doc wording |
+|-------|-------------------------------------------|
+| Nested ternaries (M01) | Also rewrite skill `phase` nesting in `projection.ts` (~542), not only prior RLM content and `/profiles` |
+| Python checker tests (M01) | **ADD** `tests/unit/scripts/test_check_codebase_tree.py` — no checker test exists today |
+| Memory categories (M02) | Categories are open regex-validated strings — **no** `MEMORY_CANDIDATE_CATEGORIES`. Use free-form / list policy editor, not `multi_choice` |
+| Trajectory tests (M07) | `tests/unit/backend/rlm/test_trajectory_projection.py` **already exists** and imports helpers from `runner.py` — rewire after extract |
+| Inventory rebuild (M13) | Also fix `composition/testing.py`, not only `composition/daytona.py` |
+| TUI AGENTS ownership (M12) | `tools/fleet-tui/AGENTS.md` wrongly attributes live/durable projection to `transcript.ts`; projection lives in `projection.ts` |
 
-## RC-8 — fix(chat): committed terminal must win over post-commit claim revoke  ✅ done in `040d957dc`
-- [x] Symptom: successful recursive turn committed (checkpoint written, turns persisted), then detached cleanup raced a stale-claim revoke into `turn_claim._revoke` → InvalidClaimTransitionError("a committed Run cannot be revoked") → live stream emitted `Turn failed` AFTER the commit. Durable truth and stream terminal disagreed.
-- [x] Fix: revoke/cleanup paths treat already-committed claim as benign no-op (log + complete settling, never emit failure); run one recursion replay lane proving finish=stop and persisted roles+answer.
+### Mission dependency map
 
-## RC-7 + deadlock root cause (DIAGNOSED 2026-08-08 via faulthandler SIGUSR1 capture, /tmp/fleet-dogfood/threaddump.txt)
-- [x] Root cause pinned: nested sync wait deadlock — tool execution (e.g. load_skill _install_resources) sync-calls run_workspace_agent through _SyncCodeInterpreter.code_run/_sync_await (interpreter.py:303-327) which posts the sandbox coroutine to the RLM WORKER THREAD'S OWN asyncio loop (runner.py:957 asyncio.run), while that worker thread is itself parked in nested Future.result() inside http_broker._poll_once. Circular wait: worker waits broker-answer; answer executor waits the worker's loop. Any tool whose host impl does sync FS work on the worker-owned bridge deadlocks the entire turn; uvicorn starves draining the turn generator (RC-7 wedge).
-- [x] FIX (WS-RC7): implemented by `b5deb7e22` with a composition-wide bridge
-  service loop in `daytona/interpreter.py:289-319`; `tests/unit/backend/daytona/test_sync_bridge_loop.py`
-  covers the nested-wait regression. Private deterministic compositions retain
-  the documented caller-loop fallback.
+```text
+M01 → M02 → M03 → M04 → M05 → M06 → M07 → M08 → M09 → M10 → M11 → M12 → M13 → M14 → M15
+```
 
+---
 
-## RC-11 — fix(api): /api/volume/tree lists nothing anywhere  ✅ done (Daytona mod_time is a string; _modified_timestamp now parses it)
-- [x] Symptom: fixed by `92cfbbc20`; Daytona `mod_time` strings are parsed by
-  `_modified_timestamp`, so nested entries are no longer discarded by the tree
-  projection.
-- [ ] Follow-up ergonomics: tree uses query parameter `root` while `/api/files`
-  uses `path`; document the distinction or add an explicitly tested alias.
-- [x] Contract coverage: `tests/contracts/backend/test_workspace_files_api.py:93-122`
-  seeds nested paths and asserts the tree projection.
+## Blockers (P0–P1) — missions 01–06
 
-## Follow-up investigation — RC-7 server wedge under load+disconnect (UNSCHEDULED, file after phase A)
-- [ ] Symptom: after 4 concurrent live turns incl. 1 recursive child (~16 min of throttled LLM rounds) and 3 client disconnects within seconds, the ASGI server froze completely: frozen log, `/openapi.json` (static) unresponsive >15 min. macOS `sample`: main thread spinning in uvloop idle → async_gen_asend chains = runaway coroutine starving the loop.
-- [ ] Controlled repro so far: 3 mid-run client disconnects alone do NOT wedge (server stayed healthy; orphaned turn completed server-side). Suspects: recursive child runtime settlement, settlement-on-disconnect path with in-flight recursive child, or a no-await loop in cleanup/drain under lease pressure. Needs faulthandler+SIGUSR1 reproduction with the recursion lane included (harness: /tmp/fleet-dogfood/fault_server.py, threaddump.txt path).
-- [ ] Fix owner: after PR-A merges; add to TODOS when scheduled.
+### Mission 01 — Enforce clarity rules (no nested ternaries)
 
+- **Tier:** `blocker`
+- **Status:** `done`
+- **Depends on:** —
+- **Narrative:** `IMPLEMENTATION_PHASES.md` §PR 1
 
-## ENDGAME
-- [x] PR-H readability refactor
-- [x] RC-11 volume-tree listing emptiness (fixed by `92cfbbc20`; retain only the
-  query-parameter ergonomics follow-up above)
-- [x] Full `make check` + check-security + build/check-release + `git diff --check`
-  (2026-08-09; credentialed Daytona live proof remains separate and was not run.)
-- [x] Release promotion and review remain human-owned; this file does not direct
-  push, PR, babysit, or merge operations.
+**Purpose:** Make nested-ternary clarity mechanically enforceable in TUI Biome and backend Python AST checks so later refactors cannot reintroduce it.
+
+**Non-goals:**
+
+- Ban ordinary single ternaries
+- Enable a formatter/rule that rewrites simple `if` into ternaries
+- Create a separate `check_nested_ternaries.py`
+
+**Compatibility:** No public API/SSE/TUI behavior change; rewrite is expression → explicit branches only.
+
+**Files:**
+
+| Action | Path |
+|--------|------|
+| EDIT | `tools/fleet-tui/biome.json` — enable `style.noNestedTernary: "error"` |
+| EDIT | `tools/fleet-tui/src/tui/projection.ts` — prior RLM content, tool status, skill phase |
+| EDIT | `tools/fleet-tui/src/tui/commands.ts` — `/profiles` status |
+| EDIT | `tools/fleet-tui/src/tui/autocomplete.ts` — resume/skill completions (extra Biome site) |
+| EDIT | `tools/fleet-tui/src/tui/command-presenter.ts` — profile/settings nested ternaries (extra sites) |
+| EDIT | `src/fleet_rlm/files/memory_models.py` — nested `record_version` IfExp → helper |
+| EDIT | `src/fleet_rlm/rlm/dspy_contract.py` — nested history selection IfExp |
+| EDIT | `scripts/check_codebase_tree.py` — detect nested `ast.IfExp` |
+| ADD | `tests/unit/scripts/test_check_codebase_tree.py` |
+
+**Implementation notes:**
+
+- Biome: keep `recommended: true` and existing `style.noNonNullAssertion: "off"`.
+- Python: flag an `ast.IfExp` whose `body` or `orelse` contains another `ast.IfExp`; leave simple conditional expressions allowed.
+- Extend the existing import-boundary checker; do not add a new repo script.
+
+**Tests:**
+
+- Nested-`IfExp` fixture fails the checker; simple `IfExp` still passes
+- Existing import-boundary checks still pass
+- TUI projection / command tests still pass
+
+**Validation gate:**
+
+```bash
+cd tools/fleet-tui && pnpm lint
+cd tools/fleet-tui && pnpm exec biome check src/tui/projection.ts src/tui/commands.ts src/tui/autocomplete.ts src/tui/command-presenter.ts
+uv run python scripts/check_codebase_tree.py
+uv run pytest tests/unit/scripts/test_check_codebase_tree.py -q
+cd tools/fleet-tui && pnpm exec vitest run src/tui/tests/projection.test.ts
+```
+
+**Acceptance:**
+
+- [x] Biome reports nested ternaries as errors and current sites are rewritten
+- [x] Python checker rejects nested `IfExp` and allows simple ternary
+- [x] Existing tests pass
+
+---
+
+### Mission 02 — Make configuration policy one coherent contract
+
+- **Tier:** `blocker`
+- **Status:** `open`
+- **Depends on:** Mission 01
+- **Narrative:** `IMPLEMENTATION_PHASES.md` §PR 2
+
+**Purpose:** Close runtime/config drift: expose `rlm.autonomous_memory_categories` on the editable policy surface and prevent future inventory omissions with invariant tests; dedupe root policy-document parsing.
+
+**Non-goals:**
+
+- Generic `SettingSpec` framework that generates Pydantic + TOML + API + editors
+- Closed category vocabulary / `multi_choice` against a fixed enum
+- Changes to `Settings` public runtime behavior or secret exposure
+
+**Compatibility:** Profiles load identically; unknown TOML fields still fail closed; secrets remain unavailable via policy API.
+
+**Files:**
+
+| Action | Path |
+|--------|------|
+| EDIT | `src/fleet_rlm/config.py` — extract shared `PolicyDocument` / `_read_policy_document` |
+| EDIT | `src/fleet_rlm/config_policy.py` — add free-form/list field for `rlm.autonomous_memory_categories` → `rlm_autonomous_memory_categories` |
+| EDIT | `tests/unit/backend/test_config.py` |
+| EDIT | `tests/unit/backend/test_config_policy.py` |
+
+**Implementation notes:**
+
+- Today: `Settings.rlm_autonomous_memory_categories` exists (`config.py` ~211, validator ~281–291, flatten ~377/587) but `ConfigPolicyService._FIELDS` RLM block ends at `rlm.verbose` with **zero** `autonomous_memory` matches.
+- Categories are open strings normalized via `normalize_memory_candidate_categories` / `normalize_workspace_memory_category` (`files/memory_candidates.py`, `files/memory_models.py`). Prefer extending `EditorKind` with a list/text representation (e.g. text list) rather than inventing `MEMORY_CANDIDATE_CATEGORIES`.
+- Inventory invariant: every `ConfigPolicyService` field is accepted by the TOML schema; every explicitly editable non-secret runtime field is represented in `ConfigPolicyService`.
+- Keep env-var / secret resolution separate from `PolicyDocument` parsing.
+
+**Tests:**
+
+- Profiles load; default profile resolution unchanged
+- Autonomous memory categories appear and edit correctly through policy API
+- Inventory invariant tests fail if a field drifts
+- Secrets still absent from policy responses
+
+**Validation gate:**
+
+```bash
+uv run pytest tests/unit/backend/test_config.py tests/unit/backend/test_config_policy.py -q
+```
+
+**Acceptance:**
+
+- [ ] Field visible/editable on policy surface
+- [ ] Inventory invariant tests land and pass
+- [ ] `PolicyDocument` helper removes duplicated root parsing without behavior change
+- [ ] No secret leakage; no `Settings` public behavior change
+
+---
+
+### Mission 03 — Bound Workspace Agent provider execution
+
+- **Tier:** `blocker`
+- **Status:** `open`
+- **Depends on:** Mission 02
+- **Narrative:** `IMPLEMENTATION_PHASES.md` §PR 3
+
+**Purpose:** Give `run_workspace_agent` / `run_workspace_agent_async` an explicit Daytona `code_run` timeout so post-commit ownership cannot retain leases indefinitely on a stalled provider call.
+
+**Non-goals:**
+
+- New public / TOML timeout knob
+- Detach-and-forget post-commit threads
+- Release Sandbox while the promotion thread still uses it
+- Rewrite Workspace Agent security algorithm
+
+**Compatibility:** Ownership ordering unchanged: short visible wait → owned promotion → bounded provider call → `PreparedRun.aclose()` → lease release exactly once.
+
+**Files:**
+
+| Action | Path |
+|--------|------|
+| EDIT | `src/fleet_rlm/daytona/workspace_agent.py` — `run_workspace_agent` / async (~1267–1277) pass `timeout=` |
+| EDIT | `src/fleet_rlm/daytona/workspace_fs.py` — only if needed for timeout injection |
+| EDIT | `src/fleet_rlm/daytona/workspace_memory.py` — only if needed |
+| EDIT | `src/fleet_rlm/daytona/run_environment.py` — only if needed |
+
+**Implementation notes:**
+
+- Prefer reuse of an existing runtime bound (e.g. `rlm_execution_timeout_s` / interpreter timeout semantics) **or** one internal constant — not a new settings field.
+- Interface shape: `timeout_s: float` keyword on host runners.
+- Hostile fake: `process.code_run` never completes normally must still settle.
+
+**Tests:**
+
+- Workspace Agent contract tests
+- Workspace Memory promotion / post-commit ownership tests
+- Run preparation/cleanup tests proving `PreparedRun.aclose()` returns and lease releases once
+
+**Validation gate:**
+
+```bash
+uv run pytest tests/unit/backend/daytona/test_workspace_agent_stat.py \
+  tests/unit/backend/daytona/test_workspace_agent_delete_patch.py -q
+# plus the promotion / preparation tests touched by this mission
+```
+
+**Acceptance:**
+
+- [ ] Provider call is bounded
+- [ ] Public post-commit wait remains short
+- [ ] Hostile hang eventually times out; resources release once
+- [ ] No new TOML/public setting
+
+---
+
+### Mission 04 — Live two-child `rlm_query_batched` certification
+
+- **Tier:** `blocker`
+- **Status:** `open`
+- **Depends on:** Mission 03
+- **Narrative:** `IMPLEMENTATION_PHASES.md` §PR 4
+
+**Purpose:** Live-certify Root `rlm_query_batched([prompt_a, prompt_b])` with real DSPy + real Daytona + two simultaneous child RLMs + cleanup.
+
+**Non-goals:**
+
+- 8-child stress test
+- New concurrency config
+- Arbitrary recursive depth beyond `RLM_NATIVE_CHILD_DEPTH = 1`
+- Enlarging the single-child live test into a kitchen-sink suite
+
+**Compatibility:** Deterministic recursive unit behavior unchanged; this adds a live canary only.
+
+**Files:**
+
+| Action | Path |
+|--------|------|
+| ADD | `tests/live/backend/test_daytona_recursive_batch.py` |
+| EDIT | (optional) live helpers only if shared fixtures are required |
+
+**Implementation notes:**
+
+- Mirror patterns from `tests/live/backend/test_phase2_daytona_recursive.py`.
+- Assert: distinct child Sandbox IDs and Volume paths; both started/completed; `peak_child_concurrency == 2`; ordered results for `[prompt_a, prompt_b]`; Root synthesis + SUBMIT; all child Sandboxes removed; admission permits returned; no active child lease; child fan-out not exposed recursively.
+- Live lane requires explicit `FLEET_LIVE=1` and credentialed env; do not fold into default `make check`.
+
+**Tests:** The new live module itself is the gate.
+
+**Validation gate:**
+
+```bash
+FLEET_LIVE=1 uv run pytest tests/live/backend/test_daytona_recursive_batch.py -q
+```
+
+**Acceptance:**
+
+- [ ] Two-child live canary green
+- [ ] Cleanup invariants proven
+- [ ] No new runtime knobs
+
+---
+
+### Mission 05 — Align package support, dependency policy, and CI
+
+- **Tier:** `blocker`
+- **Status:** `open`
+- **Depends on:** Mission 04
+- **Narrative:** `IMPLEMENTATION_PHASES.md` §PR 5
+
+**Purpose:** Make declared Python/DSPy support match what CI actually certifies.
+
+**Non-goals:**
+
+- Exact-pin the project to `dspy==3.3.0` solely to match a stale workflow name
+- Collapse CircleCI quality/unit/e2e/daytona/TUI job structure
+- Drop Python 3.11 from `requires-python` without removing classifiers
+
+**Compatibility:** Runtime `dspy>=3.3.0,<3.4` patch-range policy stays; full gate remains Python 3.13.
+
+**Files:**
+
+| Action | Path |
+|--------|------|
+| EDIT | `pyproject.toml` — remove dead `tomli>=2.4.1; python_version < '3.11'` |
+| EDIT | `.github/workflows/check-dspy-pin.yml` — verify **locked** DSPy version, not hard-coded `dspy==3.3.0` installability framing |
+| EDIT | `.circleci/config.yml` (and/or companion workflows) — add lightweight 3.11 + 3.12 compat jobs |
+| EDIT | release/preflight docs or scripts only if they contradict the new lanes |
+
+**Implementation notes:**
+
+- Package already declares `requires-python = ">=3.11,<3.14"` and `dspy>=3.3.0,<3.4`.
+- Compat jobs: lock/install + import/package validation + unit/contract — not full Daytona/E2E.
+- Keep 3.13 as the full gate image.
+
+**Tests / Validation gate:**
+
+```bash
+# local smoke for metadata + unit; CI must show 3.11/3.12/3.13 lanes green
+uv sync --all-extras --dev
+uv run pytest tests/unit/backend tests/contracts/backend -q
+```
+
+**Acceptance:**
+
+- [ ] Dead `tomli` marker removed
+- [ ] DSPy workflow matches locked version / patch-range policy
+- [ ] Lightweight 3.11 and 3.12 jobs exist and pass
+- [ ] 3.13 full gate unchanged in role
+
+---
+
+### Mission 06 — Give Turn preparation one explicit owner
+
+- **Tier:** `blocker`
+- **Status:** `open`
+- **Depends on:** Mission 05
+- **Narrative:** `IMPLEMENTATION_PHASES.md` §PR 6
+
+**Purpose:** Flatten `TurnCoordinator.open()` ownership without changing the Run state machine: shared claim/cleanup helpers stop being private cross-imports; preparation gets one object for task/claim-loss/cancel/settle.
+
+**Non-goals:**
+
+- Polymorphic attempt hierarchy / framework
+- Merging `TurnCoordinator`, `RunExecutionDriver`, and `RunLifecycle` into one type
+- Changing claim/heartbeat/quarantine semantics
+
+**Compatibility:** Existing preparation failure modes remain covered (claim loss, cancel, timeout, late provider completion, disconnect, cleanup failure, successful handoff).
+
+**Files:**
+
+| Action | Path |
+|--------|------|
+| EDIT | `src/fleet_rlm/chat/turn_coordinator.py` — `open()` (~152–364); stop `_private` imports from `run_execution` (~15–23) |
+| EDIT | `src/fleet_rlm/chat/run_execution.py` — export or move shared helpers (`_ClaimHeartbeat`, `_shield_cleanup`, etc.) |
+| ADD | `src/fleet_rlm/chat/run_ownership.py` — **only if** it materially simplifies callers |
+| ADD | `src/fleet_rlm/chat/preparation_attempt.py` — **only if** it materially simplifies callers |
+
+**Implementation notes:**
+
+- `PreparationAttempt`-shaped API: `wait() -> PreparedRun`, `cancel_and_settle()`.
+- Move only genuinely shared prep+execution ownership helpers.
+- Reviewer should understand `open()` from top-level branches, not five nested closures.
+
+**Tests:** Existing TurnCoordinator / run execution / preparation behavior tests (claim loss, cancel, timeout, cleanup failure, handoff, heartbeat stop).
+
+**Validation gate:**
+
+```bash
+uv run pytest tests/unit/backend -q -k 'turn_coordinator or run_execution or preparation or claim'
+# narrow to the concrete modules this mission touches after locating them
+```
+
+**Acceptance:**
+
+- [ ] No private sibling-module imports for ownership helpers
+- [ ] Preparation attempt ownership is explicit
+- [ ] Behavior tests green; Run state machine unchanged
+
+---
+
+## Recommended (P2–P5) — missions 07–13
+
+### Mission 07 — Extract pure trajectory reconciliation from `RLMRunner`
+
+- **Tier:** `recommended`
+- **Status:** `open`
+- **Depends on:** Mission 06
+- **Narrative:** `IMPLEMENTATION_PHASES.md` §PR 7
+
+**Purpose:** Let `runner.py` read as execution orchestration; move pure trajectory/live-detail reconciliation into a dedicated module; tighten Memory candidate drain typing.
+
+**Non-goals:**
+
+- `TrajectoryService` class / polymorphic projection engine
+- Changing emitted RuntimeEvents or durable ExecutionDetails semantics
+- Legacy `getattr` / dynamic drain compatibility if every adapter already implements the protocol
+
+**Compatibility:** Identical trajectory + live observations → identical RuntimeEvents, ExecutionDetails, stream IDs, and correction behavior.
+
+**Files:**
+
+| Action | Path |
+|--------|------|
+| ADD | `src/fleet_rlm/rlm/trajectory_projection.py` |
+| EDIT | `src/fleet_rlm/rlm/runner.py` — move helpers `_trajectory_details` (~279+), `_preserve_stream_id`, `_stream_text`, `_align_trajectory_detail`, `_same_stream_payload`, `_detail_position`, `_outside_reasoning_position`, `_trajectory_insertion`, `_reconcile_trajectory` |
+| EDIT | `src/fleet_rlm/rlm/context.py` — `PreparedCapabilities.drain_memory_candidates` → `tuple[MemoryCandidate, ...]` |
+| EDIT | `src/fleet_rlm/chat/capability_preparation.py` / Daytona prepared capabilities as needed |
+| EDIT | `tests/unit/backend/rlm/test_trajectory_projection.py` — **rewire imports** (file already exists) |
+
+**Implementation notes:**
+
+- Prefer plain functions with domain names.
+- Replace `_drain_memory_candidates` dynamic path in `runner.py` with direct typed drain.
+
+**Validation gate:**
+
+```bash
+uv run pytest tests/unit/backend/rlm/test_trajectory_projection.py -q
+uv run pytest tests/unit/backend/rlm -q
+```
+
+**Acceptance:**
+
+- [ ] Helpers live in `trajectory_projection.py`
+- [ ] Existing trajectory tests rewired and green
+- [ ] `drain_memory_candidates` typed; no dynamic legacy path
+
+---
+
+### Mission 08 — Separate batched scheduling from recursive child semantics
+
+- **Tier:** `recommended`
+- **Status:** `open`
+- **Depends on:** Mission 07
+- **Narrative:** `IMPLEMENTATION_PHASES.md` §PR 8
+
+**Purpose:** Move bounded ThreadPool batch scheduling out of `recursive_calls.py` so `RecursiveRLMExecutor` owns recursive semantics only.
+
+**Non-goals:**
+
+- Extensible generic scheduler abstraction
+- Changing public `tool` / `batched_tool` contracts
+- Raising native child depth
+
+**Compatibility:** Preserve atomic reservation, order, max parallelism, first failure, timeout, queued cancellation, running lease retention, worker-local spans, cleanup error propagation.
+
+**Files:**
+
+| Action | Path |
+|--------|------|
+| ADD | `src/fleet_rlm/rlm/recursive_batch.py` |
+| EDIT | `src/fleet_rlm/rlm/recursive_calls.py` — keep policy, single-child, depth, child construction/cleanup, tools, metrics; move `_call_batched` scheduling (~788+) |
+| EDIT | `tests/unit/backend/rlm/test_recursive_calls.py` — update imports if needed; keep `test_recursive_batch_*` coverage |
+
+**Implementation notes:**
+
+- Narrow API e.g. `run_reserved_batch(reservations, *, execute, deadline, max_parallel, ...) -> list[str]`.
+- If internal `call_count` means reserved calls, rename to `reserved_call_count` (or equivalent) for clarity.
+
+**Validation gate:**
+
+```bash
+uv run pytest tests/unit/backend/rlm/test_recursive_calls.py -q
+```
+
+**Acceptance:**
+
+- [ ] Batch scheduling isolated in `recursive_batch.py`
+- [ ] All current batch tests green
+- [ ] Ambiguous counter naming cleaned up if present
+
+---
+
+### Mission 09 — Extract DSPy synchronous Daytona bridge
+
+- **Tier:** `recommended`
+- **Status:** `open`
+- **Depends on:** Mission 08
+- **Narrative:** `IMPLEMENTATION_PHASES.md` §PR 9
+
+**Purpose:** Make `interpreter.py` describe the Fleet interpreter; move sync/async transport bridge to `dspy_sync_bridge.py`.
+
+**Non-goals:**
+
+- Daytona synchronous client stack
+- `RLM.acall()` / native async interpreter migration
+- Worker-thread removal
+
+**Compatibility:** DSPy still sees a sync interpreter view over AsyncSandbox; Tool/SUBMIT/observation semantics unchanged.
+
+**Files:**
+
+| Action | Path |
+|--------|------|
+| ADD | `src/fleet_rlm/daytona/dspy_sync_bridge.py` |
+| EDIT | `src/fleet_rlm/daytona/interpreter.py` — move `_SyncBridgeLoop` (~310+), `_sync_await`, `_SyncCodeInterpreter`, `_SyncProcess`, `_SyncFileSystem`, `_SyncDaytonaSandbox` (~473+), `sync_sandbox`, `bridge_service_loop`, `set_bridge_service_loop` |
+
+**Implementation notes:**
+
+- Rename `_SyncDaytonaSandbox` → `_DSPySyncSandboxView`.
+- Keep in `interpreter.py`: `DaytonaCodeInterpreter`, broker wiring, host Tool mediation, SUBMIT, observations, repair feedback, DSPy `CodeInterpreter` contract.
+
+**Validation gate:**
+
+```bash
+uv run pytest tests/unit/backend/daytona -q
+uv run python scripts/check_codebase_tree.py
+```
+
+**Acceptance:**
+
+- [ ] Bridge symbols live in `dspy_sync_bridge.py`
+- [ ] Interpreter file owns Fleet interpreter semantics
+- [ ] No async-DSPy migration sneak-in
+
+---
+
+### Mission 10 — Workspace Agent as real Python source
+
+- **Tier:** `recommended`
+- **Status:** `open`
+- **Depends on:** Mission 09
+- **Narrative:** `IMPLEMENTATION_PHASES.md` §PR 10
+
+**Purpose:** Extract the remote Workspace Agent program from quoted string lines into ordinary packaged Python source without changing security or wire protocol.
+
+**Non-goals:**
+
+- Rewriting CAS / lock / path / fsync / delete algorithms while extracting
+- Importing the runtime module as host behavior
+- `inspect.getsource()` or a second template language
+
+**Compatibility:** Provider round trips, wire payload, response shape, error mapping, and security behavior unchanged.
+
+**Files:**
+
+| Action | Path |
+|--------|------|
+| ADD | `src/fleet_rlm/daytona/workspace_agent_runtime.py` — real stdlib-only remote program |
+| EDIT | `src/fleet_rlm/daytona/workspace_agent.py` — validation, serialization, `importlib.resources` load, decode, host exception mapping; remove giant `"\n".join((...))` (~73–1252) |
+| EDIT | `scripts/validate_release.py` — require runtime source in wheel |
+| EDIT | Workspace Agent unit tests — golden protocol lock before extract |
+
+**Implementation notes:**
+
+- Lock golden behavior first (traversal, symlink, FIFO, oversized read, checksum, atomic write, append, patch unique/missing/ambiguous, empty-dir delete, non-empty conflict, Memory mutation, fsync warning, WORM fallback), then extract.
+- Load via `importlib.resources`, not host import of remote entrypoints.
+
+**Validation gate:**
+
+```bash
+uv run pytest tests/unit/backend/daytona/test_workspace_agent_stat.py \
+  tests/unit/backend/daytona/test_workspace_agent_delete_patch.py -q
+make build-release
+make check-release
+```
+
+**Acceptance:**
+
+- [ ] Remote agent is readable Python source in the package/wheel
+- [ ] Golden protocol tests green before and after
+- [ ] Wheel required-file assertion includes the runtime module
+
+---
+
+### Mission 11 — Reload `UIMessagePart` discriminated union
+
+- **Tier:** `recommended`
+- **Status:** `open`
+- **Depends on:** Mission 10
+- **Narrative:** `IMPLEMENTATION_PHASES.md` §PR 11
+
+**Purpose:** Replace the reload mega-envelope with exact per-variant models + Pydantic discriminator while keeping serialized JSON identical.
+
+**Non-goals:**
+
+- Removing snake/camel live-transport compatibility
+- API redesign / field renames
+- Hand-editing `openapi.yaml` or generated TUI types
+
+**Compatibility:** Serialized reload JSON must not change; OpenAPI regenerates via `make api-sync`.
+
+**Files:**
+
+| Action | Path |
+|--------|------|
+| EDIT | `src/fleet_rlm/api/schemas.py` — replace mega-envelope `UIMessagePart` (~133–163) with discriminated variants |
+| REGEN | `openapi.yaml` |
+| REGEN | `tools/fleet-tui/src/generated/openapi.ts` |
+| EDIT/ADD | contract tests / fixtures for every durable part variant |
+
+**Implementation notes:**
+
+- Pattern: `TextUIMessagePart`, `ReasoningUIMessagePart`, `DynamicToolUIMessagePart`, … + `Annotated[..., Field(discriminator="type")]`.
+- For each variant: old fixture JSON → validates → serialization equals fixture.
+
+**Validation gate:**
+
+```bash
+make api-sync
+make api-check
+uv run pytest tests/contracts/backend -q
+```
+
+**Acceptance:**
+
+- [ ] Discriminated union in schemas
+- [ ] Wire JSON unchanged vs fixtures
+- [ ] `make api-check` green; TUI generated types updated only via sync
+
+---
+
+### Mission 12 — Split TUI live vs durable projection
+
+- **Tier:** `recommended`
+- **Status:** `open`
+- **Depends on:** Mission 11
+- **Narrative:** `IMPLEMENTATION_PHASES.md` §PR 12
+
+**Purpose:** Separate live SSE projection from durable reload projection so each contract is obvious.
+
+**Non-goals:**
+
+- `AbstractProjectionEngine` / strategy / registry
+- Changing `fleet-turn-stream.ts` stream-order grammar
+- Changing `store.ts` reducer model
+- Removing snake/camel dual-field reads
+
+**Compatibility:** Final user-visible live and durable projections remain equivalent where intended; dual camel/snake tolerance retained.
+
+**Files:**
+
+| Action | Path |
+|--------|------|
+| ADD | `tools/fleet-tui/src/tui/live-projection.ts` — from `LiveTurnProjector` (~9–281) |
+| ADD | `tools/fleet-tui/src/tui/durable-projection.ts` — from `projectDurableTurns` (~292+) |
+| ADD | `tools/fleet-tui/src/tui/projection-helpers.ts` — only tiny shared pure helpers |
+| EDIT | `tools/fleet-tui/src/tui/projection.ts` — re-export shim or delete after call-site update |
+| EDIT | `tools/fleet-tui/src/tui/tests/projection.test.ts` (+ `runner.test.ts` imports) |
+| EDIT | `tools/fleet-tui/AGENTS.md` — fix ownership (projection ≠ `transcript.ts`) |
+
+**Validation gate:**
+
+```bash
+cd tools/fleet-tui && pnpm test  # or the package's projection/test script
+cd tools/fleet-tui && pnpm exec biome check .
+```
+
+**Acceptance:**
+
+- [ ] Live and durable projection live in separate modules
+- [ ] Stream grammar and store reducer untouched in semantics
+- [ ] Dual-field reads preserved
+- [ ] AGENTS.md ownership corrected
+
+---
+
+### Mission 13 — Small consolidation / deletion sweep
+
+- **Tier:** `recommended`
+- **Status:** `open`
+- **Depends on:** Mission 12
+- **Narrative:** `IMPLEMENTATION_PHASES.md` §PR 13
+
+**Purpose:** Delete proven low-risk duplication after the larger extractions land.
+
+**Non-goals:**
+
+- Broad comment/docstring cleanup campaign outside touched files
+- Changing Skill `allowed-tools` authorization semantics
+- Large unrelated refactors
+
+**Compatibility:** Behavior-preserving edits only.
+
+**Files:**
+
+| Action | Path |
+|--------|------|
+| EDIT | `src/fleet_rlm/composition/daytona.py` — `dataclasses.replace(...)` instead of field-by-field `RuntimeInventory(...)` rebuild (~425–445) |
+| EDIT | `src/fleet_rlm/composition/testing.py` — same pattern (~342–361) |
+| EDIT | Memory injection sites — reuse already-normalized query |
+| EDIT | Skills manifest layer — stale diagnostics/comments only |
+| EDIT | Already-touched files — delete restating Parameters/Returns docstrings; keep “why” comments |
+
+**Validation gate:**
+
+```bash
+uv run pytest tests/unit/backend/composition tests/unit/backend -q -k 'composition or skill or memory'
+# then smallest lane covering touched files
+```
+
+**Acceptance:**
+
+- [ ] Inventory rebuilds use `dataclasses.replace`
+- [ ] No Skill authorization semantic change
+- [ ] Only restating comments removed; architecture “why” comments kept
+
+---
+
+## RC certification — mission 14
+
+### Mission 14 — Release-candidate certification freeze
+
+- **Tier:** `rc`
+- **Status:** `open`
+- **Depends on:** Missions 01–13 (recommended replacement cut); **minimum** cut may proceed after 01–06 only if product accepts higher clarity debt
+- **Narrative:** `IMPLEMENTATION_PHASES.md` §6
+
+**Purpose:** Stop architecture changes and prove the branch with one RC commit across deterministic, Python-compat, persistence, live Daytona, public transport, and wheel gates.
+
+**Non-goals:**
+
+- Further module extractions during RC
+- Comparing against `main` databases
+- Requiring identical internal live vs durable transport events (semantic equivalence only)
+
+**Compatibility:** Freeze module ownership listed in phase §9; only bugfixes allowed after freeze.
+
+**Validation gate (all required):**
+
+```bash
+make check
+make check-security
+make build-release
+make check-release
+make api-check
+make stream-check
+git diff --check
+```
+
+Plus:
+
+- Python compatibility lanes green for **3.11 / 3.12 / 3.13**
+- Persistence: clean DB `alembic upgrade head` + Session→Turn→Result; representative **dev-0.7** DB upgrade + reload + new Turn
+- Live Daytona checklist: ordinary Root Turn; Workspace R/W/edit/delete; attachment read; artifact commit; explicit Memory CRUD; post-commit Memory promotion; single recursive child; **M04 two-child canary**; cancel during execution; deadline/timeout cleanup — then no leaked permits/Sandboxes/interpreters/owned background tasks
+- Public transport: same semantic Turn via live SSE, replay SSE, durable reload, TUI live projection, TUI durable projection
+- Wheel: required payloads present (incl. Workspace Agent runtime source after M10); TestPyPI installed-wheel smoke as in release workflow
+
+**Acceptance:**
+
+- [ ] Architecture frozen
+- [ ] All deterministic gates green
+- [ ] Compat + persistence + live + transport + wheel gates green
+- [ ] One RC commit identified
+
+---
+
+## Cutover — mission 15
+
+### Mission 15 — Repository cutover protection
+
+- **Tier:** `cutover`
+- **Status:** `open`
+- **Depends on:** Mission 14 **and** default-branch / rebase switch complete
+- **Narrative:** `IMPLEMENTATION_PHASES.md` §7
+
+**Purpose:** After the replacement branch becomes the protected default, require the canonical CI status checks on merges.
+
+**Non-goals:**
+
+- Configuring protection on a temporary branch that will disappear before cutover
+- Changing CI job graph beyond what M05 already landed
+
+**Required status checks (minimum):**
+
+- quality
+- lint-typecheck
+- test-unit
+- test-e2e
+- daytona-coverage
+- tui
+- Python compatibility
+
+**Acceptance:**
+
+- [ ] Branch protection enabled on the post-cutover default branch
+- [ ] Required checks match the list above
+- [ ] Merges without green required checks are blocked
+
+---
+
+## Explicitly deferred (after replacement)
+
+Do **not** schedule these inside missions 01–15:
+
+- [ ] Native async DSPy interpreter / `RLM.acall()` migration off the sync bridge
+- [ ] Root/Sub model tuning campaigns
+- [ ] Public snake/camel casing removals on live transport
+- [ ] AssistantPart ↔ durable dataclass unification spike
+- [ ] Generic Workspace/Project Tool host merge
+- [ ] Additional `dspy_contract.py` splitting (except maybe later `rlm/dspy_tracing.py`)
+- [ ] `AsyncDaytonaVolumeFS` / sync volume adapter rewrite
+- [ ] Blanket comment/docstring cleanup campaign
+
+---
+
+## Out of scope / do-not-do (this program)
+
+From `IMPLEMENTATION_PHASES.md` §5 — agents must not invent these as missions:
+
+1. **Do not** generically merge `workspace_tools.py` and `project_tools.py` into a declarative Tool framework unless a clear net deletion is proven (not a blocker).
+2. **Do not** split `dspy_contract.py` into many tiny modules during this program.
+3. **Do not** collapse durable dataclasses and Pydantic AssistantPart models yet.
+4. **Do not** rewrite Volume FS adapters for line-count reasons.
+5. **Do not** start the async DSPy RLM migration before cutover.
+
+Also preserve architectural invariants from phase §3 (native child depth 1, width not depth, fresh child Sandboxes, Root final-answer authority, RuntimeEvent ≠ durable AssistantPart ≠ live chunk, Alembic-head schema validation, accepted-stream SSE, mounted Workspace Agent as privileged mutation boundary, immediate vs post-commit Memory rules).
+
+---
+
+## Quick claim cheat-sheet
+
+| Next claim | When |
+|------------|------|
+| Mission 01 | Always first |
+| Missions 02–06 | Sequentially after prior `done` |
+| Missions 07–13 | After M06 for recommended replacement |
+| Mission 14 | After chosen cutoff (min M06 or full M13) |
+| Mission 15 | Only after default-branch switch |
