@@ -382,7 +382,7 @@ async def test_daytona_install_registers_and_dispose_clears_bridge_service_loop(
     falls back to caller capture instead of posting to a closing loop.
     """
     import fleet_rlm.composition.daytona as composition
-    from fleet_rlm.daytona.interpreter import bridge_service_loop, set_bridge_service_loop
+    from fleet_rlm.daytona.dspy_sync_bridge import bridge_service_loop, set_bridge_service_loop
 
     inventory = RuntimeInventory(
         turn_coordinator=object(),

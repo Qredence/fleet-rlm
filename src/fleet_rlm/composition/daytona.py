@@ -22,6 +22,7 @@ from fleet_rlm.composition.inventory import (
     install_runtime_inventory,
 )
 from fleet_rlm.config import Settings
+from fleet_rlm.daytona.dspy_sync_bridge import set_bridge_service_loop
 from fleet_rlm.persistence.database import ensure_database_compatible
 from fleet_rlm.persistence.repositories.turns import ReconciliationSummary
 from fleet_rlm.skills.catalog import SkillCatalog
@@ -405,8 +406,6 @@ async def install_daytona_composition(
     Returns:
         RuntimeInventory: The installed Daytona runtime inventory.
     """
-    from fleet_rlm.daytona.interpreter import set_bridge_service_loop
-
     skill_catalog = getattr(app.state, "skill_catalog", None)
     if not isinstance(skill_catalog, SkillCatalog):
         raise CompositionError("bundled Skill catalog is unavailable")
@@ -463,8 +462,6 @@ async def dispose_daytona_composition(app: FastAPI) -> None:
     The shutdown drains pending turn cleanup before disposing runtime, gateway, and
     database resources, then unregisters the Daytona bridge service loop.
     """
-    from fleet_rlm.daytona.interpreter import set_bridge_service_loop
-
     inventory = clear_runtime_inventory(app)
     orphan_task = getattr(inventory, "orphan_cleanup_task", None)
     await _cancel_orphan_cleanup(orphan_task)

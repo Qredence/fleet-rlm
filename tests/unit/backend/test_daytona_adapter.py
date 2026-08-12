@@ -140,7 +140,7 @@ def test_sanitize_provider_message_strips_secrets_and_paths() -> None:
 
 @pytest.mark.asyncio
 async def test_sync_sandbox_bridges_async_filesystem_from_dspy_worker() -> None:
-    from fleet_rlm.daytona.interpreter import sync_sandbox
+    from fleet_rlm.daytona.dspy_sync_bridge import sync_sandbox
 
     class AsyncFilesystem:
         async def download_file(self, path: str) -> bytes:
@@ -158,7 +158,7 @@ async def test_sync_sandbox_bridges_async_filesystem_from_dspy_worker() -> None:
 
 @pytest.mark.asyncio
 async def test_sync_sandbox_exposes_only_explicit_async_services() -> None:
-    from fleet_rlm.daytona.interpreter import sync_sandbox
+    from fleet_rlm.daytona.dspy_sync_bridge import sync_sandbox
 
     class Service:
         async def create_context(self, **kwargs):
@@ -228,7 +228,7 @@ async def test_sync_sandbox_exposes_only_explicit_async_services() -> None:
 @pytest.mark.asyncio
 async def test_sync_sandbox_rejects_calls_from_owning_loop() -> None:
     from fleet_rlm.daytona.errors import DaytonaAdapterError
-    from fleet_rlm.daytona.interpreter import sync_sandbox
+    from fleet_rlm.daytona.dspy_sync_bridge import sync_sandbox
 
     class Fs:
         async def download_file(self, path: str) -> bytes:

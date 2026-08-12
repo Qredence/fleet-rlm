@@ -23,7 +23,8 @@ from pathlib import Path
 from typing import Any, cast
 from uuid import uuid4
 
-from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, sandbox_backend, sync_sandbox
+from fleet_rlm.daytona.dspy_sync_bridge import sync_sandbox
+from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, sandbox_backend
 from fleet_rlm.daytona.platform import (
     LiveDaytonaPlatform,
     LiveDaytonaVolumeClient,

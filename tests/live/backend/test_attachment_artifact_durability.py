@@ -23,7 +23,7 @@ import pytest
 from fleet_rlm.artifacts.local_catalog import LocalArtifactCatalog
 from fleet_rlm.chat.run_cleanup import RunCleanupSupervisor
 from fleet_rlm.config import Settings, load_runtime_settings
-from fleet_rlm.daytona.interpreter import sync_sandbox
+from fleet_rlm.daytona.dspy_sync_bridge import sync_sandbox
 from fleet_rlm.daytona.run_environment import DaytonaRuntimeResources
 from fleet_rlm.daytona.session_manager import LeaseRequest
 from fleet_rlm.daytona.workspace_fs import DaytonaSandboxVolumeFs

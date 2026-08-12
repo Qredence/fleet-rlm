@@ -25,14 +25,13 @@ from types import SimpleNamespace
 import pytest
 
 from fleet_rlm.daytona import recursive_child_runtime
-from fleet_rlm.daytona.errors import DaytonaAdapterError
-from fleet_rlm.daytona.interpreter import (
-    DaytonaCodeInterpreter,
+from fleet_rlm.daytona.dspy_sync_bridge import (
     bridge_service_loop,
-    sandbox_backend,
     set_bridge_service_loop,
     sync_sandbox,
 )
+from fleet_rlm.daytona.errors import DaytonaAdapterError
+from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, sandbox_backend
 from fleet_rlm.daytona.session_manager import DaytonaAdmission, DaytonaAdmissionPermit
 from fleet_rlm.rlm.child_runtime import ChildRuntimeCleanupError
 

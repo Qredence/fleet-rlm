@@ -3,9 +3,9 @@
 The async adapters are the single source of truth for every operation. The
 synchronous ``DaytonaSessionWorkspaceFS`` is a thin bridge for DSPy
 worker-thread host tools: it facades the caller-provided synchronous sandbox
-view (``_SyncDaytonaSandbox`` or a test double) into the async shape and
-drives each delegation coroutine to completion inline, since the underlying
-synchronous bridge calls already block.
+view from :func:`fleet_rlm.daytona.dspy_sync_bridge.sync_sandbox` (or a test
+double) into the async shape and drives each delegation coroutine to
+completion inline, since the underlying synchronous bridge calls already block.
 """
 
 from __future__ import annotations
@@ -604,7 +604,7 @@ class _SyncProcessFacade:
     """Awaitable ``process`` wrapper over one synchronous sandbox bridge.
 
     The wrapped ``code_run`` already blocks the worker thread
-    (``_SyncDaytonaSandbox`` routing onto the bridge service loop, or a
+    (``sync_sandbox()`` routing onto the bridge service loop, or a
     synchronous test double), so coroutines built on it never truly suspend.
     """
 

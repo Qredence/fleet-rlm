@@ -25,7 +25,7 @@ from fleet_rlm.chat.run_preparation import (
 )
 from fleet_rlm.composition.common import recursive_rlm_options
 from fleet_rlm.config import Settings, load_runtime_settings
-from fleet_rlm.daytona.interpreter import sync_sandbox
+from fleet_rlm.daytona.dspy_sync_bridge import sync_sandbox
 from fleet_rlm.daytona.platform import (
     LiveDaytonaPlatform,
     LiveDaytonaVolumeClient,

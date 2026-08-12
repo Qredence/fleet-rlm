@@ -464,7 +464,7 @@ uv run pytest tests/unit/backend/rlm/test_recursive_calls.py -q
 ### Mission 09 — Extract DSPy synchronous Daytona bridge
 
 - **Tier:** `recommended`
-- **Status:** `open`
+- **Status:** `done`
 - **Depends on:** Mission 08
 - **Narrative:** `IMPLEMENTATION_PHASES.md` §PR 9
 
@@ -499,9 +499,9 @@ uv run python scripts/check_codebase_tree.py
 
 **Acceptance:**
 
-- [ ] Bridge symbols live in `dspy_sync_bridge.py`
-- [ ] Interpreter file owns Fleet interpreter semantics
-- [ ] No async-DSPy migration sneak-in
+- [x] Bridge symbols live in `dspy_sync_bridge.py`
+- [x] Interpreter file owns Fleet interpreter semantics
+- [x] No async-DSPy migration sneak-in
 
 ---
 

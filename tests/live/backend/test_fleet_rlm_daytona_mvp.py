@@ -34,7 +34,7 @@ from fleet_rlm.config import (
     load_profile_environment_contracts,
     load_runtime_settings,
 )
-from fleet_rlm.daytona.interpreter import sync_sandbox
+from fleet_rlm.daytona.dspy_sync_bridge import sync_sandbox
 from fleet_rlm.daytona.workspace_fs import DaytonaSandboxVolumeFs
 from fleet_rlm.files.volume_paths import volume_paths_from_settings
 from fleet_rlm.rlm.tool_observer import ToolEventView
