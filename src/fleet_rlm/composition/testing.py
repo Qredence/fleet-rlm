@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
@@ -146,15 +147,7 @@ class TestingCapabilityPreparer:
         max_artifact_bytes: int = 10_000_000,
         max_url_bytes: int = 10 * 1024 * 1024,
     ) -> None:
-        """Initialize a testing capability preparer with configured source limits.
-
-        Parameters:
-            skill_catalog (SkillCatalog): Catalog of available skills.
-            models (RLMModelBundle): Models used for capability preparation.
-            options (RLMOptions): Runtime options for capability preparation.
-            max_artifact_bytes (int): Maximum permitted artifact size in bytes.
-            max_url_bytes (int): Maximum permitted URL source size in bytes.
-        """
+        """Initialize a testing capability preparer with configured source limits."""
         from fleet_rlm.files.url_tool import InMemoryUrlSourceStore
 
         del models, options
@@ -171,17 +164,7 @@ class TestingCapabilityPreparer:
         *,
         deadline: float,
     ) -> PreparedHostCapabilities:
-        """Prepare capabilities for a turn within the specified execution environment and deadline.
-
-        Parameters:
-            turn (ClaimedRun): The turn whose capabilities are being prepared.
-            environment (RunEnvironment): The environment in which the turn will execute.
-            attachments (PreparedAttachments): Attachments available to the turn.
-            deadline (float): The time limit for preparation.
-
-        Returns:
-            PreparedHostCapabilities: The prepared capabilities.
-        """
+        """Prepare host capabilities for one turn within the execution deadline."""
         from fleet_rlm.files.tools import FileToolHost
         from fleet_rlm.files.url_tool import UrlToolHost
 
@@ -339,17 +322,10 @@ def install_testing_composition(
         rlm_factory=TestingRLMFactory(),
         workspace_volume_mirror=mirror,
     )
-    inventory = RuntimeInventory(
-        turn_coordinator=local_inventory.turn_coordinator,
-        attachment_lifecycle=local_inventory.attachment_lifecycle,
-        artifact_reader=local_inventory.artifact_reader,
-        session_catalog=local_inventory.session_catalog,
-        run_lifecycle=local_inventory.run_lifecycle,
-        run_preparation=local_inventory.run_preparation,
-        run_cleanup_supervisor=local_inventory.run_cleanup_supervisor,
-        run_state_store=local_inventory.run_state_store,
-        config_policy=local_inventory.config_policy,
-        database=local_inventory.database,
+    # Overlay only the host volume adapters; keep the shared local inventory
+    # members so new RuntimeInventory fields cannot silently drop here.
+    inventory = replace(
+        local_inventory,
         workspace_volume_gateway=volume_gateway,
         workspace_file_service=WorkspaceFileService(
             HostWorkspaceAccessGateway(
@@ -357,7 +333,6 @@ def install_testing_composition(
                 max_file_bytes=settings.max_upload_bytes,
             )
         ),
-        workspace_volume_mirror=local_inventory.workspace_volume_mirror,
     )
     return install_runtime_inventory(app, inventory)
 

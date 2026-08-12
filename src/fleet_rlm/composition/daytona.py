@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from dataclasses import replace
 from datetime import timedelta
 from pathlib import Path
 from typing import Any
@@ -34,12 +35,7 @@ _STARTUP_CLEANUP_RECOVERY_BUDGET_SECONDS = 75.0
 
 
 def require_daytona_settings(settings: Settings) -> None:
-    """
-    Validate that all required Daytona runtime settings are configured.
-
-    Raises:
-        CompositionError: If the runtime environment is not Daytona or one or more required settings are missing.
-    """
+    """Validate that all required Daytona runtime settings are configured."""
     if settings.run_environment != "daytona":
         raise CompositionError("Daytona composition requires run_environment='daytona'")
     missing: list[str] = []
@@ -69,15 +65,7 @@ async def _dispose_components(
     database: RuntimeDatabaseLifecycle | None = None,
     suppress_errors: bool,
 ) -> None:
-    """
-    Asynchronously disposes the available runtime components.
-
-    Parameters:
-        resources (RuntimeProcessResources | None): Runtime process resources to dispose.
-        gateway (object | None): Gateway to close.
-        database (RuntimeDatabaseLifecycle | None): Database lifecycle to close.
-        suppress_errors (bool): Whether to suppress disposal errors.
-    """
+    """Dispose available runtime components, optionally suppressing errors."""
     first_error: Exception | None = None
     for target, method_name in ((resources, "adispose"), (gateway, "close"), (database, "aclose")):
         method = getattr(target, method_name, None)
@@ -113,16 +101,7 @@ async def _reconcile_daytona_settling(
     fence_timeout: float = _STARTUP_RECOVERY_FENCE_TIMEOUT_SECONDS,
     deadline: float | None = None,
 ) -> ReconciliationSummary:
-    """
-    Reconcile stale settling turns using bounded session fencing.
-
-    Parameters:
-        fence_timeout (float): Maximum time allowed to fence each session, in seconds.
-        deadline (float | None): Optional monotonic-time deadline for the overall reconciliation.
-
-    Returns:
-        ReconciliationSummary: Summary of the reconciliation results.
-    """
+    """Reconcile stale settling turns using bounded session fencing."""
 
     async def bounded_fence(session_id: UUID) -> None:
         remaining = fence_timeout
@@ -196,16 +175,7 @@ async def run_deferred_orphan_cleanup(
 
 
 async def build_daytona_composition(settings: Settings, *, skill_catalog: SkillCatalog) -> RuntimeInventory:
-    """
-    Construct the Daytona runtime inventory and clean up partially initialized resources on failure.
-
-    Parameters:
-        settings (Settings): Application settings used to configure the Daytona runtime.
-        skill_catalog (SkillCatalog): Application skill catalog used to build turn preparation.
-
-    Returns:
-        RuntimeInventory: The initialized Daytona runtime services and resources.
-    """
+    """Construct the Daytona runtime inventory; clean up partial init on failure."""
     from fleet_rlm.rlm.dspy_contract import assert_dspy_version
 
     assert_dspy_version()
@@ -397,15 +367,7 @@ async def install_daytona_composition(
     app: FastAPI,
     settings: Settings,
 ) -> RuntimeInventory:
-    """Install the Daytona runtime inventory on the application.
-
-    Parameters:
-        app (FastAPI): Application that provides the skill catalog and receives the runtime inventory.
-        settings (Settings): Configuration used to build the Daytona composition.
-
-    Returns:
-        RuntimeInventory: The installed Daytona runtime inventory.
-    """
+    """Install the Daytona runtime inventory on the application."""
     skill_catalog = getattr(app.state, "skill_catalog", None)
     if not isinstance(skill_catalog, SkillCatalog):
         raise CompositionError("bundled Skill catalog is unavailable")
@@ -421,26 +383,14 @@ async def install_daytona_composition(
         from fleet_rlm.config import _CONFIG_PATH, active_profile
         from fleet_rlm.config_policy import ConfigPolicyService
 
-        inventory = RuntimeInventory(
-            turn_coordinator=inventory.turn_coordinator,
-            attachment_lifecycle=inventory.attachment_lifecycle,
-            artifact_reader=inventory.artifact_reader,
-            session_catalog=inventory.session_catalog,
-            run_lifecycle=inventory.run_lifecycle,
-            run_preparation=inventory.run_preparation,
-            run_cleanup_supervisor=inventory.run_cleanup_supervisor,
-            run_state_store=inventory.run_state_store,
+        # Replace only the restart-facing policy service; keep every other
+        # already-built inventory member to avoid field-by-field drift.
+        inventory = replace(
+            inventory,
             config_policy=ConfigPolicyService(
                 _CONFIG_PATH,
                 active_profile=active_profile(settings),
             ),
-            database=inventory.database,
-            model_bundle=inventory.model_bundle,
-            run_environment_resources=inventory.run_environment_resources,
-            workspace_volume_gateway=inventory.workspace_volume_gateway,
-            workspace_file_service=inventory.workspace_file_service,
-            workspace_volume_mirror=inventory.workspace_volume_mirror,
-            orphan_cleanup_task=inventory.orphan_cleanup_task,
         )
         return install_runtime_inventory(app, inventory)
     except Exception:

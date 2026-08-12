@@ -167,7 +167,7 @@ def _relevant_recent_workspace_memory_digest(store: DaytonaWorkspaceMemoryStore,
     try:
         from fleet_rlm.files.memory_tools import search_workspace_memory_entries
 
-        scored, _warnings = search_workspace_memory_entries(store, normalized_query=_injection_query(request))
+        scored, _warnings = search_workspace_memory_entries(store, normalized_query=query)
     except Exception:
         return fallback
     if not scored:

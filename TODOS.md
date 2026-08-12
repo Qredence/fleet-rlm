@@ -648,7 +648,7 @@ cd tools/fleet-tui && pnpm exec biome check .
 ### Mission 13 — Small consolidation / deletion sweep
 
 - **Tier:** `recommended`
-- **Status:** `open`
+- **Status:** `done`
 - **Depends on:** Mission 12
 - **Narrative:** `IMPLEMENTATION_PHASES.md` §PR 13
 
@@ -681,9 +681,9 @@ uv run pytest tests/unit/backend/composition tests/unit/backend -q -k 'compositi
 
 **Acceptance:**
 
-- [ ] Inventory rebuilds use `dataclasses.replace`
-- [ ] No Skill authorization semantic change
-- [ ] Only restating comments removed; architecture “why” comments kept
+- [x] Inventory rebuilds use `dataclasses.replace`
+- [x] No Skill authorization semantic change
+- [x] Only restating comments removed; architecture “why” comments kept
 
 ---
 

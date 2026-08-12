@@ -1,8 +1,8 @@
-"""Validated bundled Skill manifest parsing (expand phase).
+"""Validated bundled Skill manifest parsing.
 
-The manifest is the future Skill-owned source for discovery and resource
-metadata. Runtime catalog construction remains separately owned until the
-contracted migration ticket replaces the host declarations.
+Manifests own discovery, identity, behavior metadata, and resources. Host
+catalog construction binds optional Signatures only; it does not redeclare
+Skill cards or resource bodies.
 """
 
 from __future__ import annotations
@@ -152,7 +152,7 @@ def parse_skill_manifest(document: str, *, source: str = "SKILL.md") -> SkillMan
         raise ValueError(f"missing Skill manifest fields: {sorted(missing)}")
     metadata = _required_mapping(root["metadata"], "metadata")
     if set(metadata) != _METADATA_FIELDS:
-        raise ValueError("Skill manifest metadata must contain only version")
+        raise ValueError("Skill manifest metadata must contain only version and affordances")
 
     resources_value = root.get("resources", [])
     if not isinstance(resources_value, Sequence) or isinstance(resources_value, (str, bytes, bytearray)):
