@@ -63,7 +63,7 @@ async def test_live_preparation_stages_attachment_and_cleans_it(
             volume.pop(path, None)
 
     class SandboxProcess:
-        async def code_run(self, code: str):
+        async def code_run(self, code: str, **kwargs):
             output = StringIO()
             with redirect_stdout(output), suppress(SystemExit):
                 exec(code, {})

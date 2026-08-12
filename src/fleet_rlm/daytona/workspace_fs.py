@@ -611,8 +611,8 @@ class _SyncProcessFacade:
     def __init__(self, process: Any) -> None:
         self._process = process
 
-    async def code_run(self, code: str) -> Any:
-        return self._process.code_run(code)
+    async def code_run(self, code: str, **kwargs: Any) -> Any:
+        return self._process.code_run(code, **kwargs)
 
 
 class _SyncSandboxFacade:

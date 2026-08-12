@@ -34,7 +34,7 @@ class LocalProcess:
     def __init__(self) -> None:
         self.calls: list[str] = []
 
-    def code_run(self, code: str):
+    def code_run(self, code: str, **kwargs):
         self.calls.append(code)
         output = StringIO()
         with redirect_stdout(output), suppress(SystemExit):
@@ -46,7 +46,7 @@ class BoundedSubprocess:
     def __init__(self) -> None:
         self.timed_out = False
 
-    def code_run(self, code: str):
+    def code_run(self, code: str, **kwargs):
         try:
             completed = subprocess.run(
                 [sys.executable, "-c", code],
@@ -692,7 +692,7 @@ def test_provider_failure_is_closed_and_does_not_leak_raw_error(tmp_path: Path) 
     from fleet_rlm.daytona.workspace_memory import DaytonaWorkspaceMemoryStore
 
     class FailingProcess:
-        def code_run(self, _code: str):
+        def code_run(self, _code: str, **kwargs):
             return SimpleNamespace(exit_code=1, result="provider token leaked")
 
     root = tmp_path / "volume"
@@ -1327,7 +1327,7 @@ class _WormSubprocess:
         self.calls: list[str] = []
         self._fail_once_name = fail_first_exclusive_create
 
-    def code_run(self, code: str):
+    def code_run(self, code: str, **kwargs):
         self.calls.append(code)
         prelude = _WORM_PRELUDE
         if self._fail_once_name is not None:

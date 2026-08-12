@@ -27,7 +27,7 @@ Narrative detail stays in that document; **this file is the work queue**.
 
 - **Branch:** `dev-0.7`
 - **Audit SHA:** `c34e7d84d8dd753e94d08dc987fef686f1f65e62` (matches `IMPLEMENTATION_PHASES.md`)
-- **Verified against:** `src/fleet_rlm/` and `tools/fleet-tui/` (static audit; live Daytona gates remain unexecuted until mission 04 / 14)
+- **Verified against:** `src/fleet_rlm/` and `tools/fleet-tui/` (static audit; Mission 03 Workspace Agent timeout landed; Mission 04 live batch canary pending; Mission 14 remains the full RC live gate)
 
 ### Corrections vs `IMPLEMENTATION_PHASES.md`
 
@@ -170,7 +170,7 @@ uv run pytest tests/unit/backend/test_config.py tests/unit/backend/test_config_p
 ### Mission 03 — Bound Workspace Agent provider execution
 
 - **Tier:** `blocker`
-- **Status:** `open`
+- **Status:** `done`
 - **Depends on:** Mission 02
 - **Narrative:** `IMPLEMENTATION_PHASES.md` §PR 3
 
@@ -216,10 +216,10 @@ uv run pytest tests/unit/backend/daytona/test_workspace_agent_stat.py \
 
 **Acceptance:**
 
-- [ ] Provider call is bounded
-- [ ] Public post-commit wait remains short
-- [ ] Hostile hang eventually times out; resources release once
-- [ ] No new TOML/public setting
+- [x] Provider call is bounded
+- [x] Public post-commit wait remains short
+- [x] Hostile hang eventually times out; resources release once
+- [x] No new TOML/public setting
 
 ---
 

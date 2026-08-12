@@ -14,9 +14,12 @@ import pytest
 class LocalProcess:
     def __init__(self) -> None:
         self.calls: list[str] = []
+        self.timeouts: list[int | None] = []
 
-    def code_run(self, code: str):
+    def code_run(self, code: str, **kwargs: object):
         self.calls.append(code)
+        timeout = kwargs.get("timeout")
+        self.timeouts.append(timeout if isinstance(timeout, int) or timeout is None else int(timeout))
         output = StringIO()
         with redirect_stdout(output), suppress(SystemExit):
             exec(code, {})

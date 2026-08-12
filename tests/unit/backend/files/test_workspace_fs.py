@@ -18,7 +18,7 @@ class LocalProcess:
     def __init__(self) -> None:
         self.calls: list[str] = []
 
-    def code_run(self, code: str):
+    def code_run(self, code: str, **kwargs):
         self.calls.append(code)
         output = StringIO()
         with redirect_stdout(output), suppress(SystemExit):
@@ -940,7 +940,7 @@ async def test_async_workspace_fs_delete_and_patch_passthrough(tmp_path: Path) -
     root.mkdir(parents=True)
 
     class AsyncLocalProcess(LocalProcess):
-        async def code_run(self, code: str):
+        async def code_run(self, code: str, **kwargs):
             return super().code_run(code)
 
     process = AsyncLocalProcess()

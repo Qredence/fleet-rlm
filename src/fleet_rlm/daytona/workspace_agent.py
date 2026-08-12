@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import errno
 import json
+import math
 from typing import Any
 
+from fleet_rlm.daytona.interpreter import DEFAULT_EXECUTION_TIMEOUT_S
 from fleet_rlm.files.workspace_models import WorkspaceConflictError
 
 _UNSUPPORTED_LINK_ERRNOS = frozenset({errno.EPERM})
@@ -31,6 +33,10 @@ _WORM_RECREATE_ERRNOS = frozenset(
         getattr(errno, "ENOTSUP", errno.EOPNOTSUPP),
     }
 )
+# Bound provider Workspace Agent ``code_run``. Reuses the interpreter execution
+# default (same numeric bound as Settings ``rlm_execution_timeout_s``).
+# Not a public TOML knob — callers may override via ``timeout_s``.
+WORKSPACE_AGENT_CODE_RUN_TIMEOUT_S = DEFAULT_EXECUTION_TIMEOUT_S
 
 
 class WorkspaceAgentStorageError(OSError):
@@ -1264,16 +1270,34 @@ def decode_workspace_agent_response(response: Any, relative: str) -> dict[str, o
     return payload
 
 
-def run_workspace_agent(sandbox: Any, **arguments: Any) -> dict[str, object]:
-    relative = str(arguments.get("relative") or "")
-    code = build_workspace_agent_code(**arguments)
-    return decode_workspace_agent_response(sandbox.process.code_run(code), relative)
+def _provider_code_run_timeout_s(timeout_s: float) -> int:
+    """Convert a host timeout into Daytona's integer ``code_run`` timeout."""
+    if not math.isfinite(timeout_s) or timeout_s <= 0:
+        raise ValueError("workspace agent timeout_s must be positive")
+    return max(1, math.ceil(timeout_s))
 
 
-async def run_workspace_agent_async(sandbox: Any, **arguments: Any) -> dict[str, object]:
+def run_workspace_agent(
+    sandbox: Any,
+    *,
+    timeout_s: float = WORKSPACE_AGENT_CODE_RUN_TIMEOUT_S,
+    **arguments: Any,
+) -> dict[str, object]:
     relative = str(arguments.get("relative") or "")
     code = build_workspace_agent_code(**arguments)
-    response = await sandbox.process.code_run(code)
+    response = sandbox.process.code_run(code, timeout=_provider_code_run_timeout_s(timeout_s))
+    return decode_workspace_agent_response(response, relative)
+
+
+async def run_workspace_agent_async(
+    sandbox: Any,
+    *,
+    timeout_s: float = WORKSPACE_AGENT_CODE_RUN_TIMEOUT_S,
+    **arguments: Any,
+) -> dict[str, object]:
+    relative = str(arguments.get("relative") or "")
+    code = build_workspace_agent_code(**arguments)
+    response = await sandbox.process.code_run(code, timeout=_provider_code_run_timeout_s(timeout_s))
     return decode_workspace_agent_response(response, relative)
 
 
