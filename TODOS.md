@@ -273,7 +273,7 @@ FLEET_LIVE=1 uv run pytest tests/live/backend/test_daytona_recursive_batch.py -q
 ### Mission 05 — Align package support, dependency policy, and CI
 
 - **Tier:** `blocker`
-- **Status:** `open`
+- **Status:** `done`
 - **Depends on:** Mission 04
 - **Narrative:** `IMPLEMENTATION_PHASES.md` §PR 5
 
@@ -312,10 +312,10 @@ uv run pytest tests/unit/backend tests/contracts/backend -q
 
 **Acceptance:**
 
-- [ ] Dead `tomli` marker removed
-- [ ] DSPy workflow matches locked version / patch-range policy
-- [ ] Lightweight 3.11 and 3.12 jobs exist and pass
-- [ ] 3.13 full gate unchanged in role
+- [x] Dead `tomli` marker removed
+- [x] DSPy workflow matches locked version / patch-range policy
+- [x] Lightweight 3.11 and 3.12 jobs exist and pass
+- [x] 3.13 full gate unchanged in role
 
 ---
 

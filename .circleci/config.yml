@@ -9,6 +9,15 @@ executors:
     working_directory: ~/project
     environment:
       UV_CACHE_DIR: ~/.cache/uv
+  python-compat:
+    parameters:
+      image:
+        type: string
+    docker:
+      - image: << parameters.image >>
+    working_directory: ~/project
+    environment:
+      UV_CACHE_DIR: ~/.cache/uv
   node:
     docker:
       - image: cimg/node:22.23.2@sha256:7c78a95e25876729c2c9cada532b0636fd3ec7dbae922b3d90d83704f4c87639
@@ -34,27 +43,43 @@ commands:
             - ~/.local/bin/uvx
 
   restore_uv_cache:
+    parameters:
+      python_tag:
+        type: string
+        default: "py313"
     steps:
       - restore_cache:
           keys:
-            - v1-uv-py313-{{ arch }}-{{ checksum "uv.lock" }}
-            - v1-uv-py313-{{ arch }}-
+            - v1-uv-<< parameters.python_tag >>-{{ arch }}-{{ checksum "uv.lock" }}
+            - v1-uv-<< parameters.python_tag >>-{{ arch }}-
 
   save_uv_cache:
+    parameters:
+      python_tag:
+        type: string
+        default: "py313"
     steps:
       - save_cache:
-          key: v1-uv-py313-{{ arch }}-{{ checksum "uv.lock" }}
+          key: v1-uv-<< parameters.python_tag >>-{{ arch }}-{{ checksum "uv.lock" }}
           paths:
             - ~/.cache/uv
 
   install_python_dependencies:
+    parameters:
+      python_version:
+        type: string
+        default: "3.13"
+      python_tag:
+        type: string
+        default: "py313"
     steps:
       - install_uv
-      - restore_uv_cache
+      - restore_uv_cache:
+          python_tag: << parameters.python_tag >>
       - run:
-          name: Install Python dependencies
+          name: Install Python dependencies (<< parameters.python_version >>)
           no_output_timeout: 15m
-          command: uv sync --all-extras --dev --python 3.13 --verbose
+          command: uv sync --all-extras --dev --python << parameters.python_version >> --verbose
 
 jobs:
   quality:
@@ -156,6 +181,50 @@ jobs:
           path: .scratch/coverage
           destination: coverage/daytona
 
+  python-compat:
+    parameters:
+      python_version:
+        type: string
+      python_tag:
+        type: string
+      image:
+        type: string
+    executor:
+      name: python-compat
+      image: << parameters.image >>
+    resource_class: medium
+    steps:
+      - checkout
+      - install_python_dependencies:
+          python_version: << parameters.python_version >>
+          python_tag: << parameters.python_tag >>
+      - save_uv_cache:
+          python_tag: << parameters.python_tag >>
+      - run:
+          name: Import and package validation
+          command: |
+            export FLEET_COMPAT_PYTHON=<< parameters.python_version >>
+            uv run --python "<< parameters.python_version >>" python - \<<'PY'
+            import dspy
+            import fleet_rlm
+            import os
+            import sys
+
+            expected = tuple(int(part) for part in os.environ["FLEET_COMPAT_PYTHON"].split("."))
+            assert sys.version_info[:2] == expected, sys.version
+            assert dspy.__version__.startswith("3.3."), dspy.__version__
+            print("fleet_rlm", fleet_rlm.__version__)
+            print("dspy", dspy.__version__)
+            PY
+      - run:
+          name: Unit and contract tests
+          no_output_timeout: 15m
+          command: |
+            env FLEET_DAYTONA_API_KEY= FLEET_OPENAI_API_KEY= FLEET_LLM_BASE_URL= FLEET_DATABASE_URL= \
+              uv run --python "<< parameters.python_version >>" pytest \
+              tests/unit/backend tests/contracts/backend -q \
+              -m "not live_llm and not live_daytona and not benchmark and not db"
+
   tui:
     executor: node
     resource_class: small
@@ -185,4 +254,14 @@ workflows:
       - test-unit
       - test-e2e
       - daytona-coverage
+      - python-compat:
+          name: python-compat-311
+          python_version: "3.11"
+          python_tag: "py311"
+          image: cimg/python:3.11.13
+      - python-compat:
+          name: python-compat-312
+          python_version: "3.12"
+          python_tag: "py312"
+          image: cimg/python:3.12.11
       - tui

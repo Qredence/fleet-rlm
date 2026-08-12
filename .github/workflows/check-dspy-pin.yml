@@ -1,4 +1,4 @@
-name: Check dspy pin
+name: Check locked dspy availability
 
 permissions:
   contents: read
@@ -16,7 +16,7 @@ on:
 
 jobs:
   check-dspy-availability:
-    name: Verify dspy==3.3.0 is installable from PyPI
+    name: Verify locked dspy is installable from PyPI
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -31,17 +31,39 @@ jobs:
       - name: Set up Python
         run: uv python install 3.12
 
-      - name: Check dspy==3.3.0 installability
+      - name: Resolve locked dspy version
+        id: locked
         run: |
-          # 3.3.0 is the backend contract pin in pyproject.toml.
-          # Fail loudly if PyPI yanks or removes the release.
-          # uv-managed Python installations are externally managed; probe from
-          # a temporary virtual environment instead of writing to the base
-          # interpreter.
+          # Runtime policy remains dspy>=3.3.0,<3.4; this workflow verifies the
+          # version recorded in uv.lock stays installable on PyPI.
+          LOCKED="$(uv run --no-project python - <<'PY'
+          import re
+          import tomllib
+          from pathlib import Path
+
+          data = tomllib.loads(Path("uv.lock").read_text(encoding="utf-8"))
+          match = next((pkg for pkg in data["package"] if pkg["name"] == "dspy"), None)
+          if match is None:
+              raise SystemExit("dspy is missing from uv.lock")
+          version = match["version"]
+          if not re.fullmatch(r"3\.3\.\d+", version):
+              raise SystemExit(
+                  f"locked dspy=={version} is outside the declared 3.3.x patch range "
+                  "(dspy>=3.3.0,<3.4)"
+              )
+          print(version)
+          PY
+          )"
+          echo "version=${LOCKED}" >> "${GITHUB_OUTPUT}"
+          echo "Locked dspy==${LOCKED}"
+
+      - name: Check locked dspy installability
+        run: |
           probe_venv="$RUNNER_TEMP/dspy-pin-venv"
+          locked="${{ steps.locked.outputs.version }}"
           uv venv --python 3.12 "$probe_venv"
-          if ! uv pip install --dry-run --python "$probe_venv/bin/python" "dspy==3.3.0"; then
-            echo "::error::dspy==3.3.0 is no longer installable from PyPI. The release may have been yanked. Re-pin to a reissued release or vendor the source per the AGENTS.md contract."
+          if ! uv pip install --dry-run --python "$probe_venv/bin/python" "dspy==${locked}"; then
+            echo "::error::dspy==${locked} (from uv.lock) is no longer installable from PyPI. The release may have been yanked. Re-lock to a reissued 3.3.x release or vendor the source per the AGENTS.md contract."
             exit 1
           fi
-          echo "dspy==3.3.0 is available from PyPI."
+          echo "dspy==${locked} is available from PyPI."

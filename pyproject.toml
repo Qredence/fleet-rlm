@@ -45,7 +45,6 @@ dependencies = [
     "python-dotenv>=1.2.2",
     "pyyaml>=6.0.3,<7",
     "sqlalchemy[asyncio]>=2.0.51,<3",
-    "tomli>=2.4.1; python_version < '3.11'",
     # Web API surface. Pinned exactly to 0.141.1 (latest PyPI release, Jul 29
     # 2026) for reproducible installs; bump deliberately when a newer release is
     # validated against the runtime + test suite.

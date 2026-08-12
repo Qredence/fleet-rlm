@@ -55,10 +55,12 @@ CircleCI enforces the same non-live surface: the `ci` workflow runs `quality`
 (on the Node-bearing `cimg/python:*-node` executor so `api-check` can run
 openapi-typescript there: release, docs, security, dependency, `api-check`,
 and `stream-check`),
-`lint-typecheck`, `test-unit`, `test-e2e`, `daytona-coverage`, and the `tui`
+`lint-typecheck`, `test-unit`, `test-e2e`, `daytona-coverage`, lightweight
+`python-compat-311` / `python-compat-312` jobs (lock/install, import check, and
+`tests/unit/backend` + `tests/contracts/backend` only), and the `tui`
 job (pnpm format, lint, typecheck, and Vitest against the maintained client).
-The api/stream contract and TUI lanes therefore block merges on drift, not
-just local `make check` runs.
+Python 3.13 remains the full gate image; 3.11/3.12 certify declared support
+without duplicating Daytona coverage or E2E.
 
 `git diff --check` is required separately. Useful focused commands are:
 
