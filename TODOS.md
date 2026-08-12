@@ -27,7 +27,7 @@ Narrative detail stays in that document; **this file is the work queue**.
 
 - **Branch:** `dev-0.7`
 - **Audit SHA:** `c34e7d84d8dd753e94d08dc987fef686f1f65e62` (matches `IMPLEMENTATION_PHASES.md`)
-- **Verified against:** `src/fleet_rlm/` and `tools/fleet-tui/` (static audit; Mission 04 live two-child batch canary executed; Mission 14 RC freeze + persistence wrap-up in progress; cancel/deadline live + human/CI approval still open)
+- **Verified against:** `src/fleet_rlm/` and `tools/fleet-tui/` (static audit; Mission 04 live two-child batch canary executed; Mission 14 RC freeze + persistence wrap-up done; host-forced live cancel + deadline canaries green; CI/human approval still open until origin push)
 
 ### Corrections vs `IMPLEMENTATION_PHASES.md`
 
@@ -737,8 +737,8 @@ Plus:
 - [x] Public transport deterministic gates (api-check, stream-check, TUI projection tests)
 - [x] Wheel/hygiene gates via `make build-release` + `make check-release`
 - [x] RC commits identified: freeze `834145f71` + post-freeze heartbeat fix `6cb836c0e`
-- [ ] Live cancel-during-execution proof (no dedicated live harness under `tests/live/backend/`)
-- [ ] Live deadline/timeout cleanup proof (existing harness currently model-flaky; see notes)
+- [x] Live cancel-during-execution proof (`tests/live/backend/test_daytona_cancel_during_execution.py`, host-forced `request_cancel` during interpreter execute)
+- [x] Live deadline/timeout cleanup proof (`tests/live/backend/test_daytona_deadline_cleanup.py`, host-forced interpreter stall + `turn_timeout_seconds`)
 - [ ] External promotion / human approval on the receipt (`ci` / `human_approval` still `pending`)
 
 **RC commits:**
@@ -763,22 +763,20 @@ Plus:
 
 **Cancel / deadline evidence (this wrap-up):**
 
-- Cancel during execution: **no** dedicated live test exists under `tests/live/backend/`. Deterministic coverage green: `test_run_cancellation_api.py`, `test_turn_coordinator_cancellation.py`, `test_runner_cancellation.py`, `test_true_caller_cancellation_still_propagates_after_runner_starts`
-- Deadline/timeout cleanup: attempted live `test_live_failed_run_discards_memory_candidates` — **FAILED** because the live model refused the sleep(900)/no-SUBMIT prompt and `SUBMIT`ted a refusal (`finishReason=stop` instead of timeout). Deterministic deadline/cleanup coverage green: recursive-batch deadline join, preparation timeout, timed-out/cancelled settlement without memory promotion. Post-attempt Daytona cleanup sweep deleted leftover STOPPED/ARCHIVED sandboxes + `fleet-rlm-live-mvp-*` volumes; inventory ended at 0 sandboxes
+- Cancel during execution: `FLEET_LIVE=1 uv run pytest tests/live/backend/test_daytona_cancel_during_execution.py -q` **PASSED** (~34s). Host-forced `RunLifecycle.request_cancel` during the first interpreter `execute_code`; public SSE abort `Turn cancelled`; admission permit + lease registry released. Deterministic coverage remains: `test_run_cancellation_api.py`, `test_turn_coordinator_cancellation.py`, `test_runner_cancellation.py`, `test_true_caller_cancellation_still_propagates_after_runner_starts`
+- Deadline/timeout cleanup: `FLEET_LIVE=1 uv run pytest tests/live/backend/test_daytona_deadline_cleanup.py -q` **PASSED** (~51s). Host-forced interpreter stall (not a model `sleep(900)` prompt) with `turn_timeout_seconds=45`; `finishReason=error` and public timed-out error; no `propose_memory` promotion; admission permit + lease registry released. QRE-142 `test_live_failed_run_discards_memory_candidates` remains model-flaky and is not the RC proof.
 
 **Still open inside Mission 14:**
 
-- Live cancel-during-execution (needs new live harness or explicit human waiver)
-- Live deadline/timeout cleanup (existing QRE-142 failed-run harness is model-dependent; needs non-cooperative timeout force or waiver)
 - Explicit Memory CRUD live (bounded receipt / memory canaries do not fully substitute a dedicated CRUD live suite)
-- External promotion / human approval on the receipt (`ci` / `human_approval` still `pending`)
+- External promotion / human approval on the receipt (`ci` / `human_approval` still `pending`; verifier requires those fields to stay pending)
 
 **Optional live extras after receipt green:**
 
 - [x] M04 two-child recursive batch canary re-run (`tests/live/backend/test_daytona_recursive_batch.py`, ~74s)
 - [x] Memory candidate promotion live (`tests/live/backend/test_memory_candidate_live.py`, ~174s)
-- [ ] Live cancel-during-execution (no existing test)
-- [ ] Live deadline/timeout cleanup (`test_live_failed_run_discards_memory_candidates` attempted; model refused timeout harness)
+- [x] Live cancel-during-execution (`tests/live/backend/test_daytona_cancel_during_execution.py`)
+- [x] Live deadline/timeout cleanup (`tests/live/backend/test_daytona_deadline_cleanup.py`; QRE-142 failed-run harness remains model-flaky)
 
 ---
 
