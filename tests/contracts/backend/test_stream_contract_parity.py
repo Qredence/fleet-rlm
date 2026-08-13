@@ -9,11 +9,7 @@ from fleet_rlm.composition.testing import create_testing_app
 from fleet_rlm.sessions.assistant_parts import AssistantPartModelUnion
 from fleet_rlm.sessions.committed_turn import CommittedTurn
 
-_ASSISTANT_TYPES = {
-    model.model_fields["type"].default
-    for model in AssistantPartModelUnion
-    for default in (model.model_fields["type"].default,)
-}
+_ASSISTANT_TYPES = {model.model_fields["type"].default for model in AssistantPartModelUnion}
 _TRANSPORT_SEMANTICS = set(FLEET_UI_CHUNK_TYPES)
 
 

@@ -463,7 +463,6 @@ class RLMRunner:
         observations = _ObservationBuffer(EventRecorder(context.identity.run_id, context.identity.session_id))
         async for event in self._initial_events(context, observations):
             yield event
-        spec = context.capabilities.spec
         spec, relay, guards, task, recursive_executor = self._start_worker(context)
         ownership.task = task
         if recursive_executor is not None:
