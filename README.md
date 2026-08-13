@@ -128,8 +128,10 @@ make check-release
 git diff --check
 ```
 
-`make api-sync` regenerates both `openapi.yaml` and
-`tools/fleet-tui/src/generated/openapi.ts`; `make api-check` verifies both.
+`make api-sync` regenerates `openapi.yaml`,
+`tools/fleet-tui/src/generated/openapi.ts`, and
+`tools/fleet-tui/src/generated/fleet-ui-chunk-validation.ts`;
+`make api-check` verifies all three.
 
 Credentialed promotion additionally requires a passing receipt tied to the
 exact candidate SHA:

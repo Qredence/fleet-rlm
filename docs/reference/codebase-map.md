@@ -74,7 +74,8 @@ compatibility runtime and parallel foundation package no longer exist.
   SQLite test/local helpers.
 - Runtime Events are transport-neutral. `api/sse.py` alone owns the public AI
   SDK UI v1 SSE projection.
-- `make api-sync` owns both root OpenAPI and generated TUI HTTP types.
+- `make api-sync` owns root OpenAPI, generated TUI HTTP types, and
+  `tools/fleet-tui/src/generated/fleet-ui-chunk-validation.ts`.
 
 The authoritative route inventory and shapes are in
 [HTTP API](http-api.md) and `openapi.yaml`.
