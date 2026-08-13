@@ -47,13 +47,16 @@ def main() -> int:
         source = path.read_text(encoding="utf-8")
         tree = ast.parse(source, filename=str(path))
         for line, imported in _imports_from_tree(tree):
-            if imported == "daytona" or imported.startswith("daytona."):
-                if not relative.parts or relative.parts[0] != "daytona":
-                    boundary_violations.append(f"{relative}:{line}: Daytona SDK import outside daytona/")
-            if relative.parts[:2] == ("api", "routes") and imported.startswith((
-                "fleet_rlm.persistence",
-                "fleet_rlm.daytona",
-            )):
+            if (imported == "daytona" or imported.startswith("daytona.")) and (
+                not relative.parts or relative.parts[0] != "daytona"
+            ):
+                boundary_violations.append(f"{relative}:{line}: Daytona SDK import outside daytona/")
+            if relative.parts[:2] == ("api", "routes") and imported.startswith(
+                (
+                    "fleet_rlm.persistence",
+                    "fleet_rlm.daytona",
+                )
+            ):
                 boundary_violations.append(f"{relative}:{line}: route bypasses injected application modules")
         for line in find_nested_ternaries(tree):
             clarity_violations.append(f"{relative}:{line}: nested conditional expression (IfExp)")

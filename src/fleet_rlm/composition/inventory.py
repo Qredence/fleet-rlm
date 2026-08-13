@@ -61,10 +61,6 @@ class RuntimeProcessResources(Protocol):
     async def adispose(self) -> None: ...
 
 
-class AsyncCloseable(Protocol):
-    async def close(self) -> None: ...
-
-
 class RuntimeInventoryError(RuntimeError):
     """Raised when a runtime inventory is incomplete or invalid."""
 
@@ -158,7 +154,6 @@ def clear_runtime_inventory(app: FastAPI) -> RuntimeInventory | None:
 
 
 __all__ = [
-    "AsyncCloseable",
     "RuntimeDatabaseLifecycle",
     "RuntimeInventory",
     "RuntimeInventoryError",

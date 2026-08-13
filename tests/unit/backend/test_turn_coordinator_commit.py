@@ -79,6 +79,7 @@ async def test_open_commits_typed_result_then_replays_without_rerun() -> None:
         execution = SimpleNamespace(run_id=run_id, session_id=session.id)
         artifact_sink = Sink()
         result_snapshot_sink = None
+        post_commit_memory_promotion = None
 
         async def aclose(self):
             operations.append("close")
@@ -218,6 +219,7 @@ async def test_open_invalid_typed_output_never_promotes_candidate() -> None:
         execution = SimpleNamespace(run_id=run_id, session_id=session.id)
         artifact_sink = Sink()
         result_snapshot_sink = None
+        post_commit_memory_promotion = None
 
         async def aclose(self):
             nonlocal closes
@@ -320,6 +322,7 @@ async def test_open_commits_typed_result_through_temporary_sql(tmp_path) -> None
             execution = SimpleNamespace(run_id=run_id, session_id=session_id)
             artifact_sink = None
             result_snapshot_sink = None
+            post_commit_memory_promotion = None
 
             async def aclose(self):
                 nonlocal closes
@@ -453,8 +456,9 @@ async def test_live_commit_projects_suffix_before_terminal_and_then_closes() -> 
             *,
             artifact_sink=None,
             result_snapshot_sink=None,
+            memory_promotion=None,
         ):
-            del claimed, resolution, artifact_sink
+            del claimed, resolution, artifact_sink, memory_promotion
             assert result_snapshot_sink is None
             operations.append("finish")
             return CommittedTurnReceipt(run_id, 1, committed, ())
@@ -463,6 +467,7 @@ async def test_live_commit_projects_suffix_before_terminal_and_then_closes() -> 
         execution = object()
         artifact_sink = object()
         result_snapshot_sink = None
+        post_commit_memory_promotion = None
 
         async def aclose(self):
             operations.append("close")

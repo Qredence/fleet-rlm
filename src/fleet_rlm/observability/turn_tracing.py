@@ -237,10 +237,6 @@ class TraceSpanHandle:
             logger.debug("trace span close failed; continuing", exc_info=True)
 
 
-# Kept as an alias for the existing phase-span test and call-site vocabulary.
-PhaseSpanHandle = TraceSpanHandle
-
-
 def start_turn_span(
     name: str,
     *,
@@ -282,13 +278,13 @@ def start_turn_span(
 
 
 @contextmanager
-def turn_phase_span(name: str, *, inputs: Mapping[str, object]) -> Iterator[PhaseSpanHandle]:
+def turn_phase_span(name: str, *, inputs: Mapping[str, object]) -> Iterator[TraceSpanHandle]:
     """Record one bounded, nested Turn phase without affecting its outcome.
 
     The caller supplies bounded operational metadata and sanitized previews
     when step-level debugging needs them. Unbounded prompts, generated
     programs, interpreter output, and sensitive values must never be attached.
-    Yields a ``PhaseSpanHandle`` so callers can attach bounded outputs at exit
+    Yields a ``TraceSpanHandle`` so callers can attach bounded outputs at exit
     time.
     Outside an active ``fleet_turn`` trace this is a no-op that never imports
     MLflow, keeping tracing-disabled turns free of any MLflow footprint.

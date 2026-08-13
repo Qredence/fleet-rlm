@@ -52,9 +52,9 @@ exist.
   deterministic policy. `persistence/` owns SQLAlchemy adapters.
 - Imports remain credential-free and side-effect-free.
 
-- `daytona/broker_source.py` contains pure broker source generation. The HTTP
-  broker may re-export those helpers for compatibility, but source generation
-  does not own provider lifecycle or persistence.
+- `daytona/broker_source.py` contains pure broker source generation.
+  `http_broker.py` owns HTTP-in-sandbox transport and host-tool/SUBMIT lifecycle.
+  Source generation does not own provider lifecycle or persistence.
 
 ## Turn and async boundary
 

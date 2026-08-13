@@ -20,10 +20,9 @@ export async function run(options: CliOptions): Promise<void> {
   }
 
   const client = createFleetClient(options);
-  const resumed = Boolean(options.sessionId);
-  const session = resumed
-    ? await client.getSession(options.sessionId!)
-    : await client.createSession();
+  const sessionId = options.sessionId;
+  const resumed = Boolean(sessionId);
+  const session = sessionId ? await client.getSession(sessionId) : await client.createSession();
   const initialEvents = resumed ? projectDurableTurns(await client.listTurns(session.id)) : [];
 
   process.stdout.write(`Fleet session: ${session.id}\n`);

@@ -6,8 +6,8 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { FleetApiClient } from "../../fleet-api-client.js";
+import { type CommandContext, formatVolumeTree, listCommands, parseInput } from "../commands.js";
 import { ConversationStore } from "../store.js";
-import { formatVolumeTree, listCommands, parseInput, type CommandContext } from "../commands.js";
 
 async function makeTempFile(
   name: string,
@@ -170,7 +170,9 @@ describe("command handlers", () => {
       session: { id: "old-session", title: "Old", status: "active", resumed: true },
     });
     type UpdatedSession = Awaited<ReturnType<FleetApiClient["updateSession"]>>;
-    let resolveUpdate!: (session: UpdatedSession) => void;
+    let resolveUpdate: (session: UpdatedSession) => void = () => {
+      throw new Error("updateSession resolve is not armed");
+    };
     ctx.client.updateSession = vi.fn(
       () =>
         new Promise<UpdatedSession>((resolve) => {
@@ -529,8 +531,8 @@ describe("attachment commands", () => {
   });
 });
 
-describe("Session Workspace file commands", () => {
-  it("/files lists Session Workspace entries with sizes", async () => {
+describe("Workspace files/ commands", () => {
+  it("/files lists Workspace files/ entries with sizes", async () => {
     const { ctx } = makeContext();
     ctx.client.listWorkspaceFiles = vi.fn().mockResolvedValue({
       entries: [
@@ -559,6 +561,7 @@ describe("Session Workspace file commands", () => {
     const last = ctx.store.getState().messages.at(-1);
     expect(last).toMatchObject({ kind: "text", role: "system" });
     if (last?.kind === "text") {
+      expect(last.text).toContain("Workspace files");
       expect(last.text).toContain("report.md");
       expect(last.text).toContain("notes/");
       expect(last.text).toContain("2.0KB");
@@ -580,7 +583,10 @@ describe("Session Workspace file commands", () => {
     expect(ctx.client.readWorkspaceFile).toHaveBeenCalledWith("report.md", 8_000);
     const last = ctx.store.getState().messages.at(-1);
     expect(last).toMatchObject({ kind: "text", role: "system" });
-    if (last?.kind === "text") expect(last.text).toContain("line two");
+    if (last?.kind === "text") {
+      expect(last.text).toContain("Workspace file report.md");
+      expect(last.text).toContain("line two");
+    }
   });
 
   it("/file save pages to eof and writes atomically", async () => {
@@ -610,7 +616,7 @@ describe("Session Workspace file commands", () => {
       expect(ctx.client.readWorkspaceFile).toHaveBeenCalledTimes(2);
       expect(await readFile(target, "utf8")).toBe("first pagesecond page");
       const last = ctx.store.getState().messages.at(-1);
-      if (last?.kind === "text") expect(last.text).toContain("Saved");
+      if (last?.kind === "text") expect(last.text).toContain("Saved Workspace file");
     } finally {
       await rm(dir, { recursive: true, force: true });
     }

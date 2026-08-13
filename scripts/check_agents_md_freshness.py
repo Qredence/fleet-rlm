@@ -19,7 +19,7 @@ import subprocess
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import NamedTuple
+from typing import ClassVar, NamedTuple
 
 
 class ValidationError(NamedTuple):
@@ -37,7 +37,7 @@ class AgentsMdValidator:
     LINK_PATTERN = re.compile(r"\[([^\]]+)\]\(([^)]+)\)")
     CODE_BLOCK_PATTERN = re.compile(r"```[^\n]*\n(.*?)```", re.DOTALL)
     MAKEFILE_TARGET_PATTERN = re.compile(r"`make\s+(\w+)`")
-    CLI_COMMAND_PATTERNS = [
+    CLI_COMMAND_PATTERNS: ClassVar[list[re.Pattern[str]]] = [
         re.compile(r"`(uv\s+run\s+fleet[^\s`]*)"),
         re.compile(r"`(uv\s+run\s+fleet-rlm[^\s`]*)"),
         re.compile(r"`(fleet\s+\w+)"),

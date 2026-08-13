@@ -37,9 +37,25 @@ const settings = {
   ],
 } satisfies FleetSettingsPolicy;
 
+function defaultsField(): FleetSettingsPolicy["scopes"][number]["fields"][number] {
+  const field = settings.scopes[0]?.fields[0];
+  if (!field) {
+    throw new Error("expected settings.scopes[0].fields[0]");
+  }
+  return field;
+}
+
+function firstSkill(): FleetSkillCard {
+  const skill = skills[0];
+  if (!skill) {
+    throw new Error("expected skills[0]");
+  }
+  return skill;
+}
+
 describe("TextSettingEditor", () => {
   it("edits text values (pre-filled with the current value) and confirms with Enter", () => {
-    const field = settings.scopes[0]!.fields[0]!;
+    const field = defaultsField();
     const finish = vi.fn();
     const editor = new TextSettingEditor({ ...field, value: "old", editor: "text" }, finish);
 
@@ -50,7 +66,7 @@ describe("TextSettingEditor", () => {
   });
 
   it("cancels with Escape and refuses empty values", () => {
-    const field = settings.scopes[0]!.fields[0]!;
+    const field = defaultsField();
     const finish = vi.fn();
     const editor = new TextSettingEditor({ ...field, value: "", editor: "text" }, finish);
 
@@ -63,7 +79,7 @@ describe("TextSettingEditor", () => {
   });
 
   it("allows empty Enter when allowEmpty is set", () => {
-    const field = settings.scopes[0]!.fields[0]!;
+    const field = defaultsField();
     const finish = vi.fn();
     const editor = new TextSettingEditor({ ...field, value: "", editor: "text" }, finish, {
       allowEmpty: true,
@@ -77,7 +93,7 @@ describe("TextSettingEditor", () => {
 describe("MultiChoiceEditor", () => {
   it("toggles choices with Space and confirms the joined selection", () => {
     const field = {
-      ...settings.scopes[0]!.fields[0]!,
+      ...defaultsField(),
       editor: "multi_choice" as const,
       value: ["a"],
       choices: ["a", "b", "c"],
@@ -126,7 +142,7 @@ describe("SkillSelector", () => {
     const selector = new SkillSelector(
       [
         {
-          ...skills[0]!,
+          ...firstSkill(),
           name: "調査😀e\u0301",
           description: "界面を確認する✅",
         },

@@ -102,6 +102,7 @@ async def test_coordinator_settles_commit_after_cancellation(commit_succeeds: bo
         execution = object()
         artifact_sink = None
         result_snapshot_sink = snapshot
+        post_commit_memory_promotion = None
 
         async def aclose(self):
             return None

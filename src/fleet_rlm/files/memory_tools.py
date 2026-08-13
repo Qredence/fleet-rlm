@@ -120,10 +120,6 @@ def normalize_memory_search_query(query: str) -> str:
     return normalized
 
 
-# Keep the private name for local callers that have not yet migrated.
-_normalize_search_query = normalize_memory_search_query
-
-
 def _lexical_tokens(text: str) -> tuple[str, ...]:
     return tuple(token for token in text.split() if token)
 
@@ -616,7 +612,7 @@ def _output(result: object, fields: tuple[str, ...]) -> JsonValue:
 def _event_category(value: object) -> str:
     """Project a category without ever reflecting an invalid caller string."""
     try:
-        return normalize_workspace_memory_category(value)  # ty: ignore[invalid-argument-type]
+        return normalize_workspace_memory_category(value)
     except WorkspaceMemoryCategoryError:
         return "invalid"
 
@@ -624,6 +620,6 @@ def _event_category(value: object) -> str:
 def _event_id(value: object) -> str:
     """Project a memory id without ever reflecting an invalid caller string."""
     try:
-        return normalize_workspace_memory_id(value)  # ty: ignore[invalid-argument-type]
+        return normalize_workspace_memory_id(value)
     except WorkspaceMemoryIdError:
         return "invalid"

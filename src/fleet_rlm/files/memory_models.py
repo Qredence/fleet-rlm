@@ -63,8 +63,13 @@ _MEMORY_RECORD = re.compile(
     r"(?P<learning>[^\r\n]+)\n"
 )
 
-_WORKSPACE_MEMORY_SOURCES = frozenset(("user_explicit", "agent_candidate", "operator_import", "legacy_unknown"))
 WorkspaceMemorySource = Literal["user_explicit", "agent_candidate", "operator_import", "legacy_unknown"]
+_WORKSPACE_MEMORY_SOURCE_BY_NAME: dict[str, WorkspaceMemorySource] = {
+    "user_explicit": "user_explicit",
+    "agent_candidate": "agent_candidate",
+    "operator_import": "operator_import",
+    "legacy_unknown": "legacy_unknown",
+}
 
 _MEMORY_RECORD_V3 = re.compile(
     r"- \[(?P<timestamp>\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z)\] "
@@ -93,7 +98,7 @@ class WorkspaceMemoryEntryNotFoundError(KeyError):
     """No Workspace Memory entry carries the requested id."""
 
 
-def normalize_workspace_memory_category(category: str) -> str:
+def normalize_workspace_memory_category(category: object) -> str:
     """Return one valid plain category using the current Tool contract."""
     if not isinstance(category, str) or "\x00" in category:
         raise WorkspaceMemoryCategoryError
@@ -107,7 +112,7 @@ def normalize_workspace_memory_category(category: str) -> str:
     return normalized
 
 
-def normalize_workspace_memory_id(memory_id: str) -> str:
+def normalize_workspace_memory_id(memory_id: object) -> str:
     """Return one valid stable memory record id (exactly 8 lowercase hex digits)."""
     if not isinstance(memory_id, str) or _MEMORY_ID.fullmatch(memory_id) is None:
         raise WorkspaceMemoryIdError
@@ -115,9 +120,10 @@ def normalize_workspace_memory_id(memory_id: str) -> str:
 
 
 def normalize_workspace_memory_source(source: str) -> WorkspaceMemorySource:
-    if source in _WORKSPACE_MEMORY_SOURCES:
-        return source  # type: ignore[return-value]
-    raise WorkspaceMemoryRecordError
+    try:
+        return _WORKSPACE_MEMORY_SOURCE_BY_NAME[source]
+    except KeyError:
+        raise WorkspaceMemoryRecordError from None
 
 
 def workspace_memory_record_id(timestamp: str, category: str, learning: str) -> str:

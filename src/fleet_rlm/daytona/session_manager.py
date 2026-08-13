@@ -124,11 +124,6 @@ def get_active_lease_registry() -> ActiveLeaseRegistry:
     return _REGISTRY
 
 
-def set_active_lease_registry(registry: ActiveLeaseRegistry) -> None:
-    global _REGISTRY
-    _REGISTRY = registry
-
-
 @dataclass(slots=True)
 class InterpreterLease:
     """Acquired interpreter binding for one Run."""
@@ -780,6 +775,5 @@ __all__ = [
     "LeaseRequest",
     "binding_matches_expected",
     "get_active_lease_registry",
-    "set_active_lease_registry",
     "workspace_volume_subpath",
 ]

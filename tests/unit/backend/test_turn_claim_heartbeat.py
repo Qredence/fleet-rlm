@@ -146,6 +146,7 @@ async def test_transient_heartbeat_failure_recovers_without_ending_run() -> None
         execution = SimpleNamespace(run_id=run_id, session_id=session.id)
         artifact_sink = None
         result_snapshot_sink = None
+        post_commit_memory_promotion = None
 
         async def aclose(self):
             return None
@@ -240,6 +241,7 @@ async def test_repeated_transient_failures_revoke_without_provider_fence() -> No
         execution = SimpleNamespace(run_id=run_id, session_id=session.id)
         artifact_sink = None
         result_snapshot_sink = None
+        post_commit_memory_promotion = None
 
         async def aclose(self):
             return None
@@ -338,6 +340,7 @@ async def test_claim_loss_wins_finalization_and_prevents_stale_commit() -> None:
         execution = SimpleNamespace(run_id=run_id, session_id=session.id)
         artifact_sink = None
         result_snapshot_sink = None
+        post_commit_memory_promotion = None
 
         async def aclose(self):
             return None
@@ -439,6 +442,7 @@ async def test_invalid_heartbeat_revokes_run_fences_before_releasing_claim() -> 
         execution = SimpleNamespace(run_id=run_id, session_id=session.id)
         artifact_sink = None
         result_snapshot_sink = None
+        post_commit_memory_promotion = None
 
         async def aclose(self):
             cleanup_order.append("resources-closed")
@@ -553,6 +557,7 @@ async def test_post_commit_heartbeat_does_not_fail_committed_turn(caplog) -> Non
         execution = SimpleNamespace(run_id=run_id, session_id=session.id)
         artifact_sink = None
         result_snapshot_sink = SnapshotSink()
+        post_commit_memory_promotion = None
 
         async def aclose(self):
             return None

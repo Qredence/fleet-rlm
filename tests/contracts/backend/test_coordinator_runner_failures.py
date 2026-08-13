@@ -148,6 +148,7 @@ class _Harness:
         class Prepared:
             artifact_sink = None
             result_snapshot_sink = None
+            post_commit_memory_promotion = None
 
             def __init__(self) -> None:
                 self.execution = execution

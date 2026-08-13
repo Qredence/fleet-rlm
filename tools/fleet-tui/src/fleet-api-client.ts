@@ -148,7 +148,7 @@ export class FleetApiClient {
     return (await response.json()) as FleetAttachment;
   }
 
-  /** List Session Workspace entries under a Workspace-relative path. */
+  /** List Workspace files/ root entries under a relative path via /api/files. */
   async listWorkspaceFiles(
     params: { path?: string; limit?: number; after?: string } = {},
   ): Promise<FleetWorkspaceFileList> {
@@ -160,14 +160,14 @@ export class FleetApiClient {
     return this.requestJson<FleetWorkspaceFileList>(`/api/files${suffix ? `?${suffix}` : ""}`);
   }
 
-  /** Stat one Session Workspace entry. */
+  /** Stat one Workspace files/ root entry. */
   async statWorkspaceFile(path: string): Promise<FleetWorkspaceFileEntry> {
     return this.requestJson<FleetWorkspaceFileEntry>(
       `/api/files/stat?path=${encodeURIComponent(path)}`,
     );
   }
 
-  /** Read one Session Workspace text page (server caps max_chars at 10 000). */
+  /** Read one Workspace files/ root text page (server caps max_chars at 10 000). */
   async readWorkspaceFile(path: string, maxChars?: number): Promise<FleetWorkspaceFileRead> {
     const query = new URLSearchParams();
     query.set("path", path);

@@ -70,7 +70,7 @@ sibling concurrency through `recursion_max_parallel_children`.
 - `AttachmentLifecycleService` owns Attachment upload, authorization, integrity,
   and Run staging; it is not a DSPy execution Module.
 - Daytona composition constructs Turn preparation explicitly; process-lifetime
-  `LiveKernelResources` owns provider resources but no mutable preparation graph.
+  `DaytonaRuntimeResources` owns provider resources but no mutable preparation graph.
 - Daytona uses one process-owned `AsyncDaytona` for provisioning, lifecycle,
   filesystem, and Workspace operations. Only DSPy's synchronous
   `CodeInterpreter.execute()` seam receives an explicit, allowlisted
@@ -154,10 +154,9 @@ exception text.
 
 ## Terminal client
 
-`@earendil-works/pi-tui@0.84.0` is the only renderer. Fleet uses its
-`TuiMainScreen` adapter to preserve native terminal scrollback; the client
-requires Node 22.19+, owns no model or provider runtime, and consumes the
-FastAPI HTTP/SSE contract.
+`@earendil-works/pi-tui@0.84.0` is the only renderer. Fleet uses `TuiAltScreen`
+with a follow-end transcript `ScrollView`; the client requires Node 22.19+, owns
+no model or provider runtime, and consumes the FastAPI HTTP/SSE contract.
 
 `fleet-turn-stream.ts` owns strict request/retry/stream lifecycle and part
 ordering; `sse.ts` owns framing and generated-chunk validation; `tui/runner.ts`
@@ -167,10 +166,11 @@ helpers in `projection-helpers.ts`); `store.ts` owns atomic hydration and termin
 stream settlement. The application, screen, message renderer, commands,
 presenters, and autocomplete own interaction and static presentation.
 
-The operator timeline renders all evidence fully expanded in native terminal
-scrollback. Fleet does not capture the mouse, clip old messages, or maintain a
-transcript viewport. Artifact CLI downloads validate content length and SHA-256
-before atomically replacing the requested destination.
+The operator timeline renders in an alternate-screen follow-end viewport.
+PgUp/PgDn scroll a page, Home/End jump top/bottom, the mouse wheel scrolls,
+drag selects text for copy, and tool/code/output cards fold with Ctrl+O. There
+is no classic renderer. Artifact CLI downloads validate content length and
+SHA-256 before atomically replacing the requested destination.
 
 ## Durable files
 
