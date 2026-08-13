@@ -62,6 +62,7 @@ class PreparedHostCapabilities:
         self._artifact_candidates = artifact_candidates
         self._memory_candidates = memory_candidates
         self.preparation_notices = preparation_notices
+        self.workspace_memory_digest = ""
 
     def drain_public_details(self) -> tuple[AttachmentRead | SkillActivated | SkillLoaded, ...]:
         values: list[AttachmentRead | SkillActivated | SkillLoaded] = []

@@ -10,6 +10,7 @@ import dspy
 import pytest
 
 from fleet_rlm.sessions.history_tools import SESSION_HISTORY_RESULT_BYTE_BUDGET
+from tests.unit.backend.rlm.fakes import HostCapabilityDefaults
 
 
 @pytest.mark.asyncio
@@ -41,7 +42,7 @@ async def test_native_rlm_retrieves_older_content_absent_from_initial_kwargs() -
     assert older_detail not in str(manifest.to_input())
     (history_tool,) = SessionHistoryToolHost(history).as_tools()
 
-    class Capabilities:
+    class Capabilities(HostCapabilityDefaults):
         spec = RLMExecutionSpec(tools=(history_tool,))
 
         def drain_public_details(self):
@@ -139,7 +140,7 @@ async def test_native_rlm_continues_history_across_truncated_pages() -> None:
     second_page = history_tool(offset=first_page["next_offset"], limit=20)
     assert second_page["messages"][-1]["content"] == "final-detail"
 
-    class Capabilities:
+    class Capabilities(HostCapabilityDefaults):
         spec = RLMExecutionSpec(tools=(history_tool,))
 
         def drain_public_details(self):

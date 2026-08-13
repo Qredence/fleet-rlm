@@ -208,7 +208,7 @@ class _ProductionDaytonaDoctorDependencies:
         await probe_configured_root_lm(
             settings,
             interpreter_factory=_provider_probe_interpreter,
-            child_runtime_factory=_provider_probe_child_runtime,
+            child_runtime_factory=_ProviderProbeChildRuntimeFactory(),
         )
 
 
@@ -230,6 +230,19 @@ def _provider_probe_child_runtime(call_index: int) -> Any:
         volume_subpath=f"recursive/provider-probe/run/{call_index}",
         _close=interpreter.shutdown,
     )
+
+
+class _ProviderProbeChildRuntimeFactory:
+    """In-process probe factory with no late-acquisition ownership."""
+
+    def __call__(self, call_index: int) -> Any:
+        return _provider_probe_child_runtime(call_index)
+
+    def wait_owned(self) -> None:
+        return None
+
+    def raise_if_cleanup_failed(self) -> None:
+        return None
 
 
 _SUCCESS_MESSAGES: dict[DoctorStepName, str] = {

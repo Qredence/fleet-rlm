@@ -6,6 +6,7 @@ import dspy
 import pytest
 
 from fleet_rlm.rlm.provider_probe import RLMProviderContractError, probe_root_lm
+from tests.unit.backend.rlm.fakes import FakeChildRuntimeFactory
 
 
 def _interpreter():
@@ -40,7 +41,11 @@ async def test_provider_probe_requires_multiple_native_actions_and_typed_submit(
         adapter=dspy.JSONAdapter(),
     )
 
-    result = await probe_root_lm(lm, interpreter_factory=_interpreter, child_runtime_factory=_child_runtime)
+    result = await probe_root_lm(
+        lm,
+        interpreter_factory=_interpreter,
+        child_runtime_factory=FakeChildRuntimeFactory(_child_runtime),
+    )
 
     assert result.iterations == 3
     assert result.termination_mode == "typed_submit"
@@ -54,7 +59,11 @@ async def test_provider_probe_rejects_unparseable_native_provider_output() -> No
     )
 
     with pytest.raises(RLMProviderContractError, match="unparseable"):
-        await probe_root_lm(lm, interpreter_factory=_interpreter, child_runtime_factory=_child_runtime)
+        await probe_root_lm(
+            lm,
+            interpreter_factory=_interpreter,
+            child_runtime_factory=FakeChildRuntimeFactory(_child_runtime),
+        )
 
 
 @pytest.mark.asyncio
@@ -90,7 +99,7 @@ async def test_provider_probe_reports_native_extraction_fallback_for_forced_fina
     result = await provider_probe.probe_root_lm(
         dspy.utils.DummyLM([], adapter=dspy.JSONAdapter()),
         interpreter_factory=_interpreter,
-        child_runtime_factory=_child_runtime,
+        child_runtime_factory=FakeChildRuntimeFactory(_child_runtime),
     )
 
     assert result.iterations == 3

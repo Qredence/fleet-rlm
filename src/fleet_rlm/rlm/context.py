@@ -40,7 +40,16 @@ class PreparationNotice:
 
 
 class RLMInterpreter(CodeInterpreter, Protocol):
-    """Narrow interpreter surface consumed by DSPy's RLM adapter."""
+    """Fleet interpreter surface used before ``dspy.RLM.acall``.
+
+    DSPy ``CodeInterpreter`` remains ``tools`` / ``start`` / ``execute`` /
+    ``shutdown``. ``bind_context_capsule`` and ``drain_context_accesses`` are
+    Fleet pre-``acall`` hooks; DSPy never calls them.
+    """
+
+    def bind_context_capsule(self, capsule: AttachmentContextCapsule) -> None:
+        """Bind one host-created Volume context capsule before the RLM starts."""
+        ...
 
     def drain_context_accesses(self) -> tuple[str, ...]: ...
 
@@ -61,6 +70,11 @@ class PreparedCapabilities(Protocol):
     def drain_memory_candidates(self) -> tuple[MemoryCandidate, ...]: ...
 
     def record_attachment_accesses(self, attachment_ids: tuple[str, ...]) -> None: ...
+
+    @property
+    def workspace_memory_digest(self) -> str:
+        """Bounded Workspace Memory tail for Signature injection; empty when absent."""
+        ...
 
     async def aclose(self) -> None: ...
 

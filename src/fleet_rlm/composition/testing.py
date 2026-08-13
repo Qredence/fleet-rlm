@@ -38,6 +38,7 @@ from fleet_rlm.files.lifecycle import AttachmentLifecycle
 from fleet_rlm.files.models import PreparedAttachments
 from fleet_rlm.files.workspace_models import UNAVAILABLE_WORKSPACE_CAPABILITY
 from fleet_rlm.rlm.dspy_contract import RLMOptions
+from fleet_rlm.rlm.inputs import AttachmentContextCapsule
 from fleet_rlm.rlm.model_bundle import RLMModelBundle
 from fleet_rlm.rlm.recursive_calls import RecursiveRLMOptions
 from fleet_rlm.rlm.signature import FleetRLMSignature
@@ -66,6 +67,9 @@ class TestingInterpreter:
 
     def shutdown(self) -> None:
         return None
+
+    def bind_context_capsule(self, capsule: AttachmentContextCapsule) -> None:
+        del capsule
 
     def drain_context_accesses(self) -> tuple[str, ...]:
         return ()

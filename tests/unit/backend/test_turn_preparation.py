@@ -8,6 +8,8 @@ from uuid import uuid4
 
 import pytest
 
+from tests.unit.backend.rlm.fakes import HostCapabilityDefaults
+
 
 @pytest.mark.asyncio
 async def test_preparation_bounds_history_and_closes_in_dependency_order() -> None:
@@ -47,7 +49,7 @@ async def test_preparation_bounds_history_and_closes_in_dependency_order() -> No
             del access, ids, run, sink
             return PreparedAttachments((), ())
 
-    class Capabilities:
+    class Capabilities(HostCapabilityDefaults):
         spec = RLMExecutionSpec()
 
         def drain_public_details(self):
@@ -146,7 +148,7 @@ async def test_capability_preparation_is_bounded_by_turn_deadline_and_releases_e
             del access, ids, run, sink
             return PreparedAttachments((), ())
 
-    class SlowCapabilities:
+    class SlowCapabilities(HostCapabilityDefaults):
         async def prepare(self, turn, environment, attachments, *, deadline):
             del turn, environment, attachments, deadline
             await asyncio.sleep(60)
@@ -221,7 +223,7 @@ async def test_preparation_failure_removes_staged_run_bytes_but_not_session_work
                 (StagedAttachment(attachment_id, staged_path),),
             )
 
-    class FailingCapabilities:
+    class FailingCapabilities(HostCapabilityDefaults):
         async def prepare(self, turn, environment, attachments, *, deadline):
             del turn, environment, attachments, deadline
             raise RuntimeError("private capability failure")
@@ -296,7 +298,7 @@ async def test_capsule_validation_failure_releases_all_prepared_resources() -> N
                 context_mount_path="/configured/volume",
             )
 
-    class Capabilities:
+    class Capabilities(HostCapabilityDefaults):
         spec = RLMExecutionSpec()
 
         def drain_public_details(self):

@@ -24,6 +24,7 @@ from fleet_rlm.rlm.routing_eval import (
     score_routing_execution,
     summarize_scores,
 )
+from tests.unit.backend.rlm.fakes import FakeChildRuntimeFactory
 
 
 def test_curated_scenarios_cover_the_six_owned_routes() -> None:
@@ -152,7 +153,7 @@ def test_native_child_to_sub_lm_fallback_has_no_second_sandbox() -> None:
             dspy.utils.DummyLM([{"answer": "fallback element"}], adapter=adapter),
         ),
         options=RecursiveRLMOptions(),
-        child_runtime_factory=factory,
+        child_runtime_factory=FakeChildRuntimeFactory(factory),
         deadline=time.monotonic() + 30,
     )
 
@@ -200,7 +201,7 @@ async def test_harness_runs_an_isolated_fake_lm_python_scenario() -> None:
         root_lm=root,
         sub_lm=sub,
         root_interpreter_factory=lambda: DaytonaCodeInterpreter(backend=InProcessInterpreterBackend()),
-        child_runtime_factory=child_factory,
+        child_runtime_factory=FakeChildRuntimeFactory(child_factory),
     )
 
     assert len(scores) == 1
@@ -234,7 +235,7 @@ async def test_harness_routes_one_native_semantic_call_to_configured_sub_lm() ->
         root_lm=root,
         sub_lm=sub,
         root_interpreter_factory=lambda: DaytonaCodeInterpreter(backend=InProcessInterpreterBackend()),
-        child_runtime_factory=unexpected_child,
+        child_runtime_factory=FakeChildRuntimeFactory(unexpected_child),
     )
 
     assert scores[0].answer_correct is True
@@ -275,7 +276,7 @@ async def test_harness_routes_native_semantic_batch_to_configured_sub_lm() -> No
         root_lm=root,
         sub_lm=sub,
         root_interpreter_factory=lambda: DaytonaCodeInterpreter(backend=InProcessInterpreterBackend()),
-        child_runtime_factory=unexpected_child,
+        child_runtime_factory=FakeChildRuntimeFactory(unexpected_child),
     )
 
     assert scores[0].answer_correct is True

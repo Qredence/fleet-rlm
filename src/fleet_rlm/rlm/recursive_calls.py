@@ -319,9 +319,9 @@ class RecursiveRLMExecutor:
             raise ChildRuntimeCleanupError("recursive child cleanup failed") from fatal_cleanup_error
         if cleanup_pending:
             raise ChildRuntimeCleanupError("recursive child cleanup is still pending")
-        factory_check = getattr(self._child_runtime_factory, "raise_if_cleanup_failed", None)
-        if callable(factory_check):
-            factory_check()
+        factory = self._child_runtime_factory
+        if factory is not None:
+            factory.raise_if_cleanup_failed()
 
     def wait_owned(self) -> None:
         """Wait for every detached child worker retained after batch settlement.
@@ -348,11 +348,11 @@ class RecursiveRLMExecutor:
             raise ChildRuntimeCleanupError("recursive child cleanup failed") from self._state.fatal_cleanup_error
 
         # A Daytona factory adopts timed-out provider acquisitions so a late
-        # Sandbox/permit cannot be orphaned.  Keep that ownership under the
-        # same cleanup boundary when the optional hook is available.
-        factory_wait_owned = getattr(self._child_runtime_factory, "wait_owned", None)
-        if callable(factory_wait_owned):
-            factory_wait_owned()
+        # Sandbox/permit cannot be orphaned. Keep that ownership under the
+        # same cleanup boundary as retained child workers.
+        factory = self._child_runtime_factory
+        if factory is not None:
+            factory.wait_owned()
 
     def _retain_pending_batch_futures(self, futures: set[Future[str]]) -> None:
         pending = [future for future in futures if not future.done()]

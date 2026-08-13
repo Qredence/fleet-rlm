@@ -100,9 +100,8 @@ class PreparedRun:
         await self._resources.aclose()
 
 
-def _workspace_memory_digest(capabilities: PreparedCapabilities) -> str:
-    """Bounded defensive projection of the capability digest; never fails a Run."""
-    digest = getattr(capabilities, "workspace_memory_digest", "")
+def _bounded_workspace_memory_digest(digest: str) -> str:
+    """Clamp a Protocol digest to the injection tail; never fails a Run."""
     if not isinstance(digest, str) or len(digest.encode("utf-8")) > WORKSPACE_MEMORY_INJECTION_TAIL_BYTES:
         return ""
     return digest
@@ -244,7 +243,7 @@ class DefaultRunPreparer:
                     raise RunPreparationTimeoutError("Turn preparation timed out") from None
                 except (DatabaseConnectionError, OSError, SQLAlchemyError) as exc:
                     raise RunPreparationUnavailableError("Turn capabilities are unavailable") from exc
-                capabilities_phase.set_outputs({"notice_count": len(getattr(capabilities, "preparation_notices", ()))})
+                capabilities_phase.set_outputs({"notice_count": len(capabilities.preparation_notices)})
             try:
                 if await run.cancellation_requested():
                     raise RunPreparationCancelledError("Turn cancelled")
@@ -305,8 +304,8 @@ class DefaultRunPreparer:
                     for ref in staged.refs
                 ),
                 attachment_context=attachment_context,
-                preparation_notices=tuple(getattr(capabilities, "preparation_notices", ())),
-                workspace_memory_digest=_workspace_memory_digest(capabilities),
+                preparation_notices=tuple(capabilities.preparation_notices),
+                workspace_memory_digest=_bounded_workspace_memory_digest(capabilities.workspace_memory_digest),
             ),
             execution=ExecutionRuntime(
                 models=self._models,

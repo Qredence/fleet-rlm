@@ -11,6 +11,8 @@ from uuid import uuid4
 
 import pytest
 
+from tests.unit.backend.rlm.fakes import HostCapabilityDefaults
+
 
 @pytest.fixture
 def fleet_trace_active() -> Iterator[None]:
@@ -87,7 +89,7 @@ def _make_preparer(*, environments: Any = None) -> Any:
             del access, ids, run, sink
             return PreparedAttachments((), ())
 
-    class Capabilities:
+    class Capabilities(HostCapabilityDefaults):
         spec = RLMExecutionSpec()
 
         def drain_public_details(self) -> tuple[Any, ...]:

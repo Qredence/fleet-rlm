@@ -33,6 +33,7 @@ from fleet_rlm.rlm.model_bundle import RLMModelBundle
 from fleet_rlm.rlm.runner import RLMRunner
 from fleet_rlm.rlm.tool_observer import ToolEventView, observe_tool
 from fleet_rlm.sessions.models import TurnAccess
+from tests.unit.backend.rlm.fakes import HostCapabilityDefaults
 
 
 class _ActionPredictor(dspy.Predict):
@@ -358,7 +359,7 @@ async def test_runner_completes_native_repair_and_extract_as_prediction_result(f
         RLMExecutionContext,
     )
 
-    class Capabilities:
+    class Capabilities(HostCapabilityDefaults):
         spec = RLMExecutionSpec()
 
         def drain_public_details(self):

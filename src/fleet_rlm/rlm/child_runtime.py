@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
@@ -34,7 +33,25 @@ class ChildRuntimeLease(Protocol):
         ...
 
 
-ChildRuntimeFactory = Callable[[int], ChildRuntimeLease]
+class ChildRuntimeFactory(Protocol):
+    """Acquire child leases and own late acquisitions that never produced a lease.
+
+    ``wait_owned`` and ``raise_if_cleanup_failed`` sit on the factory, not the
+    lease: a timed-out Daytona acquisition may still complete with a Sandbox
+    that must be closed even though no ``ChildRuntimeLease`` was returned.
+    """
+
+    def __call__(self, call_index: int) -> ChildRuntimeLease:
+        """Return a dedicated child runtime lease for ``call_index``."""
+        ...
+
+    def wait_owned(self) -> None:
+        """Block until late factory-owned acquisitions have closed."""
+        ...
+
+    def raise_if_cleanup_failed(self) -> None:
+        """Raise when factory-owned late cleanup failed or is still pending."""
+        ...
 
 
 __all__ = [
