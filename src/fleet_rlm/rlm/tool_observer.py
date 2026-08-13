@@ -29,12 +29,12 @@ ToolAfterResult = Callable[[Any], None]
 ToolObserver: TypeAlias = Callable[[ObservationDetail | Status | WarningEvent], None]
 
 
-def _empty_input(_arguments: Mapping[str, Any]) -> JsonValue:
+def _empty_input(*_arguments: Any) -> JsonValue:
     """Return an empty JSON object for any argument mapping."""
     return {}
 
 
-def _empty_output(_result: Any) -> JsonValue:
+def _empty_output(*_result: Any) -> JsonValue:
     return {}
 
 

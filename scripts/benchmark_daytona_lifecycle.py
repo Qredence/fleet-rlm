@@ -152,7 +152,6 @@ async def _run_cycle(
     interpreter: DaytonaCodeInterpreter | None = None
     deleted = False
     region: str | None = None
-    cleanup_started = 0.0
     try:
         volume_id, sample["volume_readiness"] = await _timed(
             lambda: get_or_create_volume_id(volume_client, volume_config)

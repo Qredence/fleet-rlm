@@ -486,7 +486,7 @@ class RecursiveRLMExecutor:
                 self._state.maximum_prompt_chars,
                 *(len(prompt) for prompt in prompts),
             )
-        for _prompt in prompts:
+        for _ in prompts:
             self._metrics.record_recursive_call()
         return tuple(range(start, start + len(prompts)))
 
