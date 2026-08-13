@@ -101,9 +101,9 @@ class MemoryCandidateToolHost:
                     )
             return payload
 
-        return MappingProxyType({
-            "propose_memory": ToolEventView(input_projection=propose_input, output_projection=propose_output)
-        })
+        return MappingProxyType(
+            {"propose_memory": ToolEventView(input_projection=propose_input, output_projection=propose_output)}
+        )
 
 
 def _event_candidate_category(value: object) -> str:

@@ -506,6 +506,7 @@ async def test_disconnect_before_open_resolves_settles_cancelled_and_persists_to
                 execution = object()
                 artifact_sink = None
                 result_snapshot_sink = None
+                post_commit_memory_promotion = None
 
                 async def aclose(self):
                     return None

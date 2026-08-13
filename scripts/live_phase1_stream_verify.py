@@ -28,49 +28,57 @@ _CANDIDATE_PATHS = (
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 _LIVE_ROOT_MODEL = "deepseek-v4-flash"
 _LIVE_SUB_MODEL = "deepseek-v4-flash"
-_FAILURE_CATEGORIES = frozenset({
-    "precondition_failed",
-    "proof_failed",
-    "cleanup_failed",
-    "receipt_invalid",
-    "interrupted",
-})
-_FAILURE_PHASES = frozenset({
-    "policy",
-    "candidate",
-    "scenario",
-    "receipt",
-    "receipt_json",
-    "receipt_fields",
-    "receipt_status",
-    "receipt_timing",
-    "receipt_streaming",
-    "receipt_assertions",
-    "receipt_resources",
-})
+_FAILURE_CATEGORIES = frozenset(
+    {
+        "precondition_failed",
+        "proof_failed",
+        "cleanup_failed",
+        "receipt_invalid",
+        "interrupted",
+    }
+)
+_FAILURE_PHASES = frozenset(
+    {
+        "policy",
+        "candidate",
+        "scenario",
+        "receipt",
+        "receipt_json",
+        "receipt_fields",
+        "receipt_status",
+        "receipt_timing",
+        "receipt_streaming",
+        "receipt_assertions",
+        "receipt_resources",
+    }
+)
 _TEST_SUCCESS_FIELDS = frozenset({"schema", "timing", "streaming", "assertions", "resources", "failure", "passed"})
-_SUCCESS_FIELDS = frozenset({
-    "schema",
-    "candidate",
-    "policy",
-    "timing",
-    "streaming",
-    "assertions",
-    "resources",
-    "failure",
-    "passed",
-})
-_REQUIRED_ASSERTIONS = frozenset({
-    "typed_submit",
-    "attachment_prepared",
-    "attachment_accessed",
-    "single_semantic_call",
-    "batched_semantic_call",
-    "no_recursive_child",
-    "terminal_ordering",
-    "broker_session_cleanup",
-    "turn_resources_cleanup",
-})
+_SUCCESS_FIELDS = frozenset(
+    {
+        "schema",
+        "candidate",
+        "policy",
+        "timing",
+        "streaming",
+        "assertions",
+        "resources",
+        "failure",
+        "passed",
+    }
+)
+_REQUIRED_ASSERTIONS = frozenset(
+    {
+        "typed_submit",
+        "attachment_prepared",
+        "attachment_accessed",
+        "single_semantic_call",
+        "batched_semantic_call",
+        "no_recursive_child",
+        "terminal_ordering",
+        "broker_session_cleanup",
+        "turn_resources_cleanup",
+    }
+)
 
 EXIT_PRECONDITION = 2
 EXIT_PROOF = 3

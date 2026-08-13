@@ -29,25 +29,29 @@ _REPO_ROOT = Path(__file__).resolve().parents[1]
 _EVIDENCE_ROOT = _REPO_ROOT / ".scratch" / "fleet-rlm-recursive-runtime" / "evidence"
 _LIVE_ROOT_MODEL = "deepseek-v4-flash"
 _LIVE_SUB_MODEL = "deepseek-v4-flash"
-_FAILURE_CATEGORIES = frozenset({
-    "precondition_failed",
-    "proof_failed",
-    "cleanup_failed",
-    "receipt_invalid",
-    "interrupted",
-})
+_FAILURE_CATEGORIES = frozenset(
+    {
+        "precondition_failed",
+        "proof_failed",
+        "cleanup_failed",
+        "receipt_invalid",
+        "interrupted",
+    }
+)
 _FAILURE_PHASES = frozenset({"policy", "candidate", "scenario", "receipt", "receipt_json", "receipt_fields"})
-_REQUIRED_ASSERTIONS = frozenset({
-    "dedicated_child_sandbox",
-    "same_volume_sibling_scope",
-    "root_marker_absent_in_child",
-    "root_continuity",
-    "child_typed_submit",
-    "root_typed_submit",
-    "strict_child_cleanup",
-    "terminal_ordering",
-    "no_grandchild_sandbox",
-})
+_REQUIRED_ASSERTIONS = frozenset(
+    {
+        "dedicated_child_sandbox",
+        "same_volume_sibling_scope",
+        "root_marker_absent_in_child",
+        "root_continuity",
+        "child_typed_submit",
+        "root_typed_submit",
+        "strict_child_cleanup",
+        "terminal_ordering",
+        "no_grandchild_sandbox",
+    }
+)
 _TEST_FIELDS = frozenset({"schema", "timing", "assertions", "failure", "passed"})
 _SUCCESS_FIELDS = frozenset({"schema", "candidate", "policy", "timing", "assertions", "failure", "passed"})
 EXIT_PRECONDITION = 2

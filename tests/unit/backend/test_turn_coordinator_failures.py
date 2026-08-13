@@ -102,6 +102,7 @@ async def test_open_non_success_has_one_last_terminal_and_never_promotes(
         execution = SimpleNamespace(run_id=run_id, session_id=session.id)
         artifact_sink = Sink()
         result_snapshot_sink = None
+        post_commit_memory_promotion = None
 
         async def aclose(self):
             nonlocal closes
@@ -346,6 +347,7 @@ async def test_open_midstream_execution_failure_keeps_sequence_and_terminal_orde
         execution = SimpleNamespace(run_id=run_id, session_id=session.id)
         artifact_sink = None
         result_snapshot_sink = None
+        post_commit_memory_promotion = None
 
         async def aclose(self):
             nonlocal closes
@@ -474,6 +476,7 @@ async def test_open_commit_failure_projects_commit_failure_terminal(monkeypatch:
         execution = SimpleNamespace(run_id=run_id, session_id=session.id)
         artifact_sink = None
         result_snapshot_sink = None
+        post_commit_memory_promotion = None
 
         async def aclose(self):
             nonlocal closes
@@ -594,6 +597,7 @@ async def test_failed_turn_emits_settlement_claim_and_cleanup_spans(
             execution = SimpleNamespace(run_id=run_id, session_id=session.id, request="fail")
             artifact_sink = Sink()
             result_snapshot_sink = None
+            post_commit_memory_promotion = None
 
             async def aclose(self):
                 return None

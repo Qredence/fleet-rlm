@@ -531,33 +531,35 @@ class WorkspaceMemoryToolHost:
         def forget_output(result: object) -> JsonValue:
             return _output(result, ("ok", "namespace", "memory_id", "removed"))
 
-        return MappingProxyType({
-            "read_workspace_memory": ToolEventView(output_projection=read_output),
-            "remember": ToolEventView(
-                input_projection=remember_input,
-                output_projection=remember_output,
-            ),
-            "update_workspace_memory": ToolEventView(
-                input_projection=remember_input,
-                output_projection=remember_output,
-            ),
-            "list_memories": ToolEventView(
-                input_projection=list_input,
-                output_projection=list_output,
-            ),
-            "search_memories": ToolEventView(
-                input_projection=search_input,
-                output_projection=search_output,
-            ),
-            "edit_memory": ToolEventView(
-                input_projection=edit_input,
-                output_projection=edit_output,
-            ),
-            "forget": ToolEventView(
-                input_projection=forget_input,
-                output_projection=forget_output,
-            ),
-        })
+        return MappingProxyType(
+            {
+                "read_workspace_memory": ToolEventView(output_projection=read_output),
+                "remember": ToolEventView(
+                    input_projection=remember_input,
+                    output_projection=remember_output,
+                ),
+                "update_workspace_memory": ToolEventView(
+                    input_projection=remember_input,
+                    output_projection=remember_output,
+                ),
+                "list_memories": ToolEventView(
+                    input_projection=list_input,
+                    output_projection=list_output,
+                ),
+                "search_memories": ToolEventView(
+                    input_projection=search_input,
+                    output_projection=search_output,
+                ),
+                "edit_memory": ToolEventView(
+                    input_projection=edit_input,
+                    output_projection=edit_output,
+                ),
+                "forget": ToolEventView(
+                    input_projection=forget_input,
+                    output_projection=forget_output,
+                ),
+            }
+        )
 
     def _remember(self, key_learning: str, category: str) -> dict[str, object]:
         record, normalized_category = self._record(key_learning, category)
