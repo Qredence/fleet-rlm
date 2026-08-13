@@ -116,10 +116,12 @@ async def test_open_non_success_has_one_last_terminal_and_never_promotes(
     class Stream:
         def __init__(self):
             recorder = EventRecorder(run_id, session.id)
-            self._events = iter((
-                recorder.record(RunStarted(delivery="live")),
-                recorder.record(Status("execution", "running")),
-            ))
+            self._events = iter(
+                (
+                    recorder.record(RunStarted(delivery="live")),
+                    recorder.record(Status("execution", "running")),
+                )
+            )
             self.outcome = RLMOutcome(
                 status,  # type: ignore[arg-type]
                 artifact_candidates=(candidate,),
@@ -359,10 +361,12 @@ async def test_open_midstream_execution_failure_keeps_sequence_and_terminal_orde
     class Stream:
         def __init__(self):
             recorder = EventRecorder(run_id, session.id)
-            self._events = iter((
-                recorder.record(RunStarted(delivery="live")),
-                recorder.record(Status("execution", "running")),
-            ))
+            self._events = iter(
+                (
+                    recorder.record(RunStarted(delivery="live")),
+                    recorder.record(Status("execution", "running")),
+                )
+            )
             self.outcome = None
 
         def __aiter__(self):
@@ -606,10 +610,12 @@ async def test_failed_turn_emits_settlement_claim_and_cleanup_spans(
         class Stream:
             def __init__(self):
                 recorder = EventRecorder(run_id, session.id)
-                self._events = iter((
-                    recorder.record(RunStarted(delivery="live")),
-                    recorder.record(Status("execution", "running")),
-                ))
+                self._events = iter(
+                    (
+                        recorder.record(RunStarted(delivery="live")),
+                        recorder.record(Status("execution", "running")),
+                    )
+                )
                 self.outcome = RLMOutcome("failed", public_error_message="Turn failed")
 
             def __aiter__(self):

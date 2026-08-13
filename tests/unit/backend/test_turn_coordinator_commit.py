@@ -93,10 +93,12 @@ async def test_open_commits_typed_result_then_replays_without_rerun() -> None:
     class Stream:
         def __init__(self, execution):
             recorder = EventRecorder(execution.run_id, execution.session_id)
-            self._events = iter((
-                recorder.record(RunStarted(delivery="live")),
-                recorder.record(Status("execution", "running")),
-            ))
+            self._events = iter(
+                (
+                    recorder.record(RunStarted(delivery="live")),
+                    recorder.record(Status("execution", "running")),
+                )
+            )
             self.outcome = RLMOutcome(
                 terminal_status="completed",
                 prediction=PredictionResult(
@@ -303,16 +305,18 @@ async def test_open_commits_typed_result_through_temporary_sql(tmp_path) -> None
         await create_tables(engine)
         factory = create_session_factory(engine)
         async with factory() as db, db.begin():
-            db.add_all((
-                UserRow(id=access.user_id),
-                WorkspaceRow(id=access.workspace_id),
-                SessionRow(
-                    id=session_id,
-                    user_id=access.user_id,
-                    workspace_id=access.workspace_id,
-                    title="SQL coordinator",
-                ),
-            ))
+            db.add_all(
+                (
+                    UserRow(id=access.user_id),
+                    WorkspaceRow(id=access.workspace_id),
+                    SessionRow(
+                        id=session_id,
+                        user_id=access.user_id,
+                        workspace_id=access.workspace_id,
+                        title="SQL coordinator",
+                    ),
+                )
+            )
 
         class Prepared:
             execution = SimpleNamespace(run_id=run_id, session_id=session_id)
