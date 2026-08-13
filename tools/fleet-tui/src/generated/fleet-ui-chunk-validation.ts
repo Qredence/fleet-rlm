@@ -128,12 +128,12 @@ function isNullableString(value: unknown): boolean {
   return value === null || isString(value);
 }
 
-function isNullableBoolean(value: unknown): boolean {
-  return value === null || typeof value === "boolean";
-}
-
 function isBoolean(value: unknown): value is boolean {
   return typeof value === "boolean";
+}
+
+function isNullableBoolean(value: unknown): boolean {
+  return value === null || isBoolean(value);
 }
 
 function isInteger(value: unknown): value is number {
