@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import json
-from types import SimpleNamespace
 from uuid import uuid4
 
 import dspy
 import pytest
+
+from tests.unit.backend.rlm.fakes import FakeRLMInterpreter, HostCapabilityDefaults
 
 
 @pytest.mark.asyncio
@@ -56,7 +57,7 @@ async def test_prepared_rlm_kwargs_bound_a_large_session_to_recent_previews() ->
             del access, ids, run, sink
             return PreparedAttachments((), ())
 
-    class Capabilities:
+    class Capabilities(HostCapabilityDefaults):
         spec = RLMExecutionSpec()
 
         def drain_public_details(self):
@@ -86,7 +87,7 @@ async def test_prepared_rlm_kwargs_bound_a_large_session_to_recent_previews() ->
             async def release():
                 return None
 
-            return RunEnvironment(SimpleNamespace(), sink, sink, release)
+            return RunEnvironment(FakeRLMInterpreter(), sink, sink, release)
 
     async def not_cancelled() -> bool:
         return False

@@ -39,6 +39,7 @@ from fleet_rlm.rlm.errors import RunCancelledError
 from fleet_rlm.rlm.events import RuntimeEvent
 from fleet_rlm.rlm.runner import RLMRunner
 from fleet_rlm.sessions.models import TurnAccess
+from tests.unit.backend.rlm.fakes import FakeRLMInterpreter, HostCapabilityDefaults
 
 
 class MemoryStore:
@@ -180,7 +181,7 @@ class MemoryWorkspace:
         return WorkspaceEntry(path, "file", len(self.files[path].encode()), None)
 
 
-class Capabilities:
+class Capabilities(HostCapabilityDefaults):
     def __init__(self, workspace: MemoryWorkspace) -> None:
         workspace_host = WorkspaceToolHost(workspace, max_file_bytes=1024)
         memory_host = WorkspaceMemoryToolHost(workspace.memory_registry.resolve(workspace.access.workspace_id))
@@ -203,7 +204,7 @@ class Capabilities:
         return ()
 
 
-class Interpreter:
+class Interpreter(FakeRLMInterpreter):
     def __init__(self) -> None:
         self.variables: dict[str, object] = {}
 

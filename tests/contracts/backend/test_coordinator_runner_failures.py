@@ -36,12 +36,13 @@ from fleet_rlm.rlm.events import (
 from fleet_rlm.rlm.factory import RLMFactory
 from fleet_rlm.rlm.runner import RLMRunner
 from fleet_rlm.sessions.models import AssistantTurnRecord, TurnAccess, TurnInput
+from tests.unit.backend.rlm.fakes import HostCapabilityDefaults
 
 FailureMode = Literal["invalid_output", "malformed_trajectory", "internal_cancel", "timeout"]
 HarnessMode = FailureMode | Literal["caller_cancel", "native_success"]
 
 
-class _Capabilities:
+class _Capabilities(HostCapabilityDefaults):
     spec = RLMExecutionSpec()
 
     def drain_public_details(self):

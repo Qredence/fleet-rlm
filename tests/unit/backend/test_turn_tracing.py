@@ -23,6 +23,7 @@ from fleet_rlm.observability.turn_tracing import (
     turn_trace,
 )
 from fleet_rlm.rlm.tool_observer import ToolEventView, observe_tool
+from tests.unit.backend.rlm.fakes import FakeChildRuntimeFactory
 
 
 @pytest.fixture(autouse=True)
@@ -542,7 +543,7 @@ def test_recursive_child_span_records_bounded_metadata(monkeypatch: pytest.Monke
             dspy.utils.DummyLM([{"answer": "fallback"}], adapter=adapter),
         ),
         options=RecursiveRLMOptions(),
-        child_runtime_factory=_in_process_child_runtime,
+        child_runtime_factory=FakeChildRuntimeFactory(_in_process_child_runtime),
         deadline=time.monotonic() + 30,
     )
 
@@ -596,7 +597,7 @@ def test_recursive_batch_spans_finish_with_active_mlflow(
             dspy.utils.DummyLM([{"answer": "fallback"}], adapter=adapter),
         ),
         options=RecursiveRLMOptions(max_calls=2, max_parallel_children=2),
-        child_runtime_factory=_in_process_child_runtime,
+        child_runtime_factory=FakeChildRuntimeFactory(_in_process_child_runtime),
         deadline=time.monotonic() + 30,
     )
 
@@ -629,7 +630,7 @@ def test_recursive_child_span_marks_shutdown_failure(monkeypatch: pytest.MonkeyP
             dspy.utils.DummyLM([{"answer": "fallback"}], adapter=adapter),
         ),
         options=RecursiveRLMOptions(),
-        child_runtime_factory=_in_process_child_runtime,
+        child_runtime_factory=FakeChildRuntimeFactory(_in_process_child_runtime),
         deadline=time.monotonic() + 30,
     )
 
@@ -669,7 +670,7 @@ def test_recursive_child_span_marks_native_setup_failure(monkeypatch: pytest.Mon
             dspy.utils.DummyLM([{"answer": "unused"}], adapter=adapter),
         ),
         options=RecursiveRLMOptions(),
-        child_runtime_factory=_raise_setup_error,
+        child_runtime_factory=FakeChildRuntimeFactory(_raise_setup_error),
         deadline=time.monotonic() + 30,
     )
 

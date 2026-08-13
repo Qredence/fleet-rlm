@@ -16,6 +16,7 @@ from typing import Any, Literal, cast
 
 import dspy
 
+from fleet_rlm.rlm.child_runtime import ChildRuntimeFactory
 from fleet_rlm.rlm.dspy_contract import RLMOptions, _RLMTraceCallback, build_native_rlm
 from fleet_rlm.rlm.events import ObservationDetail, ToolCompleted, ToolFailed, ToolStarted
 from fleet_rlm.rlm.model_bundle import RLMModelBundle
@@ -312,6 +313,24 @@ class _RoutingScenarioSignature(dspy.Signature):
     answer: str = dspy.OutputField()
 
 
+class _TrackingChildRuntimeFactory:
+    """Count child acquisitions while forwarding factory-owned cleanup."""
+
+    def __init__(self, inner: ChildRuntimeFactory) -> None:
+        self._inner = inner
+        self.created = 0
+
+    def __call__(self, call_index: int) -> Any:
+        self.created += 1
+        return self._inner(call_index)
+
+    def wait_owned(self) -> None:
+        self._inner.wait_owned()
+
+    def raise_if_cleanup_failed(self) -> None:
+        self._inner.raise_if_cleanup_failed()
+
+
 async def _maybe_await(value: Any) -> Any:
     if inspect.isawaitable(value):
         return await value
@@ -324,7 +343,7 @@ async def run_routing_scenario(
     root_lm: Any,
     sub_lm: Any,
     root_interpreter_factory: Callable[[], Any] | Callable[[], Awaitable[Any]],
-    child_runtime_factory: Callable[[int], Any],
+    child_runtime_factory: ChildRuntimeFactory,
     recursion_enabled: bool = True,
     repeats: int = 1,
     deadline_seconds: float = 120.0,
@@ -344,13 +363,7 @@ async def run_routing_scenario(
         captured = []
         started = time.perf_counter()
         deadline = time.monotonic() + deadline_seconds
-        created_children = 0
-
-        def tracked_child_factory(call_index: int) -> Any:
-            nonlocal created_children
-            created_children += 1
-            return child_runtime_factory(call_index)
-
+        tracked_child_factory = _TrackingChildRuntimeFactory(child_runtime_factory)
         recursive = RecursiveRLMExecutor(
             models=RLMModelBundle(root_lm=root_lm, sub_lm=sub_lm),
             options=RecursiveRLMOptions(enabled=recursion_enabled),
@@ -399,7 +412,7 @@ async def run_routing_scenario(
             child_iterations=summary.child_iterations,
             recursive_prompt_chars=summary.maximum_prompt_chars,
             latency_ms=details_facts.latency_ms,
-            sandbox_count=created_children,
+            sandbox_count=tracked_child_factory.created,
             recursive_batch_calls=summary.recursive_batch_calls,
             peak_child_concurrency=summary.peak_child_concurrency,
         )

@@ -634,9 +634,10 @@ class RLMRunner:
         """Bind the prepared Volume context to the interpreter before the RLM starts."""
         if context.session.attachment_context is None:
             return
-        bind = getattr(context.execution.interpreter, "bind_context_capsule", None)
-        if callable(bind):
-            bind(context.session.attachment_context)
+        interpreter = context.execution.interpreter
+        if interpreter is None:
+            return
+        interpreter.bind_context_capsule(context.session.attachment_context)
 
     @staticmethod
     def _bind_observer(
@@ -683,10 +684,10 @@ class RLMRunner:
 
     @staticmethod
     def _record_attachment_accesses(context: RLMExecutionContext) -> None:
-        drain_accesses = getattr(context.execution.interpreter, "drain_context_accesses", None)
-        record_accesses = getattr(context.capabilities, "record_attachment_accesses", None)
-        if callable(drain_accesses) and callable(record_accesses):
-            record_accesses(tuple(drain_accesses()))
+        interpreter = context.execution.interpreter
+        if interpreter is None:
+            return
+        context.capabilities.record_attachment_accesses(tuple(interpreter.drain_context_accesses()))
 
     @staticmethod
     def _record_phase_failure(

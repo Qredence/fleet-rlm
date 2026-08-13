@@ -140,7 +140,7 @@ async def test_runner_uses_supported_async_call_and_returns_typed_outcome(
     from fleet_rlm.rlm.runner import RLMRunner
     from fleet_rlm.sessions.models import TurnAccess
     from fleet_rlm.skills.models import SkillCard
-    from tests.unit.backend.rlm.fakes import EmptyCapabilities
+    from tests.unit.backend.rlm.fakes import EmptyCapabilities, FakeRLMInterpreter
 
     class Factory:
         options = None
@@ -193,7 +193,7 @@ async def test_runner_uses_supported_async_call_and_returns_typed_outcome(
 
             return Program()
 
-    class Interpreter:
+    class Interpreter(FakeRLMInterpreter):
         observer = None
 
         def bind_observer(self, observer, *, max_chars):

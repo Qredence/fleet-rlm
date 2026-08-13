@@ -6,6 +6,8 @@ from uuid import uuid4
 
 import pytest
 
+from tests.unit.backend.rlm.fakes import HostCapabilityDefaults
+
 
 @pytest.mark.asyncio
 async def test_connection_reset_during_capability_preparation_is_unavailable() -> None:
@@ -40,7 +42,7 @@ async def test_connection_reset_during_capability_preparation_is_unavailable() -
             del access, ids, run, sink
             return PreparedAttachments((), ())
 
-    class Capabilities:
+    class Capabilities(HostCapabilityDefaults):
         async def prepare(self, turn, environment, attachments, *, deadline):
             del turn, environment, attachments, deadline
             raise DatabaseConnectionError("connection reset during TLS handshake")
@@ -158,7 +160,7 @@ async def test_connection_reset_during_post_capability_cancellation_probe_is_una
             del access, ids, run, sink
             return PreparedAttachments((), ())
 
-    class Capabilities:
+    class Capabilities(HostCapabilityDefaults):
         preparation_notices = ()
 
         async def prepare(self, turn, environment, attachments, *, deadline):

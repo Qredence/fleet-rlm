@@ -24,6 +24,7 @@ from fleet_rlm.rlm.recursive_calls import (
     RecursiveRLMExecutor,
     RecursiveRLMOptions,
 )
+from tests.unit.backend.rlm.fakes import FakeChildRuntimeFactory
 
 
 def _executor(
@@ -76,7 +77,7 @@ def _executor(
     return RecursiveRLMExecutor(
         models=RLMModelBundle(root, sub),
         options=options or RecursiveRLMOptions(),
-        child_runtime_factory=factory,
+        child_runtime_factory=FakeChildRuntimeFactory(factory),
         deadline=time.monotonic() + 30,
         observer=observer,
         is_authorized=is_authorized,
@@ -204,7 +205,7 @@ def test_recursive_batched_tool_preserves_order_and_bounds_child_concurrency() -
     executor = RecursiveRLMExecutor(
         models=RLMModelBundle(root, sub),
         options=RecursiveRLMOptions(max_calls=3, max_parallel_children=2),
-        child_runtime_factory=factory,
+        child_runtime_factory=FakeChildRuntimeFactory(factory),
         deadline=time.monotonic() + 30,
         observer=events.append,
     )
@@ -295,7 +296,7 @@ def test_recursive_batch_join_stops_at_turn_deadline_and_worker_retains_lease(
             dspy.utils.DummyLM([{"answer": "unused"}], adapter=adapter),
         ),
         options=RecursiveRLMOptions(max_calls=1, max_parallel_children=1),
-        child_runtime_factory=factory,
+        child_runtime_factory=FakeChildRuntimeFactory(factory),
         deadline=time.monotonic() + 0.05,
     )
 
@@ -551,7 +552,7 @@ def test_recursive_batch_preserves_order_when_workers_finish_out_of_order(
     executor = RecursiveRLMExecutor(
         models=RLMModelBundle(root, sub),
         options=RecursiveRLMOptions(max_calls=3, max_parallel_children=3),
-        child_runtime_factory=factory,
+        child_runtime_factory=FakeChildRuntimeFactory(factory),
         deadline=time.monotonic() + 5,
     )
 
@@ -601,7 +602,7 @@ def test_recursive_batch_wraps_failure_when_all_children_are_done(
     executor = RecursiveRLMExecutor(
         models=RLMModelBundle(root, sub),
         options=RecursiveRLMOptions(max_calls=2, max_parallel_children=2),
-        child_runtime_factory=factory,
+        child_runtime_factory=FakeChildRuntimeFactory(factory),
         deadline=time.monotonic() + 5,
     )
 
@@ -653,7 +654,7 @@ def test_recursive_batch_failure_returns_before_running_sibling_and_cleanup_wait
     executor = RecursiveRLMExecutor(
         models=RLMModelBundle(root, sub),
         options=RecursiveRLMOptions(max_calls=2, max_parallel_children=2),
-        child_runtime_factory=factory,
+        child_runtime_factory=FakeChildRuntimeFactory(factory),
         deadline=time.monotonic() + 5,
     )
     result: dict[str, BaseException] = {}
@@ -739,7 +740,7 @@ def test_recursive_batch_submit_failure_retains_already_submitted_worker(
             dspy.utils.DummyLM([{"answer": "unused"}], adapter=adapter),
         ),
         options=RecursiveRLMOptions(max_calls=2, max_parallel_children=1),
-        child_runtime_factory=factory,
+        child_runtime_factory=FakeChildRuntimeFactory(factory),
         deadline=time.monotonic() + 10,
     )
 
@@ -767,12 +768,14 @@ def test_executor_wait_owned_times_out_when_child_worker_never_completes(
             dspy.utils.DummyLM([{"answer": "unused"}], adapter=adapter),
         ),
         options=RecursiveRLMOptions(max_calls=1, max_parallel_children=1),
-        child_runtime_factory=lambda call_index: ChildRuntimeLease(
-            DaytonaCodeInterpreter(backend=InProcessInterpreterBackend()),
-            f"child-{call_index}",
-            "test-volume",
-            f"recursive/test-workspace/test-run/{call_index}",
-            lambda: None,
+        child_runtime_factory=FakeChildRuntimeFactory(
+            lambda call_index: ChildRuntimeLease(
+                DaytonaCodeInterpreter(backend=InProcessInterpreterBackend()),
+                f"child-{call_index}",
+                "test-volume",
+                f"recursive/test-workspace/test-run/{call_index}",
+                lambda: None,
+            )
         ),
         deadline=time.monotonic() + 10,
     )
@@ -834,7 +837,7 @@ def test_recursive_batch_cancels_queued_children_before_they_acquire_a_lease(
     executor = RecursiveRLMExecutor(
         models=RLMModelBundle(root, sub),
         options=RecursiveRLMOptions(max_calls=3, max_parallel_children=1),
-        child_runtime_factory=factory,
+        child_runtime_factory=FakeChildRuntimeFactory(factory),
         deadline=time.monotonic() + 1,
     )
 

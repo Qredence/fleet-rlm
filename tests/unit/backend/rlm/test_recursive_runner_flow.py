@@ -26,7 +26,7 @@ from fleet_rlm.rlm.model_bundle import RLMModelBundle
 from fleet_rlm.rlm.recursive_calls import RecursiveRLMOptions
 from fleet_rlm.rlm.runner import RLMRunner
 from fleet_rlm.sessions.models import TurnAccess
-from tests.unit.backend.rlm.fakes import EmptyCapabilities
+from tests.unit.backend.rlm.fakes import EmptyCapabilities, FakeChildRuntimeFactory
 
 
 @pytest.mark.asyncio
@@ -73,7 +73,7 @@ async def test_root_child_root_flow_preserves_parent_repl_and_typed_submit() -> 
         ),
         delegation=DelegationPolicy(
             recursive_options=RecursiveRLMOptions(enabled=True, max_calls=2),
-            child_runtime_factory=lambda call_index: _child_lease(call_index),
+            child_runtime_factory=FakeChildRuntimeFactory(lambda call_index: _child_lease(call_index)),
         ),
         capabilities=EmptyCapabilities(),
     )
@@ -176,7 +176,8 @@ async def test_runner_rejects_recursive_tool_after_authority_revocation() -> Non
             cancellation_requested=not_cancelled,
         ),
         delegation=DelegationPolicy(
-            recursive_options=RecursiveRLMOptions(enabled=True, max_calls=1), child_runtime_factory=child_factory
+            recursive_options=RecursiveRLMOptions(enabled=True, max_calls=1),
+            child_runtime_factory=FakeChildRuntimeFactory(child_factory),
         ),
         capabilities=EmptyCapabilities(),
     )
@@ -299,7 +300,8 @@ async def test_failed_child_cleanup_prevents_successful_root_outcome() -> None:
             cancellation_requested=not_cancelled,
         ),
         delegation=DelegationPolicy(
-            recursive_options=RecursiveRLMOptions(enabled=True, max_calls=2), child_runtime_factory=failed_lease
+            recursive_options=RecursiveRLMOptions(enabled=True, max_calls=2),
+            child_runtime_factory=FakeChildRuntimeFactory(failed_lease),
         ),
         capabilities=EmptyCapabilities(),
     )
@@ -374,7 +376,7 @@ async def test_runner_wait_owned_retains_pending_recursive_workers_until_child_l
         ),
         delegation=DelegationPolicy(
             recursive_options=RecursiveRLMOptions(enabled=True, max_calls=1),
-            child_runtime_factory=child_factory,
+            child_runtime_factory=FakeChildRuntimeFactory(child_factory),
         ),
         capabilities=EmptyCapabilities(),
     )
