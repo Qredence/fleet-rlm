@@ -200,7 +200,8 @@ def test_main_writes_failure_receipt_for_invalid_limit(monkeypatch: pytest.Monke
     output = tmp_path / "failed.json"
     assert main(["annotate", "--limit", "0", "--output", str(output)]) == 1
     payload = json.loads(output.read_text())
-    assert payload.pop("generated_at")
+    generated_at = payload.pop("generated_at")
+    assert generated_at
     assert payload == {
         "schema": "fleet.trace-annotation/v1",
         "command": "annotate",

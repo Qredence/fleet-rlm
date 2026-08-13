@@ -308,7 +308,8 @@ def test_cli_writes_bounded_failure_receipt(tmp_path) -> None:
     output = tmp_path / "failed.json"
     assert main(["compare", "--output", str(output)]) == 1
     payload = json.loads(output.read_text())
-    assert payload.pop("generated_at")
+    generated_at = payload.pop("generated_at")
+    assert generated_at
     assert payload == {
         "schema": "fleet.rlm-latency/v1",
         "command": "compare",

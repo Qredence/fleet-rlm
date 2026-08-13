@@ -82,9 +82,6 @@ async def test_startup_orphan_cleanup_skips_provisioning_for_empty_workspace(mon
         raise AssertionError("empty startup cleanup must not provision a sandbox")
 
     class EmptyCatalog(_FakeArtifactCatalog):
-        def __init__(self) -> None:
-            self.calls = []
-
         async def list_storage_refs(self, *, workspace_id: object) -> list[str]:
             self.calls.append(("storage", workspace_id))
             return []

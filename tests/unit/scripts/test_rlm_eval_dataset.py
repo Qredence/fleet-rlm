@@ -203,7 +203,8 @@ def test_main_writes_bounded_failure_receipt_without_live_opt_in(
     output = tmp_path / "failed.json"
     assert main(["show", "--output", str(output)]) == 1
     payload = json.loads(output.read_text())
-    assert payload.pop("generated_at")
+    generated_at = payload.pop("generated_at")
+    assert generated_at
     assert payload == {
         "schema": "fleet.eval-dataset/v1",
         "command": "show",

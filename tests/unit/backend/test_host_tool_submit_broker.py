@@ -586,8 +586,10 @@ def test_http_broker_poll_and_fulfill_route_through_pooled_client() -> None:
     broker._client = client
 
     fulfilled: list[str] = []
-    assert broker._poll_once(lambda name, _args, _kwargs: fulfilled.append(name)) is True
-    assert broker._poll_once(lambda name, _args, _kwargs: fulfilled.append(name)) is False
+    first_poll = broker._poll_once(lambda name, _args, _kwargs: fulfilled.append(name))
+    second_poll = broker._poll_once(lambda name, _args, _kwargs: fulfilled.append(name))
+    assert first_poll is True
+    assert second_poll is False
 
     assert fulfilled == ["echo"]
     assert broker._poll_count == 2

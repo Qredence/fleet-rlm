@@ -1,6 +1,6 @@
 /** Slash command registry for the Fleet TUI. */
 
-import { readFile, stat } from "node:fs/promises";
+import { open } from "node:fs/promises";
 import { basename } from "node:path";
 
 import { saveArtifact, writeFileAtomic } from "../cli-core.js";
@@ -474,12 +474,18 @@ registerCommand({
     }
     for (const arg of args) {
       try {
-        const info = await stat(arg);
-        if (!info.isFile()) {
-          appendSystem(ctx.store, `${arg} is not a regular file.`);
-          continue;
+        const handle = await open(arg, "r");
+        let bytes: Buffer;
+        try {
+          const info = await handle.stat();
+          if (!info.isFile()) {
+            appendSystem(ctx.store, `${arg} is not a regular file.`);
+            continue;
+          }
+          bytes = await handle.readFile();
+        } finally {
+          await handle.close();
         }
-        const bytes = await readFile(arg);
         const ref = await ctx.client.uploadAttachment({
           name: basename(arg),
           bytes,

@@ -794,7 +794,7 @@ def test_intermediate_replacement_race_stays_on_open_directory(
     def racing_open(
         path: str | bytes,
         flags: int,
-        mode: int = 0o777,
+        mode: int = 0o600,
         *,
         dir_fd: int | None = None,
     ) -> int:

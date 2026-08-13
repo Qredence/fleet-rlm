@@ -146,7 +146,8 @@ def test_main_writes_failure_receipt_for_out_of_range_sample_rate(
     output = tmp_path / "failed.json"
     assert main(["start", "--sample-rate", "2.0", "--output", str(output)]) == 1
     payload = json.loads(output.read_text())
-    assert payload.pop("generated_at")
+    generated_at = payload.pop("generated_at")
+    assert generated_at
     assert payload == {
         "schema": "fleet.monitoring-config/v1",
         "command": "start",
