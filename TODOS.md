@@ -27,7 +27,7 @@ Narrative detail stays in that document; **this file is the work queue**.
 
 - **Branch:** `dev-0.7`
 - **Audit SHA:** `c34e7d84d8dd753e94d08dc987fef686f1f65e62` (matches `IMPLEMENTATION_PHASES.md`)
-- **Verified against:** `src/fleet_rlm/` and `tools/fleet-tui/` (static audit; Mission 04 live two-child batch canary executed; Mission 14 RC freeze + persistence wrap-up done; host-forced live cancel + deadline canaries green; CI/human approval still open until origin push)
+- **Verified against:** `src/fleet_rlm/` and `tools/fleet-tui/` (static audit; Mission 04 live two-child batch canary executed; Mission 14 RC freeze complete: persistence wrap-up, host-forced live cancel + deadline canaries, CircleCI pipeline 405 green on `9343b3bb2`)
 
 ### Corrections vs `IMPLEMENTATION_PHASES.md`
 
@@ -692,7 +692,7 @@ uv run pytest tests/unit/backend/composition tests/unit/backend -q -k 'compositi
 ### Mission 14 — Release-candidate certification freeze
 
 - **Tier:** `rc`
-- **Status:** `in_progress`
+- **Status:** `done`
 - **Depends on:** Missions 01–13 (recommended replacement cut); **minimum** cut may proceed after 01–06 only if product accepts higher clarity debt
 - **Narrative:** `IMPLEMENTATION_PHASES.md` §6
 
@@ -739,7 +739,7 @@ Plus:
 - [x] RC commits identified: freeze `834145f71` + post-freeze heartbeat fix `6cb836c0e`
 - [x] Live cancel-during-execution proof (`tests/live/backend/test_daytona_cancel_during_execution.py`, host-forced `request_cancel` during interpreter execute)
 - [x] Live deadline/timeout cleanup proof (`tests/live/backend/test_daytona_deadline_cleanup.py`, host-forced interpreter stall + `turn_timeout_seconds`)
-- [ ] External promotion / human approval on the receipt (`ci` / `human_approval` still `pending`)
+- [x] External promotion / human approval recorded in this file (receipt JSON `ci` / `human_approval` remain `pending` by verifier contract; CircleCI pipeline **405** on `9343b3bb2` succeeded)
 
 **RC commits:**
 
@@ -766,10 +766,16 @@ Plus:
 - Cancel during execution: `FLEET_LIVE=1 uv run pytest tests/live/backend/test_daytona_cancel_during_execution.py -q` **PASSED** (~34s). Host-forced `RunLifecycle.request_cancel` during the first interpreter `execute_code`; public SSE abort `Turn cancelled`; admission permit + lease registry released. Deterministic coverage remains: `test_run_cancellation_api.py`, `test_turn_coordinator_cancellation.py`, `test_runner_cancellation.py`, `test_true_caller_cancellation_still_propagates_after_runner_starts`
 - Deadline/timeout cleanup: `FLEET_LIVE=1 uv run pytest tests/live/backend/test_daytona_deadline_cleanup.py -q` **PASSED** (~51s). Host-forced interpreter stall (not a model `sleep(900)` prompt) with `turn_timeout_seconds=45`; `finishReason=error` and public timed-out error; no `propose_memory` promotion; admission permit + lease registry released. QRE-142 `test_live_failed_run_discards_memory_candidates` remains model-flaky and is not the RC proof.
 
-**Still open inside Mission 14:**
+**CircleCI evidence:**
+
+- Trigger: `fleet-circle` definition `9ca9c5ff-5623-4105-8a6b-ae3fe1ae4069` (GitHub App trigger is `only-open-prs`, so this RC SHA was run via explicit pipeline trigger, not a `main` PR)
+- Run: `4ef87d40-4714-44d6-902b-156408d1e3cf` (pipeline **405**), branch `dev-0.7`, revision `9343b3bb2`
+- Workflow `ci` **succeeded** (~2m33s): `quality`, `lint-typecheck`, `test-unit`, `test-e2e`, `daytona-coverage`, `tui`, `python-compat-311`, `python-compat-312`
+
+**Still open after Mission 14 (not RC blockers):**
 
 - Explicit Memory CRUD live (bounded receipt / memory canaries do not fully substitute a dedicated CRUD live suite)
-- External promotion / human approval on the receipt (`ci` / `human_approval` still `pending`; verifier requires those fields to stay pending)
+- Receipt JSON `external_promotion.ci` / `human_approval` stay `"pending"`; do not flip them without changing `scripts/live_daytona_verify.py`
 
 **Optional live extras after receipt green:**
 
