@@ -697,6 +697,25 @@ def test_settings_does_not_read_runtime_environment(monkeypatch: pytest.MonkeyPa
     assert Settings(_env_file=None).turn_timeout_seconds == 1800
 
 
+def test_settings_does_not_scan_unprefixed_environment_or_dotenv(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    (tmp_path / ".env").write_text("LOG_LEVEL=DEBUG\nDATABASE_URL=postgresql://dotenv\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("LOG_LEVEL", "DEBUG")
+    monkeypatch.setenv("DATABASE_URL", "postgresql://leaked")
+    monkeypatch.setenv("DAYTONA_API_KEY", "leaked-key")
+
+    constructed = Settings()
+    from_file_kwarg = Settings(_env_file=".env")
+    validated = Settings.model_validate({})
+
+    for settings in (constructed, from_file_kwarg, validated):
+        assert settings.log_level == "INFO"
+        assert settings.database_url is None
+        assert settings.daytona_api_key is None
+
+
 @pytest.mark.parametrize("value", [0, -1])
 def test_turn_timeout_must_be_positive(value: int) -> None:
     with pytest.raises(ValidationError):

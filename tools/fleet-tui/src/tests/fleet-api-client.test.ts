@@ -63,7 +63,7 @@ describe("FleetApiClient", () => {
     expect(init.headers).toBeUndefined();
   });
 
-  it("lists, stats, and reads Session Workspace files", async () => {
+  it("lists, stats, and reads Workspace files/ root entries", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(
         JSON.stringify({

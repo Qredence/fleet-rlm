@@ -1,23 +1,8 @@
-"""Attachment upload and staging for the clean backend."""
+"""Attachment upload and staging.
+
+Import concrete catalog, lifecycle, and tool types from their owning modules.
+Keeping package initialization side-effect free avoids loading host-tool graphs
+on submodule imports.
+"""
 
 from __future__ import annotations
-
-from fleet_rlm.files.errors import (
-    AttachmentError,
-    AttachmentNotFoundError,
-    AttachmentValidationError,
-)
-from fleet_rlm.files.lifecycle import AttachmentLifecycleService, StoredAttachment
-from fleet_rlm.files.models import AttachmentRef, StagedAttachment
-from fleet_rlm.files.tools import FileToolHost
-
-__all__ = [
-    "AttachmentError",
-    "AttachmentLifecycleService",
-    "AttachmentNotFoundError",
-    "AttachmentRef",
-    "AttachmentValidationError",
-    "FileToolHost",
-    "StagedAttachment",
-    "StoredAttachment",
-]

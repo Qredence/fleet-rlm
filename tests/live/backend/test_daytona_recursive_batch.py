@@ -233,12 +233,14 @@ def test_daytona_recursive_batch_two_children_through_fastapi(
         name="verify_batch",
         desc="Verify ordered two-child batch answers exactly once.",
     )
-    proof_views = MappingProxyType({
-        "verify_batch": ToolEventView(
-            input_projection=lambda values: {"result_count": len(values.get("results") or ())},
-            output_projection=lambda result: {"ok": bool(result.get("ok"))},
-        )
-    })
+    proof_views = MappingProxyType(
+        {
+            "verify_batch": ToolEventView(
+                input_projection=lambda values: {"result_count": len(values.get("results") or ())},
+                output_projection=lambda result: {"ok": bool(result.get("ok"))},
+            )
+        }
+    )
     cleanup_failures: tuple[str, ...] = ()
     app = create_app(settings=settings)
     with TestClient(app) as client:

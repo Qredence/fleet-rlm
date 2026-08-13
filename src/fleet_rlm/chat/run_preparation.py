@@ -41,7 +41,6 @@ from fleet_rlm.rlm.model_bundle import RLMModelBundle
 from fleet_rlm.rlm.recursive_calls import RecursiveRLMOptions
 
 AsyncCleanup = Callable[[], Awaitable[None]]
-PostCommitMemoryPromotion = OwnedPostCommitMemoryPromotion
 
 
 class RunPreparationError(RuntimeError):
@@ -92,7 +91,7 @@ class PreparedRun:
     artifact_sink: RunArtifactSink
     _resources: _PreparedRunResources
     result_snapshot_sink: ResultSnapshotSink | None = None
-    post_commit_memory_promotion: PostCommitMemoryPromotion | None = None
+    post_commit_memory_promotion: OwnedPostCommitMemoryPromotion | None = None
 
     async def aclose(self) -> None:
         if self.post_commit_memory_promotion is not None:
@@ -122,7 +121,7 @@ class RunEnvironment:
     child_runtime_factory: ChildRuntimeFactory | None = None
     context_mount_path: str | None = None
     workspace_memory_store: Any | None = None
-    post_commit_memory_promotion: PostCommitMemoryPromotion | None = None
+    post_commit_memory_promotion: OwnedPostCommitMemoryPromotion | None = None
 
 
 class RunEnvironmentProvider(Protocol):

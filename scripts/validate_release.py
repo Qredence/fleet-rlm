@@ -8,12 +8,11 @@ import importlib.util
 import re
 import subprocess
 import sys
+import tomllib
 import zipfile
 from pathlib import Path
 
 import yaml
-
-import tomllib
 
 ROOT = Path(__file__).resolve().parents[1]
 PYPROJECT = ROOT / "pyproject.toml"
@@ -84,8 +83,7 @@ def hygiene(_args: argparse.Namespace) -> int:
         for path in tracked
         if path
         and (
-            re.search(r"(^|/)\.env(?:\..+)?$", path)
-            and not path.endswith(".env.example")
+            (re.search(r"(^|/)\.env(?:\..+)?$", path) and not path.endswith(".env.example"))
             or path.endswith((".tmp", ".swp"))
             or "__pycache__" in path
         )

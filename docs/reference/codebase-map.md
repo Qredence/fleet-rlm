@@ -9,10 +9,16 @@ compatibility runtime and parallel foundation package no longer exist.
 | --- | --- | --- |
 | `app.py`, `main.py` | FastAPI factory, handlers/routers, static Skill catalog, lifespan selection, ASGI entrypoint | composition, API routers, Skill catalog |
 | `composition/` | common inventory plus explicit Daytona and private testing wiring | domain modules and adapters |
+| `config.py`, `config_policy.py` | TOML-profile runtime Settings and loopback-only non-secret policy editor | policy document, Settings |
+| `json_types.py` | closed `JsonScalar`/`JsonValue` contract | none |
+| `snapshot_contract.py` | immutable Daytona Snapshot name policy | none |
+| `result_snapshot.py` | private commit-gated typed-result encoding | RLM prediction/usage |
 | `api/` | HTTP translation, local scope, dependency aliases, OpenAPI/SSE projection, UIMessage reload | domain interfaces and composed modules |
 | `chat/` | Turn preparation, shared capability preparation, coordinator facade, private Turn execution driver, lifecycle finalization, owned post-commit Memory promotion, shared Turn Claim policy | RLM, Sessions, Skills, files |
 | `rlm/` | DSPy Signature, Root/Sub model roles, fresh RLM construction, delegation metrics, routing evaluation, fixed-depth child executor, options, events, runner | DSPy and domain values |
+| `optimization/` | trusted-host GEPA/evidence lane | Daytona evaluator, evidence types |
 | `daytona/` | exclusive SDK boundary: async platform/provisioning, provider-only Session ownership, DSPy-only sync interpreter seam, pure broker source plus transport, diagnostics, Session Workspace gateways, and the mounted Workspace Memory adapter | Daytona SDK and domain values |
+| `runtime/` | provider-neutral Sandbox binding records and store ports | domain values |
 | `sessions/` | Session catalog, Turn input/history, canonical AssistantPart vocabulary, versioned Committed Turn | domain values |
 | `files/`, `artifacts/` | Attachment staging, paged/full-lifecycle Session Workspace and Project tools, workspace-wide Memory values/tools, direct Workspace Artifact Candidate staging, Artifact promotion/read | storage interfaces and safe paths |
 | `skills/` | bundled catalog, authorization, progressive loading, capability seam, Tool construction | domain values and package resources |
@@ -44,7 +50,7 @@ compatibility runtime and parallel foundation package no longer exist.
   `TurnCoordinator` remains the public stream facade and `RunLifecycle.finish()`
   remains the artifact/atomic-commit owner.
 - `daytona/broker_source.py` owns pure broker source generation;
-  `http_broker.py` keeps compatibility re-exports for existing callers.
+  `http_broker.py` owns HTTP-in-sandbox transport and host-tool/SUBMIT lifecycle.
 - Startup recovery claims eligible nonterminal rows by ownership. Daytona startup
   supplies a bounded provider fence; deterministic compositions supply an explicit
   no-provider fence policy, and failed fences restore retryable ownership.
@@ -86,11 +92,12 @@ The authoritative route inventory and shapes are in
 | `src/tui/durable-projection.ts` | durable reload turns → store events (`projectDurableTurns`) |
 | `src/tui/projection-helpers.ts` | shared pure helpers / message builders for projection |
 | `src/tui/store.ts` | conversation state, atomic Session hydration, and terminal stream settlement |
-| `src/tui/application.ts`, `screen.ts`, `transcript.ts` | pi-tui main-screen lifecycle, editor/input, cached native-scrollback layout, terminal-safe status, and mutable Run activity |
+| `src/tui/application.ts`, `screen.ts`, `transcript.ts` | pi-tui alternate-screen lifecycle, editor/input, follow-end `ScrollView` layout, terminal-safe status, and mutable Run activity |
 | `src/tui/message-renderer.ts`, `terminal-text.ts` | complete event, cached Markdown, result, Artifact, code/output presentation, and terminal-safe text |
 | `src/tui/commands.ts`, `command-presenter.ts`, `autocomplete.ts` | slash commands, overlays, status, and completion |
 | `src/generated/openapi.ts`, `src/generated/fleet-ui-chunk-validation.ts` | generated HTTP types and chunk-validation tables owned by `make api-sync` |
 
-Live and reload use the same display semantics. Evidence is fully expanded and
-uses native terminal scrollback; there is no classic renderer, mouse capture,
-collapsing state, or application transcript viewport.
+Live and reload use the same display semantics. There is no classic renderer.
+The operator timeline renders in an alternate-screen follow-end `ScrollView`:
+PgUp/PgDn/Home/End and the mouse wheel scroll, drag selects text for copy, and
+tool/code/output cards fold with Ctrl+O.

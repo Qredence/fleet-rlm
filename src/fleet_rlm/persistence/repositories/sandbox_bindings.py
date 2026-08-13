@@ -84,7 +84,4 @@ class SqlAlchemySandboxBindingStore:
             return _row_to_binding(row)
 
 
-SqlAlchemyBindingStore = SqlAlchemySandboxBindingStore
-
-
-__all__ = ["SqlAlchemyBindingStore", "SqlAlchemySandboxBindingStore"]
+__all__ = ["SqlAlchemySandboxBindingStore"]

@@ -107,14 +107,8 @@ def _mark_memory_dir_migrated(memory_dir: str) -> None:
 
 
 # Query-independent caching of a Workspace Memory digest is unsafe once the
-# composition depends on the current request. Turn preparation therefore
-# composes on demand and uses mutations only as ordinary immediate writes.
-
-
-def invalidate_workspace_memory_digest(volume_root: str) -> None:
-    """Cache-free compatibility point for existing mutation call sites."""
-    del volume_root
-
+# composition depends on the current request. Turn preparation composes on
+# demand; mutations are ordinary immediate writes with no cache to invalidate.
 
 _INJECTION_RELEVANT_LIMIT = 4
 _INJECTION_RECENT_COUNT = 4
@@ -281,7 +275,6 @@ class DaytonaWorkspaceMemoryStore:
             total_bytes = entry.get("byte_size")
             if type(total_bytes) is not int or not len(data) <= total_bytes <= self._max_file_bytes:
                 raise ValueError("invalid memory response")
-            invalidate_workspace_memory_digest(self._volume_root)
             return WorkspaceMemoryAppendResult(entry_bytes=len(data), total_bytes=total_bytes)
         except WorkspaceConflictError as exc:
             detail = str(getattr(exc, "detail", "") or (exc.args[1] if len(exc.args) > 1 else ""))
@@ -367,7 +360,6 @@ class DaytonaWorkspaceMemoryStore:
             if isinstance(exc, WorkspaceMemoryStoreUnavailableError):
                 raise
             raise WorkspaceMemoryStoreUnavailableError() from exc
-        invalidate_workspace_memory_digest(self._volume_root)
         return True
 
     def edit_entry(
@@ -419,7 +411,6 @@ class DaytonaWorkspaceMemoryStore:
                 raise WorkspaceMemoryRecordError
         except WorkspaceMemoryRecordError as exc:
             raise WorkspaceMemoryStoreUnavailableError() from exc
-        invalidate_workspace_memory_digest(self._volume_root)
         return record
 
     # -- internals -------------------------------------------------------------
@@ -474,7 +465,6 @@ class DaytonaWorkspaceMemoryStore:
             max_bytes=self._max_file_bytes,
             total_file_bytes=self._max_file_bytes,
         )
-        invalidate_workspace_memory_digest(self._volume_root)
 
     def _read_full_content(self) -> str:
         """Read the entire store body (bounded by the file cap), untransformed."""

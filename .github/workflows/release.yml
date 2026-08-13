@@ -78,8 +78,8 @@ jobs:
 
       - name: Lint with Ruff
         run: |
-          uv run ruff check src tests
-          uv run ruff format --check src tests
+          uv run ruff check src tests scripts migrations
+          uv run ruff format --check src tests scripts migrations
 
       - name: Type-check with ty
         run: uv run ty check src

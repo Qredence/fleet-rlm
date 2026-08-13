@@ -136,7 +136,7 @@ uv run fleet doctor daytona
 uv run fleet web
 uv run fleet-rlm serve-api
 uv run pytest tests/unit/backend tests/contracts/backend -q
-uv run ty check src/fleet_rlm
+uv run ty check src
 uv run python scripts/check_codebase_tree.py
 make api-check
 ```

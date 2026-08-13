@@ -101,21 +101,21 @@ class MemoryCandidateToolHost:
                     )
             return payload
 
-        return MappingProxyType(
-            {"propose_memory": ToolEventView(input_projection=propose_input, output_projection=propose_output)}
-        )
+        return MappingProxyType({
+            "propose_memory": ToolEventView(input_projection=propose_input, output_projection=propose_output)
+        })
 
 
 def _event_candidate_category(value: object) -> str:
     try:
-        return normalize_workspace_memory_category(value)  # ty: ignore[invalid-argument-type]
+        return normalize_workspace_memory_category(value)
     except WorkspaceMemoryCategoryError:
         return "invalid"
 
 
 def _event_candidate_id(value: object) -> str:
     try:
-        return normalize_workspace_memory_id(value) if isinstance(value, str) else "invalid"
+        return normalize_workspace_memory_id(value)
     except WorkspaceMemoryIdError:
         return "invalid"
 

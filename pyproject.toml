@@ -83,8 +83,8 @@ dev = [
     "pytest-cov>=7.1,<8",
     "pytest-timeout>=2.4.0",
     "pytest-xdist>=3.5.0",
-    "ruff>=0.16.1",
-    "ty>=0.0.65",
+    "ruff>=0.16.3",
+    "ty>=0.0.71",
 ]
 server = [
     "psycopg[binary]>=3.3.4,<4",
@@ -114,8 +114,8 @@ dev = [
     "pytest-cov>=7.1,<8",
     "pytest-timeout>=2.4.0",
     "pytest-xdist>=3.5.0",
-    "ruff>=0.16.1",
-    "ty>=0.0.65",
+    "ruff>=0.16.3",
+    "ty>=0.0.71",
 ]
 
 [tool.uv]
@@ -235,7 +235,7 @@ select = [
     "F",     # Pyflakes
     "E",     # Pycodestyle errors
     "W",     # Pycodestyle warnings
-    "I001",  # Isort - import sorting
+    "I",     # Isort - import sorting
     "N",     # pep8-naming
     "B",     # flake8-bugbear
     "UP",    # pyupgrade
@@ -248,11 +248,9 @@ select = [
     "LOG",   # flake8-logging-usage
 ]
 
-# Public package re-exports and standalone script stdout are intentional.
-# Scripts bootstrap the repo root onto sys.path before sibling imports so they
-# run both as package modules and as direct file paths.
+# Scripts bootstrap the repo root onto sys.path, then print CLI output.
+# Bundled Skill scripts are operator-facing helpers that write to stdout.
 [tool.ruff.lint.per-file-ignores]
-"__init__.py" = ["F401", "F403"]
 "scripts/**/*.py" = ["E402", "T201"]
 "src/fleet_rlm/skills/bundled/**/scripts/*.py" = ["T201"]
 
@@ -279,9 +277,10 @@ skip-magic-trailing-comma = false
 
 [tool.ty.src]
 exclude = [
+    # Tests and scripts are not the typed public package; they use doubles and
+    # assignment patches that are not worth a host type-check pass.
     "tests/",
     "scripts/",
-    "notebooks/",
     # Remote agent entrypoint expects host-injected parameters; not host-typed.
     "src/fleet_rlm/daytona/workspace_agent_runtime.py",
 ]

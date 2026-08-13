@@ -31,6 +31,7 @@ def _turn():
 class _Prepared:
     artifact_sink = None
     result_snapshot_sink = None
+    post_commit_memory_promotion = None
 
     def __init__(self, *, deadline: float) -> None:
         self.execution = SimpleNamespace(request="driver test", deadline=deadline)

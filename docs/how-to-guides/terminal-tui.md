@@ -55,14 +55,15 @@ stay chronological, complete, static, and expanded. Live text, generated code,
 and interpreter output are accumulated by stream identity and finalized without
 leaving a stale streaming cursor. Daytona forwards ordinary interpreter stdout
 as bounded deltas; private `SUBMIT` protocol markers never enter the timeline.
-The theme is automatic;
-there is no theme command or persisted theme setting.
+Builtin dark/light palettes follow the terminal preference; `/theme` lists and
+switches those builtins or custom JSON themes persisted under
+`$FLEET_TUI_STATE_DIR`.
 
-Transcript, activity, editor, and footer still form native terminal history. Fleet
-does not capture the mouse, pin the prompt, clip old evidence, or maintain a
-transcript viewport. Use the terminal's wheel, trackpad, or
-`Shift+PageUp/PageDown` scrollback; plain `PageUp/PageDown` remain editor keys.
-Resize, hydration, and clear may replay the screen and return to the live bottom.
+The transcript is a follow-end `ScrollView` inside `TuiAltScreen`. PgUp/PgDn
+scroll a page, Home/End jump top/bottom, the mouse wheel scrolls, drag selects
+text for copy, and new output re-follows the end. Tool, code, and output cards
+fold with Ctrl+O. Resize, hydration, and clear may replay the screen and return
+to the live bottom.
 
 During a Turn, the activity rail shows phase, safe backend detail, elapsed time,
 SSE-derived started/completed step counts, Tool count, and `Ctrl+C`
@@ -97,8 +98,8 @@ settings take effect after restarting Fleet.
 
 `/attach <path>…` uploads local files through the lifecycle-owned Attachment
 endpoint and pins them (up to eight) to the next Turn; `/attach list` and
-`/attach clear` manage the pins. `/files [path]` lists Session Workspace
-entries and `/file <path>` previews text; `/file <path> save <local>` writes
+`/attach clear` manage the pins. `/files [path]` lists the Workspace `files/`
+root via `/api/files` and `/file <path>` previews text; `/file <path> save <local>` writes
 paged content atomically to a local path. `/artifact <id> <local>` downloads a
 committed Artifact with content-length and SHA-256 verification;
 `/artifacts` lists Artifact ids in the conversation. `/redo` resubmits the last

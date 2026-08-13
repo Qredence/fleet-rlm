@@ -78,7 +78,7 @@ def iter_docs_files(docs_root: Path) -> list[Path]:
     )
 
 
-@functools.lru_cache(maxsize=None)
+@functools.cache
 def _resolve_path(parent_path: Path, target: str) -> Path:
     return (parent_path / target).resolve()
 

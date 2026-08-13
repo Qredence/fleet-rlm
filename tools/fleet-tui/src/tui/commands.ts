@@ -513,7 +513,7 @@ registerCommand({
 
 registerCommand({
   name: "files",
-  description: "List Session Workspace files under a Workspace-relative path",
+  description: "List the Workspace files/ root via /api/files",
   usage: "/files [path]",
   handler: async (args, ctx) => {
     if (args.length > 1) {
@@ -523,7 +523,7 @@ registerCommand({
     try {
       const listing = await ctx.client.listWorkspaceFiles({ path: args[0] ?? "." });
       if (listing.entries.length === 0) {
-        appendSystem(ctx.store, `No Session Workspace entries under “${args[0] ?? "."}”.`);
+        appendSystem(ctx.store, `No Workspace files/ entries under “${args[0] ?? "."}”.`);
         return;
       }
       const lines = listing.entries
@@ -535,17 +535,17 @@ registerCommand({
         .join("\n");
       appendSystem(
         ctx.store,
-        `Session Workspace${args[0] ? ` (${args[0]})` : ""}\n\n${lines}${listing.truncated ? "\n\n…listing truncated; use /files <path> to narrow." : ""}`,
+        `Workspace files${args[0] ? ` (${args[0]})` : ""}\n\n${lines}${listing.truncated ? "\n\n…listing truncated; use /files <path> to narrow." : ""}`,
       );
     } catch (error) {
-      appendSystem(ctx.store, `Failed to list Session Workspace: ${errorMessage(error)}`);
+      appendSystem(ctx.store, `Failed to list Workspace files: ${errorMessage(error)}`);
     }
   },
 });
 
 registerCommand({
   name: "file",
-  description: "Show or save one Session Workspace file",
+  description: "Show or save one file from the Workspace files/ root",
   usage: "/file <path> [save <localPath>]",
   handler: async (args, ctx) => {
     const path = args[0];
@@ -568,10 +568,10 @@ registerCommand({
           content += page.content;
           cursor = page.next_cursor ?? undefined;
           pages += 1;
-          if (pages > 1_000) throw new Error("Session Workspace file is too large to save");
+          if (pages > 1_000) throw new Error("Workspace file is too large to save");
         } while (cursor);
         await writeFileAtomic(localPath, Buffer.from(content, "utf8"));
-        appendSystem(ctx.store, `Saved Session Workspace file to ${localPath}.`);
+        appendSystem(ctx.store, `Saved Workspace file to ${localPath}.`);
       } catch (error) {
         appendSystem(ctx.store, `Failed to save ${path}: ${errorMessage(error)}`);
       }
@@ -590,7 +590,7 @@ registerCommand({
         .join("\n");
       appendSystem(
         ctx.store,
-        `Session Workspace file ${path} (${formatBytes(page.byte_size)})\n\n${lines}${page.content.length >= 8_000 ? "\n\n…preview truncated; use /file <path> save <localPath> for the full file." : ""}`,
+        `Workspace file ${path} (${formatBytes(page.byte_size)})\n\n${lines}${page.content.length >= 8_000 ? "\n\n…preview truncated; use /file <path> save <localPath> for the full file." : ""}`,
       );
     } catch (error) {
       appendSystem(ctx.store, `Failed to read ${path}: ${errorMessage(error)}`);

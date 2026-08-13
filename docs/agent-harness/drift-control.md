@@ -22,18 +22,18 @@ git diff --check
 ## Active documentation
 
 Current docs must be reachable from `docs/index.md` or `docs/SUMMARY.md`.
-`docs/plan-implementation/` contains policy only unless authorized unfinished
-work is explicitly tracked. Completed local plans and receipts may be retained
-under ignored `.scratch/archive/`; they are evidence, not current specification.
+Completed local plans and receipts may be retained under ignored
+`.scratch/archive/`; they are evidence, not current specification.
 
 ## Script and contract drift
 
 Retained helpers must appear in `scripts/README.md` and support `--help` where
-applicable. The OpenAPI generator owns two checked-in artifacts:
+applicable. `make api-sync` owns three checked-in artifacts:
 
 ```bash
 make api-sync   # openapi.yaml + tools/fleet-tui/src/generated/openapi.ts
-make api-check  # verifies both
+                # + tools/fleet-tui/src/generated/fleet-ui-chunk-validation.ts
+make api-check  # verifies all three
 ```
 
 Any generated diff must be reviewed as a public contract change.

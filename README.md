@@ -31,7 +31,7 @@ Forward terminal arguments after `--`, for example:
 uv run fleet cli -- --session <uuid>
 ```
 
-The terminal uses native scrollback and does not own a model, provider key, or
+The terminal uses an alternate-screen viewport and does not own a model, provider key, or
 Sandbox. See the [terminal guide](docs/how-to-guides/terminal-tui.md) and
 [configuration reference](docs/reference/configuration.md).
 

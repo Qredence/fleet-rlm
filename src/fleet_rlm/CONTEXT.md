@@ -328,8 +328,7 @@ delegation uses ordered, bounded sibling execution.
 
 ### `daytona/` package one-liners
 
-- `__init__.py` — ownership package: curated re-exports of the Daytona adapter surface.
-- `bindings.py` — compatibility re-exports for Sandbox bindings.
+- `__init__.py` — ownership package: side-effect-free; import adapter types from owning modules.
 - `broker_source.py` — pure source-string generation for the in-sandbox host-tool broker.
 - `diagnostics.py` — opt-in disposable provider/mount probes (`fleet doctor daytona`).
 - `errors.py` — Fleet-facing error types and sanitized mapping for Daytona failures.

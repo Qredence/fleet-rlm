@@ -25,8 +25,7 @@ from tests.live.backend.test_fleet_rlm_daytona_mvp import (
 pytestmark = [pytest.mark.live_daytona, pytest.mark.timeout(600)]
 
 _CANCEL_PROMPT = (
-    "Run exactly one Python code cell containing only print('cancel-probe'). "
-    "Do not call SUBMIT or any tools."
+    "Run exactly one Python code cell containing only print('cancel-probe'). Do not call SUBMIT or any tools."
 )
 _WORKER_HOLD_SECONDS = 1.0
 

@@ -50,7 +50,7 @@ Start with the smallest relevant lane:
 ```bash
 uv run pytest tests/unit/backend/path_to_test.py -q
 uv run ruff check path/to/changed.py
-uv run ty check src/fleet_rlm
+uv run ty check src
 ```
 
 For terminal changes:

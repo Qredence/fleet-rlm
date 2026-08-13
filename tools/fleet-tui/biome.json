@@ -1,5 +1,5 @@
 {
-  "$schema": "https://biomejs.dev/schemas/2.5.5/schema.json",
+  "$schema": "https://biomejs.dev/schemas/2.5.8/schema.json",
   "files": {
     "includes": ["src/**/*.ts", "!src/generated/**"]
   },
@@ -13,11 +13,11 @@
     "rules": {
       "recommended": true,
       "complexity": {
-        "noBannedTypes": "off"
+        "noBannedTypes": "error"
       },
       "style": {
         "noNestedTernary": "error",
-        "noNonNullAssertion": "off"
+        "noNonNullAssertion": "error"
       }
     }
   }

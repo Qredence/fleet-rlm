@@ -44,7 +44,7 @@ substitute for the opt-in live Daytona durability checks below.
 `make check` includes:
 
 - Ruff lint and format checks;
-- `ty` for `src/fleet_rlm`;
+- `ty` for `src`;
 - backend/script/LiteLLM/contract/end-to-end tests excluding live,
   benchmark, and database markers;
 - `make api-check` for OpenAPI and generated TUI HTTP types;
@@ -66,8 +66,8 @@ without duplicating Daytona coverage or E2E.
 
 ```bash
 uv run pytest tests/unit/backend tests/unit/scripts tests/contracts/backend tests/e2e -q
-uv run ruff check src/fleet_rlm tests scripts
-uv run ty check src/fleet_rlm
+uv run ruff check src tests scripts migrations
+uv run ty check src
 make api-check
 pnpm --dir tools/fleet-tui run test
 git diff --check
@@ -86,7 +86,8 @@ provider ownership.
 The TUI suite observes the application through an injected deterministic
 terminal. It covers strict stream state, live/durable ordering, atomic hydration,
 commands and Skill selection, cancellation, complete static rendering,
-10,000-row native scrollback, absence of mouse-mode sequences, and cleanup.
+alternate-screen follow-end scroll (`viewport-scroll.test.ts`), large-history
+render cost (`transcript.bench.ts`), and cleanup.
 
 ## Database gate
 

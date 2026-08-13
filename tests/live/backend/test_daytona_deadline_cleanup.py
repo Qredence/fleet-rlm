@@ -25,8 +25,7 @@ pytestmark = [pytest.mark.live_daytona, pytest.mark.timeout(300)]
 
 _TURN_TIMEOUT_SECONDS = 45
 _TIMEOUT_PROMPT = (
-    "Run exactly one Python code cell containing only print('deadline-probe'). "
-    "Do not call SUBMIT or any tools."
+    "Run exactly one Python code cell containing only print('deadline-probe'). Do not call SUBMIT or any tools."
 )
 
 
@@ -132,8 +131,7 @@ def test_daytona_deadline_cleanup_through_fastapi(
             assert any("timed out" in text.lower() for text in errors), errors
             assert not any(chunk.get("type") == "abort" for chunk in chunks)
             assert not any(
-                chunk.get("type") == "tool-output-available" and "propose_memory" in str(chunk)
-                for chunk in chunks
+                chunk.get("type") == "tool-output-available" and "propose_memory" in str(chunk) for chunk in chunks
             )
             _wait_for_release(resources, session_id, permits=settings.max_active_daytona_leases)
             sandbox_ids.update(resources._sandbox_ids)

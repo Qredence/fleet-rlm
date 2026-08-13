@@ -52,12 +52,13 @@ class FleetTuiApplicationImpl implements FleetTuiApplication {
   private started = false;
   private stopping?: Promise<void>;
   private lastCtrlCAt = 0;
-  private resolveFinished!: () => void;
-  private readonly finished = new Promise<void>((resolve) => {
-    this.resolveFinished = resolve;
-  });
+  private resolveFinished: () => void = () => undefined;
+  private readonly finished: Promise<void>;
 
   constructor(private readonly options: FleetTuiOptions) {
+    this.finished = new Promise((resolve) => {
+      this.resolveFinished = resolve;
+    });
     setTerminalColorScheme("dark");
     this.themeReady = initTheme(process.env.FLEET_TUI_THEME);
     this.terminal = options.terminal ?? new ProcessTerminal();
@@ -285,9 +286,10 @@ class FleetTuiApplicationImpl implements FleetTuiApplication {
 
   private persistDraftDebounced(): void {
     const store = this.options.draftStore;
+    const session = this.store.getState().session;
     const state = this.draftState();
-    if (!store || !state) return;
-    store.schedule(state ? this.store.getState().session!.id : "", state);
+    if (!store || !session || !state) return;
+    store.schedule(session.id, state);
   }
 
   private async persistDraft(): Promise<void> {

@@ -22,7 +22,6 @@ from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, SecretStr, field
 from fleet_rlm.snapshot_contract import validate_snapshot_name
 
 _CONFIG_PATH = Path(__file__).resolve().parents[2] / "config" / "fleet.toml"
-_PROFILE_ENVIRONMENT = "FLEET_CONFIG_PROFILE"  # deprecated; not used to select the active profile
 _ENVIRONMENT_NAME = re.compile(r"^[A-Z][A-Z0-9_]*$")
 
 
@@ -125,8 +124,12 @@ class Settings(BaseModel):
 
     Production callers must use :func:`load_runtime_settings`, which derives
     these values from the selected TOML policy and its explicit environment
-    references.  This model deliberately never consumes ambient ``FLEET_*``
-    settings: that would let stale deployment values override the policy.
+    references. Direct ``Settings(...)`` construction is for tests and
+    injected inventories: it accepts constructor values only.
+
+    This model never scans ambient environment variables, ``.env``, or secret
+    files for field names. That would let stale ``FLEET_*`` or unprefixed
+    values such as ``DATABASE_URL`` override the selected TOML policy.
     """
 
     model_config = ConfigDict(extra="ignore")

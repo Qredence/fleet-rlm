@@ -61,8 +61,7 @@ telemetry displays as `—` rather than an estimated zero.
 
 Use `/help` for commands. `/theme [name]` lists and switches the builtin
 (`dark`/`light`) or custom JSON themes (see below).
-
-Use `/help` for commands. `/rename <title>` names the current Session;
+`/rename <title>` names the current Session;
 `/sessions [title search]` opens the active Session selector. Switching Sessions
 preserves the unsent draft and pending Skill selections. `/skills` and `/skill`
 manage up to four exact Skill selections for the next accepted Turn; `/settings`
@@ -72,15 +71,15 @@ durable Run cancellation. Escape cancels an active Run while preserving the unse
 draft. Ctrl+C clears the editor and exits when pressed twice while empty;
 Ctrl+D keeps its forward-delete behavior and exits only from an empty editor.
 
-Attachments and Session Workspace files are first-class inputs/outputs of the
+Attachments and Workspace `files/` are first-class inputs/outputs of the
 backend Turn contract, so the TUI can move files in both directions:
 
 - `/attach <path>…` uploads local files through `POST /api/attachments` and pins
   them to the next Turn (up to eight); `/attach list` and `/attach clear` manage
   the pins. The RLM receives them as Attachment metadata on the Turn body.
-- `/files [path]` lists Session Workspace entries and `/file <path>` previews
-  text; `/file <path> save <local>` pages the full content and writes it
-  atomically to a local path.
+- `/files [path]` lists the Workspace `files/` root via `/api/files` and
+  `/file <path>` previews text; `/file <path> save <local>` pages the full
+  content and writes it atomically to a local path.
 - `/artifact <id> <local>` downloads a committed Artifact with content-length
   and SHA-256 verification and saves it atomically; `/artifacts` lists Artifact
   ids from the current conversation for copy-paste.
