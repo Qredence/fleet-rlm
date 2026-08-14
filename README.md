@@ -1,146 +1,152 @@
 # Fleet RLM
 
-Fleet RLM is an RLM-native backend built around FastAPI SSE, `dspy.RLM`, and
-Daytona Sandboxes with workspace-scoped durable Volumes. The canonical backend
-is `src/fleet_rlm/`; the maintained development client is the pi-tui workspace
-under `tools/fleet-tui/`.
+**Recursive language-model backend with live streaming, durable sessions, and sandboxed execution.**
 
-## Install and run
+Fleet RLM runs [DSPy](https://github.com/stanfordnlp/dspy) `dspy.RLM` behind a compact FastAPI + SSE API. Each turn executes in an isolated [Daytona](https://www.daytona.io/) sandbox with workspace-scoped volumes, host-mediated tools, and a terminal client that streams reasoning, code, and output as it happens.
+
+[![CircleCI](https://dl.circleci.com/status-badge/img/gh/Qredence/fleet-rlm/tree/main.svg?style=svg)](https://dl.circleci.com/status-badge/redirect/gh/Qredence/fleet-rlm/tree/main)
+[![PyPI](https://img.shields.io/pypi/v/fleet-rlm?style=flat-square&logo=pypi&logoColor=white)](https://pypi.org/project/fleet-rlm/)
+[![Python](https://img.shields.io/badge/python-3.11%20|%203.12%20|%203.13-3776AB?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
+[![License](https://img.shields.io/badge/license-MIT-2EA44F?style=flat-square)](LICENSE)
+[![Docs](https://img.shields.io/badge/docs-Read%20the%20Docs-2C9ED0?style=flat-square&logo=readthedocs&logoColor=white)](https://fleet-rlm.readthedocs.io/)
+[![DSPy](https://img.shields.io/badge/DSPy-3.3+-8B5CF6?style=flat-square)](https://dspy.ai/)
+[![FastAPI](https://img.shields.io/badge/FastAPI-SSE-009688?style=flat-square&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
+
+---
+
+## Why Fleet RLM
+
+- **RLM-native** — One fresh `dspy.RLM` per turn with Python REPL execution, native sub-LM queries, and optional recursive child RLMs.
+- **Operator-visible streaming** — Reasoning, tool calls, interpreter code, and stdout flow over SSE to the maintained [pi-tui terminal](tools/fleet-tui/).
+- **Durable by default** — Sessions, turns, attachments, artifacts, and workspace memory survive across runs.
+- **Sandboxed execution** — Daytona interpreters run in isolated sandboxes with bounded workspace volumes and host-mediated memory tools.
+- **Policy-driven runtime** — Non-secret behavior lives in `config/fleet.toml`; secrets stay in `FLEET_*` environment variables.
+
+## Quick start
+
+### 1. Install
 
 ```bash
+git clone https://github.com/Qredence/fleet-rlm.git
+cd fleet-rlm
 uv sync --all-extras --dev
-
-# supervised backend + pi-tui
-uv run fleet cli   # Daytona
-
-# backend only
-uv run fleet web
-uv run fleet-rlm serve-api --port 8000
 ```
 
-Select the non-secret runtime policy with `[config] default_profile` in
-`config/fleet.toml` or the TUI `/profiles` command, then restart Fleet.
-`fleet cli` requires a selected Daytona profile. A mismatch fails before runtime
-services start.
+You need **Node 22.19+** and **pnpm** for the terminal client (`fleet cli`).
 
-`fleet cli` requires Node 22.19+ and pnpm. It waits for backend readiness, writes
-backend output under `.fleet_rlm/logs/`, and stops the backend when pi-tui exits.
-Forward terminal arguments after `--`, for example:
+### 2. Configure credentials
 
-```bash
-uv run fleet cli -- --session <uuid>
-```
-
-The terminal uses an alternate-screen viewport and does not own a model, provider key, or
-Sandbox. See the [terminal guide](docs/how-to-guides/terminal-tui.md) and
-[configuration reference](docs/reference/configuration.md).
-
-### Daytona
-
-Daytona is the full Fleet runtime. The shipped `daytona-recursive` default uses
-an OpenCode Go API key and base URL, plus the Daytona key and database URL. The
-`daytona-managed` and benchmark profiles use the Databricks AI Gateway instead.
-See the [generated profile matrix](docs/reference/profile-matrix.md) for the
-policy-derived environment names and token limits. Initialize the configured
-database explicitly; startup never applies migrations automatically.
+Pick a runtime profile in `config/fleet.toml` (`default_profile`; shipped default is `daytona-recursive`), then export the provider and Daytona variables for that profile. See the [profile matrix](docs/reference/profile-matrix.md) for the exact `FLEET_*` names.
 
 ```bash
 export FLEET_DATABASE_URL='postgresql+asyncpg://...'
 export FLEET_DAYTONA_API_KEY='...'
 export FLEET_OPENCODE_GO_API_KEY='...'
 export FLEET_OPENCODE_GO_BASE_URL='https://<gateway>/v1'
-make daytona-snapshot-check
+
 uv run python scripts/db_init.py
+```
+
+Startup never applies migrations automatically — initialize the database explicitly before serving.
+
+### 3. Run
+
+**Supervised backend + terminal** (recommended for local development):
+
+```bash
+uv run fleet cli
+```
+
+**Backend only:**
+
+```bash
+uv run fleet web
+# or
 uv run fleet-rlm serve-api --port 8000
 ```
 
-The committed default is `default_profile = "daytona-recursive"`. Set
-`default_profile = "daytona"` for the non-recursive interactive profile, or
-select another documented profile before restarting Fleet.
-
-Use `uv run fleet doctor daytona` for an opt-in disposable provider, database,
-mount, and interpreter probe before diagnosing a Turn.
-
-## Backend API
-
-- `POST /api/sessions/{session_id}/turns` — local-scope idempotent SSE execution.
-- `/api/sessions` — Session CRUD and ordered committed Turn history.
-- `/api/attachments` — durable Attachment upload and metadata lookup.
-- `/api/artifacts/{artifact_id}` — committed metadata and verified content.
-- `GET /api/volume/tree` — Daytona-only bounded read-only logical Workspace
-  Volume paths.
-- `/api/skills` — bounded system Skill Card discovery for the five bundled
-  Skills.
-- `PUT /api/runs/{run_id}/cancellation` — durable Run cancellation.
-
-There is no `/api/v1`, WebSocket execution, optimization/evaluation API,
-runtime-admin API, caller-selected BYOK profile API, or public Artifact creation.
-The Volume tree is a read-only, process-local view rather than a general-purpose
-Sandbox filesystem browser.
-See the [HTTP API](docs/reference/http-api.md) and generated
-[OpenAPI](openapi.yaml).
-
-## Architecture
-
-One Turn validates its deterministic local scope, Attachments, and exact Skill
-selections before opening SSE. `TurnCoordinator` begins and prepares execution,
-`RLMRunner` runs one fresh native `dspy.RLM`, and `RunLifecycle.finish()` owns
-result snapshot handling, Artifact publication, and atomic Turn Commit. The
-coordinator then projects the terminal suffix and cleans up Run resources.
-
-The Root uses Python, native Sub-LM queries, or isolated child RLMs according to
-the cheapest-sufficient delegation ladder. Recursive children remain one native
-level deep; Root-only `rlm_query_batched` provides ordered, bounded sibling
-fan-out, and Root verifies and synthesizes their evidence before `SUBMIT`.
-
-Daytona Turns acquire a fresh Interpreter Lease and use Workspace Volume Scope.
-Each Turn receives a bounded newest-record digest of Workspace Memory in its
-`session_context`; the full `memory/MEMORIES.md` log remains behind the
-host-mediated Memory Tools. The RLM may append a record only when the user
-explicitly asks to remember something. Memory is immediate workspace state,
-not Session History or a Turn-commit record, and survives failed Runs and
-Sandbox replacement. Full Session history stays host-side behind the bounded
-`read_session_history` Tool.
-
-Read the [architecture](docs/architecture.md), [backend context](src/fleet_rlm/CONTEXT.md),
-and [codebase map](docs/reference/codebase-map.md).
-
-## Database
-
-Alembic owns live schema evolution through one canonical baseline. For an
-explicit disposable/live database:
+Resume a durable session:
 
 ```bash
-uv run alembic upgrade head
-uv run alembic check
+uv run fleet cli -- --session <session-uuid>
 ```
 
-Runtime startup never calls SQLAlchemy `create_all` for a live PostgreSQL
-database.
-
-## Validation and release evidence
+Before your first turn, verify Daytona connectivity:
 
 ```bash
-make check
-make check-security
-make build-release
-make check-release
-git diff --check
+uv run fleet doctor daytona
 ```
 
-`make api-sync` regenerates `openapi.yaml`,
-`tools/fleet-tui/src/generated/openapi.ts`, and
-`tools/fleet-tui/src/generated/fleet-ui-chunk-validation.ts`;
-`make api-check` verifies all three.
+> **Profile mismatch fails fast.** `fleet cli` requires a Daytona profile that matches your credentials. Select profiles with `/profiles` in the TUI or edit `default_profile`, then restart Fleet.
 
-Credentialed promotion additionally requires a passing receipt tied to the
-exact candidate SHA:
+## How a turn works
+
+```text
+Client  →  POST /api/sessions/{id}/turns  →  SSE stream
+                │
+                ├─ validate scope, attachments, skills
+                ├─ TurnCoordinator opens run + prepares context
+                ├─ RLMRunner executes one native dspy.RLM in Daytona
+                ├─ stream reasoning, tools, code, output events
+                └─ RunLifecycle commits result, artifacts, and turn history
+```
+
+The root agent can answer directly, delegate to sub-LMs, or fan out bounded recursive child RLMs. Session history stays host-side; workspace memory (`memory/MEMORIES.md`) persists across sandbox replacement.
+
+## Commands
+
+| Command | What it does |
+| --- | --- |
+| `uv run fleet cli` | Start backend + pi-tui terminal (Daytona profile required) |
+| `uv run fleet web` | Start backend only on port 8000 |
+| `uv run fleet doctor daytona` | Opt-in disposable probe of provider, DB, mounts, interpreter |
+| `uv run python scripts/db_init.py` | Initialize or upgrade database to Alembic head |
+| `make check` | Default validation lane (backend + TUI) |
+
+Backend logs for supervised runs: `.fleet_rlm/logs/`.
+
+## API surface
+
+| Endpoint | Purpose |
+| --- | --- |
+| `POST /api/sessions/{session_id}/turns` | Idempotent turn execution over SSE |
+| `/api/sessions` | Session CRUD and committed turn history |
+| `/api/attachments` | Durable attachment upload and lookup |
+| `/api/artifacts/{artifact_id}` | Committed artifact metadata and content |
+| `GET /api/volume/tree` | Bounded read-only workspace volume tree (Daytona) |
+| `/api/skills` | Bundled skill card discovery |
+| `PUT /api/runs/{run_id}/cancellation` | Durable run cancellation |
+
+Full contract: [HTTP API reference](docs/reference/http-api.md) and [OpenAPI](openapi.yaml).
+
+## Project layout
+
+| Path | Role |
+| --- | --- |
+| `src/fleet_rlm/` | Canonical Python backend |
+| `tools/fleet-tui/` | Maintained pi-tui terminal client |
+| `config/fleet.toml` | Runtime policy (profiles, limits, tracing) |
+| `migrations/` | Alembic schema |
+| `docs/` | Architecture, guides, and reference |
+
+## Development
 
 ```bash
-FLEET_LIVE=1 uv run python scripts/live_daytona_verify.py \
-  --output .scratch/release-ready-mvp/assets/daytona-mvp-proof.json
+make check                 # lint, typecheck, tests (default lane)
+make api-sync              # regenerate OpenAPI + TUI types
+make check-security        # security scans
 ```
 
-The verifier keeps credentials out of Sandboxes and writes only bounded local
-evidence. A historical pass does not promote a later SHA. See the
-[DSPy RLM and Daytona guide](docs/how-to-guides/dspy-integration.md).
+Contributing workflow and architecture rules: [CONTRIBUTING.md](CONTRIBUTING.md).
+
+Key docs:
+
+- [Architecture](docs/architecture.md)
+- [Configuration](docs/reference/configuration.md)
+- [Terminal UI guide](docs/how-to-guides/terminal-tui.md)
+- [DSPy + Daytona integration](docs/how-to-guides/dspy-integration.md)
+- [Testing strategy](docs/how-to-guides/testing-strategy.md)
+
+## License
+
+MIT — see [LICENSE](LICENSE).
