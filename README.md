@@ -30,9 +30,10 @@ Fleet RLM runs [DSPy](https://github.com/stanfordnlp/dspy) `dspy.RLM` behind a c
 git clone https://github.com/Qredence/fleet-rlm.git
 cd fleet-rlm
 uv sync --all-extras --dev
+pnpm --dir tools/fleet-tui install --frozen-lockfile
 ```
 
-You need **Node 22.19+** and **pnpm** for the terminal client (`fleet cli`).
+You need **Node 22.19+** and **pnpm** for the terminal client (`fleet cli`). `uv sync` does not install TUI dependencies; run the `pnpm` step above before `fleet cli`.
 
 ### 2. Configure credentials
 
