@@ -264,4 +264,9 @@ workflows:
           python_version: "3.12"
           python_tag: "py312"
           image: cimg/python:3.12.11
+      - python-compat:
+          name: python-compat-313
+          python_version: "3.13"
+          python_tag: "py313"
+          image: cimg/python:3.13.13
       - tui
