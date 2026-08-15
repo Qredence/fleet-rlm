@@ -323,7 +323,7 @@ def test_daytona_benchmark_profiles_use_compatible_models_without_cache_or_mlflo
             assert "reasoning_effort" not in llm
 
     assert document["profiles"]["daytona-bench"]["rlm"] == {"verbose": False}
-    assert document["profiles"]["daytona-bench-40"]["rlm"] == {"max_iterations": 40}
+    assert document["profiles"]["daytona-bench-40"]["rlm"] == {"max_iters": 40}
 
 
 def _select_profile(tmp_path: Path, *, profile: str, monkeypatch: pytest.MonkeyPatch) -> Path:
@@ -370,7 +370,7 @@ def test_daytona_benchmark_profiles_resolve_without_mlflow(
     assert settings.daytona_snapshot == "fleet-rlm-python313-v5"
     assert settings.root_llm_cache is False
     assert settings.sub_llm_cache is False
-    assert settings.rlm_max_iterations == iterations
+    assert settings.rlm_max_iters == iterations
     assert settings.mlflow_tracing_enabled is False
 
 
@@ -411,7 +411,7 @@ cache = false
 num_retries = 4
 temperature = 0.2
 [defaults.rlm]
-max_iterations = 3
+max_iters = 3
 max_llm_calls = 4
 max_output_chars = 500
 max_execution_output_chars = 250
@@ -451,7 +451,7 @@ def test_runtime_settings_deep_merge_profile_and_keep_role_policy(
 
     assert settings.run_environment == "daytona"
     assert settings.live_enabled is True
-    assert settings.rlm_max_iterations == 3
+    assert settings.rlm_max_iters == 3
     assert settings.max_url_bytes == 30
     assert settings.root_lm.model == "openai/root"
     assert settings.sub_lm.temperature == 0.2
@@ -510,7 +510,7 @@ def test_runtime_settings_ignores_stale_environment_policy_overrides(
     settings = config.load_runtime_settings()
 
     assert settings.root_model == "openai/root"
-    assert settings.rlm_max_iterations == 3
+    assert settings.rlm_max_iters == 3
 
 
 def test_runtime_settings_resolves_only_toml_declared_environment_values(

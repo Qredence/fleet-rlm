@@ -99,7 +99,7 @@ def build_local_storage_adapters(
 def rlm_options(settings: Settings) -> RLMOptions:
     """Project Settings onto the exact native DSPy RLM options."""
     return RLMOptions(
-        max_iterations=settings.rlm_max_iterations,
+        max_iters=settings.rlm_max_iters,
         max_llm_calls=settings.rlm_max_llm_calls,
         max_output_chars=settings.rlm_max_output_chars,
     )
@@ -116,7 +116,7 @@ def recursive_rlm_options(settings: Settings) -> RecursiveRLMOptions:
         enabled=settings.rlm_recursion_enabled,
         max_calls=settings.rlm_recursion_max_calls,
         max_prompt_chars=settings.rlm_recursion_max_prompt_chars,
-        child_max_iterations=settings.rlm_recursion_child_max_iterations,
+        child_max_iters=settings.rlm_recursion_child_max_iters,
         child_max_llm_calls=settings.rlm_recursion_child_max_llm_calls,
         child_max_output_chars=settings.rlm_recursion_child_max_output_chars,
         max_parallel_children=settings.rlm_recursion_max_parallel_children,

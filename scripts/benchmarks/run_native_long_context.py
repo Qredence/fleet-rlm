@@ -264,7 +264,7 @@ def _rlm(
     """
     rlm = RLMFactory(verbose=False).create(
         models=RLMModelBundle(root_lm=_root_lm(), sub_lm=sub_lm),
-        options=RLMOptions(max_iterations=len(codes), max_llm_calls=4, max_output_chars=2_000),
+        options=RLMOptions(max_iters=len(codes), max_llm_calls=4, max_output_chars=2_000),
         tools=tools,
         signature=NativeLongContextSignature,
     )

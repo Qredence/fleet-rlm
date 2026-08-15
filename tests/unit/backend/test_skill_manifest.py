@@ -203,3 +203,27 @@ def test_human_catalog_documentation_matches_current_runtime_cards() -> None:
     readme = Path("src/fleet_rlm/skills/bundled/README.md").read_text(encoding="utf-8")
     for card in catalog.cards():
         assert f"| `{card.name}` | {card.version} |" in readme
+
+
+def test_bundle_parser_ignores_installer_bytecode_artifacts(tmp_path: Path) -> None:
+    """pip-installed bundles gain __pycache__ pyc siblings that are not bundle content."""
+    bundle = tmp_path / "bytecode-skill"
+    bundle.mkdir()
+    (bundle / "SKILL.md").write_text(
+        _document(resources="resources:\n  - path: scripts/tool.py\n    media_type: text/x-python\n"),
+        encoding="utf-8",
+    )
+    scripts = bundle / "scripts"
+    scripts.mkdir()
+    (scripts / "tool.py").write_text("def run():\n    return 'ok'\n", encoding="utf-8")
+    pycache = scripts / "__pycache__"
+    pycache.mkdir()
+    (pycache / "tool.cpython-312.pyc").write_bytes(b"\x00\x00\x00\x00\x00\x00\x00\x00")
+    (pycache / "other.cpython-312.pyc").write_bytes(b"\x00\x00\x00\x00\x00\x00\x00\x00")
+
+    manifest = parse_bundled_skill_manifest(bundle)
+    assert [resource.path for resource in manifest.resources] == ["scripts/tool.py"]
+
+    (bundle / "notes.md").write_text("undeclared", encoding="utf-8")
+    with pytest.raises(ValueError, match="undeclared resource bodies"):
+        parse_bundled_skill_manifest(bundle)

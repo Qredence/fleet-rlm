@@ -2,7 +2,7 @@
 
 All notable changes to this project are documented in this file.
 
-## [Unreleased]
+## [0.7.0] - 2026-08-15
 
 ### Added
 
@@ -16,16 +16,28 @@ All notable changes to this project are documented in this file.
   enabled; operators can correlate Turns to traces without new SSE chunk types or
   Turn-path coupling. The shipped TOML policy enables local tracing for interactive
   profiles and keeps benchmark profiles off; export remains fail-soft.
+- **Change:** Added the credentialed Daytona-backed Fleet RLM MVP proof,
+  bounded receipt validation, strict cleanup, and release evidence.
+  **Outcome:** The backend MVP can be promoted only after the live proof,
+  local release gates, and human review all pass.
 
 ### Changed
 
 - **Change:** Migrated the native Fleet RLM integration to DSPy `3.3.0`,
-  preserving Fleet's `max_iterations` configuration while adapting
-  construction and caller-owned interpreter invocation to DSPy's final contract.
+  adapting construction and caller-owned interpreter invocation to DSPy's final
+  contract.
   **Outcome:** Native Turns, live per-iteration observation, recursive children,
   and deterministic test composition retain their event and cleanup behavior
   while using the exact DSPy `3.3.0` runtime; Fleet no longer projects a second
   token-level `dspy.streamify` protocol.
+
+- **Change:** Adopted DSPy 3.3.x's `max_iters` spelling end-to-end. The legacy
+  Fleet iteration-budget spelling (TOML `rlm.*` keys, `Settings.rlm_*`,
+  `RLMOptions.*`, settings-API paths, and the MLflow `RLM.execute` span input
+  key) is removed with no alias.
+  **Outcome:** `RLMOptions.max_iters` passes verbatim to
+  `dspy.RLM(max_iters=...)` with no adapter layer; budgets are unchanged and
+  policies using the old key fail validation.
 
 - **Change:** Bumped `fastapi[standard]` from `==0.139.0` to `==0.141.1`
   (latest PyPI release, Jul 29 2026) along with `fastapi-cli` 0.0.24 -> 0.0.32,
@@ -58,15 +70,6 @@ All notable changes to this project are documented in this file.
   **Outcome:** Models gain one bounded recovery step on repetitive loops before
   the Turn is stopped, reducing spurious terminal failures while retaining the
   hard stop for genuine no-progress loops.
-
-## [0.7.0] - 2026-07-17
-
-### Added
-
-- **Change:** Added the credentialed Daytona-backed Fleet RLM MVP proof,
-  bounded receipt validation, strict cleanup, and release evidence.
-  **Outcome:** The backend MVP can be promoted only after the live proof,
-  local release gates, and human review all pass.
 
 ## [0.6.2] - 2026-06-29
 
@@ -1338,6 +1341,7 @@ All notable changes to this project are documented in this file.
 - Removed checked-in `__pycache__` directories under `src/fleet_rlm/`.
 - Moved non-runtime memory-topology notes out of package source and into docs.
 
+[0.7.0]: https://github.com/Qredence/fleet-rlm/compare/v0.6.2...v0.7.0
 [0.6.2]: https://github.com/Qredence/fleet-rlm/compare/v0.6.0...v0.6.2
 [0.6.0]: https://github.com/Qredence/fleet-rlm/compare/v0.5.50...v0.6.0
 [0.5.50]: https://github.com/Qredence/fleet-rlm/compare/v0.5.40...v0.5.50
