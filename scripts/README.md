@@ -26,6 +26,7 @@
 | `daytona_snapshot.py` | Explicitly create or check the immutable Fleet Daytona Snapshot |
 | `codex_feedback_loop.py` | Run the local Codex feedback-loop probes |
 | `deployment_observability.py` | Inspect deployment observability inputs |
+| `circleci_trigger_release.py` | Trigger and await the GitHub Actions PyPI release from CircleCI |
 | `validate_mlflow_tracing.py` | Emit and validate a local or Managed Databricks trace using the selected Fleet TOML policy |
 | `benchmarks/rlm_eval_dataset.py` | Manage the UC-backed v2 evaluation dataset (static records + tagged production traces with expectations) |
 | `benchmarks/enable_monitoring.py` | Start, inspect, and stop server-side production monitoring scorers over UC-ingested traces |
