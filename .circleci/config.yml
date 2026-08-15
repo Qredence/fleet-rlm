@@ -5,7 +5,7 @@ executors:
     docker:
       # The -node variant adds Node.js so openapi-typescript (npx) can run in
       # the same job as the python gates (api-check regenerates TUI types).
-      - image: cimg/python:3.13.13-node
+      - image: cimg/python:3.13.15-node
     working_directory: ~/project
     environment:
       UV_CACHE_DIR: ~/.cache/uv
@@ -246,6 +246,12 @@ jobs:
             pnpm --dir tools/fleet-tui run typecheck
             pnpm --dir tools/fleet-tui test
 
+# Trigger model: the project is set to "Only build pull requests", so regular
+# branch pushes stay unbuilt (credit savings). `main` is added to the project's
+# pr_only_branch_overrides, so every merge to main re-runs this full suite at
+# the merge SHA (replacing the former manual API-trigger certification). Tags
+# intentionally do not build here — the GitHub Actions release workflow owns
+# releases.
 workflows:
   ci:
     jobs:
@@ -258,10 +264,10 @@ workflows:
           name: python-compat-311
           python_version: "3.11"
           python_tag: "py311"
-          image: cimg/python:3.11.13
+          image: cimg/python:3.11.16
       - python-compat:
           name: python-compat-312
           python_version: "3.12"
           python_tag: "py312"
-          image: cimg/python:3.12.11
+          image: cimg/python:3.12.14
       - tui
