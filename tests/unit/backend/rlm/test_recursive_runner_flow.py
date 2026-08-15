@@ -66,7 +66,7 @@ async def test_root_child_root_flow_preserves_parent_repl_and_typed_submit() -> 
         ),
         execution=ExecutionRuntime(
             models=RLMModelBundle(root, sub),
-            options=RLMOptions(max_iterations=4, max_llm_calls=4),
+            options=RLMOptions(max_iters=4, max_llm_calls=4),
             deadline=time.monotonic() + 30,
             interpreter=DaytonaCodeInterpreter(backend=InProcessInterpreterBackend()),
             cancellation_requested=not_cancelled,
@@ -170,7 +170,7 @@ async def test_runner_rejects_recursive_tool_after_authority_revocation() -> Non
         ),
         execution=ExecutionRuntime(
             models=RLMModelBundle(root, sub),
-            options=RLMOptions(max_iterations=2, max_llm_calls=2),
+            options=RLMOptions(max_iters=2, max_llm_calls=2),
             deadline=time.monotonic() + 30,
             interpreter=DaytonaCodeInterpreter(backend=InProcessInterpreterBackend()),
             cancellation_requested=not_cancelled,
@@ -225,7 +225,7 @@ async def test_normal_daytona_policy_omits_recursive_tool_and_guidance() -> None
         ),
         execution=ExecutionRuntime(
             models=RLMModelBundle(root, sub),
-            options=RLMOptions(max_iterations=2, max_llm_calls=2),
+            options=RLMOptions(max_iters=2, max_llm_calls=2),
             deadline=time.monotonic() + 30,
             interpreter=DaytonaCodeInterpreter(backend=InProcessInterpreterBackend()),
             cancellation_requested=not_cancelled,
@@ -293,7 +293,7 @@ async def test_failed_child_cleanup_prevents_successful_root_outcome() -> None:
         ),
         execution=ExecutionRuntime(
             models=RLMModelBundle(root, sub),
-            options=RLMOptions(max_iterations=4, max_llm_calls=4),
+            options=RLMOptions(max_iters=4, max_llm_calls=4),
             deadline=time.monotonic() + 30,
             interpreter=DaytonaCodeInterpreter(backend=InProcessInterpreterBackend()),
             cancellation_requested=not_cancelled,
@@ -367,7 +367,7 @@ async def test_runner_wait_owned_retains_pending_recursive_workers_until_child_l
         ),
         execution=ExecutionRuntime(
             models=RLMModelBundle(root, sub),
-            options=RLMOptions(max_iterations=4, max_llm_calls=4),
+            options=RLMOptions(max_iters=4, max_llm_calls=4),
             deadline=time.monotonic() + 0.15,
             interpreter=DaytonaCodeInterpreter(backend=InProcessInterpreterBackend()),
             cancellation_requested=not_cancelled,

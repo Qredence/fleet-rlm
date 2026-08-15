@@ -199,7 +199,7 @@ class Settings(BaseModel):
         le=8,
         description="Daytona Admission bound for process-wide acquiring or active Interpreter Leases",
     )
-    rlm_max_iterations: int = Field(default=20, gt=0)
+    rlm_max_iters: int = Field(default=20, gt=0)
     rlm_max_llm_calls: int = Field(default=50, gt=0)
     rlm_max_output_chars: int = Field(default=10_000, gt=0)
     rlm_max_execution_output_chars: int = Field(default=4_000, gt=0)
@@ -207,7 +207,7 @@ class Settings(BaseModel):
     rlm_recursion_enabled: bool = False
     rlm_recursion_max_calls: int = Field(default=4, gt=0)
     rlm_recursion_max_prompt_chars: int = Field(default=50_000, gt=0)
-    rlm_recursion_child_max_iterations: int = Field(default=8, gt=0)
+    rlm_recursion_child_max_iters: int = Field(default=8, gt=0)
     rlm_recursion_child_max_llm_calls: int = Field(default=12, gt=0)
     rlm_recursion_child_max_output_chars: int = Field(default=4_000, gt=0)
     rlm_recursion_max_parallel_children: int = Field(default=2, gt=0, le=8)
@@ -365,7 +365,7 @@ _TABLE_KEYS: dict[str, frozenset[str]] = {
     "llm": frozenset({"root", "sub"}),
     "rlm": frozenset(
         {
-            "max_iterations",
+            "max_iters",
             "max_llm_calls",
             "max_output_chars",
             "max_execution_output_chars",
@@ -373,7 +373,7 @@ _TABLE_KEYS: dict[str, frozenset[str]] = {
             "recursion_enabled",
             "recursion_max_calls",
             "recursion_max_prompt_chars",
-            "recursion_child_max_iterations",
+            "recursion_child_max_iters",
             "recursion_child_max_llm_calls",
             "recursion_child_max_output_chars",
             "recursion_max_parallel_children",
@@ -575,7 +575,7 @@ def _flatten_policy(policy: Mapping[str, Any]) -> dict[str, Any]:
         "max_active_daytona_leases": runtime.get("max_active_daytona_leases"),
         "run_heartbeat_seconds": runtime.get("heartbeat_seconds"),
         "run_stale_after_seconds": runtime.get("stale_after_seconds"),
-        "rlm_max_iterations": rlm.get("max_iterations"),
+        "rlm_max_iters": rlm.get("max_iters"),
         "rlm_max_llm_calls": rlm.get("max_llm_calls"),
         "rlm_max_output_chars": rlm.get("max_output_chars"),
         "rlm_max_execution_output_chars": rlm.get("max_execution_output_chars"),
@@ -583,7 +583,7 @@ def _flatten_policy(policy: Mapping[str, Any]) -> dict[str, Any]:
         "rlm_recursion_enabled": rlm.get("recursion_enabled", False),
         "rlm_recursion_max_calls": rlm.get("recursion_max_calls", 4),
         "rlm_recursion_max_prompt_chars": rlm.get("recursion_max_prompt_chars", 50_000),
-        "rlm_recursion_child_max_iterations": rlm.get("recursion_child_max_iterations", 8),
+        "rlm_recursion_child_max_iters": rlm.get("recursion_child_max_iters", 8),
         "rlm_recursion_child_max_llm_calls": rlm.get("recursion_child_max_llm_calls", 12),
         "rlm_recursion_child_max_output_chars": rlm.get("recursion_child_max_output_chars", 4_000),
         "rlm_recursion_max_parallel_children": rlm.get("recursion_max_parallel_children", 2),
@@ -940,7 +940,7 @@ def redacted_policy_summary(settings: Settings, *, profile: str) -> str:
     return (
         f"profile={profile} environment={settings.run_environment} "
         f"root_model={root.model} sub_model={sub.model} "
-        f"rlm_iterations={settings.rlm_max_iterations} "
+        f"rlm_iters={settings.rlm_max_iters} "
         f"rlm_llm_calls={settings.rlm_max_llm_calls} "
         f"rlm_verbose={settings.rlm_verbose} log_level={settings.log_level} "
         f"volume={settings.volume_name} "

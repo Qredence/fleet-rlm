@@ -39,7 +39,7 @@ def test_settings_policy_is_loopback_only_and_revision_checked(monkeypatch, tmp_
             json={
                 "revision": body["revision"],
                 "scope": "defaults",
-                "path": "rlm.max_iterations",
+                "path": "rlm.max_iters",
                 "value": 21,
             },
         )
@@ -51,7 +51,7 @@ def test_settings_policy_is_loopback_only_and_revision_checked(monkeypatch, tmp_
             json={
                 "revision": body["revision"],
                 "scope": "defaults",
-                "path": "rlm.max_iterations",
+                "path": "rlm.max_iters",
                 "value": 22,
             },
         )

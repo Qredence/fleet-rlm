@@ -95,9 +95,11 @@ clients cannot provide models, Signatures, or executable capabilities.
 
 ## DSPy 3.3.x ownership contract
 
-Fleet keeps the public configuration key `max_iterations`. The adapter in
-`rlm.dspy_contract` maps that key to DSPy 3.3.x's constructor parameter
-`max_iters`; no other Fleet configuration or public API uses the DSPy spelling.
+Fleet uses DSPy 3.3.x's `max_iters` spelling end-to-end. The public
+configuration key is `rlm.max_iters` (`Settings.rlm_max_iters`), and
+`RLMOptions.max_iters` is passed directly to `dspy.RLM(max_iters=...)` in
+`rlm.dspy_contract` with no adapter or alias. Policies that still set the
+legacy pre-3.3 iteration-budget key fail validation.
 Native RLM construction does not accept an interpreter. It installs a
 fail-closed `interpreter_factory` so an invocation without a caller-owned
 interpreter becomes a bounded `RLMConfigError` rather than silently creating a

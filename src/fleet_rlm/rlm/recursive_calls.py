@@ -51,7 +51,7 @@ class RecursiveRLMOptions:
     enabled: bool = False
     max_calls: int = 4
     max_prompt_chars: int = 50_000
-    child_max_iterations: int = 8
+    child_max_iters: int = 8
     child_max_llm_calls: int = 12
     child_max_output_chars: int = 4_000
     max_parallel_children: int = 2
@@ -60,7 +60,7 @@ class RecursiveRLMOptions:
         for name, value in (
             ("max_calls", self.max_calls),
             ("max_prompt_chars", self.max_prompt_chars),
-            ("child_max_iterations", self.child_max_iterations),
+            ("child_max_iters", self.child_max_iters),
             ("child_max_llm_calls", self.child_max_llm_calls),
             ("child_max_output_chars", self.child_max_output_chars),
             ("max_parallel_children", self.max_parallel_children),
@@ -552,7 +552,7 @@ class RecursiveRLMExecutor:
         child = build_native_rlm(
             signature=RecursiveSubtaskSignature,
             options=RLMOptions(
-                max_iterations=self._options.child_max_iterations,
+                max_iters=self._options.child_max_iters,
                 max_llm_calls=self._options.child_max_llm_calls,
                 max_output_chars=self._options.child_max_output_chars,
             ),

@@ -87,7 +87,7 @@ async def test_native_rlm_retrieves_older_content_absent_from_initial_kwargs() -
         ),
         execution=ExecutionRuntime(
             models=SimpleNamespace(root_lm=object(), sub_lm=object()),
-            options=RLMOptions(max_iterations=1),
+            options=RLMOptions(max_iters=1),
             deadline=asyncio.get_running_loop().time() + 10,
             interpreter=DaytonaCodeInterpreter(backend=InProcessInterpreterBackend()),
             cancellation_requested=not_cancelled,
@@ -186,7 +186,7 @@ async def test_native_rlm_continues_history_across_truncated_pages() -> None:
         ),
         execution=ExecutionRuntime(
             models=SimpleNamespace(root_lm=object(), sub_lm=object()),
-            options=RLMOptions(max_iterations=1),
+            options=RLMOptions(max_iters=1),
             deadline=asyncio.get_running_loop().time() + 10,
             interpreter=DaytonaCodeInterpreter(backend=InProcessInterpreterBackend()),
             cancellation_requested=not_cancelled,

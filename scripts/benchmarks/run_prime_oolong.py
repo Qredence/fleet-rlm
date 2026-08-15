@@ -439,14 +439,14 @@ def _active_policy_metadata(payload: Mapping[str, Any]) -> tuple[str, str, str, 
     }
     root_model = values.get("llm.root.model")
     sub_model = values.get("llm.sub.model")
-    max_iterations = values.get("rlm.max_iterations")
+    max_iters = values.get("rlm.max_iters")
     if not isinstance(root_model, str) or not root_model:
         raise PrimeOolongError("Fleet active profile does not identify the root model")
     if not isinstance(sub_model, str) or not sub_model:
         raise PrimeOolongError("Fleet active profile does not identify the Sub model")
-    if not isinstance(max_iterations, int) or isinstance(max_iterations, bool) or max_iterations < 1:
+    if not isinstance(max_iters, int) or isinstance(max_iters, bool) or max_iters < 1:
         raise PrimeOolongError("Fleet active profile does not identify the RLM iteration ceiling")
-    return profile, root_model, sub_model, max_iterations
+    return profile, root_model, sub_model, max_iters
 
 
 async def _server_policy_metadata(
@@ -462,10 +462,10 @@ async def _server_policy_metadata(
         raise PrimeOolongError("Fleet active benchmark policy could not be verified") from exc
     if not isinstance(payload, Mapping):
         raise PrimeOolongError("Fleet settings response is invalid")
-    profile, root_model, sub_model, max_iterations = _active_policy_metadata(payload)
+    profile, root_model, sub_model, max_iters = _active_policy_metadata(payload)
     if profile != expected_profile:
         raise PrimeOolongError(f"expected Fleet profile {expected_profile!r}, but the live server uses {profile!r}")
-    return profile, root_model, sub_model, max_iterations
+    return profile, root_model, sub_model, max_iters
 
 
 async def _upload_context(client: httpx.AsyncClient, context: str, context_sha256: str) -> str:

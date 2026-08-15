@@ -24,12 +24,20 @@ All notable changes to this project are documented in this file.
 ### Changed
 
 - **Change:** Migrated the native Fleet RLM integration to DSPy `3.3.0`,
-  preserving Fleet's `max_iterations` configuration while adapting
-  construction and caller-owned interpreter invocation to DSPy's final contract.
+  adapting construction and caller-owned interpreter invocation to DSPy's final
+  contract.
   **Outcome:** Native Turns, live per-iteration observation, recursive children,
   and deterministic test composition retain their event and cleanup behavior
   while using the exact DSPy `3.3.0` runtime; Fleet no longer projects a second
   token-level `dspy.streamify` protocol.
+
+- **Change:** Adopted DSPy 3.3.x's `max_iters` spelling end-to-end. The legacy
+  Fleet iteration-budget spelling (TOML `rlm.*` keys, `Settings.rlm_*`,
+  `RLMOptions.*`, settings-API paths, and the MLflow `RLM.execute` span input
+  key) is removed with no alias.
+  **Outcome:** `RLMOptions.max_iters` passes verbatim to
+  `dspy.RLM(max_iters=...)` with no adapter layer; budgets are unchanged and
+  policies using the old key fail validation.
 
 - **Change:** Bumped `fastapi[standard]` from `==0.139.0` to `==0.141.1`
   (latest PyPI release, Jul 29 2026) along with `fastapi-cli` 0.0.24 -> 0.0.32,

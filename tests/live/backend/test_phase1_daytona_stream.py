@@ -206,7 +206,7 @@ def _load_live_settings(tmp_path: Path) -> Settings:
         update={
             "database_url": database_url,
             "volume_name": f"fleet-rlm-phase1-stream-{uuid4()}",
-            "rlm_max_iterations": 5,
+            "rlm_max_iters": 5,
             "rlm_max_llm_calls": 8,
             "turn_timeout_seconds": 840,
         }
