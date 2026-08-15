@@ -5,7 +5,11 @@ executors:
     docker:
       # The -node variant adds Node.js so openapi-typescript (npx) can run in
       # the same job as the python gates (api-check regenerates TUI types).
-      - image: cimg/python:3.13.15-node
+      # The 3.13 patch must match .python-version: pyenv resolves that file for
+      # `uv run` steps that don't pass --python, so a mismatched patch fails
+      # with "pyenv: version '3.13.x' is not installed". The 3.11/3.12 compat
+      # jobs below pass --python explicitly and are independent of that pin.
+      - image: cimg/python:3.13.13-node
     working_directory: ~/project
     environment:
       UV_CACHE_DIR: ~/.cache/uv
