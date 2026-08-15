@@ -5,6 +5,10 @@ repo_root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 cd "$repo_root"
 
 branch="$(git branch --show-current)"
+if [[ -z "$branch" ]]; then
+  echo "ERROR: Unable to determine current branch (detached HEAD?); use a feature branch based on origin/main." >&2
+  exit 1
+fi
 if [[ "$branch" == "main" || "$branch" == "master" ]]; then
   echo "ERROR: Codex Cloud must not run from $branch; use a feature branch based on origin/main." >&2
   exit 1
