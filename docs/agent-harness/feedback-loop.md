@@ -13,8 +13,10 @@ The safe loop requires no live Daytona or LLM credentials.
 
 ## Codex Cloud Loop
 
-Cloud tasks for this repository start from `dev-0.7`; never select `main` or
-`master`. The environment setup script is
+Cloud tasks for this repository start from a feature branch based on
+`origin/main`; never run directly on `main` or `master` — the protected
+branch rejects direct pushes, so changes land through pull requests into
+`main`. The environment setup script is
 `.codex/workspace-bootstrap.zsh`, and cached-container resumes use
 `.codex/maintenance.zsh`. Both scripts install the locked Python and TUI
 dependencies and enforce the branch guard.
