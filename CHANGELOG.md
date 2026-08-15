@@ -2,7 +2,7 @@
 
 All notable changes to this project are documented in this file.
 
-## [Unreleased]
+## [0.7.0] - 2026-08-15
 
 ### Added
 
@@ -16,6 +16,10 @@ All notable changes to this project are documented in this file.
   enabled; operators can correlate Turns to traces without new SSE chunk types or
   Turn-path coupling. The shipped TOML policy enables local tracing for interactive
   profiles and keeps benchmark profiles off; export remains fail-soft.
+- **Change:** Added the credentialed Daytona-backed Fleet RLM MVP proof,
+  bounded receipt validation, strict cleanup, and release evidence.
+  **Outcome:** The backend MVP can be promoted only after the live proof,
+  local release gates, and human review all pass.
 
 ### Changed
 
@@ -58,15 +62,6 @@ All notable changes to this project are documented in this file.
   **Outcome:** Models gain one bounded recovery step on repetitive loops before
   the Turn is stopped, reducing spurious terminal failures while retaining the
   hard stop for genuine no-progress loops.
-
-## [0.7.0] - 2026-07-17
-
-### Added
-
-- **Change:** Added the credentialed Daytona-backed Fleet RLM MVP proof,
-  bounded receipt validation, strict cleanup, and release evidence.
-  **Outcome:** The backend MVP can be promoted only after the live proof,
-  local release gates, and human review all pass.
 
 ## [0.6.2] - 2026-06-29
 
@@ -1338,6 +1333,7 @@ All notable changes to this project are documented in this file.
 - Removed checked-in `__pycache__` directories under `src/fleet_rlm/`.
 - Moved non-runtime memory-topology notes out of package source and into docs.
 
+[0.7.0]: https://github.com/Qredence/fleet-rlm/compare/v0.6.2...v0.7.0
 [0.6.2]: https://github.com/Qredence/fleet-rlm/compare/v0.6.0...v0.6.2
 [0.6.0]: https://github.com/Qredence/fleet-rlm/compare/v0.5.50...v0.6.0
 [0.5.50]: https://github.com/Qredence/fleet-rlm/compare/v0.5.40...v0.5.50
