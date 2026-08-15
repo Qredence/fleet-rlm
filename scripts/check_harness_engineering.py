@@ -165,7 +165,6 @@ class HarnessChecker:
             ".pre-commit-config.yaml",
             ".circleci/config.yml",
             ".chunk/config.json",
-            ".fastapicloudignore",
             ".codex/config.toml",
             ".codex/environments/environment.toml",
         )
