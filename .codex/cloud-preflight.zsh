@@ -6,21 +6,21 @@ cd "$repo_root"
 
 branch="$(git branch --show-current)"
 if [[ "$branch" == "main" || "$branch" == "master" ]]; then
-  echo "ERROR: Codex Cloud must not run from $branch; use dev-0.7." >&2
+  echo "ERROR: Codex Cloud must not run from $branch; use a feature branch based on origin/main." >&2
   exit 1
 fi
 
-if ! git show-ref --verify --quiet refs/remotes/origin/dev-0.7; then
-  echo "ERROR: origin/dev-0.7 is unavailable; cannot verify the Cloud base." >&2
+if ! git show-ref --verify --quiet refs/remotes/origin/main; then
+  echo "ERROR: origin/main is unavailable; cannot verify the Cloud base." >&2
   exit 1
 fi
 
-if ! git merge-base --is-ancestor origin/dev-0.7 HEAD; then
-  echo "ERROR: HEAD is not based on origin/dev-0.7." >&2
+if ! git merge-base --is-ancestor origin/main HEAD; then
+  echo "ERROR: HEAD is not based on origin/main." >&2
   exit 1
 fi
 
-echo "Codex Cloud branch guard: current=$branch base=origin/dev-0.7"
+echo "Codex Cloud branch guard: current=$branch base=origin/main"
 git status --short --branch --untracked-files=all
 
 if (( $# == 0 )); then

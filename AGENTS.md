@@ -11,7 +11,7 @@
 - Do not hand-edit generated/synced artifacts; use the commands listed below.
 - Do not mutate user-level Codex config. Ask before deploy, push, migrations, or deletion.
 
-For the current Codex Cloud delivery sequence, use `dev-0.7` as the base branch and never use `main` or `master`. Cloud tasks may use limited internet and explicitly authorized apps/connectors; keep credentials and tokens out of the repository.
+For the current delivery sequence, base all work on `origin/main`; `main` is a protected branch whose required status checks reject direct pushes, so land changes through pull requests into `main` and never push to `main` or `master` directly. Cloud tasks may use limited internet and explicitly authorized apps/connectors; keep credentials and tokens out of the repository.
 
 ## Reading Path
 
