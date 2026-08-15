@@ -274,7 +274,7 @@ describe("FleetApiClient", () => {
     await client.updateSettings({
       revision: "a".repeat(64),
       scope: "defaults",
-      path: "rlm.max_iterations",
+      path: "rlm.max_iters",
       value: 21,
     });
 
@@ -291,7 +291,7 @@ describe("FleetApiClient", () => {
         body: JSON.stringify({
           revision: "a".repeat(64),
           scope: "defaults",
-          path: "rlm.max_iterations",
+          path: "rlm.max_iters",
           value: 21,
         }),
       }),

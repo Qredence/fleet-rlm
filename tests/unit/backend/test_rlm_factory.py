@@ -95,7 +95,7 @@ def test_invalid_options_fail_before_construction() -> None:
     from fleet_rlm.rlm.errors import RLMConfigError
 
     with pytest.raises(RLMConfigError):
-        RLMOptions(max_iterations=0)
+        RLMOptions(max_iters=0)
     with pytest.raises(RLMConfigError):
         RLMOptions(max_llm_calls=-1)
     with pytest.raises(RLMConfigError):
@@ -113,7 +113,7 @@ def test_factory_passes_explicit_constructor_kwargs() -> None:
     root = MagicMock(name="root_lm")
     sub = MagicMock(name="sub_lm")
     options = RLMOptions(
-        max_iterations=7,
+        max_iters=7,
         max_llm_calls=11,
         max_output_chars=2048,
     )

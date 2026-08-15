@@ -58,16 +58,16 @@ def test_policy_update_preserves_comments_and_validates_all_profiles(tmp_path: P
 
     after = service.update(
         scope="defaults",
-        path="rlm.max_iterations",
+        path="rlm.max_iters",
         value=21,
         revision=before.revision,
     )
 
-    assert _field(after, "defaults", "rlm.max_iterations")["value"] == 21
+    assert _field(after, "defaults", "rlm.max_iters")["value"] == 21
     content = policy.read_text(encoding="utf-8")
     assert "# Prime Oolong mechanics profile" in content
-    assert "max_iterations = 21" in content
-    assert _field(after, "daytona", "rlm.max_iterations")["value"] == 21
+    assert "max_iters = 21" in content
+    assert _field(after, "daytona", "rlm.max_iters")["value"] == 21
 
 
 def test_policy_can_add_a_profile_override_for_an_inherited_setting(tmp_path: Path) -> None:
@@ -76,13 +76,13 @@ def test_policy_can_add_a_profile_override_for_an_inherited_setting(tmp_path: Pa
 
     service.update(
         scope="daytona-bench",
-        path="rlm.max_iterations",
+        path="rlm.max_iters",
         value=12,
         revision=before.revision,
     )
 
     assert "[profiles.daytona-bench.rlm]" in policy.read_text(encoding="utf-8")
-    assert _field(service.read(), "daytona-bench", "rlm.max_iterations")["value"] == 12
+    assert _field(service.read(), "daytona-bench", "rlm.max_iters")["value"] == 12
 
 
 def test_policy_can_disable_live_execution_for_all_profiles(tmp_path: Path) -> None:
@@ -103,10 +103,10 @@ def test_policy_can_disable_live_execution_for_all_profiles(tmp_path: Path) -> N
 def test_policy_rejects_stale_revision_and_invalid_database_environment_reference(tmp_path: Path) -> None:
     service, _ = _service(tmp_path)
     before = service.read()
-    service.update(scope="defaults", path="rlm.max_iterations", value=21, revision=before.revision)
+    service.update(scope="defaults", path="rlm.max_iters", value=21, revision=before.revision)
 
     with pytest.raises(PolicyConflictError):
-        service.update(scope="defaults", path="rlm.max_iterations", value=22, revision=before.revision)
+        service.update(scope="defaults", path="rlm.max_iters", value=22, revision=before.revision)
 
     current = service.read()
     with pytest.raises(FleetConfigurationError, match="uppercase environment variable"):

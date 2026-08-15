@@ -265,7 +265,7 @@ def _lifecycle(factory: _LifecycleFactory, proof: object) -> StrictDaytonaEvalua
         policy=OptimizationSandboxPolicy("fleet-test-v1", ("gateway.example.test",)),
         proof=proof,
         models=StrictEvaluationModels(root_lm=object(), sub_lm=object()),  # type: ignore[arg-type]
-        options=RLMOptions(max_iterations=2, max_llm_calls=3, max_output_chars=100),
+        options=RLMOptions(max_iters=2, max_llm_calls=3, max_output_chars=100),
     )
 
 
@@ -295,7 +295,7 @@ def test_lifecycle_rejects_proof_for_a_different_domain_policy() -> None:
             policy=OptimizationSandboxPolicy("fleet-test-v1", ("other-gateway.example.test",)),
             proof=_proof(),
             models=StrictEvaluationModels(root_lm=object(), sub_lm=object()),  # type: ignore[arg-type]
-            options=RLMOptions(max_iterations=2, max_llm_calls=3, max_output_chars=100),
+            options=RLMOptions(max_iters=2, max_llm_calls=3, max_output_chars=100),
         )
 
     assert events == []

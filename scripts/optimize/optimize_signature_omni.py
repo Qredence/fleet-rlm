@@ -168,7 +168,7 @@ class InProcessTurnExecutor:
             max_tokens=args.worker_max_tokens,
         )
         options = RLMOptions(
-            max_iterations=args.max_iterations,
+            max_iters=args.max_iters,
             max_llm_calls=args.max_llm_calls,
             max_output_chars=args.max_output_chars,
         )
@@ -925,7 +925,7 @@ def build_parser() -> argparse.ArgumentParser:
         default=0.005,
         help="Pareto shaping: score penalty per REPL iteration (0 disables)",
     )
-    parser.add_argument("--max-iterations", type=int, default=20)
+    parser.add_argument("--max-iters", type=int, default=20)
     parser.add_argument("--max-llm-calls", type=int, default=50)
     parser.add_argument("--max-output-chars", type=int, default=10_000)
     parser.add_argument("--worker-max-tokens", type=int, default=8_000)

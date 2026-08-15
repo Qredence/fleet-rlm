@@ -23,7 +23,7 @@ model_provider_service = "uscentral.default.zencode-oai"
 model_provider_service = "uscentral.default.zencode-oai"
 
 [defaults.rlm]
-max_iterations = 20
+max_iters = 20
 max_llm_calls = 50
 max_output_chars = 10000
 max_execution_output_chars = 4000
@@ -31,7 +31,7 @@ execution_timeout_s = 120
 recursion_enabled = false
 recursion_max_calls = 4
 recursion_max_prompt_chars = 50000
-recursion_child_max_iterations = 8
+recursion_child_max_iters = 8
 recursion_child_max_llm_calls = 12
 recursion_child_max_output_chars = 4000
 recursion_max_parallel_children = 2
@@ -200,4 +200,4 @@ cache = false
 tracing_enabled = false
 
 [profiles.daytona-bench-40.rlm]
-max_iterations = 40
+max_iters = 40

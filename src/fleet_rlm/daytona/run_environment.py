@@ -537,7 +537,7 @@ def build_run_preparation(
 ) -> DefaultRunPreparer:
     """Compose Daytona Run preparation without mutating resource ownership."""
     options = RLMOptions(
-        max_iterations=settings.rlm_max_iterations,
+        max_iters=settings.rlm_max_iters,
         max_llm_calls=settings.rlm_max_llm_calls,
         max_output_chars=settings.rlm_max_output_chars,
     )

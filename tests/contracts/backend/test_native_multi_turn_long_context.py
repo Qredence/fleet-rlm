@@ -182,7 +182,7 @@ def _rlm(
     interpreter = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())
     rlm = RLMFactory().create(
         models=RLMModelBundle(root_lm=root_lm, sub_lm=sub_lm),
-        options=RLMOptions(max_iterations=len(action), max_llm_calls=4),
+        options=RLMOptions(max_iters=len(action), max_llm_calls=4),
         tools=tools,
         signature="request -> answer: str",
     )

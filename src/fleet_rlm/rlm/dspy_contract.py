@@ -323,15 +323,19 @@ def assert_dspy_version() -> None:
 
 @dataclass(frozen=True, slots=True)
 class RLMOptions:
-    """The three execution limits owned by native ``dspy.RLM``."""
+    """The three execution limits owned by native ``dspy.RLM``.
 
-    max_iterations: int = 20
+    Field names mirror the DSPy 3.3.x constructor keyword for keyword;
+    ``max_iters`` is passed to ``dspy.RLM(max_iters=...)`` with no alias.
+    """
+
+    max_iters: int = 20
     max_llm_calls: int = 50
     max_output_chars: int = 10_000
 
     def __post_init__(self) -> None:
         for name, value in (
-            ("max_iterations", self.max_iterations),
+            ("max_iters", self.max_iters),
             ("max_llm_calls", self.max_llm_calls),
             ("max_output_chars", self.max_output_chars),
         ):
@@ -798,7 +802,7 @@ def build_native_rlm(
     """
     return dspy.RLM(
         signature,
-        max_iters=options.max_iterations,
+        max_iters=options.max_iters,
         max_llm_calls=options.max_llm_calls,
         max_output_chars=options.max_output_chars,
         verbose=verbose,

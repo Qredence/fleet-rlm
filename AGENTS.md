@@ -144,7 +144,7 @@ Run `make check-docs` when docs, commands, Codex config, generated contracts, or
 - Under pinned DSPy 3.3.0, every `dspy.LM` model must resolve a provider; model
   roles/defaults come from the selected TOML profile, and bare compatible-base
   IDs use `normalize_model_id`. Prefer stock LMs with stateless overrides; Fleet
-  maps `max_iterations` to DSPy's `max_iters`. Root may use native
+  uses DSPy's `max_iters` end-to-end (`rlm.max_iters`, `RLMOptions.max_iters`). Root may use native
   `llm_query`/`llm_query_batched`, while Root-only `rlm_query_batched` reserves
   ordered, isolated child RLMs under a fixed native depth of one.
 - Native RLMs use a fail-closed interpreter factory and caller-owned positional interpreters; Fleet or child leases own shutdown.

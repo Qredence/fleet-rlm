@@ -89,7 +89,7 @@ async def probe_root_lm(
     )
     rlm = build_native_rlm(
         signature=_ProviderProbeSignature,
-        options=RLMOptions(max_iterations=4, max_llm_calls=4, max_output_chars=2_000),
+        options=RLMOptions(max_iters=4, max_llm_calls=4, max_output_chars=2_000),
         tools=[recursive.tool],
     )
     try:

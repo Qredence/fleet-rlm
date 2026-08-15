@@ -55,7 +55,7 @@ def _case_settings(tmp_path: Path) -> Settings:
     return _live_settings(tmp_path).model_copy(
         update={
             "volume_name": f"fleet-rlm-live-deadline-{uuid4()}",
-            "rlm_max_iterations": 4,
+            "rlm_max_iters": 4,
             "rlm_max_llm_calls": 6,
             "turn_timeout_seconds": _TURN_TIMEOUT_SECONDS,
             "run_stale_after_seconds": 600,

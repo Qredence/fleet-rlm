@@ -150,7 +150,7 @@ def _live_qre140_settings(tmp_path: Path) -> Settings:
     settings = _live_settings(tmp_path).model_copy(
         update={
             "rlm_autonomous_memory_categories": ("operator preference",),
-            "rlm_max_iterations": 4,
+            "rlm_max_iters": 4,
             "rlm_max_llm_calls": 8,
             "rlm_execution_timeout_s": 560,
             "turn_timeout_seconds": 560,
