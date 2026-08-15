@@ -84,6 +84,18 @@ the same bounded payloads the TUI displays.
 > validation with an unknown-key error; delete the key. Trace content is now
 > always readable (bounded by `mlflow.trace_content_max_chars`).
 
+PostHog product analytics are policy-controlled by the optional `[posthog]`
+section. `posthog.enabled` switches analytics on or off, `posthog.project_token_env`
+names the environment variable holding the project token, and `posthog.host`
+overrides the ingestion host (the committed default targets the EU instance for
+project 15008). Analytics are enabled by the shipped `[defaults.posthog]` policy
+but stay disabled whenever the named token variable is absent, and they never
+block startup. The benchmark profiles (`daytona-bench`, `daytona-bench-40`)
+explicitly keep analytics off to stay traceless, mirroring the MLflow policy.
+Every analytics event shares one stable per-installation `distinct_id` persisted
+under the storage data root; the deterministic local user id is never used as a
+PostHog identity.
+
 Profile role tables avoid an inheritance framework. Only defaults that duplicate
 `Settings` behavior are omitted; explicit profiles keep operator-visible role
 values rather than gaining `extends`, mixins, or cross-profile aliases.
@@ -180,6 +192,7 @@ Fleet restart.
 | `FLEET_MLFLOW_EXPERIMENT_NAME` | `daytona-managed.mlflow.experiment_name_env` | Managed MLflow experiment |
 | `FLEET_MLFLOW_TRACE_CATALOG` / `FLEET_MLFLOW_TRACE_SCHEMA` | `daytona-managed.mlflow.*_env` | Unity Catalog destination |
 | `FLEET_MLFLOW_TRACE_TABLE_PREFIX` / `FLEET_MLFLOW_TRACING_SQL_WAREHOUSE_ID` | `daytona-managed.mlflow.*_env` | Trace table prefix and SQL warehouse |
+| `POSTHOG_PROJECT_TOKEN` | `posthog.project_token_env` | PostHog project token for product analytics (enabled by default, disabled when absent) |
 Model ids may use an explicit `provider/model` prefix. For an OpenAI-compatible
 base URL, bare ids are normalized with the `openai/` prefix before constructing
 `dspy.LM`.

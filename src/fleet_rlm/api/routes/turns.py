@@ -29,6 +29,7 @@ from fleet_rlm.chat.run_preparation import (
 )
 from fleet_rlm.chat.turn_coordinator import OpenedTurnStream
 from fleet_rlm.observability.failure_diagnostics import normalize_turn_failure
+from fleet_rlm.posthog_client import get_client, get_distinct_id
 from fleet_rlm.sessions.models import TurnAccess, TurnInput
 from fleet_rlm.skills.errors import InvalidSkillSelectionError
 from fleet_rlm.skills.models import SkillSelectionRef
@@ -180,6 +181,7 @@ async def create_turn(
     _headers: Annotated[None, Depends(_stream_headers)],
 ) -> AsyncIterator[ServerSentEvent]:
     """Stream one Turn, opening claim and preparation inside the SSE generator."""
+    ph = get_client()
     yield _preparation_prelude()
     heartbeat_seconds = float(settings.run_heartbeat_seconds)
     open_task: asyncio.Task[OpenedTurnStream] | None = None
@@ -214,10 +216,35 @@ async def create_turn(
             raise
         if message == "Turn is unavailable":
             _log_preparation_unavailable(_correlation_id(request), exc)
+        if ph is not None:
+            ph.capture(
+                distinct_id=get_distinct_id(),
+                event="turn_failed",
+                properties={
+                    "workspace_id": str(identity.workspace_id),
+                    "session_id": str(session_id),
+                    "failure_phase": "open",
+                    "failure_message": message,
+                },
+            )
         for chunk in _open_failure_frames(message):
             yield ServerSentEvent(data=chunk)
         yield ServerSentEvent(raw_data="[DONE]")
         return
+
+    skill_count = len(body.skill_selections)
+    if ph is not None:
+        ph.capture(
+            distinct_id=get_distinct_id(),
+            event="turn_created",
+            properties={
+                "workspace_id": str(identity.workspace_id),
+                "session_id": str(session_id),
+                "skill_count": skill_count,
+                "has_attachments": len(body.attachment_ids) > 0,
+                "attachment_count": len(body.attachment_ids),
+            },
+        )
 
     projector = AISDKUIProjector()
     try:
@@ -225,6 +252,22 @@ async def create_turn(
             for chunk in projector.project(event):
                 yield ServerSentEvent(data=chunk)
         yield ServerSentEvent(raw_data="[DONE]")
+    except (asyncio.CancelledError, GeneratorExit):
+        # Client disconnect is not a turn failure; never capture it.
+        raise
+    except BaseException as exc:
+        if ph is not None:
+            ph.capture(
+                distinct_id=get_distinct_id(),
+                event="turn_failed",
+                properties={
+                    "workspace_id": str(identity.workspace_id),
+                    "session_id": str(session_id),
+                    "failure_phase": "stream",
+                    "failure_message": normalize_turn_failure(exc).message,
+                },
+            )
+        raise
     finally:
         await opened.aclose()
 

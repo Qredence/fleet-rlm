@@ -10,6 +10,7 @@ import logging
 import os
 import re
 import tomllib
+import urllib.parse
 from collections.abc import Mapping
 from copy import deepcopy
 from dataclasses import dataclass
@@ -272,6 +273,18 @@ class Settings(BaseModel):
     mlflow_trace_schema: str | None = Field(default=None)
     mlflow_trace_table_prefix: str | None = Field(default=None)
     mlflow_tracing_sql_warehouse_id: str | None = Field(default=None)
+    posthog_enabled: bool = Field(
+        default=False,
+        description="Enable PostHog product analytics selected by the Fleet policy",
+    )
+    posthog_project_token: SecretStr | None = Field(
+        default=None,
+        description="PostHog project token resolved from posthog.project_token_env",
+    )
+    posthog_host: str | None = Field(
+        default=None,
+        description="PostHog ingestion host selected by the Fleet policy",
+    )
     _dotenv_values: dict[str, str] = PrivateAttr(default_factory=dict)
     _active_profile: str | None = PrivateAttr(default=None)
 
@@ -304,6 +317,18 @@ class Settings(BaseModel):
             text = text.split(" #", 1)[0].rstrip().strip("'\"")
         if not (text.startswith("http://") or text.startswith("https://")):
             return None
+        return text.rstrip("/")
+
+    @field_validator("posthog_host")
+    @classmethod
+    def _validate_posthog_host(cls, value: str | None) -> str | None:
+        """PostHog ingestion hosts must be real http(s) endpoints."""
+        if value is None or value == "":
+            return None
+        text = str(value).strip()
+        parsed = urllib.parse.urlparse(text)
+        if parsed.scheme not in ("http", "https") or not parsed.netloc:
+            raise ValueError("posthog_host must be an absolute http(s) URL")
         return text.rstrip("/")
 
     @field_validator("daytona_snapshot", mode="before")
@@ -404,6 +429,7 @@ _TABLE_KEYS: dict[str, frozenset[str]] = {
             "tracing_sql_warehouse_id_env",
         }
     ),
+    "posthog": frozenset({"enabled", "project_token_env", "host"}),
 }
 _ROLE_KEYS = frozenset(
     {
@@ -517,6 +543,11 @@ def _validate_policy_table(value: object, location: str, *, allow_partial_llm: b
                 if key in mlflow and reference in mlflow:
                     raise FleetConfigurationError(f"{location}.mlflow cannot define both {key} and {reference}")
                 _validate_optional_environment_reference(mlflow.get(reference), f"{location}.mlflow.{reference}")
+        elif name == "posthog":
+            _validate_optional_environment_reference(
+                _require_mapping(child, f"{location}.posthog").get("project_token_env"),
+                f"{location}.posthog.project_token_env",
+            )
 
 
 def _validate_environment_reference(value: object, location: str) -> str:
@@ -567,6 +598,7 @@ def _flatten_policy(policy: Mapping[str, Any]) -> dict[str, Any]:
     log = table("logging")
     llm = table("llm")
     mlflow = table("mlflow")
+    posthog = table("posthog")
     values: dict[str, Any] = {
         "app_name": application.get("name"),
         "run_environment": runtime.get("environment"),
@@ -600,6 +632,9 @@ def _flatten_policy(policy: Mapping[str, Any]) -> dict[str, Any]:
         "volume_name": daytona.get("volume_name"),
         "volume_mount_path": daytona.get("volume_mount_path"),
         "log_level": log.get("level"),
+        "posthog_enabled": posthog.get("enabled", False),
+        "posthog_project_token_env": posthog.get("project_token_env"),
+        "posthog_host": posthog.get("host"),
     }
     if "tracing_enabled" in mlflow:
         values["mlflow_tracing_enabled"] = mlflow["tracing_enabled"]
@@ -639,6 +674,8 @@ def _flatten_policy(policy: Mapping[str, Any]) -> dict[str, Any]:
     optional = {
         "database_url_env",
         "daytona_api_key_env",
+        "posthog_project_token_env",
+        "posthog_host",
         "daytona_snapshot",
         "daytona_org_id",
         "root_llm_model_provider_service",
@@ -890,6 +927,9 @@ def load_runtime_settings() -> Settings:
     values["database_url"] = _resolve_environment_value(database_url_env, dotenv)
     daytona_api_key = _resolve_environment_value(daytona_api_key_env, dotenv)
     values["daytona_api_key"] = SecretStr(daytona_api_key) if daytona_api_key is not None else None
+    posthog_project_token_env = values.pop("posthog_project_token_env", None)
+    posthog_project_token = _resolve_environment_value(posthog_project_token_env, dotenv)
+    values["posthog_project_token"] = SecretStr(posthog_project_token) if posthog_project_token is not None else None
     for settings_field in (
         "root_llm_base_url",
         "sub_llm_base_url",

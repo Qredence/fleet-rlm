@@ -9,6 +9,7 @@ from fleet_rlm.api.errors import http_error
 from fleet_rlm.api.schemas import SettingsPolicyPatchRequest, SettingsPolicyResponse
 from fleet_rlm.config import FleetConfigurationError
 from fleet_rlm.config_policy import PolicyAccessError, PolicyConflictError
+from fleet_rlm.posthog_client import get_client, get_distinct_id
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
 
@@ -45,10 +46,26 @@ def get_settings_policy(policy: ConfigPolicyDep) -> SettingsPolicyResponse:
 def patch_settings_policy(body: SettingsPolicyPatchRequest, policy: ConfigPolicyDep) -> SettingsPolicyResponse:
     try:
         if body.profile is not None:
-            return _response(policy.set_default_profile(body.profile, revision=body.revision))
+            result = _response(policy.set_default_profile(body.profile, revision=body.revision))
+            ph = get_client()
+            if ph is not None:
+                ph.capture(
+                    distinct_id=get_distinct_id(),
+                    event="settings_policy_updated",
+                    properties={"update_kind": "profile"},
+                )
+            return result
         if body.scope is None or body.path is None or body.value is None:
             raise http_error(422, "settings_policy_invalid", "Settings value is invalid")
-        return _response(policy.update(scope=body.scope, path=body.path, value=body.value, revision=body.revision))
+        result = _response(policy.update(scope=body.scope, path=body.path, value=body.value, revision=body.revision))
+        ph = get_client()
+        if ph is not None:
+            ph.capture(
+                distinct_id=get_distinct_id(),
+                event="settings_policy_updated",
+                properties={"update_kind": "field", "scope": body.scope, "path": body.path},
+            )
+        return result
     except PolicyConflictError as exc:
         raise http_error(409, "settings_revision_conflict", "Settings changed; reload before saving") from exc
     except (PolicyAccessError, FleetConfigurationError) as exc:

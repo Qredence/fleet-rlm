@@ -12,6 +12,7 @@ from fleet_rlm.api.errors import http_error
 from fleet_rlm.api.schemas import ArtifactResponse
 from fleet_rlm.artifacts.errors import ArtifactNotFoundError
 from fleet_rlm.artifacts.models import ArtifactAccess, ArtifactRef
+from fleet_rlm.posthog_client import get_client, get_distinct_id
 
 router = APIRouter(prefix="/api/artifacts", tags=["artifacts"])
 _SAFE_FILENAME = re.compile(r"[^A-Za-z0-9._-]+")
@@ -93,6 +94,18 @@ async def download_artifact(
     extension = {"text": ".txt", "markdown": ".md", "json": ".json"}[ref.kind]
     stem = _SAFE_FILENAME.sub("-", ref.title or "artifact").strip(".-") or "artifact"
     filename = f"{stem}{extension}"
+    ph = get_client()
+    if ph is not None:
+        ph.capture(
+            distinct_id=get_distinct_id(),
+            event="artifact_downloaded",
+            properties={
+                "workspace_id": str(identity.workspace_id),
+                "artifact_id": str(artifact_id),
+                "artifact_kind": ref.kind,
+                "artifact_byte_size": ref.byte_size,
+            },
+        )
     return Response(
         content=data,
         media_type=ref.media_type,

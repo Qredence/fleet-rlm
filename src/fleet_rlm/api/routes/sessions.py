@@ -20,6 +20,7 @@ from fleet_rlm.api.schemas import (
     UIMessageResponse,
 )
 from fleet_rlm.api.ui_message import assistant_turn_to_ui_message, user_turn_to_ui_message
+from fleet_rlm.posthog_client import get_client, get_distinct_id
 from fleet_rlm.sessions.catalog import SequenceCursor
 from fleet_rlm.sessions.errors import SessionNotFoundError
 from fleet_rlm.sessions.models import AssistantTurnRecord, SessionRecord
@@ -65,6 +66,13 @@ async def create_session(
         workspace_id=identity.workspace_id,
         title=title[:255],
     )
+    ph = get_client()
+    if ph is not None:
+        ph.capture(
+            distinct_id=get_distinct_id(),
+            event="session_created",
+            properties={"workspace_id": str(identity.workspace_id)},
+        )
     return SessionDetailResponse(
         id=record.id,
         title=record.title,
@@ -160,6 +168,19 @@ async def patch_session(
         # Internal validation failures must not leak exception text into the
         # public contract; collapse them to the closed invalid_request code.
         raise http_error(422, "invalid_request", "Invalid request") from exc
+    ph = get_client()
+    if ph is not None:
+        ph.capture(
+            distinct_id=get_distinct_id(),
+            event="session_updated",
+            properties={
+                "workspace_id": str(identity.workspace_id),
+                "session_id": str(session_id),
+                "title_changed": body.title is not None,
+                "status_changed": body.status is not None,
+                "new_status": body.status,
+            },
+        )
     return SessionDetailResponse(
         id=record.id,
         title=record.title,

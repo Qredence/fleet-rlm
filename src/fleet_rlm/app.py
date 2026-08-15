@@ -12,6 +12,7 @@ from fastapi import FastAPI
 
 from . import __version__
 from .config import Settings, configure_logging, load_runtime_settings
+from .posthog_client import init_posthog, shutdown_posthog
 
 if TYPE_CHECKING:
     from fleet_rlm.composition.inventory import RuntimeDatabaseLifecycle, RuntimeInventory
@@ -133,6 +134,7 @@ def create_app(
         if not isinstance(mlflow_runtime, MLflowRuntime):
             mlflow_runtime = MLflowRuntime(settings_obj)
             app.state.mlflow_runtime = mlflow_runtime
+        init_posthog(settings_obj)
         await mlflow_runtime.start()
         try:
             if _composition_installer is not None:
@@ -161,6 +163,7 @@ def create_app(
             raise RuntimeError("Fleet only supports the Daytona runtime")
         finally:
             await mlflow_runtime.close()
+            shutdown_posthog()
 
     app = FastAPI(
         title=resolved.app_name,

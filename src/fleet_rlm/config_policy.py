@@ -279,6 +279,9 @@ _FIELDS: tuple[PolicyField, ...] = (
         "Tracing SQL warehouse environment variable",
         "text",
     ),
+    PolicyField("posthog.enabled", "PostHog", "Analytics enabled", "boolean", settings_field="posthog_enabled"),
+    PolicyField("posthog.project_token_env", "PostHog", "Project token environment variable", "text"),
+    PolicyField("posthog.host", "PostHog", "Ingestion host", "text", settings_field="posthog_host"),
 )
 _FIELD_BY_PATH = {field.path: field for field in _FIELDS}
 
