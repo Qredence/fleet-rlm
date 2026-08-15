@@ -50,12 +50,12 @@ def list_skills(
 ) -> list[SkillCardResponse]:
     """
     List skill metadata available to the caller, optionally ranked by a search query.
-    
+
     Parameters:
-    	q (str | None): Optional query used to rank skills by matching terms in their names or descriptions.
-    
+        q (str | None): Optional query used to rank skills by matching terms in their names or descriptions.
+
     Returns:
-    	list[SkillCardResponse]: Response-formatted skill cards.
+        list[SkillCardResponse]: Response-formatted skill cards.
     """
     cards = _rank(catalog.cards(), q)
     ph = get_client()

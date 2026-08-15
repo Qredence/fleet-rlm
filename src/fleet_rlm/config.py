@@ -311,10 +311,10 @@ class Settings(BaseModel):
     def _sanitize_llm_base_url(cls, value: object) -> str | None:
         """
         Normalize an optional LLM service base URL.
-        
+
         Parameters:
             value (object): Candidate URL value to sanitize.
-        
+
         Returns:
             str | None: The normalized HTTP(S) URL without trailing slashes, or `None` for empty or invalid values.
         """
@@ -332,13 +332,13 @@ class Settings(BaseModel):
     def _validate_posthog_host(cls, value: str | None) -> str | None:
         """
         Validate and normalize the optional PostHog ingestion host.
-        
+
         Parameters:
             value (str | None): PostHog ingestion host URL.
-        
+
         Returns:
             str | None: The normalized URL without a trailing slash, or ``None`` for an empty value.
-        
+
         Raises:
             ValueError: If the value is not an absolute HTTP or HTTPS URL.
         """
@@ -355,13 +355,13 @@ class Settings(BaseModel):
     def _sanitize_daytona_snapshot(cls, value: object) -> str | None:
         """
         Normalize and validate a Daytona snapshot name.
-        
+
         Parameters:
             value (object): Candidate snapshot name.
-        
+
         Returns:
             str | None: The validated snapshot name, or `None` for empty values.
-        
+
         Raises:
             ValueError: If the snapshot name is not immutable or does not end with a positive version number.
         """
@@ -584,16 +584,16 @@ def _validate_policy_table(value: object, location: str, *, allow_partial_llm: b
 def _validate_environment_reference(value: object, location: str) -> str:
     """
     Validate and return an uppercase environment-variable name.
-    
+
     Parameters:
-    	value (object): Value to validate as an environment-variable name
-    	location (str): Configuration location used in validation errors
-    
+        value (object): Value to validate as an environment-variable name
+        location (str): Configuration location used in validation errors
+
     Returns:
-    	str: The validated environment-variable name
-    
+        str: The validated environment-variable name
+
     Raises:
-    	FleetConfigurationError: If the value is not a valid uppercase environment-variable name
+        FleetConfigurationError: If the value is not a valid uppercase environment-variable name
     """
     if not isinstance(value, str) or not _ENVIRONMENT_NAME.fullmatch(value):
         raise FleetConfigurationError(f"{location} must name an uppercase environment variable")
@@ -943,12 +943,13 @@ def _require_managed_profile_environment_values(
 def load_runtime_settings() -> Settings:
     """
     Load and validate the runtime settings for the active Fleet profile.
-    
+
     Returns:
         Settings: Resolved runtime settings, including environment-backed values.
-    
+
     Raises:
-        FleetConfigurationError: If the policy is missing, incomplete, invalid, or unsupported, or required environment values are unavailable.
+        FleetConfigurationError: If the policy is missing, incomplete, invalid, or unsupported, or
+            required environment values are unavailable.
     """
     dotenv = dotenv_values(".env")
     document = _read_policy_document(_CONFIG_PATH)

@@ -21,14 +21,15 @@ from fleet_rlm.posthog_client import (
 def _fake_posthog(created: list[tuple[str, str | None, bool]], shutdowns: list[str] | None = None) -> object:
     """
     Create a mock PostHog constructor that records client creation and shutdown events.
-    
+
     Parameters:
         created (list[tuple[str, str | None, bool]]): Collection receiving client initialization arguments.
         shutdowns (list[str] | None): Collection receiving tokens when mock clients shut down.
-    
+
     Returns:
         object: Callable mock constructor for creating clients with a shutdown method.
     """
+
     def build(token: str, host: str | None = None, enable_exception_autocapture: bool = True) -> object:
         created.append((token, host, enable_exception_autocapture))
         if shutdowns is None:

@@ -54,7 +54,12 @@ def _load_or_create_instance_id(data_root: str) -> str:
 def init_posthog(settings: Settings) -> None:
     """
     Initialize the singleton PostHog client according to the configured analytics policy.
-    
+
+    Called once during the FastAPI lifespan startup. Re-initialisation is idempotent: a previous
+    client is shut down first. When the policy disables PostHog, or enables it without a
+    resolvable project token, the module stays a no-op and startup never fails (fail-soft,
+    mirroring the MLflow runtime).
+
     Parameters:
         settings (Settings): Application settings containing the analytics policy, project token, host, and data root.
     """
@@ -86,7 +91,10 @@ def init_posthog(settings: Settings) -> None:
 
 
 def shutdown_posthog() -> None:
-    """Shut down the active PostHog client and clear the client reference."""
+    """Shut down the active PostHog client and clear the client reference.
+
+    Called once during the FastAPI lifespan shutdown.
+    """
     global _client
     if _client is not None:
         _client.shutdown()
@@ -94,8 +102,8 @@ def shutdown_posthog() -> None:
 
 
 def get_client() -> Posthog | None:
-    """Provides access to the active PostHog analytics client.
-    
+    """Return the active PostHog analytics client.
+
     Returns:
         Posthog | None: The active client, or `None` when analytics are disabled.
     """
@@ -105,8 +113,9 @@ def get_client() -> Posthog | None:
 def get_distinct_id() -> str:
     """
     Provide the analytics identity for the current installation.
-    
-    Returns:
-        str: The persistent installation identity, or a process-random identity if initialization has not occurred.
+
+    All events must use this single identity so every install maps to exactly one PostHog user.
+    Returns the persistent installation identity, or a process-random identity if initialization
+    has not occurred.
     """
     return _distinct_id or str(uuid.uuid4())

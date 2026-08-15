@@ -81,13 +81,13 @@ async def download_artifact(
 ) -> Response:
     """
     Download an artifact within the caller's workspace scope.
-    
+
     Parameters:
         artifact_id (UUID): Identifier of the artifact to download.
-    
+
     Returns:
         Response: The artifact content with its media type and download filename.
-    
+
     Raises:
         HTTPException: If the artifact is missing or artifact storage is unavailable.
     """
