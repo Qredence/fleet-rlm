@@ -296,7 +296,7 @@ async def test_runner_uses_supported_async_call_and_returns_typed_outcome(
         (
             "RLM.execute",
             {
-                "max_iterations": context.execution.options.max_iterations,
+                "max_iters": context.execution.options.max_iters,
                 "max_llm_calls": context.execution.options.max_llm_calls,
                 "max_output_chars": context.execution.options.max_output_chars,
             },

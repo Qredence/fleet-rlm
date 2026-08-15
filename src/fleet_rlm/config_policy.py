@@ -134,7 +134,7 @@ _FIELDS: tuple[PolicyField, ...] = (
         ("none", "low", "medium", "high"),
         settings_field="sub_llm_reasoning_effort",
     ),
-    PolicyField("rlm.max_iterations", "RLM", "Maximum iterations", "number", settings_field="rlm_max_iterations"),
+    PolicyField("rlm.max_iters", "RLM", "Maximum iterations", "number", settings_field="rlm_max_iters"),
     PolicyField("rlm.max_llm_calls", "RLM", "Maximum LLM calls", "number", settings_field="rlm_max_llm_calls"),
     PolicyField(
         "rlm.max_output_chars", "RLM", "Maximum output characters", "number", settings_field="rlm_max_output_chars"
@@ -171,11 +171,11 @@ _FIELDS: tuple[PolicyField, ...] = (
         settings_field="rlm_recursion_max_prompt_chars",
     ),
     PolicyField(
-        "rlm.recursion_child_max_iterations",
+        "rlm.recursion_child_max_iters",
         "RLM",
         "Child maximum iterations",
         "number",
-        settings_field="rlm_recursion_child_max_iterations",
+        settings_field="rlm_recursion_child_max_iters",
     ),
     PolicyField(
         "rlm.recursion_child_max_llm_calls",

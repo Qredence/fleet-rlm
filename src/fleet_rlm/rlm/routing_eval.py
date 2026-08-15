@@ -312,6 +312,36 @@ class _RoutingScenarioSignature(dspy.Signature):
     answer: str = dspy.OutputField()
 
 
+class _TrackingChildRuntimeFactory:
+    """Count child acquisitions while forwarding optional factory-owned cleanup.
+
+    ``RecursiveRLMExecutor`` looks for ``wait_owned`` and
+    ``raise_if_cleanup_failed`` on the factory it was given so timed-out
+    provider acquisitions adopted by the factory are awaited under the same
+    cleanup boundary as retained child workers. The tracking wrapper must
+    forward those optional hooks when the underlying factory provides them;
+    otherwise a late-adopted Sandbox could be orphaned in this lane.
+    """
+
+    def __init__(self, inner: Callable[[int], Any]) -> None:
+        self._inner = inner
+        self.created = 0
+
+    def __call__(self, call_index: int) -> Any:
+        self.created += 1
+        return self._inner(call_index)
+
+    def wait_owned(self) -> None:
+        factory_wait_owned = getattr(self._inner, "wait_owned", None)
+        if callable(factory_wait_owned):
+            factory_wait_owned()
+
+    def raise_if_cleanup_failed(self) -> None:
+        factory_raise = getattr(self._inner, "raise_if_cleanup_failed", None)
+        if callable(factory_raise):
+            factory_raise()
+
+
 async def _maybe_await(value: Any) -> Any:
     if inspect.isawaitable(value):
         return await value
@@ -344,12 +374,7 @@ async def run_routing_scenario(
         captured = []
         started = time.perf_counter()
         deadline = time.monotonic() + deadline_seconds
-        created_children = 0
-
-        def tracked_child_factory(call_index: int) -> Any:
-            nonlocal created_children
-            created_children += 1
-            return child_runtime_factory(call_index)
+        tracked_child_factory = _TrackingChildRuntimeFactory(child_runtime_factory)
 
         recursive = RecursiveRLMExecutor(
             models=RLMModelBundle(root_lm=root_lm, sub_lm=sub_lm),
@@ -399,7 +424,7 @@ async def run_routing_scenario(
             child_iterations=summary.child_iterations,
             recursive_prompt_chars=summary.maximum_prompt_chars,
             latency_ms=details_facts.latency_ms,
-            sandbox_count=created_children,
+            sandbox_count=tracked_child_factory.created,
             recursive_batch_calls=summary.recursive_batch_calls,
             peak_child_concurrency=summary.peak_child_concurrency,
         )

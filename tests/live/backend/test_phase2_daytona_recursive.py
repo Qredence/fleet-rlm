@@ -157,7 +157,7 @@ def _load_live_settings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Sett
         update={
             "database_url": database_url,
             "volume_name": f"fleet-rlm-phase2-recursive-{uuid4()}",
-            "rlm_max_iterations": 7,
+            "rlm_max_iters": 7,
             "rlm_max_llm_calls": 10,
             "turn_timeout_seconds": 900,
         }

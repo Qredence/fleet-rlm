@@ -48,17 +48,17 @@ independent verification in separate iterations.
 | `max_llm_calls` | 50 | Max sub-LM calls (`llm_query` / batched) |
 | `max_output_chars` | 10000 | Truncates **REPL step output** fed back into the loop (not a silent truncate of SUBMIT) |
 
-Fleet keeps the public `RLMOptions.max_iterations` configuration field and maps
-it to DSPy 3.3.x's `max_iters` constructor parameter in
-`rlm.dspy_contract`. Do not rename the Fleet field.
-
-Fleet maps these via `FLEET_RLM_MAX_ITERATIONS`, `FLEET_RLM_MAX_LLM_CALLS`, and `FLEET_RLM_MAX_OUTPUT_CHARS`.
+Fleet uses DSPy 3.3.x's `max_iters` spelling end-to-end: `RLMOptions.max_iters`,
+`Settings.rlm_max_iters`, and the TOML policy key `rlm.max_iters` are passed
+directly to `dspy.RLM(max_iters=...)` in `rlm.dspy_contract` with no alias.
+Settings resolve only from the selected TOML policy; ambient `FLEET_*`
+environment variables are ignored.
 
 ## Fleet-to-DSPy construction and ownership
 
 | Fleet surface | Fleet value | DSPy 3.3.x surface |
 |---|---|---|
-| Fleet iteration budget | `max_iterations` | `max_iters` |
+| Fleet iteration budget | `max_iters` | `max_iters` |
 | Native construction | `build_native_rlm(...)` without an interpreter | `dspy.RLM(..., interpreter_factory=...)` |
 | Native async execution | Existing caller-owned interpreter | `await rlm.acall(interpreter, **named_inputs)` |
 | Native streaming | Existing caller-owned interpreter | `stream_program(interpreter, **named_inputs)` |
@@ -87,7 +87,7 @@ keyword-only and are not routed through the native positional call contract.
   recursive history.
 - **Daytona** (primary durable path): custom interpreter, Session Workspace tools, Artifact candidates promoted on Turn Commit.
 - Recursive child calls are bounded by the policy keys `recursion_max_calls`,
-  `recursion_max_prompt_chars`, `recursion_child_max_iterations`,
+  `recursion_max_prompt_chars`, `recursion_child_max_iters`,
   `recursion_child_max_llm_calls`, and `recursion_child_max_output_chars`.
 - MLflow `RLM.*_lm` spans record recursive depth, call order, bounded context-size
   metadata, response shape, and per-call provider token usage when DSPy exposes it;
