@@ -1,0 +1,91 @@
+version: 2.1
+
+commands:
+  install_uv:
+    steps:
+      - restore_cache:
+          keys:
+            - v1-uv-bin-{{ arch }}
+      - run:
+          name: Install uv (skip if cached)
+          command: |
+            if [ ! -f "$HOME/.local/bin/uv" ]; then
+              curl -LsSf https://astral.sh/uv/install.sh | sh
+            fi
+            echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$BASH_ENV"
+      - save_cache:
+          key: v1-uv-bin-{{ arch }}
+          paths:
+            - ~/.local/bin/uv
+            - ~/.local/bin/uvx
+
+executors:
+  python:
+    docker:
+      # The -node variant adds Node.js so openapi-typescript (npx) can run in
+      # the same job as the python gates (api-check regenerates TUI types).
+      - image: cimg/python:3.13.13-node
+    working_directory: ~/project
+    environment:
+      UV_CACHE_DIR: ~/.cache/uv
+jobs:
+  deploy-pypi-rollback:
+    executor: python
+    resource_class: small
+    environment:
+      COMPONENT_NAME: "<< pipeline.deploy.component_name >>"
+      ENVIRONMENT_NAME: "<< pipeline.deploy.environment_name >>"
+      TARGET_VERSION: "<< pipeline.deploy.target_version >>"
+    steps:
+      - checkout
+      - install_uv
+      - run:
+          name: Plan rollback
+          command: |
+            circleci run release plan deploy-pypi-rollback \
+              --environment-name=${ENVIRONMENT_NAME} \
+              --component-name=${COMPONENT_NAME} \
+              --target-version=${TARGET_VERSION} \
+              --rollback
+      - run:
+          name: Perform rollback
+          command: |
+            # TODO: add rollback logic using ${TARGET_VERSION}
+            echo "Rolling back PyPI deployment to version ${TARGET_VERSION}"
+      - run:
+          name: Update deployment status to failed
+          command: circleci run release update deploy-pypi-rollback --status=FAILED
+          when: on_fail
+  cancel-deploy-pypi-rollback:
+    docker:
+      - image: cimg/base:stable
+    steps:
+      - run:
+          name: Update planned release to CANCELED
+          command: |
+            circleci run release update deploy-pypi-rollback \
+              --status=CANCELED
+  deploy-pypi-rollback-release:
+    type: release
+    plan_name: deploy-pypi-rollback
+    validation:
+      enabled: true
+
+
+workflows:
+  rollback:
+    jobs:
+      - deploy-pypi-rollback:
+          filters:
+            branches:
+              only: main
+      - deploy-pypi-rollback-release:
+          requires:
+            - deploy-pypi-rollback
+          filters:
+            branches:
+              only: main
+      - cancel-deploy-pypi-rollback:
+          requires:
+            - deploy-pypi-rollback:
+              - canceled

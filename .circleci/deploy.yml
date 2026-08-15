@@ -1,0 +1,93 @@
+version: 2.1
+
+commands:
+  install_uv:
+    steps:
+      - restore_cache:
+          keys:
+            - v1-uv-bin-{{ arch }}
+      - run:
+          name: Install uv (skip if cached)
+          command: |
+            if [ ! -f "$HOME/.local/bin/uv" ]; then
+              curl -LsSf https://astral.sh/uv/install.sh | sh
+            fi
+            echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$BASH_ENV"
+      - save_cache:
+          key: v1-uv-bin-{{ arch }}
+          paths:
+            - ~/.local/bin/uv
+            - ~/.local/bin/uvx
+
+executors:
+  python:
+    docker:
+      # The -node variant adds Node.js so openapi-typescript (npx) can run in
+      # the same job as the python gates (api-check regenerates TUI types).
+      - image: cimg/python:3.13.13-node
+    working_directory: ~/project
+    environment:
+      UV_CACHE_DIR: ~/.cache/uv
+jobs:
+  deploy-pypi:
+    executor: python
+    resource_class: small
+    environment:
+      COMPONENT_NAME: "fleet-rlm"
+      ENVIRONMENT_NAME: "pypi"
+      TARGET_VERSION: "<< pipeline.deploy.target_version >>"
+    steps:
+      - checkout
+      - install_uv
+      - run:
+          name: Plan release
+          command: |
+            circleci run release plan \
+              --environment-name=${ENVIRONMENT_NAME} \
+              --component-name=${COMPONENT_NAME} \
+              --target-version=${TARGET_VERSION}
+      - run:
+          name: Perform deployment
+          no_output_timeout: 45m
+          command: |
+            uv run python scripts/circleci_trigger_release.py \
+              --version="${TARGET_VERSION}" \
+              --ref=main
+      - run:
+          name: Update deployment status to failed
+          command: circleci run release update --status=FAILED
+          when: on_fail
+  cancel-deploy-pypi:
+    docker:
+      - image: cimg/base:stable
+    steps:
+      - run:
+          name: Update planned release to CANCELED
+          command: |
+            circleci run release update deploy-pypi \
+              --status=CANCELED
+  deploy-pypi-release:
+    type: release
+    plan_name: deploy-pypi
+    validation:
+      enabled: true
+      auto_rollback_on_failure: true
+
+
+workflows:
+  deploy:
+    jobs:
+      - deploy-pypi:
+          filters:
+            branches:
+              only: main
+      - deploy-pypi-release:
+          requires:
+            - deploy-pypi
+          filters:
+            branches:
+              only: main
+      - cancel-deploy-pypi:
+          requires:
+            - deploy-pypi:
+              - canceled
