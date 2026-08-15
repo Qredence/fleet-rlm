@@ -282,3 +282,42 @@ async def test_harness_routes_native_semantic_batch_to_configured_sub_lm() -> No
     assert scores[0].routing_match is True
     assert scores[0].facts.tool_counts["llm_query_batched"] == 1
     assert len(sub.history) == 3
+
+
+def test_tracking_child_factory_forwards_optional_factory_cleanup() -> None:
+    """The routing harness forwards factory-owned cleanup hooks it does not use."""
+
+    from fleet_rlm.rlm.routing_eval import _TrackingChildRuntimeFactory
+
+    class _FakeLease:
+        pass
+
+    class _Factory:
+        def __init__(self) -> None:
+            self.created: list[int] = []
+            self.waited = 0
+            self.raised = 0
+
+        def __call__(self, call_index: int) -> _FakeLease:
+            self.created.append(call_index)
+            return _FakeLease()
+
+        def wait_owned(self) -> None:
+            self.waited += 1
+
+        def raise_if_cleanup_failed(self) -> None:
+            self.raised += 1
+
+    factory = _Factory()
+    tracked = _TrackingChildRuntimeFactory(factory)
+    assert isinstance(tracked(3), _FakeLease)
+    tracked.wait_owned()
+    tracked.raise_if_cleanup_failed()
+    assert tracked.created == 1
+    assert factory.created == [3]
+    assert factory.waited == 1
+    assert factory.raised == 1
+
+    plain_tracked = _TrackingChildRuntimeFactory(lambda _index: _FakeLease())
+    plain_tracked.wait_owned()
+    plain_tracked.raise_if_cleanup_failed()
