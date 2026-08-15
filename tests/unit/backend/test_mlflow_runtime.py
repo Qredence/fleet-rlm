@@ -178,7 +178,7 @@ def test_mlflow_runtime_start_failure_still_shuts_down_posthog(monkeypatch: pyte
 
     def fail_configure(_settings: Settings) -> bool:
         configure_calls.append("configure")
-        raise RuntimeError("mlflow unavailable")
+        raise FleetConfigurationError("mlflow unavailable")
 
     def install(app, settings, *, database):
         del app, settings
@@ -194,7 +194,7 @@ def test_mlflow_runtime_start_failure_still_shuts_down_posthog(monkeypatch: pyte
     app = create_app(settings=_settings(), _composition_installer=install)
 
     assert posthog_calls == []
-    with pytest.raises(RuntimeError, match="mlflow unavailable"), TestClient(app):
+    with pytest.raises(FleetConfigurationError, match="mlflow unavailable"), TestClient(app):
         pass
     # Verify shutdown_posthog was called despite mlflow_runtime.start() raising
     assert posthog_calls == ["init", "shutdown"]
@@ -218,7 +218,8 @@ def test_mlflow_runtime_close_failure_still_shuts_down_posthog(monkeypatch: pyte
     def configure(_settings: Settings) -> bool:
         return True
 
-    def fail_flush() -> None:
+    def fail_close(self: MLflowRuntime) -> None:
+        del self
         flush_calls.append("flush")
         raise RuntimeError("flush failed")
 
@@ -233,7 +234,7 @@ def test_mlflow_runtime_close_failure_still_shuts_down_posthog(monkeypatch: pyte
     monkeypatch.setattr("fleet_rlm.app.init_posthog", track_init)
     monkeypatch.setattr("fleet_rlm.app.shutdown_posthog", track_shutdown)
     monkeypatch.setattr("fleet_rlm.observability.tracing.configure_tracing", configure)
-    monkeypatch.setattr("fleet_rlm.observability.tracing.flush_tracing", fail_flush)
+    monkeypatch.setattr(MLflowRuntime, "close", fail_close)
     app = create_app(settings=_settings(), _composition_installer=install)
 
     assert posthog_calls == []
