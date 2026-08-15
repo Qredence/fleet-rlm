@@ -60,6 +60,17 @@ async def create_session(
     identity: LocalScopeDep,
     repo: SessionCatalogDep,
 ) -> SessionDetailResponse:
+    """
+    Create a session for the authenticated user in the current workspace.
+    
+    Parameters:
+    	body (SessionCreateRequest): Session creation data, including the optional title.
+    	identity (LocalScopeDep): Authenticated user and workspace scope.
+    	repo (SessionCatalogDep): Session repository used to create the session.
+    
+    Returns:
+    	SessionDetailResponse: The newly created session details.
+    """
     title = (body.title or "New Session").strip() or "New Session"
     record = await repo.create(
         user_id=identity.user_id,
@@ -148,6 +159,18 @@ async def patch_session(
     identity: LocalScopeDep,
     repo: SessionCatalogDep,
 ) -> SessionDetailResponse:
+    """
+    Update the title or status of a session within the authenticated user's workspace.
+    
+    Parameters:
+        body (SessionPatchRequest): Fields to update; at least one field is required.
+    
+    Returns:
+        SessionDetailResponse: The updated session details.
+    
+    Raises:
+        HTTPException: If no fields are provided, the title is blank, the status is invalid, or the session cannot be updated.
+    """
     if body.title is None and body.status is None:
         raise http_error(422, "session_no_fields", "No fields to update")
     if body.title is not None and not body.title.strip():

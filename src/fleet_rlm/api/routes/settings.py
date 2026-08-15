@@ -44,6 +44,18 @@ def get_settings_policy(policy: ConfigPolicyDep) -> SettingsPolicyResponse:
     dependencies=[Depends(require_loopback_client)],
 )
 def patch_settings_policy(body: SettingsPolicyPatchRequest, policy: ConfigPolicyDep) -> SettingsPolicyResponse:
+    """
+    Update the settings policy's default profile or a specified field.
+    
+    Parameters:
+    	body (SettingsPolicyPatchRequest): The requested profile or field update, including the expected revision.
+    
+    Returns:
+    	SettingsPolicyResponse: The updated settings policy.
+    
+    Raises:
+    	HTTPException: If the revision conflicts, the update is invalid, or the policy is unavailable.
+    """
     try:
         if body.profile is not None:
             result = _response(policy.set_default_profile(body.profile, revision=body.revision))

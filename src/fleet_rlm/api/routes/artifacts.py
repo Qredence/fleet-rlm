@@ -79,6 +79,18 @@ async def download_artifact(
     identity: LocalScopeDep,
     reader: ArtifactReaderDep,
 ) -> Response:
+    """
+    Download an artifact within the caller's workspace scope.
+    
+    Parameters:
+        artifact_id (UUID): Identifier of the artifact to download.
+    
+    Returns:
+        Response: The artifact content with its media type and download filename.
+    
+    Raises:
+        HTTPException: If the artifact is missing or artifact storage is unavailable.
+    """
     try:
         content = await reader.content(
             ArtifactAccess(identity.user_id, identity.workspace_id),

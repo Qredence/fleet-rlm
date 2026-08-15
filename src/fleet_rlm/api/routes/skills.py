@@ -48,7 +48,15 @@ def list_skills(
     identity: LocalScopeDep,
     q: Annotated[str | None, Query(description="Optional ranking query")] = None,
 ) -> list[SkillCardResponse]:
-    """List SkillCards authorized for the caller (metadata only)."""
+    """
+    List skill metadata available to the caller, optionally ranked by a search query.
+    
+    Parameters:
+    	q (str | None): Optional query used to rank skills by matching terms in their names or descriptions.
+    
+    Returns:
+    	list[SkillCardResponse]: Response-formatted skill cards.
+    """
     cards = _rank(catalog.cards(), q)
     ph = get_client()
     if ph is not None:

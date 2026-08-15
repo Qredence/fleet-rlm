@@ -126,7 +126,15 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
-        """Own tracing setup and provider composition for one application lifespan."""
+        """
+        Manage application resources for the duration of a FastAPI application lifespan.
+        
+        Parameters:
+        	app (FastAPI): Application instance whose runtime state and composition are initialized.
+        
+        Raises:
+        	RuntimeError: If the configured runtime environment is unsupported.
+        """
         from fleet_rlm.observability.mlflow_runtime import MLflowRuntime
 
         settings_obj: Settings = app.state.settings

@@ -309,7 +309,15 @@ class Settings(BaseModel):
     @field_validator("llm_base_url", mode="before")
     @classmethod
     def _sanitize_llm_base_url(cls, value: object) -> str | None:
-        """Only keep real http(s) bases; ignore secrets/comments pasted into .env."""
+        """
+        Normalize an optional LLM service base URL.
+        
+        Parameters:
+            value (object): Candidate URL value to sanitize.
+        
+        Returns:
+            str | None: The normalized HTTP(S) URL without trailing slashes, or `None` for empty or invalid values.
+        """
         if value is None or value == "":
             return None
         text = str(value).strip().strip("'\"")
@@ -322,7 +330,18 @@ class Settings(BaseModel):
     @field_validator("posthog_host")
     @classmethod
     def _validate_posthog_host(cls, value: str | None) -> str | None:
-        """PostHog ingestion hosts must be real http(s) endpoints."""
+        """
+        Validate and normalize the optional PostHog ingestion host.
+        
+        Parameters:
+            value (str | None): PostHog ingestion host URL.
+        
+        Returns:
+            str | None: The normalized URL without a trailing slash, or ``None`` for an empty value.
+        
+        Raises:
+            ValueError: If the value is not an absolute HTTP or HTTPS URL.
+        """
         if value is None or value == "":
             return None
         text = str(value).strip()
@@ -334,6 +353,18 @@ class Settings(BaseModel):
     @field_validator("daytona_snapshot", mode="before")
     @classmethod
     def _sanitize_daytona_snapshot(cls, value: object) -> str | None:
+        """
+        Normalize and validate a Daytona snapshot name.
+        
+        Parameters:
+            value (object): Candidate snapshot name.
+        
+        Returns:
+            str | None: The validated snapshot name, or `None` for empty values.
+        
+        Raises:
+            ValueError: If the snapshot name is not immutable or does not end with a positive version number.
+        """
         if value is None:
             return None
         text = str(value).strip()
@@ -551,6 +582,19 @@ def _validate_policy_table(value: object, location: str, *, allow_partial_llm: b
 
 
 def _validate_environment_reference(value: object, location: str) -> str:
+    """
+    Validate and return an uppercase environment-variable name.
+    
+    Parameters:
+    	value (object): Value to validate as an environment-variable name
+    	location (str): Configuration location used in validation errors
+    
+    Returns:
+    	str: The validated environment-variable name
+    
+    Raises:
+    	FleetConfigurationError: If the value is not a valid uppercase environment-variable name
+    """
     if not isinstance(value, str) or not _ENVIRONMENT_NAME.fullmatch(value):
         raise FleetConfigurationError(f"{location} must name an uppercase environment variable")
     return value
@@ -898,14 +942,13 @@ def _require_managed_profile_environment_values(
 
 def load_runtime_settings() -> Settings:
     """
-    Load and validate the active Fleet runtime configuration.
-
+    Load and validate the runtime settings for the active Fleet profile.
+    
     Returns:
-        Settings: The resolved runtime settings for the selected profile.
-
+        Settings: Resolved runtime settings, including environment-backed values.
+    
     Raises:
-        FleetConfigurationError: If the configuration file is missing or contains invalid, incomplete,
-            or unsupported settings.
+        FleetConfigurationError: If the policy is missing, incomplete, invalid, or unsupported, or required environment values are unavailable.
     """
     dotenv = dotenv_values(".env")
     document = _read_policy_document(_CONFIG_PATH)

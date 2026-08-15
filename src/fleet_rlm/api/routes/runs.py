@@ -32,6 +32,17 @@ async def request_run_cancellation(
     identity: LocalScopeDep,
     lifecycle: RunLifecycleDep,
 ) -> CancellationResponse:
+    """
+    Request cancellation for a run.
+    
+    Parameters:
+    	run_id (UUID): The identifier of the run to cancel.
+    	identity (LocalScopeDep): The authenticated user's workspace scope.
+    	lifecycle (RunLifecycleDep): The run lifecycle service.
+    
+    Returns:
+    	CancellationResponse: The run identifier and resulting cancellation state.
+    """
     try:
         status = await lifecycle.request_cancel(TurnAccess(identity.user_id, identity.workspace_id), run_id)
     except RunNotFoundError as exc:
