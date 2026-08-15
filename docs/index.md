@@ -36,6 +36,5 @@ FastAPI/SSE contract backed by DSPy, Daytona, and SQLAlchemy/Alembic.
 - schema: `migrations/`
 - validation: `Makefile`, `tests/`, and TUI tests
 
-No tracked implementation plan is currently active. Local `PLANS.md` is a
-phase-verification record; ignored `.scratch/archive/` contains noncanonical
-historical plans/evidence.
+No tracked implementation plan is currently active; internal mission plans
+and ExecPlan guides are kept under the ignored local `.scratch/` tree.
