@@ -173,7 +173,7 @@ def test_rlm_options_match_the_product_defaults() -> None:
     from fleet_rlm.rlm.dspy_contract import RLMOptions
 
     assert RLMOptions() == RLMOptions(
-        max_iterations=20,
+        max_iters=20,
         max_llm_calls=50,
         max_output_chars=10_000,
     )
@@ -189,7 +189,7 @@ def test_build_native_rlm_preserves_exact_public_constructor_inputs() -> None:
     sub_lm = object()
     kwargs: dict[str, Any] = {
         "signature": TaskSignature,
-        "options": RLMOptions(max_iterations=7, max_llm_calls=11, max_output_chars=2048),
+        "options": RLMOptions(max_iters=7, max_llm_calls=11, max_output_chars=2048),
         "tools": [_lookup],
         "sub_lm": sub_lm,
     }
@@ -215,7 +215,7 @@ def test_build_native_rlm_fails_closed_without_a_caller_owned_interpreter() -> N
     from fleet_rlm.rlm.dspy_contract import RLMOptions, build_native_rlm
     from fleet_rlm.rlm.errors import RLMConfigError
 
-    rlm = build_native_rlm(signature="request -> answer", options=RLMOptions(max_iterations=1))
+    rlm = build_native_rlm(signature="request -> answer", options=RLMOptions(max_iters=1))
 
     with pytest.raises(RLMConfigError, match="caller-owned interpreter"):
         rlm(request="missing interpreter")
@@ -238,7 +238,7 @@ async def test_native_json_action_contract_parses_first_and_followup_iterations(
     )
     rlm = build_native_rlm(
         signature="request -> answer",
-        options=RLMOptions(max_iterations=2),
+        options=RLMOptions(max_iters=2),
         sub_lm=lm,
         verbose=False,
     )
@@ -307,7 +307,7 @@ async def test_native_rlm_callback_observes_completed_action_without_altering_pr
     interpreter = Interpreter()
     rlm = build_native_rlm(
         signature=TaskSignature,
-        options=RLMOptions(max_iterations=1),
+        options=RLMOptions(max_iters=1),
     )
     rlm.generate_action = Action()
     bind_native_rlm_observer(rlm, observed.append, max_chars=64)

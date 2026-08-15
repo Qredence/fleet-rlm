@@ -350,9 +350,7 @@ def _skill_events(chunks: list[dict[str, Any]], skill_id: str) -> list[dict[str,
 
 
 def test_live_old_relevant_memory_recovered_beyond_tail_window(tmp_path: Path) -> None:
-    settings = _case_settings(
-        tmp_path, "relevance", rlm_max_iterations=4, rlm_max_llm_calls=6, turn_timeout_seconds=560
-    )
+    settings = _case_settings(tmp_path, "relevance", rlm_max_iters=4, rlm_max_llm_calls=6, turn_timeout_seconds=560)
     ledger = _CaptureLedger()
     started = time.perf_counter()
     with _QRE142Runner(settings) as run:
@@ -442,7 +440,7 @@ def test_live_provenance_and_supersession_through_promotion(tmp_path: Path) -> N
         tmp_path,
         "supersession",
         rlm_autonomous_memory_categories=("operator preference",),
-        rlm_max_iterations=6,
+        rlm_max_iters=6,
         rlm_max_llm_calls=8,
         turn_timeout_seconds=560,
     )
@@ -539,7 +537,7 @@ def test_live_memory_candidates_default_off_and_mlflow_fail_soft(
     settings = _case_settings(
         tmp_path,
         "default-off",
-        rlm_max_iterations=3,
+        rlm_max_iters=3,
         rlm_max_llm_calls=4,
         turn_timeout_seconds=560,
         mlflow_tracing_enabled=True,
@@ -591,7 +589,7 @@ def test_live_failed_run_discards_memory_candidates(tmp_path: Path) -> None:
         tmp_path,
         "failed-run",
         rlm_autonomous_memory_categories=("operator preference",),
-        rlm_max_iterations=8,
+        rlm_max_iters=8,
         rlm_max_llm_calls=8,
         turn_timeout_seconds=180,
         rlm_execution_timeout_s=280,
@@ -636,7 +634,7 @@ def test_live_failed_run_discards_memory_candidates(tmp_path: Path) -> None:
 
 def test_live_skill_consumes_declared_resource_with_truthful_card(tmp_path: Path) -> None:
     settings = _case_settings(
-        tmp_path, "skill-resource", rlm_max_iterations=4, rlm_max_llm_calls=6, turn_timeout_seconds=560
+        tmp_path, "skill-resource", rlm_max_iters=4, rlm_max_llm_calls=6, turn_timeout_seconds=560
     )
     ledger = _CaptureLedger()
     started = time.perf_counter()
@@ -691,7 +689,7 @@ def test_live_skill_consumes_declared_resource_with_truthful_card(tmp_path: Path
 
 def test_live_custom_signature_skill_coexistence(tmp_path: Path) -> None:
     settings = _case_settings(
-        tmp_path, "custom-signature", rlm_max_iterations=4, rlm_max_llm_calls=6, turn_timeout_seconds=560
+        tmp_path, "custom-signature", rlm_max_iters=4, rlm_max_llm_calls=6, turn_timeout_seconds=560
     )
     ledger = _CaptureLedger()
     started = time.perf_counter()

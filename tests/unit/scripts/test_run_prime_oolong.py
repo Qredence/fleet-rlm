@@ -403,7 +403,7 @@ class _Client:
                         "fields": [
                             {"path": "llm.root.model", "value": "model"},
                             {"path": "llm.sub.model", "value": "sub-model"},
-                            {"path": "rlm.max_iterations", "value": 20},
+                            {"path": "rlm.max_iters", "value": 20},
                         ],
                     }
                 ],

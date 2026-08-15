@@ -135,7 +135,7 @@ def _load_live_settings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Sett
         update={
             "database_url": database_url,
             "volume_name": f"fleet-rlm-recursive-batch-{uuid4()}",
-            "rlm_max_iterations": 8,
+            "rlm_max_iters": 8,
             "rlm_max_llm_calls": 14,
             "turn_timeout_seconds": 900,
             # Daytona Root + two child sandboxes can exceed the default 60s claim

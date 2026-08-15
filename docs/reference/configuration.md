@@ -101,7 +101,7 @@ typed Runtime Events projected through SSE or the terminal client.
 
 The `[rlm]` recursion settings include `recursion_enabled` and bound the native
 `rlm_query(prompt=prompt)` child harness: `recursion_max_calls`,
-`recursion_max_prompt_chars`, `recursion_child_max_iterations`,
+`recursion_max_prompt_chars`, `recursion_child_max_iters`,
 `recursion_child_max_llm_calls`, and `recursion_child_max_output_chars`.
 `recursion_max_parallel_children` bounds the number of independent child RLMs
 that Fleet may run concurrently; it defaults to `2` and is not a model-facing

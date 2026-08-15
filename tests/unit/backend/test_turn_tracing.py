@@ -438,11 +438,11 @@ def test_annotate_trace_io_marks_root_span_error_when_failed(monkeypatch: pytest
 def test_turn_phase_span_records_bounded_metadata_when_a_turn_span_is_active(monkeypatch: pytest.MonkeyPatch) -> None:
     calls = _install_fake_mlflow(monkeypatch)
 
-    with turn_phase_span("RLM.execute", inputs={"max_iterations": 20, "max_llm_calls": 50}):
+    with turn_phase_span("RLM.execute", inputs={"max_iters": 20, "max_llm_calls": 50}):
         pass
 
     assert calls.start_span_names == ["RLM.execute"]
-    assert calls.span_inputs[-1] == {"max_iterations": 20, "max_llm_calls": 50}
+    assert calls.span_inputs[-1] == {"max_iters": 20, "max_llm_calls": 50}
     assert calls.span_outputs[-1] == {"phase_status": "completed"}
 
 
@@ -505,7 +505,7 @@ def test_turn_phase_span_setup_failure_is_soft(monkeypatch: pytest.MonkeyPatch) 
     _install_fake_mlflow(monkeypatch, explode=True)
     executed = False
 
-    with turn_phase_span("RLM.execute", inputs={"max_iterations": 20}):
+    with turn_phase_span("RLM.execute", inputs={"max_iters": 20}):
         executed = True
 
     assert executed

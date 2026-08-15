@@ -182,7 +182,7 @@ def _live_settings(tmp_path: Path) -> Settings:
         update={
             "database_url": database_url,
             "volume_name": f"fleet-rlm-live-mvp-{uuid4()}",
-            "rlm_max_iterations": 8,
+            "rlm_max_iters": 8,
             "rlm_max_llm_calls": 12,
             "turn_timeout_seconds": 840,
             # Live product evidence is RuntimeEvents → SSE → TUI. Keep optional
@@ -567,7 +567,7 @@ async def _replace_binding(resources: Any, binding: SandboxBinding) -> SandboxBi
 def test_direct_pi_digit_uses_deterministic_repl_without_optional_capabilities(tmp_path: Path) -> None:
     settings = _live_settings(tmp_path).model_copy(
         update={
-            "rlm_max_iterations": 3,
+            "rlm_max_iters": 3,
             "turn_timeout_seconds": 840,
         }
     )
