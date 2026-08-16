@@ -35,7 +35,18 @@ export interface paths {
         /** List Sessions */
         get: operations["list_sessions"];
         put?: never;
-        /** Create Session */
+        /**
+         * Create Session
+         * @description Create a session for the authenticated user in the current workspace.
+         *
+         *     Parameters:
+         *         body (SessionCreateRequest): Session creation data, including the optional title.
+         *         identity (LocalScopeDep): Authenticated user and workspace scope.
+         *         repo (SessionCatalogDep): Session repository used to create the session.
+         *
+         *     Returns:
+         *         SessionDetailResponse: The newly created session details.
+         */
         post: operations["create_session"];
         delete?: never;
         options?: never;
@@ -57,7 +68,20 @@ export interface paths {
         delete?: never;
         options?: never;
         head?: never;
-        /** Patch Session */
+        /**
+         * Patch Session
+         * @description Update the title or status of a session within the authenticated user's workspace.
+         *
+         *     Parameters:
+         *         body (SessionPatchRequest): Fields to update; at least one field is required.
+         *
+         *     Returns:
+         *         SessionDetailResponse: The updated session details.
+         *
+         *     Raises:
+         *         HTTPException: If no fields are provided, the title is blank, the status is invalid, or the
+         *             session cannot be updated.
+         */
         patch: operations["update_session"];
         trace?: never;
     };
@@ -119,7 +143,19 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Download Artifact */
+        /**
+         * Download Artifact
+         * @description Download an artifact within the caller's workspace scope.
+         *
+         *     Parameters:
+         *         artifact_id (UUID): Identifier of the artifact to download.
+         *
+         *     Returns:
+         *         Response: The artifact content with its media type and download filename.
+         *
+         *     Raises:
+         *         HTTPException: If the artifact is missing or artifact storage is unavailable.
+         */
         get: operations["download_artifact"];
         put?: never;
         post?: never;
@@ -138,7 +174,13 @@ export interface paths {
         };
         /**
          * List Skills
-         * @description List SkillCards authorized for the caller (metadata only).
+         * @description List skill metadata available to the caller, optionally ranked by a search query.
+         *
+         *     Parameters:
+         *         q (str | None): Optional query used to rank skills by matching terms in their names or descriptions.
+         *
+         *     Returns:
+         *         list[SkillCardResponse]: Response-formatted skill cards.
          */
         get: operations["list_skills"];
         put?: never;
@@ -174,7 +216,18 @@ export interface paths {
             cookie?: never;
         };
         get?: never;
-        /** Request Run Cancellation */
+        /**
+         * Request Run Cancellation
+         * @description Request cancellation for a run.
+         *
+         *     Parameters:
+         *         run_id (UUID): The identifier of the run to cancel.
+         *         identity (LocalScopeDep): The authenticated user's workspace scope.
+         *         lifecycle (RunLifecycleDep): The run lifecycle service.
+         *
+         *     Returns:
+         *         CancellationResponse: The run identifier and resulting cancellation state.
+         */
         put: operations["request_run_cancellation"];
         post?: never;
         delete?: never;
@@ -197,7 +250,19 @@ export interface paths {
         delete?: never;
         options?: never;
         head?: never;
-        /** Patch Settings Policy */
+        /**
+         * Patch Settings Policy
+         * @description Update the settings policy's default profile or a specified field.
+         *
+         *     Parameters:
+         *         body (SettingsPolicyPatchRequest): The requested profile or field update, including the expected revision.
+         *
+         *     Returns:
+         *         SettingsPolicyResponse: The updated settings policy.
+         *
+         *     Raises:
+         *         HTTPException: If the revision conflicts, the update is invalid, or the policy is unavailable.
+         */
         patch: operations["update_settings_policy"];
         trace?: never;
     };

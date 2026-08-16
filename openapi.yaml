@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: fleet-rlm
-  version: 0.7.0
+  version: 0.7.1
 paths:
   /api/sessions/{session_id}/turns:
     post:
@@ -128,6 +128,12 @@ paths:
       tags:
       - sessions
       summary: Create Session
+      description: "Create a session for the authenticated user in the current workspace.\n\
+        \nParameters:\n    body (SessionCreateRequest): Session creation data, including\
+        \ the optional title.\n    identity (LocalScopeDep): Authenticated user and\
+        \ workspace scope.\n    repo (SessionCatalogDep): Session repository used\
+        \ to create the session.\n\nReturns:\n    SessionDetailResponse: The newly\
+        \ created session details."
       operationId: create_session
       requestBody:
         required: true
@@ -236,6 +242,12 @@ paths:
       tags:
       - sessions
       summary: Patch Session
+      description: "Update the title or status of a session within the authenticated\
+        \ user's workspace.\n\nParameters:\n    body (SessionPatchRequest): Fields\
+        \ to update; at least one field is required.\n\nReturns:\n    SessionDetailResponse:\
+        \ The updated session details.\n\nRaises:\n    HTTPException: If no fields\
+        \ are provided, the title is blank, the status is invalid, or the\n      \
+        \  session cannot be updated."
       operationId: update_session
       parameters:
       - name: session_id
@@ -348,6 +360,11 @@ paths:
       tags:
       - artifacts
       summary: Download Artifact
+      description: "Download an artifact within the caller's workspace scope.\n\n\
+        Parameters:\n    artifact_id (UUID): Identifier of the artifact to download.\n\
+        \nReturns:\n    Response: The artifact content with its media type and download\
+        \ filename.\n\nRaises:\n    HTTPException: If the artifact is missing or artifact\
+        \ storage is unavailable."
       operationId: download_artifact
       parameters:
       - name: artifact_id
@@ -397,7 +414,10 @@ paths:
       tags:
       - skills
       summary: List Skills
-      description: List SkillCards authorized for the caller (metadata only).
+      description: "List skill metadata available to the caller, optionally ranked\
+        \ by a search query.\n\nParameters:\n    q (str | None): Optional query used\
+        \ to rank skills by matching terms in their names or descriptions.\n\nReturns:\n\
+        \    list[SkillCardResponse]: Response-formatted skill cards."
       operationId: list_skills
       parameters:
       - name: q
@@ -458,6 +478,11 @@ paths:
       tags:
       - runs
       summary: Request Run Cancellation
+      description: "Request cancellation for a run.\n\nParameters:\n    run_id (UUID):\
+        \ The identifier of the run to cancel.\n    identity (LocalScopeDep): The\
+        \ authenticated user's workspace scope.\n    lifecycle (RunLifecycleDep):\
+        \ The run lifecycle service.\n\nReturns:\n    CancellationResponse: The run\
+        \ identifier and resulting cancellation state."
       operationId: request_run_cancellation
       parameters:
       - name: run_id
@@ -497,6 +522,11 @@ paths:
       tags:
       - settings
       summary: Patch Settings Policy
+      description: "Update the settings policy's default profile or a specified field.\n\
+        \nParameters:\n    body (SettingsPolicyPatchRequest): The requested profile\
+        \ or field update, including the expected revision.\n\nReturns:\n    SettingsPolicyResponse:\
+        \ The updated settings policy.\n\nRaises:\n    HTTPException: If the revision\
+        \ conflicts, the update is invalid, or the policy is unavailable."
       operationId: update_settings_policy
       requestBody:
         content:

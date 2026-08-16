@@ -1,5 +1,13 @@
 version: 2.1
 
+parameters:
+  deploy_pypi:
+    type: boolean
+    default: false
+  release_version:
+    type: string
+    default: ""
+
 executors:
   python:
     docker:
@@ -104,10 +112,11 @@ jobs:
             corepack prepare pnpm@10.33.2 --activate
             pnpm --dir tools/fleet-tui install --frozen-lockfile
       - run:
-          name: API and stream contract checks
-          command: |
-            make api-check
-            make stream-check
+          name: API contract checks
+          command: make api-check
+      - run:
+          name: Stream contract check
+          command: make stream-check
       - run:
           name: Python dependency check
           command: uvx deptry . --config pyproject.toml
@@ -180,6 +189,48 @@ jobs:
       - store_artifacts:
           path: .scratch/coverage
           destination: coverage/daytona
+
+  # Opt-in deployment bridge for the existing GitHub Actions PyPI release.
+  # Configure GITHUB_TOKEN in a CircleCI project/context with actions:write.
+  deploy-pypi:
+    executor: python
+    resource_class: small
+    steps:
+      - checkout
+      - install_uv
+      - run:
+          name: Validate PyPI deploy inputs
+          command: |
+            test -n "<< pipeline.parameters.release_version >>" || {
+              echo "release_version must be supplied when enabling deploy_pypi" >&2
+              exit 1
+            }
+            test -n "${GITHUB_TOKEN:-}" || {
+              echo "GITHUB_TOKEN must be configured in the CircleCI project or context" >&2
+              exit 1
+            }
+      - run:
+          name: Plan a PyPI deploy
+          command: |
+            circleci run release plan \
+              --environment-name="pypi" \
+              --component-name="fleet-rlm" \
+              --target-version="<< pipeline.parameters.release_version >>"
+      - run:
+          name: Trigger and wait for GitHub Actions release
+          no_output_timeout: 45m
+          command: |
+            uv run python scripts/circleci_trigger_release.py \
+              --version="<< pipeline.parameters.release_version >>" \
+              --ref=main
+      - run:
+          name: Update deploy to SUCCESS
+          command: circleci run release update --status=SUCCESS
+          when: on_success
+      - run:
+          name: Update planned deploy to FAILED
+          command: circleci run release update --status=FAILED
+          when: on_fail
 
   python-compat:
     parameters:
@@ -264,4 +315,17 @@ workflows:
           python_version: "3.12"
           python_tag: "py312"
           image: cimg/python:3.12.11
+      - python-compat:
+          name: python-compat-313
+          python_version: "3.13"
+          python_tag: "py313"
+          image: cimg/python:3.13.13
       - tui
+
+  deploy-pypi:
+    when: << pipeline.parameters.deploy_pypi >>
+    jobs:
+      - deploy-pypi:
+          filters:
+            branches:
+              only: main

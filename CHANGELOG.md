@@ -2,6 +2,15 @@
 
 All notable changes to this project are documented in this file.
 
+## [0.7.1] - 2026-08-15
+
+### Changed
+
+- **Change:** Added explicit Python 3.13 compatibility coverage and an
+  opt-in CircleCI PyPI deployment path with Smart Deployments metadata.
+  **Outcome:** Python 3.13 compatibility and release promotion are covered
+  by the repository's supported CI workflow without changing runtime behavior.
+
 ## [0.7.0] - 2026-08-15
 
 ### Added
