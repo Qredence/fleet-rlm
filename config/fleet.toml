@@ -64,6 +64,14 @@ async_logging = true
 trace_sampling_ratio = 1.0
 trace_content_max_chars = 10000
 
+[defaults.posthog]
+# PostHog product analytics for project 15008, hosted on the EU ingestion
+# endpoint. The project token is resolved from the named environment variable;
+# analytics stay disabled when it is absent and never block startup.
+enabled = true
+project_token_env = "POSTHOG_PROJECT_TOKEN"
+host = "https://eu.i.posthog.com"
+
 [profiles.daytona.runtime]
 environment = "daytona"
 
@@ -173,6 +181,10 @@ cache = false
 [profiles.daytona-bench.mlflow]
 tracing_enabled = false
 
+# Benchmarks must also stay analytics-free.
+[profiles.daytona-bench.posthog]
+enabled = false
+
 [profiles.daytona-bench.rlm]
 # Keep host logs free of model-generated execution output; live SSE remains
 # bounded and is the operator-facing execution surface.
@@ -198,6 +210,10 @@ cache = false
 # Benchmarks must stay traceless; override the on-by-default global below.
 [profiles.daytona-bench-40.mlflow]
 tracing_enabled = false
+
+# Benchmarks must also stay analytics-free.
+[profiles.daytona-bench-40.posthog]
+enabled = false
 
 [profiles.daytona-bench-40.rlm]
 max_iters = 40

@@ -181,3 +181,6 @@ PLANS.md
 
 notebooks/
 .databricks
+
+# chunk review context artifacts
+.chunk/context/
