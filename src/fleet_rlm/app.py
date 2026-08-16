@@ -12,6 +12,7 @@ from fastapi import FastAPI
 
 from . import __version__
 from .config import Settings, configure_logging, load_runtime_settings
+from .posthog_client import init_posthog, shutdown_posthog
 
 if TYPE_CHECKING:
     from fleet_rlm.composition.inventory import RuntimeDatabaseLifecycle, RuntimeInventory
@@ -125,7 +126,15 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
-        """Own tracing setup and provider composition for one application lifespan."""
+        """
+        Manage application resources for the duration of a FastAPI application lifespan.
+
+        Parameters:
+            app (FastAPI): Application instance whose runtime state and composition are initialized.
+
+        Raises:
+            RuntimeError: If the configured runtime environment is unsupported.
+        """
         from fleet_rlm.observability.mlflow_runtime import MLflowRuntime
 
         settings_obj: Settings = app.state.settings
@@ -133,34 +142,39 @@ def create_app(
         if not isinstance(mlflow_runtime, MLflowRuntime):
             mlflow_runtime = MLflowRuntime(settings_obj)
             app.state.mlflow_runtime = mlflow_runtime
-        await mlflow_runtime.start()
+
         try:
-            if _composition_installer is not None:
-                async with _local_db_lifespan(app, settings_obj, _composition_installer):
-                    yield
-                return
+            init_posthog(settings_obj)
+            await mlflow_runtime.start()
+            try:
+                if _composition_installer is not None:
+                    async with _local_db_lifespan(app, settings_obj, _composition_installer):
+                        yield
+                    return
 
-            if settings_obj.run_environment == "daytona":
-                from fleet_rlm.composition import (
-                    dispose_daytona_composition,
-                    install_daytona_composition,
-                    require_daytona_settings,
-                )
+                if settings_obj.run_environment == "daytona":
+                    from fleet_rlm.composition import (
+                        dispose_daytona_composition,
+                        install_daytona_composition,
+                        require_daytona_settings,
+                    )
 
-                require_daytona_settings(settings_obj)
-                installed = False
-                try:
-                    await install_daytona_composition(app, settings_obj)
-                    installed = True
-                    yield
-                finally:
-                    if installed:
-                        await dispose_daytona_composition(app)
-                return
+                    require_daytona_settings(settings_obj)
+                    installed = False
+                    try:
+                        await install_daytona_composition(app, settings_obj)
+                        installed = True
+                        yield
+                    finally:
+                        if installed:
+                            await dispose_daytona_composition(app)
+                    return
 
-            raise RuntimeError("Fleet only supports the Daytona runtime")
+                raise RuntimeError("Fleet only supports the Daytona runtime")
+            finally:
+                await mlflow_runtime.close()
         finally:
-            await mlflow_runtime.close()
+            shutdown_posthog()
 
     app = FastAPI(
         title=resolved.app_name,

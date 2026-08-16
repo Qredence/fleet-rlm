@@ -112,10 +112,11 @@ jobs:
             corepack prepare pnpm@10.33.2 --activate
             pnpm --dir tools/fleet-tui install --frozen-lockfile
       - run:
-          name: API and stream contract checks
-          command: |
-            make api-check
-            make stream-check
+          name: API contract checks
+          command: make api-check
+      - run:
+          name: Stream contract check
+          command: make stream-check
       - run:
           name: Python dependency check
           command: uvx deptry . --config pyproject.toml
