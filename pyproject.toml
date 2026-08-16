@@ -34,7 +34,7 @@ dependencies = [
     "dspy>=3.3.0,<3.4",
     "packaging>=24,<27",
     # Sandboxed execution.
-    "daytona==0.202.0",
+    "daytona==0.204.0",
     # Persistence and migrations.
     "aiosqlite>=0.20.0",
     "alembic>=1.18.5,<2",
