@@ -31,11 +31,6 @@ _LIVE_TEST = "tests/live/backend/test_fleet_rlm_daytona_mvp.py::test_complete_da
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 _LIVE_ROOT_MODEL = os.environ.get("FLEET_LIVE_ROOT_MODEL", "deepseek-v4-flash")
 _LIVE_SUB_MODEL = os.environ.get("FLEET_LIVE_SUB_MODEL", "deepseek-v4-flash")
-_MODEL_ALIAS_BASE = (
-    _LIVE_ROOT_MODEL.removesuffix("-0731")
-    if _LIVE_ROOT_MODEL == _LIVE_SUB_MODEL
-    else _LIVE_SUB_MODEL.removesuffix("-0731")
-)
 _APPROVED_ROOT_MODELS = frozenset(
     name
     for base in {_LIVE_ROOT_MODEL, _LIVE_ROOT_MODEL.removesuffix("-0731"), _LIVE_ROOT_MODEL + "-0731"}

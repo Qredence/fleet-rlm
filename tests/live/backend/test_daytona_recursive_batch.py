@@ -31,16 +31,6 @@ pytestmark = [pytest.mark.live_daytona, pytest.mark.timeout(960)]
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _LIVE_ROOT_MODEL = os.environ.get("FLEET_LIVE_ROOT_MODEL", "deepseek-v4-flash")
 _LIVE_SUB_MODEL = os.environ.get("FLEET_LIVE_SUB_MODEL", "deepseek-v4-flash")
-_APPROVED_MODELS = frozenset(
-    name
-    for base in {
-        _LIVE_ROOT_MODEL,
-        _LIVE_ROOT_MODEL.removesuffix("-0731"),
-        _LIVE_SUB_MODEL,
-        _LIVE_SUB_MODEL.removesuffix("-0731"),
-    }
-    for name in (base, f"openai/{base}")
-)
 _CONTRACT_ID = "fleet.daytona-recursive-batch"
 _TOKEN_A = "BATCH_TOKEN_ALPHA"
 _TOKEN_B = "BATCH_TOKEN_BETA"
