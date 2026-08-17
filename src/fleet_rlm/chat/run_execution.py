@@ -435,12 +435,21 @@ class RunExecutionDriver:
             settlement_inputs["iterations"] = resolution.usage.get("iterations")
             settlement_inputs["memory_candidate_count"] = len(resolution.memory_candidates)
         with turn_phase_span("Turn.settlement", inputs=settlement_inputs):
+            finish_kwargs: dict[str, Any] = {}
+            # PreparedRun owns this field; SimpleNamespace test doubles
+            # predating P23 may omit it (no outbox intents then). The kwarg is
+            # only forwarded when present so legacy lifecycle doubles keep
+            # their narrower finish signatures.
+            builder = getattr(prepared, "memory_intent_builder", None)
+            if builder is not None:
+                finish_kwargs["memory_intents_builder"] = builder
             return await self._lifecycle.finish(
                 run,
                 resolution,
                 artifact_sink=prepared.artifact_sink,
                 result_snapshot_sink=prepared.result_snapshot_sink,
                 memory_promotion=prepared.post_commit_memory_promotion,
+                **finish_kwargs,
             )
 
     async def _settle_cancellation(
