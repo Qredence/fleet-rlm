@@ -371,18 +371,19 @@ async def test_daytona_dispose_detaches_inventory_before_disposal() -> None:
 
 
 @pytest.mark.asyncio
-async def test_daytona_install_registers_and_dispose_clears_bridge_service_loop(
+async def test_daytona_install_registers_and_dispose_clears_bridge_dispatcher(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The composition loop is the bridge service loop for the app lifespan.
+    """Each app lifespan owns its bridge dispatcher (QRE-154).
 
-    Sync Daytona bridges post SDK coroutines to this registered loop (the one
-    loop-affine to every Daytona SDK object, which never performs nested
-    synchronous waits); disposal releases it so post-lifespan bridge traffic
-    falls back to caller capture instead of posting to a closing loop.
+    Sync Daytona bridges post SDK coroutines to the dispatcher's registered
+    loop (the one loop-affine to every Daytona SDK object, which never
+    performs nested synchronous waits); disposal clears only this
+    composition's dispatcher, and the legacy process-default dispatcher stays
+    unregistered throughout.
     """
     import fleet_rlm.composition.daytona as composition
-    from fleet_rlm.daytona.dspy_sync_bridge import bridge_service_loop, set_bridge_service_loop
+    from fleet_rlm.daytona.dspy_sync_bridge import SyncBridgeDispatcher, bridge_service_loop
 
     inventory = RuntimeInventory(
         turn_coordinator=object(),
@@ -399,9 +400,19 @@ async def test_daytona_install_registers_and_dispose_clears_bridge_service_loop(
         workspace_volume_mirror=object(),
     )
 
-    async def fake_build(_settings: object, *, skill_catalog: SkillCatalog) -> RuntimeInventory:
+    async def fake_build(
+        _settings: object,
+        *,
+        skill_catalog: SkillCatalog,
+        dispatcher: SyncBridgeDispatcher | None = None,
+    ) -> RuntimeInventory:
         assert skill_catalog is app.state.skill_catalog
-        return inventory
+        assert dispatcher is not None
+        # The install path registers the composition loop before building.
+        assert dispatcher.service_loop() is asyncio.get_running_loop()
+        return replace(inventory, bridge_dispatcher=dispatcher)
+
+    from dataclasses import replace
 
     monkeypatch.setattr(composition, "build_daytona_composition", fake_build)
     monkeypatch.setattr("fleet_rlm.config_policy.ConfigPolicyService", lambda *_a, **_k: object())
@@ -410,15 +421,15 @@ async def test_daytona_install_registers_and_dispose_clears_bridge_service_loop(
     app = SimpleNamespace(state=SimpleNamespace())
     app.state.skill_catalog = SkillCatalog(())
 
-    try:
-        installed = await composition.install_daytona_composition(app, object())
-        assert bridge_service_loop() is asyncio.get_running_loop()
-        assert installed is app.state.runtime_inventory
+    installed = await composition.install_daytona_composition(app, object())
+    dispatcher = installed.bridge_dispatcher
+    assert isinstance(dispatcher, SyncBridgeDispatcher)
+    assert dispatcher.service_loop() is asyncio.get_running_loop()
+    assert bridge_service_loop() is None  # legacy default never registered
+    assert installed is app.state.runtime_inventory
 
-        await composition.dispose_daytona_composition(app)
-        assert bridge_service_loop() is None
-    finally:
-        set_bridge_service_loop(None)
+    await composition.dispose_daytona_composition(app)
+    assert dispatcher.service_loop() is None
     assert bridge_service_loop() is None
 
 
@@ -571,7 +582,8 @@ async def test_install_daytona_composition_does_not_create_schema(monkeypatch) -
         run_preparation=preparation,
     )
 
-    async def fake_build(_settings, *, skill_catalog):
+    async def fake_build(_settings, *, skill_catalog, dispatcher=None):
+        assert dispatcher is not None  # the install path always injects one (QRE-154)
         assert isinstance(skill_catalog, SkillCatalog)
         return inventory
 
@@ -660,7 +672,8 @@ async def test_live_startup_preserves_original_error_and_attempts_all_cleanup(mo
         orphan_cleanup_task=orphan_cleanup_task,
     )
 
-    async def fake_build(_settings, *, skill_catalog):
+    async def fake_build(_settings, *, skill_catalog, dispatcher=None):
+        assert dispatcher is not None  # the install path always injects one (QRE-154)
         assert isinstance(skill_catalog, SkillCatalog)
         return inventory
 

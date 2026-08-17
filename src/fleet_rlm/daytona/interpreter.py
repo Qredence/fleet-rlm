@@ -32,7 +32,7 @@ from fleet_rlm.daytona.broker_source import (
     build_submit_setup_code,
     extract_final_payload,
 )
-from fleet_rlm.daytona.dspy_sync_bridge import sync_sandbox, tombstone_sync_sandbox
+from fleet_rlm.daytona.dspy_sync_bridge import SyncBridgeDispatcher, sync_sandbox, tombstone_sync_sandbox
 from fleet_rlm.daytona.errors import (
     DaytonaAdapterError,
     map_provider_error,
@@ -803,13 +803,17 @@ def sandbox_backend(
     sandbox: Any,
     *,
     loop: asyncio.AbstractEventLoop | None = None,
+    dispatcher: SyncBridgeDispatcher | None = None,
     timeout_s: int | None = DEFAULT_EXECUTION_TIMEOUT_S,
 ) -> InterpreterBackend:
     """Build a stateful backend from a live Daytona sandbox (daytona package only).
 
     ``timeout_s`` bounds each ``run_code`` call (Daytona's SDK default is ten
-    minutes when unset); pass ``None`` to keep the SDK default.
+    minutes when unset); pass ``None`` to keep the SDK default. When ``loop``
+    is given, ``dispatcher`` optionally injects the composition-owned bridge
+    authority (QRE-154); omitted, the view resolves through the legacy
+    process-default dispatcher.
     """
     if loop is not None:
-        sandbox = sync_sandbox(sandbox, loop)
+        sandbox = sync_sandbox(sandbox, loop, dispatcher)
     return _SandboxProcessBackend(sandbox, timeout_s=timeout_s)

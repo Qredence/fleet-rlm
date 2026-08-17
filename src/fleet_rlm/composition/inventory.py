@@ -15,11 +15,14 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from typing import ClassVar, Protocol
+from typing import TYPE_CHECKING, ClassVar, Protocol
 from uuid import UUID
 
 from fastapi import FastAPI
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
+
+if TYPE_CHECKING:
+    from fleet_rlm.daytona.dspy_sync_bridge import SyncBridgeDispatcher
 
 from fleet_rlm.artifacts.reader import ArtifactReader
 from fleet_rlm.chat.run_cleanup import RunCleanupSupervisor
@@ -97,6 +100,9 @@ class RuntimeInventory:
     workspace_volume_gateway: WorkspaceVolumeGateway | None = None
     workspace_file_service: WorkspaceFileService | None = None
     workspace_volume_mirror: VolumeTreeFs | None = None
+    # Composition-owned Daytona sync-bridge dispatcher (QRE-154); disposed
+    # compositions clear their own loop authority via clear_loop().
+    bridge_dispatcher: SyncBridgeDispatcher | None = None
     # Best-effort post-readiness orphan sweep; cancelled at dispose. It must
     # never gate startup readiness, so it is tracked (not awaited) here.
     orphan_cleanup_task: asyncio.Task[None] | None = None

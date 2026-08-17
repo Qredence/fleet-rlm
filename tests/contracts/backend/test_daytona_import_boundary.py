@@ -11,6 +11,7 @@ ALLOWED_DAYTONA_IMPORT_ROOTS = {
 }
 EXPECTED_DAYTONA_MODULES = {
     "__init__.py",
+    "admission.py",
     "broker_source.py",
     "diagnostics.py",
     "dspy_sync_bridge.py",
@@ -24,6 +25,7 @@ EXPECTED_DAYTONA_MODULES = {
     "provisioning.py",
     "recursive_child_runtime.py",
     "run_environment.py",
+    "sandbox_lease.py",
     "session_manager.py",
     "workspace_agent.py",
     "workspace_agent_runtime.py",

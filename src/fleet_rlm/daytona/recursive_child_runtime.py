@@ -13,9 +13,11 @@ from threading import Lock, Thread
 from typing import Any
 from uuid import UUID
 
+from fleet_rlm.daytona.dspy_sync_bridge import SyncBridgeDispatcher
 from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, sandbox_backend
 from fleet_rlm.daytona.lifecycle import AbsenceOutcome, confirm_absence
 from fleet_rlm.daytona.provisioning import SandboxPlatform, recursive_child_volume_subpath
+from fleet_rlm.daytona.sandbox_lease import SandboxLease, SandboxLeasePolicy, schedule_owned_close
 from fleet_rlm.daytona.session_manager import (
     DaytonaAdmission,
     DaytonaAdmissionPermit,
@@ -58,6 +60,7 @@ class ChildRuntimeLease:
 def build_child_runtime_factory(
     *,
     loop: asyncio.AbstractEventLoop,
+    dispatcher: SyncBridgeDispatcher | None = None,
     platform: SandboxPlatform,
     admission: DaytonaAdmission,
     volume_id: str,
@@ -202,6 +205,7 @@ def build_child_runtime_factory(
         """
         acquisition_coroutine = _acquire_child_runtime(
             loop=loop,
+            dispatcher=dispatcher,
             platform=platform,
             admission=admission,
             volume_id=volume_id,
@@ -251,6 +255,7 @@ def build_child_runtime_factory(
 async def _acquire_child_runtime(
     *,
     loop: asyncio.AbstractEventLoop,
+    dispatcher: SyncBridgeDispatcher | None = None,
     platform: SandboxPlatform,
     admission: DaytonaAdmission,
     volume_id: str,
@@ -294,7 +299,7 @@ async def _acquire_child_runtime(
         child_sandbox_id = sandbox_id
         _require_authorized(is_authorized)
         interpreter = DaytonaCodeInterpreter(
-            backend=sandbox_backend(sandbox, loop=loop, timeout_s=execution_timeout_s),
+            backend=sandbox_backend(sandbox, loop=loop, dispatcher=dispatcher, timeout_s=execution_timeout_s),
             execution_output_cap=execution_output_cap,
         )
 
@@ -340,51 +345,21 @@ def _close_child_runtime_sync(
     first_error: BaseException | None = None
 
     def schedule_cleanup() -> tuple[Future[None], Any | None]:
-        cleanup = _cleanup_child_runtime_async(
-            platform=platform,
-            sandbox=sandbox,
-            sandbox_id=sandbox_id,
-            mount_path=mount_path,
-            permit=permit,
+        # QRE-156: the post-vs-disposable-loop close lane is owned once by the
+        # lease seam; a thread-start failure releases admission synchronously.
+        execution = schedule_owned_close(
+            loop=loop,
+            build=lambda: _cleanup_child_runtime_async(
+                platform=platform,
+                sandbox=sandbox,
+                sandbox_id=sandbox_id,
+                mount_path=mount_path,
+                permit=permit,
+            ),
+            fallback_owner_release=permit.release,
+            thread_name="fleet-child-cleanup-fallback",
         )
-        try:
-            return asyncio.run_coroutine_threadsafe(cleanup, loop), cleanup
-        except BaseException:
-            cleanup.close()
-
-        # The owner loop may close during late acquisition handoff. Run the
-        # provider cleanup on a disposable loop so the permit's ``finally``
-        # still executes even when run_coroutine_threadsafe is unavailable.
-        fallback: Future[None] = Future()
-
-        def run_fallback_cleanup() -> None:
-            try:
-                asyncio.run(
-                    _cleanup_child_runtime_async(
-                        platform=platform,
-                        sandbox=sandbox,
-                        sandbox_id=sandbox_id,
-                        mount_path=mount_path,
-                        permit=permit,
-                    )
-                )
-            except BaseException as exc:
-                if not fallback.done():
-                    fallback.set_exception(exc)
-            else:
-                if not fallback.done():
-                    fallback.set_result(None)
-
-        fallback_thread = Thread(target=run_fallback_cleanup, name="fleet-child-cleanup-fallback", daemon=True)
-        try:
-            fallback_thread.start()
-        except BaseException as exc:
-            # A thread-start failure cannot safely run provider I/O. Release
-            # admission synchronously and surface the unresolved deletion.
-            with contextlib.suppress(BaseException):
-                permit.release()
-            fallback.set_exception(exc)
-        return fallback, None
+        return execution.future, execution.coroutine
 
     shutdown_result: Future[None] = Future()
     deferred_cleanup = False
@@ -537,15 +512,13 @@ async def _cleanup_child_runtime_async(
     """
     Clean up a child runtime's files and sandbox, then release its admission permit.
 
-    The admission slot stays owned by this coroutine until the provider
-    confirms the ephemeral Sandbox is absent, not merely deletion-requested
-    (QRE-151). Confirmation runs even when the delete request itself failed:
-    the Sandbox may be absent already, or deletion may have been accepted
-    provider-side despite the client error. A non-absent classified outcome is
-    an explicit quarantine failure surfaced as :class:`ChildRuntimeCleanupError`
-    rather than a silently released permit; close-path timeouts retain the
-    still-running coroutine, so late confirmation keeps ownership until it
-    settles.
+    Lease-backed (QRE-156): the shared :class:`SandboxLease` seam owns the
+    purge -> delete -> confirmed-absence -> admission-release pipeline
+    (QRE-151 semantics). Confirmation runs even when the delete request itself
+    failed; a non-absent classified outcome is an explicit quarantine failure
+    surfaced as :class:`ChildRuntimeCleanupError` rather than a silently
+    released permit; close-path timeouts retain the still-running coroutine,
+    so late confirmation keeps ownership until it settles.
 
     Parameters:
         platform (SandboxPlatform): Platform used to delete the sandbox and to
@@ -564,32 +537,30 @@ async def _cleanup_child_runtime_async(
         BaseException: The first error encountered while purging files,
         deleting the sandbox, or confirming its absence.
     """
-    first_error: BaseException | None = None
-    try:
-        try:
-            await _purge_regular_files(sandbox, mount_path)
-        except BaseException as exc:
-            first_error = exc
-        try:
-            await platform.delete(sandbox_id)
-        except BaseException as exc:
-            if first_error is None:
-                first_error = exc
-        outcome = await confirm(
-            probe=platform.get,
-            sandbox_id=sandbox_id,
-            timeout_s=confirm_timeout_s,
-            poll_interval_s=confirm_poll_interval_s,
+    lease = SandboxLease(
+        kind="recursive_child",
+        sandbox=sandbox,
+        sandbox_id=sandbox_id,
+        platform=platform,
+        permit=permit,
+        purge=lambda sandbox: _purge_regular_files(sandbox, mount_path),
+        policy=SandboxLeasePolicy(
+            kind="recursive_child",
+            # Interpreter shutdown stays orchestrated by the sync close path
+            # (thread + quarantine); the lease owns purge/delete/confirm/release.
+            interpreter_shutdown=False,
+            confirm_timeout_s=confirm_timeout_s,
+            confirm_poll_interval_s=confirm_poll_interval_s,
+            confirm_fn=confirm,
+        ),
+    )
+    receipt = await lease.aclose()
+    if receipt.first_error is not None or not receipt.provider.confirmed_absent:
+        raise ChildRuntimeCleanupError(
+            "recursive child Sandbox cleanup failed "
+            f"(sandbox_id={sandbox_id!r}, provider_error={receipt.provider.error!r}, "
+            f"first_error={receipt.first_error!r}, quarantined={receipt.quarantine.quarantined})"
         )
-        if not outcome.absent and first_error is None:
-            first_error = ChildRuntimeCleanupError(
-                "recursive child Sandbox deletion was not confirmed absent "
-                f"(sandbox_id={sandbox_id!r}, outcome={outcome!r})"
-            )
-    finally:
-        permit.release()
-    if first_error is not None:
-        raise first_error
 
 
 async def _purge_regular_files(sandbox: Any, mount_path: str) -> None:
