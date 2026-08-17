@@ -336,13 +336,10 @@ class RunExecutionDriver:
             self._finish_with_trace(run, outcome, prepared),
             name="fleet-turn-finalization",
         )
-        execution_deadline = float(
-            getattr(
-                prepared.execution,
-                "deadline",
-                asyncio.get_running_loop().time() + self._turn_timeout_seconds,
-            )
-        )
+        # RLMExecutionContext.execution (ExecutionRuntime) owns the shared
+        # Turn deadline established by the coordinator; the fallback only
+        # protects legacy PreparedRun doubles without the deep context.
+        execution_deadline = self._execution_deadline(prepared)
         remaining = max(0.0, execution_deadline - asyncio.get_running_loop().time())
         result = await self._wait_for_finalization(
             state.finalization_task,
@@ -758,9 +755,19 @@ class RunExecutionDriver:
             cleanup_awaitable.close()
             raise
 
+    def _execution_deadline(self, prepared: PreparedRun) -> float:
+        """Shared Turn deadline from the deep execution context (P25)."""
+        execution_runtime = getattr(prepared.execution, "execution", None)
+        if execution_runtime is not None:
+            return float(execution_runtime.deadline)
+        return asyncio.get_running_loop().time() + self._turn_timeout_seconds
+
     @staticmethod
     def _trace_request(prepared: PreparedRun) -> str:
-        request = getattr(prepared.execution, "request", "")
+        # RLMExecutionContext.session (SessionView) owns the public request;
+        # the fallback only protects legacy PreparedRun doubles.
+        session = getattr(prepared.execution, "session", None)
+        request = getattr(session, "request", "") if session is not None else ""
         return request if isinstance(request, str) else ""
 
     @staticmethod

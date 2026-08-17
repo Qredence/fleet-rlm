@@ -29,10 +29,23 @@ RECEIPT_SCHEMA = "fleet.daytona-mvp-proof/v1"
 EVIDENCE_ENV = "FLEET_LIVE_EVIDENCE_PATH"
 _LIVE_TEST = "tests/live/backend/test_fleet_rlm_daytona_mvp.py::test_complete_daytona_mvp_through_fastapi"
 _REPO_ROOT = Path(__file__).resolve().parents[1]
-_LIVE_ROOT_MODEL = "deepseek-v4-flash"
-_LIVE_SUB_MODEL = "deepseek-v4-flash"
-_APPROVED_ROOT_MODELS = frozenset({_LIVE_ROOT_MODEL, f"openai/{_LIVE_ROOT_MODEL}"})
-_APPROVED_SUB_MODELS = frozenset({_LIVE_SUB_MODEL, f"openai/{_LIVE_SUB_MODEL}"})
+_LIVE_ROOT_MODEL = os.environ.get("FLEET_LIVE_ROOT_MODEL", "deepseek-v4-flash")
+_LIVE_SUB_MODEL = os.environ.get("FLEET_LIVE_SUB_MODEL", "deepseek-v4-flash")
+_MODEL_ALIAS_BASE = (
+    _LIVE_ROOT_MODEL.removesuffix("-0731")
+    if _LIVE_ROOT_MODEL == _LIVE_SUB_MODEL
+    else _LIVE_SUB_MODEL.removesuffix("-0731")
+)
+_APPROVED_ROOT_MODELS = frozenset(
+    name
+    for base in {_LIVE_ROOT_MODEL, _LIVE_ROOT_MODEL.removesuffix("-0731"), _LIVE_ROOT_MODEL + "-0731"}
+    for name in (base, f"openai/{base}")
+)
+_APPROVED_SUB_MODELS = frozenset(
+    name
+    for base in {_LIVE_SUB_MODEL, _LIVE_SUB_MODEL.removesuffix("-0731"), _LIVE_SUB_MODEL + "-0731"}
+    for name in (base, f"openai/{base}")
+)
 _DURABILITY_TEST = "tests/live/backend/test_attachment_artifact_durability.py"
 _SUCCESS_FIELDS = frozenset(
     {
@@ -60,6 +73,15 @@ _FAILURE_CATEGORIES = frozenset(
         "interrupted",
     }
 )
+
+
+def _model_family(name: object) -> str:
+    """Dated and undated spellings of one production model family."""
+    if not isinstance(name, str):
+        return ""
+    base = name.removeprefix("openai/")
+    return base.removesuffix("-0731")
+
 
 EXIT_PRECONDITION = 2
 EXIT_PROOF = 3
@@ -525,7 +547,9 @@ def _build_success_receipt(
         "versions": versions,
         "lockfile_sha256": lockfile_sha256,
     }
-    if receipt.get("models") != models:
+    if _model_family(receipt.get("models", {}).get("root")) != _model_family(models.get("root")) or _model_family(
+        receipt.get("models", {}).get("sub")
+    ) != _model_family(models.get("sub")):
         raise ReceiptError("receipt_models")
     receipt["lanes"] = {
         "attachment_artifact_durability": {
@@ -848,7 +872,9 @@ def main(argv: list[str] | None = None) -> int:
         print("Live proof receipt validation failed.", file=sys.stderr)
         return EXIT_RECEIPT
 
-    if receipt["models"] != models:
+    if _model_family(receipt["models"].get("root")) != _model_family(models.get("root")) or _model_family(
+        receipt["models"].get("sub")
+    ) != _model_family(models.get("sub")):
         _write_failure(
             output,
             category="receipt_invalid",
