@@ -29,8 +29,8 @@ from tests.live.backend.test_phase1_daytona_stream import _strict_cleanup
 pytestmark = [pytest.mark.live_daytona, pytest.mark.timeout(960)]
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
-_LIVE_ROOT_MODEL = "deepseek-v4-flash"
-_LIVE_SUB_MODEL = "deepseek-v4-flash"
+_LIVE_ROOT_MODEL = os.environ.get("FLEET_LIVE_ROOT_MODEL", "deepseek-v4-flash")
+_LIVE_SUB_MODEL = os.environ.get("FLEET_LIVE_SUB_MODEL", "deepseek-v4-flash")
 _CONTRACT_ID = "fleet.daytona-recursive-batch"
 _TOKEN_A = "BATCH_TOKEN_ALPHA"
 _TOKEN_B = "BATCH_TOKEN_BETA"
@@ -107,19 +107,25 @@ def _load_live_settings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Sett
     import fleet_rlm.config as configuration
 
     copied_policy = tmp_path / "batch-fleet.toml"
-    copied_policy.write_text(
+    target_profile = os.environ.get("FLEET_LIVE_PROFILE", "daytona-recursive")
+    policy_source = (
         (_REPO_ROOT / "config" / "fleet.toml")
         .read_text(encoding="utf-8")
-        .replace('default_profile = "daytona"', 'default_profile = "daytona-recursive"', 1),
-        encoding="utf-8",
+        .replace('default_profile = "daytona"', 'default_profile = "daytona-recursive"', 1)
     )
+    if target_profile != "daytona-recursive":
+        policy_source = policy_source.replace(
+            'default_profile = "daytona-recursive"', f'default_profile = "{target_profile}"', 1
+        )
+    copied_policy.write_text(policy_source, encoding="utf-8")
     monkeypatch.setattr(configuration, "_CONFIG_PATH", copied_policy)
     try:
         policy = require_live_execution()
     except FleetConfigurationError:
         pytest.fail("Recursive batch canary requires runtime.live_enabled=true")
-    if active_profile(policy) != "daytona-recursive" or policy.run_environment != "daytona":
-        pytest.fail("Recursive batch canary requires the daytona-recursive profile")
+    target_profile = os.environ.get("FLEET_LIVE_PROFILE", "daytona-recursive")
+    if active_profile(policy) != target_profile or policy.run_environment != "daytona":
+        pytest.fail("Recursive batch canary requires the selected daytona profile")
     if not policy.rlm_recursion_enabled or (policy.root_model, policy.sub_model) != (
         _LIVE_ROOT_MODEL,
         _LIVE_SUB_MODEL,

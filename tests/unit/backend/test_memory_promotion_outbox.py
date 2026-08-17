@@ -86,7 +86,9 @@ async def test_claim_due_fences_concurrent_claimers() -> None:
         from fleet_rlm.persistence.repositories.memory_promotion_intents import SqlAlchemyMemoryPromotionOutbox
 
         outbox = SqlAlchemyMemoryPromotionOutbox(factory)
-        now = datetime(2026, 8, 17, 13, 0, 0, tzinfo=UTC)
+        # The database assigns the initial due time at commit; claim against
+        # a clock sampled after that server default has been materialized.
+        now = datetime.now(UTC)
         first, second = await asyncio.gather(
             outbox.claim_due(now=now, claim_owner="worker:a"),
             outbox.claim_due(now=now, claim_owner="worker:b"),
@@ -112,10 +114,11 @@ async def test_stale_completing_claims_are_reclaimable() -> None:
         from fleet_rlm.persistence.repositories.memory_promotion_intents import SqlAlchemyMemoryPromotionOutbox
 
         outbox = SqlAlchemyMemoryPromotionOutbox(factory, stale_claim_after_seconds=60)
-        claimed = await outbox.claim_due(now=datetime(2026, 8, 17, 13, 0, 0, tzinfo=UTC), claim_owner="worker:a")
+        now = datetime.now(UTC)
+        claimed = await outbox.claim_due(now=now, claim_owner="worker:a")
         assert len(claimed) == 1
 
-        later = datetime(2026, 8, 17, 14, 0, 0, tzinfo=UTC)
+        later = now + timedelta(hours=1)
         reclaimed = await outbox.reclaim_stale(now=later)
         assert reclaimed == 1
         rows = await _rows(factory)
@@ -137,7 +140,7 @@ async def test_requeue_backoff_then_deadletter_at_attempt_cap() -> None:
         from fleet_rlm.persistence.repositories.memory_promotion_intents import SqlAlchemyMemoryPromotionOutbox
 
         outbox = SqlAlchemyMemoryPromotionOutbox(factory, max_attempts=2, backoff_base_seconds=30)
-        now = datetime(2026, 8, 17, 13, 0, 0, tzinfo=UTC)
+        now = datetime.now(UTC)
         claimed = await outbox.claim_due(now=now, claim_owner="worker:a")
         outcome = await outbox.requeue(claimed[0].intent_id, reason="store_unavailable", now=now, attempts=1)
         assert outcome == "pending"

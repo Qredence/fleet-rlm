@@ -30,8 +30,18 @@ pytestmark = [pytest.mark.live_daytona, pytest.mark.timeout(900)]
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _RECEIPT_SCHEMA = "fleet.phase1-daytona-stream/v1"
 _EVIDENCE_ENV = "FLEET_PHASE1_STREAM_EVIDENCE_PATH"
-_LIVE_ROOT_MODEL = "deepseek-v4-flash"
-_LIVE_SUB_MODEL = "deepseek-v4-flash"
+_LIVE_ROOT_MODEL = os.environ.get("FLEET_LIVE_ROOT_MODEL", "deepseek-v4-flash")
+_LIVE_SUB_MODEL = os.environ.get("FLEET_LIVE_SUB_MODEL", "deepseek-v4-flash")
+_APPROVED_MODELS = frozenset(
+    name
+    for base in {
+        _LIVE_ROOT_MODEL,
+        _LIVE_ROOT_MODEL.removesuffix("-0731"),
+        _LIVE_SUB_MODEL,
+        _LIVE_SUB_MODEL.removesuffix("-0731"),
+    }
+    for name in (base, f"openai/{base}")
+)
 _CLEANUP_RETRY_DELAYS = (0.5, 1.0, 2.0, 4.0)
 _ATTACHMENT_CONTENT = "phase-one capsule witness: CEDAR-17\n"
 _CONTRACT_ID = "fleet.phase1-daytona-stream"
@@ -196,7 +206,7 @@ def _load_live_settings(tmp_path: Path) -> Settings:
         pytest.fail("Phase 1 stream canary requires runtime.live_enabled=true")
     if active_profile(policy) != "daytona" or policy.run_environment != "daytona":
         pytest.fail("Phase 1 stream canary requires the normal daytona profile")
-    if (policy.root_model, policy.sub_model) != (_LIVE_ROOT_MODEL, _LIVE_SUB_MODEL):
+    if policy.root_model not in _APPROVED_MODELS or policy.sub_model not in _APPROVED_MODELS:
         pytest.fail("Phase 1 stream canary requires DeepSeek v4 Flash for Root and Sub")
     if policy.daytona_api_key is None or not has_llm_credentials(policy):
         pytest.fail("Phase 1 stream canary is missing configured provider credentials")

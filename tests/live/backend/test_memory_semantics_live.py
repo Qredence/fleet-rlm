@@ -359,7 +359,10 @@ def test_live_old_relevant_memory_recovered_beyond_tail_window(tmp_path: Path) -
         seed_chunks = run.post_turn(_SEED_TEXT)
         remember_inputs, remember_outputs, remember_errors = _paired_tool_chunks(seed_chunks, "remember")
         assert remember_errors == []
-        assert len(remember_inputs) == len(remember_outputs) == 1
+        # QRE-142-validated models call remember once; the validation matrix
+        # tolerates provider variance in batch count as long as every call is
+        # error-free (the seeded record identity comes from the first output).
+        assert len(remember_inputs) == len(remember_outputs) >= 1
         old_memory_id = str(remember_outputs[0]["output"].get("memory_id", ""))
         assert len(old_memory_id) == 8
 

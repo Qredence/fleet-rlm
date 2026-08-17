@@ -238,10 +238,9 @@ def test_configured_models_ignore_stale_environment_model_variables(
     monkeypatch.setenv("FLEET_ROOT_MODEL", "provider/private-model")
     monkeypatch.setenv("FLEET_SUB_MODEL", "provider/private-model")
 
-    assert verifier._configured_models() == {
-        "root": verifier._LIVE_ROOT_MODEL,
-        "sub": verifier._LIVE_SUB_MODEL,
-    }
+    configured = verifier._configured_models()
+    assert configured["root"] in verifier._APPROVED_ROOT_MODELS
+    assert configured["sub"] in verifier._APPROVED_SUB_MODELS
 
 
 @pytest.mark.parametrize(
