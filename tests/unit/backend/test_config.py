@@ -17,11 +17,11 @@ def test_profile_environment_matrix_follows_selected_toml_policy() -> None:
     contracts = {contract.name: contract for contract in load_profile_environment_contracts()}
 
     assert active_profile_contract().name == "daytona-recursive"
-    assert contracts["daytona-recursive"].provider == "OpenCode Go"
+    assert contracts["daytona-recursive"].provider == "Databricks AI Gateway"
     assert contracts["daytona-recursive"].provider_environment_names == (
         "FLEET_DAYTONA_API_KEY",
-        "FLEET_OPENCODE_GO_API_KEY",
-        "FLEET_OPENCODE_GO_BASE_URL",
+        "DATABRICKS_TOKEN",
+        "FLEET_DATABRICKS_AI_GATEWAY_BASE_URL",
     )
     assert contracts["daytona-managed"].provider == "Databricks AI Gateway"
     assert contracts["daytona-managed"].managed_policy_environment_names == (
@@ -51,18 +51,18 @@ def test_daytona_profile_uses_specialized_bounded_model_roles() -> None:
     assert document["defaults"]["daytona"]["snapshot"] == "fleet-rlm-python313-v5"
     llm = document["profiles"]["daytona"]["llm"]
     assert llm["root"] == {
-        "model": "deepseek-v4-flash",
-        "api_key_env": "FLEET_OPENCODE_GO_API_KEY",
-        "base_url_env": "FLEET_OPENCODE_GO_BASE_URL",
+        "model": "deepseek-v4-flash-0731",
+        "api_key_env": "DATABRICKS_TOKEN",
+        "base_url_env": "FLEET_DATABRICKS_AI_GATEWAY_BASE_URL",
         "max_tokens": 16000,
         # Cache hits provide no fresh action observation and can read as a frozen stream.
         "cache": False,
         "reasoning_effort": "low",
     }
     assert llm["sub"] == {
-        "model": "deepseek-v4-flash",
-        "api_key_env": "FLEET_OPENCODE_GO_API_KEY",
-        "base_url_env": "FLEET_OPENCODE_GO_BASE_URL",
+        "model": "deepseek-v4-flash-0731",
+        "api_key_env": "DATABRICKS_TOKEN",
+        "base_url_env": "FLEET_DATABRICKS_AI_GATEWAY_BASE_URL",
         "max_tokens": 16000,
         "temperature": 0,
         "cache": False,
@@ -79,20 +79,19 @@ def test_daytona_profile_uses_specialized_bounded_model_roles() -> None:
     "profile",
     ("daytona", "daytona-recursive", "daytona-managed", "daytona-bench", "daytona-bench-40"),
 )
-def test_all_daytona_profiles_use_deepseek_v4_flash_for_both_roles(profile: str) -> None:
+def test_daytona_profiles_use_expected_deepseek_model_for_both_roles(profile: str) -> None:
     policy_path = Path(__file__).resolve().parents[3] / "config" / "fleet.toml"
     document = tomllib.loads(policy_path.read_text(encoding="utf-8"))
 
     llm = document["profiles"][profile]["llm"]
-    assert llm["root"]["model"] == "deepseek-v4-flash"
-    assert llm["sub"]["model"] == "deepseek-v4-flash"
-    if profile in {"daytona", "daytona-recursive"}:
-        # The interactive profiles serve the OpenCode Go gateway (the
-        # recursive profile must mirror the daytona llm section exactly);
-        # every other profile stays on the Databricks AI Gateway.
-        expected_key_env, expected_base_env = "FLEET_OPENCODE_GO_API_KEY", "FLEET_OPENCODE_GO_BASE_URL"
-    else:
-        expected_key_env, expected_base_env = "DATABRICKS_TOKEN", "FLEET_DATABRICKS_AI_GATEWAY_BASE_URL"
+    expected_model = (
+        "deepseek-v4-flash-0731"
+        if profile in {"daytona", "daytona-recursive", "daytona-managed"}
+        else "deepseek-v4-flash"
+    )
+    assert llm["root"]["model"] == expected_model
+    assert llm["sub"]["model"] == expected_model
+    expected_key_env, expected_base_env = "DATABRICKS_TOKEN", "FLEET_DATABRICKS_AI_GATEWAY_BASE_URL"
     assert llm["root"]["api_key_env"] == expected_key_env
     assert llm["sub"]["api_key_env"] == expected_key_env
     assert llm["root"]["base_url_env"] == expected_base_env
@@ -219,13 +218,13 @@ def test_daytona_profile_resolves_deepseek_root_and_sub_with_gateway_params(
     import fleet_rlm.config as config
 
     monkeypatch.setenv("FLEET_DAYTONA_API_KEY", "test-daytona-key")
-    monkeypatch.setenv("FLEET_OPENCODE_GO_API_KEY", "test-opencode-go-key")
-    monkeypatch.setenv("FLEET_OPENCODE_GO_BASE_URL", "https://gateway.example.test/v1")
+    monkeypatch.setenv("DATABRICKS_TOKEN", "test-databricks-token")
+    monkeypatch.setenv("FLEET_DATABRICKS_AI_GATEWAY_BASE_URL", "https://gateway.example.test/v1")
 
     settings = config.load_runtime_settings()
 
-    assert settings.root_model == "deepseek-v4-flash"
-    assert settings.sub_model == "deepseek-v4-flash"
+    assert settings.root_model == "deepseek-v4-flash-0731"
+    assert settings.sub_model == "deepseek-v4-flash-0731"
     assert settings.root_llm_model_provider_service == "uscentral.default.zencode-oai"
     assert settings.sub_llm_model_provider_service == "uscentral.default.zencode-oai"
     assert settings.root_llm_reasoning_effort == "low"
@@ -246,8 +245,8 @@ def test_daytona_ignores_managed_mlflow_environment_values_when_not_selected(
     import fleet_rlm.config as config
 
     monkeypatch.setenv("FLEET_DAYTONA_API_KEY", "test-daytona-key")
-    monkeypatch.setenv("FLEET_OPENCODE_GO_API_KEY", "test-opencode-go-key")
-    monkeypatch.setenv("FLEET_OPENCODE_GO_BASE_URL", "https://gateway.example.test/v1")
+    monkeypatch.setenv("DATABRICKS_TOKEN", "test-databricks-token")
+    monkeypatch.setenv("FLEET_DATABRICKS_AI_GATEWAY_BASE_URL", "https://gateway.example.test/v1")
     monkeypatch.setenv("FLEET_MLFLOW_EXPERIMENT_NAME", "managed-experiment")
     monkeypatch.setenv("FLEET_MLFLOW_TRACE_CATALOG", "managed_catalog")
 
@@ -355,8 +354,8 @@ def test_daytona_benchmark_profiles_resolve_without_mlflow(
 
     _select_profile(tmp_path, profile=profile, monkeypatch=monkeypatch)
     monkeypatch.setenv("FLEET_DAYTONA_API_KEY", "test-daytona-key")
-    # Benchmark profiles keep the Databricks AI Gateway; only the interactive
-    # daytona/daytona-recursive profiles use the OpenCode Go gateway.
+    # All profiles use the Databricks AI Gateway; benchmark profiles retain
+    # the undated compatible model and disable MLflow tracing.
     monkeypatch.setenv("DATABRICKS_TOKEN", "test-databricks-token")
     monkeypatch.setenv("FLEET_DATABRICKS_AI_GATEWAY_BASE_URL", "https://gateway.example.test/v1")
 

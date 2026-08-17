@@ -27,7 +27,7 @@ def test_policy_read_exposes_toml_values_without_environment_secret_values(tmp_p
 
     field = _field(service.read(), "daytona", "llm.root.api_key_env")
 
-    assert field["value"] == "FLEET_OPENCODE_GO_API_KEY"
+    assert field["value"] == "DATABRICKS_TOKEN"
     assert field["editor"] == "text"
     assert "secret" not in str(field).lower()
 

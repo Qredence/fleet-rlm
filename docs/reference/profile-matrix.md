@@ -7,9 +7,9 @@ Provider environment names are the only values required by the credentialed live
 
 | Profile | Default | Provider | Root/Sub model | Root/Sub max tokens | Recursion | MLflow | Provider environment names | Managed-policy environment names |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `daytona` | no | OpenCode Go | `deepseek-v4-flash` / `deepseek-v4-flash` | 16000 / 16000 | disabled | http://127.0.0.1:5001 | `FLEET_DAYTONA_API_KEY`, `FLEET_OPENCODE_GO_API_KEY`, `FLEET_OPENCODE_GO_BASE_URL` | — |
-| `daytona-recursive` | yes | OpenCode Go | `deepseek-v4-flash` / `deepseek-v4-flash` | 16000 / 16000 | enabled | http://127.0.0.1:5001 | `FLEET_DAYTONA_API_KEY`, `FLEET_OPENCODE_GO_API_KEY`, `FLEET_OPENCODE_GO_BASE_URL` | — |
-| `daytona-managed` | no | Databricks AI Gateway | `deepseek-v4-flash` / `deepseek-v4-flash` | 8000 / 8000 | disabled | databricks | `FLEET_DAYTONA_API_KEY`, `DATABRICKS_TOKEN`, `FLEET_DATABRICKS_AI_GATEWAY_BASE_URL` | `FLEET_DATABASE_URL`, `FLEET_MLFLOW_EXPERIMENT_NAME`, `FLEET_MLFLOW_TRACE_CATALOG`, `FLEET_MLFLOW_TRACE_SCHEMA`, `FLEET_MLFLOW_TRACE_TABLE_PREFIX`, `FLEET_MLFLOW_TRACING_SQL_WAREHOUSE_ID` |
+| `daytona` | no | Databricks AI Gateway | `deepseek-v4-flash-0731` / `deepseek-v4-flash-0731` | 16000 / 16000 | disabled | http://127.0.0.1:5001 | `FLEET_DAYTONA_API_KEY`, `DATABRICKS_TOKEN`, `FLEET_DATABRICKS_AI_GATEWAY_BASE_URL` | — |
+| `daytona-recursive` | yes | Databricks AI Gateway | `deepseek-v4-flash-0731` / `deepseek-v4-flash-0731` | 16000 / 16000 | enabled | http://127.0.0.1:5001 | `FLEET_DAYTONA_API_KEY`, `DATABRICKS_TOKEN`, `FLEET_DATABRICKS_AI_GATEWAY_BASE_URL` | — |
+| `daytona-managed` | no | Databricks AI Gateway | `deepseek-v4-flash-0731` / `deepseek-v4-flash-0731` | 8000 / 8000 | disabled | databricks | `FLEET_DAYTONA_API_KEY`, `DATABRICKS_TOKEN`, `FLEET_DATABRICKS_AI_GATEWAY_BASE_URL` | `FLEET_DATABASE_URL`, `FLEET_MLFLOW_EXPERIMENT_NAME`, `FLEET_MLFLOW_TRACE_CATALOG`, `FLEET_MLFLOW_TRACE_SCHEMA`, `FLEET_MLFLOW_TRACE_TABLE_PREFIX`, `FLEET_MLFLOW_TRACING_SQL_WAREHOUSE_ID` |
 | `daytona-bench` | no | Databricks AI Gateway | `deepseek-v4-flash` / `deepseek-v4-flash` | 8000 / 8000 | disabled | disabled | `FLEET_DAYTONA_API_KEY`, `DATABRICKS_TOKEN`, `FLEET_DATABRICKS_AI_GATEWAY_BASE_URL` | — |
 | `daytona-bench-40` | no | Databricks AI Gateway | `deepseek-v4-flash` / `deepseek-v4-flash` | 8000 / 8000 | disabled | disabled | `FLEET_DAYTONA_API_KEY`, `DATABRICKS_TOKEN`, `FLEET_DATABRICKS_AI_GATEWAY_BASE_URL` | — |
 
