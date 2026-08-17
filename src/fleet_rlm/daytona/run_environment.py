@@ -47,7 +47,7 @@ from fleet_rlm.daytona.session_manager import (
     LeaseRequest,
 )
 from fleet_rlm.daytona.workspace_fs import AsyncDaytonaVolumeFS, DaytonaSandboxVolumeFs, VolumeFSCacheState
-from fleet_rlm.files.memory_candidates import MemoryCandidateCollector
+from fleet_rlm.files.memory_candidates import MemoryCandidateCollector, build_memory_promotion_intents
 from fleet_rlm.files.memory_models import WORKSPACE_MEMORY_INJECTION_TAIL_BYTES
 from fleet_rlm.files.models import (
     AttachmentAccess,
@@ -269,6 +269,13 @@ class _DaytonaEnvironmentProvider:
                 )
             )
 
+            def memory_intent_builder(run_id: Any, candidates: tuple[Any, ...]) -> tuple[Any, ...]:
+                return build_memory_promotion_intents(
+                    run_id=run_id,
+                    candidates=candidates,
+                    allowed_categories=self.settings.rlm_autonomous_memory_categories,
+                )
+
             async def release() -> None:
                 await self.resources.session_manager.release(lease)
 
@@ -298,6 +305,7 @@ class _DaytonaEnvironmentProvider:
                 context_mount_path=str(paths.mount_path),
                 workspace_memory_store=memory_store,
                 post_commit_memory_promotion=memory_promotion,
+                memory_intent_builder=memory_intent_builder,
             )
         except BaseException:
             await asyncio.shield(self.resources.session_manager.release(lease))

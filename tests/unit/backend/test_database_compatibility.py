@@ -41,7 +41,7 @@ async def test_database_compatibility_rejects_database_without_alembic_revision(
 @pytest.mark.asyncio
 async def test_database_compatibility_accepts_exact_alembic_head(tmp_path: Path) -> None:
     database_url = f"sqlite+aiosqlite:///{tmp_path / 'head.sqlite3'}"
-    await _set_revision(database_url, "019f8c1d2e3f")
+    await _set_revision(database_url, "019fa2e4b7c1")
 
     await check_database_compatibility(database_url)
 
@@ -86,4 +86,43 @@ def test_existing_baseline_database_upgrades_to_settling_head(
         columns = {column["name"] for column in inspect(connection).get_columns("fleet_runs")}
         revision = connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
     assert {"terminal_intent", "recovery_metadata_json"} <= columns
-    assert revision == "019f8c1d2e3f"
+    assert revision == "019fa2e4b7c1"
+
+
+def test_existing_baseline_database_upgrades_to_memory_intents_head(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """P23: baseline databases reach the promotion-intent head with the new table."""
+    root = Path(__file__).resolve().parents[3]
+    database_path = tmp_path / "existing_p23.sqlite3"
+    database_url = f"sqlite:///{database_path}"
+    monkeypatch.setenv("FLEET_DATABASE_URL", database_url)
+    config = Config(str(root / "alembic.ini"))
+    config.set_main_option("script_location", str(root / "migrations"))
+
+    command.upgrade(config, "019f5b3c96bd")
+    with create_engine(database_url).connect() as connection:
+        assert "fleet_memory_promotion_intents" not in set(inspect(connection).get_table_names())
+
+    command.upgrade(config, "head")
+    with create_engine(database_url).connect() as connection:
+        tables = set(inspect(connection).get_table_names())
+        revision = connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
+        intent_columns = {
+            column["name"] for column in inspect(connection).get_columns("fleet_memory_promotion_intents")
+        }
+    assert "fleet_memory_promotion_intents" in tables
+    assert {
+        "run_id",
+        "candidate_id",
+        "candidate_ordinal",
+        "memory_id",
+        "record_text",
+        "status",
+        "attempts",
+        "next_attempt_at",
+        "claim_owner",
+        "claim_heartbeat_at",
+        "completion_reason",
+    } <= intent_columns
+    assert revision == "019fa2e4b7c1"

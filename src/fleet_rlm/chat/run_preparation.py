@@ -12,7 +12,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from fleet_rlm.artifacts.promotion import RunArtifactSink
 from fleet_rlm.chat.post_commit_memory import OwnedPostCommitMemoryPromotion
-from fleet_rlm.chat.run_lifecycle import ClaimedRun
+from fleet_rlm.chat.run_lifecycle import ClaimedRun, MemoryIntentBuilder
 from fleet_rlm.chat.session_context import build_session_context_manifest
 from fleet_rlm.files.memory_models import WORKSPACE_MEMORY_INJECTION_TAIL_BYTES
 from fleet_rlm.files.models import (
@@ -122,6 +122,7 @@ class PreparedRun:
     _resources: _PreparedRunResources
     result_snapshot_sink: ResultSnapshotSink | None = None
     post_commit_memory_promotion: OwnedPostCommitMemoryPromotion | None = None
+    memory_intent_builder: MemoryIntentBuilder | None = None
 
     @property
     def cleanup_receipt(self) -> PreparedResourcesReceipt | None:
@@ -156,6 +157,7 @@ class RunEnvironment:
     context_mount_path: str | None = None
     workspace_memory_store: Any | None = None
     post_commit_memory_promotion: OwnedPostCommitMemoryPromotion | None = None
+    memory_intent_builder: MemoryIntentBuilder | None = None
 
 
 class RunEnvironmentProvider(Protocol):
@@ -361,6 +363,7 @@ class DefaultRunPreparer:
             resources,
             environment.result_snapshot_sink,
             environment.post_commit_memory_promotion,
+            environment.memory_intent_builder,
         )
 
     async def _prepare_capabilities(

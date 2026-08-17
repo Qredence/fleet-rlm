@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Awaitable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from hashlib import sha256
 from typing import Any, Literal, Protocol, TypeAlias, TypeVar
@@ -25,6 +25,14 @@ from fleet_rlm.chat.run_claim import (
 )
 from fleet_rlm.chat.run_cleanup import RunCleanupSupervisor, RunCleanupUnavailableError
 from fleet_rlm.chat.turn_detail_policy import commit_success
+from fleet_rlm.files.memory_candidates import (
+    OUTCOME_DEADLINE_EXCEEDED,
+    OUTCOME_INTERRUPTED,
+    OUTCOME_PROMOTED,
+    OUTCOME_PROMOTION_FAILED,
+    MemoryCandidate,
+    MemoryPromotionIntent,
+)
 from fleet_rlm.observability.turn_tracing import turn_phase_span
 from fleet_rlm.result_snapshot import ResultSnapshotSink, encode_result_snapshot
 from fleet_rlm.rlm.context import AsyncCancellationProbe
@@ -32,6 +40,8 @@ from fleet_rlm.rlm.dspy_contract import RLMUsage
 from fleet_rlm.rlm.outcome import RLMOutcome
 from fleet_rlm.sessions.committed_turn import CommittedTurn
 from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
+
+MemoryIntentBuilder = Callable[[UUID, tuple[MemoryCandidate, ...]], tuple[MemoryPromotionIntent, ...]]
 
 logger = logging.getLogger(__name__)
 _POST_COMMIT_MEMORY_PROMOTION_TIMEOUT_S = 2.0
@@ -194,11 +204,20 @@ class _RunStateStore(Protocol):
         run: ClaimedRun,
         committed: CommittedTurn,
         artifacts: tuple[PromotedArtifact, ...],
+        memory_intents: tuple[MemoryPromotionIntent, ...] = (),
     ) -> CommittedTurnReceipt: ...
 
     async def transition_claim(self, run: ClaimedRun, command: ClaimCommand) -> FailedRunReceipt | None: ...
 
     async def request_cancel(self, access: TurnAccess, run_id: UUID) -> CancelResult: ...
+
+
+class _MemoryPromotionOutbox(Protocol):
+    """Structural seam for QRE-166 fast-path outcome marking (P23)."""
+
+    async def complete_run(self, run_id: UUID, *, completion_reason: str) -> int: ...
+
+    async def note_run_attempt(self, run_id: UUID, *, reason: str) -> int: ...
 
 
 class RunLifecycle(Protocol):
@@ -215,6 +234,7 @@ class RunLifecycle(Protocol):
         artifact_sink: RunArtifactSink | None = None,
         result_snapshot_sink: ResultSnapshotSink | None = None,
         memory_promotion: OwnedPostCommitMemoryPromotion | None = None,
+        memory_intents_builder: MemoryIntentBuilder | None = None,
     ) -> RunSettlement: ...
 
     async def request_cancel(self, access: TurnAccess, run_id: UUID) -> CancelResult: ...
@@ -239,6 +259,7 @@ class RunLifecycleService:
         heartbeat_seconds: int = 10,
         stale_after_seconds: int = 60,
         cleanup: RunCleanupSupervisor | None = None,
+        memory_outbox: _MemoryPromotionOutbox | None = None,
     ) -> None:
         self._store = store
         self._promotion = ArtifactPromotion(max_bytes=max_artifact_bytes)
@@ -246,6 +267,7 @@ class RunLifecycleService:
         self.heartbeat_seconds = heartbeat_seconds
         self.stale_after_seconds = stale_after_seconds
         self._cleanup = cleanup
+        self._memory_outbox = memory_outbox
 
     async def begin(self, request: RunClaim) -> RunStart:
         return await self._store.begin(request)
@@ -258,6 +280,7 @@ class RunLifecycleService:
         artifact_sink: RunArtifactSink | None = None,
         result_snapshot_sink: ResultSnapshotSink | None = None,
         memory_promotion: OwnedPostCommitMemoryPromotion | None = None,
+        memory_intents_builder: MemoryIntentBuilder | None = None,
     ) -> RunSettlement:
         """
         Finalize a Run with a successful outcome or record its failure.
@@ -334,10 +357,28 @@ class RunLifecycleService:
                 # round-trip overlaps with the DB transaction; reconciled after
                 # the commit is durable (see _reconcile_snapshot_after_commit).
                 snapshot_task = asyncio.ensure_future(result_snapshot_sink.write(snapshot_path, snapshot))
+            # P23/QRE-165: pin crash-recoverable Memory promotion intents
+            # before the commit so they ride the SAME durable transaction.
+            # Build failure degrades softly (optional-side-effect contract).
+            memory_intents: tuple[MemoryPromotionIntent, ...] = ()
+            raw_candidates = tuple(resolution.memory_candidates) if isinstance(resolution, RLMOutcome) else ()
+            if raw_candidates and memory_intents_builder is not None:
+                try:
+                    memory_intents = memory_intents_builder(run.run_id, raw_candidates)
+                except Exception as exc:
+                    logger.warning(
+                        "Memory promotion intent pinning dropped; Turn commits without intents (%s)",
+                        type(exc).__name__,
+                        exc_info=exc,
+                    )
             stage = "commit_turn"
             if run.authority.revoked:
                 raise RunLifecycleUnavailableError("Turn claim is no longer available")
-            commit_task, commit_cancelled = await _settle_owned(self._store.commit(run, committed, promoted))
+            if memory_intents:
+                commit_call = self._store.commit(run, committed, promoted, memory_intents=memory_intents)
+            else:
+                commit_call = self._store.commit(run, committed, promoted)
+            commit_task, commit_cancelled = await _settle_owned(commit_call)
             try:
                 receipt = commit_task.result()
             except BaseException:
@@ -375,7 +416,7 @@ class RunLifecycleService:
             return await self._transition_receipt(run, FailClaim(_claim_failure(failure), failure.usage))
 
         await self._reconcile_snapshot_after_commit(snapshot_task, result_snapshot_sink, snapshot_path)
-        await self._promote_memory_candidates_after_commit(resolution, memory_promotion)
+        await self._promote_memory_candidates_after_commit(resolution, memory_promotion, run_id=run.run_id)
         await self._settle_staging(artifact_sink, candidates)
         return receipt
 
@@ -383,11 +424,17 @@ class RunLifecycleService:
         self,
         resolution: RLMOutcome | RunFailure,
         memory_promotion: OwnedPostCommitMemoryPromotion | None,
+        *,
+        run_id: UUID | None = None,
     ) -> None:
         """Run one optional, metadata-bounded promotion after the durable commit."""
         candidates = tuple(resolution.memory_candidates) if isinstance(resolution, RLMOutcome) else ()
         if not candidates or memory_promotion is None:
             return
+        # P23/QRE-166: best-effort outcome marking on the durable outbox. A
+        # marking failure NEVER changes the committed receipt (outbox errors
+        # are warnings only) — the reconciler converges any row left pending.
+        outbox = self._memory_outbox if run_id is not None else None
         with turn_phase_span(
             "Turn.memory_candidate_promotion",
             inputs={
@@ -400,6 +447,7 @@ class RunLifecycleService:
                 timeout_s=_POST_COMMIT_MEMORY_PROMOTION_TIMEOUT_S,
             )
             if attempt.status == "deadline_exceeded":
+                await self._mark_run_outbox(run_id, outbox, "note", reason=OUTCOME_DEADLINE_EXCEEDED)
                 logger.warning(
                     "Memory Candidate promotion exceeded the bounded post-commit deadline; "
                     "owned cleanup will retain the Run lease"
@@ -413,12 +461,14 @@ class RunLifecycleService:
                 )
                 return
             if attempt.status == "interrupted":
+                await self._mark_run_outbox(run_id, outbox, "note", reason=OUTCOME_INTERRUPTED)
                 logger.warning(
                     "Memory Candidate promotion was interrupted after the Turn commit; owned cleanup retained"
                 )
                 span.set_outputs({"promotion_outcome": "interrupted", "promoted_count": 0})
                 return
             if attempt.status == "failed":
+                await self._mark_run_outbox(run_id, outbox, "note", reason=OUTCOME_PROMOTION_FAILED)
                 logger.warning("Memory Candidate promotion failed after the Turn commit; Turn remains committed")
                 # The Turn is already durable; unlike commit ownership, a post-commit
                 # optional side effect preserves the receipt rather than re-raising.
@@ -439,10 +489,35 @@ class RunLifecycleService:
                 }
             )
             if failures:
+                await self._mark_run_outbox(run_id, outbox, "note", reason=OUTCOME_PROMOTION_FAILED)
                 logger.warning(
                     "Memory Candidate promotion dropped %d candidate(s) after the Turn commit; Turn remains committed",
                     failures,
                 )
+            else:
+                await self._mark_run_outbox(run_id, outbox, "complete", reason=OUTCOME_PROMOTED)
+
+    async def _mark_run_outbox(
+        self,
+        run_id: UUID | None,
+        outbox: _MemoryPromotionOutbox | None,
+        action: Literal["complete", "note"],
+        *,
+        reason: str,
+    ) -> None:
+        if outbox is None or run_id is None:
+            return
+        try:
+            if action == "complete":
+                await outbox.complete_run(run_id, completion_reason=reason)
+            else:
+                await outbox.note_run_attempt(run_id, reason=reason)
+        except Exception as exc:
+            logger.warning(
+                "Memory promotion outbox marking failed for one Run (%s); reconciler converges",
+                type(exc).__name__,
+                exc_info=exc,
+            )
 
     async def request_cancel(self, access: TurnAccess, run_id: UUID) -> CancelResult:
         return await self._store.request_cancel(access, run_id)
