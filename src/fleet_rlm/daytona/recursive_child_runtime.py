@@ -13,6 +13,7 @@ from threading import Lock, Thread
 from typing import Any
 from uuid import UUID
 
+from fleet_rlm.daytona.dspy_sync_bridge import SyncBridgeDispatcher
 from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, sandbox_backend
 from fleet_rlm.daytona.lifecycle import AbsenceOutcome, confirm_absence
 from fleet_rlm.daytona.provisioning import SandboxPlatform, recursive_child_volume_subpath
@@ -58,6 +59,7 @@ class ChildRuntimeLease:
 def build_child_runtime_factory(
     *,
     loop: asyncio.AbstractEventLoop,
+    dispatcher: SyncBridgeDispatcher | None = None,
     platform: SandboxPlatform,
     admission: DaytonaAdmission,
     volume_id: str,
@@ -202,6 +204,7 @@ def build_child_runtime_factory(
         """
         acquisition_coroutine = _acquire_child_runtime(
             loop=loop,
+            dispatcher=dispatcher,
             platform=platform,
             admission=admission,
             volume_id=volume_id,
@@ -251,6 +254,7 @@ def build_child_runtime_factory(
 async def _acquire_child_runtime(
     *,
     loop: asyncio.AbstractEventLoop,
+    dispatcher: SyncBridgeDispatcher | None = None,
     platform: SandboxPlatform,
     admission: DaytonaAdmission,
     volume_id: str,
@@ -294,7 +298,7 @@ async def _acquire_child_runtime(
         child_sandbox_id = sandbox_id
         _require_authorized(is_authorized)
         interpreter = DaytonaCodeInterpreter(
-            backend=sandbox_backend(sandbox, loop=loop, timeout_s=execution_timeout_s),
+            backend=sandbox_backend(sandbox, loop=loop, dispatcher=dispatcher, timeout_s=execution_timeout_s),
             execution_output_cap=execution_output_cap,
         )
 

@@ -17,6 +17,7 @@ from typing import Any, Protocol
 from uuid import UUID, uuid4
 
 from fleet_rlm.chat.run_cleanup import RunCleanupSupervisor, RunCleanupUnavailableError
+from fleet_rlm.daytona.dspy_sync_bridge import SyncBridgeDispatcher
 from fleet_rlm.daytona.errors import (
     DaytonaAdapterError,
     ProviderRequestError,
@@ -191,13 +192,14 @@ def _build_interpreter(
     sandbox: Any,
     *,
     loop: asyncio.AbstractEventLoop,
+    dispatcher: SyncBridgeDispatcher | None = None,
     execution_output_cap: int = DEFAULT_EXECUTION_OUTPUT_CHARS,
     execution_timeout_s: int = DEFAULT_EXECUTION_TIMEOUT_S,
 ) -> DaytonaCodeInterpreter:
     """Attach a code-interpreter backend when the sandbox exposes one."""
     if hasattr(sandbox, "code_interpreter"):
         return DaytonaCodeInterpreter(
-            backend=sandbox_backend(sandbox, loop=loop, timeout_s=execution_timeout_s),
+            backend=sandbox_backend(sandbox, loop=loop, dispatcher=dispatcher, timeout_s=execution_timeout_s),
             execution_output_cap=execution_output_cap,
         )
     # Fake/test sandboxes may already carry an interpreter attribute.
@@ -240,12 +242,14 @@ class DaytonaSessionManager:
         idle_stop_seconds: float | None = None,
         execution_output_cap: int = DEFAULT_EXECUTION_OUTPUT_CHARS,
         execution_timeout_s: int = DEFAULT_EXECUTION_TIMEOUT_S,
+        dispatcher: SyncBridgeDispatcher | None = None,
     ) -> None:
         self._platform = platform
         self._volume_client = volume_client
         self._volume_config = volume_config
         self._bindings = bindings
         self._admission = admission or DaytonaAdmission()
+        self._dispatcher = dispatcher
         self._sandbox_spec = sandbox_spec
         self._cleanup = cleanup or RunCleanupSupervisor()
         self._execution_output_cap = execution_output_cap
@@ -569,6 +573,7 @@ class DaytonaSessionManager:
         interpreter = _build_interpreter(
             sandbox,
             loop=asyncio.get_running_loop(),
+            dispatcher=self._dispatcher,
             execution_output_cap=self._execution_output_cap,
             execution_timeout_s=self._execution_timeout_s,
         )

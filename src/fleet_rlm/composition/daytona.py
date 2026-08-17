@@ -23,7 +23,7 @@ from fleet_rlm.composition.inventory import (
     install_runtime_inventory,
 )
 from fleet_rlm.config import Settings
-from fleet_rlm.daytona.dspy_sync_bridge import set_bridge_service_loop
+from fleet_rlm.daytona.dspy_sync_bridge import SyncBridgeDispatcher
 from fleet_rlm.persistence.database import ensure_database_compatible
 from fleet_rlm.persistence.repositories.turns import ReconciliationSummary
 from fleet_rlm.skills.catalog import SkillCatalog
@@ -174,7 +174,12 @@ async def run_deferred_orphan_cleanup(
     )
 
 
-async def build_daytona_composition(settings: Settings, *, skill_catalog: SkillCatalog) -> RuntimeInventory:
+async def build_daytona_composition(
+    settings: Settings,
+    *,
+    skill_catalog: SkillCatalog,
+    dispatcher: SyncBridgeDispatcher | None = None,
+) -> RuntimeInventory:
     """Construct the Daytona runtime inventory; clean up partial init on failure."""
     from fleet_rlm.rlm.dspy_contract import assert_dspy_version
 
@@ -238,6 +243,7 @@ async def build_daytona_composition(settings: Settings, *, skill_catalog: SkillC
             max_active_leases=resolved.max_active_daytona_leases,
             execution_output_cap=resolved.rlm_max_execution_output_chars,
             execution_timeout_s=resolved.rlm_execution_timeout_s,
+            dispatcher=dispatcher,
         )
         mounted_workspace_gateway = DaytonaWorkspaceGateway(
             platform=resources.platform,
@@ -335,6 +341,7 @@ async def build_daytona_composition(settings: Settings, *, skill_catalog: SkillC
         )
         return RuntimeInventory(
             run_environment_resources=resources,
+            bridge_dispatcher=dispatcher,
             turn_coordinator=coordinator,
             session_catalog=session_catalog,
             run_lifecycle=lifecycle,
@@ -373,11 +380,17 @@ async def install_daytona_composition(
         raise CompositionError("bundled Skill catalog is unavailable")
     # The composition loop owns every loop-affine Daytona SDK object and never
     # performs nested synchronous waits; bridges post SDK coroutines here.
-    set_bridge_service_loop(asyncio.get_running_loop())
+    # QRE-154: each composition owns its dispatcher so overlapping app/test
+    # compositions cannot overwrite each other's bridge authority.
+    dispatcher = SyncBridgeDispatcher()
+    composition_loop = asyncio.get_running_loop()
+    dispatcher.set_loop(composition_loop)
     try:
-        inventory = await build_daytona_composition(settings, skill_catalog=skill_catalog)
+        inventory = await build_daytona_composition(
+            settings, skill_catalog=skill_catalog, dispatcher=dispatcher
+        )
     except Exception:
-        set_bridge_service_loop(None)
+        dispatcher.clear_loop(composition_loop)
         raise
     try:
         from fleet_rlm.config import _CONFIG_PATH, active_profile
@@ -402,7 +415,7 @@ async def install_daytona_composition(
             database=inventory.database,
             suppress_errors=True,
         )
-        set_bridge_service_loop(None)
+        dispatcher.clear_loop(composition_loop)
         raise
 
 
@@ -425,5 +438,8 @@ async def dispose_daytona_composition(app: FastAPI) -> None:
         suppress_errors=False,
     )
     # Release the bridge service loop after component disposal so bridges can
-    # still run SDK coroutines while runtimes shut down.
-    set_bridge_service_loop(None)
+    # still run SDK coroutines while runtimes shut down. Only this
+    # composition's dispatcher is cleared; loop identity is re-checked inside.
+    dispatcher = getattr(inventory, "bridge_dispatcher", None)
+    if isinstance(dispatcher, SyncBridgeDispatcher):
+        dispatcher.clear_loop(dispatcher.service_loop())
