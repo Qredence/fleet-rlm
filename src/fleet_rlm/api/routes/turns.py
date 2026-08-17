@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import logging
 from collections.abc import AsyncIterator
 from typing import Annotated, Any, Final
@@ -27,7 +26,7 @@ from fleet_rlm.chat.run_preparation import (
     RunPreparationTimeoutError,
     RunPreparationUnavailableError,
 )
-from fleet_rlm.chat.turn_coordinator import OpenedTurnStream
+from fleet_rlm.chat.run_runtime_owner import RunOwnership
 from fleet_rlm.observability.failure_diagnostics import normalize_turn_failure
 from fleet_rlm.posthog_client import get_client, get_distinct_id
 from fleet_rlm.sessions.models import TurnAccess, TurnInput
@@ -117,28 +116,6 @@ def _command(
     )
 
 
-async def _settle_open_after_disconnect(open_task: asyncio.Task[OpenedTurnStream]) -> OpenedTurnStream | None:
-    """Wait through repeated client-disconnect cancellation until open resolves.
-
-    ``coordinator.open`` owns claim settlement and preparation cleanup;
-    cancelling it midway would strand the durable claim, so a disconnecting
-    client never cancels the task. The route waits the open out, then closes
-    the resulting stream the same way the transport would have.
-    """
-    while not open_task.done():
-        try:
-            await asyncio.shield(open_task)
-        except asyncio.CancelledError:
-            continue
-    try:
-        return open_task.result()
-    except asyncio.CancelledError:  # pragma: no cover - only foreign task owners cancel
-        return None
-    except Exception:
-        logger.warning("turn open failed after the client disconnected", exc_info=True)
-        return None
-
-
 def _stream_headers(response: Response) -> None:
     response.headers["x-vercel-ai-ui-message-stream"] = "v1"
 
@@ -184,33 +161,39 @@ async def create_turn(
     ph = get_client()
     yield _preparation_prelude()
     heartbeat_seconds = float(settings.run_heartbeat_seconds)
-    open_task: asyncio.Task[OpenedTurnStream] | None = None
-    opened: OpenedTurnStream | None = None
+    owner: RunOwnership | None = None
     try:
-        open_task = asyncio.create_task(
-            coordinator.open(_command(session_id, body, identity, idempotency_key)),
-            name="fleet-turn-open",
-        )
+        open_owned = getattr(coordinator, "open_owned", None)
+        if callable(open_owned):
+            owner = open_owned(_command(session_id, body, identity, idempotency_key))
+        else:
+            # Compatibility for deterministic pre-P21 coordinator doubles;
+            # ownership policy still lives in the shared RunOwnership handle.
+            owner = RunOwnership(
+                lambda _on_settlement, _on_cleanup: coordinator.open(
+                    _command(session_id, body, identity, idempotency_key)
+                )
+            ).start()
         while True:
-            done, _pending = await asyncio.wait({open_task}, timeout=heartbeat_seconds)
-            if open_task in done:
-                opened = open_task.result()
+            opened = await owner.wait_open(timeout=heartbeat_seconds)
+            if opened is not None:
                 break
             yield _preparation_prelude()
     except RunPreparationCancelledError:
+        if owner is not None:
+            await owner.aclose()
         yield ServerSentEvent(data={"type": "abort", "reason": "Turn cancelled"})
         yield ServerSentEvent(raw_data="[DONE]")
         return
     except (asyncio.CancelledError, GeneratorExit):
-        if open_task is not None:
-            opened = await _settle_open_after_disconnect(open_task)
-            if opened is not None:
-                with contextlib.suppress(BaseException):
-                    await opened.__anext__()
-                with contextlib.suppress(BaseException):
-                    await opened.aclose()
+        # The owner retains/adopts the pending open task and settles it before
+        # the transport task can finish; disconnect never strands a claim.
+        if owner is not None:
+            await owner.aclose()
         raise
     except BaseException as exc:
+        if owner is not None:
+            await owner.aclose()
         message = _open_failure_message(exc)
         if message is None:
             raise
@@ -248,7 +231,8 @@ async def create_turn(
 
     projector = AISDKUIProjector()
     try:
-        async for event in opened:
+        assert owner is not None
+        async for event in owner:
             for chunk in projector.project(event):
                 yield ServerSentEvent(data=chunk)
         yield ServerSentEvent(raw_data="[DONE]")
@@ -269,7 +253,8 @@ async def create_turn(
             )
         raise
     finally:
-        await opened.aclose()
+        if owner is not None:
+            await owner.aclose()
 
 
 __all__ = ["router"]
