@@ -1,9 +1,29 @@
-"""Stdlib-only remote Session Workspace agent and its host execution adapter."""
+"""Stdlib-only remote Session Workspace agent and its host execution adapter.
+
+P22 (QRE-161/162/163) transport: the hardened remote program in
+``workspace_agent_runtime.py`` is wrapped into a versioned installed module
+(``handle(request)`` dispatch, handshake manifest, checksum). On first use of
+a Sandbox with a filesystem surface, the host uploads that module once to
+``WORKSPACE_AGENT_INSTALL_PATH`` (non-Volume, versioned by protocol), verifies
+protocol version + source SHA-256 + operations + bounds + capability claims
+with a fail-closed handshake, and then serves every operation as a compact
+JSON request (~700 B envelope for a read/stat) instead of retransmitting the
+full ~53 KiB source. Verified state is cached per Sandbox id; replacements
+install independently. Host Sandboxes without an ``fs.upload_file`` surface
+(test doubles) keep the legacy full-source wire; mismatch or failed installs
+never fall back to it.
+"""
 
 from __future__ import annotations
 
+import asyncio
+import hashlib
 import json
 import math
+import textwrap
+import threading
+import time
+from dataclasses import dataclass
 from importlib.resources import files
 from typing import Any
 
@@ -14,10 +34,35 @@ from fleet_rlm.files.workspace_models import WorkspaceConflictError
 # default (same numeric bound as Settings ``rlm_execution_timeout_s``).
 # Not a public TOML knob — callers may override via ``timeout_s``.
 WORKSPACE_AGENT_CODE_RUN_TIMEOUT_S = DEFAULT_EXECUTION_TIMEOUT_S
+WORKSPACE_AGENT_PROTOCOL_VERSION = "fleet.workspace-agent/v1"
+WORKSPACE_AGENT_INSTALL_PATH = "/home/daytona/fleet_rlm_workspace_agent_v1.py"
+WORKSPACE_AGENT_MODULE_NAME = "fleet_rlm_workspace_agent_v1"
+WORKSPACE_AGENT_REQUEST_MAX_BYTES = 16 * 1024 * 1024
+WORKSPACE_AGENT_RESPONSE_MAX_BYTES = 16 * 1024 * 1024
+WORKSPACE_AGENT_SUPPORTED_OPERATIONS = (
+    "list",
+    "stat",
+    "tail_read",
+    "read",
+    "read_page",
+    "append",
+    "memory_migrate",
+    "memory_append",
+    "memory_edit",
+    "memory_delete",
+    "unlink",
+    "delete",
+    "patch",
+    "write",
+)
 
 
 class WorkspaceAgentStorageError(OSError):
     """Remote mounted-volume mutation failure."""
+
+
+class WorkspaceAgentProtocolError(RuntimeError):
+    """Installed Workspace Agent is absent, incompatible, or tampered with."""
 
 
 _PATH_ERRORS = {
@@ -32,6 +77,8 @@ _VALUE_ERRORS = {
     "invalid_utf8": "workspace file is not valid UTF-8",
     "cursor": "workspace cursor is invalid",
 }
+# Protocol-integrity failures are typed protocol errors, never path errors.
+_PROTOCOL_ERRORS = frozenset({"protocol_mismatch", "request_invalid"})
 
 
 _WORKSPACE_AGENT_RUNTIME_NAME = "workspace_agent_runtime.py"
@@ -90,6 +137,286 @@ def build_workspace_agent_code(
     return preamble + "\n" + _workspace_agent_runtime_source()
 
 
+def _workspace_agent_runtime_checksum() -> str:
+    return hashlib.sha256(_workspace_agent_runtime_source().encode("utf-8")).hexdigest()
+
+
+def build_installed_workspace_agent_source() -> str:
+    # Build the versioned module uploaded once per Sandbox (P22/QRE-162).
+    # The hardened remote dispatch remains the source of truth: helper
+    # definitions stay module-level and the existing dispatch tail is wrapped
+    # in ``handle(request)``. Request state stays call-local because each
+    # operation executes a fresh module instance; ``locked_fd`` and
+    # ``append_memory_id`` are initialized to the same defaults the legacy
+    # script preamble provided. No operation transmits this source after the
+    # agent is verified.
+    source = _workspace_agent_runtime_source()
+    marker = "\ntry:\n    try:\n        base_fds, root_fd = open_chain"
+    split = source.find(marker)
+    if split < 0:
+        raise WorkspaceAgentProtocolError("Workspace Agent dispatch marker is missing")
+    prefix = source[:split]
+    dispatch = source[split + 1 :]
+    manifest = repr(
+        {
+            "protocol_version": WORKSPACE_AGENT_PROTOCOL_VERSION,
+            "source_checksum": _workspace_agent_runtime_checksum(),
+            "operations": WORKSPACE_AGENT_SUPPORTED_OPERATIONS,
+            "request_max_bytes": WORKSPACE_AGENT_REQUEST_MAX_BYTES,
+            "response_max_bytes": WORKSPACE_AGENT_RESPONSE_MAX_BYTES,
+            "locking": "fcntl_flock_inode_revalidation",
+            "replacement": "replace_overwrite_recreate",
+            "fallback": "non_atomic_overwrite_cleanup_warning",
+        }
+    )
+    # Core fields are required; optional fields default exactly as the legacy
+    # build_workspace_agent_code signature did, so compact callers may omit
+    # them and legacy callers passing all fields behave identically.
+    required = ("volume_root", "root", "relative", "operation")
+    optional: dict[str, object] = {
+        "allow_missing": False,
+        "max_bytes": 0,
+        "limit": 0,
+        "overwrite": False,
+        "content_b64": "",
+        "after": "",
+        "offset": 0,
+        "max_chars": 0,
+        "total_file_bytes": 0,
+        "checksum": False,
+        "memory_id": "",
+        "expected_sha256": "",
+    }
+    required_check = (
+        "    if any(k not in request for k in "
+        + repr(list(required))
+        + '):\n        return {"ok": False, "error": "request_invalid"}\n'
+    )
+    assignments = "\n".join(
+        [f"    {name} = request[{name!r}]" for name in required]
+        + [f"    {name} = request.get({name!r}, {default!r})" for name, default in optional.items()]
+    )
+    handle = (
+        "\n\n_AGENT_HANDSHAKE = "
+        + manifest
+        + "\n\ndef handle(request):\n"
+        + "    if not isinstance(request, dict):\n"
+        + '        return {"ok": False, "error": "request_invalid"}\n'
+        + '    if request.get("operation") == "__handshake__":\n'
+        + '        return {"ok": True, "kind": "workspace_agent_handshake", **_AGENT_HANDSHAKE}\n'
+        + '    if request.get("protocol_version") != _AGENT_HANDSHAKE["protocol_version"]:\n'
+        + '        return {"ok": False, "error": "protocol_mismatch"}\n'
+        + "    global volume_root, root, relative, allow_missing, operation\n"
+        + "    global max_bytes, limit, overwrite, content_b64, after, offset\n"
+        + "    global max_chars, total_file_bytes, checksum, memory_id, expected_sha256\n"
+        + "    global locked_fd, append_memory_id\n"
+        + "    locked_fd = None\n"
+        + "    append_memory_id = ''\n"
+        + required_check
+        + assignments
+        + "\n"
+        + textwrap.indent(dispatch, "    ")
+    )
+    return prefix + handle
+
+
+def build_workspace_agent_request_code(arguments: dict[str, object]) -> str:
+    # Build only the compact installed-agent request wrapper (P22/QRE-163).
+    # Normal operations transmit this shim plus the JSON request — never the
+    # full runtime source. A fresh module instance per call keeps request
+    # state call-local.
+    request = {"protocol_version": WORKSPACE_AGENT_PROTOCOL_VERSION, **arguments}
+    encoded = json.dumps(request, ensure_ascii=False, separators=(",", ":"))
+    if len(encoded.encode("utf-8")) > WORKSPACE_AGENT_REQUEST_MAX_BYTES:
+        raise WorkspaceAgentProtocolError("Workspace Agent request exceeds its bound")
+    code = (
+        "import importlib.util as _u, json as _j\n"
+        f"_s = _u.spec_from_file_location({WORKSPACE_AGENT_MODULE_NAME!r}, {WORKSPACE_AGENT_INSTALL_PATH!r})\n"
+        "if _s is None or _s.loader is None: raise RuntimeError('workspace agent unavailable')\n"
+        "_m = _u.module_from_spec(_s); _s.loader.exec_module(_m)\n"
+        f"try:\n    _v = _m.handle(_j.loads({encoded!r}))\n"
+        "except SystemExit:\n    pass\n"
+        "else:\n    print(_j.dumps(_v, ensure_ascii=False, separators=(',', ':')))\n"
+    )
+    return code
+
+
+@dataclass(slots=True)
+class WorkspaceAgentMetrics:
+    # Per-Sandbox transport measurements for P22 evidence receipts.
+    source_transfer_bytes: int = 0
+    bootstrap_count: int = 0
+    handshake_calls: int = 0
+    operation_calls: int = 0
+    request_bytes: int = 0
+    latency_ms_total: float = 0.0
+
+
+class _WorkspaceAgentSession:
+    def __init__(self) -> None:
+        self.verified = False
+        self.metrics = WorkspaceAgentMetrics()
+        self._sync_lock = threading.Lock()
+        self._async_lock: asyncio.Lock | None = None
+
+    @staticmethod
+    def supports_installation(sandbox: Any) -> bool:
+        fs = getattr(sandbox, "fs", None)
+        process = getattr(sandbox, "process", None)
+        return callable(getattr(fs, "upload_file", None)) and callable(getattr(process, "code_run", None))
+
+    @staticmethod
+    def _json_response(response: Any) -> dict[str, object] | None:
+        if int(getattr(response, "exit_code", 1)) != 0:
+            return None
+        raw = str(getattr(response, "result", ""))
+        if len(raw.encode("utf-8")) > WORKSPACE_AGENT_RESPONSE_MAX_BYTES:
+            return None
+        try:
+            payload = json.loads(raw)
+        except (TypeError, ValueError):
+            return None
+        return payload if isinstance(payload, dict) else None
+
+    @staticmethod
+    def _valid_handshake(payload: dict[str, object] | None) -> bool:
+        if not isinstance(payload, dict) or payload.get("ok") is not True:
+            return False
+        if payload.get("kind") != "workspace_agent_handshake":
+            return False
+        if payload.get("protocol_version") != WORKSPACE_AGENT_PROTOCOL_VERSION:
+            return False
+        if payload.get("source_checksum") != _workspace_agent_runtime_checksum():
+            return False
+        operations = payload.get("operations")
+        if not isinstance(operations, list) or list(operations) != list(WORKSPACE_AGENT_SUPPORTED_OPERATIONS):
+            return False
+        return (
+            payload.get("locking") == "fcntl_flock_inode_revalidation"
+            and payload.get("replacement") == "replace_overwrite_recreate"
+            and payload.get("fallback") == "non_atomic_overwrite_cleanup_warning"
+            and payload.get("request_max_bytes") == WORKSPACE_AGENT_REQUEST_MAX_BYTES
+            and payload.get("response_max_bytes") == WORKSPACE_AGENT_RESPONSE_MAX_BYTES
+        )
+
+    async def _raw_async(self, sandbox: Any, code: str, timeout_s: float) -> Any:
+        started = time.monotonic()
+        self.metrics.request_bytes += len(code.encode("utf-8"))
+        response = await sandbox.process.code_run(code, timeout=_provider_code_run_timeout_s(timeout_s))
+        self.metrics.latency_ms_total += (time.monotonic() - started) * 1000.0
+        return response
+
+    def _raw_sync(self, sandbox: Any, code: str, timeout_s: float) -> Any:
+        started = time.monotonic()
+        self.metrics.request_bytes += len(code.encode("utf-8"))
+        response = sandbox.process.code_run(code, timeout=_provider_code_run_timeout_s(timeout_s))
+        self.metrics.latency_ms_total += (time.monotonic() - started) * 1000.0
+        return response
+
+    async def ensure_async(self, sandbox: Any, timeout_s: float) -> None:
+        if self.verified:
+            return
+        if self._async_lock is None:
+            self._async_lock = asyncio.Lock()
+        async with self._async_lock:
+            if self.verified:
+                return
+            handshake = build_workspace_agent_request_code({"operation": "__handshake__", "relative": ""})
+            self.metrics.handshake_calls += 1
+            try:
+                payload = self._json_response(await self._raw_async(sandbox, handshake, timeout_s))
+            except Exception:
+                payload = None
+            if not self._valid_handshake(payload):
+                installed = build_installed_workspace_agent_source().encode("utf-8")
+                await sandbox.fs.upload_file(installed, WORKSPACE_AGENT_INSTALL_PATH)
+                self.metrics.source_transfer_bytes += len(installed)
+                self.metrics.bootstrap_count += 1
+                self.metrics.handshake_calls += 1
+                try:
+                    payload = self._json_response(await self._raw_async(sandbox, handshake, timeout_s))
+                except Exception:
+                    payload = None
+            if not self._valid_handshake(payload):
+                raise WorkspaceAgentProtocolError("Workspace Agent protocol handshake failed")
+            self.verified = True
+
+    def ensure_sync(self, sandbox: Any, timeout_s: float) -> None:
+        if self.verified:
+            return
+        with self._sync_lock:
+            if self.verified:
+                return
+            handshake = build_workspace_agent_request_code({"operation": "__handshake__", "relative": ""})
+            self.metrics.handshake_calls += 1
+            try:
+                payload = self._json_response(self._raw_sync(sandbox, handshake, timeout_s))
+            except Exception:
+                payload = None
+            if not self._valid_handshake(payload):
+                installed = build_installed_workspace_agent_source().encode("utf-8")
+                sandbox.fs.upload_file(installed, WORKSPACE_AGENT_INSTALL_PATH)
+                self.metrics.source_transfer_bytes += len(installed)
+                self.metrics.bootstrap_count += 1
+                self.metrics.handshake_calls += 1
+                try:
+                    payload = self._json_response(self._raw_sync(sandbox, handshake, timeout_s))
+                except Exception:
+                    payload = None
+            if not self._valid_handshake(payload):
+                raise WorkspaceAgentProtocolError("Workspace Agent protocol handshake failed")
+            self.verified = True
+
+    async def request_async(self, sandbox: Any, arguments: dict[str, object], timeout_s: float) -> dict[str, object]:
+        await self.ensure_async(sandbox, timeout_s)
+        code = build_workspace_agent_request_code(arguments)
+        self.metrics.operation_calls += 1
+        return decode_workspace_agent_response(
+            await self._raw_async(sandbox, code, timeout_s),
+            str(arguments.get("relative") or ""),
+        )
+
+    def request_sync(self, sandbox: Any, arguments: dict[str, object], timeout_s: float) -> dict[str, object]:
+        self.ensure_sync(sandbox, timeout_s)
+        code = build_workspace_agent_request_code(arguments)
+        self.metrics.operation_calls += 1
+        return decode_workspace_agent_response(
+            self._raw_sync(sandbox, code, timeout_s),
+            str(arguments.get("relative") or ""),
+        )
+
+
+_AGENT_SESSIONS: dict[object, _WorkspaceAgentSession] = {}
+_AGENT_SESSIONS_LOCK = threading.Lock()
+
+
+def _agent_session(sandbox: Any) -> _WorkspaceAgentSession:
+    # Verified-install state is keyed by provider Sandbox identity so a
+    # retained Sandbox reuses one install and a replacement Sandbox (new id)
+    # installs and handshakes independently.
+    sandbox_id = getattr(sandbox, "id", None)
+    key: object = ("id", sandbox_id) if isinstance(sandbox_id, str) and sandbox_id else ("object", id(sandbox))
+    with _AGENT_SESSIONS_LOCK:
+        session = _AGENT_SESSIONS.get(key)
+        if session is None:
+            session = _WorkspaceAgentSession()
+            _AGENT_SESSIONS[key] = session
+        return session
+
+
+def workspace_agent_metrics(sandbox: Any) -> WorkspaceAgentMetrics:
+    # Live per-Sandbox P22 transport counters (used by evidence receipts).
+    return _agent_session(sandbox).metrics
+
+
+def drop_workspace_agent_session(sandbox: Any) -> None:
+    # Test/lease-disposal hook: forget verified-install state for a Sandbox.
+    sandbox_id = getattr(sandbox, "id", None)
+    key: object = ("id", sandbox_id) if isinstance(sandbox_id, str) and sandbox_id else ("object", id(sandbox))
+    with _AGENT_SESSIONS_LOCK:
+        _AGENT_SESSIONS.pop(key, None)
+
+
 def decode_workspace_agent_response(response: Any, relative: str) -> dict[str, object]:
     if int(getattr(response, "exit_code", 1)) != 0:
         raise ValueError("workspace path is unsafe")
@@ -115,6 +442,10 @@ def run_workspace_agent(
     timeout_s: float = WORKSPACE_AGENT_CODE_RUN_TIMEOUT_S,
     **arguments: Any,
 ) -> dict[str, object]:
+    if _WorkspaceAgentSession.supports_installation(sandbox):
+        return _agent_session(sandbox).request_sync(sandbox, arguments, timeout_s)
+    # Compatibility path for process-only test doubles: Sandboxes without a
+    # filesystem upload surface keep the legacy full-source transmission.
     relative = str(arguments.get("relative") or "")
     code = build_workspace_agent_code(**arguments)
     response = sandbox.process.code_run(code, timeout=_provider_code_run_timeout_s(timeout_s))
@@ -127,6 +458,9 @@ async def run_workspace_agent_async(
     timeout_s: float = WORKSPACE_AGENT_CODE_RUN_TIMEOUT_S,
     **arguments: Any,
 ) -> dict[str, object]:
+    if _WorkspaceAgentSession.supports_installation(sandbox):
+        return await _agent_session(sandbox).request_async(sandbox, arguments, timeout_s)
+    # Compatibility path for process-only test doubles (see sync adapter).
     relative = str(arguments.get("relative") or "")
     code = build_workspace_agent_code(**arguments)
     response = await sandbox.process.code_run(code, timeout=_provider_code_run_timeout_s(timeout_s))
@@ -148,6 +482,8 @@ def _raise_workspace_error(payload: dict[str, object], relative: str) -> None:
     value_error = _VALUE_ERRORS.get(error)
     if value_error is not None:
         raise ValueError(value_error)
+    if error in _PROTOCOL_ERRORS:
+        raise WorkspaceAgentProtocolError(error)
     if error == "unsupported_storage":
         raise WorkspaceAgentStorageError(str(payload.get("errno") or "unknown"))
     raise ValueError("workspace path is unsafe")

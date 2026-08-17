@@ -1180,10 +1180,10 @@ except StorageError as exc:
 except OSError:
     fail('unsafe')
 finally:
-    released_locked_fd = locals().get('locked_fd')
+    released_locked_fd = locals().get('locked_fd', globals().get('locked_fd'))
     if released_locked_fd is not None:
         try:
             os.close(released_locked_fd)
         except OSError:
             pass
-    close_all(base_fds if 'base_fds' in locals() else [])
+    close_all(locals().get('base_fds', globals().get('base_fds', [])))
