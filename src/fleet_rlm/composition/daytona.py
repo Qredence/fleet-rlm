@@ -386,9 +386,7 @@ async def install_daytona_composition(
     composition_loop = asyncio.get_running_loop()
     dispatcher.set_loop(composition_loop)
     try:
-        inventory = await build_daytona_composition(
-            settings, skill_catalog=skill_catalog, dispatcher=dispatcher
-        )
+        inventory = await build_daytona_composition(settings, skill_catalog=skill_catalog, dispatcher=dispatcher)
     except Exception:
         dispatcher.clear_loop(composition_loop)
         raise

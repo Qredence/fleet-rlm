@@ -24,6 +24,7 @@ from fleet_rlm.daytona.provisioning import (
     ensure_shared_volume_layout,
     get_or_create_volume_id,
 )
+from fleet_rlm.daytona.sandbox_lease import SandboxLease, SandboxLeasePolicy
 from fleet_rlm.daytona.workspace_fs import AsyncDaytonaSessionWorkspaceFS, AsyncDaytonaVolumeFS
 from fleet_rlm.files.volume_paths import UnsafePathError, VolumePaths, validate_mount_path, validate_path_id
 from fleet_rlm.files.volume_storage import VolumeFile, WorkspaceVolumeGateway, WorkspaceVolumeSession
@@ -300,25 +301,32 @@ class DaytonaWorkspaceGateway:
                 raise map_provider_error(exc) from exc
             finally:
                 if sandbox is not None:
-                    try:
-                        await asyncio.wait_for(
-                            self._platform.delete(sandbox),
-                            timeout=_SANDBOX_DELETE_GRACE_SECONDS,
-                        )
-                    except TimeoutError:
+                    # Lease-backed (QRE-156): the temporary Volume-I/O teardown uses the
+                    # same confirmed provider cleanup contract as every other
+                    # lifecycle; the workspace lock stays held through confirmation.
+                    # Failure stays bounded and logged, never raised into the file op.
+                    lease = SandboxLease(
+                        kind="volume_io",
+                        sandbox=sandbox,
+                        sandbox_id=getattr(sandbox, "id", None),
+                        platform=self._platform,
+                        policy=SandboxLeasePolicy(
+                            kind="volume_io",
+                            interpreter_shutdown=False,
+                            provider_request_timeout_s=_SANDBOX_DELETE_GRACE_SECONDS,
+                            confirm_timeout_s=_SANDBOX_DELETE_GRACE_SECONDS,
+                            confirm_poll_interval_s=0.5,
+                        ),
+                    )
+                    receipt = await lease.aclose()
+                    if not receipt.provider.confirmed_absent:
                         logger.warning(
-                            "Workspace I/O Sandbox deletion did not finish within grace period",
+                            "Workspace I/O Sandbox deletion not confirmed absent within grace period",
                             extra={
                                 "workspace_id": str(workspace_id),
                                 "grace_seconds": _SANDBOX_DELETE_GRACE_SECONDS,
-                            },
-                        )
-                    except Exception as exc:
-                        logger.warning(
-                            "Workspace I/O Sandbox deletion failed",
-                            extra={
-                                "workspace_id": str(workspace_id),
-                                "error_type": type(exc).__name__,
+                                "provider_error": receipt.provider.error,
+                                "plateau": receipt.provider.plateau,
                             },
                         )
 

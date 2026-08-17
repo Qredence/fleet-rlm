@@ -343,3 +343,34 @@ async def test_owned_acquisition_settles_and_closes_lease() -> None:
     assert isinstance(receipt, SandboxLeaseReceipt)
     assert receipt.provider.confirmed_absent is True
     assert permit._released is True
+
+
+@pytest.mark.asyncio
+async def test_hung_delete_request_is_classified_not_wedged() -> None:
+    """A delete request that never returns cannot wedge the close (QRE-156)."""
+
+    class _HangingDeletePlatform(_ScriptedPlatform):
+        async def delete(self, sandbox_id: str) -> None:
+            self.deletes.append(sandbox_id)
+            await asyncio.Event().wait()
+
+    platform = _HangingDeletePlatform([None])
+    _, permit = await _permit()
+    lease = SandboxLease(
+        kind="volume_io",
+        sandbox=None,
+        sandbox_id="sb-hung",
+        platform=platform,
+        permit=permit,
+        policy=SandboxLeasePolicy(
+            kind="volume_io",
+            interpreter_shutdown=False,
+            provider_request_timeout_s=0.05,
+            confirm_poll_interval_s=0.01,
+            confirm_timeout_s=0.2,
+        ),
+    )
+    receipt = await asyncio.wait_for(lease.aclose(), timeout=5)
+    assert "TimeoutError" in str(receipt.provider.error)
+    assert receipt.provider.confirmed_absent is True  # probe (scripted absent) still ran
+    assert permit._released is True

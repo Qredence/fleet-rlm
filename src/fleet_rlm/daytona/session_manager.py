@@ -17,6 +17,14 @@ from typing import Any, Protocol
 from uuid import UUID, uuid4
 
 from fleet_rlm.chat.run_cleanup import RunCleanupSupervisor, RunCleanupUnavailableError
+
+# Admission ownership lives in fleet_rlm.daytona.admission (QRE-156); the
+# re-export here keeps the historical session_manager import surface working.
+from fleet_rlm.daytona.admission import (
+    DaytonaAdmission,
+    DaytonaAdmissionPermit,
+    DaytonaAdmissionTimeoutError,
+)
 from fleet_rlm.daytona.dspy_sync_bridge import SyncBridgeDispatcher
 from fleet_rlm.daytona.errors import (
     DaytonaAdapterError,
@@ -43,46 +51,10 @@ from fleet_rlm.daytona.provisioning import (
     require_scoped_volume_subpath,
     workspace_volume_subpath,
 )
+from fleet_rlm.daytona.sandbox_lease import SandboxLease, SandboxLeasePolicy, SandboxLeaseReceipt
 from fleet_rlm.runtime.bindings import SandboxBinding
 
 logger = logging.getLogger(__name__)
-
-
-class DaytonaAdmissionTimeoutError(RuntimeError):
-    """The Turn deadline elapsed before Daytona capacity became available."""
-
-
-@dataclass(slots=True)
-class DaytonaAdmissionPermit:
-    """One idempotently releasable slot in Daytona admission."""
-
-    _semaphore: asyncio.BoundedSemaphore
-    _released: bool = field(default=False, init=False)
-
-    def release(self) -> None:
-        if self._released:
-            return
-        self._released = True
-        self._semaphore.release()
-
-
-class DaytonaAdmission:
-    """Bound acquiring plus active Interpreter Leases for one process."""
-
-    def __init__(self, *, max_active_leases: int = 8) -> None:
-        if max_active_leases <= 0:
-            raise ValueError("max_active_leases must be positive")
-        if max_active_leases > 8:
-            raise ValueError("max_active_leases must be at most 8")
-        self._semaphore = asyncio.BoundedSemaphore(max_active_leases)
-
-    async def acquire(self, *, deadline: float) -> DaytonaAdmissionPermit:
-        try:
-            async with asyncio.timeout_at(deadline):
-                await self._semaphore.acquire()
-        except TimeoutError:
-            raise DaytonaAdmissionTimeoutError("Daytona admission unavailable") from None
-        return DaytonaAdmissionPermit(self._semaphore)
 
 
 class ActiveLeaseConflictError(RuntimeError):
@@ -270,6 +242,21 @@ class DaytonaSessionManager:
             workspace_id=workspace_id,
         )
 
+    def _sandbox_retirement_lease(self, sandbox_id: str, *, confirm_timeout_s: float = 120.0) -> SandboxLease:
+        """Confirmed teardown of a formerly owned Session sandbox (QRE-156)."""
+        return SandboxLease(
+            kind="retained_session",
+            sandbox=None,
+            sandbox_id=sandbox_id,
+            platform=self._platform,
+            policy=SandboxLeasePolicy(
+                kind="retained_session",
+                interpreter_shutdown=False,
+                provider_action="delete",
+                confirm_timeout_s=confirm_timeout_s,
+            ),
+        )
+
     async def acquire(self, request: LeaseRequest, *, deadline: float) -> InterpreterLease:
         """Ensure a running Sandbox with Workspace Volume Scope; return a lease."""
         require_non_zero_workspace_id(request.workspace_id)
@@ -358,12 +345,27 @@ class DaytonaSessionManager:
             )
         )
         if lease.created_sandbox:
-            deletion = self._platform.delete(lease.sandbox_id)
+            # Lease-backed (QRE-156): the retired sandbox's deletion is
+            # confirmed absent through the shared contract, before the
+            # submission lane lets it go (including the inline fallback).
+            retire = self._sandbox_retirement_lease(lease.sandbox_id)
+            receipt_box: dict[str, SandboxLeaseReceipt] = {}
+
+            async def _retire() -> None:
+                receipt_box["receipt"] = await retire.aclose()
+
+            deletion = _retire()
             try:
                 self._cleanup.submit(deletion)
             except RunCleanupUnavailableError:
                 deletion.close()
-                await self._platform.delete(lease.sandbox_id)
+                await _retire()
+                receipt = receipt_box["receipt"]
+                if receipt.first_error is not None:
+                    logger.warning(
+                        "retired session sandbox deletion was not confirmed",
+                        extra={"sandbox_id": lease.sandbox_id, "error": receipt.first_error},
+                    )
 
     async def fence_session(self, session_id: UUID) -> None:
         """Fence a Sandbox retained by a settling Run during startup recovery."""
@@ -388,8 +390,29 @@ class DaytonaSessionManager:
         )
         if binding.sandbox_id is None:
             return
+        # Lease-backed (QRE-156/AC4): recovery fencing rides the shared
+        # provider lifecycle adapter; the receipt records the provider action
+        # and failure without letting force=True deletion go unrecorded.
+        fence_lease = SandboxLease(
+            kind="recovery_fence",
+            sandbox=None,
+            sandbox_id=binding.sandbox_id,
+            platform=self._platform,
+            policy=SandboxLeasePolicy(
+                kind="recovery_fence",
+                interpreter_shutdown=False,
+                provider_action="stop",
+                stop_force=True,
+            ),
+        )
+
+        async def _fenced_stop() -> None:
+            receipt = await fence_lease.aclose()
+            if receipt.first_error is not None:
+                raise RuntimeError(str(receipt.first_error))
+
         await asyncio.wait_for(
-            self._platform.stop(binding.sandbox_id, timeout=60, force=True),
+            _fenced_stop(),
             timeout=60,
         )
         await self._bindings.upsert(
@@ -544,7 +567,7 @@ class DaytonaSessionManager:
         except BaseException:
             if created_sandbox:
                 with contextlib.suppress(Exception):
-                    await self._platform.delete(_sandbox_id(sandbox))
+                    await self._sandbox_retirement_lease(_sandbox_id(sandbox), confirm_timeout_s=30.0).aclose()
             raise
 
     async def _persist_binding_and_build_lease(
@@ -695,7 +718,7 @@ class DaytonaSessionManager:
         expected = self._expected_mount(volume_id=volume_id, workspace_id=resolved_workspace)
         if binding.sandbox_id:
             with contextlib.suppress(Exception):
-                await self._platform.delete(binding.sandbox_id)
+                await self._sandbox_retirement_lease(binding.sandbox_id).aclose()
         request = LeaseRequest(
             session_id=binding.session_id,
             user_id=user_id,
