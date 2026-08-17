@@ -76,9 +76,9 @@ host = "https://eu.i.posthog.com"
 environment = "daytona"
 
 [profiles.daytona.llm.root]
-model = "deepseek-v4-flash"
-api_key_env = "FLEET_OPENCODE_GO_API_KEY"
-base_url_env = "FLEET_OPENCODE_GO_BASE_URL"
+model = "deepseek-v4-flash-0731"
+api_key_env = "DATABRICKS_TOKEN"
+base_url_env = "FLEET_DATABRICKS_AI_GATEWAY_BASE_URL"
 max_tokens = 16000
 # Streaming turns re-enter identical action prompts on retries/repeated steps;
 # a cache hit yields zero streamify deltas and reads as a frozen stream.
@@ -86,9 +86,9 @@ cache = false
 reasoning_effort = "low"
 
 [profiles.daytona.llm.sub]
-model = "deepseek-v4-flash"
-api_key_env = "FLEET_OPENCODE_GO_API_KEY"
-base_url_env = "FLEET_OPENCODE_GO_BASE_URL"
+model = "deepseek-v4-flash-0731"
+api_key_env = "DATABRICKS_TOKEN"
+base_url_env = "FLEET_DATABRICKS_AI_GATEWAY_BASE_URL"
 max_tokens = 16000
 temperature = 0
 cache = false
@@ -103,17 +103,17 @@ experiment_name = "fleet-rlm"
 environment = "daytona"
 
 [profiles.daytona-recursive.llm.root]
-model = "deepseek-v4-flash"
-api_key_env = "FLEET_OPENCODE_GO_API_KEY"
-base_url_env = "FLEET_OPENCODE_GO_BASE_URL"
+model = "deepseek-v4-flash-0731"
+api_key_env = "DATABRICKS_TOKEN"
+base_url_env = "FLEET_DATABRICKS_AI_GATEWAY_BASE_URL"
 max_tokens = 16000
 cache = false
 reasoning_effort = "low"
 
 [profiles.daytona-recursive.llm.sub]
-model = "deepseek-v4-flash"
-api_key_env = "FLEET_OPENCODE_GO_API_KEY"
-base_url_env = "FLEET_OPENCODE_GO_BASE_URL"
+model = "deepseek-v4-flash-0731"
+api_key_env = "DATABRICKS_TOKEN"
+base_url_env = "FLEET_DATABRICKS_AI_GATEWAY_BASE_URL"
 max_tokens = 16000
 temperature = 0
 cache = false
@@ -135,14 +135,14 @@ recursion_enabled = true
 environment = "daytona"
 
 [profiles.daytona-managed.llm.root]
-model = "deepseek-v4-flash"
+model = "deepseek-v4-flash-0731"
 api_key_env = "DATABRICKS_TOKEN"
 base_url_env = "FLEET_DATABRICKS_AI_GATEWAY_BASE_URL"
 max_tokens = 8000
 reasoning_effort = "low"
 
 [profiles.daytona-managed.llm.sub]
-model = "deepseek-v4-flash"
+model = "deepseek-v4-flash-0731"
 api_key_env = "DATABRICKS_TOKEN"
 base_url_env = "FLEET_DATABRICKS_AI_GATEWAY_BASE_URL"
 max_tokens = 8000
