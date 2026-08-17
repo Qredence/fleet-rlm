@@ -145,3 +145,22 @@ async def test_owner_waits_for_detached_cleanup_before_released() -> None:
     receipt = await close_task
     assert receipt.state is RunOwnershipState.RELEASED
     assert receipt.recursive_workers.status == "clean"
+
+
+@pytest.mark.asyncio
+async def test_terminal_receipt_carries_sandbox_lease_receipt_without_serializing_it() -> None:
+    from types import SimpleNamespace
+
+    stream = _Stream([])
+    lease_receipt = SimpleNamespace(provider=object(), admission=object(), clean=True)
+    stream.cleanup_receipt = SimpleNamespace(clean=True, results=(lease_receipt,))
+
+    async def open_with_receipt(on_settlement: Any, _on_cleanup: Any) -> _Stream:
+        on_settlement(SimpleNamespace(status="completed"))
+        return stream
+
+    owner = RunOwnership(open_with_receipt).start()
+    await owner.wait_open()
+    receipt = await owner.aclose()
+    assert receipt.sandbox_leases == (lease_receipt,)
+    assert receipt.clean is True
