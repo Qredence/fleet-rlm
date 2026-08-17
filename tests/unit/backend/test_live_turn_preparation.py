@@ -35,7 +35,6 @@ async def test_live_preparation_stages_attachment_and_cleans_it(
     persists memory and result snapshots, and cleans up the staged attachment when the prepared
     turn closes.
     """
-    del monkeypatch
     data = b"attachment body"
     attachment_id = uuid4()
     ref = AttachmentRef(
@@ -49,6 +48,19 @@ async def test_live_preparation_stages_attachment_and_cleans_it(
     volume_root = tmp_path / "volume"
     volume_root.mkdir()
 
+    from fleet_rlm.daytona import workspace_agent as workspace_agent_module
+
+    # Materialize the installed agent OUTSIDE the claimed volume tree so the
+    # test's exact volume-content assertion is unaffected (real installs also
+    # live outside the mounted Volume).
+    agent_remote = tmp_path / "remote" / "home" / "daytona" / "fleet_rlm_workspace_agent_v1.py"
+    agent_remote_path = str(agent_remote)
+    monkeypatch.setattr(
+        workspace_agent_module,
+        "WORKSPACE_AGENT_INSTALL_PATH",
+        agent_remote_path,
+    )
+
     class SandboxFs:
         async def create_folder(self, path: str, mode: str | None = None) -> None:
             del path, mode
@@ -57,6 +69,14 @@ async def test_live_preparation_stages_attachment_and_cleans_it(
             return volume[path]
 
         async def upload_file(self, value: bytes, path: str) -> None:
+            # Emulate a real remote filesystem so the installed Workspace
+            # Agent module is importable by the exec-based process double.
+            # The install is Sandbox-local state, not mounted-Volume state,
+            # so it is kept out of the simulated Volume content map.
+            if path == agent_remote_path:
+                agent_remote.parent.mkdir(parents=True, exist_ok=True)
+                agent_remote.write_bytes(value)
+                return
             volume[path] = value
 
         async def delete_file(self, path: str) -> None:

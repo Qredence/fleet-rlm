@@ -127,6 +127,10 @@ routes or public events.
 - Alembic owns live schema evolution; live PostgreSQL startup never calls
   `create_all`. Explicit SQLite test/local helpers may call `create_tables`.
 - Durable Attachment and Artifact bytes live in Workspace Volume Scope.
+- The mounted Workspace Agent is installed once per Sandbox as a versioned,
+  checksum-verified module; operations then run as compact handshake-bound
+  JSON requests. Protocol, digest, or capability mismatch fails closed before
+  Workspace/Memory use and never falls back to per-operation source shipping.
 - Daytona Session Workspace text lives under
   `sessions/{session_id}/workspace/`. Paged reads, bounded immediate-child
   listings, append, replacement writes, unique-fragment edits, and file or
