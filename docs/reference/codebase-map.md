@@ -89,8 +89,10 @@ The authoritative route inventory and shapes are in
 | `src/fleet-turn-stream.ts` | request opening, bounded same-key retry, strict stream and part lifecycle |
 | `src/sse.ts` | SSE framing and closed validation against generated chunk tables |
 | `src/tui/runner.ts` | active Run state, submission, cancellation |
-| `src/tui/live-projection.ts` | live SSE chunk → store events (`LiveTurnProjector`) |
-| `src/tui/durable-projection.ts` | durable reload turns → store events (`projectDurableTurns`) |
+| `src/tui/canonical.ts` | canonical semantic Turn event types (backend-mirrored) + cross-language JSON serializer |
+| `src/tui/live-adapter.ts`, `durable-adapter.ts` | thin wire → canonical adapters (all casing/wrapper compat lives here) |
+| `src/tui/turn-reducer.ts` | one source-agnostic reducer: canonical events → store events (all fold/mint state) |
+| `src/tui/live-projection.ts`, `durable-projection.ts` | stable facades composing adapter + reducer for the runner/hydration call sites |
 | `src/tui/projection-helpers.ts` | shared pure helpers / message builders for projection |
 | `src/tui/store.ts` | conversation state, atomic Session hydration, and terminal stream settlement |
 | `src/tui/application.ts`, `screen.ts`, `transcript.ts` | pi-tui alternate-screen lifecycle, editor/input, follow-end `ScrollView` layout, terminal-safe status, and mutable Run activity |

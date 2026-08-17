@@ -1,3 +1,10 @@
+import type {
+  ArtifactEvent,
+  AttachmentEvent,
+  SkillEvent,
+  UsageEvent,
+  WarningEvent,
+} from "./canonical.js";
 import type { Message, Role } from "./store.js";
 import { observedTokenCounts } from "./usage-summary.js";
 
@@ -126,35 +133,17 @@ export function result(
   };
 }
 
-export function skill(
-  id: string,
-  runId: string,
-  fallbackId: string | undefined,
-  value: Record<string, unknown>,
-  clock: Clock,
-): Message {
-  let phase: "activated" | "loaded";
-  if (value.phase === "activated" || value.phase === "loaded") {
-    phase = value.phase;
-  } else if (value.trust !== undefined && value.trust !== null) {
-    phase = "activated";
-  } else {
-    phase = "loaded";
-  }
-  const trust = optionalString(value.trust);
-  const affordances = Array.isArray(value.affordances)
-    ? value.affordances.filter((item): item is string => typeof item === "string")
-    : undefined;
+export function skill(id: string, runId: string, event: SkillEvent, clock: Clock): Message {
   return {
     id,
     kind: "skill",
     runId,
-    skillId: string(value.skillId ?? value.skill_id ?? fallbackId),
-    name: string(value.name, "(skill)"),
-    phase,
-    version: string(value.version, "1.0.0"),
-    ...(trust ? { trust } : {}),
-    ...(affordances?.length ? { affordances } : {}),
+    skillId: event.skillId || "(skill)",
+    name: event.name ?? "(skill)",
+    phase: event.phase === "activated" || event.trust !== undefined ? "activated" : "loaded",
+    version: event.version ?? "1.0.0",
+    ...(event.trust ? { trust: event.trust } : {}),
+    ...(event.affordances?.length ? { affordances: event.affordances } : {}),
     ts: clock(),
   };
 }
@@ -162,64 +151,47 @@ export function skill(
 export function attachment(
   id: string,
   runId: string,
-  fallbackId: string | undefined,
-  value: Record<string, unknown>,
+  event: AttachmentEvent,
   clock: Clock,
 ): Message {
   return {
     id,
     kind: "attachment",
     runId,
-    attachmentId: string(value.attachmentId ?? value.attachment_id ?? fallbackId),
-    filename: string(value.filename, "(file)"),
-    bytes: number(value.byteSize ?? value.byte_size),
+    attachmentId: event.attachmentId || "(attachment)",
+    filename: event.filename ?? "(file)",
+    bytes: event.byteSize ?? 0,
     ts: clock(),
   };
 }
 
-export function warning(
-  id: string,
-  runId: string,
-  value: Record<string, unknown>,
-  clock: Clock,
-): Message {
+export function warning(id: string, runId: string, event: WarningEvent, clock: Clock): Message {
   return {
     id,
     kind: "warning",
     runId,
-    code: string(value.code, "warning"),
-    message: string(value.message),
+    code: event.code || "warning",
+    message: event.message,
     ts: clock(),
   };
 }
 
-export function artifact(
-  id: string,
-  runId: string,
-  fallbackId: string | undefined,
-  value: Record<string, unknown>,
-  clock: Clock,
-): Message {
+export function artifact(id: string, runId: string, event: ArtifactEvent, clock: Clock): Message {
   return {
     id,
     kind: "artifact",
     runId,
-    artifactId: string(value.artifactId ?? value.artifact_id ?? fallbackId),
-    name: string(value.title ?? value.name, "(artifact)"),
-    artifactKind: string(value.kind ?? value.artifact_kind, "file"),
-    bytes: number(value.byteSize ?? value.byte_size),
+    artifactId: event.artifactId || "(artifact)",
+    name: event.title ?? "(artifact)",
+    artifactKind: event.artifactKind ?? "file",
+    bytes: event.byteSize ?? 0,
     ts: clock(),
   };
 }
 
-export function usage(
-  id: string,
-  runId: string,
-  source: Record<string, unknown>,
-  clock: Clock,
-): Message {
-  const value = data(source.usage ?? source);
-  const observedLmUsage = data(value.observed_lm_usage ?? value.observedLmUsage);
+export function usage(id: string, runId: string, event: UsageEvent, clock: Clock): Message {
+  const value = data(event.usage);
+  const observedLmUsage = data(value.observed_lm_usage);
   const tokens = observedTokenCounts(observedLmUsage);
   return {
     id,
@@ -228,7 +200,7 @@ export function usage(
     iterations: nullableNumber(value.iterations),
     inputTokens: tokens.input,
     outputTokens: tokens.output,
-    durationMs: nullableNumber(value.duration_ms ?? value.durationMs),
+    durationMs: nullableNumber(value.duration_ms),
     observedLmUsage,
     ts: clock(),
   };
@@ -262,12 +234,6 @@ export function data(value: unknown): Record<string, unknown> {
 
 export function string(value: unknown, fallback = ""): string {
   return value === undefined || value === null ? fallback : String(value);
-}
-
-export function optionalString(value: unknown): string | undefined {
-  if (value === undefined || value === null) return undefined;
-  const result = String(value);
-  return result || undefined;
 }
 
 export function number(value: unknown, fallback = 0): number {
