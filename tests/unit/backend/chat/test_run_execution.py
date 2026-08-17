@@ -310,9 +310,9 @@ def test_execution_deadline_reads_the_deep_execution_context() -> None:
     not a fresh fallback window (P25)."""
     from types import SimpleNamespace
 
-    import fleet_rlm.chat.run_execution as run_execution
+    from fleet_rlm.chat.run_execution import RunExecutionDriver
 
-    driver = run_execution.RunExecutionDriver.__new__(run_execution.RunExecutionDriver)
+    driver = RunExecutionDriver.__new__(RunExecutionDriver)
     driver._turn_timeout_seconds = 99.0
     deep = SimpleNamespace(execution=SimpleNamespace(deadline=1234.5))
     assert driver._execution_deadline(SimpleNamespace(execution=deep)) == 1234.5
