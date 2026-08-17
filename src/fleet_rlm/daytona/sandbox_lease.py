@@ -26,16 +26,19 @@ and sanitized, credential-free error strings only.
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import inspect
 import logging
 import time
 from collections.abc import Awaitable, Callable, Coroutine
 from concurrent.futures import Future
 from dataclasses import dataclass, field
+from threading import Thread
 from typing import Any, Literal, Protocol, TypeAlias
 
+from fleet_rlm.daytona.admission import DaytonaAdmissionPermit
 from fleet_rlm.daytona.lifecycle import AbsenceConfirmation, AbsenceOutcome, confirm_absence
 from fleet_rlm.daytona.provisioning import SandboxPlatform
-from fleet_rlm.daytona.session_manager import DaytonaAdmissionPermit
 
 logger = logging.getLogger(__name__)
 
@@ -167,12 +170,19 @@ class SandboxLeasePolicy:
     confirm_absence: bool = True
     confirm_timeout_s: float = 120.0
     confirm_poll_interval_s: float = 1.0
+    # Test/contract seam for injecting a scripted confirmation policy; the
+    # default is fleet_rlm.daytona.lifecycle.confirm_absence.
+    confirm_fn: Callable[..., Awaitable[AbsenceOutcome]] | None = None
     interpreter_shutdown: bool = True
     strict_broker_cleanup: bool = True
     close_result_timeout_s: float = DEFAULT_CLOSE_RESULT_TIMEOUT_S
     # stop(force=True) silently DELETES on stop failure (platform.py) — that is
     # fencing semantics. Retained-session/idle semantics must never force.
     stop_force: bool = False
+    # Bound on the provider's action REQUEST (delete/stop) itself. When set,
+    # a hung request is abandoned client-side (the provider may still dequeue
+    # it) and the close proceeds to confirmation. None = unbounded request.
+    provider_request_timeout_s: float | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -273,7 +283,11 @@ class SandboxLease:
         request_error: str | None = None
         if action == "delete":
             try:
-                await platform.delete(self._sandbox_id)
+                request = platform.delete(self._sandbox_id)
+                if policy.provider_request_timeout_s is not None:
+                    await asyncio.wait_for(request, timeout=policy.provider_request_timeout_s)
+                else:
+                    await request
             except BaseException as exc:
                 request_error = _sanitize_error(exc)
             # Confirmation runs even when the delete request itself failed:
@@ -283,8 +297,20 @@ class SandboxLease:
             plateau: tuple[str, ...] = ()
             absent = False
             confirm_error: str | None = None
+            probe = getattr(platform, "get", None)
+            if policy.confirm_absence and not callable(probe):
+                # No absence-probe surface: classify rather than explode; the
+                # caller keeps its bounded teardown semantics.
+                return ProviderCleanupOutcome(
+                    action="delete",
+                    requested=True,
+                    confirmed_absent=False,
+                    duration_s=time.monotonic() - started,
+                    error=request_error or "absence probe unavailable: platform lacks get",
+                )
             if policy.confirm_absence:
-                absence: AbsenceOutcome = await confirm_absence(
+                confirm_fn = policy.confirm_fn or confirm_absence
+                absence: AbsenceOutcome = await confirm_fn(
                     probe=platform.get,
                     sandbox_id=self._sandbox_id,
                     timeout_s=policy.confirm_timeout_s,
@@ -303,7 +329,11 @@ class SandboxLease:
                 error=request_error or confirm_error,
             )
         try:
-            await platform.stop(self._sandbox_id, timeout=60, force=self._policy.stop_force)
+            stop_request = platform.stop(self._sandbox_id, timeout=60, force=self._policy.stop_force)
+            if policy.provider_request_timeout_s is not None:
+                await asyncio.wait_for(stop_request, timeout=policy.provider_request_timeout_s)
+            else:
+                await stop_request
         except BaseException as exc:
             return ProviderCleanupOutcome(
                 action="stop",
@@ -356,13 +386,13 @@ class SandboxLease:
         held = self._permit is not None
         if self._permit is not None:
             self._permit.release()
-        admission = AdmissionOutcome(
-            held=held,
-            released=held,
-            released_after=("confirmed_cleanup" if not quarantined and first_error is None else "quarantine_failure")
-            if held
-            else "not_held",
-        )
+        if not held:
+            released_after = "not_held"
+        elif not quarantined and first_error is None:
+            released_after = "confirmed_cleanup"
+        else:
+            released_after = "quarantine_failure"
+        admission = AdmissionOutcome(held=held, released=held, released_after=released_after)
 
         receipt = SandboxLeaseReceipt(
             kind=policy.kind,
@@ -460,6 +490,73 @@ class OwnedAcquisition:
         if callable(close):
             close()
         return None
+
+
+@dataclass(slots=True)
+class OwnedCloseExecution:
+    """One scheduled owned async close, with its disposable-loop fallback record.
+
+    ``coroutine`` is the initially built close coroutine on the posted path
+    (caller may ``close()`` it when cancelling the future); on the fallback
+    path it was already closed by the seam and reads ``None``.
+    """
+
+    future: Future[Any]
+    used_fallback: bool
+    coroutine: Any | None = None
+
+
+def schedule_owned_close(
+    *,
+    loop: asyncio.AbstractEventLoop,
+    build: Callable[[], Coroutine[Any, Any, Any]],
+    fallback_owner_release: Callable[[], None] | None = None,
+    thread_name: str = "fleet-lease-close-fallback",
+) -> OwnedCloseExecution:
+    """Post one owned async close to the owner loop, or run it on a disposable loop.
+
+    ``build`` creates the close coroutine, which is solely responsible for its
+    owned resources (permit release, provider deletion, receipts). When the
+    post fails (owner loop closing during late-acquisition handoff), the close
+    still runs on a disposable daemon loop built from a FRESH coroutine so the
+    permit's settle semantics execute; a thread-start failure releases via
+    ``fallback_owner_release`` (when provided) and surfaces the error on the
+    returned future rather than stranding ownership.
+    """
+    coroutine = build()
+    try:
+        return OwnedCloseExecution(
+            future=asyncio.run_coroutine_threadsafe(coroutine, loop),
+            used_fallback=False,
+            coroutine=coroutine,
+        )
+    except BaseException:
+        if inspect.iscoroutine(coroutine):
+            coroutine.close()
+
+    fallback: Future[Any] = Future()
+
+    def run_fallback() -> None:
+        try:
+            asyncio.run(build())
+        except BaseException as exc:
+            if not fallback.done():
+                fallback.set_exception(exc)
+        else:
+            if not fallback.done():
+                fallback.set_result(None)
+
+    thread = Thread(target=run_fallback, name=thread_name, daemon=True)
+    try:
+        thread.start()
+    except BaseException as exc:
+        # A thread-start failure cannot safely run provider I/O. Release the
+        # owned resource synchronously and surface the failure.
+        if fallback_owner_release is not None:
+            with contextlib.suppress(BaseException):
+                fallback_owner_release()
+        fallback.set_exception(exc)
+    return OwnedCloseExecution(future=fallback, used_fallback=True, coroutine=None)
 
 
 def acquire_owned_lease(

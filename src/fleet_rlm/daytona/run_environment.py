@@ -252,7 +252,7 @@ class _DaytonaEnvironmentProvider:
             sink = _DaytonaRunSink(
                 sandbox,
                 loop=asyncio.get_running_loop(),
-                dispatcher=getattr(self.resources, 'dispatcher', None),
+                dispatcher=getattr(self.resources, "dispatcher", None),
                 paths=paths,
             )
             assert sink.volume_fs is not None
@@ -275,7 +275,7 @@ class _DaytonaEnvironmentProvider:
             main_loop = asyncio.get_running_loop()
             child_runtime_factory = build_child_runtime_factory(
                 loop=main_loop,
-                dispatcher=getattr(self.resources, 'dispatcher', None),
+                dispatcher=getattr(self.resources, "dispatcher", None),
                 platform=self.resources.platform,
                 admission=self.resources.daytona_admission,
                 volume_id=lease.volume_id,

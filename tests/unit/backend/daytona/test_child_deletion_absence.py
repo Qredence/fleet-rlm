@@ -110,7 +110,7 @@ async def test_unconfirmed_teardown_is_explicit_quarantine_failure() -> None:
     _, permit = await _take_permit()
     with pytest.raises(ChildRuntimeCleanupError) as excinfo:
         await _cleanup_coroutine(platform, permit)
-    assert "was not confirmed absent" in str(excinfo.value)
+    assert "absence unconfirmed" in str(excinfo.value)
     assert permit._released is True  # quarantine releases once, never silently
 
 
