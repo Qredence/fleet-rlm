@@ -526,7 +526,9 @@ def test_recursive_batch_preserves_order_when_workers_finish_out_of_order(
     sub = dspy.utils.DummyLM([{"answer": "unused"}], adapter=adapter)
     finish_order: list[str] = []
     created: list[ChildRuntimeLease] = []
-    delays = {"A": 0.10, "B": 0.01, "C": 0.05}
+    # Wide spacing keeps the out-of-order finish robust under coverage+xdist
+    # load: the assertion is ordering, not the microsecond schedule.
+    delays = {"A": 0.60, "B": 0.05, "C": 0.30}
 
     class Child:
         def __call__(self, _interpreter: object, *, prompt: str) -> dspy.Prediction:

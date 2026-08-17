@@ -36,6 +36,7 @@ from fleet_rlm.chat.run_lifecycle import (
     RunStateError,
     _RunClaimToken,
 )
+from fleet_rlm.files.memory_candidates import MemoryPromotionIntent
 from fleet_rlm.persistence.database import DatabaseConnectionError
 from fleet_rlm.persistence.models import RunRow, SessionRow
 from fleet_rlm.persistence.repositories.run_claim_decisions import (
@@ -215,7 +216,11 @@ class InMemoryRunStateStore:
         run: ClaimedRun,
         committed: CommittedTurn,
         artifacts: tuple[PromotedArtifact, ...],
+        memory_intents: tuple[MemoryPromotionIntent, ...] = (),
     ) -> CommittedTurnReceipt:
+        # The credential-free private composition keeps promotion in-process;
+        # the SQL store owns the durable outbox, so intents are ignored here.
+        del memory_intents
         async with self._lock:
             if run.authority.revoked:
                 raise RunStateError("Turn claim is invalid")
@@ -455,11 +460,12 @@ class SqlAlchemyRunStateStore:
         run: ClaimedRun,
         committed: CommittedTurn,
         artifacts: tuple[PromotedArtifact, ...],
+        memory_intents: tuple[MemoryPromotionIntent, ...] = (),
     ) -> CommittedTurnReceipt:
         if run.authority.revoked:
             raise RunStateError("Turn claim is invalid")
         async with self._sessions() as db, db.begin():
-            return await _commit_sql_run(db, run, committed, artifacts)
+            return await _commit_sql_run(db, run, committed, artifacts, memory_intents)
 
     async def transition_claim(self, run: ClaimedRun, command: ClaimCommand) -> FailedRunReceipt | None:
         async with self._sessions() as db, db.begin():

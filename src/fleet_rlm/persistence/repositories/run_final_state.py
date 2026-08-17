@@ -33,7 +33,8 @@ from fleet_rlm.chat.run_lifecycle import (
     RunNotFoundError,
     RunStateError,
 )
-from fleet_rlm.persistence.models import RunRow, SessionRow, TurnRow
+from fleet_rlm.files.memory_candidates import MemoryPromotionIntent
+from fleet_rlm.persistence.models import MemoryPromotionIntentRow, RunRow, SessionRow, TurnRow
 from fleet_rlm.persistence.repositories.run_claim_decisions import _claim_owner_matches, _validate_sql_claim
 from fleet_rlm.persistence.repositories.run_codec import (
     _apply_memory_next_state,
@@ -115,6 +116,7 @@ async def _commit_sql_run(
     run: ClaimedRun,
     committed,
     artifacts: tuple[PromotedArtifact, ...],
+    memory_intents: tuple[MemoryPromotionIntent, ...] = (),
 ) -> CommittedTurnReceipt:
     """Apply the successful SQL commit inside the facade-owned transaction."""
     row = await db.get(RunRow, run.run_id, with_for_update=True)
@@ -158,6 +160,10 @@ async def _commit_sql_run(
         )
     )
     db.add_all(_artifact_row_for_commit(run, item) for item in artifacts)
+    # P23/QRE-165: crash-recoverable Memory promotion intents ride the same
+    # transaction as the successful Turn commit; a rollback here (including
+    # the revocation recheck below) eliminates intents with everything else.
+    db.add_all(_memory_intent_row_for_commit(run, intent) for intent in memory_intents)
     session.checkpoint_version += 1
     row.status = "completed"
     row.commit_checkpoint_version = session.checkpoint_version
@@ -171,6 +177,26 @@ async def _commit_sql_run(
         session.checkpoint_version,
         committed,
         tuple(item.ref for item in artifacts),
+    )
+
+
+def _memory_intent_row_for_commit(run: ClaimedRun, intent: MemoryPromotionIntent) -> MemoryPromotionIntentRow:
+    """Build the pinned outbox row for one candidate inside the commit tx."""
+    return MemoryPromotionIntentRow(
+        run_id=run.run_id,
+        session_id=run.session_id,
+        workspace_id=run.access.workspace_id,
+        user_id=run.access.user_id,
+        candidate_ordinal=intent.candidate_ordinal,
+        candidate_id=intent.candidate_id,
+        category=intent.category,
+        learning=intent.learning,
+        byte_size=intent.byte_size,
+        supersedes_id=intent.supersedes_id,
+        memory_id=intent.memory_id,
+        record_text=intent.record_text,
+        source=intent.source,
+        status="pending",
     )
 
 

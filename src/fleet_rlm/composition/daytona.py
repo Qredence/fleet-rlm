@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import replace
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 from uuid import UUID
@@ -24,7 +24,9 @@ from fleet_rlm.composition.inventory import (
 )
 from fleet_rlm.config import Settings
 from fleet_rlm.daytona.dspy_sync_bridge import SyncBridgeDispatcher
+from fleet_rlm.daytona.memory_outbox_reconcile import MemoryOutboxReconciler
 from fleet_rlm.persistence.database import ensure_database_compatible
+from fleet_rlm.persistence.repositories.memory_promotion_intents import SqlAlchemyMemoryPromotionOutbox
 from fleet_rlm.persistence.repositories.turns import ReconciliationSummary
 from fleet_rlm.skills.catalog import SkillCatalog
 
@@ -92,6 +94,37 @@ async def _cancel_orphan_cleanup(task: asyncio.Task[None] | None) -> None:
         pass
     except Exception:
         logger.warning("Daytona orphan cleanup failed while settling shutdown", exc_info=True)
+
+
+async def run_deferred_memory_outbox_reconcile(
+    reconciler: MemoryOutboxReconciler,
+    *,
+    interval_seconds: float = 60.0,
+) -> None:
+    """Periodic outbox sweeps; never blocks startup readiness (P23/QRE-166)."""
+    while True:
+        try:
+            receipt = await reconciler.reconcile_once()
+        except Exception as exc:
+            logger.warning(
+                "Memory outbox reconcile sweep failed (%s); next interval retries",
+                type(exc).__name__,
+                exc_info=exc,
+            )
+        else:
+            if receipt.claimed:
+                logger.info(
+                    "Memory outbox reconcile sweep claimed=%d promoted=%d dropped=%d retried=%d "
+                    "dead_lettered=%d workspaces=%d provider_unavailable=%s",
+                    receipt.claimed,
+                    receipt.promoted,
+                    receipt.dropped,
+                    receipt.retried,
+                    receipt.dead_lettered,
+                    receipt.workspaces,
+                    receipt.provider_unavailable,
+                )
+        await asyncio.sleep(interval_seconds)
 
 
 async def _reconcile_daytona_settling(
@@ -284,12 +317,14 @@ async def build_daytona_composition(
             stale_after_seconds=resolved.run_stale_after_seconds,
         )
         session_catalog = SqlAlchemySessionCatalog(session_factory)
+        memory_outbox = SqlAlchemyMemoryPromotionOutbox(session_factory)
         lifecycle = RunLifecycleService(
             run_state,
             max_artifact_bytes=resolved.max_artifact_bytes,
             heartbeat_seconds=resolved.run_heartbeat_seconds,
             stale_after_seconds=resolved.run_stale_after_seconds,
             cleanup=cleanup,
+            memory_outbox=memory_outbox,
         )
         recovery = await _reconcile_daytona_settling(
             run_state,
@@ -316,6 +351,22 @@ async def build_daytona_composition(
                 recovery.budget_exhausted,
             )
 
+        # P23/QRE-166: DB-only startup step — reclaim stale delivery claims and
+        # log bounded outbox state inside the shared startup budget. Delivery
+        # itself is deferred to the tracked sweep task below (ephemeral
+        # sandbox cold starts would blow the startup budget).
+        outbox_reclaimed = await memory_outbox.reclaim_stale(now=datetime.now(UTC))
+        outbox_summary = await memory_outbox.summary()
+        logger.info(
+            "Memory promotion outbox startup phase=reclaim reclaimed=%d pending=%d completing=%d "
+            "completed=%d failed=%d",
+            outbox_reclaimed,
+            outbox_summary.pending,
+            outbox_summary.completing,
+            outbox_summary.completed,
+            outbox_summary.failed,
+        )
+
         # Defer the non-critical orphan sweep until after readiness; it creates
         # ephemeral Daytona sandboxes whose cold provisioning routinely exceeds
         # the startup budget (see supervisor._READY_TIMEOUT_SECONDS).
@@ -327,6 +378,18 @@ async def build_daytona_composition(
                 artifact_catalog=artifact_catalog,
             ),
             name="fleet-daytona-orphan-cleanup",
+        )
+        memory_outbox_reconciler = MemoryOutboxReconciler(
+            memory_outbox,
+            gateway=gateway,
+            volume_paths=volume_paths,
+            dispatcher=dispatcher,
+            allowed_categories=lambda: tuple(resolved.rlm_autonomous_memory_categories),
+            max_upload_bytes=resolved.max_upload_bytes,
+        )
+        memory_outbox_task = asyncio.get_running_loop().create_task(
+            run_deferred_memory_outbox_reconcile(memory_outbox_reconciler),
+            name="fleet-memory-outbox-reconcile",
         )
 
         coordinator = TurnCoordinator(
@@ -355,6 +418,7 @@ async def build_daytona_composition(
             database=database_lifecycle,
             model_bundle=model_bundle,
             orphan_cleanup_task=orphan_cleanup_task,
+            memory_outbox_task=memory_outbox_task,
         )
     except Exception:
         await _cancel_orphan_cleanup(orphan_cleanup_task)
@@ -407,6 +471,7 @@ async def install_daytona_composition(
     except Exception:
         clear_runtime_inventory(app)
         await _cancel_orphan_cleanup(inventory.orphan_cleanup_task)
+        await _cancel_orphan_cleanup(getattr(inventory, "memory_outbox_task", None))
         await _dispose_components(
             resources=inventory.run_environment_resources,
             gateway=inventory.workspace_volume_gateway,
@@ -426,6 +491,7 @@ async def dispose_daytona_composition(app: FastAPI) -> None:
     inventory = clear_runtime_inventory(app)
     orphan_task = getattr(inventory, "orphan_cleanup_task", None)
     await _cancel_orphan_cleanup(orphan_task)
+    await _cancel_orphan_cleanup(getattr(inventory, "memory_outbox_task", None))
     cleanup = getattr(inventory, "run_cleanup_supervisor", None)
     if cleanup is not None:
         await cleanup.shutdown(drain_seconds=30)

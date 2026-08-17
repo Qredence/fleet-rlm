@@ -106,6 +106,9 @@ class RuntimeInventory:
     # Best-effort post-readiness orphan sweep; cancelled at dispose. It must
     # never gate startup readiness, so it is tracked (not awaited) here.
     orphan_cleanup_task: asyncio.Task[None] | None = None
+    # Best-effort post-readiness Memory promotion outbox sweep (P23); cancelled
+    # at dispose like the orphan sweep and never readiness-gating.
+    memory_outbox_task: asyncio.Task[None] | None = None
 
     _REQUIRED_ROUTE_FIELDS: ClassVar[tuple[str, ...]] = (
         "turn_coordinator",
