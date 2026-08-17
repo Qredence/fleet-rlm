@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import time
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from concurrent.futures import Future, wait
 from dataclasses import dataclass, field
 from pathlib import PurePosixPath
@@ -14,6 +14,7 @@ from typing import Any
 from uuid import UUID
 
 from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, sandbox_backend
+from fleet_rlm.daytona.lifecycle import AbsenceOutcome, confirm_absence
 from fleet_rlm.daytona.provisioning import SandboxPlatform, recursive_child_volume_subpath
 from fleet_rlm.daytona.session_manager import (
     DaytonaAdmission,
@@ -27,6 +28,12 @@ from fleet_rlm.rlm.child_runtime import (
 )
 
 _CHILD_CLEANUP_RESULT_TIMEOUT_S = 60.0
+# Absence-confirmation budget for one deleted ephemeral child Sandbox. Kept
+# distinctly larger than the close-path result timeout so a quarantined
+# (retained, still-running) cleanup coroutine normally confirms within its own
+# budget instead of dying unclassified with the loop.
+_CHILD_DELETE_CONFIRM_TIMEOUT_S = 120.0
+_CHILD_DELETE_CONFIRM_POLL_S = 1.0
 
 
 @dataclass(slots=True)
@@ -523,19 +530,39 @@ async def _cleanup_child_runtime_async(
     sandbox_id: str,
     mount_path: str,
     permit: DaytonaAdmissionPermit,
+    confirm: Callable[..., Awaitable[AbsenceOutcome]] = confirm_absence,
+    confirm_timeout_s: float = _CHILD_DELETE_CONFIRM_TIMEOUT_S,
+    confirm_poll_interval_s: float = _CHILD_DELETE_CONFIRM_POLL_S,
 ) -> None:
     """
     Clean up a child runtime's files and sandbox, then release its admission permit.
 
+    The admission slot stays owned by this coroutine until the provider
+    confirms the ephemeral Sandbox is absent, not merely deletion-requested
+    (QRE-151). Confirmation runs even when the delete request itself failed:
+    the Sandbox may be absent already, or deletion may have been accepted
+    provider-side despite the client error. A non-absent classified outcome is
+    an explicit quarantine failure surfaced as :class:`ChildRuntimeCleanupError`
+    rather than a silently released permit; close-path timeouts retain the
+    still-running coroutine, so late confirmation keeps ownership until it
+    settles.
+
     Parameters:
-        platform (SandboxPlatform): Platform used to delete the sandbox.
+        platform (SandboxPlatform): Platform used to delete the sandbox and to
+            probe confirmed absence (``platform.get`` returns ``None`` on
+            explicit not-found).
         sandbox (Any): Sandbox whose mounted files are purged.
         sandbox_id (str): Identifier of the sandbox to delete.
         mount_path (str): Root path under which regular files are removed.
         permit (DaytonaAdmissionPermit): Admission permit to release after cleanup.
+        confirm (Callable[..., Awaitable[AbsenceOutcome]]): Absence confirmation
+            policy seam; defaults to :func:`fleet_rlm.daytona.lifecycle.confirm_absence`.
+        confirm_timeout_s (float): Confirmation budget in seconds.
+        confirm_poll_interval_s (float): Delay between absence probes in seconds.
 
     Raises:
-        BaseException: The first error encountered while purging files or deleting the sandbox.
+        BaseException: The first error encountered while purging files,
+        deleting the sandbox, or confirming its absence.
     """
     first_error: BaseException | None = None
     try:
@@ -548,6 +575,17 @@ async def _cleanup_child_runtime_async(
         except BaseException as exc:
             if first_error is None:
                 first_error = exc
+        outcome = await confirm(
+            probe=platform.get,
+            sandbox_id=sandbox_id,
+            timeout_s=confirm_timeout_s,
+            poll_interval_s=confirm_poll_interval_s,
+        )
+        if not outcome.absent and first_error is None:
+            first_error = ChildRuntimeCleanupError(
+                "recursive child Sandbox deletion was not confirmed absent "
+                f"(sandbox_id={sandbox_id!r}, outcome={outcome!r})"
+            )
     finally:
         permit.release()
     if first_error is not None:
