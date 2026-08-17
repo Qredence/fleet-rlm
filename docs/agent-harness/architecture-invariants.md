@@ -3,6 +3,44 @@
 If a change violates an invariant, remediate the code or update this document
 and its matching automated check in the same patch.
 
+## Foundations (frozen at ownership-architecture integration, P25)
+
+- **DSPy is Fleet's foundational cognitive framework, not a compatibility
+  layer.** Every Turn constructs a fresh `dspy.RLM` per the DSPy 3.3.0 contract,
+  Tools are `dspy.Tool` objects, execution goes through `rlm.acall(**inputs)`
+  with `RLMOptions.max_iters` enforcing DSPy's iteration budget end-to-end, and
+  bounded child RLMs provide controlled width at a fixed native depth of one.
+  Pinned framework constructor, Signature, Prediction, Tool, Root/Sub LM,
+  callback, trajectory, usage, and child-RLM contracts are regression-gated in
+  `tests/unit/backend/rlm/` and the live matrix.
+- **SQLite owns Sessions, Runs, Turn/Artifact records, sandbox bindings, and
+  the Memory promotion outbox.** Alembic owns the live schema (fresh canonical
+  baseline plus chained revisions); `create_tables` is reserved for explicit
+  test/offline helpers. The outbox rides the same transaction as successful
+  Turn commit; it carries recovery state only, never authoritative Memory
+  content.
+- **The Daytona Volume is the durable authority for Workspace bytes:**
+  Attachments, promoted Artifacts, result snapshots, and the Workspace Memory
+  log. Sandboxes are replaceable compute attached to that Volume; retained
+  Session Sandboxes own capability state, and ephemeral I/O Sandboxes are
+  purpose-labelled, verified, and confirmed-deleted (`stop`→`destroying`→
+  absent proof, not acceptance).
+- **Shared-Volume concurrency is deliberately narrow, from live evidence.**
+  `fcntl.flock` + inode revalidation inside one mounted agent guards
+  compare/mutate windows on one mount; live falsification proved independent
+  sandbox mounts do NOT coordinate records through flock, so Memory mutation
+  ownership is process-level: the leased Session Sandbox is the write path,
+  explicit operator operations are immediate, autonomous promotion is
+  single-lane (deterministic intents + one reconciler claim fence), and
+  concurrent cross-Sandbox appends may lose records — never silently inside
+  one owner.
+- **Ownership seams are one-directional.** Provider objects die under
+  `SandboxLease` receipts with typed cleanup; claimed Runs die under the
+  coordinator-owned `RunOwnership` state machine with an internal
+  `RunLifetimeReceipt`; Workspace operations ride the versioned installed
+  agent whose handshake fails closed before use; Memory promotion rides the
+  transactional outbox with bounded idempotent reconciliation.
+
 ## Product identity
 
 Fleet is one product: a durable conversational RLM Session. Judge every change

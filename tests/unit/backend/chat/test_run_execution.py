@@ -299,3 +299,39 @@ async def _collect(driver, turn, prepared, heartbeat):
             trace_id=None,
         )
     ]
+
+
+async def _deadline_in_loop(driver, prepared) -> float:
+    return driver._execution_deadline(prepared)
+
+
+def test_execution_deadline_reads_the_deep_execution_context() -> None:
+    """B1 regression: finalization waits against the shared Turn deadline,
+    not a fresh fallback window (P25)."""
+    from types import SimpleNamespace
+
+    import fleet_rlm.chat.run_execution as run_execution
+
+    driver = run_execution.RunExecutionDriver.__new__(run_execution.RunExecutionDriver)
+    driver._turn_timeout_seconds = 99.0
+    deep = SimpleNamespace(execution=SimpleNamespace(deadline=1234.5))
+    assert driver._execution_deadline(SimpleNamespace(execution=deep)) == 1234.5
+    legacy = SimpleNamespace()
+    loop = asyncio.new_event_loop()
+    try:
+        fallback = loop.run_until_complete(_deadline_in_loop(driver, SimpleNamespace(execution=legacy)))
+    finally:
+        loop.close()
+    assert isinstance(fallback, float)
+
+
+def test_trace_request_reads_the_session_view() -> None:
+    """B2 regression: MLflow turn traces record the public request text."""
+    from types import SimpleNamespace
+
+    from fleet_rlm.chat.run_execution import RunExecutionDriver
+
+    prepared = SimpleNamespace(execution=SimpleNamespace(session=SimpleNamespace(request="show me")))
+    assert RunExecutionDriver._trace_request(prepared) == "show me"
+    legacy = SimpleNamespace(execution=SimpleNamespace())
+    assert RunExecutionDriver._trace_request(legacy) == ""
