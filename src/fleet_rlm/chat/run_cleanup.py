@@ -35,11 +35,13 @@ class RunCleanupSupervisor:
         if not self.available:
             raise RunCleanupUnavailableError("Turn cleanup capacity is unavailable")
 
-    def submit(self, cleanup: Awaitable[None]) -> None:
+    def submit(self, cleanup: Awaitable[None]) -> asyncio.Task[None]:
+        """Submit owned cleanup and return its strong task handle."""
         self.require_capacity()
         task = asyncio.create_task(self._run(cleanup), name="fleet-turn-cleanup")
         self._tasks.add(task)
         task.add_done_callback(self._tasks.discard)
+        return task
 
     async def _run(self, cleanup: Awaitable[None]) -> None:
         try:
