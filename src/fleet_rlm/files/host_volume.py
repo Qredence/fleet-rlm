@@ -127,51 +127,6 @@ class _HostWorkspaceVolumeSession:
         )
 
 
-class HostWorkspaceVolumeGateway:
-    """One isolated host-backed Volume root per Workspace."""
-
-    def __init__(self, root: Path | str, *, volume_paths: VolumePaths) -> None:
-        self._root = Path(root)
-        self._paths = volume_paths
-
-    def _mirror(self, workspace_id: UUID) -> HostVolumeMirror:
-        return HostVolumeMirror(
-            self._root / "workspaces" / str(workspace_id),
-            volume_paths=self._paths,
-        )
-
-    @asynccontextmanager
-    async def open_workspace(self, workspace_id: UUID) -> AsyncIterator[WorkspaceVolumeSession]:
-        yield _HostWorkspaceVolumeSession(self._mirror(workspace_id))
-
-    async def write_bytes(self, workspace_id: UUID, logical_path: str, data: bytes) -> None:
-        async with self.open_workspace(workspace_id) as volume:
-            await volume.write_bytes(logical_path, data)
-
-    async def read_bytes(self, workspace_id: UUID, logical_path: str) -> bytes:
-        async with self.open_workspace(workspace_id) as volume:
-            return await volume.read_bytes(logical_path)
-
-    async def remove_bytes(self, workspace_id: UUID, logical_path: str) -> None:
-        async with self.open_workspace(workspace_id) as volume:
-            await volume.remove_bytes(logical_path)
-
-    async def list_files(
-        self,
-        workspace_id: UUID,
-        logical_root: str,
-        *,
-        max_depth: int,
-        max_files: int,
-    ) -> tuple[VolumeFile, ...]:
-        async with self.open_workspace(workspace_id) as volume:
-            return await volume.list_files(
-                logical_root,
-                max_depth=max_depth,
-                max_files=max_files,
-            )
-
-
 class OfflineHostVolumeGateway:
     """Adapt one shared local mirror to the async durable-store port."""
 
@@ -213,6 +168,5 @@ class OfflineHostVolumeGateway:
 
 __all__ = [
     "HostVolumeMirror",
-    "HostWorkspaceVolumeGateway",
     "OfflineHostVolumeGateway",
 ]

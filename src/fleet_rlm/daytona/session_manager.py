@@ -10,7 +10,7 @@ import asyncio
 import contextlib
 import logging
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from threading import Lock
 from typing import Any, Protocol
@@ -47,12 +47,14 @@ from fleet_rlm.daytona.provisioning import (
     VolumeClient,
     VolumeConfig,
     get_or_create_volume_id,
+)
+from fleet_rlm.daytona.sandbox_lease import SandboxLease, SandboxLeasePolicy, SandboxLeaseReceipt
+from fleet_rlm.runtime.bindings import (
+    SandboxBinding,
     require_non_zero_workspace_id,
     require_scoped_volume_subpath,
     workspace_volume_subpath,
 )
-from fleet_rlm.daytona.sandbox_lease import SandboxLease, SandboxLeasePolicy, SandboxLeaseReceipt
-from fleet_rlm.runtime.bindings import SandboxBinding
 from fleet_rlm.runtime.owned_effect import OwnedEffect
 
 logger = logging.getLogger(__name__)
@@ -110,7 +112,6 @@ class InterpreterLease:
     session_id: str | None = None
     run_id: str | None = None
     volume_subpath: str | None = None
-    delete_sandbox: Callable[[str], None] | None = None
     created_sandbox: bool = False
     _released: bool = field(default=False, init=False, repr=False)
     _on_release: Callable[[], None] | None = field(default=None, init=False, repr=False)
@@ -384,18 +385,7 @@ class DaytonaSessionManager:
 
     async def _fence_binding(self, binding: SandboxBinding) -> None:
         """Persist fencing around one awaited provider stop."""
-        await self._bindings.upsert(
-            SandboxBinding(
-                session_id=binding.session_id,
-                sandbox_id=binding.sandbox_id,
-                workspace_id=binding.workspace_id,
-                volume_id=binding.volume_id,
-                volume_subpath=binding.volume_subpath,
-                mount_path=binding.mount_path,
-                provider_state="fencing",
-                last_verified_at=datetime.now(UTC),
-            )
-        )
+        await self._bindings.upsert(replace(binding, provider_state="fencing", last_verified_at=datetime.now(UTC)))
         if binding.sandbox_id is None:
             return
         # Lease-backed (QRE-156/AC4): recovery fencing rides the shared
@@ -423,18 +413,7 @@ class DaytonaSessionManager:
             _fenced_stop(),
             timeout=60,
         )
-        await self._bindings.upsert(
-            SandboxBinding(
-                session_id=binding.session_id,
-                sandbox_id=binding.sandbox_id,
-                workspace_id=binding.workspace_id,
-                volume_id=binding.volume_id,
-                volume_subpath=binding.volume_subpath,
-                mount_path=binding.mount_path,
-                provider_state="quarantined",
-                last_verified_at=datetime.now(UTC),
-            )
-        )
+        await self._bindings.upsert(replace(binding, provider_state="quarantined", last_verified_at=datetime.now(UTC)))
 
     @staticmethod
     def _bind_lease_ownership(
@@ -519,16 +498,11 @@ class DaytonaSessionManager:
         except DaytonaAdapterError as exc:
             if exc.cause_type not in {"SandboxUnrecoverable", "SandboxSnapshotMismatch"}:
                 raise
+            # binding_matches_expected above proved identity/mount fields match
+            # this request's scope; mark the bound record unrecoverable with a
+            # reset verification timestamp.
             replacement = await self.replace(
-                SandboxBinding(
-                    session_id=request.session_id,
-                    sandbox_id=binding.sandbox_id,
-                    workspace_id=request.workspace_id,
-                    volume_id=context.expected.volume_id,
-                    volume_subpath=context.expected.volume_subpath,
-                    mount_path=context.expected.mount_path,
-                    provider_state="unrecoverable",
-                ),
+                replace(binding, provider_state="unrecoverable", last_verified_at=None),
                 workspace_id=request.workspace_id,
                 user_id=request.user_id,
             )
@@ -617,7 +591,6 @@ class DaytonaSessionManager:
             interpreter=interpreter,
             session_id=str(session_id),
             run_id=str(run_id),
-            delete_sandbox=None,
             created_sandbox=created_sandbox,
         )
 
@@ -671,18 +644,7 @@ class DaytonaSessionManager:
         if sandbox is None:
             return
         await self._platform.stop(sandbox_id)
-        await self._bindings.upsert(
-            SandboxBinding(
-                session_id=binding.session_id,
-                sandbox_id=binding.sandbox_id,
-                workspace_id=binding.workspace_id,
-                volume_id=binding.volume_id,
-                volume_subpath=binding.volume_subpath,
-                mount_path=binding.mount_path,
-                provider_state="stopped",
-                last_verified_at=datetime.now(UTC),
-            )
-        )
+        await self._bindings.upsert(replace(binding, provider_state="stopped", last_verified_at=datetime.now(UTC)))
 
     async def aclose(self) -> None:
         """Cancel process-local idle policy tasks during composition shutdown."""

@@ -878,3 +878,19 @@ def observed_usage(prediction: Any, *, duration_ms: int) -> RLMUsage:
             "duration_ms": duration_ms,
         }
     )
+
+
+_RLM_EXTRACTION_FALLBACK_REASONING = "Extract forced final output"
+
+
+def rlm_termination_mode(prediction: Any) -> str:
+    """Classify one completed RLM prediction's termination mode.
+
+    DSPy's forced final-output extraction lands on the reserved
+    ``final_reasoning`` marker; its presence means the RLM could not settle
+    through typed SUBMIT payloads, so the fallback is named explicitly rather
+    than re-derived with the magic string at each call site.
+    """
+    if getattr(prediction, "final_reasoning", None) == _RLM_EXTRACTION_FALLBACK_REASONING:
+        return "native_extraction_fallback"
+    return "typed_submit"

@@ -293,7 +293,8 @@ def test_write_creates_parents_and_honors_overwrite(tmp_path: Path) -> None:
 
     assert created.path == "notes/decision.md"
     assert created.byte_size == 5
-    assert workspace.read_text("notes/decision.md", max_bytes=32) == "first"
+    page = workspace.read_text_page("notes/decision.md", cursor=None, max_chars=32, max_bytes=32)
+    assert page.content == "first" and page.eof is True
     with pytest.raises(FileExistsError):
         workspace.write_text("notes/decision.md", "second", overwrite=False)
     replaced = workspace.write_text("notes/decision.md", "second", overwrite=True)
@@ -700,11 +701,11 @@ def test_enforces_write_and_read_byte_bounds_and_strict_utf8(tmp_path: Path) -> 
     path = root / "invalid.txt"
     path.write_bytes(b"\xff")
     with pytest.raises(ValueError, match="UTF-8"):
-        workspace.read_text("invalid.txt", max_bytes=4)
+        workspace.read_text_page("invalid.txt", cursor=None, max_chars=4, max_bytes=4)
 
     path.write_bytes(b"12345")
     with pytest.raises(ValueError, match="read bound"):
-        workspace.read_text("invalid.txt", max_bytes=4)
+        workspace.read_text_page("invalid.txt", cursor=None, max_chars=4, max_bytes=4)
 
 
 def test_rejects_directories_as_text_and_files_as_list_roots(tmp_path: Path) -> None:
@@ -713,7 +714,7 @@ def test_rejects_directories_as_text_and_files_as_list_roots(tmp_path: Path) -> 
     (root / "note.txt").write_text("hello", encoding="utf-8")
 
     with pytest.raises(IsADirectoryError):
-        workspace.read_text("notes", max_bytes=32)
+        workspace.read_text_page("notes", cursor=None, max_chars=32, max_bytes=32)
     with pytest.raises(NotADirectoryError):
         workspace.list_entries("note.txt")
 
@@ -741,7 +742,7 @@ def test_atomic_read_uses_single_code_run_and_rejects_symlink_target(tmp_path: P
     alias.symlink_to(secret)
 
     with pytest.raises(ValueError, match="unsafe"):
-        workspace.read_text("note.txt", max_bytes=32)
+        workspace.read_text_page("note.txt", cursor=None, max_chars=32, max_bytes=32)
 
     assert len(process.calls) == 1
 
@@ -774,7 +775,7 @@ def test_final_replacement_race_never_reads_outside_workspace(
     monkeypatch.setattr(os, "stat", racing_stat)
 
     with pytest.raises(ValueError, match="unsafe"):
-        workspace.read_text("note.txt", max_bytes=32)
+        workspace.read_text_page("note.txt", cursor=None, max_chars=32, max_bytes=32)
 
     assert outside.read_text(encoding="utf-8") == "secret"
 

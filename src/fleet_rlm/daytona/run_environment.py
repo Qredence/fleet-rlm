@@ -253,9 +253,9 @@ class _DaytonaEnvironmentProvider:
                 raise
             if sandbox is None:
                 raise RuntimeError("acquired Sandbox is unavailable")
-            from fleet_rlm.daytona.workspace_memory import DaytonaWorkspaceMemoryStore
+            from fleet_rlm.daytona.workspace_memory import build_workspace_memory_store
 
-            paths = volume_paths_from_settings(self.settings)
+            paths = self.resources.volume_paths
             sink = _DaytonaRunSink(
                 sandbox,
                 loop=asyncio.get_running_loop(),
@@ -263,7 +263,7 @@ class _DaytonaEnvironmentProvider:
                 paths=paths,
             )
             assert sink.volume_fs is not None
-            memory_store = DaytonaWorkspaceMemoryStore(
+            memory_store = build_workspace_memory_store(
                 sink.volume_fs.sandbox,
                 volume_paths=paths,
                 max_upload_bytes=self.settings.max_upload_bytes,
@@ -333,10 +333,37 @@ class _LiveAttachmentLifecycle:
         return await self.attachment_lifecycle.prepare_run(access, attachment_ids, run, sink)
 
 
+async def _prepare_memory_digest(memory_store: Any, *, request: str) -> str:
+    """Return the per-Run injection digest, degrading fail-soft with diagnostics.
+
+    User-visible behavior is unchanged: ANY preparation failure still degrades
+    to no injection. The failure is classified once into a bounded, sanitized
+    diagnostic so provider outages, corrupt stores, invariant violations, and
+    internal defects no longer look identical to operators.
+    """
+    from fleet_rlm.daytona.memory_diagnostics import record_memory_degradation
+    from fleet_rlm.daytona.workspace_memory import read_workspace_memory_injection_digest
+
+    try:
+        return await asyncio.to_thread(
+            read_workspace_memory_injection_digest,
+            memory_store,
+            request=request,
+        )
+    except Exception as exc:
+        record_memory_degradation(exc, operation="injection_digest", fallback_outcome="no_memory_injection")
+        return ""
+
+
 @dataclass(slots=True)
 class _LiveCapabilityPreparer:
     settings: Settings
     skill_catalog: SkillCatalog
+    volume_paths: VolumePaths | None = None
+
+    def __post_init__(self) -> None:
+        if self.volume_paths is None:
+            self.volume_paths = volume_paths_from_settings(self.settings)
 
     async def prepare(
         self,
@@ -356,10 +383,7 @@ class _LiveCapabilityPreparer:
             LivePreparedCapabilities: Prepared capabilities and any preparation notices.
         """
         from fleet_rlm.daytona.workspace_fs import DaytonaSessionWorkspaceFS
-        from fleet_rlm.daytona.workspace_memory import (
-            DaytonaWorkspaceMemoryStore,
-            read_workspace_memory_injection_digest,
-        )
+        from fleet_rlm.daytona.workspace_memory import build_workspace_memory_store
         from fleet_rlm.files.memory_tools import WorkspaceMemoryToolHost
         from fleet_rlm.files.project_tools import ProjectToolHost
         from fleet_rlm.files.tools import FileToolHost
@@ -369,7 +393,7 @@ class _LiveCapabilityPreparer:
         sink = environment.attachment_sink
         volume_fs = cast(_DaytonaRunSink, sink).volume_fs
         assert volume_fs is not None  # _DaytonaRunSink is always constructed with loop
-        paths = volume_paths_from_settings(self.settings)
+        paths = self.volume_paths if self.volume_paths is not None else volume_paths_from_settings(self.settings)
         file_host = FileToolHost(
             attachments=attachments.refs,
             staged_attachments=attachments.staged,
@@ -417,7 +441,7 @@ class _LiveCapabilityPreparer:
         if memory_store is None:
             # Direct capability-preparation tests may provide only a minimal
             # RunEnvironment; production acquisition owns this store.
-            memory_store = DaytonaWorkspaceMemoryStore(
+            memory_store = build_workspace_memory_store(
                 volume_fs.sandbox,
                 volume_paths=paths,
                 max_upload_bytes=self.settings.max_upload_bytes,
@@ -440,15 +464,9 @@ class _LiveCapabilityPreparer:
         # Per-Run Workspace Memory injection: relevant matches first, then the
         # newest complete records. Best-effort by contract; search/storage
         # failures degrade to no injection, and search failure degrades to
-        # the recency-only fallback.
-        try:
-            memory_digest = await asyncio.to_thread(
-                read_workspace_memory_injection_digest,
-                memory_store,
-                request=run.input.text,
-            )
-        except Exception:
-            memory_digest = ""
+        # the recency-only fallback. Every degraded operation records one
+        # bounded, sanitized diagnostic at this fail-soft seam (P31).
+        memory_digest = await _prepare_memory_digest(memory_store, request=run.input.text)
         file_tools = file_host.as_tools()
         workspace_tools = workspace_host.as_tools()
         project_tools = project_host.as_tools()
@@ -509,6 +527,7 @@ class DaytonaRuntimeResources:
         self.platform = LiveDaytonaPlatform(self.client, self.sandbox_spec)
         self.volume_client = LiveDaytonaVolumeClient(self.client)
         self.volume_config = volume_config_from_settings(self.settings)
+        self.volume_paths = volume_paths_from_settings(self.settings)
         self.bindings = bindings
         self.daytona_admission = DaytonaAdmission(
             max_active_leases=max_active_leases,
@@ -531,10 +550,6 @@ class DaytonaRuntimeResources:
     def track_sandbox(self, sandbox_id: str | None) -> None:
         if sandbox_id and sandbox_id not in self._sandbox_ids:
             self._sandbox_ids.append(sandbox_id)
-
-    def forget_sandboxes(self) -> None:
-        """Drop tracked sandbox ids without deleting (API-restart simulation)."""
-        self._sandbox_ids.clear()
 
     async def cleanup(self) -> None:
         """Delete tracked sandboxes (best-effort)."""
@@ -570,5 +585,5 @@ def build_run_preparation(
         recursive_options=recursive_rlm_options(settings),
         attachments=_LiveAttachmentLifecycle(attachment_lifecycle),
         environments=_DaytonaEnvironmentProvider(resources, settings),
-        capabilities=_LiveCapabilityPreparer(settings, skill_catalog),
+        capabilities=_LiveCapabilityPreparer(settings, skill_catalog, volume_paths=resources.volume_paths),
     )

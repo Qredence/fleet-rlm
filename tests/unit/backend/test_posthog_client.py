@@ -44,7 +44,7 @@ def test_init_disabled_policy_leaves_client_disabled(monkeypatch) -> None:
     created: list[tuple[str, str | None, bool]] = []
     monkeypatch.setattr("fleet_rlm.posthog_client.Posthog", _fake_posthog(created))
 
-    init_posthog(Settings(_env_file=None, posthog_enabled=False))
+    init_posthog(Settings(posthog_enabled=False))
 
     assert get_client() is None
     assert created == []
@@ -55,7 +55,7 @@ def test_init_enabled_without_token_stays_disabled(monkeypatch) -> None:
     created: list[tuple[str, str | None, bool]] = []
     monkeypatch.setattr("fleet_rlm.posthog_client.Posthog", _fake_posthog(created))
 
-    init_posthog(Settings(_env_file=None, posthog_enabled=True))
+    init_posthog(Settings(posthog_enabled=True))
 
     assert get_client() is None
     assert created == []
@@ -67,7 +67,6 @@ def test_reinit_with_disabled_policy_shuts_down_previous_client(monkeypatch, tmp
     shutdowns: list[str] = []
     monkeypatch.setattr("fleet_rlm.posthog_client.Posthog", _fake_posthog(created, shutdowns))
     settings = Settings(
-        _env_file=None,
         posthog_enabled=True,
         posthog_project_token="phc-test-token",
         data_root=str(tmp_path),
@@ -76,7 +75,7 @@ def test_reinit_with_disabled_policy_shuts_down_previous_client(monkeypatch, tmp
     init_posthog(settings)
     assert get_client() is not None
 
-    init_posthog(Settings(_env_file=None, posthog_enabled=False))
+    init_posthog(Settings(posthog_enabled=False))
 
     assert get_client() is None
     assert shutdowns == ["phc-test-token"]
@@ -85,11 +84,11 @@ def test_reinit_with_disabled_policy_shuts_down_previous_client(monkeypatch, tmp
 
 def test_posthog_host_must_be_absolute_http_url() -> None:
     with pytest.raises(ValidationError):
-        Settings(_env_file=None, posthog_host="eu.i.posthog.com")
+        Settings(posthog_host="eu.i.posthog.com")
 
 
 def test_posthog_host_normalizes_trailing_slash() -> None:
-    settings = Settings(_env_file=None, posthog_host="https://eu.i.posthog.com/")
+    settings = Settings(posthog_host="https://eu.i.posthog.com/")
 
     assert settings.posthog_host == "https://eu.i.posthog.com"
 
@@ -101,7 +100,6 @@ def test_init_enabled_with_token_creates_client_and_disables_exception_autocaptu
 
     init_posthog(
         Settings(
-            _env_file=None,
             posthog_enabled=True,
             posthog_project_token="phc-test-token",
             posthog_host="https://eu.i.posthog.com",
@@ -119,7 +117,6 @@ def test_distinct_id_is_stable_and_persisted_across_restarts(monkeypatch, tmp_pa
     created: list[tuple[str, str | None, bool]] = []
     monkeypatch.setattr("fleet_rlm.posthog_client.Posthog", _fake_posthog(created))
     settings = Settings(
-        _env_file=None,
         posthog_enabled=True,
         posthog_project_token="phc-test-token",
         data_root=str(tmp_path),
@@ -141,7 +138,6 @@ def test_distinct_id_is_persisted_instance_id_not_deterministic_local_user_id(mo
     created: list[tuple[str, str | None, bool]] = []
     monkeypatch.setattr("fleet_rlm.posthog_client.Posthog", _fake_posthog(created))
     settings = Settings(
-        _env_file=None,
         posthog_enabled=True,
         posthog_project_token="phc-test-token",
         data_root=str(tmp_path),
@@ -192,4 +188,4 @@ def test_benchmark_profiles_disable_posthog() -> None:
 
     for profile in ("daytona-bench", "daytona-bench-40"):
         flattened = _flatten_policy(_deep_merge(document.defaults, document.profiles[profile]))
-        assert flattened["posthog_enabled"] is False
+        assert flattened.settings["posthog_enabled"] is False

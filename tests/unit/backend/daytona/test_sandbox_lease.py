@@ -9,11 +9,9 @@ from typing import Any
 import pytest
 
 from fleet_rlm.daytona.sandbox_lease import (
-    OwnedAcquisition,
     SandboxLease,
     SandboxLeasePolicy,
     SandboxLeaseReceipt,
-    acquire_owned_lease,
 )
 from fleet_rlm.daytona.session_manager import DaytonaAdmission, DaytonaAdmissionPermit
 
@@ -297,52 +295,6 @@ async def test_interpreter_failure_surfaces_on_receipt_without_raising() -> None
     assert receipt.interpreter.broker == "failed"
     assert "broker stop failed" in str(receipt.first_error)
     assert receipt.clean is False
-
-
-@pytest.mark.asyncio
-async def test_owned_acquisition_settles_and_closes_lease() -> None:
-    """Late acquisition ownership: adopted future results get closed, never stranded."""
-    import concurrent.futures
-    import threading
-
-    loop = asyncio.get_running_loop()
-    platform = _ScriptedPlatform([None])
-    _, permit = await _permit()
-
-    async def acquire() -> SandboxLease:
-        return SandboxLease(
-            kind="recursive_child",
-            sandbox=_Sandbox(id="sb-8"),
-            sandbox_id="sb-8",
-            platform=platform,
-            permit=permit,
-            policy=SandboxLeasePolicy(kind="recursive_child", confirm_poll_interval_s=0.01),
-        )
-
-    # The seam is thread-facing: post from a worker thread like DSPy workers do.
-    holder: dict[str, Any] = {}
-
-    def post() -> None:
-        holder["future"] = acquire_owned_lease(loop=loop, acquire=acquire)
-
-    thread = threading.Thread(target=post, daemon=True)
-    thread.start()
-    thread.join(timeout=5)
-    assert not thread.is_alive()
-    future: concurrent.futures.Future[SandboxLease] = holder["future"]
-    # result() blocks until the owner loop settles the coroutine; run it off-loop.
-    lease = await asyncio.to_thread(future.result, 5)
-
-    acquisition = OwnedAcquisition(loop=loop, close_lease=lambda _: asyncio.sleep(0))
-    assert acquisition.owned_futures == []
-    adopted: concurrent.futures.Future[Any] = concurrent.futures.Future()
-    adopted.set_result(lease)
-    # settle_adopted closes synchronously (lease.close uses asyncio.run); keep
-    # it on a worker thread like its production callers.
-    receipt = await asyncio.to_thread(acquisition.settle_adopted, adopted)
-    assert isinstance(receipt, SandboxLeaseReceipt)
-    assert receipt.provider.confirmed_absent is True
-    assert permit._released is True
 
 
 @pytest.mark.asyncio

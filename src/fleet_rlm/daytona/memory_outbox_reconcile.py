@@ -135,11 +135,11 @@ class MemoryOutboxReconciler:
         now: datetime,
     ) -> tuple[int, int, int, int]:
         from fleet_rlm.daytona.dspy_sync_bridge import sync_sandbox
-        from fleet_rlm.daytona.workspace_memory import DaytonaWorkspaceMemoryStore
+        from fleet_rlm.daytona.workspace_memory import build_workspace_memory_store
 
         loop = asyncio.get_running_loop()
         view = sync_sandbox(sandbox, loop, self._dispatcher)
-        store = DaytonaWorkspaceMemoryStore(view, volume_paths=self._paths, max_upload_bytes=self._max_upload_bytes)
+        store = build_workspace_memory_store(view, volume_paths=self._paths, max_upload_bytes=self._max_upload_bytes)
         promoted = dropped = retried = dead_lettered = 0
         for intent in intents:
             try:

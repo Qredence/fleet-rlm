@@ -95,7 +95,7 @@ class FakeMemoryStore:
         if not matches:
             raise WorkspaceMemoryEntryNotFoundError(memory_id)
         entry = matches[-1]
-        record, _normalized = _reformat(entry, key_learning, category)
+        record = _reformat(entry, key_learning, category)
         updated_entry = _parsed(record)
         self.entries = tuple(updated_entry if item is entry else item for item in self.entries)
         return record
@@ -107,14 +107,16 @@ def _parsed(record: str) -> WorkspaceMemoryEntry:
     return parse_workspace_memory_record(record)
 
 
-def _reformat(entry: WorkspaceMemoryEntry, key_learning: str, category: str | None) -> tuple[str, str]:
-    from fleet_rlm.files.memory_models import reformat_workspace_memory_record
+def _reformat(entry: WorkspaceMemoryEntry, key_learning: str, category: str | None) -> str:
+    from fleet_rlm.files.memory_models import format_workspace_memory_v3_record
 
-    return reformat_workspace_memory_record(
-        timestamp=entry.timestamp,
+    return format_workspace_memory_v3_record(
+        key_learning,
+        entry.category if category is None else category,
         memory_id=entry.memory_id,
-        category=entry.category if category is None else category,
-        key_learning=key_learning,
+        created_at=entry.timestamp,
+        updated_at=entry.timestamp,
+        source="legacy_unknown",
     )
 
 

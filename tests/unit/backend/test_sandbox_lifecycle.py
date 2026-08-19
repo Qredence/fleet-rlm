@@ -11,8 +11,10 @@ from fleet_rlm.daytona.errors import (
     ProviderRequestError,
     classify_provider_error,
     is_sandbox_not_found,
+    is_transient_provider_failure,
     map_provider_error,
     provider_status_category,
+    sanitize_failure_text,
     sanitize_provider_message,
 )
 from fleet_rlm.daytona.platform import LiveDaytonaPlatform, LiveDaytonaVolumeClient, normalize_state
@@ -103,6 +105,55 @@ def test_sanitize_provider_message_redacts_secrets_and_private_paths() -> None:
     assert "/Users/zach" not in sanitized
     assert "/Volumes/SSD" not in sanitized
     assert sanitized.count("[redacted]") >= 4
+
+
+def test_sanitize_failure_text_types_and_redacts_exception() -> None:
+    text = sanitize_failure_text(RuntimeError("provider down api_key=super-secret path=/tmp/private"))
+
+    assert text.startswith("RuntimeError: provider down ")
+    assert "super-secret" not in text
+    assert "/tmp/private" not in text
+    assert text.count("[redacted]") == 2
+
+
+def test_sanitize_failure_text_caps_after_redaction() -> None:
+    text = sanitize_failure_text(RuntimeError("api_key=secret " + "x" * 500))
+
+    assert len(text) == 200
+    assert "secret" not in text
+
+
+@pytest.mark.parametrize(
+    ("exc", "expected"),
+    [
+        # Transient shapes kept identical to the retired broker-local check.
+        (SimpleNamespace(status_code=503), True),
+        (TimeoutError("timed out"), True),
+        (ConnectionError("offline"), True),
+        (ProviderRequestError("502 Bad Gateway", cause_type="DaytonaError"), True),
+        (
+            ProviderRequestError("HTTP 503 Service Unavailable api_key=sk-secret", cause_type="PreviewLinkError"),
+            True,
+        ),
+        # Non-transient shapes never retry.
+        (_AuthError(), False),
+        (SimpleNamespace(status_code=422), False),
+        (
+            ProviderRequestError(
+                "Total disk limit exceeded. Upgrade your organization's Tier.",
+                cause_type="DaytonaValidationError",
+                status_code=400,
+            ),
+            False,
+        ),
+        (ProviderRequestError("mount", cause_type="WorkspaceMountMismatch"), False),
+        (ProviderRequestError("404 sandbox missing", cause_type="DaytonaError"), False),
+        (ProviderRequestError("processed 15001 objects", cause_type="DaytonaError"), False),
+        (RuntimeError("other"), False),
+    ],
+)
+def test_is_transient_provider_failure(exc: object, expected: bool) -> None:
+    assert is_transient_provider_failure(exc) is expected
 
 
 @pytest.mark.asyncio

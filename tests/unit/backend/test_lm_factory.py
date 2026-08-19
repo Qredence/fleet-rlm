@@ -8,25 +8,16 @@ from unittest.mock import MagicMock
 import pytest
 from pydantic import SecretStr
 
+import fleet_rlm.rlm.lm_factory as factory
 from fleet_rlm.config import Settings
-from fleet_rlm.rlm.lm_factory import (
-    build_model_bundle,
-    has_llm_credentials,
-    normalize_model_id,
-    resolve_role_api_key,
-    sanitize_base_url,
-)
 
 
 def test_model_bundle_applies_independent_role_policy(monkeypatch: pytest.MonkeyPatch) -> None:
-    import fleet_rlm.rlm.lm_factory as factory
-
     monkeypatch.setenv("ROOT_KEY", "root-secret")
     monkeypatch.setenv("SUB_KEY", "sub-secret")
     build = MagicMock(side_effect=("root-lm", "sub-lm"))
     monkeypatch.setattr(factory, "build_lm", build)
     settings = Settings(
-        _env_file=None,
         root_model="openai/root",
         sub_model="openai/sub",
         root_llm_api_key_env="ROOT_KEY",
@@ -54,8 +45,6 @@ def test_model_bundle_applies_independent_role_policy(monkeypatch: pytest.Monkey
 
 
 def test_build_lm_allows_reasoning_effort_only_when_configured(monkeypatch: pytest.MonkeyPatch) -> None:
-    import fleet_rlm.rlm.lm_factory as factory
-
     lm = MagicMock(side_effect=("default-lm", "bounded-lm"))
     monkeypatch.setattr(factory.dspy, "LM", lm)
 
@@ -64,15 +53,46 @@ def test_build_lm_allows_reasoning_effort_only_when_configured(monkeypatch: pyte
 
     assert default == "default-lm"
     assert bounded == "bounded-lm"
+    # stream_options (usage) is always allowlisted; reasoning_effort only appends
+    # its param when explicitly configured.
     assert "reasoning_effort" not in lm.call_args_list[0].kwargs
-    assert "allowed_openai_params" not in lm.call_args_list[0].kwargs
+    assert lm.call_args_list[0].kwargs["allowed_openai_params"] == ["stream_options"]
     assert lm.call_args_list[1].kwargs["reasoning_effort"] == "none"
-    assert lm.call_args_list[1].kwargs["allowed_openai_params"] == ["reasoning_effort"]
+    assert lm.call_args_list[1].kwargs["allowed_openai_params"] == ["stream_options", "reasoning_effort"]
+
+
+def test_build_lm_requests_usage_via_stream_options(monkeypatch: pytest.MonkeyPatch) -> None:
+    lm = MagicMock(return_value="lm")
+    monkeypatch.setattr(factory.dspy, "LM", lm)
+
+    factory.build_lm("openai/model", api_key=None)
+
+    kwargs = lm.call_args.kwargs
+    # Stream so the provider emits a usage block on the final chunk: gateways
+    # (Databricks AI Gateway included) ignore stream_options.include_usage on a
+    # non-streamed request. `stream` is a litellm transport toggle passed
+    # directly; `stream_options` is an OpenAI body param that must be allowlisted.
+    # DSPy/litellm aggregate the deltas internally, so lm() still returns the
+    # same final outputs and ChatAdapter parsing is untouched.
+    assert kwargs["stream"] is True
+    assert kwargs["stream_options"] == {"include_usage": True}
+    assert kwargs["allowed_openai_params"] == ["stream_options"]
+
+
+def test_build_lm_requests_usage_and_reasoning_effort_together(monkeypatch: pytest.MonkeyPatch) -> None:
+    lm = MagicMock(return_value="lm")
+    monkeypatch.setattr(factory.dspy, "LM", lm)
+
+    factory.build_lm("openai/model", api_key=None, reasoning_effort="none")
+
+    kwargs = lm.call_args.kwargs
+    assert kwargs["stream"] is True
+    assert kwargs["stream_options"] == {"include_usage": True}
+    assert kwargs["reasoning_effort"] == "none"
+    assert kwargs["allowed_openai_params"] == ["stream_options", "reasoning_effort"]
 
 
 def test_build_lm_uses_chat_completion_transport(monkeypatch: pytest.MonkeyPatch) -> None:
-    import fleet_rlm.rlm.lm_factory as factory
-
     lm = MagicMock(return_value="deepseek-lm")
     monkeypatch.setattr(factory.dspy, "LM", lm)
 
@@ -92,8 +112,6 @@ def test_build_lm_uses_chat_completion_transport(monkeypatch: pytest.MonkeyPatch
 def test_mocked_litellm_request_resolves_unqualified_deepseek_model(monkeypatch: pytest.MonkeyPatch) -> None:
     import dspy.clients.lm as dspy_lm
     from litellm import get_llm_provider
-
-    import fleet_rlm.rlm.lm_factory as factory
 
     completion = MagicMock(return_value={"choices": []})
     monkeypatch.setattr(dspy_lm, "_get_litellm", lambda: SimpleNamespace(completion=completion))
@@ -119,23 +137,23 @@ def test_mocked_litellm_request_resolves_unqualified_deepseek_model(monkeypatch:
 
 
 def test_sanitize_base_url_accepts_https_and_strips_comments() -> None:
-    assert sanitize_base_url("https://opencode.ai/zen/v1") == "https://opencode.ai/zen/v1"
-    assert sanitize_base_url("https://opencode.ai/zen/v1/") == "https://opencode.ai/zen/v1"
-    assert sanitize_base_url("https://opencode.ai/zen/v1'   # real gateway") == "https://opencode.ai/zen/v1"
-    assert sanitize_base_url("'https://example.com/v1'") == "https://example.com/v1"
+    assert factory.sanitize_base_url("https://opencode.ai/zen/v1") == "https://opencode.ai/zen/v1"
+    assert factory.sanitize_base_url("https://opencode.ai/zen/v1/") == "https://opencode.ai/zen/v1"
+    assert factory.sanitize_base_url("https://opencode.ai/zen/v1'   # real gateway") == "https://opencode.ai/zen/v1"
+    assert factory.sanitize_base_url("'https://example.com/v1'") == "https://example.com/v1"
 
 
 def test_sanitize_base_url_rejects_keys_and_empty() -> None:
-    assert sanitize_base_url(None) is None
-    assert sanitize_base_url("") is None
-    assert sanitize_base_url("sk-ws-H.not-a-url") is None
-    assert sanitize_base_url("openai.com/v1") is None  # missing scheme
+    assert factory.sanitize_base_url(None) is None
+    assert factory.sanitize_base_url("") is None
+    assert factory.sanitize_base_url("sk-ws-H.not-a-url") is None
+    assert factory.sanitize_base_url("openai.com/v1") is None  # missing scheme
 
 
 def test_normalize_model_id_adds_openai_prefix_to_bare_names() -> None:
-    assert normalize_model_id("deepseek-v4-flash-free") == "openai/deepseek-v4-flash-free"
-    assert normalize_model_id("openai/gpt-4o-mini") == "openai/gpt-4o-mini"
-    assert normalize_model_id("anthropic/claude-sonnet-4") == "anthropic/claude-sonnet-4"
+    assert factory.normalize_model_id("deepseek-v4-flash-free") == "openai/deepseek-v4-flash-free"
+    assert factory.normalize_model_id("openai/gpt-4o-mini") == "openai/gpt-4o-mini"
+    assert factory.normalize_model_id("anthropic/claude-sonnet-4") == "anthropic/claude-sonnet-4"
 
 
 def test_runtime_does_not_accept_provider_environment_aliases(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -149,40 +167,38 @@ def test_runtime_does_not_accept_provider_environment_aliases(monkeypatch: pytes
     monkeypatch.setenv("OPENAI_API_KEY", "provider-alias-must-not-be-used")
     monkeypatch.setenv("DSPY_LM_MODEL", "provider/alias-model")
 
-    settings = Settings(_env_file=None)
+    settings = Settings()
 
     assert settings.llm_api_key is None
     assert settings.root_model == "openai/gpt-4o-mini"
     with pytest.raises(RuntimeError, match="FLEET_OPENAI_API_KEY"):
-        build_model_bundle(settings)
+        factory.build_model_bundle(settings)
 
 
 def test_whitespace_legacy_key_is_not_a_credential(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("FLEET_OPENAI_API_KEY", raising=False)
-    settings = Settings(_env_file=None, llm_api_key=SecretStr("   "))
+    settings = Settings(llm_api_key=SecretStr("   "))
 
-    assert has_llm_credentials(settings) is False
+    assert factory.has_llm_credentials(settings) is False
 
 
 def test_legacy_generic_key_does_not_cross_provider_role_boundaries(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("DATABRICKS_TOKEN", raising=False)
     settings = Settings(
-        _env_file=None,
         llm_api_key=SecretStr("legacy-key"),
         root_llm_api_key_env="DATABRICKS_TOKEN",
         sub_llm_api_key_env="DATABRICKS_TOKEN",
     )
 
-    assert resolve_role_api_key(settings, settings.llm_role("root")) is None
+    assert factory.resolve_role_api_key(settings, settings.llm_role("root")) is None
 
 
 def test_explicit_role_environment_credentials_are_detected(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("DATABRICKS_TOKEN", "provider-key")
     settings = Settings(
-        _env_file=None,
         root_llm_api_key_env="DATABRICKS_TOKEN",
         sub_llm_api_key_env="DATABRICKS_TOKEN",
     )
 
     assert settings.llm_api_key is None
-    assert has_llm_credentials(settings) is True
+    assert factory.has_llm_credentials(settings) is True

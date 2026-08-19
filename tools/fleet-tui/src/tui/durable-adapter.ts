@@ -7,18 +7,7 @@
 
 import type { FleetTurn } from "../fleet-api-client.js";
 import type { CanonicalEvent } from "./canonical.js";
-
-function asRecord(value: unknown): Record<string, unknown> {
-  return value !== null && typeof value === "object" ? (value as Record<string, unknown>) : {};
-}
-
-function str(value: unknown): string | undefined {
-  return typeof value === "string" && value.length > 0 ? value : undefined;
-}
-
-function int(value: unknown): number | null {
-  return typeof value === "number" && Number.isInteger(value) ? value : null;
-}
+import { asRecord, int, str } from "./coerce.js";
 
 function metadataString(turn: FleetTurn, key: string): string | undefined {
   const value = turn.metadata?.[key];
@@ -58,7 +47,7 @@ export function adaptDurableTurns(turns: FleetTurn[]): CanonicalEvent[] {
           // Live-only lifecycle: bookkeeping only for durable step attribution.
           const value = part.type === "data-step" ? asRecord(part.data) : {};
           const step = int(value.step);
-          if (step !== null) currentStep = step;
+          if (step !== undefined) currentStep = step;
           break;
         }
         case "reasoning":
@@ -161,7 +150,7 @@ export function adaptDurableTurns(turns: FleetTurn[]): CanonicalEvent[] {
             attachmentId: str(value.attachmentId) ?? part.id ?? "(attachment)",
             phase: str(value.phase),
             filename: str(value.filename),
-            byteSize: int(value.byteSize),
+            byteSize: int(value.byteSize) ?? null,
             streamId,
             messageId,
           });
@@ -186,7 +175,7 @@ export function adaptDurableTurns(turns: FleetTurn[]): CanonicalEvent[] {
             artifactKind: str(value.artifactKind) ?? str(value.kind),
             title: str(value.title) ?? str(value.name),
             mediaType: str(value.mediaType),
-            byteSize: int(value.byteSize),
+            byteSize: int(value.byteSize) ?? null,
             checksumSha256: str(value.checksumSha256),
             streamId,
             messageId,
@@ -200,7 +189,7 @@ export function adaptDurableTurns(turns: FleetTurn[]): CanonicalEvent[] {
           events.push({
             type: "usage",
             iterations: int(payload.iterations) ?? 0,
-            durationMs: int(payload.duration_ms) ?? int(payload.durationMs),
+            durationMs: int(payload.duration_ms) ?? int(payload.durationMs) ?? null,
             usage: payload,
             streamId,
             messageId,

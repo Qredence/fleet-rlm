@@ -1,4 +1,4 @@
-"""Workspace Memory model invariants: v1+v2 records, tolerant reads, strict writes."""
+"""Workspace Memory model invariants: v1/v2/v3 records, tolerant reads, strict record validation."""
 
 from __future__ import annotations
 
@@ -8,19 +8,15 @@ import pytest
 
 from fleet_rlm.files.memory_models import (
     WORKSPACE_MEMORY_HEADER,
-    WORKSPACE_MEMORY_INJECTION_TAIL_BYTES,
     WORKSPACE_MEMORY_MAX_WARNINGS,
     WorkspaceMemoryEntryNotFoundError,
     WorkspaceMemoryIdError,
     WorkspaceMemoryRecordError,
-    build_workspace_memory_digest,
     count_workspace_memory_warnings,
     format_workspace_memory_record,
     format_workspace_memory_v3_record,
     normalize_workspace_memory_id,
     parse_workspace_memory_lines,
-    reformat_workspace_memory_record,
-    validate_workspace_memory_content,
     validate_workspace_memory_record,
     workspace_memory_record_id,
 )
@@ -68,22 +64,6 @@ def test_v2_records_require_an_exactly_8_lowercase_hex_id(record: str) -> None:
         validate_workspace_memory_record(record)
 
 
-def test_strict_write_validation_rejects_malformed_lines_and_stray_headers() -> None:
-    validate_workspace_memory_content(V1_RECORD + V2_RECORD)
-    validate_workspace_memory_content(f"{WORKSPACE_MEMORY_HEADER}\n" + V1_RECORD + V2_RECORD)
-    validate_workspace_memory_content("")
-
-    with pytest.raises(WorkspaceMemoryRecordError):
-        validate_workspace_memory_content("garbage\n" + V1_RECORD)
-    with pytest.raises(WorkspaceMemoryRecordError):
-        # header exempt only as the very first line
-        validate_workspace_memory_content(V1_RECORD + f"{WORKSPACE_MEMORY_HEADER}\n")
-    with pytest.raises(WorkspaceMemoryRecordError):
-        validate_workspace_memory_content("\n")  # blank lines are not writable
-    with pytest.raises(WorkspaceMemoryRecordError):
-        validate_workspace_memory_content("- [2026-07-27T11:14:05Z] **General**: " + "x" * 4_096 + "\n")
-
-
 def test_tolerant_parse_skips_malformed_lines_with_bounded_warnings() -> None:
     content = (
         f"{WORKSPACE_MEMORY_HEADER}\n"
@@ -118,86 +98,6 @@ def test_tolerant_parse_skips_malformed_lines_with_bounded_warnings() -> None:
 def test_warning_count_is_bounded() -> None:
     lines = parse_workspace_memory_lines("bad\n" * (WORKSPACE_MEMORY_MAX_WARNINGS + 50))
     assert count_workspace_memory_warnings(lines) == WORKSPACE_MEMORY_MAX_WARNINGS
-
-
-def test_digest_drops_header_and_malformed_lines_and_respects_the_byte_budget() -> None:
-    digest, warnings = build_workspace_memory_digest("")
-    assert digest == "" and warnings == 0
-
-    heavy = "".join(
-        f"- [2026-07-27T11:14:{second:02d}Z] **General** <!-- id:{second:08x} -->: {'y' * 700}\n"
-        for second in range(10)
-    )
-    digest, warnings = build_workspace_memory_digest(f"{WORKSPACE_MEMORY_HEADER}\n" + heavy + "garbage\n")
-    assert warnings == 1
-    assert digest
-    assert len(digest.encode("utf-8")) <= WORKSPACE_MEMORY_INJECTION_TAIL_BYTES
-    # tail trim keeps only whole record lines
-    assert set(digest.splitlines()[0][:2]) <= set("- ")
-    for line in digest.splitlines(keepends=True):
-        validate_workspace_memory_record(line)
-
-
-def test_digest_keeps_newest_record_when_tail_starts_at_record_boundary() -> None:
-    prefix = "- [2026-07-27T11:14:06Z] **General** <!-- id:bbbbbbbb -->: "
-    learning_length = WORKSPACE_MEMORY_INJECTION_TAIL_BYTES - len(prefix.encode("utf-8")) - 1
-    newest = prefix + ("x" * learning_length) + "\n"
-    previous = "- [2026-07-27T11:14:05Z] **General** <!-- id:aaaaaaaa -->: previous\n"
-
-    validate_workspace_memory_record(newest)
-    digest, warnings = build_workspace_memory_digest(previous + newest)
-
-    assert digest == newest
-    assert warnings == 0
-
-
-def test_reformat_preserves_identity_and_shape_on_edit() -> None:
-    record, category = reformat_workspace_memory_record(
-        timestamp="2026-07-27T11:14:05Z",
-        memory_id="d2c1b7a1",
-        category="Preference",
-        key_learning="  prefers   polars ",
-    )
-    assert record == (
-        "- [2026-07-27T11:14:05Z] **Preference** <-- id:d2c1b7a1 -->: prefers polars\n".replace(
-            " <-- id:d2c1b7a1 -->", " <!-- id:d2c1b7a1 source:legacy_unknown updated:2026-07-27T11:14:05Z -->"
-        )
-    )
-    assert category == "Preference"
-
-    upgraded_record, _ = reformat_workspace_memory_record(
-        timestamp="2026-07-27T11:14:05Z",
-        memory_id=workspace_memory_record_id("2026-07-27T11:14:05Z", "General", "still legacy"),
-        category="General",
-        key_learning="still legacy",
-    )
-    assert upgraded_record == (
-        "- [2026-07-27T11:14:05Z] **General** <!-- id:"
-        + workspace_memory_record_id("2026-07-27T11:14:05Z", "General", "still legacy")
-        + " source:legacy_unknown updated:2026-07-27T11:14:05Z -->: still legacy\n"
-    )
-
-    with pytest.raises(WorkspaceMemoryRecordError):
-        reformat_workspace_memory_record(
-            timestamp="not-a-timestamp",
-            memory_id="d2c1b7a1",
-            category="General",
-            key_learning="x",
-        )
-    with pytest.raises(WorkspaceMemoryRecordError):
-        reformat_workspace_memory_record(
-            timestamp="2026-07-27T11:14:05Z",
-            memory_id="D2C1B7A1",
-            category="General",
-            key_learning="x",
-        )
-    with pytest.raises(WorkspaceMemoryRecordError):
-        reformat_workspace_memory_record(
-            timestamp="2026-07-27T11:14:05Z",
-            memory_id="d2c1b7a1",
-            category="General",
-            key_learning="   ",
-        )
 
 
 def test_id_normalization_shape() -> None:
@@ -238,7 +138,7 @@ def test_v3_records_parse_provenance_and_legacy_records_project_unknown_fallback
     assert provenance.supersedes_id == old_id
     assert provenance.memory_id == "dddd0004"
     validate_workspace_memory_record(updated)
-    validate_workspace_memory_content(V1_RECORD + V2_RECORD + target + updated)
+    assert not any(line.malformed for line in lines)
 
 
 @pytest.mark.parametrize(
@@ -300,7 +200,7 @@ def test_supersession_graph_marks_active_state_and_rejects_invalid_geometry() ->
     assert entries[0].superseded_by_id == "bbbb0002"
     assert entries[1].superseded_by_id == "cccc0003"
     assert entries[2].superseded_by_id is None
-    validate_workspace_memory_content(first_record + second_record + third_record)
+    assert not any(line.malformed for line in lines)
 
     for invalid_content in (
         second_record,  # missing target
@@ -308,5 +208,4 @@ def test_supersession_graph_marks_active_state_and_rejects_invalid_geometry() ->
         first_record + second_record + _v3("dddd0004", "duplicate target", supersedes_id="aaaa0001"),
         first_record + _v3("aaaa0001", "duplicate record id"),
     ):
-        with pytest.raises(WorkspaceMemoryRecordError):
-            validate_workspace_memory_content(invalid_content)
+        assert any(line.malformed for line in parse_workspace_memory_lines(invalid_content))

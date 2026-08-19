@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Iterator
 from dataclasses import dataclass
 
 from dspy.utils.exceptions import AdapterParseError
@@ -65,15 +66,27 @@ def trace_failure_category(exc: BaseException) -> str:
     return normalize_turn_failure(exc).cause_type
 
 
+def walk_cause_chain(exc: BaseException) -> Iterator[BaseException]:
+    """Yield ``exc`` then each nested ``__cause__``/``__context__`` with a cycle guard.
+
+    Attribute access stays guarded so failure classification can never raise
+    while inspecting another failure.
+    """
+    current: BaseException | None = exc
+    seen: set[int] = set()
+    try:
+        while current is not None and id(current) not in seen:
+            seen.add(id(current))
+            yield current
+            current = current.__cause__ or current.__context__
+    except Exception:
+        return
+
+
 def _diagnostic_cause(exc: BaseException) -> BaseException:
     current = exc
-    seen: set[int] = set()
-    while id(current) not in seen:
-        seen.add(id(current))
-        nested = current.__cause__ or current.__context__
-        if nested is None:
-            break
-        if isinstance(nested, (DaytonaAdapterError, AdapterParseError)):
-            return nested
-        current = nested
+    for item in walk_cause_chain(exc):
+        if item is not current and isinstance(item, (DaytonaAdapterError, AdapterParseError)):
+            return item
+        current = item
     return current

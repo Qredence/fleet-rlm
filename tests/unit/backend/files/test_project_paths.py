@@ -17,7 +17,6 @@ def test_projects_root_is_a_volume_sibling() -> None:
     paths = VolumePaths.from_mount()
 
     assert paths.projects_root() == PurePosixPath("/home/daytona/fleet/projects")
-    assert paths.projects == paths.projects_root()
     assert paths.project_dir("fleet-rlm") == PurePosixPath("/home/daytona/fleet/projects/fleet-rlm")
 
 

@@ -159,26 +159,6 @@ class VolumePaths:
         return self.mount_path
 
     @property
-    def files(self) -> PurePosixPath:
-        return self.files_root()
-
-    @property
-    def attachments(self) -> PurePosixPath:
-        return self.attachments_root()
-
-    @property
-    def artifacts(self) -> PurePosixPath:
-        return self.artifacts_root()
-
-    @property
-    def projects(self) -> PurePosixPath:
-        return self.projects_root()
-
-    @property
-    def runs(self) -> PurePosixPath:
-        return resolve_under_root(self.mount_path, "runs")
-
-    @property
     def memory_dir(self) -> PurePosixPath:
         """Browsable memory root: memory/."""
         return resolve_under_root(self.mount_path, "memory")
@@ -187,11 +167,6 @@ class VolumePaths:
     def memory_file(self) -> PurePosixPath:
         """Canonical Workspace Memory log: memory/MEMORIES.md."""
         return resolve_under_root(self.mount_path, "memory", "MEMORIES.md")
-
-    @property
-    def legacy_memory_file(self) -> PurePosixPath:
-        """Pre-migration Workspace Memory log at the volume root."""
-        return resolve_under_root(self.mount_path, "MEMORIES.md")
 
     def artifacts_root(self) -> PurePosixPath:
         return resolve_under_root(self.mount_path, "artifacts")

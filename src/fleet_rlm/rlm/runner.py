@@ -149,8 +149,8 @@ def _terminal_status(exc: BaseException) -> TerminalStatus:
 
 def _public_failure_message(exc: BaseException) -> str:
     # Read the instance attribute so a parametrized ``RunTerminalError("...")``
-    # override is honored, matching ``sanitize_public_error``. Class-attr
-    # defaults (currently all raise sites) fall through the same lookup.
+    # override is honored. Class-attr defaults (currently all raise sites)
+    # fall through the same lookup.
     """Return a sanitized public message for a run failure.
 
     Parameters:

@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from fleet_rlm.config import FleetConfigurationError
+from fleet_rlm.config import FleetConfigurationError, Settings
 from fleet_rlm.config_policy import ConfigPolicyService, PolicyConflictError
 
 
@@ -201,8 +201,22 @@ def test_policy_inventory_covers_flattened_non_secret_settings(tmp_path: Path) -
     profile = document.default_profile or next(iter(document.profiles))
     flattened = _flatten_policy(_deep_merge(document.defaults, document.profiles[profile]))
     covered = {field.settings_field for field in _FIELDS if field.settings_field}
-    missing = sorted(key for key in flattened if not key.endswith("_env") and key not in covered)
+    missing = sorted(key for key in flattened.settings if key not in covered)
     assert missing == [], f"editable Settings fields missing from ConfigPolicyService: {missing}"
+    # Environment references resolve into real Settings fields and stay
+    # operator-editable only through their ``*_env`` TOML paths.
+    from fleet_rlm.config import config_field_specs
+
+    editable_paths = {field.path for field in _FIELDS}
+    reference_paths = {
+        spec.environment_reference_for: spec.toml_path
+        for spec in config_field_specs()
+        if spec.environment_reference_for is not None
+    }
+    for field_name, environment_name in flattened.environment_references.items():
+        assert field_name in Settings.model_fields
+        assert environment_name not in flattened.settings
+        assert reference_paths[field_name] in editable_paths
 
 
 def test_set_default_profile_persists_and_surfaces_in_snapshot(tmp_path: Path) -> None:

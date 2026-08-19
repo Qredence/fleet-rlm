@@ -13,7 +13,6 @@ import inspect
 import json
 import keyword
 import logging
-import re
 import secrets
 import time
 import uuid
@@ -35,7 +34,7 @@ from fleet_rlm.daytona.broker_source import (
 from fleet_rlm.daytona.errors import (
     DaytonaAdapterError,
     ProviderRequestError,
-    is_safe_pre_creation_retry,
+    is_transient_provider_failure,
     map_provider_error,
     provider_status_code,
     sanitize_provider_message,
@@ -52,13 +51,6 @@ _BROKER_SERVER_PATH = "/home/daytona/fleet_rlm_broker_server.py"
 _BROKER_SESSION_COMMAND = f"cd /home/daytona && python {_BROKER_SERVER_PATH.rsplit('/', 1)[-1]}"
 _MAX_EXECUTE_REQUEST_BYTES = 2 * 1024 * 1024
 _MAX_EXECUTE_OUTPUT_CHARS = 64 * 1024
-
-
-def _is_retryable_preview_link_error(exc: DaytonaAdapterError) -> bool:
-    """Retry only transient provider failures while resolving the preview URL."""
-    if is_safe_pre_creation_retry(exc):
-        return True
-    return re.search(r"\b5\d{2}\b", sanitize_provider_message(str(exc))) is not None
 
 
 class FleetFinalOutputError(Exception):
@@ -181,7 +173,7 @@ class DaytonaHttpToolBroker:
             except Exception as exc:
                 mapped = map_provider_error(exc)
                 last_error = mapped
-                if not _is_retryable_preview_link_error(mapped):
+                if not is_transient_provider_failure(mapped):
                     break
 
         assert last_error is not None

@@ -553,7 +553,7 @@ async def _strict_cleanup(resources: Any, sandbox_ids: set[str], volume_name: st
         if not await _retry_cleanup(delete_sandbox):
             failures.append("sandbox")
     try:
-        resources.forget_sandboxes()
+        resources._sandbox_ids.clear()
     except Exception:
         failures.append("tracking")
 

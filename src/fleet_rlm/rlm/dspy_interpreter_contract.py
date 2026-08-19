@@ -31,21 +31,11 @@ def copy_output_fields(
     return deepcopy(output_fields)
 
 
-def initial_tools_registered() -> bool:
-    """Return the inject-cycle registration flag before the first reinjection."""
-    return False
-
-
 def needs_tool_reinjection(*, tools_registered: bool, http_broker_ready: bool) -> bool:
     """Return whether the adapter must register tools and SUBMIT for this cycle."""
     if not tools_registered:
         return True
     return not http_broker_ready
-
-
-def mark_tools_registered() -> bool:
-    """Return the registration flag after tools and SUBMIT are bound."""
-    return True
 
 
 def wrap_final_output(value: Any) -> FinalOutput:
@@ -63,9 +53,7 @@ __all__ = [
     "CodeInterpreter",
     "FinalOutput",
     "copy_output_fields",
-    "initial_tools_registered",
     "is_final_output",
-    "mark_tools_registered",
     "needs_tool_reinjection",
     "wrap_final_output",
 ]

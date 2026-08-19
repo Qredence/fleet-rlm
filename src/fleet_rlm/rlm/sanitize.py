@@ -115,32 +115,6 @@ _DECLARED_SAFE_PLACEHOLDERS = frozenset(
 )
 
 
-def sanitize_public_error(exc: BaseException | str) -> str:
-    """Return a concise client-safe message; never rethrow raw provider text."""
-    if isinstance(exc, BaseException):
-        # Prefer typed public messages when available
-        public = getattr(exc, "public_message", None)
-        status = getattr(exc, "status", None)
-        if isinstance(public, str) and public.strip() and status:
-            return public.strip()
-        raw = str(exc).strip() or type(exc).__name__
-    else:
-        raw = str(exc).strip() or "Turn failed"
-
-    cleaned = _TOKENISH.sub("[redacted]", raw)
-    cleaned = _SECRETISH.sub("[redacted]", cleaned)
-    cleaned = _DSNISH.sub("[redacted-dsn]", cleaned)
-    cleaned = _PATHISH.sub("[path]", cleaned)
-    cleaned = _PROMPTISH.sub("[redacted-prompt]", cleaned)
-    if _STACKISH.search(cleaned) or "Traceback" in cleaned or "\n  File " in cleaned:
-        return "Turn failed"
-    # Cap length so stack-like dumps never fill SSE frames.
-    if len(cleaned) > 240:
-        cleaned = cleaned[:237] + "..."
-    # Provider-ish type names alone are ok; long internal dumps already capped
-    return cleaned or "Turn failed"
-
-
 def sanitize_public_text(text: str, *, max_len: int = 10_000) -> str:
     """Bound and redact model-authored text intended for public detail or answers."""
     cleaned = _TOKENISH.sub("[redacted]", text)

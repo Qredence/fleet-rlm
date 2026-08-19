@@ -6,18 +6,7 @@
 
 import type { FleetUIMessageChunk } from "../sse.js";
 import type { CanonicalEvent } from "./canonical.js";
-
-function asRecord(value: unknown): Record<string, unknown> {
-  return value !== null && typeof value === "object" ? (value as Record<string, unknown>) : {};
-}
-
-function str(value: unknown): string | undefined {
-  return typeof value === "string" && value.length > 0 ? value : undefined;
-}
-
-function int(value: unknown): number | undefined {
-  return typeof value === "number" && Number.isInteger(value) ? value : undefined;
-}
+import { asRecord, int, str } from "./coerce.js";
 
 function metadataString(value: unknown, key: string): string | undefined {
   return str(asRecord(value)[key]);

@@ -18,7 +18,7 @@ def _settings(**overrides: object) -> Settings:
         "mlflow_experiment_name": "fleet-test",
     }
     values.update(overrides)
-    return Settings(_env_file=None, **values)
+    return Settings(**values)
 
 
 @pytest.mark.asyncio

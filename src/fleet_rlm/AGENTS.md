@@ -18,6 +18,13 @@ contracts, and tracked docs remain authoritative.
   `config.py` owns strict runtime resolution; `config_policy.py` and the
   loopback-only `/api/settings` routes edit only non-secret policy for restart.
   Do not restore ambient environment aliases or expose referenced secret values.
+  Every `Settings` field carries one authoritative `FleetFieldPolicy`
+  declaration; `_TABLE_KEYS`, policy flattening, and the editor inventory
+  derive from those declarations, so adding or renaming a supported setting
+  means editing that declaration (plus one `*_env` spec for
+  environment-resolved keys) rather than mirroring names across modules.
+  Direct `Settings(...)` construction rejects unknown keys without echoing
+  their values.
 - Keep Daytona SDK imports inside `daytona/`.
 - Create a fresh native DSPy RLM per Turn through `rlm.dspy_contract`. Native
   `RLMOptions` mirrors DSPy 3.3.x exactly: `max_iters` bounds action/REPL
@@ -67,7 +74,11 @@ contracts, and tracked docs remain authoritative.
   idempotent for the same record, and edit/forget perform one mounted-agent
   read-modify-publish operation. Each Turn additionally receives its bounded
   4 KiB relevant+recent `workspace_memory tail` digest inside
-  `session_context`.
+  `session_context`. Memory preparation stays fail-soft, but every degraded
+  operation records one bounded, sanitized diagnostic (category, operation,
+  runtime, cause type, fallback outcome) through `daytona/memory_diagnostics.py`
+  at the adapter seam; strict mutation/list failures (including duplicate
+  stable ids) keep failing closed.
 - Resolve zero to four exact Skill selections against the immutable bundled
   catalog. Skill instructions and resources load progressively; bundled Skills
   never register executable tools. Runtime execution uses a typed

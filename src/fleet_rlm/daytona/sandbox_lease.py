@@ -14,10 +14,8 @@ This module concentrates those semantics behind one deep lease seam:
   :meth:`SandboxLease.aclose` (async) execution; repeated closes are
   idempotent and the close returns a typed :class:`SandboxLeaseReceipt`
   exposing interpreter/broker/provider/admission/quarantine outcomes.
-- :func:`acquire_owned_lease` implements late-acquisition ownership once:
-  provider work started before a deadline/cancellation boundary is adopted by
-  a registered owner instead of being cancelled mid-flight (cancelling would
-  strand sandboxes/permits).
+- Late-acquisition ownership (P30) is adopted by the recursive child lease
+  machinery and the runtime owned-effect queue instead of a parallel seam.
 
 The seam never broadens public error surfaces: receipts carry typed statuses
 and sanitized, credential-free error strings only.
@@ -32,11 +30,12 @@ import logging
 import time
 from collections.abc import Awaitable, Callable, Coroutine
 from concurrent.futures import Future
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from threading import Thread
 from typing import Any, Literal, Protocol, TypeAlias
 
 from fleet_rlm.daytona.admission import DaytonaAdmissionPermit
+from fleet_rlm.daytona.errors import sanitize_failure_text
 from fleet_rlm.daytona.lifecycle import AbsenceConfirmation, AbsenceOutcome, confirm_absence
 from fleet_rlm.daytona.provisioning import SandboxPlatform
 
@@ -53,7 +52,6 @@ __all__ = [
     "SandboxLease",
     "SandboxLeasePolicy",
     "SandboxLeaseReceipt",
-    "acquire_owned_lease",
 ]
 
 LeaseKind: TypeAlias = Literal["retained_session", "recursive_child", "volume_io", "recovery_fence"]
@@ -61,11 +59,6 @@ LeaseKind: TypeAlias = Literal["retained_session", "recursive_child", "volume_io
 #: Bound for one blocking close result before ownership quarantines the
 #: still-running close (it keeps the permit until it settles).
 DEFAULT_CLOSE_RESULT_TIMEOUT_S = 60.0
-
-
-def _sanitize_error(exc: BaseException) -> str:
-    """Bounded, credential-free failure description for receipts."""
-    return f"{type(exc).__name__}: {str(exc)[:200]}"
 
 
 class LeaseCleanupError(RuntimeError):
@@ -244,7 +237,7 @@ class SandboxLease:
         try:
             interpreter.shutdown(strict_broker_cleanup=policy.strict_broker_cleanup)
         except BaseException as exc:
-            error = _sanitize_error(exc)
+            error = sanitize_failure_text(exc)
             # Consolidated shutdown: broker/backend share the recorded failure.
             return InterpreterCloseOutcome(
                 status="failed",
@@ -289,7 +282,7 @@ class SandboxLease:
                 else:
                     await request
             except BaseException as exc:
-                request_error = _sanitize_error(exc)
+                request_error = sanitize_failure_text(exc)
             # Confirmation runs even when the delete request itself failed:
             # the Sandbox may be absent already, or deletion may have been
             # accepted provider-side despite the client error (QRE-151
@@ -340,7 +333,7 @@ class SandboxLease:
                 requested=True,
                 confirmed_absent=False,
                 duration_s=time.monotonic() - started,
-                error=_sanitize_error(exc),
+                error=sanitize_failure_text(exc),
             )
         return ProviderCleanupOutcome(
             action="stop",
@@ -366,7 +359,7 @@ class SandboxLease:
                 await self._purge(self._sandbox)
             except BaseException as exc:
                 if first_error is None:
-                    first_error = _sanitize_error(exc)
+                    first_error = sanitize_failure_text(exc)
 
         provider = await self._provider_close()
         if provider.error is not None and first_error is None:
@@ -444,52 +437,15 @@ class SandboxLease:
                     released=self._permit is not None,
                     released_after="quarantine_failure" if self._permit is not None else "not_held",
                 ),
-                quarantine=QuarantineOutcome(quarantined=True, lane="fallback_thread", error=_sanitize_error(exc)),
+                quarantine=QuarantineOutcome(
+                    quarantined=True, lane="fallback_thread", error=sanitize_failure_text(exc)
+                ),
                 duration_s=0.0,
-                first_error=_sanitize_error(exc),
+                first_error=sanitize_failure_text(exc),
             )
             if self._permit is not None:
                 self._permit.release()
         return self._receipt
-
-
-def _sandbox_id_or_none(sandbox: Any) -> str | None:
-    value = getattr(sandbox, "id", None)
-    return value if isinstance(value, str) and value else None
-
-
-@dataclass
-class OwnedAcquisition:
-    """Late-acquisition ownership: adopted provider work always gets closed.
-
-    Wraps a started coroutine (posted future): the owner registers a close
-    hook once; whoever resolves the future last (normal return or late
-    settle) runs the close. Cancelling provider work mid-flight is forbidden:
-    it would strand Sandboxes and admission permits.
-    """
-
-    loop: asyncio.AbstractEventLoop
-    close_lease: Callable[[Any], Awaitable[Any]]
-    owned_futures: list[Future[Any]] = field(default_factory=list)
-
-    def adopt(self, coroutine: Coroutine[Any, Any, Any]) -> Future[Any]:
-        """Adopt started provider work; its result is owned and closed."""
-        future = asyncio.run_coroutine_threadsafe(coroutine, self.loop)
-        self.owned_futures.append(future)
-        return future
-
-    def settle_adopted(self, future: Future[Any]) -> SandboxLeaseReceipt | None:
-        """Close the lease embodied in one adopted future result, if any."""
-        try:
-            lease = future.result(timeout=DEFAULT_CLOSE_RESULT_TIMEOUT_S)
-        except BaseException:
-            return None
-        if isinstance(lease, SandboxLease):
-            return lease.close()
-        close = getattr(lease, "close", None)
-        if callable(close):
-            close()
-        return None
 
 
 @dataclass(slots=True)
@@ -559,15 +515,6 @@ def schedule_owned_close(
     return OwnedCloseExecution(future=fallback, used_fallback=True, coroutine=None)
 
 
-def acquire_owned_lease(
-    *,
-    loop: asyncio.AbstractEventLoop,
-    acquire: Callable[[], Coroutine[Any, Any, SandboxLease]],
-) -> Future[SandboxLease]:
-    """Post lease acquisition to the owner loop; caller owns the future.
-
-    The acquisition coroutine itself is responsible for adopting late
-    completion (see :class:`OwnedAcquisition`); this seam only standardizes
-    the thread-safe posting + ownership typing.
-    """
-    return asyncio.run_coroutine_threadsafe(acquire(), loop)
+def _sandbox_id_or_none(sandbox: Any) -> str | None:
+    value = getattr(sandbox, "id", None)
+    return value if isinstance(value, str) and value else None

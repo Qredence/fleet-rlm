@@ -48,6 +48,15 @@ compatibility runtime and parallel foundation package no longer exist.
   Run lifecycle, RLM worker, and equivalent provider waits use it; recursive
   batch futures and Daytona lease/quarantine state retain their specialized
   ownership and cleanup policies.
+- `daytona/memory_diagnostics.py` owns the bounded P31 degradation taxonomy:
+  normalization, provider unavailability, corrupt records, invariant
+  violations, search failure, legacy migration, and unexpected internal
+  failures. The optional read-side Memory path stays fail-soft; mutations and
+  list operations remain fail-closed.
+- `tools/fleet-tui/src/tui/tests/turn-reducer-invariants.test.ts` is the P32
+  deterministic convergence proof. Live and durable adapters may differ in
+  framing, but both reduce through the same canonical event vocabulary and
+  source-agnostic reducer.
 - `RunLifecycleService` maps outcomes to typed Claim commands, and both Run
   repositories apply them through one `transition_claim()` seam under their
   existing lock/transaction boundaries.
@@ -90,6 +99,9 @@ compatibility runtime and parallel foundation package no longer exist.
 
 The authoritative route inventory and shapes are in
 [HTTP API](http-api.md) and `openapi.yaml`.
+
+The final P34 ownership matrix, freeze constraints, and certification commands
+are maintained in [Maintainability freeze](../how-to-guides/maintainability-freeze.md).
 
 ## Maintained terminal client
 

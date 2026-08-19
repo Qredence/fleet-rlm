@@ -18,13 +18,6 @@ class TurnPreview:
     role: Literal["user", "assistant"]
     preview: str
 
-    def to_input(self) -> dict[str, object]:
-        return {
-            "ordinal": self.ordinal,
-            "role": self.role,
-            "preview": self.preview,
-        }
-
 
 @dataclass(frozen=True, slots=True)
 class SessionContextManifest:
@@ -32,14 +25,6 @@ class SessionContextManifest:
     checkpoint_version: int
     message_count: int
     recent: tuple[TurnPreview, ...]
-
-    def to_input(self) -> dict[str, object]:
-        return {
-            "session_id": str(self.session_id),
-            "checkpoint_version": self.checkpoint_version,
-            "message_count": self.message_count,
-            "recent": [item.to_input() for item in self.recent],
-        }
 
 
 def build_session_context_manifest(

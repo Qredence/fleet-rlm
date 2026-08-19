@@ -499,3 +499,37 @@ def test_candidate_promotion_preserves_append_time_conflict_and_continues() -> N
     assert result.dropped_count == 1
     assert result.reasons == ("supersedes_not_active",)
     assert len(store.appended) == 1
+
+
+def test_intent_builder_and_post_commit_promotion_mint_identical_records() -> None:
+    """Both promotion paths share one validation + record-minting pipeline (P33 fold)."""
+    from datetime import UTC, datetime
+
+    from fleet_rlm.files.memory_candidates import MemoryCandidate, build_memory_promotion_intents
+
+    def clock() -> datetime:
+        return datetime(2026, 8, 17, 12, 0, 0, tzinfo=UTC)
+
+    candidate = MemoryCandidate(
+        candidate_id="cand00000001",
+        category="Project",
+        learning="shared minting stays byte-identical",
+        byte_size=len(b"shared minting stays byte-identical"),
+    )
+    intents = build_memory_promotion_intents(
+        run_id=uuid4(),
+        candidates=(candidate,),
+        allowed_categories=("Project",),
+        clock=clock,
+    )
+    store = _PromotionStore()
+    result = promote_memory_candidates(
+        store=store,
+        candidates=(candidate,),
+        allowed_categories=("Project",),
+        clock=clock,
+    )
+
+    assert result.promoted_count == 1
+    assert store.appended == [intents[0].record_text]
+    assert intents[0].memory_id in store.appended[0]

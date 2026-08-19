@@ -25,10 +25,6 @@ class SequenceCursor:
         ):
             raise ValueError("after_sequence must be a non-negative integer")
 
-    @classmethod
-    def from_query(cls, value: int | None) -> SequenceCursor:
-        return cls(after_sequence=value)
-
     def next_after_sequence(self, last_sequence: int) -> int:
         if not isinstance(last_sequence, int) or isinstance(last_sequence, bool) or last_sequence < 1:
             raise ValueError("last_sequence must be a positive integer")

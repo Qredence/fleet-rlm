@@ -12,7 +12,7 @@ import dspy
 from fleet_rlm.observability.failure_diagnostics import trace_failure_category
 from fleet_rlm.observability.turn_tracing import turn_phase_span
 from fleet_rlm.rlm.context import RLMExecutionContext
-from fleet_rlm.rlm.dspy_contract import _RLMTraceCallback, observed_usage
+from fleet_rlm.rlm.dspy_contract import _RLMTraceCallback, observed_usage, rlm_termination_mode
 from fleet_rlm.rlm.recursive_calls import RecursiveCallSummary, RecursiveRLMExecutor
 from fleet_rlm.rlm.worker_execution import invoke_native_rlm
 
@@ -33,19 +33,7 @@ def recursive_summary(executor: RecursiveRLMExecutor | None, metrics: Any | None
         return executor.summary()
     if metrics is not None and callable(getattr(metrics, "snapshot", None)):
         snapshot = metrics.snapshot()
-        return RecursiveCallSummary(
-            0,
-            0,
-            0,
-            0,
-            snapshot.depth_fallback_calls,
-            (),
-            recursive_batch_calls=snapshot.recursive_batch_calls,
-            recursive_children_started=snapshot.recursive_children_started,
-            recursive_children_completed=snapshot.recursive_children_completed,
-            peak_child_concurrency=snapshot.peak_child_concurrency,
-            delegation_metrics=snapshot,
-        )
+        return RecursiveCallSummary.from_snapshot(snapshot, depth_fallback_count=snapshot.depth_fallback_calls)
     return RecursiveCallSummary(0, 0, 0, 0, 0, ())
 
 
@@ -104,10 +92,7 @@ def record_phase_success(
     Returns:
         Any: The original prediction.
     """
-    final_reasoning = getattr(prediction, "final_reasoning", None)
-    termination_mode = (
-        "native_extraction_fallback" if final_reasoning == "Extract forced final output" else "typed_submit"
-    )
+    termination_mode = rlm_termination_mode(prediction)
     usage = observed_usage(prediction, duration_ms=int((time.perf_counter() - started) * 1000))
     summary = recursive_summary(recursive_executor, metrics)
     phase.set_outputs(

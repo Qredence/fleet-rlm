@@ -278,7 +278,7 @@ def test_public_failure_message_honors_instance_override() -> None:
     from fleet_rlm.rlm.runner import _public_failure_message
 
     # A parametrized terminal error sets an instance ``public_message``; the
-    # runner must honor it (matching sanitize_public_error) instead of reading
+    # runner must honor the instance attribute instead of reading
     # the class attribute.
     error = RunTerminalError("custom public message")
     assert _public_failure_message(error) == "custom public message"

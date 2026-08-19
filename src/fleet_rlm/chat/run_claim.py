@@ -173,15 +173,20 @@ def _terminal_status(status: ClaimStatus) -> ClaimTerminalStatus:
     return status
 
 
-def _failure_code(state: ClaimState) -> ClaimFailureCode:
-    if state.failure_code is not None:
-        return state.failure_code
+def failure_code_for_terminal_status(status: ClaimTerminalStatus) -> ClaimFailureCode:
+    """Derive the canonical failure code for one terminal status without intent state."""
     codes: dict[ClaimTerminalStatus, ClaimFailureCode] = {
         "failed": "execution_failed",
         "cancelled": "cancelled",
         "timeout": "timeout",
     }
-    return codes[_terminal_status(state.status)]
+    return codes[status]
+
+
+def _failure_code(state: ClaimState) -> ClaimFailureCode:
+    if state.failure_code is not None:
+        return state.failure_code
+    return failure_code_for_terminal_status(_terminal_status(state.status))
 
 
 __all__ = [
@@ -199,4 +204,5 @@ __all__ = [
     "InvalidClaimTransitionError",
     "RevokeClaim",
     "decide_claim_transition",
+    "failure_code_for_terminal_status",
 ]

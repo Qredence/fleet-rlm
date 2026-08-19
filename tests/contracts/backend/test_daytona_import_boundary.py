@@ -20,6 +20,7 @@ EXPECTED_DAYTONA_MODULES = {
     "interpreter.py",
     "interpreter_output.py",
     "lifecycle.py",
+    "memory_diagnostics.py",
     "memory_outbox_reconcile.py",
     "optimization_evaluator.py",
     "platform.py",

@@ -19,10 +19,12 @@ from fleet_rlm.chat.run_claim import (
     BeginSettlement,
     ClaimCommand,
     ClaimFailure,
+    ClaimFailureCode,
     CompleteSettlement,
     FailClaim,
     HeartbeatClaim,
     RevokeClaim,
+    failure_code_for_terminal_status,
 )
 from fleet_rlm.chat.run_cleanup import RunCleanupSupervisor, RunCleanupUnavailableError
 from fleet_rlm.chat.turn_detail_policy import commit_success
@@ -126,24 +128,8 @@ class CommittedRunReplay:
 
 
 RunStart: TypeAlias = ClaimedRun | CommittedRunReplay
-RunFailureCode: TypeAlias = Literal[
-    "preparation_failed",
-    "execution_failed",
-    "commit_failed",
-    "cancelled",
-    "timeout",
-    "stale_claim",
-]
-
-
-def failure_code_for_terminal_status(
-    status: Literal["failed", "cancelled", "timeout"],
-) -> RunFailureCode:
-    if status == "cancelled":
-        return "cancelled"
-    if status == "timeout":
-        return "timeout"
-    return "execution_failed"
+# The failure-code vocabulary is owned once by run_claim; lifecycle aliases it.
+RunFailureCode: TypeAlias = ClaimFailureCode
 
 
 @dataclass(frozen=True, slots=True)
@@ -740,5 +726,4 @@ __all__ = [
     "RunStart",
     "RunStateError",
     "RunValidationError",
-    "failure_code_for_terminal_status",
 ]

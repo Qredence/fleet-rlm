@@ -57,53 +57,13 @@ class SyncBridgeDispatcher:
         return self._service_loop
 
 
-_default_dispatcher = SyncBridgeDispatcher()
-
-
-def default_bridge_dispatcher() -> SyncBridgeDispatcher:
-    """Return the legacy process-default dispatcher (transitional seam).
-
-    New compositions must own a :class:`SyncBridgeDispatcher` instead of
-    registering on this default; the default exists only so un-migrated
-    private-test and optimization lanes keep their legacy behavior.
-    """
-    return _default_dispatcher
-
-
-def set_bridge_service_loop(loop: asyncio.AbstractEventLoop | None) -> None:
-    """Register the composition-wide loop on the legacy process-default dispatcher.
-
-    Daytona SDK objects (client, Sandbox, FileSystem; their aiohttp session)
-    are loop-affine to the loop that created them — the composition/uvicorn
-    loop — and fail with "attached to a different loop" elsewhere, so every
-    ``_Sync*`` bridge posts its SDK coroutines to this one registered loop.
-    That loop also carries the RC-7 safety property: it never performs nested
-    synchronous waits (those live only on RLM worker threads and broker
-    fulfill threads), so a posted coroutine always gets serviced and the
-    worker↔bridge circular wait cannot form.
-
-    Transitional facade over :func:`default_bridge_dispatcher`; composition
-    installs route through their own :class:`SyncBridgeDispatcher` instead.
-    """
-    if loop is None:
-        _default_dispatcher.clear_loop(_default_dispatcher.service_loop())
-    else:
-        _default_dispatcher.set_loop(loop)
-
-
-def bridge_service_loop() -> asyncio.AbstractEventLoop | None:
-    """Return the loop registered on the legacy process-default dispatcher."""
-    return _default_dispatcher.service_loop()
-
-
 class _SyncBridgeLoop:
     """Service-loop routing and close state for one synchronous Daytona bridge.
 
-    Posted SDK coroutines run on the registered composition-wide service loop
-    (see :func:`set_bridge_service_loop`); when no service loop is registered
-    (e.g. private-test compositions that never install the Daytona inventory)
-    the bridge falls back to its caller-captured loop, matching legacy
-    behavior. The bridge owns no threads, so Turns cannot leak daemon threads;
+    Posted SDK coroutines run on the composition-owned service loop exposed by
+    the injected dispatcher; when no dispatcher is injected (e.g. private-test
+    compositions that never install the Daytona inventory) the bridge falls
+    back to its caller-captured loop. The bridge owns no threads, so Turns cannot leak daemon threads;
     :meth:`close` tombstones the bridge so late calls fail typed-fast instead
     of posting to a service loop after lease release.
     """
@@ -140,8 +100,7 @@ class _SyncBridgeLoop:
             registered = self._dispatcher.service_loop()
             if registered is not None:
                 return registered
-        registered = _default_dispatcher.service_loop()
-        return registered if registered is not None else self._caller_loop
+        return self._caller_loop
 
     def run(self, awaitable: Any) -> Any:
         """Post one awaitable on the service loop and block until it settles."""
@@ -278,9 +237,9 @@ class _DSPySyncSandboxView:
     """Explicit synchronous Daytona view used only by DSPy worker execution.
 
     Routes SDK coroutines through the composition-wide bridge service loop
-    (see :func:`set_bridge_service_loop`); the ``loop`` constructor argument
-    anchors the fail-fast owning-loop guard and is the fallback target only
-    when no service loop is registered.
+    exposed by the injected dispatcher; the ``loop`` constructor argument
+    anchors the fail-fast owning-loop guard and is the fallback target when
+    no dispatcher is injected.
     """
 
     def __init__(
@@ -320,8 +279,8 @@ def sync_sandbox(
     """Return a synchronous sandbox view for DSPy worker-thread execution.
 
     ``dispatcher`` injects the composition-owned bridge authority (QRE-154);
-    when omitted, the view resolves through the legacy process-default
-    dispatcher. The concrete view type is private to this module. Callers that
+    when omitted, the view falls back to its caller-captured loop. The
+    concrete view type is private to this module. Callers that
     need to invalidate a view after lease release should use
     :func:`tombstone_sync_sandbox`.
     """
@@ -342,9 +301,6 @@ def tombstone_sync_sandbox(sandbox: Any) -> None:
 
 __all__ = [
     "SyncBridgeDispatcher",
-    "bridge_service_loop",
-    "default_bridge_dispatcher",
-    "set_bridge_service_loop",
     "sync_sandbox",
     "tombstone_sync_sandbox",
 ]

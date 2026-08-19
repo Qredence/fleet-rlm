@@ -116,8 +116,12 @@ async def test_live_preparation_stages_attachment_and_cleans_it(
 
             return PreparedAttachments((ref,), (StagedAttachment(ref.id, logical_path),))
 
+    settings = Settings(run_environment="daytona", volume_mount_path=str(volume_root))
+    from fleet_rlm.files.volume_paths import volume_paths_from_settings
+
     resources = SimpleNamespace(
-        settings=Settings(run_environment="daytona", volume_mount_path=str(volume_root)),
+        settings=settings,
+        volume_paths=volume_paths_from_settings(settings),
         session_manager=SessionManager(),
         platform=SimpleNamespace(get=AsyncMock(return_value=SimpleNamespace(fs=SandboxFs(), process=SandboxProcess()))),
         models=RLMModelBundle(object(), object()),
@@ -215,9 +219,16 @@ async def test_live_preparation_stages_attachment_and_cleans_it(
     canonical_memory = volume_root / "memory" / "MEMORIES.md"
     canonical_text = canonical_memory.read_text(encoding="utf-8")
     assert canonical_text.startswith("# Fleet Memory v2\n")
-    from fleet_rlm.files.memory_models import validate_workspace_memory_content
+    from fleet_rlm.files.memory_models import (
+        parse_workspace_memory_lines,
+        validate_workspace_memory_record,
+    )
 
-    validate_workspace_memory_content(canonical_text)
+    canonical_lines = parse_workspace_memory_lines(canonical_text)
+    assert not any(line.malformed for line in canonical_lines)
+    for line in canonical_lines:
+        if not line.header:
+            validate_workspace_memory_record(line.raw)
     assert learning + "\n" in canonical_text and memory_id in canonical_text
     assert not (volume_root / "MEMORIES.md").exists()
 
@@ -362,8 +373,12 @@ async def test_admission_timeout_is_sanitized_by_live_preparation() -> None:
             assert deadline > asyncio.get_running_loop().time()
             raise DaytonaAdmissionTimeoutError("provider secret should not escape")
 
+    settings = Settings(run_environment="daytona")
+    from fleet_rlm.files.volume_paths import volume_paths_from_settings
+
     resources = SimpleNamespace(
-        settings=Settings(run_environment="daytona"),
+        settings=settings,
+        volume_paths=volume_paths_from_settings(settings),
         session_manager=SessionManager(),
         models=RLMModelBundle(object(), object()),
     )

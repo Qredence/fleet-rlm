@@ -13,7 +13,6 @@ from fleet_rlm.config import Settings
 def test_independent_workspace_files_survive_requests_and_enforce_checksums(tmp_path: Path) -> None:
     app = create_testing_app(
         settings=Settings(
-            _env_file=None,
             run_environment="daytona",
             data_root=str(tmp_path),
         )
@@ -67,7 +66,6 @@ def test_independent_workspace_files_survive_requests_and_enforce_checksums(tmp_
 def test_workspace_files_api_cannot_address_fleet_managed_namespaces(tmp_path: Path) -> None:
     app = create_testing_app(
         settings=Settings(
-            _env_file=None,
             run_environment="daytona",
             data_root=str(tmp_path),
         )
@@ -91,7 +89,7 @@ def test_workspace_files_api_cannot_address_fleet_managed_namespaces(tmp_path: P
 
 
 def test_volume_tree_returns_relative_logical_paths(tmp_path: Path) -> None:
-    app = create_testing_app(settings=Settings(_env_file=None, run_environment="daytona", data_root=str(tmp_path)))
+    app = create_testing_app(settings=Settings(run_environment="daytona", data_root=str(tmp_path)))
     workspace_id = uuid5(NAMESPACE_URL, "fleet-rlm/local-workspace")
 
     import asyncio
@@ -110,7 +108,7 @@ def test_volume_tree_returns_relative_logical_paths(tmp_path: Path) -> None:
 
 
 def test_volume_tree_is_not_truncated_when_file_count_equals_requested_limit(tmp_path: Path) -> None:
-    app = create_testing_app(settings=Settings(_env_file=None, run_environment="daytona", data_root=str(tmp_path)))
+    app = create_testing_app(settings=Settings(run_environment="daytona", data_root=str(tmp_path)))
     workspace_id = uuid5(NAMESPACE_URL, "fleet-rlm/local-workspace")
 
     import asyncio
@@ -129,7 +127,6 @@ def test_volume_tree_is_not_truncated_when_file_count_equals_requested_limit(tmp
 def test_workspace_files_stat_reports_content_checksum_and_directory_entries(tmp_path: Path) -> None:
     app = create_testing_app(
         settings=Settings(
-            _env_file=None,
             run_environment="daytona",
             data_root=str(tmp_path),
         )
@@ -172,7 +169,6 @@ def test_workspace_files_stat_reports_content_checksum_and_directory_entries(tmp
 def test_workspace_files_delete_and_patch_round_trip(tmp_path: Path) -> None:
     app = create_testing_app(
         settings=Settings(
-            _env_file=None,
             run_environment="daytona",
             data_root=str(tmp_path),
         )
@@ -232,7 +228,6 @@ def test_workspace_files_delete_and_patch_round_trip(tmp_path: Path) -> None:
 def test_workspace_files_delete_maps_404_and_409(tmp_path: Path) -> None:
     app = create_testing_app(
         settings=Settings(
-            _env_file=None,
             run_environment="daytona",
             data_root=str(tmp_path),
         )
@@ -269,7 +264,6 @@ def test_workspace_files_delete_maps_404_and_409(tmp_path: Path) -> None:
 def test_workspace_files_patch_maps_404_409_and_returns_fresh_checksum(tmp_path: Path) -> None:
     app = create_testing_app(
         settings=Settings(
-            _env_file=None,
             run_environment="daytona",
             data_root=str(tmp_path),
         )

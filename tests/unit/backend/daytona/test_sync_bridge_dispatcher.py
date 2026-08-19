@@ -14,8 +14,6 @@ from types import SimpleNamespace
 
 from fleet_rlm.daytona.dspy_sync_bridge import (
     SyncBridgeDispatcher,
-    bridge_service_loop,
-    set_bridge_service_loop,
     sync_sandbox,
     tombstone_sync_sandbox,
 )
@@ -90,9 +88,6 @@ def test_compositions_cannot_overwrite_each_others_bridge_authority() -> None:
         view_b = sync_sandbox(_sandbox(), server_b.loop, dispatcher_b)
         assert view_a._owner.service_loop() is server_a.loop
         assert view_b._owner.service_loop() is server_b.loop
-        # Legacy default dispatcher untouched by either composition.
-        assert bridge_service_loop() is None
-
         assert _call_from_worker_thread(view_a, "/a") == b"bytes:/a"
         assert _call_from_worker_thread(view_b, "/b") == b"bytes:/b"
 
@@ -106,21 +101,6 @@ def test_compositions_cannot_overwrite_each_others_bridge_authority() -> None:
         assert dispatcher_a.service_loop() is None
         dispatcher_b.clear_loop(server_b.loop)
         assert dispatcher_b.service_loop() is None
-
-
-def test_uninjected_view_uses_legacy_default_dispatcher_then_caller_loop() -> None:
-    """Views without injected dispatchers keep legacy resolution behavior."""
-    dispatcher = SyncBridgeDispatcher()
-    with _ServingLoop("fleet-test-default-loop") as server:
-        dispatcher.set_loop(server.loop)
-        # Legacy facade targets the process-default dispatcher, not this one.
-        assert bridge_service_loop() is None
-        set_bridge_service_loop(server.loop)
-        try:
-            view = sync_sandbox(_sandbox(), server.loop)
-            assert _call_from_worker_thread(view, "/legacy") == b"bytes:/legacy"
-        finally:
-            set_bridge_service_loop(None)
 
 
 def test_fail_fast_when_called_from_the_servicing_event_loop() -> None:

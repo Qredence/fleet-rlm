@@ -117,6 +117,61 @@ class MemoryPromotionIntent:
     source: str = WORKSPACE_MEMORY_CANDIDATE_SOURCE
 
 
+@dataclass(frozen=True, slots=True)
+class _ValidatedPromotionCandidate:
+    """One candidate after shared shape validation for both promotion paths."""
+
+    category: str
+    learning: str
+    byte_size: int
+    supersedes_id: str | None
+
+
+def _validate_promotion_candidate(candidate: MemoryCandidate) -> _ValidatedPromotionCandidate:
+    """Validate one candidate's shape, raising the WorkspaceMemory*Error taxonomy.
+
+    The intent builder propagates the raise; post-commit promotion catches it and
+    drops the candidate as ``invalid_entry``.
+    """
+    normalized = normalize_memory_candidate_categories((candidate.category,))[0]
+    learning = normalize_workspace_memory_learning(candidate.learning)
+    supersedes_id = None if candidate.supersedes_id is None else normalize_workspace_memory_id(candidate.supersedes_id)
+    byte_size = len(learning.encode("utf-8"))
+    if byte_size > WORKSPACE_MEMORY_CANDIDATE_MAX_LEARNING_BYTES or byte_size != candidate.byte_size:
+        raise WorkspaceMemoryRecordError
+    if candidate.source != WORKSPACE_MEMORY_CANDIDATE_SOURCE:
+        raise WorkspaceMemoryRecordError
+    return _ValidatedPromotionCandidate(normalized, learning, byte_size, supersedes_id)
+
+
+def _mint_candidate_record(
+    learning: str,
+    category: str,
+    *,
+    promoted_at: datetime,
+    supersedes_id: str | None,
+) -> tuple[str, str]:
+    """Mint ``(memory_id, canonical v3 record)`` for one promotion timestamp.
+
+    Shared by crash-recoverable intent pinning and the post-commit fast path so
+    replay identity and the wired record text cannot drift between them.
+    """
+    if promoted_at.tzinfo is None:
+        promoted_at = promoted_at.replace(tzinfo=UTC)
+    timestamp = promoted_at.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+    memory_id = workspace_memory_record_id(timestamp, category, learning)
+    record_text = format_workspace_memory_v3_record(
+        learning,
+        category,
+        memory_id=memory_id,
+        created_at=timestamp,
+        updated_at=timestamp,
+        source=WORKSPACE_MEMORY_CANDIDATE_SOURCE,
+        supersedes_id=supersedes_id,
+    )
+    return memory_id, record_text
+
+
 def build_memory_promotion_intents(
     *,
     run_id: UUID,  # identity anchor: intents are (run_id, candidate_id)-scoped rows
@@ -140,9 +195,6 @@ def build_memory_promotion_intents(
         raise WorkspaceMemoryCategoryError("no autonomous Memory categories allowed")
     now = clock or (lambda: datetime.now(UTC))
     pinned_at = now()
-    if pinned_at.tzinfo is None:
-        pinned_at = pinned_at.replace(tzinfo=UTC)
-    timestamp = pinned_at.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
     intents: list[MemoryPromotionIntent] = []
     if run_id is None:
         raise WorkspaceMemoryRecordError("run_id is required for intent scoping")
@@ -152,40 +204,28 @@ def build_memory_promotion_intents(
         normalized = normalize_memory_candidate_categories((candidate.category,))[0]
         if normalized not in allowed:
             raise WorkspaceMemoryCategoryError("candidate category is not allowed")
-        learning = normalize_workspace_memory_learning(candidate.learning)
-        byte_size = len(learning.encode("utf-8"))
-        if byte_size > WORKSPACE_MEMORY_CANDIDATE_MAX_LEARNING_BYTES or byte_size != candidate.byte_size:
-            raise WorkspaceMemoryRecordError("candidate byte size is invalid")
-        if candidate.source != WORKSPACE_MEMORY_CANDIDATE_SOURCE:
-            raise WorkspaceMemoryRecordError("candidate source is invalid")
-        supersedes_id = (
-            None if candidate.supersedes_id is None else normalize_workspace_memory_id(candidate.supersedes_id)
-        )
-        claim = (normalized, learning)
+        validated = _validate_promotion_candidate(candidate)
+        claim = (validated.category, validated.learning)
         if claim in claims:
             raise WorkspaceMemoryRecordError("duplicate candidate in batch")
         claims.add(claim)
-        total_bytes += byte_size
+        total_bytes += validated.byte_size
         if total_bytes > WORKSPACE_MEMORY_CANDIDATE_MAX_TOTAL_BYTES:
             raise WorkspaceMemoryRecordError("candidate batch exceeds its aggregate bound")
-        memory_id = workspace_memory_record_id(timestamp, normalized, learning)
-        record_text = format_workspace_memory_v3_record(
-            learning,
-            normalized,
-            memory_id=memory_id,
-            created_at=timestamp,
-            updated_at=timestamp,
-            source=WORKSPACE_MEMORY_CANDIDATE_SOURCE,
-            supersedes_id=supersedes_id,
+        memory_id, record_text = _mint_candidate_record(
+            validated.learning,
+            validated.category,
+            promoted_at=pinned_at,
+            supersedes_id=validated.supersedes_id,
         )
         intents.append(
             MemoryPromotionIntent(
                 candidate_id=candidate.candidate_id,
                 candidate_ordinal=ordinal,
-                category=normalized,
-                learning=learning,
-                byte_size=byte_size,
-                supersedes_id=supersedes_id,
+                category=validated.category,
+                learning=validated.learning,
+                byte_size=validated.byte_size,
+                supersedes_id=validated.supersedes_id,
                 memory_id=memory_id,
                 record_text=record_text,
             )
@@ -232,33 +272,22 @@ def promote_memory_candidates(
     batch_claims: set[tuple[str, str]] = set()
     for candidate in candidates:
         try:
-            normalized = normalize_memory_candidate_categories((candidate.category,))[0]
-            learning = normalize_workspace_memory_learning(candidate.learning)
-            supersedes_id = (
-                None if candidate.supersedes_id is None else normalize_workspace_memory_id(candidate.supersedes_id)
-            )
-            byte_size = len(learning.encode("utf-8"))
-            if byte_size > WORKSPACE_MEMORY_CANDIDATE_MAX_LEARNING_BYTES:
-                raise WorkspaceMemoryRecordError
-            if byte_size != candidate.byte_size:
-                raise WorkspaceMemoryRecordError
-            if candidate.source != WORKSPACE_MEMORY_CANDIDATE_SOURCE:
-                raise WorkspaceMemoryRecordError
+            validated = _validate_promotion_candidate(candidate)
         except (WorkspaceMemoryCategoryError, WorkspaceMemoryIdError, WorkspaceMemoryRecordError):
             dropped_count += 1
             reasons.append("invalid_entry")
             continue
-        if normalized not in allowed:
+        if validated.category not in allowed:
             dropped_count += 1
             reasons.append("policy_denied")
             continue
-        candidate_bytes += byte_size
-        batch_claim = (normalized, learning)
+        candidate_bytes += validated.byte_size
+        batch_claim = (validated.category, validated.learning)
         if batch_claim in batch_claims:
             duplicate_count += 1
             continue
         batch_claims.add(batch_claim)
-        prepared.append((normalized, learning, supersedes_id))
+        prepared.append((validated.category, validated.learning, validated.supersedes_id))
 
     if prepared:
         try:
@@ -286,17 +315,10 @@ def promote_memory_candidates(
             reasons.append("supersedes_not_active")
             continue
         try:
-            promoted_at = now()
-            if promoted_at.tzinfo is None:
-                promoted_at = promoted_at.replace(tzinfo=UTC)
-            timestamp = promoted_at.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
-            record = format_workspace_memory_v3_record(
+            memory_id, record = _mint_candidate_record(
                 learning,
                 normalized,
-                memory_id=workspace_memory_record_id(timestamp, normalized, learning),
-                created_at=timestamp,
-                updated_at=timestamp,
-                source=WORKSPACE_MEMORY_CANDIDATE_SOURCE,
+                promoted_at=now(),
                 supersedes_id=supersedes_id,
             )
         except (WorkspaceMemoryRecordError, UnicodeError, ValueError, OverflowError):
@@ -320,7 +342,7 @@ def promote_memory_candidates(
             continue
         promoted_count += 1
         active_content.add((normalized, learning))
-        active_ids.add(workspace_memory_record_id(timestamp, normalized, learning))
+        active_ids.add(memory_id)
     return MemoryCandidatePromotionResult(
         proposed_count=proposed_count,
         promoted_count=promoted_count,

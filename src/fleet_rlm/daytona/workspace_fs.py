@@ -755,12 +755,6 @@ class AsyncDaytonaSessionWorkspaceFS:
             eof,
         )
 
-    async def read_text(self, path: str, *, max_bytes: int) -> str:
-        page = await self.read_text_page(path, cursor=None, max_chars=max_bytes, max_bytes=max_bytes)
-        if not page.eof:
-            raise ValueError("workspace file exceeds read bound")
-        return page.content
-
     async def write_text(
         self,
         path: str,
@@ -939,10 +933,6 @@ class DaytonaSessionWorkspaceFS:
         max_bytes: int,
     ) -> WorkspaceTextPage:
         return _run_blocking(self._core.read_text_page(path, cursor=cursor, max_chars=max_chars, max_bytes=max_bytes))
-
-    def read_text(self, path: str, *, max_bytes: int) -> str:
-        """Compatibility adapter for internal callers that need a bounded whole read."""
-        return _run_blocking(self._core.read_text(path, max_bytes=max_bytes))
 
     def write_text(
         self,

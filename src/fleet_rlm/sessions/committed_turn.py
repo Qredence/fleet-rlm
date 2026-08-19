@@ -8,6 +8,8 @@ from types import MappingProxyType
 from typing import Any, Literal, TypeAlias, cast
 from uuid import UUID
 
+from pydantic import ValidationError
+
 from fleet_rlm.json_types import JsonScalar as JsonScalar
 from fleet_rlm.json_types import JsonValue as JsonValue
 from fleet_rlm.rlm.dspy_contract import RLMUsage, validate_rlm_usage
@@ -356,7 +358,7 @@ class CommittedTurnCodec:
             raise CommittedTurnValidationError("trace_id must be a string or null")
         try:
             parts = tuple(assistant_part_from_payload(part) for part in raw_parts)
-        except Exception as exc:
+        except (ValidationError, ValueError) as exc:
             message = str(exc)
             if "String should have at least 1 character" in message and any(
                 isinstance(part, Mapping) and part.get("type") == "text" for part in raw_parts

@@ -38,7 +38,7 @@ async def test_native_rlm_retrieves_older_content_absent_from_initial_kwargs() -
     )
     session_id = uuid4()
     manifest = build_session_context_manifest(session_id, 4, history)
-    assert older_detail not in str(manifest.to_input())
+    assert all(older_detail not in item.preview for item in manifest.recent)
     (history_tool,) = SessionHistoryToolHost(history).as_tools()
 
     class Capabilities:
