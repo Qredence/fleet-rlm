@@ -245,3 +245,74 @@ class SkillRow(Base):
     visibility: Mapped[str] = mapped_column(String(32), nullable=False, default="workspace")
     metadata_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class MemoryPromotionIntentRow(Base):
+    """Crash-recoverable autonomous Memory promotion intent (P23).
+
+    Rows are inserted only inside the successful Turn commit transaction and
+    pinned to canonical v3 record bytes, so reconciliation replays are
+    byte-identical and idempotent at the mounted Workspace Agent.
+    """
+
+    __tablename__ = "fleet_memory_promotion_intents"
+    __table_args__ = (
+        UniqueConstraint("run_id", "candidate_id", name="uq_fleet_memory_intents_run_candidate"),
+        CheckConstraint(
+            "status IN ('pending', 'completing', 'completed', 'failed')",
+            name="ck_fleet_memory_intents_status",
+        ),
+        CheckConstraint("length(candidate_id) = 12", name="ck_fleet_memory_intents_candidate_id"),
+        CheckConstraint("length(memory_id) = 8", name="ck_fleet_memory_intents_memory_id"),
+        CheckConstraint(
+            "supersedes_id IS NULL OR length(supersedes_id) = 8",
+            name="ck_fleet_memory_intents_supersedes",
+        ),
+        CheckConstraint(
+            "byte_size >= 0 AND byte_size <= 3904",
+            name="ck_fleet_memory_intents_byte_size",
+        ),
+        CheckConstraint("attempts >= 0", name="ck_fleet_memory_intents_attempts"),
+        CheckConstraint(
+            "source IN ('agent_candidate')",
+            name="ck_fleet_memory_intents_source",
+        ),
+        Index("ix_fleet_memory_intents_claim_scan", "status", "next_attempt_at"),
+        Index("ix_fleet_memory_intents_run", "run_id"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=_uuid)
+    run_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("fleet_runs.id", ondelete="CASCADE"), nullable=False
+    )
+    session_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("fleet_sessions.id", ondelete="CASCADE"), nullable=False
+    )
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("fleet_workspaces.id", ondelete="CASCADE"), nullable=False
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("fleet_users.id", ondelete="CASCADE"), nullable=False
+    )
+    candidate_ordinal: Mapped[int] = mapped_column(Integer, nullable=False)
+    candidate_id: Mapped[str] = mapped_column(String(12), nullable=False)
+    category: Mapped[str] = mapped_column(String(64), nullable=False)
+    learning: Mapped[str] = mapped_column(Text, nullable=False)
+    byte_size: Mapped[int] = mapped_column(Integer, nullable=False)
+    supersedes_id: Mapped[str | None] = mapped_column(String(8), nullable=True)
+    memory_id: Mapped[str] = mapped_column(String(8), nullable=False)
+    record_text: Mapped[str] = mapped_column(Text, nullable=False)
+    source: Mapped[str] = mapped_column(String(32), nullable=False, default="agent_candidate")
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="pending")
+    completion_reason: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    promoted_memory_id: Mapped[str | None] = mapped_column(String(8), nullable=True)
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    last_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    next_attempt_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    last_error: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    claim_owner: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    claim_heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

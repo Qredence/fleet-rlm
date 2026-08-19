@@ -36,8 +36,8 @@ Every Signature receives request text, bounded `session_context`, bounded
 `skill_cards`, and bounded Attachment metadata. Full committed history remains
 host-side behind `read_session_history`. The default Signature uses strict local
 Pydantic DTOs; conversion and JSON serialization happen once immediately before
-native `dspy.RLM.acall()`. Custom Skill Signatures retain their existing
-JSON-compatible common input annotations.
+native `await rlm.acall(interpreter, **named_inputs)`. Custom Skill Signatures
+retain their existing JSON-compatible common input annotations.
 
 `rlm/instructions.py` owns the default Fleet Root instruction fragments. Base,
 REPL, tool, optional recursion, verification, and bounded-context guidance are
@@ -47,10 +47,12 @@ monolithic Signature docstring.
 The Root follows a bounded delegation ladder: Python for deterministic work,
 native `llm_query`/`llm_query_batched` for semantic work, `rlm_query` for one
 iterative isolated subproblem, and Root-only `rlm_query_batched` for ordered
-independent child RLMs. Recursive children remain one native level deep, receive
-copied DSPy Root/Sub runtimes, and return evidence for Root verification and
-synthesis. Fleet reserves the shared recursive budget atomically and controls
-sibling concurrency through `recursion_max_parallel_children`.
+independent child RLMs. The Root starts at recursive depth 0; direct recursive
+calls run as native depth-1 children, while a child’s further recursive call is
+a bounded Sub-LM fallback with no grandchild Sandbox. Children receive copied
+DSPy Root/Sub runtimes and return evidence for Root verification and synthesis.
+Fleet reserves the shared recursive budget atomically and controls sibling
+concurrency through `recursion_max_parallel_children`.
 
 ## Composition and ownership
 

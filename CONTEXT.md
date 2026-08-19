@@ -121,6 +121,17 @@ A host-declared DSPy Signature and bounded input/output policy selected during
 Turn preparation.
 _Avoid_: caller-provided schema, serialized executable
 
+**Native RLM**:
+The stock pinned DSPy `dspy.RLM` module used for one bounded Turn or Recursive
+Child. `max_iters` limits action/REPL iterations, `max_llm_calls` limits prompts
+sent through native semantic `llm_query`/`llm_query_batched`, and
+`max_output_chars` limits retained REPL output. These are execution budgets, not
+recursion-depth controls. Fleet supplies a caller-owned Daytona interpreter and
+projects callback/trajectory evidence; `dspy.RLM(verbose=...)` is host logging,
+not the public stream.
+_Avoid_: RAG/retrieval module, hidden chain-of-thought, configurable native
+`max_depth`
+
 **Runtime Event**:
 The closed transport-neutral record of Run progress and completion. The SSE
 layer projects Runtime Events into AI SDK UI chunks.
@@ -148,21 +159,27 @@ _Avoid_: Session-owned Sandbox, reusable global interpreter
 **Delegation Ladder**:
 The Root chooses the cheapest sufficient mechanism: Python for deterministic
 work, native `llm_query`/`llm_query_batched` for bounded semantic work, and
-`rlm_query`/`rlm_query_batched` for isolated iterative subproblems. The Root
-remains responsible for verification, synthesis, and `SUBMIT`.
+`rlm_query`/`rlm_query_batched` for isolated iterative subproblems. Semantic
+queries stay at the current RLM depth; recursive tools advance one level. The
+Root remains responsible for verification, synthesis, and `SUBMIT`.
 _Avoid_: automatic delegation, hidden agent swarm
 
 **Recursive Child**:
 A one-level native RLM specialist with a fresh Daytona Sandbox, child-scoped
-Volume path, copied Root/Sub DSPy runtimes, and its own cleanup. Children do
-not receive Fleet Tools, credentials, history, or recursive batch capability.
+Volume path, copied Root/Sub DSPy runtimes, and its own cleanup. The Root starts
+at depth 0; a direct child is depth 1. A child may expose `rlm_query`, but any
+further delegation is recorded at depth 2 and uses the bounded Sub-LM fallback,
+not another native RLM or Sandbox. Children do not receive ordinary
+Session/Workspace/Skill Fleet Tools, credentials, history, or recursive batch
+capability; `rlm_query` is their only recursive delegation tool.
 _Avoid_: Child Session, shared interpreter, grandchild
 
 **Recursive Batch**:
-A Root-only ordered collection of independent Recursive Children. Fleet reserves
-the shared recursive budget atomically, bounds sibling concurrency by policy,
-and uses all-or-nothing settlement; child results are evidence for Root
-synthesis, not final authority.
+A Root-only ordered collection of independent Recursive Children. Every item in
+the batch is reserved at native depth 1; batching changes sibling concurrency,
+not depth. Fleet reserves the shared recursive budget atomically, bounds sibling
+concurrency by policy, and uses all-or-nothing settlement; child results are
+evidence for Root synthesis, not final authority.
 _Avoid_: recursive swarm, unordered partial result
 
 ## Reserved, not current product behavior

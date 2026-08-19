@@ -6,7 +6,7 @@ import asyncio
 import contextlib
 import logging
 from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable
-from typing import Self
+from typing import Any, Self
 from uuid import UUID
 
 from fleet_rlm.chat.commands import OpenTurnCommand
@@ -37,6 +37,7 @@ from fleet_rlm.chat.run_preparation import (
     RunPreparationCancelledError,
     RunPreparationTimeoutError,
 )
+from fleet_rlm.chat.run_runtime_owner import RunOwnership
 from fleet_rlm.observability.turn_tracing import annotate_trace_io, turn_phase_span, turn_trace
 from fleet_rlm.rlm.dspy_contract import empty_rlm_usage
 from fleet_rlm.rlm.events import EventRecorder, RunCompleted, RunStarted, RuntimeEvent, Status
@@ -47,15 +48,26 @@ logger = logging.getLogger(__name__)
 class OpenedTurnStream:
     """Prepared stream handle whose close shields settlement and cleanup."""
 
-    def __init__(self, run_id: UUID, events: AsyncIterator[RuntimeEvent]) -> None:
+    def __init__(
+        self,
+        run_id: UUID,
+        events: AsyncIterator[RuntimeEvent],
+        *,
+        prepared: PreparedRun | None = None,
+    ) -> None:
         self.run_id = run_id
         self._events = events
+        self._prepared = prepared
 
     def __aiter__(self) -> Self:
         return self
 
     async def __anext__(self) -> RuntimeEvent:
         return await self._events.__anext__()
+
+    @property
+    def cleanup_receipt(self) -> Any | None:
+        return getattr(self._prepared, "cleanup_receipt", None)
 
     async def aclose(self) -> None:
         close = getattr(self._events, "aclose", None)
@@ -125,7 +137,25 @@ class TurnCoordinator:
             annotate_trace_io(request=start.input.text, response_text="Turn prepared")
             return prepared
 
+    def open_owned(self, command: OpenTurnCommand) -> RunOwnership:
+        """Start one coordinator-owned Run lifetime handle (P21)."""
+        return RunOwnership(
+            lambda on_settlement, on_cleanup: self._open_impl(
+                command, on_settlement=on_settlement, on_cleanup=on_cleanup
+            )
+        ).start()
+
     async def open(self, command: OpenTurnCommand) -> OpenedTurnStream:
+        """Compatibility wrapper returning the existing prepared stream."""
+        return await self._open_impl(command, on_settlement=None)
+
+    async def _open_impl(
+        self,
+        command: OpenTurnCommand,
+        *,
+        on_settlement: Callable[[object], None] | None = None,
+        on_cleanup: Callable[[asyncio.Task[None]], None] | None = None,
+    ) -> OpenedTurnStream:
         """Complete claim and preparation before a transport sends headers."""
         try:
             self._cleanup.require_capacity()
@@ -188,7 +218,17 @@ class TurnCoordinator:
             if result == "claim_lost":
                 raise RunLifecycleUnavailableError("Turn claim is no longer available") from None
             raise
-        return OpenedTurnStream(start.run_id, self._execute(start, prepared, heartbeat))
+        return OpenedTurnStream(
+            start.run_id,
+            self._execute(
+                start,
+                prepared,
+                heartbeat,
+                on_settlement=on_settlement,
+                on_cleanup=on_cleanup,
+            ),
+            prepared=prepared,
+        )
 
     async def _replay(self, start: CommittedRunReplay) -> AsyncGenerator[RuntimeEvent]:
         recorder = EventRecorder(start.run_id, start.session_id)
@@ -203,6 +243,9 @@ class TurnCoordinator:
         run: ClaimedRun,
         prepared: PreparedRun,
         heartbeat: ClaimHeartbeat | None,
+        *,
+        on_settlement: Callable[[object], None] | None = None,
+        on_cleanup: Callable[[asyncio.Task[None]], None] | None = None,
     ) -> AsyncGenerator[RuntimeEvent]:
         with turn_trace(
             run.session_id,
@@ -210,7 +253,14 @@ class TurnCoordinator:
             enabled=self._mlflow_tracing_enabled,
             expose_trace_id=self._mlflow_expose_trace_id,
         ) as handle:
-            async for event in self._execution_driver.stream(run, prepared, heartbeat, trace_id=handle.trace_id):
+            async for event in self._execution_driver.stream(
+                run,
+                prepared,
+                heartbeat,
+                trace_id=handle.trace_id,
+                on_settlement=on_settlement,
+                on_cleanup=on_cleanup,
+            ):
                 yield event
 
     def _start_heartbeat(self, run: ClaimedRun) -> ClaimHeartbeat | None:

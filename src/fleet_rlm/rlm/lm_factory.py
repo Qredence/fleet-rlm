@@ -20,7 +20,6 @@ from fleet_rlm.rlm.model_bundle import RLMModelBundle
 # Values that look like secrets/keys must never be treated as base URLs.
 _URL_RE = re.compile(r"^https?://", re.IGNORECASE)
 _LEGACY_LLM_API_KEY_ENV = "FLEET_OPENAI_API_KEY"
-_MODEL_PROVIDER_SERVICE_HEADER = "Databricks-Model-Provider-Service"
 
 
 def sanitize_base_url(value: str | None) -> str | None:
@@ -94,26 +93,33 @@ def build_lm(
     model: str,
     *,
     api_key: str | None,
-    model_provider_service: str | None = None,
     base_url: str | None = None,
     max_tokens: int | None = None,
     temperature: float | None = None,
     reasoning_effort: str | None = None,
-    model_type: str = "chat",
     cache: bool = True,
     num_retries: int = 3,
 ) -> dspy.LM:
-    """Construct a stock ``dspy.LM`` per the public LM constructor contract."""
+    """
+    Construct a chat-oriented DSPy language model.
+
+    Parameters:
+        model (str): Model identifier.
+        api_key (str | None): Optional provider authentication key.
+        base_url (str | None): Optional OpenAI-compatible API base URL.
+        reasoning_effort (str | None): Optional reasoning effort setting.
+
+    Returns:
+        dspy.LM: Configured DSPy language model.
+    """
     model_id = normalize_model_id(model)
     kwargs: dict[str, Any] = {
-        "model_type": model_type,
+        "model_type": "chat",
         "cache": cache,
         "num_retries": num_retries,
     }
     if api_key:
         kwargs["api_key"] = api_key
-    if model_provider_service:
-        kwargs["headers"] = {_MODEL_PROVIDER_SERVICE_HEADER: model_provider_service}
     if base_url:
         kwargs["api_base"] = base_url
     if max_tokens is not None:
@@ -122,23 +128,45 @@ def build_lm(
         kwargs["temperature"] = temperature
     if reasoning_effort is not None:
         kwargs["reasoning_effort"] = reasoning_effort
-        # The Databricks AI Gateway accepts this OpenAI-compatible parameter,
-        # while LiteLLM's generic OpenAI provider otherwise rejects it.
+        # LiteLLM normally filters this OpenAI-compatible parameter; explicitly
+        # allow it for providers that expose reasoning controls.
         kwargs["allowed_openai_params"] = ["reasoning_effort"]
     return dspy.LM(model_id, **kwargs)
 
 
 def build_model_bundle(settings: Settings) -> RLMModelBundle:
-    """Build explicit Root and Sub Model roles from resolved Fleet policy."""
+    """
+    Build the root and sub language models from the configured role policies.
+
+    Parameters:
+        settings (Settings): Configuration containing the root and sub model policies and credentials.
+
+    Returns:
+        RLMModelBundle: Bundle containing the configured root and sub language models.
+
+    Raises:
+        RuntimeError: If a configured role does not have an API key.
+    """
 
     def build(policy: LLMRoleSettings) -> dspy.LM:
+        """
+        Build an LLM from the specified role settings.
+
+        Parameters:
+            policy (LLMRoleSettings): Model and runtime settings for the LLM role.
+
+        Returns:
+            dspy.LM: The configured language model.
+
+        Raises:
+            RuntimeError: If the role's API key is not configured.
+        """
         api_key = resolve_role_api_key(settings, policy)
         if not api_key:
             raise RuntimeError(f"LLM API key not configured ({policy.api_key_env})")
         return build_lm(
             policy.model,
             api_key=api_key,
-            model_provider_service=policy.model_provider_service,
             base_url=sanitize_base_url(policy.base_url),
             max_tokens=policy.max_tokens,
             temperature=policy.temperature,

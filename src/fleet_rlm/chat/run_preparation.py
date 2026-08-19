@@ -12,7 +12,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from fleet_rlm.artifacts.promotion import RunArtifactSink
 from fleet_rlm.chat.post_commit_memory import OwnedPostCommitMemoryPromotion
-from fleet_rlm.chat.run_lifecycle import ClaimedRun
+from fleet_rlm.chat.run_lifecycle import ClaimedRun, MemoryIntentBuilder
 from fleet_rlm.chat.session_context import build_session_context_manifest
 from fleet_rlm.files.memory_models import WORKSPACE_MEMORY_INJECTION_TAIL_BYTES
 from fleet_rlm.files.models import (
@@ -40,7 +40,7 @@ from fleet_rlm.rlm.inputs import AttachmentContextCapsule, AttachmentContextEntr
 from fleet_rlm.rlm.model_bundle import RLMModelBundle
 from fleet_rlm.rlm.recursive_calls import RecursiveRLMOptions
 
-AsyncCleanup = Callable[[], Awaitable[None]]
+AsyncCleanup = Callable[[], Awaitable[Any]]
 
 
 class RunPreparationError(RuntimeError):
@@ -67,22 +67,52 @@ class RunPreparationUnavailableError(RunPreparationError):
     pass
 
 
+@dataclass(frozen=True, slots=True)
+class PreparedResourcesReceipt:
+    """Internal component proof for one idempotent PreparedRun close."""
+
+    attempted: int
+    completed: int
+    failures: tuple[str, ...] = ()
+    results: tuple[Any, ...] = ()
+
+    @property
+    def clean(self) -> bool:
+        return not self.failures and self.completed == self.attempted
+
+
 @dataclass(slots=True)
 class _PreparedRunResources:
     cleanups: tuple[AsyncCleanup, ...]
     _closed: bool = field(default=False, init=False)
     _lock: asyncio.Lock = field(default_factory=asyncio.Lock, init=False)
+    _receipt: PreparedResourcesReceipt | None = field(default=None, init=False)
 
-    async def aclose(self) -> None:
+    @property
+    def receipt(self) -> PreparedResourcesReceipt | None:
+        return self._receipt
+
+    async def aclose(self) -> PreparedResourcesReceipt:
         async with self._lock:
-            if self._closed:
-                return
+            if self._receipt is not None:
+                return self._receipt
             self._closed = True
+            failures: list[str] = []
+            results: list[Any] = []
+            completed = 0
             for cleanup in reversed(self.cleanups):
                 try:
-                    await cleanup()
-                except Exception:
-                    continue
+                    results.append(await cleanup())
+                    completed += 1
+                except Exception as exc:
+                    failures.append(f"{type(exc).__name__}: {str(exc)[:200]}")
+            self._receipt = PreparedResourcesReceipt(
+                attempted=len(self.cleanups),
+                completed=completed,
+                failures=tuple(failures),
+                results=tuple(results),
+            )
+            return self._receipt
 
 
 @dataclass(frozen=True, slots=True)
@@ -92,11 +122,16 @@ class PreparedRun:
     _resources: _PreparedRunResources
     result_snapshot_sink: ResultSnapshotSink | None = None
     post_commit_memory_promotion: OwnedPostCommitMemoryPromotion | None = None
+    memory_intent_builder: MemoryIntentBuilder | None = None
 
-    async def aclose(self) -> None:
+    @property
+    def cleanup_receipt(self) -> PreparedResourcesReceipt | None:
+        return self._resources.receipt
+
+    async def aclose(self) -> PreparedResourcesReceipt:
         if self.post_commit_memory_promotion is not None:
             await self.post_commit_memory_promotion.wait_owned()
-        await self._resources.aclose()
+        return await self._resources.aclose()
 
 
 def _workspace_memory_digest(capabilities: PreparedCapabilities) -> str:
@@ -122,6 +157,7 @@ class RunEnvironment:
     context_mount_path: str | None = None
     workspace_memory_store: Any | None = None
     post_commit_memory_promotion: OwnedPostCommitMemoryPromotion | None = None
+    memory_intent_builder: MemoryIntentBuilder | None = None
 
 
 class RunEnvironmentProvider(Protocol):
@@ -327,6 +363,7 @@ class DefaultRunPreparer:
             resources,
             environment.result_snapshot_sink,
             environment.post_commit_memory_promotion,
+            environment.memory_intent_builder,
         )
 
     async def _prepare_capabilities(

@@ -54,8 +54,18 @@ _SECRET_NAMES = tuple(
     name for contract in load_profile_environment_contracts() for name in contract.provider_environment_names
 )
 _CLEANUP_RETRY_DELAYS = (0.5, 1.0, 2.0, 4.0)
-_LIVE_ROOT_MODEL = "deepseek-v4-flash"
-_LIVE_SUB_MODEL = "deepseek-v4-flash"
+_LIVE_ROOT_MODEL = os.environ.get("FLEET_LIVE_ROOT_MODEL", "databricks-deepseek-v4-flash-0731")
+_LIVE_SUB_MODEL = os.environ.get("FLEET_LIVE_SUB_MODEL", "databricks-deepseek-v4-flash-0731")
+_APPROVED_MODELS = frozenset(
+    name
+    for base in {
+        _LIVE_ROOT_MODEL,
+        _LIVE_ROOT_MODEL.removesuffix("-0731"),
+        _LIVE_SUB_MODEL,
+        _LIVE_SUB_MODEL.removesuffix("-0731"),
+    }
+    for name in (base, f"openai/{base}")
+)
 
 
 class LiveDaytonaMVPResult(dspy.Signature):
@@ -158,13 +168,14 @@ def _load_repo_env() -> None:
 
 def _live_settings(tmp_path: Path) -> Settings:
     """
-    Load and configure settings required for the live Daytona MVP proof.
+    Load settings for the live Daytona MVP proof.
 
     Parameters:
-        tmp_path (Path): Temporary directory in which to create the proof database.
+        tmp_path (Path): Temporary directory used for the proof database.
 
     Returns:
-        Settings: Runtime settings configured with a temporary database and bounded proof resources.
+        Settings: Runtime settings with a temporary database, unique volume, bounded
+            proof limits, and MLflow tracing disabled.
     """
     _load_repo_env()
     if os.environ.get("FLEET_LIVE", "").strip().lower() not in {"1", "true", "yes"}:
@@ -174,8 +185,8 @@ def _live_settings(tmp_path: Path) -> Settings:
     if missing:
         pytest.fail("Live Daytona MVP proof missing required credentials: " + ", ".join(missing))
     policy = load_runtime_settings()
-    if (policy.root_model, policy.sub_model) != (_LIVE_ROOT_MODEL, _LIVE_SUB_MODEL):
-        pytest.fail("Live Daytona MVP proof requires the production DeepSeek v4 Flash Root and Sub policy")
+    if policy.root_model not in _APPROVED_MODELS or policy.sub_model not in _APPROVED_MODELS:
+        pytest.fail("Live Daytona MVP proof requires the databricks-deepseek-v4-flash-0731 Root and Sub policy")
     database_url = f"sqlite+aiosqlite:///{(tmp_path / 'live-mvp.db').resolve()}"
     upgrade_to_head(database_url)
     return policy.model_copy(

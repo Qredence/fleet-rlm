@@ -32,7 +32,7 @@ from fleet_rlm.daytona.broker_source import (
     build_submit_setup_code,
     extract_final_payload,
 )
-from fleet_rlm.daytona.dspy_sync_bridge import sync_sandbox, tombstone_sync_sandbox
+from fleet_rlm.daytona.dspy_sync_bridge import SyncBridgeDispatcher, sync_sandbox, tombstone_sync_sandbox
 from fleet_rlm.daytona.errors import (
     DaytonaAdapterError,
     map_provider_error,
@@ -162,12 +162,20 @@ class InProcessInterpreterBackend:
             self.namespace[name] = self._wrap_host_tool(name, fn)
 
     def ensure_submit(self, output_fields: list[dict[str, Any]] | None) -> None:
+        """
+        Install or refresh the namespace bindings required for submitting final outputs.
+
+        Parameters:
+            output_fields (list[dict[str, Any]] | None): Output-field definitions used
+                to configure submission support.
+        """
         key = _submit_signature_key(output_fields)
         if key == self._submit_key:
             return
         self.namespace["FleetFinalOutputError"] = FleetFinalOutputError
         self.namespace["_FINAL_OUTPUT_MARKER"] = "__FLEET_FINAL_OUTPUT__"
-        self.namespace["_json"] = __import__("json")
+        self.namespace["json"] = __import__("json")
+        self.namespace["_json"] = self.namespace["json"]
         exec(build_submit_setup_code(output_fields), self.namespace, self.namespace)
         self._submit_key = key
 
@@ -803,13 +811,17 @@ def sandbox_backend(
     sandbox: Any,
     *,
     loop: asyncio.AbstractEventLoop | None = None,
+    dispatcher: SyncBridgeDispatcher | None = None,
     timeout_s: int | None = DEFAULT_EXECUTION_TIMEOUT_S,
 ) -> InterpreterBackend:
     """Build a stateful backend from a live Daytona sandbox (daytona package only).
 
     ``timeout_s`` bounds each ``run_code`` call (Daytona's SDK default is ten
-    minutes when unset); pass ``None`` to keep the SDK default.
+    minutes when unset); pass ``None`` to keep the SDK default. When ``loop``
+    is given, ``dispatcher`` optionally injects the composition-owned bridge
+    authority (QRE-154); omitted, the view resolves through the legacy
+    process-default dispatcher.
     """
     if loop is not None:
-        sandbox = sync_sandbox(sandbox, loop)
+        sandbox = sync_sandbox(sandbox, loop, dispatcher)
     return _SandboxProcessBackend(sandbox, timeout_s=timeout_s)

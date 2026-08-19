@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import threading
+import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 from types import SimpleNamespace
@@ -309,6 +310,25 @@ def test_runner_uses_stock_json_adapter_without_protocol_salvage() -> None:
 
     assert type(adapter) is dspy.JSONAdapter
     assert adapter.use_native_function_calling is True
+
+
+def test_record_phase_failure_preserves_last_lm_call_structure() -> None:
+    from fleet_rlm.rlm.runner import RLMRunner
+
+    outputs: list[dict[str, object]] = []
+    phase = SimpleNamespace(set_outputs=outputs.append)
+
+    RLMRunner._record_phase_failure(
+        phase,
+        time.perf_counter(),
+        None,
+        None,
+        ValueError("provider failure"),
+        last_lm_call={"call_index": 4, "response_keys": ()},
+    )
+
+    assert outputs[-1]["failure_category"] == "unknown"
+    assert outputs[-1]["last_lm_call"] == {"call_index": 4, "response_keys": ()}
 
 
 @pytest.mark.asyncio

@@ -23,13 +23,14 @@ references fail startup.
 ## Runtime prerequisites
 
 The provider environment contract is policy-derived; see the [profile matrix](profile-matrix.md).
-The shipped interactive profiles (`daytona` and `daytona-recursive`) use
-OpenCode Go. Managed and benchmark profiles use the Databricks AI Gateway.
-Every provider-backed profile also requires `FLEET_DAYTONA_API_KEY`.
+All committed profiles use the OpenAI-compatible Chat Completion API through the
+configured Databricks AI Gateway endpoint and require
+`DATABRICKS_TOKEN`, `FLEET_DATABRICKS_AI_GATEWAY_BASE_URL`, and
+`FLEET_DAYTONA_API_KEY`.
 
 | Profile family | Provider values | Persistence and tracing |
 | --- | --- | --- |
-| `daytona` / `daytona-recursive` | `FLEET_OPENCODE_GO_API_KEY`, `FLEET_OPENCODE_GO_BASE_URL`, `FLEET_DAYTONA_API_KEY` | Configure `FLEET_DATABASE_URL` at Alembic head for durable deployment; local SQLite is suitable for development. Local MLflow tracing is enabled. |
+| `daytona` / `daytona-recursive` | `DATABRICKS_TOKEN`, `FLEET_DATABRICKS_AI_GATEWAY_BASE_URL`, `FLEET_DAYTONA_API_KEY` | Configure `FLEET_DATABASE_URL` at Alembic head for durable deployment; local SQLite is suitable for development. Local MLflow tracing is enabled. |
 | `daytona-managed` | `DATABRICKS_TOKEN`, `FLEET_DATABRICKS_AI_GATEWAY_BASE_URL`, `FLEET_DAYTONA_API_KEY` | `FLEET_DATABASE_URL` and every managed MLflow environment name in the matrix are required. |
 | `daytona-bench` / `daytona-bench-40` | `DATABRICKS_TOKEN`, `FLEET_DATABRICKS_AI_GATEWAY_BASE_URL`, `FLEET_DAYTONA_API_KEY` | Use the explicitly configured database for benchmark runs; MLflow tracing is disabled. |
 
@@ -40,8 +41,9 @@ applies migrations; use `uv run python scripts/db_init.py` or Alembic directly.
 
 `config/fleet.toml` deep-merges `[defaults]` into the selected
 `[profiles.<name>]`. It centralizes application identity; runtime timeouts,
-leases, liveness, and the credentialed-command live switch; Root/Sub model ids, provider-service routing, endpoint, token limit, temperature,
-cache, retries, and secret-variable references; RLM limits and host verbosity;
+leases, liveness, and the credentialed-command live switch; Root/Sub model ids,
+Chat Completion base endpoints, token limits, temperatures, cache, retries, and
+secret-variable references; RLM limits and host verbosity;
 storage limits and database variable reference; Daytona API-key/Volume/Snapshot
 policy; MLflow tracking policy; and Fleet/DSPy logger level. The storage limits
 are independent: `storage.max_upload_bytes` bounds uploads and workspace files,
@@ -111,19 +113,29 @@ chain-of-thought or arbitrary callback payloads.
 `rlm.verbose` controls native DSPy host logs only. It does not control the
 typed Runtime Events projected through SSE or the terminal client.
 
+The native RLM policy fields map directly to DSPy 3.3.x: `max_iters` bounds
+Root/child action iterations, `max_llm_calls` bounds prompts sent through native
+`llm_query` and `llm_query_batched` tools (each batched prompt counts), and
+`max_output_chars` bounds retained REPL output/history. The default Root values
+are `20`, `50`, and `10000`; the child values are `8`, `12`, and `4000`.
+`max_execution_output_chars`, the Turn deadline, and recursive call/concurrency
+limits are separate Fleet controls. There is no configurable recursive depth;
+`RLM_NATIVE_CHILD_DEPTH = 1` is a fixed product invariant.
+
 The `[rlm]` recursion settings include `recursion_enabled` and bound the native
 `rlm_query(prompt=prompt)` child harness: `recursion_max_calls`,
 `recursion_max_prompt_chars`, `recursion_child_max_iters`,
 `recursion_child_max_llm_calls`, and `recursion_child_max_output_chars`.
 `recursion_max_parallel_children` bounds the number of independent child RLMs
-that Fleet may run concurrently; it defaults to `2` and is not a model-facing
-concurrency control.
+that Fleet may run concurrently; the committed default is `5` and it is not a
+model-facing concurrency control.
 The native recursive-child boundary is a fixed product invariant (`RLM_NATIVE_CHILD_DEPTH = 1`),
 not an editable policy value. Existing policies that still set
 `rlm.recursion_max_depth` fail validation; delete the key.
 These are non-secret policy values; `.env` and ambient process variables do not
-override them. The default and `daytona` policies keep recursion disabled.
-`daytona-recursive` enables one real child level: each child receives a fresh,
+override them. The committed Daytona profiles inherit recursive execution from
+`[defaults.rlm]`; `daytona-recursive` is the selected default profile.
+Each child receives a fresh,
 dedicated Daytona Sandbox, ordinary Daytona network egress, and the same Volume
 ID mounted at `recursive/<workspace-id>/<run-id>/<call-index>`. That private
 sibling scope cannot reach the Root `workspaces/<workspace-id>` mount. The
@@ -136,18 +148,14 @@ Root-only, Run-scoped candidate collector and permits best-effort promotion only
 after a successful durable Turn commit; it does not change explicit-user memory
 behavior.
 
-All committed profiles use `deepseek-v4-flash` for both Root and Sub. The
-interactive `daytona` and `daytona-recursive` profiles route through OpenCode
-Go with `FLEET_OPENCODE_GO_API_KEY` and `FLEET_OPENCODE_GO_BASE_URL`; both roles
-have a 16,000-output-token cap, disabled LM caching, and low reasoning effort.
-`daytona-recursive` additionally enables the bounded child-RLM policy.
-
-The `daytona-managed`, `daytona-bench`, and `daytona-bench-40` profiles route
-through the Databricks AI Gateway with `DATABRICKS_TOKEN` and
-`FLEET_DATABRICKS_AI_GATEWAY_BASE_URL`; both roles have an 8,000-output-token
-cap. Benchmark profiles disable LM caching and MLflow tracing. The inherited
-provider-service value is `uscentral.default.zencode-oai`, sent as
-`Databricks-Model-Provider-Service`.
+All committed profiles use the OpenAI-compatible Chat Completion format:
+Root and Sub each use the `databricks-deepseek-v4-flash-0731` endpoint, the
+`DATABRICKS_TOKEN` API-key environment reference, and the configured
+`FLEET_DATABRICKS_AI_GATEWAY_BASE_URL`. `dspy.LM` sends the request to the
+provider's `/chat/completions` endpoint with `model_type="chat"`; no
+provider-specific routing header is required. Interactive profiles cap both
+roles at 16,000 output tokens; managed and benchmark profiles cap both roles at
+8,000. Benchmark profiles disable LM caching and keep MLflow tracing off.
 
 The interactive profiles route traces to the local `fleet-rlm` experiment at
 `http://127.0.0.1:5001`; the supervised `fleet cli` command starts or reuses that
@@ -163,6 +171,9 @@ The local pi-tui `/settings` command reads and edits the non-secret policy in
 when an operator has explicitly exposed the normal API on another interface.
 The selector supports `[defaults]` and every existing named profile, and offers
 choice, text/number, and boolean child panels according to each setting type.
+Root/Sub model ids, provider API-key environment names, and Chat Completion base
+URL environment names are directly editable there; only the names are shown,
+never secret values.
 
 Edits are revision-checked, atomically written, and validated against every
 profile before saving. They never read or display `.env` values or provider
@@ -184,11 +195,9 @@ Fleet restart.
 | --- | --- | --- |
 | `FLEET_DATABASE_URL` | `storage.database_url_env` | Async SQLAlchemy URL; required by the managed profile and durable deployments |
 | `FLEET_DAYTONA_API_KEY` | `daytona.api_key_env` | Daytona provider credential for every profile |
-| `FLEET_OPENCODE_GO_API_KEY` | Root/Sub `api_key_env` in `daytona` and `daytona-recursive` | OpenCode Go credential |
-| `FLEET_OPENCODE_GO_BASE_URL` | Root/Sub `base_url_env` in `daytona` and `daytona-recursive` | OpenCode Go endpoint |
+| `DATABRICKS_TOKEN` | Root/Sub `api_key_env` in every committed profile | Provider API key for the Chat Completion endpoint |
+| `FLEET_DATABRICKS_AI_GATEWAY_BASE_URL` | Root/Sub `base_url_env` in every committed profile | Databricks AI Gateway `/mlflow/v1` base URL (`/chat/completions` is appended) |
 | `FLEET_OPENAI_API_KEY` | A custom Root/Sub `api_key_env` reference | OpenAI-compatible provider credential for custom policy only |
-| `DATABRICKS_TOKEN` | Root/Sub `api_key_env` in managed and benchmark profiles | Databricks AI Gateway credential |
-| `FLEET_DATABRICKS_AI_GATEWAY_BASE_URL` | Root/Sub `base_url_env` in managed and benchmark profiles | Databricks AI Gateway endpoint |
 | `FLEET_MLFLOW_EXPERIMENT_NAME` | `daytona-managed.mlflow.experiment_name_env` | Managed MLflow experiment |
 | `FLEET_MLFLOW_TRACE_CATALOG` / `FLEET_MLFLOW_TRACE_SCHEMA` | `daytona-managed.mlflow.*_env` | Unity Catalog destination |
 | `FLEET_MLFLOW_TRACE_TABLE_PREFIX` / `FLEET_MLFLOW_TRACING_SQL_WAREHOUSE_ID` | `daytona-managed.mlflow.*_env` | Trace table prefix and SQL warehouse |

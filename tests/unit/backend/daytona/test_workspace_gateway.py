@@ -74,7 +74,10 @@ class _Platform:
         return sandbox
 
     async def delete(self, sandbox: object) -> None:
-        self.deleted.append(str(sandbox.id))
+        if isinstance(sandbox, str):
+            self.deleted.append(sandbox)
+        else:
+            self.deleted.append(str(sandbox.id))
 
 
 class _Volumes:

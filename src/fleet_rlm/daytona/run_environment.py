@@ -25,7 +25,7 @@ from fleet_rlm.chat.run_preparation import (
 )
 from fleet_rlm.composition.common import recursive_rlm_options
 from fleet_rlm.config import Settings, load_runtime_settings
-from fleet_rlm.daytona.dspy_sync_bridge import sync_sandbox
+from fleet_rlm.daytona.dspy_sync_bridge import SyncBridgeDispatcher, sync_sandbox
 from fleet_rlm.daytona.platform import (
     LiveDaytonaPlatform,
     LiveDaytonaVolumeClient,
@@ -47,7 +47,7 @@ from fleet_rlm.daytona.session_manager import (
     LeaseRequest,
 )
 from fleet_rlm.daytona.workspace_fs import AsyncDaytonaVolumeFS, DaytonaSandboxVolumeFs, VolumeFSCacheState
-from fleet_rlm.files.memory_candidates import MemoryCandidateCollector
+from fleet_rlm.files.memory_candidates import MemoryCandidateCollector, build_memory_promotion_intents
 from fleet_rlm.files.memory_models import WORKSPACE_MEMORY_INJECTION_TAIL_BYTES
 from fleet_rlm.files.models import (
     AttachmentAccess,
@@ -152,6 +152,7 @@ class _DaytonaRunSink:
         sandbox: Any,
         *,
         loop: asyncio.AbstractEventLoop | None = None,
+        dispatcher: SyncBridgeDispatcher | None = None,
         paths: VolumePaths,
     ) -> None:
         self._sandbox = sandbox
@@ -161,7 +162,9 @@ class _DaytonaRunSink:
         cache_state = VolumeFSCacheState()
         self._files = AsyncDaytonaVolumeFS(sandbox, mount_path=mount_path, cache_state=cache_state)
         self.volume_fs = (
-            DaytonaSandboxVolumeFs(sync_sandbox(sandbox, loop), mount_path=mount_path, cache_state=cache_state)
+            DaytonaSandboxVolumeFs(
+                sync_sandbox(sandbox, loop, dispatcher), mount_path=mount_path, cache_state=cache_state
+            )
             if loop is not None
             else None
         )
@@ -249,6 +252,7 @@ class _DaytonaEnvironmentProvider:
             sink = _DaytonaRunSink(
                 sandbox,
                 loop=asyncio.get_running_loop(),
+                dispatcher=getattr(self.resources, "dispatcher", None),
                 paths=paths,
             )
             assert sink.volume_fs is not None
@@ -265,12 +269,20 @@ class _DaytonaEnvironmentProvider:
                 )
             )
 
+            def memory_intent_builder(run_id: Any, candidates: tuple[Any, ...]) -> tuple[Any, ...]:
+                return build_memory_promotion_intents(
+                    run_id=run_id,
+                    candidates=candidates,
+                    allowed_categories=self.settings.rlm_autonomous_memory_categories,
+                )
+
             async def release() -> None:
                 await self.resources.session_manager.release(lease)
 
             main_loop = asyncio.get_running_loop()
             child_runtime_factory = build_child_runtime_factory(
                 loop=main_loop,
+                dispatcher=getattr(self.resources, "dispatcher", None),
                 platform=self.resources.platform,
                 admission=self.resources.daytona_admission,
                 volume_id=lease.volume_id,
@@ -293,6 +305,7 @@ class _DaytonaEnvironmentProvider:
                 context_mount_path=str(paths.mount_path),
                 workspace_memory_store=memory_store,
                 post_commit_memory_promotion=memory_promotion,
+                memory_intent_builder=memory_intent_builder,
             )
         except BaseException:
             await asyncio.shield(self.resources.session_manager.release(lease))
@@ -480,10 +493,12 @@ class DaytonaRuntimeResources:
         idle_stop_seconds: float | None = DEFAULT_IDLE_STOP_SECONDS,
         execution_output_cap: int,
         execution_timeout_s: int,
+        dispatcher: SyncBridgeDispatcher | None = None,
     ) -> None:
         self.settings = resolve_settings(settings)
         self.sandbox_spec = sandbox_spec or sandbox_spec_from_settings(self.settings)
         self.client = build_daytona_client(self.settings)
+        self.dispatcher = dispatcher
         self.platform = LiveDaytonaPlatform(self.client, self.sandbox_spec)
         self.volume_client = LiveDaytonaVolumeClient(self.client)
         self.volume_config = volume_config_from_settings(self.settings)
@@ -502,6 +517,7 @@ class DaytonaRuntimeResources:
             idle_stop_seconds=idle_stop_seconds,
             execution_output_cap=execution_output_cap,
             execution_timeout_s=execution_timeout_s,
+            dispatcher=dispatcher,
         )
         self._sandbox_ids: list[str] = []
 

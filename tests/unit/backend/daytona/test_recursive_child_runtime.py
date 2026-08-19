@@ -78,6 +78,10 @@ class _Platform:
         """Record a sandbox deletion request for the specified sandbox."""
         self.deleted.append(sandbox_id)
 
+    async def get(self, _sandbox_id: str) -> None:
+        """Report every deleted Sandbox as already absent (explicit not-found)."""
+        return None
+
 
 @pytest.mark.asyncio
 async def test_child_runtime_uses_sibling_volume_scope_and_strictly_cleans_only_child(

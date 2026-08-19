@@ -16,9 +16,20 @@ def build_submit_setup_code(output_fields: list[dict[str, Any]] | None) -> str:
 
 
 def remote_submit_setup_code(output_fields: list[dict[str, Any]] | None) -> str:
+    """Generate remote setup source code for submitting final tool output.
+
+    Parameters:
+        output_fields (list[dict[str, Any]] | None): Output field definitions used to
+            generate the typed submission function; `None` or an empty list produces
+            the generic submission function.
+
+    Returns:
+        str: Complete remote setup source code.
+    """
     return f"""
 import base64 as _base64
-import json as _json
+import json
+_json = json
 _FINAL_OUTPUT_MARKER = {_FINAL_OUTPUT_MARKER!r}
 
 class FleetFinalOutputError(Exception):
@@ -42,7 +53,18 @@ def SUBMIT(**kwargs):
 
 
 def _typed_submit_source(output_fields: list[dict[str, Any]]) -> str:
+    """
+    Generate source code for a typed ``SUBMIT`` function based on configured output fields.
+
+    Parameters:
+        output_fields (list[dict[str, Any]]): Output field definitions used to build the
+            generated signature and result mapping.
+
+    Returns:
+        str: Source code defining the generated ``SUBMIT`` function.
+    """
     signature_parts: list[str] = []
+    validation_parts: list[str] = []
     result_parts: list[str] = []
     for field in output_fields:
         name = str(field.get("name") or "").strip()
@@ -50,9 +72,24 @@ def _typed_submit_source(output_fields: list[dict[str, Any]]) -> str:
             continue
         type_hint = str(field.get("type") or "").strip()
         signature_parts.append(f"{name}: {type_hint}" if type_hint else name)
+        if type_hint in {"str", "builtins.str"}:
+            message = (
+                f"SUBMIT field {name} must be a string; serialize mappings/lists with "
+                "json.dumps(value, ensure_ascii=False)"
+            )
+            validation_parts.extend(
+                (
+                    f"if not isinstance({name}, str):",
+                    f"    raise TypeError({message!r})",
+                )
+            )
         result_parts.append(f'"{name}": {name}')
     signature = ", ".join(signature_parts) or "**kwargs"
-    body = f"result = {{{', '.join(result_parts)}}}" if result_parts else "result = dict(kwargs)"
+    body_lines = [
+        *validation_parts,
+        f"result = {{{', '.join(result_parts)}}}" if result_parts else "result = dict(kwargs)",
+    ]
+    body = "\n    ".join(body_lines)
     return f"""
 import base64 as _base64
 

@@ -20,11 +20,58 @@ from fleet_rlm.daytona.errors import DaytonaAdapterError
 
 _BRIDGE_SERVICE_POLL_S = 0.5
 
-_bridge_service_loop: asyncio.AbstractEventLoop | None = None
+
+class SyncBridgeDispatcher:
+    """Composition-owned routing authority for sync-view SDK coroutines.
+
+    Each Daytona composition owns exactly one dispatcher and injects it into
+    every :func:`sync_sandbox` view it creates, so multiple app/test
+    compositions in one process cannot overwrite each other's bridge
+    authority. The dispatcher carries the same RC-7 guarantee as the legacy
+    module-global: its registered loop never performs nested synchronous
+    waits, so posted coroutines are always serviced. Closing a view
+    tombstones only that view's ``_SyncBridgeLoop``; the dispatcher itself is
+    shared composition state and must never be tombstoned per-view.
+    """
+
+    def __init__(self) -> None:
+        self._service_loop: asyncio.AbstractEventLoop | None = None
+
+    def set_loop(self, loop: asyncio.AbstractEventLoop | None) -> None:
+        """Register the loop servicing sync-view SDK coroutines for this composition."""
+        self._service_loop = loop
+
+    def clear_loop(self, loop: asyncio.AbstractEventLoop | None) -> None:
+        """Unregister only when this dispatcher still routes onto ``loop``.
+
+        A disposing composition can never clear another composition's loop:
+        the identity check makes retreat behaviorally safe under overlapping
+        lifespans.
+        """
+        if loop is not None and self._service_loop is not loop:
+            return
+        self._service_loop = None
+
+    def service_loop(self) -> asyncio.AbstractEventLoop | None:
+        """Return the registered composition loop, if any."""
+        return self._service_loop
+
+
+_default_dispatcher = SyncBridgeDispatcher()
+
+
+def default_bridge_dispatcher() -> SyncBridgeDispatcher:
+    """Return the legacy process-default dispatcher (transitional seam).
+
+    New compositions must own a :class:`SyncBridgeDispatcher` instead of
+    registering on this default; the default exists only so un-migrated
+    private-test and optimization lanes keep their legacy behavior.
+    """
+    return _default_dispatcher
 
 
 def set_bridge_service_loop(loop: asyncio.AbstractEventLoop | None) -> None:
-    """Register the composition-wide loop that services sync-bridge SDK coroutines.
+    """Register the composition-wide loop on the legacy process-default dispatcher.
 
     Daytona SDK objects (client, Sandbox, FileSystem; their aiohttp session)
     are loop-affine to the loop that created them — the composition/uvicorn
@@ -34,14 +81,19 @@ def set_bridge_service_loop(loop: asyncio.AbstractEventLoop | None) -> None:
     synchronous waits (those live only on RLM worker threads and broker
     fulfill threads), so a posted coroutine always gets serviced and the
     worker↔bridge circular wait cannot form.
+
+    Transitional facade over :func:`default_bridge_dispatcher`; composition
+    installs route through their own :class:`SyncBridgeDispatcher` instead.
     """
-    global _bridge_service_loop
-    _bridge_service_loop = loop
+    if loop is None:
+        _default_dispatcher.clear_loop(_default_dispatcher.service_loop())
+    else:
+        _default_dispatcher.set_loop(loop)
 
 
 def bridge_service_loop() -> asyncio.AbstractEventLoop | None:
-    """Return the registered composition-wide bridge service loop, if any."""
-    return _bridge_service_loop
+    """Return the loop registered on the legacy process-default dispatcher."""
+    return _default_dispatcher.service_loop()
 
 
 class _SyncBridgeLoop:
@@ -56,8 +108,14 @@ class _SyncBridgeLoop:
     of posting to a service loop after lease release.
     """
 
-    def __init__(self, *, caller_loop: asyncio.AbstractEventLoop | None) -> None:
+    def __init__(
+        self,
+        *,
+        caller_loop: asyncio.AbstractEventLoop | None,
+        dispatcher: SyncBridgeDispatcher | None = None,
+    ) -> None:
         self._caller_loop = caller_loop
+        self._dispatcher = dispatcher
         self._closed = False
 
     def _bridge_error(self, message: str) -> DaytonaAdapterError:
@@ -72,8 +130,17 @@ class _SyncBridgeLoop:
         self._closed = False
 
     def service_loop(self) -> asyncio.AbstractEventLoop | None:
-        """Resolve the loop servicing this bridge: registered service loop first."""
-        registered = bridge_service_loop()
+        """Resolve the loop servicing this bridge: injected dispatcher first.
+
+        Resolution order pins authority at view creation: an explicitly
+        injected composition dispatcher, then the legacy process-default
+        dispatcher, then the caller-captured loop (legacy/test fallback).
+        """
+        if self._dispatcher is not None:
+            registered = self._dispatcher.service_loop()
+            if registered is not None:
+                return registered
+        registered = _default_dispatcher.service_loop()
         return registered if registered is not None else self._caller_loop
 
     def run(self, awaitable: Any) -> Any:
@@ -216,8 +283,13 @@ class _DSPySyncSandboxView:
     when no service loop is registered.
     """
 
-    def __init__(self, sandbox: Any, loop: asyncio.AbstractEventLoop) -> None:
-        owner = _SyncBridgeLoop(caller_loop=loop)
+    def __init__(
+        self,
+        sandbox: Any,
+        loop: asyncio.AbstractEventLoop,
+        dispatcher: SyncBridgeDispatcher | None = None,
+    ) -> None:
+        owner = _SyncBridgeLoop(caller_loop=loop, dispatcher=dispatcher)
         if hasattr(sandbox, "code_interpreter"):
             self.code_interpreter = _SyncCodeInterpreter(sandbox.code_interpreter, owner, loop)
         if hasattr(sandbox, "process"):
@@ -240,15 +312,22 @@ class _DSPySyncSandboxView:
         self._owner.start()
 
 
-def sync_sandbox(sandbox: Any, loop: asyncio.AbstractEventLoop) -> Any:
+def sync_sandbox(
+    sandbox: Any,
+    loop: asyncio.AbstractEventLoop,
+    dispatcher: SyncBridgeDispatcher | None = None,
+) -> Any:
     """Return a synchronous sandbox view for DSPy worker-thread execution.
 
-    The concrete view type is private to this module. Callers that need to
-    invalidate a view after lease release should use :func:`tombstone_sync_sandbox`.
+    ``dispatcher`` injects the composition-owned bridge authority (QRE-154);
+    when omitted, the view resolves through the legacy process-default
+    dispatcher. The concrete view type is private to this module. Callers that
+    need to invalidate a view after lease release should use
+    :func:`tombstone_sync_sandbox`.
     """
     if isinstance(sandbox, _DSPySyncSandboxView):
         return sandbox
-    return _DSPySyncSandboxView(sandbox, loop)
+    return _DSPySyncSandboxView(sandbox, loop, dispatcher)
 
 
 def tombstone_sync_sandbox(sandbox: Any) -> None:
@@ -262,7 +341,9 @@ def tombstone_sync_sandbox(sandbox: Any) -> None:
 
 
 __all__ = [
+    "SyncBridgeDispatcher",
     "bridge_service_loop",
+    "default_bridge_dispatcher",
     "set_bridge_service_loop",
     "sync_sandbox",
     "tombstone_sync_sandbox",

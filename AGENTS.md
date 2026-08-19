@@ -25,7 +25,6 @@ For the current delivery sequence, base all work on `origin/main`; `main` is a p
 
 - `src/fleet_rlm/AGENTS.md` - backend, runtime, API, persistence, Daytona, and package rules.
 - `scripts/AGENTS.md` - maintenance, validation, benchmark, and release scripts.
-- `scripts/optimize/AGENTS.md` - offline signature-optimization lane (GEPA, FRONTIER-tier rules).
 - `tools/fleet-tui/AGENTS.md` - pi-tui client, SSE projection, state, and tests.
 
 ## Durable Detail Locations
@@ -141,10 +140,10 @@ Run `make check-docs` when docs, commands, Codex config, generated contracts, or
   include the maintained TUI. Live promotion uses `tests/live/backend/` with
   explicit `FLEET_LIVE=1`. `make api-sync` owns root OpenAPI and generated TUI
   HTTP types; a future graphical client is separate work.
-- Under pinned DSPy 3.3.0, every `dspy.LM` model must resolve a provider; model
-  roles/defaults come from the selected TOML profile, and bare compatible-base
-  IDs use `normalize_model_id`. Prefer stock LMs with stateless overrides; Fleet
-  uses DSPy's `max_iters` end-to-end (`rlm.max_iters`, `RLMOptions.max_iters`). Root may use native
-  `llm_query`/`llm_query_batched`, while Root-only `rlm_query_batched` reserves
-  ordered, isolated child RLMs under a fixed native depth of one.
-- Native RLMs use a fail-closed interpreter factory and caller-owned positional interpreters; Fleet or child leases own shutdown.
+- Under pinned DSPy 3.3.0, every `dspy.LM` must resolve a provider; profile roles
+  and bare IDs use `normalize_model_id`; native `RLMOptions` map one-to-one to
+  DSPy. `max_iters` bounds iterations, `max_llm_calls` semantic prompts, and
+  `max_output_chars` retained REPL output. Root-only `rlm_query_batched` reserves
+  children; Root depth is 0, children are depth 1, deeper calls use Sub-LM
+  fallback (`max_depth` is not configurable). Caller-owned RLM interpreters are
+  fail-closed and Fleet-owned; `RLM(verbose=...)` is host logging, not UI streaming.

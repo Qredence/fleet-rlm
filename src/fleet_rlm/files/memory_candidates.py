@@ -75,6 +75,124 @@ class MemoryCandidatePromotionResult:
     reasons: tuple[str, ...] = ()
 
 
+# P23 closed outbox outcome vocabulary (host diagnostics only; never raw
+# exceptions and never Memory content). Shared by the persistence facade and
+# the post-commit fast path to keep the byte vocabulary single-sourced.
+OUTCOME_PROMOTED = "promoted"
+OUTCOME_DUPLICATE = "duplicate"
+OUTCOME_POLICY_DENIED = "policy_denied"
+OUTCOME_SUPERSEDES_NOT_ACTIVE = "supersedes_not_active"
+OUTCOME_MEMORY_ID_COLLISION = "memory_id_collision"
+OUTCOME_STORE_UNAVAILABLE = "store_unavailable"
+OUTCOME_PROMOTION_FAILED = "promotion_failed"
+OUTCOME_DEADLINE_EXCEEDED = "deadline_exceeded"
+OUTCOME_INTERRUPTED = "interrupted"
+TERMINAL_OUTCOMES = frozenset(
+    {
+        OUTCOME_POLICY_DENIED,
+        OUTCOME_SUPERSEDES_NOT_ACTIVE,
+        OUTCOME_MEMORY_ID_COLLISION,
+    }
+)
+
+
+@dataclass(frozen=True, slots=True)
+class MemoryPromotionIntent:
+    """One crash-recoverable promotion effect pinned at Turn-commit time (P23).
+
+    ``record_text`` is the canonical v3 record minted once per intent; every
+    replay appends byte-identical text so the mounted Workspace Agent's exact
+    (timestamp, category, learning) replay check returns the existing durable
+    id instead of duplicating active Memory.
+    """
+
+    candidate_id: str
+    candidate_ordinal: int
+    category: str
+    learning: str
+    byte_size: int
+    supersedes_id: str | None
+    memory_id: str
+    record_text: str
+    source: str = WORKSPACE_MEMORY_CANDIDATE_SOURCE
+
+
+def build_memory_promotion_intents(
+    *,
+    run_id: UUID,  # identity anchor: intents are (run_id, candidate_id)-scoped rows
+    candidates: Sequence[MemoryCandidate],
+    allowed_categories: Sequence[str],
+    clock: Callable[[], datetime] | None = None,
+) -> tuple[MemoryPromotionIntent, ...]:
+    """Pin one bounded, deterministic intent per accepted candidate.
+
+    Pure: no store or I/O. Raises ``WorkspaceMemoryRecordError`` or
+    ``WorkspaceMemoryCategoryError`` on defensive invalid input; the caller
+    degrades softly (commit the Turn without intents), mirroring the
+    optional-side-effect contract for post-commit promotion.
+    """
+    if not candidates:
+        return ()
+    if len(candidates) > WORKSPACE_MEMORY_CANDIDATE_MAX_COUNT:
+        raise WorkspaceMemoryRecordError("candidate batch exceeds its bound")
+    allowed = set(normalize_memory_candidate_categories(tuple(allowed_categories)))
+    if not allowed:
+        raise WorkspaceMemoryCategoryError("no autonomous Memory categories allowed")
+    now = clock or (lambda: datetime.now(UTC))
+    pinned_at = now()
+    if pinned_at.tzinfo is None:
+        pinned_at = pinned_at.replace(tzinfo=UTC)
+    timestamp = pinned_at.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+    intents: list[MemoryPromotionIntent] = []
+    if run_id is None:
+        raise WorkspaceMemoryRecordError("run_id is required for intent scoping")
+    claims: set[tuple[str, str]] = set()
+    total_bytes = 0
+    for ordinal, candidate in enumerate(candidates):
+        normalized = normalize_memory_candidate_categories((candidate.category,))[0]
+        if normalized not in allowed:
+            raise WorkspaceMemoryCategoryError("candidate category is not allowed")
+        learning = normalize_workspace_memory_learning(candidate.learning)
+        byte_size = len(learning.encode("utf-8"))
+        if byte_size > WORKSPACE_MEMORY_CANDIDATE_MAX_LEARNING_BYTES or byte_size != candidate.byte_size:
+            raise WorkspaceMemoryRecordError("candidate byte size is invalid")
+        if candidate.source != WORKSPACE_MEMORY_CANDIDATE_SOURCE:
+            raise WorkspaceMemoryRecordError("candidate source is invalid")
+        supersedes_id = (
+            None if candidate.supersedes_id is None else normalize_workspace_memory_id(candidate.supersedes_id)
+        )
+        claim = (normalized, learning)
+        if claim in claims:
+            raise WorkspaceMemoryRecordError("duplicate candidate in batch")
+        claims.add(claim)
+        total_bytes += byte_size
+        if total_bytes > WORKSPACE_MEMORY_CANDIDATE_MAX_TOTAL_BYTES:
+            raise WorkspaceMemoryRecordError("candidate batch exceeds its aggregate bound")
+        memory_id = workspace_memory_record_id(timestamp, normalized, learning)
+        record_text = format_workspace_memory_v3_record(
+            learning,
+            normalized,
+            memory_id=memory_id,
+            created_at=timestamp,
+            updated_at=timestamp,
+            source=WORKSPACE_MEMORY_CANDIDATE_SOURCE,
+            supersedes_id=supersedes_id,
+        )
+        intents.append(
+            MemoryPromotionIntent(
+                candidate_id=candidate.candidate_id,
+                candidate_ordinal=ordinal,
+                category=normalized,
+                learning=learning,
+                byte_size=byte_size,
+                supersedes_id=supersedes_id,
+                memory_id=memory_id,
+                record_text=record_text,
+            )
+        )
+    return tuple(intents)
+
+
 def promote_memory_candidates(
     *,
     store: WorkspaceMemoryStore,

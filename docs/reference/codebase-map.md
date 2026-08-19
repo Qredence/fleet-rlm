@@ -14,15 +14,15 @@ compatibility runtime and parallel foundation package no longer exist.
 | `snapshot_contract.py` | immutable Daytona Snapshot name policy | none |
 | `result_snapshot.py` | private commit-gated typed-result encoding | RLM prediction/usage |
 | `api/` | HTTP translation, local scope, dependency aliases, OpenAPI/SSE projection, UIMessage reload | domain interfaces and composed modules |
-| `chat/` | Turn preparation, shared capability preparation, coordinator facade, private Turn execution driver, lifecycle finalization, owned post-commit Memory promotion, shared Turn Claim policy | RLM, Sessions, Skills, files |
+| `chat/` | coordinator facade plus coordinator-owned `RunOwnership` lifetime state/receipt, Turn preparation, private execution driver, lifecycle finalization, owned post-commit Memory promotion, shared Turn Claim policy | RLM, Sessions, Skills, files |
 | `rlm/` | DSPy Signature, Root/Sub model roles, fresh RLM construction, delegation metrics, routing evaluation, fixed-depth child executor, options, events, runner | DSPy and domain values |
 | `optimization/` | trusted-host GEPA/evidence lane | Daytona evaluator, evidence types |
-| `daytona/` | exclusive SDK boundary: async platform/provisioning, provider-only Session ownership, DSPy-only sync interpreter seam, pure broker source plus transport, diagnostics, Session Workspace gateways, and the mounted Workspace Memory adapter | Daytona SDK and domain values |
+| `daytona/` | exclusive SDK boundary: async platform/provisioning, provider-only Session ownership, DSPy-only sync interpreter seam (injected `SyncBridgeDispatcher`), confirmed Sandbox Lease ownership (`sandbox_lease.py`) with typed cleanup receipts and confirmed deletion lifecycle (`lifecycle.py`), versioned installed Workspace Agent protocol (`workspace_agent.py`), pure broker source plus transport, diagnostics, Session Workspace gateways, and the mounted Workspace Memory adapter | Daytona SDK and domain values |
 | `runtime/` | provider-neutral Sandbox binding records and store ports | domain values |
 | `sessions/` | Session catalog, Turn input/history, canonical AssistantPart vocabulary, versioned Committed Turn | domain values |
 | `files/`, `artifacts/` | Attachment staging, paged/full-lifecycle Session Workspace and Project tools, workspace-wide Memory values/tools, direct Workspace Artifact Candidate staging, Artifact promotion/read | storage interfaces and safe paths |
 | `skills/` | bundled catalog, authorization, progressive loading, capability seam, Tool construction | domain values and package resources |
-| `persistence/` | SQLAlchemy models and internal Run codec, claim decisions, liveness, final-state, query helpers, and repository adapters | Session/file/Artifact interfaces |
+| `persistence/` | SQLAlchemy models and internal Run codec, claim decisions, liveness, final-state, query helpers, Memory promotion outbox (P23), and repository adapters | Session/file/Artifact interfaces |
 | `observability/` | sanitized failure diagnostics; opt-in Databricks MLflow DSPy tracing | domain errors, Settings |
 | `cli/` | supervised Daytona plus pi-tui, backend launchers, doctor dispatch | ASGI entrypoint and Daytona diagnostics |
 
@@ -89,8 +89,10 @@ The authoritative route inventory and shapes are in
 | `src/fleet-turn-stream.ts` | request opening, bounded same-key retry, strict stream and part lifecycle |
 | `src/sse.ts` | SSE framing and closed validation against generated chunk tables |
 | `src/tui/runner.ts` | active Run state, submission, cancellation |
-| `src/tui/live-projection.ts` | live SSE chunk → store events (`LiveTurnProjector`) |
-| `src/tui/durable-projection.ts` | durable reload turns → store events (`projectDurableTurns`) |
+| `src/tui/canonical.ts` | canonical semantic Turn event types (backend-mirrored) + cross-language JSON serializer |
+| `src/tui/live-adapter.ts`, `durable-adapter.ts` | thin wire → canonical adapters (all casing/wrapper compat lives here) |
+| `src/tui/turn-reducer.ts` | one source-agnostic reducer: canonical events → store events (all fold/mint state) |
+| `src/tui/live-projection.ts`, `durable-projection.ts` | stable facades composing adapter + reducer for the runner/hydration call sites |
 | `src/tui/projection-helpers.ts` | shared pure helpers / message builders for projection |
 | `src/tui/store.ts` | conversation state, atomic Session hydration, and terminal stream settlement |
 | `src/tui/application.ts`, `screen.ts`, `transcript.ts` | pi-tui alternate-screen lifecycle, editor/input, follow-end `ScrollView` layout, terminal-safe status, and mutable Run activity |

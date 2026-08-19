@@ -138,6 +138,8 @@ class _ExecutionState:
     pending_event: asyncio.Task[RuntimeEvent] | None = None
     stream: RunEventStream | None = None
     finalization_task: asyncio.Task[RunSettlement] | None = None
+    cleanup_task: asyncio.Task[None] | None = None
+    on_cleanup: Callable[[asyncio.Task[None]], None] | None = None
     settled: bool = False
     cleanup_handed_off: bool = False
 
@@ -171,12 +173,15 @@ class RunExecutionDriver:
         heartbeat: ClaimHeartbeat | None,
         *,
         trace_id: str | None,
+        on_settlement: Callable[[RunSettlement], None] | None = None,
+        on_cleanup: Callable[[asyncio.Task[None]], None] | None = None,
     ) -> AsyncGenerator[RuntimeEvent]:
         """Drain provider events, settle the Run, and hand off owned cleanup."""
         state = _ExecutionState(
             recorder=EventRecorder(run.run_id, run.session_id),
             heartbeat=heartbeat,
             claim_loss_waiter=(asyncio.create_task(heartbeat.lost.wait()) if heartbeat is not None else None),
+            on_cleanup=on_cleanup,
         )
         trace_request = self._trace_request(prepared)
         try:
@@ -197,18 +202,22 @@ class RunExecutionDriver:
                 return
 
             self._annotate_receipt(trace_request, outcome, receipt)
+            if on_settlement is not None:
+                on_settlement(receipt)
             state.settled = True
             if isinstance(receipt, CommittedTurnReceipt):
                 for event in self._projector.project(receipt.committed_turn, state.recorder, mode="live_suffix"):
                     yield event
             yield terminal(state.recorder, receipt, trace_id=trace_id)
         except (GeneratorExit, asyncio.CancelledError):
-            await self._settle_cancellation(run, prepared, state)
+            await self._settle_cancellation(run, prepared, state, on_settlement=on_settlement)
             raise
         except Exception:
             if not state.settled:
                 receipt = await self._recover_failure(run, prepared, trace_request)
                 if receipt is not None:
+                    if on_settlement is not None:
+                        on_settlement(receipt)
                     state.settled = True
                     yield terminal(state.recorder, receipt, trace_id=trace_id)
                 else:
@@ -327,13 +336,10 @@ class RunExecutionDriver:
             self._finish_with_trace(run, outcome, prepared),
             name="fleet-turn-finalization",
         )
-        execution_deadline = float(
-            getattr(
-                prepared.execution,
-                "deadline",
-                asyncio.get_running_loop().time() + self._turn_timeout_seconds,
-            )
-        )
+        # RLMExecutionContext.execution (ExecutionRuntime) owns the shared
+        # Turn deadline established by the coordinator; the fallback only
+        # protects legacy PreparedRun doubles without the deep context.
+        execution_deadline = self._execution_deadline(prepared)
         remaining = max(0.0, execution_deadline - asyncio.get_running_loop().time())
         result = await self._wait_for_finalization(
             state.finalization_task,
@@ -426,12 +432,21 @@ class RunExecutionDriver:
             settlement_inputs["iterations"] = resolution.usage.get("iterations")
             settlement_inputs["memory_candidate_count"] = len(resolution.memory_candidates)
         with turn_phase_span("Turn.settlement", inputs=settlement_inputs):
+            finish_kwargs: dict[str, Any] = {}
+            # PreparedRun owns this field; SimpleNamespace test doubles
+            # predating P23 may omit it (no outbox intents then). The kwarg is
+            # only forwarded when present so legacy lifecycle doubles keep
+            # their narrower finish signatures.
+            builder = getattr(prepared, "memory_intent_builder", None)
+            if builder is not None:
+                finish_kwargs["memory_intents_builder"] = builder
             return await self._lifecycle.finish(
                 run,
                 resolution,
                 artifact_sink=prepared.artifact_sink,
                 result_snapshot_sink=prepared.result_snapshot_sink,
                 memory_promotion=prepared.post_commit_memory_promotion,
+                **finish_kwargs,
             )
 
     async def _settle_cancellation(
@@ -439,6 +454,8 @@ class RunExecutionDriver:
         run: ClaimedRun,
         prepared: PreparedRun,
         state: _ExecutionState,
+        *,
+        on_settlement: Callable[[RunSettlement], None] | None = None,
     ) -> None:
         if state.settled:
             return
@@ -450,12 +467,15 @@ class RunExecutionDriver:
             with contextlib.suppress(BaseException):
                 await self._cancel_pending_event(state)
             claim_lost = _heartbeat_claim_lost(state)
+            cancellation_receipt: RunSettlement | None = None
             if not claim_lost:
                 with contextlib.suppress(BaseException):
-                    await self._lifecycle.settle(
+                    cancellation_receipt = await self._lifecycle.settle(
                         run,
                         RunFailure("cancelled", "cancelled", "Turn cancelled", empty_rlm_usage()),
                     )
+                if cancellation_receipt is not None and on_settlement is not None:
+                    on_settlement(cancellation_receipt)
                 claim_lost = _heartbeat_claim_lost(state)
             # Cleanup handoff is independent of durable settlement success. The
             # owned stream must still drain recursive workers before Run
@@ -503,7 +523,7 @@ class RunExecutionDriver:
         claim_loss_usage: RLMUsage | None = None,
         finalization_task: asyncio.Task[RunSettlement] | None = None,
     ) -> None:
-        self._submit_cleanup(
+        state.cleanup_task = self._submit_cleanup(
             run,
             state.stream,
             prepared,
@@ -513,6 +533,8 @@ class RunExecutionDriver:
             claim_loss_usage=claim_loss_usage,
         )
         state.cleanup_handed_off = True
+        if state.on_cleanup is not None:
+            state.on_cleanup(state.cleanup_task)
         await self._stop_claim_waiter(state)
         state.heartbeat = None
 
@@ -653,7 +675,7 @@ class RunExecutionDriver:
         *,
         claim_lost: bool = False,
         claim_loss_usage: RLMUsage | None = None,
-    ) -> None:
+    ) -> asyncio.Task[None]:
         async def cleanup() -> None:
             committed = False
             cleanup_error: BaseException | None = None
@@ -728,14 +750,24 @@ class RunExecutionDriver:
 
         cleanup_awaitable = cleanup()
         try:
-            self._cleanup.submit(cleanup_awaitable)
+            return self._cleanup.submit(cleanup_awaitable)
         except BaseException:
             cleanup_awaitable.close()
             raise
 
+    def _execution_deadline(self, prepared: PreparedRun) -> float:
+        """Shared Turn deadline from the deep execution context (P25)."""
+        execution_runtime = getattr(prepared.execution, "execution", None)
+        if execution_runtime is not None:
+            return float(execution_runtime.deadline)
+        return asyncio.get_running_loop().time() + self._turn_timeout_seconds
+
     @staticmethod
     def _trace_request(prepared: PreparedRun) -> str:
-        request = getattr(prepared.execution, "request", "")
+        # RLMExecutionContext.session (SessionView) owns the public request;
+        # the fallback only protects legacy PreparedRun doubles.
+        session = getattr(prepared.execution, "session", None)
+        request = getattr(session, "request", "") if session is not None else ""
         return request if isinstance(request, str) else ""
 
     @staticmethod

@@ -421,6 +421,7 @@ def run_turn(
 
     Raises:
         BenchmarkError: If the Turn reports an error, is aborted, or finishes for a reason other than `stop`.
+            The exception preserves partial trace_id and run_id values when available.
     """
     session = client.post("/api/sessions", json={"title": f"latency-{nonce}"})
     session.raise_for_status()
@@ -442,54 +443,60 @@ def run_turn(
     first_event_ms: float | None = None
     termination_mode: str | None = None
     started = time.perf_counter()
-    with client.stream(
-        "POST",
-        f"/api/sessions/{session_id}/turns",
-        json={"text": prompt, "attachment_ids": list(attachment_ids), "skill_selections": []},
-        headers={"Idempotency-Key": f"rlm-latency-{uuid4()}"},
-    ) as response:
-        response.raise_for_status()
-        for chunk in _sse_chunks(response):
-            if first_event_ms is None:
-                first_event_ms = (time.perf_counter() - started) * 1000
-            metadata = chunk.get("messageMetadata")
-            if isinstance(metadata, Mapping):
-                if isinstance(metadata.get("traceId"), str):
-                    trace_id = str(metadata["traceId"])
-                if isinstance(metadata.get("runId"), str):
-                    run_id = str(metadata["runId"])
-            chunk_type = chunk.get("type")
-            termination_mode = _termination_mode_from_chunk(chunk) or termination_mode
-            if chunk_type == "text-delta" and isinstance(chunk.get("delta"), str):
-                answer_parts.append(str(chunk["delta"]))
-            elif chunk_type == "data-structured-result":
-                answer = _structured_answer(chunk) or answer
-            elif chunk_type == "data-usage" and isinstance(chunk.get("data"), Mapping):
-                raw_usage = chunk["data"].get("usage")
-                if isinstance(raw_usage, Mapping):
-                    usage = dict(raw_usage)
-                    iterations = int(usage.get("iterations", 0) or 0)
-            elif chunk_type == "tool-input-available":
-                tool_name = chunk.get("toolName")
-                batch_calls += int(tool_name == "llm_query_batched")
-                recursive_calls += int(tool_name == "rlm_query")
-                recursive_batch_calls += int(tool_name == "rlm_query_batched")
-            elif chunk_type == "tool-output-available" and isinstance(chunk.get("output"), Mapping):
-                raw_peak = chunk["output"].get("peak_child_concurrency")
-                if isinstance(raw_peak, int) and not isinstance(raw_peak, bool):
-                    peak_child_concurrency = max(peak_child_concurrency, raw_peak)
-            elif chunk_type == "data-attachment" and isinstance(chunk.get("data"), Mapping):
-                data = chunk["data"]
-                accessed_id = data.get("attachment_id", data.get("attachmentId"))
-                attachment_accessed = attachment_accessed or str(accessed_id) in requested_attachment_ids
-            elif chunk_type == "data-rlm-code" and isinstance(chunk.get("data"), Mapping):
-                _append_trajectory_value(trajectory["codes"], chunk["data"].get("code"))
-            elif chunk_type == "data-rlm-output" and isinstance(chunk.get("data"), Mapping):
-                _append_trajectory_value(trajectory["outputs"], chunk["data"].get("output"))
-            elif chunk_type in {"error", "abort"}:
-                raise BenchmarkError(str(chunk.get("errorText") or chunk.get("reason") or "Turn failed"))
-            elif chunk_type == "finish" and chunk.get("finishReason") != "stop":
-                raise BenchmarkError("Turn did not finish with stop")
+    try:
+        with client.stream(
+            "POST",
+            f"/api/sessions/{session_id}/turns",
+            json={"text": prompt, "attachment_ids": list(attachment_ids), "skill_selections": []},
+            headers={"Idempotency-Key": f"rlm-latency-{uuid4()}"},
+        ) as response:
+            response.raise_for_status()
+            for chunk in _sse_chunks(response):
+                if first_event_ms is None:
+                    first_event_ms = (time.perf_counter() - started) * 1000
+                metadata = chunk.get("messageMetadata")
+                if isinstance(metadata, Mapping):
+                    if isinstance(metadata.get("traceId"), str):
+                        trace_id = str(metadata["traceId"])
+                    if isinstance(metadata.get("runId"), str):
+                        run_id = str(metadata["runId"])
+                chunk_type = chunk.get("type")
+                termination_mode = _termination_mode_from_chunk(chunk) or termination_mode
+                if chunk_type == "text-delta" and isinstance(chunk.get("delta"), str):
+                    answer_parts.append(str(chunk["delta"]))
+                elif chunk_type == "data-structured-result":
+                    answer = _structured_answer(chunk) or answer
+                elif chunk_type == "data-usage" and isinstance(chunk.get("data"), Mapping):
+                    raw_usage = chunk["data"].get("usage")
+                    if isinstance(raw_usage, Mapping):
+                        usage = dict(raw_usage)
+                        iterations = int(usage.get("iterations", 0) or 0)
+                elif chunk_type == "tool-input-available":
+                    tool_name = chunk.get("toolName")
+                    batch_calls += int(tool_name == "llm_query_batched")
+                    recursive_calls += int(tool_name == "rlm_query")
+                    recursive_batch_calls += int(tool_name == "rlm_query_batched")
+                elif chunk_type == "tool-output-available" and isinstance(chunk.get("output"), Mapping):
+                    raw_peak = chunk["output"].get("peak_child_concurrency")
+                    if isinstance(raw_peak, int) and not isinstance(raw_peak, bool):
+                        peak_child_concurrency = max(peak_child_concurrency, raw_peak)
+                elif chunk_type == "data-attachment" and isinstance(chunk.get("data"), Mapping):
+                    data = chunk["data"]
+                    accessed_id = data.get("attachment_id", data.get("attachmentId"))
+                    attachment_accessed = attachment_accessed or str(accessed_id) in requested_attachment_ids
+                elif chunk_type == "data-rlm-code" and isinstance(chunk.get("data"), Mapping):
+                    _append_trajectory_value(trajectory["codes"], chunk["data"].get("code"))
+                elif chunk_type == "data-rlm-output" and isinstance(chunk.get("data"), Mapping):
+                    _append_trajectory_value(trajectory["outputs"], chunk["data"].get("output"))
+                elif chunk_type in {"error", "abort"}:
+                    raise BenchmarkError(str(chunk.get("errorText") or chunk.get("reason") or "Turn failed"))
+                elif chunk_type == "finish" and chunk.get("finishReason") != "stop":
+                    raise BenchmarkError("Turn did not finish with stop")
+    except Exception as exc:
+        # Preserve partial trace_id and run_id for failed streams
+        exc.trace_id = trace_id  # type: ignore[attr-defined]
+        exc.run_id = run_id  # type: ignore[attr-defined]
+        raise
     return {
         "answer": answer if answer is not None else "".join(answer_parts),
         "trace_id": trace_id,
@@ -598,7 +605,19 @@ def _attach_trace_identity(row: dict[str, Any], execution_trace_id: str | None) 
 
 
 def _execution_trace_diagnostics(mlflow_url: str, trace_id: str) -> dict[str, Any]:
-    """Collect bounded span diagnostics needed for benchmark comparisons."""
+    """
+    Collect bounded execution-trace diagnostics for benchmark comparisons.
+
+    Parameters:
+        mlflow_url (str): MLflow tracking server URL.
+        trace_id (str): Identifier of the execution trace to inspect.
+
+    Returns:
+        dict[str, Any]: Diagnostic metrics for root language-model spans, context size,
+            adapter and repair errors, response keys, and detail truncation. Returns a
+            status of ``"unavailable"`` and the exception category when diagnostics
+            cannot be collected.
+    """
     try:
         import mlflow
 
@@ -607,16 +626,49 @@ def _execution_trace_diagnostics(mlflow_url: str, trace_id: str) -> dict[str, An
         spans = list(trace.data.spans)
         repair_error_count = 0
         detail_overflowed = False
+        root_lm_spans = [span for span in spans if span.name == "RLM.root_lm"]
+        root_lm_wall_times = [
+            float(span.outputs["wall_time_ms"])
+            for span in root_lm_spans
+            if isinstance(getattr(span, "outputs", None), Mapping)
+            and isinstance(span.outputs.get("wall_time_ms"), (int, float))
+        ]
+        root_lm_provider_times = [
+            float(span.outputs["provider_response_ms"])
+            for span in root_lm_spans
+            if isinstance(getattr(span, "outputs", None), Mapping)
+            and isinstance(span.outputs.get("provider_response_ms"), (int, float))
+        ]
+        root_lm_context_chars = [
+            int(span.inputs["context_chars"])
+            for span in root_lm_spans
+            if isinstance(getattr(span, "inputs", None), Mapping) and isinstance(span.inputs.get("context_chars"), int)
+        ]
+        adapter_parse_error_count = 0
+        last_lm_response_keys: list[str] = []
         for span in spans:
             outputs = getattr(span, "outputs", None)
             if isinstance(outputs, Mapping):
                 result_kind = outputs.get("result_kind")
                 if result_kind == "repair_error":
                     repair_error_count += 1
+                if span.name == "RLM.execute" and outputs.get("failure_category") == "adapter_parse_error":
+                    adapter_parse_error_count += 1
+                last_lm_call = outputs.get("last_lm_call")
+                if span.name == "RLM.execute" and isinstance(last_lm_call, Mapping):
+                    keys = last_lm_call.get("response_keys")
+                    if isinstance(keys, (list, tuple)):
+                        last_lm_response_keys = [str(key) for key in keys[:32]]
                 if span.name == "Turn.progress.warning" and "omitted" in str(outputs.get("message", "")):
                     detail_overflowed = True
         return {
-            "root_lm_span_count": sum(span.name == "RLM.root_lm" for span in spans),
+            "root_lm_span_count": len(root_lm_spans),
+            "root_lm_wall_time_ms": round(sum(root_lm_wall_times), 3),
+            "root_lm_provider_response_ms": round(sum(root_lm_provider_times), 3),
+            "root_lm_slowest_wall_time_ms": round(max(root_lm_wall_times), 3) if root_lm_wall_times else 0.0,
+            "root_lm_max_context_chars": max(root_lm_context_chars) if root_lm_context_chars else 0,
+            "adapter_parse_error_count": adapter_parse_error_count,
+            "last_lm_response_keys": last_lm_response_keys,
             "repair_error_count": repair_error_count,
             "detail_overflowed": detail_overflowed,
         }
@@ -644,14 +696,18 @@ def _tag_trace(mlflow_url: str, trace_id: str, *, workload_id: str, variant: str
 
 
 def _aggregate(rows: Sequence[Mapping[str, Any]], *, workload_id: str = EVIDENCE_WORKLOAD_ID) -> dict[str, Any]:
-    """Aggregate measured benchmark rows into latency, error, usage, execution, and trace metrics.
+    """
+    Aggregate measured benchmark rows into latency, error, usage, execution, trace,
+    diagnostic, and corpus-quality metrics.
 
     Parameters:
         rows (Sequence[Mapping[str, Any]]): Benchmark sample records to aggregate.
+        workload_id (str): Workload identifier used to determine whether corpus-quality metrics apply.
 
     Returns:
-        dict[str, Any]: Aggregate metrics for measured samples, excluding warmups and failed samples from
-        success-based metrics. Quality evaluation is marked incomplete.
+        dict[str, Any]: Aggregate metrics. Warmups and failed samples are excluded from
+            success-based metrics, and quality is marked incomplete unless all corpus
+            checks pass for the corpus workload.
     """
     measured = [row for row in rows if row.get("sample_kind") == "measured"]
     successes = [row for row in measured if not row.get("error_category")]
@@ -681,7 +737,7 @@ def _aggregate(rows: Sequence[Mapping[str, Any]], *, workload_id: str = EVIDENCE
         bool(measured) and corpus_report_complete and corpus_evidence_complete and all(corpus_quality_results)
     )
     diagnostics: list[Mapping[str, Any]] = []
-    for row in successes:
+    for row in measured:
         item = row.get("trace_diagnostics")
         if isinstance(item, Mapping):
             diagnostics.append(item)
@@ -709,6 +765,25 @@ def _aggregate(rows: Sequence[Mapping[str, Any]], *, workload_id: str = EVIDENCE
         "trace_ids": [row["trace_id"] for row in successes if row.get("trace_id")],
         "trace_id_match_rate": (sum(trace_matches) / len(trace_matches)) if trace_matches else 0.0,
         "root_lm_span_count": sum(int(item.get("root_lm_span_count", 0)) for item in diagnostics),
+        "root_lm_wall_time_ms": round(sum(float(item.get("root_lm_wall_time_ms", 0.0)) for item in diagnostics), 3),
+        "root_lm_provider_response_ms": round(
+            sum(float(item.get("root_lm_provider_response_ms", 0.0)) for item in diagnostics), 3
+        ),
+        "root_lm_slowest_wall_time_ms": round(
+            max((float(item.get("root_lm_slowest_wall_time_ms", 0.0)) for item in diagnostics), default=0.0), 3
+        ),
+        "root_lm_max_context_chars": max(
+            (int(item.get("root_lm_max_context_chars", 0)) for item in diagnostics), default=0
+        ),
+        "adapter_parse_error_count": sum(int(item.get("adapter_parse_error_count", 0)) for item in diagnostics),
+        "last_lm_response_keys": next(
+            (
+                list(item.get("last_lm_response_keys", []))
+                for item in reversed(diagnostics)
+                if isinstance(item.get("last_lm_response_keys"), list)
+            ),
+            [],
+        ),
         "repair_error_count": sum(int(item.get("repair_error_count", 0)) for item in diagnostics),
         "detail_overflowed": any(item.get("detail_overflowed") is True for item in diagnostics),
         "corpus_report_complete": corpus_report_complete if workload_id == CORPUS_WORKLOAD_ID else None,
@@ -876,12 +951,24 @@ def run_benchmark(args: argparse.Namespace) -> dict[str, Any]:
                         if not row["corpus_quality_passed"]:
                             raise BenchmarkError("corpus report or execution evidence validation failed")
                 except Exception as exc:
+                    # Extract partial trace_id and run_id from stream failures
+                    partial_trace_id = getattr(exc, "trace_id", None) or row.get("trace_id")
+                    partial_run_id = getattr(exc, "run_id", None) or row.get("run_id")
+                    # Collect diagnostics for failed runs when trace_id is available
+                    diagnostics = {}
+                    if partial_trace_id:
+                        diagnostics = _execution_trace_diagnostics(
+                            args.mlflow_url,
+                            str(partial_trace_id),
+                        )
                     row = {
                         **row,
                         "duration_ms": row.get("duration_ms", round((time.perf_counter() - sample_started) * 1000, 3)),
                         "first_event_ms": row.get("first_event_ms", -1.0),
                         "error_category": type(exc).__name__,
-                        "trace_id": row.get("trace_id"),
+                        "trace_id": partial_trace_id,
+                        "run_id": partial_run_id,
+                        "trace_diagnostics": diagnostics if diagnostics else row.get("trace_diagnostics"),
                     }
                 row["workload_id"] = workload_id
                 if corpus_case is not None:

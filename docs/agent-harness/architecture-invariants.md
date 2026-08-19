@@ -3,6 +3,46 @@
 If a change violates an invariant, remediate the code or update this document
 and its matching automated check in the same patch.
 
+## Foundations (frozen at ownership-architecture integration, P25)
+
+- **DSPy is Fleet's foundational cognitive framework, not a compatibility
+  layer.** Every Turn constructs a fresh `dspy.RLM` per the DSPy 3.3.0 contract,
+  Tools are `dspy.Tool` objects, and execution goes through the caller-owned
+  `await rlm.acall(interpreter, **named_inputs)` surface. `RLMOptions.max_iters`
+  enforces DSPy's iteration budget end-to-end; native `max_llm_calls` and
+  `max_output_chars` retain their DSPy meanings. Bounded child RLMs provide
+  controlled width at fixed native depth one. Pinned framework constructor,
+  Signature, Prediction, Tool, Root/Sub LM, callback, trajectory, usage, and
+  child-RLM contracts are regression-gated in `tests/unit/backend/rlm/` and the
+  live matrix.
+- **SQLite owns Sessions, Runs, Turn/Artifact records, sandbox bindings, and
+  the Memory promotion outbox.** Alembic owns the live schema (fresh canonical
+  baseline plus chained revisions); `create_tables` is reserved for explicit
+  test/offline helpers. The outbox rides the same transaction as successful
+  Turn commit; it carries recovery state only, never authoritative Memory
+  content.
+- **The Daytona Volume is the durable authority for Workspace bytes:**
+  Attachments, promoted Artifacts, result snapshots, and the Workspace Memory
+  log. Sandboxes are replaceable compute attached to that Volume; retained
+  Session Sandboxes own capability state, and ephemeral I/O Sandboxes are
+  purpose-labelled, verified, and confirmed-deleted (`stop`→`destroying`→
+  absent proof, not acceptance).
+- **Shared-Volume concurrency is deliberately narrow, from live evidence.**
+  `fcntl.flock` + inode revalidation inside one mounted agent guards
+  compare/mutate windows on one mount; live falsification proved independent
+  sandbox mounts do NOT coordinate records through flock, so Memory mutation
+  ownership is process-level: the leased Session Sandbox is the write path,
+  explicit operator operations are immediate, autonomous promotion is
+  single-lane (deterministic intents + one reconciler claim fence), and
+  concurrent cross-Sandbox appends may lose records — never silently inside
+  one owner.
+- **Ownership seams are one-directional.** Provider objects die under
+  `SandboxLease` receipts with typed cleanup; claimed Runs die under the
+  coordinator-owned `RunOwnership` state machine with an internal
+  `RunLifetimeReceipt`; Workspace operations ride the versioned installed
+  agent whose handshake fails closed before use; Memory promotion rides the
+  transactional outbox with bounded idempotent reconciliation.
+
 ## Product identity
 
 Fleet is one product: a durable conversational RLM Session. Judge every change
@@ -64,7 +104,8 @@ exist.
 - Pass request text, bounded `session_context`, authorized `skill_cards`, and
   bounded Attachment metadata to the default Fleet Signature. Custom Task
   Contracts receive only declared host-bounded inputs. Keep older history behind
-  `read_session_history` and call `await rlm.acall(**named_inputs)`.
+  `read_session_history` and call `await rlm.acall(interpreter, **named_inputs)`;
+  the interpreter is caller-owned and its lease remains with Fleet.
 - The Turn stream opens immediately with transient `data-status` preparation
   heartbeats (never recorded); claim, preparation, Attachment-ownership, and
   Skill-selection failures then resolve as closed `error` + `finish` chunks
@@ -127,6 +168,10 @@ routes or public events.
 - Alembic owns live schema evolution; live PostgreSQL startup never calls
   `create_all`. Explicit SQLite test/local helpers may call `create_tables`.
 - Durable Attachment and Artifact bytes live in Workspace Volume Scope.
+- The mounted Workspace Agent is installed once per Sandbox as a versioned,
+  checksum-verified module; operations then run as compact handshake-bound
+  JSON requests. Protocol, digest, or capability mismatch fails closed before
+  Workspace/Memory use and never falls back to per-operation source shipping.
 - Daytona Session Workspace text lives under
   `sessions/{session_id}/workspace/`. Paged reads, bounded immediate-child
   listings, append, replacement writes, unique-fragment edits, and file or
@@ -179,8 +224,10 @@ routes or public events.
   selected TOML policy; ambient selectors and unreferenced variables are
   ignored. The canonical public Run Environment is `daytona`.
 - `RLM_NATIVE_CHILD_DEPTH = 1` is a product invariant. The policy
-  `recursion_max_parallel_children` bounds sibling workers; it does not expose
-  concurrency or depth controls to the model and does not permit child fan-out.
+  `recursion_max_parallel_children` bounds Root-selected sibling workers; it
+  does not expose concurrency or depth controls to the model and does not permit
+  child-controlled fan-out. A child may use native semantic tools and its
+  recursive request becomes a Sub-LM depth fallback rather than a grandchild.
 - There is no `/api/v1`, WebSocket execution, dual serve, legacy migration,
   runtime-admin, optimization/evaluation API, or public Artifact creation.
 - The maintained client is pi-tui. A graphical/Web client is separate future

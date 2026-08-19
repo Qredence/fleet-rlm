@@ -24,6 +24,13 @@ def test_stock_json_adapter_parses_valid_typed_action() -> None:
     }
 
 
+def test_stock_json_adapter_rejects_empty_completion() -> None:
+    with pytest.raises(AdapterParseError) as raised:
+        dspy.JSONAdapter().parse(_ActionSignature, "")
+
+    assert raised.value.adapter_name == "JSONAdapter"
+
+
 @pytest.mark.parametrize(
     "completion",
     [

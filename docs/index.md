@@ -16,7 +16,7 @@ FastAPI/SSE contract backed by DSPy, Daytona, and SQLAlchemy/Alembic.
 8. [DSPy RLM and Daytona integration](how-to-guides/dspy-integration.md)
 9. [Daytona Snapshot](how-to-guides/daytona-snapshot.md)
 10. [Official Oolong benchmark](how-to-guides/official-oolong.md)
-11. [Evaluation, monitoring, and signature optimization](how-to-guides/evaluation-optimization.md)
+11. [Evaluation and monitoring](how-to-guides/evaluation-optimization.md)
 12. [Agent harness](agent-harness/README.md)
 
 ## Reference
