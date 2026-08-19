@@ -16,7 +16,7 @@ import pytest
 from pydantic import ValidationError
 
 import fleet_rlm.config as config
-from fleet_rlm.config_policy import _FIELDS
+import fleet_rlm.config_policy as config_policy
 
 _EXPECTED_INVENTORY: tuple[tuple[str, str, str, str, tuple[str, ...], str | None], ...] = (
     ("application.name", "Application", "Name", "text", (), "app_name"),
@@ -189,14 +189,16 @@ def test_policy_inventory_is_derived_from_the_schema_identically() -> None:
         if spec.group is not None
     )
     current = tuple(
-        (field.path, field.group, field.label, field.editor, field.choices, field.settings_field) for field in _FIELDS
+        (field.path, field.group, field.label, field.editor, field.choices, field.settings_field)
+        for field in config_policy._FIELDS
     )
     assert current == derived
 
 
 def test_policy_inventory_matches_the_frozen_operator_surface() -> None:
     current = tuple(
-        (field.path, field.group, field.label, field.editor, field.choices, field.settings_field) for field in _FIELDS
+        (field.path, field.group, field.label, field.editor, field.choices, field.settings_field)
+        for field in config_policy._FIELDS
     )
     assert current == _EXPECTED_INVENTORY
 
