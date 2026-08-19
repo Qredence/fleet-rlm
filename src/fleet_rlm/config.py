@@ -241,25 +241,6 @@ class Settings(BaseModel):
             doc="Legacy programmatic fallback key for roles naming FLEET_OPENAI_API_KEY; never settable via TOML",
         ),
     ] = Field(default=None)
-    llm_base_url: Annotated[
-        str | None,
-        FleetFieldPolicy(
-            toml_path=None, compatibility=True, doc="Programmatic-only compatibility input; no TOML mapping"
-        ),
-    ] = Field(
-        default=None,
-        description="Optional OpenAI-compatible base URL for dspy.LM",
-    )
-    llm_max_tokens: Annotated[
-        int | None,
-        FleetFieldPolicy(
-            toml_path=None, compatibility=True, doc="Programmatic-only compatibility input; no TOML mapping"
-        ),
-    ] = Field(
-        default=None,
-        ge=1,
-        description="Optional output-token limit passed to both DSPy model roles",
-    )
     root_model: Annotated[
         str,
         FleetFieldPolicy(
@@ -863,27 +844,6 @@ class Settings(BaseModel):
             return normalize_memory_candidate_categories(value)
         except ValueError as exc:
             raise ValueError("rlm_autonomous_memory_categories contains an invalid Workspace Memory category") from exc
-
-    @field_validator("llm_base_url", mode="before")
-    @classmethod
-    def _sanitize_llm_base_url(cls, value: object) -> str | None:
-        """
-        Normalize an optional LLM service base URL.
-
-        Parameters:
-            value (object): Candidate URL value to sanitize.
-
-        Returns:
-            str | None: The normalized HTTP(S) URL without trailing slashes, or `None` for empty or invalid values.
-        """
-        if value is None or value == "":
-            return None
-        text = str(value).strip().strip("'\"")
-        if " #" in text:
-            text = text.split(" #", 1)[0].rstrip().strip("'\"")
-        if not (text.startswith("http://") or text.startswith("https://")):
-            return None
-        return text.rstrip("/")
 
     @field_validator("posthog_host")
     @classmethod

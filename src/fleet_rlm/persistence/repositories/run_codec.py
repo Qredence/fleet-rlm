@@ -22,6 +22,7 @@ from fleet_rlm.chat.run_claim import (
     ClaimState,
     ClaimStatus,
     ClaimTransition,
+    failure_code_for_terminal_status,
 )
 from fleet_rlm.chat.run_lifecycle import (
     ClaimedRun,
@@ -29,7 +30,6 @@ from fleet_rlm.chat.run_lifecycle import (
     RunFailure,
     RunFailureCode,
     RunStateError,
-    failure_code_for_terminal_status,
 )
 from fleet_rlm.chat.turn_detail_policy import commit_cancelled_tombstone
 from fleet_rlm.persistence.models import ArtifactRow, RunRow, TurnRow

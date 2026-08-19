@@ -28,10 +28,6 @@ class OwnedPostCommitMemoryPromotion:
         self._action = action
         self._task: asyncio.Task[Any] | None = None
 
-    def __call__(self, candidates: tuple[Any, ...]) -> Any:
-        """Retain compatibility with simple lifecycle adapters and tests."""
-        return self._action(candidates)
-
     async def promote(
         self,
         candidates: tuple[Any, ...],

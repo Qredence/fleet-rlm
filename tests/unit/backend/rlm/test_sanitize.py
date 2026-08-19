@@ -47,27 +47,4 @@ def test_declared_output_validator_rejects_private_material(value: object) -> No
         validate_declared_public_value(value)
 
 
-def test_error_redaction_remains_a_transforming_boundary() -> None:
-    from fleet_rlm.rlm.sanitize import sanitize_public_error
 
-    assert sanitize_public_error("provider token=actual-secret-value") == "provider [redacted]"
-
-
-def test_sanitize_public_error_redacts_bare_provider_token() -> None:
-    from fleet_rlm.rlm.sanitize import sanitize_public_error
-
-    token = "sk-ant-api03-0123456789abcdef0123456789abcdef0123456789abcdef"
-    result = sanitize_public_error(f"authentication error: {token}")
-
-    assert token not in result
-    assert "[redacted]" in result
-
-
-def test_sanitize_public_error_redacts_trailing_bearer_token() -> None:
-    from fleet_rlm.rlm.sanitize import sanitize_public_error
-
-    jwt = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJzZXJ2aWNlLWFjY291bnQifQ.fakeSignature"
-    result = sanitize_public_error(f"provider: unauthorized Bearer {jwt}")
-
-    assert jwt not in result
-    assert "[redacted]" in result

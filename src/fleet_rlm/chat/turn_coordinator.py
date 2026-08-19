@@ -27,7 +27,6 @@ from fleet_rlm.chat.run_lifecycle import (
 )
 from fleet_rlm.chat.run_ownership import (
     ClaimHeartbeat,
-    consume_task_exception,
     shield_cleanup,
     stop_heartbeat,
 )
@@ -329,16 +328,6 @@ class TurnCoordinator:
             await self._lifecycle.complete_settling(run)
         finally:
             await stop_heartbeat(heartbeat)
-
-    def _submit_claim_loss_cleanup(self, run: ClaimedRun, heartbeat: ClaimHeartbeat) -> None:
-        """Submit claim-loss cleanup for compatibility with synchronous callers."""
-        cleanup_awaitable = self._claim_loss_cleanup(run, heartbeat)
-        try:
-            self._cleanup.submit(cleanup_awaitable)
-        except BaseException:
-            cleanup_awaitable.close()
-            task = asyncio.create_task(self._claim_loss_cleanup(run, heartbeat), name="fleet-claim-loss-cleanup")
-            task.add_done_callback(consume_task_exception)
 
     async def _submit_claim_loss_cleanup_or_drain(
         self,

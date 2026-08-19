@@ -29,6 +29,7 @@ from fleet_rlm.rlm.dspy_contract import (
     build_native_rlm,
     observed_usage,
     prediction_result,
+    rlm_termination_mode,
 )
 from fleet_rlm.runtime.owned_effect import OwnedEffect
 
@@ -425,7 +426,7 @@ class StrictDaytonaEvaluationLifecycle:
                 proof_id=self._proof.proof_id,
                 curated_input_sha256=curated_input.consume().sha256,
                 curated_input_schema=curated_input.receipt.schema,
-                termination_mode=_termination_mode(prediction),
+                termination_mode=rlm_termination_mode(prediction),
             )
         except BaseException as exc:
             primary_error = exc
@@ -507,21 +508,6 @@ def _strict_named_inputs(handle: dict[str, str | int]) -> dict[str, Any]:
         dict[str, Any]: Mapping containing the copied handle under `curated_input_handle`.
     """
     return {"curated_input_handle": dict(handle)}
-
-
-def _termination_mode(prediction: Any) -> str:
-    """
-    Determine how the evaluator terminated based on the prediction metadata.
-
-    Parameters:
-        prediction (Any): The evaluator prediction to inspect.
-
-    Returns:
-        str: `"native_extraction_fallback"` when forced final output extraction was used; `"typed_submit"` otherwise.
-    """
-    if getattr(prediction, "final_reasoning", None) == "Extract forced final output":
-        return "native_extraction_fallback"
-    return "typed_submit"
 
 
 def _require_sha256(value: str, label: str) -> None:

@@ -3,10 +3,9 @@
 from __future__ import annotations
 
 import asyncio
-import contextlib
 from collections.abc import Awaitable
 from dataclasses import dataclass
-from typing import Any, TypeVar
+from typing import TypeVar
 
 from fleet_rlm.runtime.owned_effect import OwnedEffect
 
@@ -36,18 +35,6 @@ async def shield_cleanup(awaitable: Awaitable[T]) -> T:
     return settled.result()
 
 
-def consume_task_exception(task: asyncio.Task[Any]) -> None:
-    """
-    Consume a task's exception without propagating it.
-
-    Parameters:
-        task (asyncio.Task[Any]): The task whose exception should be retrieved.
-    """
-    if not task.cancelled():
-        with contextlib.suppress(BaseException):
-            task.exception()
-
-
 async def stop_heartbeat(heartbeat: ClaimHeartbeat | None) -> None:
     if heartbeat is None:
         return
@@ -57,7 +44,6 @@ async def stop_heartbeat(heartbeat: ClaimHeartbeat | None) -> None:
 
 __all__ = [
     "ClaimHeartbeat",
-    "consume_task_exception",
     "shield_cleanup",
     "stop_heartbeat",
 ]
