@@ -210,7 +210,7 @@ jobs:
               exit 1
             }
             export RELEASE_VERSION="<< pipeline.parameters.release_version >>"
-            python - <<'PY'
+            python - \<<'PY'
             import os
             import tomllib
 
