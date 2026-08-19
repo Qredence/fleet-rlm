@@ -697,6 +697,17 @@ class RLMRunner:
         *,
         last_lm_call: Mapping[str, object] | None = None,
     ) -> None:
+        """
+        Record failure details and execution metrics for a tracing phase.
+        
+        Parameters:
+            phase (Any): Tracing phase that receives the failure outputs.
+            started (float): Monotonic start time used to calculate elapsed time.
+            recursive_executor (RecursiveRLMExecutor | None): Executor supplying recursive execution metrics.
+            metrics (Any): Fallback metrics source when recursive executor metrics are unavailable.
+            exc (BaseException): Exception that caused the phase to fail.
+            last_lm_call (Mapping[str, object] | None): Optional summary of the most recent language-model call.
+        """
         recursive_summary = _recursive_summary(recursive_executor, metrics)
         outputs: dict[str, object] = {
             "elapsed_ms": int((time.perf_counter() - started) * 1000),
@@ -719,6 +730,19 @@ class RLMRunner:
         recursive_executor: RecursiveRLMExecutor | None,
         metrics: Any,
     ) -> Any:
+        """
+        Record successful execution metrics for a tracing phase.
+        
+        Parameters:
+        	phase (Any): Tracing phase whose outputs are updated.
+        	prediction (Any): Completed prediction associated with the phase.
+        	started (float): Execution start time used to calculate elapsed duration.
+        	recursive_executor (RecursiveRLMExecutor | None): Recursive executor used during execution, if any.
+        	metrics (Any): Fallback metrics source for recursive execution statistics.
+        
+        Returns:
+        	Any: The completed prediction.
+        """
         final_reasoning = getattr(prediction, "final_reasoning", None)
         termination_mode = (
             "native_extraction_fallback" if final_reasoning == "Extract forced final output" else "typed_submit"

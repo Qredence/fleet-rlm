@@ -162,6 +162,12 @@ class InProcessInterpreterBackend:
             self.namespace[name] = self._wrap_host_tool(name, fn)
 
     def ensure_submit(self, output_fields: list[dict[str, Any]] | None) -> None:
+        """
+        Install or refresh the namespace bindings required for submitting final outputs.
+        
+        Parameters:
+        	output_fields (list[dict[str, Any]] | None): Output-field definitions used to configure submission support.
+        """
         key = _submit_signature_key(output_fields)
         if key == self._submit_key:
             return

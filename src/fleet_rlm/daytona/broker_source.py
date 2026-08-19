@@ -16,6 +16,13 @@ def build_submit_setup_code(output_fields: list[dict[str, Any]] | None) -> str:
 
 
 def remote_submit_setup_code(output_fields: list[dict[str, Any]] | None) -> str:
+    """Generate remote setup source code for submitting final tool output.
+    
+    Parameters:
+    	output_fields (list[dict[str, Any]] | None): Output field definitions used to generate the typed submission function; `None` or an empty list produces the generic submission function.
+    
+    Returns:
+    	str: Complete remote setup source code."""
     return f"""
 import base64 as _base64
 import json
@@ -43,6 +50,15 @@ def SUBMIT(**kwargs):
 
 
 def _typed_submit_source(output_fields: list[dict[str, Any]]) -> str:
+    """
+    Generate source code for a typed ``SUBMIT`` function based on configured output fields.
+    
+    Parameters:
+        output_fields (list[dict[str, Any]]): Output field definitions used to build the generated signature and result mapping.
+    
+    Returns:
+        str: Source code defining the generated ``SUBMIT`` function.
+    """
     signature_parts: list[str] = []
     validation_parts: list[str] = []
     result_parts: list[str] = []

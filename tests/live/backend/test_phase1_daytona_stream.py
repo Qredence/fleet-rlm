@@ -185,17 +185,13 @@ class _FirstStreamDeltaMiddleware:
 
 def _load_live_settings(tmp_path: Path) -> Settings:
     """
-    Load and validate live Phase 1 streaming test settings.
-
+    Load and validate settings for the live Phase 1 streaming test.
+    
     Parameters:
-        tmp_path (Path): Temporary directory for the test database.
-
+        tmp_path (Path): Temporary directory in which to create the test database.
+    
     Returns:
-        Settings: Validated Daytona settings with an upgraded temporary database and bounded execution limits.
-
-    Raises:
-        pytest.skip: If the evidence-path environment variable is not configured.
-        pytest.fail: If live execution, the Daytona profile, required models, or provider credentials are unavailable.
+        Settings: Validated settings using an upgraded temporary database and bounded execution limits.
     """
     if not os.environ.get(_EVIDENCE_ENV):
         pytest.skip("Run this credentialed canary via scripts/live_phase1_stream_verify.py")

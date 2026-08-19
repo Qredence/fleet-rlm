@@ -421,6 +421,7 @@ snapshot = "fleet-test-v1"
 def test_runtime_settings_deep_merge_profile_and_keep_role_policy(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
+    """Verify that profile settings are deeply merged while preserving separate root and sub-model policies."""
     import fleet_rlm.config as config
 
     policy = tmp_path / "fleet.toml"

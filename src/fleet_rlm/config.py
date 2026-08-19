@@ -92,6 +92,18 @@ class LLMRoleSettings(BaseModel):
     @field_validator("api_key_env")
     @classmethod
     def _validate_api_key_env(cls, value: str) -> str:
+        """
+        Validate an API key environment-variable name.
+        
+        Parameters:
+            value (str): Environment-variable name to validate.
+        
+        Returns:
+            str: The validated environment-variable name.
+        
+        Raises:
+            ValueError: If the name is not uppercase or does not match the required format.
+        """
         if not _ENVIRONMENT_NAME.fullmatch(value):
             raise ValueError("api_key_env must name an uppercase environment variable")
         return value
@@ -354,7 +366,15 @@ class Settings(BaseModel):
             raise ValueError("FLEET_DAYTONA_SNAPSHOT must be immutable and end in -v<positive integer>") from exc
 
     def llm_role(self, role: Literal["root", "sub"]) -> LLMRoleSettings:
-        """Return one explicit Root or Sub role resolved from TOML policy."""
+        """
+        Build the configured settings for the requested LLM role.
+        
+        Parameters:
+            role (Literal["root", "sub"]): The role whose settings to return.
+        
+        Returns:
+            LLMRoleSettings: The configured Root or Sub role settings.
+        """
         prefix = f"{role}_llm"
         return LLMRoleSettings(
             model=self.root_model if role == "root" else self.sub_model,
@@ -776,7 +796,17 @@ def _profile_contract(
     defaults: Mapping[str, Any],
     selected: object,
 ) -> ProfileEnvironmentContract:
-    """Build one non-secret contract from defaults merged with a selected profile."""
+    """
+    Builds the non-secret environment contract for a profile after applying its defaults and overrides.
+    
+    Parameters:
+        name (str): Profile name used to identify configuration locations.
+        defaults (Mapping[str, Any]): Default policy values.
+        selected (object): Profile-specific policy values.
+    
+    Returns:
+        ProfileEnvironmentContract: Validated contract containing the profile's runtime, model, and environment-reference settings.
+    """
     selected_table = _require_mapping(selected, f"profiles.{name}")
     _validate_policy_table(selected_table, f"profiles.{name}")
     merged = _deep_merge(defaults, selected_table)

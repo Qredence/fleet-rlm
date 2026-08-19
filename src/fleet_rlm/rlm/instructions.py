@@ -69,7 +69,15 @@ class RLMInstructionFragments:
 
 
 def fleet_rlm_instruction_fragments(*, recursion_enabled: bool) -> RLMInstructionFragments:
-    """Return the Root instruction fragments for one recursion policy."""
+    """
+    Build instruction fragments for the selected recursion policy.
+    
+    Parameters:
+        recursion_enabled (bool): Whether to include recursive execution instructions.
+    
+    Returns:
+        RLMInstructionFragments: The instruction fragments configured for the recursion policy.
+    """
     step = 6 if recursion_enabled else 5
     verification = f"""{step}. Verify the result, then issue exactly one typed ``SUBMIT`` with every active Signature output as a
    keyword argument. For nontrivial deterministic or numerical work, do not submit in the initial
