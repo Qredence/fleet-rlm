@@ -100,12 +100,11 @@ async def test_preparation_bounds_history_and_closes_in_dependency_order() -> No
         capabilities=CapabilityFactory(),
     ).prepare(turn, deadline=float("inf"))
 
-    assert prepared.execution.session.session_context.to_input() == {
-        "session_id": str(turn.session_id),
-        "checkpoint_version": 0,
-        "message_count": 1,
-        "recent": [{"ordinal": 1, "role": "user", "preview": "prior"}],
-    }
+    manifest = prepared.execution.session.session_context
+    assert manifest.session_id == turn.session_id
+    assert manifest.checkpoint_version == 0
+    assert manifest.message_count == 1
+    assert [(item.ordinal, item.role, item.preview) for item in manifest.recent] == [(1, "user", "prior")]
     assert prepared.result_snapshot_sink is None
     await prepared.aclose()
     await prepared.aclose()

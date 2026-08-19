@@ -14,10 +14,8 @@ This module concentrates those semantics behind one deep lease seam:
   :meth:`SandboxLease.aclose` (async) execution; repeated closes are
   idempotent and the close returns a typed :class:`SandboxLeaseReceipt`
   exposing interpreter/broker/provider/admission/quarantine outcomes.
-- :func:`acquire_owned_lease` implements late-acquisition ownership once:
-  provider work started before a deadline/cancellation boundary is adopted by
-  a registered owner instead of being cancelled mid-flight (cancelling would
-  strand sandboxes/permits).
+- Late-acquisition ownership (P30) is adopted by the recursive child lease
+  machinery and the runtime owned-effect queue instead of a parallel seam.
 
 The seam never broadens public error surfaces: receipts carry typed statuses
 and sanitized, credential-free error strings only.
@@ -32,7 +30,7 @@ import logging
 import time
 from collections.abc import Awaitable, Callable, Coroutine
 from concurrent.futures import Future
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from threading import Thread
 from typing import Any, Literal, Protocol, TypeAlias
 
@@ -53,7 +51,6 @@ __all__ = [
     "SandboxLease",
     "SandboxLeasePolicy",
     "SandboxLeaseReceipt",
-    "acquire_owned_lease",
 ]
 
 LeaseKind: TypeAlias = Literal["retained_session", "recursive_child", "volume_io", "recovery_fence"]
@@ -453,45 +450,6 @@ class SandboxLease:
         return self._receipt
 
 
-def _sandbox_id_or_none(sandbox: Any) -> str | None:
-    value = getattr(sandbox, "id", None)
-    return value if isinstance(value, str) and value else None
-
-
-@dataclass
-class OwnedAcquisition:
-    """Late-acquisition ownership: adopted provider work always gets closed.
-
-    Wraps a started coroutine (posted future): the owner registers a close
-    hook once; whoever resolves the future last (normal return or late
-    settle) runs the close. Cancelling provider work mid-flight is forbidden:
-    it would strand Sandboxes and admission permits.
-    """
-
-    loop: asyncio.AbstractEventLoop
-    close_lease: Callable[[Any], Awaitable[Any]]
-    owned_futures: list[Future[Any]] = field(default_factory=list)
-
-    def adopt(self, coroutine: Coroutine[Any, Any, Any]) -> Future[Any]:
-        """Adopt started provider work; its result is owned and closed."""
-        future = asyncio.run_coroutine_threadsafe(coroutine, self.loop)
-        self.owned_futures.append(future)
-        return future
-
-    def settle_adopted(self, future: Future[Any]) -> SandboxLeaseReceipt | None:
-        """Close the lease embodied in one adopted future result, if any."""
-        try:
-            lease = future.result(timeout=DEFAULT_CLOSE_RESULT_TIMEOUT_S)
-        except BaseException:
-            return None
-        if isinstance(lease, SandboxLease):
-            return lease.close()
-        close = getattr(lease, "close", None)
-        if callable(close):
-            close()
-        return None
-
-
 @dataclass(slots=True)
 class OwnedCloseExecution:
     """One scheduled owned async close, with its disposable-loop fallback record.
@@ -559,15 +517,6 @@ def schedule_owned_close(
     return OwnedCloseExecution(future=fallback, used_fallback=True, coroutine=None)
 
 
-def acquire_owned_lease(
-    *,
-    loop: asyncio.AbstractEventLoop,
-    acquire: Callable[[], Coroutine[Any, Any, SandboxLease]],
-) -> Future[SandboxLease]:
-    """Post lease acquisition to the owner loop; caller owns the future.
-
-    The acquisition coroutine itself is responsible for adopting late
-    completion (see :class:`OwnedAcquisition`); this seam only standardizes
-    the thread-safe posting + ownership typing.
-    """
-    return asyncio.run_coroutine_threadsafe(acquire(), loop)
+def _sandbox_id_or_none(sandbox: Any) -> str | None:
+    value = getattr(sandbox, "id", None)
+    return value if isinstance(value, str) and value else None

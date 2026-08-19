@@ -378,11 +378,11 @@ async def test_daytona_install_registers_and_dispose_clears_bridge_dispatcher(
     Sync Daytona bridges post SDK coroutines to the dispatcher's registered
     loop (the one loop-affine to every Daytona SDK object, which never
     performs nested synchronous waits); disposal clears only this
-    composition's dispatcher, and the legacy process-default dispatcher stays
-    unregistered throughout.
+    composition's dispatcher. The legacy process-default dispatcher seam
+    was removed in P33.
     """
     import fleet_rlm.composition.daytona as composition
-    from fleet_rlm.daytona.dspy_sync_bridge import SyncBridgeDispatcher, bridge_service_loop
+    from fleet_rlm.daytona.dspy_sync_bridge import SyncBridgeDispatcher
 
     inventory = RuntimeInventory(
         turn_coordinator=object(),
@@ -424,12 +424,10 @@ async def test_daytona_install_registers_and_dispose_clears_bridge_dispatcher(
     dispatcher = installed.bridge_dispatcher
     assert isinstance(dispatcher, SyncBridgeDispatcher)
     assert dispatcher.service_loop() is asyncio.get_running_loop()
-    assert bridge_service_loop() is None  # legacy default never registered
     assert installed is app.state.runtime_inventory
 
     await composition.dispose_daytona_composition(app)
     assert dispatcher.service_loop() is None
-    assert bridge_service_loop() is None
 
 
 def test_testing_database_is_created_and_closed_by_lifespan() -> None:

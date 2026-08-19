@@ -18,7 +18,6 @@ import asyncio
 import contextlib
 import threading
 import time
-from collections.abc import Iterator
 from concurrent.futures import Future, ThreadPoolExecutor
 from types import SimpleNamespace
 
@@ -26,8 +25,7 @@ import pytest
 
 from fleet_rlm.daytona import recursive_child_runtime
 from fleet_rlm.daytona.dspy_sync_bridge import (
-    bridge_service_loop,
-    set_bridge_service_loop,
+    SyncBridgeDispatcher,
     sync_sandbox,
 )
 from fleet_rlm.daytona.errors import DaytonaAdapterError
@@ -94,13 +92,14 @@ class _ServingLoop:
 
 
 @contextlib.contextmanager
-def _registered_service_loop(name: str = "fleet-test-service-loop") -> Iterator[_ServingLoop]:
+def _registered_service_loop(name: str = "fleet-test-service-loop"):
+    dispatcher = SyncBridgeDispatcher()
     with _ServingLoop(name) as server:
-        set_bridge_service_loop(server.loop)
+        dispatcher.set_loop(server.loop)
         try:
-            yield server
+            yield server, dispatcher
         finally:
-            set_bridge_service_loop(None)
+            dispatcher.clear_loop(server.loop)
 
 
 def _run_worker(body) -> threading.Thread:
@@ -108,8 +107,7 @@ def _run_worker(body) -> threading.Thread:
 
 
 def test_no_service_loop_falls_back_to_caller_captured_loop() -> None:
-    """Unregistered bridges capture the caller loop, matching legacy behavior."""
-    assert bridge_service_loop() is None
+    """Undispatched bridges capture the caller loop, matching legacy behavior."""
     fs = _AsyncFs()
     result_holder: dict[str, object] = {}
     holder: dict[str, object] = {}
@@ -132,23 +130,22 @@ def test_no_service_loop_falls_back_to_caller_captured_loop() -> None:
     assert fs.loops and all(loop is holder["loop"] for loop in fs.loops)
     assert fs.thread_names and all(name == worker_thread.name for name in fs.thread_names)
     assert elapsed < _DEADLOCK_BOUND_S
-    assert bridge_service_loop() is None
 
 
 def test_registered_service_loop_services_every_bridge() -> None:
-    """Bridges default to the registered service loop regardless of capture loop."""
+    """Dispatched bridges default to the registered service loop regardless of capture loop."""
     fs = _AsyncFs()
-    with _registered_service_loop() as server:
-        assert bridge_service_loop() is server.loop
+    with _registered_service_loop() as (server, dispatcher):
+        assert dispatcher.service_loop() is server.loop
         worker_loop_owner = _ServingLoop("fleet-test-worker-loop")
         with worker_loop_owner:
-            bridge_a = sync_sandbox(_sandbox(fs), worker_loop_owner.loop)
-            bridge_b = sync_sandbox(_sandbox(fs), server.loop)
+            bridge_a = sync_sandbox(_sandbox(fs), worker_loop_owner.loop, dispatcher)
+            bridge_b = sync_sandbox(_sandbox(fs), server.loop, dispatcher)
             assert bridge_a.fs.download_file("/a") == b"bytes:/a"
             assert bridge_b.process.code_run("print(1)").result == "ran:print(1)"
     assert fs.loops and all(loop is server.loop for loop in fs.loops)
     assert all(name == server.thread.name for name in fs.thread_names)
-    assert bridge_service_loop() is None
+    assert dispatcher.service_loop() is None
 
 
 def test_sync_bridge_completes_inside_nested_deadlock_shape() -> None:
@@ -161,12 +158,12 @@ def test_sync_bridge_completes_inside_nested_deadlock_shape() -> None:
     """
     fs = _AsyncFs()
     outcome: dict[str, object] = {}
-    with _registered_service_loop() as server:
+    with _registered_service_loop() as (server, dispatcher):
 
         async def worker() -> None:
             # Declared against THIS (later-parked) loop, like
             # _build_interpreter(loop=asyncio.get_running_loop()).
-            bridge = sync_sandbox(_sandbox(fs), asyncio.get_running_loop())
+            bridge = sync_sandbox(_sandbox(fs), asyncio.get_running_loop(), dispatcher)
 
             def fulfill(path: str) -> bytes:
                 return bridge.fs.download_file(path)
@@ -234,8 +231,8 @@ def test_legacy_caller_loop_shape_deadlocks() -> None:
 def test_sequential_and_concurrent_calls_share_one_service_loop() -> None:
     """Sequential reuse and concurrent first use all hit the one service loop."""
     fs = _AsyncFs()
-    with _registered_service_loop() as server:
-        bridge = sync_sandbox(_sandbox(fs), asyncio.new_event_loop())
+    with _registered_service_loop() as (server, dispatcher):
+        bridge = sync_sandbox(_sandbox(fs), asyncio.new_event_loop(), dispatcher)
         results: list[bytes] = []
         results_lock = threading.Lock()
 
@@ -258,8 +255,8 @@ def test_sequential_and_concurrent_calls_share_one_service_loop() -> None:
 
 def test_close_fails_calls_typed_fast_and_start_recovers() -> None:
     """close() tombstones the bridge (typed-fast); start() reopens it."""
-    with _registered_service_loop():
-        bridge = sync_sandbox(_sandbox(), asyncio.new_event_loop())
+    with _registered_service_loop() as (_server, dispatcher):
+        bridge = sync_sandbox(_sandbox(), asyncio.new_event_loop(), dispatcher)
         assert bridge.fs.download_file("/warm") == b"bytes:/warm"
         bridge.close()
         started = time.perf_counter()
@@ -276,10 +273,11 @@ def test_close_fails_calls_typed_fast_and_start_recovers() -> None:
 
 def test_stopped_service_loop_fails_typed_fast_and_reregistration_recovers() -> None:
     """A dead service loop raises typed-fast; re-registering restores service."""
+    dispatcher = SyncBridgeDispatcher()
     server = _ServingLoop("fleet-test-dead-loop")
     with server:
-        set_bridge_service_loop(server.loop)
-        bridge = sync_sandbox(_sandbox(), asyncio.new_event_loop())
+        dispatcher.set_loop(server.loop)
+        bridge = sync_sandbox(_sandbox(), asyncio.new_event_loop(), dispatcher)
         assert bridge.fs.download_file("/warm") == b"bytes:/warm"
         # Stop serving WITHOUT closing the loop: posts queue but never run.
         server.stop(close=False)
@@ -290,17 +288,17 @@ def test_stopped_service_loop_fails_typed_fast_and_reregistration_recovers() -> 
         assert time.perf_counter() - started < _DEADLOCK_BOUND_S + 2 * _POLL_BOUND_S
         assert exc_info.value.cause_type == "InterpreterBridgeError"
         server.loop.close()
-    set_bridge_service_loop(None)
+    dispatcher.clear_loop(server.loop)
 
-    with _registered_service_loop():
-        bridge2 = sync_sandbox(_sandbox(), asyncio.new_event_loop())
+    with _registered_service_loop() as (_server2, dispatcher2):
+        bridge2 = sync_sandbox(_sandbox(), asyncio.new_event_loop(), dispatcher2)
         assert bridge2.fs.download_file("/recover") == b"bytes:/recover"
 
 
 def test_call_from_service_loop_fails_fast() -> None:
     """A sync bridge call issued from the service loop itself fails fast."""
-    with _registered_service_loop() as server:
-        bridge = sync_sandbox(_sandbox(), asyncio.new_event_loop())
+    with _registered_service_loop() as (server, dispatcher):
+        bridge = sync_sandbox(_sandbox(), asyncio.new_event_loop(), dispatcher)
 
         async def host_side() -> object:
             return bridge.fs.download_file("/x")
@@ -315,9 +313,9 @@ def test_interpreter_shutdown_tombstones_bridge_calls_only() -> None:
     """shutdown() tombstones its bridge while the shared service loop survives."""
     guard_loop = asyncio.new_event_loop()
     try:
-        with _registered_service_loop() as server:
-            backend = sandbox_backend(_sandbox(), loop=guard_loop)
-            other = sync_sandbox(_sandbox(), guard_loop)
+        with _registered_service_loop() as (server, dispatcher):
+            backend = sandbox_backend(_sandbox(), loop=guard_loop, dispatcher=dispatcher)
+            other = sync_sandbox(_sandbox(), guard_loop, dispatcher)
             interpreter = DaytonaCodeInterpreter(backend=backend)
             interpreter.start()
             assert backend.sandbox.fs.download_file("/warm") == b"bytes:/warm"

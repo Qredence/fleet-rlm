@@ -110,7 +110,6 @@ class InterpreterLease:
     session_id: str | None = None
     run_id: str | None = None
     volume_subpath: str | None = None
-    delete_sandbox: Callable[[str], None] | None = None
     created_sandbox: bool = False
     _released: bool = field(default=False, init=False, repr=False)
     _on_release: Callable[[], None] | None = field(default=None, init=False, repr=False)
@@ -617,7 +616,6 @@ class DaytonaSessionManager:
             interpreter=interpreter,
             session_id=str(session_id),
             run_id=str(run_id),
-            delete_sandbox=None,
             created_sandbox=created_sandbox,
         )
 

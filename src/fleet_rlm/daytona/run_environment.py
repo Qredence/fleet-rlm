@@ -545,10 +545,6 @@ class DaytonaRuntimeResources:
         if sandbox_id and sandbox_id not in self._sandbox_ids:
             self._sandbox_ids.append(sandbox_id)
 
-    def forget_sandboxes(self) -> None:
-        """Drop tracked sandbox ids without deleting (API-restart simulation)."""
-        self._sandbox_ids.clear()
-
     async def cleanup(self) -> None:
         """Delete tracked sandboxes (best-effort)."""
         for sid in list(self._sandbox_ids):
