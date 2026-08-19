@@ -217,12 +217,14 @@ class _DelayedDeleteBeforeUnlinkAgentProcess:
         request = json.loads(calls[-1].args[0].value)
         if request["operation"] == "delete":
             unlink_line = "                    os.unlink(relative_parts[-1], dir_fd=parent_fd)"
+            assert unlink_line in delayed
             inserted = (
                 f"                    open({gate!r}, 'w').close()\n                    time.sleep(0.25)\n{unlink_line}"
             )
             delayed = delayed.replace(unlink_line, inserted, 1)
         if request["operation"] == "write":
             branch = "        if operation == 'write':"
+            assert branch in delayed
             waiter = f"        while not os.path.exists({gate!r}):\n            time.sleep(0.01)\n{branch}"
             delayed = delayed.replace(branch, waiter, 1)
         completed = await asyncio.to_thread(

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import time
 from collections.abc import Callable
 from concurrent.futures import Future, ThreadPoolExecutor, wait
@@ -14,6 +15,7 @@ _FALLBACK_CLEANUP_EXECUTOR = ThreadPoolExecutor(
     max_workers=1,
     thread_name_prefix="fleet-late-child-cleanup-fallback",
 )
+_CLEANUP_EXCEPTIONS = (Exception, asyncio.CancelledError, KeyboardInterrupt, SystemExit)
 
 
 class LateCleanupOwner:
@@ -49,7 +51,7 @@ class LateCleanupOwner:
                     continue
                 try:
                     error = future.exception()
-                except BaseException as exc:
+                except _CLEANUP_EXCEPTIONS as exc:
                     error = exc
                 if error is not None and self._error is None:
                     self._error = error
@@ -87,7 +89,7 @@ class LateCleanupOwner:
             """
             try:
                 error = done.exception()
-            except BaseException as exc:
+            except _CLEANUP_EXCEPTIONS as exc:
                 self._record_error(exc)
             else:
                 if error is not None:
@@ -125,7 +127,7 @@ class LateCleanupOwner:
                 self._record_error(exc)
                 self._complete(marker)
                 return
-            except BaseException:
+            except _CLEANUP_EXCEPTIONS:
                 self._complete(marker)
                 return
 
@@ -135,7 +137,7 @@ class LateCleanupOwner:
                 """
                 try:
                     close_lease(lease)
-                except BaseException as exc:
+                except _CLEANUP_EXCEPTIONS as exc:
                     self._record_error(exc)
                 finally:
                     self._complete(marker)
@@ -143,11 +145,11 @@ class LateCleanupOwner:
             thread = Thread(target=close, name="fleet-late-child-cleanup", daemon=True)
             try:
                 thread.start()
-            except BaseException as exc:
+            except _CLEANUP_EXCEPTIONS as exc:
                 self._record_error(exc)
                 try:
                     _FALLBACK_CLEANUP_EXECUTOR.submit(close)
-                except BaseException as dispatch_error:
+                except _CLEANUP_EXCEPTIONS as dispatch_error:
                     self._record_error(dispatch_error)
                     self._complete(marker, dispatch_error)
 

@@ -10,7 +10,7 @@ from uuid import uuid4
 
 import pytest
 
-from fleet_rlm.daytona import recursive_child_runtime
+from fleet_rlm.daytona import recursive_child_cleanup, recursive_child_runtime
 from fleet_rlm.daytona.provisioning import (
     recursive_child_volume_subpath,
     require_recursive_child_volume_subpath,
@@ -114,7 +114,7 @@ def test_child_runtime_lease_concurrent_close_joins_one_cleanup() -> None:
     def run_close() -> None:
         try:
             lease.close()
-        except BaseException as exc:  # pragma: no cover - assertion below reports unexpected failures
+        except Exception as exc:  # pragma: no cover - assertion below reports unexpected failures
             errors.append(exc)
 
     first = threading.Thread(target=run_close)
@@ -343,6 +343,65 @@ async def test_interpreter_shutdown_timeout_quarantines_provider_cleanup(
 
     release_shutdown.set()
     await asyncio.to_thread(factory.wait_owned)
+    assert platform.deleted == ["child-sandbox"]
+    permit = await admission.acquire(deadline=asyncio.get_running_loop().time() + 1)
+    permit.release()
+
+
+@pytest.mark.asyncio
+async def test_quarantine_thread_start_failure_uses_fallback_executor(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    child = _Sandbox("child-sandbox", _Fs({"/home/daytona/fleet/intermediate.txt"}))
+    release_shutdown = threading.Event()
+    platform = _Platform(child)
+    real_thread = recursive_child_cleanup.Thread
+    thread_starts = 0
+
+    class FailingQuarantineThread:
+        def __init__(self, *, target: object, **kwargs: object) -> None:
+            nonlocal thread_starts
+            thread_starts += 1
+            self._thread = real_thread(target=target, **kwargs)  # type: ignore[arg-type]
+
+        def start(self) -> None:
+            if thread_starts == 2:
+                raise RuntimeError("quarantine thread start failed")
+            self._thread.start()
+
+    class HangingInterpreter:
+        def __init__(self, **_kwargs: object) -> None:
+            return None
+
+        def shutdown(self, *, strict_broker_cleanup: bool = False) -> None:
+            assert strict_broker_cleanup is True
+            release_shutdown.wait(2)
+
+    monkeypatch.setattr(recursive_child_cleanup, "Thread", FailingQuarantineThread)
+    monkeypatch.setattr(recursive_child_runtime, "DaytonaCodeInterpreter", HangingInterpreter)
+    monkeypatch.setattr(recursive_child_runtime, "sandbox_backend", lambda sandbox, **_kwargs: sandbox)
+    monkeypatch.setattr(recursive_child_runtime, "_CHILD_CLEANUP_RESULT_TIMEOUT_S", 0.05)
+    admission = DaytonaAdmission(max_active_leases=1)
+    factory = recursive_child_runtime.build_child_runtime_factory(
+        loop=asyncio.get_running_loop(),
+        platform=platform,
+        admission=admission,
+        volume_id="shared-volume",
+        mount_path="/home/daytona/fleet",
+        workspace_id=uuid4(),
+        run_id=uuid4(),
+        deadline=asyncio.get_running_loop().time() + 30,
+        execution_timeout_s=30,
+        execution_output_cap=1000,
+    )
+    lease = await asyncio.to_thread(factory, 1)
+
+    with pytest.raises(recursive_child_runtime.ChildRuntimeCleanupError, match="recursive child cleanup failed"):
+        await asyncio.to_thread(lease.close)
+    release_shutdown.set()
+    await asyncio.to_thread(factory.wait_owned)
+
+    assert thread_starts == 2
     assert platform.deleted == ["child-sandbox"]
     permit = await admission.acquire(deadline=asyncio.get_running_loop().time() + 1)
     permit.release()

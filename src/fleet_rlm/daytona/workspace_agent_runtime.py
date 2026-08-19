@@ -45,6 +45,12 @@ def respond(payload) -> NoReturn:
     Parameters:
         payload: The response payload to propagate.
     """
+    try:
+        encoded = json.dumps(payload, ensure_ascii=False, separators=(',', ':'))
+    except (TypeError, ValueError):
+        raise _AgentResponse({'ok': False, 'error': 'response_invalid'})
+    if len(encoded.encode('utf-8')) > AGENT_RESPONSE_MAX_BYTES:
+        raise _AgentResponse({'ok': False, 'error': 'too_large'})
     raise _AgentResponse(payload)
 
 

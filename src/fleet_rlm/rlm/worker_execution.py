@@ -16,6 +16,7 @@ from fleet_rlm.runtime.owned_effect import OwnedEffect
 T = TypeVar("T")
 
 RLMWorkerExecution = Callable[[Any, RLMExecutionContext, Mapping[str, Any]], Coroutine[Any, Any, T]]
+_WORKER_SETTLE_EXCEPTIONS = (Exception, asyncio.CancelledError, KeyboardInterrupt, SystemExit)
 
 
 class WorkerOwnership:
@@ -54,7 +55,7 @@ class WorkerOwnership:
             owned = OwnedEffect.start(asyncio.to_thread(waiter))
             try:
                 await owned.settle()
-            except BaseException as exc:
+            except _WORKER_SETTLE_EXCEPTIONS as exc:
                 waiter_errors.append(exc)
         if waiter_errors:
             raise waiter_errors[0]
@@ -83,14 +84,14 @@ class RLMWorkerHandle(Generic[T]):
         """Wait for completion as an observation signal without raising its error."""
         try:
             await self._effect.observe_completion()
-        except BaseException:
+        except _WORKER_SETTLE_EXCEPTIONS:
             self.consume_exception()
 
     async def settle_after_caller_cancellation(self) -> bool:
         """Settle the owned worker and report whether the waiter was cancelled."""
         try:
             await self._effect.settle()
-        except BaseException:
+        except _WORKER_SETTLE_EXCEPTIONS:
             self.consume_exception()
         return self._effect.caller_cancelled
 

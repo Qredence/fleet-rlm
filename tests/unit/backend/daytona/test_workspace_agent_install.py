@@ -18,7 +18,7 @@ import pytest
 
 from fleet_rlm.daytona import workspace_agent as wa
 
-_FULL_SOURCE_MARKERS = ("def respond(payload):", "O_NOFOLLOW", "fcntl.flock")
+_FULL_SOURCE_MARKERS = ("def respond(payload) -> NoReturn:", "O_NOFOLLOW", "fcntl.flock")
 
 
 class _InstallFs:

@@ -76,6 +76,18 @@ def test_metadata_and_validation_are_available_without_dispatch() -> None:
     }
 
 
+def test_response_bound_returns_bounded_error_without_recursing(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(runtime, "AGENT_RESPONSE_MAX_BYTES", 32)
+    volume = tmp_path / "volume"
+    root = volume / "workspace"
+    root.mkdir(parents=True)
+    (root / "note.txt").write_text("x" * 32, encoding="utf-8")
+
+    response = runtime.handle(_request(volume, root, "read", "note.txt", max_bytes=32, total_file_bytes=32))
+
+    assert response == {"ok": False, "error": "too_large"}
+
+
 def test_direct_handler_dispatches_every_workspace_operation(tmp_path: Path) -> None:
     volume = tmp_path / "volume"
     root = volume / "workspace"

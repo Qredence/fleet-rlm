@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 from collections.abc import Awaitable, Callable, Coroutine
-from concurrent.futures import Future
+from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import PurePosixPath
 from threading import Thread
 from typing import Any
@@ -22,6 +22,10 @@ CHILD_DELETE_CONFIRM_POLL_S = 1.0
 # Cleanup ownership must retain cancellation and process-level shutdown
 # signals while avoiding a bare BaseException handler in each branch.
 _CLEANUP_EXCEPTIONS = (Exception, asyncio.CancelledError, KeyboardInterrupt, SystemExit)
+_QUARANTINE_FALLBACK_EXECUTOR = ThreadPoolExecutor(
+    max_workers=1,
+    thread_name_prefix="fleet-child-runtime-quarantine-fallback",
+)
 
 
 def close_child_runtime_sync(
@@ -146,11 +150,7 @@ def close_child_runtime_sync(
                                 cleanup_error = done_error
                             if error is None:
                                 error = cleanup_error
-                            if marker is not None:
-                                if error is None:
-                                    marker.set_result(None)
-                                else:
-                                    marker.set_exception(error)
+                            complete_marker(error)
 
                         cleanup_future.add_done_callback(finish_marker)
                     except _CLEANUP_EXCEPTIONS:
@@ -161,11 +161,16 @@ def close_child_runtime_sync(
                         raise
                 except _CLEANUP_EXCEPTIONS as cleanup_error:
                     quarantine_error = quarantine_error or cleanup_error
-                if marker is not None and not marker_pending:
-                    if quarantine_error is None:
-                        marker.set_result(None)
-                    else:
-                        marker.set_exception(quarantine_error)
+                if not marker_pending:
+                    complete_marker(quarantine_error)
+
+            def complete_marker(error: BaseException | None) -> None:
+                if marker is None or marker.done():
+                    return
+                if error is None:
+                    marker.set_result(None)
+                else:
+                    marker.set_exception(error)
 
             quarantine_thread = Thread(
                 target=finish_quarantine,
@@ -174,9 +179,11 @@ def close_child_runtime_sync(
             )
             try:
                 quarantine_thread.start()
-            except _CLEANUP_EXCEPTIONS as thread_error:
-                if marker is not None:
-                    marker.set_exception(thread_error)
+            except _CLEANUP_EXCEPTIONS:
+                try:
+                    _QUARANTINE_FALLBACK_EXECUTOR.submit(finish_quarantine)
+                except _CLEANUP_EXCEPTIONS as dispatch_error:
+                    complete_marker(dispatch_error)
                 deferred_cleanup = True
                 first_error = exc
             else:
