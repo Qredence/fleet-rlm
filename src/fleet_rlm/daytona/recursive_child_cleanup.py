@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 from collections.abc import Awaitable, Callable, Coroutine
 from concurrent.futures import Future
@@ -18,6 +19,9 @@ from fleet_rlm.rlm.child_runtime import ChildRuntimeCleanupError
 CHILD_CLEANUP_RESULT_TIMEOUT_S = 60.0
 CHILD_DELETE_CONFIRM_TIMEOUT_S = 120.0
 CHILD_DELETE_CONFIRM_POLL_S = 1.0
+# Cleanup ownership must retain cancellation and process-level shutdown
+# signals while avoiding a bare BaseException handler in each branch.
+_CLEANUP_EXCEPTIONS = (Exception, asyncio.CancelledError, KeyboardInterrupt, SystemExit)
 
 
 def close_child_runtime_sync(
@@ -62,7 +66,7 @@ def close_child_runtime_sync(
     def run_shutdown() -> None:
         try:
             interpreter.shutdown(strict_broker_cleanup=True)
-        except BaseException as exc:
+        except _CLEANUP_EXCEPTIONS as exc:
             shutdown_result.set_exception(exc)
         else:
             shutdown_result.set_result(None)
@@ -70,7 +74,7 @@ def close_child_runtime_sync(
     shutdown_thread = Thread(target=run_shutdown, name="fleet-child-interpreter-shutdown", daemon=True)
     try:
         shutdown_thread.start()
-    except BaseException as exc:
+    except _CLEANUP_EXCEPTIONS as exc:
         first_error = exc
     else:
         try:
@@ -89,7 +93,7 @@ def close_child_runtime_sync(
                 marker_pending = False
                 try:
                     shutdown_result.result()
-                except BaseException as shutdown_error:
+                except _CLEANUP_EXCEPTIONS as shutdown_error:
                     quarantine_error = shutdown_error
                 try:
                     cleanup_future, cleanup_coroutine = schedule_cleanup()
@@ -102,7 +106,7 @@ def close_child_runtime_sync(
                             error = quarantine_error
                             try:
                                 cleanup_error = done.exception()
-                            except BaseException as done_error:
+                            except _CLEANUP_EXCEPTIONS as done_error:
                                 cleanup_error = done_error
                             if error is None:
                                 error = cleanup_error
@@ -113,13 +117,13 @@ def close_child_runtime_sync(
                                     marker.set_exception(error)
 
                         cleanup_future.add_done_callback(finish_marker)
-                    except BaseException:
+                    except _CLEANUP_EXCEPTIONS:
                         cleanup_future.cancel()
                         if cleanup_coroutine is not None:
                             with contextlib.suppress(BaseException):
                                 cleanup_coroutine.close()
                         raise
-                except BaseException as cleanup_error:
+                except _CLEANUP_EXCEPTIONS as cleanup_error:
                     quarantine_error = quarantine_error or cleanup_error
                 if marker is not None and not marker_pending:
                     if quarantine_error is None:
@@ -134,7 +138,7 @@ def close_child_runtime_sync(
             )
             try:
                 quarantine_thread.start()
-            except BaseException as thread_error:
+            except _CLEANUP_EXCEPTIONS as thread_error:
                 if marker is not None:
                     marker.set_exception(thread_error)
                 deferred_cleanup = True
@@ -142,7 +146,7 @@ def close_child_runtime_sync(
             else:
                 deferred_cleanup = True
                 first_error = exc
-        except BaseException as exc:
+        except _CLEANUP_EXCEPTIONS as exc:
             first_error = exc
 
     if not deferred_cleanup:
@@ -160,7 +164,7 @@ def close_child_runtime_sync(
                     with contextlib.suppress(BaseException):
                         cleanup_coroutine.close()
             first_error = first_error or exc
-        except BaseException as exc:
+        except _CLEANUP_EXCEPTIONS as exc:
             first_error = first_error or exc
             if future is not None:
                 future.cancel()
