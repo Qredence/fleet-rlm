@@ -176,7 +176,12 @@ async def confirm_absence(
             if isinstance(exc, (asyncio.CancelledError, KeyboardInterrupt, SystemExit)):
                 raise
             note("probe_error")
-            return AbsenceProbeError(sandbox_id, sanitize_failure_text(exc), tuple(observations), clock() - started)
+            return AbsenceProbeError(
+                sandbox_id,
+                sanitize_failure_text(exc, max_chars=160),
+                tuple(observations),
+                clock() - started,
+            )
         if target is None:
             note("not_found")
             return AbsenceConfirmation(sandbox_id, tuple(observations), clock() - started)

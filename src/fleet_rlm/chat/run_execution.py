@@ -106,11 +106,11 @@ async def _close_stream_owned(stream: RunEventStream | None, remember: Callable[
         return
     try:
         await stream.aclose()
-    except BaseException as exc:
+    except (Exception, asyncio.CancelledError) as exc:
         remember(exc)
     try:
         await _wait_stream_owned(stream)
-    except BaseException as exc:
+    except (Exception, asyncio.CancelledError) as exc:
         remember(exc)
 
 
@@ -720,7 +720,7 @@ class RunExecutionDriver:
             effective_claim_lost = True
             try:
                 receipt = await self._revoke_claim(run, claim_loss_usage or empty_rlm_usage())
-            except BaseException as exc:
+            except (Exception, asyncio.CancelledError) as exc:
                 remember(exc)
                 return
             # A racing commit wins: no fence and no settlement release
@@ -729,7 +729,7 @@ class RunExecutionDriver:
             if receipt is not None and self._claim_loss_fence is not None:
                 try:
                     await self._claim_loss_fence(run.session_id)
-                except BaseException as exc:
+                except (Exception, asyncio.CancelledError) as exc:
                     remember(exc)
 
         try:
@@ -747,7 +747,7 @@ class RunExecutionDriver:
                     await shield_cleanup(finalization_task)
             try:
                 await prepared.aclose()
-            except BaseException as exc:
+            except (Exception, asyncio.CancelledError) as exc:
                 remember(exc)
             if (
                 late_claim_loss_window

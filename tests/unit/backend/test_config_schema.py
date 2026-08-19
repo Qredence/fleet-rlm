@@ -16,11 +16,6 @@ import pytest
 from pydantic import ValidationError
 
 import fleet_rlm.config as config
-from fleet_rlm.config import (
-    EnvironmentReferenceSpec,
-    FleetConfigurationError,
-    Settings,
-)
 from fleet_rlm.config_policy import _FIELDS
 
 _EXPECTED_INVENTORY: tuple[tuple[str, str, str, str, tuple[str, ...], str | None], ...] = (
@@ -183,16 +178,14 @@ _EXPECTED_INVENTORY: tuple[tuple[str, str, str, str, tuple[str, ...], str | None
 def test_every_settings_field_carries_one_authoritative_declaration() -> None:
     """Removing/duplicating a policy declaration fails the schema build loudly."""
     policies = config._field_policies()
-    assert set(policies) == set(Settings.model_fields)
+    assert set(policies) == set(config.Settings.model_fields)
 
 
 def test_policy_inventory_is_derived_from_the_schema_identically() -> None:
     """The editor inventory built by ``config_policy`` is the schema inventory."""
-    from fleet_rlm.config import config_field_specs
-
     derived = tuple(
         (spec.toml_path, spec.group, spec.label, spec.editor, spec.choices, spec.settings_field)
-        for spec in config_field_specs()
+        for spec in config.config_field_specs()
         if spec.group is not None
     )
     current = tuple(
@@ -231,7 +224,7 @@ def test_environment_reference_specs_reference_real_fields_and_follow_naming() -
 
 
 def test_schema_build_rejects_reference_to_nonexistent_field(monkeypatch: pytest.MonkeyPatch) -> None:
-    bogus = EnvironmentReferenceSpec(
+    bogus = config.EnvironmentReferenceSpec(
         toml_path="storage.bogus_env",
         group="Storage",
         label="Bogus environment variable",
@@ -240,12 +233,12 @@ def test_schema_build_rejects_reference_to_nonexistent_field(monkeypatch: pytest
     )
     monkeypatch.setattr(config, "_ENVIRONMENT_REFERENCE_SPECS", (*config._ENVIRONMENT_REFERENCE_SPECS, bogus))
 
-    with pytest.raises(FleetConfigurationError, match="not_a_settings_field"):
+    with pytest.raises(config.FleetConfigurationError, match="not_a_settings_field"):
         config._build_field_specs()
 
 
 def test_schema_build_rejects_duplicate_ranks(monkeypatch: pytest.MonkeyPatch) -> None:
-    colliding = EnvironmentReferenceSpec(
+    colliding = config.EnvironmentReferenceSpec(
         toml_path="storage.colliding_env",
         group="Storage",
         label="Colliding environment variable",
@@ -254,7 +247,7 @@ def test_schema_build_rejects_duplicate_ranks(monkeypatch: pytest.MonkeyPatch) -
     )
     monkeypatch.setattr(config, "_ENVIRONMENT_REFERENCE_SPECS", (*config._ENVIRONMENT_REFERENCE_SPECS, colliding))
 
-    with pytest.raises(FleetConfigurationError, match="duplicate policy inventory rank"):
+    with pytest.raises(config.FleetConfigurationError, match="duplicate policy inventory rank"):
         config._build_field_specs()
 
 
@@ -267,8 +260,8 @@ def test_secret_fields_are_never_operator_editable() -> None:
 
 
 def test_unknown_direct_settings_field_is_rejected_without_leaking_values() -> None:
-    with pytest.raises(FleetConfigurationError) as excinfo:
-        Settings(data_rooot="super-secret-payload")  # type: ignore[call-arg]
+    with pytest.raises(config.FleetConfigurationError) as excinfo:
+        config.Settings(data_rooot="super-secret-payload")  # type: ignore[call-arg]
 
     message = str(excinfo.value)
     assert "data_rooot" in message
@@ -276,18 +269,18 @@ def test_unknown_direct_settings_field_is_rejected_without_leaking_values() -> N
 
 
 def test_retired_settings_kwargs_are_rejected() -> None:
-    with pytest.raises(FleetConfigurationError, match="_env_file"):
-        Settings(_env_file=None)  # type: ignore[call-arg]
+    with pytest.raises(config.FleetConfigurationError, match="_env_file"):
+        config.Settings(_env_file=None)  # type: ignore[call-arg]
 
 
 def test_model_validate_rejects_unknown_keys() -> None:
-    with pytest.raises(FleetConfigurationError, match="app_name_extra"):
-        Settings.model_validate({"app_name_extra": "x"})
+    with pytest.raises(config.FleetConfigurationError, match="app_name_extra"):
+        config.Settings.model_validate({"app_name_extra": "x"})
 
 
 def test_known_field_type_errors_remain_pydantic_validation_errors() -> None:
     with pytest.raises(ValidationError, match="turn_timeout_seconds"):
-        Settings(turn_timeout_seconds=0)
+        config.Settings(turn_timeout_seconds=0)
 
 
 def test_committed_policy_loads_every_profile_identically(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -336,7 +329,7 @@ def test_required_policy_key_reports_its_settings_field() -> None:
     document["defaults"]["runtime"].pop("turn_timeout_seconds")
     profile = document["profiles"][document["config"]["default_profile"]]
 
-    with pytest.raises(FleetConfigurationError, match="turn_timeout_seconds"):
+    with pytest.raises(config.FleetConfigurationError, match="turn_timeout_seconds"):
         config._flatten_policy(config._deep_merge(document["defaults"], profile))
 
 
@@ -351,4 +344,4 @@ def test_absent_optional_policy_keys_fall_back_to_settings_defaults() -> None:
 
     assert "rlm_recursion_max_calls" not in flat.settings
     # ``Settings`` owns the fallback default; TOML absence stays absent.
-    assert Settings(**flat.settings).rlm_recursion_max_calls == 4
+    assert config.Settings(**flat.settings).rlm_recursion_max_calls == 4

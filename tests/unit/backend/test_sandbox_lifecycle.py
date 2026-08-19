@@ -116,6 +116,13 @@ def test_sanitize_failure_text_types_and_redacts_exception() -> None:
     assert text.count("[redacted]") == 2
 
 
+def test_sanitize_failure_text_caps_after_redaction() -> None:
+    text = sanitize_failure_text(RuntimeError("api_key=secret " + "x" * 500))
+
+    assert len(text) == 200
+    assert "secret" not in text
+
+
 @pytest.mark.parametrize(
     ("exc", "expected"),
     [

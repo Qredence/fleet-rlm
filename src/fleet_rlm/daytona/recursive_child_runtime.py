@@ -20,7 +20,6 @@ from fleet_rlm.daytona.recursive_child_cleanup import (
 )
 from fleet_rlm.daytona.recursive_child_cleanup import (
     cleanup_after_failed_acquire,
-    cleanup_child_runtime_async,
     close_child_runtime_sync,
 )
 from fleet_rlm.daytona.recursive_child_late import LateCleanupOwner
@@ -35,11 +34,9 @@ from fleet_rlm.rlm.child_runtime import (
     ChildRuntimeFactory,
 )
 
-# Patchable compat seams (tests and live proofs monkeypatch these module-level
-# names): each binds the canonical implementation, and the call sites below read
-# them from this module's namespace at call time.
+# Patchable compatibility seam: tests and live proofs monkeypatch this module-
+# level name, so the acquisition call site reads it at call time.
 _acquire_child_runtime = acquire_child_runtime
-_cleanup_child_runtime_async = cleanup_child_runtime_async
 
 
 # Absence-confirmation budget policy lives in ``recursive_child_cleanup``

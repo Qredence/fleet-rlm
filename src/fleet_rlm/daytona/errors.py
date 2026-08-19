@@ -18,6 +18,8 @@ ProviderFailureKind = Literal[
     "unknown",
 ]
 
+DEFAULT_SANITIZED_FAILURE_MAX_CHARS = 200
+
 _SECRET_PATTERNS = (
     re.compile(r"(?i)(api[_-]?key|token|secret|password|authorization)\s*[:=]\s*\S+"),
     re.compile(r"(?i)bearer\s+\S+"),
@@ -37,14 +39,14 @@ def sanitize_provider_message(raw: str) -> str:
     return message
 
 
-def sanitize_failure_text(exc: BaseException) -> str:
+def sanitize_failure_text(exc: BaseException, *, max_chars: int = DEFAULT_SANITIZED_FAILURE_MAX_CHARS) -> str:
     """Credential-free ``TypeName: message`` failure description for receipts.
 
     Single owner for lease receipts and deletion-probe error strings; text is
     exactly :func:`sanitize_provider_message` output, so redaction policy
     cannot drift between lifecycle lanes.
     """
-    return f"{type(exc).__name__}: {sanitize_provider_message(str(exc))}"
+    return f"{type(exc).__name__}: {sanitize_provider_message(str(exc))}"[:max_chars]
 
 
 @dataclass(slots=True)

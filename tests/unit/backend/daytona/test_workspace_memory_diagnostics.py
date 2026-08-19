@@ -193,7 +193,7 @@ def test_provider_outage_is_classified_and_still_fail_soft(
 def _capture(store) -> BaseException:
     try:
         store.read_tail(byte_budget=128)
-    except BaseException as exc:
+    except Exception as exc:
         return exc
     raise AssertionError("expected read_tail to fail")
 

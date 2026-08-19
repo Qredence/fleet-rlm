@@ -17,8 +17,7 @@ import pytest
 
 def test_workspace_memory_and_fs_route_through_the_p28_runtime_handlers() -> None:
     """Installed + fallback workspace execution stays on the one runtime handler."""
-    import fleet_rlm.daytona.workspace_fs as workspace_fs
-    import fleet_rlm.daytona.workspace_memory as workspace_memory
+    from fleet_rlm.daytona import workspace_fs, workspace_memory
     from fleet_rlm.daytona.workspace_agent import run_workspace_agent, run_workspace_agent_async
 
     assert workspace_memory.run_workspace_agent is run_workspace_agent
@@ -27,7 +26,7 @@ def test_workspace_memory_and_fs_route_through_the_p28_runtime_handlers() -> Non
 
 def test_owned_effect_primitive_owns_post_commit_promotion() -> None:
     """Owned-effect call sites settle through the P27 primitive, not hand-rolled waits."""
-    import fleet_rlm.chat.post_commit_memory as post_commit_memory
+    from fleet_rlm.chat import post_commit_memory
     from fleet_rlm.runtime.owned_effect import OwnedEffect
 
     assert post_commit_memory.OwnedEffect is OwnedEffect
@@ -112,22 +111,22 @@ def test_settings_keeps_no_legacy_llm_fields() -> None:
 
 def test_deleted_dataclass_methods_and_fields_stay_deleted() -> None:
     """Dead compat surfaces removed in P33 do not reappear on the domain models."""
-    from fleet_rlm.chat.post_commit_memory import OwnedPostCommitMemoryPromotion
+    from fleet_rlm.chat import post_commit_memory
     from fleet_rlm.chat.session_context import SessionContextManifest, TurnPreview
     from fleet_rlm.chat.turn_coordinator import TurnCoordinator
     from fleet_rlm.config import Settings
+    from fleet_rlm.daytona import workspace_fs
     from fleet_rlm.daytona.session_manager import InterpreterLease
-    from fleet_rlm.daytona.workspace_fs import AsyncDaytonaSessionWorkspaceFS, DaytonaSessionWorkspaceFS
     from fleet_rlm.sessions.models import AssistantTurnRecord
 
     assert not hasattr(Settings, "llm_api_url")
     assert "delete_sandbox" not in InterpreterLease.__dataclass_fields__
-    assert "__call__" not in vars(OwnedPostCommitMemoryPromotion)
+    assert "__call__" not in vars(post_commit_memory.OwnedPostCommitMemoryPromotion)
     assert not hasattr(TurnPreview, "to_input")
     assert not hasattr(SessionContextManifest, "to_input")
     assert not hasattr(TurnCoordinator, "_submit_claim_loss_cleanup")
-    assert not hasattr(DaytonaSessionWorkspaceFS, "read_text")
-    assert not hasattr(AsyncDaytonaSessionWorkspaceFS, "read_text")
+    assert not hasattr(workspace_fs.DaytonaSessionWorkspaceFS, "read_text")
+    assert not hasattr(workspace_fs.AsyncDaytonaSessionWorkspaceFS, "read_text")
     assert not hasattr(AssistantTurnRecord, "content")
 
 
