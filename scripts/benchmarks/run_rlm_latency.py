@@ -955,11 +955,12 @@ def run_benchmark(args: argparse.Namespace) -> dict[str, Any]:
                     partial_trace_id = getattr(exc, "trace_id", None) or row.get("trace_id")
                     partial_run_id = getattr(exc, "run_id", None) or row.get("run_id")
                     # Collect diagnostics for failed runs when trace_id is available
-                    diagnostics = (
-                        _execution_trace_diagnostics(args.mlflow_url, str(partial_trace_id))
-                        if partial_trace_id
-                        else {}
-                    )
+                    diagnostics = {}
+                    if partial_trace_id:
+                        diagnostics = _execution_trace_diagnostics(
+                            args.mlflow_url,
+                            str(partial_trace_id),
+                        )
                     row = {
                         **row,
                         "duration_ms": row.get("duration_ms", round((time.perf_counter() - sample_started) * 1000, 3)),

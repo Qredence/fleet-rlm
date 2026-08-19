@@ -367,9 +367,15 @@ def test_cli_writes_bounded_failure_receipt(tmp_path) -> None:
 
 
 def test_failed_stream_retains_adapter_parse_error_count_via_diagnostics(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Regression test: stream failures preserve trace_id/run_id and collect diagnostics including adapter_parse_error_count."""
+    """Regression test: failed streams preserve IDs and collect parse-error diagnostics."""
 
     class _FailingTurnClient:
+        def __enter__(self) -> _FailingTurnClient:
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
         def post(self, path: str, **_kwargs: object) -> _Response:
             if path == "/api/sessions":
                 return _Response(payload={"id": "session-1"})
@@ -387,7 +393,13 @@ def test_failed_stream_retains_adapter_parse_error_count_via_diagnostics(monkeyp
 
         def stream(self, _method: str, _path: str, **_kwargs: object) -> _Stream:
             lines = [
-                "data: " + json_module.dumps({"type": "messageMetadata", "messageMetadata": {"traceId": "tr-1", "runId": "run-1"}}),
+                "data: "
+                + json_module.dumps(
+                    {
+                        "type": "messageMetadata",
+                        "messageMetadata": {"traceId": "tr-1", "runId": "run-1"},
+                    }
+                ),
                 "data: " + json_module.dumps({"type": "error", "errorText": "Adapter parse failure"}),
             ]
             return _Stream(_Response(lines=lines))
