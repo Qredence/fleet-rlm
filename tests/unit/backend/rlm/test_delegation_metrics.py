@@ -59,11 +59,31 @@ def test_token_usage_normalizer_accepts_both_supported_alias_families() -> None:
     assert normalize_lm_token_usage({"input_tokens": 11, "output_tokens": 7, "total_tokens": 21})["total_tokens"] == 21
 
 
-def test_metrics_count_input_output_aliases_when_total_is_absent() -> None:
+def test_metrics_record_input_output_total_per_lm_call() -> None:
     metrics = DelegationMetrics()
     metrics.record_lm_call("sub", 1, usage={"input_tokens": 13, "output_tokens": 4})
 
-    assert metrics.snapshot().lm_token_totals == (("sub", 1, 17),)
+    # lm_token_totals entries are (role, depth, input, output, total) so
+    # per-iteration prompt growth is legible without losing the total.
+    assert metrics.snapshot().lm_token_totals == (("sub", 1, 13, 4, 17),)
+
+
+def test_metrics_token_totals_partial_usage_is_not_collapsed_to_zero() -> None:
+    # A provider that reports only input_tokens must not read as 0 tokens.
+    metrics = DelegationMetrics()
+    metrics.record_lm_call("root", 0, usage={"input_tokens": 50})
+    metrics.record_lm_call("root", 0, usage={"prompt_tokens": 30, "completion_tokens": 20})
+
+    assert metrics.snapshot().lm_token_totals == (("root", 0, 80, 20, 100),)
+    assert metrics.snapshot().as_dict()["lm_token_totals"] == [
+        {
+            "role": "root",
+            "recursive_depth": 0,
+            "input_tokens": 80,
+            "output_tokens": 20,
+            "tokens": 100,
+        }
+    ]
 
 
 def test_lm_telemetry_matches_callback_response_in_concurrent_history() -> None:

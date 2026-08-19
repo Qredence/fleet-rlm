@@ -63,10 +63,47 @@ def test_build_lm_allows_reasoning_effort_only_when_configured(monkeypatch: pyte
 
     assert default == "default-lm"
     assert bounded == "bounded-lm"
+    # stream_options (usage) is always allowlisted; reasoning_effort only appends
+    # its param when explicitly configured.
     assert "reasoning_effort" not in lm.call_args_list[0].kwargs
-    assert "allowed_openai_params" not in lm.call_args_list[0].kwargs
+    assert lm.call_args_list[0].kwargs["allowed_openai_params"] == ["stream_options"]
     assert lm.call_args_list[1].kwargs["reasoning_effort"] == "none"
-    assert lm.call_args_list[1].kwargs["allowed_openai_params"] == ["reasoning_effort"]
+    assert lm.call_args_list[1].kwargs["allowed_openai_params"] == ["stream_options", "reasoning_effort"]
+
+
+def test_build_lm_requests_usage_via_stream_options(monkeypatch: pytest.MonkeyPatch) -> None:
+    import fleet_rlm.rlm.lm_factory as factory
+
+    lm = MagicMock(return_value="lm")
+    monkeypatch.setattr(factory.dspy, "LM", lm)
+
+    factory.build_lm("openai/model", api_key=None)
+
+    kwargs = lm.call_args.kwargs
+    # Stream so the provider emits a usage block on the final chunk: gateways
+    # (Databricks AI Gateway included) ignore stream_options.include_usage on a
+    # non-streamed request. `stream` is a litellm transport toggle passed
+    # directly; `stream_options` is an OpenAI body param that must be allowlisted.
+    # DSPy/litellm aggregate the deltas internally, so lm() still returns the
+    # same final outputs and ChatAdapter parsing is untouched.
+    assert kwargs["stream"] is True
+    assert kwargs["stream_options"] == {"include_usage": True}
+    assert kwargs["allowed_openai_params"] == ["stream_options"]
+
+
+def test_build_lm_requests_usage_and_reasoning_effort_together(monkeypatch: pytest.MonkeyPatch) -> None:
+    import fleet_rlm.rlm.lm_factory as factory
+
+    lm = MagicMock(return_value="lm")
+    monkeypatch.setattr(factory.dspy, "LM", lm)
+
+    factory.build_lm("openai/model", api_key=None, reasoning_effort="none")
+
+    kwargs = lm.call_args.kwargs
+    assert kwargs["stream"] is True
+    assert kwargs["stream_options"] == {"include_usage": True}
+    assert kwargs["reasoning_effort"] == "none"
+    assert kwargs["allowed_openai_params"] == ["stream_options", "reasoning_effort"]
 
 
 def test_build_lm_uses_chat_completion_transport(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -113,10 +113,21 @@ def build_lm(
         dspy.LM: Configured DSPy language model.
     """
     model_id = normalize_model_id(model)
+    allowed_openai_params: list[str] = ["stream_options"]
     kwargs: dict[str, Any] = {
         "model_type": "chat",
         "cache": cache,
         "num_retries": num_retries,
+        # Stream and ask for a usage block on the final chunk. Gateways such as
+        # the Databricks AI Gateway ignore ``stream_options.include_usage`` on a
+        # non-streamed request, so streaming is required to observe token usage.
+        # DSPy/litellm aggregate the streamed deltas internally and ``lm()``
+        # still returns the same final outputs, leaving ChatAdapter parsing
+        # untouched. ``stream`` is a litellm transport toggle (a first-class
+        # completion() param), while ``stream_options`` is an OpenAI body param
+        # LiteLLM filters unless allowlisted.
+        "stream": True,
+        "stream_options": {"include_usage": True},
     }
     if api_key:
         kwargs["api_key"] = api_key
@@ -130,7 +141,8 @@ def build_lm(
         kwargs["reasoning_effort"] = reasoning_effort
         # LiteLLM normally filters this OpenAI-compatible parameter; explicitly
         # allow it for providers that expose reasoning controls.
-        kwargs["allowed_openai_params"] = ["reasoning_effort"]
+        allowed_openai_params.append("reasoning_effort")
+    kwargs["allowed_openai_params"] = allowed_openai_params
     return dspy.LM(model_id, **kwargs)
 
 

@@ -36,7 +36,9 @@ class DelegationMetricsSnapshot:
     peak_child_concurrency: int = 0
     lm_call_counts: tuple[tuple[str, int, int], ...] = ()
     lm_latency_ms: tuple[tuple[str, int, float], ...] = ()
-    lm_token_totals: tuple[tuple[str, int, int], ...] = ()
+    # Entries are (role, recursive_depth, input_tokens, output_tokens, total_tokens);
+    # input/output are kept alongside the total so partial usage never reads as 0.
+    lm_token_totals: tuple[tuple[str, int, int, int, int], ...] = ()
 
     def as_dict(self) -> dict[str, object]:
         """Return a bounded JSON/MLflow-safe representation."""
@@ -59,8 +61,14 @@ class DelegationMetricsSnapshot:
                 for role, depth, total in self.lm_latency_ms
             ],
             "lm_token_totals": [
-                {"role": role, "recursive_depth": depth, "tokens": tokens}
-                for role, depth, tokens in self.lm_token_totals
+                {
+                    "role": role,
+                    "recursive_depth": depth,
+                    "input_tokens": input_tokens,
+                    "output_tokens": output_tokens,
+                    "tokens": tokens,
+                }
+                for role, depth, input_tokens, output_tokens, tokens in self.lm_token_totals
             ],
         }
 
@@ -72,6 +80,8 @@ class DelegationMetrics:
         self._lock = Lock()
         self._lm_calls: dict[tuple[str, int], int] = {}
         self._lm_latency_ms: dict[tuple[str, int], float] = {}
+        self._lm_input_tokens: dict[tuple[str, int], int] = {}
+        self._lm_output_tokens: dict[tuple[str, int], int] = {}
         self._lm_tokens: dict[tuple[str, int], int] = {}
         self._recursive_child_calls = 0
         self._recursive_batch_calls = 0
@@ -92,10 +102,15 @@ class DelegationMetrics:
         """Record one completed or failed LM request without retaining content."""
         normalized_role = role if role in {"root", "sub"} else "unknown"
         key = (normalized_role, max(0, int(recursive_depth)))
-        tokens = normalize_lm_token_usage(usage).get("total_tokens", 0)
+        normalized_usage = normalize_lm_token_usage(usage)
+        input_tokens = normalized_usage.get("input_tokens", 0)
+        output_tokens = normalized_usage.get("output_tokens", 0)
+        tokens = normalized_usage.get("total_tokens", 0)
         with self._lock:
             self._lm_calls[key] = self._lm_calls.get(key, 0) + 1
             self._lm_latency_ms[key] = self._lm_latency_ms.get(key, 0.0) + max(0.0, float(duration_ms))
+            self._lm_input_tokens[key] = self._lm_input_tokens.get(key, 0) + input_tokens
+            self._lm_output_tokens[key] = self._lm_output_tokens.get(key, 0) + output_tokens
             self._lm_tokens[key] = self._lm_tokens.get(key, 0) + tokens
 
     def record_recursive_call(self) -> None:
@@ -125,7 +140,19 @@ class DelegationMetrics:
         with self._lock:
             calls = tuple(sorted((role, depth, count) for (role, depth), count in self._lm_calls.items()))
             latency = tuple(sorted((role, depth, total) for (role, depth), total in self._lm_latency_ms.items()))
-            tokens = tuple(sorted((role, depth, total) for (role, depth), total in self._lm_tokens.items()))
+            token_keys = self._lm_input_tokens.keys() | self._lm_output_tokens.keys() | self._lm_tokens.keys()
+            tokens = tuple(
+                sorted(
+                    (
+                        role,
+                        depth,
+                        self._lm_input_tokens.get((role, depth), 0),
+                        self._lm_output_tokens.get((role, depth), 0),
+                        self._lm_tokens.get((role, depth), 0),
+                    )
+                    for (role, depth) in token_keys
+                )
+            )
             return DelegationMetricsSnapshot(
                 root_lm_calls_depth_0=self._lm_calls.get(("root", 0), 0),
                 sub_lm_calls_depth_0=self._lm_calls.get(("sub", 0), 0),
