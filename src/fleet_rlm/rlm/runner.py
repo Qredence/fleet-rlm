@@ -699,7 +699,7 @@ class RLMRunner:
     ) -> None:
         """
         Record failure details and execution metrics for a tracing phase.
-        
+
         Parameters:
             phase (Any): Tracing phase that receives the failure outputs.
             started (float): Monotonic start time used to calculate elapsed time.
@@ -732,16 +732,16 @@ class RLMRunner:
     ) -> Any:
         """
         Record successful execution metrics for a tracing phase.
-        
+
         Parameters:
-        	phase (Any): Tracing phase whose outputs are updated.
-        	prediction (Any): Completed prediction associated with the phase.
-        	started (float): Execution start time used to calculate elapsed duration.
-        	recursive_executor (RecursiveRLMExecutor | None): Recursive executor used during execution, if any.
-        	metrics (Any): Fallback metrics source for recursive execution statistics.
-        
+                phase (Any): Tracing phase whose outputs are updated.
+                prediction (Any): Completed prediction associated with the phase.
+                started (float): Execution start time used to calculate elapsed duration.
+                recursive_executor (RecursiveRLMExecutor | None): Recursive executor used during execution, if any.
+                metrics (Any): Fallback metrics source for recursive execution statistics.
+
         Returns:
-        	Any: The completed prediction.
+                Any: The completed prediction.
         """
         final_reasoning = getattr(prediction, "final_reasoning", None)
         termination_mode = (

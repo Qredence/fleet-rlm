@@ -102,13 +102,13 @@ def build_lm(
 ) -> dspy.LM:
     """
     Construct a chat-oriented DSPy language model.
-    
+
     Parameters:
         model (str): Model identifier.
         api_key (str | None): Optional provider authentication key.
         base_url (str | None): Optional OpenAI-compatible API base URL.
         reasoning_effort (str | None): Optional reasoning effort setting.
-    
+
     Returns:
         dspy.LM: Configured DSPy language model.
     """
@@ -137,27 +137,27 @@ def build_lm(
 def build_model_bundle(settings: Settings) -> RLMModelBundle:
     """
     Build the root and sub language models from the configured role policies.
-    
+
     Parameters:
-    	settings (Settings): Configuration containing the root and sub model policies and credentials.
-    
+        settings (Settings): Configuration containing the root and sub model policies and credentials.
+
     Returns:
-    	RLMModelBundle: Bundle containing the configured root and sub language models.
-    
+        RLMModelBundle: Bundle containing the configured root and sub language models.
+
     Raises:
-    	RuntimeError: If a configured role does not have an API key.
+        RuntimeError: If a configured role does not have an API key.
     """
 
     def build(policy: LLMRoleSettings) -> dspy.LM:
         """
         Build an LLM from the specified role settings.
-        
+
         Parameters:
             policy (LLMRoleSettings): Model and runtime settings for the LLM role.
-        
+
         Returns:
             dspy.LM: The configured language model.
-        
+
         Raises:
             RuntimeError: If the role's API key is not configured.
         """

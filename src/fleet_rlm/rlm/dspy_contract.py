@@ -447,7 +447,7 @@ class _RLMTraceCallback(BaseCallback):
         metrics: DelegationMetrics | None = None,
     ) -> None:
         """Initialize LM tracing state for root and delegated language-model calls.
-        
+
         Parameters:
             root_lm (Any): Language model identified as the root caller.
             sub_lm (Any): Language model identified as a delegated caller.
@@ -506,7 +506,7 @@ class _RLMTraceCallback(BaseCallback):
     ) -> None:
         """
         Finalize tracing and telemetry for an LM call.
-        
+
         Parameters:
             call_id (str): Identifier of the LM call.
             outputs (dict[str, Any] | None): Response data from the call.
@@ -594,12 +594,12 @@ class _RLMTraceCallback(BaseCallback):
 def _trace_preview(value: object, *, max_chars: int = 900) -> str:
     """
     Create a bounded, sanitized text preview of a value.
-    
+
     Parameters:
-    	max_chars (int): Maximum requested length of the preview.
-    
+        max_chars (int): Maximum requested length of the preview.
+
     Returns:
-    	str: Sanitized text representation of the value, limited to the configured length.
+        str: Sanitized text representation of the value, limited to the configured length.
     """
     from fleet_rlm.observability.turn_tracing import trace_preview_limit
     from fleet_rlm.rlm.sanitize import sanitize_public_text

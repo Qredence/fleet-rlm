@@ -169,12 +169,13 @@ def _load_repo_env() -> None:
 def _live_settings(tmp_path: Path) -> Settings:
     """
     Load settings for the live Daytona MVP proof.
-    
+
     Parameters:
         tmp_path (Path): Temporary directory used for the proof database.
-    
+
     Returns:
-        Settings: Runtime settings with a temporary database, unique volume, bounded proof limits, and MLflow tracing disabled.
+        Settings: Runtime settings with a temporary database, unique volume, bounded
+            proof limits, and MLflow tracing disabled.
     """
     _load_repo_env()
     if os.environ.get("FLEET_LIVE", "").strip().lower() not in {"1", "true", "yes"}:

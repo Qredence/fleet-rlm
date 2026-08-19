@@ -186,10 +186,10 @@ class _FirstStreamDeltaMiddleware:
 def _load_live_settings(tmp_path: Path) -> Settings:
     """
     Load and validate settings for the live Phase 1 streaming test.
-    
+
     Parameters:
         tmp_path (Path): Temporary directory in which to create the test database.
-    
+
     Returns:
         Settings: Validated settings using an upgraded temporary database and bounded execution limits.
     """

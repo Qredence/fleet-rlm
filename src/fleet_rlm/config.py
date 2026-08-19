@@ -94,13 +94,13 @@ class LLMRoleSettings(BaseModel):
     def _validate_api_key_env(cls, value: str) -> str:
         """
         Validate an API key environment-variable name.
-        
+
         Parameters:
             value (str): Environment-variable name to validate.
-        
+
         Returns:
             str: The validated environment-variable name.
-        
+
         Raises:
             ValueError: If the name is not uppercase or does not match the required format.
         """
@@ -368,10 +368,10 @@ class Settings(BaseModel):
     def llm_role(self, role: Literal["root", "sub"]) -> LLMRoleSettings:
         """
         Build the configured settings for the requested LLM role.
-        
+
         Parameters:
             role (Literal["root", "sub"]): The role whose settings to return.
-        
+
         Returns:
             LLMRoleSettings: The configured Root or Sub role settings.
         """
@@ -798,14 +798,15 @@ def _profile_contract(
 ) -> ProfileEnvironmentContract:
     """
     Builds the non-secret environment contract for a profile after applying its defaults and overrides.
-    
+
     Parameters:
         name (str): Profile name used to identify configuration locations.
         defaults (Mapping[str, Any]): Default policy values.
         selected (object): Profile-specific policy values.
-    
+
     Returns:
-        ProfileEnvironmentContract: Validated contract containing the profile's runtime, model, and environment-reference settings.
+        ProfileEnvironmentContract: Validated contract containing the profile's runtime,
+            model, and environment-reference settings.
     """
     selected_table = _require_mapping(selected, f"profiles.{name}")
     _validate_policy_table(selected_table, f"profiles.{name}")

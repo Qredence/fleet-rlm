@@ -71,10 +71,10 @@ class RLMInstructionFragments:
 def fleet_rlm_instruction_fragments(*, recursion_enabled: bool) -> RLMInstructionFragments:
     """
     Build instruction fragments for the selected recursion policy.
-    
+
     Parameters:
         recursion_enabled (bool): Whether to include recursive execution instructions.
-    
+
     Returns:
         RLMInstructionFragments: The instruction fragments configured for the recursion policy.
     """
