@@ -945,6 +945,7 @@ def handle(request):
                         try:
                             os.close(fd)
                         except OSError:
+                            # The descriptor is already unusable; continue with the rewrite fallback.
                             pass
                         fd = None
                     if existing_stat is None:
@@ -985,6 +986,7 @@ def handle(request):
                         if stat.S_ISREG(target_stat.st_mode):
                             respond({'ok': True, 'entry': entry_for(target_stat, 'memory/' + relative_parts[-1])})
                     except FileNotFoundError:
+                        # Absence in the migrated memory path means there is no replacement to preserve.
                         pass
                     fail('not_found')
                 if not stat.S_ISREG(legacy_stat.st_mode):
@@ -1015,8 +1017,10 @@ def handle(request):
                         os.unlink(relative_parts[-1], dir_fd=root_fd)
                         fsync_directory(root_fd)
                     except FileNotFoundError:
+                        # A concurrent removal already leaves the legacy entry absent.
                         pass
                     except StorageError:
+                        # Volume directory durability is best effort after publishing the replacement.
                         pass
                     respond({'ok': True, 'entry': entry_for(target_stat, 'memory/' + relative_parts[-1])})
                 written_stat = publish_new(parent_fd, relative_parts[-1], payload)
@@ -1025,14 +1029,17 @@ def handle(request):
                 try:
                     fsync_directory(parent_fd)
                 except StorageError:
+                    # The replacement is published even when the volume cannot fsync its directory.
                     pass
                 try:
                     os.unlink(relative_parts[-1], dir_fd=root_fd)
                     try:
                         fsync_directory(root_fd)
                     except StorageError:
+                        # The legacy removal remains successful when its directory fsync is unsupported.
                         pass
                 except FileNotFoundError:
+                    # A concurrent removal already achieved the desired post-migration state.
                     pass
                 respond({'ok': True, 'entry': entry_for(written_stat, 'memory/' + relative_parts[-1])})
             finally:
@@ -1451,6 +1458,7 @@ def handle(request):
             try:
                 os.close(locked_fd)
             except OSError:
+                # Descriptor cleanup must not mask the operation's result.
                 pass
         close_all(base_fds)
     return {'ok': False, 'error': 'unsupported'}
