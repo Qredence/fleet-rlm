@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
-from collections.abc import Awaitable, Callable
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from hashlib import sha256
-from typing import Any, Literal, Protocol, TypeAlias, TypeVar
+from typing import Any, Literal, Protocol, TypeAlias
 from uuid import UUID
 
 from fleet_rlm.artifacts.models import ArtifactAccess, ArtifactCandidate, ArtifactRef
@@ -38,6 +39,7 @@ from fleet_rlm.result_snapshot import ResultSnapshotSink, encode_result_snapshot
 from fleet_rlm.rlm.context import AsyncCancellationProbe
 from fleet_rlm.rlm.dspy_contract import RLMUsage
 from fleet_rlm.rlm.outcome import RLMOutcome
+from fleet_rlm.runtime.owned_effect import OwnedEffect
 from fleet_rlm.sessions.committed_turn import CommittedTurn
 from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
 
@@ -81,25 +83,6 @@ class RunIntegrityError(RunLifecycleError):
 
 class RunLifecycleUnavailableError(RunLifecycleError):
     pass
-
-
-_T = TypeVar("_T")
-
-
-async def _settle_owned(awaitable: Awaitable[_T]) -> tuple[asyncio.Future[_T], bool]:
-    """Shield one owned side effect and wait through repeated caller cancellation."""
-    task = asyncio.ensure_future(awaitable)
-    cancellation_requested = False
-    while not task.done():
-        try:
-            await asyncio.shield(task)
-        except asyncio.CancelledError:
-            if task.cancelled():
-                return task, cancellation_requested
-            cancellation_requested = True
-        except BaseException:
-            return task, cancellation_requested
-    return task, cancellation_requested
 
 
 @dataclass(frozen=True, slots=True)
@@ -378,17 +361,19 @@ class RunLifecycleService:
                 commit_call = self._store.commit(run, committed, promoted, memory_intents=memory_intents)
             else:
                 commit_call = self._store.commit(run, committed, promoted)
-            commit_task, commit_cancelled = await _settle_owned(commit_call)
+            commit_effect = OwnedEffect.start(commit_call)
             try:
-                receipt = commit_task.result()
+                commit_wait = await commit_effect.settle()
+                receipt = commit_wait.result()
             except BaseException:
-                if commit_cancelled:
+                if commit_effect.caller_cancelled:
                     raise asyncio.CancelledError from None
                 raise
         except BaseException as exc:
             if snapshot_task is not None:
                 # Never let an in-flight snapshot write race rollback removals.
-                await _settle_owned(snapshot_task)
+                with contextlib.suppress(BaseException):
+                    await OwnedEffect.from_task(snapshot_task).settle()
             cleanup_cancelled = False
             if snapshot_path is not None:
                 cleanup_cancelled |= await self._rollback(result_snapshot_sink, (snapshot_path,))
@@ -560,15 +545,23 @@ class RunLifecycleService:
             asyncio.ensure_future(sink.read(candidate.staging_path, max_bytes=self._max_artifact_bytes))
             for candidate in candidates
         ]
-        settled = [await _settle_owned(read) for read in reads]
+        settled = []
+        for read in reads:
+            effect = OwnedEffect.from_task(read)
+            try:
+                settled.append((effect, await effect.settle()))
+            except BaseException:
+                if effect.caller_cancelled:
+                    raise asyncio.CancelledError from None
+                raise
         values: list[bytes] = []
         cancellation_requested = False
-        for candidate, (read_task, read_cancelled) in zip(candidates, settled, strict=True):
-            cancellation_requested |= read_cancelled
+        for candidate, (read_effect, read_wait) in zip(candidates, settled, strict=True):
+            cancellation_requested |= read_wait.caller_cancelled
             try:
-                data = read_task.result()
+                data = read_wait.result()
             except BaseException:
-                if read_cancelled:
+                if read_effect.caller_cancelled:
                     raise asyncio.CancelledError from None
                 raise
             if len(data) != candidate.byte_size or sha256(data).hexdigest() != candidate.checksum_sha256.lower():
@@ -590,9 +583,15 @@ class RunLifecycleService:
         artifacts: list[PromotedArtifact] = []
         for candidate, data in zip(candidates, values, strict=True):
             written.append(candidate.durable_path)
-            write_task, write_cancelled = await _settle_owned(sink.write(candidate.durable_path, data))
-            write_task.result()
-            if write_cancelled:
+            write_effect = OwnedEffect.start(sink.write(candidate.durable_path, data))
+            try:
+                write_wait = await write_effect.settle()
+                write_wait.result()
+            except BaseException:
+                if write_effect.caller_cancelled:
+                    raise asyncio.CancelledError from None
+                raise
+            if write_wait.caller_cancelled:
                 raise asyncio.CancelledError
             artifacts.append(
                 PromotedArtifact(
@@ -625,8 +624,8 @@ class RunLifecycleService:
         """
         if snapshot_task is None:
             return
-        settled, cancelled = await _settle_owned(snapshot_task)
         try:
+            settled = await OwnedEffect.from_task(snapshot_task).settle()
             settled.result()
         except asyncio.CancelledError:
             logger.warning("result snapshot write cancelled after commit; Turn remains committed")
@@ -635,7 +634,7 @@ class RunLifecycleService:
             if sink is not None and snapshot_path is not None:
                 await RunLifecycleService._rollback(sink, (snapshot_path,))
         else:
-            if cancelled:
+            if settled.caller_cancelled:
                 logger.warning("result snapshot write saw cancellation after commit; Turn remains committed")
 
     async def _settle_staging(
@@ -666,13 +665,15 @@ class RunLifecycleService:
             return False
         cancellation_requested = False
         for location in locations:
+            effect = OwnedEffect.start(sink.remove(location))
             try:
-                remove_task, remove_cancelled = await _settle_owned(sink.remove(location))
-                cancellation_requested |= remove_cancelled
-                remove_task.result()
+                remove_wait = await effect.settle()
+                cancellation_requested |= remove_wait.caller_cancelled
+                remove_wait.result()
             except asyncio.CancelledError:
                 cancellation_requested = True
             except Exception:
+                cancellation_requested |= effect.caller_cancelled
                 continue
         return cancellation_requested
 

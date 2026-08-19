@@ -16,6 +16,7 @@ from fleet_rlm.daytona.provisioning import (
     require_recursive_child_volume_subpath,
     require_scoped_volume_subpath,
 )
+from fleet_rlm.daytona.recursive_child_lease import ChildRuntimeLease, ChildRuntimeLeaseState
 from fleet_rlm.daytona.session_manager import DaytonaAdmission
 
 
@@ -81,6 +82,61 @@ class _Platform:
     async def get(self, _sandbox_id: str) -> None:
         """Report every deleted Sandbox as already absent (explicit not-found)."""
         return None
+
+
+def test_child_runtime_lease_concurrent_close_joins_one_cleanup() -> None:
+    started = threading.Event()
+    release = threading.Event()
+    calls: list[str] = []
+
+    def close() -> None:
+        calls.append("close")
+        started.set()
+        assert release.wait(2)
+
+    lease = ChildRuntimeLease(SimpleNamespace(), "sandbox", "volume", "subpath", close)
+    errors: list[BaseException] = []
+
+    def run_close() -> None:
+        try:
+            lease.close()
+        except BaseException as exc:  # pragma: no cover - assertion below reports unexpected failures
+            errors.append(exc)
+
+    first = threading.Thread(target=run_close)
+    second = threading.Thread(target=run_close)
+    first.start()
+    assert started.wait(2)
+    assert lease.state is ChildRuntimeLeaseState.CLOSING
+    second.start()
+    release.set()
+    first.join(timeout=2)
+    second.join(timeout=2)
+
+    assert errors == []
+    assert calls == ["close"]
+    assert lease.state is ChildRuntimeLeaseState.CLOSED
+    lease.close()
+    assert calls == ["close"]
+
+
+def test_child_runtime_lease_failure_is_failed_and_reobserved() -> None:
+    calls = 0
+
+    def close() -> None:
+        nonlocal calls
+        calls += 1
+        raise RuntimeError("cleanup failed")
+
+    lease = ChildRuntimeLease(SimpleNamespace(), "sandbox", "volume", "subpath", close)
+    with pytest.raises(RuntimeError, match="cleanup failed"):
+        lease.close()
+    assert lease.state is ChildRuntimeLeaseState.FAILED
+    assert isinstance(lease.close_error, RuntimeError)
+
+    with pytest.raises(RuntimeError, match="cleanup failed"):
+        lease.close()
+    assert calls == 1
 
 
 @pytest.mark.asyncio

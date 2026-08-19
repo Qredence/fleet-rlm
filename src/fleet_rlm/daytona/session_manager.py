@@ -53,6 +53,7 @@ from fleet_rlm.daytona.provisioning import (
 )
 from fleet_rlm.daytona.sandbox_lease import SandboxLease, SandboxLeasePolicy, SandboxLeaseReceipt
 from fleet_rlm.runtime.bindings import SandboxBinding
+from fleet_rlm.runtime.owned_effect import OwnedEffect
 
 logger = logging.getLogger(__name__)
 
@@ -301,12 +302,9 @@ class DaytonaSessionManager:
         acquisition: asyncio.Task[InterpreterLease],
     ) -> InterpreterLease:
         """Wait through repeated caller cancellation until provider work settles."""
-        while not acquisition.done():
-            try:
-                await asyncio.shield(acquisition)
-            except asyncio.CancelledError:
-                continue
-        return acquisition.result()
+        effect = OwnedEffect.from_task(acquisition)
+        await effect.settle()
+        return effect.result()
 
     def _adopt_late_acquisition(
         self,

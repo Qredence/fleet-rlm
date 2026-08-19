@@ -59,6 +59,7 @@ from fleet_rlm.files.workspace_models import DAYTONA_WORKSPACE_CAPABILITY
 from fleet_rlm.rlm.context import RLMExecutionSpec
 from fleet_rlm.rlm.dspy_contract import RLMOptions
 from fleet_rlm.rlm.model_bundle import RLMModelBundle
+from fleet_rlm.runtime.owned_effect import OwnedEffect
 from fleet_rlm.skills.catalog import SkillCatalog
 
 logger = logging.getLogger(__name__)
@@ -94,19 +95,6 @@ def _promote_memory_candidates(
             ",".join(result.reasons) or "-",
         )
     return result
-
-
-async def _settle_owned_thread(task: asyncio.Task[Any]) -> bool:
-    """Wait through repeated caller cancellation until owned thread work exits."""
-    cancellation_requested = False
-    while not task.done():
-        try:
-            await asyncio.shield(task)
-        except asyncio.CancelledError:
-            cancellation_requested = True
-        except BaseException:
-            break
-    return cancellation_requested
 
 
 def _consume_task_result(task: asyncio.Task[Any]) -> None:
@@ -229,19 +217,27 @@ class _DaytonaEnvironmentProvider:
         try:
             self.resources.track_sandbox(lease.sandbox_id)
             lookup = asyncio.create_task(self.resources.platform.get(lease.sandbox_id))
+            lookup_effect = OwnedEffect.from_task(lookup)
             try:
                 async with asyncio.timeout_at(deadline):
                     sandbox = await asyncio.shield(lookup)
             except TimeoutError:
                 if lookup.done():
                     raise
-                cancelled = await _settle_owned_thread(lookup)
+                try:
+                    settled = await lookup_effect.settle()
+                except BaseException:
+                    lookup_effect.consume_exception()
+                    cancelled = lookup_effect.caller_cancelled
+                else:
+                    cancelled = settled.caller_cancelled
                 _consume_task_result(lookup)
                 if cancelled:
                     raise asyncio.CancelledError from None
                 raise RunPreparationTimeoutError("Turn preparation timed out") from None
             except asyncio.CancelledError:
-                await _settle_owned_thread(lookup)
+                with contextlib.suppress(BaseException):
+                    await lookup_effect.settle()
                 _consume_task_result(lookup)
                 raise
             if sandbox is None:

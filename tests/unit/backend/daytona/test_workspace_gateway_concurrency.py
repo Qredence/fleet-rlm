@@ -152,8 +152,8 @@ class _SubprocessAgentProcess:
             self._barrier.set()
         await self._barrier.wait()
         delayed = code.replace(
-            f"    if operation == {self._mutation_delay!r}:",
-            f"    time.sleep(0.12)\n    if operation == {self._mutation_delay!r}:",
+            f"        if operation == {self._mutation_delay!r}:",
+            f"        time.sleep(0.12)\n        if operation == {self._mutation_delay!r}:",
             1,
         )
         completed = await asyncio.to_thread(
@@ -181,13 +181,15 @@ class _DelayedDeleteBeforeUnlinkAgentProcess:
         await self._barrier.wait()
         delayed = code
         gate = str(self._coordination_path)
-        if "operation = 'delete'" in code:
-            unlink_line = "                os.unlink(relative_parts[-1], dir_fd=parent_fd)"
-            inserted = f"                open({gate!r}, 'w').close()\n                time.sleep(0.25)\n{unlink_line}"
+        if "if operation == 'delete':" in code:
+            unlink_line = "                    os.unlink(relative_parts[-1], dir_fd=parent_fd)"
+            inserted = (
+                f"                    open({gate!r}, 'w').close()\n                    time.sleep(0.25)\n{unlink_line}"
+            )
             delayed = delayed.replace(unlink_line, inserted, 1)
-        if "operation = 'write'" in code:
-            branch = "    if operation == 'write':"
-            waiter = f"    while not os.path.exists({gate!r}):\n        time.sleep(0.01)\n{branch}"
+        if "if operation == 'write':" in code:
+            branch = "        if operation == 'write':"
+            waiter = f"        while not os.path.exists({gate!r}):\n            time.sleep(0.01)\n{branch}"
             delayed = delayed.replace(branch, waiter, 1)
         completed = await asyncio.to_thread(
             subprocess.run,

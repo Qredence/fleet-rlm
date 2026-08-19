@@ -8,6 +8,8 @@ from collections.abc import Awaitable
 from dataclasses import dataclass
 from typing import Any, TypeVar
 
+from fleet_rlm.runtime.owned_effect import OwnedEffect
+
 T = TypeVar("T")
 
 
@@ -23,29 +25,11 @@ async def shield_cleanup(awaitable: Awaitable[T]) -> T:
     Returns the awaitable's result so cancel/settle paths can keep a bool or
     receipt without a second cancel-resistant awaiter twin.
     """
-    try:
-        task = asyncio.ensure_future(awaitable)
-    except BaseException:
-        close = getattr(awaitable, "close", None)
-        if callable(close):
-            with contextlib.suppress(BaseException):
-                close()
-        raise
-    cancelled = False
-    while not task.done():
-        try:
-            await asyncio.shield(task)
-        except asyncio.CancelledError:
-            cancelled = True
-    if task.cancelled():
+    effect = OwnedEffect.start(awaitable)
+    settled = await effect.settle()
+    if settled.caller_cancelled:
         raise asyncio.CancelledError
-    try:
-        result = task.result()
-    except BaseException:
-        raise
-    if cancelled:
-        raise asyncio.CancelledError
-    return result
+    return settled.result()
 
 
 def consume_task_exception(task: asyncio.Task[Any]) -> None:

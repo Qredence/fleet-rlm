@@ -44,11 +44,11 @@ async def _run_member(
         class RaceProcess:
             def code_run(self, code: str, **_kwargs):
                 markers = {{
-                    "write": "    if operation == 'write':",
-                    "edit_compose": "            payload = ''.join(lines).encode('utf-8')",
+                    "write": "        if operation == 'write':",
+                    "edit_compose": "                payload = ''.join(lines).encode('utf-8')",
                 }}
                 marker = markers[{delay_operation!r}]
-                prefix = "            " if {delay_operation!r} == "edit_compose" else "    "
+                prefix = "                " if {delay_operation!r} == "edit_compose" else "        "
                 deferred = code.replace(marker, prefix + "time.sleep(0.10)" + chr(10) + marker, 1)
                 completed = subprocess.run(
                     [sys.executable, "-c", deferred],

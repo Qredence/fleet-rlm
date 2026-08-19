@@ -94,10 +94,10 @@ def test_binds_only_the_canonical_memory_subdir_file(tmp_path: Path) -> None:
     target = root / "memory" / "MEMORIES.md"
     assert target.is_file()
     assert target.read_text(encoding="utf-8") == HEADER + "- [2026-07-27T11:14:05Z] **General**: hello\n"
-    assert all("relative = 'MEMORIES.md'" in code for code in process.calls)
+    assert all('"relative":"MEMORIES.md"' in code for code in process.calls)
     # the migration probe reads at the volume root; durable ops stay under memory/
-    assert any(f"root = {str(root)!r}" in code for code in process.calls)
-    assert any(f"root = {str(root / 'memory')!r}" in code for code in process.calls)
+    assert any(f'"root":"{root}"' in code for code in process.calls)
+    assert any(f'"root":"{target.parent}"' in code for code in process.calls)
 
 
 def test_fresh_store_starts_with_the_v2_header(tmp_path: Path) -> None:
@@ -859,12 +859,12 @@ def test_edits_and_deletes_use_one_workspace_agent_round_trip(tmp_path: Path) ->
 
     store.edit_entry("aaaa0001", "revised")
     assert len(process.calls) == 1
-    assert "operation = 'memory_edit'" in process.calls[0]
+    assert '"operation":"memory_edit"' in process.calls[0]
 
     process.calls.clear()
     assert store.delete_entry("aaaa0001") is True
     assert len(process.calls) == 1
-    assert "operation = 'memory_delete'" in process.calls[0]
+    assert '"operation":"memory_delete"' in process.calls[0]
 
 
 def test_edit_and_delete_under_a_missing_store_are_empty_not_found(tmp_path: Path) -> None:

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import threading
-import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 from types import SimpleNamespace
@@ -17,17 +16,17 @@ import pytest
 @pytest.mark.asyncio
 async def test_detail_relay_keeps_1024_ordinary_events_and_lifecycle_details() -> None:
     from fleet_rlm.rlm.events import RLMOutput, SkillLoaded
-    from fleet_rlm.rlm.runner import _MAX_DETAIL_EVENTS, _DetailRelay
+    from fleet_rlm.rlm.observation import MAX_DETAIL_EVENTS, DetailRelay
 
-    relay = _DetailRelay()
-    for index in range(_MAX_DETAIL_EVENTS):
+    relay = DetailRelay()
+    for index in range(MAX_DETAIL_EVENTS):
         relay.publish(RLMOutput(f"detail-{index}", index))
     relay.publish(SkillLoaded("skill-1", "benchmark", "1.0.0"))
-    relay.publish(RLMOutput("dropped", _MAX_DETAIL_EVENTS + 1))
+    relay.publish(RLMOutput("dropped", MAX_DETAIL_EVENTS + 1))
 
     details = relay.drain()
 
-    assert sum(isinstance(detail, RLMOutput) for detail in details) == _MAX_DETAIL_EVENTS
+    assert sum(isinstance(detail, RLMOutput) for detail in details) == MAX_DETAIL_EVENTS
     assert any(isinstance(detail, SkillLoaded) for detail in details)
     assert relay.overflowed is True
 
@@ -35,9 +34,9 @@ async def test_detail_relay_keeps_1024_ordinary_events_and_lifecycle_details() -
 @pytest.mark.asyncio
 async def test_detail_relay_retains_step_lifecycle_when_ordinary_queue_is_full() -> None:
     from fleet_rlm.rlm.events import RLMOutput, StepFinished, StepStarted
-    from fleet_rlm.rlm.runner import _DetailRelay
+    from fleet_rlm.rlm.observation import DetailRelay
 
-    relay = _DetailRelay(maxsize=1)
+    relay = DetailRelay(maxsize=1)
     relay.publish(RLMOutput("queued", 1))
     relay.publish(StepStarted(1))
     relay.publish(RLMOutput("dropped", 1))
@@ -231,7 +230,7 @@ async def test_runner_uses_supported_async_call_and_returns_typed_outcome(
         yield SimpleNamespace(set_outputs=lambda _outputs: None)
 
     monkeypatch.setattr(dspy, "context", tracked_context)
-    monkeypatch.setattr("fleet_rlm.rlm.runner.turn_phase_span", tracked_phase_span)
+    monkeypatch.setattr("fleet_rlm.rlm.execution_trace.turn_phase_span", tracked_phase_span)
     context = RLMExecutionContext(
         identity=RunIdentity(run_id=uuid4(), session_id=uuid4(), access=TurnAccess(uuid4(), uuid4())),
         session=SessionView(
@@ -310,25 +309,6 @@ def test_runner_uses_stock_json_adapter_without_protocol_salvage() -> None:
 
     assert type(adapter) is dspy.JSONAdapter
     assert adapter.use_native_function_calling is True
-
-
-def test_record_phase_failure_preserves_last_lm_call_structure() -> None:
-    from fleet_rlm.rlm.runner import RLMRunner
-
-    outputs: list[dict[str, object]] = []
-    phase = SimpleNamespace(set_outputs=outputs.append)
-
-    RLMRunner._record_phase_failure(
-        phase,
-        time.perf_counter(),
-        None,
-        None,
-        ValueError("provider failure"),
-        last_lm_call={"call_index": 4, "response_keys": ()},
-    )
-
-    assert outputs[-1]["failure_category"] == "unknown"
-    assert outputs[-1]["last_lm_call"] == {"call_index": 4, "response_keys": ()}
 
 
 @pytest.mark.asyncio

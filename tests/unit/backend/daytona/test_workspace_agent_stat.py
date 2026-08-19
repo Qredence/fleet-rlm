@@ -53,7 +53,7 @@ def _run_stat(tmp_path: Path, relative: str, **overrides: object) -> tuple[dict[
     return run_workspace_agent(SimpleNamespace(process=process), **arguments), process
 
 
-def test_stat_checksum_flag_is_repr_embedded_like_other_operation_params() -> None:
+def test_stat_checksum_flag_is_encoded_in_the_handler_request() -> None:
     from fleet_rlm.daytona.workspace_agent import build_workspace_agent_code
 
     base = {
@@ -68,8 +68,8 @@ def test_stat_checksum_flag_is_repr_embedded_like_other_operation_params() -> No
         "content_b64": "",
     }
 
-    assert "checksum = False" in build_workspace_agent_code(**base)
-    assert "checksum = True" in build_workspace_agent_code(**base, checksum=True)
+    assert '"checksum":false' in build_workspace_agent_code(**base)
+    assert '"checksum":true' in build_workspace_agent_code(**base, checksum=True)
     assert "import base64, datetime, errno, fcntl, hashlib, json, os, re, stat, time" in build_workspace_agent_code(
         **base
     )
@@ -98,7 +98,7 @@ def test_stat_without_checksum_never_hashes(tmp_path: Path) -> None:
     entry = payload["entry"]
     assert isinstance(entry, dict)
     assert "checksum" not in entry
-    assert "checksum = False" in process.calls[0]
+    assert '"checksum":false' in process.calls[0]
 
 
 def test_stat_checksum_skips_directories_and_missing_entries(tmp_path: Path) -> None:
@@ -159,4 +159,4 @@ def test_sync_workspace_fs_stat_passthrough_exposes_checksum(tmp_path: Path) -> 
     plain = workspace.stat("note.txt")
     assert plain is not None
     assert plain.checksum_sha256 is None
-    assert "checksum = False" in process.calls[-1]
+    assert '"checksum":false' in process.calls[-1]
