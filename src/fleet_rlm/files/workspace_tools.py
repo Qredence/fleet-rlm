@@ -37,48 +37,48 @@ def _entry(entry: WorkspaceEntry) -> dict[str, object]:
     return result
 
 
-def _raise_tool_error(exc: BaseException) -> NoReturn:
+def _translate_fs_tool_errors(exc: BaseException, error_type: type[WorkspaceToolError], *, domain: str) -> NoReturn:
+    """Map one mounted-FS failure into the owning host's closed tool-error vocabulary.
+
+    ``WorkspaceToolHost`` and ``ProjectToolHost`` share this translation (P33):
+    the code vocabulary, exception mapping, and per-domain message shape are
+    owned once here; each host binds its own error class and noun only.
+    """
     if isinstance(exc, WorkspaceToolError):
         raise exc
     if getattr(exc, "code", None) == "unsupported_storage":
-        raise WorkspaceToolError(
-            "unsupported_storage",
-            "Session Workspace storage does not support this mutation",
-        ) from None
+        raise error_type("unsupported_storage", f"{domain} storage does not support this mutation") from None
     if isinstance(exc, FileNotFoundError):
-        raise WorkspaceToolError("not_found", "Session Workspace file was not found") from None
+        raise error_type("not_found", f"{domain} file was not found") from None
     if isinstance(exc, FileExistsError):
         detail = getattr(exc, "detail", "")
         if detail == "checksum_mismatch":
-            raise WorkspaceToolError(
-                "conflict",
-                "Session Workspace checksum precondition did not match the current file content",
+            raise error_type(
+                "conflict", f"{domain} checksum precondition did not match the current file content"
             ) from None
         if detail == "not_empty":
-            raise WorkspaceToolError(
-                "conflict", "Session Workspace directory is not empty; delete its contents first"
-            ) from None
+            raise error_type("conflict", f"{domain} directory is not empty; delete its contents first") from None
         if detail == "ambiguous":
-            raise WorkspaceToolError(
-                "conflict", "Session Workspace edit text occurs more than once; make it unique"
-            ) from None
+            raise error_type("conflict", f"{domain} edit text occurs more than once; make it unique") from None
         if detail == "missing":
-            raise WorkspaceToolError("conflict", "Session Workspace edit text was not found in the file") from None
-        raise WorkspaceToolError(
-            "conflict", "Session Workspace file already exists; use overwrite=True to replace it"
-        ) from None
+            raise error_type("conflict", f"{domain} edit text was not found in the file") from None
+        raise error_type("conflict", f"{domain} file already exists; use overwrite=True to replace it") from None
     if isinstance(exc, IsADirectoryError):
-        raise WorkspaceToolError("is_directory", "Session Workspace path is a directory") from None
+        raise error_type("is_directory", f"{domain} path is a directory") from None
     if isinstance(exc, NotADirectoryError):
-        raise WorkspaceToolError("invalid_path", "Session Workspace path has a non-directory parent") from None
+        raise error_type("invalid_path", f"{domain} path has a non-directory parent") from None
     if isinstance(exc, ValueError):
         message = str(exc)
         if "cursor" in message:
-            raise WorkspaceToolError("invalid_cursor", "Session Workspace cursor is invalid") from None
+            raise error_type("invalid_cursor", f"{domain} cursor is invalid") from None
         if "size" in message or "bound" in message:
-            raise WorkspaceToolError("too_large", "Session Workspace file exceeds its size bound") from None
-        raise WorkspaceToolError("invalid_path", "Session Workspace request is invalid") from None
-    raise WorkspaceToolError("unavailable", "Session Workspace is unavailable") from None
+            raise error_type("too_large", f"{domain} file exceeds its size bound") from None
+        raise error_type("invalid_path", f"{domain} request is invalid") from None
+    raise error_type("unavailable", f"{domain} storage is unavailable") from None
+
+
+def _raise_tool_error(exc: BaseException) -> NoReturn:
+    _translate_fs_tool_errors(exc, WorkspaceToolError, domain="Session Workspace")
 
 
 class WorkspaceToolHost:

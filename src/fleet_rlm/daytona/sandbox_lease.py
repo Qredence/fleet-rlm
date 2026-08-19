@@ -35,6 +35,7 @@ from threading import Thread
 from typing import Any, Literal, Protocol, TypeAlias
 
 from fleet_rlm.daytona.admission import DaytonaAdmissionPermit
+from fleet_rlm.daytona.errors import sanitize_failure_text
 from fleet_rlm.daytona.lifecycle import AbsenceConfirmation, AbsenceOutcome, confirm_absence
 from fleet_rlm.daytona.provisioning import SandboxPlatform
 
@@ -58,11 +59,6 @@ LeaseKind: TypeAlias = Literal["retained_session", "recursive_child", "volume_io
 #: Bound for one blocking close result before ownership quarantines the
 #: still-running close (it keeps the permit until it settles).
 DEFAULT_CLOSE_RESULT_TIMEOUT_S = 60.0
-
-
-def _sanitize_error(exc: BaseException) -> str:
-    """Bounded, credential-free failure description for receipts."""
-    return f"{type(exc).__name__}: {str(exc)[:200]}"
 
 
 class LeaseCleanupError(RuntimeError):
@@ -241,7 +237,7 @@ class SandboxLease:
         try:
             interpreter.shutdown(strict_broker_cleanup=policy.strict_broker_cleanup)
         except BaseException as exc:
-            error = _sanitize_error(exc)
+            error = sanitize_failure_text(exc)
             # Consolidated shutdown: broker/backend share the recorded failure.
             return InterpreterCloseOutcome(
                 status="failed",
@@ -286,7 +282,7 @@ class SandboxLease:
                 else:
                     await request
             except BaseException as exc:
-                request_error = _sanitize_error(exc)
+                request_error = sanitize_failure_text(exc)
             # Confirmation runs even when the delete request itself failed:
             # the Sandbox may be absent already, or deletion may have been
             # accepted provider-side despite the client error (QRE-151
@@ -337,7 +333,7 @@ class SandboxLease:
                 requested=True,
                 confirmed_absent=False,
                 duration_s=time.monotonic() - started,
-                error=_sanitize_error(exc),
+                error=sanitize_failure_text(exc),
             )
         return ProviderCleanupOutcome(
             action="stop",
@@ -363,7 +359,7 @@ class SandboxLease:
                 await self._purge(self._sandbox)
             except BaseException as exc:
                 if first_error is None:
-                    first_error = _sanitize_error(exc)
+                    first_error = sanitize_failure_text(exc)
 
         provider = await self._provider_close()
         if provider.error is not None and first_error is None:
@@ -441,9 +437,11 @@ class SandboxLease:
                     released=self._permit is not None,
                     released_after="quarantine_failure" if self._permit is not None else "not_held",
                 ),
-                quarantine=QuarantineOutcome(quarantined=True, lane="fallback_thread", error=_sanitize_error(exc)),
+                quarantine=QuarantineOutcome(
+                    quarantined=True, lane="fallback_thread", error=sanitize_failure_text(exc)
+                ),
                 duration_s=0.0,
-                first_error=_sanitize_error(exc),
+                first_error=sanitize_failure_text(exc),
             )
             if self._permit is not None:
                 self._permit.release()

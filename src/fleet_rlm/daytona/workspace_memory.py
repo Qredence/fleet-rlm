@@ -215,6 +215,21 @@ def read_workspace_memory_injection_digest(
     return _relevant_recent_workspace_memory_digest(store, request=request)
 
 
+def build_workspace_memory_store(
+    sandbox_view: Any,
+    *,
+    volume_paths: VolumePaths,
+    max_upload_bytes: int,
+) -> DaytonaWorkspaceMemoryStore:
+    """Assemble the canonical Workspace Memory store over one sync sandbox view.
+
+    Single construction seam used by Run acquisition/capability preparation and
+    the memory-outbox reconciler so the (sync view + VolumePaths + upload cap)
+    assembly stays identical at every call site.
+    """
+    return DaytonaWorkspaceMemoryStore(sandbox_view, volume_paths=volume_paths, max_upload_bytes=max_upload_bytes)
+
+
 class DaytonaWorkspaceMemoryStore:
     """Use the mounted Workspace Volume's canonical ``memory/MEMORIES.md`` file only."""
 

@@ -6,7 +6,8 @@ import asyncio
 import contextlib
 import logging
 from collections.abc import Awaitable, Callable, Coroutine
-from typing import Any, Literal, Protocol
+from enum import StrEnum
+from typing import Any, Protocol
 
 from fleet_rlm.chat.run_cleanup import RunCleanupSupervisor
 from fleet_rlm.chat.run_lifecycle import ClaimedRun, RunFailure, RunLifecycle, RunLifecycleUnavailableError
@@ -16,6 +17,13 @@ from fleet_rlm.chat.run_preparation import PreparedRun
 logger = logging.getLogger(__name__)
 
 _PREPARATION_CLEANUP_TIMEOUT_S = 1.0
+
+
+class PreparationSettlement(StrEnum):
+    """Terminal outcome of one owned preparation settlement (typed, no string sentinels)."""
+
+    CLAIM_LOST = "claim_lost"
+    SETTLED = "settled"
 
 
 class _SubmitClaimLoss(Protocol):
@@ -124,7 +132,7 @@ class PreparationAttempt:
                     )
         return bool(pending) or self._preparation_cleanup_error is not None
 
-    async def cancel_and_settle(self, failure: RunFailure) -> Literal["claim_lost", "settled"]:
+    async def cancel_and_settle(self, failure: RunFailure) -> PreparationSettlement:
         """Cancel/timeout path: sample claim loss before and after cancel; revoke after finish."""
         claim_was_lost = self._heartbeat is not None and (self._heartbeat.lost.is_set() or self._run.authority.revoked)
         preparation_pending = await shield_cleanup(self.cancel())
@@ -132,21 +140,21 @@ class PreparationAttempt:
         if claim_was_lost:
             assert self._heartbeat is not None
             await self._submit_claim_loss_with_cleanup(preparation_pending)
-            return "claim_lost"
+            return PreparationSettlement.CLAIM_LOST
         await stop_heartbeat(self._heartbeat)
         await self._settle_failure(failure, preparation_pending, revoke_after_finish=True)
-        return "settled"
+        return PreparationSettlement.SETTLED
 
-    async def settle_failure(self, failure: RunFailure) -> Literal["claim_lost", "settled"]:
+    async def settle_failure(self, failure: RunFailure) -> PreparationSettlement:
         """Generic Exception path: claim_lost() only; finish without finally-revoke when not pending."""
         preparation_pending = await shield_cleanup(self.cancel())
         if self.claim_lost():
             assert self._heartbeat is not None
             await self._submit_claim_loss_with_cleanup(preparation_pending)
-            return "claim_lost"
+            return PreparationSettlement.CLAIM_LOST
         await stop_heartbeat(self._heartbeat)
         await self._settle_failure(failure, preparation_pending, revoke_after_finish=False)
-        return "settled"
+        return PreparationSettlement.SETTLED
 
     def _record_preparation_cleanup_error(self, exc: BaseException) -> None:
         if self._preparation_cleanup_error is None:

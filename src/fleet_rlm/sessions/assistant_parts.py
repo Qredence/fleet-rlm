@@ -13,7 +13,7 @@ from collections.abc import Mapping, Sequence
 from typing import Annotated, Any, Literal, assert_never, cast
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, field_validator, model_validator
 
 from fleet_rlm.rlm.dspy_contract import RLMUsage
 from fleet_rlm.sessions.committed_turn import (
@@ -258,6 +258,8 @@ AssistantPart = Annotated[
     Field(discriminator="type"),
 ]
 
+_ASSISTANT_PART_ADAPTER: TypeAdapter[AssistantPart] = TypeAdapter(AssistantPart)
+
 AssistantPartModelUnion = (
     StepAssistantPart,
     ReasoningAssistantPart,
@@ -416,10 +418,7 @@ def assistant_part_payload(part: CommittedPart) -> dict[str, Any]:
 
 def assistant_part_from_payload(payload: object) -> CommittedPart:
     """Validate a durable part payload and convert it to the runtime aggregate."""
-    from pydantic import TypeAdapter
-
-    adapter: TypeAdapter[AssistantPart] = TypeAdapter(AssistantPart)
-    return assistant_part_from_model(adapter.validate_python(payload, strict=False))
+    return assistant_part_from_model(_ASSISTANT_PART_ADAPTER.validate_python(payload, strict=False))
 
 
 __all__ = [

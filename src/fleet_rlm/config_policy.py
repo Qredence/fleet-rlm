@@ -39,11 +39,8 @@ from fleet_rlm.files.memory_models import WorkspaceMemoryCategoryError
 
 __all__ = [
     "ConfigPolicyService",
-    "EditorKind",
     "PolicyAccessError",
     "PolicyConflictError",
-    "PolicyField",
-    "PolicySnapshot",
 ]
 
 

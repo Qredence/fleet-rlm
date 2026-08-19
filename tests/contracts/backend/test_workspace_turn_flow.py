@@ -16,8 +16,8 @@ from fleet_rlm.files.memory_models import (
     WorkspaceMemoryEntryNotFoundError,
     WorkspaceMemoryListResult,
     WorkspaceMemoryReadResult,
+    format_workspace_memory_v3_record,
     parse_workspace_memory_lines,
-    reformat_workspace_memory_record,
 )
 from fleet_rlm.files.memory_tools import WorkspaceMemoryToolHost
 from fleet_rlm.files.workspace_models import (
@@ -109,11 +109,13 @@ class MemoryStore:
         target = targets[-1]
         entry = lines[target].entry
         assert entry is not None
-        record, _normalized = reformat_workspace_memory_record(
-            timestamp=entry.timestamp,
+        record = format_workspace_memory_v3_record(
+            key_learning,
+            entry.category if category is None else category,
             memory_id=entry.memory_id,
-            category=entry.category if category is None else category,
-            key_learning=key_learning,
+            created_at=entry.timestamp,
+            updated_at=entry.timestamp,
+            source="legacy_unknown",
         )
         lines[target] = parse_workspace_memory_lines(record)[0]
         self.content = "".join(line.raw for line in lines)

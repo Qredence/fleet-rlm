@@ -1,4 +1,5 @@
 import type { components } from "./generated/openapi.js";
+import { record } from "./tui/coerce.js";
 
 export type FleetSession = components["schemas"]["SessionDetailResponse"];
 export type FleetTurn = components["schemas"]["UIMessageResponse"];
@@ -288,12 +289,6 @@ export class FleetApiClient {
       code,
     );
   }
-}
-
-function record(value: unknown): Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : {};
 }
 
 function nonEmptyString(value: unknown): string | undefined {

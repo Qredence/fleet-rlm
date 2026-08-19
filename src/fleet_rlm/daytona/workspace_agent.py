@@ -305,6 +305,66 @@ class _WorkspaceAgentSession:
         self.metrics.latency_ms_total += (time.monotonic() - started) * 1000.0
         return response
 
+    def _handshake_code(self) -> str:
+        """Build the handshake request and count the attempt."""
+        code = build_workspace_agent_request_code({"operation": "__handshake__", "relative": ""})
+        self.metrics.handshake_calls += 1
+        return code
+
+    def _operation_code(self, arguments: dict[str, object]) -> str:
+        """Build an operation request and count the call."""
+        code = build_workspace_agent_request_code(arguments)
+        self.metrics.operation_calls += 1
+        return code
+
+    def _install_source(self) -> bytes:
+        """Return the installable runtime source bytes."""
+        return build_installed_workspace_agent_source().encode("utf-8")
+
+    def _count_install(self, installed: bytes) -> None:
+        """Count one completed install transfer."""
+        self.metrics.source_transfer_bytes += len(installed)
+        self.metrics.bootstrap_count += 1
+
+    def _finish_ensure(self, payload: dict[str, object] | None) -> None:
+        if not self._valid_handshake(payload):
+            raise WorkspaceAgentProtocolError("Workspace Agent protocol handshake failed")
+        self.verified = True
+
+    @staticmethod
+    def _relative(arguments: dict[str, object]) -> str:
+        return str(arguments.get("relative") or "")
+
+    async def _handshake_async(self, sandbox: Any, timeout_s: float) -> dict[str, object] | None:
+        try:
+            return self._json_response(await self._raw_async(sandbox, self._handshake_code(), timeout_s))
+        except Exception:
+            return None
+
+    def _handshake_sync(self, sandbox: Any, timeout_s: float) -> dict[str, object] | None:
+        try:
+            return self._json_response(self._raw_sync(sandbox, self._handshake_code(), timeout_s))
+        except Exception:
+            return None
+
+    async def _ensure_async(self, sandbox: Any, timeout_s: float) -> None:
+        payload = await self._handshake_async(sandbox, timeout_s)
+        if not self._valid_handshake(payload):
+            installed = self._install_source()
+            await sandbox.fs.upload_file(installed, WORKSPACE_AGENT_INSTALL_PATH)
+            self._count_install(installed)
+            payload = await self._handshake_async(sandbox, timeout_s)
+        self._finish_ensure(payload)
+
+    def _ensure_sync(self, sandbox: Any, timeout_s: float) -> None:
+        payload = self._handshake_sync(sandbox, timeout_s)
+        if not self._valid_handshake(payload):
+            installed = self._install_source()
+            sandbox.fs.upload_file(installed, WORKSPACE_AGENT_INSTALL_PATH)
+            self._count_install(installed)
+            payload = self._handshake_sync(sandbox, timeout_s)
+        self._finish_ensure(payload)
+
     async def ensure_async(self, sandbox: Any, timeout_s: float) -> None:
         if self.verified:
             return
@@ -313,25 +373,7 @@ class _WorkspaceAgentSession:
         async with self._async_lock:
             if self.verified:
                 return
-            handshake = build_workspace_agent_request_code({"operation": "__handshake__", "relative": ""})
-            self.metrics.handshake_calls += 1
-            try:
-                payload = self._json_response(await self._raw_async(sandbox, handshake, timeout_s))
-            except Exception:
-                payload = None
-            if not self._valid_handshake(payload):
-                installed = build_installed_workspace_agent_source().encode("utf-8")
-                await sandbox.fs.upload_file(installed, WORKSPACE_AGENT_INSTALL_PATH)
-                self.metrics.source_transfer_bytes += len(installed)
-                self.metrics.bootstrap_count += 1
-                self.metrics.handshake_calls += 1
-                try:
-                    payload = self._json_response(await self._raw_async(sandbox, handshake, timeout_s))
-                except Exception:
-                    payload = None
-            if not self._valid_handshake(payload):
-                raise WorkspaceAgentProtocolError("Workspace Agent protocol handshake failed")
-            self.verified = True
+            await self._ensure_async(sandbox, timeout_s)
 
     def ensure_sync(self, sandbox: Any, timeout_s: float) -> None:
         if self.verified:
@@ -339,43 +381,17 @@ class _WorkspaceAgentSession:
         with self._sync_lock:
             if self.verified:
                 return
-            handshake = build_workspace_agent_request_code({"operation": "__handshake__", "relative": ""})
-            self.metrics.handshake_calls += 1
-            try:
-                payload = self._json_response(self._raw_sync(sandbox, handshake, timeout_s))
-            except Exception:
-                payload = None
-            if not self._valid_handshake(payload):
-                installed = build_installed_workspace_agent_source().encode("utf-8")
-                sandbox.fs.upload_file(installed, WORKSPACE_AGENT_INSTALL_PATH)
-                self.metrics.source_transfer_bytes += len(installed)
-                self.metrics.bootstrap_count += 1
-                self.metrics.handshake_calls += 1
-                try:
-                    payload = self._json_response(self._raw_sync(sandbox, handshake, timeout_s))
-                except Exception:
-                    payload = None
-            if not self._valid_handshake(payload):
-                raise WorkspaceAgentProtocolError("Workspace Agent protocol handshake failed")
-            self.verified = True
+            self._ensure_sync(sandbox, timeout_s)
 
     async def request_async(self, sandbox: Any, arguments: dict[str, object], timeout_s: float) -> dict[str, object]:
         await self.ensure_async(sandbox, timeout_s)
-        code = build_workspace_agent_request_code(arguments)
-        self.metrics.operation_calls += 1
-        return decode_workspace_agent_response(
-            await self._raw_async(sandbox, code, timeout_s),
-            str(arguments.get("relative") or ""),
-        )
+        response = await self._raw_async(sandbox, self._operation_code(arguments), timeout_s)
+        return decode_workspace_agent_response(response, self._relative(arguments))
 
     def request_sync(self, sandbox: Any, arguments: dict[str, object], timeout_s: float) -> dict[str, object]:
         self.ensure_sync(sandbox, timeout_s)
-        code = build_workspace_agent_request_code(arguments)
-        self.metrics.operation_calls += 1
-        return decode_workspace_agent_response(
-            self._raw_sync(sandbox, code, timeout_s),
-            str(arguments.get("relative") or ""),
-        )
+        response = self._raw_sync(sandbox, self._operation_code(arguments), timeout_s)
+        return decode_workspace_agent_response(response, self._relative(arguments))
 
 
 _AGENT_SESSIONS: dict[object, _WorkspaceAgentSession] = {}

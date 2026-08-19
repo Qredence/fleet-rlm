@@ -18,7 +18,7 @@ import dspy
 
 from fleet_rlm.files.volume_paths import UnsafePathError, validate_project_slug
 from fleet_rlm.files.workspace_models import SessionWorkspaceFS, WorkspaceEntry
-from fleet_rlm.files.workspace_tools import MAX_WORKSPACE_READ_CHARS, WorkspaceToolError
+from fleet_rlm.files.workspace_tools import MAX_WORKSPACE_READ_CHARS, WorkspaceToolError, _translate_fs_tool_errors
 from fleet_rlm.files.workspace_validation import WorkspacePathError, normalize_workspace_path
 from fleet_rlm.rlm.events import JsonValue
 from fleet_rlm.rlm.tool_observer import ToolEventView, bound_event_text
@@ -43,40 +43,7 @@ def _entry(entry: WorkspaceEntry) -> dict[str, object]:
 
 
 def _raise_tool_error(exc: BaseException) -> NoReturn:
-    if isinstance(exc, WorkspaceToolError):
-        raise exc
-    if getattr(exc, "code", None) == "unsupported_storage":
-        raise ProjectToolError(
-            "unsupported_storage",
-            "Project storage does not support this mutation",
-        ) from None
-    if isinstance(exc, FileNotFoundError):
-        raise ProjectToolError("not_found", "Project file was not found") from None
-    if isinstance(exc, FileExistsError):
-        detail = getattr(exc, "detail", "")
-        if detail == "checksum_mismatch":
-            raise ProjectToolError(
-                "conflict", "Project checksum precondition did not match the current file content"
-            ) from None
-        if detail == "not_empty":
-            raise ProjectToolError("conflict", "Project directory is not empty; delete its contents first") from None
-        if detail == "ambiguous":
-            raise ProjectToolError("conflict", "Project edit text occurs more than once; make it unique") from None
-        if detail == "missing":
-            raise ProjectToolError("conflict", "Project edit text was not found in the file") from None
-        raise ProjectToolError("conflict", "Project file already exists; use overwrite=True to replace it") from None
-    if isinstance(exc, IsADirectoryError):
-        raise ProjectToolError("is_directory", "Project path is a directory") from None
-    if isinstance(exc, NotADirectoryError):
-        raise ProjectToolError("invalid_path", "Project path has a non-directory parent") from None
-    if isinstance(exc, ValueError):
-        message = str(exc)
-        if "cursor" in message:
-            raise ProjectToolError("invalid_cursor", "Project cursor is invalid") from None
-        if "size" in message or "bound" in message:
-            raise ProjectToolError("too_large", "Project file exceeds its size bound") from None
-        raise ProjectToolError("invalid_path", "Project request is invalid") from None
-    raise ProjectToolError("unavailable", "Project storage is unavailable") from None
+    _translate_fs_tool_errors(exc, ProjectToolError, domain="Project")
 
 
 def _normalize_project_path(path: str, *, allow_root: bool = False) -> str:

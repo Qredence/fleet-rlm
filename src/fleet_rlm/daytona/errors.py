@@ -37,6 +37,16 @@ def sanitize_provider_message(raw: str) -> str:
     return message
 
 
+def sanitize_failure_text(exc: BaseException) -> str:
+    """Credential-free ``TypeName: message`` failure description for receipts.
+
+    Single owner for lease receipts and deletion-probe error strings; text is
+    exactly :func:`sanitize_provider_message` output, so redaction policy
+    cannot drift between lifecycle lanes.
+    """
+    return f"{type(exc).__name__}: {sanitize_provider_message(str(exc))}"
+
+
 @dataclass(slots=True)
 class DaytonaAdapterError(Exception):
     """Normalized Daytona failure safe for Fleet callers."""
@@ -116,6 +126,20 @@ def classify_provider_error(exc: object) -> ProviderFailureKind:
 def is_safe_pre_creation_retry(exc: object) -> bool:
     """True only for transient failures before sandbox creation is attempted."""
     return classify_provider_error(exc) in {"network", "timeout", "provider_5xx"}
+
+
+_TRANSIENT_STATUS_TEXT = re.compile(r"\b5\d{2}\b")
+
+
+def is_transient_provider_failure(exc: object) -> bool:
+    """True for transient provider failures: network, timeout, or 5xx.
+
+    The 5xx text-marker leg covers provider failures that arrive without
+    structured status metadata (e.g. preview-link resolution errors).
+    """
+    if is_safe_pre_creation_retry(exc):
+        return True
+    return _TRANSIENT_STATUS_TEXT.search(sanitize_provider_message(str(exc))) is not None
 
 
 def is_sandbox_not_found(exc: BaseException) -> bool:

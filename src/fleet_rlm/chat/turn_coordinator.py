@@ -11,7 +11,7 @@ from uuid import UUID
 
 from fleet_rlm.chat.commands import OpenTurnCommand
 from fleet_rlm.chat.committed_turn_events import CommittedTurnEventProjector
-from fleet_rlm.chat.preparation_attempt import PreparationAttempt
+from fleet_rlm.chat.preparation_attempt import PreparationAttempt, PreparationSettlement
 from fleet_rlm.chat.run_cleanup import RunCleanupSupervisor, RunCleanupUnavailableError
 from fleet_rlm.chat.run_execution import RunExecutionDriver, RunRunner
 from fleet_rlm.chat.run_lifecycle import (
@@ -72,6 +72,12 @@ class OpenedTurnStream:
         close = getattr(self._events, "aclose", None)
         if close is not None:
             await shield_cleanup(close())
+
+
+def _settled_or_unavailable(result: PreparationSettlement) -> None:
+    """Translate the attempt's typed settlement into the coordinator's claim-loss error."""
+    if result is PreparationSettlement.CLAIM_LOST:
+        raise RunLifecycleUnavailableError("Turn claim is no longer available")
 
 
 class TurnCoordinator:
@@ -190,32 +196,32 @@ class TurnCoordinator:
         try:
             prepared = await attempt.wait()
         except (RunPreparationCancelledError, asyncio.CancelledError):
-            result = await attempt.cancel_and_settle(
-                RunFailure("cancelled", "cancelled", "Turn cancelled", empty_rlm_usage())
+            _settled_or_unavailable(
+                await attempt.cancel_and_settle(
+                    RunFailure("cancelled", "cancelled", "Turn cancelled", empty_rlm_usage())
+                )
             )
-            if result == "claim_lost":
-                raise RunLifecycleUnavailableError("Turn claim is no longer available") from None
             raise
         except (RunPreparationTimeoutError, TimeoutError) as exc:
-            result = await attempt.cancel_and_settle(
-                RunFailure("timeout", "timeout", "Turn preparation timed out", empty_rlm_usage())
+            _settled_or_unavailable(
+                await attempt.cancel_and_settle(
+                    RunFailure("timeout", "timeout", "Turn preparation timed out", empty_rlm_usage())
+                )
             )
-            if result == "claim_lost":
-                raise RunLifecycleUnavailableError("Turn claim is no longer available") from None
             if isinstance(exc, RunPreparationTimeoutError):
                 raise
             raise RunPreparationTimeoutError("Turn preparation timed out") from None
         except Exception:
-            result = await attempt.settle_failure(
-                RunFailure(
-                    "failed",
-                    "preparation_failed",
-                    "Turn could not be prepared",
-                    empty_rlm_usage(),
+            _settled_or_unavailable(
+                await attempt.settle_failure(
+                    RunFailure(
+                        "failed",
+                        "preparation_failed",
+                        "Turn could not be prepared",
+                        empty_rlm_usage(),
+                    )
                 )
             )
-            if result == "claim_lost":
-                raise RunLifecycleUnavailableError("Turn claim is no longer available") from None
             raise
         return OpenedTurnStream(
             start.run_id,

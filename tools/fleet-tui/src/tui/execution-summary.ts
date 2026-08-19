@@ -1,3 +1,4 @@
+import { record } from "./coerce.js";
 import type { Message } from "./store.js";
 
 export type ExecutionSummary = {
@@ -92,12 +93,6 @@ export function formatExecutionMetric(value: number | null): string {
 
 function isInterpreterError(output: string): boolean {
   return /^\s*(?:\[Error\]|Execution (?:error|failed)\b)/i.test(output);
-}
-
-function record(value: unknown): Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : {};
 }
 
 function nonnegativeFinite(value: number | null): number | null {

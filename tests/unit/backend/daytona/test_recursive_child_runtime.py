@@ -14,10 +14,10 @@ from fleet_rlm.daytona import recursive_child_cleanup, recursive_child_runtime
 from fleet_rlm.daytona.provisioning import (
     recursive_child_volume_subpath,
     require_recursive_child_volume_subpath,
-    require_scoped_volume_subpath,
 )
 from fleet_rlm.daytona.recursive_child_lease import ChildRuntimeLease, ChildRuntimeLeaseState
 from fleet_rlm.daytona.session_manager import DaytonaAdmission
+from fleet_rlm.runtime.bindings import require_scoped_volume_subpath
 
 
 @dataclass

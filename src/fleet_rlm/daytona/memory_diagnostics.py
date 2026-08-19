@@ -16,12 +16,12 @@ bodies, paths, or secrets — so operator telemetry cannot leak Workspace data.
 from __future__ import annotations
 
 import logging
-from collections.abc import Iterator
 from contextlib import suppress
 from dataclasses import dataclass
 from enum import StrEnum
 
 from fleet_rlm.files.memory_models import WorkspaceMemoryStoreUnavailableError
+from fleet_rlm.observability.failure_diagnostics import walk_cause_chain
 
 logger = logging.getLogger(__name__)
 
@@ -61,20 +61,6 @@ class MemoryDegradation:
     fallback_outcome: str
 
 
-def _chain(exc: BaseException) -> Iterator[BaseException]:
-    """Walk the cause/context chain with a cycle guard."""
-
-    current: BaseException | None = exc
-    seen: set[int] = set()
-    try:
-        while current is not None and id(current) not in seen:
-            seen.add(id(current))
-            yield current
-            current = current.__cause__ or current.__context__
-    except Exception:
-        return
-
-
 def classify_memory_failure(exc: BaseException, *, operation: str) -> tuple[MemoryFailureCategory, str]:
     """Map one degraded operation's exception to a sanitized category + cause type.
 
@@ -88,7 +74,7 @@ def classify_memory_failure(exc: BaseException, *, operation: str) -> tuple[Memo
     from fleet_rlm.daytona.workspace_agent import WorkspaceAgentStorageError
     from fleet_rlm.files.memory_tools import MemoryToolError
 
-    chain = list(_chain(exc))
+    chain = list(walk_cause_chain(exc))
     cause_type = type(chain[-1]).__name__ if chain else type(exc).__name__
     for item in chain:
         if isinstance(item, MemoryMigrationError):

@@ -100,6 +100,20 @@ async def _wait_stream_owned(stream: RunEventStream) -> None:
         await wait_owned()
 
 
+async def _close_stream_owned(stream: RunEventStream | None, remember: Callable[[BaseException], None]) -> None:
+    """Close + owned-wait one event stream, remembering the first failure."""
+    if stream is None:
+        return
+    try:
+        await stream.aclose()
+    except BaseException as exc:
+        remember(exc)
+    try:
+        await _wait_stream_owned(stream)
+    except BaseException as exc:
+        remember(exc)
+
+
 def _heartbeat_claim_lost(state: _ExecutionState) -> bool:
     return state.heartbeat is not None and state.heartbeat.lost.is_set()
 
@@ -571,49 +585,24 @@ class RunExecutionDriver:
             state.cleanup_handed_off = True
 
             async def inline_cleanup() -> None:
-                cleanup_error = False
-                claim_cleanup_settled = not claim_lost
                 try:
                     with contextlib.suppress(BaseException):
                         await self._stop_claim_waiter(state)
+                    # Heartbeat stops before claim settlement, closing the
+                    # liveness window before the revoke like the queued path.
                     with contextlib.suppress(BaseException):
                         await stop_heartbeat(state.heartbeat)
                     state.heartbeat = None
-                    if claim_lost:
-                        try:
-                            receipt = await self._revoke_claim(run, claim_loss_usage or empty_rlm_usage())
-                        except BaseException:
-                            receipt = None
-                            cleanup_error = True
-                        claim_cleanup_settled = receipt is not None
-                        if receipt is not None and self._claim_loss_fence is not None:
-                            try:
-                                await self._claim_loss_fence(run.session_id)
-                            except BaseException:
-                                cleanup_error = True
-                                claim_cleanup_settled = False
-                    stream = state.stream
-                    if stream is not None:
-                        try:
-                            await stream.aclose()
-                        except BaseException:
-                            cleanup_error = True
-                        try:
-                            await _wait_stream_owned(stream)
-                        except BaseException:
-                            cleanup_error = True
-                    if finalization_task is not None:
-                        # The finalization task is owned until it settles; a
-                        # post-revocation lifecycle error is expected here.
-                        with contextlib.suppress(BaseException):
-                            await shield_cleanup(finalization_task)
-                    try:
-                        await prepared.aclose()
-                    except BaseException:
-                        cleanup_error = True
-                    if not cleanup_error and claim_cleanup_settled:
-                        with contextlib.suppress(BaseException):
-                            await self._lifecycle.complete_settling(run)
+                    await self._drain_owned_execution(
+                        run,
+                        prepared,
+                        state.stream,
+                        None,
+                        finalization_task,
+                        claim_lost=claim_lost,
+                        claim_loss_usage=claim_loss_usage,
+                        late_claim_loss_window=False,
+                    )
                 finally:
                     with contextlib.suppress(BaseException):
                         await self._stop_claim_waiter(state)
@@ -630,20 +619,17 @@ class RunExecutionDriver:
             await stop_heartbeat(state.heartbeat)
             if not state.cleanup_handed_off:
                 cleanup_error: BaseException | None = None
-                stream = state.stream
-                if stream is not None:
-                    try:
-                        await stream.aclose()
-                    except BaseException as exc:
+
+                def remember(exc: BaseException) -> None:
+                    nonlocal cleanup_error
+                    if cleanup_error is None:
                         cleanup_error = exc
-                    try:
-                        await _wait_stream_owned(stream)
-                    except BaseException as exc:
-                        cleanup_error = cleanup_error or exc
+
+                await _close_stream_owned(state.stream, remember)
                 try:
                     await shield_cleanup(prepared.aclose())
                 except BaseException as exc:
-                    cleanup_error = cleanup_error or exc
+                    remember(exc)
                 if cleanup_error is not None:
                     raise cleanup_error
 
@@ -677,83 +663,107 @@ class RunExecutionDriver:
         claim_loss_usage: RLMUsage | None = None,
     ) -> asyncio.Task[None]:
         async def cleanup() -> None:
-            committed = False
-            cleanup_error: BaseException | None = None
-            effective_claim_lost = claim_lost
-            claim_cleanup_attempted = False
-
-            async def apply_claim_loss() -> None:
-                nonlocal committed, claim_cleanup_attempted, effective_claim_lost
-                if claim_cleanup_attempted:
-                    return
-                claim_cleanup_attempted = True
-                effective_claim_lost = True
-                try:
-                    receipt = await self._revoke_claim(run, claim_loss_usage or empty_rlm_usage())
-                except BaseException as exc:
-                    remember(exc)
-                    return
-                # A racing commit wins: no fence and no settlement release
-                # against a committed Run.
-                committed = receipt is None
-                if receipt is not None and self._claim_loss_fence is not None:
-                    try:
-                        await self._claim_loss_fence(run.session_id)
-                    except BaseException as exc:
-                        remember(exc)
-
-            def remember(exc: BaseException) -> None:
-                nonlocal cleanup_error
-                if cleanup_error is None:
-                    cleanup_error = exc
-
-            try:
-                # Stop the heartbeat before the final durable transition. This
-                # closes the window in which claim loss can be observed after a
-                # local settlement decision but before complete_settling.
-                await stop_heartbeat(heartbeat)
-                if heartbeat is not None:
-                    effective_claim_lost = effective_claim_lost or heartbeat.lost.is_set()
-                if effective_claim_lost:
-                    await apply_claim_loss()
-                if stream is not None:
-                    try:
-                        await stream.aclose()
-                    except BaseException as exc:
-                        remember(exc)
-                    try:
-                        await _wait_stream_owned(stream)
-                    except BaseException as exc:
-                        remember(exc)
-                if finalization_task is not None:
-                    # A timeout/cancellation revokes authority before this
-                    # task settles; its expected RunLifecycleUnavailableError
-                    # is not a child-ownership failure. Waiting for the task
-                    # is the ownership proof, regardless of its result.
-                    with contextlib.suppress(BaseException):
-                        await shield_cleanup(finalization_task)
-                try:
-                    await prepared.aclose()
-                except BaseException as exc:
-                    remember(exc)
-                if heartbeat is not None and heartbeat.lost.is_set() and not effective_claim_lost:
-                    await apply_claim_loss()
-                if cleanup_error is None and not committed:
-                    try:
-                        await self._lifecycle.complete_settling(run)
-                    except BaseException as exc:
-                        remember(exc)
-            finally:
-                await stop_heartbeat(heartbeat)
+            cleanup_error = await self._drain_owned_execution(
+                run,
+                prepared,
+                stream,
+                heartbeat,
+                finalization_task,
+                claim_lost=claim_lost,
+                claim_loss_usage=claim_loss_usage,
+                late_claim_loss_window=True,
+            )
             if cleanup_error is not None:
                 raise cleanup_error
 
-        cleanup_awaitable = cleanup()
+        awaitable = cleanup()
         try:
-            return self._cleanup.submit(cleanup_awaitable)
+            return self._cleanup.submit(awaitable)
         except BaseException:
-            cleanup_awaitable.close()
+            awaitable.close()
             raise
+
+    async def _drain_owned_execution(
+        self,
+        run: ClaimedRun,
+        prepared: PreparedRun,
+        stream: RunEventStream | None,
+        heartbeat: ClaimHeartbeat | None,
+        finalization_task: asyncio.Task[RunSettlement] | None,
+        *,
+        claim_lost: bool,
+        claim_loss_usage: RLMUsage | None,
+        late_claim_loss_window: bool,
+    ) -> BaseException | None:
+        """One owned teardown order for detached cleanup paths (first failure, or None).
+
+        Heartbeat stops before the final durable transition; claim loss is
+        settled before resources close; finalization settlement is awaited as
+        ownership proof; ``complete_settling`` runs only when the teardown was
+        clean and no racing commit already settled the Run.
+        """
+        cleanup_error: BaseException | None = None
+        committed = False
+        claim_cleanup_attempted = False
+        effective_claim_lost = claim_lost
+
+        def remember(exc: BaseException) -> None:
+            nonlocal cleanup_error
+            if cleanup_error is None:
+                cleanup_error = exc
+
+        async def apply_claim_loss() -> None:
+            nonlocal committed, claim_cleanup_attempted, effective_claim_lost
+            if claim_cleanup_attempted:
+                return
+            claim_cleanup_attempted = True
+            effective_claim_lost = True
+            try:
+                receipt = await self._revoke_claim(run, claim_loss_usage or empty_rlm_usage())
+            except BaseException as exc:
+                remember(exc)
+                return
+            # A racing commit wins: no fence and no settlement release
+            # against a committed Run.
+            committed = receipt is None
+            if receipt is not None and self._claim_loss_fence is not None:
+                try:
+                    await self._claim_loss_fence(run.session_id)
+                except BaseException as exc:
+                    remember(exc)
+
+        try:
+            await stop_heartbeat(heartbeat)
+            if heartbeat is not None and heartbeat.lost.is_set():
+                effective_claim_lost = True
+            if effective_claim_lost:
+                await apply_claim_loss()
+            await _close_stream_owned(stream, remember)
+            if finalization_task is not None:
+                # A timeout/cancellation revokes authority before this task
+                # settles; waiting for it is the ownership proof regardless of
+                # its result.
+                with contextlib.suppress(BaseException):
+                    await shield_cleanup(finalization_task)
+            try:
+                await prepared.aclose()
+            except BaseException as exc:
+                remember(exc)
+            if (
+                late_claim_loss_window
+                and heartbeat is not None
+                and heartbeat.lost.is_set()
+                and not effective_claim_lost
+            ):
+                await apply_claim_loss()
+            if cleanup_error is None and not committed:
+                try:
+                    await self._lifecycle.complete_settling(run)
+                except BaseException as exc:
+                    remember(exc)
+        finally:
+            await stop_heartbeat(heartbeat)
+        return cleanup_error
 
     def _execution_deadline(self, prepared: PreparedRun) -> float:
         """Shared Turn deadline from the deep execution context (P25)."""
