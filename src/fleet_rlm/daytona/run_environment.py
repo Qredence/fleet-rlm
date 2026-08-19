@@ -333,6 +333,28 @@ class _LiveAttachmentLifecycle:
         return await self.attachment_lifecycle.prepare_run(access, attachment_ids, run, sink)
 
 
+async def _prepare_memory_digest(memory_store: Any, *, request: str) -> str:
+    """Return the per-Run injection digest, degrading fail-soft with diagnostics.
+
+    User-visible behavior is unchanged: ANY preparation failure still degrades
+    to no injection. The failure is classified once into a bounded, sanitized
+    diagnostic so provider outages, corrupt stores, invariant violations, and
+    internal defects no longer look identical to operators.
+    """
+    from fleet_rlm.daytona.memory_diagnostics import record_memory_degradation
+    from fleet_rlm.daytona.workspace_memory import read_workspace_memory_injection_digest
+
+    try:
+        return await asyncio.to_thread(
+            read_workspace_memory_injection_digest,
+            memory_store,
+            request=request,
+        )
+    except Exception as exc:
+        record_memory_degradation(exc, operation="injection_digest", fallback_outcome="no_memory_injection")
+        return ""
+
+
 @dataclass(slots=True)
 class _LiveCapabilityPreparer:
     settings: Settings
@@ -356,10 +378,7 @@ class _LiveCapabilityPreparer:
             LivePreparedCapabilities: Prepared capabilities and any preparation notices.
         """
         from fleet_rlm.daytona.workspace_fs import DaytonaSessionWorkspaceFS
-        from fleet_rlm.daytona.workspace_memory import (
-            DaytonaWorkspaceMemoryStore,
-            read_workspace_memory_injection_digest,
-        )
+        from fleet_rlm.daytona.workspace_memory import DaytonaWorkspaceMemoryStore
         from fleet_rlm.files.memory_tools import WorkspaceMemoryToolHost
         from fleet_rlm.files.project_tools import ProjectToolHost
         from fleet_rlm.files.tools import FileToolHost
@@ -440,15 +459,9 @@ class _LiveCapabilityPreparer:
         # Per-Run Workspace Memory injection: relevant matches first, then the
         # newest complete records. Best-effort by contract; search/storage
         # failures degrade to no injection, and search failure degrades to
-        # the recency-only fallback.
-        try:
-            memory_digest = await asyncio.to_thread(
-                read_workspace_memory_injection_digest,
-                memory_store,
-                request=run.input.text,
-            )
-        except Exception:
-            memory_digest = ""
+        # the recency-only fallback. Every degraded operation records one
+        # bounded, sanitized diagnostic at this fail-soft seam (P31).
+        memory_digest = await _prepare_memory_digest(memory_store, request=run.input.text)
         file_tools = file_host.as_tools()
         workspace_tools = workspace_host.as_tools()
         project_tools = project_host.as_tools()

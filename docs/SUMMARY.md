@@ -8,6 +8,7 @@
 * [Official Oolong benchmark](how-to-guides/official-oolong.md)
 * [Evaluation and monitoring](how-to-guides/evaluation-optimization.md)
 * [Terminal UI](how-to-guides/terminal-tui.md)
+* [Workspace Memory degradation diagnostics](how-to-guides/workspace-memory-degradation.md)
 * [Reference](reference/index.md)
   * [Configuration](reference/configuration.md)
   * [Runtime Profile Matrix](reference/profile-matrix.md)

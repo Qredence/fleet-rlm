@@ -18,6 +18,12 @@ from contextlib import contextmanager
 from datetime import UTC, datetime
 from typing import Any
 
+from fleet_rlm.daytona.memory_diagnostics import (
+    MemoryInvariantError,
+    MemoryMigrationError,
+    MemoryPayloadError,
+    record_memory_degradation,
+)
 from fleet_rlm.daytona.workspace_agent import WorkspaceAgentStorageError, run_workspace_agent
 from fleet_rlm.files.memory_models import (
     WORKSPACE_MEMORY_BYTE_BUDGET,
@@ -127,7 +133,9 @@ def _injection_query(request: str) -> str:
         from fleet_rlm.files.memory_tools import normalize_memory_search_query
 
         return normalize_memory_search_query(bounded)
-    except Exception:
+    except Exception as exc:
+        # Preparation stays fail-soft; the degradation is now diagnosable.
+        record_memory_degradation(exc, operation="normalize_query", fallback_outcome="recency_only_digest")
         return ""
 
 
@@ -162,7 +170,10 @@ def _relevant_recent_workspace_memory_digest(store: DaytonaWorkspaceMemoryStore,
         from fleet_rlm.files.memory_tools import search_workspace_memory_entries
 
         scored, _warnings = search_workspace_memory_entries(store, normalized_query=query)
-    except Exception:
+    except Exception as exc:
+        # Expected provider/storage degradation or a search defect: classify it
+        # without losing the fail-soft recency-only contract.
+        record_memory_degradation(exc, operation="relevance_search", fallback_outcome="recency_only_digest")
         return fallback
     if not scored:
         return fallback
@@ -316,14 +327,14 @@ class DaytonaWorkspaceMemoryStore:
                 except WorkspaceMemoryRecordError:
                     continue
         if len(set(shape_ids)) != len(shape_ids):
-            raise WorkspaceMemoryStoreUnavailableError()
+            raise MemoryInvariantError()
         entries = [line.entry for line in lines if line.entry is not None]
         warnings = count_workspace_memory_warnings(lines)
         if len({entry.memory_id for entry in entries}) != len(entries):
             # A cursor must name one physical row. Human edits can still forge
             # duplicate ids, so fail closed rather than skip or target an
             # arbitrary row while paging or mutating.
-            raise WorkspaceMemoryStoreUnavailableError()
+            raise MemoryInvariantError()
         if after is not None:
             matches = [index for index, entry in enumerate(entries) if entry.memory_id == after]
             if not matches:
@@ -457,14 +468,17 @@ class DaytonaWorkspaceMemoryStore:
             or legacy_entry.get("kind") != "file"
             or legacy_entry.get("is_regular_file") is False
         ):
-            raise WorkspaceMemoryStoreUnavailableError()
-        self._run(
-            root=self._volume_root,
-            operation="memory_migrate",
-            relative=_MEMORY_NAME,
-            max_bytes=self._max_file_bytes,
-            total_file_bytes=self._max_file_bytes,
-        )
+            raise MemoryMigrationError()
+        try:
+            self._run(
+                root=self._volume_root,
+                operation="memory_migrate",
+                relative=_MEMORY_NAME,
+                max_bytes=self._max_file_bytes,
+                total_file_bytes=self._max_file_bytes,
+            )
+        except Exception as exc:
+            raise MemoryMigrationError() from exc
 
     def _read_full_content(self) -> str:
         """Read the entire store body (bounded by the file cap), untransformed."""
@@ -513,7 +527,7 @@ class DaytonaWorkspaceMemoryStore:
             or type(total_bytes) is not int
             or type(bytes_returned) is not int
         ):
-            raise ValueError("invalid memory response")
+            raise MemoryPayloadError("invalid memory response")
         if (
             bytes_returned < 0
             or bytes_returned > byte_budget
@@ -521,7 +535,7 @@ class DaytonaWorkspaceMemoryStore:
             or total_bytes > self._max_file_bytes
             or bytes_returned != len(content.encode("utf-8"))
         ):
-            raise ValueError("invalid memory response")
+            raise MemoryPayloadError("invalid memory response")
         return content, truncated, total_bytes, bytes_returned
 
     def _run(
