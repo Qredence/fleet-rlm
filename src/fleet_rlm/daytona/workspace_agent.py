@@ -20,7 +20,6 @@ import asyncio
 import hashlib
 import json
 import math
-import textwrap
 import threading
 import time
 from dataclasses import dataclass
@@ -114,110 +113,91 @@ def build_workspace_agent_code(
     memory_id: str = "",
     expected_sha256: str = "",
 ) -> str:
-    preamble = "\n".join(
-        (
-            f"volume_root = {volume_root!r}",
-            f"root = {root!r}",
-            f"relative = {relative!r}",
-            f"allow_missing = {allow_missing!r}",
-            f"operation = {operation!r}",
-            f"max_bytes = {int(max_bytes)!r}",
-            f"limit = {int(limit)!r}",
-            f"overwrite = {overwrite!r}",
-            f"content_b64 = {content_b64!r}",
-            f"after = {after!r}",
-            f"offset = {int(offset)!r}",
-            f"max_chars = {int(max_chars)!r}",
-            f"total_file_bytes = {int(total_file_bytes)!r}",
-            f"checksum = {checksum!r}",
-            f"memory_id = {memory_id!r}",
-            f"expected_sha256 = {expected_sha256!r}",
-        )
+    """
+    Construct a complete Workspace Agent script for a filesystem or memory operation.
+
+    Parameters:
+        volume_root (str): Workspace volume root.
+        root (str): Root directory for the operation.
+        operation (str): Operation to perform.
+        relative (str): Path relative to the selected root.
+        allow_missing (bool): Whether a missing target is permitted.
+        max_bytes (int): Maximum number of bytes to read.
+        limit (int): Maximum number of entries to return.
+        overwrite (bool): Whether an existing file may be replaced.
+        content_b64 (str): Base64-encoded content for write operations.
+        after (str): Pagination marker for directory listings.
+        offset (int): Byte offset for file reads.
+        max_chars (int): Maximum number of decoded characters to return.
+        total_file_bytes (int): Expected total file size for chunked reads.
+        checksum (bool): Whether to include a checksum in the result.
+        memory_id (str): Identifier of the memory object.
+        expected_sha256 (str): Expected SHA-256 checksum for verification.
+
+    Returns:
+        str: A complete script containing the runtime and encoded operation request.
+
+    Raises:
+        WorkspaceAgentProtocolError: If the encoded request exceeds the protocol size limit.
+    """
+    request = {
+        "protocol_version": WORKSPACE_AGENT_PROTOCOL_VERSION,
+        "volume_root": volume_root,
+        "root": root,
+        "relative": relative,
+        "allow_missing": allow_missing,
+        "operation": operation,
+        "max_bytes": int(max_bytes),
+        "limit": int(limit),
+        "overwrite": overwrite,
+        "content_b64": content_b64,
+        "after": after,
+        "offset": int(offset),
+        "max_chars": int(max_chars),
+        "total_file_bytes": int(total_file_bytes),
+        "checksum": checksum,
+        "memory_id": memory_id,
+        "expected_sha256": expected_sha256,
+    }
+    encoded = json.dumps(request, ensure_ascii=False, separators=(",", ":"))
+    if len(encoded.encode("utf-8")) > WORKSPACE_AGENT_REQUEST_MAX_BYTES:
+        raise WorkspaceAgentProtocolError("Workspace Agent request exceeds its bound")
+    return (
+        _workspace_agent_runtime_source()
+        + "\n\nprint(json.dumps(handle(json.loads("
+        + repr(encoded)
+        + ")), ensure_ascii=False, separators=(',', ':')))\n"
     )
-    return preamble + "\n" + _workspace_agent_runtime_source()
 
 
 def _workspace_agent_runtime_checksum() -> str:
+    """Compute the SHA-256 checksum of the packaged workspace agent runtime source.
+
+    Returns:
+        str: The hexadecimal SHA-256 checksum of the runtime source.
+    """
     return hashlib.sha256(_workspace_agent_runtime_source().encode("utf-8")).hexdigest()
 
 
 def build_installed_workspace_agent_source() -> str:
-    # Build the versioned module uploaded once per Sandbox (P22/QRE-162).
-    # The hardened remote dispatch remains the source of truth: helper
-    # definitions stay module-level and the existing dispatch tail is wrapped
-    # in ``handle(request)``. Request state stays call-local because each
-    # operation executes a fresh module instance; ``locked_fd`` and
-    # ``append_memory_id`` are initialized to the same defaults the legacy
-    # script preamble provided. No operation transmits this source after the
-    # agent is verified.
+    # The uploaded artifact is exactly the packaged runtime module. Its
+    # handler computes the checksum from ``__file__`` during the handshake, so
+    # the manifest covers the bytes that were actually installed.
+    """
+    Return the validated source code for the installed Workspace Agent runtime.
+
+    Raises:
+        WorkspaceAgentProtocolError: If the runtime source contains a syntax error.
+
+    Returns:
+        str: The packaged Workspace Agent runtime source.
+    """
     source = _workspace_agent_runtime_source()
-    marker = "\ntry:\n    try:\n        base_fds, root_fd = open_chain"
-    split = source.find(marker)
-    if split < 0:
-        raise WorkspaceAgentProtocolError("Workspace Agent dispatch marker is missing")
-    prefix = source[:split]
-    dispatch = source[split + 1 :]
-    manifest = repr(
-        {
-            "protocol_version": WORKSPACE_AGENT_PROTOCOL_VERSION,
-            "source_checksum": _workspace_agent_runtime_checksum(),
-            "operations": WORKSPACE_AGENT_SUPPORTED_OPERATIONS,
-            "request_max_bytes": WORKSPACE_AGENT_REQUEST_MAX_BYTES,
-            "response_max_bytes": WORKSPACE_AGENT_RESPONSE_MAX_BYTES,
-            "locking": "fcntl_flock_inode_revalidation",
-            "replacement": "replace_overwrite_recreate",
-            "fallback": "non_atomic_overwrite_cleanup_warning",
-        }
-    )
-    # Core fields are required; optional fields default exactly as the legacy
-    # build_workspace_agent_code signature did, so compact callers may omit
-    # them and legacy callers passing all fields behave identically.
-    required = ("volume_root", "root", "relative", "operation")
-    optional: dict[str, object] = {
-        "allow_missing": False,
-        "max_bytes": 0,
-        "limit": 0,
-        "overwrite": False,
-        "content_b64": "",
-        "after": "",
-        "offset": 0,
-        "max_chars": 0,
-        "total_file_bytes": 0,
-        "checksum": False,
-        "memory_id": "",
-        "expected_sha256": "",
-    }
-    required_check = (
-        "    if any(k not in request for k in "
-        + repr(list(required))
-        + '):\n        return {"ok": False, "error": "request_invalid"}\n'
-    )
-    assignments = "\n".join(
-        [f"    {name} = request[{name!r}]" for name in required]
-        + [f"    {name} = request.get({name!r}, {default!r})" for name, default in optional.items()]
-    )
-    handle = (
-        "\n\n_AGENT_HANDSHAKE = "
-        + manifest
-        + "\n\ndef handle(request):\n"
-        + "    if not isinstance(request, dict):\n"
-        + '        return {"ok": False, "error": "request_invalid"}\n'
-        + '    if request.get("operation") == "__handshake__":\n'
-        + '        return {"ok": True, "kind": "workspace_agent_handshake", **_AGENT_HANDSHAKE}\n'
-        + '    if request.get("protocol_version") != _AGENT_HANDSHAKE["protocol_version"]:\n'
-        + '        return {"ok": False, "error": "protocol_mismatch"}\n'
-        + "    global volume_root, root, relative, allow_missing, operation\n"
-        + "    global max_bytes, limit, overwrite, content_b64, after, offset\n"
-        + "    global max_chars, total_file_bytes, checksum, memory_id, expected_sha256\n"
-        + "    global locked_fd, append_memory_id\n"
-        + "    locked_fd = None\n"
-        + "    append_memory_id = ''\n"
-        + required_check
-        + assignments
-        + "\n"
-        + textwrap.indent(dispatch, "    ")
-    )
-    return prefix + handle
+    try:
+        compile(source, _WORKSPACE_AGENT_RUNTIME_NAME, "exec")
+    except SyntaxError as exc:
+        raise WorkspaceAgentProtocolError("Workspace Agent runtime is invalid") from exc
+    return source
 
 
 def build_workspace_agent_request_code(arguments: dict[str, object]) -> str:
@@ -225,6 +205,18 @@ def build_workspace_agent_request_code(arguments: dict[str, object]) -> str:
     # Normal operations transmit this shim plus the JSON request — never the
     # full runtime source. A fresh module instance per call keeps request
     # state call-local.
+    """
+    Builds a compact script that invokes the installed Workspace Agent with a protocol-tagged request.
+
+    Args:
+        arguments: Operation-specific request fields.
+
+    Returns:
+        A Python script that executes the installed agent and prints its response.
+
+    Raises:
+        WorkspaceAgentProtocolError: If the encoded request exceeds the maximum size.
+    """
     request = {"protocol_version": WORKSPACE_AGENT_PROTOCOL_VERSION, **arguments}
     encoded = json.dumps(request, ensure_ascii=False, separators=(",", ":"))
     if len(encoded.encode("utf-8")) > WORKSPACE_AGENT_REQUEST_MAX_BYTES:
@@ -442,10 +434,21 @@ def run_workspace_agent(
     timeout_s: float = WORKSPACE_AGENT_CODE_RUN_TIMEOUT_S,
     **arguments: Any,
 ) -> dict[str, object]:
+    """
+    Execute a workspace agent operation synchronously.
+
+    Parameters:
+        sandbox (Any): Sandbox used to execute the operation.
+        timeout_s (float): Maximum execution time in seconds.
+        **arguments (Any): Operation parameters, including the requested workspace operation.
+
+    Returns:
+        dict[str, object]: The decoded workspace operation result.
+    """
     if _WorkspaceAgentSession.supports_installation(sandbox):
         return _agent_session(sandbox).request_sync(sandbox, arguments, timeout_s)
-    # Compatibility path for process-only test doubles: Sandboxes without a
-    # filesystem upload surface keep the legacy full-source transmission.
+    # Compatibility path for process-only test doubles: send the complete
+    # packaged artifact plus a request, using the same handler as installation.
     relative = str(arguments.get("relative") or "")
     code = build_workspace_agent_code(**arguments)
     response = sandbox.process.code_run(code, timeout=_provider_code_run_timeout_s(timeout_s))
@@ -458,9 +461,20 @@ async def run_workspace_agent_async(
     timeout_s: float = WORKSPACE_AGENT_CODE_RUN_TIMEOUT_S,
     **arguments: Any,
 ) -> dict[str, object]:
+    """
+    Execute a workspace operation asynchronously through the remote agent.
+
+    Parameters:
+        timeout_s (float): Maximum execution time in seconds.
+        **arguments (Any): Operation name and operation-specific parameters.
+
+    Returns:
+        dict[str, object]: The decoded operation result.
+    """
     if _WorkspaceAgentSession.supports_installation(sandbox):
         return await _agent_session(sandbox).request_async(sandbox, arguments, timeout_s)
-    # Compatibility path for process-only test doubles (see sync adapter).
+    # Compatibility path for process-only test doubles (see sync adapter); the
+    # complete artifact still invokes the same runtime handler.
     relative = str(arguments.get("relative") or "")
     code = build_workspace_agent_code(**arguments)
     response = await sandbox.process.code_run(code, timeout=_provider_code_run_timeout_s(timeout_s))

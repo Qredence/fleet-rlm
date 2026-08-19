@@ -53,6 +53,7 @@ from fleet_rlm.daytona.provisioning import (
 )
 from fleet_rlm.daytona.sandbox_lease import SandboxLease, SandboxLeasePolicy, SandboxLeaseReceipt
 from fleet_rlm.runtime.bindings import SandboxBinding
+from fleet_rlm.runtime.owned_effect import OwnedEffect
 
 logger = logging.getLogger(__name__)
 
@@ -301,12 +302,9 @@ class DaytonaSessionManager:
         acquisition: asyncio.Task[InterpreterLease],
     ) -> InterpreterLease:
         """Wait through repeated caller cancellation until provider work settles."""
-        while not acquisition.done():
-            try:
-                await asyncio.shield(acquisition)
-            except asyncio.CancelledError:
-                continue
-        return acquisition.result()
+        effect = OwnedEffect.from_task(acquisition)
+        await effect.settle()
+        return effect.result()
 
     def _adopt_late_acquisition(
         self,
@@ -315,6 +313,16 @@ class DaytonaSessionManager:
         request: LeaseRequest,
         run_id: UUID,
     ) -> None:
+        """
+        Schedule cleanup for an acquisition that completes after its lease request ends.
+
+        Parameters:
+            acquisition (asyncio.Task[InterpreterLease]): The provider acquisition task to settle.
+            permit (DaytonaAdmissionPermit): The admission permit to release after cleanup.
+            request (LeaseRequest): The request associated with the late-acquired lease.
+            run_id (UUID): The run identifier to release from the active lease registry.
+        """
+
         async def cleanup() -> None:
             try:
                 lease = await self._settle_provider_acquisition(acquisition)

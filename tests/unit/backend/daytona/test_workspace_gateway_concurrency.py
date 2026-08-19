@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import ast
 import asyncio
 import hashlib
+import json
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -147,13 +149,22 @@ class _SubprocessAgentProcess:
         self._mutation_delay = mutation_delay
 
     async def code_run(self, code: str, **_kwargs) -> SimpleNamespace:
+        """
+        Run generated agent code in a subprocess after synchronizing concurrent calls.
+
+        Parameters:
+            code (str): Python source code for the generated agent.
+
+        Returns:
+            SimpleNamespace: Contains the subprocess exit status in `exit_code` and standard output in `result`.
+        """
         self.calls += 1
         if self.calls >= 2:
             self._barrier.set()
         await self._barrier.wait()
         delayed = code.replace(
-            f"    if operation == {self._mutation_delay!r}:",
-            f"    time.sleep(0.12)\n    if operation == {self._mutation_delay!r}:",
+            f"        if operation == {self._mutation_delay!r}:",
+            f"        time.sleep(0.12)\n        if operation == {self._mutation_delay!r}:",
             1,
         )
         completed = await asyncio.to_thread(
@@ -175,19 +186,46 @@ class _DelayedDeleteBeforeUnlinkAgentProcess:
         self._coordination_path = coordination_path
 
     async def code_run(self, code: str, **_kwargs) -> SimpleNamespace:
+        """
+        Runs generated agent code in a subprocess after coordinating concurrent
+        executions and injecting race-condition synchronization for delete or
+        write operations.
+
+        Parameters:
+                code (str): Generated agent code to execute.
+                _kwargs: Additional execution arguments, accepted for interface compatibility.
+
+        Returns:
+                SimpleNamespace: Contains the subprocess exit code in `exit_code` and standard output in `result`.
+        """
         self.calls += 1
         if self.calls >= 2:
             self._barrier.set()
         await self._barrier.wait()
         delayed = code
         gate = str(self._coordination_path)
-        if "operation = 'delete'" in code:
-            unlink_line = "                os.unlink(relative_parts[-1], dir_fd=parent_fd)"
-            inserted = f"                open({gate!r}, 'w').close()\n                time.sleep(0.25)\n{unlink_line}"
+        calls = [
+            node
+            for node in ast.walk(ast.parse(code))
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "loads"
+            and node.args
+            and isinstance(node.args[0], ast.Constant)
+            and isinstance(node.args[0].value, str)
+        ]
+        request = json.loads(calls[-1].args[0].value)
+        if request["operation"] == "delete":
+            unlink_line = "                    os.unlink(relative_parts[-1], dir_fd=parent_fd)"
+            assert unlink_line in delayed
+            inserted = (
+                f"                    open({gate!r}, 'w').close()\n                    time.sleep(0.25)\n{unlink_line}"
+            )
             delayed = delayed.replace(unlink_line, inserted, 1)
-        if "operation = 'write'" in code:
-            branch = "    if operation == 'write':"
-            waiter = f"    while not os.path.exists({gate!r}):\n        time.sleep(0.01)\n{branch}"
+        if request["operation"] == "write":
+            branch = "        if operation == 'write':"
+            assert branch in delayed
+            waiter = f"        while not os.path.exists({gate!r}):\n            time.sleep(0.01)\n{branch}"
             delayed = delayed.replace(branch, waiter, 1)
         completed = await asyncio.to_thread(
             subprocess.run,

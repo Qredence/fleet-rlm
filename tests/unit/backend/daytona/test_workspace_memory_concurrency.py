@@ -33,6 +33,20 @@ async def _run_member(
     learning: str = "",
     delay_operation: str,
 ) -> _MemberResult:
+    """
+    Run a delayed workspace-memory mutation in a subprocess.
+
+    Parameters:
+        volume_root (Path): Shared volume used by the subprocess.
+        action (str): Mutation to perform: ``append``, ``edit``, or ``delete``.
+        record (str): Record content for an append operation.
+        memory_id (str): Target record identifier for an edit or delete operation.
+        learning (str): Replacement learning content for an edit operation.
+        delay_operation (str): Operation phase at which to inject the delay.
+
+    Returns:
+        _MemberResult: The subprocess return code and captured output.
+    """
     volume_root.mkdir(parents=True, exist_ok=True)
     script = textwrap.dedent(
         f"""
@@ -44,11 +58,12 @@ async def _run_member(
         class RaceProcess:
             def code_run(self, code: str, **_kwargs):
                 markers = {{
-                    "write": "    if operation == 'write':",
-                    "edit_compose": "            payload = ''.join(lines).encode('utf-8')",
+                    "write": "        if operation == 'write':",
+                    "edit_compose": "                payload = ''.join(lines).encode('utf-8')",
                 }}
                 marker = markers[{delay_operation!r}]
-                prefix = "            " if {delay_operation!r} == "edit_compose" else "    "
+                prefix = "                " if {delay_operation!r} == "edit_compose" else "        "
+                assert marker in code, "workspace agent delay marker missing"
                 deferred = code.replace(marker, prefix + "time.sleep(0.10)" + chr(10) + marker, 1)
                 completed = subprocess.run(
                     [sys.executable, "-c", deferred],

@@ -123,6 +123,16 @@ The overall wall-clock limit for one Turn, represented internally by one
 absolute deadline shared with Daytona Admission. It is not an RLM Option.
 _Avoid_: LM call limit, Daytona Admission timeout, payload-size limit
 
+**Owned Effect**:
+Already-started asynchronous work retained by the caller that started it. The
+provider-neutral `runtime.OwnedEffect` seam shields settlement from waiter
+cancellation, preserves the terminal result or exception, and may return a
+bounded pending wait without cancelling the effect. Run lifecycle, RLM worker,
+and equivalent provider waits use this vocabulary; Run Ownership, recursive
+batch quarantine, and Daytona lease cleanup retain their domain-specific state
+and fallback policy.
+_Avoid_: generic task scheduler, background job, Run Ownership replacement
+
 **Daytona Admission**:
 The process-wide bound on acquiring or active Daytona Interpreter Leases. A
 wait uses the Turn Timeout deadline and never creates a second timeout policy.
@@ -330,7 +340,7 @@ separate `workspace_volume*` module exists.
 | `files/workspace_tools.py` | RLM Tool host binding Session Workspace operations as Host-Mediated Tools | `daytona/run_environment.py` |
 | `files/project_tools.py` | RLM Tool host for the durable projects-root namespace | `daytona/run_environment.py` |
 | `daytona/workspace_memory.py` | Workspace Memory store implementation over one mounted agent round trip | `daytona/run_environment.py` |
-| `daytona/workspace_agent.py` | Emitted stdlib-only Sandbox workspace agent code plus host run/decode adapters | `daytona/workspace_fs.py`, `daytona/workspace_memory.py` |
+| `daytona/workspace_agent.py` | Host run/decode adapter and versioned artifact/handshake transport for the packaged stdlib-only `workspace_agent_runtime.py` `handle(request)` used by installed and fallback launchers | `daytona/workspace_fs.py`, `daytona/workspace_memory.py` |
 
 ### `rlm/` package one-liner
 
@@ -350,10 +360,16 @@ delegation uses ordered, bounded sibling execution.
 - `optimization_evaluator.py` — disposable no-volume lifecycle for the offline signature-optimization lane.
 - `platform.py` — live SandboxPlatform and VolumeClient adapters over the Daytona SDK.
 - `provisioning.py` — strict async Sandbox, Volume, mount, and layout provisioning.
-- `recursive_child_runtime.py` — dedicated disposable runtimes for native DSPy recursive children.
+- `recursive_child_runtime.py` — factory/orchestration seam for native DSPy
+  recursive children; `recursive_child_acquisition.py` owns acquisition,
+  `recursive_child_lease.py` owns explicit close state,
+  `recursive_child_cleanup.py` owns shutdown/provider cleanup, and
+  `recursive_child_late.py` owns late/quarantined work.
 - `run_environment.py` — Run environment inventory and exact Turn capability preparation.
 - `session_manager.py` — interpreter lease acquire/release and Sandbox binding lifecycle.
-- `workspace_agent.py` — emitted Sandbox workspace agent source and its host execution adapter.
+- `workspace_agent.py` — Workspace Agent artifact/handshake host adapter; the
+  packaged `workspace_agent_runtime.py` owns the explicit stdlib-only
+  `handle(request)` used by installed and fallback launchers.
 - `workspace_fs.py` — Session Workspace FS implementation (see disambiguation above).
 - `workspace_gateway.py` — ephemeral mounted-Sandbox gateway (see disambiguation above).
 - `workspace_memory.py` — Workspace Memory store implementation (see disambiguation above).

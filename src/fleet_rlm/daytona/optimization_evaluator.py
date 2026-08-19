@@ -30,6 +30,7 @@ from fleet_rlm.rlm.dspy_contract import (
     observed_usage,
     prediction_result,
 )
+from fleet_rlm.runtime.owned_effect import OwnedEffect
 
 if TYPE_CHECKING:
     from fleet_rlm.optimization.types import OptimizationRecord
@@ -436,13 +437,13 @@ class StrictDaytonaEvaluationLifecycle:
 
     async def _cleanup(self, interpreter: DaytonaCodeInterpreter | None, sandbox: Any) -> BaseException | None:
         """
-        Attempt interpreter shutdown and sandbox deletion, preserving cleanup failures during cancellation.
+        Shut down the interpreter and delete the sandbox, retaining the first cleanup error.
 
         Returns:
-            BaseException | None: The first cleanup error, or `None` when cleanup succeeds.
+            BaseException | None: The first cleanup error, or `None` if cleanup succeeds.
 
         Raises:
-            asyncio.CancelledError: If the caller is cancelled while sandbox deletion is pending.
+            asyncio.CancelledError: If cancellation occurs while sandbox deletion is pending.
         """
         cleanup_error: BaseException | None = None
         if interpreter is not None:
@@ -450,21 +451,17 @@ class StrictDaytonaEvaluationLifecycle:
                 await asyncio.to_thread(interpreter.shutdown, strict_broker_cleanup=True)
             except BaseException as exc:
                 cleanup_error = exc
-        delete_task = asyncio.create_task(self._factory.delete(sandbox))
-        cancelled = False
-        while not delete_task.done():
-            try:
-                await asyncio.shield(delete_task)
-            except asyncio.CancelledError:
-                cancelled = True
-            except BaseException as exc:
-                cleanup_error = cleanup_error or exc
-                break
-        if delete_task.done():
-            try:
-                delete_task.result()
-            except BaseException as exc:
-                cleanup_error = cleanup_error or exc
+        delete_effect = OwnedEffect.start(self._factory.delete(sandbox))
+        try:
+            delete_wait = await delete_effect.settle()
+        except asyncio.CancelledError as exc:
+            cleanup_error = cleanup_error or exc
+            cancelled = True
+        except Exception as exc:
+            cleanup_error = cleanup_error or exc
+            cancelled = delete_effect.caller_cancelled
+        else:
+            cancelled = delete_wait.caller_cancelled
         if cancelled:
             raise asyncio.CancelledError
         return cleanup_error

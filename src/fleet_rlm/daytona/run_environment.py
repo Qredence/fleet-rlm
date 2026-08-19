@@ -59,6 +59,7 @@ from fleet_rlm.files.workspace_models import DAYTONA_WORKSPACE_CAPABILITY
 from fleet_rlm.rlm.context import RLMExecutionSpec
 from fleet_rlm.rlm.dspy_contract import RLMOptions
 from fleet_rlm.rlm.model_bundle import RLMModelBundle
+from fleet_rlm.runtime.owned_effect import OwnedEffect
 from fleet_rlm.skills.catalog import SkillCatalog
 
 logger = logging.getLogger(__name__)
@@ -70,7 +71,16 @@ def _promote_memory_candidates(
     *,
     allowed_categories: tuple[str, ...],
 ) -> Any:
-    """Run the bounded post-commit Memory effect outside execution capabilities."""
+    """
+    Promote memory candidates through the configured memory store.
+
+    Parameters:
+        candidates (tuple[Any, ...]): Memory candidates to promote.
+        allowed_categories (tuple[str, ...]): Candidate categories eligible for promotion.
+
+    Returns:
+        MemoryCandidatePromotionResult: Counts and reasons describing the promotion outcome.
+    """
     from fleet_rlm.files.memory_candidates import MemoryCandidatePromotionResult, promote_memory_candidates
 
     if store is None:
@@ -96,20 +106,8 @@ def _promote_memory_candidates(
     return result
 
 
-async def _settle_owned_thread(task: asyncio.Task[Any]) -> bool:
-    """Wait through repeated caller cancellation until owned thread work exits."""
-    cancellation_requested = False
-    while not task.done():
-        try:
-            await asyncio.shield(task)
-        except asyncio.CancelledError:
-            cancellation_requested = True
-        except BaseException:
-            break
-    return cancellation_requested
-
-
 def _consume_task_result(task: asyncio.Task[Any]) -> None:
+    """Consumes a completed task's result while suppressing cancellation and task exceptions."""
     if task.cancelled():
         return
     with contextlib.suppress(BaseException):
@@ -199,18 +197,19 @@ class _DaytonaEnvironmentProvider:
 
     async def acquire(self, run: ClaimedRun, *, deadline: float) -> RunEnvironment:
         """
-        Acquire and configure a Daytona-backed environment for a Run.
+        Acquire and configure a Daytona-backed environment for a run.
 
         Parameters:
             run (ClaimedRun): Run whose session, access, and identifiers determine the environment.
             deadline (float): Absolute time limit for environment acquisition and setup.
 
         Returns:
-            RunEnvironment: Configured environment with run sinks, resource cleanup, and child-runtime creation.
+            RunEnvironment: Configured environment with run sinks, cleanup, memory services, and child-runtime creation.
 
         Raises:
             RunPreparationUnavailableError: If environment admission times out.
             RunPreparationTimeoutError: If lease acquisition or environment setup exceeds the deadline.
+            RuntimeError: If the acquired sandbox is unavailable.
         """
         try:
             lease = await self.resources.session_manager.acquire(
@@ -229,19 +228,27 @@ class _DaytonaEnvironmentProvider:
         try:
             self.resources.track_sandbox(lease.sandbox_id)
             lookup = asyncio.create_task(self.resources.platform.get(lease.sandbox_id))
+            lookup_effect = OwnedEffect.from_task(lookup)
             try:
                 async with asyncio.timeout_at(deadline):
                     sandbox = await asyncio.shield(lookup)
             except TimeoutError:
                 if lookup.done():
                     raise
-                cancelled = await _settle_owned_thread(lookup)
+                try:
+                    settled = await lookup_effect.settle()
+                except BaseException:
+                    lookup_effect.consume_exception()
+                    cancelled = lookup_effect.caller_cancelled
+                else:
+                    cancelled = settled.caller_cancelled
                 _consume_task_result(lookup)
                 if cancelled:
                     raise asyncio.CancelledError from None
                 raise RunPreparationTimeoutError("Turn preparation timed out") from None
             except asyncio.CancelledError:
-                await _settle_owned_thread(lookup)
+                with contextlib.suppress(BaseException):
+                    await lookup_effect.settle()
                 _consume_task_result(lookup)
                 raise
             if sandbox is None:

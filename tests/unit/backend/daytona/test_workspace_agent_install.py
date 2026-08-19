@@ -18,7 +18,7 @@ import pytest
 
 from fleet_rlm.daytona import workspace_agent as wa
 
-_FULL_SOURCE_MARKERS = ("def respond(payload):", "O_NOFOLLOW", "fcntl.flock")
+_FULL_SOURCE_MARKERS = ("def respond(payload) -> NoReturn:", "O_NOFOLLOW", "fcntl.flock")
 
 
 class _InstallFs:
@@ -286,10 +286,22 @@ def test_process_only_sandbox_keeps_legacy_wire(tmp_path: Path) -> None:
     payload = wa.run_workspace_agent(sandbox, **_stat_args(volume, root))
     assert payload["ok"] is True
     assert len(process.calls) == 1
-    assert "def respond(payload):" in process.calls[0]
+    assert "def respond(payload) -> NoReturn:" in process.calls[0]
 
 
 def _memory_args(volume: Path, root: Path, operation: str, **overrides: object) -> dict[str, object]:
+    """
+    Build memory-operation arguments with defaults and optional overrides.
+
+    Parameters:
+        volume (Path): Root path of the memory volume.
+        root (Path): Root path used by the operation.
+        operation (str): Memory operation to perform.
+        overrides (object): Argument values that replace the defaults.
+
+    Returns:
+        dict[str, object]: Arguments for the memory operation.
+    """
     args: dict[str, object] = {
         "volume_root": str(volume),
         "root": str(root),

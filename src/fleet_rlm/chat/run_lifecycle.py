@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
-from collections.abc import Awaitable, Callable
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from hashlib import sha256
-from typing import Any, Literal, Protocol, TypeAlias, TypeVar
+from typing import Any, Literal, Protocol, TypeAlias
 from uuid import UUID
 
 from fleet_rlm.artifacts.models import ArtifactAccess, ArtifactCandidate, ArtifactRef
@@ -38,6 +39,7 @@ from fleet_rlm.result_snapshot import ResultSnapshotSink, encode_result_snapshot
 from fleet_rlm.rlm.context import AsyncCancellationProbe
 from fleet_rlm.rlm.dspy_contract import RLMUsage
 from fleet_rlm.rlm.outcome import RLMOutcome
+from fleet_rlm.runtime.owned_effect import OwnedEffect
 from fleet_rlm.sessions.committed_turn import CommittedTurn
 from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
 
@@ -81,25 +83,6 @@ class RunIntegrityError(RunLifecycleError):
 
 class RunLifecycleUnavailableError(RunLifecycleError):
     pass
-
-
-_T = TypeVar("_T")
-
-
-async def _settle_owned(awaitable: Awaitable[_T]) -> tuple[asyncio.Future[_T], bool]:
-    """Shield one owned side effect and wait through repeated caller cancellation."""
-    task = asyncio.ensure_future(awaitable)
-    cancellation_requested = False
-    while not task.done():
-        try:
-            await asyncio.shield(task)
-        except asyncio.CancelledError:
-            if task.cancelled():
-                return task, cancellation_requested
-            cancellation_requested = True
-        except BaseException:
-            return task, cancellation_requested
-    return task, cancellation_requested
 
 
 @dataclass(frozen=True, slots=True)
@@ -283,21 +266,21 @@ class RunLifecycleService:
         memory_intents_builder: MemoryIntentBuilder | None = None,
     ) -> RunSettlement:
         """
-        Finalize a Run with a successful outcome or record its failure.
+        Finalize a claimed Run by committing a successful Turn or recording a failure.
 
         Parameters:
-            run (ClaimedRun): The claimed Run being finalized.
-            resolution (RLMOutcome | RunFailure): The execution outcome or failure to record.
-            artifact_sink (RunArtifactSink | None): Storage for staged and promoted artifacts.
-            result_snapshot_sink (ResultSnapshotSink | None): Storage for the optional result snapshot.
+            run (ClaimedRun): The claimed Run to finalize.
+            resolution (RLMOutcome | RunFailure): The successful outcome or failure result.
+            artifact_sink (RunArtifactSink | None): Storage used to read, publish, and clean up artifacts.
 
         Returns:
-            RunSettlement: The receipt for the committed turn or recorded failure.
+            RunSettlement: The receipt for the committed Turn or recorded failure.
 
         Raises:
-            RunLifecycleUnavailableError: If the Run claim has been revoked.
+            RunLifecycleUnavailableError: If the claim has been revoked.
             RunStateError: If the outcome contains an invalid state.
             RunValidationError: If artifacts are provided without an artifact sink.
+            asyncio.CancelledError: If finalization or required cleanup is cancelled.
         """
         if run.authority.revoked:
             raise RunLifecycleUnavailableError("Turn claim is no longer available")
@@ -378,17 +361,19 @@ class RunLifecycleService:
                 commit_call = self._store.commit(run, committed, promoted, memory_intents=memory_intents)
             else:
                 commit_call = self._store.commit(run, committed, promoted)
-            commit_task, commit_cancelled = await _settle_owned(commit_call)
+            commit_effect = OwnedEffect.start(commit_call)
             try:
-                receipt = commit_task.result()
+                commit_wait = await commit_effect.settle()
+                receipt = commit_wait.result()
             except BaseException:
-                if commit_cancelled:
+                if commit_effect.caller_cancelled:
                     raise asyncio.CancelledError from None
                 raise
         except BaseException as exc:
             if snapshot_task is not None:
                 # Never let an in-flight snapshot write race rollback removals.
-                await _settle_owned(snapshot_task)
+                with contextlib.suppress(BaseException):
+                    await OwnedEffect.from_task(snapshot_task).settle()
             cleanup_cancelled = False
             if snapshot_path is not None:
                 cleanup_cancelled |= await self._rollback(result_snapshot_sink, (snapshot_path,))
@@ -552,6 +537,21 @@ class RunLifecycleService:
         candidates: tuple[ArtifactCandidate, ...],
         sink: RunArtifactSink | None,
     ) -> tuple[bytes, ...]:
+        """
+        Read and validate staged artifact candidates.
+
+        Parameters:
+                candidates (tuple[ArtifactCandidate, ...]): Artifact candidates to read and validate.
+                sink (RunArtifactSink | None): Storage sink containing the staged artifacts.
+
+        Returns:
+                tuple[bytes, ...]: Validated artifact contents in candidate order,
+                    or an empty tuple when no sink is provided.
+
+        Raises:
+                RunIntegrityError: If an artifact's size or checksum does not match its candidate.
+                asyncio.CancelledError: If cancellation is requested during reading or validation.
+        """
         if sink is None:
             return ()
         # Independent volume reads run concurrently; integrity validation stays
@@ -560,15 +560,23 @@ class RunLifecycleService:
             asyncio.ensure_future(sink.read(candidate.staging_path, max_bytes=self._max_artifact_bytes))
             for candidate in candidates
         ]
-        settled = [await _settle_owned(read) for read in reads]
+        settled = []
+        for read in reads:
+            effect = OwnedEffect.from_task(read)
+            try:
+                settled.append((effect, await effect.settle()))
+            except BaseException:
+                if effect.caller_cancelled:
+                    raise asyncio.CancelledError from None
+                raise
         values: list[bytes] = []
         cancellation_requested = False
-        for candidate, (read_task, read_cancelled) in zip(candidates, settled, strict=True):
-            cancellation_requested |= read_cancelled
+        for candidate, (read_effect, read_wait) in zip(candidates, settled, strict=True):
+            cancellation_requested |= read_wait.caller_cancelled
             try:
-                data = read_task.result()
+                data = read_wait.result()
             except BaseException:
-                if read_cancelled:
+                if read_effect.caller_cancelled:
                     raise asyncio.CancelledError from None
                 raise
             if len(data) != candidate.byte_size or sha256(data).hexdigest() != candidate.checksum_sha256.lower():
@@ -585,14 +593,32 @@ class RunLifecycleService:
         sink: RunArtifactSink | None,
         written: list[str],
     ) -> tuple[PromotedArtifact, ...]:
+        """
+        Publish validated artifact contents to durable storage.
+
+        Parameters:
+                candidates (tuple[ArtifactCandidate, ...]): Artifact metadata and destination paths.
+                values (tuple[bytes, ...]): Validated contents corresponding to the candidates.
+                sink (RunArtifactSink | None): Storage sink used to write the artifacts.
+                written (list[str]): List updated with each destination path before writing.
+
+        Returns:
+                tuple[PromotedArtifact, ...]: Promoted artifacts created from the written candidates.
+        """
         if sink is None:
             return ()
         artifacts: list[PromotedArtifact] = []
         for candidate, data in zip(candidates, values, strict=True):
             written.append(candidate.durable_path)
-            write_task, write_cancelled = await _settle_owned(sink.write(candidate.durable_path, data))
-            write_task.result()
-            if write_cancelled:
+            write_effect = OwnedEffect.start(sink.write(candidate.durable_path, data))
+            try:
+                write_wait = await write_effect.settle()
+                write_wait.result()
+            except BaseException:
+                if write_effect.caller_cancelled:
+                    raise asyncio.CancelledError from None
+                raise
+            if write_wait.caller_cancelled:
                 raise asyncio.CancelledError
             artifacts.append(
                 PromotedArtifact(
@@ -625,8 +651,8 @@ class RunLifecycleService:
         """
         if snapshot_task is None:
             return
-        settled, cancelled = await _settle_owned(snapshot_task)
         try:
+            settled = await OwnedEffect.from_task(snapshot_task).settle()
             settled.result()
         except asyncio.CancelledError:
             logger.warning("result snapshot write cancelled after commit; Turn remains committed")
@@ -635,7 +661,7 @@ class RunLifecycleService:
             if sink is not None and snapshot_path is not None:
                 await RunLifecycleService._rollback(sink, (snapshot_path,))
         else:
-            if cancelled:
+            if settled.caller_cancelled:
                 logger.warning("result snapshot write saw cancellation after commit; Turn remains committed")
 
     async def _settle_staging(
@@ -643,7 +669,10 @@ class RunLifecycleService:
         sink: RunArtifactSink | None,
         candidates: tuple[ArtifactCandidate, ...],
     ) -> None:
-        """Remove staging candidates, detached when a cleanup supervisor is available."""
+        """Remove staged artifact files using the cleanup supervisor when available.
+
+        Falls back to inline cleanup when the supervisor is unavailable.
+        """
         if self._cleanup is not None and sink is not None and candidates:
             staging_paths = tuple(candidate.staging_path for candidate in candidates)
 
@@ -662,17 +691,29 @@ class RunLifecycleService:
         sink: RunArtifactSink | ResultSnapshotSink | None,
         locations,
     ) -> bool:
+        """
+        Removes supplied artifact or snapshot locations and reports whether cancellation occurred.
+
+        Parameters:
+            sink: Sink used to remove the locations.
+            locations: Locations to remove.
+
+        Returns:
+            `True` if cancellation was requested during removal, `False` otherwise.
+        """
         if sink is None:
             return False
         cancellation_requested = False
         for location in locations:
+            effect = OwnedEffect.start(sink.remove(location))
             try:
-                remove_task, remove_cancelled = await _settle_owned(sink.remove(location))
-                cancellation_requested |= remove_cancelled
-                remove_task.result()
+                remove_wait = await effect.settle()
+                cancellation_requested |= remove_wait.caller_cancelled
+                remove_wait.result()
             except asyncio.CancelledError:
                 cancellation_requested = True
             except Exception:
+                cancellation_requested |= effect.caller_cancelled
                 continue
         return cancellation_requested
 

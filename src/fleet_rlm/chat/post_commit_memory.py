@@ -8,6 +8,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, Literal
 
+from fleet_rlm.runtime.owned_effect import OwnedEffect
+
 PostCommitPromotionStatus = Literal["completed", "deadline_exceeded", "interrupted", "failed"]
 
 
@@ -54,20 +56,12 @@ class OwnedPostCommitMemoryPromotion:
         return PostCommitPromotionAttempt("completed", result)
 
     async def wait_owned(self) -> None:
-        """Settle started work before the prepared resources it uses are released."""
+        """Wait for the started promotion task to settle, suppressing any exceptions."""
         task = self._task
         if task is None:
             return
-        while not task.done():
-            try:
-                await asyncio.shield(task)
-            except asyncio.CancelledError:
-                continue
-            except BaseException:
-                break
-        if task.done() and not task.cancelled():
-            with contextlib.suppress(BaseException):
-                task.exception()
+        with contextlib.suppress(BaseException):
+            await OwnedEffect.from_task(task).settle()
 
 
 __all__ = [
