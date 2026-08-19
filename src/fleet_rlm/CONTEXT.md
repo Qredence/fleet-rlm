@@ -217,6 +217,10 @@ Each Turn's `session_context` also carries a bounded <= 4 KiB
 `workspace_memory tail` digest so relevant and recent
 learnings are visible without a Tool call. Records are durable independently
 of Turn Commit and survive failed or cancelled Runs and Sandbox replacement.
+Optional read-side degradation is classified once by
+`daytona/memory_diagnostics.py` into a bounded sanitized category; mutation and
+list operations remain strict. Do not add a second Memory warning taxonomy or
+leak raw provider, path, query, or record content through diagnostics.
 _Avoid_: Session History, unbounded learned state
 
 **Workspace Volume Tree**:
@@ -373,6 +377,13 @@ delegation uses ordered, bounded sibling execution.
 - `workspace_fs.py` — Session Workspace FS implementation (see disambiguation above).
 - `workspace_gateway.py` — ephemeral mounted-Sandbox gateway (see disambiguation above).
 - `workspace_memory.py` — Workspace Memory store implementation (see disambiguation above).
+
+The post-P25 maintainability baseline keeps one canonical transformation at
+each seam: `RunLifecycle.finish()` commits, `TurnCoordinator` settles the
+stream, `OwnedEffect` supplies the provider-neutral wait vocabulary, and the
+TUI adapters feed one canonical reducer. See the [P34 maintainability freeze
+guide](../../docs/how-to-guides/maintainability-freeze.md) for the certification
+matrix and cleanup guardrails.
 
 ## Out of this context (for now)
 

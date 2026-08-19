@@ -278,6 +278,13 @@ gated and has not been run.
 
 ## Compatibility and status
 
+The maintainability baseline is frozen by the [P34 certification guide](how-to-guides/maintainability-freeze.md).
+It records the one-owner seams for lifecycle settlement, native RLM
+observation, recursive child cleanup, the Workspace agent, Memory diagnostics,
+configuration metadata, and canonical TUI reduction. The freeze is structural:
+it does not authorize model-routing, latency, throughput, schema, Memory-format,
+or public HTTP/SSE changes.
+
 There is no legacy backend, `/api/v1`, WebSocket execution, dual-serve, data
 migration layer, classic terminal renderer, or maintained Web frontend. A
 future graphical client is a separate effort. The current module ownership is

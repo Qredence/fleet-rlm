@@ -55,6 +55,29 @@ and its matching automated check in the same patch.
   replace Run Ownership, child-runtime state, or Daytona lease/quarantine
   receipts; those domains retain their specialized state and fallback policy.
 
+## Final maintainability freeze (P34)
+
+- Every deep seam has one owner and one canonical representation. A private
+  helper is acceptable when it keeps a boundary local; duplicate adapters,
+  pass-through wrappers, repeated normalization/serialization, and dead aliases
+  are not.
+- `daytona/memory_diagnostics.py` classifies optional read-side degradation into
+  the closed `MemoryFailureCategory` vocabulary. Diagnostics are bounded and
+  sanitized; mutation and list paths remain strict. A new catch site must use
+  the existing classifier rather than inventing a parallel warning format.
+- `config.py` is the source of truth for `FleetFieldPolicy` metadata and
+  `config_policy.py` derives its editor inventory from it. No second complete
+  configuration-field mirror is allowed.
+- `tools/fleet-tui/src/tui/tests/turn-reducer-invariants.test.ts` is the
+  deterministic P32 proof that live and durable projections converge through
+  one canonical reducer. Wire adapters own casing and framing compatibility;
+  the reducer does not.
+- P34 excludes model routing/tuning, recursion or throughput changes, schema
+  changes, Memory format changes, and public contract changes. A cleanup is
+  valid only after all consumers and the full deterministic matrix have been
+  checked. The live Daytona gate remains separately required evidence when the
+  delivery claims live certification.
+
 ## Product identity
 
 Fleet is one product: a durable conversational RLM Session. Judge every change

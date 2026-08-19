@@ -18,6 +18,7 @@ FastAPI/SSE contract backed by DSPy, Daytona, and SQLAlchemy/Alembic.
 10. [Official Oolong benchmark](how-to-guides/official-oolong.md)
 11. [Evaluation and monitoring](how-to-guides/evaluation-optimization.md)
 12. [Agent harness](agent-harness/README.md)
+13. [Maintainability freeze](how-to-guides/maintainability-freeze.md)
 
 ## Reference
 
