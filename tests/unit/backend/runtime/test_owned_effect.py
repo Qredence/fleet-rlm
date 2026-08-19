@@ -72,8 +72,9 @@ async def test_waiter_cancellation_does_not_hide_later_effect_failure() -> None:
     await asyncio.sleep(0)
     release.set()
 
-    with pytest.raises(RuntimeError, match="late failure"):
+    with pytest.raises(RuntimeError, match="late failure") as caught:
         await waiter
+    assert str(caught.value) == "late failure"
     assert effect.caller_cancelled is True
 
 

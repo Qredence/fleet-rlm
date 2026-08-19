@@ -19,12 +19,16 @@ from fleet_rlm.daytona.recursive_child_acquisition import (
 )
 from fleet_rlm.daytona.recursive_child_cleanup import (
     CHILD_CLEANUP_RESULT_TIMEOUT_S,
-    CHILD_DELETE_CONFIRM_POLL_S,
-    CHILD_DELETE_CONFIRM_TIMEOUT_S,
     cleanup_after_failed_acquire,
     cleanup_child_runtime_async,
     close_child_runtime_sync,
     purge_regular_files,
+)
+from fleet_rlm.daytona.recursive_child_cleanup import (
+    CHILD_DELETE_CONFIRM_POLL_S as _CHILD_DELETE_CONFIRM_POLL_S,
+)
+from fleet_rlm.daytona.recursive_child_cleanup import (
+    CHILD_DELETE_CONFIRM_TIMEOUT_S as _CHILD_DELETE_CONFIRM_TIMEOUT_S,
 )
 from fleet_rlm.daytona.recursive_child_late import LateCleanupOwner
 from fleet_rlm.daytona.recursive_child_lease import ChildRuntimeLease, ChildRuntimeLeaseState
@@ -39,14 +43,12 @@ from fleet_rlm.rlm.child_runtime import (
 )
 
 _CHILD_CLEANUP_RESULT_TIMEOUT_S = CHILD_CLEANUP_RESULT_TIMEOUT_S
+
+
 # Absence-confirmation budget for one deleted ephemeral child Sandbox. Kept
 # distinctly larger than the close-path result timeout so a quarantined
 # (retained, still-running) cleanup coroutine normally confirms within its own
 # budget instead of dying unclassified with the loop.
-_CHILD_DELETE_CONFIRM_TIMEOUT_S = CHILD_DELETE_CONFIRM_TIMEOUT_S
-_CHILD_DELETE_CONFIRM_POLL_S = CHILD_DELETE_CONFIRM_POLL_S
-
-
 def build_child_runtime_factory(
     *,
     loop: asyncio.AbstractEventLoop,
@@ -250,9 +252,19 @@ async def _cleanup_child_runtime_async(
     await cleanup_child_runtime_async(**kwargs)
 
 
-_purge_regular_files = purge_regular_files
-_sandbox_id = sandbox_id_for
-_require_authorized = require_authorized
+async def _purge_regular_files(sandbox: Any, mount_path: str) -> None:
+    """Preserve the runtime-patchable regular-file purge seam."""
+    await purge_regular_files(sandbox, mount_path)
+
+
+def _sandbox_id(sandbox: Any) -> str:
+    """Preserve the runtime-patchable sandbox-id validation seam."""
+    return sandbox_id_for(sandbox)
+
+
+def _require_authorized(is_authorized: Callable[[], bool] | None) -> None:
+    """Preserve the runtime-patchable authorization seam."""
+    require_authorized(is_authorized)
 
 
 __all__ = [

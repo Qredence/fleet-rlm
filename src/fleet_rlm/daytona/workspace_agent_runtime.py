@@ -1354,3 +1354,4 @@ def handle(request):
             except OSError:
                 pass
         close_all(base_fds)
+    return {'ok': False, 'error': 'unsupported'}

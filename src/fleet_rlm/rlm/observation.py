@@ -154,7 +154,8 @@ class WorkerMonitor:
         if self.intended_stop is not None:
             self.worker.consume_exception()
             intended_stop = self.intended_stop
-            raise intended_stop
+            if isinstance(intended_stop, BaseException):
+                raise intended_stop
 
 
 class ObservationSession:
