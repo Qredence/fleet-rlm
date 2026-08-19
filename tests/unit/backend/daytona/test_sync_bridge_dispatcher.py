@@ -103,9 +103,6 @@ def test_compositions_cannot_overwrite_each_others_bridge_authority() -> None:
         assert dispatcher_b.service_loop() is None
 
 
-
-
-
 def test_fail_fast_when_called_from_the_servicing_event_loop() -> None:
     """The servicing loop thread can never block on its own bridge (RC-7 guard)."""
     dispatcher = SyncBridgeDispatcher()

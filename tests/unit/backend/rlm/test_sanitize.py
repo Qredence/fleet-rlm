@@ -45,6 +45,3 @@ def test_declared_output_validator_rejects_private_material(value: object) -> No
 
     with pytest.raises(ValueError):
         validate_declared_public_value(value)
-
-
-

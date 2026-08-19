@@ -211,6 +211,7 @@ class AssistantTurnRecord:
     committed: CommittedTurn
     run_id: UUID
 
+
 @dataclass(frozen=True, slots=True)
 class SessionRecord:
     id: UUID
