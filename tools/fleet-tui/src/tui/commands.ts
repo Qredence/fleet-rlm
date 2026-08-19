@@ -330,7 +330,8 @@ registerCommand({
 
 registerCommand({
   name: "settings",
-  description: "View and edit config/fleet.toml policy (never .env secrets; restart required)",
+  description:
+    "View/edit non-secret config/fleet.toml provider/model policy; never displays or edits .env; restart Fleet to apply",
   usage: "/settings",
   handler: async (_args, ctx) => {
     try {

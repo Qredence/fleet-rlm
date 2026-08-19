@@ -262,6 +262,7 @@ describe("FleetApiClient", () => {
           JSON.stringify({
             revision: "a".repeat(64),
             scopes: [
+              { name: "defaults", fields: [] },
               {
                 name: "daytona",
                 fields: [
@@ -308,8 +309,10 @@ describe("FleetApiClient", () => {
     const client = new FleetApiClient({ baseUrl: "http://fleet.test" });
 
     const settings = await client.getSettings();
+    const daytonaScope = settings.scopes.find((scope) => scope.name === "daytona");
+    expect(daytonaScope).toBeDefined();
     const fields = Object.fromEntries(
-      (settings.scopes[0]?.fields ?? []).map((field) => [field.path, field.value]),
+      (daytonaScope?.fields ?? []).map((field) => [field.path, field.value]),
     );
     expect(fields["llm.root.model"]).toBe("databricks-deepseek-v4-flash-0731");
     expect(fields["llm.root.api_key_env"]).toBe("DATABRICKS_TOKEN");

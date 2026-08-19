@@ -475,7 +475,7 @@ function choicesOf(field: SettingsField): string[] {
  */
 function settingDescription(field: SettingsField): string {
   if (field.path.endsWith(".api_key_env")) return `${field.path} · name only; secret stays in .env`;
-  if (field.path.endsWith(".base_url_env")) return `${field.path} · OpenAI-compatible /v1 base URL`;
+  if (field.path.endsWith(".base_url_env")) return `${field.path} · name only; URL stays in .env`;
   if (field.path.endsWith(".base_url")) return `${field.path} · OpenAI-compatible /v1 base URL`;
   if (field.path.endsWith(".model")) return `${field.path} · provider model id`;
   return field.path;

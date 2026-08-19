@@ -31,6 +31,7 @@ def test_default_signature_orders_capabilities_before_semantic_calls() -> None:
     assert "Never pass positional arguments" in instructions
     assert "SUBMIT(answer=answer)" in instructions
     assert "json.dumps(..., ensure_ascii=False)" in instructions
+    assert "json.dumps(answer, ensure_ascii=False)" in instructions
     assert "Use ``indent=2`` only when" in normalized_instructions
     assert "Python ``repr`` text" in instructions
     assert "Once sufficient verification exists, the next action must contain ``SUBMIT``" in normalized_instructions
