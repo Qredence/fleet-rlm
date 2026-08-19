@@ -421,6 +421,7 @@ def run_turn(
 
     Raises:
         BenchmarkError: If the Turn reports an error, is aborted, or finishes for a reason other than `stop`.
+            The exception preserves partial trace_id and run_id values when available.
     """
     session = client.post("/api/sessions", json={"title": f"latency-{nonce}"})
     session.raise_for_status()
@@ -442,54 +443,60 @@ def run_turn(
     first_event_ms: float | None = None
     termination_mode: str | None = None
     started = time.perf_counter()
-    with client.stream(
-        "POST",
-        f"/api/sessions/{session_id}/turns",
-        json={"text": prompt, "attachment_ids": list(attachment_ids), "skill_selections": []},
-        headers={"Idempotency-Key": f"rlm-latency-{uuid4()}"},
-    ) as response:
-        response.raise_for_status()
-        for chunk in _sse_chunks(response):
-            if first_event_ms is None:
-                first_event_ms = (time.perf_counter() - started) * 1000
-            metadata = chunk.get("messageMetadata")
-            if isinstance(metadata, Mapping):
-                if isinstance(metadata.get("traceId"), str):
-                    trace_id = str(metadata["traceId"])
-                if isinstance(metadata.get("runId"), str):
-                    run_id = str(metadata["runId"])
-            chunk_type = chunk.get("type")
-            termination_mode = _termination_mode_from_chunk(chunk) or termination_mode
-            if chunk_type == "text-delta" and isinstance(chunk.get("delta"), str):
-                answer_parts.append(str(chunk["delta"]))
-            elif chunk_type == "data-structured-result":
-                answer = _structured_answer(chunk) or answer
-            elif chunk_type == "data-usage" and isinstance(chunk.get("data"), Mapping):
-                raw_usage = chunk["data"].get("usage")
-                if isinstance(raw_usage, Mapping):
-                    usage = dict(raw_usage)
-                    iterations = int(usage.get("iterations", 0) or 0)
-            elif chunk_type == "tool-input-available":
-                tool_name = chunk.get("toolName")
-                batch_calls += int(tool_name == "llm_query_batched")
-                recursive_calls += int(tool_name == "rlm_query")
-                recursive_batch_calls += int(tool_name == "rlm_query_batched")
-            elif chunk_type == "tool-output-available" and isinstance(chunk.get("output"), Mapping):
-                raw_peak = chunk["output"].get("peak_child_concurrency")
-                if isinstance(raw_peak, int) and not isinstance(raw_peak, bool):
-                    peak_child_concurrency = max(peak_child_concurrency, raw_peak)
-            elif chunk_type == "data-attachment" and isinstance(chunk.get("data"), Mapping):
-                data = chunk["data"]
-                accessed_id = data.get("attachment_id", data.get("attachmentId"))
-                attachment_accessed = attachment_accessed or str(accessed_id) in requested_attachment_ids
-            elif chunk_type == "data-rlm-code" and isinstance(chunk.get("data"), Mapping):
-                _append_trajectory_value(trajectory["codes"], chunk["data"].get("code"))
-            elif chunk_type == "data-rlm-output" and isinstance(chunk.get("data"), Mapping):
-                _append_trajectory_value(trajectory["outputs"], chunk["data"].get("output"))
-            elif chunk_type in {"error", "abort"}:
-                raise BenchmarkError(str(chunk.get("errorText") or chunk.get("reason") or "Turn failed"))
-            elif chunk_type == "finish" and chunk.get("finishReason") != "stop":
-                raise BenchmarkError("Turn did not finish with stop")
+    try:
+        with client.stream(
+            "POST",
+            f"/api/sessions/{session_id}/turns",
+            json={"text": prompt, "attachment_ids": list(attachment_ids), "skill_selections": []},
+            headers={"Idempotency-Key": f"rlm-latency-{uuid4()}"},
+        ) as response:
+            response.raise_for_status()
+            for chunk in _sse_chunks(response):
+                if first_event_ms is None:
+                    first_event_ms = (time.perf_counter() - started) * 1000
+                metadata = chunk.get("messageMetadata")
+                if isinstance(metadata, Mapping):
+                    if isinstance(metadata.get("traceId"), str):
+                        trace_id = str(metadata["traceId"])
+                    if isinstance(metadata.get("runId"), str):
+                        run_id = str(metadata["runId"])
+                chunk_type = chunk.get("type")
+                termination_mode = _termination_mode_from_chunk(chunk) or termination_mode
+                if chunk_type == "text-delta" and isinstance(chunk.get("delta"), str):
+                    answer_parts.append(str(chunk["delta"]))
+                elif chunk_type == "data-structured-result":
+                    answer = _structured_answer(chunk) or answer
+                elif chunk_type == "data-usage" and isinstance(chunk.get("data"), Mapping):
+                    raw_usage = chunk["data"].get("usage")
+                    if isinstance(raw_usage, Mapping):
+                        usage = dict(raw_usage)
+                        iterations = int(usage.get("iterations", 0) or 0)
+                elif chunk_type == "tool-input-available":
+                    tool_name = chunk.get("toolName")
+                    batch_calls += int(tool_name == "llm_query_batched")
+                    recursive_calls += int(tool_name == "rlm_query")
+                    recursive_batch_calls += int(tool_name == "rlm_query_batched")
+                elif chunk_type == "tool-output-available" and isinstance(chunk.get("output"), Mapping):
+                    raw_peak = chunk["output"].get("peak_child_concurrency")
+                    if isinstance(raw_peak, int) and not isinstance(raw_peak, bool):
+                        peak_child_concurrency = max(peak_child_concurrency, raw_peak)
+                elif chunk_type == "data-attachment" and isinstance(chunk.get("data"), Mapping):
+                    data = chunk["data"]
+                    accessed_id = data.get("attachment_id", data.get("attachmentId"))
+                    attachment_accessed = attachment_accessed or str(accessed_id) in requested_attachment_ids
+                elif chunk_type == "data-rlm-code" and isinstance(chunk.get("data"), Mapping):
+                    _append_trajectory_value(trajectory["codes"], chunk["data"].get("code"))
+                elif chunk_type == "data-rlm-output" and isinstance(chunk.get("data"), Mapping):
+                    _append_trajectory_value(trajectory["outputs"], chunk["data"].get("output"))
+                elif chunk_type in {"error", "abort"}:
+                    raise BenchmarkError(str(chunk.get("errorText") or chunk.get("reason") or "Turn failed"))
+                elif chunk_type == "finish" and chunk.get("finishReason") != "stop":
+                    raise BenchmarkError("Turn did not finish with stop")
+    except Exception as exc:
+        # Preserve partial trace_id and run_id for failed streams
+        exc.trace_id = trace_id  # type: ignore[attr-defined]
+        exc.run_id = run_id  # type: ignore[attr-defined]
+        raise
     return {
         "answer": answer if answer is not None else "".join(answer_parts),
         "trace_id": trace_id,
@@ -944,12 +951,23 @@ def run_benchmark(args: argparse.Namespace) -> dict[str, Any]:
                         if not row["corpus_quality_passed"]:
                             raise BenchmarkError("corpus report or execution evidence validation failed")
                 except Exception as exc:
+                    # Extract partial trace_id and run_id from stream failures
+                    partial_trace_id = getattr(exc, "trace_id", None) or row.get("trace_id")
+                    partial_run_id = getattr(exc, "run_id", None) or row.get("run_id")
+                    # Collect diagnostics for failed runs when trace_id is available
+                    diagnostics = (
+                        _execution_trace_diagnostics(args.mlflow_url, str(partial_trace_id))
+                        if partial_trace_id
+                        else {}
+                    )
                     row = {
                         **row,
                         "duration_ms": row.get("duration_ms", round((time.perf_counter() - sample_started) * 1000, 3)),
                         "first_event_ms": row.get("first_event_ms", -1.0),
                         "error_category": type(exc).__name__,
-                        "trace_id": row.get("trace_id"),
+                        "trace_id": partial_trace_id,
+                        "run_id": partial_run_id,
+                        "trace_diagnostics": diagnostics if diagnostics else row.get("trace_diagnostics"),
                     }
                 row["workload_id"] = workload_id
                 if corpus_case is not None:

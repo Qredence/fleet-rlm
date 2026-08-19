@@ -28,6 +28,7 @@ from scripts.benchmarks.run_rlm_latency import (
     main,
     percentile,
     quality_gate,
+    run_benchmark,
     run_turn,
 )
 
@@ -363,3 +364,71 @@ def test_cli_writes_bounded_failure_receipt(tmp_path) -> None:
         "status": "failed",
         "error_category": "BenchmarkError",
     }
+
+
+def test_failed_stream_retains_adapter_parse_error_count_via_diagnostics(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Regression test: stream failures preserve trace_id/run_id and collect diagnostics including adapter_parse_error_count."""
+
+    class _FailingTurnClient:
+        def post(self, path: str, **_kwargs: object) -> _Response:
+            if path == "/api/sessions":
+                return _Response(payload={"id": "session-1"})
+            return _Response(payload={})
+
+        def get(self, path: str, **_kwargs: object) -> _Response:
+            if path == "/api/settings":
+                return _Response(
+                    payload={
+                        "active_profile": "default",
+                        "scopes": [{"name": "default", "fields": []}],
+                    }
+                )
+            return _Response(payload={})
+
+        def stream(self, _method: str, _path: str, **_kwargs: object) -> _Stream:
+            lines = [
+                "data: " + json_module.dumps({"type": "messageMetadata", "messageMetadata": {"traceId": "tr-1", "runId": "run-1"}}),
+                "data: " + json_module.dumps({"type": "error", "errorText": "Adapter parse failure"}),
+            ]
+            return _Stream(_Response(lines=lines))
+
+    execution_trace_spans = [
+        SimpleNamespace(
+            name="RLM.execute",
+            inputs={},
+            outputs={
+                "failure_category": "adapter_parse_error",
+                "last_lm_call": {"response_keys": ["invalid"]},
+            },
+        ),
+    ]
+
+    fake_mlflow = SimpleNamespace(
+        set_tracking_uri=lambda _url: None,
+        get_trace=lambda _trace_id: SimpleNamespace(data=SimpleNamespace(spans=execution_trace_spans)),
+        search_traces=lambda **_kwargs: [],
+        MlflowClient=lambda: SimpleNamespace(set_trace_tag=lambda *_args: None),
+    )
+    monkeypatch.setitem(sys.modules, "mlflow", fake_mlflow)
+    monkeypatch.setenv("FLEET_LIVE", "1")
+
+    args = build_parser().parse_args(
+        [
+            "benchmark",
+            "--warmups",
+            "0",
+            "--runs",
+            "1",
+            "--output",
+            "receipt.json",
+        ]
+    )
+
+    with monkeypatch.context() as m:
+        m.setattr("httpx.Client", lambda **_kwargs: _FailingTurnClient())
+        receipt = run_benchmark(args)
+
+    aggregate = receipt["aggregate"]
+    assert aggregate["sample_count"] == 1
+    assert aggregate["error_rate"] == 1.0
+    assert aggregate["adapter_parse_error_count"] == 1
