@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import contextlib
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Coroutine
 from concurrent.futures import Future
 from pathlib import PurePosixPath
 from threading import Thread
@@ -31,19 +31,25 @@ def close_child_runtime_sync(
     permit: DaytonaAdmissionPermit,
     retain_pending_cleanup: Callable[[Future[Any]], None] | None = None,
     cleanup_result_timeout_s: float = CHILD_CLEANUP_RESULT_TIMEOUT_S,
+    cleanup_child_runtime: Callable[..., Coroutine[Any, Any, None]] | None = None,
+    confirm_timeout_s: float = CHILD_DELETE_CONFIRM_TIMEOUT_S,
+    confirm_poll_interval_s: float = CHILD_DELETE_CONFIRM_POLL_S,
 ) -> None:
     """Shutdown the interpreter, then settle provider cleanup and admission."""
     first_error: BaseException | None = None
+    cleanup_fn = cleanup_child_runtime if cleanup_child_runtime is not None else cleanup_child_runtime_async
 
     def schedule_cleanup() -> tuple[Future[None], Any | None]:
         execution = schedule_owned_close(
             loop=loop,
-            build=lambda: cleanup_child_runtime_async(
+            build=lambda: cleanup_fn(
                 platform=platform,
                 sandbox=sandbox,
                 sandbox_id=sandbox_id,
                 mount_path=mount_path,
                 permit=permit,
+                confirm_timeout_s=confirm_timeout_s,
+                confirm_poll_interval_s=confirm_poll_interval_s,
             ),
             fallback_owner_release=permit.release,
             thread_name="fleet-child-cleanup-fallback",
@@ -151,7 +157,8 @@ def close_child_runtime_sync(
             elif future is not None:
                 future.cancel()
                 if cleanup_coroutine is not None:
-                    cleanup_coroutine.close()
+                    with contextlib.suppress(BaseException):
+                        cleanup_coroutine.close()
             first_error = first_error or exc
         except BaseException as exc:
             first_error = first_error or exc
@@ -189,15 +196,17 @@ async def cleanup_child_runtime_async(
     confirm: Callable[..., Awaitable[AbsenceOutcome]] = confirm_absence,
     confirm_timeout_s: float = CHILD_DELETE_CONFIRM_TIMEOUT_S,
     confirm_poll_interval_s: float = CHILD_DELETE_CONFIRM_POLL_S,
+    purge: Callable[[Any, str], Awaitable[None]] | None = None,
 ) -> None:
     """Purge, delete, confirm absence, and release one child lease."""
+    purge_fn = purge if purge is not None else purge_regular_files
     lease = SandboxLease(
         kind="recursive_child",
         sandbox=sandbox,
         sandbox_id=sandbox_id,
         platform=platform,
         permit=permit,
-        purge=lambda sandbox: purge_regular_files(sandbox, mount_path),
+        purge=lambda sandbox: purge_fn(sandbox, mount_path),
         policy=SandboxLeasePolicy(
             kind="recursive_child",
             interpreter_shutdown=False,
@@ -216,19 +225,31 @@ async def cleanup_child_runtime_async(
 
 
 async def purge_regular_files(sandbox: Any, mount_path: str) -> None:
-    """Delete regular files contained within one mounted child subpath."""
+    """Delete all files and child directories contained within one subpath."""
     root = PurePosixPath(mount_path)
-    entries = await sandbox.fs.list_files(str(root), depth=64)
+    entries = await sandbox.fs.list_files(str(root), depth=None)
+    files: list[PurePosixPath] = []
+    directories: list[PurePosixPath] = []
     for entry in entries:
         path = getattr(entry, "path", None)
-        if not isinstance(path, str) or bool(getattr(entry, "is_dir", False)):
+        if not isinstance(path, str):
             continue
         candidate = PurePosixPath(path)
         try:
-            candidate.relative_to(root)
+            relative = candidate.relative_to(root)
         except ValueError:
             continue
-        await sandbox.fs.delete_file(path)
+        if not relative.parts:
+            continue
+        if bool(getattr(entry, "is_dir", False)):
+            directories.append(candidate)
+        else:
+            files.append(candidate)
+
+    for path in files:
+        await sandbox.fs.delete_file(str(path))
+    for path in sorted(directories, key=lambda item: len(item.parts), reverse=True):
+        await sandbox.fs.delete_file(str(path), recursive=True)
 
 
 __all__ = [

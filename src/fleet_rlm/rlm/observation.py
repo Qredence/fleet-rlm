@@ -153,7 +153,8 @@ class WorkerMonitor:
             raise asyncio.CancelledError
         if self.intended_stop is not None:
             self.worker.consume_exception()
-            raise self.intended_stop
+            intended_stop = self.intended_stop
+            raise intended_stop
 
 
 class ObservationSession:

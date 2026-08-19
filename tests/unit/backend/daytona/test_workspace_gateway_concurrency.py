@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import ast
 import asyncio
 import hashlib
+import json
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -181,13 +183,24 @@ class _DelayedDeleteBeforeUnlinkAgentProcess:
         await self._barrier.wait()
         delayed = code
         gate = str(self._coordination_path)
-        if "if operation == 'delete':" in code:
+        calls = [
+            node
+            for node in ast.walk(ast.parse(code))
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "loads"
+            and node.args
+            and isinstance(node.args[0], ast.Constant)
+            and isinstance(node.args[0].value, str)
+        ]
+        request = json.loads(calls[-1].args[0].value)
+        if request["operation"] == "delete":
             unlink_line = "                    os.unlink(relative_parts[-1], dir_fd=parent_fd)"
             inserted = (
                 f"                    open({gate!r}, 'w').close()\n                    time.sleep(0.25)\n{unlink_line}"
             )
             delayed = delayed.replace(unlink_line, inserted, 1)
-        if "if operation == 'write':" in code:
+        if request["operation"] == "write":
             branch = "        if operation == 'write':"
             waiter = f"        while not os.path.exists({gate!r}):\n            time.sleep(0.01)\n{branch}"
             delayed = delayed.replace(branch, waiter, 1)

@@ -24,11 +24,12 @@ class _Sandbox:
 
 
 class _FsStub:
-    async def list_files(self, _root: str, *, depth: int) -> list[Any]:
-        assert depth == 64
+    async def list_files(self, _root: str, *, depth: int | None) -> list[Any]:
+        assert depth is None
         return []
 
-    async def delete_file(self, _path: str) -> None:
+    async def delete_file(self, _path: str, *, recursive: bool = False) -> None:
+        del recursive
         raise AssertionError("no files should be purged in this test")
 
 

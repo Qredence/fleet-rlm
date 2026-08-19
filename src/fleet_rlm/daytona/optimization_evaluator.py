@@ -454,7 +454,10 @@ class StrictDaytonaEvaluationLifecycle:
         delete_effect = OwnedEffect.start(self._factory.delete(sandbox))
         try:
             delete_wait = await delete_effect.settle()
-        except BaseException as exc:
+        except asyncio.CancelledError as exc:
+            cleanup_error = cleanup_error or exc
+            cancelled = True
+        except Exception as exc:
             cleanup_error = cleanup_error or exc
             cancelled = delete_effect.caller_cancelled
         else:

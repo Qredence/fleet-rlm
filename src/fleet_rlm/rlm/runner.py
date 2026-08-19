@@ -274,7 +274,7 @@ class RLMRunner:
         yield observations.record_event(RunStarted(delivery="live"))
         yield observations.record_event(Status("execution", "running"))
         for notice in context.session.preparation_notices:
-            yield observations.record_event(WarningEvent(notice.message, notice.code))
+            yield observations.record(WarningEvent(notice.message, notice.code))
         for item in self._drain_capability_details(context):
             yield observations.record(item)
         if await context.execution.cancellation_requested():
@@ -292,6 +292,8 @@ class RLMRunner:
         Parameters:
             context (RLMExecutionContext): Execution context containing the request, capabilities,
                 runtime options, and authorization state.
+            ownership (WorkerOwnership): Owner of the started worker and its blocking resource waiters.
+            observations (ObservationSession): Recorder and publish seam for worker-thread details.
 
         Returns:
             tuple: The execution specification, tool guards, typed worker handle, and recursive executor.

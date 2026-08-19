@@ -286,7 +286,7 @@ def test_process_only_sandbox_keeps_legacy_wire(tmp_path: Path) -> None:
     payload = wa.run_workspace_agent(sandbox, **_stat_args(volume, root))
     assert payload["ok"] is True
     assert len(process.calls) == 1
-    assert "def respond(payload):" in process.calls[0]
+    assert "def respond(payload) -> NoReturn:" in process.calls[0]
 
 
 def _memory_args(volume: Path, root: Path, operation: str, **overrides: object) -> dict[str, object]:

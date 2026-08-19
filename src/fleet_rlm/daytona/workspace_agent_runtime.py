@@ -6,6 +6,7 @@ the host never edits, searches, or re-indents this source.
 """
 
 import base64, datetime, errno, fcntl, hashlib, json, os, re, stat, time
+from typing import NoReturn
 # Portable errno membership sets owned by this remote program (include numeric
 # ENOSYS/EOPNOTSUPP literals that some volume backends surface without names).
 _UNSUPPORTED_LINK_ERRNOS = frozenset({errno.EPERM})
@@ -37,11 +38,11 @@ class _AgentResponse(Exception):
         self.payload = payload
 
 
-def respond(payload):
+def respond(payload) -> NoReturn:
     raise _AgentResponse(payload)
 
 
-def fail(error, **extra):
+def fail(error, **extra) -> NoReturn:
     respond({'ok': False, 'error': error, **extra})
 
 
@@ -591,6 +592,7 @@ def handle(request):
     if not isinstance(content_b64, str) or not isinstance(expected_sha256, str):
         return {'ok': False, 'error': 'request_invalid'}
     locked_fd = None
+    base_fds = []
     append_memory_id = ''
     try:
         try:
@@ -798,17 +800,17 @@ def handle(request):
             parent_fds, parent_fd = open_parent(root_fd, relative_parts[:-1], create=True)
             fd = None
             existing_stat = None
-            if expected_sha256:
-                try:
-                    locked_fd, existing_stat = lock_existing(parent_fd, relative_parts[-1])
-                except FileNotFoundError:
-                    fail('conflict', detail='checksum_mismatch')
-                current = read_existing(
-                    parent_fd, relative_parts[-1], max_bytes, expected_stat=existing_stat
-                )
-                if hashlib.sha256(current).hexdigest() != expected_sha256:
-                    fail('conflict', detail='checksum_mismatch')
             try:
+                if expected_sha256:
+                    try:
+                        locked_fd, existing_stat = lock_existing(parent_fd, relative_parts[-1])
+                    except FileNotFoundError:
+                        fail('conflict', detail='checksum_mismatch')
+                    current = read_existing(
+                        parent_fd, relative_parts[-1], max_bytes, expected_stat=existing_stat
+                    )
+                    if hashlib.sha256(current).hexdigest() != expected_sha256:
+                        fail('conflict', detail='checksum_mismatch')
                 try:
                     if locked_fd is None:
                         existing_stat = os.stat(relative_parts[-1], dir_fd=parent_fd, follow_symlinks=False)
@@ -1346,10 +1348,9 @@ def handle(request):
     except OSError:
         return {'ok': False, 'error': 'unsafe'}
     finally:
-        released_locked_fd = locals().get('locked_fd', globals().get('locked_fd'))
-        if released_locked_fd is not None:
+        if locked_fd is not None:
             try:
-                os.close(released_locked_fd)
+                os.close(locked_fd)
             except OSError:
                 pass
-        close_all(locals().get('base_fds', globals().get('base_fds', [])))
+        close_all(base_fds)

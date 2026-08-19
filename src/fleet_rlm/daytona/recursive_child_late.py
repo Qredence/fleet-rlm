@@ -4,11 +4,16 @@ from __future__ import annotations
 
 import time
 from collections.abc import Callable
-from concurrent.futures import Future, wait
+from concurrent.futures import Future, ThreadPoolExecutor, wait
 from threading import Lock, Thread
 from typing import Any
 
 from fleet_rlm.rlm.child_runtime import ChildRuntimeCleanupError
+
+_FALLBACK_CLEANUP_EXECUTOR = ThreadPoolExecutor(
+    max_workers=1,
+    thread_name_prefix="fleet-late-child-cleanup-fallback",
+)
 
 
 class LateCleanupOwner:
@@ -99,9 +104,11 @@ class LateCleanupOwner:
                 thread.start()
             except BaseException as exc:
                 self._record_error(exc)
-                # A thread-start failure has no safe asynchronous owner left;
-                # make one best-effort synchronous close before surfacing it.
-                close()
+                try:
+                    _FALLBACK_CLEANUP_EXECUTOR.submit(close)
+                except BaseException as dispatch_error:
+                    self._record_error(dispatch_error)
+                    self._complete(marker, dispatch_error)
 
         acquisition.add_done_callback(close_late)
 

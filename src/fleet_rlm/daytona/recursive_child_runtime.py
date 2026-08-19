@@ -180,6 +180,8 @@ async def _acquire_child_runtime(
         sandbox_backend_factory=sandbox_backend,
         close_child_runtime=_close_child_runtime_sync,
         cleanup_after_failed_acquire=_cleanup_after_failed_acquire,
+        sandbox_id_for_fn=_sandbox_id,
+        require_authorized_fn=_require_authorized,
     )
 
 
@@ -205,6 +207,9 @@ def _close_child_runtime_sync(
         permit=permit,
         retain_pending_cleanup=retain_pending_cleanup,
         cleanup_result_timeout_s=_CHILD_CLEANUP_RESULT_TIMEOUT_S,
+        cleanup_child_runtime=_cleanup_child_runtime_async,
+        confirm_timeout_s=_CHILD_DELETE_CONFIRM_TIMEOUT_S,
+        confirm_poll_interval_s=_CHILD_DELETE_CONFIRM_POLL_S,
     )
 
 
@@ -218,7 +223,33 @@ async def _cleanup_after_failed_acquire(
     await cleanup_after_failed_acquire(platform, sandbox, sandbox_id, permit)
 
 
-_cleanup_child_runtime_async = cleanup_child_runtime_async
+async def _cleanup_child_runtime_async(
+    *,
+    platform: SandboxPlatform,
+    sandbox: Any,
+    sandbox_id: str,
+    mount_path: str,
+    permit: Any,
+    confirm: Callable[..., Any] | None = None,
+    confirm_timeout_s: float = _CHILD_DELETE_CONFIRM_TIMEOUT_S,
+    confirm_poll_interval_s: float = _CHILD_DELETE_CONFIRM_POLL_S,
+) -> None:
+    """Compatibility wrapper preserving the runtime's injectable cleanup seams."""
+    kwargs: dict[str, Any] = {
+        "platform": platform,
+        "sandbox": sandbox,
+        "sandbox_id": sandbox_id,
+        "mount_path": mount_path,
+        "permit": permit,
+        "confirm_timeout_s": confirm_timeout_s,
+        "confirm_poll_interval_s": confirm_poll_interval_s,
+        "purge": _purge_regular_files,
+    }
+    if confirm is not None:
+        kwargs["confirm"] = confirm
+    await cleanup_child_runtime_async(**kwargs)
+
+
 _purge_regular_files = purge_regular_files
 _sandbox_id = sandbox_id_for
 _require_authorized = require_authorized

@@ -49,6 +49,7 @@ async def _run_member(
                 }}
                 marker = markers[{delay_operation!r}]
                 prefix = "                " if {delay_operation!r} == "edit_compose" else "        "
+                assert marker in code, "workspace agent delay marker missing"
                 deferred = code.replace(marker, prefix + "time.sleep(0.10)" + chr(10) + marker, 1)
                 completed = subprocess.run(
                     [sys.executable, "-c", deferred],
