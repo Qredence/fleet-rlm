@@ -20,4 +20,4 @@ def test_public_runtime_profiles_are_exactly_daytona() -> None:
 
 def test_daytona_is_the_default_public_runtime_profile(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("FLEET_RUN_ENVIRONMENT", raising=False)
-    assert Settings(_env_file=None).run_environment == "daytona"
+    assert Settings().run_environment == "daytona"

@@ -26,7 +26,6 @@ def test_model_bundle_applies_independent_role_policy(monkeypatch: pytest.Monkey
     build = MagicMock(side_effect=("root-lm", "sub-lm"))
     monkeypatch.setattr(factory, "build_lm", build)
     settings = Settings(
-        _env_file=None,
         root_model="openai/root",
         sub_model="openai/sub",
         root_llm_api_key_env="ROOT_KEY",
@@ -149,7 +148,7 @@ def test_runtime_does_not_accept_provider_environment_aliases(monkeypatch: pytes
     monkeypatch.setenv("OPENAI_API_KEY", "provider-alias-must-not-be-used")
     monkeypatch.setenv("DSPY_LM_MODEL", "provider/alias-model")
 
-    settings = Settings(_env_file=None)
+    settings = Settings()
 
     assert settings.llm_api_key is None
     assert settings.root_model == "openai/gpt-4o-mini"
@@ -159,7 +158,7 @@ def test_runtime_does_not_accept_provider_environment_aliases(monkeypatch: pytes
 
 def test_whitespace_legacy_key_is_not_a_credential(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("FLEET_OPENAI_API_KEY", raising=False)
-    settings = Settings(_env_file=None, llm_api_key=SecretStr("   "))
+    settings = Settings(llm_api_key=SecretStr("   "))
 
     assert has_llm_credentials(settings) is False
 
@@ -167,7 +166,6 @@ def test_whitespace_legacy_key_is_not_a_credential(monkeypatch: pytest.MonkeyPat
 def test_legacy_generic_key_does_not_cross_provider_role_boundaries(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("DATABRICKS_TOKEN", raising=False)
     settings = Settings(
-        _env_file=None,
         llm_api_key=SecretStr("legacy-key"),
         root_llm_api_key_env="DATABRICKS_TOKEN",
         sub_llm_api_key_env="DATABRICKS_TOKEN",
@@ -179,7 +177,6 @@ def test_legacy_generic_key_does_not_cross_provider_role_boundaries(monkeypatch:
 def test_explicit_role_environment_credentials_are_detected(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("DATABRICKS_TOKEN", "provider-key")
     settings = Settings(
-        _env_file=None,
         root_llm_api_key_env="DATABRICKS_TOKEN",
         sub_llm_api_key_env="DATABRICKS_TOKEN",
     )

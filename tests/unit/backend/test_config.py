@@ -252,7 +252,7 @@ def test_recursive_depth_is_a_recursive_execution_invariant_not_a_setting() -> N
     from fleet_rlm.composition.common import recursive_rlm_options
     from fleet_rlm.rlm.recursive_calls import RLM_NATIVE_CHILD_DEPTH
 
-    settings = Settings(_env_file=None)
+    settings = Settings()
     assert not hasattr(settings, "rlm_recursion_max_depth")
     options = recursive_rlm_options(settings)
     assert RLM_NATIVE_CHILD_DEPTH == 1
@@ -598,7 +598,7 @@ def test_redacted_policy_summary_never_includes_secret_values() -> None:
     from fleet_rlm.config import redacted_policy_summary
 
     summary = redacted_policy_summary(
-        Settings(_env_file=None, llm_api_key=SecretStr("private-llm-key")),
+        Settings(llm_api_key=SecretStr("private-llm-key")),
         profile="daytona",
     )
 
@@ -611,7 +611,7 @@ def test_startup_rejects_retired_environment_variables(monkeypatch: pytest.Monke
 
     monkeypatch.setenv("FLEET_LIVE_KERNEL", "true")
     with pytest.raises(ValueError, match=r"retired Fleet environment variable.*FLEET_LIVE_KERNEL"):
-        create_app(settings=Settings(_env_file=None))
+        create_app(settings=Settings())
 
 
 def test_startup_rejects_retired_budget_environment(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -619,40 +619,40 @@ def test_startup_rejects_retired_budget_environment(monkeypatch: pytest.MonkeyPa
 
     monkeypatch.setenv("FLEET_BUDGET_MAX_ITERATIONS", "6")
     with pytest.raises(ValueError, match=r"retired Fleet environment variable.*FLEET_BUDGET_MAX_ITERATIONS"):
-        create_app(settings=Settings(_env_file=None))
+        create_app(settings=Settings())
 
 
 def test_turn_timeout_defaults_to_thirty_minutes() -> None:
-    assert Settings(_env_file=None).turn_timeout_seconds == 1800
+    assert Settings().turn_timeout_seconds == 1800
 
 
 def test_live_execution_is_enabled_by_default_and_can_be_disabled() -> None:
-    assert Settings(_env_file=None).live_enabled is True
-    assert Settings(_env_file=None, live_enabled=False).live_enabled is False
+    assert Settings().live_enabled is True
+    assert Settings(live_enabled=False).live_enabled is False
 
 
 def test_url_source_limit_defaults_to_ten_mebibytes() -> None:
-    assert Settings(_env_file=None).max_url_bytes == 10 * 1024 * 1024
+    assert Settings().max_url_bytes == 10 * 1024 * 1024
 
 
 def test_mlflow_tracing_field_defaults_to_disabled() -> None:
     # The Settings field default is off; the committed [defaults.mlflow] policy
     # enables it. Test the field default here, policy default in test_config.py.
-    assert Settings(_env_file=None).mlflow_tracing_enabled is False
-    assert Settings(_env_file=None).mlflow_trace_content_max_chars == 10_000
+    assert Settings().mlflow_tracing_enabled is False
+    assert Settings().mlflow_trace_content_max_chars == 10_000
 
 
 def test_mlflow_tracing_can_be_disabled_explicitly() -> None:
-    assert Settings(_env_file=None, mlflow_tracing_enabled=False).mlflow_tracing_enabled is False
+    assert Settings(mlflow_tracing_enabled=False).mlflow_tracing_enabled is False
 
 
 def test_daytona_admission_defaults_to_eight_leases() -> None:
-    assert Settings(_env_file=None).max_active_daytona_leases == 8
+    assert Settings().max_active_daytona_leases == 8
 
 
 def test_settings_does_not_read_fleet_environment(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("FLEET_MAX_ACTIVE_DAYTONA_LEASES", "3")
-    assert Settings(_env_file=None).max_active_daytona_leases == 8
+    assert Settings().max_active_daytona_leases == 8
 
 
 def test_settings_ignore_mlflow_environment_policy(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -661,7 +661,7 @@ def test_settings_ignore_mlflow_environment_policy(monkeypatch: pytest.MonkeyPat
     monkeypatch.setenv("FLEET_MLFLOW_TRACE_TABLE_PREFIX", "fleet_app")
     monkeypatch.setenv("FLEET_MLFLOW_TRACING_SQL_WAREHOUSE_ID", "warehouse-123")
 
-    settings = Settings(_env_file=None)
+    settings = Settings()
 
     assert settings.mlflow_trace_catalog is None
     assert settings.mlflow_trace_schema is None
@@ -672,12 +672,12 @@ def test_settings_ignore_mlflow_environment_policy(monkeypatch: pytest.MonkeyPat
 @pytest.mark.parametrize("value", [0, -1, 9])
 def test_daytona_admission_must_be_between_one_and_eight(value: int) -> None:
     with pytest.raises(ValidationError):
-        Settings(_env_file=None, max_active_daytona_leases=value)
+        Settings(max_active_daytona_leases=value)
 
 
 def test_settings_does_not_read_runtime_environment(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("FLEET_TURN_TIMEOUT_SECONDS", "1200")
-    assert Settings(_env_file=None).turn_timeout_seconds == 1800
+    assert Settings().turn_timeout_seconds == 1800
 
 
 def test_settings_does_not_scan_unprefixed_environment_or_dotenv(
@@ -690,10 +690,9 @@ def test_settings_does_not_scan_unprefixed_environment_or_dotenv(
     monkeypatch.setenv("DAYTONA_API_KEY", "leaked-key")
 
     constructed = Settings()
-    from_file_kwarg = Settings(_env_file=".env")
     validated = Settings.model_validate({})
 
-    for settings in (constructed, from_file_kwarg, validated):
+    for settings in (constructed, validated):
         assert settings.log_level == "INFO"
         assert settings.database_url is None
         assert settings.daytona_api_key is None
@@ -702,14 +701,14 @@ def test_settings_does_not_scan_unprefixed_environment_or_dotenv(
 @pytest.mark.parametrize("value", [0, -1])
 def test_turn_timeout_must_be_positive(value: int) -> None:
     with pytest.raises(ValidationError):
-        Settings(_env_file=None, turn_timeout_seconds=value)
+        Settings(turn_timeout_seconds=value)
 
 
 def test_autonomous_memory_candidate_categories_default_off() -> None:
     policy_path = Path(__file__).resolve().parents[3] / "config" / "fleet.toml"
     document = tomllib.loads(policy_path.read_text(encoding="utf-8"))
 
-    assert Settings(_env_file=None).rlm_autonomous_memory_categories == ()
+    assert Settings().rlm_autonomous_memory_categories == ()
     assert document["defaults"]["rlm"]["autonomous_memory_categories"] == []
 
 
@@ -739,9 +738,9 @@ def test_autonomous_memory_candidate_categories_resolve_from_toml(
 
 def test_autonomous_memory_candidate_categories_fail_closed() -> None:
     with pytest.raises(ValidationError, match="rlm_autonomous_memory_categories"):
-        Settings(_env_file=None, rlm_autonomous_memory_categories=("Bad Category!",))
+        Settings(rlm_autonomous_memory_categories=("Bad Category!",))
 
 
 def test_autonomous_memory_candidate_category_policy_is_bounded() -> None:
     with pytest.raises(ValidationError, match="rlm_autonomous_memory_categories"):
-        Settings(_env_file=None, rlm_autonomous_memory_categories=tuple(f"Category {index}" for index in range(17)))
+        Settings(rlm_autonomous_memory_categories=tuple(f"Category {index}" for index in range(17)))

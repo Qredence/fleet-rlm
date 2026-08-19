@@ -3,6 +3,10 @@
 This module owns the committed policy document only.  It never reads values from
 ``.env`` or process environment variables, so callers cannot use it to recover
 credentials or runtime overrides.
+
+The editable-field inventory derives from the authoritative
+:class:`fleet_rlm.config.FleetFieldPolicy` declarations on ``Settings`` fields
+plus their ``*_env`` reference specs; nothing here mirrors field names by hand.
 """
 
 from __future__ import annotations
@@ -14,12 +18,13 @@ import threading
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any
 
 import tomlkit
 from tomlkit import TOMLDocument
 
 from fleet_rlm.config import (
+    EditorKind,
     FleetConfigurationError,
     Settings,
     _deep_merge,
@@ -27,11 +32,19 @@ from fleet_rlm.config import (
     _policy_document_from_mapping,
     _require_mapping,
     _validate_policy_table,
+    config_field_specs,
 )
 from fleet_rlm.files.memory_candidates import normalize_memory_candidate_categories
 from fleet_rlm.files.memory_models import WorkspaceMemoryCategoryError
 
-EditorKind = Literal["text", "number", "boolean", "single_choice", "multi_choice", "string_list"]
+__all__ = [
+    "ConfigPolicyService",
+    "EditorKind",
+    "PolicyAccessError",
+    "PolicyConflictError",
+    "PolicyField",
+    "PolicySnapshot",
+]
 
 
 class PolicyConflictError(ValueError):
@@ -52,226 +65,19 @@ class PolicyField:
     settings_field: str | None = None
 
 
-_FIELDS: tuple[PolicyField, ...] = (
-    PolicyField("application.name", "Application", "Name", "text", settings_field="app_name"),
-    PolicyField("runtime.environment", "Runtime", "Environment", "single_choice", ("daytona",), "run_environment"),
-    PolicyField("runtime.live_enabled", "Runtime", "Live execution", "boolean", settings_field="live_enabled"),
+# Derived from the authoritative Settings policy declarations (config.py);
+# no Settings field names or TOML paths are authored here by hand.
+_FIELDS: tuple[PolicyField, ...] = tuple(
     PolicyField(
-        "runtime.turn_timeout_seconds",
-        "Runtime",
-        "Turn timeout seconds",
-        "number",
-        settings_field="turn_timeout_seconds",
-    ),
-    PolicyField(
-        "runtime.max_active_daytona_leases",
-        "Runtime",
-        "Maximum Daytona leases",
-        "number",
-        settings_field="max_active_daytona_leases",
-    ),
-    PolicyField(
-        "runtime.heartbeat_seconds", "Runtime", "Heartbeat seconds", "number", settings_field="run_heartbeat_seconds"
-    ),
-    PolicyField(
-        "runtime.stale_after_seconds",
-        "Runtime",
-        "Stale after seconds",
-        "number",
-        settings_field="run_stale_after_seconds",
-    ),
-    PolicyField("llm.root.model", "Root LLM", "Model id", "text", settings_field="root_model"),
-    PolicyField(
-        "llm.root.api_key_env",
-        "Root LLM",
-        "Provider API key environment variable",
-        "text",
-        settings_field="root_llm_api_key_env",
-    ),
-    PolicyField("llm.root.base_url", "Root LLM", "Provider base URL", "text", settings_field="root_llm_base_url"),
-    PolicyField("llm.root.base_url_env", "Root LLM", "Provider base URL environment variable", "text"),
-    PolicyField("llm.root.max_tokens", "Root LLM", "Maximum tokens", "number", settings_field="root_llm_max_tokens"),
-    PolicyField("llm.root.temperature", "Root LLM", "Temperature", "number", settings_field="root_llm_temperature"),
-    PolicyField("llm.root.cache", "Root LLM", "Cache", "boolean", settings_field="root_llm_cache"),
-    PolicyField("llm.root.num_retries", "Root LLM", "Retries", "number", settings_field="root_llm_num_retries"),
-    PolicyField(
-        "llm.root.reasoning_effort",
-        "Root LLM",
-        "Reasoning effort",
-        "single_choice",
-        ("none", "low", "medium", "high"),
-        settings_field="root_llm_reasoning_effort",
-    ),
-    PolicyField("llm.sub.model", "Sub LLM", "Model id", "text", settings_field="sub_model"),
-    PolicyField(
-        "llm.sub.api_key_env",
-        "Sub LLM",
-        "Provider API key environment variable",
-        "text",
-        settings_field="sub_llm_api_key_env",
-    ),
-    PolicyField("llm.sub.base_url", "Sub LLM", "Provider base URL", "text", settings_field="sub_llm_base_url"),
-    PolicyField("llm.sub.base_url_env", "Sub LLM", "Provider base URL environment variable", "text"),
-    PolicyField("llm.sub.max_tokens", "Sub LLM", "Maximum tokens", "number", settings_field="sub_llm_max_tokens"),
-    PolicyField("llm.sub.temperature", "Sub LLM", "Temperature", "number", settings_field="sub_llm_temperature"),
-    PolicyField("llm.sub.cache", "Sub LLM", "Cache", "boolean", settings_field="sub_llm_cache"),
-    PolicyField("llm.sub.num_retries", "Sub LLM", "Retries", "number", settings_field="sub_llm_num_retries"),
-    PolicyField(
-        "llm.sub.reasoning_effort",
-        "Sub LLM",
-        "Reasoning effort",
-        "single_choice",
-        ("none", "low", "medium", "high"),
-        settings_field="sub_llm_reasoning_effort",
-    ),
-    PolicyField("rlm.max_iters", "RLM", "Maximum iterations", "number", settings_field="rlm_max_iters"),
-    PolicyField("rlm.max_llm_calls", "RLM", "Maximum LLM calls", "number", settings_field="rlm_max_llm_calls"),
-    PolicyField(
-        "rlm.max_output_chars", "RLM", "Maximum output characters", "number", settings_field="rlm_max_output_chars"
-    ),
-    PolicyField(
-        "rlm.max_execution_output_chars",
-        "RLM",
-        "Maximum execution output characters",
-        "number",
-        settings_field="rlm_max_execution_output_chars",
-    ),
-    PolicyField(
-        "rlm.execution_timeout_s",
-        "RLM",
-        "Sandbox execution timeout (seconds)",
-        "number",
-        settings_field="rlm_execution_timeout_s",
-    ),
-    PolicyField(
-        "rlm.recursion_enabled",
-        "RLM",
-        "Enable recursive child RLMs",
-        "boolean",
-        settings_field="rlm_recursion_enabled",
-    ),
-    PolicyField(
-        "rlm.recursion_max_calls", "RLM", "Recursive maximum calls", "number", settings_field="rlm_recursion_max_calls"
-    ),
-    PolicyField(
-        "rlm.recursion_max_prompt_chars",
-        "RLM",
-        "Recursive prompt character bound",
-        "number",
-        settings_field="rlm_recursion_max_prompt_chars",
-    ),
-    PolicyField(
-        "rlm.recursion_child_max_iters",
-        "RLM",
-        "Child maximum iterations",
-        "number",
-        settings_field="rlm_recursion_child_max_iters",
-    ),
-    PolicyField(
-        "rlm.recursion_child_max_llm_calls",
-        "RLM",
-        "Child maximum LLM calls",
-        "number",
-        settings_field="rlm_recursion_child_max_llm_calls",
-    ),
-    PolicyField(
-        "rlm.recursion_child_max_output_chars",
-        "RLM",
-        "Child maximum output characters",
-        "number",
-        settings_field="rlm_recursion_child_max_output_chars",
-    ),
-    PolicyField(
-        "rlm.recursion_max_parallel_children",
-        "RLM",
-        "Maximum parallel child RLMs",
-        "number",
-        settings_field="rlm_recursion_max_parallel_children",
-    ),
-    PolicyField(
-        "rlm.autonomous_memory_categories",
-        "RLM",
-        "Autonomous Memory categories",
-        "string_list",
-        settings_field="rlm_autonomous_memory_categories",
-    ),
-    PolicyField("rlm.verbose", "RLM", "DSPy host verbose logging", "boolean", settings_field="rlm_verbose"),
-    PolicyField("storage.data_root", "Storage", "Data root", "text", settings_field="data_root"),
-    PolicyField(
-        "storage.max_upload_bytes", "Storage", "Maximum upload bytes", "number", settings_field="max_upload_bytes"
-    ),
-    PolicyField(
-        "storage.max_url_bytes", "Storage", "Maximum URL source bytes", "number", settings_field="max_url_bytes"
-    ),
-    PolicyField(
-        "storage.max_artifact_bytes", "Storage", "Maximum artifact bytes", "number", settings_field="max_artifact_bytes"
-    ),
-    PolicyField("storage.database_url_env", "Storage", "Database URL environment variable", "text"),
-    PolicyField("daytona.api_key_env", "Daytona", "API key environment variable", "text"),
-    PolicyField("daytona.snapshot", "Daytona", "Snapshot", "text", settings_field="daytona_snapshot"),
-    PolicyField("daytona.org_id", "Daytona", "Organization ID", "text", settings_field="daytona_org_id"),
-    PolicyField("daytona.volume_name", "Daytona", "Volume name", "text", settings_field="volume_name"),
-    PolicyField(
-        "daytona.volume_mount_path", "Daytona", "Volume mount path", "text", settings_field="volume_mount_path"
-    ),
-    PolicyField(
-        "logging.level",
-        "Logging",
-        "Level",
-        "single_choice",
-        ("CRITICAL", "ERROR", "WARNING", "INFO", "DEBUG"),
-        "log_level",
-    ),
-    PolicyField(
-        "mlflow.tracing_enabled", "MLflow", "Tracing enabled", "boolean", settings_field="mlflow_tracing_enabled"
-    ),
-    PolicyField(
-        "mlflow.async_logging", "MLflow", "Async trace logging", "boolean", settings_field="mlflow_async_logging"
-    ),
-    PolicyField(
-        "mlflow.trace_sampling_ratio",
-        "MLflow",
-        "Trace sampling ratio",
-        "number",
-        settings_field="mlflow_trace_sampling_ratio",
-    ),
-    PolicyField(
-        "mlflow.trace_content_max_chars",
-        "MLflow",
-        "Trace payload character limit",
-        "number",
-        settings_field="mlflow_trace_content_max_chars",
-    ),
-    PolicyField("mlflow.experiment_name", "MLflow", "Experiment name", "text", settings_field="mlflow_experiment_name"),
-    PolicyField("mlflow.experiment_name_env", "MLflow", "Experiment environment variable", "text"),
-    PolicyField("mlflow.tracking_uri", "MLflow", "Tracking URI", "text", settings_field="mlflow_tracking_uri"),
-    PolicyField(
-        "mlflow.expose_trace_id", "MLflow", "Expose trace ID", "boolean", settings_field="mlflow_expose_trace_id"
-    ),
-    PolicyField("mlflow.trace_catalog", "MLflow", "Trace catalog", "text", settings_field="mlflow_trace_catalog"),
-    PolicyField("mlflow.trace_catalog_env", "MLflow", "Trace catalog environment variable", "text"),
-    PolicyField("mlflow.trace_schema", "MLflow", "Trace schema", "text", settings_field="mlflow_trace_schema"),
-    PolicyField("mlflow.trace_schema_env", "MLflow", "Trace schema environment variable", "text"),
-    PolicyField(
-        "mlflow.trace_table_prefix", "MLflow", "Trace table prefix", "text", settings_field="mlflow_trace_table_prefix"
-    ),
-    PolicyField("mlflow.trace_table_prefix_env", "MLflow", "Trace table prefix environment variable", "text"),
-    PolicyField(
-        "mlflow.tracing_sql_warehouse_id",
-        "MLflow",
-        "Tracing SQL warehouse ID",
-        "text",
-        settings_field="mlflow_tracing_sql_warehouse_id",
-    ),
-    PolicyField(
-        "mlflow.tracing_sql_warehouse_id_env",
-        "MLflow",
-        "Tracing SQL warehouse environment variable",
-        "text",
-    ),
-    PolicyField("posthog.enabled", "PostHog", "Analytics enabled", "boolean", settings_field="posthog_enabled"),
-    PolicyField("posthog.project_token_env", "PostHog", "Project token environment variable", "text"),
-    PolicyField("posthog.host", "PostHog", "Ingestion host", "text", settings_field="posthog_host"),
+        path=spec.toml_path,
+        group=spec.group,
+        label=spec.label,
+        editor=spec.editor,
+        choices=spec.choices,
+        settings_field=spec.settings_field,
+    )
+    for spec in config_field_specs()
+    if spec.group is not None
 )
 _FIELD_BY_PATH = {field.path: field for field in _FIELDS}
 
@@ -478,9 +284,9 @@ class ConfigPolicyService:
         for profile, value in document.profiles.items():
             selected = _require_mapping(value, f"profiles.{profile}")
             _validate_policy_table(selected, f"profiles.{profile}")
-            values = _flatten_policy(_deep_merge(document.defaults, selected))
+            flattened = _flatten_policy(_deep_merge(document.defaults, selected))
             try:
-                Settings.model_validate(values)
+                Settings.model_validate(dict(flattened.settings))
             except ValueError as exc:
                 raise FleetConfigurationError("invalid Fleet configuration policy") from exc
 

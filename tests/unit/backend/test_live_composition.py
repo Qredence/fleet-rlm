@@ -165,7 +165,6 @@ def test_require_daytona_settings_fails_closed_without_deps(monkeypatch: pytest.
     with pytest.raises(CompositionError, match="DAYTONA_SNAPSHOT"):
         require_daytona_settings(
             Settings(
-                _env_file=None,
                 run_environment="daytona",
                 database_url="sqlite+aiosqlite:///:memory:",
                 daytona_api_key=SecretStr("daytona-key"),

@@ -18,6 +18,13 @@ contracts, and tracked docs remain authoritative.
   `config.py` owns strict runtime resolution; `config_policy.py` and the
   loopback-only `/api/settings` routes edit only non-secret policy for restart.
   Do not restore ambient environment aliases or expose referenced secret values.
+  Every `Settings` field carries one authoritative `FleetFieldPolicy`
+  declaration; `_TABLE_KEYS`, policy flattening, and the editor inventory
+  derive from those declarations, so adding or renaming a supported setting
+  means editing that declaration (plus one `*_env` spec for
+  environment-resolved keys) rather than mirroring names across modules.
+  Direct `Settings(...)` construction rejects unknown keys without echoing
+  their values.
 - Keep Daytona SDK imports inside `daytona/`.
 - Create a fresh native DSPy RLM per Turn through `rlm.dspy_contract`. Native
   `RLMOptions` mirrors DSPy 3.3.x exactly: `max_iters` bounds action/REPL

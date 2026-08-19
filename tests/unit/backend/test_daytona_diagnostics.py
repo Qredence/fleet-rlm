@@ -120,7 +120,7 @@ async def test_daytona_doctor_fails_settings_without_provider_operations() -> No
 
     dependencies = FakeDoctorDependencies()
     result = await run_daytona_doctor(
-        Settings(_env_file=None, daytona_api_key=None, database_url=None),
+        Settings(daytona_api_key=None, database_url=None),
         dependencies=dependencies,
     )
 

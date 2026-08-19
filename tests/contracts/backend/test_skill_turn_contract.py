@@ -207,7 +207,7 @@ async def test_progressive_resource_requires_load_and_daytona_preparation_is_pro
     assert host.load_skill(str(selected.card.id), selected.card.version)["ok"] is True
     assert host.read_skill_resource(str(selected.card.id), resource_path, selected.card.version)["ok"] is True
 
-    settings = Settings(_env_file=None, run_environment="daytona")
+    settings = Settings(run_environment="daytona")
     environment = SimpleNamespace(attachment_sink=SimpleNamespace(volume_fs=SimpleNamespace(sandbox=object())))
     turn = _turn()
     prepared = await _LiveCapabilityPreparer(settings, catalog).prepare(
@@ -409,7 +409,7 @@ async def test_daytona_report_builder_workspace_selection_keeps_workspace_host_o
             SkillSelectionRef(workspace_files.card.id, workspace_files.card.version),
         )
     )
-    settings = Settings(_env_file=None, run_environment="daytona")
+    settings = Settings(run_environment="daytona")
     environment = SimpleNamespace(attachment_sink=SimpleNamespace(volume_fs=SimpleNamespace(sandbox=object())))
     prepared = await _LiveCapabilityPreparer(settings, catalog).prepare(
         turn,

@@ -343,7 +343,7 @@ def create_testing_app(*, settings: Settings | None = None) -> FastAPI:
 
     if settings is None:
         settings_factory: Any = Settings
-        resolved = settings_factory(_env_file=None, run_environment="daytona")
+        resolved = settings_factory(run_environment="daytona")
     else:
         resolved = settings
     return create_app(settings=resolved, _composition_installer=install_testing_composition)

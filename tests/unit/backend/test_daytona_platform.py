@@ -18,7 +18,6 @@ async def test_build_daytona_client_uses_explicit_api_url_without_deprecation(
 ) -> None:
     monkeypatch.setenv("DAYTONA_API_URL", "https://ambient.example/api")
     settings = Settings(
-        _env_file=None,
         daytona_api_key=SecretStr("test-daytona-key"),
         daytona_org_id="test-org",
     )
