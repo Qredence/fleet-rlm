@@ -68,6 +68,15 @@ def _patch_payload(old: str, new: str) -> str:
 
 
 def _write(tmp_path: Path, relative: str, content: bytes) -> dict[str, object]:
+    """Write byte content to a file in the temporary workspace.
+    
+    Parameters:
+    	relative (str): Workspace-relative path of the file to write
+    	content (bytes): Content to write
+    
+    Returns:
+    	dict[str, object]: Result returned by the workspace agent's write operation
+    """
     sandbox, _process = _sandbox()
     return _run(
         tmp_path,

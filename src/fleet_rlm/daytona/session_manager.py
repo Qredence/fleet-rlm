@@ -313,6 +313,15 @@ class DaytonaSessionManager:
         request: LeaseRequest,
         run_id: UUID,
     ) -> None:
+        """
+        Schedule cleanup for an acquisition that completes after its lease request ends.
+        
+        Parameters:
+            acquisition (asyncio.Task[InterpreterLease]): The provider acquisition task to settle.
+            permit (DaytonaAdmissionPermit): The admission permit to release after cleanup.
+            request (LeaseRequest): The request associated with the late-acquired lease.
+            run_id (UUID): The run identifier to release from the active lease registry.
+        """
         async def cleanup() -> None:
             try:
                 lease = await self._settle_provider_acquisition(acquisition)

@@ -22,6 +22,7 @@ class WorkerOwnership:
     """Keep one started worker and its blocking resource waiters owned."""
 
     def __init__(self) -> None:
+        """Initialize an empty worker ownership registry."""
         self._effect: OwnedEffect[Any] | None = None
         self._blocking_waiters: list[Callable[[], None]] = []
 
@@ -34,7 +35,12 @@ class WorkerOwnership:
         self._blocking_waiters.append(waiter)
 
     async def wait_owned(self) -> None:
-        """Wait for the worker and all blocking resource owners to settle."""
+        """
+        Wait for the worker and all blocking resource owners to settle.
+        
+        Raises:
+            BaseException: The first error raised while settling a blocking resource owner.
+        """
         if self._effect is not None:
             with contextlib.suppress(BaseException):
                 await self._effect.settle()
@@ -58,6 +64,7 @@ class RLMWorkerHandle(Generic[T]):
     """Typed access to an owned RLM result without exposing task mechanics."""
 
     def __init__(self, effect: OwnedEffect[T]) -> None:
+        """Initialize a worker handle for the owned effect."""
         self._effect = effect
 
     def done(self) -> bool:
@@ -93,7 +100,20 @@ async def invoke_native_rlm(
     context: RLMExecutionContext,
     kwargs: Mapping[str, Any],
 ) -> Any:
-    """Invoke the supported native DSPy surface with the caller-owned interpreter."""
+    """
+    Invoke the RLM operation using the caller-owned interpreter when required.
+    
+    Parameters:
+        rlm (Any): RLM object to invoke.
+        context (RLMExecutionContext): Execution context containing the caller-owned interpreter.
+        kwargs (Mapping[str, Any]): Keyword arguments passed to the RLM operation.
+    
+    Returns:
+        Any: Result produced by the RLM operation.
+    
+    Raises:
+        RLMConfigError: If an exact native `dspy.RLM` instance is invoked without a caller-owned interpreter.
+    """
     native_call_args: tuple[Any, ...] = ()
     if type(rlm) is dspy.RLM:
         if context.execution.interpreter is None:
@@ -122,7 +142,12 @@ async def _run_in_worker(
     kwargs: Mapping[str, Any],
     execute: RLMWorkerExecution[T],
 ) -> T:
-    """Propagate context into a thread and run the async RLM call there."""
+    """
+    Execute the RLM operation in a worker thread.
+    
+    Returns:
+        The result produced by the RLM operation.
+    """
     return cast(T, await asyncio.to_thread(_run_private_event_loop, rlm, context, kwargs, execute))
 
 

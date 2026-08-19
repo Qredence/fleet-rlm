@@ -65,23 +65,25 @@ def build_child_runtime_factory(
     is_authorized: Callable[[], bool] | None = None,
 ) -> ChildRuntimeFactory:
     """
-    Build a factory that acquires disposable child runtimes for a root turn.
-
-    The returned factory blocks the calling worker thread until child-runtime acquisition completes on the event loop.
-
+    Build a factory for acquiring disposable child-runtime leases for recursive calls.
+    
+    The factory waits until the configured deadline for each acquisition and retains
+    late acquisitions for cleanup.
+    
     Parameters:
         volume_id (str): Identifier of the volume mounted in child runtimes.
         mount_path (str): Mount path used by child runtimes.
         workspace_id (UUID): Identifier of the workspace owning the runtimes.
         run_id (UUID): Identifier of the root turn run.
-        deadline (float): Acquisition deadline as a monotonic timestamp.
+        deadline (float): Monotonic acquisition deadline.
         execution_timeout_s (int): Maximum execution time for each child runtime.
         execution_output_cap (int): Maximum output size for each child runtime.
-        is_authorized (Callable[[], bool] | None): Optional callback that determines whether
-            child-runtime creation remains authorized.
-
+        is_authorized (Callable[[], bool] | None): Optional callback that determines
+            whether child-runtime creation remains authorized.
+    
     Returns:
-        ChildRuntimeFactory: A factory that accepts a call index and returns a leased child runtime.
+        ChildRuntimeFactory: A callable factory that accepts a recursive call index
+            and returns its leased child runtime.
     """
 
     late_owner = LateCleanupOwner(wait_timeout_s=_CHILD_CLEANUP_RESULT_TIMEOUT_S)
@@ -134,12 +136,23 @@ def build_child_runtime_factory(
         """Callable child-runtime factory with late-acquisition ownership."""
 
         def __call__(self, call_index: int) -> ChildRuntimeLease:
+            """
+            Create a disposable child-runtime lease for a recursive call.
+            
+            Parameters:
+                call_index (int): Index identifying the recursive call.
+            
+            Returns:
+                ChildRuntimeLease: Lease for the acquired child runtime.
+            """
             return create(call_index)
 
         def wait_owned(self) -> None:
+            """Wait for all retained cleanup operations to finish."""
             late_owner.wait_owned()
 
         def raise_if_cleanup_failed(self) -> None:
+            """Raise a deferred cleanup error if any late cleanup operation failed."""
             late_owner.raise_if_failed()
 
     return Factory()
@@ -236,7 +249,17 @@ async def _cleanup_child_runtime_async(
     confirm_timeout_s: float = _CHILD_DELETE_CONFIRM_TIMEOUT_S,
     confirm_poll_interval_s: float = _CHILD_DELETE_CONFIRM_POLL_S,
 ) -> None:
-    """Compatibility wrapper preserving the runtime's injectable cleanup seams."""
+    """
+    Clean up a child runtime and optionally confirm its sandbox deletion.
+    
+    Parameters:
+        sandbox_id (str): Identifier of the sandbox to clean up.
+        mount_path (str): Path whose regular files are purged during cleanup.
+        permit (Any): Authorization permit for the cleanup operation.
+        confirm (Callable[..., Any] | None): Optional callback used to confirm sandbox deletion.
+        confirm_timeout_s (float): Maximum time to wait for deletion confirmation.
+        confirm_poll_interval_s (float): Interval between deletion confirmation checks.
+    """
     kwargs: dict[str, Any] = {
         "platform": platform,
         "sandbox": sandbox,
@@ -258,7 +281,15 @@ async def _purge_regular_files(sandbox: Any, mount_path: str) -> None:
 
 
 def _sandbox_id(sandbox: Any) -> str:
-    """Preserve the runtime-patchable sandbox-id validation seam."""
+    """
+    Extracts the validated identifier from a sandbox.
+    
+    Parameters:
+    	sandbox (Any): Sandbox whose identifier is retrieved.
+    
+    Returns:
+    	str: The sandbox identifier.
+    """
     return sandbox_id_for(sandbox)
 
 

@@ -39,7 +39,26 @@ async def acquire_child_runtime(
     sandbox_id_for_fn: Callable[[Any], str] | None = None,
     require_authorized_fn: Callable[[Callable[[], bool] | None], None] | None = None,
 ) -> ChildRuntimeLease:
-    """Acquire a child runtime while keeping construction dependencies injectable."""
+    """
+    Acquire an ephemeral runtime for executing a recursive child operation.
+    
+    Parameters:
+        volume_id (str): Identifier of the volume mounted in the child sandbox.
+        mount_path (str): Path where the volume is mounted.
+        workspace_id (UUID): Workspace containing the recursive child.
+        run_id (UUID): Run containing the recursive child.
+        call_index (int): Index identifying the recursive child call.
+        deadline (float): Absolute event-loop time by which acquisition must complete.
+        execution_timeout_s (int): Maximum execution time for the child runtime.
+        execution_output_cap (int): Maximum output retained from child execution.
+    
+    Returns:
+        ChildRuntimeLease: Lease containing the child interpreter, sandbox metadata, and cleanup callback.
+    
+    Raises:
+        ChildRuntimeAuthorizationError: If the owning turn is no longer authorized.
+        ChildRuntimeCleanupError: If acquisition fails and cleanup also fails.
+    """
     sandbox_id_resolver = sandbox_id_for if sandbox_id_for_fn is None else sandbox_id_for_fn
     authorization_check = require_authorized if require_authorized_fn is None else require_authorized_fn
     authorization_check(is_authorized)
@@ -71,6 +90,7 @@ async def acquire_child_runtime(
         )
 
         def close() -> None:
+            """Close the child runtime and release its associated resources."""
             close_child_runtime(
                 loop=loop,
                 platform=platform,
@@ -101,7 +121,15 @@ def sandbox_id_for(sandbox: Any) -> str:
 
 
 def require_authorized(is_authorized: Callable[[], bool] | None) -> None:
-    """Fail closed when the owning Turn is no longer authorized."""
+    """
+    Ensure the owning turn remains authorized.
+    
+    Parameters:
+    	is_authorized (Callable[[], bool] | None): Authorization callback, or None to skip the check.
+    
+    Raises:
+    	ChildRuntimeAuthorizationError: If the callback reports that the owning turn is no longer authorized.
+    """
     if is_authorized is not None and not is_authorized():
         raise ChildRuntimeAuthorizationError("Turn is no longer authorized")
 

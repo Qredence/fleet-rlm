@@ -20,17 +20,29 @@ class LateCleanupOwner:
     """Keep late provider work owned until its cleanup future settles."""
 
     def __init__(self, *, wait_timeout_s: float) -> None:
+        """Initialize an owner for tracking late cleanup work.
+        
+        Parameters:
+        	wait_timeout_s (float): Maximum time to wait for owned cleanup work to finish.
+        """
         self._lock = Lock()
         self._pending: set[Future[Any]] = set()
         self._error: BaseException | None = None
         self._wait_timeout_s = wait_timeout_s
 
     def _record_error(self, exc: BaseException) -> None:
+        """Record the first cleanup error observed by this owner."""
         with self._lock:
             if self._error is None:
                 self._error = exc
 
     def _state(self) -> tuple[BaseException | None, bool]:
+        """
+        Collect completed work and report the first recorded error and whether work remains pending.
+        
+        Returns:
+            tuple[BaseException | None, bool]: The first cleanup error, if any, and whether unfinished work remains.
+        """
         with self._lock:
             for future in tuple(self._pending):
                 if not future.done():
@@ -46,6 +58,13 @@ class LateCleanupOwner:
 
     @staticmethod
     def _complete(marker: Future[None], error: BaseException | None = None) -> None:
+        """
+        Completes a marker future with a result or an exception.
+        
+        Parameters:
+        	marker (Future[None]): The future to complete.
+        	error (BaseException | None): The exception to assign to the future, or `None` to complete it successfully.
+        """
         if marker.done():
             return
         if error is None:
@@ -59,6 +78,12 @@ class LateCleanupOwner:
             self._pending.add(future)
 
         def settled(done: Future[Any]) -> None:
+            """
+            Record a completed future's failure and release it from pending ownership.
+            
+            Parameters:
+                done (Future[Any]): The completed future whose terminal state is observed.
+            """
             try:
                 error = done.exception()
             except BaseException as exc:
@@ -76,11 +101,23 @@ class LateCleanupOwner:
         acquisition: Future[Any],
         close_lease: Callable[[Any], None],
     ) -> None:
-        """Adopt a late lease and close it from a thread independent of the loop."""
+        """Adopt a late lease for cleanup outside the event loop.
+        
+        Parameters:
+            acquisition (Future[Any]): Future resolving to the lease to close.
+            close_lease (Callable[[Any], None]): Function that closes the acquired lease.
+        
+        ChildRuntimeCleanupError and lease-closing failures are recorded for later reporting.
+        """
         marker: Future[None] = Future()
         self.retain(marker)
 
         def close_late(done: Future[Any]) -> None:
+            """Handle a completed late acquisition and arrange independent lease cleanup.
+            
+            Parameters:
+            	done (Future[Any]): Completed future containing the acquired lease or an acquisition error.
+            """
             try:
                 lease = done.result()
             except ChildRuntimeCleanupError as exc:
@@ -92,6 +129,9 @@ class LateCleanupOwner:
                 return
 
             def close() -> None:
+                """
+                Close the acquired lease and mark the late cleanup operation complete.
+                """
                 try:
                     close_lease(lease)
                 except BaseException as exc:
@@ -121,7 +161,12 @@ class LateCleanupOwner:
             raise ChildRuntimeCleanupError("recursive child cleanup is still pending")
 
     def wait_owned(self) -> None:
-        """Wait for retained work within the bounded quarantine window."""
+        """
+        Wait for retained cleanup work until the bounded ownership window expires.
+        
+        Raises:
+            ChildRuntimeCleanupError: If cleanup fails or remains pending after the wait.
+        """
         wait_deadline = time.monotonic() + max(self._wait_timeout_s, 1.0)
         while True:
             with self._lock:

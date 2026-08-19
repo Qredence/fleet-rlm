@@ -18,6 +18,9 @@ def test_thread_start_failure_dispatches_cleanup_without_loop_thread_close(
     release = Event()
 
     def close(_lease: object) -> None:
+        """
+        Signal that cleanup was invoked and wait for release.
+        """
         started.set()
         assert release.wait(2)
 

@@ -71,7 +71,16 @@ def _promote_memory_candidates(
     *,
     allowed_categories: tuple[str, ...],
 ) -> Any:
-    """Run the bounded post-commit Memory effect outside execution capabilities."""
+    """
+    Promote memory candidates through the configured memory store.
+    
+    Parameters:
+        candidates (tuple[Any, ...]): Memory candidates to promote.
+        allowed_categories (tuple[str, ...]): Candidate categories eligible for promotion.
+    
+    Returns:
+        MemoryCandidatePromotionResult: Counts and reasons describing the promotion outcome.
+    """
     from fleet_rlm.files.memory_candidates import MemoryCandidatePromotionResult, promote_memory_candidates
 
     if store is None:
@@ -98,6 +107,7 @@ def _promote_memory_candidates(
 
 
 def _consume_task_result(task: asyncio.Task[Any]) -> None:
+    """Consumes a completed task's result while suppressing cancellation and task exceptions."""
     if task.cancelled():
         return
     with contextlib.suppress(BaseException):
@@ -187,18 +197,19 @@ class _DaytonaEnvironmentProvider:
 
     async def acquire(self, run: ClaimedRun, *, deadline: float) -> RunEnvironment:
         """
-        Acquire and configure a Daytona-backed environment for a Run.
-
+        Acquire and configure a Daytona-backed environment for a run.
+        
         Parameters:
             run (ClaimedRun): Run whose session, access, and identifiers determine the environment.
             deadline (float): Absolute time limit for environment acquisition and setup.
-
+        
         Returns:
-            RunEnvironment: Configured environment with run sinks, resource cleanup, and child-runtime creation.
-
+            RunEnvironment: Configured environment with run sinks, cleanup, memory services, and child-runtime creation.
+        
         Raises:
             RunPreparationUnavailableError: If environment admission times out.
             RunPreparationTimeoutError: If lease acquisition or environment setup exceeds the deadline.
+            RuntimeError: If the acquired sandbox is unavailable.
         """
         try:
             lease = await self.resources.session_manager.acquire(

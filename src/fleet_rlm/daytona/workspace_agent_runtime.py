@@ -39,6 +39,12 @@ class _AgentResponse(Exception):
 
 
 def respond(payload) -> NoReturn:
+    """
+    Raise an internal response carrying the provided payload.
+    
+    Parameters:
+        payload: The response payload to propagate.
+    """
     raise _AgentResponse(payload)
 
 
@@ -99,6 +105,18 @@ def get_metadata():
 
 AGENT_METADATA = get_metadata()
 def decode_page(data):
+    """
+    Decode UTF-8 page data, allowing a truncated final multibyte sequence.
+    
+    Parameters:
+    	data (bytes): The byte sequence to decode.
+    
+    Returns:
+    	tuple[str, int]: The decoded text and the number of bytes represented by it.
+    
+    Raises:
+    	UnicodeDecodeError: If the data contains invalid UTF-8 other than a truncated final sequence.
+    """
     try:
         return data.decode('utf-8'), len(data)
     except UnicodeDecodeError as exc:
@@ -134,6 +152,20 @@ class ReplacementUnsupported(Exception):
         super().__init__(errno_value)
         self.errno = errno_value
 def open_directory(path, *, dir_fd=None, create=False):
+    """
+    Open a directory without following symbolic links, optionally creating it.
+    
+    Parameters:
+        path: Directory path or path component to open.
+        dir_fd: Directory descriptor relative to which the path is resolved.
+        create: Whether to create the directory if it does not exist.
+    
+    Returns:
+        An open file descriptor for the directory.
+    
+    Raises:
+        UnsafePath: If the path refers to a symbolic link.
+    """
     flags = os.O_RDONLY | os.O_DIRECTORY | getattr(os, 'O_NOFOLLOW', 0)
     try:
         existing = os.stat(path, dir_fd=dir_fd, follow_symlinks=False)
@@ -154,6 +186,17 @@ def open_directory(path, *, dir_fd=None, create=False):
             pass
         return os.open(path, flags, dir_fd=dir_fd)
 def open_chain(*, volume_root, root, create=False):
+    """
+    Open the volume root and each component of a workspace root path.
+    
+    Parameters:
+        volume_root: Absolute path to the volume containing the workspace root.
+        root: Workspace root path within the volume.
+        create (bool): Whether to create missing root directories.
+    
+    Returns:
+        tuple: A list of opened directory descriptors and the descriptor for the workspace root.
+    """
     fds = []
     try:
         volume_fd = open_directory(volume_root)
@@ -444,6 +487,19 @@ def recreate_existing(parent_fd, name, payload, previous):
     # O_EXCL recreate is the only accepted mutation. A failed mutation
     # restores the previous bytes best-effort so the log is never
     # silently destroyed.
+    """
+    Recreates an existing file by removing it and exclusively creating it with the new payload.
+    
+    Parameters:
+        payload (bytes): Replacement file contents.
+        previous (bytes): Previous file contents used for best-effort restoration if replacement fails.
+    
+    Returns:
+        tuple: The recreated file's metadata and an optional directory-synchronization error number.
+    
+    Raises:
+        StorageError: If the file cannot be recreated or the replacement operation fails.
+    """
     def create_fresh(data):
         created = None
         attempts = 0
@@ -496,6 +552,17 @@ def recreate_existing(parent_fd, name, payload, previous):
 
 
 def _valid_root_paths(volume_root, root, operation):
+    """
+    Validate that a requested root is an absolute path within the volume root.
+    
+    Parameters:
+        volume_root (str): Absolute path defining the permitted volume.
+        root (str): Absolute requested root path.
+        operation (str): Operation being performed; `stat` and `memory_migrate` may target the volume root itself.
+    
+    Returns:
+        bool: `True` if the paths and operation satisfy the workspace root constraints, `False` otherwise.
+    """
     if not isinstance(volume_root, str) or not isinstance(root, str):
         return False
     if not os.path.isabs(volume_root) or not os.path.isabs(root):
@@ -516,6 +583,16 @@ def _valid_root_paths(volume_root, root, operation):
 
 
 def _valid_relative_path(relative, operation):
+    """
+    Validate a relative workspace path for safe filesystem access.
+    
+    Parameters:
+    	relative (str): The path to validate.
+    	operation: The operation associated with the path.
+    
+    Returns:
+    	bool: `True` if the path is valid, `False` otherwise.
+    """
     if not isinstance(relative, str) or not relative or '\x00' in relative or '\\' in relative:
         return False
     if relative == '.':
@@ -529,6 +606,14 @@ def _valid_relative_path(relative, operation):
 
 
 def _valid_request_values(request):
+    """Validates optional request fields against their expected types and protocol limits.
+    
+    Parameters:
+    	request (dict): Request values to validate.
+    
+    Returns:
+    	bool: `true` if all supported values have valid types and bounds, `false` otherwise.
+    """
     boolean_fields = ('allow_missing', 'overwrite', 'checksum')
     string_fields = ('content_b64', 'after', 'memory_id', 'expected_sha256')
     integer_fields = ('max_bytes', 'limit', 'offset', 'max_chars', 'total_file_bytes')
@@ -547,7 +632,15 @@ def _valid_request_values(request):
 
 
 def handle(request):
-    """Validate and execute one workspace request."""
+    """
+    Validate and execute a workspace operation request.
+    
+    Parameters:
+    	request (dict): Request containing the protocol version, operation, workspace paths, and operation-specific values.
+    
+    Returns:
+    	dict: Structured success data or an error code describing why the request could not be completed.
+    """
     if not isinstance(request, dict):
         return {'ok': False, 'error': 'request_invalid'}
     try:

@@ -18,7 +18,16 @@ from fleet_rlm.rlm.worker_execution import invoke_native_rlm
 
 
 def recursive_summary(executor: RecursiveRLMExecutor | None, metrics: Any | None = None) -> RecursiveCallSummary:
-    """Return recursive execution metrics, or zero-valued metrics when disabled."""
+    """
+    Summarize recursive execution metrics for an executor or metrics collector.
+    
+    Parameters:
+    	executor (RecursiveRLMExecutor | None): Executor providing recursive metrics, if available.
+    	metrics (Any | None): Optional metrics collector used when no executor is available.
+    
+    Returns:
+    	RecursiveCallSummary: Recursive execution metrics, a snapshot-derived summary, or zero-valued metrics when no source is available.
+    """
     if executor is not None:
         return executor.summary()
     if metrics is not None and callable(getattr(metrics, "snapshot", None)):
@@ -48,7 +57,17 @@ def record_phase_failure(
     *,
     last_lm_call: Mapping[str, object] | None = None,
 ) -> None:
-    """Record sanitized failure details and delegation metrics for a trace phase."""
+    """
+    Record failure status, timing, recursive-call statistics, and delegation metrics for a trace phase.
+    
+    Parameters:
+        phase (Any): Trace phase receiving the failure outputs.
+        started (float): Monotonic timestamp captured when the phase started.
+        recursive_executor (RecursiveRLMExecutor | None): Recursive executor associated with the phase.
+        metrics (Any): Metrics snapshot used when recursive execution is unavailable.
+        exc (BaseException): Exception that caused the phase to fail.
+        last_lm_call (Mapping[str, object] | None): Optional details of the most recent language-model call.
+    """
     summary = recursive_summary(recursive_executor, metrics)
     outputs: dict[str, object] = {
         "elapsed_ms": int((time.perf_counter() - started) * 1000),
@@ -71,7 +90,19 @@ def record_phase_success(
     recursive_executor: RecursiveRLMExecutor | None,
     metrics: Any,
 ) -> Any:
-    """Record sanitized success details and delegation metrics for a trace phase."""
+    """
+    Record successful completion details and recursive delegation metrics for a trace phase.
+    
+    Parameters:
+    	phase (Any): Trace phase whose outputs are updated.
+    	prediction (Any): Completed RLM prediction used to derive usage and termination details.
+    	started (float): Monotonic start time used to calculate elapsed duration.
+    	recursive_executor (RecursiveRLMExecutor | None): Executor providing recursive-call metrics.
+    	metrics (Any): Execution metrics used when recursive metrics are unavailable.
+    
+    Returns:
+    	Any: The original prediction.
+    """
     final_reasoning = getattr(prediction, "final_reasoning", None)
     termination_mode = (
         "native_extraction_fallback" if final_reasoning == "Extract forced final output" else "typed_submit"
@@ -106,7 +137,17 @@ class ExecutionTraceAssembler:
         context: RLMExecutionContext,
         kwargs: Mapping[str, Any],
     ) -> Any:
-        """Run one native RLM invocation under the Turn-scoped tracing context."""
+        """
+        Execute one native RLM invocation within a traced turn phase.
+        
+        Parameters:
+        	rlm (Any): The native RLM instance to invoke.
+        	context (RLMExecutionContext): Execution settings, models, delegation metrics, and interpreter state.
+        	kwargs (Mapping[str, Any]): Keyword arguments passed to the RLM invocation.
+        
+        Returns:
+        	Any: The RLM prediction.
+        """
         started = time.perf_counter()
         trace_callback = _RLMTraceCallback(
             root_lm=context.execution.models.root_lm,
@@ -160,6 +201,7 @@ class ExecutionTraceAssembler:
 
     @staticmethod
     def _record_attachment_accesses(context: RLMExecutionContext) -> None:
+        """Record interpreter attachment accesses in the execution capabilities when supported."""
         drain_accesses = getattr(context.execution.interpreter, "drain_context_accesses", None)
         record_accesses = getattr(context.capabilities, "record_attachment_accesses", None)
         if callable(drain_accesses) and callable(record_accesses):

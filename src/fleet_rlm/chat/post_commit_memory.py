@@ -56,7 +56,7 @@ class OwnedPostCommitMemoryPromotion:
         return PostCommitPromotionAttempt("completed", result)
 
     async def wait_owned(self) -> None:
-        """Settle started work before the prepared resources it uses are released."""
+        """Wait for the started promotion task to settle, suppressing any exceptions."""
         task = self._task
         if task is None:
             return

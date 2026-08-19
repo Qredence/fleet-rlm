@@ -437,13 +437,13 @@ class StrictDaytonaEvaluationLifecycle:
 
     async def _cleanup(self, interpreter: DaytonaCodeInterpreter | None, sandbox: Any) -> BaseException | None:
         """
-        Attempt interpreter shutdown and sandbox deletion, preserving cleanup failures during cancellation.
-
+        Shut down the interpreter and delete the sandbox, retaining the first cleanup error.
+        
         Returns:
-            BaseException | None: The first cleanup error, or `None` when cleanup succeeds.
-
+            BaseException | None: The first cleanup error, or `None` if cleanup succeeds.
+        
         Raises:
-            asyncio.CancelledError: If the caller is cancelled while sandbox deletion is pending.
+            asyncio.CancelledError: If cancellation occurs while sandbox deletion is pending.
         """
         cleanup_error: BaseException | None = None
         if interpreter is not None:

@@ -39,11 +39,36 @@ def close_child_runtime_sync(
     confirm_timeout_s: float = CHILD_DELETE_CONFIRM_TIMEOUT_S,
     confirm_poll_interval_s: float = CHILD_DELETE_CONFIRM_POLL_S,
 ) -> None:
-    """Shutdown the interpreter, then settle provider cleanup and admission."""
+    """
+    Shutdown the interpreter and complete provider cleanup for a recursive child runtime.
+    
+    Parameters:
+        loop (Any): Event loop used to schedule asynchronous cleanup.
+        platform (SandboxPlatform): Sandbox provider platform.
+        sandbox (Any): Sandbox instance to clean up.
+        sandbox_id (str): Identifier of the sandbox.
+        mount_path (str): POSIX mount path whose files are purged during cleanup.
+        interpreter (Any): Interpreter to shut down.
+        permit (DaytonaAdmissionPermit): Admission permit released after cleanup.
+        retain_pending_cleanup (Callable[[Future[Any]], None] | None): Callback for retaining cleanup that exceeds its timeout.
+        cleanup_result_timeout_s (float): Maximum time to wait for shutdown or cleanup results.
+        cleanup_child_runtime (Callable[..., Coroutine[Any, Any, None]] | None): Optional cleanup implementation.
+        confirm_timeout_s (float): Maximum time to wait for provider deletion confirmation.
+        confirm_poll_interval_s (float): Interval between provider deletion checks.
+    
+    Raises:
+        ChildRuntimeCleanupError: If shutdown or cleanup fails, or cleanup cannot be completed within the timeout.
+    """
     first_error: BaseException | None = None
     cleanup_fn = cleanup_child_runtime if cleanup_child_runtime is not None else cleanup_child_runtime_async
 
     def schedule_cleanup() -> tuple[Future[None], Any | None]:
+        """
+        Schedule asynchronous child-runtime cleanup.
+        
+        Returns:
+        	tuple[Future[None], Any | None]: The cleanup future and an optional coroutine handle.
+        """
         execution = schedule_owned_close(
             loop=loop,
             build=lambda: cleanup_fn(
@@ -89,6 +114,9 @@ def close_child_runtime_sync(
                 retain_pending_cleanup(marker)
 
             def finish_quarantine() -> None:
+                """
+                Completes quarantined runtime shutdown and cleanup, signaling the pending completion marker when all work finishes.
+                """
                 quarantine_error: BaseException | None = None
                 marker_pending = False
                 try:
@@ -103,6 +131,12 @@ def close_child_runtime_sync(
                         marker_pending = marker is not None
 
                         def finish_marker(done: Future[None]) -> None:
+                            """
+                            Completes the cleanup marker with the quarantine or cleanup error, if any.
+                            
+                            Parameters:
+                            	done (Future[None]): Future whose completion status determines the cleanup result.
+                            """
                             error = quarantine_error
                             try:
                                 cleanup_error = done.exception()
@@ -182,7 +216,7 @@ async def cleanup_after_failed_acquire(
     sandbox_id: str | None,
     permit: DaytonaAdmissionPermit,
 ) -> None:
-    """Delete any partially acquired Sandbox before releasing admission."""
+    """Delete any partially acquired sandbox and release the admission permit."""
     try:
         if sandbox is not None:
             await platform.delete(sandbox_id if sandbox_id is not None else sandbox)
@@ -202,7 +236,20 @@ async def cleanup_child_runtime_async(
     confirm_poll_interval_s: float = CHILD_DELETE_CONFIRM_POLL_S,
     purge: Callable[[Any, str], Awaitable[None]] | None = None,
 ) -> None:
-    """Purge, delete, confirm absence, and release one child lease."""
+    """
+    Purge and delete a recursive-child sandbox, confirm its provider-side absence, and release its admission permit.
+    
+    Parameters:
+        sandbox_id (str): Identifier of the sandbox being cleaned up.
+        mount_path (str): POSIX mount path whose regular files are purged.
+        confirm (Callable): Function used to confirm provider-side sandbox absence.
+        confirm_timeout_s (float): Maximum time allowed for absence confirmation.
+        confirm_poll_interval_s (float): Interval between absence confirmation checks.
+        purge (Callable | None): Optional function used to purge files from the sandbox.
+    
+    Raises:
+        ChildRuntimeCleanupError: If cleanup fails or provider-side absence is not confirmed.
+    """
     purge_fn = purge if purge is not None else purge_regular_files
     lease = SandboxLease(
         kind="recursive_child",
@@ -229,7 +276,15 @@ async def cleanup_child_runtime_async(
 
 
 async def purge_regular_files(sandbox: Any, mount_path: str) -> None:
-    """Delete all files and child directories contained within one subpath."""
+    """
+    Delete contained files and directories under a POSIX mount path.
+    
+    Parameters:
+    	sandbox (Any): Sandbox whose filesystem is being cleaned.
+    	mount_path (str): Root path whose contents should be deleted.
+    
+    Files are deleted before directories, and entries outside the mount path or without a valid path are ignored.
+    """
     root = PurePosixPath(mount_path)
     entries = await sandbox.fs.list_files(str(root), depth=None)
     files: list[PurePosixPath] = []

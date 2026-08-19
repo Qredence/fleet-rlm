@@ -42,6 +42,12 @@ class DetailRelay:
     """Thread-safe bounded relay retaining lifecycle-critical details."""
 
     def __init__(self, *, maxsize: int = MAX_DETAIL_EVENTS) -> None:
+        """
+        Initialize a bounded relay for runtime event details.
+        
+        Parameters:
+            maxsize (int): Maximum number of ordinary details to retain. Values below zero are treated as zero; lifecycle-critical details remain retainable.
+        """
         self._loop = asyncio.get_running_loop()
         # Step and Tool lifecycle are durable protocol signals, not optional
         # diagnostic detail. Keep them even while normal observation traffic is capped.
@@ -51,6 +57,7 @@ class DetailRelay:
         self.overflowed = False
 
     def publish(self, detail: RuntimeEventDetail) -> None:
+        """Publish a runtime detail to the relay from the current or another thread."""
         try:
             loop = asyncio.get_running_loop()
         except RuntimeError:
@@ -72,15 +79,27 @@ class DetailRelay:
 
     @staticmethod
     def _is_retained(detail: RuntimeEventDetail) -> bool:
+        """Determine whether a runtime detail is retained regardless of the ordinary event capacity."""
         return isinstance(detail, _RETAINED_DETAIL_TYPES)
 
     async def get(self) -> RuntimeEventDetail:
+        """Retrieve the next retained runtime event detail.
+        
+        Returns:
+        	RuntimeEventDetail: The next available runtime event detail.
+        """
         detail = await self._queue.get()
         if not self._is_retained(detail):
             self._ordinary_count -= 1
         return detail
 
     def drain(self) -> list[RuntimeEventDetail]:
+        """
+        Remove and return all currently queued runtime event details.
+        
+        Returns:
+            list[RuntimeEventDetail]: The queued details in queue order.
+        """
         values: list[RuntimeEventDetail] = []
         while True:
             try:
@@ -102,6 +121,14 @@ class WorkerMonitor:
         context: RLMExecutionContext,
         drain_capabilities: Callable[[], tuple[ExecutionDetail, ...]],
     ) -> None:
+        """Initialize monitoring state for a worker execution.
+        
+        Parameters:
+        	worker: The worker whose execution is monitored.
+        	relay: The relay that provides runtime details.
+        	context: The execution context containing cancellation and deadline state.
+        	drain_capabilities: A callback that retrieves pending capability-generated details.
+        """
         self.worker = worker
         self.relay = relay
         self.context = context
@@ -110,6 +137,11 @@ class WorkerMonitor:
         self.caller_cancelled = False
 
     async def stream(self) -> AsyncIterator[RuntimeEventDetail]:
+        """Stream runtime event details while monitoring worker completion, cancellation, and deadlines.
+        
+        Yields:
+            RuntimeEventDetail: A detail emitted by the worker or its capabilities.
+        """
         pending: asyncio.Task[RuntimeEventDetail] | None = None
         completion = asyncio.create_task(self.worker.wait_until_done(), name="fleet-rlm-worker-completion")
         try:
@@ -148,6 +180,13 @@ class WorkerMonitor:
                 self.caller_cancelled |= await self.worker.settle_after_caller_cancellation()
 
     def raise_if_stopped(self) -> None:
+        """
+        Raise the exception associated with a stopped worker.
+        
+        Raises:
+            asyncio.CancelledError: If the caller cancelled the observation.
+            BaseException: The worker's intended stop exception, when one was recorded.
+        """
         if self.caller_cancelled:
             self.worker.consume_exception()
             raise asyncio.CancelledError
@@ -162,16 +201,34 @@ class ObservationSession:
     """Project worker details into recorded Runtime Events and bounded outcome details."""
 
     def __init__(self, run_id: UUID, session_id: UUID, *, maxsize: int = MAX_DETAIL_EVENTS) -> None:
+        """Initialize an observation session for a run and session.
+        
+        Parameters:
+        	run_id (UUID): Identifier of the run associated with the session.
+        	session_id (UUID): Identifier of the session associated with the run.
+        	maxsize (int): Maximum number of ordinary execution details retained by the session.
+        """
         self._recorder = EventRecorder(run_id, session_id)
         self._relay = DetailRelay(maxsize=maxsize)
         self._details: list[ExecutionDetail] = []
 
     @property
     def details(self) -> list[ExecutionDetail]:
+        """
+        Accesses the execution details collected during the observation session.
+        
+        Returns:
+        	list[ExecutionDetail]: The collected execution details.
+        """
         return self._details
 
     @property
     def overflowed(self) -> bool:
+        """Indicates whether the relay dropped ordinary details after reaching its capacity.
+        
+        Returns:
+        	bool: `True` if ordinary details were dropped, `False` otherwise.
+        """
         return self._relay.overflowed
 
     def publish(self, detail: RuntimeEventDetail) -> None:
@@ -179,6 +236,15 @@ class ObservationSession:
         self._relay.publish(detail)
 
     def record(self, detail: RuntimeEventDetail) -> RuntimeEvent:
+        """
+        Record a runtime event and retain non-status details for the execution outcome.
+        
+        Parameters:
+        	detail (RuntimeEventDetail): Runtime detail to record.
+        
+        Returns:
+        	RuntimeEvent: The recorded runtime event.
+        """
         if not isinstance(detail, Status):
             self._details.append(cast(ExecutionDetail, detail))
         return self._recorder.record(detail)

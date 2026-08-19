@@ -28,14 +28,14 @@ class _Fs:
 
     async def list_files(self, _root: str, *, depth: int | None) -> list[SimpleNamespace]:
         """
-        List tracked files at the supported filesystem traversal depth.
-
+        List all tracked files and directories using unbounded traversal.
+        
         Parameters:
             _root (str): Root path for the listing.
-            depth (int | None): An unbounded traversal is required.
-
+            depth (int | None): Must be `None` to request unbounded traversal.
+        
         Returns:
-            list[SimpleNamespace]: File entries sorted by path.
+            list[SimpleNamespace]: File entries followed by directory entries, with each group sorted by path.
         """
         assert depth is None
         return [
@@ -45,11 +45,11 @@ class _Fs:
 
     async def delete_file(self, path: str, *, recursive: bool = False) -> None:
         """
-        Delete a tracked file and record the deletion.
-
+        Remove a tracked file or directory and record its path.
+        
         Parameters:
-            path (str): Path of the file or directory to delete.
-            recursive (bool): Whether a directory deletion is recursive.
+            path (str): Path of the file or directory to remove.
+            recursive (bool): Whether to remove the directory and its descendants.
         """
         if recursive:
             self.files.difference_update(
@@ -94,7 +94,7 @@ class _Platform:
         self.deleted.append(sandbox_id)
 
     async def get(self, _sandbox_id: str) -> None:
-        """Report every deleted Sandbox as already absent (explicit not-found)."""
+        """Treat every sandbox lookup as absent."""
         return None
 
 

@@ -34,6 +34,16 @@ def _layout(tmp_path: Path) -> tuple[Path, Path]:
 
 
 def _run_stat(tmp_path: Path, relative: str, **overrides: object) -> tuple[dict[str, object], LocalProcess]:
+    """Run a workspace-agent stat operation with configurable arguments.
+    
+    Parameters:
+        tmp_path (Path): Temporary directory used to create the workspace.
+        relative (str): Workspace-relative path to inspect.
+        **overrides (object): Argument values that override the default stat request.
+    
+    Returns:
+        tuple[dict[str, object], LocalProcess]: The stat payload and simulated process.
+    """
     from fleet_rlm.daytona.workspace_agent import run_workspace_agent
 
     volume_root, root = _layout(tmp_path)

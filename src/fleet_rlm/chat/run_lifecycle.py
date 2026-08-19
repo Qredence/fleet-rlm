@@ -266,21 +266,21 @@ class RunLifecycleService:
         memory_intents_builder: MemoryIntentBuilder | None = None,
     ) -> RunSettlement:
         """
-        Finalize a Run with a successful outcome or record its failure.
-
+        Finalize a claimed Run by committing a successful Turn or recording a failure.
+        
         Parameters:
-            run (ClaimedRun): The claimed Run being finalized.
-            resolution (RLMOutcome | RunFailure): The execution outcome or failure to record.
-            artifact_sink (RunArtifactSink | None): Storage for staged and promoted artifacts.
-            result_snapshot_sink (ResultSnapshotSink | None): Storage for the optional result snapshot.
-
+            run (ClaimedRun): The claimed Run to finalize.
+            resolution (RLMOutcome | RunFailure): The successful outcome or failure result.
+            artifact_sink (RunArtifactSink | None): Storage used to read, publish, and clean up artifacts.
+        
         Returns:
-            RunSettlement: The receipt for the committed turn or recorded failure.
-
+            RunSettlement: The receipt for the committed Turn or recorded failure.
+        
         Raises:
-            RunLifecycleUnavailableError: If the Run claim has been revoked.
+            RunLifecycleUnavailableError: If the claim has been revoked.
             RunStateError: If the outcome contains an invalid state.
             RunValidationError: If artifacts are provided without an artifact sink.
+            asyncio.CancelledError: If finalization or required cleanup is cancelled.
         """
         if run.authority.revoked:
             raise RunLifecycleUnavailableError("Turn claim is no longer available")
@@ -537,6 +537,20 @@ class RunLifecycleService:
         candidates: tuple[ArtifactCandidate, ...],
         sink: RunArtifactSink | None,
     ) -> tuple[bytes, ...]:
+        """
+        Read and validate staged artifact candidates.
+        
+        Parameters:
+        	candidates (tuple[ArtifactCandidate, ...]): Artifact candidates to read and validate.
+        	sink (RunArtifactSink | None): Storage sink containing the staged artifacts.
+        
+        Returns:
+        	tuple[bytes, ...]: Validated artifact contents in candidate order, or an empty tuple when no sink is provided.
+        
+        Raises:
+        	RunIntegrityError: If an artifact's size or checksum does not match its candidate.
+        	asyncio.CancelledError: If cancellation is requested during reading or validation.
+        """
         if sink is None:
             return ()
         # Independent volume reads run concurrently; integrity validation stays
@@ -578,6 +592,18 @@ class RunLifecycleService:
         sink: RunArtifactSink | None,
         written: list[str],
     ) -> tuple[PromotedArtifact, ...]:
+        """
+        Publish validated artifact contents to durable storage.
+        
+        Parameters:
+        	candidates (tuple[ArtifactCandidate, ...]): Artifact metadata and destination paths.
+        	values (tuple[bytes, ...]): Validated contents corresponding to the candidates.
+        	sink (RunArtifactSink | None): Storage sink used to write the artifacts.
+        	written (list[str]): List updated with each destination path before writing.
+        
+        Returns:
+        	tuple[PromotedArtifact, ...]: Promoted artifacts created from the written candidates.
+        """
         if sink is None:
             return ()
         artifacts: list[PromotedArtifact] = []
@@ -642,7 +668,7 @@ class RunLifecycleService:
         sink: RunArtifactSink | None,
         candidates: tuple[ArtifactCandidate, ...],
     ) -> None:
-        """Remove staging candidates, detached when a cleanup supervisor is available."""
+        """Remove staged artifact files, using the cleanup supervisor when available and falling back to inline cleanup when necessary."""
         if self._cleanup is not None and sink is not None and candidates:
             staging_paths = tuple(candidate.staging_path for candidate in candidates)
 
@@ -661,6 +687,16 @@ class RunLifecycleService:
         sink: RunArtifactSink | ResultSnapshotSink | None,
         locations,
     ) -> bool:
+        """
+        Removes supplied artifact or snapshot locations and reports whether cancellation occurred.
+        
+        Parameters:
+            sink: Sink used to remove the locations.
+            locations: Locations to remove.
+        
+        Returns:
+            `True` if cancellation was requested during removal, `False` otherwise.
+        """
         if sink is None:
             return False
         cancellation_requested = False

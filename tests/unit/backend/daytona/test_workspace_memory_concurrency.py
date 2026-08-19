@@ -33,6 +33,20 @@ async def _run_member(
     learning: str = "",
     delay_operation: str,
 ) -> _MemberResult:
+    """
+    Run a delayed workspace-memory mutation in a subprocess.
+    
+    Parameters:
+        volume_root (Path): Shared volume used by the subprocess.
+        action (str): Mutation to perform: ``append``, ``edit``, or ``delete``.
+        record (str): Record content for an append operation.
+        memory_id (str): Target record identifier for an edit or delete operation.
+        learning (str): Replacement learning content for an edit operation.
+        delay_operation (str): Operation phase at which to inject the delay.
+    
+    Returns:
+        _MemberResult: The subprocess return code and captured output.
+    """
     volume_root.mkdir(parents=True, exist_ok=True)
     script = textwrap.dedent(
         f"""
