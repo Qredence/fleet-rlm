@@ -151,10 +151,10 @@ class _SubprocessAgentProcess:
     async def code_run(self, code: str, **_kwargs) -> SimpleNamespace:
         """
         Run generated agent code in a subprocess after synchronizing concurrent calls.
-        
+
         Parameters:
             code (str): Python source code for the generated agent.
-        
+
         Returns:
             SimpleNamespace: Contains the subprocess exit status in `exit_code` and standard output in `result`.
         """
@@ -187,14 +187,16 @@ class _DelayedDeleteBeforeUnlinkAgentProcess:
 
     async def code_run(self, code: str, **_kwargs) -> SimpleNamespace:
         """
-        Runs generated agent code in a subprocess after coordinating concurrent executions and injecting race-condition synchronization for delete or write operations.
-        
+        Runs generated agent code in a subprocess after coordinating concurrent
+        executions and injecting race-condition synchronization for delete or
+        write operations.
+
         Parameters:
-        	code (str): Generated agent code to execute.
-        	_kwargs: Additional execution arguments, accepted for interface compatibility.
-        
+                code (str): Generated agent code to execute.
+                _kwargs: Additional execution arguments, accepted for interface compatibility.
+
         Returns:
-        	SimpleNamespace: Contains the subprocess exit code in `exit_code` and standard output in `result`.
+                SimpleNamespace: Contains the subprocess exit code in `exit_code` and standard output in `result`.
         """
         self.calls += 1
         if self.calls >= 2:

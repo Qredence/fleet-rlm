@@ -73,11 +73,11 @@ def _promote_memory_candidates(
 ) -> Any:
     """
     Promote memory candidates through the configured memory store.
-    
+
     Parameters:
         candidates (tuple[Any, ...]): Memory candidates to promote.
         allowed_categories (tuple[str, ...]): Candidate categories eligible for promotion.
-    
+
     Returns:
         MemoryCandidatePromotionResult: Counts and reasons describing the promotion outcome.
     """
@@ -198,14 +198,14 @@ class _DaytonaEnvironmentProvider:
     async def acquire(self, run: ClaimedRun, *, deadline: float) -> RunEnvironment:
         """
         Acquire and configure a Daytona-backed environment for a run.
-        
+
         Parameters:
             run (ClaimedRun): Run whose session, access, and identifiers determine the environment.
             deadline (float): Absolute time limit for environment acquisition and setup.
-        
+
         Returns:
             RunEnvironment: Configured environment with run sinks, cleanup, memory services, and child-runtime creation.
-        
+
         Raises:
             RunPreparationUnavailableError: If environment admission times out.
             RunPreparationTimeoutError: If lease acquisition or environment setup exceeds the deadline.

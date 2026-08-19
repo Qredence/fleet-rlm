@@ -126,7 +126,10 @@ async def test_runner_uses_native_path_for_plain_greeting() -> None:
 async def test_runner_uses_supported_async_call_and_returns_typed_outcome(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Verify supported asynchronous execution produces a typed successful outcome with events, usage metrics, configured tools, and execution tracing."""
+    """Verify supported asynchronous execution produces a typed successful outcome.
+
+    The outcome includes events, usage metrics, configured tools, and execution tracing.
+    """
     from fleet_rlm.chat.session_context import SessionContextManifest
     from fleet_rlm.files.workspace_models import WorkspaceCapabilityMetadata
     from fleet_rlm.rlm.context import (
@@ -229,11 +232,11 @@ async def test_runner_uses_supported_async_call_and_returns_typed_outcome(
     def tracked_phase_span(name: str, *, inputs: dict[str, object]) -> Iterator[SimpleNamespace]:
         """
         Record a phase span and provide an object for recording its outputs.
-        
+
         Parameters:
             name (str): Name of the phase span.
             inputs (dict[str, object]): Inputs associated with the phase span.
-        
+
         Yields:
             SimpleNamespace: Object with a no-op `set_outputs` method.
         """

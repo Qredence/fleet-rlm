@@ -40,9 +40,9 @@ async def test_waiter_cancellation_does_not_cancel_owned_effect() -> None:
 
     async def work() -> str:
         """Wait for the release event, then return the settled result.
-        
+
         Returns:
-        	str: The string "settled".
+                str: The string "settled".
         """
         await release.wait()
         return "settled"
@@ -69,9 +69,9 @@ async def test_waiter_cancellation_does_not_hide_later_effect_failure() -> None:
     async def fail_later() -> str:
         """
         Wait for the release signal, then raise a late failure.
-        
+
         Returns:
-        	str: This coroutine does not return normally.
+                str: This coroutine does not return normally.
         """
         await release.wait()
         raise RuntimeError("late failure")

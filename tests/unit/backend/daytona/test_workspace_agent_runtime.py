@@ -13,16 +13,16 @@ from fleet_rlm.daytona import workspace_agent_runtime as runtime
 def _request(volume: Path, root: Path, operation: str, relative: str, **overrides: object) -> dict[str, object]:
     """
     Build a workspace agent request with standard defaults and optional overrides.
-    
+
     Parameters:
-    	volume (Path): Workspace volume path.
-    	root (Path): Workspace root path.
-    	operation (str): Workspace operation to request.
-    	relative (str): Path relative to the workspace root.
-    	**overrides (object): Request fields that replace their default values.
-    
+        volume (Path): Workspace volume path.
+        root (Path): Workspace root path.
+        operation (str): Workspace operation to request.
+        relative (str): Path relative to the workspace root.
+        **overrides (object): Request fields that replace their default values.
+
     Returns:
-    	dict[str, object]: The assembled workspace agent request.
+        dict[str, object]: The assembled workspace agent request.
     """
     request: dict[str, object] = {
         "protocol_version": runtime.AGENT_PROTOCOL_VERSION,

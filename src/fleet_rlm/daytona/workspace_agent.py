@@ -115,7 +115,7 @@ def build_workspace_agent_code(
 ) -> str:
     """
     Construct a complete Workspace Agent script for a filesystem or memory operation.
-    
+
     Parameters:
         volume_root (str): Workspace volume root.
         root (str): Root directory for the operation.
@@ -133,10 +133,10 @@ def build_workspace_agent_code(
         checksum (bool): Whether to include a checksum in the result.
         memory_id (str): Identifier of the memory object.
         expected_sha256 (str): Expected SHA-256 checksum for verification.
-    
+
     Returns:
         str: A complete script containing the runtime and encoded operation request.
-    
+
     Raises:
         WorkspaceAgentProtocolError: If the encoded request exceeds the protocol size limit.
     """
@@ -172,9 +172,9 @@ def build_workspace_agent_code(
 
 def _workspace_agent_runtime_checksum() -> str:
     """Compute the SHA-256 checksum of the packaged workspace agent runtime source.
-    
+
     Returns:
-    	str: The hexadecimal SHA-256 checksum of the runtime source.
+        str: The hexadecimal SHA-256 checksum of the runtime source.
     """
     return hashlib.sha256(_workspace_agent_runtime_source().encode("utf-8")).hexdigest()
 
@@ -185,12 +185,12 @@ def build_installed_workspace_agent_source() -> str:
     # the manifest covers the bytes that were actually installed.
     """
     Return the validated source code for the installed Workspace Agent runtime.
-    
+
     Raises:
-    	WorkspaceAgentProtocolError: If the runtime source contains a syntax error.
-    
+        WorkspaceAgentProtocolError: If the runtime source contains a syntax error.
+
     Returns:
-    	str: The packaged Workspace Agent runtime source.
+        str: The packaged Workspace Agent runtime source.
     """
     source = _workspace_agent_runtime_source()
     try:
@@ -207,13 +207,13 @@ def build_workspace_agent_request_code(arguments: dict[str, object]) -> str:
     # state call-local.
     """
     Builds a compact script that invokes the installed Workspace Agent with a protocol-tagged request.
-    
+
     Args:
         arguments: Operation-specific request fields.
-    
+
     Returns:
         A Python script that executes the installed agent and prints its response.
-    
+
     Raises:
         WorkspaceAgentProtocolError: If the encoded request exceeds the maximum size.
     """
@@ -436,12 +436,12 @@ def run_workspace_agent(
 ) -> dict[str, object]:
     """
     Execute a workspace agent operation synchronously.
-    
+
     Parameters:
         sandbox (Any): Sandbox used to execute the operation.
         timeout_s (float): Maximum execution time in seconds.
         **arguments (Any): Operation parameters, including the requested workspace operation.
-    
+
     Returns:
         dict[str, object]: The decoded workspace operation result.
     """
@@ -463,11 +463,11 @@ async def run_workspace_agent_async(
 ) -> dict[str, object]:
     """
     Execute a workspace operation asynchronously through the remote agent.
-    
+
     Parameters:
         timeout_s (float): Maximum execution time in seconds.
         **arguments (Any): Operation name and operation-specific parameters.
-    
+
     Returns:
         dict[str, object]: The decoded operation result.
     """

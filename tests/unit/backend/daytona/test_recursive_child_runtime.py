@@ -29,11 +29,11 @@ class _Fs:
     async def list_files(self, _root: str, *, depth: int | None) -> list[SimpleNamespace]:
         """
         List all tracked files and directories using unbounded traversal.
-        
+
         Parameters:
             _root (str): Root path for the listing.
             depth (int | None): Must be `None` to request unbounded traversal.
-        
+
         Returns:
             list[SimpleNamespace]: File entries followed by directory entries, with each group sorted by path.
         """
@@ -46,7 +46,7 @@ class _Fs:
     async def delete_file(self, path: str, *, recursive: bool = False) -> None:
         """
         Remove a tracked file or directory and record its path.
-        
+
         Parameters:
             path (str): Path of the file or directory to remove.
             recursive (bool): Whether to remove the directory and its descendants.

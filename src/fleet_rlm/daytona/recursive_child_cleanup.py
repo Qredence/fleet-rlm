@@ -41,7 +41,7 @@ def close_child_runtime_sync(
 ) -> None:
     """
     Shutdown the interpreter and complete provider cleanup for a recursive child runtime.
-    
+
     Parameters:
         loop (Any): Event loop used to schedule asynchronous cleanup.
         platform (SandboxPlatform): Sandbox provider platform.
@@ -50,12 +50,13 @@ def close_child_runtime_sync(
         mount_path (str): POSIX mount path whose files are purged during cleanup.
         interpreter (Any): Interpreter to shut down.
         permit (DaytonaAdmissionPermit): Admission permit released after cleanup.
-        retain_pending_cleanup (Callable[[Future[Any]], None] | None): Callback for retaining cleanup that exceeds its timeout.
+        retain_pending_cleanup (Callable[[Future[Any]], None] | None): Callback
+            for retaining cleanup that exceeds its timeout.
         cleanup_result_timeout_s (float): Maximum time to wait for shutdown or cleanup results.
         cleanup_child_runtime (Callable[..., Coroutine[Any, Any, None]] | None): Optional cleanup implementation.
         confirm_timeout_s (float): Maximum time to wait for provider deletion confirmation.
         confirm_poll_interval_s (float): Interval between provider deletion checks.
-    
+
     Raises:
         ChildRuntimeCleanupError: If shutdown or cleanup fails, or cleanup cannot be completed within the timeout.
     """
@@ -65,9 +66,9 @@ def close_child_runtime_sync(
     def schedule_cleanup() -> tuple[Future[None], Any | None]:
         """
         Schedule asynchronous child-runtime cleanup.
-        
+
         Returns:
-        	tuple[Future[None], Any | None]: The cleanup future and an optional coroutine handle.
+                tuple[Future[None], Any | None]: The cleanup future and an optional coroutine handle.
         """
         execution = schedule_owned_close(
             loop=loop,
@@ -115,7 +116,8 @@ def close_child_runtime_sync(
 
             def finish_quarantine() -> None:
                 """
-                Completes quarantined runtime shutdown and cleanup, signaling the pending completion marker when all work finishes.
+                Completes quarantined runtime shutdown and cleanup, signaling the
+                pending completion marker when all work finishes.
                 """
                 quarantine_error: BaseException | None = None
                 marker_pending = False
@@ -133,9 +135,9 @@ def close_child_runtime_sync(
                         def finish_marker(done: Future[None]) -> None:
                             """
                             Completes the cleanup marker with the quarantine or cleanup error, if any.
-                            
+
                             Parameters:
-                            	done (Future[None]): Future whose completion status determines the cleanup result.
+                                done (Future[None]): Future whose completion status determines the cleanup result.
                             """
                             error = quarantine_error
                             try:
@@ -238,7 +240,7 @@ async def cleanup_child_runtime_async(
 ) -> None:
     """
     Purge and delete a recursive-child sandbox, confirm its provider-side absence, and release its admission permit.
-    
+
     Parameters:
         sandbox_id (str): Identifier of the sandbox being cleaned up.
         mount_path (str): POSIX mount path whose regular files are purged.
@@ -246,7 +248,7 @@ async def cleanup_child_runtime_async(
         confirm_timeout_s (float): Maximum time allowed for absence confirmation.
         confirm_poll_interval_s (float): Interval between absence confirmation checks.
         purge (Callable | None): Optional function used to purge files from the sandbox.
-    
+
     Raises:
         ChildRuntimeCleanupError: If cleanup fails or provider-side absence is not confirmed.
     """
@@ -278,11 +280,11 @@ async def cleanup_child_runtime_async(
 async def purge_regular_files(sandbox: Any, mount_path: str) -> None:
     """
     Delete contained files and directories under a POSIX mount path.
-    
+
     Parameters:
-    	sandbox (Any): Sandbox whose filesystem is being cleaned.
-    	mount_path (str): Root path whose contents should be deleted.
-    
+        sandbox (Any): Sandbox whose filesystem is being cleaned.
+        mount_path (str): Root path whose contents should be deleted.
+
     Files are deleted before directories, and entries outside the mount path or without a valid path are ignored.
     """
     root = PurePosixPath(mount_path)

@@ -66,10 +66,10 @@ def build_child_runtime_factory(
 ) -> ChildRuntimeFactory:
     """
     Build a factory for acquiring disposable child-runtime leases for recursive calls.
-    
+
     The factory waits until the configured deadline for each acquisition and retains
     late acquisitions for cleanup.
-    
+
     Parameters:
         volume_id (str): Identifier of the volume mounted in child runtimes.
         mount_path (str): Mount path used by child runtimes.
@@ -80,7 +80,7 @@ def build_child_runtime_factory(
         execution_output_cap (int): Maximum output size for each child runtime.
         is_authorized (Callable[[], bool] | None): Optional callback that determines
             whether child-runtime creation remains authorized.
-    
+
     Returns:
         ChildRuntimeFactory: A callable factory that accepts a recursive call index
             and returns its leased child runtime.
@@ -138,10 +138,10 @@ def build_child_runtime_factory(
         def __call__(self, call_index: int) -> ChildRuntimeLease:
             """
             Create a disposable child-runtime lease for a recursive call.
-            
+
             Parameters:
                 call_index (int): Index identifying the recursive call.
-            
+
             Returns:
                 ChildRuntimeLease: Lease for the acquired child runtime.
             """
@@ -251,7 +251,7 @@ async def _cleanup_child_runtime_async(
 ) -> None:
     """
     Clean up a child runtime and optionally confirm its sandbox deletion.
-    
+
     Parameters:
         sandbox_id (str): Identifier of the sandbox to clean up.
         mount_path (str): Path whose regular files are purged during cleanup.
@@ -283,12 +283,12 @@ async def _purge_regular_files(sandbox: Any, mount_path: str) -> None:
 def _sandbox_id(sandbox: Any) -> str:
     """
     Extracts the validated identifier from a sandbox.
-    
+
     Parameters:
-    	sandbox (Any): Sandbox whose identifier is retrieved.
-    
+        sandbox (Any): Sandbox whose identifier is retrieved.
+
     Returns:
-    	str: The sandbox identifier.
+        str: The sandbox identifier.
     """
     return sandbox_id_for(sandbox)
 

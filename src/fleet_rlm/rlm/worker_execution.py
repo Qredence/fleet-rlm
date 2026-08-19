@@ -37,7 +37,7 @@ class WorkerOwnership:
     async def wait_owned(self) -> None:
         """
         Wait for the worker and all blocking resource owners to settle.
-        
+
         Raises:
             BaseException: The first error raised while settling a blocking resource owner.
         """
@@ -102,15 +102,15 @@ async def invoke_native_rlm(
 ) -> Any:
     """
     Invoke the RLM operation using the caller-owned interpreter when required.
-    
+
     Parameters:
         rlm (Any): RLM object to invoke.
         context (RLMExecutionContext): Execution context containing the caller-owned interpreter.
         kwargs (Mapping[str, Any]): Keyword arguments passed to the RLM operation.
-    
+
     Returns:
         Any: Result produced by the RLM operation.
-    
+
     Raises:
         RLMConfigError: If an exact native `dspy.RLM` instance is invoked without a caller-owned interpreter.
     """
@@ -144,7 +144,7 @@ async def _run_in_worker(
 ) -> T:
     """
     Execute the RLM operation in a worker thread.
-    
+
     Returns:
         The result produced by the RLM operation.
     """

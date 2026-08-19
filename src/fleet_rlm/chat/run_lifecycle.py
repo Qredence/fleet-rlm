@@ -267,15 +267,15 @@ class RunLifecycleService:
     ) -> RunSettlement:
         """
         Finalize a claimed Run by committing a successful Turn or recording a failure.
-        
+
         Parameters:
             run (ClaimedRun): The claimed Run to finalize.
             resolution (RLMOutcome | RunFailure): The successful outcome or failure result.
             artifact_sink (RunArtifactSink | None): Storage used to read, publish, and clean up artifacts.
-        
+
         Returns:
             RunSettlement: The receipt for the committed Turn or recorded failure.
-        
+
         Raises:
             RunLifecycleUnavailableError: If the claim has been revoked.
             RunStateError: If the outcome contains an invalid state.
@@ -539,17 +539,18 @@ class RunLifecycleService:
     ) -> tuple[bytes, ...]:
         """
         Read and validate staged artifact candidates.
-        
+
         Parameters:
-        	candidates (tuple[ArtifactCandidate, ...]): Artifact candidates to read and validate.
-        	sink (RunArtifactSink | None): Storage sink containing the staged artifacts.
-        
+                candidates (tuple[ArtifactCandidate, ...]): Artifact candidates to read and validate.
+                sink (RunArtifactSink | None): Storage sink containing the staged artifacts.
+
         Returns:
-        	tuple[bytes, ...]: Validated artifact contents in candidate order, or an empty tuple when no sink is provided.
-        
+                tuple[bytes, ...]: Validated artifact contents in candidate order,
+                    or an empty tuple when no sink is provided.
+
         Raises:
-        	RunIntegrityError: If an artifact's size or checksum does not match its candidate.
-        	asyncio.CancelledError: If cancellation is requested during reading or validation.
+                RunIntegrityError: If an artifact's size or checksum does not match its candidate.
+                asyncio.CancelledError: If cancellation is requested during reading or validation.
         """
         if sink is None:
             return ()
@@ -594,15 +595,15 @@ class RunLifecycleService:
     ) -> tuple[PromotedArtifact, ...]:
         """
         Publish validated artifact contents to durable storage.
-        
+
         Parameters:
-        	candidates (tuple[ArtifactCandidate, ...]): Artifact metadata and destination paths.
-        	values (tuple[bytes, ...]): Validated contents corresponding to the candidates.
-        	sink (RunArtifactSink | None): Storage sink used to write the artifacts.
-        	written (list[str]): List updated with each destination path before writing.
-        
+                candidates (tuple[ArtifactCandidate, ...]): Artifact metadata and destination paths.
+                values (tuple[bytes, ...]): Validated contents corresponding to the candidates.
+                sink (RunArtifactSink | None): Storage sink used to write the artifacts.
+                written (list[str]): List updated with each destination path before writing.
+
         Returns:
-        	tuple[PromotedArtifact, ...]: Promoted artifacts created from the written candidates.
+                tuple[PromotedArtifact, ...]: Promoted artifacts created from the written candidates.
         """
         if sink is None:
             return ()
@@ -668,7 +669,10 @@ class RunLifecycleService:
         sink: RunArtifactSink | None,
         candidates: tuple[ArtifactCandidate, ...],
     ) -> None:
-        """Remove staged artifact files, using the cleanup supervisor when available and falling back to inline cleanup when necessary."""
+        """Remove staged artifact files using the cleanup supervisor when available.
+
+        Falls back to inline cleanup when the supervisor is unavailable.
+        """
         if self._cleanup is not None and sink is not None and candidates:
             staging_paths = tuple(candidate.staging_path for candidate in candidates)
 
@@ -689,11 +693,11 @@ class RunLifecycleService:
     ) -> bool:
         """
         Removes supplied artifact or snapshot locations and reports whether cancellation occurred.
-        
+
         Parameters:
             sink: Sink used to remove the locations.
             locations: Locations to remove.
-        
+
         Returns:
             `True` if cancellation was requested during removal, `False` otherwise.
         """

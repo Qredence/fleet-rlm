@@ -23,9 +23,9 @@ class OwnedEffectWait(Generic[T]):
     def done(self) -> bool:
         """
         Determine whether the owned effect has completed.
-        
+
         Returns:
-        	bool: `True` if the effect has completed, `False` otherwise.
+                bool: `True` if the effect has completed, `False` otherwise.
         """
         return self._effect.done()
 
@@ -33,7 +33,7 @@ class OwnedEffectWait(Generic[T]):
     def pending(self) -> bool:
         """
         Indicates whether the effect remains incomplete after the wait.
-        
+
         Returns:
             bool: `true` if the effect is still pending, `false` otherwise.
         """
@@ -50,9 +50,9 @@ class OwnedEffect(Generic[T]):
     def __init__(self, task: asyncio.Future[T]) -> None:
         """
         Initialize an owned effect from an existing asynchronous task.
-        
+
         Parameters:
-        	task (asyncio.Future[T]): The task or future representing the effect.
+                task (asyncio.Future[T]): The task or future representing the effect.
         """
         self._task = task
         self._caller_cancelled = False
@@ -79,7 +79,7 @@ class OwnedEffect(Generic[T]):
     def caller_cancelled(self) -> bool:
         """
         Indicates whether a caller waiting on the effect requested cancellation.
-        
+
         Returns:
             bool: `true` if a caller requested cancellation, `false` otherwise.
         """
@@ -110,14 +110,14 @@ class OwnedEffect(Generic[T]):
     async def settle(self, *, timeout: float | None = None) -> OwnedEffectWait[T]:
         """
         Wait for the owned effect without cancelling it.
-        
+
         Caller cancellation is recorded while waiting, and a timeout leaves an incomplete
         effect pending for later observation. Negative timeout values are treated as zero.
-        
+
         Parameters:
             timeout (float | None): Maximum time to wait in seconds, or None to wait
                 without a deadline.
-        
+
         Returns:
             OwnedEffectWait[T]: Outcome describing caller cancellation and whether the
                 wait expired before the effect completed.

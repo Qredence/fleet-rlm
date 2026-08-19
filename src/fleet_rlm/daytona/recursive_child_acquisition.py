@@ -41,7 +41,7 @@ async def acquire_child_runtime(
 ) -> ChildRuntimeLease:
     """
     Acquire an ephemeral runtime for executing a recursive child operation.
-    
+
     Parameters:
         volume_id (str): Identifier of the volume mounted in the child sandbox.
         mount_path (str): Path where the volume is mounted.
@@ -51,10 +51,10 @@ async def acquire_child_runtime(
         deadline (float): Absolute event-loop time by which acquisition must complete.
         execution_timeout_s (int): Maximum execution time for the child runtime.
         execution_output_cap (int): Maximum output retained from child execution.
-    
+
     Returns:
         ChildRuntimeLease: Lease containing the child interpreter, sandbox metadata, and cleanup callback.
-    
+
     Raises:
         ChildRuntimeAuthorizationError: If the owning turn is no longer authorized.
         ChildRuntimeCleanupError: If acquisition fails and cleanup also fails.
@@ -123,12 +123,12 @@ def sandbox_id_for(sandbox: Any) -> str:
 def require_authorized(is_authorized: Callable[[], bool] | None) -> None:
     """
     Ensure the owning turn remains authorized.
-    
+
     Parameters:
-    	is_authorized (Callable[[], bool] | None): Authorization callback, or None to skip the check.
-    
+        is_authorized (Callable[[], bool] | None): Authorization callback, or None to skip the check.
+
     Raises:
-    	ChildRuntimeAuthorizationError: If the callback reports that the owning turn is no longer authorized.
+        ChildRuntimeAuthorizationError: If the callback reports that the owning turn is no longer authorized.
     """
     if is_authorized is not None and not is_authorized():
         raise ChildRuntimeAuthorizationError("Turn is no longer authorized")

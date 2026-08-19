@@ -20,13 +20,14 @@ from fleet_rlm.rlm.worker_execution import invoke_native_rlm
 def recursive_summary(executor: RecursiveRLMExecutor | None, metrics: Any | None = None) -> RecursiveCallSummary:
     """
     Summarize recursive execution metrics for an executor or metrics collector.
-    
+
     Parameters:
-    	executor (RecursiveRLMExecutor | None): Executor providing recursive metrics, if available.
-    	metrics (Any | None): Optional metrics collector used when no executor is available.
-    
+        executor (RecursiveRLMExecutor | None): Executor providing recursive metrics, if available.
+        metrics (Any | None): Optional metrics collector used when no executor is available.
+
     Returns:
-    	RecursiveCallSummary: Recursive execution metrics, a snapshot-derived summary, or zero-valued metrics when no source is available.
+        RecursiveCallSummary: Recursive execution metrics, a snapshot-derived
+            summary, or zero-valued metrics when no source is available.
     """
     if executor is not None:
         return executor.summary()
@@ -59,7 +60,7 @@ def record_phase_failure(
 ) -> None:
     """
     Record failure status, timing, recursive-call statistics, and delegation metrics for a trace phase.
-    
+
     Parameters:
         phase (Any): Trace phase receiving the failure outputs.
         started (float): Monotonic timestamp captured when the phase started.
@@ -92,16 +93,16 @@ def record_phase_success(
 ) -> Any:
     """
     Record successful completion details and recursive delegation metrics for a trace phase.
-    
+
     Parameters:
-    	phase (Any): Trace phase whose outputs are updated.
-    	prediction (Any): Completed RLM prediction used to derive usage and termination details.
-    	started (float): Monotonic start time used to calculate elapsed duration.
-    	recursive_executor (RecursiveRLMExecutor | None): Executor providing recursive-call metrics.
-    	metrics (Any): Execution metrics used when recursive metrics are unavailable.
-    
+        phase (Any): Trace phase whose outputs are updated.
+        prediction (Any): Completed RLM prediction used to derive usage and termination details.
+        started (float): Monotonic start time used to calculate elapsed duration.
+        recursive_executor (RecursiveRLMExecutor | None): Executor providing recursive-call metrics.
+        metrics (Any): Execution metrics used when recursive metrics are unavailable.
+
     Returns:
-    	Any: The original prediction.
+        Any: The original prediction.
     """
     final_reasoning = getattr(prediction, "final_reasoning", None)
     termination_mode = (
@@ -139,14 +140,14 @@ class ExecutionTraceAssembler:
     ) -> Any:
         """
         Execute one native RLM invocation within a traced turn phase.
-        
+
         Parameters:
-        	rlm (Any): The native RLM instance to invoke.
-        	context (RLMExecutionContext): Execution settings, models, delegation metrics, and interpreter state.
-        	kwargs (Mapping[str, Any]): Keyword arguments passed to the RLM invocation.
-        
+                rlm (Any): The native RLM instance to invoke.
+                context (RLMExecutionContext): Execution settings, models, delegation metrics, and interpreter state.
+                kwargs (Mapping[str, Any]): Keyword arguments passed to the RLM invocation.
+
         Returns:
-        	Any: The RLM prediction.
+                Any: The RLM prediction.
         """
         started = time.perf_counter()
         trace_callback = _RLMTraceCallback(

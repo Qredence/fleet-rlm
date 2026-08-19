@@ -131,12 +131,12 @@ class RunEventStream:
 
 def _terminal_status(exc: BaseException) -> TerminalStatus:
     """Map an exception to the terminal status of a run.
-    
+
     Parameters:
-    	exc (BaseException): The exception that ended the run.
-    
+        exc (BaseException): The exception that ended the run.
+
     Returns:
-    	TerminalStatus: The status associated with the exception.
+        TerminalStatus: The status associated with the exception.
     """
     if isinstance(exc, RunTerminalError):
         return cast(TerminalStatus, exc.status)
@@ -152,10 +152,10 @@ def _public_failure_message(exc: BaseException) -> str:
     # override is honored, matching ``sanitize_public_error``. Class-attr
     # defaults (currently all raise sites) fall through the same lookup.
     """Return a sanitized public message for a run failure.
-    
+
     Parameters:
         exc (BaseException): The exception describing the failure.
-    
+
     Returns:
         str: A user-facing failure message appropriate for the exception type.
     """
@@ -177,12 +177,12 @@ class RLMRunner:
     def stream(self, context: RLMExecutionContext) -> RunEventStream:
         """
         Create an event stream for an RLM execution.
-        
+
         Parameters:
-        	context (RLMExecutionContext): Context describing the execution to run.
-        
+                context (RLMExecutionContext): Context describing the execution to run.
+
         Returns:
-        	RunEventStream: Stream of execution events with access to the final outcome.
+                RunEventStream: Stream of execution events with access to the final outcome.
         """
         outcome: list[RLMOutcome] = []
         ownership = WorkerOwnership()
@@ -213,12 +213,12 @@ class RLMRunner:
     ) -> AsyncIterator[RuntimeEvent]:
         """
         Stream runtime events for an RLM execution and record its terminal outcome.
-        
+
         Parameters:
             context (RLMExecutionContext): Execution context containing capabilities and runtime state.
             outcome (list[RLMOutcome]): Mutable collection receiving the final execution outcome.
             ownership (WorkerOwnership): Worker lifecycle ownership for the execution.
-        
+
         Yields:
             RuntimeEvent: An event emitted during execution.
         """
@@ -273,17 +273,17 @@ class RLMRunner:
     ) -> AsyncIterator[RuntimeEvent]:
         """
         Execute the successful run path and publish its runtime events.
-        
+
         Parameters:
             context (RLMExecutionContext): Execution context for the run.
             outcome (list[RLMOutcome]): Mutable collection receiving the completed outcome.
             ownership (WorkerOwnership): Worker lifecycle ownership manager.
             prediction (list[Any]): Mutable collection receiving the worker prediction.
             started (float): Monotonic start timestamp used to calculate the duration.
-        
+
         Yields:
             RuntimeEvent: Events emitted during initialization, execution, and prediction reconciliation.
-        
+
         Raises:
             RunIntegrityFailureError: If the completed execution has unresolved integrity violations.
         """
@@ -327,14 +327,14 @@ class RLMRunner:
     ) -> AsyncIterator[RuntimeEvent]:
         """
         Emit initial execution status, preparation notices, and capability details.
-        
+
         Parameters:
             context (RLMExecutionContext): Execution context containing preparation notices and cancellation state.
             observations (ObservationSession): Session used to record emitted runtime events.
-        
+
         Yields:
             RuntimeEvent: An initial run, status, warning, or capability event.
-        
+
         Raises:
             RunCancelledError: If cancellation was requested before execution begins.
         """
@@ -478,7 +478,7 @@ class RLMRunner:
     ) -> AsyncIterator[RuntimeEvent]:
         """
         Emit reconciled prediction details, final reasoning, and capability events.
-        
+
         Parameters:
             context (RLMExecutionContext): Execution context containing output limits and capability details.
             observations (ObservationSession): Session used to record emitted runtime events.
@@ -519,7 +519,7 @@ class RLMRunner:
     ) -> None:
         """
         Bind an observation callback to a supported RLM target.
-        
+
         Parameters:
             target (Any): RLM instance or target exposing a ``bind_observer`` method.
             publish (Callable[[RuntimeEventDetail], None]): Callback for publishing runtime event details.
@@ -541,15 +541,15 @@ class RLMRunner:
     def _drain_capability_details(context: RLMExecutionContext) -> tuple[ExecutionDetail, ...]:
         """
         Collects and validates the public capability details from an execution context.
-        
+
         Parameters:
-        	context (RLMExecutionContext): Execution context containing capability details.
-        
+                context (RLMExecutionContext): Execution context containing capability details.
+
         Returns:
-        	tuple[ExecutionDetail, ...]: The supported public capability details.
-        
+                tuple[ExecutionDetail, ...]: The supported public capability details.
+
         Raises:
-        	TypeError: If the capability host returns an unsupported detail type.
+                TypeError: If the capability host returns an unsupported detail type.
         """
         values = context.capabilities.drain_public_details()
         if not all(isinstance(item, (AttachmentRead, SkillActivated, SkillLoaded, WarningEvent)) for item in values):

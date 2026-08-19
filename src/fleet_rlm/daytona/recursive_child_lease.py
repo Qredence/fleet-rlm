@@ -42,9 +42,9 @@ class ChildRuntimeLease:
     def state(self) -> ChildRuntimeLeaseState:
         """
         Expose the lease's current lifecycle state.
-        
+
         Returns:
-        	ChildRuntimeLeaseState: The current lease state.
+                ChildRuntimeLeaseState: The current lease state.
         """
         with self._condition:
             return self._state
@@ -57,10 +57,10 @@ class ChildRuntimeLease:
 
     def close(self) -> None:
         """Close the child runtime lease exactly once.
-        
+
         Concurrent callers wait for an in-progress close and observe its result. Cleanup
         failures are retained and re-raised by subsequent callers.
-        
+
         Raises:
             RuntimeError: If cleanup is invoked recursively by the closing thread.
             BaseException: The exception raised by the cleanup callback.

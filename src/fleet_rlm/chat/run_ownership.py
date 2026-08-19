@@ -22,10 +22,10 @@ class ClaimHeartbeat:
 async def shield_cleanup(awaitable: Awaitable[T]) -> T:
     """
     Complete an awaitable despite caller cancellation.
-    
+
     Returns:
         T: The awaitable's result.
-    
+
     Raises:
         asyncio.CancelledError: If the caller was cancelled while the awaitable settled.
     """
@@ -39,9 +39,9 @@ async def shield_cleanup(awaitable: Awaitable[T]) -> T:
 def consume_task_exception(task: asyncio.Task[Any]) -> None:
     """
     Consume a task's exception without propagating it.
-    
+
     Parameters:
-    	task (asyncio.Task[Any]): The task whose exception should be retrieved.
+        task (asyncio.Task[Any]): The task whose exception should be retrieved.
     """
     if not task.cancelled():
         with contextlib.suppress(BaseException):
