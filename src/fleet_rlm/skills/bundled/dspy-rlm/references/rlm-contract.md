@@ -36,7 +36,11 @@ pass only the smallest sufficient slice, and retain the child answer in a
 parent variable. Child RLMs have fresh interpreter contexts and no Fleet
 durable Tools; the Root remains responsible for the public typed submission.
 Use keyword arguments for the one typed submission and provide every active
-Signature output; for the default Signature, call `SUBMIT(answer=answer)`.
+Signature output. The default `answer` output is a string: call
+`SUBMIT(answer=answer)` for text, but serialize a mapping or list first with
+`SUBMIT(answer=json.dumps(answer, ensure_ascii=False))`; use `indent=2` only
+when the formatted value fits the Turn output character budget. Passing a
+mapping or list directly produces Python `repr` text.
 For nontrivial deterministic work, keep the initial computation and later
 independent verification in separate iterations.
 
@@ -81,7 +85,7 @@ keyword-only and are not routed through the native positional call contract.
   malformed output is an `adapter_parse_error`. RLM action output contains
   `reasoning` and `code`; `completed` is internal loop state, not a Signature
   output field. Production Daytona model roles cap each response at 8,000
-  tokens. The configured Databricks DeepSeek v4 Flash Root and Sub Models use the
+  tokens. The configured `databricks-deepseek-v4-flash-0731` Root and Sub Models use the
   compatible Chat Completions path without a reasoning-effort override. This is
   separate from `max_output_chars`, which bounds REPL output retained in
   recursive history.

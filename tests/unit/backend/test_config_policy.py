@@ -31,9 +31,9 @@ def test_policy_read_exposes_toml_values_without_environment_secret_values(tmp_p
     assert field["editor"] == "text"
     assert "secret" not in str(field).lower()
 
-    provider_service = _field(service.read(), "daytona", "llm.root.model_provider_service")
-    assert provider_service["value"] == "uscentral.default.zencode-oai"
-    assert provider_service["editor"] == "text"
+    model = _field(service.read(), "daytona", "llm.root.model")
+    assert model["value"] == "databricks-deepseek-v4-flash-0731"
+    assert model["editor"] == "text"
 
     tracking_uri = _field(service.read(), "daytona", "mlflow.tracking_uri")
     assert tracking_uri["value"] == "http://127.0.0.1:5001"

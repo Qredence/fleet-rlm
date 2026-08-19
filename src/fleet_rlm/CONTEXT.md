@@ -100,8 +100,14 @@ Tools as bound for the Run.
 _Avoid_: HTTP request, Chat Execution Context (live term)
 
 **RLM Options**:
-The native DSPy limits for one Run: iterations, LM calls, and output characters.
-Turn timeout and payload-size limits are separate operational controls.
+The native DSPy limits for one Root or Recursive Child invocation. The default
+Root values mirror DSPy 3.3.x: `max_iters = 20` for action/REPL iterations,
+`max_llm_calls = 50` for prompts sent through native
+`llm_query`/`llm_query_batched`, and `max_output_chars = 10000` for retained REPL
+output. Fleet child defaults are smaller (`8`, `12`, and `4000` respectively).
+These limits are independent of recursive depth; Turn timeout, interpreter
+output caps, recursive call budgets, and payload-size limits are separate
+operational controls.
 _Avoid_: Fleet budget ledger, billing quota, plan limit
 
 **Observed LM Usage**:
@@ -124,13 +130,15 @@ _Avoid_: Sandbox retention limit, per-Session claim, RLM Option
 
 **Root Model**:
 The model role that steers the recursive trajectory for a Run (generates and
-revises interpreter work toward a final answer).
+revises interpreter work toward a final answer). Its RLM action iterations do
+not increase recursive delegation depth; the Root executor starts at depth 0.
 _Avoid_: primary LLM, chat model alone, Sub Model
 
 **Sub Model**:
 The model role that answers sub-queries issued from interpreter work during a
 Run (e.g. bounded `llm_query`-style calls), distinct from the Root Model role
-even when both use the same provider configuration.
+even when both use the same provider configuration. It also handles the
+bounded depth fallback when a child attempts delegation beyond native depth 1.
 _Avoid_: Root Model, helper model (vague), utility model (optional third role)
 
 **Delegation Metrics**:
@@ -142,11 +150,15 @@ _Avoid_: billing record, hidden prompt capture, public answer quality
 
 **Recursive Child / Recursive Batch**:
 The Root may call `rlm_query` for one isolated iterative specialist or
-`rlm_query_batched` for ordered independent specialists. A batch is Root-only,
-reserves the shared call budget atomically, bounds concurrency, and settles
-all-or-nothing. Each child has a fresh Sandbox and copied DSPy LM runtimes; a
-child may use native semantic queries but cannot create another child batch.
-_Avoid_: Child Session, recursive swarm, shared LM history
+`rlm_query_batched` for ordered independent specialists. Fleet computes each
+reservation as `child_depth = executor_depth + 1`: Root depth 0 produces native
+child depth 1 with a fresh Sandbox and copied DSPy LM runtimes. A child receives
+only `rlm_query` plus native semantic tools; if it delegates, depth 2 is settled
+by the bounded Sub-LM fallback rather than another native RLM or Sandbox. A
+batch is Root-only, every item remains depth 1, shared call budget is reserved
+atomically, concurrency is bounded, and settlement is all-or-nothing.
+_Avoid_: Child Session, recursive swarm, shared LM history, configurable native
+`max_depth`
 
 **Code-Interpreter Context**:
 Python REPL state for one Run inside a Sandbox. Fleet RLM backend uses **per-Run**

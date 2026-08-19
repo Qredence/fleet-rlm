@@ -20,7 +20,7 @@ Fleet RLM runs [DSPy](https://github.com/stanfordnlp/dspy) `dspy.RLM` behind a c
 - **Operator-visible streaming** — Reasoning, tool calls, interpreter code, and stdout flow over SSE to the maintained [pi-tui terminal](tools/fleet-tui/).
 - **Durable by default** — Sessions, turns, attachments, artifacts, and workspace memory survive across runs.
 - **Sandboxed execution** — Daytona interpreters run in isolated sandboxes with bounded workspace volumes and host-mediated memory tools.
-- **Policy-driven runtime** — Non-secret behavior lives in `config/fleet.toml`; secrets stay in `FLEET_*` environment variables.
+- **Policy-driven runtime** — Non-secret behavior lives in `config/fleet.toml`; secret values stay in environment variables.
 
 ## Quick start
 
@@ -37,13 +37,19 @@ You need **Node 22.19+** and **pnpm** for the terminal client (`fleet cli`). `uv
 
 ### 2. Configure credentials
 
-Pick a runtime profile in `config/fleet.toml` (`default_profile`; shipped default is `daytona-recursive`), then export the provider and Daytona variables for that profile. See the [profile matrix](docs/reference/profile-matrix.md) for the exact `FLEET_*` names.
+Pick a runtime profile in `config/fleet.toml` (`default_profile`; shipped default is `daytona-recursive`), then export the provider and Daytona variables for that profile. See the [profile matrix](docs/reference/profile-matrix.md) for the exact environment names.
+
+Fleet connects through an OpenAI-compatible Chat Completions base URL, so
+Databricks is only the shipped example. To use OpenAI or another compatible
+provider, update the selected profile's `model`, `api_key_env`, and
+`base_url_env` entries in `config/fleet.toml`; the base URL is typically the
+provider's `/v1` root, such as `https://api.openai.com/v1`.
 
 ```bash
 export FLEET_DATABASE_URL='postgresql+asyncpg://...'
 export FLEET_DAYTONA_API_KEY='...'
-export FLEET_OPENCODE_GO_API_KEY='...'
-export FLEET_OPENCODE_GO_BASE_URL='https://<gateway>/v1'
+export DATABRICKS_TOKEN='...'
+export FLEET_DATABRICKS_AI_GATEWAY_BASE_URL='https://<workspace-id>.ai-gateway.gcp.databricks.com/mlflow/v1'
 
 uv run python scripts/db_init.py
 ```

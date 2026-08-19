@@ -173,8 +173,8 @@ def test_default_profile_enables_posthog_and_resolves_token(monkeypatch) -> None
     import fleet_rlm.config as config
 
     monkeypatch.setenv("FLEET_DAYTONA_API_KEY", "test-daytona-key")
-    monkeypatch.setenv("FLEET_OPENCODE_GO_API_KEY", "test-opencode-go-key")
-    monkeypatch.setenv("FLEET_OPENCODE_GO_BASE_URL", "https://gateway.example.test/v1")
+    monkeypatch.setenv("DATABRICKS_TOKEN", "test-databricks-token")
+    monkeypatch.setenv("FLEET_DATABRICKS_AI_GATEWAY_BASE_URL", "https://gateway.example.test/v1")
     monkeypatch.setenv("POSTHOG_PROJECT_TOKEN", "phc-policy-token")
 
     settings = config.load_runtime_settings()

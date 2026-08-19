@@ -293,11 +293,17 @@ function relativeUpdatedAt(value: string | null | undefined): string {
 
 type SettingsField = FleetSettingsPolicy["scopes"][number]["fields"][number];
 
+/**
+ * Creates a selectable settings item with an editor appropriate for the field type.
+ *
+ * @param field - The settings field to represent
+ * @returns A settings item containing the field's display information and editing options
+ */
 function fieldItem(field: SettingsField): SettingItem {
   const base = {
     id: field.path,
     label: `${field.group} · ${field.label}`,
-    description: field.path,
+    description: settingDescription(field),
     currentValue: displayValue(field.value),
   };
   if (field.editor === "boolean" || field.editor === "single_choice") {
@@ -451,10 +457,36 @@ export class MultiChoiceEditor implements Component {
   }
 }
 
+/**
+ * Gets the available choices for a settings field.
+ *
+ * @param field - The settings field to inspect
+ * @returns The field's choices, or an empty array when none are defined
+ */
 function choicesOf(field: SettingsField): string[] {
   return field.choices ?? [];
 }
 
+/**
+ * Generates a contextual description for a settings field path.
+ *
+ * @param field - The settings field to describe
+ * @returns A contextual description for recognized field paths, or the field path
+ */
+function settingDescription(field: SettingsField): string {
+  if (field.path.endsWith(".api_key_env")) return `${field.path} · name only; secret stays in .env`;
+  if (field.path.endsWith(".base_url_env")) return `${field.path} · name only; URL stays in .env`;
+  if (field.path.endsWith(".base_url")) return `${field.path} · OpenAI-compatible /v1 base URL`;
+  if (field.path.endsWith(".model")) return `${field.path} · provider model id`;
+  return field.path;
+}
+
+/**
+ * Formats a value for display.
+ *
+ * @param value - The value to format
+ * @returns The value itself when it is a string; otherwise, its JSON representation
+ */
 function displayValue(value: unknown): string {
   return typeof value === "string" ? value : JSON.stringify(value);
 }

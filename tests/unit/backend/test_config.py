@@ -17,13 +17,13 @@ def test_profile_environment_matrix_follows_selected_toml_policy() -> None:
     contracts = {contract.name: contract for contract in load_profile_environment_contracts()}
 
     assert active_profile_contract().name == "daytona-recursive"
-    assert contracts["daytona-recursive"].provider == "Databricks AI Gateway"
+    assert contracts["daytona-recursive"].provider == "OpenAI Chat Completion"
     assert contracts["daytona-recursive"].provider_environment_names == (
         "FLEET_DAYTONA_API_KEY",
         "DATABRICKS_TOKEN",
         "FLEET_DATABRICKS_AI_GATEWAY_BASE_URL",
     )
-    assert contracts["daytona-managed"].provider == "Databricks AI Gateway"
+    assert contracts["daytona-managed"].provider == "OpenAI Chat Completion"
     assert contracts["daytona-managed"].managed_policy_environment_names == (
         "FLEET_DAYTONA_API_KEY",
         "DATABRICKS_TOKEN",
@@ -51,7 +51,7 @@ def test_daytona_profile_uses_specialized_bounded_model_roles() -> None:
     assert document["defaults"]["daytona"]["snapshot"] == "fleet-rlm-python313-v5"
     llm = document["profiles"]["daytona"]["llm"]
     assert llm["root"] == {
-        "model": "deepseek-v4-flash-0731",
+        "model": "databricks-deepseek-v4-flash-0731",
         "api_key_env": "DATABRICKS_TOKEN",
         "base_url_env": "FLEET_DATABRICKS_AI_GATEWAY_BASE_URL",
         "max_tokens": 16000,
@@ -60,7 +60,7 @@ def test_daytona_profile_uses_specialized_bounded_model_roles() -> None:
         "reasoning_effort": "low",
     }
     assert llm["sub"] == {
-        "model": "deepseek-v4-flash-0731",
+        "model": "databricks-deepseek-v4-flash-0731",
         "api_key_env": "DATABRICKS_TOKEN",
         "base_url_env": "FLEET_DATABRICKS_AI_GATEWAY_BASE_URL",
         "max_tokens": 16000,
@@ -68,10 +68,7 @@ def test_daytona_profile_uses_specialized_bounded_model_roles() -> None:
         "cache": False,
         "reasoning_effort": "low",
     }
-    assert document["defaults"]["llm"] == {
-        "root": {"model_provider_service": "uscentral.default.zencode-oai"},
-        "sub": {"model_provider_service": "uscentral.default.zencode-oai"},
-    }
+    assert "llm" not in document["defaults"]
     assert document["defaults"]["runtime"]["live_enabled"] is True
 
 
@@ -79,16 +76,12 @@ def test_daytona_profile_uses_specialized_bounded_model_roles() -> None:
     "profile",
     ("daytona", "daytona-recursive", "daytona-managed", "daytona-bench", "daytona-bench-40"),
 )
-def test_daytona_profiles_use_expected_deepseek_model_for_both_roles(profile: str) -> None:
+def test_daytona_profiles_use_expected_model_for_both_roles(profile: str) -> None:
     policy_path = Path(__file__).resolve().parents[3] / "config" / "fleet.toml"
     document = tomllib.loads(policy_path.read_text(encoding="utf-8"))
 
     llm = document["profiles"][profile]["llm"]
-    expected_model = (
-        "deepseek-v4-flash-0731"
-        if profile in {"daytona", "daytona-recursive", "daytona-managed"}
-        else "deepseek-v4-flash"
-    )
+    expected_model = "databricks-deepseek-v4-flash-0731"
     assert llm["root"]["model"] == expected_model
     assert llm["sub"]["model"] == expected_model
     expected_key_env, expected_base_env = "DATABRICKS_TOKEN", "FLEET_DATABRICKS_AI_GATEWAY_BASE_URL"
@@ -212,7 +205,7 @@ def test_daytona_managed_profile_requires_declared_database_and_mlflow_values(
         config.load_runtime_settings()
 
 
-def test_daytona_profile_resolves_deepseek_root_and_sub_with_gateway_params(
+def test_daytona_profile_resolves_root_and_sub_with_gateway_params(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     import fleet_rlm.config as config
@@ -223,10 +216,8 @@ def test_daytona_profile_resolves_deepseek_root_and_sub_with_gateway_params(
 
     settings = config.load_runtime_settings()
 
-    assert settings.root_model == "deepseek-v4-flash-0731"
-    assert settings.sub_model == "deepseek-v4-flash-0731"
-    assert settings.root_llm_model_provider_service == "uscentral.default.zencode-oai"
-    assert settings.sub_llm_model_provider_service == "uscentral.default.zencode-oai"
+    assert settings.root_model == "databricks-deepseek-v4-flash-0731"
+    assert settings.sub_model == "databricks-deepseek-v4-flash-0731"
     assert settings.root_llm_reasoning_effort == "low"
     assert settings.sub_llm_reasoning_effort == "low"
     assert settings.sub_llm_temperature == 0
@@ -287,19 +278,13 @@ def test_stale_recursive_depth_policy_key_fails_validation(monkeypatch: pytest.M
         config.load_runtime_settings()
 
 
-def test_recursive_daytona_profile_enables_only_the_recursive_tool_policy() -> None:
+def test_committed_daytona_policy_enables_recursive_child_execution() -> None:
     policy_path = Path(__file__).resolve().parents[3] / "config" / "fleet.toml"
     document = tomllib.loads(policy_path.read_text(encoding="utf-8"))
 
-    assert document["defaults"]["rlm"]["recursion_enabled"] is False
+    assert document["defaults"]["rlm"]["recursion_enabled"] is True
     assert document["profiles"]["daytona-recursive"]["rlm"] == {"recursion_enabled": True}
     assert document["profiles"]["daytona-recursive"]["llm"] == document["profiles"]["daytona"]["llm"]
-
-
-@pytest.mark.parametrize("value", ("", "   "))
-def test_model_provider_service_rejects_blank_values(value: str) -> None:
-    with pytest.raises(ValidationError, match="model_provider_service"):
-        Settings(_env_file=None, root_llm_model_provider_service=value)
 
 
 def test_daytona_benchmark_profiles_use_compatible_models_without_cache_or_mlflow() -> None:
@@ -314,7 +299,7 @@ def test_daytona_benchmark_profiles_use_compatible_models_without_cache_or_mlflo
         assert policy["mlflow"]["tracing_enabled"] is False
         for role in ("root", "sub"):
             llm = policy["llm"][role]
-            assert llm["model"] == "deepseek-v4-flash"
+            assert llm["model"] == "databricks-deepseek-v4-flash-0731"
             assert llm["api_key_env"] == "DATABRICKS_TOKEN"
             assert llm["base_url_env"] == "FLEET_DATABRICKS_AI_GATEWAY_BASE_URL"
             assert llm["cache"] is False
@@ -354,18 +339,16 @@ def test_daytona_benchmark_profiles_resolve_without_mlflow(
 
     _select_profile(tmp_path, profile=profile, monkeypatch=monkeypatch)
     monkeypatch.setenv("FLEET_DAYTONA_API_KEY", "test-daytona-key")
-    # All profiles use the Databricks AI Gateway; benchmark profiles retain
-    # the undated compatible model and disable MLflow tracing.
+    # All profiles use the OpenAI-compatible Chat Completion format; benchmark
+    # profiles use the same Databricks endpoint and disable MLflow tracing.
     monkeypatch.setenv("DATABRICKS_TOKEN", "test-databricks-token")
     monkeypatch.setenv("FLEET_DATABRICKS_AI_GATEWAY_BASE_URL", "https://gateway.example.test/v1")
 
     settings = config.load_runtime_settings()
 
     assert settings.run_environment == "daytona"
-    assert settings.root_model == "deepseek-v4-flash"
+    assert settings.root_model == "databricks-deepseek-v4-flash-0731"
     assert settings.sub_model == settings.root_model
-    assert settings.root_llm_model_provider_service == "uscentral.default.zencode-oai"
-    assert settings.sub_llm_model_provider_service == "uscentral.default.zencode-oai"
     assert settings.daytona_snapshot == "fleet-rlm-python313-v5"
     assert settings.root_llm_cache is False
     assert settings.sub_llm_cache is False
@@ -438,6 +421,7 @@ snapshot = "fleet-test-v1"
 def test_runtime_settings_deep_merge_profile_and_keep_role_policy(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
+    """Verify that profile settings are deeply merged while preserving separate root and sub-model policies."""
     import fleet_rlm.config as config
 
     policy = tmp_path / "fleet.toml"
@@ -454,7 +438,7 @@ def test_runtime_settings_deep_merge_profile_and_keep_role_policy(
     assert settings.max_url_bytes == 30
     assert settings.root_lm.model == "openai/root"
     assert settings.sub_lm.temperature == 0.2
-    assert settings.lm_roles.root.model_provider_service is None
+    assert settings.lm_roles.root.model == "openai/root"
     assert settings.lm_roles.sub.api_key_env == "SUB_KEY"
 
 

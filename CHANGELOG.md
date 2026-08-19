@@ -2,6 +2,38 @@
 
 All notable changes to this project are documented in this file.
 
+## [0.7.2] - 2026-08-19
+
+### Added
+
+- **Change:** Added bounded LM and execution-trace diagnostics for latency
+  benchmarks, including provider timing, context size, adapter parse errors,
+  response keys, and partial trace identifiers on failed streams.
+  **Outcome:** Failed and successful benchmark samples retain enough structured
+  evidence to diagnose provider and adapter behavior without recording response
+  text.
+- **Change:** Added explicit validation and guidance for declared string
+  outputs, including `json.dumps(..., ensure_ascii=False)` serialization for
+  mappings and lists.
+  **Outcome:** Structured submissions fail clearly instead of silently becoming
+  Python `repr` text.
+
+### Changed
+
+- **Change:** Standardized LLM configuration on OpenAI-compatible Chat
+  Completions base URLs and removed the Databricks-specific provider-service
+  header. The quick start now documents OpenAI and other compatible gateways
+  alongside the shipped Databricks profile.
+  **Outcome:** Providers can be selected through the same model, API-key, and
+  base-URL environment references in `config/fleet.toml`.
+
+### Removed
+
+- **Change:** Removed the retired `scripts/optimize/` signature-optimization
+  lane, its agent guidance, and its unit tests.
+  **Outcome:** The maintained repository no longer exposes obsolete offline
+  optimization scripts.
+
 ## [0.7.1] - 2026-08-15
 
 ### Changed

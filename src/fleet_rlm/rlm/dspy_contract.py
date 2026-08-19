@@ -446,14 +446,23 @@ class _RLMTraceCallback(BaseCallback):
         recursive_depth: int = 0,
         metrics: DelegationMetrics | None = None,
     ) -> None:
+        """Initialize LM tracing state for root and delegated language-model calls.
+
+        Parameters:
+            root_lm (Any): Language model identified as the root caller.
+            sub_lm (Any): Language model identified as a delegated caller.
+            recursive_depth (int): Current recursive delegation depth.
+            metrics (DelegationMetrics | None): Optional metrics collector.
+        """
         self._roles = {id(root_lm): "root", id(sub_lm): "sub"}
         self._recursive_depth = max(0, int(recursive_depth))
         self._metrics = metrics
         self._call_index = 0
         self._spans: dict[str, tuple[Any, Any, int | None, int, float]] = {}
+        self._last_call: dict[str, JsonValue] | None = None
 
     def on_lm_start(self, call_id: str, instance: Any, inputs: dict[str, Any]) -> None:
-        """Starts tracing for a recognized language-model call and records its input metadata."""
+        """Start tracing a recognized language-model call and record its input metadata."""
         role = self._roles.get(id(instance))
         if role is None:
             return
@@ -496,12 +505,12 @@ class _RLMTraceCallback(BaseCallback):
         exception: Exception | None = None,
     ) -> None:
         """
-        Finalize the tracing span for an LM call.
+        Finalize tracing and telemetry for an LM call.
 
         Parameters:
             call_id (str): Identifier of the LM call.
-            outputs (dict[str, Any] | None): Response data from the LM call.
-            exception (Exception | None): Error that caused the call to fail, if any.
+            outputs (dict[str, Any] | None): Response data from the call.
+            exception (Exception | None): Exception raised by the call, if applicable.
         """
         state = self._spans.pop(call_id, None)
         if state is None:
@@ -525,6 +534,27 @@ class _RLMTraceCallback(BaseCallback):
                 **provider,
             }
         )
+        last_call: dict[str, JsonValue] = {
+            "role": role,
+            "recursive_depth": self._recursive_depth,
+            "call_index": call_index,
+            "request_status": "failed" if exception is not None else "completed",
+        }
+        for key in (
+            "response_keys",
+            "response_chars",
+            "wall_time_ms",
+            "provider_response_ms",
+            "litellm_overhead_ms",
+            "callback_duration_ms",
+            "provider_request_id",
+        ):
+            value = response_details.get(key)
+            if value is not None:
+                last_call[key] = value
+        if exception is not None:
+            last_call["failure_category"] = _trace_failure_category(exception)
+        self._last_call = last_call
         if self._metrics is not None:
             self._metrics.record_lm_call(
                 role,
@@ -556,9 +586,21 @@ class _RLMTraceCallback(BaseCallback):
                 attributes=attributes,
             )
 
+    def last_call_summary(self) -> dict[str, JsonValue]:
+        """Return structural metadata for the most recently completed LM call."""
+        return dict(self._last_call) if self._last_call is not None else {}
+
 
 def _trace_preview(value: object, *, max_chars: int = 900) -> str:
-    """Return bounded, sanitized model text for an engineering trace preview."""
+    """
+    Create a bounded, sanitized text preview of a value.
+
+    Parameters:
+        max_chars (int): Maximum requested length of the preview.
+
+    Returns:
+        str: Sanitized text representation of the value, limited to the configured length.
+    """
     from fleet_rlm.observability.turn_tracing import trace_preview_limit
     from fleet_rlm.rlm.sanitize import sanitize_public_text
 

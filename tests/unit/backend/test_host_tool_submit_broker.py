@@ -121,6 +121,22 @@ def test_submit_returns_final_output() -> None:
     assert result.output == {"answer": "done"}
 
 
+def test_typed_submit_rejects_non_string_values_with_serialization_guidance() -> None:
+    from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
+
+    interp = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())
+    interp.output_fields = [{"name": "answer", "type": "str"}]
+    interp.start()
+
+    repair = interp.execute("SUBMIT(answer={'section': 1})")
+
+    assert not isinstance(repair, FinalOutput)
+    assert "json.dumps" in str(repair)
+    result = interp.execute("import json\nSUBMIT(answer=json.dumps({'section': 1}, indent=2))")
+    assert isinstance(result, FinalOutput)
+    assert result.output == {"answer": '{\n  "section": 1\n}'}
+
+
 def test_two_interpreters_do_not_share_python_variables() -> None:
     from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
 

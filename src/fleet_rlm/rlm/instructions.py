@@ -69,15 +69,28 @@ class RLMInstructionFragments:
 
 
 def fleet_rlm_instruction_fragments(*, recursion_enabled: bool) -> RLMInstructionFragments:
-    """Return the Root instruction fragments for one recursion policy."""
+    """
+    Build instruction fragments for the selected recursion policy.
+
+    Parameters:
+        recursion_enabled (bool): Whether to include recursive execution instructions.
+
+    Returns:
+        RLMInstructionFragments: The instruction fragments configured for the recursion policy.
+    """
     step = 6 if recursion_enabled else 5
     verification = f"""{step}. Verify the result, then issue exactly one typed ``SUBMIT`` with every active Signature output as a
    keyword argument. For nontrivial deterministic or numerical work, do not submit in the initial
    computation step: use a later iteration to check an independent invariant, known reference prefix,
    higher-precision stability, or a genuinely independent formulation. Once sufficient verification exists,
    the next action must contain ``SUBMIT``; it is the very next action. Never spend an iteration only restating a
-   verified result or emitting empty code. Do not reproduce a large code block. Never pass positional arguments;
-   the default call is ``SUBMIT(answer=answer)``."""
+   verified result or emitting empty code. Do not reproduce a large code block. Never pass positional arguments.
+   A declared ``str`` output must receive a string. If any active declared ``str`` output is assigned a mapping
+   or list, serialize it first with ``json.dumps(..., ensure_ascii=False)`` and submit that string. For example,
+   if ``answer`` is a mapping or list, serialize it with ``json.dumps(answer, ensure_ascii=False)``. Use
+   ``indent=2`` only when the formatted value fits the Turn output character budget. Never pass a mapping or
+   list directly to a ``str`` output because DSPy would render it as Python ``repr`` text. The default call
+   is ``SUBMIT(answer=answer)``."""
     return RLMInstructionFragments(
         base=BASE_RLM_INSTRUCTIONS,
         repl=REPL_RLM_INSTRUCTIONS,

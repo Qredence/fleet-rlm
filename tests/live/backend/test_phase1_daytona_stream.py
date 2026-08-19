@@ -30,8 +30,8 @@ pytestmark = [pytest.mark.live_daytona, pytest.mark.timeout(900)]
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _RECEIPT_SCHEMA = "fleet.phase1-daytona-stream/v1"
 _EVIDENCE_ENV = "FLEET_PHASE1_STREAM_EVIDENCE_PATH"
-_LIVE_ROOT_MODEL = os.environ.get("FLEET_LIVE_ROOT_MODEL", "deepseek-v4-flash")
-_LIVE_SUB_MODEL = os.environ.get("FLEET_LIVE_SUB_MODEL", "deepseek-v4-flash")
+_LIVE_ROOT_MODEL = os.environ.get("FLEET_LIVE_ROOT_MODEL", "databricks-deepseek-v4-flash-0731")
+_LIVE_SUB_MODEL = os.environ.get("FLEET_LIVE_SUB_MODEL", "databricks-deepseek-v4-flash-0731")
 _APPROVED_MODELS = frozenset(
     name
     for base in {
@@ -185,17 +185,13 @@ class _FirstStreamDeltaMiddleware:
 
 def _load_live_settings(tmp_path: Path) -> Settings:
     """
-    Load and validate live Phase 1 streaming test settings.
+    Load and validate settings for the live Phase 1 streaming test.
 
     Parameters:
-        tmp_path (Path): Temporary directory for the test database.
+        tmp_path (Path): Temporary directory in which to create the test database.
 
     Returns:
-        Settings: Validated Daytona settings with an upgraded temporary database and bounded execution limits.
-
-    Raises:
-        pytest.skip: If the evidence-path environment variable is not configured.
-        pytest.fail: If live execution, the Daytona profile, required models, or provider credentials are unavailable.
+        Settings: Validated settings using an upgraded temporary database and bounded execution limits.
     """
     if not os.environ.get(_EVIDENCE_ENV):
         pytest.skip("Run this credentialed canary via scripts/live_phase1_stream_verify.py")
@@ -207,7 +203,7 @@ def _load_live_settings(tmp_path: Path) -> Settings:
     if active_profile(policy) != "daytona" or policy.run_environment != "daytona":
         pytest.fail("Phase 1 stream canary requires the normal daytona profile")
     if policy.root_model not in _APPROVED_MODELS or policy.sub_model not in _APPROVED_MODELS:
-        pytest.fail("Phase 1 stream canary requires DeepSeek v4 Flash for Root and Sub")
+        pytest.fail("Phase 1 stream canary requires databricks-deepseek-v4-flash-0731 for Root and Sub")
     if policy.daytona_api_key is None or not has_llm_credentials(policy):
         pytest.fail("Phase 1 stream canary is missing configured provider credentials")
     database_url = f"sqlite+aiosqlite:///{(tmp_path / 'phase1-stream.db').resolve()}"

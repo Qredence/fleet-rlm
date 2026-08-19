@@ -47,9 +47,10 @@ engineering-only MLflow tracing.
 
 Select `[config] default_profile` in `config/fleet.toml`, directly or through
 the TUI `/profiles` command, then restart Fleet. The committed policy defines
-the runtime, model roles, token limits, provider route, and names of external
-configuration values. The shipped `daytona-recursive` and `daytona` profiles use
-OpenCode Go; managed and benchmark profiles use the Databricks AI Gateway. See
+the runtime, model ids, Chat Completion base URLs, token limits, and names of
+external configuration values. The shipped profiles use the OpenAI-compatible
+Chat Completion format; their provider endpoint and API-key environment names
+come from the selected policy. See
 the [profile matrix](docs/reference/profile-matrix.md) before selecting a
 profile. Daytona requires a migrated database, a Daytona credential, and the
 provider values named by the selected policy. The current live proof does not

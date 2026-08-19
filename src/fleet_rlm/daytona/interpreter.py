@@ -162,12 +162,20 @@ class InProcessInterpreterBackend:
             self.namespace[name] = self._wrap_host_tool(name, fn)
 
     def ensure_submit(self, output_fields: list[dict[str, Any]] | None) -> None:
+        """
+        Install or refresh the namespace bindings required for submitting final outputs.
+
+        Parameters:
+            output_fields (list[dict[str, Any]] | None): Output-field definitions used
+                to configure submission support.
+        """
         key = _submit_signature_key(output_fields)
         if key == self._submit_key:
             return
         self.namespace["FleetFinalOutputError"] = FleetFinalOutputError
         self.namespace["_FINAL_OUTPUT_MARKER"] = "__FLEET_FINAL_OUTPUT__"
-        self.namespace["_json"] = __import__("json")
+        self.namespace["json"] = __import__("json")
+        self.namespace["_json"] = self.namespace["json"]
         exec(build_submit_setup_code(output_fields), self.namespace, self.namespace)
         self._submit_key = key
 

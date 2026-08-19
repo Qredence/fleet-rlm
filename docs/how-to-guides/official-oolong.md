@@ -14,12 +14,17 @@ prime whoami
 
 Do not install `oolong_rlm` or Verifiers into Fleet's project environment. The runner verifies environment version `0.1.11`, Hub hash `97d47526`, version ID `zixnre6tq4e4drk82nm2ebph`, and the three pinned source hashes before it creates an isolated uv sidecar from Prime's package index.
 
-Start Fleet with the `daytona-bench` profile. This profile uses `deepseek-v4-flash` for both DSPy model roles, routes through `uscentral.default.zencode-oai`, disables both LM caches, and leaves MLflow tracing off. Put real provider values in `.env`; scripts load it with `python-dotenv` and `override=False`, so existing process exports win.
+Start Fleet with the `daytona-bench` profile. This profile uses the
+`databricks-deepseek-v4-flash-0731` endpoint for both DSPy model roles, routes
+through the configured OpenAI-compatible Databricks AI Gateway, disables both
+LM caches, and leaves MLflow tracing off. Put real provider values in `.env`;
+scripts load it with `python-dotenv` and `override=False`, so existing process
+exports win.
 
 ```bash
 FLEET_DAYTONA_API_KEY=<real Daytona API key>
 DATABRICKS_TOKEN=<real Databricks token>
-FLEET_DATABRICKS_AI_GATEWAY_BASE_URL=https://<your-workspace>/ai-gateway/openai/v1
+FLEET_DATABRICKS_AI_GATEWAY_BASE_URL=https://<workspace-id>.ai-gateway.gcp.databricks.com/mlflow/v1
 FLEET_DATABASE_URL=postgresql+asyncpg://<user>:<password>@<host>/<database>
 ```
 

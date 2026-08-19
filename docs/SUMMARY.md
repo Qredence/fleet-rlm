@@ -6,7 +6,7 @@
 * [DSPy RLM and Daytona Integration](how-to-guides/dspy-integration.md)
 * [Daytona Snapshot](how-to-guides/daytona-snapshot.md)
 * [Official Oolong benchmark](how-to-guides/official-oolong.md)
-* [Evaluation, monitoring, and signature optimization](how-to-guides/evaluation-optimization.md)
+* [Evaluation and monitoring](how-to-guides/evaluation-optimization.md)
 * [Terminal UI](how-to-guides/terminal-tui.md)
 * [Reference](reference/index.md)
   * [Configuration](reference/configuration.md)
