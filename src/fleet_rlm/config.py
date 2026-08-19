@@ -26,15 +26,6 @@ _CONFIG_PATH = Path(__file__).resolve().parents[2] / "config" / "fleet.toml"
 _ENVIRONMENT_NAME = re.compile(r"^[A-Z][A-Z0-9_]*$")
 
 
-def _clean_model_provider_service(value: str | None) -> str | None:
-    if value is None:
-        return None
-    cleaned = value.strip()
-    if not cleaned:
-        raise ValueError("model_provider_service must not be blank")
-    return cleaned
-
-
 class FleetConfigurationError(ValueError):
     """Raised when the required Fleet runtime policy is invalid."""
 
@@ -90,7 +81,6 @@ class LLMRoleSettings(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     model: str
-    model_provider_service: str | None = None
     api_key_env: str
     base_url: str | None = None
     max_tokens: int | None = Field(default=None, ge=1)
@@ -105,11 +95,6 @@ class LLMRoleSettings(BaseModel):
         if not _ENVIRONMENT_NAME.fullmatch(value):
             raise ValueError("api_key_env must name an uppercase environment variable")
         return value
-
-    @field_validator("model_provider_service")
-    @classmethod
-    def _validate_model_provider_service(cls, value: str | None) -> str | None:
-        return _clean_model_provider_service(value)
 
 
 @dataclass(frozen=True, slots=True)
@@ -151,14 +136,12 @@ class Settings(BaseModel):
     )
     root_model: str = Field(
         default="openai/gpt-4o-mini",
-        description="Root LM id for dspy.LM (provider/model)",
+        description="Root model id sent through the OpenAI-compatible Chat Completion provider",
     )
-    root_llm_model_provider_service: str | None = None
     sub_model: str = Field(
         default="openai/gpt-4o-mini",
-        description="Sub LM id for llm_query / llm_query_batched",
+        description="Sub model id sent through the OpenAI-compatible Chat Completion provider",
     )
-    sub_llm_model_provider_service: str | None = None
     database_url: str | None = Field(
         default=None,
         description="Async SQLAlchemy URL (e.g. sqlite+aiosqlite:///:memory: or postgresql+asyncpg://...)",
@@ -231,11 +214,6 @@ class Settings(BaseModel):
     sub_llm_reasoning_effort: Literal["none", "low", "medium", "high"] | None = None
     sub_llm_cache: bool = True
     sub_llm_num_retries: int = Field(default=3, ge=0)
-
-    @field_validator("root_llm_model_provider_service", "sub_llm_model_provider_service")
-    @classmethod
-    def _validate_role_model_provider_service(cls, value: str | None) -> str | None:
-        return _clean_model_provider_service(value)
 
     mlflow_tracing_enabled: bool = Field(
         default=False,
@@ -380,7 +358,6 @@ class Settings(BaseModel):
         prefix = f"{role}_llm"
         return LLMRoleSettings(
             model=self.root_model if role == "root" else self.sub_model,
-            model_provider_service=getattr(self, f"{prefix}_model_provider_service"),
             api_key_env=getattr(self, f"{prefix}_api_key_env"),
             base_url=getattr(self, f"{prefix}_base_url"),
             max_tokens=getattr(self, f"{prefix}_max_tokens"),
@@ -465,7 +442,6 @@ _TABLE_KEYS: dict[str, frozenset[str]] = {
 _ROLE_KEYS = frozenset(
     {
         "model",
-        "model_provider_service",
         "api_key_env",
         "base_url",
         "base_url_env",
@@ -536,11 +512,6 @@ def _validate_policy_table(value: object, location: str, *, allow_partial_llm: b
             if role_extras:
                 raise FleetConfigurationError(
                     f"unknown configuration key(s) at {location}.llm.{role}: {', '.join(sorted(role_extras))}"
-                )
-            provider_service = role_table.get("model_provider_service")
-            if provider_service is not None and (not isinstance(provider_service, str) or not provider_service.strip()):
-                raise FleetConfigurationError(
-                    f"{location}.llm.{role}.model_provider_service must be a non-blank string"
                 )
             if "base_url" in role_table and "base_url_env" in role_table:
                 raise FleetConfigurationError(f"{location}.llm.{role} cannot define both base_url and base_url_env")
@@ -706,7 +677,6 @@ def _flatten_policy(policy: Mapping[str, Any]) -> dict[str, Any]:
     for role in ("root", "sub"):
         role_values = _require_mapping(llm.get(role, {}), f"llm.{role}")
         values[f"{role}_model"] = role_values.get("model")
-        values[f"{role}_llm_model_provider_service"] = role_values.get("model_provider_service")
         values[f"{role}_llm_api_key_env"] = role_values.get("api_key_env")
         values[f"{role}_llm_base_url"] = role_values.get("base_url")
         values[f"{role}_llm_base_url_env"] = role_values.get("base_url_env")
@@ -722,8 +692,6 @@ def _flatten_policy(policy: Mapping[str, Any]) -> dict[str, Any]:
         "posthog_host",
         "daytona_snapshot",
         "daytona_org_id",
-        "root_llm_model_provider_service",
-        "sub_llm_model_provider_service",
         "root_llm_base_url",
         "sub_llm_base_url",
         "root_llm_base_url_env",
@@ -856,11 +824,7 @@ def _profile_contract(
             )
         )
     )
-    key_pair = (root_api_key_env, root_base_url_env)
-    provider = {
-        ("FLEET_OPENCODE_GO_API_KEY", "FLEET_OPENCODE_GO_BASE_URL"): "OpenCode Go",
-        ("DATABRICKS_TOKEN", "FLEET_DATABRICKS_AI_GATEWAY_BASE_URL"): "Databricks AI Gateway",
-    }.get(key_pair, "custom configured gateway")
+    provider = "OpenAI Chat Completion"
     return ProfileEnvironmentContract(
         name=name,
         runtime_environment=required_text(runtime.get("environment"), f"profiles.{name}.runtime.environment"),

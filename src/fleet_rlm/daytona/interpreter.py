@@ -167,7 +167,8 @@ class InProcessInterpreterBackend:
             return
         self.namespace["FleetFinalOutputError"] = FleetFinalOutputError
         self.namespace["_FINAL_OUTPUT_MARKER"] = "__FLEET_FINAL_OUTPUT__"
-        self.namespace["_json"] = __import__("json")
+        self.namespace["json"] = __import__("json")
+        self.namespace["_json"] = self.namespace["json"]
         exec(build_submit_setup_code(output_fields), self.namespace, self.namespace)
         self._submit_key = key
 

@@ -20,7 +20,6 @@ from fleet_rlm.rlm.model_bundle import RLMModelBundle
 # Values that look like secrets/keys must never be treated as base URLs.
 _URL_RE = re.compile(r"^https?://", re.IGNORECASE)
 _LEGACY_LLM_API_KEY_ENV = "FLEET_OPENAI_API_KEY"
-_MODEL_PROVIDER_SERVICE_HEADER = "Databricks-Model-Provider-Service"
 
 
 def sanitize_base_url(value: str | None) -> str | None:
@@ -94,26 +93,27 @@ def build_lm(
     model: str,
     *,
     api_key: str | None,
-    model_provider_service: str | None = None,
     base_url: str | None = None,
     max_tokens: int | None = None,
     temperature: float | None = None,
     reasoning_effort: str | None = None,
-    model_type: str = "chat",
     cache: bool = True,
     num_retries: int = 3,
 ) -> dspy.LM:
-    """Construct a stock ``dspy.LM`` per the public LM constructor contract."""
+    """Construct a stock DSPy Chat Completion LM.
+
+    ``base_url`` points at the provider's OpenAI-compatible ``/v1`` root,
+    ``api_key`` authenticates the provider, and the configured model id is sent
+    to ``/chat/completions``.
+    """
     model_id = normalize_model_id(model)
     kwargs: dict[str, Any] = {
-        "model_type": model_type,
+        "model_type": "chat",
         "cache": cache,
         "num_retries": num_retries,
     }
     if api_key:
         kwargs["api_key"] = api_key
-    if model_provider_service:
-        kwargs["headers"] = {_MODEL_PROVIDER_SERVICE_HEADER: model_provider_service}
     if base_url:
         kwargs["api_base"] = base_url
     if max_tokens is not None:
@@ -122,8 +122,8 @@ def build_lm(
         kwargs["temperature"] = temperature
     if reasoning_effort is not None:
         kwargs["reasoning_effort"] = reasoning_effort
-        # The Databricks AI Gateway accepts this OpenAI-compatible parameter,
-        # while LiteLLM's generic OpenAI provider otherwise rejects it.
+        # LiteLLM normally filters this OpenAI-compatible parameter; explicitly
+        # allow it for providers that expose reasoning controls.
         kwargs["allowed_openai_params"] = ["reasoning_effort"]
     return dspy.LM(model_id, **kwargs)
 
@@ -138,7 +138,6 @@ def build_model_bundle(settings: Settings) -> RLMModelBundle:
         return build_lm(
             policy.model,
             api_key=api_key,
-            model_provider_service=policy.model_provider_service,
             base_url=sanitize_base_url(policy.base_url),
             max_tokens=policy.max_tokens,
             temperature=policy.temperature,

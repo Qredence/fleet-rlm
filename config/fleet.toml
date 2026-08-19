@@ -14,13 +14,8 @@ max_active_daytona_leases = 8
 heartbeat_seconds = 10
 stale_after_seconds = 60
 
-# Shared gateway policy only. Model, credential references, and execution
-# tuning belong to each explicit provider-specific profile below.
-[defaults.llm.root]
-model_provider_service = "uscentral.default.zencode-oai"
-
-[defaults.llm.sub]
-model_provider_service = "uscentral.default.zencode-oai"
+# Each profile supplies a provider base URL, API-key environment reference, and
+# provider-native model id for the OpenAI-compatible Chat Completion request.
 
 [defaults.rlm]
 max_iters = 20
@@ -75,8 +70,10 @@ host = "https://eu.i.posthog.com"
 [profiles.daytona.runtime]
 environment = "daytona"
 
+# Databricks Foundation Model endpoint routed through the OpenAI-compatible
+# Chat Completion gateway. The endpoint name is the model id sent to the gateway.
 [profiles.daytona.llm.root]
-model = "deepseek-v4-flash-0731"
+model = "databricks-deepseek-v4-flash-0731"
 api_key_env = "DATABRICKS_TOKEN"
 base_url_env = "FLEET_DATABRICKS_AI_GATEWAY_BASE_URL"
 max_tokens = 16000
@@ -86,7 +83,7 @@ cache = false
 reasoning_effort = "low"
 
 [profiles.daytona.llm.sub]
-model = "deepseek-v4-flash-0731"
+model = "databricks-deepseek-v4-flash-0731"
 api_key_env = "DATABRICKS_TOKEN"
 base_url_env = "FLEET_DATABRICKS_AI_GATEWAY_BASE_URL"
 max_tokens = 16000
@@ -103,7 +100,7 @@ experiment_name = "fleet-rlm"
 environment = "daytona"
 
 [profiles.daytona-recursive.llm.root]
-model = "deepseek-v4-flash-0731"
+model = "databricks-deepseek-v4-flash-0731"
 api_key_env = "DATABRICKS_TOKEN"
 base_url_env = "FLEET_DATABRICKS_AI_GATEWAY_BASE_URL"
 max_tokens = 16000
@@ -111,7 +108,7 @@ cache = false
 reasoning_effort = "low"
 
 [profiles.daytona-recursive.llm.sub]
-model = "deepseek-v4-flash-0731"
+model = "databricks-deepseek-v4-flash-0731"
 api_key_env = "DATABRICKS_TOKEN"
 base_url_env = "FLEET_DATABRICKS_AI_GATEWAY_BASE_URL"
 max_tokens = 16000
@@ -135,14 +132,14 @@ recursion_enabled = true
 environment = "daytona"
 
 [profiles.daytona-managed.llm.root]
-model = "deepseek-v4-flash-0731"
+model = "databricks-deepseek-v4-flash-0731"
 api_key_env = "DATABRICKS_TOKEN"
 base_url_env = "FLEET_DATABRICKS_AI_GATEWAY_BASE_URL"
 max_tokens = 8000
 reasoning_effort = "low"
 
 [profiles.daytona-managed.llm.sub]
-model = "deepseek-v4-flash-0731"
+model = "databricks-deepseek-v4-flash-0731"
 api_key_env = "DATABRICKS_TOKEN"
 base_url_env = "FLEET_DATABRICKS_AI_GATEWAY_BASE_URL"
 max_tokens = 8000
@@ -164,14 +161,14 @@ tracing_sql_warehouse_id_env = "FLEET_MLFLOW_TRACING_SQL_WAREHOUSE_ID"
 environment = "daytona"
 
 [profiles.daytona-bench.llm.root]
-model = "deepseek-v4-flash"
+model = "databricks-deepseek-v4-flash-0731"
 api_key_env = "DATABRICKS_TOKEN"
 base_url_env = "FLEET_DATABRICKS_AI_GATEWAY_BASE_URL"
 max_tokens = 8000
 cache = false
 
 [profiles.daytona-bench.llm.sub]
-model = "deepseek-v4-flash"
+model = "databricks-deepseek-v4-flash-0731"
 api_key_env = "DATABRICKS_TOKEN"
 base_url_env = "FLEET_DATABRICKS_AI_GATEWAY_BASE_URL"
 max_tokens = 8000
@@ -194,14 +191,14 @@ verbose = false
 environment = "daytona"
 
 [profiles.daytona-bench-40.llm.root]
-model = "deepseek-v4-flash"
+model = "databricks-deepseek-v4-flash-0731"
 api_key_env = "DATABRICKS_TOKEN"
 base_url_env = "FLEET_DATABRICKS_AI_GATEWAY_BASE_URL"
 max_tokens = 8000
 cache = false
 
 [profiles.daytona-bench-40.llm.sub]
-model = "deepseek-v4-flash"
+model = "databricks-deepseek-v4-flash-0731"
 api_key_env = "DATABRICKS_TOKEN"
 base_url_env = "FLEET_DATABRICKS_AI_GATEWAY_BASE_URL"
 max_tokens = 8000

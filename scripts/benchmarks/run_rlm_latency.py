@@ -607,16 +607,49 @@ def _execution_trace_diagnostics(mlflow_url: str, trace_id: str) -> dict[str, An
         spans = list(trace.data.spans)
         repair_error_count = 0
         detail_overflowed = False
+        root_lm_spans = [span for span in spans if span.name == "RLM.root_lm"]
+        root_lm_wall_times = [
+            float(span.outputs["wall_time_ms"])
+            for span in root_lm_spans
+            if isinstance(getattr(span, "outputs", None), Mapping)
+            and isinstance(span.outputs.get("wall_time_ms"), (int, float))
+        ]
+        root_lm_provider_times = [
+            float(span.outputs["provider_response_ms"])
+            for span in root_lm_spans
+            if isinstance(getattr(span, "outputs", None), Mapping)
+            and isinstance(span.outputs.get("provider_response_ms"), (int, float))
+        ]
+        root_lm_context_chars = [
+            int(span.inputs["context_chars"])
+            for span in root_lm_spans
+            if isinstance(getattr(span, "inputs", None), Mapping) and isinstance(span.inputs.get("context_chars"), int)
+        ]
+        adapter_parse_error_count = 0
+        last_lm_response_keys: list[str] = []
         for span in spans:
             outputs = getattr(span, "outputs", None)
             if isinstance(outputs, Mapping):
                 result_kind = outputs.get("result_kind")
                 if result_kind == "repair_error":
                     repair_error_count += 1
+                if span.name == "RLM.execute" and outputs.get("failure_category") == "adapter_parse_error":
+                    adapter_parse_error_count += 1
+                last_lm_call = outputs.get("last_lm_call")
+                if span.name == "RLM.execute" and isinstance(last_lm_call, Mapping):
+                    keys = last_lm_call.get("response_keys")
+                    if isinstance(keys, (list, tuple)):
+                        last_lm_response_keys = [str(key) for key in keys[:32]]
                 if span.name == "Turn.progress.warning" and "omitted" in str(outputs.get("message", "")):
                     detail_overflowed = True
         return {
-            "root_lm_span_count": sum(span.name == "RLM.root_lm" for span in spans),
+            "root_lm_span_count": len(root_lm_spans),
+            "root_lm_wall_time_ms": round(sum(root_lm_wall_times), 3),
+            "root_lm_provider_response_ms": round(sum(root_lm_provider_times), 3),
+            "root_lm_slowest_wall_time_ms": round(max(root_lm_wall_times), 3) if root_lm_wall_times else 0.0,
+            "root_lm_max_context_chars": max(root_lm_context_chars) if root_lm_context_chars else 0,
+            "adapter_parse_error_count": adapter_parse_error_count,
+            "last_lm_response_keys": last_lm_response_keys,
             "repair_error_count": repair_error_count,
             "detail_overflowed": detail_overflowed,
         }
@@ -681,7 +714,7 @@ def _aggregate(rows: Sequence[Mapping[str, Any]], *, workload_id: str = EVIDENCE
         bool(measured) and corpus_report_complete and corpus_evidence_complete and all(corpus_quality_results)
     )
     diagnostics: list[Mapping[str, Any]] = []
-    for row in successes:
+    for row in measured:
         item = row.get("trace_diagnostics")
         if isinstance(item, Mapping):
             diagnostics.append(item)
@@ -709,6 +742,25 @@ def _aggregate(rows: Sequence[Mapping[str, Any]], *, workload_id: str = EVIDENCE
         "trace_ids": [row["trace_id"] for row in successes if row.get("trace_id")],
         "trace_id_match_rate": (sum(trace_matches) / len(trace_matches)) if trace_matches else 0.0,
         "root_lm_span_count": sum(int(item.get("root_lm_span_count", 0)) for item in diagnostics),
+        "root_lm_wall_time_ms": round(sum(float(item.get("root_lm_wall_time_ms", 0.0)) for item in diagnostics), 3),
+        "root_lm_provider_response_ms": round(
+            sum(float(item.get("root_lm_provider_response_ms", 0.0)) for item in diagnostics), 3
+        ),
+        "root_lm_slowest_wall_time_ms": round(
+            max((float(item.get("root_lm_slowest_wall_time_ms", 0.0)) for item in diagnostics), default=0.0), 3
+        ),
+        "root_lm_max_context_chars": max(
+            (int(item.get("root_lm_max_context_chars", 0)) for item in diagnostics), default=0
+        ),
+        "adapter_parse_error_count": sum(int(item.get("adapter_parse_error_count", 0)) for item in diagnostics),
+        "last_lm_response_keys": next(
+            (
+                list(item.get("last_lm_response_keys", []))
+                for item in reversed(diagnostics)
+                if isinstance(item.get("last_lm_response_keys"), list)
+            ),
+            [],
+        ),
         "repair_error_count": sum(int(item.get("repair_error_count", 0)) for item in diagnostics),
         "detail_overflowed": any(item.get("detail_overflowed") is True for item in diagnostics),
         "corpus_report_complete": corpus_report_complete if workload_id == CORPUS_WORKLOAD_ID else None,

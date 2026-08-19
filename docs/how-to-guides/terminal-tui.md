@@ -59,6 +59,12 @@ Builtin dark/light palettes follow the terminal preference; `/theme` lists and
 switches those builtins or custom JSON themes persisted under
 `$FLEET_TUI_STATE_DIR`.
 
+RLM reasoning, generated code, and interpreter output come from Fleet callback
+and trajectory Runtime Events, not `dspy.RLM(verbose=...)` or a provider token
+stream. Recursive status is bounded backend metadata: Root depth is 0, a native
+child is depth 1, and deeper delegation is a Sub-LM fallback without another
+Sandbox. The TUI does not infer depth from iteration counts or model text.
+
 The transcript is a follow-end `ScrollView` inside `TuiAltScreen`. PgUp/PgDn
 scroll a page, Home/End jump top/bottom, the mouse wheel scrolls, drag selects
 text for copy, and new output re-follows the end. Tool, code, and output cards

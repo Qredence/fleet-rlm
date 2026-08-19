@@ -33,6 +33,8 @@ class FleetRLMSignature(dspy.Signature):
     answer: str = dspy.OutputField(
         desc=(
             "Concise user-facing answer within the Turn output character budget. "
+            "This output is a string: serialize mappings or lists with json.dumps(..., ensure_ascii=False) before "
+            "SUBMIT instead of passing them directly; use indentation only when it fits the output budget. "
             "When the full report is longer and Session Workspace is available, write it with workspace "
             "or artifact tools first, then submit a short summary that references only a relative workspace path."
         )

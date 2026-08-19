@@ -1,7 +1,7 @@
 """Shared MLflow GenAI judge definitions for Fleet RLM evaluation scripts.
 
-One registration path keeps benchmark evaluation, production monitoring,
-judge alignment, and signature optimization operating on the same scorer
+One registration path keeps benchmark evaluation, production monitoring, and
+judge alignment operating on the same scorer
 registry instead of drifting into per-script judge variants.
 """
 

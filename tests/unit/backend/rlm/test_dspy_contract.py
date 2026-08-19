@@ -471,6 +471,27 @@ def test_lm_trace_callback_records_role_and_failure_category(monkeypatch: pytest
     assert calls.status == "ERROR"
 
 
+def test_lm_trace_callback_keeps_structural_last_call_summary() -> None:
+    from types import SimpleNamespace
+
+    from fleet_rlm.rlm.dspy_contract import _RLMTraceCallback
+
+    root = SimpleNamespace(model="root-model", history=[])
+    callback = _RLMTraceCallback(root_lm=root, sub_lm=SimpleNamespace(model="sub-model"))
+
+    callback.on_lm_start("call-1", root, {"prompt": "sensitive prompt"})
+    callback.on_lm_end("call-1", [])
+
+    summary = callback.last_call_summary()
+
+    assert summary["role"] == "root"
+    assert summary["call_index"] == 1
+    assert summary["request_status"] == "completed"
+    assert summary["response_keys"] == ()
+    assert "response_preview" not in summary
+    assert "sensitive prompt" not in str(summary)
+
+
 def test_lm_trace_profiles_include_bounded_readable_payloads(monkeypatch: pytest.MonkeyPatch) -> None:
     from fleet_rlm.observability import tracing
     from fleet_rlm.rlm.dspy_contract import _lm_input_profile, _lm_output_profile

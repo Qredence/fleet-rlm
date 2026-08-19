@@ -19,16 +19,26 @@ contracts, and tracked docs remain authoritative.
   loopback-only `/api/settings` routes edit only non-secret policy for restart.
   Do not restore ambient environment aliases or expose referenced secret values.
 - Keep Daytona SDK imports inside `daytona/`.
-- Create a fresh native DSPy RLM per Turn through `rlm.dspy_contract`. Inject and
-  `FinalOutput` protocol knowledge lives in `rlm.dspy_interpreter_contract`.
-  Daytona supplies a fresh custom interpreter. Native calls use the supported
-  `await rlm.acall(interpreter, **named_inputs)` surface; deterministic testing
-  doubles remain keyword-only. Fleet owns shutdown for caller-provided
-  interpreters.
-- `RecursiveRLMExecutor` owns bounded child delegation. Root receives
-  `rlm_query` and ordered `rlm_query_batched`; a child receives only `rlm_query`
-  plus native semantic sub-LM tools. The shared call budget is reserved under a
-  lock, child LM runtimes are copied, and each child owns a fresh Sandbox lease.
+- Create a fresh native DSPy RLM per Turn through `rlm.dspy_contract`. Native
+  `RLMOptions` mirrors DSPy 3.3.x exactly: `max_iters` bounds action/REPL
+  iterations, `max_llm_calls` bounds prompts sent through native
+  `llm_query`/`llm_query_batched`, and `max_output_chars` bounds retained REPL
+  output. `verbose` is host logging only; it is not the live evidence path.
+  Inject and `FinalOutput` protocol knowledge lives in
+  `rlm.dspy_interpreter_contract`. Daytona supplies a fresh custom interpreter.
+  Native calls use the supported `await rlm.acall(interpreter, **named_inputs)`
+  surface; deterministic testing doubles remain keyword-only. Fleet owns
+  shutdown for caller-provided interpreters.
+- `RecursiveRLMExecutor` owns bounded child delegation. The Runner creates the
+  Root executor at depth 0. Each `rlm_query` reservation sets
+  `child_depth = executor_depth + 1`; depth 1 acquires a fresh child Sandbox
+  and native RLM, while depth greater than `RLM_NATIVE_CHILD_DEPTH = 1` uses a
+  bounded Sub-LM `dspy.Predict` fallback and never acquires another Sandbox.
+  Root receives `rlm_query` and ordered `rlm_query_batched`; a child receives
+  only `rlm_query` plus native semantic Sub-LM tools, so child batch delegation
+  is not exposed. The shared call budget is reserved under a lock, child LM
+  runtimes are copied with the Turn deadline, and each native child owns a
+  fresh Sandbox lease.
 - Every Signature receives request text, bounded `session_context`, bounded
   `skill_cards`, and bounded Attachment metadata. Older committed messages
   remain behind the Session-scoped `read_session_history` Tool.
@@ -156,9 +166,12 @@ run `make api-check` after any HTTP contract change.
 ## DSPy RLM history contract
 
 Under the supported, pinned DSPy 3.3.x line, `RLM` owns one immutable
-`REPLHistory` per
-`RLM.acall`/`RLM.forward` invocation. The caller-owned Daytona interpreter
-provides execution state and lifecycle only; it must not mirror or reset
-DSPy's history. Completed interactions are exposed by DSPy as
-`Prediction.trajectory`, which Fleet may normalize for SSE and durable
-observation projection without mutating the prediction.
+`REPLHistory` per `RLM.acall`/`RLM.forward` invocation. `max_iters` limits the
+number of Root or child action/REPL cycles; it is not a recursion-depth limit.
+The caller-owned Daytona interpreter provides execution state and lifecycle
+only; it must not mirror or reset DSPy's history. Completed interactions are
+exposed by DSPy as `Prediction.trajectory`, which Fleet may normalize for SSE
+and durable observation projection without mutating the prediction. Native
+semantic `llm_query` calls remain inside the current RLM depth; only Fleet's
+recursive delegation tools (`rlm_query` and Root-only `rlm_query_batched`) advance
+the delegation depth.

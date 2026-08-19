@@ -297,7 +297,7 @@ function fieldItem(field: SettingsField): SettingItem {
   const base = {
     id: field.path,
     label: `${field.group} · ${field.label}`,
-    description: field.path,
+    description: settingDescription(field),
     currentValue: displayValue(field.value),
   };
   if (field.editor === "boolean" || field.editor === "single_choice") {
@@ -453,6 +453,14 @@ export class MultiChoiceEditor implements Component {
 
 function choicesOf(field: SettingsField): string[] {
   return field.choices ?? [];
+}
+
+function settingDescription(field: SettingsField): string {
+  if (field.path.endsWith(".api_key_env")) return `${field.path} · name only; secret stays in .env`;
+  if (field.path.endsWith(".base_url_env")) return `${field.path} · OpenAI-compatible /v1 base URL`;
+  if (field.path.endsWith(".base_url")) return `${field.path} · OpenAI-compatible /v1 base URL`;
+  if (field.path.endsWith(".model")) return `${field.path} · provider model id`;
+  return field.path;
 }
 
 function displayValue(value: unknown): string {

@@ -78,6 +78,25 @@ def test_remote_submit_setup_is_self_contained() -> None:
         raise AssertionError("SUBMIT must terminate execution with its final value")
 
 
+def test_typed_string_submit_rejects_structured_values_and_accepts_json_text() -> None:
+    source = remote_submit_setup_code([{"name": "answer", "type": "str"}])
+
+    namespace: dict[str, object] = {}
+    exec(source, namespace, namespace)
+
+    with pytest.raises(TypeError, match=r"json\.dumps"):
+        namespace["SUBMIT"](answer={"value": 1})  # type: ignore[operator]
+
+    formatted = json.dumps({"value": 1}, ensure_ascii=False, indent=2)
+    try:
+        exec("SUBMIT(answer=json.dumps({'value': 1}, ensure_ascii=False, indent=2))", namespace, namespace)
+    except BaseException as exc:
+        assert type(exc).__name__ == "FleetFinalOutputError"
+        assert getattr(exc, "value", None) == {"answer": formatted}
+    else:
+        raise AssertionError("SUBMIT must terminate execution with its final value")
+
+
 def test_final_output_frames_round_trip_and_accept_legacy_plain_payload() -> None:
     value = {"answer": "done", "count": 2}
     frame = final_output_frame(value)

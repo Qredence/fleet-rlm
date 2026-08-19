@@ -330,7 +330,7 @@ registerCommand({
 
 registerCommand({
   name: "settings",
-  description: "View and edit local Fleet policy settings",
+  description: "View and edit local Chat Completion provider/model settings",
   usage: "/settings",
   handler: async (_args, ctx) => {
     try {

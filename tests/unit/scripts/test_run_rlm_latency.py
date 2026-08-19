@@ -3,6 +3,8 @@ from __future__ import annotations
 import gzip
 import json
 import json as json_module
+import sys
+from types import SimpleNamespace
 
 import pytest
 
@@ -17,6 +19,7 @@ from scripts.benchmarks.run_rlm_latency import (
     BenchmarkError,
     _aggregate,
     _attach_trace_identity,
+    _execution_trace_diagnostics,
     _termination_mode_from_chunk,
     _upload_corpus,
     _usage_totals,
@@ -234,6 +237,50 @@ def test_aggregate_excludes_failed_samples_from_latency_percentiles() -> None:
     assert summary["error_rate"] == pytest.approx(1 / 3)
     assert summary["end_to_end_ms"] == {"mean": 150.0, "p50": 100.0, "p95": 200.0}
     assert summary["first_runtime_event_ms"] == {"p50": 10.0, "p95": 20.0}
+
+
+def test_execution_trace_diagnostics_exposes_provider_latency_and_parse_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    spans = [
+        SimpleNamespace(
+            name="RLM.root_lm",
+            inputs={"context_chars": 12},
+            outputs={"wall_time_ms": 100.0, "provider_response_ms": 98.0},
+        ),
+        SimpleNamespace(
+            name="RLM.root_lm",
+            inputs={"context_chars": 24},
+            outputs={"wall_time_ms": 220.0, "provider_response_ms": 219.0},
+        ),
+        SimpleNamespace(
+            name="RLM.execute",
+            inputs={},
+            outputs={
+                "failure_category": "adapter_parse_error",
+                "last_lm_call": {"response_keys": ()},
+            },
+        ),
+    ]
+    fake_mlflow = SimpleNamespace(
+        set_tracking_uri=lambda _url: None,
+        get_trace=lambda _trace_id: SimpleNamespace(data=SimpleNamespace(spans=spans)),
+    )
+    monkeypatch.setitem(sys.modules, "mlflow", fake_mlflow)
+
+    diagnostics = _execution_trace_diagnostics("http://localhost:5001", "trace-1")
+
+    assert diagnostics == {
+        "root_lm_span_count": 2,
+        "root_lm_wall_time_ms": 320.0,
+        "root_lm_provider_response_ms": 317.0,
+        "root_lm_slowest_wall_time_ms": 220.0,
+        "root_lm_max_context_chars": 24,
+        "adapter_parse_error_count": 1,
+        "last_lm_response_keys": [],
+        "repair_error_count": 0,
+        "detail_overflowed": False,
+    }
 
 
 def test_usage_totals_keep_only_approved_counters() -> None:

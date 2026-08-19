@@ -30,6 +30,9 @@ def test_default_signature_orders_capabilities_before_semantic_calls() -> None:
     assert "known reference prefix" in instructions
     assert "Never pass positional arguments" in instructions
     assert "SUBMIT(answer=answer)" in instructions
+    assert "json.dumps(answer, ensure_ascii=False)" in instructions
+    assert "Use ``indent=2`` only when" in instructions
+    assert "Python ``repr`` text" in instructions
     assert "Once sufficient verification exists, the next action must contain ``SUBMIT``" in normalized_instructions
     assert "Never spend an iteration only restating a verified result or emitting empty code" in normalized_instructions
     assert "Never repeat an identical interpreter action" in normalized_instructions

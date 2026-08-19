@@ -44,6 +44,11 @@ Individual lanes: `pnpm test`, `pnpm typecheck`, `pnpm lint`, `pnpm format:check
   design a second client protocol unless a second client exists.
 - State mutations exclusively through `store.dispatch`; no direct mutation.
 - SSE ordering invariants are enforced in `streamFleetTurn` — one start, one terminal, [DONE] last.
+- RLM progress is projected from typed Runtime Events: Root iterations expose
+  callback/trajectory reasoning, code, and output, while recursive status stays
+  bounded backend metadata. Do not infer recursive depth from iteration counts,
+  model text, or `dspy.RLM(verbose=...)`; the backend defines Root depth 0,
+  native child depth 1, and Sub-LM fallback beyond that boundary.
 - API errors use `FleetApiError` with `status`, `correlationId`, `code`.
 - Keep focused tests beside their source level under `src/tests/` or
   `src/tui/tests/`; shared behavior may be covered through its owning feature.

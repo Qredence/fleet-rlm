@@ -7,12 +7,14 @@ and its matching automated check in the same patch.
 
 - **DSPy is Fleet's foundational cognitive framework, not a compatibility
   layer.** Every Turn constructs a fresh `dspy.RLM` per the DSPy 3.3.0 contract,
-  Tools are `dspy.Tool` objects, execution goes through `rlm.acall(**inputs)`
-  with `RLMOptions.max_iters` enforcing DSPy's iteration budget end-to-end, and
-  bounded child RLMs provide controlled width at a fixed native depth of one.
-  Pinned framework constructor, Signature, Prediction, Tool, Root/Sub LM,
-  callback, trajectory, usage, and child-RLM contracts are regression-gated in
-  `tests/unit/backend/rlm/` and the live matrix.
+  Tools are `dspy.Tool` objects, and execution goes through the caller-owned
+  `await rlm.acall(interpreter, **named_inputs)` surface. `RLMOptions.max_iters`
+  enforces DSPy's iteration budget end-to-end; native `max_llm_calls` and
+  `max_output_chars` retain their DSPy meanings. Bounded child RLMs provide
+  controlled width at fixed native depth one. Pinned framework constructor,
+  Signature, Prediction, Tool, Root/Sub LM, callback, trajectory, usage, and
+  child-RLM contracts are regression-gated in `tests/unit/backend/rlm/` and the
+  live matrix.
 - **SQLite owns Sessions, Runs, Turn/Artifact records, sandbox bindings, and
   the Memory promotion outbox.** Alembic owns the live schema (fresh canonical
   baseline plus chained revisions); `create_tables` is reserved for explicit
@@ -102,7 +104,8 @@ exist.
 - Pass request text, bounded `session_context`, authorized `skill_cards`, and
   bounded Attachment metadata to the default Fleet Signature. Custom Task
   Contracts receive only declared host-bounded inputs. Keep older history behind
-  `read_session_history` and call `await rlm.acall(**named_inputs)`.
+  `read_session_history` and call `await rlm.acall(interpreter, **named_inputs)`;
+  the interpreter is caller-owned and its lease remains with Fleet.
 - The Turn stream opens immediately with transient `data-status` preparation
   heartbeats (never recorded); claim, preparation, Attachment-ownership, and
   Skill-selection failures then resolve as closed `error` + `finish` chunks
@@ -221,8 +224,10 @@ routes or public events.
   selected TOML policy; ambient selectors and unreferenced variables are
   ignored. The canonical public Run Environment is `daytona`.
 - `RLM_NATIVE_CHILD_DEPTH = 1` is a product invariant. The policy
-  `recursion_max_parallel_children` bounds sibling workers; it does not expose
-  concurrency or depth controls to the model and does not permit child fan-out.
+  `recursion_max_parallel_children` bounds Root-selected sibling workers; it
+  does not expose concurrency or depth controls to the model and does not permit
+  child-controlled fan-out. A child may use native semantic tools and its
+  recursive request becomes a Sub-LM depth fallback rather than a grandchild.
 - There is no `/api/v1`, WebSocket execution, dual serve, legacy migration,
   runtime-admin, optimization/evaluation API, or public Artifact creation.
 - The maintained client is pi-tui. A graphical/Web client is separate future

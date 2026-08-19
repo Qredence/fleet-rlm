@@ -6,7 +6,7 @@ import asyncio
 import contextlib
 import logging
 import time
-from collections.abc import AsyncIterator, Callable, Sequence
+from collections.abc import AsyncIterator, Callable, Mapping, Sequence
 from dataclasses import replace
 from typing import Any, Protocol, Self, cast
 
@@ -694,19 +694,22 @@ class RLMRunner:
         recursive_executor: RecursiveRLMExecutor | None,
         metrics: Any,
         exc: BaseException,
+        *,
+        last_lm_call: Mapping[str, object] | None = None,
     ) -> None:
         recursive_summary = _recursive_summary(recursive_executor, metrics)
-        phase.set_outputs(
-            {
-                "elapsed_ms": int((time.perf_counter() - started) * 1000),
-                "request_status": "failed",
-                "failure_category": trace_failure_category(exc),
-                "recursive_call_count": recursive_summary.call_count,
-                "recursive_prompt_chars": recursive_summary.delegated_prompt_chars,
-                "recursive_depth_fallback_count": recursive_summary.depth_fallback_count,
-                "delegation_metrics": recursive_summary.delegation_metrics.as_dict(),
-            }
-        )
+        outputs: dict[str, object] = {
+            "elapsed_ms": int((time.perf_counter() - started) * 1000),
+            "request_status": "failed",
+            "failure_category": trace_failure_category(exc),
+            "recursive_call_count": recursive_summary.call_count,
+            "recursive_prompt_chars": recursive_summary.delegated_prompt_chars,
+            "recursive_depth_fallback_count": recursive_summary.depth_fallback_count,
+            "delegation_metrics": recursive_summary.delegation_metrics.as_dict(),
+        }
+        if last_lm_call:
+            outputs["last_lm_call"] = dict(last_lm_call)
+        phase.set_outputs(outputs)
 
     @staticmethod
     def _record_phase_success(
@@ -764,6 +767,11 @@ class RLMRunner:
             workspace_memory_digest=context.session.workspace_memory_digest,
         )
         started = time.perf_counter()
+        trace_callback = _RLMTraceCallback(
+            root_lm=context.execution.models.root_lm,
+            sub_lm=context.execution.models.sub_lm,
+            metrics=context.delegation.metrics,
+        )
         with (
             turn_phase_span(
                 "RLM.execute",
@@ -777,13 +785,7 @@ class RLMRunner:
                 lm=context.execution.models.root_lm,
                 # DSPy 3.3.x combines context callbacks with instance
                 # callbacks around LM requests (dspy/utils/callback.py:258-288).
-                callbacks=[
-                    _RLMTraceCallback(
-                        root_lm=context.execution.models.root_lm,
-                        sub_lm=context.execution.models.sub_lm,
-                        metrics=context.delegation.metrics,
-                    )
-                ],
+                callbacks=[trace_callback],
                 # Keep the pinned DSPy JSON action protocol authoritative. A
                 # provider-native token stream is an adapter failure, not a
                 # second grammar that Fleet should reinterpret.
@@ -796,7 +798,14 @@ class RLMRunner:
                 if recursive_executor is not None:
                     recursive_executor.raise_if_cleanup_failed()
             except BaseException as exc:
-                self._record_phase_failure(phase, started, recursive_executor, context.delegation.metrics, exc)
+                self._record_phase_failure(
+                    phase,
+                    started,
+                    recursive_executor,
+                    context.delegation.metrics,
+                    exc,
+                    last_lm_call=trace_callback.last_call_summary(),
+                )
                 raise
             finally:
                 self._record_attachment_accesses(context)

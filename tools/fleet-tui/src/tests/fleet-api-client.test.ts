@@ -258,9 +258,46 @@ describe("FleetApiClient", () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(
-        new Response(JSON.stringify({ revision: "a".repeat(64), scopes: [] }), {
-          headers: { "content-type": "application/json" },
-        }),
+        new Response(
+          JSON.stringify({
+            revision: "a".repeat(64),
+            scopes: [
+              {
+                name: "daytona",
+                fields: [
+                  {
+                    path: "llm.root.model",
+                    group: "Root LLM",
+                    label: "Model id",
+                    value: "databricks-deepseek-v4-flash-0731",
+                    editor: "text",
+                    choices: [],
+                    environment_overridden: false,
+                  },
+                  {
+                    path: "llm.root.api_key_env",
+                    group: "Root LLM",
+                    label: "Provider API key environment variable",
+                    value: "DATABRICKS_TOKEN",
+                    editor: "text",
+                    choices: [],
+                    environment_overridden: false,
+                  },
+                  {
+                    path: "llm.root.base_url_env",
+                    group: "Root LLM",
+                    label: "Provider base URL environment variable",
+                    value: "FLEET_DATABRICKS_AI_GATEWAY_BASE_URL",
+                    editor: "text",
+                    choices: [],
+                    environment_overridden: false,
+                  },
+                ],
+              },
+            ],
+          }),
+          { headers: { "content-type": "application/json" } },
+        ),
       )
       .mockResolvedValueOnce(
         new Response(JSON.stringify({ revision: "b".repeat(64), scopes: [] }), {
@@ -270,7 +307,13 @@ describe("FleetApiClient", () => {
     globalThis.fetch = fetchMock;
     const client = new FleetApiClient({ baseUrl: "http://fleet.test" });
 
-    await client.getSettings();
+    const settings = await client.getSettings();
+    const fields = Object.fromEntries(
+      (settings.scopes[0]?.fields ?? []).map((field) => [field.path, field.value]),
+    );
+    expect(fields["llm.root.model"]).toBe("databricks-deepseek-v4-flash-0731");
+    expect(fields["llm.root.api_key_env"]).toBe("DATABRICKS_TOKEN");
+    expect(fields["llm.root.base_url_env"]).toBe("FLEET_DATABRICKS_AI_GATEWAY_BASE_URL");
     await client.updateSettings({
       revision: "a".repeat(64),
       scope: "defaults",

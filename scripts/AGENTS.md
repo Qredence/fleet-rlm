@@ -17,10 +17,10 @@ scripts import the installed `fleet_rlm` package; the backend never imports scri
   established constant name.
 - Credentialed scripts that load `.env` use
   `dotenv.load_dotenv(..., override=False)` so process exports still win.
-- Sibling imports across `scripts/benchmarks/`/`scripts/optimize/` go through the
-  established repo-root `sys.path` bootstrap (`openapi_tools.py:16`), keeping both
-  direct-file and `-m` module execution working; shared Fleet judge definitions
-  live only in `scripts/benchmarks/judges.py`.
+- Sibling imports across `scripts/benchmarks/` go through the established repo-root
+  `sys.path` bootstrap (`openapi_tools.py:16`), keeping both direct-file and `-m`
+  module execution working; shared Fleet judge definitions live only in
+  `scripts/benchmarks/judges.py`.
 - Print errors to `sys.stderr`; return non-zero on failure.
 
 ## Validation
@@ -36,14 +36,19 @@ make api-sync              # OpenAPI + generated TUI types (openapi_tools.py)
 - The Phase 1 live proof and Prime Oolong benchmark use the selected TOML
   policy's `runtime.live_enabled` switch (true by default; false fails closed)
   before credentials or models are constructed. The separate Databricks
-  quality-loop scripts and GEPA execution retain their explicit
-  `FLEET_LIVE=1` gate until that lane is migrated as its own phase.
+  quality-loop scripts retain their explicit `FLEET_LIVE=1` gate until that
+  lane is migrated as its own phase.
 - Never hardcode or log credentials; read from env after dotenv load.
 - `scripts/benchmarks/` owns routing/lifecycle benchmarks and Databricks
   quality-loop helpers (including shared Fleet judge definitions);
   `run_routing_eval.py` measures the Python → Sub-LM → child-RLM delegation
-  ladder from public evidence. `scripts/optimize/` remains the trusted-host
-  signature-optimization lane.
+  ladder from public evidence. Its depth cases start the Root at depth 0,
+  expect a direct `rlm_query` at native depth 1, and expect a child’s further
+  `rlm_query` to become a Sub-LM `depth_fallback`; Root RLM iterations and
+  native `llm_query` calls must not be mistaken for recursive depth. The
+  routing and live verification scripts should report `recursive_call_count`,
+  `recursive_depth_fallback_count`, and child settlement evidence rather than
+  infer child execution from model text.
 
 ## Quality-Gate Scripts
 
