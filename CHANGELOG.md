@@ -2,6 +2,34 @@
 
 All notable changes to this project are documented in this file.
 
+## [0.7.3] - 2026-08-20
+
+### Changed
+
+- **Change:** Aligned the native DSPy integration with the upstream `main`
+  revision while preserving the aggregated completion contract used by Fleet's
+  RLM runtime.
+  **Outcome:** DSPy upstream changes can be locked and consumed without
+  reintroducing raw streaming request-shape incompatibilities.
+- **Change:** Consolidated Session Workspace and Project tools behind shared
+  public factories and host-owned descriptions, preserving append capability
+  and event-view contracts.
+  **Outcome:** Both hosts share one explicit tool seam while retaining their
+  distinct filesystem scopes and operator-visible event behavior.
+- **Change:** Simplified Daytona runtime lifecycle cleanup and centralized
+  memory-record formatting.
+  **Outcome:** Runtime ownership and durable memory output remain easier to
+  reason about.
+
+### Fixed
+
+- **Change:** Broadened callback failure handling to include cancellation and
+  other `BaseException` paths, and made workspace/project tool error returns
+  explicit.
+  **Outcome:** Interruptions and filesystem failures settle through the
+  intended error contracts instead of relying on implicit nested-function
+  returns.
+
 ## [0.7.2] - 2026-08-19
 
 ### Added
