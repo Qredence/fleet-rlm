@@ -236,6 +236,7 @@ jobs:
           command: |
             uv run python scripts/circleci_trigger_release.py \
               --version="<< pipeline.parameters.release_version >>" \
+              --repository=Qredence/fleet-rlm \
               --ref=main
       - run:
           name: Update deploy to SUCCESS
