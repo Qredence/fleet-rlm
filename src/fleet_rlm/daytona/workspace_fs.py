@@ -465,11 +465,7 @@ class DaytonaSandboxVolumeFs:
 
 
 def _is_under(path: str, root: str) -> bool:
-    try:
-        PurePosixPath(path).relative_to(PurePosixPath(root))
-    except ValueError:
-        return False
-    return True
+    return _is_relative_to(PurePosixPath(path), PurePosixPath(root))
 
 
 def _provider_not_found(exc: BaseException) -> bool:

@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
-from collections.abc import Sequence
 from dataclasses import dataclass
 from functools import partial
 from typing import Any, cast
@@ -50,8 +49,6 @@ from fleet_rlm.daytona.workspace_fs import AsyncDaytonaVolumeFS, DaytonaSandboxV
 from fleet_rlm.files.memory_candidates import MemoryCandidateCollector, build_memory_promotion_intents
 from fleet_rlm.files.memory_models import WORKSPACE_MEMORY_INJECTION_TAIL_BYTES
 from fleet_rlm.files.models import (
-    AttachmentAccess,
-    AttachmentRun,
     PreparedAttachments,
 )
 from fleet_rlm.files.volume_paths import VolumePaths, volume_paths_from_settings
@@ -319,20 +316,6 @@ class _DaytonaEnvironmentProvider:
             raise
 
 
-@dataclass(slots=True)
-class _LiveAttachmentLifecycle:
-    attachment_lifecycle: Any
-
-    async def prepare_run(
-        self,
-        access: AttachmentAccess,
-        attachment_ids: Sequence[UUID],
-        run: AttachmentRun,
-        sink: Any,
-    ) -> PreparedAttachments:
-        return await self.attachment_lifecycle.prepare_run(access, attachment_ids, run, sink)
-
-
 async def _prepare_memory_digest(memory_store: Any, *, request: str) -> str:
     """Return the per-Run injection digest, degrading fail-soft with diagnostics.
 
@@ -583,7 +566,7 @@ def build_run_preparation(
         models=models,
         options=options,
         recursive_options=recursive_rlm_options(settings),
-        attachments=_LiveAttachmentLifecycle(attachment_lifecycle),
+        attachments=attachment_lifecycle,
         environments=_DaytonaEnvironmentProvider(resources, settings),
         capabilities=_LiveCapabilityPreparer(settings, skill_catalog, volume_paths=resources.volume_paths),
     )

@@ -149,6 +149,24 @@ def normalize_workspace_memory_learning(key_learning: str) -> str:
     return learning
 
 
+def _v3_record_line(
+    *,
+    timestamp: str,
+    category: str,
+    learning: str,
+    memory_id: str,
+    source: str,
+    updated_at: str,
+    supersedes_id: str | None = None,
+) -> str:
+    """Emit one canonical v3 record line (single owner of the v3 on-disk shape)."""
+    supersession = f" supersedes:{supersedes_id}" if supersedes_id is not None else ""
+    return (
+        f"- [{timestamp}] **{category}** <!-- id:{memory_id} source:{source} "
+        f"updated:{updated_at}{supersession} -->: {learning}\n"
+    )
+
+
 def format_workspace_memory_record(
     key_learning: str,
     category: str,
@@ -162,9 +180,13 @@ def format_workspace_memory_record(
         raise WorkspaceMemoryRecordError
     timestamp_text = timestamp.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
     memory_id = workspace_memory_record_id(timestamp_text, normalized_category, learning)
-    record = (
-        f"- [{timestamp_text}] **{normalized_category}** <!-- id:{memory_id} source:user_explicit "
-        f"updated:{timestamp_text} -->: {learning}\n"
+    record = _v3_record_line(
+        timestamp=timestamp_text,
+        category=normalized_category,
+        learning=learning,
+        memory_id=memory_id,
+        source="user_explicit",
+        updated_at=timestamp_text,
     )
     validate_workspace_memory_record(record)
     return record, normalized_category
@@ -233,10 +255,14 @@ def format_workspace_memory_v3_record(
         raise WorkspaceMemoryRecordError
     if supersedes_id is not None:
         normalize_workspace_memory_id(supersedes_id)
-    supersession = f" supersedes:{supersedes_id}" if supersedes_id is not None else ""
-    record = (
-        f"- [{created_at}] **{normalized_category}** <!-- id:{memory_id} source:{source} "
-        f"updated:{updated_at}{supersession} -->: {learning}\n"
+    record = _v3_record_line(
+        timestamp=created_at,
+        category=normalized_category,
+        learning=learning,
+        memory_id=memory_id,
+        source=source,
+        updated_at=updated_at,
+        supersedes_id=supersedes_id,
     )
     validate_workspace_memory_record(record)
     return record
