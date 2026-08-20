@@ -35,6 +35,7 @@ jobs:
     environment:
       COMPONENT_NAME: "<< pipeline.deploy.component_name >>"
       ENVIRONMENT_NAME: "<< pipeline.deploy.environment_name >>"
+      NAMESPACE: "<< pipeline.deploy.namespace >>"
       TARGET_VERSION: "<< pipeline.deploy.target_version >>"
     steps:
       - checkout
@@ -51,7 +52,7 @@ jobs:
           name: Perform rollback
           command: |
             # TODO: add rollback logic using ${TARGET_VERSION}
-            echo "Rolling back PyPI deployment to version ${TARGET_VERSION}"
+            echo "Rolling back fleet-rlm to ${TARGET_VERSION}"
       - run:
           name: Update deployment status to failed
           command: circleci run release update deploy-pypi-rollback --status=FAILED

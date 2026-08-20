@@ -22,23 +22,47 @@ commands:
 executors:
   python:
     docker:
-      # The -node variant adds Node.js so openapi-typescript (npx) can run in
-      # the same job as the python gates (api-check regenerates TUI types).
       - image: cimg/python:3.13.13-node
     working_directory: ~/project
     environment:
       UV_CACHE_DIR: ~/.cache/uv
+
 jobs:
   deploy-pypi:
     executor: python
     resource_class: small
     environment:
-      COMPONENT_NAME: "fleet-rlm"
-      ENVIRONMENT_NAME: "pypi"
-      TARGET_VERSION: "<< pipeline.deploy.target_version >>"
+      COMPONENT_NAME: "<< pipeline.parameters.deploy.component_name >>"
+      ENVIRONMENT_NAME: "<< pipeline.parameters.deploy.environment_name >>"
+      NAMESPACE: "<< pipeline.parameters.deploy.namespace >>"
+      TARGET_VERSION: "<< pipeline.parameters.deploy.target_version >>"
     steps:
       - checkout
       - install_uv
+      - run:
+          name: Validate PyPI deploy inputs
+          command: |
+            test -n "${TARGET_VERSION}" || {
+              echo "target_version must be supplied when enabling deploy_pypi" >&2
+              exit 1
+            }
+            test -n "${GITHUB_TOKEN:-}" || {
+              echo "GITHUB_TOKEN must be configured in the CircleCI project or context" >&2
+              exit 1
+            }
+            python << 'PY'
+            import os
+            import tomllib
+
+            requested = os.environ["TARGET_VERSION"].removeprefix("v")
+            with open("pyproject.toml", "rb") as handle:
+                project_version = tomllib.load(handle)["project"]["version"]
+            if project_version != requested:
+                raise SystemExit(
+                    f"target_version {requested!r} does not match pyproject.toml {project_version!r}"
+                )
+            print(f"Preparing fleet-rlm {project_version} for the PyPI deployment bridge")
+            PY
       - run:
           name: Plan release
           command: |
@@ -48,11 +72,11 @@ jobs:
               --target-version=${TARGET_VERSION}
       - run:
           name: Perform deployment
-          no_output_timeout: 45m
           command: |
             uv run python scripts/circleci_trigger_release.py \
               --version="${TARGET_VERSION}" \
               --ref=main
+          no_output_timeout: 45m
       - run:
           name: Update deployment status to failed
           command: circleci run release update --status=FAILED
@@ -73,7 +97,6 @@ jobs:
       enabled: true
       auto_rollback_on_failure: true
 
-
 workflows:
   deploy:
     jobs:
@@ -89,5 +112,5 @@ workflows:
               only: main
       - cancel-deploy-pypi:
           requires:
-            - deploy-pypi:
-              - canceled
+            - deploy-pypi
+          when: on_fail
