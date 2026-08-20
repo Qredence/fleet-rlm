@@ -116,7 +116,7 @@ def main(argv: list[str] | None = None) -> int:
             method="POST",
             payload={"ref": args.ref, "inputs": {"version": args.version}},
         )
-        if status != 204:
+        if status not in {200, 204}:
             raise ReleaseTriggerError(f"GitHub release dispatch returned HTTP {status}")
 
         run = _find_run(

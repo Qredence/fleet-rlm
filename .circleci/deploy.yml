@@ -32,10 +32,9 @@ jobs:
     executor: python
     resource_class: small
     environment:
-      COMPONENT_NAME: "<< pipeline.parameters.deploy.component_name >>"
-      ENVIRONMENT_NAME: "<< pipeline.parameters.deploy.environment_name >>"
-      NAMESPACE: "<< pipeline.parameters.deploy.namespace >>"
-      TARGET_VERSION: "<< pipeline.parameters.deploy.target_version >>"
+      COMPONENT_NAME: "fleet-rlm"
+      ENVIRONMENT_NAME: "pypi"
+      TARGET_VERSION: "<< pipeline.deploy.target_version >>"
     steps:
       - checkout
       - install_uv
@@ -50,7 +49,7 @@ jobs:
               echo "GITHUB_TOKEN must be configured in the CircleCI project or context" >&2
               exit 1
             }
-            python << 'PY'
+            python \<< 'PY'
             import os
             import tomllib
 
@@ -75,6 +74,7 @@ jobs:
           command: |
             uv run python scripts/circleci_trigger_release.py \
               --version="${TARGET_VERSION}" \
+              --repository=Qredence/fleet-rlm \
               --ref=main
           no_output_timeout: 45m
       - run:
@@ -112,5 +112,5 @@ workflows:
               only: main
       - cancel-deploy-pypi:
           requires:
-            - deploy-pypi
-          when: on_fail
+            - deploy-pypi:
+              - canceled

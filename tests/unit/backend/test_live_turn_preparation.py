@@ -91,6 +91,7 @@ async def test_live_preparation_stages_attachment_and_cleans_it(
 
     class SessionManager:
         released = False
+        sandbox_id = f"sandbox-{tmp_path}"
 
         async def acquire(self, _request, *, deadline):
             """
@@ -103,7 +104,11 @@ async def test_live_preparation_stages_attachment_and_cleans_it(
                 SimpleNamespace: A mock acquisition result containing the sandbox, interpreter, and volume identifiers.
             """
             assert deadline > asyncio.get_running_loop().time()
-            return SimpleNamespace(sandbox_id="sandbox", interpreter=object(), volume_id="test-volume")
+            return SimpleNamespace(
+                sandbox_id=self.sandbox_id,
+                interpreter=object(),
+                volume_id="test-volume",
+            )
 
         async def release(self, _lease) -> None:
             self.released = True
@@ -123,7 +128,15 @@ async def test_live_preparation_stages_attachment_and_cleans_it(
         settings=settings,
         volume_paths=volume_paths_from_settings(settings),
         session_manager=SessionManager(),
-        platform=SimpleNamespace(get=AsyncMock(return_value=SimpleNamespace(fs=SandboxFs(), process=SandboxProcess()))),
+        platform=SimpleNamespace(
+            get=AsyncMock(
+                return_value=SimpleNamespace(
+                    id=SessionManager.sandbox_id,
+                    fs=SandboxFs(),
+                    process=SandboxProcess(),
+                )
+            )
+        ),
         models=RLMModelBundle(object(), object()),
         track_sandbox=lambda _sandbox_id: None,
         daytona_admission=DaytonaAdmission(max_active_leases=2),
