@@ -53,30 +53,25 @@ def test_build_lm_allows_reasoning_effort_only_when_configured(monkeypatch: pyte
 
     assert default == "default-lm"
     assert bounded == "bounded-lm"
-    # stream_options (usage) is always allowlisted; reasoning_effort only appends
-    # its param when explicitly configured.
+    # reasoning_effort is allowlisted only when explicitly configured.
     assert "reasoning_effort" not in lm.call_args_list[0].kwargs
-    assert lm.call_args_list[0].kwargs["allowed_openai_params"] == ["stream_options"]
+    assert lm.call_args_list[0].kwargs["allowed_openai_params"] == []
     assert lm.call_args_list[1].kwargs["reasoning_effort"] == "none"
-    assert lm.call_args_list[1].kwargs["allowed_openai_params"] == ["stream_options", "reasoning_effort"]
+    assert lm.call_args_list[1].kwargs["allowed_openai_params"] == ["reasoning_effort"]
 
 
-def test_build_lm_requests_usage_via_stream_options(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_build_lm_uses_dspy_aggregated_completion_path(monkeypatch: pytest.MonkeyPatch) -> None:
     lm = MagicMock(return_value="lm")
     monkeypatch.setattr(factory.dspy, "LM", lm)
 
     factory.build_lm("openai/model", api_key=None)
 
     kwargs = lm.call_args.kwargs
-    # Stream so the provider emits a usage block on the final chunk: gateways
-    # (Databricks AI Gateway included) ignore stream_options.include_usage on a
-    # non-streamed request. `stream` is a litellm transport toggle passed
-    # directly; `stream_options` is an OpenAI body param that must be allowlisted.
-    # DSPy/litellm aggregate the deltas internally, so lm() still returns the
-    # same final outputs and ChatAdapter parsing is untouched.
-    assert kwargs["stream"] is True
-    assert kwargs["stream_options"] == {"include_usage": True}
-    assert kwargs["allowed_openai_params"] == ["stream_options"]
+    # DSPy 3.3.x's legacy LM parser expects the provider's aggregated
+    # completion object, not a raw streaming wrapper.
+    assert "stream" not in kwargs
+    assert "stream_options" not in kwargs
+    assert kwargs["allowed_openai_params"] == []
 
 
 def test_build_lm_requests_usage_and_reasoning_effort_together(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -86,10 +81,55 @@ def test_build_lm_requests_usage_and_reasoning_effort_together(monkeypatch: pyte
     factory.build_lm("openai/model", api_key=None, reasoning_effort="none")
 
     kwargs = lm.call_args.kwargs
-    assert kwargs["stream"] is True
-    assert kwargs["stream_options"] == {"include_usage": True}
     assert kwargs["reasoning_effort"] == "none"
-    assert kwargs["allowed_openai_params"] == ["stream_options", "reasoning_effort"]
+    assert "stream" not in kwargs
+    assert "stream_options" not in kwargs
+    assert kwargs["allowed_openai_params"] == ["reasoning_effort"]
+
+
+@pytest.mark.asyncio
+async def test_build_lm_legacy_async_call_processes_an_aggregated_completion(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The DSPy 3.3.x legacy LM path must receive an aggregated completion."""
+
+    import dspy.clients.lm as dspy_lm
+
+    class FakeStreamingResponse:
+        pass
+
+    class FakeCompletionResponse(dict):
+        def __init__(self) -> None:
+            choice = SimpleNamespace(
+                finish_reason="stop",
+                message=SimpleNamespace(content="OK"),
+            )
+            super().__init__(choices=[choice])
+            self.choices = [choice]
+            self.model = "openai/test"
+            self.usage = {}
+            self._hidden_params = {}
+
+    def completion(**kwargs):
+        if kwargs.get("stream", False):
+            return FakeStreamingResponse()
+        return FakeCompletionResponse()
+
+    async def acompletion(**kwargs):
+        return completion(**kwargs)
+
+    monkeypatch.setattr(
+        dspy_lm,
+        "_get_litellm",
+        lambda: SimpleNamespace(completion=completion, acompletion=acompletion),
+    )
+    monkeypatch.setattr(dspy_lm.dspy.settings, "send_stream", None)
+
+    lm = factory.build_lm("openai/model", api_key=None, cache=False)
+
+    result = await lm.acall(prompt="Reply with exactly OK.")
+
+    assert result == ["OK"]
 
 
 def test_build_lm_uses_chat_completion_transport(monkeypatch: pytest.MonkeyPatch) -> None:

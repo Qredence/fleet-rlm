@@ -377,7 +377,7 @@ class _RLMReasoningCallback(BaseCallback):
         self,
         call_id: str,
         outputs: Any | None,
-        exception: Exception | None = None,
+        exception: BaseException | None = None,
     ) -> None:
         action_span = self._action_spans.pop(call_id, None)
         try:
@@ -502,7 +502,7 @@ class _RLMTraceCallback(BaseCallback):
         self,
         call_id: str,
         outputs: dict[str, Any] | None,
-        exception: Exception | None = None,
+        exception: BaseException | None = None,
     ) -> None:
         """
         Finalize tracing and telemetry for an LM call.
@@ -510,7 +510,7 @@ class _RLMTraceCallback(BaseCallback):
         Parameters:
             call_id (str): Identifier of the LM call.
             outputs (dict[str, Any] | None): Response data from the call.
-            exception (Exception | None): Exception raised by the call, if applicable.
+            exception (BaseException | None): Exception raised by the call, if applicable.
         """
         state = self._spans.pop(call_id, None)
         if state is None:

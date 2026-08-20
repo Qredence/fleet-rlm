@@ -753,6 +753,7 @@ async def test_cancellation_during_provider_create_transfers_owned_cleanup() -> 
 
     platform.release_creates.set()
     replacement_lease = await asyncio.wait_for(replacement, timeout=2)
+    await mgr._cleanup.shutdown(drain_seconds=2)
 
     from fleet_rlm.daytona.session_manager import get_active_lease_registry
 

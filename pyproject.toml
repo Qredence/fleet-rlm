@@ -1,6 +1,6 @@
 [project]
 name = "fleet-rlm"
-version = "0.7.2"
+version = "0.7.3"
 description = "RLM-native FastAPI backend with DSPy and Daytona"
 readme = "README.md"
 requires-python = ">=3.11,<3.14"
@@ -26,12 +26,13 @@ classifiers = [
     "Typing :: Typed",
 ]
 dependencies = [
-    # dspy 3.3.x provides the native RLM and SandboxSerializable contracts used
-    # by Fleet. Pin the 3.3 line: assert_dspy_version() accepts 3.3.x patches
+    # Track DSPy's upstream main for the latest changes while uv.lock records
+    # the resolved commit for reproducible installs. The supported Fleet
+    # contract remains DSPy 3.3.x: assert_dspy_version() accepts 3.3.x patches
     # and rejects other minors, and the runtime relies on the documented RLM
     # interface plus the private interpreter-injection seam isolated in
     # rlm.dspy_contract.
-    "dspy>=3.3.0,<3.4",
+    "dspy @ git+https://github.com/stanfordnlp/dspy.git@main",
     "packaging>=24,<27",
     # Sandboxed execution.
     "daytona==0.202.0",
@@ -141,14 +142,11 @@ override-dependencies = [
     "litellm>=1.87.0",
     # urllib3 <2.7.0 has redirect header leak and streaming decompression issues.
     "urllib3>=2.7.0",
-    # Deliberate gepa override: the current dspy 3.3.0 lock declares
-    # gepa[dspy]==0.1.1, but
-    # the optimizer lane needs the omni API (optimize_best_of / gepa.oa
-    # engines), which exists only on the gepa main branch as of 2026-08. This
-    # pinned commit is what the 2026-07-22 omni blog documents. Fleet's Turn
-    # path never invokes dspy.GEPA; coexistence of the current dspy 3.3.0 lock with this gepa
-    # commit is validated by `make check` (2026-08 omni spike). Revisit when
-    # the DSPy gepa[dspy] constraint moves or a PyPI release ships the omni API.
+    # Deliberate gepa override: the optimizer lane needs the omni API
+    # (optimize_best_of / gepa.oa engines). Keep this reviewed commit until
+    # the upstream DSPy/GEPA dependency and Fleet's optimizer checks no longer
+    # need the override. Fleet's Turn path never invokes dspy.GEPA; coexistence
+    # with this gepa commit is validated by `make check`.
     "gepa @ git+https://github.com/gepa-ai/gepa@0310bb7b4952d4695718f9f557e450fd6781301e",
 ]
 

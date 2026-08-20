@@ -178,13 +178,6 @@ class SandboxLeasePolicy:
     provider_request_timeout_s: float | None = None
 
 
-@dataclass(frozen=True, slots=True)
-class SandboxLeaseReceiptStore:
-    """Simplest owner-visible receipt carrier: last close outcome."""
-
-    receipt: SandboxLeaseReceipt | None = None
-
-
 class SandboxLease:
     """Owns one Sandbox handle and its confirmed, idempotent close.
 
