@@ -12,7 +12,7 @@ from dspy.utils.exceptions import AdapterParseError
 
 from fleet_rlm.config import Settings
 from fleet_rlm.rlm.child_runtime import ChildRuntimeFactory
-from fleet_rlm.rlm.dspy_contract import RLMOptions, build_native_rlm
+from fleet_rlm.rlm.dspy_contract import RLMOptions, build_native_rlm, rlm_termination_mode
 from fleet_rlm.rlm.dspy_interpreter_contract import CodeInterpreter
 from fleet_rlm.rlm.errors import RLMConfigError
 from fleet_rlm.rlm.lm_factory import build_lm, resolve_role_api_key, sanitize_base_url
@@ -120,11 +120,7 @@ async def probe_root_lm(
         raise RLMProviderContractError("Root LM did not exercise the recursive child Tool")
     return RLMProviderProbeResult(
         iterations=len(trajectory),
-        termination_mode=(
-            "native_extraction_fallback"
-            if getattr(prediction, "final_reasoning", None) == "Extract forced final output"
-            else "typed_submit"
-        ),
+        termination_mode=rlm_termination_mode(prediction),
     )
 
 

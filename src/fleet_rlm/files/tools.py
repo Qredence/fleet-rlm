@@ -31,10 +31,6 @@ from fleet_rlm.rlm.tool_observer import ToolEventView, bound_event_text
 _EVENT_TEXT_MAX_CHARS = 256
 
 
-def _bounded_text(value: object) -> str:
-    return bound_event_text(value, max_chars=_EVENT_TEXT_MAX_CHARS)
-
-
 def _project_fields(result: object, fields: tuple[str, ...]) -> JsonValue:
     if not isinstance(result, Mapping):
         return {}
@@ -320,21 +316,21 @@ class FileToolHost:
         """Return bounded public metadata projections for File Tools."""
 
         def read_input(arguments: Mapping[str, Any]) -> JsonValue:
-            return {"attachment_id": _bounded_text(arguments.get("attachment_id"))}
+            return {"attachment_id": bound_event_text(arguments.get("attachment_id"))}
 
         def artifact_input(arguments: Mapping[str, Any]) -> JsonValue:
             content = arguments.get("content")
             return {
-                "kind": _bounded_text(arguments.get("kind")),
-                "title": _bounded_text(arguments.get("title")) if arguments.get("title") is not None else None,
+                "kind": bound_event_text(arguments.get("kind")),
+                "title": bound_event_text(arguments.get("title")) if arguments.get("title") is not None else None,
                 "content_chars": len(str(content or "")),
             }
 
         def workspace_artifact_input(arguments: Mapping[str, Any]) -> JsonValue:
             return {
-                "path": _bounded_text(arguments.get("path")),
-                "kind": _bounded_text(arguments.get("kind")),
-                "title": _bounded_text(arguments.get("title")) if arguments.get("title") is not None else None,
+                "path": bound_event_text(arguments.get("path")),
+                "kind": bound_event_text(arguments.get("kind")),
+                "title": bound_event_text(arguments.get("title")) if arguments.get("title") is not None else None,
                 "expected_sha256_present": bool(arguments.get("expected_sha256")),
             }
 

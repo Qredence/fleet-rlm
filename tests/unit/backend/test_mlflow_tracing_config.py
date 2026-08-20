@@ -172,7 +172,7 @@ def test_configure_tracing_enabled_without_workspace_settings_is_soft_disabled(
         "FLEET_MLFLOW_TRACING_SQL_WAREHOUSE_ID",
     ):
         monkeypatch.delenv(name, raising=False)
-    assert tracing.configure_tracing(Settings(_env_file=None, mlflow_tracing_enabled=True)) is False
+    assert tracing.configure_tracing(Settings(mlflow_tracing_enabled=True)) is False
     assert tracing.is_tracing_active() is False
     assert calls.tracking_uri_args == []
     assert calls.autolog_calls == 0
@@ -191,7 +191,6 @@ def test_unavailable_local_tracking_uri_does_not_activate_turn_spans(
     assert (
         tracing.configure_tracing(
             Settings(
-                _env_file=None,
                 mlflow_tracing_enabled=True,
                 mlflow_experiment_name="fleet-rlm-eval",
                 mlflow_tracking_uri="http://127.0.0.1:5001",
@@ -394,7 +393,6 @@ def test_configure_tracing_local_server_needs_only_experiment(
     calls = _install_fake_mlflow(monkeypatch)
     tracing.configure_tracing(
         Settings(
-            _env_file=None,
             mlflow_tracing_enabled=True,
             mlflow_experiment_name="fleet-rlm-eval",
             mlflow_tracking_uri="http://localhost:5001",
@@ -411,7 +409,6 @@ def test_configure_tracing_ignores_tracking_uri_environment_override(
     calls = _install_fake_mlflow(monkeypatch)
     monkeypatch.setenv("MLFLOW_TRACKING_URI", "http://ignored.example:5001")
     settings = Settings(
-        _env_file=None,
         mlflow_tracing_enabled=True,
         mlflow_experiment_name="fleet-rlm-eval",
         mlflow_tracking_uri="http://configured.example:5001",

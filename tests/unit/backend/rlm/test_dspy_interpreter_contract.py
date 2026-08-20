@@ -48,14 +48,8 @@ def test_copy_output_fields_does_not_share_nested_metadata() -> None:
 
 
 def test_needs_tool_reinjection_matches_inject_cycle() -> None:
-    from fleet_rlm.rlm.dspy_interpreter_contract import (
-        initial_tools_registered,
-        mark_tools_registered,
-        needs_tool_reinjection,
-    )
+    from fleet_rlm.rlm.dspy_interpreter_contract import needs_tool_reinjection
 
-    assert initial_tools_registered() is False
-    assert mark_tools_registered() is True
     assert needs_tool_reinjection(tools_registered=False, http_broker_ready=False) is True
     assert needs_tool_reinjection(tools_registered=False, http_broker_ready=True) is True
     assert needs_tool_reinjection(tools_registered=True, http_broker_ready=False) is True

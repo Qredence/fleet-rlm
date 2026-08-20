@@ -61,7 +61,7 @@ def test_submit_source_supports_typed_and_generic_signatures() -> None:
     assert "def SUBMIT(answer: str)" in typed
     assert "def SUBMIT(**kwargs)" in generic
     assert "FleetFinalOutputError" in typed
-    assert "_FINAL_OUTPUT_MARKER" in generic
+    assert "FINAL_OUTPUT_MARKER" in generic
 
 
 def test_remote_submit_setup_is_self_contained() -> None:

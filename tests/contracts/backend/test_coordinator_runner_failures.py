@@ -253,7 +253,7 @@ async def test_completed_trajectory_turn_commits_typed_text_and_canonical_detail
     records = await harness.store.turn_records(harness.session_id, harness.access)
     assistant = records[-1]
     assert isinstance(assistant, AssistantTurnRecord)
-    assert assistant.content == "10"
+    assert assistant.committed.text == "10"
     reasoning = [part for part in assistant.committed.parts if isinstance(part, ReasoningPart)]
     assert [part.text for part in reasoning] == [
         "initialize",

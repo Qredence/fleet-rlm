@@ -5,6 +5,7 @@ import type {
   UsageEvent,
   WarningEvent,
 } from "./canonical.js";
+import { record } from "./coerce.js";
 import type { Message, Role } from "./store.js";
 import { observedTokenCounts } from "./usage-summary.js";
 
@@ -190,8 +191,8 @@ export function artifact(id: string, runId: string, event: ArtifactEvent, clock:
 }
 
 export function usage(id: string, runId: string, event: UsageEvent, clock: Clock): Message {
-  const value = data(event.usage);
-  const observedLmUsage = data(value.observed_lm_usage);
+  const value = record(event.usage);
+  const observedLmUsage = record(value.observed_lm_usage);
   const tokens = observedTokenCounts(observedLmUsage);
   return {
     id,
@@ -224,12 +225,6 @@ function singleScalar(value: unknown): string | number | boolean | null | undefi
   return candidate === null || ["string", "number", "boolean"].includes(typeof candidate)
     ? (candidate as string | number | boolean | null)
     : undefined;
-}
-
-export function data(value: unknown): Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : {};
 }
 
 export function string(value: unknown, fallback = ""): string {

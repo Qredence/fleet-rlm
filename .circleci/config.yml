@@ -209,6 +209,20 @@ jobs:
               echo "GITHUB_TOKEN must be configured in the CircleCI project or context" >&2
               exit 1
             }
+            export RELEASE_VERSION="<< pipeline.parameters.release_version >>"
+            python - \<<'PY'
+            import os
+            import tomllib
+
+            requested = os.environ["RELEASE_VERSION"].removeprefix("v")
+            with open("pyproject.toml", "rb") as handle:
+                project_version = tomllib.load(handle)["project"]["version"]
+            if project_version != requested:
+                raise SystemExit(
+                    f"release_version {requested!r} does not match pyproject.toml {project_version!r}"
+                )
+            print(f"Preparing fleet-rlm {project_version} for the PyPI deployment bridge")
+            PY
       - run:
           name: Plan a PyPI deploy
           command: |

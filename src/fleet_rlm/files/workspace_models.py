@@ -51,13 +51,6 @@ class WorkspaceCapabilityMetadata:
     root: str
     instructions: str
 
-    def to_input(self) -> dict[str, object]:
-        return {
-            "available": self.available,
-            "root": self.root,
-            "instructions": self.instructions,
-        }
-
 
 DAYTONA_WORKSPACE_CAPABILITY = WorkspaceCapabilityMetadata(
     available=True,

@@ -11,6 +11,14 @@ from uuid import UUID
 
 from fleet_rlm.daytona.errors import DaytonaAdapterError, map_provider_error
 from fleet_rlm.files.volume_paths import DEFAULT_VOLUME_MOUNT_PATH, VolumePaths, validate_mount_path
+
+# Workspace-scoped subpath validation lives in the provider-neutral owner
+# (fleet_rlm.runtime.bindings); Daytona provisioning reuses it directly.
+from fleet_rlm.runtime.bindings import (
+    require_non_zero_workspace_id,
+    require_scoped_volume_subpath,
+    workspace_volume_subpath,
+)
 from fleet_rlm.snapshot_contract import validate_snapshot_name
 
 DEFAULT_SNAPSHOT_NAME = "fleet-rlm-python313-v5"
@@ -223,27 +231,6 @@ def verify_sandbox_spec(sandbox: Any, spec: DaytonaSandboxSpec) -> None:
         )
 
 
-def require_non_zero_workspace_id(workspace_id: UUID) -> UUID:
-    if not isinstance(workspace_id, UUID):
-        raise TypeError("workspace_id must be a UUID")
-    if workspace_id == _ZERO_UUID:
-        raise ValueError("workspace_id must not be the zero UUID")
-    return workspace_id
-
-
-def workspace_volume_subpath(workspace_id: UUID) -> str:
-    """
-    Build the canonical persistent volume subpath for a workspace.
-
-    Parameters:
-        workspace_id (UUID): The non-zero workspace identifier.
-
-    Returns:
-        str: The validated path under the workspace volume.
-    """
-    return f"workspaces/{require_non_zero_workspace_id(workspace_id)}"
-
-
 def recursive_child_volume_subpath(workspace_id: UUID, run_id: UUID, call_index: int) -> str:
     """
     Builds the canonical recursive volume scope for a disposable child RLM.
@@ -268,36 +255,6 @@ def recursive_child_volume_subpath(workspace_id: UUID, run_id: UUID, call_index:
     if not isinstance(call_index, int) or isinstance(call_index, bool) or call_index <= 0:
         raise ValueError("call_index must be a positive integer")
     return f"recursive/{workspace}/{run_id}/{call_index}"
-
-
-def require_scoped_volume_subpath(subpath: str, *, workspace_id: UUID | None = None) -> str:
-    """
-    Validate and normalize a workspace-scoped volume subpath.
-
-    Parameters:
-        subpath (str): The volume subpath, which must identify exactly one workspace.
-        workspace_id (UUID | None): If provided, the subpath must match this workspace.
-
-    Returns:
-        str: The normalized `workspaces/<workspace_id>` subpath.
-
-    Raises:
-        ValueError: If the subpath is empty, uses traversal, does not identify exactly one workspace,
-            or does not match `workspace_id`.
-    """
-    if not isinstance(subpath, str) or not subpath.strip():
-        raise ValueError("VolumeMount without workspace subpath is rejected")
-    normalized = subpath.strip().strip("/")
-    if ".." in normalized.split("/"):
-        raise ValueError("volume subpath must not contain path traversal")
-    if not normalized.startswith("workspaces/"):
-        raise ValueError("volume subpath must be under workspaces/<workspace_id>")
-    rest = normalized.removeprefix("workspaces/")
-    if not rest or "/" in rest:
-        raise ValueError("volume subpath must be exactly workspaces/<workspace_id>")
-    if workspace_id is not None and normalized != workspace_volume_subpath(workspace_id):
-        raise ValueError("volume subpath does not match workspace_id")
-    return normalized
 
 
 def require_recursive_child_volume_subpath(

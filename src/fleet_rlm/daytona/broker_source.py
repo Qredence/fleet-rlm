@@ -8,7 +8,6 @@ from collections.abc import Mapping
 from typing import Any
 
 FINAL_OUTPUT_MARKER = "__FLEET_FINAL_OUTPUT__"
-_FINAL_OUTPUT_MARKER = FINAL_OUTPUT_MARKER
 
 
 def build_submit_setup_code(output_fields: list[dict[str, Any]] | None) -> str:
@@ -30,7 +29,7 @@ def remote_submit_setup_code(output_fields: list[dict[str, Any]] | None) -> str:
 import base64 as _base64
 import json
 _json = json
-_FINAL_OUTPUT_MARKER = {_FINAL_OUTPUT_MARKER!r}
+FINAL_OUTPUT_MARKER = {FINAL_OUTPUT_MARKER!r}
 
 class FleetFinalOutputError(Exception):
     def __init__(self, value):
@@ -47,7 +46,7 @@ import base64 as _base64
 
 def SUBMIT(**kwargs):
     payload = _base64.b64encode(_json.dumps(kwargs, ensure_ascii=False).encode("utf-8")).decode("ascii")
-    print(f"{_FINAL_OUTPUT_MARKER}{payload}{_FINAL_OUTPUT_MARKER}")
+    print(f"{FINAL_OUTPUT_MARKER}{payload}{FINAL_OUTPUT_MARKER}")
     raise FleetFinalOutputError(kwargs)
 """.strip()
 
@@ -96,12 +95,12 @@ import base64 as _base64
 def SUBMIT({signature}):
     {body}
     payload = _base64.b64encode(_json.dumps(result, ensure_ascii=False).encode("utf-8")).decode("ascii")
-    print(f"{{_FINAL_OUTPUT_MARKER}}{{payload}}{{_FINAL_OUTPUT_MARKER}}")
+    print(f"{{FINAL_OUTPUT_MARKER}}{{payload}}{{FINAL_OUTPUT_MARKER}}")
     raise FleetFinalOutputError(result)
 """.strip()
 
 
-def extract_final_payload(stdout: str, *, marker: str = _FINAL_OUTPUT_MARKER) -> dict[str, Any] | None:
+def extract_final_payload(stdout: str, *, marker: str = FINAL_OUTPUT_MARKER) -> dict[str, Any] | None:
     start = stdout.find(marker)
     if start == -1:
         return None
@@ -122,7 +121,7 @@ def extract_final_payload(stdout: str, *, marker: str = _FINAL_OUTPUT_MARKER) ->
     return parsed if isinstance(parsed, dict) else None
 
 
-def final_output_frame(value: Mapping[str, Any], *, marker: str = _FINAL_OUTPUT_MARKER) -> str:
+def final_output_frame(value: Mapping[str, Any], *, marker: str = FINAL_OUTPUT_MARKER) -> str:
     """Return the exact private stdout frame emitted by ``SUBMIT``."""
     encoded = base64.b64encode(json.dumps(dict(value), ensure_ascii=False).encode("utf-8")).decode("ascii")
     return f"{marker}{encoded}{marker}"

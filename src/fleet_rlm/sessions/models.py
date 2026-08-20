@@ -211,10 +211,6 @@ class AssistantTurnRecord:
     committed: CommittedTurn
     run_id: UUID
 
-    @property
-    def content(self) -> str:
-        return self.committed.text
-
 
 @dataclass(frozen=True, slots=True)
 class SessionRecord:

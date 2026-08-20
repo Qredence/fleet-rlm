@@ -68,6 +68,15 @@ def _patch_payload(old: str, new: str) -> str:
 
 
 def _write(tmp_path: Path, relative: str, content: bytes) -> dict[str, object]:
+    """Write byte content to a file in the temporary workspace.
+
+    Parameters:
+        relative (str): Workspace-relative path of the file to write
+        content (bytes): Content to write
+
+    Returns:
+        dict[str, object]: Result returned by the workspace agent's write operation
+    """
     sandbox, _process = _sandbox()
     return _run(
         tmp_path,
@@ -79,7 +88,7 @@ def _write(tmp_path: Path, relative: str, content: bytes) -> dict[str, object]:
     )
 
 
-def test_delete_and_patch_params_are_repr_embedded() -> None:
+def test_delete_and_patch_params_are_encoded_in_the_handler_request() -> None:
     from fleet_rlm.daytona.workspace_agent import build_workspace_agent_code
 
     base = {
@@ -94,8 +103,8 @@ def test_delete_and_patch_params_are_repr_embedded() -> None:
         "content_b64": "",
     }
 
-    assert "expected_sha256 = ''" in build_workspace_agent_code(**base)
-    assert "expected_sha256 = 'abc'" in build_workspace_agent_code(**base, expected_sha256="abc")
+    assert '"expected_sha256":""' in build_workspace_agent_code(**base)
+    assert '"expected_sha256":"abc"' in build_workspace_agent_code(**base, expected_sha256="abc")
 
 
 def test_delete_regular_file_ok(tmp_path: Path) -> None:

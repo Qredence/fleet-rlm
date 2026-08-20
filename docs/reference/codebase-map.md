@@ -15,10 +15,10 @@ compatibility runtime and parallel foundation package no longer exist.
 | `result_snapshot.py` | private commit-gated typed-result encoding | RLM prediction/usage |
 | `api/` | HTTP translation, local scope, dependency aliases, OpenAPI/SSE projection, UIMessage reload | domain interfaces and composed modules |
 | `chat/` | coordinator facade plus coordinator-owned `RunOwnership` lifetime state/receipt, Turn preparation, private execution driver, lifecycle finalization, owned post-commit Memory promotion, shared Turn Claim policy | RLM, Sessions, Skills, files |
-| `rlm/` | DSPy Signature, Root/Sub model roles, fresh RLM construction, delegation metrics, routing evaluation, fixed-depth child executor, options, events, runner | DSPy and domain values |
+| `rlm/` | DSPy Signature, Root/Sub model roles, fresh RLM construction, delegation metrics, routing evaluation, fixed-depth child executor, options, events, and native execution orchestration | DSPy and domain values |
 | `optimization/` | trusted-host GEPA/evidence lane | Daytona evaluator, evidence types |
-| `daytona/` | exclusive SDK boundary: async platform/provisioning, provider-only Session ownership, DSPy-only sync interpreter seam (injected `SyncBridgeDispatcher`), confirmed Sandbox Lease ownership (`sandbox_lease.py`) with typed cleanup receipts and confirmed deletion lifecycle (`lifecycle.py`), versioned installed Workspace Agent protocol (`workspace_agent.py`), pure broker source plus transport, diagnostics, Session Workspace gateways, and the mounted Workspace Memory adapter | Daytona SDK and domain values |
-| `runtime/` | provider-neutral Sandbox binding records and store ports | domain values |
+| `daytona/` | exclusive SDK boundary: async platform/provisioning, provider-only Session ownership, DSPy-only sync interpreter seam (injected `SyncBridgeDispatcher`), confirmed Sandbox Lease ownership (`sandbox_lease.py`) with typed cleanup receipts and confirmed deletion lifecycle (`lifecycle.py`), split recursive-child acquisition/lease/cleanup/late-ownership seams (`recursive_child_*.py`), versioned installed Workspace Agent protocol with one packaged `handle(request)` artifact for installed and fallback launchers (`workspace_agent.py`, `workspace_agent_runtime.py`), pure broker source plus transport, diagnostics, Session Workspace gateways, and the mounted Workspace Memory adapter | Daytona SDK and domain values |
+| `runtime/` | provider-neutral `OwnedEffect` settlement primitive plus Sandbox binding records and store ports | domain values |
 | `sessions/` | Session catalog, Turn input/history, canonical AssistantPart vocabulary, versioned Committed Turn | domain values |
 | `files/`, `artifacts/` | Attachment staging, paged/full-lifecycle Session Workspace and Project tools, workspace-wide Memory values/tools, direct Workspace Artifact Candidate staging, Artifact promotion/read | storage interfaces and safe paths |
 | `skills/` | bundled catalog, authorization, progressive loading, capability seam, Tool construction | domain values and package resources |
@@ -37,6 +37,26 @@ compatibility runtime and parallel foundation package no longer exist.
 - `RLMRunner` owns execution, not Turn Commit or resource release.
   `RunLifecycle.finish()` owns result/Artifact publication and atomic commit;
   `TurnCoordinator` owns terminal ordering and final cleanup.
+- `rlm/runner.py` keeps `RLMRunner.stream(context)` as the deep execution seam.
+  `worker_execution.py` owns the cancellation-shielded worker/thread/event-loop
+  boundary, `observation.py` owns bounded detail relay/monitoring/drain policy,
+  and `execution_trace.py` owns trace and recursive-metric projection. These
+  are private implementation modules, not new public orchestration surfaces.
+- `runtime/owned_effect.py` defines the one provider-neutral wait vocabulary for
+  already-started async effects: caller cancellation is shielded, an optional
+  bounded wait never cancels the effect, and terminal errors remain surfaced.
+  Run lifecycle, RLM worker, and equivalent provider waits use it; recursive
+  batch futures and Daytona lease/quarantine state retain their specialized
+  ownership and cleanup policies.
+- `daytona/memory_diagnostics.py` owns the bounded P31 degradation taxonomy:
+  normalization, provider unavailability, corrupt records, invariant
+  violations, search failure, legacy migration, and unexpected internal
+  failures. The optional read-side Memory path stays fail-soft; mutations and
+  list operations remain fail-closed.
+- `tools/fleet-tui/src/tui/tests/turn-reducer-invariants.test.ts` is the P32
+  deterministic convergence proof. Live and durable adapters may differ in
+  framing, but both reduce through the same canonical event vocabulary and
+  source-agnostic reducer.
 - `RunLifecycleService` maps outcomes to typed Claim commands, and both Run
   repositories apply them through one `transition_claim()` seam under their
   existing lock/transaction boundaries.
@@ -79,6 +99,9 @@ compatibility runtime and parallel foundation package no longer exist.
 
 The authoritative route inventory and shapes are in
 [HTTP API](http-api.md) and `openapi.yaml`.
+
+The final P34 ownership matrix, freeze constraints, and certification commands
+are maintained in [Maintainability freeze](../how-to-guides/maintainability-freeze.md).
 
 ## Maintained terminal client
 

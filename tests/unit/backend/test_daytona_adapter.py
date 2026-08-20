@@ -84,14 +84,13 @@ def test_strict_shutdown_preserves_broker_error_and_closes_backend() -> None:
     assert backend.closed is True
 
 
-def test_lease_release_is_idempotent_and_does_not_delete_sandbox() -> None:
+def test_lease_release_is_idempotent() -> None:
     from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter
     from fleet_rlm.daytona.session_manager import InterpreterLease
 
     backend = _FakeBackend()
     interp = DaytonaCodeInterpreter(backend=backend)
     interp.start()
-    deleted: list[str] = []
 
     lease = InterpreterLease(
         sandbox_id="sbx-1",
@@ -99,12 +98,10 @@ def test_lease_release_is_idempotent_and_does_not_delete_sandbox() -> None:
         volume_id="vol-1",
         mount_path="/home/daytona/memory",
         interpreter=interp,
-        delete_sandbox=lambda sandbox_id: deleted.append(sandbox_id),
     )
     lease.release()
     lease.release()
     assert backend.closed is True
-    assert deleted == []
 
 
 def test_provider_errors_map_to_sanitized_fleet_errors() -> None:

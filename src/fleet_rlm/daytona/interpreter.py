@@ -29,6 +29,7 @@ from uuid import uuid4
 import dspy
 
 from fleet_rlm.daytona.broker_source import (
+    FINAL_OUTPUT_MARKER,
     build_submit_setup_code,
     extract_final_payload,
 )
@@ -53,9 +54,7 @@ from fleet_rlm.observability.turn_tracing import trace_preview_limit, turn_phase
 from fleet_rlm.rlm.dspy_interpreter_contract import (
     PUBLIC_FINAL_OUTPUT_LABEL,
     copy_output_fields,
-    initial_tools_registered,
     is_final_output,
-    mark_tools_registered,
     needs_tool_reinjection,
     wrap_final_output,
 )
@@ -173,7 +172,7 @@ class InProcessInterpreterBackend:
         if key == self._submit_key:
             return
         self.namespace["FleetFinalOutputError"] = FleetFinalOutputError
-        self.namespace["_FINAL_OUTPUT_MARKER"] = "__FLEET_FINAL_OUTPUT__"
+        self.namespace["FINAL_OUTPUT_MARKER"] = FINAL_OUTPUT_MARKER
         self.namespace["json"] = __import__("json")
         self.namespace["_json"] = self.namespace["json"]
         exec(build_submit_setup_code(output_fields), self.namespace, self.namespace)
@@ -348,7 +347,7 @@ class DaytonaCodeInterpreter:
         self._tools: dict[str, Callable[..., Any]] = dict(tools or {})
         self._bound_tools: dict[str, Callable[..., Any]] = {}
         self.output_fields: list[dict[str, Any]] | None = copy_output_fields(output_fields)
-        self._tools_registered = initial_tools_registered()
+        self._tools_registered = False
         self._started = False
         self._shutdown = False
         self._broker_port = broker_port
@@ -664,10 +663,10 @@ class DaytonaCodeInterpreter:
         if isinstance(backend, InProcessInterpreterBackend):
             backend.bind_host_tools(tools)
             backend.ensure_submit(self.output_fields)
-            self._tools_registered = mark_tools_registered()
+            self._tools_registered = True
             return
         if not isinstance(backend, _SandboxProcessBackend):
-            self._tools_registered = mark_tools_registered()
+            self._tools_registered = True
             return
         if not needs_tool_reinjection(
             tools_registered=self._tools_registered,
@@ -690,7 +689,7 @@ class DaytonaCodeInterpreter:
             self._http_broker.submit_setup_code(self.output_fields),
             timeout_s=float(backend.timeout_s or DEFAULT_EXECUTION_TIMEOUT_S),
         )
-        self._tools_registered = mark_tools_registered()
+        self._tools_registered = True
 
     def _execute_with_http_broker(
         self,

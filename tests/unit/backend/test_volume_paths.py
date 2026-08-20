@@ -11,7 +11,6 @@ from fleet_rlm.daytona.provisioning import (
     DEFAULT_VOLUME_NAME,
     VolumeConfig,
     get_or_create_volume_id,
-    require_scoped_volume_subpath,
     volume_config_from_settings,
     volume_mount_spec,
 )
@@ -23,21 +22,18 @@ from fleet_rlm.files.volume_paths import (
     validate_mount_path,
     validate_path_id,
 )
+from fleet_rlm.runtime.bindings import require_scoped_volume_subpath
 
 
 def test_default_mount_matches_design() -> None:
     assert DEFAULT_VOLUME_MOUNT_PATH == "/home/daytona/fleet"
     root = VolumePaths.from_mount()
     assert root.root == PurePosixPath("/home/daytona/fleet")
-    assert root.files == PurePosixPath("/home/daytona/fleet/files")
-    assert root.attachments == PurePosixPath("/home/daytona/fleet/attachments")
-    assert root.artifacts == PurePosixPath("/home/daytona/fleet/artifacts")
-    assert root.runs == PurePosixPath("/home/daytona/fleet/runs")
+    assert root.files_root() == PurePosixPath("/home/daytona/fleet/files")
+    assert root.attachments_root() == PurePosixPath("/home/daytona/fleet/attachments")
+    assert root.artifacts_root() == PurePosixPath("/home/daytona/fleet/artifacts")
     assert root.memory_dir == PurePosixPath("/home/daytona/fleet/memory")
     assert root.memory_file == PurePosixPath("/home/daytona/fleet/memory/MEMORIES.md")
-    assert root.legacy_memory_file == PurePosixPath("/home/daytona/fleet/MEMORIES.md")
-    assert root.artifacts_root() == PurePosixPath("/home/daytona/fleet/artifacts")
-    assert root.attachments_root() == PurePosixPath("/home/daytona/fleet/attachments")
     assert root.sessions_root() == PurePosixPath("/home/daytona/fleet/sessions")
 
 

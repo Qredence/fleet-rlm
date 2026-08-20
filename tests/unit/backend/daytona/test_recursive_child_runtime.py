@@ -10,42 +10,57 @@ from uuid import uuid4
 
 import pytest
 
-from fleet_rlm.daytona import recursive_child_runtime
+from fleet_rlm.daytona import recursive_child_cleanup, recursive_child_runtime
 from fleet_rlm.daytona.provisioning import (
     recursive_child_volume_subpath,
     require_recursive_child_volume_subpath,
-    require_scoped_volume_subpath,
 )
+from fleet_rlm.daytona.recursive_child_lease import ChildRuntimeLease, ChildRuntimeLeaseState
 from fleet_rlm.daytona.session_manager import DaytonaAdmission
+from fleet_rlm.runtime.bindings import require_scoped_volume_subpath
 
 
 @dataclass
 class _Fs:
     files: set[str]
     deleted: list[str] = field(default_factory=list)
+    directories: set[str] = field(default_factory=set)
 
-    async def list_files(self, _root: str, *, depth: int) -> list[SimpleNamespace]:
+    async def list_files(self, _root: str, *, depth: int | None) -> list[SimpleNamespace]:
         """
-        List tracked files at the supported filesystem traversal depth.
+        List all tracked files and directories using unbounded traversal.
 
         Parameters:
             _root (str): Root path for the listing.
-            depth (int): Traversal depth, which must be 64.
+            depth (int | None): Must be `None` to request unbounded traversal.
 
         Returns:
-            list[SimpleNamespace]: File entries sorted by path.
+            list[SimpleNamespace]: File entries followed by directory entries, with each group sorted by path.
         """
-        assert depth == 64
-        return [SimpleNamespace(path=path, is_dir=False) for path in sorted(self.files)]
+        assert depth is None
+        return [
+            *[SimpleNamespace(path=path, is_dir=False) for path in sorted(self.files)],
+            *[SimpleNamespace(path=path, is_dir=True) for path in sorted(self.directories)],
+        ]
 
-    async def delete_file(self, path: str) -> None:
+    async def delete_file(self, path: str, *, recursive: bool = False) -> None:
         """
-        Delete a tracked file and record the deletion.
+        Remove a tracked file or directory and record its path.
 
         Parameters:
-            path (str): Path of the file to delete.
+            path (str): Path of the file or directory to remove.
+            recursive (bool): Whether to remove the directory and its descendants.
         """
-        self.files.remove(path)
+        if recursive:
+            self.files.difference_update(
+                {candidate for candidate in self.files if candidate == path or candidate.startswith(path + "/")}
+            )
+            self.directories.difference_update(
+                {candidate for candidate in self.directories if candidate == path or candidate.startswith(path + "/")}
+            )
+        else:
+            self.files.discard(path)
+            self.directories.discard(path)
         self.deleted.append(path)
 
 
@@ -79,8 +94,93 @@ class _Platform:
         self.deleted.append(sandbox_id)
 
     async def get(self, _sandbox_id: str) -> None:
-        """Report every deleted Sandbox as already absent (explicit not-found)."""
+        """Treat every sandbox lookup as absent."""
         return None
+
+
+def test_child_runtime_lease_concurrent_close_joins_one_cleanup() -> None:
+    started = threading.Event()
+    release = threading.Event()
+    calls: list[str] = []
+
+    def close() -> None:
+        calls.append("close")
+        started.set()
+        assert release.wait(2)
+
+    lease = ChildRuntimeLease(SimpleNamespace(), "sandbox", "volume", "subpath", close)
+    errors: list[BaseException] = []
+
+    def run_close() -> None:
+        try:
+            lease.close()
+        except Exception as exc:  # pragma: no cover - assertion below reports unexpected failures
+            errors.append(exc)
+
+    first = threading.Thread(target=run_close)
+    second_entered = threading.Event()
+
+    def run_second_close() -> None:
+        second_entered.set()
+        run_close()
+
+    second = threading.Thread(target=run_second_close)
+    first.start()
+    assert started.wait(2)
+    assert lease.state is ChildRuntimeLeaseState.CLOSING
+    second.start()
+    assert second_entered.wait(2)
+    assert second.is_alive()
+    release.set()
+    first.join(timeout=2)
+    second.join(timeout=2)
+
+    assert errors == []
+    assert calls == ["close"]
+    assert lease.state is ChildRuntimeLeaseState.CLOSED
+    lease.close()
+    assert calls == ["close"]
+
+
+@pytest.mark.asyncio
+async def test_child_scope_purge_removes_nested_files_and_directories() -> None:
+    from fleet_rlm.daytona.recursive_child_cleanup import purge_regular_files
+
+    root = "/home/daytona/fleet"
+    fs = _Fs(
+        files={f"{root}/top.txt", f"{root}/nested/deep/file.txt"},
+        directories={f"{root}/nested", f"{root}/nested/deep"},
+    )
+
+    await purge_regular_files(SimpleNamespace(fs=fs), root)
+
+    assert fs.files == set()
+    assert fs.directories == set()
+    assert fs.deleted == [
+        f"{root}/nested/deep/file.txt",
+        f"{root}/top.txt",
+        f"{root}/nested/deep",
+        f"{root}/nested",
+    ]
+
+
+def test_child_runtime_lease_failure_is_failed_and_reobserved() -> None:
+    calls = 0
+
+    def close() -> None:
+        nonlocal calls
+        calls += 1
+        raise RuntimeError("cleanup failed")
+
+    lease = ChildRuntimeLease(SimpleNamespace(), "sandbox", "volume", "subpath", close)
+    with pytest.raises(RuntimeError, match="cleanup failed"):
+        lease.close()
+    assert lease.state is ChildRuntimeLeaseState.FAILED
+    assert isinstance(lease.close_error, RuntimeError)
+
+    with pytest.raises(RuntimeError, match="cleanup failed"):
+        lease.close()
+    assert calls == 1
 
 
 @pytest.mark.asyncio
@@ -243,6 +343,65 @@ async def test_interpreter_shutdown_timeout_quarantines_provider_cleanup(
 
     release_shutdown.set()
     await asyncio.to_thread(factory.wait_owned)
+    assert platform.deleted == ["child-sandbox"]
+    permit = await admission.acquire(deadline=asyncio.get_running_loop().time() + 1)
+    permit.release()
+
+
+@pytest.mark.asyncio
+async def test_quarantine_thread_start_failure_uses_fallback_executor(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    child = _Sandbox("child-sandbox", _Fs({"/home/daytona/fleet/intermediate.txt"}))
+    release_shutdown = threading.Event()
+    platform = _Platform(child)
+    real_thread = recursive_child_cleanup.Thread
+    thread_starts = 0
+
+    class FailingQuarantineThread:
+        def __init__(self, *, target: object, **kwargs: object) -> None:
+            nonlocal thread_starts
+            thread_starts += 1
+            self._thread = real_thread(target=target, **kwargs)  # type: ignore[arg-type]
+
+        def start(self) -> None:
+            if thread_starts == 2:
+                raise RuntimeError("quarantine thread start failed")
+            self._thread.start()
+
+    class HangingInterpreter:
+        def __init__(self, **_kwargs: object) -> None:
+            return None
+
+        def shutdown(self, *, strict_broker_cleanup: bool = False) -> None:
+            assert strict_broker_cleanup is True
+            release_shutdown.wait(2)
+
+    monkeypatch.setattr(recursive_child_cleanup, "Thread", FailingQuarantineThread)
+    monkeypatch.setattr(recursive_child_runtime, "DaytonaCodeInterpreter", HangingInterpreter)
+    monkeypatch.setattr(recursive_child_runtime, "sandbox_backend", lambda sandbox, **_kwargs: sandbox)
+    monkeypatch.setattr(recursive_child_runtime, "_CHILD_CLEANUP_RESULT_TIMEOUT_S", 0.05)
+    admission = DaytonaAdmission(max_active_leases=1)
+    factory = recursive_child_runtime.build_child_runtime_factory(
+        loop=asyncio.get_running_loop(),
+        platform=platform,
+        admission=admission,
+        volume_id="shared-volume",
+        mount_path="/home/daytona/fleet",
+        workspace_id=uuid4(),
+        run_id=uuid4(),
+        deadline=asyncio.get_running_loop().time() + 30,
+        execution_timeout_s=30,
+        execution_output_cap=1000,
+    )
+    lease = await asyncio.to_thread(factory, 1)
+
+    with pytest.raises(recursive_child_runtime.ChildRuntimeCleanupError, match="recursive child cleanup failed"):
+        await asyncio.to_thread(lease.close)
+    release_shutdown.set()
+    await asyncio.to_thread(factory.wait_owned)
+
+    assert thread_starts == 2
     assert platform.deleted == ["child-sandbox"]
     permit = await admission.acquire(deadline=asyncio.get_running_loop().time() + 1)
     permit.release()

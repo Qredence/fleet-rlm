@@ -24,9 +24,9 @@ from fleet_rlm.daytona.provisioning import (
     verify_sandbox_spec,
     verify_sandbox_workspace_mount,
     volume_config_from_settings,
-    workspace_volume_subpath,
 )
 from fleet_rlm.persistence.database import ensure_database_compatible
+from fleet_rlm.runtime.bindings import workspace_volume_subpath
 
 DoctorStepName = Literal["settings", "database", "provider", "rlm", "sandbox", "interpreter", "cleanup"]
 DoctorFailureCategory = Literal[

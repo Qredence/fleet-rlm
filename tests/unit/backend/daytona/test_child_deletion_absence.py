@@ -12,7 +12,7 @@ from typing import Any
 
 import pytest
 
-from fleet_rlm.daytona.recursive_child_runtime import _cleanup_child_runtime_async
+from fleet_rlm.daytona.recursive_child_cleanup import cleanup_child_runtime_async
 from fleet_rlm.daytona.session_manager import DaytonaAdmission, DaytonaAdmissionPermit
 from fleet_rlm.rlm.child_runtime import ChildRuntimeCleanupError
 
@@ -24,11 +24,12 @@ class _Sandbox:
 
 
 class _FsStub:
-    async def list_files(self, _root: str, *, depth: int) -> list[Any]:
-        assert depth == 64
+    async def list_files(self, _root: str, *, depth: int | None) -> list[Any]:
+        assert depth is None
         return []
 
-    async def delete_file(self, _path: str) -> None:
+    async def delete_file(self, _path: str, *, recursive: bool = False) -> None:
+        del recursive
         raise AssertionError("no files should be purged in this test")
 
 
@@ -73,7 +74,7 @@ def _cleanup_coroutine(platform: _ScriptedPlatform, permit: DaytonaAdmissionPerm
         "confirm_timeout_s": 0.25,
     }
     kwargs.update(overrides)
-    return _cleanup_child_runtime_async(**kwargs)
+    return cleanup_child_runtime_async(**kwargs)
 
 
 def _sandbox() -> Any:

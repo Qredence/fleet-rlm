@@ -70,13 +70,10 @@ def test_dependency_import_names_map_distribution_to_module() -> None:
 
 def test_settings_require_snapshot_only_when_converted_to_daytona_spec() -> None:
     with pytest.raises(ValueError, match="FLEET_DAYTONA_SNAPSHOT"):
-        sandbox_spec_from_settings(Settings(_env_file=None))
-    assert (
-        sandbox_spec_from_settings(Settings(_env_file=None, daytona_snapshot="fleet-test-v1")).snapshot
-        == "fleet-test-v1"
-    )
+        sandbox_spec_from_settings(Settings())
+    assert sandbox_spec_from_settings(Settings(daytona_snapshot="fleet-test-v1")).snapshot == "fleet-test-v1"
     with pytest.raises(ValueError, match="FLEET_DAYTONA_SNAPSHOT"):
-        Settings(_env_file=None, daytona_snapshot="latest")
+        Settings(daytona_snapshot="latest")
 
 
 def test_snapshot_provenance_is_exact() -> None:

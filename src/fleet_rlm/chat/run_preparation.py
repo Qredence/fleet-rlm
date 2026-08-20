@@ -55,14 +55,6 @@ class RunPreparationTimeoutError(RunPreparationError):
     pass
 
 
-class RunPreparationValidationError(RunPreparationError):
-    pass
-
-
-class RunPreparationIntegrityError(RunPreparationError):
-    pass
-
-
 class RunPreparationUnavailableError(RunPreparationError):
     pass
 
@@ -418,8 +410,6 @@ __all__ = [
     "RunPreparation",
     "RunPreparationCancelledError",
     "RunPreparationError",
-    "RunPreparationIntegrityError",
     "RunPreparationTimeoutError",
     "RunPreparationUnavailableError",
-    "RunPreparationValidationError",
 ]

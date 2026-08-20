@@ -21,7 +21,13 @@ from fleet_rlm.rlm.child_runtime import (
     ChildRuntimeLease,
 )
 from fleet_rlm.rlm.delegation_metrics import DelegationMetrics, DelegationMetricsSnapshot
-from fleet_rlm.rlm.dspy_contract import RLMOptions, _RLMTraceCallback, build_native_rlm, prediction_result
+from fleet_rlm.rlm.dspy_contract import (
+    RLMOptions,
+    _RLMTraceCallback,
+    build_native_rlm,
+    prediction_result,
+    rlm_termination_mode,
+)
 from fleet_rlm.rlm.errors import RLMConfigError
 from fleet_rlm.rlm.events import Status
 from fleet_rlm.rlm.model_bundle import RLMModelBundle
@@ -86,6 +92,33 @@ class RecursiveCallSummary:
     recursive_children_completed: int = 0
     peak_child_concurrency: int = 0
     delegation_metrics: DelegationMetricsSnapshot = field(default_factory=DelegationMetricsSnapshot)
+
+    @classmethod
+    def from_snapshot(
+        cls,
+        snapshot: DelegationMetricsSnapshot,
+        *,
+        call_count: int = 0,
+        delegated_prompt_chars: int = 0,
+        maximum_prompt_chars: int = 0,
+        child_iterations: int = 0,
+        depth_fallback_count: int = 0,
+        termination_modes: tuple[str, ...] = (),
+    ) -> RecursiveCallSummary:
+        """Assemble one bounded summary from a shared delegation snapshot."""
+        return cls(
+            call_count,
+            delegated_prompt_chars,
+            maximum_prompt_chars,
+            child_iterations,
+            depth_fallback_count,
+            termination_modes,
+            recursive_batch_calls=snapshot.recursive_batch_calls,
+            recursive_children_started=snapshot.recursive_children_started,
+            recursive_children_completed=snapshot.recursive_children_completed,
+            peak_child_concurrency=snapshot.peak_child_concurrency,
+            delegation_metrics=snapshot,
+        )
 
 
 @dataclass(slots=True)
@@ -295,19 +328,14 @@ class RecursiveRLMExecutor:
     def summary(self) -> RecursiveCallSummary:
         """Return bounded aggregate recursion metadata without content."""
         with self._state.lock:
-            snapshot = self._metrics.snapshot()
-            return RecursiveCallSummary(
+            return RecursiveCallSummary.from_snapshot(
+                self._metrics.snapshot(),
                 call_count=self._state.reserved_call_count,
                 delegated_prompt_chars=self._state.delegated_prompt_chars,
                 maximum_prompt_chars=self._state.maximum_prompt_chars,
                 child_iterations=self._state.child_iterations,
                 depth_fallback_count=self._state.depth_fallback_count,
                 termination_modes=tuple(self._state.termination_modes),
-                recursive_batch_calls=snapshot.recursive_batch_calls,
-                recursive_children_started=snapshot.recursive_children_started,
-                recursive_children_completed=snapshot.recursive_children_completed,
-                peak_child_concurrency=snapshot.peak_child_concurrency,
-                delegation_metrics=snapshot,
             )
 
     def raise_if_cleanup_failed(self) -> None:
@@ -585,11 +613,7 @@ class RecursiveRLMExecutor:
         self._ensure_call_authorized(batch_cancelled)
         trajectory = getattr(prediction, "trajectory", ())
         child_iterations = len(trajectory) if isinstance(trajectory, list) else 0
-        mode = (
-            "native_extraction_fallback"
-            if getattr(prediction, "final_reasoning", None) == "Extract forced final output"
-            else "typed_submit"
-        )
+        mode = rlm_termination_mode(prediction)
         completion_outputs = self._record_completion(call, mode=mode, child_iterations=child_iterations)
         return result.display_text, completion_outputs
 

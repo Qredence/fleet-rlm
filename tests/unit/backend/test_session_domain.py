@@ -103,9 +103,9 @@ def test_turn_input_rejects_duplicate_or_oversized_skill_selections() -> None:
 def test_sequence_cursor_is_an_actual_nonnegative_sequence() -> None:
     from fleet_rlm.sessions.catalog import SequenceCursor
 
-    assert SequenceCursor.from_query(None).after_sequence is None
-    assert SequenceCursor.from_query(0).after_sequence == 0
-    assert SequenceCursor.from_query(41).next_after_sequence(42) == 42
+    assert SequenceCursor().after_sequence is None
+    assert SequenceCursor(after_sequence=0).after_sequence == 0
+    assert SequenceCursor(after_sequence=41).next_after_sequence(42) == 42
 
     with pytest.raises(ValueError):
-        SequenceCursor.from_query(-1)
+        SequenceCursor(after_sequence=-1)

@@ -173,6 +173,29 @@ def annotate_trace_io(
         logger.debug("annotate_trace_io failed; continuing without root span I/O", exc_info=True)
 
 
+def annotate_turn_attributes(attributes: Mapping[str, object]) -> None:
+    """Attach bounded, sanitized attributes to the active ``fleet_turn`` span.
+
+    Fail-soft by contract: with no active Turn trace (or when MLflow is
+    unavailable) this is a no-op that never imports MLflow, and annotation
+    faults are logged at debug level without affecting the Turn.
+    Callers supply only bounded low-cardinality metadata.
+    """
+    if not _fleet_trace_active.get():
+        return
+    try:
+        import mlflow
+
+        span = mlflow.get_current_active_span()
+        if span is None:
+            return
+        setter = getattr(span, "set_attributes", None)
+        if callable(setter):
+            setter(_trace_mapping(attributes))
+    except Exception:
+        logger.debug("annotate_turn_attributes failed; continuing", exc_info=True)
+
+
 def current_turn_trace_id() -> str | None:
     """Return the active Turn trace id for this context, if any."""
     return _current_trace_id.get()

@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
-from collections.abc import Sequence
 from dataclasses import dataclass
 from functools import partial
 from typing import Any, cast
@@ -50,8 +49,6 @@ from fleet_rlm.daytona.workspace_fs import AsyncDaytonaVolumeFS, DaytonaSandboxV
 from fleet_rlm.files.memory_candidates import MemoryCandidateCollector, build_memory_promotion_intents
 from fleet_rlm.files.memory_models import WORKSPACE_MEMORY_INJECTION_TAIL_BYTES
 from fleet_rlm.files.models import (
-    AttachmentAccess,
-    AttachmentRun,
     PreparedAttachments,
 )
 from fleet_rlm.files.volume_paths import VolumePaths, volume_paths_from_settings
@@ -59,6 +56,7 @@ from fleet_rlm.files.workspace_models import DAYTONA_WORKSPACE_CAPABILITY
 from fleet_rlm.rlm.context import RLMExecutionSpec
 from fleet_rlm.rlm.dspy_contract import RLMOptions
 from fleet_rlm.rlm.model_bundle import RLMModelBundle
+from fleet_rlm.runtime.owned_effect import OwnedEffect
 from fleet_rlm.skills.catalog import SkillCatalog
 
 logger = logging.getLogger(__name__)
@@ -70,7 +68,16 @@ def _promote_memory_candidates(
     *,
     allowed_categories: tuple[str, ...],
 ) -> Any:
-    """Run the bounded post-commit Memory effect outside execution capabilities."""
+    """
+    Promote memory candidates through the configured memory store.
+
+    Parameters:
+        candidates (tuple[Any, ...]): Memory candidates to promote.
+        allowed_categories (tuple[str, ...]): Candidate categories eligible for promotion.
+
+    Returns:
+        MemoryCandidatePromotionResult: Counts and reasons describing the promotion outcome.
+    """
     from fleet_rlm.files.memory_candidates import MemoryCandidatePromotionResult, promote_memory_candidates
 
     if store is None:
@@ -96,20 +103,8 @@ def _promote_memory_candidates(
     return result
 
 
-async def _settle_owned_thread(task: asyncio.Task[Any]) -> bool:
-    """Wait through repeated caller cancellation until owned thread work exits."""
-    cancellation_requested = False
-    while not task.done():
-        try:
-            await asyncio.shield(task)
-        except asyncio.CancelledError:
-            cancellation_requested = True
-        except BaseException:
-            break
-    return cancellation_requested
-
-
 def _consume_task_result(task: asyncio.Task[Any]) -> None:
+    """Consumes a completed task's result while suppressing cancellation and task exceptions."""
     if task.cancelled():
         return
     with contextlib.suppress(BaseException):
@@ -199,18 +194,19 @@ class _DaytonaEnvironmentProvider:
 
     async def acquire(self, run: ClaimedRun, *, deadline: float) -> RunEnvironment:
         """
-        Acquire and configure a Daytona-backed environment for a Run.
+        Acquire and configure a Daytona-backed environment for a run.
 
         Parameters:
             run (ClaimedRun): Run whose session, access, and identifiers determine the environment.
             deadline (float): Absolute time limit for environment acquisition and setup.
 
         Returns:
-            RunEnvironment: Configured environment with run sinks, resource cleanup, and child-runtime creation.
+            RunEnvironment: Configured environment with run sinks, cleanup, memory services, and child-runtime creation.
 
         Raises:
             RunPreparationUnavailableError: If environment admission times out.
             RunPreparationTimeoutError: If lease acquisition or environment setup exceeds the deadline.
+            RuntimeError: If the acquired sandbox is unavailable.
         """
         try:
             lease = await self.resources.session_manager.acquire(
@@ -229,26 +225,34 @@ class _DaytonaEnvironmentProvider:
         try:
             self.resources.track_sandbox(lease.sandbox_id)
             lookup = asyncio.create_task(self.resources.platform.get(lease.sandbox_id))
+            lookup_effect = OwnedEffect.from_task(lookup)
             try:
                 async with asyncio.timeout_at(deadline):
                     sandbox = await asyncio.shield(lookup)
             except TimeoutError:
                 if lookup.done():
                     raise
-                cancelled = await _settle_owned_thread(lookup)
+                try:
+                    settled = await lookup_effect.settle()
+                except BaseException:
+                    lookup_effect.consume_exception()
+                    cancelled = lookup_effect.caller_cancelled
+                else:
+                    cancelled = settled.caller_cancelled
                 _consume_task_result(lookup)
                 if cancelled:
                     raise asyncio.CancelledError from None
                 raise RunPreparationTimeoutError("Turn preparation timed out") from None
             except asyncio.CancelledError:
-                await _settle_owned_thread(lookup)
+                with contextlib.suppress(BaseException):
+                    await lookup_effect.settle()
                 _consume_task_result(lookup)
                 raise
             if sandbox is None:
                 raise RuntimeError("acquired Sandbox is unavailable")
-            from fleet_rlm.daytona.workspace_memory import DaytonaWorkspaceMemoryStore
+            from fleet_rlm.daytona.workspace_memory import build_workspace_memory_store
 
-            paths = volume_paths_from_settings(self.settings)
+            paths = self.resources.volume_paths
             sink = _DaytonaRunSink(
                 sandbox,
                 loop=asyncio.get_running_loop(),
@@ -256,7 +260,7 @@ class _DaytonaEnvironmentProvider:
                 paths=paths,
             )
             assert sink.volume_fs is not None
-            memory_store = DaytonaWorkspaceMemoryStore(
+            memory_store = build_workspace_memory_store(
                 sink.volume_fs.sandbox,
                 volume_paths=paths,
                 max_upload_bytes=self.settings.max_upload_bytes,
@@ -312,24 +316,37 @@ class _DaytonaEnvironmentProvider:
             raise
 
 
-@dataclass(slots=True)
-class _LiveAttachmentLifecycle:
-    attachment_lifecycle: Any
+async def _prepare_memory_digest(memory_store: Any, *, request: str) -> str:
+    """Return the per-Run injection digest, degrading fail-soft with diagnostics.
 
-    async def prepare_run(
-        self,
-        access: AttachmentAccess,
-        attachment_ids: Sequence[UUID],
-        run: AttachmentRun,
-        sink: Any,
-    ) -> PreparedAttachments:
-        return await self.attachment_lifecycle.prepare_run(access, attachment_ids, run, sink)
+    User-visible behavior is unchanged: ANY preparation failure still degrades
+    to no injection. The failure is classified once into a bounded, sanitized
+    diagnostic so provider outages, corrupt stores, invariant violations, and
+    internal defects no longer look identical to operators.
+    """
+    from fleet_rlm.daytona.memory_diagnostics import record_memory_degradation
+    from fleet_rlm.daytona.workspace_memory import read_workspace_memory_injection_digest
+
+    try:
+        return await asyncio.to_thread(
+            read_workspace_memory_injection_digest,
+            memory_store,
+            request=request,
+        )
+    except Exception as exc:
+        record_memory_degradation(exc, operation="injection_digest", fallback_outcome="no_memory_injection")
+        return ""
 
 
 @dataclass(slots=True)
 class _LiveCapabilityPreparer:
     settings: Settings
     skill_catalog: SkillCatalog
+    volume_paths: VolumePaths | None = None
+
+    def __post_init__(self) -> None:
+        if self.volume_paths is None:
+            self.volume_paths = volume_paths_from_settings(self.settings)
 
     async def prepare(
         self,
@@ -349,10 +366,7 @@ class _LiveCapabilityPreparer:
             LivePreparedCapabilities: Prepared capabilities and any preparation notices.
         """
         from fleet_rlm.daytona.workspace_fs import DaytonaSessionWorkspaceFS
-        from fleet_rlm.daytona.workspace_memory import (
-            DaytonaWorkspaceMemoryStore,
-            read_workspace_memory_injection_digest,
-        )
+        from fleet_rlm.daytona.workspace_memory import build_workspace_memory_store
         from fleet_rlm.files.memory_tools import WorkspaceMemoryToolHost
         from fleet_rlm.files.project_tools import ProjectToolHost
         from fleet_rlm.files.tools import FileToolHost
@@ -362,7 +376,7 @@ class _LiveCapabilityPreparer:
         sink = environment.attachment_sink
         volume_fs = cast(_DaytonaRunSink, sink).volume_fs
         assert volume_fs is not None  # _DaytonaRunSink is always constructed with loop
-        paths = volume_paths_from_settings(self.settings)
+        paths = self.volume_paths if self.volume_paths is not None else volume_paths_from_settings(self.settings)
         file_host = FileToolHost(
             attachments=attachments.refs,
             staged_attachments=attachments.staged,
@@ -410,7 +424,7 @@ class _LiveCapabilityPreparer:
         if memory_store is None:
             # Direct capability-preparation tests may provide only a minimal
             # RunEnvironment; production acquisition owns this store.
-            memory_store = DaytonaWorkspaceMemoryStore(
+            memory_store = build_workspace_memory_store(
                 volume_fs.sandbox,
                 volume_paths=paths,
                 max_upload_bytes=self.settings.max_upload_bytes,
@@ -433,15 +447,9 @@ class _LiveCapabilityPreparer:
         # Per-Run Workspace Memory injection: relevant matches first, then the
         # newest complete records. Best-effort by contract; search/storage
         # failures degrade to no injection, and search failure degrades to
-        # the recency-only fallback.
-        try:
-            memory_digest = await asyncio.to_thread(
-                read_workspace_memory_injection_digest,
-                memory_store,
-                request=run.input.text,
-            )
-        except Exception:
-            memory_digest = ""
+        # the recency-only fallback. Every degraded operation records one
+        # bounded, sanitized diagnostic at this fail-soft seam (P31).
+        memory_digest = await _prepare_memory_digest(memory_store, request=run.input.text)
         file_tools = file_host.as_tools()
         workspace_tools = workspace_host.as_tools()
         project_tools = project_host.as_tools()
@@ -502,6 +510,7 @@ class DaytonaRuntimeResources:
         self.platform = LiveDaytonaPlatform(self.client, self.sandbox_spec)
         self.volume_client = LiveDaytonaVolumeClient(self.client)
         self.volume_config = volume_config_from_settings(self.settings)
+        self.volume_paths = volume_paths_from_settings(self.settings)
         self.bindings = bindings
         self.daytona_admission = DaytonaAdmission(
             max_active_leases=max_active_leases,
@@ -524,10 +533,6 @@ class DaytonaRuntimeResources:
     def track_sandbox(self, sandbox_id: str | None) -> None:
         if sandbox_id and sandbox_id not in self._sandbox_ids:
             self._sandbox_ids.append(sandbox_id)
-
-    def forget_sandboxes(self) -> None:
-        """Drop tracked sandbox ids without deleting (API-restart simulation)."""
-        self._sandbox_ids.clear()
 
     async def cleanup(self) -> None:
         """Delete tracked sandboxes (best-effort)."""
@@ -561,7 +566,7 @@ def build_run_preparation(
         models=models,
         options=options,
         recursive_options=recursive_rlm_options(settings),
-        attachments=_LiveAttachmentLifecycle(attachment_lifecycle),
+        attachments=attachment_lifecycle,
         environments=_DaytonaEnvironmentProvider(resources, settings),
-        capabilities=_LiveCapabilityPreparer(settings, skill_catalog),
+        capabilities=_LiveCapabilityPreparer(settings, skill_catalog, volume_paths=resources.volume_paths),
     )

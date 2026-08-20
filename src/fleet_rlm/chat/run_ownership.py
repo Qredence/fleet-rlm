@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import asyncio
-import contextlib
 from collections.abc import Awaitable
 from dataclasses import dataclass
-from typing import Any, TypeVar
+from typing import TypeVar
+
+from fleet_rlm.runtime.owned_effect import OwnedEffect
 
 T = TypeVar("T")
 
@@ -18,40 +19,20 @@ class ClaimHeartbeat:
 
 
 async def shield_cleanup(awaitable: Awaitable[T]) -> T:
-    """Complete an owned awaitable even if the caller is repeatedly cancelled.
-
-    Returns the awaitable's result so cancel/settle paths can keep a bool or
-    receipt without a second cancel-resistant awaiter twin.
     """
-    try:
-        task = asyncio.ensure_future(awaitable)
-    except BaseException:
-        close = getattr(awaitable, "close", None)
-        if callable(close):
-            with contextlib.suppress(BaseException):
-                close()
-        raise
-    cancelled = False
-    while not task.done():
-        try:
-            await asyncio.shield(task)
-        except asyncio.CancelledError:
-            cancelled = True
-    if task.cancelled():
-        raise asyncio.CancelledError
-    try:
-        result = task.result()
-    except BaseException:
-        raise
-    if cancelled:
-        raise asyncio.CancelledError
-    return result
+    Complete an awaitable despite caller cancellation.
 
+    Returns:
+        T: The awaitable's result.
 
-def consume_task_exception(task: asyncio.Task[Any]) -> None:
-    if not task.cancelled():
-        with contextlib.suppress(BaseException):
-            task.exception()
+    Raises:
+        asyncio.CancelledError: If the caller was cancelled while the awaitable settled.
+    """
+    effect = OwnedEffect.start(awaitable)
+    settled = await effect.settle()
+    if settled.caller_cancelled:
+        raise asyncio.CancelledError
+    return settled.result()
 
 
 async def stop_heartbeat(heartbeat: ClaimHeartbeat | None) -> None:
@@ -63,7 +44,6 @@ async def stop_heartbeat(heartbeat: ClaimHeartbeat | None) -> None:
 
 __all__ = [
     "ClaimHeartbeat",
-    "consume_task_exception",
     "shield_cleanup",
     "stop_heartbeat",
 ]

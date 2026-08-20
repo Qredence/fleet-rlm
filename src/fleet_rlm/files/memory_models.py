@@ -26,9 +26,8 @@ synthesized id and original timestamp.
 
 Humans edit this file, so reads are *tolerant*: malformed lines are skipped
 with a bounded warning count instead of poisoning the whole read. Writes stay
-strict: :func:`validate_workspace_memory_record` and
-:func:`validate_workspace_memory_content` reject anything outside the v1/v2/v3
-shapes plus optional header.
+strict: :func:`validate_workspace_memory_record` rejects anything outside the
+v1/v2/v3 shapes.
 """
 
 from __future__ import annotations
@@ -150,65 +149,44 @@ def normalize_workspace_memory_learning(key_learning: str) -> str:
     return learning
 
 
+def _v3_record_line(
+    *,
+    timestamp: str,
+    category: str,
+    learning: str,
+    memory_id: str,
+    source: str,
+    updated_at: str,
+    supersedes_id: str | None = None,
+) -> str:
+    """Emit one canonical v3 record line (single owner of the v3 on-disk shape)."""
+    supersession = f" supersedes:{supersedes_id}" if supersedes_id is not None else ""
+    return (
+        f"- [{timestamp}] **{category}** <!-- id:{memory_id} source:{source} "
+        f"updated:{updated_at}{supersession} -->: {learning}\n"
+    )
+
+
 def format_workspace_memory_record(
     key_learning: str,
     category: str,
     *,
     timestamp: datetime,
 ) -> tuple[str, str]:
-    """Normalize and format one canonical v2 Workspace Memory record."""
+    """Normalize and format one fresh canonical v3 ``user_explicit`` record."""
     learning = normalize_workspace_memory_learning(key_learning)
     normalized_category = normalize_workspace_memory_category(category)
     if not isinstance(timestamp, datetime):
         raise WorkspaceMemoryRecordError
     timestamp_text = timestamp.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
     memory_id = workspace_memory_record_id(timestamp_text, normalized_category, learning)
-    record = (
-        f"- [{timestamp_text}] **{normalized_category}** <!-- id:{memory_id} source:user_explicit "
-        f"updated:{timestamp_text} -->: {learning}\n"
-    )
-    validate_workspace_memory_record(record)
-    return record, normalized_category
-
-
-_TIMESTAMP_TEXT = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z")
-
-
-def reformat_workspace_memory_record(
-    *,
-    timestamp: str,
-    memory_id: str,
-    category: str,
-    key_learning: str,
-    source: WorkspaceMemorySource = "legacy_unknown",
-    updated_at: str | None = None,
-    supersedes_id: str | None = None,
-) -> tuple[str, str]:
-    """Rebuild one canonical v3 record preserving identity and provenance.
-
-    The creation timestamp and effective id are preserved verbatim. Legacy v1
-    and v2 rows upgrade in place to v3 with ``legacy_unknown`` provenance;
-    provenance and supersession metadata are carried forward rather than
-    silently re-identifying the memory.
-    """
-    if not isinstance(timestamp, str) or _TIMESTAMP_TEXT.fullmatch(timestamp) is None:
-        raise WorkspaceMemoryRecordError
-    try:
-        datetime.strptime(timestamp, "%Y-%m-%dT%H:%M:%SZ")
-        update_text = updated_at or timestamp
-        datetime.strptime(update_text, "%Y-%m-%dT%H:%M:%SZ")
-    except ValueError as exc:
-        raise WorkspaceMemoryRecordError from exc
-    learning = normalize_workspace_memory_learning(key_learning)
-    normalized_category = normalize_workspace_memory_category(category)
-    normalize_workspace_memory_id(memory_id)
-    normalize_workspace_memory_source(source)
-    if supersedes_id is not None:
-        normalize_workspace_memory_id(supersedes_id)
-    supersession = f" supersedes:{supersedes_id}" if supersedes_id is not None else ""
-    record = (
-        f"- [{timestamp}] **{normalized_category}** <!-- id:{memory_id} source:{source} "
-        f"updated:{update_text}{supersession} -->: {learning}\n"
+    record = _v3_record_line(
+        timestamp=timestamp_text,
+        category=normalized_category,
+        learning=learning,
+        memory_id=memory_id,
+        source="user_explicit",
+        updated_at=timestamp_text,
     )
     validate_workspace_memory_record(record)
     return record, normalized_category
@@ -253,23 +231,6 @@ def validate_workspace_memory_record(record: str) -> None:
                 raise WorkspaceMemoryRecordError from exc
 
 
-def validate_workspace_memory_content(content: str) -> None:
-    """Strictly validate a whole memory file body for writes.
-
-    Accepts zero or more complete v1/v2/v3 records with at most one leading
-    :data:`WORKSPACE_MEMORY_HEADER` line; rejects blank and malformed lines.
-    """
-    if not isinstance(content, str):
-        raise WorkspaceMemoryRecordError
-    lines = content.splitlines(keepends=True)
-    if lines and lines[0] == _HEADER_LINE:
-        lines = lines[1:]
-    for record in lines:
-        validate_workspace_memory_record(record)
-    if any(line.malformed for line in parse_workspace_memory_lines(content)):
-        raise WorkspaceMemoryRecordError
-
-
 def format_workspace_memory_v3_record(
     key_learning: str,
     category: str,
@@ -294,10 +255,14 @@ def format_workspace_memory_v3_record(
         raise WorkspaceMemoryRecordError
     if supersedes_id is not None:
         normalize_workspace_memory_id(supersedes_id)
-    supersession = f" supersedes:{supersedes_id}" if supersedes_id is not None else ""
-    record = (
-        f"- [{created_at}] **{normalized_category}** <!-- id:{memory_id} source:{source} "
-        f"updated:{updated_at}{supersession} -->: {learning}\n"
+    record = _v3_record_line(
+        timestamp=created_at,
+        category=normalized_category,
+        learning=learning,
+        memory_id=memory_id,
+        source=source,
+        updated_at=updated_at,
+        supersedes_id=supersedes_id,
     )
     validate_workspace_memory_record(record)
     return record
@@ -454,27 +419,6 @@ def parse_workspace_memory_lines(
 def count_workspace_memory_warnings(lines: tuple[WorkspaceMemoryParsedLine, ...]) -> int:
     """Bounded count of malformed lines skipped by one tolerant read."""
     return min(sum(1 for line in lines if line.malformed), WORKSPACE_MEMORY_MAX_WARNINGS)
-
-
-def build_workspace_memory_digest(content: str) -> tuple[str, int]:
-    """Project memory content into a bounded turn-injection digest.
-
-    Returns ``(digest, warnings)``: the digest keeps complete v1/v2/v3 record lines
-    only (header, blanks, and malformed lines dropped), bounded to at most
-    :data:`WORKSPACE_MEMORY_INJECTION_TAIL_BYTES` UTF-8 bytes taken from the
-    tail on whole-record boundaries; ``warnings`` is the bounded malformed-line
-    count.
-    """
-    lines = parse_workspace_memory_lines(content)
-    warnings = count_workspace_memory_warnings(lines)
-    body = "".join(line.raw for line in lines if line.entry is not None)
-    encoded = body.encode("utf-8")
-    if len(encoded) > WORKSPACE_MEMORY_INJECTION_TAIL_BYTES:
-        encoded = encoded[-WORKSPACE_MEMORY_INJECTION_TAIL_BYTES:]
-        if not encoded.startswith(b"- ["):
-            boundary = encoded.find(b"\n")
-            encoded = b"" if boundary < 0 else encoded[boundary + 1 :]
-    return encoded.decode("utf-8"), warnings
 
 
 @dataclass(frozen=True, slots=True)

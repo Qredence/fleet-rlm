@@ -42,6 +42,41 @@ and its matching automated check in the same patch.
   `RunLifetimeReceipt`; Workspace operations ride the versioned installed
   agent whose handshake fails closed before use; Memory promotion rides the
   transactional outbox with bounded idempotent reconciliation.
+- **Recursive child cleanup has one explicit lease state.** Acquisition,
+  synchronous interpreter shutdown, provider cleanup/quarantine, and late
+  acquisition adoption are separate Daytona seams. A child lease transitions
+  `OPEN` → `CLOSING` → `CLOSED` only after cleanup succeeds; concurrent closes
+  join the same owned cleanup, while a failed close remains `FAILED` and
+  re-observes its recorded error instead of starting duplicate provider work.
+- **Owned effects have one provider-neutral wait vocabulary.**
+  `runtime.OwnedEffect` wraps caller-started asynchronous work, shields the
+  effect from waiter cancellation, preserves terminal results/errors, and can
+  return a bounded pending wait without cancelling the effect. It does not
+  replace Run Ownership, child-runtime state, or Daytona lease/quarantine
+  receipts; those domains retain their specialized state and fallback policy.
+
+## Final maintainability freeze (P34)
+
+- Every deep seam has one owner and one canonical representation. A private
+  helper is acceptable when it keeps a boundary local; duplicate adapters,
+  pass-through wrappers, repeated normalization/serialization, and dead aliases
+  are not.
+- `daytona/memory_diagnostics.py` classifies optional read-side degradation into
+  the closed `MemoryFailureCategory` vocabulary. Diagnostics are bounded and
+  sanitized; mutation and list paths remain strict. A new catch site must use
+  the existing classifier rather than inventing a parallel warning format.
+- `config.py` is the source of truth for `FleetFieldPolicy` metadata and
+  `config_policy.py` derives its editor inventory from it. No second complete
+  configuration-field mirror is allowed.
+- `tools/fleet-tui/src/tui/tests/turn-reducer-invariants.test.ts` is the
+  deterministic P32 proof that live and durable projections converge through
+  one canonical reducer. Wire adapters own casing and framing compatibility;
+  the reducer does not.
+- P34 excludes model routing/tuning, recursion or throughput changes, schema
+  changes, Memory format changes, and public contract changes. A cleanup is
+  valid only after all consumers and the full deterministic matrix have been
+  checked. The live Daytona gate remains separately required evidence when the
+  delivery claims live certification.
 
 ## Product identity
 
@@ -84,7 +119,11 @@ exist.
   commit and cancellation requests remain separate.
 - `rlm/` owns model roles, Signature inputs, fresh native RLM construction,
   options, Runtime Events, delegation metrics, routing evaluation, cancellation,
-  and fixed-depth child execution.
+  and fixed-depth child execution. `RLMRunner.stream(context)` remains the deep
+  execution seam; `rlm/worker_execution.py` owns the cancellation-shielded
+  worker/thread/event-loop boundary, `rlm/observation.py` owns bounded detail
+  relay/monitoring/drain policy, and `rlm/execution_trace.py` owns trace and
+  recursive-metric projection. These remain private implementation seams.
 - `daytona/` is the exclusive SDK boundary and owns provider-error normalization.
   `DaytonaRuntimeResources` remains provider-only; composition injects database,
   binding, model, preparation, limits, and cleanup ports.
@@ -168,10 +207,13 @@ routes or public events.
 - Alembic owns live schema evolution; live PostgreSQL startup never calls
   `create_all`. Explicit SQLite test/local helpers may call `create_tables`.
 - Durable Attachment and Artifact bytes live in Workspace Volume Scope.
-- The mounted Workspace Agent is installed once per Sandbox as a versioned,
-  checksum-verified module; operations then run as compact handshake-bound
-  JSON requests. Protocol, digest, or capability mismatch fails closed before
-  Workspace/Memory use and never falls back to per-operation source shipping.
+- The mounted Workspace Agent is installed once per Sandbox as the complete,
+  versioned `workspace_agent_runtime.py` artifact. Its explicit
+  `handle(request)` validates and dispatches the same operation contract for
+  installed and process-only fallback launchers; operations then run as
+  compact handshake-bound JSON requests. Protocol, artifact digest, or
+  capability mismatch fails closed before Workspace/Memory use. The host does
+  not search, split, indent, or otherwise rewrite the remote source.
 - Daytona Session Workspace text lives under
   `sessions/{session_id}/workspace/`. Paged reads, bounded immediate-child
   listings, append, replacement writes, unique-fragment edits, and file or

@@ -203,6 +203,7 @@ def test_workspace_event_views_expose_metadata_without_file_bodies_or_entries() 
     host = WorkspaceToolHost(workspace, max_file_bytes=64)
     tools = {str(tool.name): tool for tool in host.as_tools()}
     views = host.event_views()
+    assert "append_workspace_text" in views
     observed: list[object] = []
 
     observe_tool(tools["write_workspace_text"], observed.append, views["write_workspace_text"])(

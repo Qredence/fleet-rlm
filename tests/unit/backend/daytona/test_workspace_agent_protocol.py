@@ -1,11 +1,8 @@
-"""Golden wire-protocol lock for the packaged Workspace Agent runtime.
-
-Locks operation markers, error vocabulary, and host loading so Mission 10's
-extract cannot drift provider payload shape or security fail-closed paths.
-"""
+"""Golden wire-protocol lock for the packaged Workspace Agent runtime."""
 
 from __future__ import annotations
 
+import hashlib
 from importlib.resources import files
 
 
@@ -29,9 +26,12 @@ def test_runtime_source_is_packaged_and_loaded_via_importlib_resources() -> None
     from fleet_rlm.daytona import workspace_agent as host
 
     packaged = files("fleet_rlm.daytona").joinpath("workspace_agent_runtime.py").read_text(encoding="utf-8")
-    assert "def respond(payload):" in packaged
+    assert "def handle(request):" in packaged
+    assert "def get_metadata():" in packaged
     assert "class UnsafePath(Exception):" in packaged
     assert host._workspace_agent_runtime_source() == packaged
+    assert host.build_installed_workspace_agent_source() == packaged
+    assert hashlib.sha256(packaged.encode("utf-8")).hexdigest() == host._workspace_agent_runtime_checksum()
     # Host must never treat the runtime module as callable agent behavior.
     assert not hasattr(host, "respond")
 
@@ -40,11 +40,12 @@ def test_build_embeds_operation_params_and_runtime_source() -> None:
     from fleet_rlm.daytona.workspace_agent import build_workspace_agent_code
 
     code = build_workspace_agent_code(**_base(checksum=True, expected_sha256="abc"))
-    assert code.startswith("volume_root = '/home/daytona/fleet'")
-    assert "checksum = True" in code
-    assert "expected_sha256 = 'abc'" in code
+    assert code.startswith('"""Stdlib-only Session Workspace agent')
+    assert "handle(json.loads(" in code
+    assert '"checksum":true' in code
+    assert '"expected_sha256":"abc"' in code
     assert "import base64, datetime, errno, fcntl, hashlib, json, os, re, stat, time" in code
-    assert "def respond(payload):" in code
+    assert "def handle(request):" in code
 
 
 def test_runtime_retains_every_operation_branch() -> None:
@@ -76,9 +77,7 @@ def test_error_vocabulary_and_security_markers_are_stable() -> None:
         "fail('not_found')",
         "fail('conflict'",
         "fail('is_directory')",
-        "fail('not_directory')",
         "fail('unsafe')",
-        "fail('unsupported_storage'",
         "fail('read_bound')",
         "fail('too_large')",
         "O_NOFOLLOW",
@@ -93,6 +92,8 @@ def test_error_vocabulary_and_security_markers_are_stable() -> None:
         "fcntl.flock",
         "os.replace(",
     ):
+        assert marker in code, marker
+    for marker in ("'error': 'not_found'", "'error': 'not_directory'", "'error': 'unsupported_storage'"):
         assert marker in code, marker
 
 

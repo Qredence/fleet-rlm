@@ -28,7 +28,7 @@ def _post_canned_turn(client: TestClient) -> None:
 
 
 def test_public_turn_succeeds_when_tracing_is_disabled_by_policy() -> None:
-    app = create_testing_app(settings=Settings(_env_file=None, mlflow_tracing_enabled=False))
+    app = create_testing_app(settings=Settings(mlflow_tracing_enabled=False))
 
     with TestClient(app) as client:
         _post_canned_turn(client)
@@ -46,7 +46,6 @@ def test_public_turn_succeeds_when_tracing_setup_is_unavailable(monkeypatch) -> 
     monkeypatch.setattr("fleet_rlm.observability.tracing.configure_tracing", unavailable)
     app = create_testing_app(
         settings=Settings(
-            _env_file=None,
             mlflow_tracing_enabled=True,
             mlflow_experiment_name="fleet-test",
             mlflow_tracking_uri="http://127.0.0.1:5001",
@@ -70,7 +69,6 @@ def test_two_fresh_app_lifespans_can_reconfig_after_a_failed_attempt(monkeypatch
 
     monkeypatch.setattr("fleet_rlm.observability.tracing.configure_tracing", configure)
     settings = Settings(
-        _env_file=None,
         mlflow_tracing_enabled=True,
         mlflow_experiment_name="fleet-test",
         mlflow_tracking_uri="http://127.0.0.1:5001",

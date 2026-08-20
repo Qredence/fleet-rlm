@@ -416,17 +416,11 @@ async def run_routing_scenario(
             counts["rlm_query"] = counts.get("rlm_query", 0) + summary.call_count
         if summary.recursive_batch_calls:
             counts["rlm_query_batched"] = counts.get("rlm_query_batched", 0) + summary.recursive_batch_calls
-        facts = RoutingFacts(
-            tool_counts=counts,
-            native_child_count=summary.call_count - summary.depth_fallback_count,
-            max_native_child_depth=1 if summary.call_count > summary.depth_fallback_count else 0,
-            depth_fallback_count=summary.depth_fallback_count,
-            child_iterations=summary.child_iterations,
-            recursive_prompt_chars=summary.maximum_prompt_chars,
+        facts = facts_from_recursive_summary(
+            summary,
             latency_ms=details_facts.latency_ms,
+            tool_counts=counts,
             sandbox_count=tracked_child_factory.created,
-            recursive_batch_calls=summary.recursive_batch_calls,
-            peak_child_concurrency=summary.peak_child_concurrency,
         )
         scenarios.append(
             score_routing_execution(

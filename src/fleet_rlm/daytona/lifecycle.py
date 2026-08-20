@@ -28,6 +28,8 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any, Literal, Protocol, TypeAlias
 
+from fleet_rlm.daytona.errors import sanitize_failure_text
+
 __all__ = [
     "DEFAULT_CONFIRM_TIMEOUT_S",
     "DEFAULT_POLL_INTERVAL_S",
@@ -127,11 +129,6 @@ AbsenceOutcome: TypeAlias = AbsenceConfirmation | AbsenceTimeout | AbsenceProbeE
 """Closed outcome of one absence-confirmation wait; ``absent`` is authoritative."""
 
 
-def _sanitize_error(exc: BaseException) -> str:
-    """Bounded, credential-free probe-failure description."""
-    return f"{type(exc).__name__}: {str(exc)[:160]}"
-
-
 async def confirm_absence(
     *,
     probe: DeletionStateProbe,
@@ -179,7 +176,12 @@ async def confirm_absence(
             if isinstance(exc, (asyncio.CancelledError, KeyboardInterrupt, SystemExit)):
                 raise
             note("probe_error")
-            return AbsenceProbeError(sandbox_id, _sanitize_error(exc), tuple(observations), clock() - started)
+            return AbsenceProbeError(
+                sandbox_id,
+                sanitize_failure_text(exc, max_chars=160),
+                tuple(observations),
+                clock() - started,
+            )
         if target is None:
             note("not_found")
             return AbsenceConfirmation(sandbox_id, tuple(observations), clock() - started)

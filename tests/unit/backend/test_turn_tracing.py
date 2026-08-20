@@ -17,6 +17,7 @@ from fleet_rlm.observability import turn_tracing
 from fleet_rlm.observability.failure_diagnostics import trace_failure_category
 from fleet_rlm.observability.turn_tracing import (
     annotate_trace_io,
+    annotate_turn_attributes,
     current_turn_trace_id,
     start_turn_span,
     turn_phase_span,
@@ -745,3 +746,59 @@ def test_recursive_call_span_marks_failure_with_bounded_category(monkeypatch: py
         if payload.get("phase_status") == "failed" and "failure_category" in payload
     ]
     assert failed_outputs[-1]["failure_category"] == "timeout"
+
+
+def test_annotate_turn_attributes_writes_sanitized_bounded_values(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = _install_fake_mlflow(monkeypatch)
+
+    class _AttrSpan:
+        def __init__(self) -> None:
+            self.attributes: dict[str, object] = {}
+
+        def set_attributes(self, attrs: dict[str, object]) -> None:
+            self.attributes.update(attrs)
+
+    attr_span = _AttrSpan()
+    mlflow = sys.modules["mlflow"]
+    monkeypatch.setattr(mlflow, "get_current_active_span", lambda: attr_span)
+
+    annotate_turn_attributes(
+        {
+            "fleet.memory_degradation.category": "provider_unavailable",
+            "fleet.memory_degradation.operation": "injection_digest",
+            "fleet.memory_degradation.runtime": "daytona",
+            "fleet.memory_degradation.cause_type": "WorkspaceAgentStorageError",
+            "fleet.memory_degradation.fallback_outcome": "no_memory_injection",
+        }
+    )
+
+    assert attr_span.attributes == {
+        "fleet.memory_degradation.category": "provider_unavailable",
+        "fleet.memory_degradation.operation": "injection_digest",
+        "fleet.memory_degradation.runtime": "daytona",
+        "fleet.memory_degradation.cause_type": "WorkspaceAgentStorageError",
+        "fleet.memory_degradation.fallback_outcome": "no_memory_injection",
+    }
+    assert calls.get_trace_calls == 0
+
+
+def test_annotate_turn_attributes_is_noop_without_active_span(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = _install_fake_mlflow(monkeypatch)
+    mlflow = sys.modules["mlflow"]
+    monkeypatch.setattr(mlflow, "get_current_active_span", lambda: None)
+
+    annotate_turn_attributes({"fleet.memory_degradation.category": "normalization"})
+    assert calls.span_inputs == []
+
+
+def test_annotate_turn_attributes_swallows_sink_failures(monkeypatch: pytest.MonkeyPatch) -> None:
+    _install_fake_mlflow(monkeypatch)
+    mlflow = sys.modules["mlflow"]
+
+    class _FailingSpan:
+        def set_attributes(self, attrs: dict[str, object]) -> None:
+            del attrs
+            raise RuntimeError("sink down")
+
+    monkeypatch.setattr(mlflow, "get_current_active_span", lambda: _FailingSpan())
+    annotate_turn_attributes({"fleet.memory_degradation.category": "normalization"})

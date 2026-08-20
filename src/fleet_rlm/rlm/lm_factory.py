@@ -113,10 +113,15 @@ def build_lm(
         dspy.LM: Configured DSPy language model.
     """
     model_id = normalize_model_id(model)
+    allowed_openai_params: list[str] = []
     kwargs: dict[str, Any] = {
         "model_type": "chat",
         "cache": cache,
         "num_retries": num_retries,
+        # Keep DSPy 3.3.x on its aggregated completion path. Its legacy LM
+        # parser consumes ``response.choices``; raw provider stream wrappers
+        # are supported through DSPy's streamify/callback APIs, not by passing
+        # ``stream=True`` to the LM itself.
     }
     if api_key:
         kwargs["api_key"] = api_key
@@ -130,7 +135,8 @@ def build_lm(
         kwargs["reasoning_effort"] = reasoning_effort
         # LiteLLM normally filters this OpenAI-compatible parameter; explicitly
         # allow it for providers that expose reasoning controls.
-        kwargs["allowed_openai_params"] = ["reasoning_effort"]
+        allowed_openai_params.append("reasoning_effort")
+    kwargs["allowed_openai_params"] = allowed_openai_params
     return dspy.LM(model_id, **kwargs)
 
 
