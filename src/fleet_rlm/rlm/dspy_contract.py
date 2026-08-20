@@ -656,30 +656,69 @@ def _lm_input_profile(
     return profile
 
 
+def _to_output_mapping(outputs: Any) -> Mapping[str, Any] | None:
+    """Normalize LM callback outputs into a Mapping for profiling.
+
+    DSPy's ``on_lm_end`` may deliver the post-processed outputs (a Mapping), the
+    raw LiteLLM ``ModelResponse`` (a pydantic object, NOT a ``collections.abc``
+    ``Mapping`` — whose parsed text lives at ``choices[i].message.content``), or a
+    bare completion string. Key the profile off the meaningful payload for each
+    shape rather than throwing the object away.
+    """
+    if isinstance(outputs, Mapping):
+        return outputs
+    if isinstance(outputs, str):
+        return {"content": outputs}
+
+    choices = getattr(outputs, "choices", None)
+    if isinstance(choices, Sequence) and not isinstance(choices, (str, bytes, bytearray)):
+        first = choices[0] if choices else None
+        message = getattr(first, "message", None)
+        if message is None and isinstance(first, Mapping):
+            message = first.get("message")
+        content = getattr(message, "content", None)
+        if content is None and isinstance(message, Mapping):
+            content = message.get("content")
+        if isinstance(content, str):
+            finish = getattr(first, "finish_reason", None)
+            if finish is None and isinstance(first, Mapping):
+                finish = first.get("finish_reason")
+            result: dict[str, Any] = {"content": content}
+            if isinstance(finish, str):
+                result["finish_reason"] = finish
+            return result
+
+    model_dump = getattr(outputs, "model_dump", None)
+    if callable(model_dump):
+        try:
+            dumped = model_dump()
+        except Exception:  # pragma: no cover - provider objects vary
+            dumped = None
+        if isinstance(dumped, Mapping):
+            return dumped
+    return None
+
+
 def _lm_output_profile(
-    outputs: Mapping[str, Any] | None,
+    outputs: Any,
     *,
     include_previews: bool = True,
 ) -> dict[str, JsonValue]:
-    """
-    Describe an LM response for tracing.
+    """Describe an LM response for tracing.
 
-    Parameters:
-        outputs (Mapping[str, Any] | None): The LM response values to profile.
-        include_previews (bool): Whether to include a bounded response preview.
+    Accepts the post-processed outputs, the LiteLLM ``ModelResponse`` object, or a
+    bare string; all three are normalized via ``_to_output_mapping`` so the profile
+    reflects the real payload instead of collapsing to empty keys."""
 
-    Returns:
-        dict[str, JsonValue]: Structural response metadata, character count, and optionally a response preview.
-    """
-
-    if not isinstance(outputs, Mapping):
+    mapping = _to_output_mapping(outputs)
+    if mapping is None:
         return {"response_keys": ()}
-    profile: dict[str, JsonValue] = {"response_keys": tuple(sorted(str(key) for key in outputs)[:32])}
-    response_chars = sum(len(str(value)) for value in outputs.values() if isinstance(value, str))
+    profile: dict[str, JsonValue] = {"response_keys": tuple(sorted(str(key) for key in mapping)[:32])}
+    response_chars = sum(len(str(value)) for value in mapping.values() if isinstance(value, str))
     if response_chars:
         profile["response_chars"] = response_chars
-    if outputs and include_previews:
-        profile["response_preview"] = _trace_preview(_trace_payload_text(outputs))
+    if mapping and include_previews:
+        profile["response_preview"] = _trace_preview(_trace_payload_text(mapping))
     return profile
 
 

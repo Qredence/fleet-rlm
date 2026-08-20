@@ -711,3 +711,53 @@ def test_malformed_provider_usage_degrades_without_losing_measured_fields(provid
         "observed_lm_usage": {},
         "duration_ms": 17,
     }
+
+
+def test_lm_output_profile_reads_mapping_of_parsed_fields() -> None:
+    from fleet_rlm.rlm.dspy_contract import _lm_output_profile
+
+    # Success path: adapter-parsed outputs arrive as a Mapping of signature fields.
+    outputs = {"reasoning": "step", "code": "print(1)"}
+    profile = _lm_output_profile(outputs)
+    assert profile["response_keys"] == ("code", "reasoning")
+    assert profile["response_chars"] == len("step") + len("print(1)")
+    assert "response_preview" in profile
+
+
+def test_lm_output_profile_reads_model_response_choices_content() -> None:
+    from litellm import ModelResponse
+
+    from fleet_rlm.rlm.dspy_contract import _lm_output_profile
+
+    # Build a ModelResponse whose choices carry the JSON completion in message.content.
+    outputs = ModelResponse(
+        choices=[
+            {
+                "finish_reason": "stop",
+                "index": 0,
+                "message": {
+                    "role": "assistant",
+                    "content": '{"reasoning": "r", "code": "c"}',
+                },
+            }
+        ]
+    )
+    profile = _lm_output_profile(outputs)
+    assert profile["response_keys"] == ("content", "finish_reason")
+    # response_chars sums every string value in the emitted mapping:
+    # content (31) + finish_reason "stop" (4) = 35.
+    assert profile["response_chars"] == len('{"reasoning": "r", "code": "c"}') + len("stop")
+    assert "response_preview" in profile
+
+
+def test_lm_output_profile_reads_string_and_unknown_shapes() -> None:
+    from fleet_rlm.rlm.dspy_contract import _lm_output_profile
+
+    # A bare string completion is keyed as ("content",).
+    profile = _lm_output_profile('{"reasoning": "x"}')
+    assert profile["response_keys"] == ("content",)
+    assert profile["response_chars"] == len('{"reasoning": "x"}')
+
+    # Genuinely unusable shapes still degrade to the historical empty-keys shape.
+    assert _lm_output_profile(None) == {"response_keys": ()}
+    assert _lm_output_profile(object()) == {"response_keys": ()}
