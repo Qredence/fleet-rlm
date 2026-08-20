@@ -73,6 +73,32 @@ def test_prediction_result_rejects_oversized_or_publicly_unsafe_outputs_without_
         )
 
 
+def test_prediction_result_oversized_carries_sanitized_metrics_attrs() -> None:
+    from fleet_rlm.rlm.dspy_contract import PredictionOutputTooLargeError, prediction_result
+
+    class Report(dspy.Signature):
+        answer: str = dspy.OutputField()
+        metadata: dict[str, str] = dspy.OutputField()
+
+    secret = "sk-live-abcdef123456"
+    with pytest.raises(PredictionOutputTooLargeError) as excinfo:
+        prediction_result(
+            dspy.Prediction(answer=f"token={secret} " + "A" * 200, metadata={}),
+            Report,
+            max_output_chars=64,
+        )
+    exc = excinfo.value
+
+    # Public message text stays exactly the closed-Literal string.
+    assert str(exc) == "Turn output is too large"
+    assert exc.public_message == "Turn output is too large"
+    # Diagnostics ride typed attrs, not the message.
+    assert isinstance(exc.output_chars, int) and exc.output_chars > 64
+    assert isinstance(exc.output_preview, str)
+    assert secret not in exc.output_preview  # secrets redacted
+    assert len(exc.output_preview) <= 900  # bounded (_trace_preview default cap)
+
+
 def test_prediction_result_preserves_benign_security_text_and_documented_mount_verbatim() -> None:
     from fleet_rlm.rlm.dspy_contract import prediction_result
 

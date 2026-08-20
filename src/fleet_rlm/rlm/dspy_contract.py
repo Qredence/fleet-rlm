@@ -50,9 +50,22 @@ class PredictionOutputError(ValueError):
 
 
 class PredictionOutputTooLargeError(PredictionOutputError):
-    """Declared Prediction JSON exceeds the Turn commit character budget."""
+    """Declared Prediction JSON exceeds the Turn commit character budget.
+
+    Diagnostics are carried as typed, sanitized attributes (never in the public
+    message, which is a closed Literal surfaced to operators)."""
 
     public_message = "Turn output is too large"
+
+    def __init__(
+        self,
+        *,
+        output_chars: int | None = None,
+        output_preview: str | None = None,
+    ) -> None:
+        super().__init__()
+        self.output_chars = output_chars
+        self.output_preview = output_preview
 
 
 @dataclass(frozen=True, slots=True)
@@ -157,7 +170,13 @@ def prediction_result(
     plain_outputs = _plain_json(result.outputs)
     encoded = json.dumps(plain_outputs, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
     if len(encoded) > max_output_chars:
-        raise PredictionOutputTooLargeError
+        from fleet_rlm.rlm.sanitize import sanitize_public_text
+
+        preview = sanitize_public_text(_trace_preview(result.display_text, max_chars=400))
+        raise PredictionOutputTooLargeError(
+            output_chars=len(encoded),
+            output_preview=preview,
+        )
     try:
         validate_declared_public_value(result.outputs)
     except ValueError:
