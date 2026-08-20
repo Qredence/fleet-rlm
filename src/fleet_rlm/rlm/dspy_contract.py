@@ -172,7 +172,7 @@ def prediction_result(
     if len(encoded) > max_output_chars:
         from fleet_rlm.rlm.sanitize import sanitize_public_text
 
-        preview = sanitize_public_text(_trace_preview(result.display_text, max_chars=400))
+        preview = sanitize_public_text(result.display_text, max_len=400)
         raise PredictionOutputTooLargeError(
             output_chars=len(encoded),
             output_preview=preview,

@@ -96,7 +96,7 @@ def test_prediction_result_oversized_carries_sanitized_metrics_attrs() -> None:
     assert isinstance(exc.output_chars, int) and exc.output_chars > 64
     assert isinstance(exc.output_preview, str)
     assert secret not in exc.output_preview  # secrets redacted
-    assert len(exc.output_preview) <= 900  # bounded (_trace_preview default cap)
+    assert len(exc.output_preview) <= 400  # bounded (sanitize_public_text max_len)
 
 
 def test_prediction_result_preserves_benign_security_text_and_documented_mount_verbatim() -> None:
