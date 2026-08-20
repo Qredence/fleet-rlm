@@ -103,7 +103,11 @@ async def test_live_preparation_stages_attachment_and_cleans_it(
                 SimpleNamespace: A mock acquisition result containing the sandbox, interpreter, and volume identifiers.
             """
             assert deadline > asyncio.get_running_loop().time()
-            return SimpleNamespace(sandbox_id="sandbox", interpreter=object(), volume_id="test-volume")
+            return SimpleNamespace(
+                sandbox_id=f"sandbox-{tmp_path}",
+                interpreter=object(),
+                volume_id="test-volume",
+            )
 
         async def release(self, _lease) -> None:
             self.released = True
