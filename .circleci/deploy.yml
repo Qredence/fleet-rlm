@@ -52,6 +52,7 @@ jobs:
           command: |
             uv run python scripts/circleci_trigger_release.py \
               --version="${TARGET_VERSION}" \
+              --repository=Qredence/fleet-rlm \
               --ref=main
       - run:
           name: Update deployment status to failed
