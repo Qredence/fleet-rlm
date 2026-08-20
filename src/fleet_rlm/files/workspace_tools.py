@@ -17,17 +17,29 @@ from fleet_rlm.rlm.tool_observer import ToolEventView, bound_event_text
 MAX_WORKSPACE_READ_CHARS = 10_000
 SESSION_WORKSPACE_NAMESPACE = "session_workspace"
 
+__all__ = (
+    "MAX_WORKSPACE_READ_CHARS",
+    "SESSION_WORKSPACE_NAMESPACE",
+    "WorkspaceLikeConfig",
+    "WorkspaceToolError",
+    "WorkspaceToolHost",
+    "translate_fs_tool_errors",
+    "workspace_like_event_views",
+    "workspace_like_tools",
+)
+
 
 class WorkspaceToolError(RuntimeError):
     """Safe, actionable failure returned to generated workspace-tool callers."""
 
     def __init__(self, code: str, message: str) -> None:
+        """Create a closed tool error with a stable code and public message."""
         super().__init__(message)
         self.code = code
         self.public_message = message
 
 
-def _translate_fs_tool_errors(exc: BaseException, error_type: type[WorkspaceToolError], *, domain: str) -> NoReturn:
+def translate_fs_tool_errors(exc: BaseException, error_type: type[WorkspaceToolError], *, domain: str) -> NoReturn:
     """Map one mounted-FS failure into the owning host's closed tool-error vocabulary.
 
     ``WorkspaceToolHost`` and ``ProjectToolHost`` share this translation (P33):
@@ -67,19 +79,17 @@ def _translate_fs_tool_errors(exc: BaseException, error_type: type[WorkspaceTool
     raise error_type("unavailable", f"{domain} storage is unavailable") from None
 
 
-def _raise_tool_error(exc: BaseException) -> NoReturn:
-    _translate_fs_tool_errors(exc, WorkspaceToolError, domain="Session Workspace")
-
-
 class WorkspaceToolHost:
     """Bind one authorized Session Workspace into stable synchronous tools."""
 
     def __init__(self, workspace: SessionWorkspaceFS, *, max_file_bytes: int) -> None:
+        """Bind a filesystem adapter and enforce the per-file byte limit."""
         self._workspace = workspace
         self._max_file_bytes = max(1, int(max_file_bytes))
 
     def as_tools(self) -> tuple[dspy.Tool, ...]:
-        config = _WorkspaceLikeConfig(
+        """Build the stable Session Workspace tool contract."""
+        config = WorkspaceLikeConfig(
             namespace=SESSION_WORKSPACE_NAMESPACE,
             domain="Session Workspace",
             error_type=WorkspaceToolError,
@@ -91,14 +101,54 @@ class WorkspaceToolHost:
             normalize_edit_path=normalize_workspace_path,
             has_append=True,
             verb="workspace",
+            tool_docs={
+                "list": "List immediate entries in this Session's durable workspace.",
+                "stat": "Return bounded metadata for one workspace path.",
+                "read": "Read one UTF-8 workspace page without returning more than max_chars.",
+                "write": "Write one UTF-8 file immediately into this Session's durable workspace.",
+                "append": "Append UTF-8 text immediately into this Session's durable workspace.",
+                "delete": "Delete one file or empty directory immediately from this Session's durable workspace.",
+                "edit": "Replace exactly one unique occurrence of old with new in one UTF-8 workspace file.",
+            },
+            tool_descs={
+                "list": (
+                    "List immediate entries in this Session's durable Workspace only when existing durable "
+                    "state is relevant; do not explore it for a self-contained request."
+                ),
+                "stat": "Read bounded metadata for a relevant durable Session Workspace path.",
+                "read": (
+                    "Read one relevant UTF-8 durable Workspace page with max_chars in 1..10000. Continue with "
+                    "next_cursor until eof."
+                ),
+                "write": (
+                    "Write UTF-8 text immediately into this Session's durable Workspace when the result must "
+                    "survive the Run; this durability is independent of Turn Commit."
+                ),
+                "append": (
+                    "Append UTF-8 text immediately into this Session's durable Workspace when incremental "
+                    "state must survive the Run; this durability is independent of Turn Commit."
+                ),
+                "delete": (
+                    "Delete one file or one empty directory immediately from this Session's durable "
+                    "Workspace; non-empty directories are refused, and a supplied expected_sha256 guards "
+                    "against deleting changed content. This durability is independent of Turn Commit."
+                ),
+                "edit": (
+                    "Replace exactly one unique occurrence of old with new in one UTF-8 Session Workspace "
+                    "file; the edit fails when old is absent or occurs more than once, and a supplied "
+                    "expected_sha256 guards against editing changed content. Read the file first and keep "
+                    "old short and unique. This durability is independent of Turn Commit."
+                ),
+            },
         )
-        return _workspace_like_tools(self._workspace, max_file_bytes=self._max_file_bytes, config=config)
+        return workspace_like_tools(self._workspace, max_file_bytes=self._max_file_bytes, config=config)
 
     def event_views(self) -> Mapping[str, ToolEventView]:
         """Return bounded metadata-only projections for Workspace Tools."""
-        return _workspace_like_event_views(
+        return workspace_like_event_views(
             "workspace",
             lambda path, allow_root: normalize_workspace_path(path, allow_root=allow_root),
+            has_append=True,
         )
 
 
@@ -119,7 +169,7 @@ def _warnings(workspace: SessionWorkspaceFS, result: dict[str, object]) -> dict[
     return result
 
 
-class _WorkspaceLikeConfig:
+class WorkspaceLikeConfig:
     """One axis of divergence between the Session and Project tool hosts.
 
     Path normalization is NOT uniform across ops (the P33 contract): the
@@ -151,7 +201,10 @@ class _WorkspaceLikeConfig:
         # for each op. Tool names must stay byte-identical to the existing
         # hosts, e.g. "list_workspace_files" / "list_project_files".
         verb: str,
+        tool_docs: Mapping[str, str],
+        tool_descs: Mapping[str, str],
     ) -> None:
+        """Store the host-specific behavior and public tool text."""
         self.namespace = namespace
         self.domain = domain
         self.error_type = error_type
@@ -162,11 +215,14 @@ class _WorkspaceLikeConfig:
         self.normalize_edit_path = normalize_edit_path
         self.has_append = has_append
         self.verb = verb
+        self.tool_docs = tool_docs
+        self.tool_descs = tool_descs
 
 
-def _workspace_like_tools(
-    workspace: SessionWorkspaceFS, *, max_file_bytes: int, config: _WorkspaceLikeConfig
+def workspace_like_tools(
+    workspace: SessionWorkspaceFS, *, max_file_bytes: int, config: WorkspaceLikeConfig
 ) -> tuple[dspy.Tool, ...]:
+    """Build bounded synchronous tools for a workspace-like filesystem host."""
     max_file_bytes = max(1, int(max_file_bytes))
     error_type = config.error_type
     domain = config.domain
@@ -174,7 +230,7 @@ def _workspace_like_tools(
     verb = config.verb
 
     def _raise(exc: BaseException) -> NoReturn:
-        _translate_fs_tool_errors(exc, error_type, domain=domain)
+        translate_fs_tool_errors(exc, error_type, domain=domain)
 
     def list_files(path: str = ".", limit: int = 100, after: str | None = None) -> dict[str, object]:
         """List immediate entries under one workspaces root."""
@@ -192,7 +248,7 @@ def _workspace_like_tools(
                 "entries": [_entry(item) for item in listing.entries],
             }
         except Exception as exc:
-            _raise(exc)
+            return _raise(exc)
 
     def stat_file(path: str) -> dict[str, object]:
         """Return bounded metadata for one workspace path."""
@@ -204,7 +260,7 @@ def _workspace_like_tools(
         except WorkspaceToolError:
             raise
         except Exception as exc:
-            _raise(exc)
+            return _raise(exc)
 
     def read_text(path: str, cursor: str | None = None, max_chars: int = config.read_max_chars) -> dict[str, object]:
         """Read one UTF-8 workspace page without returning more than max_chars."""
@@ -218,7 +274,7 @@ def _workspace_like_tools(
                 max_bytes=max_file_bytes,
             )
         except Exception as exc:
-            _raise(exc)
+            return _raise(exc)
         return {
             "ok": True,
             "namespace": namespace,
@@ -243,7 +299,7 @@ def _workspace_like_tools(
             }
             return _warnings(workspace, result)
         except Exception as exc:
-            _raise(exc)
+            return _raise(exc)
 
     def append_text(path: str, content: str) -> dict[str, object]:
         """Append UTF-8 text immediately under one workspace root."""
@@ -259,7 +315,7 @@ def _workspace_like_tools(
             }
             return _warnings(workspace, result)
         except Exception as exc:
-            _raise(exc)
+            return _raise(exc)
 
     def delete_path_tool(path: str, expected_sha256: str | None = None) -> dict[str, object]:
         """Delete one file or empty directory immediately under one workspace root."""
@@ -269,7 +325,7 @@ def _workspace_like_tools(
             result: dict[str, object] = {"ok": True, "namespace": namespace, "path": normalized}
             return _warnings(workspace, result)
         except Exception as exc:
-            _raise(exc)
+            return _raise(exc)
 
     def edit_text(path: str, old: str, new: str, expected_sha256: str | None = None) -> dict[str, object]:
         """Replace exactly one unique occurrence of old with new in one UTF-8 file."""
@@ -286,114 +342,41 @@ def _workspace_like_tools(
             result: dict[str, object] = {"ok": True, "namespace": namespace, **entry}
             return _warnings(workspace, result)
         except Exception as exc:
-            _raise(exc)
+            return _raise(exc)
 
-    # Per-tool function docstrings feed each dspy.Tool desc below; keep them
-    # distinct per jurisdiction so the generated tool descriptions match the
-    # existing public surface. (dspy.Tool receives the SAME desc strings the
-    # old inline bodies used.)
-    list_files.__doc__ = (
-        "List immediate entries in one Project or the projects root."
-        if verb == "project"
-        else "List immediate entries in this Session's durable workspace."
-    )
-    stat_file.__doc__ = (
-        "Return bounded metadata for one Project path."
-        if verb == "project"
-        else "Return bounded metadata for one workspace path."
-    )
-    read_text.__doc__ = (
-        "Read one UTF-8 Project file page without returning more than max_chars."
-        if verb == "project"
-        else "Read one UTF-8 workspace page without returning more than max_chars."
-    )
-    write_text.__doc__ = (
-        "Write one UTF-8 deliverable immediately under projects/<slug>/."
-        if verb == "project"
-        else "Write one UTF-8 file immediately into this Session's durable workspace."
-    )
-    append_text.__doc__ = "Append UTF-8 text immediately into this Session's durable workspace."
-    delete_path_tool.__doc__ = (
-        "Delete one file or empty directory immediately under projects/<slug>/."
-        if verb == "project"
-        else "Delete one file or empty directory immediately from this Session's durable workspace."
-    )
-    edit_text.__doc__ = (
-        "Replace exactly one unique occurrence of old with new in one UTF-8 Project file."
-        if verb == "project"
-        else "Replace exactly one unique occurrence of old with new in one UTF-8 workspace file."
-    )
-
-    # Tool descs (the LLM-facing sentences) — byte-identical to the previous
-    # inline dspy.Tool(...) desc= values in workspace_tools.py/project_tools.py.
-    desc_list = (
-        "List immediate entries under projects/<slug>/ (or the projects root) only when existing "
-        "durable Project deliverables are relevant; do not explore them for a self-contained request."
-        if verb == "project"
-        else "List immediate entries in this Session's durable Workspace only when existing durable "
-        "state is relevant; do not explore it for a self-contained request."
-    )
-    desc_stat = (
-        "Read bounded metadata for a relevant durable Project deliverable path under projects/<slug>/."
-        if verb == "project"
-        else "Read bounded metadata for a relevant durable Session Workspace path."
-    )
-    desc_read = (
-        "Read one relevant UTF-8 Project deliverable page with max_chars in 1..10000 using a "
-        "projects/<slug>/<path> target. Continue with next_cursor until eof."
-        if verb == "project"
-        else "Read one relevant UTF-8 durable Workspace page with max_chars in 1..10000. Continue with "
-        "next_cursor until eof."
-    )
-    desc_write = (
-        "Write UTF-8 text immediately as a durable deliverable under projects/<slug>/ when the "
-        "result must stay browsable across Sessions; choose a short repo/task-derived slug and "
-        "keep scratch in the Session Workspace. This durability is independent of Turn Commit."
-        if verb == "project"
-        else "Write UTF-8 text immediately into this Session's durable Workspace when the result must "
-        "survive the Run; this durability is independent of Turn Commit."
-    )
-    desc_append = (
-        "Append UTF-8 text immediately into this Session's durable Workspace when incremental "
-        "state must survive the Run; this durability is independent of Turn Commit."
-    )
-    desc_delete = (
-        "Delete one file or one empty directory immediately under projects/<slug>/; non-empty "
-        "directories are refused, and a supplied expected_sha256 guards against deleting "
-        "changed content. This durability is independent of Turn Commit."
-        if verb == "project"
-        else "Delete one file or one empty directory immediately from this Session's durable "
-        "Workspace; non-empty directories are refused, and a supplied expected_sha256 guards "
-        "against deleting changed content. This durability is independent of Turn Commit."
-    )
-    desc_edit = (
-        "Replace exactly one unique occurrence of old with new in one UTF-8 Project file under "
-        "projects/<slug>/; the edit fails when old is absent or occurs more than once, and a "
-        "supplied expected_sha256 guards against editing changed content. Read the file first "
-        "and keep old short and unique. This durability is independent of Turn Commit."
-        if verb == "project"
-        else "Replace exactly one unique occurrence of old with new in one UTF-8 Session Workspace "
-        "file; the edit fails when old is absent or occurs more than once, and a supplied "
-        "expected_sha256 guards against editing changed content. Read the file first and keep "
-        "old short and unique. This durability is independent of Turn Commit."
-    )
+    for function, key in (
+        (list_files, "list"),
+        (stat_file, "stat"),
+        (read_text, "read"),
+        (write_text, "write"),
+        (delete_path_tool, "delete"),
+        (edit_text, "edit"),
+    ):
+        function.__doc__ = config.tool_docs[key]
+    if config.has_append:
+        append_text.__doc__ = config.tool_docs["append"]
 
     tools: list[dspy.Tool] = [
         dspy.Tool(
             list_files,
             name=f"list_{verb}_files",
-            desc=desc_list,
+            desc=config.tool_descs["list"],
             args={
                 "path": {"type": "string"},
                 "limit": {"type": "integer", "minimum": 1, "maximum": 100},
                 "after": {"type": ["string", "null"]},
             },
         ),
-        dspy.Tool(stat_file, name=f"stat_{verb}_file", desc=desc_stat, args={"path": {"type": "string"}}),
+        dspy.Tool(
+            stat_file,
+            name=f"stat_{verb}_file",
+            desc=config.tool_descs["stat"],
+            args={"path": {"type": "string"}},
+        ),
         dspy.Tool(
             read_text,
             name=f"read_{verb}_text",
-            desc=desc_read,
+            desc=config.tool_descs["read"],
             args={
                 "path": {"type": "string"},
                 "cursor": {"type": ["string", "null"]},
@@ -403,7 +386,7 @@ def _workspace_like_tools(
         dspy.Tool(
             write_text,
             name=f"write_{verb}_text",
-            desc=desc_write,
+            desc=config.tool_descs["write"],
             args={
                 "path": {"type": "string"},
                 "content": {"type": "string"},
@@ -416,7 +399,7 @@ def _workspace_like_tools(
             dspy.Tool(
                 append_text,
                 name=f"append_{verb}_text",
-                desc=desc_append,
+                desc=config.tool_descs["append"],
                 args={"path": {"type": "string"}, "content": {"type": "string"}},
             )
         )
@@ -425,13 +408,13 @@ def _workspace_like_tools(
             dspy.Tool(
                 delete_path_tool,
                 name=f"delete_{verb}_path",
-                desc=desc_delete,
+                desc=config.tool_descs["delete"],
                 args={"path": {"type": "string"}, "expected_sha256": {"type": ["string", "null"]}},
             ),
             dspy.Tool(
                 edit_text,
                 name=f"edit_{verb}_text",
-                desc=desc_edit,
+                desc=config.tool_descs["edit"],
                 args={
                     "path": {"type": "string"},
                     "old": {"type": "string"},
@@ -444,7 +427,12 @@ def _workspace_like_tools(
     return tuple(tools)
 
 
-def _workspace_like_event_views(verb: str, normalize_path: Callable[[str, bool], str]) -> Mapping[str, ToolEventView]:
+def workspace_like_event_views(
+    verb: str,
+    normalize_path: Callable[[str, bool], str],
+    *,
+    has_append: bool,
+) -> Mapping[str, ToolEventView]:
     """Return bounded metadata-only projections shared by Session/Project hosts.
 
     ``normalize_path`` is the host's path normalizer taking ``(path, allow_root)``
@@ -560,8 +548,7 @@ def _workspace_like_event_views(verb: str, normalize_path: Callable[[str, bool],
             output_projection=lambda result: output(result, ("ok", "namespace", "path", "byte_size", "warnings")),
         ),
     }
-    # Only the Session host has an append tool/view.
-    if verb == "workspace":
+    if has_append:
         views[f"append_{verb}_text"] = ToolEventView(
             input_projection=append_input,
             output_projection=lambda result: output(result, ("ok", "namespace", "path", "byte_size", "warnings")),

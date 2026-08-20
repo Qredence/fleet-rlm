@@ -10,7 +10,6 @@ the Session Workspace; durable deliverables belong in a Project.
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import NoReturn
 
 import dspy
 
@@ -18,11 +17,10 @@ from fleet_rlm.files.volume_paths import UnsafePathError, validate_project_slug
 from fleet_rlm.files.workspace_models import SessionWorkspaceFS
 from fleet_rlm.files.workspace_tools import (
     MAX_WORKSPACE_READ_CHARS,
+    WorkspaceLikeConfig,
     WorkspaceToolError,
-    _translate_fs_tool_errors,
-    _workspace_like_event_views,
-    _workspace_like_tools,
-    _WorkspaceLikeConfig,
+    workspace_like_event_views,
+    workspace_like_tools,
 )
 from fleet_rlm.files.workspace_validation import normalize_workspace_path
 from fleet_rlm.rlm.tool_observer import ToolEventView
@@ -37,10 +35,6 @@ class ProjectToolError(WorkspaceToolError):
     Subclasses ``WorkspaceToolError`` so the interpreter bridge keeps rendering
     structured ``{"ok": False, "error": code}`` results for project tools.
     """
-
-
-def _raise_tool_error(exc: BaseException) -> NoReturn:
-    _translate_fs_tool_errors(exc, ProjectToolError, domain="Project")
 
 
 def _normalize_project_path(path: str, *, allow_root: bool = False) -> str:
@@ -81,11 +75,13 @@ class ProjectToolHost:
     """Bind the browsable projects root into stable synchronous tools."""
 
     def __init__(self, workspace: SessionWorkspaceFS, *, max_file_bytes: int) -> None:
+        """Bind a project filesystem adapter and enforce the per-file byte limit."""
         self._workspace = workspace
         self._max_file_bytes = max(1, int(max_file_bytes))
 
     def as_tools(self) -> tuple[dspy.Tool, ...]:
-        config = _WorkspaceLikeConfig(
+        """Build the stable Project tool contract."""
+        config = WorkspaceLikeConfig(
             namespace=PROJECT_WORKSPACE_NAMESPACE,
             domain="Project",
             error_type=ProjectToolError,
@@ -99,12 +95,48 @@ class ProjectToolHost:
             normalize_edit_path=_project_file_path,
             has_append=False,
             verb="project",
+            tool_docs={
+                "list": "List immediate entries in one Project or the projects root.",
+                "stat": "Return bounded metadata for one Project path.",
+                "read": "Read one UTF-8 Project file page without returning more than max_chars.",
+                "write": "Write one UTF-8 deliverable immediately under projects/<slug>/.",
+                "delete": "Delete one file or empty directory immediately under projects/<slug>/.",
+                "edit": "Replace exactly one unique occurrence of old with new in one UTF-8 Project file.",
+            },
+            tool_descs={
+                "list": (
+                    "List immediate entries under projects/<slug>/ (or the projects root) only when existing "
+                    "durable Project deliverables are relevant; do not explore them for a self-contained request."
+                ),
+                "stat": "Read bounded metadata for a relevant durable Project deliverable path under projects/<slug>/.",
+                "read": (
+                    "Read one relevant UTF-8 Project deliverable page with max_chars in 1..10000 using a "
+                    "projects/<slug>/<path> target. Continue with next_cursor until eof."
+                ),
+                "write": (
+                    "Write UTF-8 text immediately as a durable deliverable under projects/<slug>/ when the "
+                    "result must stay browsable across Sessions; choose a short repo/task-derived slug and "
+                    "keep scratch in the Session Workspace. This durability is independent of Turn Commit."
+                ),
+                "delete": (
+                    "Delete one file or one empty directory immediately under projects/<slug>/; non-empty "
+                    "directories are refused, and a supplied expected_sha256 guards against deleting "
+                    "changed content. This durability is independent of Turn Commit."
+                ),
+                "edit": (
+                    "Replace exactly one unique occurrence of old with new in one UTF-8 Project file under "
+                    "projects/<slug>/; the edit fails when old is absent or occurs more than once, and a "
+                    "supplied expected_sha256 guards against editing changed content. Read the file first "
+                    "and keep old short and unique. This durability is independent of Turn Commit."
+                ),
+            },
         )
-        return _workspace_like_tools(self._workspace, max_file_bytes=self._max_file_bytes, config=config)
+        return workspace_like_tools(self._workspace, max_file_bytes=self._max_file_bytes, config=config)
 
     def event_views(self) -> Mapping[str, ToolEventView]:
         """Return bounded metadata-only projections for Project Tools."""
-        return _workspace_like_event_views(
+        return workspace_like_event_views(
             "project",
             lambda path, allow_root: _normalize_project_path(path, allow_root=allow_root),
+            has_append=False,
         )
