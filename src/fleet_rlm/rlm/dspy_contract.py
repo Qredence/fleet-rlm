@@ -50,9 +50,22 @@ class PredictionOutputError(ValueError):
 
 
 class PredictionOutputTooLargeError(PredictionOutputError):
-    """Declared Prediction JSON exceeds the Turn commit character budget."""
+    """Declared Prediction JSON exceeds the Turn commit character budget.
+
+    Diagnostics are carried as typed, sanitized attributes (never in the public
+    message, which is a closed Literal surfaced to operators)."""
 
     public_message = "Turn output is too large"
+
+    def __init__(
+        self,
+        *,
+        output_chars: int | None = None,
+        output_preview: str | None = None,
+    ) -> None:
+        super().__init__()
+        self.output_chars = output_chars
+        self.output_preview = output_preview
 
 
 @dataclass(frozen=True, slots=True)
@@ -157,7 +170,13 @@ def prediction_result(
     plain_outputs = _plain_json(result.outputs)
     encoded = json.dumps(plain_outputs, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
     if len(encoded) > max_output_chars:
-        raise PredictionOutputTooLargeError
+        from fleet_rlm.rlm.sanitize import sanitize_public_text
+
+        preview = sanitize_public_text(result.display_text, max_len=400)
+        raise PredictionOutputTooLargeError(
+            output_chars=len(encoded),
+            output_preview=preview,
+        )
     try:
         validate_declared_public_value(result.outputs)
     except ValueError:
@@ -552,8 +571,11 @@ class _RLMTraceCallback(BaseCallback):
             value = response_details.get(key)
             if value is not None:
                 last_call[key] = value
+        failure_outputs: dict[str, JsonValue] = {}
+        failure_attributes: dict[str, JsonValue] = {}
         if exception is not None:
-            last_call["failure_category"] = _trace_failure_category(exception)
+            failure_outputs, failure_attributes = _lm_failure_details(exception)
+            last_call.update(failure_outputs)
         self._last_call = last_call
         if self._metrics is not None:
             self._metrics.record_lm_call(
@@ -579,11 +601,11 @@ class _RLMTraceCallback(BaseCallback):
                 phase_status="failed",
                 outputs={
                     "request_status": "failed",
-                    "failure_category": _trace_failure_category(exception),
+                    **failure_outputs,
                     **response_details,
                     **({"token_usage": usage} if usage else {}),
                 },
-                attributes=attributes,
+                attributes={**(attributes or {}), **failure_attributes},
             )
 
     def last_call_summary(self) -> dict[str, JsonValue]:
@@ -656,30 +678,69 @@ def _lm_input_profile(
     return profile
 
 
+def _to_output_mapping(outputs: Any) -> Mapping[str, Any] | None:
+    """Normalize LM callback outputs into a Mapping for profiling.
+
+    DSPy's ``on_lm_end`` may deliver the post-processed outputs (a Mapping), the
+    raw LiteLLM ``ModelResponse`` (a pydantic object, NOT a ``collections.abc``
+    ``Mapping`` — whose parsed text lives at ``choices[i].message.content``), or a
+    bare completion string. Key the profile off the meaningful payload for each
+    shape rather than throwing the object away.
+    """
+    if isinstance(outputs, Mapping):
+        return outputs
+    if isinstance(outputs, str):
+        return {"content": outputs}
+
+    choices = getattr(outputs, "choices", None)
+    if isinstance(choices, Sequence) and not isinstance(choices, (str, bytes, bytearray)):
+        first = choices[0] if choices else None
+        message = getattr(first, "message", None)
+        if message is None and isinstance(first, Mapping):
+            message = first.get("message")
+        content = getattr(message, "content", None)
+        if content is None and isinstance(message, Mapping):
+            content = message.get("content")
+        if isinstance(content, str):
+            finish = getattr(first, "finish_reason", None)
+            if finish is None and isinstance(first, Mapping):
+                finish = first.get("finish_reason")
+            result: dict[str, Any] = {"content": content}
+            if isinstance(finish, str):
+                result["finish_reason"] = finish
+            return result
+
+    model_dump = getattr(outputs, "model_dump", None)
+    if callable(model_dump):
+        try:
+            dumped = model_dump()
+        except Exception:  # pragma: no cover - provider objects vary
+            dumped = None
+        if isinstance(dumped, Mapping):
+            return dumped
+    return None
+
+
 def _lm_output_profile(
-    outputs: Mapping[str, Any] | None,
+    outputs: Any,
     *,
     include_previews: bool = True,
 ) -> dict[str, JsonValue]:
-    """
-    Describe an LM response for tracing.
+    """Describe an LM response for tracing.
 
-    Parameters:
-        outputs (Mapping[str, Any] | None): The LM response values to profile.
-        include_previews (bool): Whether to include a bounded response preview.
+    Accepts the post-processed outputs, the LiteLLM ``ModelResponse`` object, or a
+    bare string; all three are normalized via ``_to_output_mapping`` so the profile
+    reflects the real payload instead of collapsing to empty keys."""
 
-    Returns:
-        dict[str, JsonValue]: Structural response metadata, character count, and optionally a response preview.
-    """
-
-    if not isinstance(outputs, Mapping):
+    mapping = _to_output_mapping(outputs)
+    if mapping is None:
         return {"response_keys": ()}
-    profile: dict[str, JsonValue] = {"response_keys": tuple(sorted(str(key) for key in outputs)[:32])}
-    response_chars = sum(len(str(value)) for value in outputs.values() if isinstance(value, str))
+    profile: dict[str, JsonValue] = {"response_keys": tuple(sorted(str(key) for key in mapping)[:32])}
+    response_chars = sum(len(str(value)) for value in mapping.values() if isinstance(value, str))
     if response_chars:
         profile["response_chars"] = response_chars
-    if outputs and include_previews:
-        profile["response_preview"] = _trace_preview(_trace_payload_text(outputs))
+    if mapping and include_previews:
+        profile["response_preview"] = _trace_preview(_trace_payload_text(mapping))
     return profile
 
 
@@ -799,6 +860,50 @@ def _trace_failure_category(exc: BaseException) -> str:
     from fleet_rlm.observability.failure_diagnostics import trace_failure_category
 
     return trace_failure_category(exc)
+
+
+_TRACE_FAILURE_DETAIL_MAX_CHARS = 300
+
+
+def _lm_failure_details(exception: BaseException) -> tuple[dict[str, JsonValue], dict[str, JsonValue]]:
+    """Build bounded, sanitized error detail for a failed LM span and summary.
+
+    Traces such as tr-db96 surfaced a failed Root LM call with an empty status
+    message and ``failure_category: unknown``: the span recorded that *a* call
+    failed but never *why*. This supplies a bounded, credential-free breakdown
+    (exception type, provider status class, and a short sanitized message) so a
+    dead model is debuggable from the trace alone.
+
+    Returns a ``(span_failure_outputs, span_failure_attributes)`` pair: the
+    classified kinds ride on span attributes (immune to output re-sanitization
+    rewriting), while a bounded ``detail`` preview stays in outputs for the UI.
+    Everything is derived from ``sanitize_provider_message``-cleaned text —
+    raw provider exception text never reaches the trace.
+    """
+    from fleet_rlm.daytona.errors import (
+        classify_provider_error,
+        provider_status_code,
+        sanitize_provider_message,
+    )
+
+    cleaned = sanitize_provider_message(str(exception))
+    detail = cleaned[:_TRACE_FAILURE_DETAIL_MAX_CHARS]
+    status = provider_status_code(exception)
+    status_category = f"{status // 100}xx" if isinstance(status, int) and 100 <= status <= 599 else "none"
+    failure_outputs: dict[str, JsonValue] = {
+        "failure_category": classify_provider_error(exception),
+        "error_kind": type(exception).__name__,
+        "provider_status_category": status_category,
+    }
+    span_failure_attributes: dict[str, JsonValue] = {
+        "fleet.error.kind": type(exception).__name__,
+        "fleet.error.category": classify_provider_error(exception),
+        "fleet.error.status": status_category,
+    }
+    if detail:
+        failure_outputs["detail"] = detail
+        span_failure_attributes["fleet.error.detail"] = detail
+    return failure_outputs, span_failure_attributes
 
 
 def bind_native_rlm_observer(

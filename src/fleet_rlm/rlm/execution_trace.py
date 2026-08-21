@@ -69,6 +69,12 @@ def record_phase_failure(
     }
     if last_lm_call:
         outputs["last_lm_call"] = dict(last_lm_call)
+    output_diag = getattr(exc, "output_chars", None)
+    if isinstance(output_diag, int):
+        outputs["output_diagnostic"] = {
+            "output_chars": output_diag,
+            "output_preview": getattr(exc, "output_preview", None),
+        }
     phase.set_outputs(outputs)
 
 

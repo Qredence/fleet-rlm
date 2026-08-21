@@ -26,12 +26,15 @@ classifiers = [
     "Typing :: Typed",
 ]
 dependencies = [
-    # Use the published DSPy release so built distributions have PyPI-valid
-    # metadata. The supported Fleet contract remains DSPy 3.3.x:
+    # Pin the upstream DSPy commit so the runtime receives unreleased changes
+    # with a reproducible manifest (uv.lock records the same commit). This
+    # direct Git requirement intentionally makes published distributions
+    # unsuitable for PyPI until the upstream changes are released.
+    # The supported Fleet contract remains DSPy 3.3.x:
     # assert_dspy_version() accepts 3.3.x patches and rejects other minors,
     # and the runtime relies on the documented RLM interface plus the private
     # interpreter-injection seam isolated in rlm.dspy_contract.
-    "dspy>=3.3,<3.4",
+    "dspy @ git+https://github.com/stanfordnlp/dspy.git@e0400fd32feac35cf8e19f18640d6a36f71724b7",
     "packaging>=24,<27",
     # Sandboxed execution.
     "daytona==0.202.0",

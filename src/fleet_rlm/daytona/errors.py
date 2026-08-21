@@ -30,6 +30,22 @@ _SECRET_PATTERNS = (
     re.compile(r"sk-[A-Za-z0-9_-]+"),
 )
 
+# Bounded HTTP status classes that may appear in already-sanitized provider
+# text when the exception carries no structured ``status_code`` metadata (for
+# example a gateway error wrapped by litellm/dspy). These ground classification
+# for statuses such as 404 that would otherwise fall through to ``unknown``.
+_BARE_STATUS_TEXT = re.compile(r"\b(4\d{2}|5\d{2})\b")
+
+
+def _sanitized_status(exc: object) -> int | None:
+    """Extract a provider HTTP status even when it is only present in the text."""
+    status = provider_status_code(exc)
+    if isinstance(status, int):
+        return status
+    message = sanitize_provider_message(str(getattr(exc, "message", str(exc)) or ""))
+    match = _BARE_STATUS_TEXT.search(message)
+    return int(match.group(1)) if match is not None else None
+
 
 def sanitize_provider_message(raw: str) -> str:
     """Strip credentials and private paths from provider error text."""
@@ -91,7 +107,7 @@ def classify_provider_error(exc: object) -> ProviderFailureKind:
     cause_type = getattr(exc, "cause_type", None)
     type_name = cause_type if isinstance(cause_type, str) and cause_type else type(exc).__name__
     normalized = type_name.replace("-", "_").lower()
-    status = provider_status_code(exc)
+    status = _sanitized_status(exc)
     message_value = getattr(exc, "message", "")
     safe_message = sanitize_provider_message(str(message_value or "")).lower()
 

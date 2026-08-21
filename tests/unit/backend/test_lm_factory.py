@@ -67,8 +67,8 @@ def test_build_lm_uses_dspy_aggregated_completion_path(monkeypatch: pytest.Monke
     factory.build_lm("openai/model", api_key=None)
 
     kwargs = lm.call_args.kwargs
-    # DSPy 3.3.x's legacy LM parser expects the provider's aggregated
-    # completion object, not a raw streaming wrapper.
+    # DSPy's native RLM path consumes the provider's completed response rather
+    # than a raw streaming wrapper.
     assert "stream" not in kwargs
     assert "stream_options" not in kwargs
     assert kwargs["allowed_openai_params"] == []
@@ -88,10 +88,10 @@ def test_build_lm_requests_usage_and_reasoning_effort_together(monkeypatch: pyte
 
 
 @pytest.mark.asyncio
-async def test_build_lm_legacy_async_call_processes_an_aggregated_completion(
+async def test_build_lm_async_call_processes_an_aggregated_completion(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The DSPy 3.3.x legacy LM path must receive an aggregated completion."""
+    """The native async RLM path receives an aggregated completion response."""
 
     import dspy.clients.lm as dspy_lm
 
@@ -111,7 +111,8 @@ async def test_build_lm_legacy_async_call_processes_an_aggregated_completion(
             self._hidden_params = {}
 
     def completion(**kwargs):
-        if kwargs.get("stream", False):
+        # A raw stream wrapper is intentionally incompatible with this path.
+        if kwargs.get("stream") or "stream_options" in kwargs:
             return FakeStreamingResponse()
         return FakeCompletionResponse()
 

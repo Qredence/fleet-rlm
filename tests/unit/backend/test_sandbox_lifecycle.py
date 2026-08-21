@@ -88,6 +88,29 @@ def test_provider_error_classification(exc: object, expected: str) -> None:
 
 
 @pytest.mark.parametrize(
+    ("exc", "expected"),
+    [
+        # Gateway errors frequently hide status under a nested httpx/requests
+        # response object rather than a top-level ``status_code`` attribute.
+        (RuntimeError("model not found"), "unknown"),
+        (SimpleNamespace(response=SimpleNamespace(status_code=404)), "request_validation"),
+        (SimpleNamespace(response=SimpleNamespace(status_code=401)), "auth"),
+        (SimpleNamespace(response=SimpleNamespace(status_code=503)), "provider_5xx"),
+        # Bare HTTP status text (no structured metadata at all) is how many
+        # gateway 404/5xx failures actually surface after wrapping.
+        (RuntimeError("404 Not Found: model databricks-deepseek-v4-flash-0731"), "request_validation"),
+        (RuntimeError("Error 503: upstream unavailable"), "provider_5xx"),
+        (RuntimeError("400 Bad Request: invalid model"), "request_validation"),
+        (RuntimeError("401 Unauthorized"), "auth"),
+        (RuntimeError("429 Too Many Requests"), "quota"),
+    ],
+)
+def test_provider_error_classification_reads_nested_status_and_text(exc: object, expected: str) -> None:
+    """404/5xx must classify even without a top-level ``status_code`` attribute."""
+    assert classify_provider_error(exc) == expected
+
+
+@pytest.mark.parametrize(
     ("status", "expected"),
     [(None, "none"), (401, "4xx"), (429, "4xx"), (503, "5xx")],
 )

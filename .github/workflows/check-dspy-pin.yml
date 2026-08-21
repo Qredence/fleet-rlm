@@ -16,7 +16,7 @@ on:
 
 jobs:
   check-dspy-availability:
-    name: Verify locked dspy is installable from PyPI
+    name: Verify locked dspy Git source is installable
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -34,36 +34,49 @@ jobs:
       - name: Resolve locked dspy version
         id: locked
         run: |
-          # Runtime policy remains dspy>=3.3.0,<3.4; this workflow verifies the
-          # version recorded in uv.lock stays installable on PyPI.
+          # The project intentionally uses a direct Git DSPy requirement;
+          # uv.lock records the exact source and commit used by local and CI runs.
           LOCKED="$(uv run --no-project python - <<'PY'
-          import re
           import tomllib
           from pathlib import Path
+          from urllib.parse import parse_qs, urlsplit, urlunsplit
 
           data = tomllib.loads(Path("uv.lock").read_text(encoding="utf-8"))
           match = next((pkg for pkg in data["package"] if pkg["name"] == "dspy"), None)
           if match is None:
               raise SystemExit("dspy is missing from uv.lock")
           version = match["version"]
-          if not re.fullmatch(r"3\.3\.\d+", version):
+          if not (version.startswith("3.3.") and version[4:].isdigit()):
               raise SystemExit(
                   f"locked dspy=={version} is outside the declared 3.3.x patch range "
                   "(dspy>=3.3.0,<3.4)"
               )
-          print(version)
+          git_source = match.get("source", {}).get("git")
+          if not git_source:
+              raise SystemExit("uv.lock does not pin dspy to a Git source")
+          parsed = urlsplit(git_source)
+          commit = parsed.fragment
+          revision = parse_qs(parsed.query).get("rev", [None])[0]
+          if not commit or revision != commit:
+              raise SystemExit(
+                  "uv.lock dspy Git source must contain matching rev and commit hash"
+              )
+          repository = urlunsplit(
+              (parsed.scheme, parsed.netloc, parsed.path, "", "")
+          )
+          print(f"dspy @ git+{repository}@{commit}")
           PY
           )"
-          echo "version=${LOCKED}" >> "${GITHUB_OUTPUT}"
-          echo "Locked dspy==${LOCKED}"
+          echo "requirement=${LOCKED}" >> "${GITHUB_OUTPUT}"
+          echo "Locked ${LOCKED}"
 
       - name: Check locked dspy installability
         run: |
           probe_venv="$RUNNER_TEMP/dspy-pin-venv"
-          locked="${{ steps.locked.outputs.version }}"
+          locked="${{ steps.locked.outputs.requirement }}"
           uv venv --python 3.12 "$probe_venv"
-          if ! uv pip install --dry-run --python "$probe_venv/bin/python" "dspy==${locked}"; then
-            echo "::error::dspy==${locked} (from uv.lock) is no longer installable from PyPI. The release may have been yanked. Re-lock to a reissued 3.3.x release or vendor the source per the AGENTS.md contract."
+          if ! uv pip install --dry-run --no-deps --python "$probe_venv/bin/python" "$locked"; then
+            echo "::error::${locked} (from uv.lock) is no longer installable from GitHub. Re-lock after confirming the upstream commit remains available."
             exit 1
           fi
-          echo "dspy==${locked} is available from PyPI."
+          echo "${locked} is available from GitHub."
