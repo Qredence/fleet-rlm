@@ -58,6 +58,8 @@ class RunEventStream(Protocol):
 
 
 class RunRunner(Protocol):
+    """Protocol for the component that drives a single prepared RLM execution."""
+
     def stream(self, context: RLMExecutionContext) -> RunEventStream: ...
 
 
@@ -95,6 +97,12 @@ def terminal(
 
 
 async def _wait_stream_owned(stream: RunEventStream) -> None:
+    """Await the stream's ``wait_owned`` hook to ensure all worker threads have settled.
+
+    Some stream implementations (e.g. the DSPy RLM runner) keep a reference to the
+    worker thread that drives synchronous SDK calls.  ``wait_owned`` blocks until that
+    thread exits so the lease can be released without racing an in-flight SDK call.
+    """
     wait_owned = getattr(stream, "wait_owned", None)
     if callable(wait_owned):
         await wait_owned()
@@ -146,6 +154,8 @@ _FinalizationWait: TypeAlias = RunSettlement | _ClaimLost | None
 
 @dataclass(slots=True)
 class _ExecutionState:
+    """Mutable run-local driver state threaded through the async execution loop."""
+
     recorder: EventRecorder
     heartbeat: ClaimHeartbeat | None
     claim_loss_waiter: asyncio.Task[bool] | None
@@ -159,7 +169,12 @@ class _ExecutionState:
 
 
 class RunExecutionDriver:
-    """Own the complete post-preparation execution and settlement protocol."""
+    """Drive one prepared Run from first provider event to durable settlement.
+
+    Races provider events against the heartbeat claim-loss signal, handles
+    timeout/cancellation authority revocation, and hands off owned cleanup to
+    the ``RunCleanupSupervisor`` so the SSE transport is never blocked by it.
+    """
 
     def __init__(
         self,
@@ -281,6 +296,12 @@ class RunExecutionDriver:
         next_event: asyncio.Task[RuntimeEvent],
         claim_loss_waiter: asyncio.Task[bool] | None,
     ) -> RuntimeEvent | _ClaimLost | None:
+        """Race the next stream event against the heartbeat claim-loss signal.
+
+        Returns the event on success, ``_ClaimLost`` when the heartbeat fires first
+        (cancelling the pending event fetch), or ``None`` when the stream is exhausted
+        (``StopAsyncIteration``).
+        """
         waiters: set[asyncio.Future[Any]] = {next_event}
         if claim_loss_waiter is not None:
             waiters.add(claim_loss_waiter)
@@ -302,6 +323,15 @@ class RunExecutionDriver:
         outcome: RLMOutcome,
         trace_request: str,
     ) -> RunSettlement | _ClaimLost:
+        """Translate a completed RLM outcome into a durable RunSettlement.
+
+        Timeout/cancellation outcomes revoke authority before durable settlement so
+        recursive workers cannot acquire new child runtimes while cleanup is still
+        draining.  A successful outcome creates a finalization task and races it
+        against the remaining Turn deadline and the claim-loss signal; a timeout on
+        finalization itself initiates a durable ``settle`` transition and hands off
+        cleanup without blocking the event generator.
+        """
         if outcome.terminal_status in {"timeout", "cancelled"}:
             status = "timeout" if outcome.terminal_status == "timeout" else "cancelled"
             failure = RunFailure(
@@ -435,6 +465,7 @@ class RunExecutionDriver:
         resolution: RLMOutcome | RunFailure,
         prepared: PreparedRun,
     ) -> RunSettlement:
+        """Wrap lifecycle.finish in a trace phase span, forwarding PreparedRun sinks."""
         terminal_status = resolution.terminal_status
         settlement_inputs: dict[str, object] = {
             "terminal_status": terminal_status,
@@ -471,6 +502,13 @@ class RunExecutionDriver:
         *,
         on_settlement: Callable[[RunSettlement], None] | None = None,
     ) -> None:
+        """Best-effort durable cancellation settlement, shielded from a second cancel.
+
+        Revokes the authority fence before attempting persistence so recursive
+        workers cannot start new child acquisitions during cleanup.  The cleanup
+        handoff runs unconditionally — even when persistence is unavailable the
+        owned stream must drain recursive workers before Run resources are released.
+        """
         if state.settled:
             return
 
@@ -613,6 +651,12 @@ class RunExecutionDriver:
             await shield_cleanup(inline_cleanup())
 
     async def _close_execution(self, prepared: PreparedRun, state: _ExecutionState) -> None:
+        """Cancel pending events, stop the heartbeat, and close the stream and PreparedRun.
+
+        Only runs when cleanup was NOT handed off to the supervisor — i.e. when the
+        generator's finally block still owns the resources (replay, early errors, or
+        queue rejection fallback).
+        """
         with turn_phase_span("Turn.cleanup", inputs={"cleanup_owned": not state.cleanup_handed_off}):
             await self._cancel_pending_event(state)
             await self._stop_claim_waiter(state)

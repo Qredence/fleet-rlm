@@ -25,6 +25,8 @@ class CanonicalEventModel(BaseModel):
 
 
 class TurnStart(CanonicalEventModel):
+    """First event in every Turn stream; anchors run identity for downstream consumers."""
+
     event: ClassVar[Literal["turn_start"]] = "turn_start"
     type: Literal["turn_start"] = "turn_start"
     run_id: str
@@ -41,6 +43,8 @@ class TurnContext(CanonicalEventModel):
 
 
 class TurnStatus(CanonicalEventModel):
+    """Operator-visible progress message emitted during preparation or execution phases."""
+
     event: ClassVar[Literal["turn_status"]] = "turn_status"
     type: Literal["turn_status"] = "turn_status"
     phase: str
@@ -48,6 +52,8 @@ class TurnStatus(CanonicalEventModel):
 
 
 class TurnFinish(CanonicalEventModel):
+    """Terminal event emitted on successful completion; carries the durable checkpoint version."""
+
     event: ClassVar[Literal["turn_finish"]] = "turn_finish"
     type: Literal["turn_finish"] = "turn_finish"
     finish_reason: str
@@ -58,24 +64,32 @@ class TurnFinish(CanonicalEventModel):
 
 
 class TurnCancelled(CanonicalEventModel):
+    """Terminal event emitted when the Turn is cancelled before or during execution."""
+
     event: ClassVar[Literal["turn_cancelled"]] = "turn_cancelled"
     type: Literal["turn_cancelled"] = "turn_cancelled"
     reason: str | None = None
 
 
 class TurnError(CanonicalEventModel):
+    """Terminal event carrying a public error message when the Turn fails without cancellation."""
+
     event: ClassVar[Literal["error"]] = "error"
     type: Literal["error"] = "error"
     text: str
 
 
 class StepStart(CanonicalEventModel):
+    """Boundary marker emitted when the RLM begins one interpreter execution step."""
+
     event: ClassVar[Literal["step_start"]] = "step_start"
     type: Literal["step_start"] = "step_start"
     step: int | None = None
 
 
 class StepFinish(CanonicalEventModel):
+    """Boundary marker emitted when the RLM completes one interpreter execution step, with wall duration."""
+
     event: ClassVar[Literal["step_finish"]] = "step_finish"
     type: Literal["step_finish"] = "step_finish"
     step: int | None = None
@@ -83,6 +97,8 @@ class StepFinish(CanonicalEventModel):
 
 
 class ReasoningPartEvent(CanonicalEventModel):
+    """Live or canonical DSPy RLM reasoning text; ``final=True`` marks the trajectory correction."""
+
     event: ClassVar[Literal["reasoning"]] = "reasoning"
     type: Literal["reasoning"] = "reasoning"
     stream_id: str
@@ -93,6 +109,8 @@ class ReasoningPartEvent(CanonicalEventModel):
 
 
 class TextPartEvent(CanonicalEventModel):
+    """Streaming assistant text token; ``final=True`` marks the last chunk in the part stream."""
+
     event: ClassVar[Literal["text"]] = "text"
     type: Literal["text"] = "text"
     stream_id: str
@@ -103,6 +121,8 @@ class TextPartEvent(CanonicalEventModel):
 
 
 class CodePartEvent(CanonicalEventModel):
+    """Python code submitted by the RLM to the interpreter for one step."""
+
     event: ClassVar[Literal["code"]] = "code"
     type: Literal["code"] = "code"
     stream_id: str
@@ -114,6 +134,8 @@ class CodePartEvent(CanonicalEventModel):
 
 
 class OutputPartEvent(CanonicalEventModel):
+    """Sandbox stdout / result for one interpreter step, projected as bounded public output."""
+
     event: ClassVar[Literal["output"]] = "output"
     type: Literal["output"] = "output"
     stream_id: str
@@ -125,6 +147,8 @@ class OutputPartEvent(CanonicalEventModel):
 
 
 class ToolCallEvent(CanonicalEventModel):
+    """Host tool invocation initiated by the RLM inside the sandbox interpreter."""
+
     event: ClassVar[Literal["tool_call"]] = "tool_call"
     type: Literal["tool_call"] = "tool_call"
     tool_call_id: str
@@ -134,6 +158,8 @@ class ToolCallEvent(CanonicalEventModel):
 
 
 class ToolResultEvent(CanonicalEventModel):
+    """Completion record for a host tool call, carrying the output or a public error string."""
+
     event: ClassVar[Literal["tool_result"]] = "tool_result"
     type: Literal["tool_result"] = "tool_result"
     tool_call_id: str
@@ -144,6 +170,8 @@ class ToolResultEvent(CanonicalEventModel):
 
 
 class SkillEvent(CanonicalEventModel):
+    """Skill lifecycle progress: ``activated`` when selected, ``loaded`` when instructions are ready."""
+
     event: ClassVar[Literal["skill"]] = "skill"
     type: Literal["skill"] = "skill"
     stream_id: str | None = None
@@ -157,6 +185,8 @@ class SkillEvent(CanonicalEventModel):
 
 
 class AttachmentEvent(CanonicalEventModel):
+    """Records an attachment being read into the RLM context during preparation."""
+
     event: ClassVar[Literal["attachment"]] = "attachment"
     type: Literal["attachment"] = "attachment"
     stream_id: str | None = None
@@ -168,6 +198,8 @@ class AttachmentEvent(CanonicalEventModel):
 
 
 class WarningEvent(CanonicalEventModel):
+    """Bounded public diagnostic; ``code`` classifies the category for client handling."""
+
     event: ClassVar[Literal["warning"]] = "warning"
     type: Literal["warning"] = "warning"
     stream_id: str | None = None
@@ -177,6 +209,8 @@ class WarningEvent(CanonicalEventModel):
 
 
 class ArtifactEvent(CanonicalEventModel):
+    """Records a Workspace Artifact promoted during or after the Turn."""
+
     event: ClassVar[Literal["artifact"]] = "artifact"
     type: Literal["artifact"] = "artifact"
     stream_id: str | None = None
@@ -190,6 +224,8 @@ class ArtifactEvent(CanonicalEventModel):
 
 
 class UsageEvent(CanonicalEventModel):
+    """Aggregated RLM resource consumption (iterations, token usage, wall duration) for one Turn."""
+
     event: ClassVar[Literal["usage"]] = "usage"
     type: Literal["usage"] = "usage"
     stream_id: str | None = None
@@ -200,6 +236,8 @@ class UsageEvent(CanonicalEventModel):
 
 
 class StructuredResultEvent(CanonicalEventModel):
+    """Typed JSON output submitted by the RLM via SUBMIT, validated against ``schema_id``."""
+
     event: ClassVar[Literal["structured_result"]] = "structured_result"
     type: Literal["structured_result"] = "structured_result"
     stream_id: str | None = None

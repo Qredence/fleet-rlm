@@ -71,6 +71,13 @@ class PreparationAttempt:
         return self._heartbeat is not None and (self._heartbeat.lost.is_set() or self._run.authority.revoked)
 
     async def wait(self) -> PreparedRun:
+        """Await preparation and the claim-loss waiter concurrently until the deadline.
+
+        Returns the ``PreparedRun`` on success.  If the heartbeat fires claim loss
+        first, the preparation task is cancelled, a claim-loss cleanup is submitted,
+        and ``RunLifecycleUnavailableError`` is raised so the coordinator can surface
+        it to the transport without leaving resources stranded.
+        """
         self._preparation_task = asyncio.create_task(self._prepare)
         self._heartbeat_lost = asyncio.create_task(self._heartbeat.lost.wait()) if self._heartbeat is not None else None
         waiters = {self._preparation_task}
@@ -93,6 +100,14 @@ class PreparationAttempt:
         return prepared
 
     async def cancel(self) -> bool:
+        """Cancel preparation and claim-loss tasks; quarantine those that don't finish promptly.
+
+        Tasks that do not cancel within ``_PREPARATION_CLEANUP_TIMEOUT_S`` are
+        quarantined in background tasks so the caller is not blocked.  A late
+        preparation result that arrived before cancellation is cleaned up via
+        ``PreparedRun.aclose()``.  Returns ``True`` when any task was still pending
+        or a cleanup error was recorded, signalling that quarantine work remains.
+        """
         for task in (self._preparation_task, self._heartbeat_lost):
             if task is not None and not task.done():
                 task.cancel()
@@ -179,6 +194,13 @@ class PreparationAttempt:
             )
 
     async def drain_quarantine(self) -> None:
+        """Await all quarantined late-preparation tasks and re-raise the first recorded error.
+
+        Quarantined tasks are background work that could not be cancelled promptly.
+        Draining them before resources are released ensures no dangling PreparedRun
+        resources are closed while still active.  A recorded ``_preparation_cleanup_error``
+        from a previous ``cancel()`` call is also re-raised here.
+        """
         quarantine_tasks = tuple(self._preparation_quarantine)
         if quarantine_tasks:
             results = await asyncio.gather(*quarantine_tasks, return_exceptions=True)
@@ -189,6 +211,11 @@ class PreparationAttempt:
             raise RuntimeError("late Turn preparation cleanup failed") from self._preparation_cleanup_error
 
     async def _drain_preparation_and_complete_settling(self) -> None:
+        """Drain quarantined cleanup tasks then release the retained durable claim.
+
+        Ordered so the durable claim is never released while late preparation work
+        (which may still own sandbox resources) is still running.
+        """
         await self.drain_quarantine()
         await self._lifecycle.complete_settling(self._run)
 
@@ -215,6 +242,15 @@ class PreparationAttempt:
         *,
         revoke_after_finish: bool,
     ) -> None:
+        """Settle a preparation failure with the correct authority-revoke ordering.
+
+        Three orderings are used depending on state:
+        - ``preparation_pending``: revoke authority first (blocks new child acquisitions),
+          then settle, then hand off quarantine cleanup — prevents sandbox leaks.
+        - ``revoke_after_finish`` (cancel/timeout path): finish first, then revoke —
+          the commit settles before authority loss so the durable receipt is correct.
+        - Otherwise (generic exception path): finish only; authority was not yet lost.
+        """
         if preparation_pending:
             self._run.authority.revoke()
             try:

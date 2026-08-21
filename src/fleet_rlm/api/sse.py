@@ -73,6 +73,11 @@ _CANONICAL_REASONING_SUFFIX = ":canonical"
 
 
 def _detail_data(detail: object) -> dict[str, Any]:
+    """Extract all dataclass fields from a detail object as a plain dict, excluding 'kind'.
+
+    ``kind`` is the internal discriminator field and is never forwarded to the transport.
+    Mapping-typed values are converted to plain dicts so JSON serialization is safe.
+    """
     fields = getattr(detail, "__dataclass_fields__", {})
     return {
         name: dict(value) if isinstance(value, Mapping) else value
@@ -196,6 +201,14 @@ class AISDKUIProjector:
         return [self._data("rlm-output", data, part_id=self._detail_part_id(event, detail, "output"))]
 
     def _project_reasoning(self, event: RuntimeEvent, detail: RLMReasoning) -> list[dict[str, Any]]:
+        """Project one RLMReasoning event, handling live-delta and canonical-trajectory cases.
+
+        DSPy emits incremental ``is_delta=True`` events during execution; the completed
+        trajectory correction arrives later as a single ``is_delta=False`` event.  When a
+        canonical correction arrives after a live stream has already been closed, a distinct
+        ``:<suffix>`` stream ID is used so strict AI SDK clients do not see a reopened part.
+        Empty delta text is suppressed unless the stream is already open (``is_final`` flush).
+        """
         part_id = self._detail_part_id(event, detail, "reasoning")
         chunks: list[dict[str, Any]] = []
         if detail.is_delta:
@@ -334,6 +347,13 @@ class AISDKUIProjector:
         return f"{name}-{event.run_id}-{step or event.sequence}"
 
     def _detail_part_id(self, event: RuntimeEvent, detail: RLMReasoning | RLMCode | RLMOutput, name: str) -> str:
+        """Return or create a stable stream ID for a multi-step RLM event part.
+
+        When the event carries its own ``stream_id`` (set by the DSPy callback), that ID
+        is recorded and returned so subsequent delta events in the same step reuse it.
+        Otherwise the ID is synthesised from the run ID and step number and cached the
+        same way so all events in one step share one part ID.
+        """
         key = (name, detail.step)
         if detail.stream_id:
             self._stream_ids[key] = detail.stream_id

@@ -19,6 +19,13 @@ if TYPE_CHECKING:
 
 
 class _CompositionInstaller(Protocol):
+    """Protocol for test-injected composition installers that bypass the Daytona runtime.
+
+    Used by private-test compositions to install a deterministic inventory without
+    real Daytona credentials.  The installed inventory is retrieved via
+    ``composition/inventory.py`` aliases and torn down by ``_local_db_lifespan``.
+    """
+
     def __call__(
         self,
         app: FastAPI,
@@ -46,6 +53,13 @@ _RETIRED_ENVIRONMENT_VARIABLES = frozenset(
 
 
 def _reject_retired_environment_variables() -> None:
+    """Fail fast when retired Fleet environment variables are still configured.
+
+    Retired variables were replaced by TOML policy fields; accepting them silently
+    would let stale config override the selected profile without warning.  Both the
+    process environment and ``.env`` are checked so CI pipelines and local dev
+    catch the problem at startup rather than at the first broken runtime call.
+    """
     configured = set(_RETIRED_ENVIRONMENT_VARIABLES.intersection(os.environ))
     env_file = Path(".env")
     if env_file.is_file():
@@ -67,6 +81,13 @@ async def _local_db_lifespan(
     settings_obj: Settings,
     install_fn: _CompositionInstaller,
 ) -> AsyncIterator[None]:
+    """Manage the database engine and runtime inventory for test/injected compositions.
+
+    Used when a caller injects a custom ``_composition_installer`` (e.g. private-test
+    compositions that install a deterministic inventory without real Daytona credentials).
+    Handles SQLite-specific ``create_tables`` calls, run-state reconciliation on startup,
+    and ordered teardown (inventory → cleanup supervisor → engine) on exit.
+    """
     from fleet_rlm.composition.inventory import RuntimeDatabaseLifecycle, clear_runtime_inventory
 
     engine = None

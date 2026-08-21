@@ -89,6 +89,8 @@ class RunLifecycleUnavailableError(RunLifecycleError):
 
 @dataclass(frozen=True, slots=True)
 class RunClaim:
+    """Validated Turn claim request passed to the run state store to begin a new Run."""
+
     access: TurnAccess
     session_id: UUID
     input: TurnInput
@@ -104,6 +106,14 @@ class _RunClaimToken:
 
 @dataclass(frozen=True, slots=True)
 class ClaimedRun:
+    """Active Run that holds a durable claim and may be committed or failed.
+
+    Callers obtain this through ``RunLifecycle.begin``.  The embedded
+    ``RunAuthority`` is the shared revocation signal: the heartbeat background
+    task, execution driver, and lifecycle all check ``authority.revoked`` to
+    coordinate orderly teardown without a separate cancel event.
+    """
+
     run_id: UUID
     session_id: UUID
     access: TurnAccess
@@ -134,6 +144,8 @@ RunFailureCode: TypeAlias = ClaimFailureCode
 
 @dataclass(frozen=True, slots=True)
 class RunFailure:
+    """Typed failure record carrying public classification, message, and usage for durable settlement."""
+
     terminal_status: Literal["failed", "cancelled", "timeout"]
     failure_code: RunFailureCode
     public_message: str
@@ -146,6 +158,8 @@ def _claim_failure(failure: RunFailure) -> ClaimFailure:
 
 @dataclass(frozen=True, slots=True)
 class CommittedTurnReceipt:
+    """Durable receipt for a successfully committed Turn, including its promoted artifacts."""
+
     run_id: UUID
     checkpoint_version: int
     committed_turn: CommittedTurn
@@ -154,6 +168,8 @@ class CommittedTurnReceipt:
 
 @dataclass(frozen=True, slots=True)
 class FailedRunReceipt:
+    """Durable receipt for a Run that ended in failure, cancellation, or timeout."""
+
     run_id: UUID
     terminal_status: Literal["failed", "cancelled", "timeout"]
     failure_code: RunFailureCode
@@ -166,6 +182,8 @@ CancelResult: TypeAlias = Literal["requested", "already_requested", "already_ter
 
 
 class _RunStateStore(Protocol):
+    """Internal protocol for the durable Run state backing store (SQL or in-memory)."""
+
     async def begin(self, request: RunClaim) -> RunStart: ...
 
     async def commit(
@@ -190,6 +208,14 @@ class _MemoryPromotionOutbox(Protocol):
 
 
 class RunLifecycle(Protocol):
+    """Public interface for managing Run state transitions across claim, commit, and failure paths.
+
+    Implementations must be safe for concurrent callers: ``heartbeat`` fires from a
+    background task while ``finish`` or ``settle`` may run on the execution driver's
+    coroutine.  All mutation is expected to be durable (e.g. SQL-backed) so a process
+    restart can reconcile settling Runs through ``run_state.reconcile_settling``.
+    """
+
     heartbeat_seconds: int
     stale_after_seconds: int
 

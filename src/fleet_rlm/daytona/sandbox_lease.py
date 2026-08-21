@@ -62,7 +62,7 @@ DEFAULT_CLOSE_RESULT_TIMEOUT_S = 60.0
 
 
 class LeaseCleanupError(RuntimeError):
-    """One lease close could not reach a clean confirmed outcome."""
+    """Raised when a lease close cannot reach a clean confirmed outcome (absence unconfirmed or quarantined)."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -156,7 +156,16 @@ class LeasePurgeHook(Protocol):
 
 @dataclass(frozen=True, slots=True)
 class SandboxLeasePolicy:
-    """Lifecycle shape declaration for one lease."""
+    """Lifecycle shape declaration for one lease.
+
+    Each lease kind has a distinct teardown contract:
+    - ``retained_session``: stop (not delete) with ``stop_force=False`` to preserve
+      idle Sandboxes across Turns; absence confirmation is skipped.
+    - ``recursive_child``: delete with full absence confirmation so the admission
+      permit is released only after the Sandbox is confirmed gone.
+    - ``volume_io``: delete the ephemeral I/O Sandbox; short timeout for a fast path.
+    - ``recovery_fence``: delete an orphaned Sandbox found during startup recovery.
+    """
 
     kind: LeaseKind
     provider_action: Literal["delete", "stop", "none"] = "delete"
@@ -217,6 +226,7 @@ class SandboxLease:
         return self._closed
 
     def _shutdown_interpreter(self) -> InterpreterCloseOutcome:
+        """Shut down the interpreter (broker + backend) synchronously and return a typed outcome."""
         interpreter = self._interpreter
         policy = self._policy
         has_broker = bool(getattr(interpreter, "_http_broker", None)) if interpreter is not None else False
@@ -260,6 +270,12 @@ class SandboxLease:
             )
 
     async def _provider_close(self) -> ProviderCleanupOutcome:
+        """Request the provider action (delete/stop) and confirm absence per policy.
+
+        Confirmation runs even when the delete request itself fails: the Sandbox
+        may already be absent or the provider may have accepted the request despite
+        returning a client error (QRE-151 semantics for every ephemeral lease).
+        """
         policy = self._policy
         platform = self._platform
         action = policy.provider_action
@@ -336,6 +352,11 @@ class SandboxLease:
         )
 
     async def _close_core(self) -> SandboxLeaseReceipt:
+        """Execute the full ordered teardown: interpreter → purge hook → provider → admission release.
+
+        The admission permit is released strictly after the confirmed provider outcome
+        (or an explicit quarantine failure), never on request acceptance alone.
+        """
         started = time.monotonic()
         policy = self._policy
         first_error: str | None = None

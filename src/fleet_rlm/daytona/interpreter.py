@@ -113,7 +113,15 @@ def _submitted_payload(result: Any) -> Mapping[str, Any] | None:
 
 
 class InProcessInterpreterBackend:
-    """Shared-namespace offline backend for host-tool and SUBMIT contracts."""
+    """Shared-namespace offline backend for host-tool and SUBMIT contracts.
+
+    Executes generated Python code inside the host process via ``exec`` with a
+    persistent namespace so variables accumulate across steps — the same semantics
+    the live Daytona broker provides.  Host-tool callables are injected into the
+    namespace and wrapped to surface typed errors; ``FleetFinalOutputError`` is
+    used to short-circuit execution when the RLM calls SUBMIT.  Used for
+    private-test compositions and integration tests that do not connect to Daytona.
+    """
 
     def __init__(self) -> None:
         self.namespace: dict[str, object] = {"_out": ""}
@@ -185,6 +193,14 @@ class InProcessInterpreterBackend:
         *,
         on_stdout: OutputCallback | None = None,
     ) -> BackendExecutionResult:
+        """Execute ``code`` in the shared namespace and return a normalized result.
+
+        ``FleetFinalOutputError`` raised inside the executed code is caught and
+        returned as a successful final payload rather than an error so the
+        interpreter can detect SUBMIT without an exception escaping to DSPy.
+        A duck-typed fallback also handles the case where the exception was raised
+        across an ``exec`` boundary that prevented the class identity check.
+        """
         if self.closed:
             raise DaytonaAdapterError(message="backend already closed", cause_type="InterpreterLifecycleError")
         if variables:
@@ -331,7 +347,15 @@ class _SandboxProcessBackend:
 
 
 class DaytonaCodeInterpreter:
-    """CodeInterpreter-compatible adapter with host-tool / SUBMIT mediation."""
+    """CodeInterpreter-compatible adapter with host-tool / SUBMIT mediation.
+
+    Owns the per-Turn interpreter lifecycle: backend selection (in-process or live
+    Daytona sandbox), tool injection, HTTP-broker startup, step observation, output
+    projection, no-progress detection, and shutdown.  The ``execute`` method is the
+    single entry point called by DSPy's RLM on each action step; it applies bounded
+    repair feedback for recoverable errors rather than raising, and raises
+    ``RunNoProgressError`` when the same action repeats twice without result change.
+    """
 
     def __init__(
         self,
@@ -698,6 +722,12 @@ class DaytonaCodeInterpreter:
         *,
         on_stdout: OutputCallback,
     ) -> Any:
+        """Execute one code step through the HTTP broker, resolving tool calls inline.
+
+        The ``tool_executor`` closure dispatches each sandbox tool call to the matching
+        host-side callable, converting ``WorkspaceToolError`` to a typed error dict so
+        the RLM can handle it gracefully rather than seeing a raw exception string.
+        """
         broker = self._http_broker
         backend = self._backend
         if broker is None or backend is None:

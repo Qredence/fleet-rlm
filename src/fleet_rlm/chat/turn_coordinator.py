@@ -69,13 +69,24 @@ class OpenedTurnStream:
         return getattr(self._prepared, "cleanup_receipt", None)
 
     async def aclose(self) -> None:
+        """Close the underlying event generator, shielding cleanup from external cancellation.
+
+        Uses ``shield_cleanup`` so that a second cancellation delivered by the
+        transport layer cannot interrupt the heartbeat stop / resource release
+        sequence inside the generator's finally block.
+        """
         close = getattr(self._events, "aclose", None)
         if close is not None:
             await shield_cleanup(close())
 
 
 def _settled_or_unavailable(result: PreparationSettlement) -> None:
-    """Translate the attempt's typed settlement into the coordinator's claim-loss error."""
+    """Re-raise ``RunLifecycleUnavailableError`` when the preparation attempt lost the claim.
+
+    Callers catch specific preparation exceptions, settle the failure, and then call this
+    helper so that a ``CLAIM_LOST`` outcome surfaces as the coordinator's canonical
+    error type rather than a silent success.
+    """
     if result is PreparationSettlement.CLAIM_LOST:
         raise RunLifecycleUnavailableError("Turn claim is no longer available")
 
@@ -236,6 +247,13 @@ class TurnCoordinator:
         )
 
     async def _replay(self, start: CommittedRunReplay) -> AsyncGenerator[RuntimeEvent]:
+        """Emit a synthetic idempotent replay stream for an already-committed Run.
+
+        The ``RunStarted`` / ``RunCompleted`` bookends and a ``Status`` marker
+        are synthesised so the transport sees a well-formed stream; the durable
+        committed turn events are projected between them via the same projector
+        used for live suffix projection.
+        """
         recorder = EventRecorder(start.run_id, start.session_id)
         yield recorder.record(RunStarted(delivery="replay"))
         yield recorder.record(Status("replay", "running", "idempotent replay"))
@@ -252,6 +270,7 @@ class TurnCoordinator:
         on_settlement: Callable[[object], None] | None = None,
         on_cleanup: Callable[[asyncio.Task[None]], None] | None = None,
     ) -> AsyncGenerator[RuntimeEvent]:
+        """Yield RuntimeEvents from the execution driver under an MLflow trace span."""
         with turn_trace(
             run.session_id,
             run.run_id,
@@ -269,6 +288,14 @@ class TurnCoordinator:
                 yield event
 
     def _start_heartbeat(self, run: ClaimedRun) -> ClaimHeartbeat | None:
+        """Start the background task that keeps the durable claim alive.
+
+        The task fires a ``heartbeat`` call at each ``interval`` and updates the
+        authority deadline so transient persistence failures do not immediately
+        revoke the claim.  ``RunAlreadyCompletedError`` is the expected stop signal
+        after a successful commit; ``RunLifecycleUnavailableError`` or a deadline
+        breach sets the ``lost`` event so the execution driver can hand off cleanup.
+        """
         interval = max(0.01, float(self._lifecycle.heartbeat_seconds))
         stale_after = max(interval * 3, float(self._lifecycle.stale_after_seconds))
         lost = asyncio.Event()
@@ -316,6 +343,15 @@ class TurnCoordinator:
         heartbeat: ClaimHeartbeat,
         preparation_cleanup: Callable[[], Awaitable[None]] | None = None,
     ) -> None:
+        """Revoke the durable claim and release the session fence after claim loss.
+
+        Stops the heartbeat first to close the liveness window, then revokes the
+        claim and invokes the optional claim-loss fence before running any
+        preparation-phase cleanup.  A ``None`` receipt means the Run committed
+        before revocation arrived — the commit owns the terminal state, so no
+        fence or settlement release is needed.  Always stops the heartbeat in the
+        finally block to handle re-entrant or interrupted calls.
+        """
         receipt: FailedRunReceipt | None = None
         try:
             await stop_heartbeat(heartbeat)
@@ -342,6 +378,7 @@ class TurnCoordinator:
         *,
         preparation_cleanup: Callable[[], Awaitable[None]] | None = None,
     ) -> None:
+        """Submit claim-loss cleanup to the supervisor queue, draining inline if the queue rejects."""
         cleanup_awaitable = self._claim_loss_cleanup(run, heartbeat, preparation_cleanup)
         try:
             self._cleanup.submit(cleanup_awaitable)
