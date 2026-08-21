@@ -127,7 +127,7 @@ override-dependencies = [
     # LiteLLM 1.83.x pins older vulnerable releases; keep the resolver on
     # patched floors until upstream relaxes its metadata.
     "aiohttp>=3.14.3",
-    # cryptography <50.0.0 exposes a PKCS#7 Bleichenbacher oracle.
+    # cryptography >=44.0.0,<50.0.0 exposes a PKCS#7 Bleichenbacher oracle.
     "cryptography>=50.0.0",
     # idna.encode() bypass advisory; force a patched release family.
     "idna>=3.16",
