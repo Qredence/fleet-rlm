@@ -27,5 +27,11 @@
     "typescript": "5.9.3",
     "vitest": "4.1.10"
   },
-  "packageManager": "pnpm@10.33.2"
+  "packageManager": "pnpm@10.33.2",
+  "pnpm": {
+    "overrides": {
+      "js-yaml": "4.3.1",
+      "postcss": "8.5.23"
+    }
+  }
 }

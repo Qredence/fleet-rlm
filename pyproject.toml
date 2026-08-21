@@ -126,14 +126,16 @@ dev = [
 override-dependencies = [
     # LiteLLM 1.83.x pins older vulnerable releases; keep the resolver on
     # patched floors until upstream relaxes its metadata.
-    "aiohttp>=3.13.4",
+    "aiohttp>=3.14.3",
+    # cryptography <50.0.0 exposes a PKCS#7 Bleichenbacher oracle.
+    "cryptography>=50.0.0",
     # idna.encode() bypass advisory; force a patched release family.
     "idna>=3.16",
     # Mako <=1.3.11 allows TemplateLookup traversal with Windows backslash URIs.
     "mako>=1.3.12",
     "python-dotenv>=1.2.2",
-    # GitPython <=3.1.49 allows config_writer() newline injection.
-    "gitpython>=3.1.50",
+    # GitPython <=3.1.57 allows unsafe git option forwarding and path access.
+    "gitpython>=3.1.58",
     # Starlette <1.3.1 has form-limit DoS and request URL hostname parsing advisories.
     "starlette>=1.3.1",
     # litellm is installed only as DSPy's transitive dependency — fleet-rlm does
@@ -144,6 +146,8 @@ override-dependencies = [
     "litellm>=1.87.0",
     # urllib3 <2.7.0 has redirect header leak and streaming decompression issues.
     "urllib3>=2.7.0",
+    # sqlparse <0.6.0 has multiple SQL parsing DoS and code-generation flaws.
+    "sqlparse>=0.6.0",
     # Deliberate gepa override: the optimizer lane needs the omni API
     # (optimize_best_of / gepa.oa engines). Keep this reviewed commit until
     # the upstream DSPy/GEPA dependency and Fleet's optimizer checks no longer
