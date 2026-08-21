@@ -118,10 +118,9 @@ def build_lm(
         "model_type": "chat",
         "cache": cache,
         "num_retries": num_retries,
-        # Keep DSPy 3.3.x on its aggregated completion path. Its legacy LM
-        # parser consumes ``response.choices``; raw provider stream wrappers
-        # are supported through DSPy's streamify/callback APIs, not by passing
-        # ``stream=True`` to the LM itself.
+        # Native RLM calls consume completed DSPy LM responses. Provider token
+        # streaming is owned by DSPy's streamify/callback APIs and is not
+        # enabled on this model-construction seam.
     }
     if api_key:
         kwargs["api_key"] = api_key
