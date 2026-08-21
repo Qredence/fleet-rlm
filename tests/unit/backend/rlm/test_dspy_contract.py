@@ -445,6 +445,9 @@ def test_lm_trace_callback_records_role_and_failure_category(monkeypatch: pytest
         def set_outputs(self, payload):
             calls.outputs.append(payload)
 
+        def set_attributes(self, payload):
+            calls.attributes = payload
+
         def set_status(self, status):
             calls.status = status
 
@@ -467,10 +470,16 @@ def test_lm_trace_callback_records_role_and_failure_category(monkeypatch: pytest
     monkeypatch.setattr("fleet_rlm.rlm.dspy_contract.time.perf_counter", lambda: next(ticks))
     callback = _RLMTraceCallback(root_lm=root, sub_lm=SimpleNamespace(model="sub-model"))
 
+    class SecretError(Exception):
+        def __str__(self) -> str:
+            return "payment failed api_key=topsecret"
+
+    boom = SecretError()
+
     token = turn_tracing._fleet_trace_active.set(True)
     try:
         callback.on_lm_start("call-1", root, {"prompt": "readable prompt"})
-        callback.on_lm_end("call-1", [], ValueError("provider response failed"))
+        callback.on_lm_end("call-1", [], boom)
     finally:
         turn_tracing._fleet_trace_active.reset(token)
 
@@ -493,8 +502,96 @@ def test_lm_trace_callback_records_role_and_failure_category(monkeypatch: pytest
         "call_index": 1,
         "wall_time_ms": 125.0,
         "phase_status": "failed",
+        "error_kind": "SecretError",
+        "provider_status_category": "none",
+        "detail": "payment failed [redacted]",
     }
     assert calls.status == "ERROR"
+
+
+def test_lm_trace_callback_records_classified_failure_detail(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A failed LM call must carry the *classified* provider failure on its span.
+
+    Regression coverage for traces such as tr-db96 where the root LM span was
+    ERROR with an empty message and ``failure_category: unknown``: the span
+    must record a bounded, sanitized error kind and status class so the model
+    that failed is debuggable without a live gateway.
+    """
+    from types import SimpleNamespace
+
+    from fleet_rlm.daytona.errors import ProviderRequestError
+    from fleet_rlm.observability import turn_tracing
+    from fleet_rlm.rlm.dspy_contract import _RLMTraceCallback
+
+    captured = SimpleNamespace(outputs=[])
+
+    class Span:
+        def set_inputs(self, payload):
+            captured.inputs = payload
+
+        def set_outputs(self, payload):
+            captured.outputs.append(payload)
+
+        def set_attributes(self, payload):
+            captured.attributes = payload
+
+        def set_status(self, status):
+            captured.status = status
+
+    # The span the callback actually finishes is the one opened by start_span;
+    # get_current_active_span (a separate handle) must not mask its attributes.
+    span = Span()
+
+    class SpanContext:
+        def __enter__(self):
+            return span
+
+        def __exit__(self, *_args):
+            return None
+
+    fake_mlflow = SimpleNamespace(
+        get_current_active_span=lambda: span,
+        start_span=lambda **_kwargs: SpanContext(),
+    )
+    fake_entities = SimpleNamespace(SpanType=SimpleNamespace(CHAIN="CHAIN", LLM="LLM"))
+    monkeypatch.setitem(sys.modules, "mlflow", fake_mlflow)
+    monkeypatch.setitem(sys.modules, "mlflow.entities", fake_entities)
+
+    root = SimpleNamespace(model="root-model")
+    callback = _RLMTraceCallback(root_lm=root, sub_lm=SimpleNamespace(model="sub-model"))
+    boom = ProviderRequestError(
+        "404 Not Found: model api_key=topsecret is unavailable",
+        cause_type="NotFoundError",
+        status_code=404,
+    )
+
+    token = turn_tracing._fleet_trace_active.set(True)
+    try:
+        callback.on_lm_start("call-404", root, {"prompt": "p"})
+        callback.on_lm_end("call-404", [], boom)
+    finally:
+        turn_tracing._fleet_trace_active.reset(token)
+
+    span_outputs = captured.outputs[-1]
+    assert span_outputs["request_status"] == "failed"
+    assert span_outputs["phase_status"] == "failed"
+    assert span_outputs["failure_category"] == "request_validation"
+    assert span_outputs["error_kind"] == "ProviderRequestError"
+    assert span_outputs["provider_status_category"] == "4xx"
+    # The classified kinds also ride on span attributes for the UI.
+    attrs = captured.attributes
+    assert attrs["fleet.error.kind"] == "ProviderRequestError"
+    assert attrs["fleet.error.category"] == "request_validation"
+    assert attrs["fleet.error.status"] == "4xx"
+    # The sanitized details must be present but free of the embedded secret.
+    assert "detail" in span_outputs
+    assert "topsecret" not in str(span_outputs)
+    assert "topsecret" not in str(attrs)
+    # last_call_summary must mirror the classified failure.
+    summary = callback.last_call_summary()
+    assert summary["failure_category"] == "request_validation"
+    assert summary["error_kind"] == "ProviderRequestError"
+    assert "topsecret" not in str(summary)
 
 
 def test_lm_trace_callback_keeps_structural_last_call_summary() -> None:

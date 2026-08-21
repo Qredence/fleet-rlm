@@ -571,8 +571,11 @@ class _RLMTraceCallback(BaseCallback):
             value = response_details.get(key)
             if value is not None:
                 last_call[key] = value
+        failure_outputs: dict[str, JsonValue] = {}
+        failure_attributes: dict[str, JsonValue] = {}
         if exception is not None:
-            last_call["failure_category"] = _trace_failure_category(exception)
+            failure_outputs, failure_attributes = _lm_failure_details(exception)
+            last_call.update(failure_outputs)
         self._last_call = last_call
         if self._metrics is not None:
             self._metrics.record_lm_call(
@@ -598,11 +601,11 @@ class _RLMTraceCallback(BaseCallback):
                 phase_status="failed",
                 outputs={
                     "request_status": "failed",
-                    "failure_category": _trace_failure_category(exception),
+                    **failure_outputs,
                     **response_details,
                     **({"token_usage": usage} if usage else {}),
                 },
-                attributes=attributes,
+                attributes={**(attributes or {}), **failure_attributes},
             )
 
     def last_call_summary(self) -> dict[str, JsonValue]:
@@ -857,6 +860,50 @@ def _trace_failure_category(exc: BaseException) -> str:
     from fleet_rlm.observability.failure_diagnostics import trace_failure_category
 
     return trace_failure_category(exc)
+
+
+_TRACE_FAILURE_DETAIL_MAX_CHARS = 300
+
+
+def _lm_failure_details(exception: BaseException) -> tuple[dict[str, JsonValue], dict[str, JsonValue]]:
+    """Build bounded, sanitized error detail for a failed LM span and summary.
+
+    Traces such as tr-db96 surfaced a failed Root LM call with an empty status
+    message and ``failure_category: unknown``: the span recorded that *a* call
+    failed but never *why*. This supplies a bounded, credential-free breakdown
+    (exception type, provider status class, and a short sanitized message) so a
+    dead model is debuggable from the trace alone.
+
+    Returns a ``(span_failure_outputs, span_failure_attributes)`` pair: the
+    classified kinds ride on span attributes (immune to output re-sanitization
+    rewriting), while a bounded ``detail`` preview stays in outputs for the UI.
+    Everything is derived from ``sanitize_provider_message``-cleaned text —
+    raw provider exception text never reaches the trace.
+    """
+    from fleet_rlm.daytona.errors import (
+        classify_provider_error,
+        provider_status_code,
+        sanitize_provider_message,
+    )
+
+    cleaned = sanitize_provider_message(str(exception))
+    detail = cleaned[:_TRACE_FAILURE_DETAIL_MAX_CHARS]
+    status = provider_status_code(exception)
+    status_category = f"{status // 100}xx" if isinstance(status, int) and 100 <= status <= 599 else "none"
+    failure_outputs: dict[str, JsonValue] = {
+        "failure_category": classify_provider_error(exception),
+        "error_kind": type(exception).__name__,
+        "provider_status_category": status_category,
+    }
+    span_failure_attributes: dict[str, JsonValue] = {
+        "fleet.error.kind": type(exception).__name__,
+        "fleet.error.category": classify_provider_error(exception),
+        "fleet.error.status": status_category,
+    }
+    if detail:
+        failure_outputs["detail"] = detail
+        span_failure_attributes["fleet.error.detail"] = detail
+    return failure_outputs, span_failure_attributes
 
 
 def bind_native_rlm_observer(
