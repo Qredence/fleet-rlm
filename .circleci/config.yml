@@ -89,6 +89,24 @@ commands:
           no_output_timeout: 15m
           command: uv sync --all-extras --dev --python << parameters.python_version >> --verbose
 
+  install_tui_dependencies:
+    steps:
+      - restore_cache:
+          keys:
+            - v1-pnpm-{{ checksum "tools/fleet-tui/pnpm-lock.yaml" }}
+      - run:
+          name: Enable corepack and activate pnpm
+          command: |
+            corepack enable
+            corepack prepare pnpm@10.33.2 --activate
+      - run:
+          name: Install TUI dependencies
+          command: pnpm --dir tools/fleet-tui install --frozen-lockfile
+      - save_cache:
+          key: v1-pnpm-{{ checksum "tools/fleet-tui/pnpm-lock.yaml" }}
+          paths:
+            - tools/fleet-tui/node_modules
+
 jobs:
   quality:
     executor: python
@@ -99,23 +117,22 @@ jobs:
       - save_uv_cache
       - run:
           name: Release and docs checks
+          no_output_timeout: 5m
           command: |
             make check-release
             make check-docs
       - run:
           name: Security checks
+          no_output_timeout: 10m
           command: make check-security
-      - run:
-          name: Install TUI dependencies
-          command: |
-            corepack enable
-            corepack prepare pnpm@10.33.2 --activate
-            pnpm --dir tools/fleet-tui install --frozen-lockfile
+      - install_tui_dependencies
       - run:
           name: API contract checks
+          no_output_timeout: 5m
           command: make api-check
       - run:
           name: Stream contract check
+          no_output_timeout: 5m
           command: make stream-check
       - run:
           name: Python dependency check
@@ -158,7 +175,7 @@ jobs:
   test-e2e:
     executor: python
     resource_class: medium+
-    parallelism: 2
+    parallelism: 1
     steps:
       - checkout
       - install_python_dependencies
@@ -289,6 +306,7 @@ jobs:
             env FLEET_DAYTONA_API_KEY= FLEET_OPENAI_API_KEY= FLEET_LLM_BASE_URL= FLEET_DATABASE_URL= \
               uv run --python "<< parameters.python_version >>" pytest \
               tests/unit/backend tests/contracts/backend -q \
+              -n 2 \
               -m "not live_llm and not live_daytona and not benchmark and not db"
 
   tui:
@@ -296,14 +314,7 @@ jobs:
     resource_class: small
     steps:
       - checkout
-      - run:
-          name: Install pnpm
-          command: |
-            corepack enable
-            corepack prepare pnpm@10.33.2 --activate
-      - run:
-          name: Install TUI dependencies
-          command: pnpm --dir tools/fleet-tui install --frozen-lockfile
+      - install_tui_dependencies
       - run:
           name: TUI lint, type, and tests
           command: |

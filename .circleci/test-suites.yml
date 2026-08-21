@@ -5,7 +5,7 @@ run: bash -c 'set -f; mkdir -p test-results; .venv/bin/pytest -p no:warnings -m 
 outputs:
   junit: test-results/pytest-unit.xml
 options:
-  dynamic-test-splitting: false
+  dynamic-test-splitting: true
 ---
 name: pytest-e2e
 discover: bash -c 'find tests/e2e -type f -name "*.py" ! -name "__init__.py" -print | sort'
