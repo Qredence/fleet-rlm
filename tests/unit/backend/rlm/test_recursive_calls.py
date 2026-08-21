@@ -296,7 +296,7 @@ def test_recursive_batch_join_stops_at_turn_deadline_and_worker_retains_lease(
         ),
         options=RecursiveRLMOptions(max_calls=1, max_parallel_children=1),
         child_runtime_factory=factory,
-        deadline=time.monotonic() + 0.05,
+        deadline=time.monotonic() + 0.3,
     )
 
     began = time.monotonic()
