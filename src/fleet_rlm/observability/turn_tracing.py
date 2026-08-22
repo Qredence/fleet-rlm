@@ -13,7 +13,7 @@ from contextvars import ContextVar, Token
 from dataclasses import dataclass, field
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as package_version
-from typing import Any, cast
+from typing import Any, Literal, cast, get_args
 from uuid import UUID
 
 from fleet_rlm.observability.tracing import is_tracing_active
@@ -90,6 +90,15 @@ def _trace_mapping(values: Mapping[str, object]) -> dict[str, object]:
 
 _LOCAL_BYOK_USER = "fleet-local"
 _SPAN_NAME = "fleet_turn"
+# Closed phase set so one Fleet Run (preparation + execution fleet_turn roots)
+# remains searchable by exactly these values, never by ad-hoc strings.
+TracePhase = Literal["preparation", "execution"]
+_TRACE_PHASES: frozenset[str] = frozenset(get_args(TracePhase))
+# MLflow trace tag/metadata keys. One-way link: the execution trace carries the
+# preparation trace id; the preparation trace never references the execution.
+_TRACE_PHASE_TAG = "fleet.trace_phase"
+_PREPARATION_TRACE_ID_TAG = "fleet.preparation_trace_id"
+_PREPARATION_TRACE_ID_MAX_CHARS = 256
 try:
     _FLEET_APP_VERSION = package_version("fleet-rlm")
 except PackageNotFoundError:
@@ -329,6 +338,8 @@ def turn_trace(
     *,
     enabled: bool,
     expose_trace_id: bool = True,
+    trace_phase: TracePhase | None = None,
+    preparation_trace_id: str | None = None,
 ) -> Iterator[TraceHandle]:
     """
     Open a root ``fleet_turn`` span for a live Turn when tracing is enabled.
@@ -338,6 +349,12 @@ def turn_trace(
         run_id (UUID): Identifier for the run associated with the Turn.
         enabled (bool): Whether to enable tracing.
         expose_trace_id (bool): Whether to expose the active trace identifier in the yielded handle.
+        trace_phase (TracePhase | None): Optional closed phase marker (``"preparation"`` or
+            ``"execution"``) recorded as ``fleet.trace_phase`` so MLflow search can tell the two
+            fleet_turn roots of one Fleet Run apart. Unknown values are ignored fail-softly.
+        preparation_trace_id (str | None): Optional bounded trace identifier of the preparation
+            phase, recorded on the execution trace as ``fleet.preparation_trace_id``. The link is
+            one-way: preparation traces never carry it.
 
     Yields:
         TraceHandle: Handle containing the trace identifier when available and exposure is enabled;
@@ -378,18 +395,30 @@ def turn_trace(
             return
 
         active_token = _fleet_trace_active.set(True)
+        tags: dict[str, str] = {
+            "fleet.run_id": str(run_id),
+            "fleet.session_id": str(session_id),
+        }
+        metadata: dict[str, str] = {
+            "fleet.run_id": str(run_id),
+            "fleet.app_version": _FLEET_APP_VERSION,
+        }
+        if trace_phase is not None:
+            if trace_phase in _TRACE_PHASES:
+                tags[_TRACE_PHASE_TAG] = trace_phase
+                metadata[_TRACE_PHASE_TAG] = trace_phase
+            else:
+                logger.debug("ignoring unrecognized trace phase %r", trace_phase)
+        if preparation_trace_id:
+            bounded_id = str(preparation_trace_id)[:_PREPARATION_TRACE_ID_MAX_CHARS]
+            tags[_PREPARATION_TRACE_ID_TAG] = bounded_id
+            metadata[_PREPARATION_TRACE_ID_TAG] = bounded_id
         try:
             mlflow.update_current_trace(
                 session_id=str(session_id),
                 user=_LOCAL_BYOK_USER,
-                tags={
-                    "fleet.run_id": str(run_id),
-                    "fleet.session_id": str(session_id),
-                },
-                metadata={
-                    "fleet.run_id": str(run_id),
-                    "fleet.app_version": _FLEET_APP_VERSION,
-                },
+                tags=tags,
+                metadata=metadata,
             )
         except Exception:
             logger.warning("MLflow update_current_trace failed; continuing", exc_info=True)

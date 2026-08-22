@@ -162,7 +162,12 @@ The interactive profiles route traces to the local `fleet-rlm` experiment at
 server. The managed profile uses `tracking_uri = "databricks"` and requires the
 Unity Catalog, table-prefix, SQL-warehouse, and database environment names shown
 in the matrix. Child DSPy trace spans remain structural only even when the
-selected Root trace policy permits bounded readable previews.
+selected Root trace policy permits bounded readable previews. One Fleet Run
+opens two `fleet_turn` root spans (preparation and execution), each tagged
+`fleet.trace_phase` with `preparation` or `execution` so both roots stay
+searchable. The execution root additionally carries the bounded one-way
+`fleet.preparation_trace_id` tag; preparation traces never reference the
+execution trace.
 
 ## Local terminal editing
 

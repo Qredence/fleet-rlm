@@ -6,6 +6,7 @@ import asyncio
 import contextlib
 import logging
 from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable
+from dataclasses import replace
 from typing import Any, Self
 from uuid import UUID
 
@@ -74,6 +75,21 @@ class OpenedTurnStream:
             await shield_cleanup(close())
 
 
+def _attach_preparation_trace_id(prepared: PreparedRun, trace_id: str | None) -> PreparedRun:
+    """Attach the preparation trace id for internal MLflow phase correlation.
+
+    Fail-soft engineering observability: private test doubles that are not the
+    frozen ``PreparedRun`` dataclass (or predate the field) are returned
+    unchanged, and an absent trace id is a no-op. Never affects the Turn.
+    """
+    if not trace_id:
+        return prepared
+    try:
+        return replace(prepared, preparation_trace_id=trace_id)  # type: ignore[type-var]
+    except (TypeError, AttributeError, ValueError):
+        return prepared
+
+
 def _settled_or_unavailable(result: PreparationSettlement) -> None:
     """Translate the attempt's typed settlement into the coordinator's claim-loss error."""
     if result is PreparationSettlement.CLAIM_LOST:
@@ -116,13 +132,21 @@ class TurnCoordinator:
         )
 
     async def _prepare_with_trace(self, start: ClaimedRun, *, deadline: float) -> PreparedRun:
-        """Trace preparation separately because SSE begins only after it succeeds."""
+        """Trace preparation separately because SSE begins only after it succeeds.
+
+        ``expose_trace_id=True`` here is internal correlation only: the
+        captured preparation trace id rides the internal ``PreparedRun`` into
+        the execution ``fleet_turn`` root as ``fleet.preparation_trace_id``.
+        It never reaches SSE — the stream's ``trace_id`` comes from the
+        execution trace handle, and preparation completes before SSE headers.
+        """
         with turn_trace(
             start.session_id,
             start.run_id,
             enabled=self._mlflow_tracing_enabled,
-            expose_trace_id=False,
-        ):
+            expose_trace_id=True,
+            trace_phase="preparation",
+        ) as handle:
             try:
                 with turn_phase_span(
                     "Turn.prepare",
@@ -140,7 +164,7 @@ class TurnCoordinator:
                 )
                 raise
             annotate_trace_io(request=start.input.text, response_text="Turn prepared")
-            return prepared
+            return _attach_preparation_trace_id(prepared, handle.trace_id)
 
     def open_owned(self, command: OpenTurnCommand) -> RunOwnership:
         """Start one coordinator-owned Run lifetime handle (P21)."""
@@ -257,6 +281,8 @@ class TurnCoordinator:
             run.run_id,
             enabled=self._mlflow_tracing_enabled,
             expose_trace_id=self._mlflow_expose_trace_id,
+            trace_phase="execution",
+            preparation_trace_id=getattr(prepared, "preparation_trace_id", None),
         ) as handle:
             async for event in self._execution_driver.stream(
                 run,

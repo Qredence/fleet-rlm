@@ -99,3 +99,72 @@ def test_lm_telemetry_matches_callback_response_in_concurrent_history() -> None:
     usage, _provider = _latest_lm_telemetry(lm, 0, first_response)
 
     assert usage == {"input_tokens": 3, "output_tokens": 2}
+
+
+def test_metrics_unobserved_usage_emits_no_zero_token_totals_and_status_unavailable() -> None:
+    # A provider that never reports usage must not manufacture an all-zero
+    # lm_token_totals entry; call counts/latency still record.
+    metrics = DelegationMetrics()
+    metrics.record_lm_call("root", 0)
+    metrics.record_lm_call("root", 0, usage=None)
+    metrics.record_lm_call("root", 0, usage={})
+
+    snapshot = metrics.snapshot()
+    assert snapshot.root_lm_calls_depth_0 == 3
+    assert snapshot.lm_token_totals == ()
+    assert snapshot.token_usage_status == "unavailable"
+    assert snapshot.as_dict()["lm_token_totals"] == []
+    assert snapshot.as_dict()["token_usage_status"] == "unavailable"
+
+
+def test_metrics_real_zero_usage_is_observed_not_unavailable() -> None:
+    # A provider-reported all-zero usage mapping is a measurement, not
+    # "unavailable".
+    metrics = DelegationMetrics()
+    metrics.record_lm_call("root", 0, usage={"input_tokens": 0, "output_tokens": 0})
+
+    snapshot = metrics.snapshot()
+    assert snapshot.lm_token_totals == (("root", 0, 0, 0, 0),)
+    assert snapshot.token_usage_status == "observed"
+    assert snapshot.as_dict()["token_usage_status"] == "observed"
+
+
+def test_metrics_mixed_observed_and_unobserved_calls_only_total_observed() -> None:
+    metrics = DelegationMetrics()
+    metrics.record_lm_call("root", 0, usage={"input_tokens": 50})
+    metrics.record_lm_call("root", 0)  # no usage: call counts, tokens must not
+    metrics.record_lm_call("sub", 0)  # entirely unobserved role/depth key
+
+    snapshot = metrics.snapshot()
+    assert snapshot.root_lm_calls_depth_0 == 2
+    assert snapshot.sub_lm_calls_depth_0 == 1
+    assert snapshot.lm_token_totals == (("root", 0, 50, 0, 50),)
+    assert snapshot.token_usage_status == "observed"
+
+
+def test_metrics_token_aggregation_is_thread_safe_across_concurrent_recorders() -> None:
+    from concurrent.futures import ThreadPoolExecutor
+
+    metrics = DelegationMetrics()
+    observed_calls_per_thread = 25
+
+    def record(thread_index: int) -> None:
+        for _ in range(observed_calls_per_thread):
+            metrics.record_lm_call("root", 0, usage={"prompt_tokens": 10, "completion_tokens": 5})
+            metrics.record_lm_call("sub", 0)  # unobserved: counts only
+            metrics.record_lm_call("root", 1, usage={"input_tokens": thread_index})
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        list(pool.map(record, range(8)))
+
+    snapshot = metrics.snapshot()
+    assert snapshot.root_lm_calls_depth_0 == 8 * observed_calls_per_thread
+    assert snapshot.sub_lm_calls_depth_0 == 8 * observed_calls_per_thread
+    assert snapshot.child_root_lm_calls_depth_1 == 8 * observed_calls_per_thread
+    totals = {(role, depth): (i, o, t) for role, depth, i, o, t in snapshot.lm_token_totals}
+    root_expected = 8 * observed_calls_per_thread
+    assert totals[("root", 0)] == (root_expected * 10, root_expected * 5, root_expected * 15)
+    depth1_expected = observed_calls_per_thread * sum(range(8))
+    assert totals[("root", 1)] == (depth1_expected, 0, depth1_expected)
+    assert ("sub", 0) not in totals
+    assert snapshot.token_usage_status == "observed"

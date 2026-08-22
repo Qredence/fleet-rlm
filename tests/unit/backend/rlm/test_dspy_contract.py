@@ -884,3 +884,121 @@ def test_lm_output_profile_reads_string_and_unknown_shapes() -> None:
     # Genuinely unusable shapes still degrade to the historical empty-keys shape.
     assert _lm_output_profile(None) == {"response_keys": ()}
     assert _lm_output_profile(object()) == {"response_keys": ()}
+
+
+def test_latest_lm_telemetry_typed_response_fallback_reads_usage_as_dict() -> None:
+    from types import SimpleNamespace
+
+    from fleet_rlm.rlm.dspy_contract import _latest_lm_telemetry
+
+    class TypedResponse:
+        """Mirror of the typed DSPy contract surface (dspy.LMResponse)."""
+
+        def __init__(self, usage: dict[str, int], provider_response: object = None) -> None:
+            self._usage = usage
+            self.provider_response = provider_response
+
+        def usage_as_dict(self) -> dict[str, int]:
+            return dict(self._usage)
+
+    lm = SimpleNamespace(history=[])
+    raw_provider = SimpleNamespace(_hidden_params={"_response_ms": 42.5, "litellm_call_id": "req-123"})
+    typed = TypedResponse(
+        {"prompt_tokens": 4, "completion_tokens": 2, "total_tokens": 6},
+        provider_response=raw_provider,
+    )
+
+    usage, provider = _latest_lm_telemetry(lm, 0, typed)
+
+    assert usage == {"prompt_tokens": 4, "completion_tokens": 2, "total_tokens": 6}
+    assert provider == {"provider_response_ms": 42.5, "provider_request_id": "req-123"}
+
+    # A typed response without usage must surface as unavailable, not zero.
+    empty = TypedResponse({})
+    assert _latest_lm_telemetry(lm, 0, empty) == ({}, {})
+    untyped = SimpleNamespace(model="x")
+    assert _latest_lm_telemetry(lm, 0, untyped) == ({}, {})
+
+
+def test_lm_trace_callback_emits_token_usage_output_and_mlflow_attribute(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Observed per-call usage must reach the span and the delegation metrics.
+
+    Regression coverage for traces where completed RLM.*_lm spans carried no
+    ``mlflow.chat.tokenUsage`` attribute and metrics emitted all-zero
+    ``lm_token_totals`` despite no provider usage ever being reported.
+    """
+    from types import SimpleNamespace
+
+    from fleet_rlm.observability import turn_tracing
+    from fleet_rlm.rlm.delegation_metrics import DelegationMetrics
+    from fleet_rlm.rlm.dspy_contract import _RLMTraceCallback
+
+    captured = SimpleNamespace(outputs=[], attributes={})
+
+    class Span:
+        def set_inputs(self, payload):
+            captured.inputs = payload
+
+        def set_outputs(self, payload):
+            captured.outputs.append(payload)
+
+        def set_attributes(self, payload):
+            captured.attributes.update(payload)
+
+        def set_status(self, status):
+            captured.status = status
+
+    class SpanContext:
+        def __enter__(self):
+            return Span()
+
+        def __exit__(self, *_args):
+            return None
+
+    fake_mlflow = SimpleNamespace(
+        get_current_active_span=lambda: Span(),
+        start_span=lambda **_kwargs: SpanContext(),
+    )
+    fake_entities = SimpleNamespace(SpanType=SimpleNamespace(CHAIN="CHAIN", LLM="LLM"))
+    monkeypatch.setitem(sys.modules, "mlflow", fake_mlflow)
+    monkeypatch.setitem(sys.modules, "mlflow.entities", fake_entities)
+    monkeypatch.setattr("fleet_rlm.rlm.dspy_contract.time.perf_counter", lambda: 0.0)
+
+    metrics = DelegationMetrics()
+    root = SimpleNamespace(model="root-model", history=[])
+    callback = _RLMTraceCallback(root_lm=root, sub_lm=SimpleNamespace(model="sub-model"), metrics=metrics)
+
+    observed_outputs = ["ok"]
+    token = turn_tracing._fleet_trace_active.set(True)
+    try:
+        # A call whose provider reports usage: attribute + token_usage output.
+        callback.on_lm_start("call-observed", root, {"prompt": "p"})
+        root.history.append({"outputs": observed_outputs, "usage": {"prompt_tokens": 4, "completion_tokens": 2}})
+        callback.on_lm_end("call-observed", observed_outputs)
+    finally:
+        turn_tracing._fleet_trace_active.reset(token)
+
+    assert captured.outputs[-1]["token_usage"] == {"prompt_tokens": 4, "completion_tokens": 2}
+    assert captured.attributes["mlflow.chat.tokenUsage"] == {
+        "input_tokens": 4,
+        "output_tokens": 2,
+        "total_tokens": 6,
+    }
+    assert metrics.snapshot().lm_token_totals == (("root", 0, 4, 2, 6),)
+    assert metrics.snapshot().token_usage_status == "observed"
+
+    captured.outputs.clear()
+    captured.attributes.clear()
+
+    token = turn_tracing._fleet_trace_active.set(True)
+    try:
+        # A call whose provider reports nothing: no usage keys, no zero totals.
+        callback.on_lm_start("call-unobserved", root, {"prompt": "p"})
+        root.history.append({"outputs": observed_outputs, "usage": {}})
+        callback.on_lm_end("call-unobserved", observed_outputs)
+    finally:
+        turn_tracing._fleet_trace_active.reset(token)
+
+    assert "token_usage" not in captured.outputs[-1]
+    assert "mlflow.chat.tokenUsage" not in captured.attributes
+    assert metrics.snapshot().lm_token_totals == (("root", 0, 4, 2, 6),)

@@ -115,6 +115,10 @@ class PreparedRun:
     result_snapshot_sink: ResultSnapshotSink | None = None
     post_commit_memory_promotion: OwnedPostCommitMemoryPromotion | None = None
     memory_intent_builder: MemoryIntentBuilder | None = None
+    # Internal engineering-observability correlation only: the preparation
+    # fleet_turn root's MLflow trace id, attached by TurnCoordinator after
+    # preparation. Never persisted, never projected into SSE/product events.
+    preparation_trace_id: str | None = None
 
     @property
     def cleanup_receipt(self) -> PreparedResourcesReceipt | None:
