@@ -9,7 +9,7 @@ import {
   type TUI,
 } from "@earendil-works/pi-tui";
 
-import { formatDuration, formatTokens, shortTraceId } from "./format.js";
+import { formatDuration, formatObservedTokens, shortTraceId } from "./format.js";
 import { keyHint } from "./keybinding-hints.js";
 import { summarizeExecution, type ExecutionSummary } from "./execution-summary.js";
 import { terminalSafeLine } from "./terminal-text.js";
@@ -233,10 +233,6 @@ function activityAction(state: State): string {
 
 function terminalSafeStatus(value: string): string {
   return terminalSafeLine(value).replaceAll(/[_-]+/g, " ");
-}
-
-function formatObservedTokens(value: number | null): string {
-  return value === null ? "—" : formatTokens(value);
 }
 
 function outcomeGlyph(outcome: NonNullable<Run["outcome"]>): keyof typeof statusGlyph {

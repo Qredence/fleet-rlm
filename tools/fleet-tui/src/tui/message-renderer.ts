@@ -10,8 +10,8 @@ import {
 import {
   formatBytes,
   formatDuration,
+  formatObservedTokens,
   formatStructuredResult,
-  formatTokens,
   redact,
   shortId,
 } from "./format.js";
@@ -19,7 +19,7 @@ import { formatExecutionMetric } from "./execution-summary.js";
 import { keyText } from "./keybinding-hints.js";
 import type { Message, Role } from "./store.js";
 import { highlightCode } from "./syntax-highlight.js";
-import { terminalSafeText } from "./terminal-text.js";
+import { hasMultipleLines, terminalSafeText } from "./terminal-text.js";
 import { markdownTheme, statusGlyph, theme, type ThemeBackground } from "./theme.js";
 
 export class MessageRenderCache {
@@ -235,9 +235,7 @@ function renderTool(message: Extract<Message, { kind: "tool" }>, width: number):
   // else stays expanded until the operator folds it with ctrl+o.
   const collapsed =
     message.collapsed === true ||
-    (message.collapsed === undefined &&
-      errorDetails !== null &&
-      shouldCollapseErrorDetails(errorDetails));
+    (message.collapsed === undefined && errorDetails !== null && hasMultipleLines(errorDetails));
   if (collapsed) {
     const summary = errorDetails !== null ? summarizeErrorDetails(errorDetails) : "";
     const suffix = summary ? `  ${theme.fg("error", terminalSafeText(summary))}` : "";
@@ -505,10 +503,6 @@ export function summarizeErrorDetails(text: string): string {
   return lines[0]?.trimmed ?? "Error";
 }
 
-function shouldCollapseErrorDetails(text: string): boolean {
-  return text.replace(/\r\n/g, "\n").replace(/\r/g, "\n").trimEnd().split("\n").length > 1;
-}
-
 function wrapStyled(
   value: string,
   width: number,
@@ -537,8 +531,4 @@ function appendStreamingCursor(line: string, width: number): string {
   const cursor = theme.fg("accent", "█");
   if (width <= 1) return truncateToWidth(cursor, width, "");
   return `${truncateToWidth(line, width - 2, "")} ${cursor}`;
-}
-
-function formatObservedTokens(value: number | null): string {
-  return value === null ? "—" : formatTokens(value);
 }

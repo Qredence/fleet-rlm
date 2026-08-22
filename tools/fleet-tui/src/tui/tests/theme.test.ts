@@ -1,4 +1,5 @@
 import { getCapabilities } from "@earendil-works/pi-tui";
+import { watch, type FSWatcher } from "node:fs";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -21,7 +22,7 @@ import {
   stopThemeMonitoring,
   theme,
 } from "../theme.js";
-import { darkPalette, mergeCustomTheme } from "../themes/palette.js";
+import { darkPalette, mergeCustomTheme, watchCustomThemes } from "../themes/palette.js";
 
 const tempDirs: string[] = [];
 
@@ -29,6 +30,34 @@ async function withStateDir(): Promise<string> {
   const dir = await mkdtemp(join(tmpdir(), "fleet-theme-"));
   tempDirs.push(dir);
   return dir;
+}
+
+/** True when a real fs.watch on this directory actually delivers events. */
+function probeFsWatch(dir: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    let watcher: FSWatcher | undefined;
+    let done = false;
+    const finish = (ok: boolean) => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      try {
+        watcher?.close();
+      } catch {
+        // probe cleanup is best-effort
+      }
+      resolve(ok);
+    };
+    const timer = setTimeout(() => finish(false), 2_000);
+    try {
+      watcher = watch(dir, () => finish(true));
+      watcher.once("error", () => finish(false));
+    } catch {
+      finish(false);
+      return;
+    }
+    void writeFile(join(dir, `.watch-probe-${process.pid}`), "x").catch(() => finish(false));
+  });
 }
 
 afterEach(async () => {
@@ -243,14 +272,67 @@ describe("theme selection", () => {
     await writeFile(path, JSON.stringify({ colors: { accent: "#123456" } }));
     vi.stubEnv("FLEET_TUI_STATE_DIR", dir);
 
-    await setTheme("solar");
-    await new Promise((resolve) => setTimeout(resolve, 100));
-    await writeFile(path, JSON.stringify({ colors: { accent: "#abcdef" } }));
+    // fs.watch can be unavailable on fd-constrained hosts (EMFILE): hot reload
+    // is disabled there by design, so only hosts with a working watcher run the
+    // live assertion. Probe with a real watch against this exact directory.
+    if (!(await probeFsWatch(join(dir, "themes")))) {
+      console.warn("skipping hot-reload assertion: fs.watch is unavailable on this host");
+      vi.unstubAllEnvs();
+      return;
+    }
 
-    await vi.waitFor(() => expect(theme.fg("accent", "x")).toContain("38;2;171;205;239"), {
-      timeout: 2_000,
-    });
+    await setTheme("solar");
+    // Rewrite on a retry cadence: an early write can race the async watcher
+    // setup, so keep publishing until the debounced reload lands.
+    await vi.waitFor(
+      async () => {
+        await writeFile(path, JSON.stringify({ colors: { accent: "#abcdef" } }));
+        expect(theme.fg("accent", "x")).toContain("38;2;171;205;239");
+      },
+      { timeout: 5_000, interval: 500 },
+    );
     await setTheme("dark");
+    vi.unstubAllEnvs();
+  });
+
+  it("reports a watcher failure exactly once without throwing", async () => {
+    const dir = await withStateDir();
+    const filePath = join(dir, "themes-state-is-a-file");
+    await writeFile(filePath, "state dir blocked by a regular file");
+    vi.stubEnv("FLEET_TUI_STATE_DIR", filePath);
+
+    const onChange = vi.fn();
+    const onError = vi.fn();
+    const stop = watchCustomThemes(onChange, onError);
+
+    await vi.waitFor(() => expect(onError).toHaveBeenCalledTimes(1), { timeout: 2_000 });
+    expect(onChange).not.toHaveBeenCalled();
+    expect(onError.mock.calls[0]?.[0]).toBeInstanceOf(Error);
+
+    // Later failures (or stopping after the failure) must never re-report or throw.
+    stop();
+    expect(onError).toHaveBeenCalledTimes(1);
+    vi.unstubAllEnvs();
+  });
+
+  it("warns once through the default error reporter when no onError is injected", async () => {
+    const dir = await withStateDir();
+    const filePath = join(dir, "themes-state-blocked");
+    await writeFile(filePath, "state dir blocked by a regular file");
+    vi.stubEnv("FLEET_TUI_STATE_DIR", filePath);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
+    const stop = watchCustomThemes(() => undefined);
+
+    await vi.waitFor(
+      () =>
+        expect(warn).toHaveBeenCalledWith(
+          expect.stringContaining("Custom theme watching is unavailable"),
+        ),
+      { timeout: 2_000 },
+    );
+    stop();
+    warn.mockRestore();
     vi.unstubAllEnvs();
   });
 
@@ -309,6 +391,25 @@ describe("adaptive contrast", () => {
     const [, red, green, blue] = match ?? [];
     const surfaceLuminance = 0.299 * Number(red) + 0.587 * Number(green) + 0.114 * Number(blue);
     expect(Math.abs(surfaceLuminance - 128)).toBeGreaterThanOrEqual(12);
+  });
+
+  it("styles transcript search matches from the active theme", () => {
+    setTerminalBackground(null);
+    const dark = createFleetTheme("dark", "truecolor");
+    const light = createFleetTheme("light", "truecolor");
+
+    // Non-current match: plain underline, current match: selection background.
+    expect(dark.getSearchMatchStyle()("hit")).toBe("\x1b[4mhit\x1b[24m");
+    expect(dark.getSearchCurrentMatchStyle()("hit")).toBe("\x1b[48;2;58;58;74mhit\x1b[49m");
+    expect(light.getSearchCurrentMatchStyle()("hit")).toBe("\x1b[48;2;208;208;224mhit\x1b[49m");
+
+    // The facade resolves against the active theme at call time.
+    setTerminalColorScheme("dark");
+    expect(theme.searchMatch()("hit")).toBe("\x1b[4mhit\x1b[24m");
+    expect(theme.currentSearchMatch()("hit")).toBe(dark.getSearchCurrentMatchStyle()("hit"));
+    setTerminalColorScheme("light");
+    expect(theme.currentSearchMatch()("hit")).toBe(light.getSearchCurrentMatchStyle()("hit"));
+    setTerminalColorScheme("dark");
   });
 
   it("exposes the settings list theme factories", () => {

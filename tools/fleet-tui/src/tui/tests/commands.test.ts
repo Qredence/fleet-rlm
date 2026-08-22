@@ -6,7 +6,14 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { FleetApiClient } from "../../fleet-api-client.js";
-import { type CommandContext, formatVolumeTree, listCommands, parseInput } from "../commands.js";
+import { FleetApiError } from "../../fleet-api-client.js";
+import {
+  type CommandContext,
+  formatVolumeTree,
+  listCommands,
+  parseInput,
+  type SettingsUpdate,
+} from "../commands.js";
 import { ConversationStore } from "../store.js";
 
 async function makeTempFile(
@@ -221,6 +228,57 @@ describe("command handlers", () => {
     });
   });
 
+  it("/settings formats an unset value without a literal undefined", async () => {
+    const { ctx } = makeContext();
+    ctx.client.getSettings = vi.fn().mockResolvedValue({
+      revision: "a".repeat(64),
+      active_profile: "daytona",
+      default_profile: "daytona",
+      restart_required: true,
+      scopes: [
+        {
+          name: "daytona",
+          fields: [
+            {
+              path: "llm.base_url",
+              group: "LLM",
+              label: "Base URL",
+              value: undefined,
+              editor: "text",
+              choices: [],
+              environment_overridden: false,
+            },
+          ],
+        },
+      ],
+    });
+
+    const settings = listCommands().find((c) => c.name === "settings");
+    if (settings) await settings.handler([], ctx);
+
+    const last = ctx.store.getState().messages.at(-1);
+    expect(last).toMatchObject({ kind: "text", role: "system" });
+    if (last?.kind === "text") {
+      expect(last.text).toContain("llm.base_url = (unset)");
+      expect(last.text).not.toContain("undefined");
+    }
+  });
+
+  it("/sessions reports a busy Run instead of silently doing nothing", async () => {
+    const { ctx } = makeContext();
+    ctx.client.listSessions = vi.fn();
+    ctx.store.dispatch({ type: "user/submit", text: "hi" });
+    ctx.store.dispatch({ type: "run/start", runId: "run-1", delivery: "live" });
+
+    const sessions = listCommands().find((command) => command.name === "sessions");
+    if (sessions) await sessions.handler([], ctx);
+
+    expect(ctx.client.listSessions).not.toHaveBeenCalled();
+    const last = ctx.store.getState().messages.at(-1);
+    expect(last).toMatchObject({ kind: "text", role: "system" });
+    if (last?.kind === "text") expect(last.text).toContain("Run is in progress");
+  });
+
   it("/cancel forwards to the cancelActiveRun hook while a Run is active", () => {
     const { ctx } = makeContext();
     const cancelSpy = vi.fn();
@@ -241,6 +299,22 @@ describe("command handlers", () => {
     expect(cancelSpy).not.toHaveBeenCalled();
     const last = ctx.store.getState().messages[ctx.store.getState().messages.length - 1];
     expect(last?.kind === "text" && last.text).toContain("No active run.");
+  });
+
+  it("/cancel during the cancelling phase does not re-cancel or claim there is no Run", async () => {
+    const { ctx } = makeContext();
+    const cancelSpy = vi.fn();
+    ctx.cancelActiveRun = cancelSpy;
+    ctx.store.dispatch({ type: "user/submit", text: "hi" });
+    ctx.store.dispatch({ type: "run/start", runId: "run-1", delivery: "live" });
+    ctx.store.dispatch({ type: "run/cancelling" });
+
+    const cancel = listCommands().find((c) => c.name === "cancel");
+    if (cancel) await Promise.resolve(cancel.handler([], ctx));
+
+    expect(cancelSpy).not.toHaveBeenCalled();
+    const last = ctx.store.getState().messages.at(-1);
+    expect(last?.kind === "text" && last.text).toContain("already in progress");
   });
 
   it("/skills lists only cards returned by discovery", async () => {
@@ -753,6 +827,77 @@ describe("redo / reload / trace", () => {
     if (last?.kind === "text") expect(last.text).toContain("Reloaded session session-1.");
   });
 
+  it("/reload keeps pending Attachments, Skills, and the /redo prompt for the same Session", async () => {
+    const { ctx } = makeContext();
+    ctx.store.dispatch({
+      type: "session/init",
+      session: { id: "session-1", title: "T", status: "active", resumed: true },
+    });
+    ctx.store.dispatch({
+      type: "skill-selection/pin",
+      selection: { id: "skill-1", expectedVersion: "1.0.0", displayName: "Skill" },
+    });
+    ctx.store.dispatch({
+      type: "attachment/pin",
+      attachment: { id: "a-1", filename: "f.txt", bytes: 1 },
+    });
+    ctx.store.dispatch({ type: "user/prompt-restore", text: "draft prompt" });
+    ctx.client.getSession = vi.fn().mockResolvedValue({
+      id: "session-1",
+      title: "T",
+      status: "active",
+      checkpoint_version: 2,
+      created_at: null,
+      updated_at: null,
+    });
+    ctx.client.listTurns = vi.fn().mockResolvedValue([]);
+
+    const reload = listCommands().find((c) => c.name === "reload");
+    if (reload) await reload.handler([], ctx);
+
+    const state = ctx.store.getState();
+    expect(state.pendingSkillSelections).toEqual([
+      { id: "skill-1", expectedVersion: "1.0.0", displayName: "Skill" },
+    ]);
+    expect(state.pendingAttachments).toEqual([{ id: "a-1", filename: "f.txt", bytes: 1 }]);
+    expect(state.lastPrompt).toBe("draft prompt");
+  });
+
+  it("/resume to a different Session never leaks pending Attachments, Skills, or the /redo prompt", async () => {
+    const { ctx } = makeContext();
+    ctx.store.dispatch({
+      type: "session/init",
+      session: { id: "session-1", title: "T", status: "active", resumed: true },
+    });
+    ctx.store.dispatch({
+      type: "skill-selection/pin",
+      selection: { id: "skill-1", expectedVersion: "1.0.0", displayName: "Skill" },
+    });
+    ctx.store.dispatch({
+      type: "attachment/pin",
+      attachment: { id: "a-1", filename: "f.txt", bytes: 1 },
+    });
+    ctx.store.dispatch({ type: "user/prompt-restore", text: "draft prompt" });
+    ctx.client.getSession = vi.fn().mockResolvedValue({
+      id: "session-2",
+      title: "Other",
+      status: "active",
+      checkpoint_version: 1,
+      created_at: null,
+      updated_at: null,
+    });
+    ctx.client.listTurns = vi.fn().mockResolvedValue([]);
+
+    const resume = listCommands().find((c) => c.name === "resume");
+    if (resume) await resume.handler(["session-2"], ctx);
+
+    const state = ctx.store.getState();
+    expect(state.session?.id).toBe("session-2");
+    expect(state.pendingSkillSelections).toEqual([]);
+    expect(state.pendingAttachments).toEqual([]);
+    expect(state.lastPrompt).toBeNull();
+  });
+
   it("/trace shows the full MLflow trace ID", () => {
     const { ctx } = makeContext();
     ctx.store.dispatch({
@@ -803,5 +948,245 @@ describe("theme command", () => {
     const last = ctx.store.getState().messages.at(-1);
     expect(last).toMatchObject({ kind: "text", role: "system" });
     if (last?.kind === "text") expect(last.text).toContain("Unknown theme");
+  });
+});
+
+describe("interactive success notifications", () => {
+  function policyFixture() {
+    return {
+      revision: "a".repeat(64),
+      active_profile: "daytona",
+      default_profile: "daytona",
+      available_profiles: ["daytona", "daytona-bench"],
+      restart_required: true,
+      scopes: [
+        {
+          name: "daytona",
+          fields: [
+            {
+              path: "rlm.max_iters",
+              group: "RLM",
+              label: "Max iterations",
+              value: 4,
+              editor: "number",
+              choices: [],
+              environment_overridden: false,
+            },
+          ],
+        },
+      ],
+    } as const;
+  }
+
+  function systemTexts(ctx: CommandContext): string[] {
+    return ctx.store
+      .getState()
+      .messages.filter((m) => m.kind === "text" && m.role === "system")
+      .map((m) => (m.kind === "text" ? m.text : ""));
+  }
+
+  /** Fake presenter that drives one field edit through the save callback. */
+  function presenterEditingOnce(update: SettingsUpdate) {
+    return {
+      chooseSetting: vi.fn(
+        async (_settings: unknown, save?: (next: SettingsUpdate) => Promise<unknown>) => {
+          if (save) {
+            await save(update);
+            return null;
+          }
+          return update;
+        },
+      ),
+    } as never;
+  }
+
+  it("/settings saves through the presenter callback and flashes instead of transcript spam", async () => {
+    const { ctx } = makeContext();
+    const notify = vi.fn();
+    const policy = policyFixture();
+    ctx.client.getSettings = vi.fn().mockResolvedValue(policy);
+    ctx.client.updateSettings = vi.fn().mockResolvedValue({ ...policy, revision: "b".repeat(64) });
+    const update: SettingsUpdate = {
+      revision: policy.revision,
+      scope: "daytona",
+      path: "rlm.max_iters",
+      value: 8,
+    };
+    const settings = listCommands().find((c) => c.name === "settings");
+    if (settings) {
+      await settings.handler([], {
+        ...ctx,
+        notify,
+        presenter: presenterEditingOnce(update),
+      });
+    }
+
+    expect(ctx.client.updateSettings).toHaveBeenCalledWith(update);
+    expect(notify).toHaveBeenCalledWith(
+      expect.stringContaining("Saved rlm.max_iters to config/fleet.toml"),
+    );
+    expect(systemTexts(ctx)).toHaveLength(0);
+  });
+
+  it("/settings falls back to a system message when no notify callback exists", async () => {
+    const { ctx } = makeContext();
+    const policy = policyFixture();
+    ctx.client.getSettings = vi.fn().mockResolvedValue(policy);
+    ctx.client.updateSettings = vi.fn().mockResolvedValue(policy);
+    const update: SettingsUpdate = {
+      revision: policy.revision,
+      scope: "daytona",
+      path: "rlm.max_iters",
+      value: 8,
+    };
+    const settings = listCommands().find((c) => c.name === "settings");
+    if (settings) await settings.handler([], { ...ctx, presenter: presenterEditingOnce(update) });
+
+    expect(systemTexts(ctx).join("\n")).toContain("Saved rlm.max_iters");
+  });
+
+  it("/settings reloads the latest policy on a revision conflict and keeps state consistent", async () => {
+    const { ctx } = makeContext();
+    const notify = vi.fn();
+    const policy = policyFixture();
+    const fresh = { ...policy, revision: "c".repeat(64) };
+    ctx.client.getSettings = vi.fn().mockResolvedValueOnce(policy).mockResolvedValueOnce(fresh);
+    ctx.client.updateSettings = vi
+      .fn()
+      .mockRejectedValue(
+        new FleetApiError(409, "Settings changed", "req-1", "settings_revision_conflict"),
+      );
+
+    let savedPolicy: unknown;
+    const presenter = {
+      chooseSetting: vi.fn(
+        async (_settings: unknown, save?: (next: SettingsUpdate) => Promise<unknown>) => {
+          if (!save) return null;
+          savedPolicy = await save({
+            revision: policy.revision,
+            scope: "daytona",
+            path: "rlm.max_iters",
+            value: 8,
+          });
+          return null;
+        },
+      ),
+    } as never;
+
+    const settings = listCommands().find((c) => c.name === "settings");
+    if (settings) await settings.handler([], { ...ctx, notify, presenter });
+
+    expect(ctx.client.getSettings).toHaveBeenCalledTimes(2);
+    expect(savedPolicy).toBe(fresh);
+    expect(notify).toHaveBeenCalledWith(expect.stringContaining("reloaded"));
+    expect(systemTexts(ctx).join("\n")).not.toContain("Failed to save settings");
+  });
+
+  it("/settings reports a failed save through the transcript error path", async () => {
+    const { ctx } = makeContext();
+    const policy = policyFixture();
+    ctx.client.getSettings = vi.fn().mockResolvedValue(policy);
+    ctx.client.updateSettings = vi
+      .fn()
+      .mockRejectedValue(new FleetApiError(422, "Settings value is invalid"));
+    const update: SettingsUpdate = {
+      revision: policy.revision,
+      scope: "daytona",
+      path: "rlm.max_iters",
+      value: 8,
+    };
+    const settings = listCommands().find((c) => c.name === "settings");
+    if (settings) await settings.handler([], { ...ctx, presenter: presenterEditingOnce(update) });
+
+    expect(systemTexts(ctx).join("\n")).toContain("Failed to save settings");
+  });
+
+  it("/settings keeps the compatibility path for presenters that ignore the save callback", async () => {
+    const { ctx } = makeContext();
+    const policy = policyFixture();
+    ctx.client.getSettings = vi.fn().mockResolvedValue(policy);
+    ctx.client.updateSettings = vi.fn().mockResolvedValue(policy);
+    const update: SettingsUpdate = {
+      revision: policy.revision,
+      scope: "daytona",
+      path: "rlm.max_iters",
+      value: 8,
+    };
+    const notify = vi.fn();
+    const presenter = { chooseSetting: vi.fn().mockResolvedValue(update) } as never;
+    const settings = listCommands().find((c) => c.name === "settings");
+    if (settings) await settings.handler([], { ...ctx, presenter, notify });
+
+    expect(ctx.client.updateSettings).toHaveBeenCalledWith(update);
+    expect(notify).toHaveBeenCalledWith(expect.stringContaining("Saved"));
+    expect(systemTexts(ctx)).toHaveLength(0);
+  });
+
+  it("/profiles flashes the selection instead of a transcript message when interactive", async () => {
+    const { ctx } = makeContext();
+    const notify = vi.fn();
+    const policy = policyFixture();
+    ctx.client.getSettings = vi.fn().mockResolvedValue(policy);
+    ctx.client.setProfile = vi
+      .fn()
+      .mockResolvedValue({ ...policy, default_profile: "daytona-bench" });
+    const presenter = { chooseProfile: vi.fn().mockResolvedValue("daytona-bench") } as never;
+    const profiles = listCommands().find((c) => c.name === "profiles");
+    if (profiles) await profiles.handler([], { ...ctx, notify, presenter });
+
+    expect(ctx.client.setProfile).toHaveBeenCalledWith("daytona-bench", policy.revision);
+    expect(notify).toHaveBeenCalledWith(expect.stringContaining("Profile set to 'daytona-bench'"));
+    expect(systemTexts(ctx)).toHaveLength(0);
+  });
+
+  it("/theme flashes after applying a picked theme and keeps failures in the transcript", async () => {
+    vi.stubEnv("FLEET_TUI_STATE_DIR", tmpdir());
+    try {
+      const { ctx } = makeContext();
+      const notify = vi.fn();
+      const theme = listCommands().find((c) => c.name === "theme");
+      if (!theme) throw new Error("theme command missing");
+
+      const apply = { chooseTheme: vi.fn().mockResolvedValue("light") } as never;
+      await theme.handler([], { ...ctx, notify, presenter: apply });
+      expect(notify).toHaveBeenCalledWith(expect.stringContaining("Theme set to 'light'."));
+      expect(systemTexts(ctx)).toHaveLength(0);
+
+      const reject = { chooseTheme: vi.fn().mockResolvedValue("not-a-theme") } as never;
+      await theme.handler([], { ...ctx, notify, presenter: reject });
+      expect(systemTexts(ctx).join("\n")).toContain("Theme not found: not-a-theme");
+      if (theme) await theme.handler(["dark"], ctx);
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it("/skills flashes the updated selection count when interactive", async () => {
+    const { ctx } = makeContext();
+    const notify = vi.fn();
+    const card = {
+      id: "00000000-0000-4000-8000-0000000000ab",
+      name: "long-context",
+      description: "Long context",
+      scope: "system",
+      version: "2.0.0",
+      trust: "system",
+      affordances: [],
+      resources_available: true,
+    };
+    ctx.client.listSkills = vi.fn().mockResolvedValue([card]);
+    const presenter = {
+      chooseSkills: vi
+        .fn()
+        .mockResolvedValue([
+          { id: card.id, expectedVersion: card.version, displayName: card.name },
+        ]),
+    } as never;
+    const skills = listCommands().find((c) => c.name === "skills");
+    if (skills) await skills.handler([], { ...ctx, notify, presenter });
+
+    expect(ctx.store.getState().pendingSkillSelections).toHaveLength(1);
+    expect(notify).toHaveBeenCalledWith(expect.stringContaining("1/4"));
+    expect(systemTexts(ctx)).toHaveLength(0);
   });
 });

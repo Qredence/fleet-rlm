@@ -130,11 +130,6 @@ export class FleetTheme {
     return `\x1b[9m${text}\x1b[29m`;
   }
 
-  /** Hex value of a background token (used by adaptive blending). */
-  bgColorValue(color: ThemeBackground): string {
-    return this.palette[color];
-  }
-
   /**
    * Background style for a surface token, blended away from the terminal's
    * actual background when the configured color would be invisible on it.
@@ -222,8 +217,14 @@ export class FleetTheme {
     return this.surfaceBackgroundColor("userMessageBg");
   }
 
-  getPopupBackgroundColor(): (str: string) => string {
-    return this.surfaceBackgroundColor("toolPanelBg");
+  /** Transcript search (Ctrl+Shift+F) non-current match: a plain theme underline. */
+  getSearchMatchStyle(): (str: string) => string {
+    return (str: string) => this.underline(str);
+  }
+
+  /** Transcript search current match: the Fleet adaptive selection background. */
+  getSearchCurrentMatchStyle(): (str: string) => string {
+    return this.selectionBackgroundColor();
   }
 }
 
@@ -282,11 +283,6 @@ export function hasExplicitThemeOverride(): boolean {
 export async function getAvailableThemes(): Promise<string[]> {
   const custom = await loadCustomThemeNames();
   return [...Object.keys(builtinPalettes), ...custom.filter((name) => !builtinPalettes[name])];
-}
-
-/** True when the active theme is a builtin that follows the terminal scheme. */
-export function isAutoTheme(): boolean {
-  return themeName === "dark" || themeName === "light";
 }
 
 /**
@@ -364,10 +360,10 @@ export const theme = {
   underline: (text: string) => activeTheme.underline(text),
   strikethrough: (text: string) => activeTheme.strikethrough(text),
   surface: (color: ThemeBackground) => activeTheme.surfaceBackgroundColor(color),
-  selection: () => activeTheme.selectionBackgroundColor(),
   userMessageBackground: () => activeTheme.getUserMessageBackgroundColor(),
-  popupBackground: () => activeTheme.getPopupBackgroundColor(),
-  bgColorValue: (color: ThemeBackground) => activeTheme.bgColorValue(color),
+  /** Transcript search match styles: resolve against the active theme at call time. */
+  searchMatch: () => activeTheme.getSearchMatchStyle(),
+  currentSearchMatch: () => activeTheme.getSearchCurrentMatchStyle(),
 };
 
 export const statusGlyph = {

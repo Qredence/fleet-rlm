@@ -1,7 +1,7 @@
 # Use the Fleet terminal UI
 
 `tools/fleet-tui/` is the maintained Node 22.19+ development client for Fleet's
-FastAPI HTTP/SSE API. It uses pi-tui 0.84.0 and owns no model, provider key,
+FastAPI HTTP/SSE API. It uses pi-tui 0.84.2 and owns no model, provider key,
 Sandbox, or execution runtime.
 
 ## Start a supervised session
@@ -67,7 +67,12 @@ Sandbox. The TUI does not infer depth from iteration counts or model text.
 
 The transcript is a follow-end `ScrollView` inside `TuiAltScreen`. PgUp/PgDn
 scroll a page, Home/End jump top/bottom, the mouse wheel scrolls, drag selects
-text for copy, and new output re-follows the end. Tool, code, and output cards
+text for copy, and new output re-follows the end. Ctrl+Shift+F opens pi-tui
+transcript search over the scroll view; Enter/Ctrl+G moves to the next match,
+Shift+Enter/Ctrl+Shift+G to the previous, and Escape closes the search overlay.
+Search matches are styled from the active Fleet theme (underline for matches,
+the adaptive selection background for the current match). Tool, code, and
+output cards
 fold with Ctrl+O. Resize, hydration, and clear may replay the screen and return
 to the live bottom.
 
@@ -97,10 +102,17 @@ Use `/help` for the current slash-command list. Important commands include
 `/profiles`, `/theme`, `/volume`, `/files`, `/file`, `/attach`, `/artifact`,
 `/artifacts`, `/redo`, `/cancel`, `/clear`, `/skills`, `/skill`, `/trace`,
 and `/exit`. `/settings`
-is a local-only TOML policy editor; `/profiles` switches the selected profile;
+is a local-only TOML policy editor whose overlay stays open for successive
+field edits (environment-pinned and single-valued fields are read-only, and
+each save reuses the freshly returned policy revision); `/profiles` opens a
+"Select profile for next restart" picker that marks the running profile;
 `/volume [root]` shows the read-only Workspace Volume tree; `/theme [name]`
-lists and switches the builtin or custom color themes. Saved policy
-settings take effect after restarting Fleet.
+lists and switches the builtin or custom color themes with a filter-as-you-type
+picker that marks the current theme. Saved policy
+settings take effect after restarting Fleet. Interactive one-shot successes
+(saved setting, selected profile, applied theme, updated Skill selections) are
+confirmed with a transient flash notice rather than a transcript message;
+failures still appear in the transcript.
 
 `/attach <path>…` uploads local files through the lifecycle-owned Attachment
 endpoint and pins them (up to eight) to the next Turn; `/attach list` and

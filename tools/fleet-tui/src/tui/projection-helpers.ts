@@ -227,19 +227,6 @@ function singleScalar(value: unknown): string | number | boolean | null | undefi
     : undefined;
 }
 
-export function string(value: unknown, fallback = ""): string {
-  return value === undefined || value === null ? fallback : String(value);
-}
-
-export function number(value: unknown, fallback = 0): number {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : fallback;
-}
-
-export function nullableNumber(value: unknown): number | null {
+function nullableNumber(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
-}
-
-export function assertNever(value: never): never {
-  throw new Error(`Unsupported Fleet UI part: ${JSON.stringify(value)}`);
 }

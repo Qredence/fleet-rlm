@@ -28,6 +28,11 @@ export function formatTokens(n: number): string {
   return `${(n / 1_000_000).toFixed(1)}M`;
 }
 
+/** Observed token count for display: em dash when the count is unavailable. */
+export function formatObservedTokens(value: number | null): string {
+  return value === null ? "—" : formatTokens(value);
+}
+
 export function shortId(id: string, length = 4): string {
   if (!id) return "";
   const clean = id.replaceAll("-", "");
@@ -65,7 +70,8 @@ export type StructuredResultDisplay = {
 };
 
 function scalar(value: unknown): string | null {
-  if (value === null) return "null";
+  // Missing wire values surface as JSON null, never the literal "undefined".
+  if (value === null || value === undefined) return "null";
   if (["string", "number", "boolean"].includes(typeof value)) return String(value);
   return null;
 }
@@ -74,7 +80,7 @@ function resultValue(value: unknown): string {
   const simple = scalar(value);
   if (simple !== null) return simple;
   try {
-    return JSON.stringify(redact(value), null, 2);
+    return JSON.stringify(redact(value), null, 2) ?? "null";
   } catch {
     return String(value);
   }

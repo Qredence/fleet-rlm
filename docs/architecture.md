@@ -156,7 +156,7 @@ exception text.
 
 ## Terminal client
 
-`@earendil-works/pi-tui@0.84.0` is the only renderer. Fleet uses `TuiAltScreen`
+`@earendil-works/pi-tui@0.84.2` is the only renderer. Fleet uses `TuiAltScreen`
 with a follow-end transcript `ScrollView`; the client requires Node 22.19+, owns
 no model or provider runtime, and consumes the FastAPI HTTP/SSE contract.
 

@@ -1,6 +1,7 @@
 /** Multi-turn conversation store. Renderer-independent source of truth. */
 
-import { summarizeExecution, type ExecutionSummary } from "./execution-summary.js";
+import type { ExecutionSummary } from "./execution-summary.js";
+import { hasMultipleLines } from "./terminal-text.js";
 
 export type Phase = "idle" | "submitting" | "running" | "cancelling" | "completed" | "error";
 
@@ -149,6 +150,9 @@ export type PendingSkillSelection = {
   displayName: string;
 };
 
+/** Maximum unique Skills pinnable for one Turn; enforced by the reducer and command surfaces. */
+export const MAX_PENDING_SKILLS = 4;
+
 export type PendingAttachment = {
   id: string;
   filename: string;
@@ -237,15 +241,13 @@ type Event =
   | { type: "attachment/clear" }
   | { type: "attachment/replace"; attachments: PendingAttachment[] }
   | { type: "attachment/consume"; attachments: PendingAttachment[] }
-  | { type: "clear" }
-  | { type: "reset" };
+  | { type: "clear" };
 
 type Listener = () => void;
 
 export class ConversationStore {
   private state: State = initialState();
   private listeners: Set<Listener> = new Set();
-  private cancelToken: AbortController | null = null;
 
   getState(): State {
     return this.state;
@@ -254,25 +256,6 @@ export class ConversationStore {
   subscribe(listener: Listener): () => void {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
-  }
-
-  setCancelToken(controller: AbortController | null): void {
-    this.cancelToken = controller;
-  }
-
-  clearCancelToken(controller: AbortController): void {
-    if (this.cancelToken === controller) this.cancelToken = null;
-  }
-
-  cancelActiveRun(): AbortController | null {
-    if (this.state.run.phase !== "running" && this.state.run.phase !== "submitting") {
-      return null;
-    }
-    if (this.cancelToken && !this.cancelToken.signal.aborted) {
-      this.cancelToken.abort();
-    }
-    this.update({ type: "run/cancelling" });
-    return this.cancelToken;
   }
 
   dispatch(event: Event): void {
@@ -314,9 +297,19 @@ function reduce(state: State, event: Event): State {
     case "session/init":
       return { ...state, session: event.session };
     case "session/hydrate": {
+      // Same-Session /reload + /resume keep locally pinned Turn inputs and the
+      // /redo prompt; switching Sessions must never leak them over the boundary.
+      const sameSession = state.session?.id === event.session.id;
       const hydrated = event.events.reduce<State>(reduce, {
         ...initialState(),
         session: event.session,
+        ...(sameSession
+          ? {
+              pendingSkillSelections: state.pendingSkillSelections,
+              pendingAttachments: state.pendingAttachments,
+              lastPrompt: state.lastPrompt,
+            }
+          : {}),
       });
       return { ...hydrated, run: initialState().run };
     }
@@ -430,19 +423,9 @@ function reduce(state: State, event: Event): State {
         },
       };
     case "message/upsert": {
-      const incoming =
-        event.message.kind === "usage"
-          ? {
-              ...event.message,
-              executionSummary: summarizeExecution(
-                [
-                  ...state.messages.filter((message) => message.id !== event.message.id),
-                  event.message,
-                ],
-                event.message.runId,
-              ),
-            }
-          : event.message;
+      // The execution summary is owned by the projection layer (TurnEventReducer
+      // attaches it to usage messages); the store never recomputes it.
+      const incoming = event.message;
       const existing = state.messages.findIndex((m) => m.id === incoming.id);
       let run = state.run;
       if (existing < 0 && incoming.kind === "tool") {
@@ -496,7 +479,7 @@ function reduce(state: State, event: Event): State {
         pendingSkillSelections[existing] = event.selection;
         return { ...state, pendingSkillSelections };
       }
-      if (state.pendingSkillSelections.length >= 4) return state;
+      if (state.pendingSkillSelections.length >= MAX_PENDING_SKILLS) return state;
       return {
         ...state,
         pendingSkillSelections: [...state.pendingSkillSelections, event.selection],
@@ -507,7 +490,7 @@ function reduce(state: State, event: Event): State {
         ? state
         : { ...state, pendingSkillSelections: [] };
     case "skill-selection/replace":
-      return { ...state, pendingSkillSelections: event.selections.slice(0, 4) };
+      return { ...state, pendingSkillSelections: event.selections.slice(0, MAX_PENDING_SKILLS) };
     case "skill-selection/consume": {
       const consumed = new Set(
         event.selections.map((selection) => `${selection.id}\u0000${selection.expectedVersion}`),
@@ -553,15 +536,9 @@ function reduce(state: State, event: Event): State {
         messages: [],
         run: initialState().run,
       };
-    case "reset":
-      return initialState();
     default:
       return state;
   }
-}
-
-function hasMultipleLines(value: string): boolean {
-  return value.replace(/\r\n/g, "\n").replace(/\r/g, "\n").trimEnd().split("\n").length > 1;
 }
 
 export type { Event as StoreEvent };
