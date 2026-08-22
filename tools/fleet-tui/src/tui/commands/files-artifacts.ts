@@ -230,6 +230,12 @@ export const artifactsCommand: CommandSpec = {
   },
 };
 
+/**
+ * Renders slash-separated volume paths as a sorted hierarchical tree.
+ *
+ * @param paths - Volume paths to render.
+ * @returns A tree representation of the paths, or `(empty)` when no paths are provided.
+ */
 export function formatVolumeTree(paths: readonly string[]): string {
   if (paths.length === 0) return "(empty)";
   const root = new Map<string, Map<string, unknown>>();
@@ -276,6 +282,12 @@ const TEXT_EXTENSIONS = new Set([
   "yml",
 ]);
 
+/**
+ * Determines the MIME type for a file path based on its extension.
+ *
+ * @param path - The file path whose extension determines the MIME type
+ * @returns `text/plain` for recognized text-file extensions, `application/octet-stream` otherwise
+ */
 function contentTypeFor(path: string): string {
   const extension = basename(path).split(".").pop()?.toLowerCase();
   return extension && TEXT_EXTENSIONS.has(extension) ? "text/plain" : "application/octet-stream";

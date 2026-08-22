@@ -74,14 +74,30 @@ export type CommandSpec = {
 
 const commands = new Map<string, CommandSpec>();
 
+/**
+ * Registers a command specification by name, replacing any existing command with the same name.
+ *
+ * @param spec - The command specification to register
+ */
 export function registerCommand(spec: CommandSpec): void {
   commands.set(spec.name, spec);
 }
 
+/**
+ * Retrieves a registered command by name.
+ *
+ * @param name - The command name to look up
+ * @returns The matching command specification, or `undefined` if no command is registered under that name
+ */
 export function getCommand(name: string): CommandSpec | undefined {
   return commands.get(name);
 }
 
+/**
+ * Lists all registered commands.
+ *
+ * @returns The registered command specifications
+ */
 export function listCommands(): CommandSpec[] {
   return Array.from(commands.values());
 }
@@ -92,6 +108,12 @@ export type ParsedInput =
   | { kind: "unknown-command"; name: string }
   | { kind: "empty" };
 
+/**
+ * Classifies raw input as empty input, a message, a registered command, or an unknown command.
+ *
+ * @param raw - The input text to classify
+ * @returns The parsed input classification, including command arguments or the unknown command name when applicable
+ */
 export function parseInput(raw: string): ParsedInput {
   const text = raw.trim();
   if (!text) return { kind: "empty" };

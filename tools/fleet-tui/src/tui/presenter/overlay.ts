@@ -20,7 +20,11 @@ export function overlayTitle(text: string): string {
   return theme.fg("accent", theme.bold(text));
 }
 
-/** Shared Fleet-styled overlay context/hint line. */
+/** Applies Fleet's dim styling to overlay hint text.
+
+ * @param text - The hint text to style
+ * @returns The dim-styled hint text
+ */
 export function overlayHint(text: string): string {
   return theme.fg("dim", text);
 }
@@ -131,6 +135,12 @@ export class TitledComponent implements Component {
   }
 }
 
+/**
+ * Determines whether input consists entirely of printable Unicode characters.
+ *
+ * @param value - The input string to evaluate
+ * @returns `true` if the string is nonempty and contains only printable characters, `false` otherwise.
+ */
 export function isPrintableInput(value: string): boolean {
   return (
     value.length > 0 &&

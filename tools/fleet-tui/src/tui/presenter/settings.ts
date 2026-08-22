@@ -70,7 +70,11 @@ export function fieldItem(field: SettingsField): SettingItem {
   };
 }
 
-/** Singleton single-choice fields have exactly one meaningful value. */
+/**
+ * Determines whether a single-choice field has at most one available choice.
+ *
+ * @returns `true` if the field uses a single-choice editor and has at most one choice, `false` otherwise.
+ */
 function isFixedChoice(field: SettingsField): boolean {
   return field.editor === "single_choice" && (field.choices?.length ?? 0) <= 1;
 }
@@ -80,13 +84,11 @@ export type ParsedFieldValue =
   | { ok: false; error: string };
 
 /**
- * Converts a raw settings editor string into the typed PATCH value. Number
- * fields reject empty and non-numeric input instead of PATCHing `NaN` (which
- * JSON encodes as `null`).
+ * Converts editor text into the typed value for a settings update.
  *
  * @param field - The settings field being edited
- * @param raw - The raw value returned by the SettingsList editor
- * @returns The typed value, or a user-facing parse error
+ * @param raw - The raw editor input
+ * @returns A parsed value, or an error message when numeric input is blank or invalid
  */
 export function parseFieldValue(field: SettingsField, raw: string): ParsedFieldValue {
   if (field.editor === "boolean") return { ok: true, value: raw === "true" };
@@ -110,6 +112,15 @@ export function parseFieldValue(field: SettingsField, raw: string): ParsedFieldV
   return { ok: true, value: raw };
 }
 
+/**
+ * Creates a settings update from raw field input and completes the editing operation.
+ *
+ * @param settings - Current settings policy used to assign the update revision
+ * @param scope - Settings scope for the update
+ * @param field - Field being updated
+ * @param raw - Raw value entered for the field
+ * @param finish - Callback receiving the update, or `null` when the value is invalid
+ */
 export function applyFieldValue(
   settings: FleetSettingsPolicy,
   scope: string,

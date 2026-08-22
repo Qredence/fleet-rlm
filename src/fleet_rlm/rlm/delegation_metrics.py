@@ -48,7 +48,12 @@ class DelegationMetricsSnapshot:
     token_usage_status: TokenUsageStatus = "unavailable"
 
     def as_dict(self) -> dict[str, object]:
-        """Return a bounded JSON/MLflow-safe representation."""
+        """
+        Return a bounded JSON- and MLflow-compatible representation of the metrics snapshot.
+        
+        Returns:
+        	dict[str, object]: Serialized metrics, including call counts, latency totals rounded to three decimal places, observed token totals, and token usage status.
+        """
         return {
             "root_lm_calls_depth_0": self.root_lm_calls_depth_0,
             "sub_lm_calls_depth_0": self.sub_lm_calls_depth_0,
@@ -108,7 +113,15 @@ class DelegationMetrics:
         duration_ms: float = 0.0,
         usage: Mapping[str, Any] | None = None,
     ) -> None:
-        """Record one completed or failed LM request without retaining content."""
+        """
+        Record a language-model request and its aggregate metrics.
+        
+        Parameters:
+            role (str): Model role, normalized to ``"root"``, ``"sub"``, or ``"unknown"``.
+            recursive_depth (int): Recursion depth associated with the request.
+            duration_ms (float): Request duration in milliseconds.
+            usage (Mapping[str, Any] | None): Provider token-usage data, if available. Token totals are recorded only when usage is observed.
+        """
         normalized_role = role if role in {"root", "sub"} else "unknown"
         key = (normalized_role, max(0, int(recursive_depth)))
         normalized_usage = normalize_lm_token_usage(usage)
@@ -130,6 +143,7 @@ class DelegationMetrics:
                 self._lm_tokens[key] = self._lm_tokens.get(key, 0) + tokens
 
     def record_recursive_call(self) -> None:
+        """Record one recursive child call."""
         with self._lock:
             self._recursive_child_calls += 1
 
@@ -153,6 +167,12 @@ class DelegationMetrics:
             self._active_children = max(0, self._active_children - 1)
 
     def snapshot(self) -> DelegationMetricsSnapshot:
+        """Create an immutable snapshot of the accumulated delegation metrics.
+        
+        Returns:
+            DelegationMetricsSnapshot: The current metrics, including call counts,
+                latency totals, concurrency data, and token usage status.
+        """
         with self._lock:
             calls = tuple(sorted((role, depth, count) for (role, depth), count in self._lm_calls.items()))
             latency = tuple(sorted((role, depth, total) for (role, depth), total in self._lm_latency_ms.items()))
@@ -188,7 +208,15 @@ class DelegationMetrics:
 
 
 def normalize_lm_token_usage(usage: Mapping[str, Any] | None) -> dict[str, int]:
-    """Map supported provider token aliases onto one canonical usage shape."""
+    """
+    Normalize provider token usage fields into canonical token names.
+    
+    Parameters:
+        usage (Mapping[str, Any] | None): Provider usage data containing supported token field aliases.
+    
+    Returns:
+        dict[str, int]: Canonical nonnegative token counts, with total tokens derived from input and output counts when unavailable.
+    """
     if not isinstance(usage, Mapping):
         return {}
     normalized: dict[str, int] = {}

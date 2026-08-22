@@ -751,11 +751,12 @@ def _latest_lm_telemetry(
 ) -> tuple[dict[str, JsonValue], dict[str, JsonValue]]:
     """
     Retrieve sanitized usage and provider telemetry for the latest completed language-model call.
-
+    
     Parameters:
         instance (Any): Language-model instance whose call history is inspected.
         history_length (int | None): Starting history position for entries belonging to the current call.
-
+        outputs (object): Callback output used to identify the matching history entry or provide typed-response telemetry.
+    
     Returns:
         tuple[dict[str, JsonValue], dict[str, JsonValue]]: Allowlisted usage data and provider response metadata.
     """
@@ -800,14 +801,14 @@ def _latest_lm_telemetry(
 
 
 def _typed_response_telemetry(outputs: object) -> tuple[dict[str, JsonValue], dict[str, JsonValue]]:
-    """Read usage directly from a typed DSPy LMResponse callback payload.
-
-    In the DSPy 3.3.x typed contract (``forward_contract = "typed_lm"``, an
-    explicit ``LMRequest``, or ``dspy.context(experimental=True)``) the LM
-    callback receives the typed ``dspy.LMResponse`` object itself. Its public
-    ``usage_as_dict()`` and ``provider_response`` are the authoritative
-    observed telemetry for that exact call; when the response carries no
-    usage this returns ``({}, {})`` rather than an estimate.
+    """
+    Read usage and provider telemetry from a typed DSPy LM response.
+    
+    Parameters:
+    	outputs (object): Typed LM response payload containing usage and provider details.
+    
+    Returns:
+    	A pair containing sanitized usage data and provider telemetry. Both mappings are empty when the payload does not expose usable telemetry.
     """
     if outputs is None:
         return {}, {}

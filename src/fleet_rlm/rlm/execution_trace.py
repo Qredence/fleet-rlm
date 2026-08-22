@@ -89,16 +89,16 @@ def record_phase_success(
 ) -> Any:
     """
     Record successful completion details and recursive delegation metrics for a trace phase.
-
+    
     Parameters:
-        phase (Any): Trace phase whose outputs are updated.
-        prediction (Any): Completed RLM prediction used to derive usage and termination details.
-        started (float): Monotonic start time used to calculate elapsed duration.
-        recursive_executor (RecursiveRLMExecutor | None): Executor providing recursive-call metrics.
-        metrics (Any): Execution metrics used when recursive metrics are unavailable.
-
+    	phase (Any): Trace phase whose outputs are updated.
+    	prediction (Any): Completed RLM prediction used to derive usage and termination details.
+    	started (float): Monotonic start time used to calculate elapsed duration.
+    	recursive_executor (RecursiveRLMExecutor | None): Executor providing recursive-call metrics.
+    	metrics (Any): Execution metrics used when recursive metrics are unavailable.
+    
     Returns:
-        Any: The original prediction.
+    	Any: The original prediction.
     """
     termination_mode = rlm_termination_mode(prediction)
     usage = observed_usage(prediction, duration_ms=int((time.perf_counter() - started) * 1000))

@@ -231,10 +231,22 @@ function activityAction(state: State): string {
   return phase ? `Running ${terminalSafeStatus(phase)}` : "Running RLM";
 }
 
+/**
+ * Sanitizes status text for terminal display.
+ *
+ * @param value - The status text to sanitize
+ * @returns The sanitized text with terminal-unsafe characters removed and underscores or hyphens replaced with spaces.
+ */
 function terminalSafeStatus(value: string): string {
   return terminalSafeLine(value).replaceAll(/[_-]+/g, " ");
 }
 
+/**
+ * Selects the status glyph for a run outcome.
+ *
+ * @param outcome - The run outcome to represent.
+ * @returns `"success"` for completed runs, `"warning"` for cancelled runs, and `"error"` for other outcomes.
+ */
 function outcomeGlyph(outcome: NonNullable<Run["outcome"]>): keyof typeof statusGlyph {
   if (outcome === "completed") return "success";
   if (outcome === "cancelled") return "warning";

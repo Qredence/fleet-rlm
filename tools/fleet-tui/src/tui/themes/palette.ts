@@ -326,11 +326,13 @@ export async function writeThemeSelection(name: string): Promise<void> {
 }
 
 /**
- * Watch the custom-themes directory and invoke the callback with the names of
- * theme files that changed. Returns a stop function. A watcher failure
- * (for example EMFILE on a file-descriptor-constrained host) disables hot
- * reload and is reported exactly once through `onError` — a broken watcher
- * must never crash the TUI, but must also never fail silently.
+ * Watches the custom themes directory and notifies callers when theme names change.
+ *
+ * A watcher failure stops monitoring and is reported once through `onError`.
+ *
+ * @param onChange - Called with the changed theme name or the current theme names
+ * @param onError - Called once when watcher setup or runtime fails
+ * @returns A function that stops watching for theme changes
  */
 export function watchCustomThemes(
   onChange: (names: string[]) => void,
@@ -386,6 +388,11 @@ export function watchCustomThemes(
   };
 }
 
+/**
+ * Reports that custom theme watching is unavailable and hot reload is disabled.
+ *
+ * @param error - The watcher failure to include in the warning
+ */
 function reportWatcherFailure(error: unknown): void {
   const detail = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
   console.warn(
@@ -393,6 +400,12 @@ function reportWatcherFailure(error: unknown): void {
   );
 }
 
+/**
+ * Extracts a custom theme name from a JSON filename.
+ *
+ * @param filename - The filename to convert into a theme name
+ * @returns The filename without its `.json` suffix, or `null` for other filenames or empty names
+ */
 function customThemeNameFromFilename(filename: string | Buffer | null): string | null {
   if (!filename) return null;
   const entry = filename.toString();

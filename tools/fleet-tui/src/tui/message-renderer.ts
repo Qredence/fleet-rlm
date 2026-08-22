@@ -218,6 +218,13 @@ const TOOL_STATUS = {
   error: { glyph: statusGlyph.error, color: "error", label: "error" },
 } as const;
 
+/**
+ * Renders a tool message with its status, elapsed time, input, and output or error details.
+ *
+ * @param message - The tool message to render
+ * @param width - The available rendering width
+ * @returns The rendered tool panel lines
+ */
 function renderTool(message: Extract<Message, { kind: "tool" }>, width: number): string[] {
   const status = TOOL_STATUS[message.status];
   // Running tools tick at 5s granularity: a mid-transcript card whose line
@@ -489,7 +496,11 @@ function isStackContextLine(line: { raw: string; trimmed: string }): boolean {
   return line.raw.startsWith(" ") || line.raw.startsWith("\t");
 }
 
-/** Summarize a multi-line error/stack trace to its last meaningful line. */
+/**
+ * Extracts a concise summary from an error message or stack trace.
+ *
+ * @returns The last meaningful line of a stack trace, the first meaningful line of other text, or `Error` when no usable detail exists.
+ */
 export function summarizeErrorDetails(text: string): string {
   const lines = errorDetailLines(text);
   if (lines.length === 0) return "Error";
@@ -503,6 +514,15 @@ export function summarizeErrorDetails(text: string): string {
   return lines[0]?.trimmed ?? "Error";
 }
 
+/**
+ * Wraps text to the available width and applies a style to each resulting line.
+ *
+ * @param value - The text to wrap and style
+ * @param width - The maximum total line width
+ * @param style - The function used to style each wrapped line
+ * @param indent - The number of spaces to prepend to each line
+ * @returns The indented, styled lines
+ */
 function wrapStyled(
   value: string,
   width: number,
@@ -527,6 +547,13 @@ function dim(value: string): string {
   return theme.fg("dim", value);
 }
 
+/**
+ * Adds a streaming cursor to a line while keeping the result within the specified width.
+ *
+ * @param line - The text to display before the cursor
+ * @param width - The maximum rendered width
+ * @returns The truncated line with a streaming cursor, or only the cursor when the width is one
+ */
 function appendStreamingCursor(line: string, width: number): string {
   const cursor = theme.fg("accent", "█");
   if (width <= 1) return truncateToWidth(cursor, width, "");

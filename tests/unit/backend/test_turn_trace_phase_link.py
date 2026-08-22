@@ -23,30 +23,53 @@ from fleet_rlm.observability import tracing
 
 class _FakeSpan:
     def __init__(self, request_id: str) -> None:
+        """Initialize a fake span with the specified request ID and empty recording collections."""
         self.request_id = request_id
         self.inputs: list[dict[str, object]] = []
         self.outputs: list[dict[str, object]] = []
         self.statuses: list[str] = []
 
     def set_inputs(self, payload: dict[str, object]) -> None:
+        """Records an input payload for the span.
+        
+        Parameters:
+        	payload (dict[str, object]): Input data associated with the span.
+        """
         self.inputs.append(payload)
 
     def set_outputs(self, payload: dict[str, object]) -> None:
+        """Record an output payload for the span.
+        
+        Parameters:
+        	payload (dict[str, object]): Output data to append to the span's recorded outputs.
+        """
         self.outputs.append(payload)
 
     def set_attributes(self, payload: dict[str, object]) -> None:
+        """Set the span attributes to the provided payload.
+        
+        Parameters:
+        	payload (dict[str, object]): Attribute names and values to assign.
+        """
         self.attributes = payload
 
     def set_status(self, status: str) -> None:
+        """Record a status value for the span."""
         self.statuses.append(status)
 
 
 def _install_fake_mlflow(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
-    """Install a fake MLflow that issues a distinct request id per root span."""
+    """
+    Install a fake MLflow module that records spans and trace updates.
+    
+    Returns:
+        SimpleNamespace: Recorded spans, trace updates, and active span state.
+    """
     calls = SimpleNamespace(spans=[], update_kwargs=[], stack=[])
 
     @contextmanager
     def start_span(*, name: str = "span", span_type: Any = None, **_kwargs: Any) -> Iterator[Any]:
+        """Create and yield a fake tracing span for the duration of a context."""
         del span_type
         span = _FakeSpan(f"tr-span-{len(calls.spans) + 1}")
         calls.spans.append((name, span))
@@ -57,9 +80,16 @@ def _install_fake_mlflow(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
             calls.stack.pop()
 
     def update_current_trace(**kwargs: Any) -> None:
+        """Records updates intended for the current trace."""
         calls.update_kwargs.append(kwargs)
 
     def get_current_active_span() -> Any:
+        """
+        Return the currently active fake tracing span, if one exists.
+        
+        Returns:
+        	Any: The active span, or `None` when no span is active.
+        """
         return calls.stack[-1] if calls.stack else None
 
     mlflow = ModuleType("mlflow")
@@ -77,6 +107,12 @@ def _install_fake_mlflow(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
 
 @pytest.fixture
 def _tracing_active(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    """
+    Temporarily enables tracing with an increased trace-content limit for a test.
+    
+    Parameters:
+    	monkeypatch (pytest.MonkeyPatch): Fixture used to modify tracing configuration.
+    """
     monkeypatch.setattr(tracing, "_TRACE_CONTENT_MAX_CHARS", 10_000)
     tracing.set_tracing_active_for_tests(True)
     yield
@@ -94,6 +130,17 @@ async def _run_success_turn(
     tracing_enabled: bool,
     expose_trace_id: bool,
 ) -> list[Any]:
+    """
+    Run a successful turn through the coordinator and collect its emitted events.
+    
+    Parameters:
+    	prepared_factory (Any): Factory that creates the prepared run for the turn.
+    	tracing_enabled (bool): Whether MLflow tracing is enabled.
+    	expose_trace_id (bool): Whether trace IDs are exposed in emitted events.
+    
+    Returns:
+    	list[Any]: Events emitted during the turn.
+    """
     from fleet_rlm.chat.commands import OpenTurnCommand
     from fleet_rlm.chat.run_lifecycle import RunLifecycleService
     from fleet_rlm.chat.turn_coordinator import TurnCoordinator
@@ -116,11 +163,20 @@ async def _run_success_turn(
 
     class Preparation:
         async def prepare(self, _turn: Any, *, deadline: float) -> Any:
+            """Create a prepared run for the current session.
+            
+            Parameters:
+            	_turn (Any): The turn associated with the preparation request.
+            
+            Returns:
+            	Any: The prepared run created for the current session.
+            """
             del deadline
             return prepared_factory(run_id, session.id)
 
     class Stream:
         def __init__(self, execution: Any) -> None:
+            """Initialize a completed execution fixture with recorded start and running-status events."""
             recorder = EventRecorder(execution.run_id, execution.session_id)
             self._events = iter(
                 (
@@ -137,6 +193,15 @@ async def _run_success_turn(
             return self
 
         async def __anext__(self) -> Any:
+            """
+            Retrieve the next event from the iterator for asynchronous iteration.
+            
+            Returns:
+            	Any: The next event.
+            
+            Raises:
+            	StopAsyncIteration: When no events remain.
+            """
             try:
                 return next(self._events)
             except StopIteration:
@@ -147,6 +212,14 @@ async def _run_success_turn(
 
     class Runner:
         def stream(self, execution: Any) -> Stream:
+            """Create a stream for the specified execution.
+            
+            Parameters:
+            	execution (Any): The execution to stream.
+            
+            Returns:
+            	Stream: A stream associated with the execution.
+            """
             return Stream(execution)
 
     coordinator = TurnCoordinator(
@@ -166,6 +239,9 @@ async def _run_success_turn(
 
 
 def _real_prepared_run(run_id: Any, session_id: Any) -> Any:
+    """
+    Create a prepared run with the specified run and session identifiers.
+    """
     from fleet_rlm.chat.run_preparation import PreparedRun, _PreparedRunResources
 
     return PreparedRun(

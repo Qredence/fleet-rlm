@@ -70,17 +70,23 @@ class OpenedTurnStream:
         return getattr(self._prepared, "cleanup_receipt", None)
 
     async def aclose(self) -> None:
+        """Close the underlying event stream while allowing cleanup to complete safely."""
         close = getattr(self._events, "aclose", None)
         if close is not None:
             await shield_cleanup(close())
 
 
 def _attach_preparation_trace_id(prepared: PreparedRun, trace_id: str | None) -> PreparedRun:
-    """Attach the preparation trace id for internal MLflow phase correlation.
-
-    Fail-soft engineering observability: private test doubles that are not the
-    frozen ``PreparedRun`` dataclass (or predate the field) are returned
-    unchanged, and an absent trace id is a no-op. Never affects the Turn.
+    """
+    Attach a preparation trace identifier for internal phase correlation.
+    
+    Parameters:
+        prepared (PreparedRun): Prepared run to annotate.
+        trace_id (str | None): Preparation trace identifier, if available.
+    
+    Returns:
+        PreparedRun: The annotated run, or the original run when no identifier is
+        provided or annotation is unsupported.
     """
     if not trace_id:
         return prepared
@@ -112,6 +118,20 @@ class TurnCoordinator:
         mlflow_tracing_enabled: bool = False,
         mlflow_expose_trace_id: bool = True,
     ) -> None:
+        """
+        Initialize the turn coordinator and its lifecycle dependencies.
+        
+        Parameters:
+            lifecycle: Service for claiming, renewing, settling, and revoking runs.
+            preparation: Service that prepares runs before execution.
+            runner: Service that executes prepared runs.
+            projector: Optional projector for committed turn events.
+            turn_timeout_seconds: Maximum duration allowed for a turn.
+            cleanup: Optional supervisor for asynchronous cleanup tasks.
+            claim_loss_fence: Optional callback applied when claim loss requires fencing.
+            mlflow_tracing_enabled: Whether MLflow tracing is enabled.
+            mlflow_expose_trace_id: Whether trace IDs may be exposed.
+        """
         self._lifecycle = lifecycle
         self._preparation = preparation
         self._runner = runner
@@ -132,13 +152,15 @@ class TurnCoordinator:
         )
 
     async def _prepare_with_trace(self, start: ClaimedRun, *, deadline: float) -> PreparedRun:
-        """Trace preparation separately because SSE begins only after it succeeds.
-
-        ``expose_trace_id=True`` here is internal correlation only: the
-        captured preparation trace id rides the internal ``PreparedRun`` into
-        the execution ``fleet_turn`` root as ``fleet.preparation_trace_id``.
-        It never reaches SSE — the stream's ``trace_id`` comes from the
-        execution trace handle, and preparation completes before SSE headers.
+        """
+        Prepare a claimed run while recording preparation tracing information for execution correlation.
+        
+        Parameters:
+            start (ClaimedRun): The claimed run to prepare.
+            deadline (float): Monotonic time by which preparation must complete.
+        
+        Returns:
+            PreparedRun: The prepared run, including its preparation trace identifier when supported.
         """
         with turn_trace(
             start.session_id,
@@ -276,6 +298,15 @@ class TurnCoordinator:
         on_settlement: Callable[[object], None] | None = None,
         on_cleanup: Callable[[asyncio.Task[None]], None] | None = None,
     ) -> AsyncGenerator[RuntimeEvent]:
+        """Stream runtime events for the prepared run during the execution phase.
+        
+        Parameters:
+        	run (ClaimedRun): The claimed run to execute.
+        	prepared (PreparedRun): The prepared run configuration.
+        	heartbeat (ClaimHeartbeat | None): The heartbeat maintaining the run claim.
+        	on_settlement (Callable[[object], None] | None): Callback invoked when settlement occurs.
+        	on_cleanup (Callable[[asyncio.Task[None]], None] | None): Callback invoked when cleanup is scheduled.
+        """
         with turn_trace(
             run.session_id,
             run.run_id,

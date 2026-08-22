@@ -6,10 +6,20 @@ import { newMessageId } from "../store.js";
 
 import type { CommandContext } from "./registry.js";
 
+/**
+ * Adds a message to the conversation store.
+ *
+ * @param message - The message to add
+ */
 function appendMessage(store: ConversationStore, message: Message): void {
   store.dispatch({ type: "message/upsert", message });
 }
 
+/**
+ * Appends a system text message to the conversation store.
+ *
+ * @param text - The message content to append
+ */
 export function appendSystem(store: ConversationStore, text: string): void {
   appendMessage(store, {
     id: newMessageId("system"),
@@ -34,10 +44,10 @@ export function notifySuccess(ctx: CommandContext, message: string): void {
 }
 
 /**
- * Renders an error for the transcript. `FleetApiError`s with a correlation ID
- * include the request ID so the failure can be traced in the host logs
- * (`.fleet_rlm/logs/latest.log`). Shared by the command handlers and the run
- * controller so the operator sees the same wording everywhere.
+ * Formats an error for display in the transcript.
+ *
+ * @param error - The error value to format
+ * @returns The error message, including the request ID and log-file location for Fleet API errors with a correlation ID
  */
 export function errorMessage(error: unknown): string {
   if (error instanceof FleetApiError && error.correlationId) {

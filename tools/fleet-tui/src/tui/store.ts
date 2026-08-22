@@ -292,6 +292,13 @@ function settleStreamingMessages(messages: Message[], runId: string | null): Mes
   return changed ? settled : messages;
 }
 
+/**
+ * Applies a store event to the conversation state and returns the updated state.
+ *
+ * @param state - The current conversation state
+ * @param event - The event describing the state change
+ * @returns The resulting conversation state
+ */
 function reduce(state: State, event: Event): State {
   switch (event.type) {
     case "session/init":

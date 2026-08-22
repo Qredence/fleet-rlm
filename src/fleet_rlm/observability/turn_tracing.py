@@ -342,22 +342,20 @@ def turn_trace(
     preparation_trace_id: str | None = None,
 ) -> Iterator[TraceHandle]:
     """
-    Open a root ``fleet_turn`` span for a live Turn when tracing is enabled.
-
+    Open a root ``fleet_turn`` span for a Fleet turn when tracing is available.
+    
     Parameters:
-        session_id (UUID): Identifier for the session associated with the Turn.
-        run_id (UUID): Identifier for the run associated with the Turn.
-        enabled (bool): Whether to enable tracing.
-        expose_trace_id (bool): Whether to expose the active trace identifier in the yielded handle.
-        trace_phase (TracePhase | None): Optional closed phase marker (``"preparation"`` or
-            ``"execution"``) recorded as ``fleet.trace_phase`` so MLflow search can tell the two
-            fleet_turn roots of one Fleet Run apart. Unknown values are ignored fail-softly.
-        preparation_trace_id (str | None): Optional bounded trace identifier of the preparation
-            phase, recorded on the execution trace as ``fleet.preparation_trace_id``. The link is
-            one-way: preparation traces never carry it.
-
+        session_id (UUID): Identifier for the session associated with the turn.
+        run_id (UUID): Identifier for the run associated with the turn.
+        enabled (bool): Whether tracing is enabled for the turn.
+        expose_trace_id (bool): Whether the yielded handle exposes the root trace identifier.
+        trace_phase (TracePhase | None): Optional phase marker, either ``"preparation"`` or
+            ``"execution"``, recorded on the trace.
+        preparation_trace_id (str | None): Optional preparation trace identifier to associate
+            with an execution trace.
+    
     Yields:
-        TraceHandle: Handle containing the trace identifier when available and exposure is enabled;
+        TraceHandle: The root trace identifier when tracing succeeds and exposure is enabled;
             otherwise, a no-op handle.
     """
     if not enabled:

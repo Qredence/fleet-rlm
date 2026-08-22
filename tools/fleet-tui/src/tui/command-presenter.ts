@@ -358,6 +358,12 @@ export class PiCommandPresenter implements CommandPresenter {
   }
 }
 
+/**
+ * Formats a timestamp as a relative update label.
+ *
+ * @param value - The timestamp to format, or `null` or `undefined`
+ * @returns A relative update label, or `updated —` for a missing or invalid timestamp
+ */
 function relativeUpdatedAt(value: string | null | undefined): string {
   if (!value) return "updated —";
   const timestamp = Date.parse(value);

@@ -177,9 +177,10 @@ export const profilesCommand: CommandSpec = {
 };
 
 /**
- * Interactive /settings save: PATCH one field, flash the result, and on a
- * revision conflict GET a fresh policy so the next edit uses the current
- * revision. Returns the freshest policy, or null after a surfaced failure.
+ * Saves a Fleet settings change and refreshes the policy when the revision is outdated.
+ *
+ * @param update - The settings field and value to save
+ * @returns The saved or refreshed settings policy, or `null` if the operation fails
  */
 async function saveSettingsUpdate(
   ctx: CommandContext,
@@ -208,6 +209,12 @@ async function saveSettingsUpdate(
   }
 }
 
+/**
+ * Parses a hidden Skill reference containing a UUID and version.
+ *
+ * @param reference - The UUID-and-version reference to parse
+ * @returns The pending Skill selection, or `null` if the reference is invalid
+ */
 function parseExactHiddenSelection(reference: string): PendingSkillSelection | null {
   const match = /^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})@([^\s@]+)$/i.exec(
     reference,
@@ -220,6 +227,11 @@ function parseExactHiddenSelection(reference: string): PendingSkillSelection | n
   };
 }
 
+/**
+ * Pins a Skill for the next Turn or updates its existing pending selection.
+ *
+ * @param selection - The Skill selection to pin or update
+ */
 function pinSkill(store: ConversationStore, selection: PendingSkillSelection): void {
   const pending = store.getState().pendingSkillSelections;
   const existing = pending.find((candidate) => candidate.id === selection.id);
@@ -234,6 +246,12 @@ function pinSkill(store: ConversationStore, selection: PendingSkillSelection): v
   );
 }
 
+/**
+ * Formats a setting value for display.
+ *
+ * @param value - The setting value to format
+ * @returns `(unset)` for nullish values; otherwise, the JSON representation of the value
+ */
 function formatSettingValue(value: unknown): string {
   if (value === undefined || value === null) return "(unset)";
   return JSON.stringify(value) ?? "(unset)";

@@ -116,10 +116,23 @@ export const reloadCommand: CommandSpec = {
   },
 };
 
+/**
+ * Resumes a Fleet Session by loading it into the current session state.
+ *
+ * @param id - The UUID of the session to resume
+ * @param ctx - The command execution context
+ */
 async function resumeSession(id: string, ctx: CommandContext): Promise<void> {
   await loadSession(ctx, id, "Resumed", "resume");
 }
 
+/**
+ * Loads a session and restores its committed turns.
+ *
+ * @param id - The session identifier to load
+ * @param verb - The past-tense action used in the success message
+ * @param actionVerb - The action used in the failure message
+ */
 async function loadSession(
   ctx: CommandContext,
   id: string,

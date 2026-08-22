@@ -166,6 +166,12 @@ export const exitCommand: CommandSpec = {
   },
 };
 
+/**
+ * Formats pending skill selections for display.
+ *
+ * @param selections - The pending skill selections to format
+ * @returns A comma-separated list of skill names and expected versions, or `(none)` when no selections are provided
+ */
 function formatPendingSkills(selections: readonly PendingSkillSelection[]): string {
   if (selections.length === 0) return "(none)";
   return selections

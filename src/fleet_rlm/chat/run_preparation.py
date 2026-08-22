@@ -122,6 +122,7 @@ class PreparedRun:
 
     @property
     def cleanup_receipt(self) -> PreparedResourcesReceipt | None:
+        """Return the cleanup receipt for the prepared run resources, if cleanup has completed."""
         return self._resources.receipt
 
     async def aclose(self) -> PreparedResourcesReceipt:

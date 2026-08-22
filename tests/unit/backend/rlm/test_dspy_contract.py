@@ -895,10 +895,21 @@ def test_latest_lm_telemetry_typed_response_fallback_reads_usage_as_dict() -> No
         """Mirror of the typed DSPy contract surface (dspy.LMResponse)."""
 
         def __init__(self, usage: dict[str, int], provider_response: object = None) -> None:
+            """Store usage metrics and the optional provider response associated with them.
+            
+            Parameters:
+            	usage (dict[str, int]): Usage metrics for the response.
+            	provider_response (object): Optional raw provider response.
+            """
             self._usage = usage
             self.provider_response = provider_response
 
         def usage_as_dict(self) -> dict[str, int]:
+            """Return the recorded usage metrics as a dictionary.
+            
+            Returns:
+            	dict[str, int]: A copy of the recorded usage metrics.
+            """
             return dict(self._usage)
 
     lm = SimpleNamespace(history=[])
@@ -937,12 +948,25 @@ def test_lm_trace_callback_emits_token_usage_output_and_mlflow_attribute(monkeyp
 
     class Span:
         def set_inputs(self, payload):
+            """
+            Store the supplied payload as the captured inputs.
+            
+            Parameters:
+                payload: Input data to capture.
+            """
             captured.inputs = payload
 
         def set_outputs(self, payload):
+            """Store the provided payload as the captured outputs."""
             captured.outputs.append(payload)
 
         def set_attributes(self, payload):
+            """
+            Update the captured attributes with the supplied values.
+            
+            Parameters:
+            	payload (dict): Attribute names and values to record.
+            """
             captured.attributes.update(payload)
 
         def set_status(self, status):
@@ -950,6 +974,12 @@ def test_lm_trace_callback_emits_token_usage_output_and_mlflow_attribute(monkeyp
 
     class SpanContext:
         def __enter__(self):
+            """
+            Enter the context manager and provide a new span.
+            
+            Returns:
+                Span: The newly created span.
+            """
             return Span()
 
         def __exit__(self, *_args):

@@ -35,7 +35,12 @@ export function dropLastGrapheme(value: string): string {
   return segments.slice(0, -1).join("");
 }
 
-/** Whether a text block spans multiple lines (CR/LF-normalized), the fold default for error details. */
+/**
+ * Determines whether text spans multiple lines after normalizing line endings and removing trailing whitespace.
+ *
+ * @param value - The text to inspect
+ * @returns `true` if the text contains multiple lines, `false` otherwise.
+ */
 export function hasMultipleLines(value: string): boolean {
   return value.replace(/\r\n/g, "\n").replace(/\r/g, "\n").trimEnd().split("\n").length > 1;
 }

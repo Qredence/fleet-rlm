@@ -20,6 +20,11 @@ export function formatBytes(n: number): string {
   return `${(n / (1024 * 1024 * 1024)).toFixed(2)}GB`;
 }
 
+/**
+ * Formats a token count using raw numbers or compact `k` and `M` units.
+ *
+ * @returns The formatted token count, or `"0"` for invalid or negative values.
+ */
 export function formatTokens(n: number): string {
   if (!Number.isFinite(n) || n < 0) return "0";
   if (n < 1000) return `${n}`;
@@ -28,11 +33,23 @@ export function formatTokens(n: number): string {
   return `${(n / 1_000_000).toFixed(1)}M`;
 }
 
-/** Observed token count for display: em dash when the count is unavailable. */
+/**
+ * Formats an observed token count for display.
+ *
+ * @param value - The observed token count, or `null` when unavailable
+ * @returns The formatted token count, or an em dash when the value is `null`
+ */
 export function formatObservedTokens(value: number | null): string {
   return value === null ? "—" : formatTokens(value);
 }
 
+/**
+ * Shortens an identifier while preserving its leading and trailing characters.
+ *
+ * @param id - The identifier to shorten
+ * @param length - The number of leading and trailing characters to retain
+ * @returns The shortened identifier, or an empty string when `id` is empty
+ */
 export function shortId(id: string, length = 4): string {
   if (!id) return "";
   const clean = id.replaceAll("-", "");
@@ -69,6 +86,12 @@ export type StructuredResultDisplay = {
   rows: Array<[label: string, value: string]>;
 };
 
+/**
+ * Converts a scalar value to its string representation.
+ *
+ * @param value - The value to convert
+ * @returns The string representation of a string, number, boolean, or missing value; `null` for complex values
+ */
 function scalar(value: unknown): string | null {
   // Missing wire values surface as JSON null, never the literal "undefined".
   if (value === null || value === undefined) return "null";
@@ -76,6 +99,12 @@ function scalar(value: unknown): string | null {
   return null;
 }
 
+/**
+ * Converts a value to a display string, redacting sensitive data in serialized complex values.
+ *
+ * @param value - The value to convert
+ * @returns The scalar representation, formatted redacted JSON, or a string fallback
+ */
 function resultValue(value: unknown): string {
   const simple = scalar(value);
   if (simple !== null) return simple;
