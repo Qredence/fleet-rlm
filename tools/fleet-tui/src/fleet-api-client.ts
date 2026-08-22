@@ -169,10 +169,15 @@ export class FleetApiClient {
   }
 
   /** Read one Workspace files/ root text page (server caps max_chars at 10 000). */
-  async readWorkspaceFile(path: string, maxChars?: number): Promise<FleetWorkspaceFileRead> {
+  async readWorkspaceFile(
+    path: string,
+    maxChars?: number,
+    cursor?: string,
+  ): Promise<FleetWorkspaceFileRead> {
     const query = new URLSearchParams();
     query.set("path", path);
     if (maxChars !== undefined) query.set("max_chars", String(maxChars));
+    if (cursor) query.set("cursor", cursor);
     return this.requestJson<FleetWorkspaceFileRead>(`/api/files/content?${query.toString()}`);
   }
 

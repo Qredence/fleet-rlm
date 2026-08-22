@@ -688,6 +688,8 @@ describe("Workspace files/ commands", () => {
       if (file) await file.handler(["big.txt", "save", target], ctx);
 
       expect(ctx.client.readWorkspaceFile).toHaveBeenCalledTimes(2);
+      expect(ctx.client.readWorkspaceFile).toHaveBeenNthCalledWith(1, "big.txt", 8_000, undefined);
+      expect(ctx.client.readWorkspaceFile).toHaveBeenNthCalledWith(2, "big.txt", 8_000, "cur-2");
       expect(await readFile(target, "utf8")).toBe("first pagesecond page");
       const last = ctx.store.getState().messages.at(-1);
       if (last?.kind === "text") expect(last.text).toContain("Saved Workspace file");
@@ -819,7 +821,8 @@ describe("redo / reload / trace", () => {
       },
     ]);
     const reload = listCommands().find((c) => c.name === "reload");
-    if (reload) await reload.handler([], ctx);
+    if (!reload) throw new Error("reload command missing");
+    await reload.handler([], ctx);
 
     expect(ctx.client.listTurns).toHaveBeenCalledWith("session-1");
     const last = ctx.store.getState().messages.at(-1);
@@ -853,7 +856,8 @@ describe("redo / reload / trace", () => {
     ctx.client.listTurns = vi.fn().mockResolvedValue([]);
 
     const reload = listCommands().find((c) => c.name === "reload");
-    if (reload) await reload.handler([], ctx);
+    if (!reload) throw new Error("reload command missing");
+    await reload.handler([], ctx);
 
     const state = ctx.store.getState();
     expect(state.pendingSkillSelections).toEqual([

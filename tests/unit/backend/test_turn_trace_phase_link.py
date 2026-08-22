@@ -282,6 +282,28 @@ async def test_hidden_expose_trace_id_keeps_link_out_of_sse(
     assert completed.trace_id is None
 
 
+@pytest.mark.usefixtures("_tracing_active")
+def test_preparation_link_tag_only_records_on_execution_phase(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from fleet_rlm.observability.turn_tracing import turn_trace
+
+    calls = _install_fake_mlflow(monkeypatch)
+    with turn_trace(
+        uuid4(),
+        uuid4(),
+        enabled=True,
+        trace_phase="preparation",
+        preparation_trace_id="tr-prep-1",
+    ):
+        pass
+    update = _trace_root_updates(calls)[-1]
+    # The link is strictly one-way: a preparation root ignores a supplied id.
+    assert update["tags"]["fleet.trace_phase"] == "preparation"
+    assert "fleet.preparation_trace_id" not in update["tags"]
+    assert "fleet.preparation_trace_id" not in update["metadata"]
+
+
 @pytest.mark.asyncio
 async def test_tracing_disabled_records_no_phase_or_link_and_no_sse_trace_id(
     monkeypatch: pytest.MonkeyPatch,

@@ -150,7 +150,7 @@ export const fileCommand: CommandSpec = {
         let cursor: string | undefined;
         let pages = 0;
         do {
-          const page = await ctx.client.readWorkspaceFile(path, cursor ? undefined : 8_000);
+          const page = await ctx.client.readWorkspaceFile(path, 8_000, cursor);
           content += page.content;
           cursor = page.next_cursor ?? undefined;
           pages += 1;

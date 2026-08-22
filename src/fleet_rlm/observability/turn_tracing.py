@@ -409,7 +409,9 @@ def turn_trace(
                 metadata[_TRACE_PHASE_TAG] = trace_phase
             else:
                 logger.debug("ignoring unrecognized trace phase %r", trace_phase)
-        if preparation_trace_id:
+        if preparation_trace_id and trace_phase == "execution":
+            # Strictly one-way: only the execution root may carry the
+            # preparation link, never a preparation or phase-less root.
             bounded_id = str(preparation_trace_id)[:_PREPARATION_TRACE_ID_MAX_CHARS]
             tags[_PREPARATION_TRACE_ID_TAG] = bounded_id
             metadata[_PREPARATION_TRACE_ID_TAG] = bounded_id

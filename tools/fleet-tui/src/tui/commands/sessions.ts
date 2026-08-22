@@ -112,15 +112,20 @@ export const reloadCommand: CommandSpec = {
       appendSystem(ctx.store, "No active Session to reload.");
       return;
     }
-    await loadSession(ctx, session.id, "Reloaded");
+    await loadSession(ctx, session.id, "Reloaded", "reload");
   },
 };
 
 async function resumeSession(id: string, ctx: CommandContext): Promise<void> {
-  await loadSession(ctx, id, "Resumed");
+  await loadSession(ctx, id, "Resumed", "resume");
 }
 
-async function loadSession(ctx: CommandContext, id: string, verb: string): Promise<void> {
+async function loadSession(
+  ctx: CommandContext,
+  id: string,
+  verb: string,
+  actionVerb: string,
+): Promise<void> {
   try {
     const [session, turns] = await Promise.all([
       ctx.client.getSession(id),
@@ -139,6 +144,6 @@ async function loadSession(ctx: CommandContext, id: string, verb: string): Promi
       turns.length ? `${verb} session ${id}.` : `${verb} session ${id} (no prior turns).`,
     );
   } catch (error) {
-    appendSystem(ctx.store, `Failed to ${verb.toLowerCase()} session: ${errorMessage(error)}`);
+    appendSystem(ctx.store, `Failed to ${actionVerb} session: ${errorMessage(error)}`);
   }
 }

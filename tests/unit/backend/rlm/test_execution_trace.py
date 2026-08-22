@@ -74,6 +74,24 @@ def test_record_phase_success_marks_token_usage_unavailable_without_any_usage_si
     assert final["delegation_metrics"]["token_usage_status"] == "unavailable"
 
 
+def test_record_phase_success_cost_only_prediction_usage_reports_unavailable() -> None:
+    from fleet_rlm.rlm.delegation_metrics import DelegationMetrics
+    from fleet_rlm.rlm.execution_trace import record_phase_success
+
+    outputs: list[dict[str, object]] = []
+    phase = SimpleNamespace(set_outputs=outputs.append)
+    prediction = SimpleNamespace(
+        trajectory=[],
+        get_lm_usage=lambda: {"gpt-test": {"cost": 0.001, "cached": True}},
+    )
+
+    record_phase_success(phase, prediction, 0.0, None, DelegationMetrics())
+
+    final = outputs[-1]
+    assert final["observed_lm_usage"] == {"gpt-test": {"cost": 0.001, "cached": True}}
+    assert final["token_usage_status"] == "unavailable"
+
+
 def test_record_phase_success_marks_token_usage_observed_from_prediction_usage() -> None:
     from fleet_rlm.rlm.delegation_metrics import DelegationMetrics
     from fleet_rlm.rlm.execution_trace import record_phase_success
