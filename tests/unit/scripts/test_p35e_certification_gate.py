@@ -12,6 +12,13 @@ from scripts import certification_gate, validate_release
 
 
 def _receipt(*, sha: str = "a" * 40) -> dict[str, object]:
+    lanes = {
+        lane: {
+            "passed": True,
+            "cleanup": {"confirmed_absent": True, "admission_restored": True},
+        }
+        for lane in certification_gate.REQUIRED_LIVE_LANES
+    }
     receipt: dict[str, object] = {
         "schema": "fleet.p35d-live-certification-matrix/v1",
         "passed": True,
@@ -24,16 +31,30 @@ def _receipt(*, sha: str = "a" * 40) -> dict[str, object]:
             "confirmed_absent": True,
             "admission_restored": True,
         },
-        "lanes": {
-            "root-direct": {
-                "passed": True,
-                "cleanup": {"confirmed_absent": True, "admission_restored": True},
-            }
-        },
+        "lanes": lanes,
     }
     unsigned = json.dumps(receipt, sort_keys=True, separators=(",", ":")).encode("utf-8")
     receipt["manifest_sha256"] = hashlib.sha256(unsigned).hexdigest()
     return receipt
+
+
+def _artifacts() -> list[dict[str, object]]:
+    return [
+        {
+            "filename": "fleet_rlm-0.7.3-py3-none-any.whl",
+            "kind": "wheel",
+            "size": 1,
+            "sha256": "c" * 64,
+            "version": "0.7.3",
+        },
+        {
+            "filename": "fleet_rlm-0.7.3.tar.gz",
+            "kind": "sdist",
+            "size": 1,
+            "sha256": "d" * 64,
+            "version": "0.7.3",
+        },
+    ]
 
 
 def test_release_version_normalizes_one_leading_v_and_rejects_mismatch(tmp_path: Path) -> None:
@@ -107,7 +128,7 @@ def test_certification_manifest_requires_same_sha_live_receipt_and_clean_goldens
         repo_root=tmp_path,
         live_manifest_path=live_path,
         gate_results=gate_results,
-        artifacts=[],
+        artifacts=_artifacts(),
         service_isolation={"passed": True},
     )
     assert manifest["passed"] is True
@@ -122,7 +143,7 @@ def test_certification_manifest_requires_same_sha_live_receipt_and_clean_goldens
             repo_root=tmp_path,
             live_manifest_path=live_path,
             gate_results=gate_results,
-            artifacts=[],
+            artifacts=_artifacts(),
             service_isolation={"passed": True},
         )
 

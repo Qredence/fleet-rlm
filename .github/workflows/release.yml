@@ -175,10 +175,13 @@ jobs:
     steps:
       - name: Check if package exists on PyPI
         run: |
-          STATUS_CODE=$(curl -sS -o /dev/null -w "%{http_code}\n" https://pypi.org/pypi/fleet-rlm/json || true)
+          STATUS_CODE=$(curl --fail-with-body -sS -o /dev/null -w "%{http_code}\n" https://pypi.org/pypi/fleet-rlm/json || STATUS_CODE="000")
           echo "Status code: $STATUS_CODE"
           if [ "$STATUS_CODE" = "404" ]; then
             echo "✅ Package name 'fleet-rlm' is available on PyPI"
+          elif [ "$STATUS_CODE" = "000" ]; then
+            echo "::error::PyPI availability check failed"
+            exit 1
           else
             echo "⚠️  Package 'fleet-rlm' already exists on PyPI. Version conflicts may occur."
           fi

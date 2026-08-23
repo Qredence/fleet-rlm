@@ -45,6 +45,18 @@ REQUIRED_GATES = (
     "live-daytona",
     "service-isolation",
 )
+REQUIRED_LIVE_LANES = (
+    "runtime-version",
+    "root-direct",
+    "root-child",
+    "root-batch",
+    "stdout-reasoning",
+    "cancel",
+    "timeout",
+    "workspace-memory",
+    "attachment-artifact",
+    "fault-logs",
+)
 OBSOLETE_RELEASE_TEXT = (
     "unreleased dspy",
     "unreleased DSPy",
@@ -117,7 +129,7 @@ def _current_identity() -> tuple[str, str]:
             text=True,
         ).stdout.strip()
         status = subprocess.run(
-            ("git", "status", "--porcelain", "--untracked-files=no"),
+            ("git", "status", "--porcelain", "--untracked-files=all"),
             cwd=REPO_ROOT,
             check=True,
             capture_output=True,
@@ -128,7 +140,10 @@ def _current_identity() -> tuple[str, str]:
         raise CertificationGateError("could not determine candidate identity") from exc
     if not _is_hex(sha, 40):
         raise CertificationGateError("candidate SHA is invalid")
-    if status:
+    unexpected = [
+        line for line in status.splitlines() if line and not (line.startswith("?? .factory/") or line == "?? .factory")
+    ]
+    if unexpected:
         raise CertificationGateError("tracked worktree is not clean")
     return sha, lockfile_sha256
 
@@ -187,7 +202,7 @@ def verify_golden_baseline(baseline_path: Path, repo_root: Path) -> dict[str, An
 
 def _live_identity(manifest_path: Path, *, sha: str, lockfile_sha256: str) -> dict[str, Any]:
     live = _read_json(manifest_path, description="live certification manifest")
-    if not str(live.get("schema", "")).startswith("fleet.p35d-"):
+    if live.get("schema") != "fleet.p35d-live-certification-matrix/v1":
         raise CertificationGateError("live certification manifest schema is not P35-D")
     if live.get("passed") is not True:
         raise CertificationGateError("live certification manifest did not pass")
@@ -207,8 +222,8 @@ def _live_identity(manifest_path: Path, *, sha: str, lockfile_sha256: str) -> di
     if candidate.get("dspy") != "3.3.1":
         raise CertificationGateError("live certification manifest is not certified for DSPy 3.3.1")
     lanes = live.get("lanes")
-    if not isinstance(lanes, dict) or not lanes:
-        raise CertificationGateError("live certification manifest has no lanes")
+    if not isinstance(lanes, dict) or set(lanes) != set(REQUIRED_LIVE_LANES):
+        raise CertificationGateError("live certification manifest has incomplete lane coverage")
     for lane_name, lane in lanes.items():
         if not isinstance(lane, dict) or lane.get("passed") is not True:
             raise CertificationGateError(f"live lane did not pass: {lane_name}")
@@ -227,6 +242,72 @@ def _live_identity(manifest_path: Path, *, sha: str, lockfile_sha256: str) -> di
         "lanes": sorted(str(name) for name in lanes),
         "manifest_sha256": live.get("manifest_sha256"),
     }
+
+
+def _validate_artifact_evidence(artifacts: object) -> list[dict[str, Any]]:
+    """Validate immutable wheel/sdist evidence embedded in a certification."""
+    if not isinstance(artifacts, list) or len(artifacts) != 2:
+        raise CertificationGateError("P35-E artifact evidence must contain one wheel and one sdist")
+    normalized: list[dict[str, Any]] = []
+    kinds: set[str] = set()
+    for artifact in artifacts:
+        if not isinstance(artifact, dict):
+            raise CertificationGateError("P35-E artifact evidence entry is invalid")
+        filename = artifact.get("filename")
+        kind = artifact.get("kind")
+        sha256 = artifact.get("sha256")
+        if (
+            not isinstance(filename, str)
+            or kind not in {"wheel", "sdist"}
+            or not _is_hex(sha256, 64)
+            or not isinstance(artifact.get("size"), int)
+            or artifact["size"] <= 0
+            or not isinstance(artifact.get("version"), str)
+        ):
+            raise CertificationGateError("P35-E artifact evidence entry is incomplete")
+        if kind in kinds:
+            raise CertificationGateError("P35-E artifact evidence contains duplicate kinds")
+        kinds.add(kind)
+        normalized.append(dict(artifact))
+    if kinds != {"wheel", "sdist"}:
+        raise CertificationGateError("P35-E artifact evidence is missing a wheel or sdist")
+    return normalized
+
+
+def _verify_manifest_golden_evidence(golden: dict[str, Any], repo_root: Path) -> None:
+    """Verify the file bytes represented by a sealed golden evidence block."""
+    if golden.get("schema") != BASELINE_SCHEMA or not _is_hex(golden.get("baseline_commit"), 40):
+        raise CertificationGateError("P35-E golden baseline evidence is malformed")
+    files = golden.get("files")
+    if not isinstance(files, list) or not files:
+        raise CertificationGateError("P35-E golden baseline has no file evidence")
+    unchanged = True
+    for item in files:
+        if (
+            not isinstance(item, dict)
+            or not isinstance(item.get("path"), str)
+            or not _is_hex(item.get("sha256"), 64)
+            or not _is_hex(item.get("baseline_sha256"), 64)
+        ):
+            raise CertificationGateError("P35-E golden file evidence is malformed")
+        relative = Path(item["path"])
+        if relative.is_absolute() or ".." in relative.parts:
+            raise CertificationGateError("P35-E golden evidence path escapes repository")
+        try:
+            actual = _sha256((repo_root / relative).read_bytes())
+        except OSError as exc:
+            raise CertificationGateError(f"golden file is missing: {item['path']}") from exc
+        if actual != item["sha256"]:
+            raise CertificationGateError(f"golden file evidence is stale: {item['path']}")
+        unchanged = unchanged and item["sha256"] == item["baseline_sha256"]
+    decision = golden.get("human_decision")
+    if not unchanged and (
+        not isinstance(decision, dict)
+        or not all(isinstance(decision.get(key), str) and decision[key].strip() for key in ("id", "rationale"))
+    ):
+        raise CertificationGateError("P35-E golden drift has no human decision")
+    if golden.get("unchanged") is not unchanged:
+        raise CertificationGateError("P35-E golden unchanged claim is invalid")
 
 
 def _service_isolation_from_path(path: Path) -> dict[str, Any]:
@@ -275,7 +356,7 @@ def build_certification_manifest(
         "gates": serialized_gates,
         "golden_baseline": golden,
         "live": live,
-        "artifacts": artifacts,
+        "artifacts": _validate_artifact_evidence(artifacts),
         "service_isolation": service_isolation,
         "claims": {
             "deterministic": True,
@@ -332,8 +413,7 @@ def verify_manifest(path: Path, *, expected_sha: str | None = None) -> dict[str,
     golden = manifest.get("golden_baseline")
     if not isinstance(golden, dict):
         raise CertificationGateError("P35-E golden baseline evidence is missing")
-    if golden.get("unchanged") is not True and not golden.get("human_decision"):
-        raise CertificationGateError("P35-E behavior goldens are not unchanged")
+    _verify_manifest_golden_evidence(golden, REPO_ROOT)
     gates = manifest.get("gates")
     if not isinstance(gates, list) or {gate.get("name") for gate in gates} != set(REQUIRED_GATES):
         raise CertificationGateError("P35-E certification manifest omits required gates")
@@ -345,6 +425,7 @@ def verify_manifest(path: Path, *, expected_sha: str | None = None) -> dict[str,
     live = manifest.get("live")
     if not isinstance(live, dict) or not live.get("lanes"):
         raise CertificationGateError("P35-E live evidence is missing")
+    _validate_artifact_evidence(manifest.get("artifacts"))
     return manifest
 
 
