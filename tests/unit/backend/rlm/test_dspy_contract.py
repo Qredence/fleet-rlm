@@ -232,7 +232,7 @@ def test_build_native_rlm_preserves_exact_public_constructor_inputs() -> None:
     assert first.max_output_chars == 2048
     assert first.sub_lm is sub_lm
     assert not hasattr(first, "_interpreter")
-    assert first._interpreter_factory.__name__ == "_missing_caller_owned_interpreter"
+    assert first._interpreter_factory.__name__ == "daytona_provider_contract"
     assert set(first.tools) == {"_lookup"}
     assert first.generate_action.callbacks == []
 

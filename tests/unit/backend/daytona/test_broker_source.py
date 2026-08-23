@@ -19,6 +19,7 @@ from fleet_rlm.daytona.broker_source import (
     extract_final_payload,
     final_output_frame,
     remote_submit_setup_code,
+    reset_binding_source,
 )
 from fleet_rlm.daytona.http_broker import DaytonaHttpToolBroker
 
@@ -73,6 +74,14 @@ def test_remote_submit_setup_is_self_contained() -> None:
         namespace["SUBMIT"](answer="done")  # type: ignore[operator]
     assert type(raised.value).__name__ == "FleetFinalOutputError"
     assert getattr(raised.value, "value", None) == {"answer": "done"}
+
+
+def test_binding_reset_source_removes_stale_tool_names() -> None:
+    namespace: dict[str, object] = {"old_tool": object(), "SUBMIT": object(), "keep": object()}
+    exec(reset_binding_source(("old_tool",)), namespace, namespace)
+    assert "old_tool" not in namespace
+    assert "SUBMIT" not in namespace
+    assert "keep" in namespace
 
 
 def test_typed_string_submit_rejects_structured_values_and_accepts_json_text() -> None:

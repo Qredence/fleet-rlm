@@ -1,15 +1,9 @@
 """DSPy 3.3.x interpreter injection and FinalOutput contract.
 
-Public ``CodeInterpreter`` only requires ``tools``, ``start``, ``execute``, and
-``shutdown``. Stock ``dspy.RLM`` additionally probes custom interpreters during
-``_inject_execution_context``:
-
-1. ``interpreter.tools.update(execution_tools)``
-2. If ``hasattr(interpreter, "output_fields")``: assign signature output metadata
-3. If ``hasattr(interpreter, "_tools_registered")``: set ``_tools_registered = False``
-
-Fleet adapters must re-register host tools and SUBMIT when that flag is false (or
-the HTTP broker has not yet been started for this reinjection cycle).
+DSPy injects invocation-scoped tools through the public ``tools`` mapping and
+assigns typed ``output_fields`` metadata before each execution.  Fleet tracks
+the desired binding generation and refreshes its broker/namespace from those
+public mutations; it does not depend on DSPy implementation state.
 """
 
 from __future__ import annotations
@@ -21,6 +15,14 @@ from dspy import CodeInterpreter, FinalOutput
 
 PUBLIC_FINAL_OUTPUT_LABEL = "FINAL submitted"
 
+# Keep this text in one place.  DSPy copies callable metadata into its native
+# action Signature exactly once at RLM construction time.
+DAYTONA_EXECUTION_INSTRUCTIONS = (
+    "Execution runs in isolated Python. The Python namespace persists across actions in one invocation. "
+    "Host Tools are callable Python functions through Fleet's local mediation seam. "
+    "Ordinary stdout is observable. Use the typed keyword `SUBMIT` for final completion."
+)
+
 
 def copy_output_fields(
     output_fields: list[dict[str, Any]] | None,
@@ -31,11 +33,14 @@ def copy_output_fields(
     return deepcopy(output_fields)
 
 
-def needs_tool_reinjection(*, tools_registered: bool, http_broker_ready: bool) -> bool:
-    """Return whether the adapter must register tools and SUBMIT for this cycle."""
-    if not tools_registered:
-        return True
-    return not http_broker_ready
+def needs_binding_refresh(
+    *,
+    desired_generation: int,
+    installed_generation: int,
+    broker_ready: bool,
+) -> bool:
+    """Return whether Fleet must refresh the complete current binding set."""
+    return desired_generation != installed_generation or not broker_ready
 
 
 def wrap_final_output(value: Any) -> FinalOutput:
@@ -49,11 +54,12 @@ def is_final_output(value: Any) -> bool:
 
 
 __all__ = [
+    "DAYTONA_EXECUTION_INSTRUCTIONS",
     "PUBLIC_FINAL_OUTPUT_LABEL",
     "CodeInterpreter",
     "FinalOutput",
     "copy_output_fields",
     "is_final_output",
-    "needs_tool_reinjection",
+    "needs_binding_refresh",
     "wrap_final_output",
 ]

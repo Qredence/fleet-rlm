@@ -47,13 +47,13 @@ def test_copy_output_fields_does_not_share_nested_metadata() -> None:
     assert fields[0]["metadata"]["description"] == "final answer"
 
 
-def test_needs_tool_reinjection_matches_inject_cycle() -> None:
-    from fleet_rlm.rlm.dspy_interpreter_contract import needs_tool_reinjection
+def test_needs_binding_refresh_uses_fleet_generation_state() -> None:
+    from fleet_rlm.rlm.dspy_interpreter_contract import needs_binding_refresh
 
-    assert needs_tool_reinjection(tools_registered=False, http_broker_ready=False) is True
-    assert needs_tool_reinjection(tools_registered=False, http_broker_ready=True) is True
-    assert needs_tool_reinjection(tools_registered=True, http_broker_ready=False) is True
-    assert needs_tool_reinjection(tools_registered=True, http_broker_ready=True) is False
+    assert needs_binding_refresh(desired_generation=1, installed_generation=0, broker_ready=False) is True
+    assert needs_binding_refresh(desired_generation=1, installed_generation=0, broker_ready=True) is True
+    assert needs_binding_refresh(desired_generation=1, installed_generation=1, broker_ready=False) is True
+    assert needs_binding_refresh(desired_generation=1, installed_generation=1, broker_ready=True) is False
 
 
 def test_public_final_output_label_is_stable() -> None:

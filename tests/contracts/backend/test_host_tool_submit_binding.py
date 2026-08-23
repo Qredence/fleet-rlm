@@ -16,7 +16,6 @@ def test_interpreter_declares_rlm_injection_surface() -> None:
     interp = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())
     assert hasattr(interp, "tools")
     assert hasattr(interp, "output_fields")
-    assert hasattr(interp, "_tools_registered")
     assert callable(interp.start)
     assert callable(interp.execute)
     assert callable(interp.shutdown)
@@ -50,13 +49,13 @@ def test_final_output_type_is_dspy_final_output() -> None:
     assert type(result) is FinalOutput
 
 
-def test_stock_rlm_resets_tools_registered_on_inject() -> None:
-    """Installed DSPy must clear _tools_registered on each inject cycle."""
+def test_fleet_generation_marks_bindings_dirty_on_native_inject() -> None:
+    """Native DSPy injection advances Fleet-owned generation state."""
     interp = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())
-    interp._tools_registered = True
+    initial_generation = interp._binding_generation
     rlm = build_native_rlm(
         signature=FleetRLMSignature,
         options=RLMOptions(max_iters=1),
     )
     rlm._inject_execution_context(interp, {})
-    assert interp._tools_registered is False
+    assert interp._binding_generation > initial_generation

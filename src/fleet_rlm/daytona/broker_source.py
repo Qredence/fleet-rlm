@@ -40,6 +40,16 @@ class FleetFinalOutputError(Exception):
 """.strip()
 
 
+def reset_binding_source(tool_names: list[str] | tuple[str, ...]) -> str:
+    """Remove all prior host bindings before installing a new invocation set."""
+    names = repr(tuple(sorted(set(tool_names))))
+    return f"""
+for _fleet_name in {names}:
+    globals().pop(_fleet_name, None)
+globals().pop("SUBMIT", None)
+""".strip()
+
+
 def _generic_submit_source() -> str:
     return """
 import base64 as _base64
@@ -497,4 +507,5 @@ __all__ = [
     "extract_final_payload",
     "final_output_frame",
     "remote_submit_setup_code",
+    "reset_binding_source",
 ]

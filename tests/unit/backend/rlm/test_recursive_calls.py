@@ -130,6 +130,15 @@ def test_recursive_tool_runs_fresh_native_child_and_redacts_observation() -> Non
     assert "child-ok" not in repr(events)
 
 
+@pytest.mark.asyncio
+async def test_recursive_tool_awaits_native_child_from_an_active_event_loop() -> None:
+    executor = _executor(
+        [{"reasoning": "submit", "code": "SUBMIT(answer='child-ok')"}],
+    )
+
+    assert executor.tool(prompt="classify selected row") == "child-ok"
+
+
 def test_recursive_tool_uses_sub_lm_at_depth_cap_without_new_interpreter() -> None:
     created: list[DaytonaCodeInterpreter] = []
     executor = _executor(

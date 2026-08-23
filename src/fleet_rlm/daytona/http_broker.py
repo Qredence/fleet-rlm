@@ -30,6 +30,7 @@ from fleet_rlm.daytona.broker_source import (
     TOOL_WRAPPER_TEMPLATE,
     extract_final_payload,
     remote_submit_setup_code,
+    reset_binding_source,
 )
 from fleet_rlm.daytona.errors import (
     DaytonaAdapterError,
@@ -188,9 +189,9 @@ class DaytonaHttpToolBroker:
 
     def register_tools(self, tools: Mapping[str, Callable[..., Any]]) -> None:
         self.ensure_started()
+        self._pending_wrappers.append(reset_binding_source(tuple(self._injected_tools)))
+        self._injected_tools.clear()
         for name, fn in tools.items():
-            if name in self._injected_tools:
-                continue
             if not name.isidentifier() or keyword.iskeyword(name):
                 msg = f"invalid tool name: {name}"
                 raise DaytonaAdapterError(message=msg, cause_type="InvalidToolNameError")

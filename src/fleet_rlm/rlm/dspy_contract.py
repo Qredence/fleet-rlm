@@ -24,6 +24,7 @@ from pydantic_core import PydanticSerializationError
 
 from fleet_rlm.json_types import JsonValue as JsonValue
 from fleet_rlm.rlm.delegation_metrics import DelegationMetrics, normalize_lm_token_usage
+from fleet_rlm.rlm.dspy_interpreter_contract import DAYTONA_EXECUTION_INSTRUCTIONS
 from fleet_rlm.rlm.errors import RLMConfigError
 from fleet_rlm.rlm.sanitize import truncate_public_text, validate_declared_public_value
 
@@ -978,9 +979,18 @@ def bind_native_rlm_observer(
         predictor.callbacks.append(_RLMReasoningCallback(observer, max_chars=max_chars))
 
 
-def _missing_caller_owned_interpreter() -> Any:
-    """Fail closed when native Fleet execution omits its caller-owned interpreter."""
+def daytona_provider_contract() -> Any:
+    """Fail closed if DSPy attempts to construct a production interpreter.
+
+    DSPy reads ``execution_instructions`` from this zero-argument callable while
+    constructing its action Signature.  The callable never creates a provider
+    resource; production always passes the already-acquired interpreter to
+    ``RLM.acall``.
+    """
     raise RLMConfigError("native RLM execution requires a caller-owned interpreter")
+
+
+cast(Any, daytona_provider_contract).execution_instructions = DAYTONA_EXECUTION_INSTRUCTIONS
 
 
 def build_native_rlm(
@@ -1006,7 +1016,7 @@ def build_native_rlm(
         verbose=verbose,
         tools=list(tools) if tools is not None else None,
         sub_lm=sub_lm,
-        interpreter_factory=_missing_caller_owned_interpreter,
+        interpreter_factory=daytona_provider_contract,
     )
 
 
