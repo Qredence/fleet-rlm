@@ -30,6 +30,7 @@ from typing import TYPE_CHECKING, Any, Protocol, cast
 from uuid import uuid4
 
 import dspy
+from dspy.utils.callback import BaseCallback, with_callbacks
 
 from fleet_rlm.daytona.broker_source import (
     FINAL_OUTPUT_MARKER,
@@ -79,6 +80,10 @@ _UNSET = object()
 _BINDING_RESERVATION: contextvars.ContextVar[object | None] = contextvars.ContextVar(
     "fleet_interpreter_binding_reservation",
     default=None,
+)
+_TOOL_POSITIONAL_ARGS: contextvars.ContextVar[tuple[Any, ...]] = contextvars.ContextVar(
+    "fleet_interpreter_tool_positional_args",
+    default=(),
 )
 
 
@@ -479,11 +484,16 @@ class DaytonaCodeInterpreter:
         backend: InterpreterBackend | None = None,
         tools: Mapping[str, Callable[..., Any]] | None = None,
         output_fields: list[dict[str, Any]] | None = None,
+        callbacks: list[BaseCallback] | None = None,
         broker_port: int = DEFAULT_BROKER_PORT,
         execution_output_cap: int = DEFAULT_EXECUTION_OUTPUT_CHARS,
         max_code_chars: int = DEFAULT_INTERMEDIATE_CODE_CHARS,
     ) -> None:
         self._backend = backend
+        # DSPy 3.3.1's callback contract is opt-in and engineering-only.
+        # Fleet Runtime Events and manual spans remain the product/trace
+        # authorities; callbacks are never installed implicitly.
+        self.callbacks = list(callbacks or [])
         self._binding_generation = 0
         self._installed_binding_generation = -1
         self._execution_lock = Lock()
@@ -624,6 +634,7 @@ class DaytonaCodeInterpreter:
         if clear_context:
             _BINDING_RESERVATION.set(None)
 
+    @with_callbacks
     def start(self) -> None:
         if self._shutdown:
             msg = "interpreter already shut down"
@@ -739,6 +750,7 @@ class DaytonaCodeInterpreter:
                 tools[name] = observe_tool(dspy.Tool(fn, name=name), cast(ToolObserver, self._observer), view).func
         return tools
 
+    @with_callbacks
     def execute(self, code: str, variables: dict[str, Any] | None = None) -> Any:
         """Execute one action while rejecting overlapping interpreter reuse."""
         token = self._acquire_execution()
@@ -939,6 +951,7 @@ class DaytonaCodeInterpreter:
                 duration_ms = int((time.perf_counter() - step_started) * 1_000)
                 self._observe(StepFinished(step, duration_ms))
 
+    @with_callbacks
     def shutdown(self, *, strict_broker_cleanup: bool = False) -> None:
         """
         Shut down the interpreter and release its broker and backend resources.
@@ -991,6 +1004,27 @@ class DaytonaCodeInterpreter:
         if first_error is not None:
             raise first_error
 
+    @with_callbacks
+    def invoke_tool(self, tool_name: str, kwargs: dict[str, Any]) -> Any:
+        """Invoke one bound host Tool through DSPy's callback lifecycle."""
+        fn = self._bound_tools.get(str(tool_name))
+        if fn is None:
+            raise CodeInterpreterError(f"Unknown tool: {tool_name}")
+        return fn(*_TOOL_POSITIONAL_ARGS.get(), **dict(kwargs))
+
+    def _invoke_tool_with_args(
+        self,
+        tool_name: str,
+        args: tuple[Any, ...],
+        kwargs: Mapping[str, Any],
+    ) -> Any:
+        """Route positional completeness through the callback-decorated seam."""
+        token = _TOOL_POSITIONAL_ARGS.set(tuple(args))
+        try:
+            return self.invoke_tool(tool_name, dict(kwargs))
+        finally:
+            _TOOL_POSITIONAL_ARGS.reset(token)
+
     def _ensure_bindings(self) -> None:
         """
         Ensure execution tools and submission support are available for the configured backend.
@@ -1007,7 +1041,18 @@ class DaytonaCodeInterpreter:
                 broker_ready=True,
             ):
                 return
-            backend.bind_host_tools(tools)
+            backend.bind_host_tools(
+                {
+                    name: (
+                        lambda *_args, _name=name, **kwargs: self._invoke_tool_with_args(
+                            _name,
+                            _args,
+                            kwargs,
+                        )
+                    )
+                    for name in tools
+                }
+            )
             backend.ensure_submit(self.output_fields)
             self._installed_binding_generation = self._binding_generation
             return
@@ -1054,8 +1099,7 @@ class DaytonaCodeInterpreter:
             raise DaytonaAdapterError(message=msg, cause_type="InterpreterConfigurationError")
 
         def tool_executor(name: str, args: list[Any], kwargs: dict[str, Any]) -> Any:
-            fn = self._bound_tools.get(name)
-            if fn is None:
+            if name not in self._bound_tools:
                 msg = f"unknown tool: {name}"
                 raise DaytonaAdapterError(message=msg, cause_type="UnknownToolError")
             try:
@@ -1063,7 +1107,7 @@ class DaytonaCodeInterpreter:
                 # ``def invoke(**kwargs)`` callables behind spoofed signatures,
                 # so broker payloads forward every parameter by name. ``args``
                 # is retained only for POSITIONAL_ONLY completeness.
-                return fn(*args, **kwargs)
+                return self._invoke_tool_with_args(name, tuple(args), kwargs)
             except WorkspaceToolError as exc:
                 return {
                     "ok": False,
