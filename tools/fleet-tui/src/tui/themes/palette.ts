@@ -326,40 +326,23 @@ export async function writeThemeSelection(name: string): Promise<void> {
 }
 
 /**
- * Watch the custom-themes directory and invoke the callback with the names of
- * theme files that changed. Returns a stop function. Errors are ignored — a
- * broken watcher must never affect the TUI.
+ * Watches the custom themes directory and notifies callers when theme names change.
+ *
+ * A watcher failure stops monitoring and is reported once through `onError`.
+ *
+ * @param onChange - Called with the changed theme name or the current theme names
+ * @param onError - Called once when watcher setup or runtime fails
+ * @returns A function that stops watching for theme changes
  */
-export function watchCustomThemes(onChange: (names: string[]) => void): () => void {
+export function watchCustomThemes(
+  onChange: (names: string[]) => void,
+  onError: (error: unknown) => void = reportWatcherFailure,
+): () => void {
   let stopped = false;
+  let reported = false;
   let timer: ReturnType<typeof setTimeout> | undefined;
   let watcher: FSWatcher | undefined;
-  const schedule = (name: string | null) => {
-    if (timer) clearTimeout(timer);
-    timer = setTimeout(() => {
-      timer = undefined;
-      if (stopped) return;
-      void loadCustomThemeNames().then((names) => {
-        if (stopped) return;
-        onChange(name ? [name] : names);
-      });
-    }, 100);
-  };
-  void mkdir(themesDir(), { recursive: true })
-    .then(() => {
-      if (stopped) return;
-      watcher = watch(themesDir(), (_event, filename) =>
-        schedule(customThemeNameFromFilename(filename)),
-      );
-      watcher.on("error", () => undefined);
-      if (stopped) {
-        watcher.close();
-        watcher = undefined;
-      }
-    })
-    .catch(() => undefined);
-  return () => {
-    stopped = true;
+  const stopWatching = () => {
     if (timer) {
       clearTimeout(timer);
       timer = undefined;
@@ -367,8 +350,62 @@ export function watchCustomThemes(onChange: (names: string[]) => void): () => vo
     watcher?.close();
     watcher = undefined;
   };
+  const fail = (error: unknown) => {
+    if (reported) return;
+    reported = true;
+    stopWatching();
+    if (!stopped) onError(error);
+  };
+  const schedule = (name: string | null) => {
+    if (timer) clearTimeout(timer);
+    timer = setTimeout(() => {
+      timer = undefined;
+      if (stopped || reported) return;
+      void loadCustomThemeNames().then((names) => {
+        if (stopped || reported) return;
+        onChange(name ? [name] : names);
+      });
+    }, 100);
+  };
+  void mkdir(themesDir(), { recursive: true })
+    .then(() => {
+      if (stopped) return;
+      try {
+        watcher = watch(themesDir(), (_event, filename) =>
+          schedule(customThemeNameFromFilename(filename)),
+        );
+        watcher.once("error", fail);
+      } catch (error) {
+        fail(error);
+        return;
+      }
+      if (stopped) stopWatching();
+    })
+    .catch(fail);
+  return () => {
+    stopped = true;
+    stopWatching();
+  };
 }
 
+/**
+ * Reports that custom theme watching is unavailable and hot reload is disabled.
+ *
+ * @param error - The watcher failure to include in the warning
+ */
+function reportWatcherFailure(error: unknown): void {
+  const detail = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+  console.warn(
+    `[fleet-tui] Custom theme watching is unavailable; hot reload is disabled until restart. ${detail}`,
+  );
+}
+
+/**
+ * Extracts a custom theme name from a JSON filename.
+ *
+ * @param filename - The filename to convert into a theme name
+ * @returns The filename without its `.json` suffix, or `null` for other filenames or empty names
+ */
 function customThemeNameFromFilename(filename: string | Buffer | null): string | null {
   if (!filename) return null;
   const entry = filename.toString();

@@ -12,6 +12,7 @@ import dspy
 from fleet_rlm.observability.failure_diagnostics import trace_failure_category
 from fleet_rlm.observability.turn_tracing import turn_phase_span
 from fleet_rlm.rlm.context import RLMExecutionContext
+from fleet_rlm.rlm.delegation_metrics import normalize_lm_token_usage
 from fleet_rlm.rlm.dspy_contract import _RLMTraceCallback, observed_usage, rlm_termination_mode
 from fleet_rlm.rlm.recursive_calls import RecursiveCallSummary, RecursiveRLMExecutor
 from fleet_rlm.rlm.worker_execution import invoke_native_rlm
@@ -66,6 +67,7 @@ def record_phase_failure(
         "recursive_prompt_chars": summary.delegated_prompt_chars,
         "recursive_depth_fallback_count": summary.depth_fallback_count,
         "delegation_metrics": summary.delegation_metrics.as_dict(),
+        "token_usage_status": summary.delegation_metrics.token_usage_status,
     }
     if last_lm_call:
         outputs["last_lm_call"] = dict(last_lm_call)
@@ -101,6 +103,13 @@ def record_phase_success(
     termination_mode = rlm_termination_mode(prediction)
     usage = observed_usage(prediction, duration_ms=int((time.perf_counter() - started) * 1000))
     summary = recursive_summary(recursive_executor, metrics)
+    # Token telemetry is truthful: "observed" only when a Prediction carries
+    # normalized token fields or an LM callback actually saw token usage;
+    # "unavailable" otherwise. A cost-only or cache-only usage mapping reports
+    # "unavailable" rather than a misleading zero-token "observed". Never an
+    # estimate, and an all-zero total still counts as observed.
+    prediction_has_tokens = any(normalize_lm_token_usage(entry) for entry in usage["observed_lm_usage"].values())
+    token_usage_status = "observed" if prediction_has_tokens else summary.delegation_metrics.token_usage_status
     phase.set_outputs(
         {
             "iterations": usage["iterations"],
@@ -112,6 +121,7 @@ def record_phase_success(
             "recursive_prompt_chars": summary.delegated_prompt_chars,
             "recursive_depth_fallback_count": summary.depth_fallback_count,
             "delegation_metrics": summary.delegation_metrics.as_dict(),
+            "token_usage_status": token_usage_status,
         }
     )
     return prediction

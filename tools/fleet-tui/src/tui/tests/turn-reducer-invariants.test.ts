@@ -140,7 +140,7 @@ function expectToolPairing(model: TurnModel, messages: Message[]): void {
   expect(byToolCallId.size).toBe(plans.length);
   for (const plan of plans) {
     const card = byToolCallId.get(plan.toolCallId);
-    if (!card || card.kind !== "tool") throw new Error(`missing tool card ${plan.toolCallId}`);
+    if (card?.kind !== "tool") throw new Error(`missing tool card ${plan.toolCallId}`);
     expect(card.name).toBe(plan.toolName);
     expect(card.input).toEqual(plan.input);
     // Terminal states are mutually exclusive and paired to one invocation.
@@ -179,7 +179,7 @@ function expectTerminalClosure(messages: Message[]): void {
   }
 }
 
-function expectPrimitiveIdentityOrder(model: TurnModel, a: Message[], b: Message[]): void {
+function expectPrimitiveIdentityOrder(a: Message[], b: Message[]): void {
   const identity = (message: Message): string => {
     switch (message.kind) {
       case "artifact":
@@ -248,7 +248,7 @@ describe("turn reducer generated invariants", () => {
             durable,
             () => `seed=${model.seed} kind parity`,
           );
-          expectPrimitiveIdentityOrder(model, live, durable);
+          expectPrimitiveIdentityOrder(live, durable);
         });
       });
 

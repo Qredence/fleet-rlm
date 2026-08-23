@@ -5,7 +5,11 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass
 from threading import Lock
-from typing import Any
+from typing import Any, Literal, TypeAlias
+
+# Closed observability contract: token totals are either truly observed from a
+# provider/history entry or unavailable. There is no "estimated" state.
+TokenUsageStatus: TypeAlias = Literal["observed", "unavailable"]
 
 _TOKEN_USAGE_ALIASES: dict[str, tuple[str, ...]] = {
     "input_tokens": ("input_tokens", "prompt_tokens"),
@@ -38,10 +42,20 @@ class DelegationMetricsSnapshot:
     lm_latency_ms: tuple[tuple[str, int, float], ...] = ()
     # Entries are (role, recursive_depth, input_tokens, output_tokens, total_tokens);
     # input/output are kept alongside the total so partial usage never reads as 0.
+    # Entries exist only for calls where usage was actually observed; a call
+    # whose provider reported no usage must never emit an all-zero entry.
     lm_token_totals: tuple[tuple[str, int, int, int, int], ...] = ()
+    token_usage_status: TokenUsageStatus = "unavailable"
 
     def as_dict(self) -> dict[str, object]:
-        """Return a bounded JSON/MLflow-safe representation."""
+        """
+        Return a bounded JSON- and MLflow-compatible representation of the metrics snapshot.
+
+        Returns:
+            dict[str, object]: Serialized metrics, including call counts, latency
+                totals rounded to three decimal places, observed token totals, and
+                token usage status.
+        """
         return {
             "root_lm_calls_depth_0": self.root_lm_calls_depth_0,
             "sub_lm_calls_depth_0": self.sub_lm_calls_depth_0,
@@ -70,6 +84,7 @@ class DelegationMetricsSnapshot:
                 }
                 for role, depth, input_tokens, output_tokens, tokens in self.lm_token_totals
             ],
+            "token_usage_status": self.token_usage_status,
         }
 
 
@@ -83,6 +98,7 @@ class DelegationMetrics:
         self._lm_input_tokens: dict[tuple[str, int], int] = {}
         self._lm_output_tokens: dict[tuple[str, int], int] = {}
         self._lm_tokens: dict[tuple[str, int], int] = {}
+        self._lm_usage_observed: set[tuple[str, int]] = set()
         self._recursive_child_calls = 0
         self._recursive_batch_calls = 0
         self._recursive_children_started = 0
@@ -99,21 +115,38 @@ class DelegationMetrics:
         duration_ms: float = 0.0,
         usage: Mapping[str, Any] | None = None,
     ) -> None:
-        """Record one completed or failed LM request without retaining content."""
+        """
+        Record a language-model request and its aggregate metrics.
+
+        Parameters:
+            role (str): Model role, normalized to ``"root"``, ``"sub"``, or ``"unknown"``.
+            recursive_depth (int): Recursion depth associated with the request.
+            duration_ms (float): Request duration in milliseconds.
+            usage (Mapping[str, Any] | None): Provider token-usage data, if available.
+                Token totals are recorded only when usage is observed.
+        """
         normalized_role = role if role in {"root", "sub"} else "unknown"
         key = (normalized_role, max(0, int(recursive_depth)))
         normalized_usage = normalize_lm_token_usage(usage)
+        # Only an actually-observed usage mapping creates token buckets. Call
+        # counts and latency stay unconditional; token totals remain absent
+        # when the provider reported nothing, so zero can never masquerade as
+        # a measurement.
+        usage_observed = bool(normalized_usage)
         input_tokens = normalized_usage.get("input_tokens", 0)
         output_tokens = normalized_usage.get("output_tokens", 0)
         tokens = normalized_usage.get("total_tokens", 0)
         with self._lock:
             self._lm_calls[key] = self._lm_calls.get(key, 0) + 1
             self._lm_latency_ms[key] = self._lm_latency_ms.get(key, 0.0) + max(0.0, float(duration_ms))
-            self._lm_input_tokens[key] = self._lm_input_tokens.get(key, 0) + input_tokens
-            self._lm_output_tokens[key] = self._lm_output_tokens.get(key, 0) + output_tokens
-            self._lm_tokens[key] = self._lm_tokens.get(key, 0) + tokens
+            if usage_observed:
+                self._lm_usage_observed.add(key)
+                self._lm_input_tokens[key] = self._lm_input_tokens.get(key, 0) + input_tokens
+                self._lm_output_tokens[key] = self._lm_output_tokens.get(key, 0) + output_tokens
+                self._lm_tokens[key] = self._lm_tokens.get(key, 0) + tokens
 
     def record_recursive_call(self) -> None:
+        """Record one recursive child call."""
         with self._lock:
             self._recursive_child_calls += 1
 
@@ -137,6 +170,12 @@ class DelegationMetrics:
             self._active_children = max(0, self._active_children - 1)
 
     def snapshot(self) -> DelegationMetricsSnapshot:
+        """Create an immutable snapshot of the accumulated delegation metrics.
+
+        Returns:
+            DelegationMetricsSnapshot: The current metrics, including call counts,
+                latency totals, concurrency data, and token usage status.
+        """
         with self._lock:
             calls = tuple(sorted((role, depth, count) for (role, depth), count in self._lm_calls.items()))
             latency = tuple(sorted((role, depth, total) for (role, depth), total in self._lm_latency_ms.items()))
@@ -167,11 +206,21 @@ class DelegationMetrics:
                 lm_call_counts=calls,
                 lm_latency_ms=latency,
                 lm_token_totals=tokens,
+                token_usage_status="observed" if self._lm_usage_observed else "unavailable",
             )
 
 
 def normalize_lm_token_usage(usage: Mapping[str, Any] | None) -> dict[str, int]:
-    """Map supported provider token aliases onto one canonical usage shape."""
+    """
+    Normalize provider token usage fields into canonical token names.
+
+    Parameters:
+        usage (Mapping[str, Any] | None): Provider usage data containing supported token field aliases.
+
+    Returns:
+        dict[str, int]: Canonical nonnegative token counts, with total tokens derived
+            from input and output counts when unavailable.
+    """
     if not isinstance(usage, Mapping):
         return {}
     normalized: dict[str, int] = {}
@@ -191,4 +240,4 @@ def normalize_lm_token_usage(usage: Mapping[str, Any] | None) -> dict[str, int]:
     return normalized
 
 
-__all__ = ["DelegationMetrics", "DelegationMetricsSnapshot", "normalize_lm_token_usage"]
+__all__ = ["DelegationMetrics", "DelegationMetricsSnapshot", "TokenUsageStatus", "normalize_lm_token_usage"]

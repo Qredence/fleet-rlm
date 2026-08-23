@@ -120,7 +120,8 @@ are maintained in [Maintainability freeze](../how-to-guides/maintainability-free
 | `src/tui/store.ts` | conversation state, atomic Session hydration, and terminal stream settlement |
 | `src/tui/application.ts`, `screen.ts`, `transcript.ts` | pi-tui alternate-screen lifecycle, editor/input, follow-end `ScrollView` layout, terminal-safe status, and mutable Run activity |
 | `src/tui/message-renderer.ts`, `terminal-text.ts` | complete event, cached Markdown, result, Artifact, code/output presentation, and terminal-safe text |
-| `src/tui/commands.ts`, `command-presenter.ts`, `autocomplete.ts` | slash commands, overlays, status, and completion |
+| `src/tui/commands.ts` (facade), `src/tui/commands/` (`registry.ts`, `shared.ts`, `sessions.ts`, `skills-settings.ts`, `files-artifacts.ts`, `status-theme-misc.ts`), `autocomplete.ts` | slash command registration, parsing, handlers in stable `/help` order, and completion |
+| `src/tui/command-presenter.ts` (facade), `src/tui/presenter/` (`overlay.ts`, `settings.ts`, `skill-selector.ts`) | interactive overlays, settings editors, and skill selector |
 | `src/generated/openapi.ts`, `src/generated/fleet-ui-chunk-validation.ts` | generated HTTP types and chunk-validation tables owned by `make api-sync` |
 
 Live and reload use the same display semantics. There is no classic renderer.

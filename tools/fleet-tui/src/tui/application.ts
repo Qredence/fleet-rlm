@@ -16,6 +16,7 @@ import {
   setTerminalBackground,
   setTerminalColorScheme,
   stopThemeMonitoring,
+  theme,
 } from "./theme.js";
 import { fleetKeybindings } from "./keybindings.js";
 
@@ -67,6 +68,10 @@ class FleetTuiApplicationImpl implements FleetTuiApplication {
     this.ui = new TuiAltScreen(this.terminal, undefined, undefined, {
       mouse: true,
       wheelScrollLines: 3,
+      // pi-tui 0.84.2 transcript search (Ctrl+Shift+F): style matches from the
+      // Fleet theme. Resolved per call so a live theme switch restyles matches.
+      searchMatchStyle: (text) => theme.searchMatch()(text),
+      searchCurrentMatchStyle: (text) => theme.currentSearchMatch()(text),
     });
     this.controller = new RunController(this.store, options.client);
     this.editor = new Editor(this.ui, editorTheme, { paddingX: 1, autocompleteMaxVisible: 8 });
@@ -260,7 +265,10 @@ class FleetTuiApplicationImpl implements FleetTuiApplication {
         void this.stop();
       },
       submit: (text) => this.submitText(text),
-      presenter: new PiCommandPresenter(this.ui, this.editor, this.store),
+      notify: (message) => this.ui.flash(message),
+      presenter: new PiCommandPresenter(this.ui, this.editor, this.store, (message) =>
+        this.ui.flash(message),
+      ),
     };
   }
 

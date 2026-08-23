@@ -214,6 +214,12 @@ export function normalizedNarrative(narrative: string, value: unknown): string |
   return scalar !== undefined && trimmed === String(scalar) ? undefined : narrative;
 }
 
+/**
+ * Extracts a scalar value from a direct input or an object with exactly one scalar-valued property.
+ *
+ * @param value - The value to inspect
+ * @returns The scalar value, or `undefined` when the input does not contain exactly one scalar value
+ */
 function singleScalar(value: unknown): string | number | boolean | null | undefined {
   if (value === null || ["string", "number", "boolean"].includes(typeof value)) {
     return value as string | number | boolean | null;
@@ -227,19 +233,12 @@ function singleScalar(value: unknown): string | number | boolean | null | undefi
     : undefined;
 }
 
-export function string(value: unknown, fallback = ""): string {
-  return value === undefined || value === null ? fallback : String(value);
-}
-
-export function number(value: unknown, fallback = 0): number {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : fallback;
-}
-
-export function nullableNumber(value: unknown): number | null {
+/**
+ * Converts a finite numeric value to a number.
+ *
+ * @param value - The value to evaluate
+ * @returns The input value if it is a finite number, or `null` otherwise.
+ */
+function nullableNumber(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
-}
-
-export function assertNever(value: never): never {
-  throw new Error(`Unsupported Fleet UI part: ${JSON.stringify(value)}`);
 }

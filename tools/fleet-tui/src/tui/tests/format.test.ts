@@ -63,6 +63,8 @@ describe("format helpers", () => {
       },
     ],
     [null, { prominent: "null", rows: [] }],
+    [undefined, { prominent: "null", rows: [] }],
+    [{ digit: undefined }, { prominent: "null", rows: [["digit", "null"]] }],
   ])("formats structured result %j", (value, expected) => {
     expect(formatStructuredResult(value)).toEqual(expected);
   });

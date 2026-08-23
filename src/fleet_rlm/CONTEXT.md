@@ -115,7 +115,9 @@ Potentially incomplete provider telemetry exposed under `observed_lm_usage` afte
 a completed Prediction. Its closed public policy admits only token, cache, and
 cost measurements; unknown provider fields are dropped. Fleet does not expose
 retry or call counters and does not infer missing provider or recursive-call
-counters.
+counters. Trace/delegation output distinguishes `token_usage_status` as
+`observed` from `unavailable`; absent provider usage emits no misleading
+all-zero aggregate.
 _Avoid_: estimated calls, remaining calls, complete billing record
 
 **Turn Timeout**:

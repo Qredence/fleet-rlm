@@ -101,7 +101,12 @@ contracts, and tracked docs remain authoritative.
   selected TOML profile. `mlflow_runtime.py` is owned by FastAPI lifespan for
   explicit startup state and flush; `tracing.py` owns configuration and
   sanitation; `turn_tracing.py` owns Turn spans. Tracing must never change Turn
-  outcomes. When policy enables trace
+  outcomes. A live Turn can produce two `fleet_turn` roots—preparation and
+  execution—each tagged `fleet.trace_phase`; the execution root carries the
+  internal one-way `fleet.preparation_trace_id` while only the execution trace
+  id may be exposed in SSE. RLM execution traces use `token_usage_status`
+  (`observed` or `unavailable`) so a provider that omits usage never emits
+  misleading all-zero token aggregates. When policy enables trace
   exposure, public `traceId` may appear only as optional `messageMetadata` on
   existing `start`/`finish` chunks — never as a new RuntimeEvent kind or
   credential-bearing payload.

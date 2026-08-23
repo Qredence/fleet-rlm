@@ -755,13 +755,21 @@ def _latest_lm_telemetry(
     Parameters:
         instance (Any): Language-model instance whose call history is inspected.
         history_length (int | None): Starting history position for entries belonging to the current call.
+        outputs (object): Callback output used to identify the matching history entry
+            or provide typed-response telemetry.
 
     Returns:
         tuple[dict[str, JsonValue], dict[str, JsonValue]]: Allowlisted usage data and provider response metadata.
     """
+
+    def _fallback() -> tuple[dict[str, JsonValue], dict[str, JsonValue]]:
+        # Computed lazily so the common history-match path skips the typed
+        # fallback work entirely (called only when history yields nothing).
+        return _typed_response_telemetry(outputs)
+
     history = getattr(instance, "history", None)
     if not isinstance(history, Sequence) or isinstance(history, (str, bytes, bytearray)):
-        return {}, {}
+        return _fallback()
     start = history_length if history_length is not None else max(0, len(history) - 1)
     candidates = [entry for entry in history[start:] if isinstance(entry, Mapping)]
     matching = [entry for entry in candidates if _history_entry_matches_outputs(entry, outputs)]
@@ -790,7 +798,39 @@ def _latest_lm_telemetry(
         provider = _provider_response_telemetry(entry.get("response"))
         if safe_usage or provider:
             return safe_usage, provider
-    return {}, {}
+    return _fallback()
+
+
+def _typed_response_telemetry(outputs: object) -> tuple[dict[str, JsonValue], dict[str, JsonValue]]:
+    """
+    Read usage and provider telemetry from a typed DSPy LM response.
+
+    Parameters:
+        outputs (object): Typed LM response payload containing usage and provider
+            details.
+
+    Returns:
+        A pair containing sanitized usage data and provider telemetry. Both mappings
+        are empty when the payload does not expose usable telemetry.
+    """
+    if outputs is None:
+        return {}, {}
+    usage_as_dict = getattr(outputs, "usage_as_dict", None)
+    if not callable(usage_as_dict):
+        return {}, {}
+    try:
+        usage = usage_as_dict()
+    except Exception:  # pragma: no cover - provider objects vary
+        return {}, {}
+    safe_usage: dict[str, JsonValue] = {}
+    if isinstance(usage, Mapping):
+        with contextlib.suppress(ValueError):
+            safe_usage = cast(
+                dict[str, JsonValue],
+                _safe_usage_entry(usage, path="lm_usage", filter_unknown=True),
+            )
+    provider = _provider_response_telemetry(getattr(outputs, "provider_response", None))
+    return safe_usage, provider
 
 
 def _history_entry_matches_outputs(entry: Mapping[str, Any], outputs: object) -> bool:

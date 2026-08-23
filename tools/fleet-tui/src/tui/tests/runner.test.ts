@@ -102,7 +102,7 @@ describe("RunController", () => {
       ).toEqual(["code", "output"]),
     );
     expect(store.getState().run.completedSteps).toBe(1);
-    expect(controller.isRunning()).toBe(true);
+    expect(store.getState().run.phase).toBe("running");
 
     streamController?.enqueue(
       encoder.encode(
@@ -178,7 +178,7 @@ describe("RunController", () => {
       .getState()
       .messages.find((message) => message.kind === "text" && message.role === "assistant");
     expect(assistant).toMatchObject({ kind: "text", text: "yo", streaming: false });
-    expect(controller.isRunning()).toBe(false);
+    expect(store.getState().run.phase).toBe("completed");
   });
 
   it("passes pending Skill selections and acknowledges them when the stream opens", async () => {
@@ -506,7 +506,7 @@ describe("RunController", () => {
     client.requestCancellation = vi.fn();
 
     controller.start("first");
-    await vi.waitFor(() => expect(controller.isRunning()).toBe(false));
+    await vi.waitFor(() => expect(store.getState().run.phase).toBe("completed"));
     controller.start("second");
     await vi.waitFor(() => expect(store.getState().run.id).toBe("r-2"));
 
@@ -521,9 +521,9 @@ describe("RunController", () => {
     const { store, controller } = setup();
 
     controller.start("first");
-    await vi.waitFor(() => expect(controller.isRunning()).toBe(false));
+    await vi.waitFor(() => expect(store.getState().run.phase).toBe("completed"));
     controller.start("second");
-    await vi.waitFor(() => expect(controller.isRunning()).toBe(false));
+    await vi.waitFor(() => expect(store.getState().run.phase).toBe("completed"));
 
     expect(
       store

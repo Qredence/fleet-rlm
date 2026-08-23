@@ -1,9 +1,6 @@
-import {
-  type FleetApiClient,
-  FleetApiError,
-  type FleetSkillSelection,
-} from "../fleet-api-client.js";
+import type { FleetApiClient, FleetSkillSelection } from "../fleet-api-client.js";
 import { streamFleetTurn } from "../fleet-turn-stream.js";
+import { errorMessage } from "./commands/shared.js";
 import { LiveTurnProjector } from "./live-projection.js";
 import { type ConversationStore, newMessageId } from "./store.js";
 
@@ -20,7 +17,6 @@ export class RunController {
     const controller = new AbortController();
     const execution: RunExecution = { controller, runId: null, cancellationRequested: false };
     this.active = execution;
-    this.store.setCancelToken(controller);
     this.store.dispatch({ type: "user/submit", text });
     void this.execute(text, execution, options);
     return controller;
@@ -49,10 +45,6 @@ export class RunController {
       this.ensureCancellation(execution),
       new Promise<void>((resolve) => setTimeout(resolve, timeoutMs)),
     ]);
-  }
-
-  isRunning(): boolean {
-    return this.active !== null && !this.active.controller.signal.aborted;
   }
 
   private async execute(
@@ -126,7 +118,6 @@ export class RunController {
     } finally {
       if (this.active === execution) {
         this.active = null;
-        this.store.clearCancelToken(controller);
       }
     }
   }
@@ -164,12 +155,3 @@ export type RunStartOptions = {
   onStreamOpen?: () => void;
   onPreStreamFailure?: (draft: string) => void;
 };
-
-function errorMessage(error: unknown): string {
-  if (error instanceof FleetApiError && error.correlationId) {
-    return `${error.message} (request ${error.correlationId}; see .fleet_rlm/logs/latest.log)`;
-  }
-  if (error instanceof Error) return error.message;
-  if (typeof error === "string") return error;
-  return "Fleet terminal request failed";
-}

@@ -26,3 +26,21 @@ export function terminalSafeLine(value: string): string {
     .replaceAll(/\s+/gu, " ")
     .trim();
 }
+
+const graphemeSegmenter = new Intl.Segmenter(undefined, { granularity: "grapheme" });
+
+/** Remove the last grapheme cluster (safe for emoji, ZWJ sequences, combining marks). */
+export function dropLastGrapheme(value: string): string {
+  const segments = Array.from(graphemeSegmenter.segment(value), ({ segment }) => segment);
+  return segments.slice(0, -1).join("");
+}
+
+/**
+ * Determines whether text spans multiple lines after normalizing line endings and removing trailing whitespace.
+ *
+ * @param value - The text to inspect
+ * @returns `true` if the text contains multiple lines, `false` otherwise.
+ */
+export function hasMultipleLines(value: string): boolean {
+  return value.replace(/\r\n/g, "\n").replace(/\r/g, "\n").trimEnd().split("\n").length > 1;
+}

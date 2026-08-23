@@ -178,6 +178,99 @@ def test_turn_trace_enabled_sets_tags_and_trace_id(monkeypatch: pytest.MonkeyPat
     assert current_turn_trace_id() is None
 
 
+def test_turn_trace_preparation_phase_records_phase_tag_without_link(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = _install_fake_mlflow(monkeypatch)
+    session_id = uuid4()
+    run_id = uuid4()
+    with turn_trace(session_id, run_id, enabled=True, trace_phase="preparation") as handle:
+        assert handle.trace_id == "tr-from-span"
+        assert current_turn_trace_id() == "tr-from-span"
+    tagged = [kwargs for kwargs in calls.update_kwargs if "tags" in kwargs]
+    assert len(tagged) == 1
+    assert tagged[0]["tags"] == {
+        "fleet.run_id": str(run_id),
+        "fleet.session_id": str(session_id),
+        "fleet.trace_phase": "preparation",
+    }
+    assert tagged[0]["metadata"] == {
+        "fleet.run_id": str(run_id),
+        "fleet.app_version": turn_tracing._FLEET_APP_VERSION,
+        "fleet.trace_phase": "preparation",
+    }
+    # One-way link: preparation traces never carry the execution link key.
+    assert "fleet.preparation_trace_id" not in tagged[0]["tags"]
+    assert "fleet.preparation_trace_id" not in tagged[0]["metadata"]
+    assert calls.update_kwargs[-1] == {"state": "OK"}
+
+
+def test_turn_trace_execution_phase_records_one_way_preparation_link(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = _install_fake_mlflow(monkeypatch)
+    session_id = uuid4()
+    run_id = uuid4()
+    with turn_trace(
+        session_id,
+        run_id,
+        enabled=True,
+        expose_trace_id=False,
+        trace_phase="execution",
+        preparation_trace_id="tr-preparation-1",
+    ) as handle:
+        # Expose semantics are unchanged: hidden handles still yield no id even
+        # though the MLflow-side link metadata is recorded.
+        assert handle.trace_id is None
+        assert current_turn_trace_id() is None
+    tagged = [kwargs for kwargs in calls.update_kwargs if "tags" in kwargs]
+    assert len(tagged) == 1
+    assert tagged[0]["tags"] == {
+        "fleet.run_id": str(run_id),
+        "fleet.session_id": str(session_id),
+        "fleet.trace_phase": "execution",
+        "fleet.preparation_trace_id": "tr-preparation-1",
+    }
+    assert tagged[0]["metadata"]["fleet.trace_phase"] == "execution"
+    assert tagged[0]["metadata"]["fleet.preparation_trace_id"] == "tr-preparation-1"
+    assert calls.update_kwargs[-1] == {"state": "OK"}
+
+
+def test_turn_trace_disabled_never_records_phase_or_link(monkeypatch: pytest.MonkeyPatch) -> None:
+    def _boom(*_a: Any, **_k: Any) -> Any:
+        raise AssertionError("mlflow must not be used when disabled")
+
+    mlflow = ModuleType("mlflow")
+    mlflow.start_span = _boom  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "mlflow", mlflow)
+
+    with turn_trace(
+        uuid4(),
+        uuid4(),
+        enabled=False,
+        trace_phase="execution",
+        preparation_trace_id="tr-preparation-1",
+    ) as handle:
+        assert handle.trace_id is None
+        assert current_turn_trace_id() is None
+
+
+def test_turn_trace_unrecognized_phase_is_ignored(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = _install_fake_mlflow(monkeypatch)
+    session_id = uuid4()
+    run_id = uuid4()
+    with turn_trace(session_id, run_id, enabled=True, trace_phase="replay"):  # type: ignore[arg-type]
+        pass
+    tagged = [kwargs for kwargs in calls.update_kwargs if "tags" in kwargs]
+    assert len(tagged) == 1
+    assert tagged[0]["tags"] == {
+        "fleet.run_id": str(run_id),
+        "fleet.session_id": str(session_id),
+    }
+    assert "fleet.trace_phase" not in tagged[0]["metadata"]
+    assert calls.update_kwargs[-1] == {"state": "OK"}
+
+
 def test_observed_url_tool_is_nested_under_turn_root_with_bounded_metadata(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

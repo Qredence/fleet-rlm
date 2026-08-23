@@ -1,7 +1,7 @@
 # Fleet RLM Terminal UI
 
 This is Fleet's maintained local Node 22.19+ client. It uses
-`@earendil-works/pi-tui@0.84.0` to render the backend's AI SDK UI v1 HTTP/SSE
+`@earendil-works/pi-tui@0.84.2` to render the backend's AI SDK UI v1 HTTP/SSE
 contract; it does not run a model, Harness agent, or Sandbox.
 
 ## Run
@@ -45,7 +45,10 @@ and renderer-neutral store.
 
 The transcript viewport follows the newest output: PgUp/PgDn scroll a page,
 Home/End jump to the top/bottom, the mouse wheel scrolls, drag selects text
-for copy, and new output re-follows the end. Tool, code, and output cards
+for copy, and new output re-follows the end. Ctrl+Shift+F opens transcript
+search over the scroll view (Enter/Ctrl+G steps to the next match,
+Shift+Enter/Ctrl+Shift+G to the previous, Escape closes); matches are styled
+from the active Fleet theme. Tool, code, and output cards
 fold with Ctrl+O (multi-line tool errors collapse to their summary by
 default); the latest card shows a dim key hint.
 
@@ -60,13 +63,20 @@ committed input/output tokens, Turn steps, Tools, and outcome; absent provider
 telemetry displays as `—` rather than an estimated zero.
 
 Use `/help` for commands. `/theme [name]` lists and switches the builtin
-(`dark`/`light`) or custom JSON themes (see below).
+(`dark`/`light`) or custom JSON themes with a filter-as-you-type picker (see below).
 `/rename <title>` names the current Session;
 `/sessions [title search]` opens the active Session selector. Switching Sessions
-preserves the unsent draft and pending Skill selections. `/skills` and `/skill`
+keeps the unsent editor text, while a same-Session `/reload` restores pending
+Skill/Attachment pins and the `/redo` prompt; those session-scoped pending inputs
+clear when switching to another Session. `/skills` and `/skill`
 manage up to four exact Skill selections for the next accepted Turn; `/settings`
-opens local TOML policy selectors for defaults and named profiles. Saving a
-setting validates it and requires a Fleet restart to apply. `/cancel` requests
+opens a local TOML policy editor for defaults and named profiles that stays open
+for successive field edits, using the freshly saved policy revision each time
+(environment-pinned and single-valued fields are read-only). Saving a setting
+validates it and requires a Fleet restart to apply. One-shot successes — a saved
+setting, a profile selected for restart, an applied theme, updated Skill
+selections — surface as transient flash notices above the viewport instead of
+permanent transcript messages; failures still land in the transcript. `/cancel` requests
 durable Run cancellation. Escape cancels an active Run while preserving the unsent editor
 draft. Ctrl+C clears the editor and exits when pressed twice while empty;
 Ctrl+D keeps its forward-delete behavior and exits only from an empty editor.
@@ -103,7 +113,8 @@ reference `vars`:
 ```
 
 Missing tokens fall back to the dark builtin; malformed files are ignored.
-`/theme [name]` lists and switches themes, the selection persists to
+`/theme [name]` lists and switches themes (the interactive picker filters as
+you type and marks the current theme), the selection persists to
 `$FLEET_TUI_STATE_DIR/theme`, `FLEET_TUI_THEME` overrides it at startup, and an
 active custom theme hot-reloads when its file changes. Surfaces and selections
 are blended adaptively against the terminal's reported background color so

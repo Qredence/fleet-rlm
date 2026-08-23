@@ -559,16 +559,93 @@ describe("pending attachments and lastPrompt", () => {
     store.dispatch({ type: "user/prompt-restore", text: "restored" });
     expect(store.getState().lastPrompt).toBe("restored");
   });
+});
 
-  it("clears attachments and lastPrompt state on reset", () => {
-    const store = makeStore();
+describe("session hydration pending-state continuity", () => {
+  const seedPending = (store: ConversationStore) => {
+    store.dispatch({
+      type: "skill-selection/pin",
+      selection: { id: "skill-1", expectedVersion: "1.0.0", displayName: "Skill" },
+    });
     store.dispatch({
       type: "attachment/pin",
       attachment: { id: "a-1", filename: "f.txt", bytes: 1 },
     });
-    store.dispatch({ type: "user/submit", text: "x" });
-    store.dispatch({ type: "reset" });
-    expect(store.getState().pendingAttachments).toEqual([]);
-    expect(store.getState().lastPrompt).toBeNull();
+    store.dispatch({ type: "user/prompt-restore", text: "last draft prompt" });
+  };
+
+  const hydrate = (
+    store: ConversationStore,
+    session: { id: string; title: string; status: string; resumed: boolean },
+  ) =>
+    store.dispatch({
+      type: "session/hydrate",
+      session,
+      events: [],
+    });
+
+  it("keeps pending Attachments, Skills, and lastPrompt when reloading the same Session", () => {
+    const store = makeStore();
+    store.dispatch({
+      type: "session/init",
+      session: { id: "session-1", title: "Session", status: "active", resumed: false },
+    });
+    seedPending(store);
+
+    hydrate(store, { id: "session-1", title: "Session", status: "active", resumed: true });
+
+    const state = store.getState();
+    expect(state.pendingSkillSelections).toEqual([
+      { id: "skill-1", expectedVersion: "1.0.0", displayName: "Skill" },
+    ]);
+    expect(state.pendingAttachments).toEqual([{ id: "a-1", filename: "f.txt", bytes: 1 }]);
+    expect(state.lastPrompt).toBe("last draft prompt");
+  });
+
+  it("never leaks pending Attachments, Skills, or lastPrompt into another Session", () => {
+    const store = makeStore();
+    store.dispatch({
+      type: "session/init",
+      session: { id: "session-1", title: "Session", status: "active", resumed: false },
+    });
+    seedPending(store);
+
+    hydrate(store, { id: "session-2", title: "Other", status: "active", resumed: true });
+
+    const state = store.getState();
+    expect(state.session?.id).toBe("session-2");
+    expect(state.pendingSkillSelections).toEqual([]);
+    expect(state.pendingAttachments).toEqual([]);
+    expect(state.lastPrompt).toBeNull();
+  });
+
+  it("leaves a caller-supplied executionSummary untouched on message/upsert", () => {
+    const store = makeStore();
+    // The execution summary is owned by the projection layer; the store must
+    // not synthesize or recompute one for usage messages.
+    const executionSummary = {
+      iterations: 1,
+      subLmCalls: 0,
+      hostCapabilityCalls: 2,
+      interpreterErrors: 0,
+      durationMs: 10,
+    };
+    store.dispatch({
+      type: "message/upsert",
+      message: {
+        id: "usage-1",
+        kind: "usage",
+        runId: "run-1",
+        iterations: 1,
+        inputTokens: null,
+        outputTokens: null,
+        durationMs: 10,
+        observedLmUsage: {},
+        executionSummary,
+        ts: 1,
+      },
+    });
+    const message = store.getState().messages[0];
+    expect(message?.kind === "usage" && message.executionSummary).toBe(executionSummary);
   });
 });

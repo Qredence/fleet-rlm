@@ -17,7 +17,17 @@ pi-tui-only terminal client. No web frontend, no React, no browser runtime.
 | `src/tui/projection-helpers.ts` | Shared pure helpers / message builders for projection |
 | `src/tui/transcript.ts` | Transcript rendering of projected messages |
 | `src/tui/store.ts` | Atomic hydration; all state via `dispatch` + pure `reduce` |
-| `src/tui/commands.ts` | Slash commands, including loopback-only TOML policy editing |
+| `src/tui/commands.ts` | Slash command facade: import-time registration of all commands in stable `/help` order; re-exports the registry types |
+| `src/tui/commands/registry.ts` | Command registry: `CommandContext`/`CommandPresenter`/specs, register/get/list, `parseInput` |
+| `src/tui/commands/shared.ts` | Shared command helpers: `appendSystem`, `notifySuccess`, FleetApiError-aware `errorMessage` |
+| `src/tui/commands/sessions.ts` | `/sessions`, `/rename`, `/resume`, `/reload` (durable hydration) |
+| `src/tui/commands/skills-settings.ts` | `/skills`, `/skill`, `/settings`, `/profiles`, including loopback-only TOML policy editing |
+| `src/tui/commands/files-artifacts.ts` | `/volume`, `/attach`, `/files`, `/file`, `/artifact(s)`, `formatVolumeTree` |
+| `src/tui/commands/status-theme-misc.ts` | `/help`, `/clear`, `/cancel`, `/status`, `/redo`, `/trace`, `/theme`, `/exit` |
+| `src/tui/command-presenter.ts` | `PiCommandPresenter` (interactive overlays) + facade re-exports for presenter modules |
+| `src/tui/presenter/overlay.ts` | Overlay scaffold: `SelectOverlay`, `TitledComponent`, title/hint helpers, `OVERLAY_OPTIONS` |
+| `src/tui/presenter/settings.ts` | Settings rows/editors: `fieldItem`, `parseFieldValue`, `TextSettingEditor`, `MultiChoiceEditor` |
+| `src/tui/presenter/skill-selector.ts` | `SkillSelector` multi-select picker for `/skills` pinning |
 | `src/tui/draft-store.ts` | Debounced per-Session draft/selection persistence (`FLEET_TUI_STATE_DIR`) |
 | `src/tui/themes/palette.ts` | Theme token types, builtin dark/light palettes, custom JSON themes + watcher |
 | `src/tui/theme.ts` | Theme engine: adaptive surfaces, selection, `initTheme`/`setTheme`, pi-tui theme factories |
@@ -53,10 +63,25 @@ Individual lanes: `pnpm test`, `pnpm typecheck`, `pnpm lint`, `pnpm format:check
 - Keep focused tests beside their source level under `src/tests/` or
   `src/tui/tests/`; shared behavior may be covered through its owning feature.
 - `/settings` reads and edits non-secret `config/fleet.toml` policy only; it
-  never displays `.env` values and saved changes require a Fleet restart.
-- `/profiles` switches the active Fleet profile by PATCHing
-  `config.default_profile` to the same loopback policy; it opens a dropdown of
-  available profiles and requires a Fleet restart to take effect.
+  never displays `.env` values and saved changes require a Fleet restart. The
+  interactive editor stays open across successive field edits, saving through a
+  `SettingsSaveCallback` that returns the freshest policy (PATCH response, or a
+  GET refresh after a `settings_revision_conflict`); environment-overridden and
+  singleton `single_choice` fields render read-only, and number fields reject
+  non-numeric input before any PATCH.
+- `/profiles` selects the Fleet profile used on the next restart by PATCHing
+  `config.default_profile` through loopback policy; the picker marks the
+  currently running profile separately from the selected restart target, and
+  the active profile changes only after a Fleet restart.
+- Interactive one-shot command successes (settings saved, profile selected,
+  theme applied, Skill selections updated) go through `CommandContext.notify`
+  (wired to `TuiAltScreen.flash`) as transient flashes; without a `notify`
+  callback (tests, non-interactive contexts) the same text falls back to a
+  system transcript message. Failures always stay in the transcript. Command
+  overlays share the `SelectOverlay`/`TitledComponent` title, context, and
+  bottom-hint pattern in `presenter/overlay.ts` (`SelectOverlay` and the
+  settings/skill presenters are re-exported via `command-presenter.ts` for
+  tests).
 - Themes: builtins are `themes/palette.ts`; custom JSON themes live in
   `$FLEET_TUI_STATE_DIR/themes/*.json` (token overrides with optional `vars`),
   hot-reload via watcher, selected name persisted to `$FLEET_TUI_STATE_DIR/theme`.

@@ -6,6 +6,7 @@ import asyncio
 import contextlib
 import logging
 from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable
+from dataclasses import replace
 from typing import Any, Self
 from uuid import UUID
 
@@ -69,9 +70,30 @@ class OpenedTurnStream:
         return getattr(self._prepared, "cleanup_receipt", None)
 
     async def aclose(self) -> None:
+        """Close the underlying event stream while allowing cleanup to complete safely."""
         close = getattr(self._events, "aclose", None)
         if close is not None:
             await shield_cleanup(close())
+
+
+def _attach_preparation_trace_id(prepared: PreparedRun, trace_id: str | None) -> PreparedRun:
+    """
+    Attach a preparation trace identifier for internal phase correlation.
+
+    Parameters:
+        prepared (PreparedRun): Prepared run to annotate.
+        trace_id (str | None): Preparation trace identifier, if available.
+
+    Returns:
+        PreparedRun: The annotated run, or the original run when no identifier is
+        provided or annotation is unsupported.
+    """
+    if not trace_id:
+        return prepared
+    try:
+        return replace(prepared, preparation_trace_id=trace_id)  # type: ignore[type-var]
+    except (TypeError, AttributeError, ValueError):
+        return prepared
 
 
 def _settled_or_unavailable(result: PreparationSettlement) -> None:
@@ -96,6 +118,20 @@ class TurnCoordinator:
         mlflow_tracing_enabled: bool = False,
         mlflow_expose_trace_id: bool = True,
     ) -> None:
+        """
+        Initialize the turn coordinator and its lifecycle dependencies.
+
+        Parameters:
+            lifecycle: Service for claiming, renewing, settling, and revoking runs.
+            preparation: Service that prepares runs before execution.
+            runner: Service that executes prepared runs.
+            projector: Optional projector for committed turn events.
+            turn_timeout_seconds: Maximum duration allowed for a turn.
+            cleanup: Optional supervisor for asynchronous cleanup tasks.
+            claim_loss_fence: Optional callback applied when claim loss requires fencing.
+            mlflow_tracing_enabled: Whether MLflow tracing is enabled.
+            mlflow_expose_trace_id: Whether trace IDs may be exposed.
+        """
         self._lifecycle = lifecycle
         self._preparation = preparation
         self._runner = runner
@@ -116,13 +152,23 @@ class TurnCoordinator:
         )
 
     async def _prepare_with_trace(self, start: ClaimedRun, *, deadline: float) -> PreparedRun:
-        """Trace preparation separately because SSE begins only after it succeeds."""
+        """
+        Prepare a claimed run while recording preparation tracing information for execution correlation.
+
+        Parameters:
+            start (ClaimedRun): The claimed run to prepare.
+            deadline (float): Monotonic time by which preparation must complete.
+
+        Returns:
+            PreparedRun: The prepared run, including its preparation trace identifier when supported.
+        """
         with turn_trace(
             start.session_id,
             start.run_id,
             enabled=self._mlflow_tracing_enabled,
-            expose_trace_id=False,
-        ):
+            expose_trace_id=True,
+            trace_phase="preparation",
+        ) as handle:
             try:
                 with turn_phase_span(
                     "Turn.prepare",
@@ -140,7 +186,7 @@ class TurnCoordinator:
                 )
                 raise
             annotate_trace_io(request=start.input.text, response_text="Turn prepared")
-            return prepared
+            return _attach_preparation_trace_id(prepared, handle.trace_id)
 
     def open_owned(self, command: OpenTurnCommand) -> RunOwnership:
         """Start one coordinator-owned Run lifetime handle (P21)."""
@@ -252,11 +298,22 @@ class TurnCoordinator:
         on_settlement: Callable[[object], None] | None = None,
         on_cleanup: Callable[[asyncio.Task[None]], None] | None = None,
     ) -> AsyncGenerator[RuntimeEvent]:
+        """Stream runtime events for the prepared run during the execution phase.
+
+        Parameters:
+            run (ClaimedRun): The claimed run to execute.
+            prepared (PreparedRun): The prepared run configuration.
+            heartbeat (ClaimHeartbeat | None): The heartbeat maintaining the run claim.
+            on_settlement (Callable[[object], None] | None): Callback invoked when settlement occurs.
+            on_cleanup (Callable[[asyncio.Task[None]], None] | None): Callback invoked when cleanup is scheduled.
+        """
         with turn_trace(
             run.session_id,
             run.run_id,
             enabled=self._mlflow_tracing_enabled,
             expose_trace_id=self._mlflow_expose_trace_id,
+            trace_phase="execution",
+            preparation_trace_id=getattr(prepared, "preparation_trace_id", None),
         ) as handle:
             async for event in self._execution_driver.stream(
                 run,

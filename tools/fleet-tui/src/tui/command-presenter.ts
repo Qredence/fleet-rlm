@@ -1,27 +1,54 @@
+/**
+ * Interactive presenter for slash commands and the narrow compatibility
+ * facade for the presenter modules: overlay scaffolding lives in
+ * `presenter/overlay.ts`, settings editors in `presenter/settings.ts`, and
+ * the Skill picker in `presenter/skill-selector.ts`.
+ */
+
 import {
-  type Component,
-  decodeKittyPrintable,
   type Editor,
-  fuzzyFilter,
-  matchesKey,
-  SelectList,
+  type SelectItem,
   type SettingItem,
   SettingsList,
   type TUI,
-  truncateToWidth,
 } from "@earendil-works/pi-tui";
 
 import type { FleetSession, FleetSettingsPolicy, FleetSkillCard } from "../fleet-api-client.js";
-import type { CommandPresenter, CommandSpec, SettingsUpdate } from "./commands.js";
+import type {
+  CommandPresenter,
+  CommandSpec,
+  SettingsSaveCallback,
+  SettingsUpdate,
+} from "./commands/registry.js";
+import { shortId } from "./format.js";
+import { OVERLAY_OPTIONS, SelectOverlay, TitledComponent } from "./presenter/overlay.js";
+import {
+  applyFieldValue,
+  displayValue,
+  fieldItem,
+  parseFieldValue,
+  type SettingsField,
+} from "./presenter/settings.js";
+import { SkillSelector } from "./presenter/skill-selector.js";
 import type { ConversationStore, PendingSkillSelection } from "./store.js";
-import { selectTheme, settingsListTheme, theme } from "./theme.js";
+import { settingsListTheme } from "./theme.js";
 
-/** Renderer-neutral command contract backed by pi-tui overlays. */
+export { SelectOverlay } from "./presenter/overlay.js";
+export {
+  fieldItem,
+  MultiChoiceEditor,
+  parseFieldValue,
+  TextSettingEditor,
+} from "./presenter/settings.js";
+export { SkillSelector } from "./presenter/skill-selector.js";
+
 export class PiCommandPresenter implements CommandPresenter {
   constructor(
     private readonly ui: TUI,
     private readonly editor: Editor,
     private readonly store: ConversationStore,
+    /** Transient one-shot notice (alt-screen flash); a no-op outside the TUI. */
+    private readonly notify: (message: string) => void = () => undefined,
   ) {}
 
   private restoreFocus = (): void => {
@@ -29,27 +56,26 @@ export class PiCommandPresenter implements CommandPresenter {
   };
 
   showHelp(commands: CommandSpec[]): void {
-    const list = new SelectList(
+    const overlay = new SelectOverlay(
       commands.map((command) => ({
         value: command.usage.split(" ", 1)[0] ?? command.usage,
         label: command.usage,
         description: command.description,
       })),
-      12,
-      selectTheme,
+      {
+        title: "Fleet TUI commands",
+        hint: "Enter insert into editor · Esc close",
+        maxVisible: 12,
+      },
     );
-    const handle = this.ui.showOverlay(list, {
-      width: "80%",
-      maxHeight: "80%",
-      anchor: "center",
-    });
+    const handle = this.ui.showOverlay(overlay, OVERLAY_OPTIONS);
     const finish = (command?: string) => {
       handle.hide();
       if (command) this.editor.setText(`${command} `);
       this.restoreFocus();
     };
-    list.onSelect = (item) => finish(item.value);
-    list.onCancel = () => finish();
+    overlay.onSelect = (item) => finish(item.value);
+    overlay.onCancel = () => finish();
   }
 
   async chooseSession(sessions: FleetSession[]): Promise<string | null> {
@@ -61,6 +87,11 @@ export class PiCommandPresenter implements CommandPresenter {
         label: session.title,
         description: `${relativeUpdatedAt(session.updated_at)} · ${shortId(session.id)}`,
       })),
+      {
+        title: "Switch Fleet Session",
+        hint: "Enter resume · Esc cancel",
+        selectedValue: state.session?.id,
+      },
     );
   }
 
@@ -74,15 +105,106 @@ export class PiCommandPresenter implements CommandPresenter {
         this.restoreFocus();
         resolve(value);
       });
-      const handle = this.ui.showOverlay(selector, {
-        width: "80%",
-        maxHeight: "80%",
-        anchor: "center",
-      });
+      const handle = this.ui.showOverlay(selector, OVERLAY_OPTIONS);
     });
   }
 
-  async chooseSetting(settings: FleetSettingsPolicy): Promise<SettingsUpdate | null> {
+  async chooseSetting(
+    settings: FleetSettingsPolicy,
+    save?: SettingsSaveCallback,
+  ): Promise<SettingsUpdate | null> {
+    if (save) {
+      await this.editSettingsInteractively(settings, save);
+      return null;
+    }
+    return this.chooseSettingOnce(settings);
+  }
+
+  async chooseTheme(themes: string[], current: string | undefined): Promise<string | null> {
+    return this.choose(
+      themes.map((name) => ({
+        value: name,
+        label: name === current ? `${name} (current)` : name,
+        description: name === current ? "active theme" : "select to apply",
+      })),
+      {
+        title: "Select theme",
+        context: `Current: ${current ?? "—"}`,
+        hint: "Type to filter · Enter apply · Esc cancel",
+        filterable: true,
+        selectedValue: current,
+      },
+    );
+  }
+
+  async chooseProfile(
+    profiles: string[],
+    active: string | undefined,
+    selected: string | undefined,
+  ): Promise<string | null> {
+    const contextParts: string[] = [];
+    if (active) contextParts.push(`Running: ${active}`);
+    if (selected) contextParts.push(`Selected for restart: ${selected}`);
+    return this.choose(
+      profiles.map((profile) => {
+        const isActive = profile === active;
+        const isSelected = profile === selected;
+        let state: "current" | "running" | "selected" | null = null;
+        if (isActive && isSelected) {
+          state = "current";
+        } else if (isActive) {
+          state = "running";
+        } else if (isSelected) {
+          state = "selected";
+        }
+        let description = "select for next restart";
+        if (state === "current") {
+          description = "running and selected for restart";
+        } else if (state === "running") {
+          description = "running now; select to keep on restart";
+        } else if (state === "selected") {
+          description = "applies on restart";
+        }
+        return {
+          value: profile,
+          label: state ? `${profile} (${state})` : profile,
+          description,
+        };
+      }),
+      {
+        title: "Select profile for next restart",
+        context: contextParts.join(" · ") || undefined,
+        hint: "Enter select · Esc cancel",
+        selectedValue: selected,
+      },
+    );
+  }
+
+  private choose(
+    items: SelectItem[],
+    options: {
+      title: string;
+      context?: string;
+      hint?: string;
+      filterable?: boolean;
+      selectedValue?: string;
+    },
+  ): Promise<string | null> {
+    return new Promise((resolve) => {
+      const overlay = new SelectOverlay(items, options);
+      const handle = this.ui.showOverlay(overlay, OVERLAY_OPTIONS);
+      const finish = (value: string | null) => {
+        handle.hide();
+        this.restoreFocus();
+        resolve(value);
+      };
+      overlay.onSelect = (item) => finish(item.value);
+      overlay.onCancel = () => finish(null);
+    });
+  }
+
+  /** Legacy contract: resolve the first chosen update and close (mocks/tests). */
+  private chooseSettingOnce(settings: FleetSettingsPolicy): Promise<SettingsUpdate | null> {
     return new Promise((resolve) => {
       const finish = (update: SettingsUpdate | null) => {
         handle.hide();
@@ -111,174 +233,137 @@ export class PiCommandPresenter implements CommandPresenter {
             ),
         }));
       const handle = this.ui.showOverlay(
-        new SettingsList(
-          scopeItems(),
-          10,
-          settingsListTheme,
-          () => undefined,
-          () => finish(null),
-          { enableSearch: true },
+        new TitledComponent(
+          new SettingsList(
+            scopeItems(),
+            10,
+            settingsListTheme,
+            () => undefined,
+            () => finish(null),
+            { enableSearch: true },
+          ),
+          "Fleet settings",
+          "Saved changes apply after a Fleet restart",
         ),
-        { width: "80%", maxHeight: "80%", anchor: "center" },
+        OVERLAY_OPTIONS,
       );
     });
   }
 
-  async chooseTheme(themes: string[], current: string | undefined): Promise<string | null> {
-    return this.choose(
-      themes.map((name) => ({
-        value: name,
-        label: name === current ? `${name} (current)` : name,
-        description: name === current ? "active theme" : "select to apply",
-      })),
-    );
-  }
-
-  async chooseProfile(
-    profiles: string[],
-    active: string | undefined,
-    selected: string | undefined,
-  ): Promise<string | null> {
-    return this.choose(
-      profiles.map((profile) => {
-        const isActive = profile === active;
-        const isSelected = profile === selected;
-        let state: "current" | "running" | "selected" | null = null;
-        if (isActive && isSelected) {
-          state = "current";
-        } else if (isActive) {
-          state = "running";
-        } else if (isSelected) {
-          state = "selected";
-        }
-        let description = "select for next restart";
-        if (state === "current") {
-          description = "active and selected";
-        } else if (state === "running") {
-          description = "select to keep on restart";
-        } else if (state === "selected") {
-          description = "restart to apply";
-        }
-        return {
-          value: profile,
-          label: state ? `${profile} (${state})` : profile,
-          description,
-        };
-      }),
-    );
-  }
-
-  private choose(
-    items: { value: string; label: string; description?: string }[],
-  ): Promise<string | null> {
+  /**
+   * Settings-first flow: the overlay stays open across edits. Each change is
+   * parsed and queued through `save`, which returns the freshest policy (PATCH
+   * response, or a GET refresh after a revision conflict) used for the next
+   * edit's revision. Displayed values always resync from that policy, so a
+   * failed or conflicted save reverts the optimistic SettingsList display.
+   */
+  private editSettingsInteractively(
+    settings: FleetSettingsPolicy,
+    save: SettingsSaveCallback,
+  ): Promise<void> {
     return new Promise((resolve) => {
-      const list = new SelectList(items, 10, selectTheme);
-      const handle = this.ui.showOverlay(list, {
-        width: "80%",
-        maxHeight: "80%",
-        anchor: "center",
-      });
-      const finish = (value: string | null) => {
-        handle.hide();
-        this.restoreFocus();
-        resolve(value);
+      let policy = settings;
+      let chain: Promise<void> = Promise.resolve();
+      let activeFieldList: SettingsList | null = null;
+      let activeScopeName: string | null = null;
+
+      const resyncDisplayedValues = (): void => {
+        // Field paths are unique per scope list; only the open scope's list
+        // can accept updates, so refresh from its fields alone.
+        const activeScope = policy.scopes.find((scope) => scope.name === activeScopeName);
+        if (!activeFieldList || !activeScope) return;
+        for (const field of activeScope.fields) {
+          activeFieldList.updateValue(field.path, displayValue(field.value));
+        }
       };
-      list.onSelect = (item) => finish(item.value);
-      list.onCancel = () => finish(null);
+
+      const enqueueSave = (scopeName: string, field: SettingsField, raw: string): void => {
+        // Serialized so revision chaining stays consistent; errors are absorbed
+        // so one bad save can neither wedge the queue nor hang dismissal.
+        chain = chain
+          .then(async () => {
+            const parsed = parseFieldValue(field, raw);
+            if (!parsed.ok) {
+              this.notify(`${field.path}: ${parsed.error}`);
+              resyncDisplayedValues();
+              return;
+            }
+            const revision = policy.revision;
+            const refreshed = await save({
+              revision,
+              scope: scopeName,
+              path: field.path,
+              value: parsed.value,
+            });
+            if (refreshed) policy = refreshed;
+            resyncDisplayedValues();
+          })
+          .catch(() => undefined);
+      };
+
+      const onFieldChange = (scopeName: string, id: string, raw: string): void => {
+        // Read field metadata from the freshest policy so refreshed choices
+        // and environment overrides apply to the next edit.
+        const scope = policy.scopes.find((candidate) => candidate.name === scopeName);
+        const field = scope?.fields.find((candidate) => candidate.path === id);
+        if (!field || field.environment_overridden) return;
+        enqueueSave(scopeName, field, raw);
+      };
+
+      const root = new SettingsList(
+        settings.scopes.map((scope) => ({
+          id: scope.name,
+          label: scope.name,
+          description: `${scope.fields.length} setting${scope.fields.length === 1 ? "" : "s"}`,
+          currentValue: "",
+          submenu: (_current, done) => {
+            // Look up the freshest snapshot so reopening a scope reflects
+            // values saved or refreshed through the server.
+            const latest =
+              policy.scopes.find((candidate) => candidate.name === scope.name) ?? scope;
+            const fieldList = new SettingsList(
+              latest.fields.map((field) => fieldItem(field)),
+              10,
+              settingsListTheme,
+              (id, value) => onFieldChange(scope.name, id, value),
+              () => done(undefined),
+              { enableSearch: true },
+            );
+            activeFieldList = fieldList;
+            activeScopeName = scope.name;
+            return fieldList;
+          },
+        })),
+        10,
+        settingsListTheme,
+        () => undefined,
+        () => {
+          handle.hide();
+          this.restoreFocus();
+          // Let queued saves settle before the command completes so flashes
+          // and error messages stay in save order.
+          void chain.then(() => resolve());
+        },
+        { enableSearch: true },
+      );
+      const handle = this.ui.showOverlay(
+        new TitledComponent(
+          root,
+          "Fleet settings",
+          "Enter edit · Esc back/close · changes apply after a Fleet restart",
+        ),
+        OVERLAY_OPTIONS,
+      );
     });
   }
 }
 
-export class SkillSelector implements Component {
-  private index = 0;
-  private query = "";
-  private selected: PendingSkillSelection[];
-  constructor(
-    private readonly skills: FleetSkillCard[],
-    current: PendingSkillSelection[],
-    private readonly finish: (value: PendingSkillSelection[] | null) => void,
-  ) {
-    this.selected = [...current];
-  }
-  invalidate(): void {}
-  render(width: number): string[] {
-    const safeWidth = Math.max(1, width);
-    const filtered = this.filteredSkills();
-    this.index = Math.min(this.index, Math.max(0, filtered.length - 1));
-    const maxVisible = 10;
-    const start = Math.max(0, Math.min(this.index - maxVisible + 1, filtered.length - maxVisible));
-    const visible = filtered.slice(start, start + maxVisible);
-    return [
-      theme.fg(
-        "accent",
-        theme.bold("Skills for the next Turn (Space toggle · Enter apply · Escape cancel)"),
-      ),
-      `${theme.fg("muted", "Filter:")} ${this.query || theme.fg("dim", "(type to search)")}`,
-      "",
-      ...(visible.length > 0
-        ? visible
-        : [{ id: "", name: "No matching Skills", version: "", description: "" }]
-      ).map((skill, offset) => {
-        const index = start + offset;
-        const checked = this.selected.some((item) => item.id === skill.id) ? "x" : " ";
-        const version = skill.version ? `@${skill.version}` : "";
-        const label = `[${checked}] ${skill.name}${version}`;
-        const selected = index === this.index;
-        return `${selected ? selectTheme.selectedPrefix(">") : " "} ${selected ? selectTheme.selectedText(label) : label}  ${selectTheme.description(skill.description)}`;
-      }),
-      "",
-      selectTheme.scrollInfo(
-        `${this.selected.length}/4 selected · ${filtered.length} shown${filtered.length > maxVisible ? ` · rows ${start + 1}-${Math.min(start + maxVisible, filtered.length)}` : ""}`,
-      ),
-    ].map((line) => truncateToWidth(line, safeWidth, "…"));
-  }
-  handleInput(data: string): void {
-    const filtered = this.filteredSkills();
-    if (matchesKey(data, "up")) this.index = Math.max(0, this.index - 1);
-    else if (matchesKey(data, "down")) this.index = Math.min(filtered.length - 1, this.index + 1);
-    else if (matchesKey(data, "pageUp")) this.index = Math.max(0, this.index - 10);
-    else if (matchesKey(data, "pageDown"))
-      this.index = Math.min(filtered.length - 1, this.index + 10);
-    else if (data === " ") {
-      const skill = filtered[this.index];
-      if (!skill) return;
-      const exists = this.selected.some((item) => item.id === skill.id);
-      if (exists) this.selected = this.selected.filter((item) => item.id !== skill.id);
-      else if (this.selected.length < 4)
-        this.selected.push({
-          id: skill.id,
-          expectedVersion: skill.version,
-          displayName: skill.name,
-        });
-    } else if (matchesKey(data, "backspace")) {
-      const graphemes = Array.from(
-        new Intl.Segmenter(undefined, { granularity: "grapheme" }).segment(this.query),
-        ({ segment }) => segment,
-      );
-      this.query = graphemes.slice(0, -1).join("");
-      this.index = 0;
-    } else if (matchesKey(data, "enter")) this.finish(this.selected);
-    else if (matchesKey(data, "escape")) this.finish(null);
-    else {
-      const printable = decodeKittyPrintable(data) ?? (isPrintableInput(data) ? data : undefined);
-      if (printable) {
-        this.query += printable;
-        this.index = 0;
-      }
-    }
-  }
-
-  private filteredSkills(): FleetSkillCard[] {
-    const query = this.query.trim();
-    if (!query) return this.skills;
-    return fuzzyFilter(this.skills, query, (skill) => `${skill.name} ${skill.description}`);
-  }
-}
-
-function shortId(id: string): string {
-  return id.length > 12 ? `${id.slice(0, 8)}…` : id;
-}
-
+/**
+ * Formats a timestamp as a relative update label.
+ *
+ * @param value - The timestamp to format, or `null` or `undefined`
+ * @returns A relative update label, or `updated —` for a missing or invalid timestamp
+ */
 function relativeUpdatedAt(value: string | null | undefined): string {
   if (!value) return "updated —";
   const timestamp = Date.parse(value);
@@ -289,214 +374,4 @@ function relativeUpdatedAt(value: string | null | undefined): string {
   const elapsedHours = Math.floor(elapsedMinutes / 60);
   if (elapsedHours < 24) return `updated ${elapsedHours}h ago`;
   return `updated ${Math.floor(elapsedHours / 24)}d ago`;
-}
-
-type SettingsField = FleetSettingsPolicy["scopes"][number]["fields"][number];
-
-/**
- * Creates a selectable settings item with an editor appropriate for the field type.
- *
- * @param field - The settings field to represent
- * @returns A settings item containing the field's display information and editing options
- */
-function fieldItem(field: SettingsField): SettingItem {
-  const base = {
-    id: field.path,
-    label: `${field.group} · ${field.label}`,
-    description: settingDescription(field),
-    currentValue: displayValue(field.value),
-  };
-  if (field.editor === "boolean" || field.editor === "single_choice") {
-    let values: string[];
-    if (field.editor === "boolean") {
-      values = ["false", "true"];
-    } else {
-      const choices = choicesOf(field);
-      values = choices.length > 0 ? choices : [displayValue(field.value)];
-    }
-    return {
-      ...base,
-      values,
-    };
-  }
-  if (field.editor === "multi_choice") {
-    return {
-      ...base,
-      submenu: (_current, done) => new MultiChoiceEditor(field, done),
-    };
-  }
-  if (field.editor === "string_list") {
-    const display = Array.isArray(field.value)
-      ? field.value.filter((item): item is string => typeof item === "string").join(", ")
-      : String(field.value ?? "");
-    return {
-      ...base,
-      submenu: (_current, done) =>
-        new TextSettingEditor({ ...field, value: display }, done, { allowEmpty: true }),
-    };
-  }
-  return {
-    ...base,
-    submenu: (_current, done) => new TextSettingEditor(field, done),
-  };
-}
-
-function applyFieldValue(
-  settings: FleetSettingsPolicy,
-  scope: string,
-  field: SettingsField,
-  raw: string,
-  finish: (update: SettingsUpdate | null) => void,
-): void {
-  let value: string | number | boolean | string[];
-  if (field.editor === "boolean") {
-    value = raw === "true";
-  } else if (field.editor === "number") {
-    value = Number(raw);
-  } else if (field.editor === "multi_choice" || field.editor === "string_list") {
-    value = raw
-      .split(",")
-      .map((item) => item.trim())
-      .filter(Boolean);
-  } else {
-    value = raw;
-  }
-  finish({
-    revision: settings.revision,
-    scope,
-    path: field.path,
-    value,
-  });
-}
-
-/** Minimal keyboard text editor for text/number settings. */
-export class TextSettingEditor implements Component {
-  private value: string;
-  private readonly allowEmpty: boolean;
-
-  constructor(
-    private readonly field: SettingsField,
-    private readonly finish: (value?: string) => void,
-    options: { allowEmpty?: boolean } = {},
-  ) {
-    this.value = String(field.value);
-    this.allowEmpty = options.allowEmpty === true;
-  }
-
-  invalidate(): void {}
-
-  render(width: number): string[] {
-    const safeWidth = Math.max(1, width);
-    return [
-      theme.fg("accent", theme.bold(`${this.field.group} · ${this.field.label}`)),
-      theme.fg("muted", `Current: ${displayValue(this.field.value)} · Enter save · Escape back`),
-      "",
-      `${theme.fg("muted", "New value:")} ${this.value || theme.fg("dim", "(type a value)")}`,
-    ].map((line) => truncateToWidth(line, safeWidth, "…"));
-  }
-
-  handleInput(data: string): void {
-    if (matchesKey(data, "escape")) {
-      this.finish(undefined);
-    } else if (matchesKey(data, "enter")) {
-      if (this.allowEmpty || this.value.trim()) this.finish(this.value);
-    } else if (matchesKey(data, "backspace")) {
-      this.value = Array.from(this.value).slice(0, -1).join("");
-    } else {
-      const printable = decodeKittyPrintable(data) ?? (isPrintableInput(data) ? data : undefined);
-      if (printable) this.value += printable;
-    }
-  }
-}
-
-/** Space-toggles a multi-choice list; Enter confirms. */
-export class MultiChoiceEditor implements Component {
-  private index = 0;
-  private selected: string[];
-
-  constructor(
-    private readonly field: SettingsField,
-    private readonly finish: (value?: string) => void,
-  ) {
-    this.selected = Array.isArray(field.value)
-      ? field.value.filter((value): value is string => typeof value === "string")
-      : [];
-  }
-
-  invalidate(): void {}
-
-  render(width: number): string[] {
-    const safeWidth = Math.max(1, width);
-    const choices = choicesOf(this.field);
-    const lines = [
-      theme.fg("accent", theme.bold(`${this.field.group} · ${this.field.label}`)),
-      theme.fg("muted", "Space toggle · Enter confirm · Escape back"),
-      "",
-      ...(choices.length > 0 ? choices : ["(no choices)"]).map((choice, index) => {
-        const checked = this.selected.includes(choice) ? "x" : " ";
-        const label = `[${checked}] ${choice}`;
-        const selected = index === this.index;
-        return `${selected ? selectTheme.selectedPrefix(">") : " "} ${selected ? selectTheme.selectedText(label) : label}`;
-      }),
-    ];
-    return lines.map((line) => truncateToWidth(line, safeWidth, "…"));
-  }
-
-  handleInput(data: string): void {
-    const choices = choicesOf(this.field);
-    if (matchesKey(data, "up")) this.index = Math.max(0, this.index - 1);
-    else if (matchesKey(data, "down")) this.index = Math.min(choices.length - 1, this.index + 1);
-    else if (data === " ") {
-      const choice = choices[this.index];
-      if (!choice) return;
-      this.selected = this.selected.includes(choice)
-        ? this.selected.filter((item) => item !== choice)
-        : [...this.selected, choice];
-    } else if (matchesKey(data, "enter")) this.finish(this.selected.join(","));
-    else if (matchesKey(data, "escape")) this.finish(undefined);
-  }
-}
-
-/**
- * Gets the available choices for a settings field.
- *
- * @param field - The settings field to inspect
- * @returns The field's choices, or an empty array when none are defined
- */
-function choicesOf(field: SettingsField): string[] {
-  return field.choices ?? [];
-}
-
-/**
- * Generates a contextual description for a settings field path.
- *
- * @param field - The settings field to describe
- * @returns A contextual description for recognized field paths, or the field path
- */
-function settingDescription(field: SettingsField): string {
-  if (field.path.endsWith(".api_key_env")) return `${field.path} · name only; secret stays in .env`;
-  if (field.path.endsWith(".base_url_env")) return `${field.path} · name only; URL stays in .env`;
-  if (field.path.endsWith(".base_url")) return `${field.path} · OpenAI-compatible /v1 base URL`;
-  if (field.path.endsWith(".model")) return `${field.path} · provider model id`;
-  return field.path;
-}
-
-/**
- * Formats a value for display.
- *
- * @param value - The value to format
- * @returns The value itself when it is a string; otherwise, its JSON representation
- */
-function displayValue(value: unknown): string {
-  return typeof value === "string" ? value : JSON.stringify(value);
-}
-
-function isPrintableInput(value: string): boolean {
-  return (
-    value.length > 0 &&
-    Array.from(value).every((character) => {
-      const codePoint = character.codePointAt(0) ?? 0;
-      return codePoint >= 0x20 && codePoint !== 0x7f;
-    })
-  );
 }

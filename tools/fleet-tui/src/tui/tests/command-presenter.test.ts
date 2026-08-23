@@ -1,8 +1,24 @@
-import { visibleWidth } from "@earendil-works/pi-tui";
+import {
+  type Component,
+  type Editor,
+  type OverlayHandle,
+  type TUI,
+  visibleWidth,
+} from "@earendil-works/pi-tui";
 import { describe, expect, it, vi } from "vitest";
 
 import type { FleetSettingsPolicy, FleetSkillCard } from "../../fleet-api-client.js";
-import { MultiChoiceEditor, SkillSelector, TextSettingEditor } from "../command-presenter.js";
+import {
+  fieldItem,
+  MultiChoiceEditor,
+  parseFieldValue,
+  PiCommandPresenter,
+  SelectOverlay,
+  SkillSelector,
+  TextSettingEditor,
+} from "../command-presenter.js";
+import type { SettingsSaveCallback } from "../commands.js";
+import { ConversationStore } from "../store.js";
 
 const skills = Array.from({ length: 14 }, (_, index) => ({
   id: `skill-${index}`,
@@ -88,7 +104,48 @@ describe("TextSettingEditor", () => {
     editor.handleInput("\r");
     expect(finish).toHaveBeenCalledWith("");
   });
+
+  it("removes a complete Unicode grapheme on backspace", () => {
+    const field = defaultsField();
+    const editor = new TextSettingEditor({ ...field, value: "", editor: "text" }, vi.fn());
+
+    editor.handleInput("x");
+    editor.handleInput("e\u0301");
+    expect(valueLine(editor)).toBe("New value: xe\u0301");
+
+    editor.handleInput("\u007f");
+    expect(valueLine(editor)).toBe("New value: x");
+  });
+
+  it("removes a multi-codepoint emoji ZWJ sequence in one backspace", () => {
+    const field = defaultsField();
+    const editor = new TextSettingEditor({ ...field, value: "ab", editor: "text" }, vi.fn());
+
+    editor.handleInput("\ud83d\udc68\u200d\ud83d\udc69\u200d\ud83d\udc67\u200d\ud83d\udc66");
+    expect(valueLine(editor)).toBe(
+      "New value: ab\ud83d\udc68\u200d\ud83d\udc69\u200d\ud83d\udc67\u200d\ud83d\udc66",
+    );
+
+    editor.handleInput("\u007f");
+    expect(valueLine(editor)).toBe("New value: ab");
+  });
+
+  it("renders an unset current value without a literal undefined", () => {
+    const field = defaultsField();
+    const editor = new TextSettingEditor({ ...field, value: undefined, editor: "text" }, vi.fn());
+
+    expect(stripAnsi(editor.render(40).join("\n"))).toContain("Current: (unset)");
+    expect(stripAnsi(editor.render(40).join("\n"))).not.toContain("undefined");
+  });
 });
+
+function valueLine(editor: TextSettingEditor): string {
+  return (
+    stripAnsi(editor.render(40).join("\n"))
+      .split("\n")
+      .find((line) => line.startsWith("New value:")) ?? ""
+  );
+}
 
 describe("MultiChoiceEditor", () => {
   it("toggles choices with Space and confirms the joined selection", () => {
@@ -158,3 +215,326 @@ describe("SkillSelector", () => {
 function stripAnsi(value: string): string {
   return value.replaceAll(new RegExp(`${String.fromCharCode(27)}\\[[\\d;]*m`, "g"), "");
 }
+
+describe("TextSettingEditor numeric fields", () => {
+  it("rejects non-numeric input with an inline error and stays open", () => {
+    const field = defaultsField();
+    const finish = vi.fn();
+    const editor = new TextSettingEditor({ ...field, value: "4", editor: "number" }, finish, {
+      numeric: true,
+    });
+
+    editor.handleInput("x");
+    editor.handleInput("\r");
+    expect(finish).not.toHaveBeenCalled();
+    expect(stripAnsi(editor.render(60).join("\n"))).toContain("Enter a number");
+
+    editor.handleInput("\u007f");
+    editor.handleInput("\r");
+    expect(finish).toHaveBeenCalledWith("4");
+  });
+});
+
+describe("fieldItem", () => {
+  function makeField(
+    overrides: Partial<ReturnType<typeof defaultsField>> = {},
+  ): ReturnType<typeof defaultsField> {
+    return { ...defaultsField(), ...overrides };
+  }
+
+  it("marks environment-overridden fields read-only with no editor affordance", () => {
+    const item = fieldItem(
+      makeField({ editor: "text", value: "gemini", environment_overridden: true }),
+    );
+    expect(item.values).toBeUndefined();
+    expect(item.submenu).toBeUndefined();
+    expect(item.description).toContain("read-only");
+    expect(item.currentValue).toBe("gemini");
+  });
+
+  it("marks singleton single_choice fields fixed/read-only to avoid no-op PATCHes", () => {
+    const item = fieldItem(
+      makeField({
+        path: "runtime.environment",
+        editor: "single_choice",
+        value: "daytona",
+        choices: ["daytona"],
+      }),
+    );
+    expect(item.values).toBeUndefined();
+    expect(item.submenu).toBeUndefined();
+    expect(item.description).toContain("fixed");
+    expect(item.currentValue).toBe("daytona");
+  });
+
+  it("still offers a cycle editor for multi-value single_choice fields", () => {
+    const item = fieldItem(makeField({ editor: "single_choice", value: "a", choices: ["a", "b"] }));
+    expect(item.values).toEqual(["a", "b"]);
+    expect(item.description).not.toContain("read-only");
+  });
+
+  it("says api_key_env paths are variable names whose value is never shown", () => {
+    const item = fieldItem(makeField({ path: "llm.api_key_env", value: "GEMINI_API_KEY" }));
+    expect(item.description).toContain("variable name only; value never shown");
+    expect(item.currentValue).toBe("GEMINI_API_KEY");
+  });
+
+  it("renders undefined and null values as (unset)", () => {
+    expect(fieldItem(makeField({ value: undefined })).currentValue).toBe("(unset)");
+    expect(fieldItem(makeField({ value: null })).currentValue).toBe("(unset)");
+  });
+});
+
+describe("parseFieldValue", () => {
+  const base = defaultsField();
+
+  it("rejects NaN numbers instead of PATCHing JSON null", () => {
+    const result = parseFieldValue({ ...base, editor: "number" }, "abc");
+    expect(result).toEqual({ ok: false, error: expect.stringContaining("not a number") });
+    expect(parseFieldValue({ ...base, editor: "number" }, "")).toMatchObject({ ok: false });
+  });
+
+  it("parses numbers, booleans, and comma lists", () => {
+    expect(parseFieldValue({ ...base, editor: "number" }, "42")).toEqual({ ok: true, value: 42 });
+    expect(parseFieldValue({ ...base, editor: "boolean" }, "true")).toEqual({
+      ok: true,
+      value: true,
+    });
+    expect(parseFieldValue({ ...base, editor: "string_list" }, "a, b ,,c")).toEqual({
+      ok: true,
+      value: ["a", "b", "c"],
+    });
+  });
+});
+
+describe("SelectOverlay", () => {
+  const items = [
+    { value: "dark", label: "dark (current)", description: "active theme" },
+    { value: "light", label: "light", description: "select to apply" },
+    { value: "midnight", label: "midnight", description: "custom theme" },
+  ];
+
+  function rendered(overlay: SelectOverlay, width = 60): string {
+    return stripAnsi(overlay.render(width).join("\n"));
+  }
+
+  it("renders the shared title, context, and bottom hint", () => {
+    const overlay = new SelectOverlay(items, {
+      title: "Select theme",
+      context: "Current: dark",
+      hint: "Type to filter · Enter apply · Esc cancel",
+    });
+    const output = rendered(overlay);
+    expect(output).toContain("Select theme");
+    expect(output).toContain("Current: dark");
+    expect(output).toContain("Enter apply · Esc cancel");
+    expect(overlay.render(60).every((line) => visibleWidth(line) <= 60)).toBe(true);
+  });
+
+  it("preselects the configured value", () => {
+    const overlay = new SelectOverlay(items, { title: "t", selectedValue: "midnight" });
+    expect(rendered(overlay)).toContain("→ midnight");
+  });
+
+  it("filters as you type and selects the narrowed item", () => {
+    const overlay = new SelectOverlay(items, { title: "t", filterable: true });
+    const onSelect = vi.fn();
+    overlay.onSelect = onSelect;
+
+    for (const key of "mid") overlay.handleInput(key);
+    expect(overlay.filterQuery).toBe("mid");
+    const filtered = rendered(overlay);
+    expect(filtered).toContain("midnight");
+    expect(filtered).not.toContain("dark");
+
+    overlay.handleInput("\r");
+    expect(onSelect).toHaveBeenCalledWith(expect.objectContaining({ value: "midnight" }));
+  });
+
+  it("removes a complete grapheme from the filter on backspace", () => {
+    const overlay = new SelectOverlay(items, { title: "t", filterable: true });
+    overlay.handleInput("l");
+    overlay.handleInput("e\u0301");
+    expect(overlay.filterQuery).toBe("le\u0301");
+    overlay.handleInput("\u007f");
+    expect(overlay.filterQuery).toBe("l");
+  });
+
+  it("cancels through the wrapped list", () => {
+    const overlay = new SelectOverlay(items, { title: "t" });
+    const onCancel = vi.fn();
+    overlay.onCancel = onCancel;
+    overlay.handleInput("\x1b");
+    expect(onCancel).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("PiCommandPresenter interactive settings editor", () => {
+  const ENTER = "\r";
+  const ESCAPE = "\x1b";
+  const DOWN = "\x1b[B";
+
+  function editableSettings(): FleetSettingsPolicy {
+    return {
+      revision: "a".repeat(64),
+      active_profile: "daytona",
+      default_profile: "daytona",
+      restart_required: true,
+      scopes: [
+        {
+          name: "daytona",
+          fields: [
+            {
+              path: "rlm.max_iters",
+              group: "RLM",
+              label: "Max iterations",
+              value: 4,
+              editor: "number" as const,
+              choices: [],
+              environment_overridden: false,
+            },
+            {
+              path: "rlm.verbose",
+              group: "RLM",
+              label: "Verbose logging",
+              value: false,
+              editor: "boolean" as const,
+              choices: [],
+              environment_overridden: false,
+            },
+          ],
+        },
+      ],
+    };
+  }
+
+  type InteractiveComponent = Component & { handleInput: (data: string) => void };
+
+  function fakeUi(): {
+    ui: TUI;
+    overlay: () => InteractiveComponent;
+    hide: ReturnType<typeof vi.fn>;
+  } {
+    let component: InteractiveComponent | null = null;
+    const hide = vi.fn();
+    const ui = {
+      showOverlay: (c: Component) => {
+        component = c as InteractiveComponent;
+        return { hide } as unknown as OverlayHandle;
+      },
+      setFocus: vi.fn(),
+    } as unknown as TUI;
+    return {
+      ui,
+      overlay: () => {
+        if (!component) throw new Error("no overlay shown");
+        return component;
+      },
+      hide,
+    };
+  }
+
+  it("keeps the overlay open across successive saves and uses the freshest revision", async () => {
+    const { ui, overlay, hide } = fakeUi();
+    const notify = vi.fn();
+    const presenter = new PiCommandPresenter(
+      ui,
+      { setText: vi.fn() } as unknown as Editor,
+      new ConversationStore(),
+      notify,
+    );
+    const settings = editableSettings();
+    const refreshed = { ...settings, revision: "b".repeat(64) };
+    const save = vi.fn<SettingsSaveCallback>().mockResolvedValue(refreshed);
+
+    const result = presenter.chooseSetting({ ...settings }, save);
+    const screen = overlay();
+    const text = () => stripAnsi(screen.render(80).join("\n"));
+    expect(text()).toContain("Fleet settings");
+
+    // Open the scope, edit the number field: "4" -> "8"
+    screen.handleInput(ENTER);
+    screen.handleInput(ENTER);
+    screen.handleInput("\u007f");
+    screen.handleInput("8");
+    screen.handleInput(ENTER);
+    await vi.waitFor(() => expect(save).toHaveBeenCalledTimes(1));
+    expect(save.mock.calls[0]?.[0]).toEqual({
+      revision: "a".repeat(64),
+      scope: "daytona",
+      path: "rlm.max_iters",
+      value: 8,
+    });
+
+    // The overlay stayed open and shows the saved value from the refreshed policy
+    expect(hide).not.toHaveBeenCalled();
+    expect(text()).toContain("rlm.max_iters");
+
+    // Cycle the boolean field; the save must use the refreshed revision
+    screen.handleInput(DOWN);
+    screen.handleInput(ENTER);
+    await vi.waitFor(() => expect(save).toHaveBeenCalledTimes(2));
+    expect(save.mock.calls[1]?.[0]).toEqual({
+      revision: "b".repeat(64),
+      scope: "daytona",
+      path: "rlm.verbose",
+      value: true,
+    });
+
+    // Escape twice: field list -> scope list -> close, which resolves the command
+    screen.handleInput(ESCAPE);
+    screen.handleInput(ESCAPE);
+    await expect(result).resolves.toBeNull();
+    expect(hide).toHaveBeenCalled();
+  });
+
+  it("flashes a parse error and does not save when a number field gets NaN input", async () => {
+    const { ui, overlay } = fakeUi();
+    const notify = vi.fn();
+    const presenter = new PiCommandPresenter(
+      ui,
+      { setText: vi.fn() } as unknown as Editor,
+      new ConversationStore(),
+      notify,
+    );
+    const save = vi.fn<SettingsSaveCallback>();
+    const result = presenter.chooseSetting(editableSettings(), save);
+    const screen = overlay();
+
+    screen.handleInput(ENTER);
+    screen.handleInput(ENTER);
+    screen.handleInput("x");
+    screen.handleInput(ENTER);
+    // Editor-level validation keeps the editor open; no save, visible error
+    expect(stripAnsi(screen.render(80).join("\n"))).toContain("Enter a number");
+    expect(save).not.toHaveBeenCalled();
+    screen.handleInput(ESCAPE);
+    screen.handleInput(ESCAPE);
+    screen.handleInput(ESCAPE);
+    await expect(result).resolves.toBeNull();
+  });
+
+  it("reverts the displayed value and keeps the current policy when a save fails", async () => {
+    const { ui, overlay } = fakeUi();
+    const presenter = new PiCommandPresenter(
+      ui,
+      { setText: vi.fn() } as unknown as Editor,
+      new ConversationStore(),
+      vi.fn(),
+    );
+    const save = vi.fn<SettingsSaveCallback>().mockResolvedValue(null);
+    const result = presenter.chooseSetting(editableSettings(), save);
+    const screen = overlay();
+
+    screen.handleInput(ENTER);
+    screen.handleInput(DOWN);
+    screen.handleInput(ENTER); // cycle boolean false -> true, save fails
+    await vi.waitFor(() => expect(save).toHaveBeenCalledTimes(1));
+    await vi.waitFor(() =>
+      expect(stripAnsi(screen.render(80).join("\n"))).toContain("RLM · Verbose logging  false"),
+    );
+    screen.handleInput(ESCAPE);
+    screen.handleInput(ESCAPE);
+    await expect(result).resolves.toBeNull();
+  });
+});
