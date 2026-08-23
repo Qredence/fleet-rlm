@@ -1,6 +1,6 @@
 # dspy.RLM contract (Fleet / DSPy 3.3.x)
 
-Authority: supported DSPy 3.3.x and [dspy.ai RLM](https://dspy.ai/api/modules/RLM/). The current lock resolves 3.3.0. Do not treat Daytona provider docs as DSPy module authority.
+Authority: supported DSPy 3.3.x and [dspy.ai RLM](https://dspy.ai/api/modules/RLM/). The current lock resolves 3.3.1. Do not treat Daytona provider docs as DSPy module authority.
 
 ## Name
 

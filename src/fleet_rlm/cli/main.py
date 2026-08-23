@@ -69,6 +69,16 @@ def _single_command_parser(*, program: str, command: str) -> argparse.ArgumentPa
 
 def _run(parser: argparse.ArgumentParser, argv: Sequence[str] | None = None) -> None:
     args = parser.parse_args(argv)
+    # Certified-runtime guard: fail closed with a bounded public error before
+    # any provider, database, or Daytona resource is constructed and before any
+    # listener binds. Argument parsing (and --help) stay reachable on any
+    # runtime; every serving/diagnostic command is guarded.
+    from fleet_rlm.rlm.dspy_contract import UncertifiedDSpyVersionError, assert_dspy_version
+
+    try:
+        assert_dspy_version()
+    except UncertifiedDSpyVersionError as exc:
+        parser.exit(1, f"{parser.prog}: error: {exc}\n")
     if args.command == "doctor":
         _run_doctor(parser, args.doctor_provider)
         return

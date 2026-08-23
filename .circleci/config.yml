@@ -295,7 +295,7 @@ jobs:
 
             expected = tuple(int(part) for part in os.environ["FLEET_COMPAT_PYTHON"].split("."))
             assert sys.version_info[:2] == expected, sys.version
-            assert dspy.__version__.startswith("3.3."), dspy.__version__
+            assert dspy.__version__ == "3.3.1", dspy.__version__
             print("fleet_rlm", fleet_rlm.__version__)
             print("dspy", dspy.__version__)
             PY

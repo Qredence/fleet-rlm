@@ -349,27 +349,54 @@ async def test_native_rlm_callback_observes_completed_action_without_altering_pr
     interpreter.shutdown()
 
 
-def test_composition_version_guard_accepts_3_3_x_and_rejects_other_minors(
+def test_composition_version_guard_accepts_exact_final_3_3_1_only(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from fleet_rlm.rlm.dspy_contract import assert_dspy_version
+    from fleet_rlm.rlm.dspy_contract import (
+        CERTIFIED_DSPY_VERSION,
+        UncertifiedDSpyVersionError,
+        assert_dspy_version,
+    )
 
-    monkeypatch.setattr(dspy, "__version__", "3.3.0")
-    assert_dspy_version()  # pinned release
+    assert CERTIFIED_DSPY_VERSION == "3.3.1"
     monkeypatch.setattr(dspy, "__version__", "3.3.1")
-    assert_dspy_version()  # patch within the pinned minor
-    monkeypatch.setattr(dspy, "__version__", "3.3.7.post1")
-    assert_dspy_version()  # post-release within the supported minor
-    monkeypatch.setattr(dspy, "__version__", "3.4.0")
-    with pytest.raises(RuntimeError, match=r"DSPy 3.3.x is required"):
-        assert_dspy_version()
-    for prerelease in ("3.3.0.dev1", "3.3.0rc1", "3.3.0b1"):
-        monkeypatch.setattr(dspy, "__version__", prerelease)
-        with pytest.raises(RuntimeError, match=r"DSPy 3.3.x release is required"):
+    assert_dspy_version()  # the certified final release
+    rejected_versions = (
+        "3.3.0",
+        "3.3.2",
+        "3.3.1.dev1",
+        "3.3.1a1",
+        "3.3.1b1",
+        "3.3.1rc1",
+        "3.3.1.post1",
+        # Literal string comparison must reject local segments that PEP 440
+        # specifier equality would silently ignore.
+        "3.3.1+local",
+        "not-a-version",
+        "3.2.9",
+        "3.4.0",
+        "4.0.0",
+    )
+    for reported in rejected_versions:
+        monkeypatch.setattr(dspy, "__version__", reported)
+        with pytest.raises(UncertifiedDSpyVersionError, match=r"exactly DSPy 3\.3\.1"):
             assert_dspy_version()
-    monkeypatch.setattr(dspy, "__version__", "not-a-version")
-    with pytest.raises(RuntimeError, match=r"DSPy 3.3.x release is required"):
+
+
+def test_composition_version_guard_error_is_bounded_and_typed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from fleet_rlm.rlm.dspy_contract import UncertifiedDSpyVersionError, assert_dspy_version
+
+    assert issubclass(UncertifiedDSpyVersionError, RuntimeError)
+    hostile = "3.3.1+" + "x" * 5000
+    monkeypatch.setattr(dspy, "__version__", hostile)
+    with pytest.raises(UncertifiedDSpyVersionError) as caught:
         assert_dspy_version()
+    message = str(caught.value)
+    assert "exactly DSPy 3.3.1" in message
+    assert hostile not in message
+    assert len(message) <= 256
 
 
 def test_rlm_usage_contract_accepts_only_the_exact_observed_shape() -> None:
