@@ -99,7 +99,10 @@ def run_development_smoke(
         raise OptimizationPreflightError("development smoke requires train and selection records")
 
     try:
-        from gepa.optimize_anything import OptimizeAnythingConfig, optimize_anything
+        # transitional (published-dependency cutover): official gepa 0.1.4 no
+        # longer ships the omni API; the follow-on optimizer adaptation removes
+        # this usage. The import stays guarded so a base install fails closed.
+        from gepa.optimize_anything import OptimizeAnythingConfig, optimize_anything  # ty: ignore[unresolved-import]
     except ImportError as exc:
         raise OptimizationPreflightError("GEPA optimization dependency is unavailable") from exc
 
