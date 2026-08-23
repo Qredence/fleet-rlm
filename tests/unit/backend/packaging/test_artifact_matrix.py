@@ -88,9 +88,9 @@ def _shannon_entropy(data: bytes) -> float:
 @pytest.fixture(scope="module")
 def built_artifacts() -> tuple[Path, Path]:
     """Ensure clean build of universal wheel and sdist."""
-    dist_dir = ROOT / "dist"
-    # Run uv build to ensure fresh artifacts
-    subprocess.run(["uv", "build"], cwd=ROOT, check=True, capture_output=True)
+    dist_dir = Path(os.environ.get("FLEET_RELEASE_DIST", ROOT / "dist"))
+    if "FLEET_RELEASE_DIST" not in os.environ:
+        subprocess.run(["uv", "build"], cwd=ROOT, check=True, capture_output=True)
     wheels = sorted(dist_dir.glob("fleet_rlm-*.whl"))
     sdists = sorted(dist_dir.glob("fleet_rlm-*.tar.gz"))
     assert len(wheels) == 1, f"Expected 1 wheel in dist/, found {wheels}"

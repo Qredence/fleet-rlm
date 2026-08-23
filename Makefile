@@ -17,6 +17,7 @@ PYTEST_PARALLEL := -n auto --maxprocesses=$(PYTEST_XDIST_MAX_WORKERS)
 	test test-fast test-unit test-contract test-daytona-cov \
 	check quality-gate check-release check-docs check-security check-deps check-codebase-tree api-check api-sync tui-check \
 	build build-release release release-check \
+	certification-gate certification-verify \
 	clean cli precommit-install precommit-run precommit \
 	sync sync-dev sync-all metadata-check docs-check security-check dependency-check release-artifacts cli-help \
 	cloud-preflight \
@@ -201,7 +202,14 @@ build:
 
 build-release: build
 	uv run python scripts/validate_release.py wheel
-	uvx twine check dist/*
+	uvx twine check --strict dist/*
+	uv run python scripts/validate_release.py artifacts
+
+certification-gate:
+	uv run python scripts/certification_gate.py run
+
+certification-verify:
+	uv run python scripts/certification_gate.py verify
 
 release: clean check check-security build-release
 

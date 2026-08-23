@@ -20,6 +20,7 @@ FastAPI/SSE contract backed by DSPy, Daytona, and SQLAlchemy/Alembic.
 12. [Agent harness](agent-harness/README.md)
 13. [Maintainability freeze](how-to-guides/maintainability-freeze.md)
 14. [P35-D callback observability decision](how-to-guides/p35d-callback-observability-decision.md)
+15. [P35-E certification gate](how-to-guides/p35e-certification-gate.md)
 
 ## Reference
 
