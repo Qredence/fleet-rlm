@@ -135,10 +135,7 @@ class _DirectRootLM(dspy.utils.DummyLM):
             [
                 {
                     "reasoning": "complete one direct typed Root action",
-                    "code": (
-                        "print('root-direct-ready', flush=True); "
-                        "SUBMIT(answer='root direct ok')"
-                    ),
+                    "code": ("print('root-direct-ready', flush=True); SUBMIT(answer='root direct ok')"),
                 }
             ],
             adapter=dspy.JSONAdapter(),
@@ -190,9 +187,7 @@ def test_p35d_live_stdout_reasoning(tmp_path: Path) -> None:
             first_reasoning = next(
                 index for index, chunk in enumerate(chunks) if chunk.get("type") == "reasoning-delta"
             )
-            first_code = next(
-                index for index, chunk in enumerate(chunks) if chunk.get("type") == "data-rlm-code"
-            )
+            first_code = next(index for index, chunk in enumerate(chunks) if chunk.get("type") == "data-rlm-code")
             assert first_reasoning < first_code < len(chunks) - 1, [
                 (
                     index,
@@ -204,23 +199,17 @@ def test_p35d_live_stdout_reasoning(tmp_path: Path) -> None:
             ]
             output_data = [chunk["data"] for chunk in outputs]
             stream_ids = {
-                str(data.get("stream_id") or chunk.get("id"))
-                for chunk, data in zip(outputs, output_data, strict=True)
+                str(data.get("stream_id") or chunk.get("id")) for chunk, data in zip(outputs, output_data, strict=True)
             }
             assert len(stream_ids) == 2
             delta_text = "".join(str(data.get("output", "")) for data in output_data if data.get("is_delta"))
             assert "stdout-alpha" in delta_text
             assert "stdout-beta" in delta_text
-            assert any(
-                "FINAL submitted" in str(data.get("output", ""))
-                for data in output_data
-                if data.get("is_final")
-            )
+            assert any("FINAL submitted" in str(data.get("output", "")) for data in output_data if data.get("is_final"))
             final_output_index = next(
                 index
                 for index, chunk in enumerate(chunks)
-                if chunk.get("type") == "data-rlm-output"
-                and chunk.get("data", {}).get("is_final") is True
+                if chunk.get("type") == "data-rlm-output" and chunk.get("data", {}).get("is_final") is True
             )
             assert final_output_index < len(chunks) - 1
             binding = client.portal.call(resources.bindings.get, session_id)

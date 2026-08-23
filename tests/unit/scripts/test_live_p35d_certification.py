@@ -61,9 +61,7 @@ def test_secret_scan_reports_only_bounded_relative_findings(tmp_path: Path) -> N
 
     assert result["passed"] is False
     assert result["files_scanned"] == 1
-    assert result["findings"] == [
-        {"path": ".fleet_rlm/logs/fault.log", "matches": ["secret_value"]}
-    ]
+    assert result["findings"] == [{"path": ".fleet_rlm/logs/fault.log", "matches": ["secret_value"]}]
     assert canary not in json.dumps(result)
 
 
@@ -71,8 +69,7 @@ def test_secret_scan_ignores_redacted_and_audience_values(tmp_path: Path) -> Non
     logs = tmp_path / ".fleet_rlm" / "logs"
     logs.mkdir(parents=True)
     (logs / "backend.log").write_text(
-        "token=*** token_audience=https://canary.invalid/oidc\n"
-        "export DATABRICKS_TOKEN='...'\n",
+        "token=*** token_audience=https://canary.invalid/oidc\nexport DATABRICKS_TOKEN='...'\n",
         encoding="utf-8",
     )
 

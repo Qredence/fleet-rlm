@@ -59,9 +59,7 @@ LIVE_LANES: dict[str, tuple[str, ...]] = {
     "cancel": (
         "tests/live/backend/test_daytona_cancel_during_execution.py::test_daytona_cancel_during_execution_through_fastapi",
     ),
-    "timeout": (
-        "tests/live/backend/test_daytona_deadline_cleanup.py::test_daytona_deadline_cleanup_through_fastapi",
-    ),
+    "timeout": ("tests/live/backend/test_daytona_deadline_cleanup.py::test_daytona_deadline_cleanup_through_fastapi",),
     "workspace-memory": (
         "tests/live/backend/test_memory_candidate_live.py::test_live_memory_candidate_promotes_after_commit_and_retrieves_on_next_turn",
     ),
@@ -109,9 +107,8 @@ def _normalized_lane(receipt: object, *, name: str) -> dict[str, Any]:
     if receipt.get("passed") is not True:
         raise CertificationError(f"{name} receipt did not pass")
     cleanup = receipt.get("cleanup")
-    if (
-        isinstance(cleanup, dict)
-        and (cleanup.get("confirmed_absent") is not True or cleanup.get("admission_restored") is not True)
+    if isinstance(cleanup, dict) and (
+        cleanup.get("confirmed_absent") is not True or cleanup.get("admission_restored") is not True
     ):
         raise CertificationError(f"{name} receipt is not cleanup-complete")
     return {
@@ -157,11 +154,7 @@ def build_manifest(
         normalized[name] = lane
     if any(not isinstance(value, dict) or value.get("passed") is not True for value in scans.values()):
         raise CertificationError("one or more evidence scans failed")
-    missing_claims = [
-        claim
-        for claim, lanes in CLAIM_LANES.items()
-        if not all(lane in normalized for lane in lanes)
-    ]
+    missing_claims = [claim for claim, lanes in CLAIM_LANES.items() if not all(lane in normalized for lane in lanes)]
     if missing_claims:
         raise CertificationError("missing live lanes for " + ", ".join(missing_claims))
     manifest = {
@@ -185,9 +178,7 @@ def build_manifest(
     return manifest
 
 
-_CREDENTIAL_ASSIGNMENT = re.compile(
-    r"(?i)\b(?:api[_-]?key|token|secret|password|authorization)\b\s*[:=]\s*(\S+)"
-)
+_CREDENTIAL_ASSIGNMENT = re.compile(r"(?i)\b(?:api[_-]?key|token|secret|password|authorization)\b\s*[:=]\s*(\S+)")
 _TRACEBACK = re.compile(r"(?i)traceback \(most recent call last\)")
 _REDACTED_VALUES = frozenset({"***", "...", "<redacted>", "[redacted]", "redacted", "none"})
 
@@ -201,9 +192,7 @@ def _has_credential_assignment(text: str, *, names: tuple[str, ...]) -> bool:
     """Return true only for non-redacted credential-like assignments."""
     if any(
         re.search(rf"(?i)\b{re.escape(name)}\b\s*[:=]\s*(\S+)", text)
-        and _is_non_redacted_credential(
-            re.search(rf"(?i)\b{re.escape(name)}\b\s*[:=]\s*(\S+)", text).group(1)
-        )
+        and _is_non_redacted_credential(re.search(rf"(?i)\b{re.escape(name)}\b\s*[:=]\s*(\S+)", text).group(1))
         for name in names
     ):
         return True
