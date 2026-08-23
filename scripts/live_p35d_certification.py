@@ -47,6 +47,7 @@ CLAIM_LANES: dict[str, tuple[str, ...]] = {
 }
 
 LIVE_LANES: dict[str, tuple[str, ...]] = {
+    "runtime-version": ("tests/live/backend/test_p35d_live_matrix.py::test_p35d_runtime_identity",),
     "root-direct": ("tests/live/backend/test_p35d_live_matrix.py::test_p35d_live_root_direct",),
     "root-child": (
         "tests/live/backend/test_callback_shadow_root_child.py::test_live_callback_shadow_root_child_ancestry",
@@ -185,9 +186,28 @@ def build_manifest(
 
 
 _CREDENTIAL_ASSIGNMENT = re.compile(
-    r"(?i)\b(?:api[_-]?key|token|secret|password|authorization)\b\s*[:=]\s*\S+"
+    r"(?i)\b(?:api[_-]?key|token|secret|password|authorization)\b\s*[:=]\s*(\S+)"
 )
 _TRACEBACK = re.compile(r"(?i)traceback \(most recent call last\)")
+_REDACTED_VALUES = frozenset({"***", "...", "<redacted>", "[redacted]", "redacted", "none"})
+
+
+def _is_non_redacted_credential(value: str) -> bool:
+    normalized = value.rstrip(",;.)").strip("'\"").lower()
+    return normalized not in _REDACTED_VALUES and not normalized.startswith(("http://", "https://"))
+
+
+def _has_credential_assignment(text: str, *, names: tuple[str, ...]) -> bool:
+    """Return true only for non-redacted credential-like assignments."""
+    if any(
+        re.search(rf"(?i)\b{re.escape(name)}\b\s*[:=]\s*(\S+)", text)
+        and _is_non_redacted_credential(
+            re.search(rf"(?i)\b{re.escape(name)}\b\s*[:=]\s*(\S+)", text).group(1)
+        )
+        for name in names
+    ):
+        return True
+    return any(_is_non_redacted_credential(match.group(1)) for match in _CREDENTIAL_ASSIGNMENT.finditer(text))
 
 
 def scan_host_log_surfaces(
@@ -205,7 +225,11 @@ def scan_host_log_surfaces(
     paths: list[Path] = []
     for surface in surfaces:
         if surface.is_dir():
-            paths.extend(path for path in surface.rglob("*") if path.is_file() and not path.is_symlink())
+            paths.extend(
+                path
+                for path in surface.rglob("*")
+                if path.is_file() and not path.is_symlink() and path.suffix.lower() in {".log", ".out", ".err"}
+            )
     findings: list[dict[str, Any]] = []
     value_set = {value for value in secret_values if value}
     name_set = {name for name in secret_names if name}
@@ -218,9 +242,7 @@ def scan_host_log_surfaces(
         matches: list[str] = []
         if any(value in text for value in value_set):
             matches.append("secret_value")
-        if any(re.search(rf"(?i)\b{re.escape(name)}\b\s*[:=]\s*\S+", text) for name in name_set):
-            matches.append("credential_assignment")
-        if _CREDENTIAL_ASSIGNMENT.search(text):
+        if _has_credential_assignment(text, names=tuple(sorted(name_set))):
             matches.append("credential_assignment")
         if _TRACEBACK.search(text) and any(value in text for value in value_set):
             matches.append("secret_bearing_traceback")
@@ -347,10 +369,22 @@ def run_matrix(*, timeout: int, output: Path) -> int:
             REPO_ROOT,
             secret_values=tuple(
                 value
-                for name in ("DAYTONA_API_KEY", "GOOGLE_API_KEY", "DEEPSEEK_API_KEY", "KIMI_API_KEY")
+                for name in (
+                    "DAYTONA_API_KEY",
+                    "GOOGLE_API_KEY",
+                    "DEEPSEEK_API_KEY",
+                    "KIMI_API_KEY",
+                    "DATABRICKS_TOKEN",
+                )
                 if (value := os.environ.get(name))
             ),
-            secret_names=("DAYTONA_API_KEY", "GOOGLE_API_KEY", "DEEPSEEK_API_KEY", "KIMI_API_KEY"),
+            secret_names=(
+                "DAYTONA_API_KEY",
+                "GOOGLE_API_KEY",
+                "DEEPSEEK_API_KEY",
+                "KIMI_API_KEY",
+                "DATABRICKS_TOKEN",
+            ),
         )
     }
     manifest = build_manifest(

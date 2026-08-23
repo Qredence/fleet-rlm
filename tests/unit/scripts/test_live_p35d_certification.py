@@ -7,6 +7,7 @@ import pytest
 
 from scripts.live_p35d_certification import (
     CLAIM_LANES,
+    LIVE_LANES,
     CertificationError,
     build_manifest,
     scan_host_log_surfaces,
@@ -24,6 +25,7 @@ def test_claim_lane_table_covers_assigned_contract() -> None:
         "VAL-RLM-071",
     }
     assert all(lanes for lanes in CLAIM_LANES.values())
+    assert all(lane in LIVE_LANES for lanes in CLAIM_LANES.values() for lane in lanes)
 
 
 def test_manifest_rejects_mixed_candidate_identity() -> None:
@@ -63,3 +65,17 @@ def test_secret_scan_reports_only_bounded_relative_findings(tmp_path: Path) -> N
         {"path": ".fleet_rlm/logs/fault.log", "matches": ["secret_value"]}
     ]
     assert canary not in json.dumps(result)
+
+
+def test_secret_scan_ignores_redacted_and_audience_values(tmp_path: Path) -> None:
+    logs = tmp_path / ".fleet_rlm" / "logs"
+    logs.mkdir(parents=True)
+    (logs / "backend.log").write_text(
+        "token=*** token_audience=https://canary.invalid/oidc\n"
+        "export DATABRICKS_TOKEN='...'\n",
+        encoding="utf-8",
+    )
+
+    result = scan_host_log_surfaces(tmp_path, secret_names=("DATABRICKS_TOKEN",))
+
+    assert result["passed"] is True

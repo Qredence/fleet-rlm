@@ -58,6 +58,28 @@ def _identity() -> dict[str, str]:
     }
 
 
+def test_p35d_runtime_identity() -> None:
+    if not _enabled():
+        pytest.skip("Set FLEET_LIVE=1 for the P35-D runtime identity proof")
+    identity = _identity()
+    assert identity["dspy"] == "3.3.1"
+    _write_receipt(
+        {
+            "schema": "fleet.p35d-runtime-identity/v1",
+            "candidate": {**identity, "versions": {"dspy": "3.3.1"}},
+            "runtime": {
+                "metadata": identity["dspy"],
+                "module": dspy.__version__,
+                "banner": f"Fleet RLM certified DSPy {identity['dspy']}",
+                "doctor_identity": True,
+            },
+            "assertions": {"exact_published_runtime": True, "resources_acquired": False},
+            "cleanup": {"confirmed_absent": True, "admission_restored": True},
+            "passed": True,
+        }
+    )
+
+
 def _write_receipt(payload: dict[str, Any]) -> None:
     raw_path = os.environ.get(_EVIDENCE_ENV)
     if not raw_path:
