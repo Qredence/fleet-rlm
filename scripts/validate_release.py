@@ -24,6 +24,7 @@ REQUIRED_WHEEL_FILES = {
     "fleet_rlm/app.py",
     "fleet_rlm/main.py",
     "fleet_rlm/py.typed",
+    "fleet_rlm/daytona/snapshot-requirements.txt",
     "fleet_rlm/api/dependencies.py",
     "fleet_rlm/chat/turn_coordinator.py",
     "fleet_rlm/daytona/workspace_agent_runtime.py",
