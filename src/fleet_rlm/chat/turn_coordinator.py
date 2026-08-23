@@ -79,11 +79,11 @@ class OpenedTurnStream:
 def _attach_preparation_trace_id(prepared: PreparedRun, trace_id: str | None) -> PreparedRun:
     """
     Attach a preparation trace identifier for internal phase correlation.
-    
+
     Parameters:
         prepared (PreparedRun): Prepared run to annotate.
         trace_id (str | None): Preparation trace identifier, if available.
-    
+
     Returns:
         PreparedRun: The annotated run, or the original run when no identifier is
         provided or annotation is unsupported.
@@ -120,7 +120,7 @@ class TurnCoordinator:
     ) -> None:
         """
         Initialize the turn coordinator and its lifecycle dependencies.
-        
+
         Parameters:
             lifecycle: Service for claiming, renewing, settling, and revoking runs.
             preparation: Service that prepares runs before execution.
@@ -154,11 +154,11 @@ class TurnCoordinator:
     async def _prepare_with_trace(self, start: ClaimedRun, *, deadline: float) -> PreparedRun:
         """
         Prepare a claimed run while recording preparation tracing information for execution correlation.
-        
+
         Parameters:
             start (ClaimedRun): The claimed run to prepare.
             deadline (float): Monotonic time by which preparation must complete.
-        
+
         Returns:
             PreparedRun: The prepared run, including its preparation trace identifier when supported.
         """
@@ -299,13 +299,13 @@ class TurnCoordinator:
         on_cleanup: Callable[[asyncio.Task[None]], None] | None = None,
     ) -> AsyncGenerator[RuntimeEvent]:
         """Stream runtime events for the prepared run during the execution phase.
-        
+
         Parameters:
-        	run (ClaimedRun): The claimed run to execute.
-        	prepared (PreparedRun): The prepared run configuration.
-        	heartbeat (ClaimHeartbeat | None): The heartbeat maintaining the run claim.
-        	on_settlement (Callable[[object], None] | None): Callback invoked when settlement occurs.
-        	on_cleanup (Callable[[asyncio.Task[None]], None] | None): Callback invoked when cleanup is scheduled.
+            run (ClaimedRun): The claimed run to execute.
+            prepared (PreparedRun): The prepared run configuration.
+            heartbeat (ClaimHeartbeat | None): The heartbeat maintaining the run claim.
+            on_settlement (Callable[[object], None] | None): Callback invoked when settlement occurs.
+            on_cleanup (Callable[[asyncio.Task[None]], None] | None): Callback invoked when cleanup is scheduled.
         """
         with turn_trace(
             run.session_id,

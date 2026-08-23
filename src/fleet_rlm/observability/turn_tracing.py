@@ -343,7 +343,7 @@ def turn_trace(
 ) -> Iterator[TraceHandle]:
     """
     Open a root ``fleet_turn`` span for a Fleet turn when tracing is available.
-    
+
     Parameters:
         session_id (UUID): Identifier for the session associated with the turn.
         run_id (UUID): Identifier for the run associated with the turn.
@@ -353,7 +353,7 @@ def turn_trace(
             ``"execution"``, recorded on the trace.
         preparation_trace_id (str | None): Optional preparation trace identifier to associate
             with an execution trace.
-    
+
     Yields:
         TraceHandle: The root trace identifier when tracing succeeds and exposure is enabled;
             otherwise, a no-op handle.

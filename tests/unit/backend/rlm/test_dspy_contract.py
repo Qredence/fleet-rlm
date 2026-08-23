@@ -896,19 +896,19 @@ def test_latest_lm_telemetry_typed_response_fallback_reads_usage_as_dict() -> No
 
         def __init__(self, usage: dict[str, int], provider_response: object = None) -> None:
             """Store usage metrics and the optional provider response associated with them.
-            
+
             Parameters:
-            	usage (dict[str, int]): Usage metrics for the response.
-            	provider_response (object): Optional raw provider response.
+                usage (dict[str, int]): Usage metrics for the response.
+                provider_response (object): Optional raw provider response.
             """
             self._usage = usage
             self.provider_response = provider_response
 
         def usage_as_dict(self) -> dict[str, int]:
             """Return the recorded usage metrics as a dictionary.
-            
+
             Returns:
-            	dict[str, int]: A copy of the recorded usage metrics.
+                dict[str, int]: A copy of the recorded usage metrics.
             """
             return dict(self._usage)
 
@@ -950,7 +950,7 @@ def test_lm_trace_callback_emits_token_usage_output_and_mlflow_attribute(monkeyp
         def set_inputs(self, payload):
             """
             Store the supplied payload as the captured inputs.
-            
+
             Parameters:
                 payload: Input data to capture.
             """
@@ -963,9 +963,9 @@ def test_lm_trace_callback_emits_token_usage_output_and_mlflow_attribute(monkeyp
         def set_attributes(self, payload):
             """
             Update the captured attributes with the supplied values.
-            
+
             Parameters:
-            	payload (dict): Attribute names and values to record.
+                payload (dict): Attribute names and values to record.
             """
             captured.attributes.update(payload)
 
@@ -976,7 +976,7 @@ def test_lm_trace_callback_emits_token_usage_output_and_mlflow_attribute(monkeyp
         def __enter__(self):
             """
             Enter the context manager and provide a new span.
-            
+
             Returns:
                 Span: The newly created span.
             """

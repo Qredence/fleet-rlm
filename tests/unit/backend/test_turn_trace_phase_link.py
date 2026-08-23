@@ -31,25 +31,25 @@ class _FakeSpan:
 
     def set_inputs(self, payload: dict[str, object]) -> None:
         """Records an input payload for the span.
-        
+
         Parameters:
-        	payload (dict[str, object]): Input data associated with the span.
+            payload (dict[str, object]): Input data associated with the span.
         """
         self.inputs.append(payload)
 
     def set_outputs(self, payload: dict[str, object]) -> None:
         """Record an output payload for the span.
-        
+
         Parameters:
-        	payload (dict[str, object]): Output data to append to the span's recorded outputs.
+            payload (dict[str, object]): Output data to append to the span's recorded outputs.
         """
         self.outputs.append(payload)
 
     def set_attributes(self, payload: dict[str, object]) -> None:
         """Set the span attributes to the provided payload.
-        
+
         Parameters:
-        	payload (dict[str, object]): Attribute names and values to assign.
+            payload (dict[str, object]): Attribute names and values to assign.
         """
         self.attributes = payload
 
@@ -61,7 +61,7 @@ class _FakeSpan:
 def _install_fake_mlflow(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
     """
     Install a fake MLflow module that records spans and trace updates.
-    
+
     Returns:
         SimpleNamespace: Recorded spans, trace updates, and active span state.
     """
@@ -86,9 +86,9 @@ def _install_fake_mlflow(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
     def get_current_active_span() -> Any:
         """
         Return the currently active fake tracing span, if one exists.
-        
+
         Returns:
-        	Any: The active span, or `None` when no span is active.
+            Any: The active span, or `None` when no span is active.
         """
         return calls.stack[-1] if calls.stack else None
 
@@ -109,9 +109,9 @@ def _install_fake_mlflow(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
 def _tracing_active(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     """
     Temporarily enables tracing with an increased trace-content limit for a test.
-    
+
     Parameters:
-    	monkeypatch (pytest.MonkeyPatch): Fixture used to modify tracing configuration.
+        monkeypatch (pytest.MonkeyPatch): Fixture used to modify tracing configuration.
     """
     monkeypatch.setattr(tracing, "_TRACE_CONTENT_MAX_CHARS", 10_000)
     tracing.set_tracing_active_for_tests(True)
@@ -132,14 +132,14 @@ async def _run_success_turn(
 ) -> list[Any]:
     """
     Run a successful turn through the coordinator and collect its emitted events.
-    
+
     Parameters:
-    	prepared_factory (Any): Factory that creates the prepared run for the turn.
-    	tracing_enabled (bool): Whether MLflow tracing is enabled.
-    	expose_trace_id (bool): Whether trace IDs are exposed in emitted events.
-    
+        prepared_factory (Any): Factory that creates the prepared run for the turn.
+        tracing_enabled (bool): Whether MLflow tracing is enabled.
+        expose_trace_id (bool): Whether trace IDs are exposed in emitted events.
+
     Returns:
-    	list[Any]: Events emitted during the turn.
+        list[Any]: Events emitted during the turn.
     """
     from fleet_rlm.chat.commands import OpenTurnCommand
     from fleet_rlm.chat.run_lifecycle import RunLifecycleService
@@ -164,12 +164,12 @@ async def _run_success_turn(
     class Preparation:
         async def prepare(self, _turn: Any, *, deadline: float) -> Any:
             """Create a prepared run for the current session.
-            
+
             Parameters:
-            	_turn (Any): The turn associated with the preparation request.
-            
+                _turn (Any): The turn associated with the preparation request.
+
             Returns:
-            	Any: The prepared run created for the current session.
+                Any: The prepared run created for the current session.
             """
             del deadline
             return prepared_factory(run_id, session.id)
@@ -195,12 +195,12 @@ async def _run_success_turn(
         async def __anext__(self) -> Any:
             """
             Retrieve the next event from the iterator for asynchronous iteration.
-            
+
             Returns:
-            	Any: The next event.
-            
+                Any: The next event.
+
             Raises:
-            	StopAsyncIteration: When no events remain.
+                StopAsyncIteration: When no events remain.
             """
             try:
                 return next(self._events)
@@ -213,12 +213,12 @@ async def _run_success_turn(
     class Runner:
         def stream(self, execution: Any) -> Stream:
             """Create a stream for the specified execution.
-            
+
             Parameters:
-            	execution (Any): The execution to stream.
-            
+                execution (Any): The execution to stream.
+
             Returns:
-            	Stream: A stream associated with the execution.
+                Stream: A stream associated with the execution.
             """
             return Stream(execution)
 
