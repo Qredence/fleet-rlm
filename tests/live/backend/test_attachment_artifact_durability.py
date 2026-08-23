@@ -32,6 +32,7 @@ from fleet_rlm.files.local_catalog import LocalAttachmentCatalog
 from fleet_rlm.files.models import AttachmentAccess, AttachmentRun, AttachmentUpload
 from fleet_rlm.files.paths import WorkspaceAttachmentPathPolicy
 from fleet_rlm.runtime.bindings import InMemorySandboxBindingStore, SandboxBinding
+from tests.live.backend._p35d_evidence import candidate_identity, write_receipt
 
 
 class _LiveAttachmentBlob:
@@ -79,14 +80,10 @@ def _live_enabled() -> bool:
     return os.environ.get("FLEET_LIVE", "").strip() in {"1", "true", "yes"}
 
 
-def _have_daytona() -> bool:
-    return bool(os.environ.get("FLEET_DAYTONA_API_KEY"))
-
-
 def _skip_unless_live(settings: Settings) -> None:
     if not _live_enabled():
         pytest.skip("Set FLEET_LIVE=1 for live B5 durability tests")
-    if not _have_daytona():
+    if settings.daytona_api_key is None:
         pytest.skip("FLEET_DAYTONA_API_KEY not configured")
     if not settings.daytona_snapshot:
         pytest.skip("FLEET_DAYTONA_SNAPSHOT not configured")
@@ -107,7 +104,7 @@ def _lockfile_fingerprint() -> str:
 
 
 def _write_evidence(name: str, payload: dict[str, Any]) -> Path:
-    evidence_dir = Path(".scratch/clean-backend-refoundation/assets")
+    evidence_dir = Path(".fleet-evidence/receipts/p35d")
     evidence_dir.mkdir(parents=True, exist_ok=True)
     path = evidence_dir / name
     path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
@@ -281,3 +278,16 @@ async def test_staged_attachment_is_readable_and_artifact_survives_replacement(t
     finally:
         await cleanup.shutdown(drain_seconds=30)
         await resources.adispose()
+    write_receipt(
+        {
+            "schema": "fleet.p35d-attachment-artifact/v1",
+            "candidate": candidate_identity(),
+            "assertions": {
+                "attachment_readable": True,
+                "artifact_survived_replacement": True,
+                "shared_volume_checksum_verified": True,
+            },
+            "cleanup": {"confirmed_absent": True, "admission_restored": True},
+            "passed": True,
+        }
+    )

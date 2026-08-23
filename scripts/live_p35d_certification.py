@@ -47,8 +47,10 @@ CLAIM_LANES: dict[str, tuple[str, ...]] = {
 }
 
 LIVE_LANES: dict[str, tuple[str, ...]] = {
-    "root-direct": ("tests/live/backend/test_fleet_rlm_daytona_mvp.py::test_complete_daytona_mvp_through_fastapi",),
-    "root-child": ("tests/live/backend/test_callback_shadow_root_child.py::test_live_callback_shadow_root_child_ancestry",),
+    "root-direct": ("tests/live/backend/test_p35d_live_matrix.py::test_p35d_live_root_direct",),
+    "root-child": (
+        "tests/live/backend/test_callback_shadow_root_child.py::test_live_callback_shadow_root_child_ancestry",
+    ),
     "root-batch": (
         "tests/live/backend/test_daytona_recursive_batch.py::test_daytona_recursive_batch_two_children_through_fastapi",
     ),
@@ -106,9 +108,11 @@ def _normalized_lane(receipt: object, *, name: str) -> dict[str, Any]:
     if receipt.get("passed") is not True:
         raise CertificationError(f"{name} receipt did not pass")
     cleanup = receipt.get("cleanup")
-    if isinstance(cleanup, dict):
-        if cleanup.get("confirmed_absent") is not True or cleanup.get("admission_restored") is not True:
-            raise CertificationError(f"{name} receipt is not cleanup-complete")
+    if (
+        isinstance(cleanup, dict)
+        and (cleanup.get("confirmed_absent") is not True or cleanup.get("admission_restored") is not True)
+    ):
+        raise CertificationError(f"{name} receipt is not cleanup-complete")
     return {
         "name": name,
         "schema": receipt.get("schema"),
@@ -308,6 +312,7 @@ def run_matrix(*, timeout: int, output: Path) -> int:
         env["FLEET_LIVE_EVIDENCE_PATH"] = str(receipt_path)
         env["FLEET_PHASE1_STREAM_EVIDENCE_PATH"] = str(receipt_path)
         env["FLEET_PHASE2_RECURSIVE_EVIDENCE_PATH"] = str(receipt_path)
+        env["FLEET_CALLBACK_SHADOW_EVIDENCE_PATH"] = str(receipt_path)
         log_path = log_root / f"{lane}.log"
         log_path.parent.mkdir(parents=True, exist_ok=True)
         completed = subprocess.run(

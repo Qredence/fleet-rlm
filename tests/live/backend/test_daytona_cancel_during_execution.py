@@ -17,6 +17,7 @@ from fleet_rlm.config import Settings
 from fleet_rlm.daytona.http_broker import DaytonaHttpToolBroker
 from fleet_rlm.daytona.session_manager import get_active_lease_registry
 from fleet_rlm.sessions.models import TurnAccess
+from tests.live.backend._p35d_evidence import candidate_identity, write_receipt
 from tests.live.backend.test_fleet_rlm_daytona_mvp import (
     _live_settings,
     _strict_cleanup,
@@ -155,3 +156,16 @@ def test_daytona_cancel_during_execution_through_fastapi(
             assert client.portal is not None
             cleanup_failures = client.portal.call(_strict_cleanup, resources, sandbox_ids, settings.volume_name)
     assert cleanup_failures == ()
+    write_receipt(
+        {
+            "schema": "fleet.p35d-cancel/v1",
+            "candidate": candidate_identity(),
+            "assertions": {
+                "cancellation_observed": True,
+                "admission_restored": True,
+                "lease_released": True,
+            },
+            "cleanup": {"confirmed_absent": True, "admission_restored": True},
+            "passed": True,
+        }
+    )

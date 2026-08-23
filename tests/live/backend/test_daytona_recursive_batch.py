@@ -24,6 +24,7 @@ from fleet_rlm.rlm.lm_factory import has_llm_credentials
 from fleet_rlm.rlm.recursive_calls import RecursiveRLMExecutor
 from fleet_rlm.rlm.tool_observer import ToolEventView
 from tests.live.backend._database import upgrade_to_head
+from tests.live.backend._p35d_evidence import candidate_identity, write_receipt
 from tests.live.backend.test_phase1_daytona_stream import _strict_cleanup
 
 pytestmark = [pytest.mark.live_daytona, pytest.mark.timeout(960)]
@@ -318,3 +319,16 @@ def test_daytona_recursive_batch_two_children_through_fastapi(
             assert client.portal is not None
             cleanup_failures = client.portal.call(_strict_cleanup, resources, settings.volume_name)
     assert cleanup_failures == ()
+    write_receipt(
+        {
+            "schema": "fleet.p35d-root-batch/v1",
+            "candidate": candidate_identity(),
+            "assertions": {
+                "ordered_root_batch": True,
+                "native_child_count": 2,
+                "peak_child_concurrency": child_evidence.peak_observed,
+            },
+            "cleanup": {"confirmed_absent": True, "admission_restored": True},
+            "passed": True,
+        }
+    )
