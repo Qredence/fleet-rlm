@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 from uuid import UUID, uuid4
 
+import dspy
 import pytest
 from fastapi.testclient import TestClient
 
@@ -16,6 +17,7 @@ from fleet_rlm.app import create_app
 from fleet_rlm.config import Settings
 from fleet_rlm.daytona.http_broker import DaytonaHttpToolBroker
 from fleet_rlm.daytona.session_manager import get_active_lease_registry
+from fleet_rlm.rlm.model_bundle import RLMModelBundle
 from fleet_rlm.sessions.models import TurnAccess
 from tests.live.backend._p35d_evidence import candidate_identity, write_receipt
 from tests.live.backend.test_fleet_rlm_daytona_mvp import (
@@ -29,6 +31,14 @@ _CANCEL_PROMPT = (
     "Run exactly one Python code cell containing only print('cancel-probe'). Do not call SUBMIT or any tools."
 )
 _WORKER_HOLD_SECONDS = 1.0
+
+
+class _CancelRootLM(dspy.utils.DummyLM):
+    def __init__(self) -> None:
+        super().__init__(
+            [{"reasoning": "run the bounded cancellation probe", "code": "print('cancel-probe')"}],
+            adapter=dspy.JSONAdapter(),
+        )
 
 
 def _case_settings(tmp_path: Path) -> Settings:
@@ -112,6 +122,9 @@ def test_daytona_cancel_during_execution_through_fastapi(
         inventory = app.state.runtime_inventory
         resources = inventory.run_environment_resources
         assert resources is not None
+        preparation = inventory.run_preparation
+        assert preparation is not None
+        preparation._models = RLMModelBundle(_CancelRootLM(), dspy.utils.DummyLM([{"answer": "unused"}]))
         session_id: UUID | None = None
         try:
             created = client.post("/api/sessions", json={"title": "Daytona live cancel canary"})
