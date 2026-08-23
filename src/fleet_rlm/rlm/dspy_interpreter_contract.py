@@ -11,7 +11,7 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Any
 
-from dspy import CodeInterpreter, FinalOutput
+from dspy import CodeExecutionError, CodeInterpreter, CodeInterpreterError, FinalOutput
 
 PUBLIC_FINAL_OUTPUT_LABEL = "FINAL submitted"
 
@@ -56,7 +56,9 @@ def is_final_output(value: Any) -> bool:
 __all__ = [
     "DAYTONA_EXECUTION_INSTRUCTIONS",
     "PUBLIC_FINAL_OUTPUT_LABEL",
+    "CodeExecutionError",
     "CodeInterpreter",
+    "CodeInterpreterError",
     "FinalOutput",
     "copy_output_fields",
     "is_final_output",

@@ -9,6 +9,7 @@ from types import ModuleType, SimpleNamespace
 from typing import Any
 
 import pytest
+from dspy.primitives.code_interpreter import CodeExecutionError
 
 from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
 
@@ -88,9 +89,11 @@ def test_sandbox_execute_span_tracks_iteration_and_repair_kind(
     interpreter = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())
 
     interpreter.execute("_out = 'first'")
-    repair = interpreter.execute("missing_name + 1")
+    with pytest.raises(CodeExecutionError) as caught:
+        interpreter.execute("missing_name + 1")
+    repair = str(caught.value)
 
-    assert isinstance(repair, str) and repair.startswith("[Error]")
+    assert isinstance(repair, str) and repair.startswith("name 'missing_name'")
     assert calls.span_inputs[1]["iteration"] == 2
     assert calls.span_outputs[1]["result_kind"] == "repair_error"
     assert calls.span_outputs[1]["repair_category"] == "NameError"
@@ -120,9 +123,11 @@ def test_sandbox_rejects_oversized_intermediate_code_before_backend_execution(
     backend = Backend()
     interpreter = DaytonaCodeInterpreter(backend=backend, max_code_chars=8)
 
-    result = interpreter.execute("value = 1\n_out = value")
+    with pytest.raises(CodeExecutionError) as caught:
+        interpreter.execute("value = 1\n_out = value")
+    result = str(caught.value)
 
-    assert isinstance(result, str) and result.startswith("[Error] Intermediate code is too large")
+    assert isinstance(result, str) and result.startswith("Intermediate code is too large")
     assert backend.calls == 0
     assert calls.span_outputs[0]["result_kind"] == "repair_error"
     assert calls.span_outputs[0]["repair_category"] == "code_too_large"

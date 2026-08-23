@@ -9,7 +9,7 @@ Host-tool / SUBMIT mediation (B1):
   (Daytona-appropriate channel; mirrors DSPy host-tool + FinalOutput outcomes).
 
 Public per-step output projection (stdout delta replay, stream closure, final
-flush, repair-feedback privacy) lives in ``interpreter_output.py``. The sync
+flush, native-error privacy) lives in ``interpreter_output.py``. The sync
 view over async Daytona sandboxes lives in ``dspy_sync_bridge.py``.
 """
 
@@ -50,12 +50,13 @@ from fleet_rlm.daytona.interpreter_output import (
     _flush_step_output,
     _OutputStreamState,
     _PublicStdoutProjector,
-    _RepairFeedback,
 )
 from fleet_rlm.files.workspace_tools import WorkspaceToolError
 from fleet_rlm.observability.turn_tracing import trace_preview_limit, turn_phase_span
 from fleet_rlm.rlm.dspy_interpreter_contract import (
     PUBLIC_FINAL_OUTPUT_LABEL,
+    CodeExecutionError,
+    CodeInterpreterError,
     copy_output_fields,
     is_final_output,
     needs_binding_refresh,
@@ -63,7 +64,7 @@ from fleet_rlm.rlm.dspy_interpreter_contract import (
 )
 from fleet_rlm.rlm.errors import RunNoProgressError, RunTerminalError
 from fleet_rlm.rlm.events import ObservationObserver, RLMCode, RLMOutput, StepFinished, StepStarted
-from fleet_rlm.rlm.sanitize import sanitize_public_text, truncate_head_tail, truncate_public_text
+from fleet_rlm.rlm.sanitize import sanitize_public_text, sanitize_repair_text, truncate_head_tail, truncate_public_text
 from fleet_rlm.rlm.tool_observer import ToolEventView, ToolObserver, observe_tool
 
 if TYPE_CHECKING:
@@ -365,27 +366,68 @@ def _result_kind(result: Any) -> str:
     """Bounded outcome classification for span metadata (never content)."""
     if is_final_output(result):
         return "final"
-    if isinstance(result, _RepairFeedback):
-        return "repair_error"
     return "output"
 
 
-def _repair_category(error: str) -> str:
-    """Return a bounded runtime-error category without retaining generated details."""
-    prefix = error.split(":", 1)[0].strip()
-    allowed = {
+_REPAIR_CATEGORIES = frozenset(
+    {
         "AttributeError",
         "ImportError",
         "IndexError",
         "KeyError",
         "ModuleNotFoundError",
         "NameError",
+        "OSError",
+        "RuntimeError",
         "SyntaxError",
         "TypeError",
         "ValueError",
         "ZeroDivisionError",
+        "code_too_large",
+        "empty_code",
+        "execution_error",
+        "no_progress",
     }
-    return prefix if prefix in allowed else "execution_error"
+)
+_TERMINAL_CATEGORIES = frozenset({"CodeInterpreterError", "InterpreterLifecycleError"})
+
+
+class _FleetCodeExecutionError(CodeExecutionError):
+    """Native DSPy recoverable error carrying bounded Fleet classification."""
+
+    category: str
+
+    def __init__(self, message: str, *, category: str) -> None:
+        super().__init__(message)
+        self.category = category
+
+
+class _FleetCodeInterpreterError(CodeInterpreterError):
+    """Native DSPy terminal error carrying bounded Fleet classification."""
+
+    category: str
+
+    def __init__(self, message: str, *, category: str) -> None:
+        super().__init__(message)
+        self.category = category
+
+
+def _repair_error(message: str, *, category: str) -> CodeExecutionError:
+    """Create DSPy's native recoverable error with bounded Fleet metadata."""
+    bounded_category = category if category in _REPAIR_CATEGORIES else "execution_error"
+    return _FleetCodeExecutionError(sanitize_repair_text(message), category=bounded_category)
+
+
+def _terminal_error(message: str, *, category: str) -> CodeInterpreterError:
+    """Create DSPy's terminal interpreter error without private details."""
+    bounded_category = category if category in _TERMINAL_CATEGORIES else "CodeInterpreterError"
+    return _FleetCodeInterpreterError(sanitize_repair_text(message), category=bounded_category)
+
+
+def _repair_category(error: str) -> str:
+    """Return a bounded runtime-error category without retaining generated details."""
+    prefix = error.split(":", 1)[0].strip()
+    return prefix if prefix in _REPAIR_CATEGORIES else "execution_error"
 
 
 class _SandboxProcessBackend:
@@ -640,7 +682,9 @@ class DaytonaCodeInterpreter:
     def _public_output(self, result: Any) -> str:
         if is_final_output(result):
             return PUBLIC_FINAL_OUTPUT_LABEL
-        if isinstance(result, _RepairFeedback):
+        if isinstance(result, CodeInterpreterError):
+            return "Execution failed"
+        if isinstance(result, CodeExecutionError):
             return "Execution error"
         return truncate_public_text(str(result or ""), max_len=self._observation_max_chars)
 
@@ -712,9 +756,11 @@ class DaytonaCodeInterpreter:
             variables (dict[str, Any] | None): Variables made available to the execution.
 
         Returns:
-            Any: Repair feedback for execution problems, a final submission result, or truncated execution output.
+            Any: A final submission result, ordinary output, or a bounded execution result.
 
         Raises:
+            CodeExecutionError: If generated code can be repaired and should be reinjected by DSPy.
+            CodeInterpreterError: If the interpreter cannot safely continue.
             DaytonaAdapterError: If the interpreter is shut down, misconfigured, or the execution provider fails.
             RunTerminalError: If execution repeats without making progress.
         """
@@ -763,16 +809,20 @@ class DaytonaCodeInterpreter:
                 bindings_started = time.perf_counter()
                 execute_started = time.perf_counter()
                 if not normalized_code:
-                    result = _RepairFeedback(
-                        "[Error] No executable code was provided; execute useful Python or call SUBMIT.",
+                    repair = _repair_error(
+                        "No executable code was provided; execute useful Python or call SUBMIT.",
                         category="empty_code",
                     )
+                    no_progress = self._reject_repeated_no_progress(normalized_code, repair)
+                    raise no_progress or repair
                 elif len(normalized_code) > self._max_code_chars:
-                    result = _RepairFeedback(
-                        f"[Error] Intermediate code is too large ({len(normalized_code)} chars); "
+                    repair = _repair_error(
+                        f"Intermediate code is too large ({len(normalized_code)} chars); "
                         f"keep one action under {self._max_code_chars} chars, use variables, and submit promptly.",
                         category="code_too_large",
                     )
+                    no_progress = self._reject_repeated_no_progress(normalized_code, repair)
+                    raise no_progress or repair
                 else:
                     self._ensure_bindings()
                     ensure_bindings_ms = int((time.perf_counter() - bindings_started) * 1_000)
@@ -791,7 +841,7 @@ class DaytonaCodeInterpreter:
                 execute_ms = int((time.perf_counter() - execute_started) * 1_000)
                 repair = self._reject_repeated_no_progress(normalized_code, result)
                 if repair is not None:
-                    result = repair
+                    raise repair
                 stdout_projector.finish(expected_final=_submitted_payload(result))
                 _flush_step_output(
                     result,
@@ -811,16 +861,7 @@ class DaytonaCodeInterpreter:
                     outputs["ensure_bindings_ms"] = ensure_bindings_ms
                     outputs["execute_ms"] = execute_ms
                     outputs.update(self._http_broker.last_execution_stats)
-                if isinstance(result, _RepairFeedback):
-                    outputs["repair_category"] = result.category
-                    outputs["execution_status"] = "recovered_error"
-                    phase.finish(
-                        phase_status="failed",
-                        outputs=outputs,
-                        attributes={"recovered": True, "failure_category": result.category},
-                    )
-                else:
-                    phase.set_outputs(outputs)
+                phase.set_outputs(outputs)
                 return result
             except RunTerminalError:
                 stdout_projector.finish()
@@ -828,6 +869,59 @@ class DaytonaCodeInterpreter:
                     "Execution failed", step=step, stream_id=output_stream_id, state=output_state, observe=self._observe
                 )
                 raise
+            except CodeInterpreterError as exc:
+                if not isinstance(exc, CodeExecutionError):
+                    category = str(getattr(exc, "category", "CodeInterpreterError"))
+                    exc = _terminal_error(str(exc), category=category)
+                    stdout_projector.finish()
+                    _close_output_stream(
+                        "Execution failed",
+                        step=step,
+                        stream_id=output_stream_id,
+                        state=output_state,
+                        observe=self._observe,
+                    )
+                    raise exc from None
+                category = str(getattr(exc, "category", "execution_error"))
+                exc = _repair_error(str(exc), category=category)
+                category = str(getattr(exc, "category", "execution_error"))
+                if category not in {"empty_code", "code_too_large", "no_progress"}:
+                    repair = self._reject_repeated_no_progress(normalized_code, exc)
+                    if repair is not None:
+                        exc = repair
+                        category = str(getattr(exc, "category", "no_progress"))
+                phase.finish(
+                    phase_status="failed",
+                    outputs={
+                        "path": "http_broker" if self._http_broker is not None else type(self._backend).__name__,
+                        "result_kind": "repair_error",
+                        "execution_status": "recovered_error",
+                        "repair_category": category,
+                    },
+                    attributes={"recovered": True, "failure_category": category},
+                )
+                stdout_projector.finish()
+                _close_output_stream(
+                    "Execution error", step=step, stream_id=output_stream_id, state=output_state, observe=self._observe
+                )
+                raise exc
+            except SyntaxError as exc:
+                repair = _repair_error(str(exc), category="SyntaxError")
+                phase.finish(
+                    phase_status="failed",
+                    outputs={
+                        "path": "syntax",
+                        "result_kind": "repair_error",
+                        "execution_status": "recovered_error",
+                        "repair_category": "SyntaxError",
+                    },
+                    attributes={"recovered": True, "failure_category": "SyntaxError"},
+                )
+                stdout_projector.finish()
+                _close_output_stream(
+                    "Execution error", step=step, stream_id=output_stream_id, state=output_state, observe=self._observe
+                )
+                raise repair from None
             except DaytonaAdapterError:
                 stdout_projector.finish()
                 _close_output_stream(
@@ -1024,11 +1118,14 @@ class DaytonaCodeInterpreter:
                         f"{error}. Build the escaped fragment before the f-string expression, "
                         "then interpolate the variable."
                     )
-                feedback = f"[Error] {error}"
+                category = raw.error_category or _repair_category(error)
+                if category in {"CodeInterpreterError", "InterpreterLifecycleError"}:
+                    raise _terminal_error(error, category=category)
+                feedback = error
                 stderr = truncate_head_tail(raw.stderr, max_chars=self._execution_output_cap).strip()
                 if stderr:
-                    feedback = f"{feedback}\nstderr: {stderr}"
-                return _RepairFeedback(feedback, category=raw.error_category or _repair_category(error))
+                    feedback = f"{feedback}\nstderr: {sanitize_repair_text(stderr)}"
+                raise _repair_error(feedback, category=category)
             if raw.final is not None:
                 return wrap_final_output(raw.final)
             return truncate_head_tail(raw.stdout, max_chars=self._execution_output_cap)
@@ -1041,7 +1138,7 @@ class DaytonaCodeInterpreter:
     def _normalize_code(code: str) -> str:
         return "\n".join(line.rstrip() for line in code.splitlines()).strip()
 
-    def _reject_repeated_no_progress(self, normalized_code: str, result: Any) -> _RepairFeedback | None:
+    def _reject_repeated_no_progress(self, normalized_code: str, result: Any) -> CodeExecutionError | None:
         if is_final_output(result):
             self._last_execution = None
             self._no_progress_repair_used = False
@@ -1050,8 +1147,8 @@ class DaytonaCodeInterpreter:
         if current == self._last_execution:
             if not self._no_progress_repair_used:
                 self._no_progress_repair_used = True
-                return _RepairFeedback(
-                    "[Error] Repeated interpreter action produced no progress. "
+                return _repair_error(
+                    "Repeated interpreter action produced no progress. "
                     "Choose a different action, use the existing output, or call SUBMIT.",
                     category="no_progress",
                 )

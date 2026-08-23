@@ -4,7 +4,7 @@ Mechanically extracted from ``interpreter.py`` (WS-8 readability split, no
 behavior change). The interpreter owns execution and observation; this module
 owns how one step's public ``RLMOutput`` stream is projected: marker-hiding
 stdout replay, capped per-step deltas, idempotent closing flush, and the
-private repair-feedback type that must never leak into public frames.
+stream closure used by native DSPy repair and terminal errors.
 """
 
 from __future__ import annotations
@@ -18,17 +18,6 @@ from fleet_rlm.rlm.dspy_interpreter_contract import is_final_output
 from fleet_rlm.rlm.events import RLMOutput
 
 OutputCallback = Callable[[str], None]
-
-
-class _RepairFeedback(str):
-    """Detailed interpreter feedback returned to RLM but not public projection."""
-
-    category: str
-
-    def __new__(cls, value: str, *, category: str = "execution_error") -> _RepairFeedback:
-        result = super().__new__(cls, value)
-        result.category = category
-        return result
 
 
 class _PublicStdoutProjector:
@@ -171,7 +160,7 @@ def _flush_step_output(
     if state.closed:
         return
     public = public_output(result)
-    if is_final_output(result) or isinstance(result, _RepairFeedback):
+    if is_final_output(result):
         _close_output_stream(public, step=step, stream_id=stream_id, state=state, observe=observe)
         return
     streamed = "".join(state.streamed_chunks)
