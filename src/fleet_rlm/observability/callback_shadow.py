@@ -209,15 +209,27 @@ class CallbackShadowRecorder(BaseCallback):
         """Return completed records in callback start order."""
         return tuple(self._completed[call_id] for call_id in self._order if call_id in self._completed)
 
+    def open_call_count(self) -> int:
+        """Return the number of callback starts without a matching end."""
+        return len(self._open)
 
-def _normalized_parent_index(records: tuple[CallbackRecord, ...], index: int) -> int | None:
+
+def _normalized_parent_index(
+    records: tuple[CallbackRecord, ...],
+    index: int,
+) -> tuple[str, int | None]:
+    """Normalize local, external, and root parentage without losing semantics."""
     parent_id = records[index].parent_call_id
     if parent_id is None:
-        return None
+        return ("root", None)
     for candidate_index, candidate in enumerate(records):
         if candidate.call_id == parent_id:
-            return candidate_index
-    return None
+            return ("local", candidate_index)
+    # DSPy may parent an interpreter callback under an RLM/module callback that
+    # is intentionally not recorded by this interpreter-only shadow probe.
+    # Preserve that fact as an external parent rather than collapsing it into
+    # a root, while ignoring generated external ids during parity comparison.
+    return ("external", None)
 
 
 def compare_callback_records(

@@ -2,17 +2,22 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
+import dspy
 import pytest
+from dspy import CodeExecutionError
 from dspy.primitives.code_interpreter import CodeInterpreterError
 from dspy.utils.callback import BaseCallback
 
+from fleet_rlm.daytona.errors import ProviderRequestError
 from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
 from fleet_rlm.observability.callback_shadow import (
     CallbackShadowRecorder,
     compare_callback_records,
 )
+from fleet_rlm.rlm.tool_observer import ToolEventView, observe_tool
 
 
 def test_shadow_recorder_matches_manual_interpreter_lifecycle() -> None:
@@ -171,3 +176,186 @@ def test_callback_parity_classifies_duration_only_differences() -> None:
     comparison = compare_callback_records(records, shifted)
     assert comparison.semantic_differences == ()
     assert comparison.timing_only_differences
+
+
+@pytest.mark.parametrize(
+    ("failure", "raised_type", "expected_category"),
+    [
+        (asyncio.CancelledError(), asyncio.CancelledError, "CancelledError"),
+        (TimeoutError("bounded timeout"), ProviderRequestError, "ProviderRequestError"),
+    ],
+)
+def test_shadow_lifecycle_parity_covers_cancellation_and_timeout(
+    failure: BaseException,
+    raised_type: type[BaseException],
+    expected_category: str,
+) -> None:
+    class FailingBackend:
+        def run(self, code: str, variables: dict[str, object] | None = None) -> str:
+            del code, variables
+            raise failure
+
+        def close(self) -> None:
+            return None
+
+    recorder = CallbackShadowRecorder()
+    interpreter = DaytonaCodeInterpreter(
+        backend=FailingBackend(),
+        callbacks=[recorder],
+    )
+
+    with pytest.raises(raised_type):
+        interpreter.execute("_out = 'never'")
+    interpreter.shutdown()
+
+    execute = next(record for record in recorder.records() if record.operation == "execute")
+    assert execute.status == "failed"
+    assert execute.exception_category == expected_category
+    assert execute.duration_ms >= 0
+
+
+def test_shadow_tool_parity_covers_async_callable() -> None:
+    async def helper(value: str) -> str:
+        await asyncio.sleep(0)
+        return f"async:{value}"
+
+    manual: list[object] = []
+    observed_tool = observe_tool(
+        dspy.Tool(helper, name="helper"),
+        manual.append,
+        ToolEventView.metadata_only(),
+    )
+    recorder = CallbackShadowRecorder()
+    interpreter = DaytonaCodeInterpreter(
+        backend=InProcessInterpreterBackend(),
+        tools={"helper": observed_tool.func},
+        callbacks=[recorder],
+    )
+
+    result = interpreter.execute("result = helper(value='a')\n_out = result")
+    interpreter.shutdown()
+
+    assert result == "async:a"
+    tool_records = [record for record in recorder.records() if record.operation == "tool_call"]
+    assert len(tool_records) == 1
+    assert tool_records[0].tool_name == "helper"
+    assert tool_records[0].status == "completed"
+    assert [type(item).__name__ for item in manual] == ["ToolStarted", "ToolCompleted"]
+
+
+def test_shadow_tool_parity_covers_validation_failure() -> None:
+    def recursive(prompt: str) -> str:
+        return f"child:{prompt}"
+
+    manual: list[object] = []
+    observed_tool = observe_tool(
+        dspy.Tool(recursive, name="rlm_query"),
+        manual.append,
+        ToolEventView.metadata_only(),
+    )
+    recorder = CallbackShadowRecorder()
+    interpreter = DaytonaCodeInterpreter(
+        backend=InProcessInterpreterBackend(),
+        tools={"rlm_query": observed_tool.func},
+        callbacks=[recorder],
+    )
+    interpreter.bind_observer(manual.append)
+
+    with pytest.raises(CodeExecutionError):
+        interpreter.execute("rlm_query()")
+    interpreter.shutdown()
+
+    tool = next(record for record in recorder.records() if record.operation == "tool_call")
+    execute = next(record for record in recorder.records() if record.operation == "execute")
+    assert tool.status == "failed"
+    assert tool.exception_category == "TypeError"
+    assert tool.parent_call_id == execute.call_id
+    assert [record.operation for record in recorder.records()].count("tool_call") == 1
+    assert [type(item).__name__ for item in manual] == [
+        "StepStarted",
+        "RLMCode",
+        "ToolStarted",
+        "ToolFailed",
+        "RLMOutput",
+        "StepFinished",
+    ]
+
+
+def test_shadow_recursive_tool_parity_has_one_nested_terminal_pair() -> None:
+    manual: list[object] = []
+    observed_tool = observe_tool(
+        dspy.Tool(lambda prompt: f"child:{prompt}", name="rlm_query"),
+        manual.append,
+        ToolEventView.metadata_only(),
+    )
+    recorder = CallbackShadowRecorder()
+    interpreter = DaytonaCodeInterpreter(
+        backend=InProcessInterpreterBackend(),
+        tools={"rlm_query": observed_tool.func},
+        callbacks=[recorder],
+    )
+    interpreter.bind_observer(manual.append)
+
+    assert interpreter.execute("child = rlm_query(prompt='bounded')\n_out = child") == "child:bounded"
+    interpreter.shutdown()
+
+    records = recorder.records()
+    execute = next(record for record in records if record.operation == "execute")
+    tool_records = [record for record in records if record.operation == "tool_call"]
+    assert len(tool_records) == 1
+    assert tool_records[0].tool_name == "rlm_query"
+    assert tool_records[0].parent_call_id == execute.call_id
+    assert tool_records[0].status == "completed"
+    assert [record.operation for record in records].count("tool_call") == 1
+    assert [type(item).__name__ for item in manual] == [
+        "StepStarted",
+        "RLMCode",
+        "ToolStarted",
+        "ToolCompleted",
+        "RLMOutput",
+        "StepFinished",
+    ]
+
+
+def test_callback_parent_comparison_distinguishes_missing_from_external_parent() -> None:
+    base = CallbackShadowRecorder()
+    interpreter = DaytonaCodeInterpreter(
+        backend=InProcessInterpreterBackend(),
+        tools={"helper": lambda: "ok"},
+        callbacks=[base],
+    )
+    assert interpreter.execute("_out = helper()") == "ok"
+    interpreter.shutdown()
+    records = base.records()
+
+    missing_parent = tuple(
+        record
+        if record.operation != "tool_call"
+        else record.__class__(
+            operation=record.operation,
+            call_id=record.call_id,
+            parent_call_id=None,
+            status=record.status,
+            duration_ms=record.duration_ms,
+            exception_category=record.exception_category,
+            tool_name=record.tool_name,
+        )
+        for record in records
+    )
+    external_parent = tuple(
+        record
+        if record.operation != "tool_call"
+        else record.__class__(
+            operation=record.operation,
+            call_id=record.call_id,
+            parent_call_id="framework-parent",
+            status=record.status,
+            duration_ms=record.duration_ms,
+            exception_category=record.exception_category,
+            tool_name=record.tool_name,
+        )
+        for record in records
+    )
+
+    comparison = compare_callback_records(missing_parent, external_parent)
+    assert any(".parent" in difference for difference in comparison.semantic_differences)

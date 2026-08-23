@@ -57,6 +57,11 @@ Deterministic evidence is maintained in:
 - `tests/unit/backend/daytona/test_interpreter_callback_shadow.py`
   - success and terminal lifecycle pairing;
   - Tool success/failure parity and ancestry;
+  - cancellation and timeout/provider-failure classification;
+  - async Tool lifecycle parity;
+  - argument-validation failure parity;
+  - recursive `rlm_query` Tool lifecycle parity;
+  - root versus local versus external parent normalization;
   - duration-only comparison;
   - callback handler/exporter failure fail-soft behavior;
   - no change to Fleet observation details.
@@ -74,16 +79,29 @@ uv run pytest \
   tests/contracts/backend/test_native_rlm_tracer.py -q
 ```
 
-The lane passed on the candidate SHA with 31 tests. Type and lint checks also
-passed for the changed modules.
+The lane passed on the candidate SHA, including the expanded cancellation,
+timeout, async Tool, validation, recursive Tool, and parent-normalization
+fixtures. Type and lint checks also passed for the changed modules.
 
-The credentialed Daytona MVP lane was attempted serially with
-`FLEET_LIVE=1` and mission-owned evidence output. It did not produce
-callback-specific acceptance evidence: the pre-existing model-driven MVP
-scenario failed its protocol assertion after the provider generated an
-extra exploratory action. No adoption claim is made from that run. The
-credentialed Root/child callback graph remains a required P38 re-certification
-before any manual span deletion.
+The original credentialed Daytona MVP lane remains non-accepting because its
+provider-driven scenario generated an extra exploratory action. A dedicated
+serial credentialed lane avoids that model variability with DSPy
+`DummyLM` scripts while still exercising the actual Root/child interpreter
+construction seams:
+
+```text
+FLEET_LIVE=1 uv run pytest \
+  tests/live/backend/test_callback_shadow_root_child.py -q -x
+```
+
+It passed and wrote the sanitized receipt
+`.fleet-evidence/receipts/p35d-callback-shadow-root-child.json`. The receipt
+proves DSPy 3.3.1 callbacks attached to the actual Root and child instances,
+Root depth 0 and child depth 1, one `rlm_query` Tool edge, paired start/end
+records, shared Run ancestry, no grandchild interpreter, and cleanup success.
+The child interpreter's startup and execute records are externally parented
+at the interpreter boundary, while its shutdown is parented to the local
+Run; the explicit Root Tool edge is the certified ancestry link.
 
 ## Product parity conclusion
 
@@ -92,3 +110,6 @@ attached only when explicitly supplied, callback records are not converted to
 Runtime Events, and all callback/export/sanitization/finalization failures
 are swallowed by the shadow path. The existing manual observer and
 `turn_phase_span("sandbox.execute")` lanes remain unchanged and green.
+
+This evidence supports **shadow-only** for P38. It does not authorize removal
+of Fleet's manual adapter, Tool observer, or product projection paths.
