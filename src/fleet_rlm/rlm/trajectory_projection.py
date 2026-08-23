@@ -164,6 +164,14 @@ def _trajectory_insertion(details: Sequence[ExecutionDetail], target: Observatio
     return finish
 
 
+def _missing_step_insertion(details: Sequence[ExecutionDetail], step: int) -> int:
+    """Place a missing canonical step before the next live step."""
+    return next(
+        (index for index, detail in enumerate(details) if isinstance(detail, StepStarted) and detail.step > step),
+        len(details),
+    )
+
+
 def has_reasoning(details: Sequence[ExecutionDetail], text: str, max_chars: int) -> bool:
     """True when durable details already contain this truncated public reasoning."""
     return any(
@@ -222,7 +230,11 @@ def reconcile_trajectory(
         start = step_starts.get(step)
         finish = step_finishes.get(step)
         if start is None or finish is None or start >= finish:
-            details.extend(step_details)
+            insertion = _missing_step_insertion(details, step)
+            for detail in step_details:
+                details.insert(insertion, detail)
+                shift_positions((), inserted_at=insertion)
+                insertion += 1
             emissions.extend(step_details)
             continue
 

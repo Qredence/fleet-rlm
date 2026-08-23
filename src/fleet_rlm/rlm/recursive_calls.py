@@ -52,11 +52,19 @@ RLM_NATIVE_CHILD_DEPTH = 1
 _PENDING_BATCH_WAIT_TIMEOUT_S = 60.0
 
 
-def _invoke_async_child(child_acall: Callable[..., Any], interpreter: Any, prompt: str) -> Any:
+def _invoke_async_child(
+    child_acall: Callable[..., Any],
+    interpreter: Any,
+    prompt: str,
+    *,
+    native: bool,
+) -> Any:
     """Await a native child even when the synchronous Tool runs on an event loop."""
 
     async def invoke() -> Any:
-        return await child_acall(interpreter, prompt=prompt)
+        if native:
+            return await child_acall(interpreter, prompt=prompt)
+        return await child_acall(interpreter=interpreter, prompt=prompt)
 
     try:
         asyncio.get_running_loop()
@@ -629,7 +637,12 @@ class RecursiveRLMExecutor:
                 # Native production children use the same caller-owned async
                 # seam as Root.  Narrow deterministic doubles may expose only
                 # ``__call__`` and remain supported for private tests.
-                prediction = _invoke_async_child(child_acall, lease.interpreter, prompt)
+                prediction = _invoke_async_child(
+                    child_acall,
+                    lease.interpreter,
+                    prompt,
+                    native=(type(child).__module__ == "dspy.predict.rlm" and type(child).__name__ == "RLM"),
+                )
             else:
                 prediction = child(lease.interpreter, prompt=prompt)
         result = prediction_result(

@@ -2,15 +2,19 @@
 
 from __future__ import annotations
 
+import asyncio
+import contextvars
 import inspect
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from functools import wraps
+from threading import Thread
 from typing import Any, TypeAlias
 from uuid import uuid4
 
 import dspy
 
+from fleet_rlm.json_types import validate_json_value
 from fleet_rlm.rlm.errors import RunNoProgressError
 from fleet_rlm.rlm.events import (
     JsonValue,
@@ -27,6 +31,15 @@ ToolInputProjection = Callable[[Mapping[str, Any]], JsonValue]
 ToolOutputProjection = Callable[[Any], JsonValue]
 ToolAfterResult = Callable[[Any], None]
 ToolObserver: TypeAlias = Callable[[ObservationDetail | Status | WarningEvent], None]
+
+
+class ToolResultSerializationError(TypeError):
+    """Closed failure for a host Tool result outside Fleet's JSON contract."""
+
+    public_message = "Tool result is invalid"
+
+    def __init__(self) -> None:
+        super().__init__(self.public_message)
 
 
 def _empty_input(*_arguments: Any) -> JsonValue:
@@ -174,12 +187,43 @@ def _validate_tool_arguments(
         raise
 
 
-def _reject_awaitable_result(result: Any) -> None:
+def _resolve_awaitable_result(result: Any) -> Any:
+    """Resolve sync and async host Tools through the synchronous DSPy seam.
+
+    Native DSPy invokes interpreter Tools synchronously, while Fleet's
+    composition also exposes async host implementations.  If the caller is
+    already on an event loop, a private thread avoids nesting or blocking that
+    loop; otherwise ``asyncio.run`` keeps the deterministic path small.
+    """
     if not inspect.isawaitable(result):
-        return
-    if inspect.iscoroutine(result):
-        result.close()
-    raise TypeError("async host tools are not supported inside the synchronous interpreter bridge")
+        return result
+
+    async def await_result() -> Any:
+        return await result
+
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(await_result())
+
+    context = contextvars.copy_context()
+    values: list[Any] = []
+    errors: list[BaseException] = []
+
+    def run() -> None:
+        try:
+            values.append(context.run(asyncio.run, await_result()))
+        except BaseException as exc:
+            errors.append(exc)
+
+    worker = Thread(target=run, name="fleet-rlm-async-tool", daemon=True)
+    worker.start()
+    worker.join()
+    if errors:
+        raise errors[0]
+    if not values:
+        raise RuntimeError("async Tool produced no result")
+    return values[0]
 
 
 def _execute_observed_tool(
@@ -193,8 +237,11 @@ def _execute_observed_tool(
     guards: RunToolGuards | None,
 ) -> Any:
     try:
-        result = source.func(**validated)
-        _reject_awaitable_result(result)
+        result = _resolve_awaitable_result(source.func(**validated))
+        try:
+            validate_json_value(result, path=f"Tool {source.name} result")
+        except (TypeError, ValueError):
+            raise ToolResultSerializationError from None
         if after_result is not None:
             after_result(result)
     except Exception as exc:
