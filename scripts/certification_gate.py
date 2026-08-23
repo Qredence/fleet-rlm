@@ -386,6 +386,7 @@ def run_gate(args: argparse.Namespace) -> int:
     service_result = _service_isolation_from_path(args.services.resolve())
     verify_golden_baseline(baseline_path, REPO_ROOT)
     live = _live_identity(live_path, sha=sha, lockfile_sha256=lockfile_sha256)
+    release_dist = args.dist.resolve()
     commands = (
         ("deterministic", "deterministic", ("make", "check", "PYTEST_XDIST_MAX_WORKERS=2")),
         ("security", "security", ("make", "check-security")),
@@ -396,7 +397,7 @@ def run_gate(args: argparse.Namespace) -> int:
             "package",
             (
                 "env",
-                "FLEET_RELEASE_DIST=dist",
+                f"FLEET_RELEASE_DIST={release_dist}",
                 "uv",
                 "run",
                 "pytest",
@@ -409,6 +410,9 @@ def run_gate(args: argparse.Namespace) -> int:
         ("whitespace", "release", ("git", "diff", "--check")),
     )
     results = [_run_gate(name, lane, command, timeout=args.timeout_seconds) for name, lane, command in commands]
+    failed = [result.name for result in results if not result.passed]
+    if failed:
+        raise CertificationGateError("failed certification gates: " + ", ".join(failed))
     results.append(
         GateResult(
             "live-daytona",
@@ -429,10 +433,10 @@ def run_gate(args: argparse.Namespace) -> int:
             True,
         )
     )
-    artifact_manifest_path = args.dist / "artifact-manifest.json"
+    artifact_manifest_path = release_dist / "artifact-manifest.json"
     if not artifact_manifest_path.is_file():
         raise CertificationGateError("package build did not emit an artifact manifest")
-    artifact_manifest = validate_release.verify_artifact_manifest(artifact_manifest_path, args.dist)
+    artifact_manifest = validate_release.verify_artifact_manifest(artifact_manifest_path, release_dist)
     artifacts = artifact_manifest["artifacts"]
     manifest = build_certification_manifest(
         sha=sha,
