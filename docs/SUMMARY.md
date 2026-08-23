@@ -10,6 +10,7 @@
 * [Terminal UI](how-to-guides/terminal-tui.md)
 * [Workspace Memory degradation diagnostics](how-to-guides/workspace-memory-degradation.md)
 * [Maintainability freeze](how-to-guides/maintainability-freeze.md)
+* [P35-D callback observability decision](how-to-guides/p35d-callback-observability-decision.md)
 * [Reference](reference/index.md)
   * [Configuration](reference/configuration.md)
   * [Runtime Profile Matrix](reference/profile-matrix.md)

@@ -52,6 +52,8 @@ only product observer.
 
 Deterministic evidence is maintained in:
 
+- `.fleet-evidence/receipts/p35d-callback-shadow.json` (sanitized,
+  git-ignored receipt for commit `1f83503a05a3bb36fefcf31f457c1731d6ddc430`);
 - `tests/unit/backend/daytona/test_interpreter_callback_shadow.py`
   - success and terminal lifecycle pairing;
   - Tool success/failure parity and ancestry;
