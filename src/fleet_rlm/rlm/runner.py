@@ -428,7 +428,7 @@ class RLMRunner:
             rlm,
             observations.publish,
             context.execution.options.max_output_chars,
-            emit_reasoning=type(rlm) is not dspy.RLM,
+            emit_reasoning=True,
         )
         kwargs = build_rlm_input_kwargs(
             request=context.session.request,
