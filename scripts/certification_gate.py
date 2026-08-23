@@ -394,7 +394,17 @@ def run_gate(args: argparse.Namespace) -> int:
         (
             "package-install-matrix",
             "package",
-            ("uv", "run", "pytest", "tests/unit/backend/packaging", "-q", "-n", "0"),
+            (
+                "env",
+                "FLEET_RELEASE_DIST=dist",
+                "uv",
+                "run",
+                "pytest",
+                "tests/unit/backend/packaging",
+                "-q",
+                "-n",
+                "0",
+            ),
         ),
         ("whitespace", "release", ("git", "diff", "--check")),
     )
