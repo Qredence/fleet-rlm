@@ -35,7 +35,7 @@ def test_owned_effect_primitive_owns_post_commit_promotion() -> None:
 
 def test_child_lease_settlement_uses_explicit_p30_state() -> None:
     """The recursive child lease exposes typed settlement states (no boolean shortcuts)."""
-    from fleet_rlm.daytona.recursive_child_lease import ChildRuntimeLeaseState
+    from fleet_rlm.daytona.recursive_child_runtime import ChildRuntimeLeaseState
 
     assert {state.name for state in ChildRuntimeLeaseState} == {"OPEN", "CLOSING", "CLOSED", "FAILED"}
 
