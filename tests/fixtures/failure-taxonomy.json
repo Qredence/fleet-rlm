@@ -1,0 +1,384 @@
+{
+  "open_path": [
+    {
+      "category": "session_not_found",
+      "chunks": [
+        {
+          "errorText": "Session not found",
+          "type": "error"
+        },
+        {
+          "finishReason": "error",
+          "type": "finish"
+        },
+        "[DONE]"
+      ],
+      "message": "Session not found",
+      "phase": "preparation",
+      "started": false
+    },
+    {
+      "category": "turn_conflict",
+      "chunks": [
+        {
+          "errorText": "A Turn is already running",
+          "type": "error"
+        },
+        {
+          "finishReason": "error",
+          "type": "finish"
+        },
+        "[DONE]"
+      ],
+      "message": "A Turn is already running",
+      "phase": "preparation",
+      "started": false
+    },
+    {
+      "category": "idempotency_mismatch",
+      "chunks": [
+        {
+          "errorText": "Idempotency key input mismatch",
+          "type": "error"
+        },
+        {
+          "finishReason": "error",
+          "type": "finish"
+        },
+        "[DONE]"
+      ],
+      "message": "Idempotency key input mismatch",
+      "phase": "preparation",
+      "started": false
+    },
+    {
+      "category": "invalid_skill_selection",
+      "chunks": [
+        {
+          "errorText": "Invalid Skill selection",
+          "type": "error"
+        },
+        {
+          "finishReason": "error",
+          "type": "finish"
+        },
+        "[DONE]"
+      ],
+      "message": "Invalid Skill selection",
+      "phase": "preparation",
+      "started": false
+    },
+    {
+      "category": "preparation_timeout",
+      "chunks": [
+        {
+          "errorText": "Turn preparation timed out",
+          "type": "error"
+        },
+        {
+          "finishReason": "error",
+          "type": "finish"
+        },
+        "[DONE]"
+      ],
+      "message": "Turn preparation timed out",
+      "phase": "preparation",
+      "started": false
+    },
+    {
+      "category": "turn_unavailable",
+      "chunks": [
+        {
+          "errorText": "Turn is unavailable",
+          "type": "error"
+        },
+        {
+          "finishReason": "error",
+          "type": "finish"
+        },
+        "[DONE]"
+      ],
+      "message": "Turn is unavailable",
+      "phase": "preparation",
+      "started": false
+    },
+    {
+      "category": "preparation_unavailable",
+      "chunks": [
+        {
+          "errorText": "Turn is unavailable",
+          "type": "error"
+        },
+        {
+          "finishReason": "error",
+          "type": "finish"
+        },
+        "[DONE]"
+      ],
+      "message": "Turn is unavailable",
+      "phase": "preparation",
+      "started": false
+    },
+    {
+      "category": "invalid_request",
+      "chunks": [
+        {
+          "errorText": "Invalid request",
+          "type": "error"
+        },
+        {
+          "finishReason": "error",
+          "type": "finish"
+        },
+        "[DONE]"
+      ],
+      "message": "Invalid request",
+      "phase": "preparation",
+      "started": false
+    }
+  ],
+  "schema": "fleet.public-failure-taxonomy/v1",
+  "structural": [
+    {
+      "category": "http_400",
+      "code": "invalid_request",
+      "message": "Invalid request",
+      "phase": "request",
+      "status": 400
+    },
+    {
+      "category": "http_404",
+      "code": "not_found",
+      "message": "Resource not found",
+      "phase": "request",
+      "status": 404
+    },
+    {
+      "category": "http_409",
+      "code": "turn_in_progress",
+      "message": "Turn conflict",
+      "phase": "request",
+      "status": 409
+    },
+    {
+      "category": "http_422",
+      "code": "invalid_request",
+      "message": "Invalid request",
+      "phase": "request",
+      "status": 422
+    },
+    {
+      "category": "http_503",
+      "code": "turn_unavailable",
+      "message": "Service unavailable",
+      "phase": "request",
+      "status": 503
+    },
+    {
+      "category": "http_504",
+      "code": "turn_preparation_timeout",
+      "message": "Turn preparation timed out",
+      "phase": "request",
+      "status": 504
+    },
+    {
+      "category": "invalid_skill_selection",
+      "code": "invalid_skill_selection",
+      "message": "Invalid Skill selection",
+      "phase": "request",
+      "status": 422
+    }
+  ],
+  "terminal": [
+    {
+      "category": "runtime_failure",
+      "chunks": [
+        {
+          "errorText": "Turn failed",
+          "type": "error"
+        },
+        {
+          "finishReason": "error",
+          "type": "finish"
+        }
+      ],
+      "durable_parts": [],
+      "event": {
+        "code": "execution_failed",
+        "kind": "run.failed",
+        "message": "Turn failed"
+      },
+      "phase": "execution"
+    },
+    {
+      "category": "invalid_output",
+      "chunks": [
+        {
+          "errorText": "Turn output is invalid",
+          "type": "error"
+        },
+        {
+          "finishReason": "error",
+          "type": "finish"
+        }
+      ],
+      "durable_parts": [],
+      "event": {
+        "code": "execution_failed",
+        "kind": "run.failed",
+        "message": "Turn output is invalid"
+      },
+      "phase": "execution"
+    },
+    {
+      "category": "output_too_large",
+      "chunks": [
+        {
+          "errorText": "Turn output is too large",
+          "type": "error"
+        },
+        {
+          "finishReason": "error",
+          "type": "finish"
+        }
+      ],
+      "durable_parts": [],
+      "event": {
+        "code": "execution_failed",
+        "kind": "run.failed",
+        "message": "Turn output is too large"
+      },
+      "phase": "execution"
+    },
+    {
+      "category": "preparation_failure",
+      "chunks": [
+        {
+          "errorText": "Turn could not be prepared",
+          "type": "error"
+        },
+        {
+          "finishReason": "error",
+          "type": "finish"
+        }
+      ],
+      "durable_parts": [],
+      "event": {
+        "code": "preparation_failed",
+        "kind": "run.failed",
+        "message": "Turn could not be prepared"
+      },
+      "phase": "execution"
+    },
+    {
+      "category": "commit_failure",
+      "chunks": [
+        {
+          "errorText": "Turn could not be committed",
+          "type": "error"
+        },
+        {
+          "finishReason": "error",
+          "type": "finish"
+        }
+      ],
+      "durable_parts": [],
+      "event": {
+        "code": "commit_failed",
+        "kind": "run.failed",
+        "message": "Turn could not be committed"
+      },
+      "phase": "execution"
+    },
+    {
+      "category": "claim_loss",
+      "chunks": [
+        {
+          "errorText": "Turn failed",
+          "type": "error"
+        },
+        {
+          "finishReason": "error",
+          "type": "finish"
+        }
+      ],
+      "durable_parts": [],
+      "event": {
+        "code": "execution_failed",
+        "kind": "run.failed",
+        "message": "Turn failed"
+      },
+      "phase": "execution"
+    },
+    {
+      "category": "timeout",
+      "chunks": [
+        {
+          "errorText": "Turn timed out",
+          "type": "error"
+        },
+        {
+          "finishReason": "error",
+          "type": "finish"
+        }
+      ],
+      "durable_parts": [],
+      "event": {
+        "code": null,
+        "kind": "run.timed_out",
+        "message": "Turn timed out"
+      },
+      "phase": "execution"
+    },
+    {
+      "category": "cancellation",
+      "chunks": [
+        {
+          "reason": "Turn cancelled",
+          "type": "abort"
+        }
+      ],
+      "durable_parts": [
+        "status",
+        "usage",
+        "text"
+      ],
+      "event": {
+        "code": null,
+        "kind": "run.cancelled",
+        "message": "Turn cancelled"
+      },
+      "phase": "execution"
+    }
+  ],
+  "terminal_shape": {
+    "cancellation": {
+      "chunks": [
+        "abort",
+        "[DONE]"
+      ],
+      "finish": false,
+      "runtime_event": "run.cancelled"
+    },
+    "failure": {
+      "chunks": [
+        "error",
+        "finish",
+        "[DONE]"
+      ],
+      "finish_reason": "error",
+      "runtime_events": [
+        "run.failed",
+        "run.timed_out"
+      ]
+    },
+    "success": {
+      "chunks": [
+        "finish",
+        "[DONE]"
+      ],
+      "finish_reason": "stop",
+      "runtime_event": "run.completed"
+    }
+  }
+}
