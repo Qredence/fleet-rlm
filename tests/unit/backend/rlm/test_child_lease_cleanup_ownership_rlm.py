@@ -511,7 +511,12 @@ def test_val_rec_017_one_absolute_deadline_covers_fork_and_batch_join(
             return dspy.Prediction(answer="late", trajectory=[])
 
     monkeypatch.setattr(recursive_calls, "build_native_rlm", lambda **_kwargs: BlockingChild())
-    deadline = time.monotonic() + 0.15
+    # Leave spawn slack: under full-suite coverage + xdist load the child thread
+    # may take longer than 0.15s to start, so the join deadline would fire before
+    # the child ever ran and `started` would race. The child blocks on
+    # `release.wait(5)`, so widening the deadline only removes the spawn race
+    # without changing what is proven.
+    deadline = time.monotonic() + 0.6
     executor = _executor(
         [{"reasoning": "unused", "code": "SUBMIT(answer='unused')"}],
         recorder,
