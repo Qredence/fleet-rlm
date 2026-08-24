@@ -274,6 +274,22 @@ async def _absent(resources: Any, sandbox_id: str) -> bool:
     return await resources.platform.get(sandbox_id) is None
 
 
+async def _delete_volume_with_grace(resources: Any, volume_name: str, grace_seconds: float) -> tuple[str, ...]:
+    """Retry Volume deletion while the provider detaches the last Sandboxes."""
+    deadline = time.monotonic() + grace_seconds
+    while True:
+        try:
+            volume = await resources.client.volume.get(volume_name, create=False)
+            if volume is None:
+                return ()
+            await resources.client.volume.delete(volume)
+            return ()
+        except Exception:
+            if time.monotonic() >= deadline:
+                return ("volume",)
+            await asyncio.sleep(10.0)
+
+
 async def _write_marker(sandbox: Any, mount_path: str, rel_path: str, content: str) -> str:
     target = f"{mount_path.rstrip('/')}/{rel_path.lstrip('/')}"
     await sandbox.fs.upload_file(content.encode("utf-8"), target)
@@ -618,8 +634,11 @@ def test_live_volume_preservation_across_all_child_outcomes(
             portal.call(resources.platform.delete, str(getattr(sibling_scratch, "id", "")))
         assert final_sibling_marker == sibling_marker_pre
         # Validator's separately owned final cleanup: scratch Sandboxes, then
-        # the shared Volume itself.
+        # the shared Volume itself. The Volume deletion can race the provider
+        # detaching the last deleted Sandbox, so it gets a bounded grace retry.
         cleanup_failures = portal.call(_strict_cleanup, resources, sandbox_ids, base_settings.volume_name)
+        if cleanup_failures == ("volume",):
+            cleanup_failures = portal.call(_delete_volume_with_grace, resources, base_settings.volume_name, 90.0)
         portal.call(resources.client.close)
     assert cleanup_failures == ()
     _record_observed_sandbox_ids("volume-preservation", sandbox_ids, scenario_session_ids)
