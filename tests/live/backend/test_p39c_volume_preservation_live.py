@@ -593,9 +593,9 @@ def test_live_volume_preservation_across_all_child_outcomes(
         cancel=True,
     )
     # The deadline scenario needs live-provider acquisition headroom: the
-    # stall must start before the Turn timeout fires (see the same race fixed
-    # in the cancel-deadline lane and p35d canary b8b3ec861).
-    deadline_settings = _settings_with_timeout(base_settings, turn_timeout_seconds=90)
+    # stall must start before the Turn timeout fires (180s matches the p35d
+    # canary for this same race and the cancel-deadline lane).
+    deadline_settings = _settings_with_timeout(base_settings, turn_timeout_seconds=180)
     run_scenario(
         name="deadline",
         settings=deadline_settings,

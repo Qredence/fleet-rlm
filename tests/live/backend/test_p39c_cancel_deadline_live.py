@@ -489,7 +489,7 @@ def test_live_deadline_with_in_flight_child_and_queued_sibling(
     # reach interpreter execution on live providers; a deadline that fires
     # before the stall is not the scenario under test (see b8b3ec861 which
     # widened the same race in the p35d canary).
-    turn_timeout_seconds = 90
+    turn_timeout_seconds = 180
     settings = _case_settings(tmp_path, name="deadline", turn_timeout_seconds=turn_timeout_seconds)
     evidence = _ScenarioEvidence()
     _install_scenario_evidence(monkeypatch, evidence)
