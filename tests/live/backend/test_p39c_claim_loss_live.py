@@ -252,7 +252,12 @@ def _block_first_child_execution(
         timeout_s: float = 130.0,
         on_stdout: Any | None = None,
     ) -> Any:
-        sandbox_id = str(getattr(getattr(self, "_sandbox", None), "id", "") or "")
+        broker_sandbox = getattr(self, "_sandbox", None)
+        # The DSPy worker seam wraps the async SDK sandbox in a sync view whose
+        # ``_sandbox`` attribute holds the object carrying the provider ``id``.
+        if broker_sandbox is not None and not hasattr(broker_sandbox, "id"):
+            broker_sandbox = getattr(broker_sandbox, "_sandbox", broker_sandbox)
+        sandbox_id = str(getattr(broker_sandbox, "id", "") or "")
         is_child = sandbox_id in evidence.sandbox_ids
         with lock:
             first_child_block = is_child and state["blocked"] == 0
