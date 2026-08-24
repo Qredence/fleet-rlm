@@ -193,6 +193,7 @@ def _install_batch_evidence(
     *,
     resources: Any,
     fail_absence_for_call_index: int | None = None,
+    barrier_wait_s: float | None = None,
 ) -> None:
     original_acquire = recursive_child_runtime._acquire_child_runtime
     original_lease = recursive_child_runtime.SandboxLease
@@ -208,6 +209,17 @@ def _install_batch_evidence(
         evidence.sandbox_ids.append(lease.sandbox_id)
         evidence.volume_subpaths.append(lease.volume_subpath)
         evidence.call_indexes.append(call_index)
+        if barrier_wait_s is not None:
+            # Deterministic bounded-concurrency proof: hold each acquired child
+            # until every sibling acquisition is in flight (or the bounded
+            # window expires), so the evidence-side overlap peak can never
+            # transiently read 1 under live provider timing.
+            barrier_deadline = time.monotonic() + barrier_wait_s
+            while time.monotonic() < barrier_deadline:
+                with evidence._lock:
+                    if evidence._active >= 2:
+                        break
+                await asyncio.sleep(0.05)
         original_close = lease._close
 
         def observed_close() -> None:
@@ -378,7 +390,7 @@ def test_live_batch_two_children_ordered_concurrent_leak_free(
         preparation = inventory.run_preparation
         assert resources is not None
         assert preparation is not None
-        _install_batch_evidence(monkeypatch, evidence, resources=resources)
+        _install_batch_evidence(monkeypatch, evidence, resources=resources, barrier_wait_s=45.0)
         _install_batch_answer_capture(monkeypatch, evidence)
         preparation._models = RLMModelBundle(
             _BatchRootLM(),
