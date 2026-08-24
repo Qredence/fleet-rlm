@@ -301,6 +301,21 @@ def _assert_no_recursive_success(chunks: list[dict[str, Any]]) -> None:
     assert not [chunk for chunk in chunks if chunk.get("type") == "data-structured-result"]
 
 
+def _wait_for_cleanup_evidence(evidence: _ScenarioEvidence, *, receipts: int, timeout: float = 120.0) -> None:
+    """Wait until the owned child cleanup settled after the cancel/deadline terminal.
+
+    The cancellation stream terminal is projected while the recursive executor
+    still owns the in-flight child; its lease close (interpreter shutdown,
+    provider delete, absence confirmation, admission release) settles on the
+    executor's cleanup boundary shortly after.
+    """
+    deadline = time.perf_counter() + timeout
+    while time.perf_counter() < deadline:
+        if len(evidence.receipts) >= receipts and len(evidence.shutdown_order) >= receipts:
+            return
+        time.sleep(0.25)
+
+
 def test_live_cancel_with_in_flight_child_and_queued_sibling(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -374,6 +389,10 @@ def test_live_cancel_with_in_flight_child_and_queued_sibling(
             assert len(evidence.sandbox_ids) == 1
             assert evidence.call_indexes == [1]
 
+            # The abort terminal settles the stream while the recursive
+            # executor still owns the in-flight child; its strict close
+            # settles on the cleanup boundary shortly after.
+            _wait_for_cleanup_evidence(evidence, receipts=1)
             # Strict interpreter/broker shutdown ran for the in-flight child.
             assert evidence.shutdown_order == [
                 f"interpreter_shutdown:{evidence.sandbox_ids[0]}:strict_broker_cleanup=True"
@@ -507,6 +526,11 @@ def test_live_deadline_with_in_flight_child_and_queued_sibling(
             assert len(evidence.sandbox_ids) == 1
             assert evidence.call_indexes == [1]
 
+            # The error terminal settles the stream while the recursive
+            # executor still owns the stalled child; its strict close settles
+            # on the cleanup boundary shortly after (the interpreter shutdown
+            # must unwind the host-forced stall first).
+            _wait_for_cleanup_evidence(evidence, receipts=1, timeout=240.0)
             # Strict interpreter/broker shutdown and one complete receipt.
             assert evidence.shutdown_order == [
                 f"interpreter_shutdown:{evidence.sandbox_ids[0]}:strict_broker_cleanup=True"

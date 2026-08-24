@@ -414,7 +414,15 @@ def test_live_claim_loss_fencing_leaves_no_recursive_resources(
             )
 
             # Cleanup ownership retained: strict interpreter/broker shutdown,
-            # provider delete, confirmed absence, admission restored.
+            # provider delete, confirmed absence, admission restored. The
+            # error terminal settles the stream while the executor still owns
+            # the stalled child; its strict close settles on the cleanup
+            # boundary shortly after.
+            deadline = time.perf_counter() + 240.0
+            while time.perf_counter() < deadline:
+                if evidence.receipts and evidence.shutdown_order:
+                    break
+                time.sleep(0.25)
             assert evidence.shutdown_order == [f"interpreter_shutdown:{child_id}:strict_broker_cleanup=True"]
             assert len(evidence.receipts) == 1
             receipt = evidence.receipts[0]
