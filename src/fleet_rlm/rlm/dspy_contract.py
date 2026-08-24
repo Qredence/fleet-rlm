@@ -561,9 +561,12 @@ class _RLMTraceCallback(BaseCallback):
         instance, span, history_length, call_index, started_at = state
         role = self._roles.get(id(instance), "unknown")
         try:
-            usage, provider = _latest_lm_telemetry(instance, history_length, outputs)
+            # P38-RLM-006: under the certified DSPy 3.3.1 legacy contract,
+            # observed per-call usage is the only truthful LM telemetry; raw
+            # provider response probes were removed with the contraction.
+            usage = _latest_lm_telemetry(instance, history_length, outputs)
         except Exception:
-            usage, provider = {}, {}
+            usage = {}
         standard_usage = _mlflow_token_usage(usage)
         attributes = {"mlflow.chat.tokenUsage": standard_usage} if standard_usage else None
         try:
@@ -574,7 +577,6 @@ class _RLMTraceCallback(BaseCallback):
             {
                 "call_index": call_index,
                 "wall_time_ms": round((time.perf_counter() - started_at) * 1000, 3),
-                **provider,
             }
         )
         last_call: dict[str, JsonValue] = {
@@ -587,10 +589,6 @@ class _RLMTraceCallback(BaseCallback):
             "response_keys",
             "response_chars",
             "wall_time_ms",
-            "provider_response_ms",
-            "litellm_overhead_ms",
-            "callback_duration_ms",
-            "provider_request_id",
         ):
             value = response_details.get(key)
             if value is not None:
@@ -705,34 +703,15 @@ def _lm_input_profile(
 def _to_output_mapping(outputs: Any) -> Mapping[str, Any] | None:
     """Normalize LM callback outputs into a Mapping for profiling.
 
-    DSPy's ``on_lm_end`` may deliver the post-processed outputs (a Mapping), the
-    raw LiteLLM ``ModelResponse`` (a pydantic object, NOT a ``collections.abc``
-    ``Mapping`` — whose parsed text lives at ``choices[i].message.content``), or a
-    bare completion string. Key the profile off the meaningful payload for each
-    shape rather than throwing the object away.
+    Under the certified DSPy 3.3.1 legacy contract, ``on_lm_end`` delivers the
+    post-processed outputs (a ``list[str | dict]``), never the raw LiteLLM
+    ``ModelResponse``. Raw response-shape probing was removed in the P38
+    contraction (P38-RLM-006/011).
     """
     if isinstance(outputs, Mapping):
         return outputs
     if isinstance(outputs, str):
         return {"content": outputs}
-
-    choices = getattr(outputs, "choices", None)
-    if isinstance(choices, Sequence) and not isinstance(choices, (str, bytes, bytearray)):
-        first = choices[0] if choices else None
-        message = getattr(first, "message", None)
-        if message is None and isinstance(first, Mapping):
-            message = first.get("message")
-        content = getattr(message, "content", None)
-        if content is None and isinstance(message, Mapping):
-            content = message.get("content")
-        if isinstance(content, str):
-            finish = getattr(first, "finish_reason", None)
-            if finish is None and isinstance(first, Mapping):
-                finish = first.get("finish_reason")
-            result: dict[str, Any] = {"content": content}
-            if isinstance(finish, str):
-                result["finish_reason"] = finish
-            return result
 
     model_dump = getattr(outputs, "model_dump", None)
     if callable(model_dump):
@@ -752,9 +731,9 @@ def _lm_output_profile(
 ) -> dict[str, JsonValue]:
     """Describe an LM response for tracing.
 
-    Accepts the post-processed outputs, the LiteLLM ``ModelResponse`` object, or a
-    bare string; all three are normalized via ``_to_output_mapping`` so the profile
-    reflects the real payload instead of collapsing to empty keys."""
+    Accepts the post-processed callback outputs or a bare string; both are
+    normalized via ``_to_output_mapping`` so the profile reflects the real
+    payload instead of collapsing to empty keys."""
 
     mapping = _to_output_mapping(outputs)
     if mapping is None:
@@ -772,28 +751,26 @@ def _latest_lm_telemetry(
     instance: Any,
     history_length: int | None,
     outputs: object = None,
-) -> tuple[dict[str, JsonValue], dict[str, JsonValue]]:
-    """
-    Retrieve sanitized usage and provider telemetry for the latest completed language-model call.
+) -> dict[str, JsonValue]:
+    """Retrieve sanitized observed usage for the latest completed LM call.
+
+    Under the certified DSPy 3.3.1 legacy forward contract, the truthful
+    per-call usage lives on the LM history entry whose ``outputs`` value is
+    the very object delivered to ``on_lm_end`` (P38-RLM-006/011: the typed
+    ``LMResponse`` fallback and raw provider-response probing were removed).
 
     Parameters:
         instance (Any): Language-model instance whose call history is inspected.
         history_length (int | None): Starting history position for entries belonging to the current call.
-        outputs (object): Callback output used to identify the matching history entry
-            or provide typed-response telemetry.
+        outputs (object): Callback output used to identify the matching history entry.
 
     Returns:
-        tuple[dict[str, JsonValue], dict[str, JsonValue]]: Allowlisted usage data and provider response metadata.
+        dict[str, JsonValue]: Allowlisted usage data; empty when unavailable
+        (missing usage is unavailable, never zero).
     """
-
-    def _fallback() -> tuple[dict[str, JsonValue], dict[str, JsonValue]]:
-        # Computed lazily so the common history-match path skips the typed
-        # fallback work entirely (called only when history yields nothing).
-        return _typed_response_telemetry(outputs)
-
     history = getattr(instance, "history", None)
     if not isinstance(history, Sequence) or isinstance(history, (str, bytes, bytearray)):
-        return _fallback()
+        return {}
     start = history_length if history_length is not None else max(0, len(history) - 1)
     candidates = [entry for entry in history[start:] if isinstance(entry, Mapping)]
     matching = [entry for entry in candidates if _history_entry_matches_outputs(entry, outputs)]
@@ -811,99 +788,25 @@ def _latest_lm_telemetry(
         if not isinstance(usage, Mapping):
             dump = getattr(usage, "model_dump", None)
             usage = dump() if callable(dump) else None
-        safe_usage: dict[str, JsonValue] = {}
         if isinstance(usage, Mapping):
             with contextlib.suppress(ValueError):
-                safe_usage = cast(
+                return cast(
                     dict[str, JsonValue],
                     _safe_usage_entry(usage, path="lm_usage", filter_unknown=True),
                 )
-
-        provider = _provider_response_telemetry(entry.get("response"))
-        if safe_usage or provider:
-            return safe_usage, provider
-    return _fallback()
-
-
-def _typed_response_telemetry(outputs: object) -> tuple[dict[str, JsonValue], dict[str, JsonValue]]:
-    """
-    Read usage and provider telemetry from a typed DSPy LM response.
-
-    Parameters:
-        outputs (object): Typed LM response payload containing usage and provider
-            details.
-
-    Returns:
-        A pair containing sanitized usage data and provider telemetry. Both mappings
-        are empty when the payload does not expose usable telemetry.
-    """
-    if outputs is None:
-        return {}, {}
-    usage_as_dict = getattr(outputs, "usage_as_dict", None)
-    if not callable(usage_as_dict):
-        return {}, {}
-    try:
-        usage = usage_as_dict()
-    except Exception:  # pragma: no cover - provider objects vary
-        return {}, {}
-    safe_usage: dict[str, JsonValue] = {}
-    if isinstance(usage, Mapping):
-        with contextlib.suppress(ValueError):
-            safe_usage = cast(
-                dict[str, JsonValue],
-                _safe_usage_entry(usage, path="lm_usage", filter_unknown=True),
-            )
-    provider = _provider_response_telemetry(getattr(outputs, "provider_response", None))
-    return safe_usage, provider
+    return {}
 
 
 def _history_entry_matches_outputs(entry: Mapping[str, Any], outputs: object) -> bool:
-    """Match DSPy legacy and typed history entries to one callback return value."""
+    """Match a DSPy 3.3.1 legacy history entry to its callback return value.
+
+    ``BaseLM._process_lm_response`` stores the post-processed outputs in the
+    entry and delivers that same object to ``on_lm_end``, so identity matching
+    is the certified pairing (``dspy/clients/base_lm.py``).
+    """
     if outputs is None:
         return False
-    if entry.get("response") is outputs:
-        return True
     return entry.get("outputs") is outputs
-
-
-def _provider_response_telemetry(response: object) -> dict[str, JsonValue]:
-    """
-    Extracts safe provider timing and request identifier metadata from an LM response.
-
-    Parameters:
-        response (object): Provider response containing optional metadata.
-
-    Returns:
-        dict[str, JsonValue]: Allowlisted provider telemetry values, or an empty dictionary when unavailable.
-    """
-    hidden = getattr(response, "_hidden_params", None)
-    if not isinstance(hidden, Mapping) and isinstance(response, Mapping):
-        hidden = response.get("_hidden_params")
-    if not isinstance(hidden, Mapping):
-        return {}
-
-    result: dict[str, JsonValue] = {}
-    numeric_fields = {
-        "_response_ms": "provider_response_ms",
-        "litellm_overhead_time_ms": "litellm_overhead_ms",
-        "callback_duration_ms": "callback_duration_ms",
-    }
-    for source, target in numeric_fields.items():
-        value = hidden.get(source)
-        if isinstance(value, (int, float)) and not isinstance(value, bool) and isfinite(float(value)) and value >= 0:
-            result[target] = round(float(value), 3)
-
-    request_id = hidden.get("litellm_call_id")
-    headers = hidden.get("additional_headers")
-    if isinstance(headers, Mapping):
-        for key in ("llm_provider-x-request-id", "x-request-id", "request-id"):
-            candidate = headers.get(key)
-            if isinstance(candidate, str) and candidate.strip():
-                request_id = candidate
-                break
-    if isinstance(request_id, str) and request_id.strip():
-        result["provider_request_id"] = request_id.strip()[:256]
-    return result
 
 
 def _mlflow_token_usage(usage: Mapping[str, JsonValue]) -> dict[str, JsonValue]:
