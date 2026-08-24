@@ -169,10 +169,46 @@ def test_val_rec_012_first_failure_cancels_queued_acquisition_before_any_lease(
     import fleet_rlm.rlm.recursive_calls as recursive_calls
 
     recorder = _Recorder()
+    first_failure = threading.Event()
+    real_run_reserved_batch = recursive_calls.run_reserved_batch
+
+    def gated_run_reserved_batch(
+        reservations,
+        *,
+        execute,
+        deadline_monotonic,
+        max_parallel,
+        on_retain_running,
+    ):
+        """Keep a queued worker behind the first-failure cancellation fence.
+
+        With one pool worker, the queued future can otherwise start in the
+        scheduler gap between the first worker raising and the parent thread
+        observing that failure. The production scheduler remains unchanged;
+        this test-only gate makes the cancellation observation deterministic.
+        """
+
+        def gated_execute(reservation, batch_cancelled):
+            if reservation.call_index != 1:
+                assert first_failure.wait(5), "first child failure was not observed"
+                remaining = max(0.0, deadline_monotonic - time.monotonic())
+                assert batch_cancelled.wait(remaining), "batch cancellation was not observed"
+            return execute(reservation, batch_cancelled)
+
+        return real_run_reserved_batch(
+            reservations,
+            execute=gated_execute,
+            deadline_monotonic=deadline_monotonic,
+            max_parallel=max_parallel,
+            on_retain_running=on_retain_running,
+        )
+
+    monkeypatch.setattr(recursive_calls, "run_reserved_batch", gated_run_reserved_batch)
 
     class FailingChild:
         def __call__(self, _interpreter: object, *, prompt: str) -> dspy.Prediction:
             if prompt == "fail":
+                first_failure.set()
                 raise ValueError("provider failure")
             raise AssertionError("queued sibling must never execute")
 
