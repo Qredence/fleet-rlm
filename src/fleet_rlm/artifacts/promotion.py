@@ -46,8 +46,7 @@ class ArtifactPromotion:
         run_id: UUID,
     ) -> tuple[ArtifactCandidate, ...]:
         ids: set[UUID] = set()
-        staging_paths: set[str] = set()
-        durable_paths: set[str] = set()
+        locations: set[str] = set()
         for candidate in candidates:
             if (
                 candidate.user_id != access.user_id
@@ -58,7 +57,7 @@ class ArtifactPromotion:
                 raise ArtifactValidationError("Artifact Candidate ownership is invalid")
             if candidate.id in ids:
                 raise ArtifactValidationError("Artifact Candidate identities must be unique")
-            if candidate.staging_path in staging_paths or candidate.durable_path in durable_paths:
+            if candidate.staging_path in locations or candidate.durable_path in locations:
                 raise ArtifactValidationError("Artifact Candidate locations must be unique")
             if candidate.staging_path == candidate.durable_path:
                 raise ArtifactValidationError("Artifact staging and durable locations must differ")
@@ -70,11 +69,11 @@ class ArtifactPromotion:
             if len(checksum) != 64 or any(char not in "0123456789abcdef" for char in checksum):
                 raise ArtifactValidationError("Artifact Candidate checksum is invalid")
             ids.add(candidate.id)
-            staging_paths.add(candidate.staging_path)
-            durable_paths.add(candidate.durable_path)
+            locations.update((candidate.staging_path, candidate.durable_path))
         return candidates
 
     @staticmethod
     def _validate_path(value: str) -> None:
-        if not value or ".." in PurePosixPath(value).parts or "\\" in value or "\x00" in value:
+        path = PurePosixPath(value)
+        if not value or not path.parts or str(path) != value or ".." in path.parts or "\\" in value or "\x00" in value:
             raise ArtifactValidationError("Artifact Candidate location is invalid")

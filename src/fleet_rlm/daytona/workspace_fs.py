@@ -333,20 +333,39 @@ class AsyncDaytonaVolumeFS:
             return tuple(VolumeFile(f["path"], f["modified_at"]) for f in cached_data)
 
         generation = self._cache_state.generation
-        entries = await self.sandbox.fs.list_files(root, depth=max_depth)
-        results: list[VolumeFile] = []
-        for entry in entries:
-            path = getattr(entry, "path", None)
-            if not isinstance(path, str) or not _is_under(path, root) or bool(getattr(entry, "is_dir", False)):
-                continue
-            modified_at = _modified_timestamp(getattr(entry, "mod_time", None))
-            if modified_at is None:
-                continue
-            results.append(VolumeFile(path, modified_at))
-            if len(results) >= max_files:
-                break
+        # Daytona's SDK has no provider-side item limit. Traverse one directory
+        # level at a time so a request never asks the provider for an
+        # unbounded recursive response; retain only the bounded lexicographic
+        # prefix needed by this API.
+        pending: list[tuple[str, int]] = [(root, 0)]
+        visited: set[str] = {root}
+        result_map: dict[str, float] = {}
+        while pending:
+            current, _current_depth = pending.pop(0)
+            entries = await self.sandbox.fs.list_files(current, depth=1)
+            child_directories: list[str] = []
+            for entry in entries:
+                path = getattr(entry, "path", None)
+                if not isinstance(path, str) or not _is_under(path, current):
+                    continue
+                relative = _safe_relative(path, root)
+                if relative is None or not relative.parts or len(relative.parts) > max_depth:
+                    continue
+                if bool(getattr(entry, "is_dir", False)):
+                    if len(relative.parts) < max_depth and path not in visited:
+                        visited.add(path)
+                        child_directories.append(path)
+                    continue
+                modified_at = _modified_timestamp(getattr(entry, "mod_time", None))
+                if modified_at is None:
+                    continue
+                result_map[path] = modified_at
+                if len(result_map) > max_files:
+                    del result_map[max(result_map)]
+            pending.extend((path, 0) for path in sorted(child_directories))
 
         # Cache directory listing
+        results = [VolumeFile(path, result_map[path]) for path in sorted(result_map)]
         if len(results) <= 100:  # Only cache small listings
             cached_data = [{"path": rf.path, "modified_at": rf.modified_at} for rf in results]
             self._cache_state.put_metadata(cache_key, json.dumps(cached_data).encode("utf-8"), generation=generation)
@@ -445,19 +464,37 @@ class DaytonaSandboxVolumeFs:
             return tuple(VolumeFile(f["path"], f["modified_at"]) for f in cached_data)
 
         generation = self._cache_state.generation
-        entries = self.sandbox.fs.list_files(root, depth=max_depth)
-        results: list[VolumeFile] = []
-        for entry in entries:
-            path = getattr(entry, "path", None)
-            if not isinstance(path, str) or not _is_under(path, root) or bool(getattr(entry, "is_dir", False)):
-                continue
-            modified_at = _modified_timestamp(getattr(entry, "mod_time", None))
-            if modified_at is None:
-                continue
-            results.append(VolumeFile(path, modified_at))
-            if len(results) >= max_files:
-                break
+        # See the async adapter above: use depth-one calls to avoid requesting
+        # an unbounded recursive provider listing, while retaining a bounded
+        # lexicographic result set.
+        pending: list[tuple[str, int]] = [(root, 0)]
+        visited: set[str] = {root}
+        result_map: dict[str, float] = {}
+        while pending:
+            current, _current_depth = pending.pop(0)
+            entries = self.sandbox.fs.list_files(current, depth=1)
+            child_directories: list[str] = []
+            for entry in entries:
+                path = getattr(entry, "path", None)
+                if not isinstance(path, str) or not _is_under(path, current):
+                    continue
+                relative = _safe_relative(path, root)
+                if relative is None or not relative.parts or len(relative.parts) > max_depth:
+                    continue
+                if bool(getattr(entry, "is_dir", False)):
+                    if len(relative.parts) < max_depth and path not in visited:
+                        visited.add(path)
+                        child_directories.append(path)
+                    continue
+                modified_at = _modified_timestamp(getattr(entry, "mod_time", None))
+                if modified_at is None:
+                    continue
+                result_map[path] = modified_at
+                if len(result_map) > max_files:
+                    del result_map[max(result_map)]
+            pending.extend((path, 0) for path in sorted(child_directories))
 
+        results = [VolumeFile(path, result_map[path]) for path in sorted(result_map)]
         if len(results) <= 100:
             cached_data = [{"path": rf.path, "modified_at": rf.modified_at} for rf in results]
             self._cache_state.put_metadata(cache_key, json.dumps(cached_data).encode("utf-8"), generation=generation)
@@ -465,7 +502,21 @@ class DaytonaSandboxVolumeFs:
 
 
 def _is_under(path: str, root: str) -> bool:
-    return _is_relative_to(PurePosixPath(path), PurePosixPath(root))
+    return _safe_relative(path, root) is not None
+
+
+def _safe_relative(path: str, root: str) -> PurePosixPath | None:
+    """Return a safe child path, rejecting traversal and prefix confusion."""
+    if not path.startswith("/") or "\\" in path or "\x00" in path:
+        return None
+    candidate = PurePosixPath(path)
+    if ".." in candidate.parts or str(candidate) != path:
+        return None
+    try:
+        relative = candidate.relative_to(PurePosixPath(root))
+    except ValueError:
+        return None
+    return relative
 
 
 def _provider_not_found(exc: BaseException) -> bool:

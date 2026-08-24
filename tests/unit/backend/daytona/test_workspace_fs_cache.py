@@ -129,6 +129,40 @@ def test_sync_cache_is_mount_aware() -> None:
 
 
 @pytest.mark.asyncio
+async def test_async_listing_uses_bounded_depth_one_provider_requests() -> None:
+    from fleet_rlm.daytona.workspace_fs import AsyncDaytonaVolumeFS
+
+    mount = "/custom/fleet"
+    root = f"{mount}/files"
+
+    class _DepthOneFs:
+        def __init__(self) -> None:
+            self.depths: list[int] = []
+            self.entries = {
+                root: [
+                    SimpleNamespace(path=f"{root}/z.txt", is_dir=False, mod_time=1.0),
+                    SimpleNamespace(path=f"{root}/a", is_dir=True, mod_time=1.0),
+                ],
+                f"{root}/a": [
+                    SimpleNamespace(path=f"{root}/a/one.txt", is_dir=False, mod_time=2.0),
+                    SimpleNamespace(path=f"{root}/a/deeper", is_dir=True, mod_time=2.0),
+                ],
+            }
+
+        async def list_files(self, path: str, *, depth: int) -> list[object]:
+            self.depths.append(depth)
+            return self.entries.get(path, [])
+
+    fs = _DepthOneFs()
+    volume = AsyncDaytonaVolumeFS(SimpleNamespace(fs=fs), mount_path=mount)
+
+    listing = await volume.list_files(root, max_depth=2, max_files=2)
+
+    assert [item.path for item in listing] == [f"{root}/a/one.txt", f"{root}/z.txt"]
+    assert fs.depths == [1, 1]
+
+
+@pytest.mark.asyncio
 async def test_shared_cache_state_does_not_store_stale_read_after_cross_adapter_mutation() -> None:
     from fleet_rlm.daytona.workspace_fs import (
         AsyncDaytonaVolumeFS,

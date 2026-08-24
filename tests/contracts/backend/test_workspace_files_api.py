@@ -124,6 +124,44 @@ def test_volume_tree_is_not_truncated_when_file_count_equals_requested_limit(tmp
         assert response.json()["truncated"] is False
 
 
+def test_volume_tree_rejects_noncanonical_root_and_provider_path_leaks(tmp_path: Path) -> None:
+    from fleet_rlm.api.dependencies import get_workspace_volume_gateway
+    from fleet_rlm.files.volume_storage import VolumeFile
+
+    app = create_testing_app(settings=Settings(run_environment="daytona", data_root=str(tmp_path)))
+
+    class _LeakyGateway:
+        async def list_files(
+            self,
+            workspace_id: object,
+            logical_root: str,
+            *,
+            max_depth: int,
+            max_files: int,
+        ) -> tuple[VolumeFile, ...]:
+            del workspace_id, logical_root, max_depth, max_files
+            return (VolumeFile("/home/daytona/fleet/../etc/passwd", 0.0),)
+
+    app.dependency_overrides[get_workspace_volume_gateway] = lambda: _LeakyGateway()
+    with TestClient(app) as client:
+        response = client.get(
+            "/api/volume/tree",
+            params={"root": "/home/daytona/fleet/../etc"},
+        )
+
+    assert response.status_code == 400
+    assert response.json()["code"] == "volume_tree_invalid"
+
+
+def test_volume_tree_root_alias_retains_root_directories(tmp_path: Path) -> None:
+    app = create_testing_app(settings=Settings(run_environment="daytona", data_root=str(tmp_path)))
+    with TestClient(app) as client:
+        response = client.get("/api/volume/tree", params={"root": "/home/daytona/fleet"})
+
+    assert response.status_code == 200
+    assert response.json()["directories"] == ["artifacts", "attachments", "files", "projects", "sessions"]
+
+
 def test_workspace_files_stat_reports_content_checksum_and_directory_entries(tmp_path: Path) -> None:
     app = create_testing_app(
         settings=Settings(

@@ -129,7 +129,13 @@ class FileToolHost:
         if ref is None or staged is None:
             return {"ok": False, "error": "not_found"}
         try:
-            data = self._volume_fs.read_bytes(staged.sandbox_path)
+            data = self._volume_fs.read_bytes(staged.sandbox_path, use_cache=False)
+            if (
+                not isinstance(ref.checksum_sha256, str)
+                or len(data) != ref.byte_size
+                or not hmac.compare_digest(hashlib.sha256(data).hexdigest(), ref.checksum_sha256.lower())
+            ):
+                return {"ok": False, "error": "not_found"}
         except Exception:
             return {"ok": False, "error": "not_found"}
 

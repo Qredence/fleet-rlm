@@ -98,6 +98,77 @@ def test_artifact_promotion_validates_the_complete_owned_candidate_batch() -> No
         policy.validate((candidate, candidate), access=access, session_id=session_id, run_id=run_id)
 
 
+def test_artifact_promotion_rejects_cross_kind_location_collisions() -> None:
+    from dataclasses import replace
+
+    from fleet_rlm.artifacts.errors import ArtifactValidationError
+    from fleet_rlm.artifacts.models import ArtifactAccess, ArtifactCandidate
+    from fleet_rlm.artifacts.promotion import ArtifactPromotion
+
+    access = ArtifactAccess(user_id=uuid4(), workspace_id=uuid4())
+    session_id, run_id = uuid4(), uuid4()
+    first = ArtifactCandidate(
+        id=uuid4(),
+        user_id=access.user_id,
+        workspace_id=access.workspace_id,
+        session_id=session_id,
+        run_id=run_id,
+        kind="text",
+        title=None,
+        media_type="text/plain",
+        byte_size=3,
+        checksum_sha256="ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+        staging_path="runs/input/first.txt",
+        durable_path="artifacts/first.txt",
+    )
+    second = replace(
+        first,
+        id=uuid4(),
+        staging_path=first.durable_path,
+        durable_path="artifacts/second.txt",
+    )
+
+    with pytest.raises(ArtifactValidationError, match="locations must be unique"):
+        ArtifactPromotion(max_bytes=8).validate(
+            (first, second),
+            access=access,
+            session_id=session_id,
+            run_id=run_id,
+        )
+
+
+@pytest.mark.parametrize("path", ["./runs/input/candidate.txt", "runs//input/candidate.txt"])
+def test_artifact_promotion_rejects_noncanonical_locations(path: str) -> None:
+    from fleet_rlm.artifacts.errors import ArtifactValidationError
+    from fleet_rlm.artifacts.models import ArtifactAccess, ArtifactCandidate
+    from fleet_rlm.artifacts.promotion import ArtifactPromotion
+
+    access = ArtifactAccess(user_id=uuid4(), workspace_id=uuid4())
+    session_id, run_id = uuid4(), uuid4()
+    candidate = ArtifactCandidate(
+        id=uuid4(),
+        user_id=access.user_id,
+        workspace_id=access.workspace_id,
+        session_id=session_id,
+        run_id=run_id,
+        kind="text",
+        title=None,
+        media_type="text/plain",
+        byte_size=3,
+        checksum_sha256="ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+        staging_path=path,
+        durable_path="artifacts/output.txt",
+    )
+
+    with pytest.raises(ArtifactValidationError, match="location is invalid"):
+        ArtifactPromotion(max_bytes=8).validate(
+            (candidate,),
+            access=access,
+            session_id=session_id,
+            run_id=run_id,
+        )
+
+
 @pytest.mark.parametrize("field", ["user_id", "workspace_id", "session_id", "run_id"])
 def test_artifact_promotion_rejects_candidate_owned_by_another_identity(field: str) -> None:
     from fleet_rlm.artifacts.errors import ArtifactValidationError
