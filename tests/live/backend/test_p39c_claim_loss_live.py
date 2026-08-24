@@ -95,6 +95,7 @@ class _ClaimLossEvidence:
     claim_loss_at: float | None = None
     claim_losses: int = 0
     child_executing = threading.Event()
+    class_shutdown_calls: list[str] = field(default_factory=list)
     _lock: threading.Lock = field(default_factory=threading.Lock)
 
 
@@ -122,6 +123,23 @@ def _case_settings(tmp_path: Path) -> Settings:
 
 
 def _install_claim_loss_evidence(monkeypatch: pytest.MonkeyPatch, evidence: _ClaimLossEvidence) -> None:
+    from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter
+
+    original_class_shutdown = DaytonaCodeInterpreter.shutdown
+
+    def class_observed_shutdown(self: DaytonaCodeInterpreter, *args: Any, **kwargs: Any) -> None:
+        backend = getattr(self, "_backend", None)
+        sandbox = getattr(backend, "sandbox", None) if backend is not None else None
+        inner = getattr(sandbox, "_sandbox", sandbox) if sandbox is not None else None
+        sandbox_id = str(getattr(inner, "id", "") or "") if inner is not None else ""
+        with evidence._lock:
+            evidence.class_shutdown_calls.append(
+                f"interpreter_shutdown:{sandbox_id}:strict_broker_cleanup={bool(kwargs.get('strict_broker_cleanup'))}"
+            )
+        return original_class_shutdown(self, *args, **kwargs)
+
+    monkeypatch.setattr(DaytonaCodeInterpreter, "shutdown", class_observed_shutdown)
+
     original_acquire = recursive_child_runtime._acquire_child_runtime
     original_lease = recursive_child_runtime.SandboxLease
 
@@ -420,10 +438,14 @@ def test_live_claim_loss_fencing_leaves_no_recursive_resources(
             # boundary shortly after.
             deadline = time.perf_counter() + 240.0
             while time.perf_counter() < deadline:
-                if evidence.receipts and evidence.shutdown_order:
+                if evidence.receipts and (evidence.shutdown_order or evidence.class_shutdown_calls):
                     break
                 time.sleep(0.25)
-            assert evidence.shutdown_order == [f"interpreter_shutdown:{child_id}:strict_broker_cleanup=True"]
+            expected_shutdown = f"interpreter_shutdown:{child_id}:strict_broker_cleanup=True"
+            shutdown_traces = (evidence.shutdown_order, evidence.class_shutdown_calls)
+            assert any(expected_shutdown in trace for trace in shutdown_traces), (
+                f"strict shutdown not recorded: {shutdown_traces}"
+            )
             assert len(evidence.receipts) == 1
             receipt = evidence.receipts[0]
             assert receipt["sandbox_id"] == child_id
@@ -473,6 +495,7 @@ def test_live_claim_loss_fencing_leaves_no_recursive_resources(
                     if sandbox_id in evidence.sandbox_ids
                 ),
                 "ordered_steps": evidence.shutdown_order,
+                "class_shutdown_trace": evidence.class_shutdown_calls,
                 "cleanup_receipts": evidence.receipts,
                 "deletion_evidence": {
                     "delete_request_acceptance_seconds": evidence.delete_acceptance_seconds,

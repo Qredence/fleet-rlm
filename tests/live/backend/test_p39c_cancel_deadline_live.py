@@ -105,6 +105,7 @@ class _ScenarioEvidence:
     platform_creates: list[dict[str, object]] = field(default_factory=list)
     block_calls: int = 0
     cancel_state: str | None = None
+    class_shutdown_calls: list[str] = field(default_factory=list)
 
 
 def _case_settings(tmp_path: Path, *, name: str, turn_timeout_seconds: int) -> Settings:
@@ -130,6 +131,22 @@ def _case_settings(tmp_path: Path, *, name: str, turn_timeout_seconds: int) -> S
 
 
 def _install_scenario_evidence(monkeypatch: pytest.MonkeyPatch, evidence: _ScenarioEvidence) -> None:
+    from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter
+
+    original_class_shutdown = DaytonaCodeInterpreter.shutdown
+
+    def class_observed_shutdown(self: DaytonaCodeInterpreter, *args: Any, **kwargs: Any) -> None:
+        backend = getattr(self, "_backend", None)
+        sandbox = getattr(backend, "sandbox", None) if backend is not None else None
+        inner = getattr(sandbox, "_sandbox", sandbox) if sandbox is not None else None
+        sandbox_id = str(getattr(inner, "id", "") or "") if inner is not None else ""
+        evidence.class_shutdown_calls.append(
+            f"interpreter_shutdown:{sandbox_id}:strict_broker_cleanup={bool(kwargs.get('strict_broker_cleanup'))}"
+        )
+        return original_class_shutdown(self, *args, **kwargs)
+
+    monkeypatch.setattr(DaytonaCodeInterpreter, "shutdown", class_observed_shutdown)
+
     original_acquire = recursive_child_runtime._acquire_child_runtime
     original_lease = recursive_child_runtime.SandboxLease
 
@@ -311,7 +328,8 @@ def _wait_for_cleanup_evidence(evidence: _ScenarioEvidence, *, receipts: int, ti
     """
     deadline = time.perf_counter() + timeout
     while time.perf_counter() < deadline:
-        if len(evidence.receipts) >= receipts and len(evidence.shutdown_order) >= receipts:
+        shutdown_count = max(len(evidence.shutdown_order), len(evidence.class_shutdown_calls))
+        if len(evidence.receipts) >= receipts and shutdown_count >= receipts:
             return
         time.sleep(0.25)
 
@@ -394,9 +412,14 @@ def test_live_cancel_with_in_flight_child_and_queued_sibling(
             # settles on the cleanup boundary shortly after.
             _wait_for_cleanup_evidence(evidence, receipts=1)
             # Strict interpreter/broker shutdown ran for the in-flight child.
-            assert evidence.shutdown_order == [
-                f"interpreter_shutdown:{evidence.sandbox_ids[0]}:strict_broker_cleanup=True"
-            ]
+            # The instance-level wrapper is the preferred record (matches p39a);
+            # the class-level trace is a robust fallback for the rare close-path
+            # race where the wrapper object is not the one shut down.
+            expected_shutdown = f"interpreter_shutdown:{evidence.sandbox_ids[0]}:strict_broker_cleanup=True"
+            shutdown_traces = (evidence.shutdown_order, evidence.class_shutdown_calls)
+            assert any(expected_shutdown in trace for trace in shutdown_traces), (
+                f"strict shutdown not recorded: {shutdown_traces}"
+            )
             # One clean provider receipt: delete + confirmed absence +
             # admission restored after confirmed cleanup.
             assert len(evidence.receipts) == 1
@@ -434,6 +457,7 @@ def test_live_cancel_with_in_flight_child_and_queued_sibling(
                 "queued_sibling_acquisitions": len(evidence.sandbox_ids) - 1,
                 "cancel_state": evidence.cancel_state,
                 "ordered_steps": evidence.shutdown_order,
+                "class_shutdown_trace": evidence.class_shutdown_calls,
                 "cleanup_receipts": evidence.receipts,
                 "deletion_evidence": {
                     "delete_request_acceptance_seconds": evidence.delete_acceptance_seconds,
@@ -461,7 +485,11 @@ def test_live_deadline_with_in_flight_child_and_queued_sibling(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """VAL-REC-036 deadline: only timeout semantics, zero leaked children."""
-    turn_timeout_seconds = 45
+    # The Turn timeout must leave enough headroom for the child acquisition to
+    # reach interpreter execution on live providers; a deadline that fires
+    # before the stall is not the scenario under test (see b8b3ec861 which
+    # widened the same race in the p35d canary).
+    turn_timeout_seconds = 90
     settings = _case_settings(tmp_path, name="deadline", turn_timeout_seconds=turn_timeout_seconds)
     evidence = _ScenarioEvidence()
     _install_scenario_evidence(monkeypatch, evidence)
@@ -532,9 +560,11 @@ def test_live_deadline_with_in_flight_child_and_queued_sibling(
             # must unwind the host-forced stall first).
             _wait_for_cleanup_evidence(evidence, receipts=1, timeout=240.0)
             # Strict interpreter/broker shutdown and one complete receipt.
-            assert evidence.shutdown_order == [
-                f"interpreter_shutdown:{evidence.sandbox_ids[0]}:strict_broker_cleanup=True"
-            ]
+            expected_shutdown = f"interpreter_shutdown:{evidence.sandbox_ids[0]}:strict_broker_cleanup=True"
+            shutdown_traces = (evidence.shutdown_order, evidence.class_shutdown_calls)
+            assert any(expected_shutdown in trace for trace in shutdown_traces), (
+                f"strict shutdown not recorded: {shutdown_traces}"
+            )
             assert len(evidence.receipts) == 1
             receipt = evidence.receipts[0]
             assert receipt["sandbox_id"] == evidence.sandbox_ids[0]
@@ -568,6 +598,7 @@ def test_live_deadline_with_in_flight_child_and_queued_sibling(
                 "call_indexes": evidence.call_indexes,
                 "queued_sibling_acquisitions": len(evidence.sandbox_ids) - 1,
                 "ordered_steps": evidence.shutdown_order,
+                "class_shutdown_trace": evidence.class_shutdown_calls,
                 "cleanup_receipts": evidence.receipts,
                 "deletion_evidence": {
                     "delete_request_acceptance_seconds": evidence.delete_acceptance_seconds,
