@@ -12,16 +12,16 @@ filenames, helper names, class layouts, or file counts.
 
 P35-E is a hard prerequisite. A deletion-oriented change is blocked when the
 same-SHA certification manifest is missing, failed, stale, or foreign to the
-candidate tree. The sealed prerequisite used to create this inventory is:
+candidate tree. The manifest is re-sealed at the current HEAD whenever code
+moves between milestones. The manifest records the certified candidate SHA
+and lockfile digest under `.fleet-evidence/receipts/p35e-certification-manifest.json`.
 
-- candidate SHA: `766827ab24da594cadce6131d764147de7aa1b0e`;
-- lockfile SHA-256: `e7baaa029303ece2bb9a70fd18fa0da966956124c851cc78c6344c99d507cbdd`;
-- manifest: `.fleet-evidence/receipts/p35e-certification-manifest.json`;
-- verification:
+Verification reads the recorded candidate SHA directly from the manifest:
 
-  ```text
-  uv run python scripts/certification_gate.py verify --sha 766827ab24da594cadce6131d764147de7aa1b0e
-  ```
+```bash
+uv run python scripts/certification_gate.py verify \
+  --sha $(jq -r '.candidate.sha' .fleet-evidence/receipts/p35e-certification-manifest.json)
+```
 
 The manifest and all live receipts remain ignored local evidence. They are
 referenced by digest and path, not copied into this document.
@@ -59,7 +59,7 @@ test name.
 
 | Evidence ID | Deterministic evidence | Required live evidence |
 | --- | --- | --- |
-| `E-BASE` | Verify the sealed P35-E manifest with `uv run python scripts/certification_gate.py verify --sha 766827ab24da594cadce6131d764147de7aa1b0e`. Reject missing, failed, stale, or foreign-SHA manifests. | The manifest already contains the required P35-E serial Daytona and validator receipts. No new live run is authorized by P36 alone. |
+| `E-BASE` | Verify the sealed P35-E manifest against its recorded candidate SHA with `uv run python scripts/certification_gate.py verify --sha $(jq -r '.candidate.sha' .fleet-evidence/receipts/p35e-certification-manifest.json)`. Reject missing, failed, stale, or foreign-SHA manifests. | The manifest already contains the required P35-E serial Daytona and validator receipts. No new live run is authorized by P36 alone. |
 | `E-P37-CLAIM` | `uv run pytest tests/unit/backend/test_turn_claim_heartbeat.py tests/unit/backend/test_turn_lifecycle.py tests/unit/backend/test_turn_lifecycle_cancellation.py tests/unit/backend/test_in_memory_turn_state.py tests/unit/backend/test_sql_turn_state.py tests/contracts/backend/test_turn_claim_adapter_parity.py -q`. The post-contraction replacement tests must retain claim-before-work, heartbeat retry and revocation, race fencing, deadline-bounded recovery, cancellation-safe recovery, and SQL/in-memory parity. | Required when a change alters provider acquisition or cleanup after claim loss: run the serial `FLEET_LIVE=1` cancellation, timeout, and claim-loss lanes and retain absence plus admission receipts. |
 | `E-P37-STREAM` | `uv run pytest tests/unit/backend/chat/test_turn_coordinator_execution.py tests/unit/backend/test_turn_coordinator_cancellation.py tests/unit/backend/test_turn_coordinator_failures.py tests/contracts/backend/test_coordinator_runner_failures.py tests/contracts/backend/test_ai_sdk_ui_turn_contract.py tests/contracts/backend/test_run_cancellation_api.py -q`. The replacement owner must preserve close-before-first-event, one absolute deadline, runner-terminal prohibition, exactly one terminal, and cancellation semantics. | Required for a provider-facing stream ownership change. Use the mission's serial Daytona deadline and cancellation lanes; do not substitute a local fake for absence proof. |
 | `E-P37-SETTLEMENT` | `uv run pytest tests/unit/backend/test_turn_coordinator_commit.py tests/unit/backend/test_turn_lifecycle_settlement.py tests/unit/backend/test_artifact_reader_and_promotion.py tests/unit/backend/chat/test_memory_candidate_promotion.py tests/contracts/backend/test_result_snapshot_commit.py -q`. Success remains lifecycle-owned and failure never publishes success identities. | Required if cleanup ordering or late post-commit ownership changes. The live receipt must show terminal ordering, resource absence, and admission restoration. |
