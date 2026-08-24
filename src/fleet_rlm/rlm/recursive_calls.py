@@ -7,9 +7,9 @@ import contextlib
 import contextvars
 import time
 from collections.abc import Callable, Mapping
-from concurrent.futures import Future, ThreadPoolExecutor, wait
+from concurrent.futures import Future, wait
 from dataclasses import dataclass, field
-from threading import Event, RLock
+from threading import Event, RLock, Thread
 from typing import Any
 
 import dspy
@@ -51,6 +51,13 @@ RLM_NATIVE_CHILD_DEPTH = 1
 # unwinds, its lease close still runs through the factory's late-cleanup lane.
 _PENDING_BATCH_WAIT_TIMEOUT_S = 60.0
 
+# Grace bound for a fenced child invocation to unwind cooperatively after the
+# absolute Turn deadline fires. A child that still will not settle is retained
+# under cleanup ownership instead of blocking the synchronous recursive Tool;
+# its lease close then drives the interpreter shutdown that unwinds it. Read
+# at call time so fault-injection lanes can shorten it.
+_CHILD_FENCE_SETTLE_GRACE_S = 5.0
+
 
 def _invoke_async_child(
     child_acall: Callable[..., Any],
@@ -58,26 +65,92 @@ def _invoke_async_child(
     prompt: str,
     *,
     native: bool,
+    deadline: float,
+    retain_pending: Callable[[Future[Any]], None],
 ) -> Any:
-    """Await a native child even when the synchronous Tool runs on an event loop."""
+    """Await a native child under the one absolute Turn deadline.
+
+    ``RLM`` executes the synchronous recursive Tool either on the parent
+    worker's running event loop or from a plain synchronous caller.  Either
+    way, the child invocation runs on a dedicated private loop thread so the
+    synchronous Tool never blocks the parent loop, and the join is fenced by
+    the remaining Turn deadline (p39b): a child that never completes cannot
+    hold the Tool past the deadline.
+
+    When the fence fires, the child task receives one cooperative
+    cancellation and is given a bounded grace window to unwind.  A child that
+    still refuses to settle is retained through ``retain_pending`` so the
+    executor's ownership boundary (``wait_owned``) settles it fail-closed
+    instead of leaking the wait.  A child that completed with its own error
+    before the fence keeps that classification.
+    """
 
     async def invoke() -> Any:
         if native:
             return await child_acall(interpreter, prompt=prompt)
         return await child_acall(interpreter=interpreter, prompt=prompt)
 
-    try:
-        asyncio.get_running_loop()
-    except RuntimeError:
-        return asyncio.run(invoke())
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise TimeoutError("recursive child deadline exceeded")
 
-    # ``RLM`` executes synchronous interpreter Tools on the parent async loop.
-    # Running a nested asyncio loop there would fail (and blocking the parent
-    # loop would deadlock run_coroutine_threadsafe), so preserve DSPy context
-    # and await the child on a short-lived private loop thread.
     context = contextvars.copy_context()
-    with ThreadPoolExecutor(max_workers=1, thread_name_prefix="fleet-rlm-child") as pool:
-        return pool.submit(context.run, asyncio.run, invoke()).result()
+    future: Future[Any] = Future()
+    loop_box: list[asyncio.AbstractEventLoop] = []
+    task_box: list[asyncio.Task[Any]] = []
+
+    def runner() -> Any:
+        loop = asyncio.new_event_loop()
+        loop_box.append(loop)
+        asyncio.set_event_loop(loop)
+        try:
+            task = loop.create_task(invoke())
+            task_box.append(task)
+            return loop.run_until_complete(task)
+        finally:
+            with contextlib.suppress(Exception):
+                loop.close()
+
+    def target() -> None:
+        try:
+            future.set_result(context.run(runner))
+        except BaseException as exc:
+            future.set_exception(exc)
+
+    thread = Thread(target=target, name="fleet-rlm-child", daemon=True)
+    thread.start()
+    try:
+        return future.result(timeout=remaining)
+    except TimeoutError:
+        # A child that settled with its own error concurrently with the fence
+        # keeps that classification; a late result past the deadline is
+        # discarded by the fence below.
+        if future.done():
+            child_error = future.exception()
+            if child_error is not None:
+                raise child_error from None
+
+    # The deadline fired while the child was still running: request one
+    # cooperative cancellation on the child's private loop.
+    loop = loop_box[0] if loop_box else None
+    task = task_box[0] if task_box else None
+    if task is not None and not task.done() and loop is not None and not loop.is_closed():
+        with contextlib.suppress(RuntimeError):
+            loop.call_soon_threadsafe(task.cancel)
+    try:
+        future.result(timeout=_CHILD_FENCE_SETTLE_GRACE_S)
+    except TimeoutError:
+        # A child that still will not settle stays owned: the retained future
+        # joins the executor's cleanup boundary instead of blocking the Tool.
+        # Its lease close runs in the caller's finally and drives the
+        # interpreter shutdown that unwinds the child; ownership then reports
+        # pending until it does.
+        retain_pending(future)
+    except BaseException:
+        # A late child error after the deadline fired is superseded by the
+        # fence: the Turn is out of time either way.
+        pass
+    raise TimeoutError("recursive child deadline exceeded")
 
 
 @dataclass(frozen=True, slots=True)
@@ -642,6 +715,8 @@ class RecursiveRLMExecutor:
                     lease.interpreter,
                     prompt,
                     native=(type(child).__module__ == "dspy.predict.rlm" and type(child).__name__ == "RLM"),
+                    deadline=self._deadline,
+                    retain_pending=lambda pending: self._retain_pending_batch_futures({pending}),
                 )
             else:
                 prediction = child(lease.interpreter, prompt=prompt)
