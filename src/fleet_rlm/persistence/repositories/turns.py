@@ -358,60 +358,56 @@ class InMemoryRunStateStore:
                 current.authority.revoke()
                 current.claim = _RunClaimToken(uuid4())
             try:
-                if fence is not None:
-                    await _await_recovery_step(fence(session_id), deadline=deadline)
-            except asyncio.CancelledError:
+                try:
+                    if fence is not None:
+                        await _await_recovery_step(fence(session_id), deadline=deadline)
+                except Exception:
+                    fence_failures += 1
+                    if _recovery_deadline_exhausted(deadline):
+                        budget_exhausted = True
+                    else:
+                        async with self._lock:
+                            current = self._runs.get(run_id)
+                            if current is not None and current.status == status:
+                                current.recovery_attempts += 1
+                                current.recovery_last_error = "provider_fence_failed"
+                                current.claim = original_claim
+                    if budget_exhausted:
+                        skipped += len(pending) - index - 1
+                        break
+                    continue
                 async with self._lock:
-                    self._recovery_runs.discard(run_id)
-                raise
-            except Exception:
-                fence_failures += 1
-                if _recovery_deadline_exhausted(deadline):
-                    budget_exhausted = True
-                else:
-                    async with self._lock:
-                        current = self._runs.get(run_id)
-                        if current is not None and current.status == status:
-                            current.recovery_attempts += 1
-                            current.recovery_last_error = "provider_fence_failed"
-                            current.claim = original_claim
-                async with self._lock:
-                    self._recovery_runs.discard(run_id)
-                if budget_exhausted:
-                    skipped += len(pending) - index - 1
-                    break
-                continue
-            async with self._lock:
-                run = self._runs.get(run_id)
-                if run is None or run.status != status:
-                    skipped += 1
-                else:
-                    if run.status == "running":
-                        stale = ClaimFailure("failed", "stale_claim", "Turn failed")
-                        revocation = decide_claim_transition(
-                            _memory_claim_state(run),
-                            RevokeClaim(stale),
-                        ).transition
-                        if revocation is None or revocation.next_state is None:
-                            skipped += 1
-                            self._recovery_runs.discard(run_id)
-                            continue
-                        _apply_memory_next_state(
-                            run,
-                            revocation.next_state,
-                            usage=empty_rlm_usage(),
-                        )
-                    decision = decide_claim_transition(_memory_claim_state(run), CompleteSettlement()).transition
-                    if decision is None or decision.next_state is None:
+                    run = self._runs.get(run_id)
+                    if run is None or run.status != status:
                         skipped += 1
                     else:
-                        _apply_memory_next_state(run, decision.next_state)
-                        if decision.next_state.status == "cancelled":
-                            self._persist_cancel_tombstone(run)
-                        run.recovery_attempts = 0
-                        run.recovery_last_error = None
-                        recovered += 1
-                self._recovery_runs.discard(run_id)
+                        if run.status == "running":
+                            stale = ClaimFailure("failed", "stale_claim", "Turn failed")
+                            revocation = decide_claim_transition(
+                                _memory_claim_state(run),
+                                RevokeClaim(stale),
+                            ).transition
+                            if revocation is None or revocation.next_state is None:
+                                skipped += 1
+                                continue
+                            _apply_memory_next_state(
+                                run,
+                                revocation.next_state,
+                                usage=empty_rlm_usage(),
+                            )
+                        decision = decide_claim_transition(_memory_claim_state(run), CompleteSettlement()).transition
+                        if decision is None or decision.next_state is None:
+                            skipped += 1
+                        else:
+                            _apply_memory_next_state(run, decision.next_state)
+                            if decision.next_state.status == "cancelled":
+                                self._persist_cancel_tombstone(run)
+                            run.recovery_attempts = 0
+                            run.recovery_last_error = None
+                            recovered += 1
+            finally:
+                async with self._lock:
+                    self._recovery_runs.discard(run_id)
         return ReconciliationSummary(
             candidates=len(pending),
             recovered=recovered,
