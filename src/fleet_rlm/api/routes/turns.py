@@ -26,7 +26,7 @@ from fleet_rlm.chat.run_preparation import (
     RunPreparationTimeoutError,
     RunPreparationUnavailableError,
 )
-from fleet_rlm.chat.run_runtime_owner import RunOwnership
+from fleet_rlm.chat.turn_coordinator import OpenedTurnStream
 from fleet_rlm.observability.failure_diagnostics import normalize_turn_failure
 from fleet_rlm.posthog_client import get_client, get_distinct_id
 from fleet_rlm.sessions.models import TurnAccess, TurnInput
@@ -36,7 +36,7 @@ from fleet_rlm.skills.models import SkillSelectionRef
 router = APIRouter(prefix="/api/sessions", tags=["turns"])
 logger = logging.getLogger(__name__)
 
-# Transient client-facing pre-run heartbeat emitted until coordinator.open()
+# Transient client-facing pre-run heartbeat emitted until the coordinator-owned open
 # resolves; it never enters the durable event log and may repeat.
 _PREPARATION_PRELUDE_CHUNK: Final[dict[str, Any]] = {
     "type": "data-status",
@@ -161,19 +161,9 @@ async def create_turn(
     ph = get_client()
     yield _preparation_prelude()
     heartbeat_seconds = float(settings.run_heartbeat_seconds)
-    owner: RunOwnership | None = None
+    owner: OpenedTurnStream | None = None
     try:
-        open_owned = getattr(coordinator, "open_owned", None)
-        if callable(open_owned):
-            owner = open_owned(_command(session_id, body, identity, idempotency_key))
-        else:
-            # Compatibility for deterministic pre-P21 coordinator doubles;
-            # ownership policy still lives in the shared RunOwnership handle.
-            owner = RunOwnership(
-                lambda _on_settlement, _on_cleanup: coordinator.open(
-                    _command(session_id, body, identity, idempotency_key)
-                )
-            ).start()
+        owner = coordinator.open_owned(_command(session_id, body, identity, idempotency_key))
         while True:
             opened = await owner.wait_open(timeout=heartbeat_seconds)
             if opened is not None:

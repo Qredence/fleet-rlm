@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from uuid import uuid4
 
 import pytest
@@ -115,3 +116,133 @@ async def test_archived_session_cannot_begin_turn() -> None:
 
     with pytest.raises(RunNotFoundError):
         await store.begin(RunClaim(access, session.id, TurnInput("hello"), "key", uuid4()))
+
+
+@pytest.mark.asyncio
+async def test_startup_reconciliation_fences_running_claims_and_allows_same_key_retry() -> None:
+    from fleet_rlm.chat.run_lifecycle import ClaimedRun, RunClaim
+    from fleet_rlm.persistence.repositories.turns import InMemoryRunStateStore
+    from fleet_rlm.sessions.models import TurnAccess, TurnInput
+
+    store = InMemoryRunStateStore()
+    access, session_id, run_id = TurnAccess(uuid4(), uuid4()), uuid4(), uuid4()
+    await store.add_session(session_id, access)
+    started = await store.begin(RunClaim(access, session_id, TurnInput("hello"), "key", run_id))
+    assert isinstance(started, ClaimedRun)
+
+    fenced: list[object] = []
+
+    async def fence(value: object) -> None:
+        fenced.append(value)
+
+    summary = await store.reconcile_settling(fence)
+
+    assert summary.candidates == 1
+    assert summary.recovered == 1
+    assert fenced == [session_id]
+    assert started.authority.revoked
+    replacement = await store.begin(RunClaim(access, session_id, TurnInput("hello"), "key", uuid4()))
+    assert isinstance(replacement, ClaimedRun)
+    assert replacement.run_id != run_id
+    assert store._runs[run_id].failure_code == "stale_claim"
+
+
+@pytest.mark.asyncio
+async def test_concurrent_in_memory_recovery_fences_one_claim_once() -> None:
+    from fleet_rlm.chat.run_lifecycle import ClaimedRun, RunClaim
+    from fleet_rlm.persistence.repositories.turns import InMemoryRunStateStore
+    from fleet_rlm.sessions.models import TurnAccess, TurnInput
+
+    store = InMemoryRunStateStore()
+    access, session_id, run_id = TurnAccess(uuid4(), uuid4()), uuid4(), uuid4()
+    await store.add_session(session_id, access)
+    started = await store.begin(RunClaim(access, session_id, TurnInput("hello"), "key", run_id))
+    assert isinstance(started, ClaimedRun)
+
+    entered = asyncio.Event()
+    release = asyncio.Event()
+    fence_calls = 0
+
+    async def fence(_session_id: object) -> None:
+        nonlocal fence_calls
+        fence_calls += 1
+        entered.set()
+        await release.wait()
+
+    first = asyncio.create_task(store.reconcile_settling(fence))
+    await entered.wait()
+    second = asyncio.create_task(store.reconcile_settling(fence))
+    await asyncio.sleep(0)
+    release.set()
+
+    first_summary, second_summary = await asyncio.gather(first, second)
+
+    assert fence_calls == 1
+    assert first_summary.recovered + second_summary.recovered == 1
+    assert store._runs[run_id].status == "failed"
+
+
+@pytest.mark.asyncio
+async def test_cancelled_in_memory_recovery_releases_recovery_guard() -> None:
+    from fleet_rlm.chat.run_lifecycle import ClaimedRun, RunClaim
+    from fleet_rlm.persistence.repositories.turns import InMemoryRunStateStore
+    from fleet_rlm.sessions.models import TurnAccess, TurnInput
+
+    store = InMemoryRunStateStore()
+    access, session_id, run_id = TurnAccess(uuid4(), uuid4()), uuid4(), uuid4()
+    await store.add_session(session_id, access)
+    started = await store.begin(RunClaim(access, session_id, TurnInput("hello"), "key", run_id))
+    assert isinstance(started, ClaimedRun)
+
+    entered = asyncio.Event()
+
+    async def blocking_fence(_session_id: object) -> None:
+        entered.set()
+        await asyncio.sleep(3600)
+
+    recovery = asyncio.create_task(store.reconcile_settling(blocking_fence))
+    await entered.wait()
+    recovery.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await recovery
+
+    summary = await store.reconcile_settling()
+    assert summary.recovered == 1
+    assert store._runs[run_id].status == "failed"
+
+
+@pytest.mark.asyncio
+async def test_in_memory_recovery_preserves_settling_intent_after_fence_failure() -> None:
+    from fleet_rlm.chat.run_claim import BeginSettlement, ClaimFailure
+    from fleet_rlm.chat.run_lifecycle import ClaimedRun, RunClaim, RunFailure
+    from fleet_rlm.persistence.repositories.turns import InMemoryRunStateStore
+    from fleet_rlm.rlm.dspy_contract import empty_rlm_usage
+    from fleet_rlm.sessions.models import TurnAccess, TurnInput
+
+    store = InMemoryRunStateStore()
+    access, session_id, run_id = TurnAccess(uuid4(), uuid4()), uuid4(), uuid4()
+    await store.add_session(session_id, access)
+    started = await store.begin(RunClaim(access, session_id, TurnInput("hello"), "key", run_id))
+    assert isinstance(started, ClaimedRun)
+    failure = RunFailure("timeout", "timeout", "Turn timed out", empty_rlm_usage())
+    await store.transition_claim(
+        started,
+        BeginSettlement(
+            ClaimFailure(failure.terminal_status, failure.failure_code, failure.public_message),
+            failure.usage,
+        ),
+    )
+
+    async def fail_fence(_session_id: object) -> None:
+        raise RuntimeError("provider unavailable")
+
+    for _ in range(2):
+        summary = await store.reconcile_settling(fail_fence)
+        assert summary.fence_failures == 1
+        assert store._runs[run_id].status == "settling"
+        assert store._runs[run_id].terminal_intent == failure
+    assert store._runs[run_id].recovery_attempts == 2
+
+    await store.reconcile_settling()
+    assert store._runs[run_id].status == "timeout"
+    assert store._runs[run_id].terminal_intent == failure

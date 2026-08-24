@@ -14,7 +14,7 @@ compatibility runtime and parallel foundation package no longer exist.
 | `snapshot_contract.py` | immutable Daytona Snapshot name policy | none |
 | `result_snapshot.py` | private commit-gated typed-result encoding | RLM prediction/usage |
 | `api/` | HTTP translation, local scope, dependency aliases, OpenAPI/SSE projection, UIMessage reload | domain interfaces and composed modules |
-| `chat/` | coordinator facade plus coordinator-owned `RunOwnership` lifetime state/receipt, Turn preparation, private execution driver, lifecycle finalization, owned post-commit Memory promotion, shared Turn Claim policy | RLM, Sessions, Skills, files |
+| `chat/` | `TurnCoordinator` claim-to-cleanup orchestration, Turn preparation, lifecycle finalization, owned post-commit Memory promotion, shared heartbeat/Claim policy | RLM, Sessions, Skills, files |
 | `rlm/` | DSPy Signature, Root/Sub model roles, fresh RLM construction, delegation metrics, routing evaluation, fixed-depth child executor, options, events, and native execution orchestration | DSPy and domain values |
 | `optimization/` | trusted-host GEPA/evidence lane | Daytona evaluator, evidence types |
 | `daytona/` | exclusive SDK boundary: async platform/provisioning, provider-only Session ownership, DSPy-only sync interpreter seam (injected `SyncBridgeDispatcher`), confirmed Sandbox Lease ownership (`sandbox_lease.py`) with typed cleanup receipts and confirmed deletion lifecycle (`lifecycle.py`), split recursive-child acquisition/lease/cleanup/late-ownership seams (`recursive_child_*.py`), versioned installed Workspace Agent protocol with one packaged `handle(request)` artifact for installed and fallback launchers (`workspace_agent.py`, `workspace_agent_runtime.py`), pure broker source plus transport, diagnostics, Session Workspace gateways, and the mounted Workspace Memory adapter | Daytona SDK and domain values |
@@ -66,9 +66,9 @@ compatibility runtime and parallel foundation package no longer exist.
 - `DaytonaRuntimeResources` owns provider resources only;
   `composition/daytona.py` injects database, binding, model, preparation, limits,
   and cleanup ports.
-- `chat/run_execution.py` owns the private post-preparation Run state machine;
-  `TurnCoordinator` remains the public stream facade and `RunLifecycle.finish()`
-  remains the artifact/atomic-commit owner.
+- `TurnCoordinator` owns the private claim-to-cleanup Run state machine and
+  public stream facade. `RunLifecycle.finish()` remains the Artifact/atomic-commit
+  owner, while `RunCleanupSupervisor` is only a bounded cleanup fallback.
 - `daytona/broker_source.py` owns pure broker source generation;
   `http_broker.py` owns HTTP-in-sandbox transport and host-tool/SUBMIT lifecycle.
 - Startup recovery claims eligible nonterminal rows by ownership. Daytona startup

@@ -15,8 +15,8 @@ import pytest
 def test_terminal_maps_turn_output_too_large_public_message() -> None:
     from uuid import uuid4
 
-    from fleet_rlm.chat.run_execution import terminal
     from fleet_rlm.chat.run_lifecycle import FailedRunReceipt
+    from fleet_rlm.chat.turn_coordinator import terminal
     from fleet_rlm.rlm.events import EventRecorder, RunFailed
 
     event = terminal(

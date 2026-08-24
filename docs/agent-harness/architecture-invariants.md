@@ -37,11 +37,11 @@ and its matching automated check in the same patch.
   concurrent cross-Sandbox appends may lose records — never silently inside
   one owner.
 - **Ownership seams are one-directional.** Provider objects die under
-  `SandboxLease` receipts with typed cleanup; claimed Runs die under the
-  coordinator-owned `RunOwnership` state machine with an internal
-  `RunLifetimeReceipt`; Workspace operations ride the versioned installed
-  agent whose handshake fails closed before use; Memory promotion rides the
-  transactional outbox with bounded idempotent reconciliation.
+  `SandboxLease` receipts with typed cleanup; claimed Runs are orchestrated
+  from claim through cleanup by `TurnCoordinator`, with durable transitions
+  owned by `RunLifecycleService`; Workspace operations ride the versioned
+  installed agent whose handshake fails closed before use; Memory promotion
+  rides the transactional outbox with bounded idempotent reconciliation.
 - **Recursive child cleanup has one explicit lease state.** Acquisition,
   synchronous interpreter shutdown, provider cleanup/quarantine, and late
   acquisition adoption are separate Daytona seams. A child lease transitions
@@ -111,9 +111,9 @@ exist.
   `RuntimeInventory`, publishes readiness last, and detaches it before disposal.
 - `composition/` owns complete common, Daytona, and private testing wiring.
 - `chat/` owns preparation, coordination, Turn Lifecycle, terminal ordering, and
-  cleanup. `chat/run_execution.py` owns the private post-preparation Run state
-  machine; `RunLifecycle.finish()` owns Artifact publication and atomic commit;
-  `TurnCoordinator` owns the public stream facade and resource release.
+  cleanup. `TurnCoordinator` owns the claim-to-cleanup Run state machine and
+  public stream facade; `RunLifecycle.finish()` owns Artifact publication and
+  atomic commit.
 - Turn Claim persistence has one typed `transition_claim()` operation. Its pure
   command/state policy is shared by in-memory and SQL adapters; successful
   commit and cancellation requests remain separate.

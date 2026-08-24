@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import itertools
 from types import SimpleNamespace
 from uuid import uuid4
@@ -109,6 +110,32 @@ async def test_preparation_bounds_history_and_closes_in_dependency_order() -> No
     await prepared.aclose()
     await prepared.aclose()
     assert operations == ["close-capabilities", "release-environment"]
+
+
+@pytest.mark.asyncio
+async def test_prepared_cleanup_continues_after_cancelled_owner_and_reobserves_failure() -> None:
+    from fleet_rlm.chat.run_preparation import PreparedRun, _PreparedRunResources
+
+    operations: list[str] = []
+
+    async def cancelled_owner() -> None:
+        operations.append("cancelled")
+        raise asyncio.CancelledError
+
+    async def remaining_owner() -> None:
+        operations.append("remaining")
+
+    prepared = PreparedRun(
+        execution=SimpleNamespace(),
+        artifact_sink=None,
+        _resources=_PreparedRunResources((remaining_owner, cancelled_owner)),
+    )
+
+    with pytest.raises(RuntimeError, match="prepared Turn cleanup failed"):
+        await prepared.aclose()
+    with pytest.raises(RuntimeError, match="prepared Turn cleanup failed"):
+        await prepared.aclose()
+    assert operations == ["cancelled", "remaining"]
 
 
 @pytest.mark.asyncio
@@ -406,10 +433,16 @@ async def test_prelude_heartbeats_are_transient_repeat_at_cadence_and_stop_when_
         def __init__(self):
             self.open_calls = 0
 
-        async def open(self, _command):
+        def open_owned(self, _command):
+            from fleet_rlm.chat.turn_coordinator import OpenedTurnStream
+
             self.open_calls += 1
-            await gate.wait()
-            return opened
+
+            async def open_stream():
+                await gate.wait()
+                return opened
+
+            return OpenedTurnStream(None, open_task=asyncio.create_task(open_stream()))
 
     coordinator = Coordinator()
     timestamps: list[float] = []
@@ -439,8 +472,13 @@ async def test_prelude_emits_once_before_instant_open_and_failure_maps_to_error_
     from fleet_rlm.chat.run_lifecycle import RunNotFoundError
 
     class Coordinator:
-        async def open(self, _command):
-            raise RunNotFoundError("claim says no")
+        def open_owned(self, _command):
+            from fleet_rlm.chat.turn_coordinator import OpenedTurnStream
+
+            async def fail():
+                raise RunNotFoundError("claim says no")
+
+            return OpenedTurnStream(None, open_task=asyncio.create_task(fail()))
 
     frames = [frame async for frame in create_turn(**_route_kwargs(Coordinator(), request=SimpleNamespace(headers={})))]
 
@@ -461,8 +499,13 @@ async def test_preparation_cancel_projects_single_abort_frame() -> None:
     from fleet_rlm.chat.run_preparation import RunPreparationCancelledError
 
     class Coordinator:
-        async def open(self, _command):
-            raise RunPreparationCancelledError("Turn cancelled")
+        def open_owned(self, _command):
+            from fleet_rlm.chat.turn_coordinator import OpenedTurnStream
+
+            async def fail():
+                raise RunPreparationCancelledError("Turn cancelled")
+
+            return OpenedTurnStream(None, open_task=asyncio.create_task(fail()))
 
     frames = [frame async for frame in create_turn(**_route_kwargs(Coordinator(), request=SimpleNamespace(headers={})))]
 

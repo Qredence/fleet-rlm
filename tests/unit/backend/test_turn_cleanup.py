@@ -29,6 +29,24 @@ async def test_cleanup_supervisor_is_bounded_and_drains_owned_work() -> None:
 
 
 @pytest.mark.asyncio
+async def test_cleanup_supervisor_observes_cancelled_cleanup(caplog: pytest.LogCaptureFixture) -> None:
+    import logging
+
+    from fleet_rlm.chat.run_cleanup import RunCleanupSupervisor
+
+    supervisor = RunCleanupSupervisor()
+
+    async def cleanup() -> None:
+        raise asyncio.CancelledError
+
+    with caplog.at_level(logging.ERROR):
+        supervisor.submit(cleanup())
+        await supervisor.shutdown(drain_seconds=1)
+
+    assert "detached Run cleanup failed" in caplog.text
+
+
+@pytest.mark.asyncio
 async def test_settling_revokes_commit_and_blocks_replacement_until_cleanup() -> None:
     from fleet_rlm.chat.run_claim import BeginSettlement, ClaimFailure, CompleteSettlement
     from fleet_rlm.chat.run_lifecycle import RunClaim, RunFailure, RunInProgressError, RunStateError

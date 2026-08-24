@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from uuid import UUID, uuid4
@@ -23,15 +24,20 @@ class _FailingCoordinator:
     def __init__(self, cause: BaseException) -> None:
         self._cause = cause
 
-    async def open(self, _command):
-        if isinstance(self._cause, RunPreparationTimeoutError):
-            raise self._cause
-        if isinstance(self._cause, RunLifecycleUnavailableError):
-            raise self._cause
-        try:
-            raise self._cause
-        except BaseException as cause:
-            raise RunPreparationUnavailableError("Turn environment is unavailable") from cause
+    def open_owned(self, _command):
+        from fleet_rlm.chat.turn_coordinator import OpenedTurnStream
+
+        async def fail():
+            if isinstance(self._cause, RunPreparationTimeoutError):
+                raise self._cause
+            if isinstance(self._cause, RunLifecycleUnavailableError):
+                raise self._cause
+            try:
+                raise self._cause
+            except BaseException as cause:
+                raise RunPreparationUnavailableError("Turn environment is unavailable") from cause
+
+        return OpenedTurnStream(None, open_task=asyncio.create_task(fail()))
 
 
 def _client(cause: BaseException) -> TestClient:

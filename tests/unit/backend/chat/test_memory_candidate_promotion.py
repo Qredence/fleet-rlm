@@ -12,7 +12,7 @@ from uuid import uuid4
 
 import pytest
 
-from fleet_rlm.chat.run_execution import RunExecutionDriver
+from fleet_rlm.chat.turn_coordinator import TurnCoordinator
 from fleet_rlm.files.memory_candidates import MemoryCandidate
 from fleet_rlm.rlm.dspy_contract import PredictionResult
 from fleet_rlm.rlm.outcome import RLMOutcome
@@ -83,15 +83,12 @@ class _Lifecycle:
         )
 
 
-def _driver(lifecycle) -> RunExecutionDriver:
-    return RunExecutionDriver(
+def _driver(lifecycle) -> TurnCoordinator:
+    return TurnCoordinator(
         lifecycle=lifecycle,
+        preparation=object(),  # type: ignore[arg-type]
         runner=cast("Any", object()),
-        projector=cast("Any", object()),
-        cleanup=cast("Any", object()),
-        claim_loss_fence=None,
         turn_timeout_seconds=30,
-        revoke_claim=cast("Any", object()),
     )
 
 
@@ -125,7 +122,7 @@ def test_memory_candidates_promote_only_after_committed_receipt() -> None:
         byte_size=25,
     )
     receipt = __import__("asyncio").run(  # convenience only for this focused seam; child class owns bridge
-        RunExecutionDriver._finish_with_trace(
+        TurnCoordinator._finish_with_trace(
             _driver(lifecycle),
             _turn(),
             _outcome(candidate),
@@ -159,7 +156,7 @@ def test_memory_candidates_are_not_promoted_after_failed_commit() -> None:
         byte_size=25,
     )
     receipt = __import__("asyncio").run(
-        RunExecutionDriver._finish_with_trace(
+        TurnCoordinator._finish_with_trace(
             _driver(lifecycle),
             _turn(),
             _outcome(candidate),
@@ -192,7 +189,7 @@ def test_memory_promotion_failure_preserves_the_committed_receipt() -> None:
         byte_size=25,
     )
     receipt = __import__("asyncio").run(
-        RunExecutionDriver._finish_with_trace(
+        TurnCoordinator._finish_with_trace(
             _driver(lifecycle),
             _turn(),
             _outcome(candidate),
@@ -378,7 +375,6 @@ class _DriverLifecycle:
 
 
 def _streaming_driver(lifecycle, stream, *, revoke_claim=None):
-    from fleet_rlm.chat.committed_turn_events import CommittedTurnEventProjector
     from fleet_rlm.chat.run_cleanup import RunCleanupSupervisor
 
     cleanup = RunCleanupSupervisor()
@@ -387,15 +383,16 @@ def _streaming_driver(lifecycle, stream, *, revoke_claim=None):
         def stream(self, _execution):
             return stream
 
-    driver = RunExecutionDriver(
+    driver = TurnCoordinator(
         lifecycle=cast("Any", lifecycle),
+        preparation=object(),  # type: ignore[arg-type]
         runner=Runner(),
-        projector=CommittedTurnEventProjector(),
         cleanup=cleanup,
         claim_loss_fence=None,
         turn_timeout_seconds=10,
-        revoke_claim=cast("Any", revoke_claim if revoke_claim is not None else object()),
     )
+    if revoke_claim is not None:
+        driver._revoke_claim = revoke_claim  # type: ignore[method-assign]
     return driver, cleanup
 
 
@@ -415,7 +412,7 @@ async def test_driver_settles_timed_out_and_cancelled_outcomes_without_memory_pr
     driver, cleanup = _streaming_driver(lifecycle, stream)
     run = _turn()
 
-    events = [event async for event in driver.stream(run, prepared, None, trace_id=None)]
+    events = [event async for event in driver._execute_claimed(run, prepared, None, trace_id=None)]
     await cleanup.shutdown(drain_seconds=1)
     assert run.authority.revoked
 
@@ -453,7 +450,7 @@ async def test_driver_claim_lost_handoff_never_promotes_memory_candidates() -> N
     driver, cleanup = _streaming_driver(lifecycle, stream, revoke_claim=revoke)
 
     async def collect():
-        return [event async for event in driver.stream(_turn(), prepared, heartbeat, trace_id=None)]
+        return [event async for event in driver._execute_claimed(_turn(), prepared, heartbeat, trace_id=None)]
 
     task = asyncio.create_task(collect())
     await stream.started.wait()
@@ -505,7 +502,7 @@ async def test_driver_settlement_failure_recovery_never_promotes_memory_candidat
     prepared = _DriverPrepared(spy, deadline=asyncio.get_running_loop().time() + 10)
     driver, cleanup = _streaming_driver(lifecycle, stream)
 
-    events = [event async for event in driver.stream(_turn(), prepared, None, trace_id=None)]
+    events = [event async for event in driver._execute_claimed(_turn(), prepared, None, trace_id=None)]
     await cleanup.shutdown(drain_seconds=1)
 
     assert isinstance(events[-1].detail, RunFailed)
