@@ -52,7 +52,7 @@ from fleet_rlm.daytona.interpreter_output import (
     _OutputStreamState,
     _PublicStdoutProjector,
 )
-from fleet_rlm.files.workspace_tools import WorkspaceToolError
+from fleet_rlm.files.filesystem_tool_helpers import FilesystemToolError
 from fleet_rlm.observability.turn_tracing import trace_preview_limit, turn_phase_span
 from fleet_rlm.rlm.dspy_interpreter_contract import (
     PUBLIC_FINAL_OUTPUT_LABEL,
@@ -1108,7 +1108,7 @@ class DaytonaCodeInterpreter:
                 # so broker payloads forward every parameter by name. ``args``
                 # is retained only for POSITIONAL_ONLY completeness.
                 return self._invoke_tool_with_args(name, tuple(args), kwargs)
-            except WorkspaceToolError as exc:
+            except FilesystemToolError as exc:
                 return {
                     "ok": False,
                     "error": exc.code,
