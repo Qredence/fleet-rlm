@@ -231,6 +231,42 @@ def _block_first_root_execution(
     monkeypatch.setattr(DaytonaHttpToolBroker, "execute_code", blocking)
 
 
+def _block_first_root_execution_gated(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    evidence: _EndingEvidence,
+    release: threading.Event,
+) -> None:
+    """Stall the first Root broker execution until the lane releases the gate.
+
+    Removes boot-time arithmetic from the deadline window: the gate holds the
+    Root job in place while the Turn deadline fires, and the lane releases it
+    after observing the terminal so the cleanup drain and admission baseline
+    recover deterministically inside the p39c-certified 60s window.
+    """
+    original = DaytonaHttpToolBroker.execute_code
+    lock = threading.Lock()
+
+    def blocking(
+        self: DaytonaHttpToolBroker,
+        code: str,
+        variables: dict[str, Any] | None = None,
+        *,
+        timeout_s: float = 130.0,
+        on_stdout: Any | None = None,
+    ) -> Any:
+        with lock:
+            first = evidence.block_calls == 0
+            evidence.block_calls += 1
+        if first:
+            if not release.wait(timeout=1500):
+                raise TimeoutError("p41b host-forced stall gate never released")
+            raise TimeoutError("p41b host-forced root stall")
+        return original(self, code, variables, timeout_s=timeout_s, on_stdout=on_stdout)
+
+    monkeypatch.setattr(DaytonaHttpToolBroker, "execute_code", blocking)
+
+
 async def _volume_exists(resources: Any, volume_name: str) -> bool:
     try:
         return (await resources.client.volume.get(volume_name, create=False)) is not None
@@ -254,15 +290,15 @@ async def _scratch_marker(resources: Any, settings: Settings) -> tuple[Any, str,
     subpath = workspace_volume_subpath(LocalScope().workspace_id)
     sandbox = await resources.platform.create(
         volume_id=volume.id,
-        mount_path=paths.mount_path,
+        mount_path=str(paths.mount_path),
         volume_subpath=subpath,
         ephemeral=True,
         labels={"fleet.p41b": "marker"},
     )
-    target = f"{paths.mount_path.rstrip('/')}/{_MARKER_REL_PATH.lstrip('/')}"
+    target = f"{str(paths.mount_path).rstrip('/')}/{_MARKER_REL_PATH.lstrip('/')}"
     await sandbox.fs.upload_file(_MARKER_CONTENT.encode("utf-8"), target)
     readback = await sandbox.fs.download_file(target)
-    return sandbox, str(volume.id), paths.mount_path, hashlib.sha256(readback).hexdigest()
+    return sandbox, str(volume.id), str(paths.mount_path), hashlib.sha256(readback).hexdigest()
 
 
 async def _read_marker_sha(sandbox: Any, mount_path: str) -> str | None:
@@ -340,7 +376,7 @@ def test_p41b_success_terminal_cleanup(tmp_path: Path, monkeypatch: pytest.Monke
         preparation = inventory.run_preparation
         portal = client.portal
         marker_sandbox: Any = None
-        marker_mount_path = volume_paths_from_settings(settings).mount_path
+        marker_mount_path = str(volume_paths_from_settings(settings).mount_path)
         preparation._models = RLMModelBundle(
             _SuccessRootLM(),
             dspy.utils.DummyLM([{"answer": "unused"}], adapter=dspy.JSONAdapter()),
@@ -552,6 +588,8 @@ def _stall_scenario(
             assert created.status_code == 201
             session_id = UUID(created.json()["id"])
 
+            gate = threading.Event()
+
             def on_first() -> None:
                 if not cancel:
                     return
@@ -569,7 +607,14 @@ def _stall_scenario(
 
                 evidence.cancel_state = portal.call(_mark_cancelled)
 
-            _block_first_root_execution(monkeypatch, evidence=evidence, on_first=on_first, hold_seconds=hold_seconds)
+            if cancel:
+                _block_first_root_execution(
+                    monkeypatch, evidence=evidence, on_first=on_first, hold_seconds=hold_seconds
+                )
+            else:
+                # Deadline ending: gate the stall on the lane's terminal observation so
+                # the deadline fires mid-stall regardless of Sandbox boot timing.
+                _block_first_root_execution_gated(monkeypatch, evidence=evidence, release=gate)
             started_at = time.perf_counter()
             response = client.post(
                 f"/api/sessions/{session_id}/turns",
@@ -597,6 +642,10 @@ def _stall_scenario(
                 errors = [chunk for chunk in chunks if chunk.get("type") == "error"]
                 assert len(errors) == 1 and "timed out" in str(errors[0].get("errorText"))
                 assert not [chunk for chunk in chunks if chunk.get("type") == "abort"]
+                # Unblock the stalled Root job now that the deadline terminal is
+                # durably observed; the cleanup drain then recovers inside the
+                # admission-baseline window.
+                gate.set()
 
             _wait_for_admission_baseline(resources, session_id, permits=settings.max_active_daytona_leases)
             sandbox_ids = _chained_sandbox_ids(
@@ -606,6 +655,7 @@ def _stall_scenario(
             assert not evidence.child_sandbox_ids, "root-only stalled ending must not acquire children"
             assert portal.call(_volume_exists, resources, settings.volume_name) is True
         finally:
+            gate.set()
             sandbox_ids = _chained_sandbox_ids(
                 portal=portal, resources=resources, session_id=session_id, evidence=evidence
             )
@@ -656,17 +706,18 @@ def test_p41b_cancellation_terminal_cleanup(tmp_path: Path, monkeypatch: pytest.
 def test_p41b_timeout_terminal_cleanup(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     if not _live_enabled():
         pytest.skip("FLEET_LIVE=1 required")
-    # The timeout must fire while the stall is engaged (after the Root Sandbox
-    # boot), so the host-forced hold exceeds the timeout by a bounded slack and
-    # the cleanup drain recovers before the admission baseline window closes.
-    turn_timeout_seconds = 180
+    # The 180s Turn deadline must fire while the host-forced Root stall is
+    # engaged; the stall is released only after the terminal is observed, so
+    # the cleanup drain recovers inside the admission-baseline window without
+    # any Sandbox-boot-time arithmetic (boot is well under 180s on the live
+    # provider; see the p39c deadline lane, which uses the same deadline).
     _stall_scenario(
         tmp_path,
         monkeypatch,
         name="timeout",
         ending="timeout",
-        turn_timeout_seconds=turn_timeout_seconds,
-        hold_seconds=turn_timeout_seconds + 30,
+        turn_timeout_seconds=180,
+        hold_seconds=0.0,
         cancel=False,
     )
 
@@ -695,6 +746,7 @@ async def test_p41b_disconnect_terminal_cleanup(tmp_path: Path, monkeypatch: pyt
     cleanup_ids: set[str] = set()
     post_cleanup: dict[str, bool] = {}
     resources: Any = None
+    gate = threading.Event()
     try:
         while not server.started:
             if serve_task.done():
@@ -707,14 +759,10 @@ async def test_p41b_disconnect_terminal_cleanup(tmp_path: Path, monkeypatch: pyt
             _OneCellLM(),
             dspy.utils.DummyLM([{"answer": "unused"}], adapter=dspy.JSONAdapter()),
         )
-        # Stall the first Root broker execution so the client disconnect lands
-        # deterministically mid-Run (same host-forced seam as the cancel lane).
-        _block_first_root_execution(
-            monkeypatch,
-            evidence=evidence,
-            on_first=lambda: None,
-            hold_seconds=20.0,
-        )
+        # Gate the first Root broker execution so the client disconnect lands
+        # deterministically mid-Run (same host-forced seam as the cancel lane,
+        # with no boot-time arithmetic).
+        _block_first_root_execution_gated(monkeypatch, evidence=evidence, release=gate)
         base = f"http://127.0.0.1:{port}"
         try:
             async with httpx.AsyncClient(base_url=base, timeout=httpx.Timeout(30.0, read=None)) as client:
@@ -724,6 +772,7 @@ async def test_p41b_disconnect_terminal_cleanup(tmp_path: Path, monkeypatch: pyt
 
                 seen: list[str] = []
                 started_stream = time.perf_counter()
+                engaged_at: float | None = None
                 async with client.stream(
                     "POST",
                     f"/api/sessions/{session_id}/turns",
@@ -731,16 +780,32 @@ async def test_p41b_disconnect_terminal_cleanup(tmp_path: Path, monkeypatch: pyt
                     headers={"Idempotency-Key": f"p41b-disconnect-{uuid4()}"},
                 ) as response:
                     assert response.status_code == 200
-                    async for line in response.aiter_lines():
+                    lines = response.aiter_lines()
+                    # Poll-safe loop: sparse streams must not starve the break
+                    # condition while the Root stall is engaged.
+                    while True:
+                        now = time.perf_counter()
+                        if evidence.block_calls >= 1:
+                            if engaged_at is None:
+                                engaged_at = now
+                            if now - engaged_at >= 2.0:
+                                break
+                        if now - started_stream >= 240.0:
+                            break
+                        try:
+                            line = await asyncio.wait_for(lines.__anext__(), timeout=1.0)
+                        except TimeoutError:
+                            continue
+                        except StopAsyncIteration:
+                            break
                         if line.startswith("data: "):
                             seen.append(line)
-                        elapsed = time.perf_counter() - started_stream
-                        if (len(seen) >= 2 and elapsed >= 2.0) or elapsed >= 12.0:
-                            break
                     # Leaving the context closes the stream mid-Turn: client disconnect.
 
             assert seen, "the client must observe streamed chunks before disconnecting"
             assert evidence.block_calls >= 1, "the stall must engage before the disconnect"
+            assert engaged_at is not None, "the client must disconnect while the stall is engaged"
+            gate.set()
 
             # Detached settlement: the durable cancellation tombstone lands while
             # admission returns to baseline. The Root Sandbox itself is retained
@@ -788,6 +853,7 @@ async def test_p41b_disconnect_terminal_cleanup(tmp_path: Path, monkeypatch: pyt
             server.should_exit = True
             await asyncio.wait_for(serve_task, timeout=30)
     finally:
+        gate.set()
         if cleanup_failures is None and resources is not None:
             candidate_ids = {str(item) for item in getattr(resources, "_sandbox_ids", set())}
             if cleanup_ids:
