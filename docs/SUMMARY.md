@@ -13,6 +13,7 @@
 * [P35-D callback observability decision](how-to-guides/p35d-callback-observability-decision.md)
 * [P35-E certification gate](how-to-guides/p35e-certification-gate.md)
 * [P36 ownership and deletion contract](how-to-guides/p36-ownership-deletion-inventory.md)
+* [P41 behavior freeze](reference/behavior-freeze.md)
 * [Reference](reference/index.md)
   * [Configuration](reference/configuration.md)
   * [Runtime Profile Matrix](reference/profile-matrix.md)

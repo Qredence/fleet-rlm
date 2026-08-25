@@ -22,6 +22,7 @@ FastAPI/SSE contract backed by DSPy, Daytona, and SQLAlchemy/Alembic.
 14. [P35-D callback observability decision](how-to-guides/p35d-callback-observability-decision.md)
 15. [P35-E certification gate](how-to-guides/p35e-certification-gate.md)
 16. [P36 ownership and deletion contract](how-to-guides/p36-ownership-deletion-inventory.md)
+17. [P41 behavior freeze](reference/behavior-freeze.md)
 
 ## Reference
 

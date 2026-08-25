@@ -149,6 +149,7 @@ Contributing workflow and architecture rules: [CONTRIBUTING.md](CONTRIBUTING.md)
 Key docs:
 
 - [Architecture](docs/architecture.md)
+- [P41 behavior freeze](docs/reference/behavior-freeze.md)
 - [Configuration](docs/reference/configuration.md)
 - [Terminal UI guide](docs/how-to-guides/terminal-tui.md)
 - [DSPy + Daytona integration](docs/how-to-guides/dspy-integration.md)
