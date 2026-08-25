@@ -19,6 +19,14 @@ receipts plus the observed-Sandbox ledger into ONE aggregate receipt that:
 
 The aggregate lane itself creates no provider resources; it is a pure join +
 re-probe so the receipt cannot be invalidated by its own footprint.
+
+Pre-flight (archive rebuild): when the canonical observed-Sandbox ledger was
+moved aside into ``.fleet-evidence/receipts-archive/p39c-*/`` (the documented
+receipts-archive convention for re-certifying at a new HEAD), the lane first
+restores missing ledger lane keys from the newest complete archived ledger.
+This restores ledger identity only: archived receipts are never moved back,
+and the same-SHA receipt gates below still fail restored lanes whose receipts
+were not re-run or re-stamped at HEAD.
 """
 
 from __future__ import annotations
@@ -37,6 +45,7 @@ from fleet_rlm.app import create_app
 from fleet_rlm.daytona.session_manager import get_active_lease_registry
 from tests.live.backend._database import upgrade_to_head
 from tests.live.backend._p35d_evidence import candidate_identity
+from tests.live.backend._p39c_evidence import rebuild_ledger_from_archive, write_lane_receipt
 from tests.live.backend.test_fleet_rlm_daytona_mvp import _live_settings
 from tests.live.backend.test_p39c_batch_live import _all_absent
 
@@ -87,14 +96,6 @@ def _load_json(path: Path) -> dict[str, Any]:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def _aggregate_receipt_path() -> Path:
-    configured = os.environ.get(_EVIDENCE_ENV)
-    if configured:
-        base = Path(configured).expanduser().resolve()
-        return base.with_name(f"{base.stem}-p39c-zero-leak{base.suffix or '.json'}")
-    return _REPO_ROOT / ".fleet-evidence" / "receipts" / "p39c-zero-leak-aggregate.json"
-
-
 async def _list_label_inventory(
     client: Any, session_ids: list[str]
 ) -> tuple[list[dict[str, str]], list[dict[str, str]]]:
@@ -141,6 +142,14 @@ def test_live_zero_leaked_sandboxes_aggregate_receipt(tmp_path: Path) -> None:
     )
 
     ledger_path = _REPO_ROOT / ".fleet-evidence" / "receipts" / _LEDGER_NAME
+    # Pre-flight: if the canonical ledger was archived aside (or resurrected
+    # as a partial single-lane ledger), restore the missing lane keys from the
+    # newest complete receipts-archive ledger before gating on the fixed
+    # seven-lane set. Identity only; receipts are still gated below.
+    restored_ledger_lane_keys = rebuild_ledger_from_archive(
+        ledger_path,
+        expected_lane_names=sorted(_LANE_RECEIPTS),
+    )
     if not ledger_path.is_file():
         pytest.fail("p39c aggregate receipt requires the observed-Sandbox ledger; run the other p39c live lanes first")
     ledger = _load_json(ledger_path)
@@ -292,6 +301,10 @@ def test_live_zero_leaked_sandboxes_aggregate_receipt(tmp_path: Path) -> None:
         "observed_id_count": len(observed_ids),
         "absence_by_id": absence_by_id,
         "recorded_sessions": sorted(session_ids),
+        "ledger": {
+            "path": str(ledger_path),
+            "restored_lane_keys_from_archive": sorted(restored_ledger_lane_keys),
+        },
         "assertions": {
             "all_observed_ids_absent": True,
             "provider_inventory_diff_empty": True,
@@ -326,6 +339,7 @@ def test_live_zero_leaked_sandboxes_aggregate_receipt(tmp_path: Path) -> None:
         "cleanup": {"confirmed_absent": True, "admission_restored": True},
         "passed": True,
     }
-    path = _aggregate_receipt_path()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(aggregate_receipt, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    # The canonical aggregate receipt always lands under
+    # .fleet-evidence/receipts/; FLEET_LIVE_EVIDENCE_PATH (when set) receives
+    # an additional env-stem copy, never a replacement.
+    write_lane_receipt("p39c-zero-leak-aggregate.json", "-p39c-zero-leak", aggregate_receipt)

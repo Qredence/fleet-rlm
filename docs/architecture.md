@@ -288,4 +288,7 @@ or public HTTP/SSE changes.
 There is no legacy backend, `/api/v1`, WebSocket execution, dual-serve, data
 migration layer, classic terminal renderer, or maintained Web frontend. A
 future graphical client is a separate effort. The current module ownership is
-also summarized in the [codebase map](reference/codebase-map.md).
+also summarized in the [codebase map](reference/codebase-map.md). The
+integrated P41 delivery freezes public behavior per the
+[P41 behavior freeze](reference/behavior-freeze.md); the freeze binds
+behavior, never private Python structure.

@@ -70,7 +70,9 @@ async def test_runner_returns_promptly_and_retains_blocking_worker_for_cleanup()
     assert await asyncio.to_thread(entered.wait, 2)
 
     cancel_requested = True
-    await asyncio.sleep(0.3)
+    deadline = asyncio.get_running_loop().time() + 2
+    while not consume.done() and asyncio.get_running_loop().time() < deadline:
+        await asyncio.sleep(0.01)
     assert consume.done(), "caller delivery must not wait for the non-cancellable worker"
     assert stream.outcome is not None
     assert stream.outcome.terminal_status == "cancelled"

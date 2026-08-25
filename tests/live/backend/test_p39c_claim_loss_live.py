@@ -17,8 +17,6 @@ absence with admission restored and no lease holder.
 from __future__ import annotations
 
 import asyncio
-import json
-import os
 import threading
 import time
 from dataclasses import dataclass, field
@@ -40,6 +38,7 @@ from fleet_rlm.daytona.session_manager import get_active_lease_registry
 from fleet_rlm.rlm.model_bundle import RLMModelBundle
 from tests.live.backend._database import upgrade_to_head
 from tests.live.backend._p35d_evidence import candidate_identity
+from tests.live.backend._p39c_evidence import record_observed_sandbox_ids, write_lane_receipt
 from tests.live.backend.test_fleet_rlm_daytona_mvp import _live_settings, _sse_chunks, _strict_cleanup
 from tests.live.backend.test_p39a_child_cleanup_ownership_live import (
     _receipt_projection,
@@ -48,9 +47,7 @@ from tests.live.backend.test_p39a_child_cleanup_ownership_live import (
 
 pytestmark = [pytest.mark.live_daytona, pytest.mark.timeout(1200)]
 
-_REPO_ROOT = Path(__file__).resolve().parents[3]
 _RECEIPT_SCHEMA = "fleet.p39c-claim-loss/v1"
-_EVIDENCE_ENV = "FLEET_LIVE_EVIDENCE_PATH"
 _HOLD_SECONDS = 30.0
 
 
@@ -291,40 +288,8 @@ def _block_first_child_execution(
 
 
 def _write_receipt(payload: dict[str, object]) -> None:
-    configured = os.environ.get(_EVIDENCE_ENV)
-    if configured:
-        base = Path(configured).expanduser().resolve()
-        path = base.with_name(f"{base.stem}-p39c-claim-loss{base.suffix or '.json'}")
-    else:
-        path = _REPO_ROOT / ".fleet-evidence" / "receipts" / "p39c-claim-loss.json"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-
-
-def _record_observed_sandbox_ids(
-    name: str, sandbox_ids: set[str], session_ids: set[str] | frozenset[str] = frozenset()
-) -> None:
-    ledger = _REPO_ROOT / ".fleet-evidence" / "receipts" / "p39c-observed-sandboxes.json"
-    ledger.parent.mkdir(parents=True, exist_ok=True)
-    payload: dict[str, Any] = {}
-    if ledger.is_file():
-        try:
-            payload = json.loads(ledger.read_text(encoding="utf-8"))
-        except json.JSONDecodeError:
-            payload = {}
-    lanes = payload.get("lanes")
-    if not isinstance(lanes, dict):
-        lanes = {}
-    existing = lanes.get(name, [])
-    lanes[name] = sorted(set(existing) | {str(item) for item in sandbox_ids if item})
-    payload["lanes"] = lanes
-    sessions = payload.get("sessions")
-    if not isinstance(sessions, dict):
-        sessions = {}
-    existing_sessions = sessions.get(name, [])
-    sessions[name] = sorted(set(existing_sessions) | {str(item) for item in session_ids if item})
-    payload["sessions"] = sessions
-    ledger.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    """Write the canonical receipt; FLEET_LIVE_EVIDENCE_PATH adds a copy."""
+    write_lane_receipt("p39c-claim-loss.json", "-p39c-claim-loss", payload)
 
 
 async def _all_absent(resources: Any, sandbox_ids: list[str]) -> dict[str, bool]:
@@ -474,7 +439,7 @@ def test_live_claim_loss_fencing_leaves_no_recursive_resources(
         finally:
             cleanup_failures = portal.call(_strict_cleanup, resources, sandbox_ids, settings.volume_name)
     assert cleanup_failures == ()
-    _record_observed_sandbox_ids("claim-loss", sandbox_ids, {str(session_id)})
+    record_observed_sandbox_ids("claim-loss", sandbox_ids, {str(session_id)})
     _write_receipt(
         {
             "schema": _RECEIPT_SCHEMA,

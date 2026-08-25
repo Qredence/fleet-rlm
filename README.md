@@ -9,7 +9,7 @@ Fleet RLM runs [DSPy](https://github.com/stanfordnlp/dspy) `dspy.RLM` behind a c
 [![Python](https://img.shields.io/badge/python-3.11%20|%203.12%20|%203.13-3776AB?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
 [![License](https://img.shields.io/badge/license-MIT-2EA44F?style=flat-square)](LICENSE)
 [![Docs](https://img.shields.io/badge/docs-Read%20the%20Docs-2C9ED0?style=flat-square&logo=readthedocs&logoColor=white)](https://fleet-rlm.readthedocs.io/)
-[![DSPy](https://img.shields.io/badge/DSPy-3.3+-8B5CF6?style=flat-square)](https://dspy.ai/)
+[![DSPy](https://img.shields.io/badge/DSPy-3.3.1-8B5CF6?style=flat-square)](https://dspy.ai/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-SSE-009688?style=flat-square&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
 
 ---
@@ -21,6 +21,15 @@ Fleet RLM runs [DSPy](https://github.com/stanfordnlp/dspy) `dspy.RLM` behind a c
 - **Durable by default** — Sessions, turns, attachments, artifacts, and workspace memory survive across runs.
 - **Sandboxed execution** — Daytona interpreters run in isolated sandboxes with bounded workspace volumes and host-mediated memory tools.
 - **Policy-driven runtime** — Non-secret behavior lives in `config/fleet.toml`; secret values stay in environment variables.
+
+## Current state
+
+- **Certified dependency baseline** — The runtime is pinned to published releases only: `dspy==3.3.1` (plus `gepa==0.1.4` under the `optimize` extra). The lockfile is registry-only with no VCS pins, and an exact-version guard (`CERTIFIED_DSPY_VERSION`) fails startup on any drift. `uv run python scripts/certification_gate.py` re-verifies the certified baseline.
+- **Turn orchestration** — `TurnCoordinator` is the sole owner of the claim → cleanup path with atomic turn commit; the stream vocabulary is the closed v1 Runtime Event set (freeze suites in `tests/freeze/`).
+- **Recursive RLM** — Native DSPy 3.3.1 child RLMs run under one contracted runtime owner (`src/fleet_rlm/daytona/recursive_child_runtime.py`) with a child deadline fence and zero-leak certification lanes in `tests/live/backend/`.
+- **Tools** — Explicit Session Workspace (7 tools) and Project (6 tools) hosts; cross-sandbox Workspace Memory append coordination is unsupported by design.
+- **Optimization** — `src/fleet_rlm/optimization/gepa_runner.py` drives the official `gepa.optimize` API under a `max_metric_calls` budget; no `fleet optimize` CLI exists yet.
+- **Live evidence** — `FLEET_LIVE=1` serial lanes write receipts under `.fleet-evidence/receipts/` (archived sets under `.fleet-evidence/receipts-archive/`); see the [testing strategy](docs/how-to-guides/testing-strategy.md).
 
 ## Quick start
 
@@ -149,6 +158,7 @@ Contributing workflow and architecture rules: [CONTRIBUTING.md](CONTRIBUTING.md)
 Key docs:
 
 - [Architecture](docs/architecture.md)
+- [P41 behavior freeze](docs/reference/behavior-freeze.md)
 - [Configuration](docs/reference/configuration.md)
 - [Terminal UI guide](docs/how-to-guides/terminal-tui.md)
 - [DSPy + Daytona integration](docs/how-to-guides/dspy-integration.md)

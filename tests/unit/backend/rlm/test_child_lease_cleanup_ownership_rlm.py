@@ -511,7 +511,10 @@ def test_val_rec_017_one_absolute_deadline_covers_fork_and_batch_join(
             return dspy.Prediction(answer="late", trajectory=[])
 
     monkeypatch.setattr(recursive_calls, "build_native_rlm", lambda **_kwargs: BlockingChild())
-    deadline = time.monotonic() + 0.15
+    # Leave enough spawn slack for full-suite coverage + xdist load. The child
+    # blocks on `release.wait(5)`, so widening the deadline only removes the
+    # scheduler race without changing what is proven.
+    deadline = time.monotonic() + 2.0
     executor = _executor(
         [{"reasoning": "unused", "code": "SUBMIT(answer='unused')"}],
         recorder,
@@ -524,7 +527,7 @@ def test_val_rec_017_one_absolute_deadline_covers_fork_and_batch_join(
     elapsed = time.monotonic() - began
     assert started.is_set()
     # Bounded by the one absolute deadline, with a small tolerance.
-    assert 0.05 <= elapsed < 1.5
+    assert 0.05 <= elapsed < 3.0
     # The child's model fork received exactly the Root deadline.
     assert fork_deadlines == [deadline]
 

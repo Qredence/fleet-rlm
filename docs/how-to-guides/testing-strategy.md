@@ -138,6 +138,40 @@ cleanup and secret isolation, and must be paired with same-SHA CI, local
 release, and human attestations before promotion. Historical receipts do not
 prove a later tip.
 
+### P39c live-evidence receipts and the receipts-archive convention
+
+The P39c recursion certification lanes (`tests/live/backend/test_p39c_*_live.py`)
+write same-SHA receipts plus one shared observed-Sandbox ledger
+(`p39c-observed-sandboxes.json`) under `.fleet-evidence/receipts/`
+(git-ignored, never committed). The canonical default-name receipt is ALWAYS
+written there; when a runner sets `FLEET_LIVE_EVIDENCE_PATH`, that location
+receives an additional env-stem copy, never a replacement. Every lane writes
+the ledger through the single shared helper
+`tests/live/backend/_p39c_evidence.py`, whose read-modify-write merge is
+atomic and refuses to shrink recorded lane coverage (`LedgerCoverageError`).
+
+Multiple workers certifying on one branch can split receipt SHAs, while the
+aggregate zero-leak gate requires every lane receipt at HEAD and the full
+seven-lane ledger. When HEAD moves, ARCHIVE the whole stale `p39c-*` set —
+move, never delete — before re-certifying:
+
+```bash
+archive=.fleet-evidence/receipts-archive/p39c-pre-$(git rev-parse --short HEAD)
+mkdir "$archive" && mv .fleet-evidence/receipts/p39c-*.json "$archive"/
+```
+
+Then re-run the lanes (or re-stamp receipts whose evidence is unchanged) at
+the stable HEAD and run the zero-leak aggregate LAST.
+
+Rebuild rule: the aggregate lane's pre-flight restores any lane key missing
+from the canonical ledger by merging id lists from the NEWEST COMPLETE
+`.fleet-evidence/receipts-archive/p39c-*/p39c-observed-sandboxes.json`
+(complete = its `lanes` mapping covers all seven lane names; newest by
+directory mtime). This restores ledger identity only: archived receipts stay
+in the archive, archived files are never modified, and restored lanes whose
+receipts still carry an old SHA FAIL the aggregate's same-SHA gates until
+they are re-run or re-stamped at HEAD.
+
 ## Security, packaging, and release
 
 ```bash
