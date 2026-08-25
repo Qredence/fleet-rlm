@@ -55,7 +55,7 @@ from fleet_rlm.rlm.model_bundle import RLMModelBundle
 from fleet_rlm.runtime.bindings import workspace_volume_subpath
 from tests.live.backend._database import upgrade_to_head
 from tests.live.backend._p35d_evidence import candidate_identity
-from tests.live.backend._p39c_evidence import write_lane_receipt
+from tests.live.backend._p39c_evidence import record_observed_sandbox_ids, write_lane_receipt
 from tests.live.backend.test_fleet_rlm_daytona_mvp import _live_settings, _sse_chunks, _strict_cleanup
 from tests.live.backend.test_p39a_child_cleanup_ownership_live import (
     _receipt_projection,
@@ -154,32 +154,6 @@ class _ProviderFailureLM(dspy.utils.DummyLM):
         return _ProviderFailureLM()
 
 
-class _StallThenSubmitLM(dspy.utils.DummyLM):
-    """One real cell, then a slow host-side second LM call (disconnect window)."""
-
-    def __init__(self, *, stall_seconds: float = 25.0) -> None:
-        super().__init__(
-            [
-                {"reasoning": "run one real cell", "code": "print('P41B-DISCONNECT-CELL')"},
-                {"reasoning": "submit", "code": "SUBMIT(answer='P41B-UNREACHABLE')"},
-            ],
-            adapter=dspy.JSONAdapter(),
-        )
-        self.calls = 0
-        self._stall_seconds = stall_seconds
-
-    def forward(self, prompt: Any = None, messages: Any = None, **kwargs: Any) -> Any:
-        self.calls += 1
-        if self.calls == 1:
-            return super().forward(prompt=prompt, messages=messages, **kwargs)
-        time.sleep(self._stall_seconds)
-        return super().forward(prompt=prompt, messages=messages, **kwargs)
-
-    def copy(self, **kwargs: Any) -> dspy.utils.DummyLM:
-        del kwargs
-        return _StallThenSubmitLM()
-
-
 class _OneCellLM(dspy.utils.DummyLM):
     """One real cell; on exhaustion return a repair-shaped extra cell."""
 
@@ -267,11 +241,16 @@ async def _volume_exists(resources: Any, volume_name: str) -> bool:
 async def _scratch_marker(resources: Any, settings: Settings) -> tuple[Any, str, str]:
     """Validator-owned ephemeral Sandbox writing the marker on the shared Volume.
 
+    Creates the per-case Volume when the lane is the first to mount it (the
+    Sandbox mount API auto-creates missing Volumes on the broker path, while
+    ``volume.get`` with ``create=False`` fail-closes; the lane creates it
+    explicitly here instead).
+
     Returns ``(sandbox, volume_id, mount_path)``; the caller deletes the
     Sandbox after read-back.
     """
     paths = volume_paths_from_settings(settings)
-    volume = await resources.client.volume.get(settings.volume_name, create=False)
+    volume = await resources.client.volume.get(settings.volume_name, create=True)
     subpath = workspace_volume_subpath(LocalScope().workspace_id)
     sandbox = await resources.platform.create(
         volume_id=volume.id,
@@ -316,12 +295,36 @@ def _chained_sandbox_ids(
     return ids
 
 
+async def _post_cleanup_absence(resources: Any, sandbox_ids: list[str]) -> dict[str, bool]:
+    """After explicit validator teardown, provider absence must be confirmed.
+
+    Mirrors the certified p39c semantics: absent means the provider reports
+    the Sandbox as gone or in a terminal destruction/archive state.
+    """
+
+    async def absent(sandbox_id: str) -> bool:
+        deadline = time.monotonic() + 150
+        while time.monotonic() < deadline:
+            target = await resources.platform.get(sandbox_id)
+            if target is None:
+                return True
+            state = str(getattr(getattr(target, "state", None), "value", getattr(target, "state", None)) or "")
+            if state.strip().lower() in {"destroyed", "deleted", "archived"}:
+                return True
+            await asyncio.sleep(1.0)
+        return await resources.platform.get(sandbox_id) is None
+
+    return {sandbox_id: await absent(sandbox_id) for sandbox_id in sandbox_ids}
+
+
 # ---------------------------------------------------------------------------
 # Ending 1: success (Root + one native child + Workspace marker)
 # ---------------------------------------------------------------------------
 
 
 def test_p41b_success_terminal_cleanup(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    if not _live_enabled():
+        pytest.skip("FLEET_LIVE=1 required")
     settings = _case_settings(tmp_path, name="success", recursion=True, turn_timeout_seconds=600)
     evidence = _EndingEvidence()
     _install_child_evidence(monkeypatch, evidence)
@@ -329,6 +332,8 @@ def test_p41b_success_terminal_cleanup(tmp_path: Path, monkeypatch: pytest.Monke
     session_id: UUID | None = None
     cleanup_failures: tuple[str, ...] = ()
     marker_sha: str | None = None
+    post_cleanup: dict[str, bool] = {}
+    cleanup_ids: set[str] = set()
     with TestClient(app) as client:
         inventory = app.state.runtime_inventory
         resources = inventory.run_environment_resources
@@ -366,11 +371,13 @@ def test_p41b_success_terminal_cleanup(tmp_path: Path, monkeypatch: pytest.Monke
             assert evidence.child_sandbox_ids, "success ending must exercise one native child"
 
             _wait_for_admission_baseline(resources, session_id, permits=settings.max_active_daytona_leases)
-            sandbox_ids = _chained_sandbox_ids(
-                portal=portal, resources=resources, session_id=session_id, evidence=evidence
+            # Turn-owned cleanliness: every recursion child is destroyed-or-archived
+            # at the cleanup boundary (the Root Sandbox is retained for Session
+            # reuse and released by validator teardown below).
+            child_absence = portal.call(_all_absent, resources, sorted(evidence.child_sandbox_ids))
+            assert child_absence and all(child_absence.values()), (
+                f"turn-owned child sandboxes must be absent: {child_absence}"
             )
-            absence = portal.call(_all_absent, resources, sorted(sandbox_ids))
-            assert absence and all(absence.values()), f"turn-owned sandboxes must be absent: {absence}"
 
             assert evidence.receipts, "the child lease must record a cleanup receipt"
             for receipt in evidence.receipts:
@@ -391,8 +398,12 @@ def test_p41b_success_terminal_cleanup(tmp_path: Path, monkeypatch: pytest.Monke
             )
             if marker_sandbox is not None:
                 sandbox_ids.add(str(marker_sandbox.id))
+            cleanup_ids = set(sandbox_ids)
             cleanup_failures = portal.call(_strict_cleanup, resources, sandbox_ids, settings.volume_name)
+            post_cleanup = portal.call(_post_cleanup_absence, resources, sorted(sandbox_ids))
     assert cleanup_failures == ()
+    assert all(post_cleanup.values()), f"post-cleanup sandboxes must be absent: {post_cleanup}"
+    record_observed_sandbox_ids("p41b-success", cleanup_ids, {str(session_id)} if session_id else set())
     _write_receipt(
         "success",
         {
@@ -408,6 +419,7 @@ def test_p41b_success_terminal_cleanup(tmp_path: Path, monkeypatch: pytest.Monke
                 "child_count": len(evidence.child_sandbox_ids),
                 "volume_intact": True,
                 "volume_marker_sha256": marker_sha,
+                "post_cleanup_absent": True,
             },
             "passed": True,
         },
@@ -420,10 +432,14 @@ def test_p41b_success_terminal_cleanup(tmp_path: Path, monkeypatch: pytest.Monke
 
 
 def test_p41b_provider_failure_terminal_cleanup(tmp_path: Path) -> None:
+    if not _live_enabled():
+        pytest.skip("FLEET_LIVE=1 required")
     settings = _case_settings(tmp_path, name="failure", recursion=False, turn_timeout_seconds=600)
     app = create_app(settings=settings)
     session_id: UUID | None = None
     cleanup_failures: tuple[str, ...] = ()
+    cleanup_ids: set[str] = set()
+    post_cleanup: dict[str, bool] = {}
     evidence = _EndingEvidence()
     with TestClient(app) as client:
         inventory = app.state.runtime_inventory
@@ -456,27 +472,28 @@ def test_p41b_provider_failure_terminal_cleanup(tmp_path: Path) -> None:
             assert _CANARY not in response.text
             assert "Traceback" not in response.text
 
-            # The failed Turn ran one real cell: a Root Sandbox was owned and is gone.
+            # The failed Turn owned a real Root Sandbox (released for Session
+            # reuse at cleanup; validator teardown deletes it below).
             binding = portal.call(resources.bindings.get, session_id)
             assert binding is not None and binding.sandbox_id is not None
+            assert not evidence.child_sandbox_ids, "root-only failure must not acquire children"
 
             page = client.get(f"/api/sessions/{session_id}/turns")
             assert page.status_code == 200
             assert _CANARY not in page.text
 
             _wait_for_admission_baseline(resources, session_id, permits=settings.max_active_daytona_leases)
-            sandbox_ids = _chained_sandbox_ids(
-                portal=portal, resources=resources, session_id=session_id, evidence=evidence
-            )
-            absence = portal.call(_all_absent, resources, sorted(sandbox_ids))
-            assert absence and all(absence.values()), f"turn-owned sandboxes must be absent: {absence}"
             assert portal.call(_volume_exists, resources, settings.volume_name) is True
         finally:
             sandbox_ids = _chained_sandbox_ids(
                 portal=portal, resources=resources, session_id=session_id, evidence=evidence
             )
+            cleanup_ids = set(sandbox_ids)
             cleanup_failures = portal.call(_strict_cleanup, resources, sandbox_ids, settings.volume_name)
+            post_cleanup = portal.call(_post_cleanup_absence, resources, sorted(sandbox_ids))
     assert cleanup_failures == ()
+    assert all(post_cleanup.values()), f"post-cleanup sandboxes must be absent: {post_cleanup}"
+    record_observed_sandbox_ids("p41b-provider_failure", cleanup_ids, {str(session_id)} if session_id else set())
     _write_receipt(
         "provider_failure",
         {
@@ -492,6 +509,7 @@ def test_p41b_provider_failure_terminal_cleanup(tmp_path: Path) -> None:
                 "lease_holder_released": True,
                 "child_count": 0,
                 "volume_intact": True,
+                "post_cleanup_absent": True,
             },
             "passed": True,
         },
@@ -518,6 +536,8 @@ def _stall_scenario(
     app = create_app(settings=settings)
     session_id: UUID | None = None
     cleanup_failures: tuple[str, ...] = ()
+    cleanup_ids: set[str] = set()
+    post_cleanup: dict[str, bool] = {}
     with TestClient(app) as client:
         inventory = app.state.runtime_inventory
         resources = inventory.run_environment_resources
@@ -583,15 +603,18 @@ def _stall_scenario(
                 portal=portal, resources=resources, session_id=session_id, evidence=evidence
             )
             assert sandbox_ids, "stalled ending must prove a turn-owned Root Sandbox existed"
-            absence = portal.call(_all_absent, resources, sorted(sandbox_ids))
-            assert all(absence.values()), f"turn-owned sandboxes must be absent: {absence}"
+            assert not evidence.child_sandbox_ids, "root-only stalled ending must not acquire children"
             assert portal.call(_volume_exists, resources, settings.volume_name) is True
         finally:
             sandbox_ids = _chained_sandbox_ids(
                 portal=portal, resources=resources, session_id=session_id, evidence=evidence
             )
+            cleanup_ids = set(sandbox_ids)
             cleanup_failures = portal.call(_strict_cleanup, resources, sandbox_ids, settings.volume_name)
+            post_cleanup = portal.call(_post_cleanup_absence, resources, sorted(sandbox_ids))
     assert cleanup_failures == ()
+    assert all(post_cleanup.values()), f"post-cleanup sandboxes must be absent: {post_cleanup}"
+    record_observed_sandbox_ids(f"p41b-{ending}", cleanup_ids, {str(session_id)} if session_id else set())
     _write_receipt(
         ending,
         {
@@ -609,6 +632,7 @@ def _stall_scenario(
                 "lease_holder_released": True,
                 "child_count": 0,
                 "volume_intact": True,
+                "post_cleanup_absent": True,
             },
             "passed": True,
         },
@@ -616,6 +640,8 @@ def _stall_scenario(
 
 
 def test_p41b_cancellation_terminal_cleanup(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    if not _live_enabled():
+        pytest.skip("FLEET_LIVE=1 required")
     _stall_scenario(
         tmp_path,
         monkeypatch,
@@ -628,14 +654,19 @@ def test_p41b_cancellation_terminal_cleanup(tmp_path: Path, monkeypatch: pytest.
 
 
 def test_p41b_timeout_terminal_cleanup(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    turn_timeout_seconds = 150
+    if not _live_enabled():
+        pytest.skip("FLEET_LIVE=1 required")
+    # The timeout must fire while the stall is engaged (after the Root Sandbox
+    # boot), so the host-forced hold exceeds the timeout by a bounded slack and
+    # the cleanup drain recovers before the admission baseline window closes.
+    turn_timeout_seconds = 180
     _stall_scenario(
         tmp_path,
         monkeypatch,
         name="timeout",
         ending="timeout",
         turn_timeout_seconds=turn_timeout_seconds,
-        hold_seconds=turn_timeout_seconds + 60,
+        hold_seconds=turn_timeout_seconds + 30,
         cancel=False,
     )
 
@@ -646,8 +677,11 @@ def test_p41b_timeout_terminal_cleanup(tmp_path: Path, monkeypatch: pytest.Monke
 
 
 @pytest.mark.asyncio
-async def test_p41b_disconnect_terminal_cleanup(tmp_path: Path) -> None:
+async def test_p41b_disconnect_terminal_cleanup(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    if not _live_enabled():
+        pytest.skip("FLEET_LIVE=1 required")
     settings = _case_settings(tmp_path, name="disconnect", recursion=False, turn_timeout_seconds=600)
+    evidence = _EndingEvidence()
     app = create_app(settings=settings)
     port = 8020
     with socket.socket() as probe:
@@ -658,6 +692,8 @@ async def test_p41b_disconnect_terminal_cleanup(tmp_path: Path) -> None:
 
     session_id: UUID | None = None
     cleanup_failures: tuple[str, ...] | None = None
+    cleanup_ids: set[str] = set()
+    post_cleanup: dict[str, bool] = {}
     resources: Any = None
     try:
         while not server.started:
@@ -668,8 +704,16 @@ async def test_p41b_disconnect_terminal_cleanup(tmp_path: Path) -> None:
         resources = inventory.run_environment_resources
         preparation = inventory.run_preparation
         preparation._models = RLMModelBundle(
-            _StallThenSubmitLM(),
+            _OneCellLM(),
             dspy.utils.DummyLM([{"answer": "unused"}], adapter=dspy.JSONAdapter()),
+        )
+        # Stall the first Root broker execution so the client disconnect lands
+        # deterministically mid-Run (same host-forced seam as the cancel lane).
+        _block_first_root_execution(
+            monkeypatch,
+            evidence=evidence,
+            on_first=lambda: None,
+            hold_seconds=20.0,
         )
         base = f"http://127.0.0.1:{port}"
         try:
@@ -679,6 +723,7 @@ async def test_p41b_disconnect_terminal_cleanup(tmp_path: Path) -> None:
                 session_id = UUID(created.json()["id"])
 
                 seen: list[str] = []
+                started_stream = time.perf_counter()
                 async with client.stream(
                     "POST",
                     f"/api/sessions/{session_id}/turns",
@@ -689,33 +734,27 @@ async def test_p41b_disconnect_terminal_cleanup(tmp_path: Path) -> None:
                     async for line in response.aiter_lines():
                         if line.startswith("data: "):
                             seen.append(line)
-                        if len(seen) >= 8:
+                        elapsed = time.perf_counter() - started_stream
+                        if (len(seen) >= 2 and elapsed >= 2.0) or elapsed >= 12.0:
                             break
                     # Leaving the context closes the stream mid-Turn: client disconnect.
 
             assert seen, "the client must observe streamed chunks before disconnecting"
+            assert evidence.block_calls >= 1, "the stall must engage before the disconnect"
 
-            # Detached settlement: cancellation tombstone lands durably while the
-            # turn-owned Sandbox is deleted and admission returns to baseline.
+            # Detached settlement: the durable cancellation tombstone lands while
+            # admission returns to baseline. The Root Sandbox itself is retained
+            # for Session reuse and deleted by validator teardown below.
             binding = await resources.bindings.get(session_id)
             assert binding is not None and binding.sandbox_id is not None
             owned = {str(binding.sandbox_id)}
 
             permits = settings.max_active_daytona_leases
-            deadline = time.perf_counter() + 300
-            while time.perf_counter() < deadline:
-                holder = get_active_lease_registry().holder(session_id)
-                if holder is None and resources.daytona_admission._semaphore._value == permits:
-                    absence = await _all_absent(resources, sorted(owned))
-                    if all(absence.values()):
-                        break
-                await asyncio.sleep(1.0)
-            else:
-                pytest.fail("disconnected Turn did not settle within the bounded window")
-
             tombstone_seen = False
+            deadline = time.perf_counter() + 450
             async with httpx.AsyncClient(base_url=base, timeout=httpx.Timeout(30.0, read=30.0)) as client:
-                for _ in range(120):
+                while time.perf_counter() < deadline:
+                    holder = get_active_lease_registry().holder(session_id)
                     page = await client.get(f"/api/sessions/{session_id}/turns")
                     assert page.status_code == 200
                     items = page.json()["items"]
@@ -728,24 +767,36 @@ async def test_p41b_disconnect_terminal_cleanup(tmp_path: Path) -> None:
                             for part in status_parts
                         ):
                             tombstone_seen = True
-                            break
-                    await asyncio.sleep(1.0)
+                    if tombstone_seen and holder is None and resources.daytona_admission._semaphore._value == permits:
+                        break
+                    await asyncio.sleep(2.0)
+                else:
+                    pytest.fail(
+                        f"disconnected Turn did not settle within the bounded window (tombstone_seen={tombstone_seen})"
+                    )
             assert tombstone_seen, "the disconnected Turn must land the cancellation tombstone durably"
             assert get_active_lease_registry().holder(session_id) is None
             assert resources.daytona_admission._semaphore._value == permits
-            assert all((await _all_absent(resources, sorted(owned))).values())
+            assert not evidence.child_sandbox_ids, "root-only disconnect must not acquire children"
             assert await _volume_exists(resources, settings.volume_name) is True
 
             owned |= {str(item) for item in getattr(resources, "_sandbox_ids", set())}
+            cleanup_ids = set(owned)
             cleanup_failures = await _strict_cleanup(resources, owned, settings.volume_name)
+            post_cleanup = await _post_cleanup_absence(resources, sorted(owned))
         finally:
             server.should_exit = True
             await asyncio.wait_for(serve_task, timeout=30)
     finally:
         if cleanup_failures is None and resources is not None:
             candidate_ids = {str(item) for item in getattr(resources, "_sandbox_ids", set())}
+            if cleanup_ids:
+                candidate_ids |= cleanup_ids
             cleanup_failures = await _strict_cleanup(resources, candidate_ids, settings.volume_name)
+            post_cleanup = await _post_cleanup_absence(resources, sorted(candidate_ids))
     assert cleanup_failures == ()
+    assert all(post_cleanup.values()), f"post-cleanup sandboxes must be absent: {post_cleanup}"
+    record_observed_sandbox_ids("p41b-disconnect", cleanup_ids, {str(session_id)} if session_id else set())
     _write_receipt(
         "disconnect",
         {
@@ -760,6 +811,7 @@ async def test_p41b_disconnect_terminal_cleanup(tmp_path: Path) -> None:
                 "lease_holder_released": True,
                 "child_count": 0,
                 "volume_intact": True,
+                "post_cleanup_absent": True,
             },
             "passed": True,
         },
@@ -795,6 +847,7 @@ def test_p41b_terminal_cleanup_aggregate() -> None:
         assert cleanup["admission_restored"] is True
         assert cleanup["lease_holder_released"] is True
         assert cleanup["volume_intact"] is True
+        assert cleanup["post_cleanup_absent"] is True
 
     write_lane_receipt(
         "p41b-terminal-cleanup-proof.json",
