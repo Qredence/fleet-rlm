@@ -122,22 +122,26 @@ def test_submit_returns_final_output() -> None:
 
 
 def test_typed_submit_rejects_non_string_values_with_serialization_guidance() -> None:
+    from dspy.primitives.code_interpreter import CodeExecutionError
+
     from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
 
     interp = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())
     interp.output_fields = [{"name": "answer", "type": "str"}]
     interp.start()
 
-    repair = interp.execute("SUBMIT(answer={'section': 1})")
+    with pytest.raises(CodeExecutionError, match=r"json\.dumps") as caught:
+        interp.execute("SUBMIT(answer={'section': 1})")
 
-    assert not isinstance(repair, FinalOutput)
-    assert "json.dumps" in str(repair)
+    assert not isinstance(caught.value, FinalOutput)
     result = interp.execute("import json\nSUBMIT(answer=json.dumps({'section': 1}, indent=2))")
     assert isinstance(result, FinalOutput)
     assert result.output == {"answer": '{\n  "section": 1\n}'}
 
 
 def test_two_interpreters_do_not_share_python_variables() -> None:
+    from dspy.primitives.code_interpreter import CodeExecutionError
+
     from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
 
     first = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())
@@ -149,7 +153,8 @@ def test_two_interpreters_do_not_share_python_variables() -> None:
 
     first.execute("private_value = 41")
 
-    assert "private_value' is not defined" in str(second.execute("SUBMIT(answer=str(private_value))"))
+    with pytest.raises(CodeExecutionError, match=r"private_value.*not defined"):
+        second.execute("SUBMIT(answer=str(private_value))")
     result = first.execute("SUBMIT(answer=str(private_value + 1))")
     assert isinstance(result, FinalOutput)
     assert result.output == {"answer": "42"}
@@ -210,6 +215,8 @@ def test_shutdown_stops_broker_and_rejects_further_execute() -> None:
 
 
 def test_host_tool_public_errors_are_sanitized() -> None:
+    from dspy.primitives.code_interpreter import CodeExecutionError
+
     from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
 
     def leaky_tool() -> str:
@@ -220,10 +227,10 @@ def test_host_tool_public_errors_are_sanitized() -> None:
     interp.output_fields = [{"name": "answer", "type": "str"}]
     interp.start()
 
-    result = interp.execute("leaky()")
+    with pytest.raises(CodeExecutionError) as caught:
+        interp.execute("leaky()")
 
-    message = str(result)
-    assert message.startswith("[Error]")
+    message = str(caught.value)
     assert "sk-secret" not in message
     assert "/tmp/secret" not in message
 

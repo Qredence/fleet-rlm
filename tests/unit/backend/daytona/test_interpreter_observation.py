@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pytest
+from dspy.primitives.code_interpreter import CodeExecutionError
 
 from fleet_rlm.daytona.broker_source import FINAL_OUTPUT_MARKER
 from fleet_rlm.daytona.errors import DaytonaAdapterError
@@ -209,7 +210,9 @@ def test_interpreter_keeps_repair_details_private_and_projects_recursive_call_co
 
     interpreter.execute("value = llm_query('private prompt')\n_out = 'done'")
     interpreter.execute("values = llm_query_batched(['one', 'two'])\n_out = 'done'")
-    error = interpreter.execute("missing_name + 1")
+    with pytest.raises(CodeExecutionError) as caught:
+        interpreter.execute("missing_name + 1")
+    error = str(caught.value)
 
     started = [item for item in observed if isinstance(item, ToolStarted)]
     completed = [item for item in observed if isinstance(item, ToolCompleted)]
@@ -220,7 +223,7 @@ def test_interpreter_keeps_repair_details_private_and_projects_recursive_call_co
     assert [item.output for item in completed] == [{}, {}]
     assert "private prompt" not in str(started)
     assert "private result" not in str(completed)
-    assert error.startswith("[Error]")
+    assert error.startswith("name 'missing_name'")
     error_outputs = [item.output for item in observed if isinstance(item, RLMOutput)]
     assert error_outputs[-1] == "Execution error"
     assert "missing_name" not in error_outputs[-1]
@@ -267,14 +270,16 @@ def test_empty_code_returns_one_repair_feedback_then_stops_the_turn() -> None:
     interpreter = DaytonaCodeInterpreter(backend=backend)
     interpreter.bind_observer(observed.append, max_chars=1_000)
 
-    first = interpreter.execute(" \n\t")
+    with pytest.raises(CodeExecutionError) as first_error:
+        interpreter.execute(" \n\t")
 
-    assert first == "[Error] No executable code was provided; execute useful Python or call SUBMIT."
+    assert str(first_error.value) == "No executable code was provided; execute useful Python or call SUBMIT."
     assert backend.calls == 0
-    second = interpreter.execute("")
+    with pytest.raises(CodeExecutionError) as second_error:
+        interpreter.execute("")
 
-    assert second == (
-        "[Error] Repeated interpreter action produced no progress. "
+    assert str(second_error.value) == (
+        "Repeated interpreter action produced no progress. "
         "Choose a different action, use the existing output, or call SUBMIT."
     )
     assert backend.calls == 0
@@ -306,10 +311,11 @@ def test_repeated_interpreter_action_allows_one_bounded_repair() -> None:
     interpreter.bind_observer(lambda _detail: None)
 
     assert interpreter.execute("_out = 'same'") == "same"
-    repair = interpreter.execute("_out = 'same'")
+    with pytest.raises(CodeExecutionError) as repair_error:
+        interpreter.execute("_out = 'same'")
 
-    assert repair == (
-        "[Error] Repeated interpreter action produced no progress. "
+    assert str(repair_error.value) == (
+        "Repeated interpreter action produced no progress. "
         "Choose a different action, use the existing output, or call SUBMIT."
     )
     with pytest.raises(RunNoProgressError, match="repeated tool calls made no progress"):
@@ -329,9 +335,11 @@ def test_f_string_backslash_syntax_error_gets_focused_native_repair_feedback() -
 
     interpreter = DaytonaCodeInterpreter(backend=SyntaxBackend())
 
-    result = interpreter.execute("generated_f_string_code")
+    with pytest.raises(CodeExecutionError) as caught:
+        interpreter.execute("generated_f_string_code")
+    result = str(caught.value)
 
-    assert result.startswith("[Error]")
+    assert result.startswith("SyntaxError:")
     assert "f-string expression part cannot include a backslash" in result
     assert "Build the escaped fragment before the f-string expression" in result
 

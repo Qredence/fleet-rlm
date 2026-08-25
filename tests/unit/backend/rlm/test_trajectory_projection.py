@@ -108,6 +108,49 @@ def test_trajectory_reconciliation_replaces_live_details_without_duplicates() ->
     )
 
 
+def test_trajectory_reconciliation_inserts_missing_earlier_step_before_later_live_step() -> None:
+    from fleet_rlm.rlm.dspy_contract import TrajectoryStep
+    from fleet_rlm.rlm.events import RLMCode, RLMOutput, RLMReasoning, StepFinished, StepStarted
+    from fleet_rlm.rlm.trajectory_projection import reconcile_trajectory
+
+    details = [
+        StepStarted(2),
+        RLMReasoning("live reasoning 2", 2),
+        RLMCode("live code 2", 2),
+        RLMOutput("live output 2", 2),
+        StepFinished(2),
+    ]
+
+    emissions = reconcile_trajectory(
+        details,
+        (
+            TrajectoryStep(1, "native reasoning 1", "native code 1", "native output 1"),
+            TrajectoryStep(2, "live reasoning 2", "live code 2", "live output 2"),
+        ),
+        max_chars=100,
+    )
+
+    assert details == [
+        StepStarted(1),
+        RLMReasoning("native reasoning 1", 1),
+        RLMCode("native code 1", 1),
+        RLMOutput("native output 1", 1),
+        StepFinished(1),
+        StepStarted(2),
+        RLMReasoning("live reasoning 2", 2),
+        RLMCode("live code 2", 2),
+        RLMOutput("live output 2", 2),
+        StepFinished(2),
+    ]
+    assert emissions == [
+        StepStarted(1),
+        RLMReasoning("native reasoning 1", 1),
+        RLMCode("native code 1", 1),
+        RLMOutput("native output 1", 1),
+        StepFinished(1),
+    ]
+
+
 def test_trajectory_reconciliation_replaces_incremental_output_with_one_canonical_part() -> None:
     from fleet_rlm.rlm.dspy_contract import TrajectoryStep
     from fleet_rlm.rlm.events import RLMCode, RLMOutput, RLMReasoning, StepFinished, StepStarted

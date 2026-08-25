@@ -13,6 +13,7 @@ import inspect
 import json
 import keyword
 import logging
+import math
 import secrets
 import time
 import uuid
@@ -30,6 +31,7 @@ from fleet_rlm.daytona.broker_source import (
     TOOL_WRAPPER_TEMPLATE,
     extract_final_payload,
     remote_submit_setup_code,
+    reset_binding_source,
 )
 from fleet_rlm.daytona.errors import (
     DaytonaAdapterError,
@@ -39,6 +41,7 @@ from fleet_rlm.daytona.errors import (
     provider_status_code,
     sanitize_provider_message,
 )
+from fleet_rlm.json_types import validate_json_value
 
 if TYPE_CHECKING:
     from fleet_rlm.daytona.interpreter import BackendExecutionResult
@@ -188,9 +191,9 @@ class DaytonaHttpToolBroker:
 
     def register_tools(self, tools: Mapping[str, Callable[..., Any]]) -> None:
         self.ensure_started()
+        self._pending_wrappers.append(reset_binding_source(tuple(self._injected_tools)))
+        self._injected_tools.clear()
         for name, fn in tools.items():
-            if name in self._injected_tools:
-                continue
             if not name.isidentifier() or keyword.iskeyword(name):
                 msg = f"invalid tool name: {name}"
                 raise DaytonaAdapterError(message=msg, cause_type="InvalidToolNameError")
@@ -213,12 +216,24 @@ class DaytonaHttpToolBroker:
     def _encode_value(value: Any) -> Any:
         if isinstance(value, bytes):
             return {"__fleet_type__": "bytes", "data": base64.b64encode(value).decode("ascii")}
-        if value is None or isinstance(value, (bool, int, float, str)):
+        if value is None or isinstance(value, (bool, int, str)):
+            return value
+        if isinstance(value, float):
+            if not math.isfinite(value):
+                raise DaytonaAdapterError(
+                    message="sandbox variable type is unsupported",
+                    cause_type="InterpreterVariableError",
+                )
             return value
         if isinstance(value, (list, tuple)):
             return [DaytonaHttpToolBroker._encode_value(item) for item in value]
         if isinstance(value, Mapping):
-            return {str(key): DaytonaHttpToolBroker._encode_value(item) for key, item in value.items()}
+            if any(not isinstance(key, str) for key in value):
+                raise DaytonaAdapterError(
+                    message="sandbox variable type is unsupported",
+                    cause_type="InterpreterVariableError",
+                )
+            return {key: DaytonaHttpToolBroker._encode_value(item) for key, item in value.items()}
         raise DaytonaAdapterError(
             message="sandbox variable type is unsupported",
             cause_type="InterpreterVariableError",
@@ -239,9 +254,15 @@ class DaytonaHttpToolBroker:
         if self._stopped:
             raise DaytonaAdapterError(message="broker already stopped", cause_type="InterpreterLifecycleError")
         execution_id = uuid.uuid4().hex if on_stdout is not None else None
+        raw_variables = variables or {}
+        if any(not isinstance(key, str) for key in raw_variables):
+            raise DaytonaAdapterError(
+                message="sandbox variable type is unsupported",
+                cause_type="InterpreterVariableError",
+            )
         payload = {
             "code": code,
-            "variables": {str(key): self._encode_value(value) for key, value in (variables or {}).items()},
+            "variables": {key: self._encode_value(value) for key, value in raw_variables.items()},
         }
         if execution_id is not None:
             payload["execution_id"] = execution_id
@@ -559,6 +580,7 @@ class DaytonaHttpToolBroker:
         kwargs = dict(item.get("kwargs") or {})
         try:
             result = tool_executor(name, args, kwargs)
+            validate_json_value(result, path=f"Tool {name} result")
             body: dict[str, Any] = {"id": call_id, "lease_token": lease, "result": result}
         except Exception as exc:
             message = sanitize_provider_message(str(exc))
@@ -573,7 +595,7 @@ class DaytonaHttpToolBroker:
         try:
             self._http().post(
                 "/result",
-                content=json.dumps(body).encode("utf-8"),
+                content=json.dumps(body, allow_nan=False).encode("utf-8"),
                 headers={"Content-Type": "application/json"},
                 timeout=10,
             )

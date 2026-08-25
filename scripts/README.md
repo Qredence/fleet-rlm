@@ -15,6 +15,7 @@
 | `live_phase1_stream_verify.py` | Run the narrow one-Turn Phase 1 native DSPy stream canary on the normal Daytona profile |
 | `live_phase2_recursive_verify.py` | Run the narrow Phase 2 dedicated-child native DSPy canary on `daytona-recursive` |
 | `live_daytona_verify.py` | Run the opt-in Daytona MVP proof and validate its bounded JSON receipt |
+| `live_p35d_certification.py` | Run the serial P35-D credentialed live certification matrix and aggregate ignored evidence receipts |
 | `live_daytona_tunnel_probe.py` | Run the development-only strict Daytona egress smoke through two Cloudflare HTTPS origins |
 | `benchmark_daytona_lifecycle.py` | Benchmark full Daytona create-through-first-execution lifecycle and select retained versus per-Turn mode |
 | `p13_memory_relevance_cost.py` | Measure live Daytona relevance-aware Workspace Memory preparation cost against the P7 Turn preparation baseline |

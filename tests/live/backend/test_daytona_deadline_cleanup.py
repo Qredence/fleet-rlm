@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 from uuid import UUID, uuid4
 
+import dspy
 import pytest
 from fastapi.testclient import TestClient
 
@@ -16,6 +17,8 @@ from fleet_rlm.app import create_app
 from fleet_rlm.config import Settings
 from fleet_rlm.daytona.http_broker import DaytonaHttpToolBroker
 from fleet_rlm.daytona.session_manager import get_active_lease_registry
+from fleet_rlm.rlm.model_bundle import RLMModelBundle
+from tests.live.backend._p35d_evidence import candidate_identity, write_receipt
 from tests.live.backend.test_fleet_rlm_daytona_mvp import (
     _live_settings,
     _strict_cleanup,
@@ -27,6 +30,14 @@ _TURN_TIMEOUT_SECONDS = 45
 _TIMEOUT_PROMPT = (
     "Run exactly one Python code cell containing only print('deadline-probe'). Do not call SUBMIT or any tools."
 )
+
+
+class _DeadlineRootLM(dspy.utils.DummyLM):
+    def __init__(self) -> None:
+        super().__init__(
+            [{"reasoning": "run the bounded timeout probe", "code": "print('deadline-probe')"}],
+            adapter=dspy.JSONAdapter(),
+        )
 
 
 def _install_blocking_execute_code(
@@ -107,6 +118,9 @@ def test_daytona_deadline_cleanup_through_fastapi(
         inventory = app.state.runtime_inventory
         resources = inventory.run_environment_resources
         assert resources is not None
+        preparation = inventory.run_preparation
+        assert preparation is not None
+        preparation._models = RLMModelBundle(_DeadlineRootLM(), dspy.utils.DummyLM([{"answer": "unused"}]))
         session_id: UUID | None = None
         try:
             created = client.post("/api/sessions", json={"title": "Daytona live deadline canary"})
@@ -140,3 +154,16 @@ def test_daytona_deadline_cleanup_through_fastapi(
             assert client.portal is not None
             cleanup_failures = client.portal.call(_strict_cleanup, resources, sandbox_ids, settings.volume_name)
     assert cleanup_failures == ()
+    write_receipt(
+        {
+            "schema": "fleet.p35d-timeout/v1",
+            "candidate": candidate_identity(),
+            "assertions": {
+                "timeout_observed": True,
+                "admission_restored": True,
+                "lease_released": True,
+            },
+            "cleanup": {"confirmed_absent": True, "admission_restored": True},
+            "passed": True,
+        }
+    )

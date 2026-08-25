@@ -6,6 +6,7 @@ import tomllib
 from pathlib import Path
 
 import pytest
+from dspy.primitives.code_interpreter import CodeExecutionError
 
 from fleet_rlm.config import Settings
 from fleet_rlm.daytona.interpreter import (
@@ -61,10 +62,12 @@ def test_error_feedback_includes_capped_stderr() -> None:
 
     interpreter = DaytonaCodeInterpreter(backend=_StderrBackend(), execution_output_cap=300)
 
-    result = interpreter.execute("missing + 1")
+    with pytest.raises(CodeExecutionError) as caught:
+        interpreter.execute("missing + 1")
+    result = str(caught.value)
 
     assert isinstance(result, str)
-    assert result.startswith("[Error] NameError")
+    assert result.startswith("NameError")
     assert "stderr:" in result
     assert len(result) < 450
     assert "characters omitted" in result

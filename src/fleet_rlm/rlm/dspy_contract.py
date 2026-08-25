@@ -23,7 +23,9 @@ from pydantic import TypeAdapter
 from pydantic_core import PydanticSerializationError
 
 from fleet_rlm.json_types import JsonValue as JsonValue
+from fleet_rlm.json_types import strict_json_dumps
 from fleet_rlm.rlm.delegation_metrics import DelegationMetrics, normalize_lm_token_usage
+from fleet_rlm.rlm.dspy_interpreter_contract import DAYTONA_EXECUTION_INSTRUCTIONS
 from fleet_rlm.rlm.errors import RLMConfigError
 from fleet_rlm.rlm.sanitize import truncate_public_text, validate_declared_public_value
 
@@ -113,7 +115,12 @@ class PredictionResult:
         if not isinstance(encoded, Mapping):
             raise PredictionOutputError
         object.__setattr__(self, "outputs", encoded)
-        if not self.schema_id or not self.schema_version:
+        if (
+            not isinstance(self.schema_id, str)
+            or not self.schema_id.strip()
+            or not isinstance(self.schema_version, str)
+            or not self.schema_version.strip()
+        ):
             raise PredictionOutputError
 
 
@@ -155,7 +162,13 @@ def prediction_result(
     outputs: dict[str, JsonValue] = {}
     try:
         for name, field in signature.output_fields.items():
-            raw = getattr(prediction, name)
+            try:
+                raw = getattr(prediction, name)
+            except AttributeError:
+                if field.is_required():
+                    raise
+                factory = field.default_factory
+                raw = cast(Callable[[], Any], factory)() if factory is not None else field.default
             adapter = TypeAdapter(field.rebuild_annotation())
             validated = adapter.validate_python(raw)
             encoded = adapter.dump_python(validated, mode="json")
@@ -978,9 +991,18 @@ def bind_native_rlm_observer(
         predictor.callbacks.append(_RLMReasoningCallback(observer, max_chars=max_chars))
 
 
-def _missing_caller_owned_interpreter() -> Any:
-    """Fail closed when native Fleet execution omits its caller-owned interpreter."""
+def daytona_provider_contract() -> Any:
+    """Fail closed if DSPy attempts to construct a production interpreter.
+
+    DSPy reads ``execution_instructions`` from this zero-argument callable while
+    constructing its action Signature.  The callable never creates a provider
+    resource; production always passes the already-acquired interpreter to
+    ``RLM.acall``.
+    """
     raise RLMConfigError("native RLM execution requires a caller-owned interpreter")
+
+
+cast(Any, daytona_provider_contract).execution_instructions = DAYTONA_EXECUTION_INSTRUCTIONS
 
 
 def build_native_rlm(
@@ -998,7 +1020,7 @@ def build_native_rlm(
     responsibility. The fallback factory prevents an omitted interpreter from
     silently creating DSPy's default interpreter.
     """
-    return dspy.RLM(
+    rlm = dspy.RLM(
         signature,
         max_iters=options.max_iters,
         max_llm_calls=options.max_llm_calls,
@@ -1006,8 +1028,41 @@ def build_native_rlm(
         verbose=verbose,
         tools=list(tools) if tools is not None else None,
         sub_lm=sub_lm,
-        interpreter_factory=_missing_caller_owned_interpreter,
+        interpreter_factory=daytona_provider_contract,
     )
+
+    # DSPy 3.3.1 intentionally exposes only simple output annotations to the
+    # interpreter.  Fleet enriches that same public metadata with required
+    # status and JSON defaults so the caller-owned broker can preserve the
+    # Signature contract without implementing a second result kernel.
+    def build_output_fields() -> list[dict[str, Any]]:
+        output_fields: list[dict[str, Any]] = []
+        for name, field in rlm.signature.output_fields.items():
+            metadata: dict[str, Any] = {"name": name, "required": field.is_required()}
+            annotation = getattr(field, "annotation", str)
+            if annotation in {str, int, float, bool}:
+                metadata["type"] = annotation.__name__
+            if not field.is_required():
+                default = field.default
+                factory = field.default_factory
+                if factory is not None:
+                    default = cast(Callable[[], Any], factory)()
+                metadata["default_json"] = strict_json_dumps(default)
+            output_fields.append(metadata)
+        return output_fields
+
+    # Keep construction side-effect free and use the native injection path
+    # unchanged; this assignment is consumed by DSPy's public
+    # ``_inject_execution_context`` on each caller-owned invocation.
+    original_inject = rlm._inject_execution_context
+
+    def inject_with_fleet_metadata(interpreter: Any, execution_tools: dict[str, Any]) -> None:
+        original_inject(interpreter, execution_tools)
+        if hasattr(interpreter, "output_fields"):
+            interpreter.output_fields = build_output_fields()
+
+    rlm._inject_execution_context = inject_with_fleet_metadata
+    return rlm
 
 
 def observed_usage(prediction: Any, *, duration_ms: int) -> RLMUsage:

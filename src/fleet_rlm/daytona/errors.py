@@ -29,6 +29,9 @@ _SECRET_PATTERNS = (
     re.compile(r"/(?:Users|Volumes|private|var|etc|opt|root|mnt|srv)/[^\s]+"),
     re.compile(r"sk-[A-Za-z0-9_-]+"),
 )
+_URL_PATTERN = re.compile(r"(?i)\bhttps?://[^\s\"'<>]+")
+_ANSI_PATTERN = re.compile(r"\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07]*(?:\x07|\x1b\\)|.)")
+_CONTROL_PATTERN = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]")
 
 # Bounded HTTP status classes that may appear in already-sanitized provider
 # text when the exception carries no structured ``status_code`` metadata (for
@@ -48,10 +51,13 @@ def _sanitized_status(exc: object) -> int | None:
 
 
 def sanitize_provider_message(raw: str) -> str:
-    """Strip credentials and private paths from provider error text."""
+    """Strip credentials, URLs, and control sequences from provider error text."""
     message = raw.strip() or "Daytona provider error"
     for pattern in _SECRET_PATTERNS:
         message = pattern.sub("[redacted]", message)
+    message = _URL_PATTERN.sub("[redacted-url]", message)
+    message = _ANSI_PATTERN.sub("", message)
+    message = _CONTROL_PATTERN.sub(" ", message)
     return message
 
 

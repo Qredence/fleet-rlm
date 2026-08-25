@@ -275,7 +275,7 @@ def test_projection_defect_fails_closed_without_changing_tool_result() -> None:
     assert observed[1].output == {}
 
 
-def test_observe_tool_rejects_non_tools_and_awaitable_results() -> None:
+def test_observe_tool_rejects_non_tools_and_resolves_awaitable_results() -> None:
     observed: list[Any] = []
 
     def plain() -> str:
@@ -289,9 +289,8 @@ def test_observe_tool_rejects_non_tools_and_awaitable_results() -> None:
         return "unsupported"
 
     wrapped = observe_tool(dspy.Tool(async_tool), observed.append, ToolEventView())
-    with pytest.raises(TypeError, match="async host tools"):
-        wrapped()
-    assert [type(item) for item in observed] == [ToolStarted, ToolFailed]
+    assert wrapped() == "unsupported"
+    assert [type(item) for item in observed] == [ToolStarted, ToolCompleted]
 
 
 def test_no_progress_guard_closes_the_tool_observation_before_failing() -> None:

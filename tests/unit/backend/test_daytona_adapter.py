@@ -43,11 +43,14 @@ def test_execute_returns_string_and_preserves_state() -> None:
 
 
 def test_execute_returns_user_code_errors_for_rlm_repair() -> None:
+    from dspy.primitives.code_interpreter import CodeExecutionError
+
     from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
 
     interp = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())
 
-    assert interp.execute("metrics = {'precision': 0.9}\nprint(metrics['prec'])") == "[Error] 'prec'"
+    with pytest.raises(CodeExecutionError, match="'prec'"):
+        interp.execute("metrics = {'precision': 0.9}\nprint(metrics['prec'])")
 
 
 def test_shutdown_is_idempotent() -> None:

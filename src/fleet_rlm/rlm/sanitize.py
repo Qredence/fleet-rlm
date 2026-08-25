@@ -48,7 +48,7 @@ _DSNISH = re.compile(
 # Host paths
 _PATHISH = re.compile(
     r"(?i)("
-    r"/home/\S+|/Users/\S+|/var/\S+|/tmp/\S+|"
+    r"/(?:home|Users|Volumes|private|var|tmp|etc|opt|root|mnt|srv)/\S+|"
     r"[A-Za-z]:\\[^\s]+|"
     r"/home/daytona/\S+"
     r")"
@@ -57,6 +57,10 @@ _PATHISH = re.compile(
 _STACKISH = re.compile(r"(?i)(traceback \(most recent call last\)|File \"[^\"]+\", line \d+)")
 # Prompt-ish dumps
 _PROMPTISH = re.compile(r"(?i)(system prompt|you are a helpful|<<<instructions>>>|BEGIN SYSTEM)")
+_ANSI_ESCAPE = re.compile(r"\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07]*(?:\x07|\x1b\\)|.)")
+_PRIVATE_MARKER = re.compile(r"__FLEET_[A-Z0-9_]+__")
+_URLISH = re.compile(r"(?i)\bhttps?://[^\s\"'<>]+")
+_UNSAFE_CONTROL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]")
 
 # Declared model outputs are never rewritten. These patterns therefore live apart
 # from the error/tool-detail redactors above and only identify concrete disclosure
@@ -125,6 +129,22 @@ def sanitize_public_text(text: str, *, max_len: int = 10_000) -> str:
     if len(cleaned) > max_len:
         cleaned = cleaned[: max_len - 3] + "..."
     return cleaned
+
+
+def sanitize_repair_text(text: str, *, max_len: int = 512) -> str:
+    """Bound repair context while removing private and control-plane content.
+
+    Repair text is sent back into the model, but it is also retained in the
+    native trajectory. Keep the useful exception category/message while
+    excluding URLs, stack dumps, Fleet framing markers, and terminal control
+    sequences from every later projection.
+    """
+    cleaned = _ANSI_ESCAPE.sub("", text)
+    cleaned = _URLISH.sub("[redacted-url]", cleaned)
+    cleaned = _PRIVATE_MARKER.sub("[redacted-marker]", cleaned)
+    cleaned = _STACKISH.sub("[redacted-traceback]", cleaned)
+    cleaned = _UNSAFE_CONTROL.sub(" ", cleaned)
+    return sanitize_public_text(cleaned, max_len=max_len)
 
 
 def truncate_public_text(text: str, *, max_len: int = 10_000) -> str:

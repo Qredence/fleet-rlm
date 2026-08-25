@@ -7,11 +7,14 @@ import json
 from collections.abc import Mapping
 from typing import Any
 
+from fleet_rlm.json_types import validate_json_value
+
 FINAL_OUTPUT_MARKER = "__FLEET_FINAL_OUTPUT__"
 
 
 def build_submit_setup_code(output_fields: list[dict[str, Any]] | None) -> str:
-    return _typed_submit_source(output_fields) if output_fields else _generic_submit_source()
+    body = _typed_submit_source(output_fields) if output_fields else _generic_submit_source()
+    return f"{_strict_submit_helpers_source()}\n\n{body}"
 
 
 def remote_submit_setup_code(output_fields: list[dict[str, Any]] | None) -> str:
@@ -40,12 +43,25 @@ class FleetFinalOutputError(Exception):
 """.strip()
 
 
+def reset_binding_source(tool_names: list[str] | tuple[str, ...]) -> str:
+    """Remove all prior host bindings before installing a new invocation set."""
+    names = repr(tuple(sorted(set(tool_names))))
+    return f"""
+for _fleet_name in {names}:
+    globals().pop(_fleet_name, None)
+globals().pop("SUBMIT", None)
+""".strip()
+
+
 def _generic_submit_source() -> str:
     return """
 import base64 as _base64
 
 def SUBMIT(**kwargs):
-    payload = _base64.b64encode(_json.dumps(kwargs, ensure_ascii=False).encode("utf-8")).decode("ascii")
+    _fleet_validate_json(kwargs)
+    payload = _base64.b64encode(
+        _json.dumps(kwargs, ensure_ascii=False, allow_nan=False).encode("utf-8")
+    ).decode("ascii")
     print(f"{FINAL_OUTPUT_MARKER}{payload}{FINAL_OUTPUT_MARKER}")
     raise FleetFinalOutputError(kwargs)
 """.strip()
@@ -65,12 +81,25 @@ def _typed_submit_source(output_fields: list[dict[str, Any]]) -> str:
     signature_parts: list[str] = []
     validation_parts: list[str] = []
     result_parts: list[str] = []
-    for field in output_fields:
+    default_values: dict[str, str] = {}
+    ordered_fields = [
+        *[field for field in output_fields if bool(field.get("required", True))],
+        *[field for field in output_fields if not bool(field.get("required", True))],
+    ]
+    for field in ordered_fields:
         name = str(field.get("name") or "").strip()
         if not name:
             continue
         type_hint = str(field.get("type") or "").strip()
-        signature_parts.append(f"{name}: {type_hint}" if type_hint else name)
+        required = bool(field.get("required", True))
+        parameter = f"{name}: {type_hint}" if type_hint else name
+        if not required:
+            parameter += "=_FLEET_MISSING"
+            default_json = field.get("default_json")
+            if not isinstance(default_json, str):
+                raise ValueError(f"typed output default for {name} is not JSON-compatible")
+            default_values[name] = default_json
+        signature_parts.append(parameter)
         if type_hint in {"str", "builtins.str"}:
             message = (
                 f"SUBMIT field {name} must be a string; serialize mappings/lists with "
@@ -82,6 +111,13 @@ def _typed_submit_source(output_fields: list[dict[str, Any]]) -> str:
                     f"    raise TypeError({message!r})",
                 )
             )
+        if not required:
+            validation_parts.extend(
+                (
+                    f"if {name} is _FLEET_MISSING:",
+                    f"    {name} = _fleet_default({name!r})",
+                )
+            )
         result_parts.append(f'"{name}": {name}')
     signature = ", ".join(signature_parts) or "**kwargs"
     body_lines = [
@@ -89,14 +125,48 @@ def _typed_submit_source(output_fields: list[dict[str, Any]]) -> str:
         f"result = {{{', '.join(result_parts)}}}" if result_parts else "result = dict(kwargs)",
     ]
     body = "\n    ".join(body_lines)
+    defaults = repr(default_values)
     return f"""
 import base64 as _base64
 
+_FLEET_MISSING = object()
+_FLEET_DEFAULTS = {defaults}
+
+def _fleet_default(name):
+    return _json.loads(_FLEET_DEFAULTS[name])
+
 def SUBMIT({signature}):
     {body}
-    payload = _base64.b64encode(_json.dumps(result, ensure_ascii=False).encode("utf-8")).decode("ascii")
+    _fleet_validate_json(result)
+    payload = _base64.b64encode(
+        _json.dumps(result, ensure_ascii=False, allow_nan=False).encode("utf-8")
+    ).decode("ascii")
     print(f"{{FINAL_OUTPUT_MARKER}}{{payload}}{{FINAL_OUTPUT_MARKER}}")
     raise FleetFinalOutputError(result)
+""".strip()
+
+
+def _strict_submit_helpers_source() -> str:
+    """Return private remote helpers for strict JSON submission."""
+    return """
+def _fleet_validate_json(value):
+    if value is None or isinstance(value, (bool, int, str)):
+        return
+    if isinstance(value, float):
+        if not __import__("math").isfinite(value):
+            raise TypeError("SUBMIT contains a non-finite number")
+        return
+    if isinstance(value, dict):
+        for key, item in value.items():
+            if not isinstance(key, str):
+                raise TypeError("SUBMIT contains a non-string mapping key")
+            _fleet_validate_json(item)
+        return
+    if isinstance(value, (list, tuple)):
+        for item in value:
+            _fleet_validate_json(item)
+        return
+    raise TypeError("SUBMIT contains an unsupported value")
 """.strip()
 
 
@@ -123,7 +193,10 @@ def extract_final_payload(stdout: str, *, marker: str = FINAL_OUTPUT_MARKER) -> 
 
 def final_output_frame(value: Mapping[str, Any], *, marker: str = FINAL_OUTPUT_MARKER) -> str:
     """Return the exact private stdout frame emitted by ``SUBMIT``."""
-    encoded = base64.b64encode(json.dumps(dict(value), ensure_ascii=False).encode("utf-8")).decode("ascii")
+    validate_json_value(value, path="SUBMIT")
+    encoded = base64.b64encode(json.dumps(dict(value), ensure_ascii=False, allow_nan=False).encode("utf-8")).decode(
+        "ascii"
+    )
     return f"{marker}{encoded}{marker}"
 
 
@@ -134,6 +207,7 @@ import hashlib
 import hmac
 import io
 import json
+import math
 import os
 import threading
 import time
@@ -164,7 +238,7 @@ def _read_json(handler):
 
 
 def _send_json(handler, data, status=200):
-    body = json.dumps(data).encode("utf-8")
+    body = json.dumps(data, allow_nan=False).encode("utf-8")
     handler.send_response(status)
     handler.send_header("Content-Type", "application/json")
     handler.send_header("Content-Length", str(len(body)))
@@ -178,10 +252,34 @@ def _decode_value(value):
     if isinstance(value, list):
         return [_decode_value(item) for item in value]
     if isinstance(value, dict):
-        return {str(key): _decode_value(item) for key, item in value.items()}
+        if any(not isinstance(key, str) for key in value):
+            raise ValueError("unsupported variable mapping key")
+        return {key: _decode_value(item) for key, item in value.items()}
+    if isinstance(value, float) and not math.isfinite(value):
+        raise ValueError("unsupported non-finite variable")
     if value is None or isinstance(value, (bool, int, float, str)):
         return value
     raise ValueError("unsupported variable value")
+
+
+def _validate_json_value(value):
+    if value is None or isinstance(value, (bool, int, str)):
+        return
+    if isinstance(value, float):
+        if not math.isfinite(value):
+            raise ValueError("unsupported non-finite value")
+        return
+    if isinstance(value, dict):
+        for key, item in value.items():
+            if not isinstance(key, str):
+                raise ValueError("unsupported mapping key")
+            _validate_json_value(item)
+        return
+    if isinstance(value, list):
+        for item in value:
+            _validate_json_value(item)
+        return
+    raise ValueError("unsupported value")
 
 
 def _fleet_load_context_manifest(raw_manifest):
@@ -428,7 +526,13 @@ class _BrokerHandler(BaseHTTPRequestHandler):
                 if "error" in data:
                     _results[call_id] = {"error": data.get("error")}
                 else:
-                    _results[call_id] = data.get("result")
+                    result = data.get("result")
+                    try:
+                        _validate_json_value(result)
+                    except ValueError:
+                        _send_json(self, {"error": "tool result is not JSON-compatible"}, 422)
+                        return
+                    _results[call_id] = result
                 req["lease_token"] = None
                 event = req.get("event")
             if event is not None:
@@ -497,4 +601,5 @@ __all__ = [
     "extract_final_payload",
     "final_output_frame",
     "remote_submit_setup_code",
+    "reset_binding_source",
 ]

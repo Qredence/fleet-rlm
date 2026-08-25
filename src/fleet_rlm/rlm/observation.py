@@ -11,6 +11,9 @@ from fleet_rlm.rlm.context import RLMExecutionContext
 from fleet_rlm.rlm.errors import RunCancelledError
 from fleet_rlm.rlm.events import (
     EventRecorder,
+    RLMCode,
+    RLMOutput,
+    RLMReasoning,
     RuntimeEvent,
     RuntimeEventDetail,
     SkillActivated,
@@ -213,6 +216,8 @@ class ObservationSession:
         self._recorder = EventRecorder(run_id, session_id)
         self._relay = DetailRelay(maxsize=maxsize)
         self._details: list[ExecutionDetail] = []
+        self._pending_step_details: list[RuntimeEventDetail] = []
+        self._reasoning_steps: set[int] = set()
 
     @property
     def details(self) -> list[ExecutionDetail]:
@@ -255,6 +260,41 @@ class ObservationSession:
         """Record a stream envelope without treating it as execution detail."""
         return self._recorder.record(detail)
 
+    def _order_live_detail(self, detail: RuntimeEventDetail) -> tuple[RuntimeEventDetail, ...]:
+        """Hold step output until its parsed reasoning is ready for publication.
+
+        Daytona execution callbacks and DSPy callbacks cross the worker/event-loop
+        boundary independently.  The callbacks can therefore arrive in reverse
+        scheduling order even though DSPy parsed the action before executing it.
+        Buffering only the step-scoped details restores the public contract
+        ``reasoning -> code -> output -> finish`` without mirroring DSPy history.
+        """
+        if isinstance(detail, RLMReasoning):
+            step = detail.step
+            if step is None:
+                return (detail,)
+            self._reasoning_steps.add(step)
+            released = [detail]
+            retained: list[RuntimeEventDetail] = []
+            for pending in self._pending_step_details:
+                if getattr(pending, "step", None) == step:
+                    released.append(pending)
+                else:
+                    retained.append(pending)
+            self._pending_step_details = retained
+            return tuple(released)
+        if isinstance(detail, (RLMCode, RLMOutput, StepFinished)):
+            step = getattr(detail, "step", None)
+            if step is not None and step not in self._reasoning_steps:
+                self._pending_step_details.append(detail)
+                return ()
+        return (detail,)
+
+    def _flush_pending_step_details(self) -> tuple[RuntimeEventDetail, ...]:
+        pending = tuple(self._pending_step_details)
+        self._pending_step_details.clear()
+        return pending
+
     async def stream_worker(
         self,
         worker: RLMWorkerHandle[Any],
@@ -264,8 +304,12 @@ class ObservationSession:
         """Yield live worker observations, final drain details, and overflow warning."""
         monitor = WorkerMonitor(worker, self._relay, context, drain_capabilities)
         async for detail in monitor.stream():
-            yield self.record(detail)
+            for ordered in self._order_live_detail(detail):
+                yield self.record(ordered)
         for detail in (*drain_capabilities(), *self._relay.drain()):
+            for ordered in self._order_live_detail(detail):
+                yield self.record(ordered)
+        for detail in self._flush_pending_step_details():
             yield self.record(detail)
         if self._relay.overflowed:
             yield self.record(WarningEvent("some detailed execution events were omitted"))
