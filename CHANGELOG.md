@@ -2,6 +2,54 @@
 
 All notable changes to this project are documented in this file.
 
+## [0.7.4] - 2026-08-25
+
+### Changed
+
+- **Change:** Pinned the runtime to the published `dspy==3.3.1` release with a
+  fail-closed pre-bind version guard, and adopted the official `gepa==0.1.4`
+  optimizer contracts for the bounded development smoke path.
+  **Outcome:** The certified DSPy composition is reproducible from PyPI, and
+  unflagged prerelease or patched installs fail closed before any listener
+  starts.
+- **Change:** Collapsed Turn ownership into `TurnCoordinator` under one
+  explicit ownership-deletion contract, and contracted recursive child
+  lease/cleanup to a single Daytona owner with a fenced child deadline.
+  **Outcome:** Run settlement, recovery, and child cleanup each have one
+  accountable owner; cancelled children cannot orphan sandboxes.
+- **Change:** Contracted native DSPy telemetry to the certified legacy path
+  and restored explicit workspace project hosts for the files surface.
+  **Outcome:** Live evidence flows through one certified path, and workspace
+  tool ownership is explicit per host.
+
+### Added
+
+- **Change:** Added the p35d live credentialed certification matrix with
+  callback-shadow parity, the native DSPy contract and error-taxonomy lanes,
+  and the Daytona interpreter seam proof.
+  **Outcome:** The certified composition is exercised against real provider
+  credentials with recorded receipts.
+- **Change:** Added the sealed p35e release certification gate bound to built
+  wheel/sdist artifact identity, plus the distribution artifact matrix.
+  **Outcome:** Release evidence covers exactly the artifacts published, not
+  reconstructed candidates.
+- **Change:** Added the p39c live recursion certification lanes and the P41
+  behavior-freeze gates with p41b terminal-cleanup and doctor-retention lanes.
+  **Outcome:** Recursive delegation, stream settlement, and operator evidence
+  retention are frozen against certified behavior.
+
+### Fixed
+
+- **Change:** Hardened volume and artifact integrity lanes, closed the
+  unawaited staging cleanup coroutine on supervisor-saturation fallback, and
+  hardened recovery cancellation.
+  **Outcome:** Failure paths settle deterministically without leaked tasks or
+  files.
+- **Change:** Closed a CodeQL `py/tarslip` alert in the packaging sdist lane
+  and addressed CI code-quality findings across the certified lanes.
+  **Outcome:** The scanned tree ships with no open high-severity alerts from
+  the release surfaces.
+
 ## [0.7.3] - 2026-08-20
 
 ### Changed

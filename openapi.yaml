@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: fleet-rlm
-  version: 0.7.3
+  version: 0.7.4
 paths:
   /api/sessions/{session_id}/turns:
     post:
