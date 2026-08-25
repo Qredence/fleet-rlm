@@ -88,9 +88,8 @@ clients cannot provide models, Signatures, or executable capabilities.
   `rlm.acall(interpreter, ...)` delegates request and response normalization to
   stock DSPy. Application code does not call LM `forward()` methods, construct
   provider-shaped requests, or opt into DSPy's experimental typed LM API while
-  the supported DSPy 3.3.x line is selected. The current lock resolves
-  the upstream `main` source at version 3.3.0; refresh the lock to capture newer
-  upstream commits.
+  the supported DSPy 3.3.x line is selected. The current lock resolves the
+  exact published registry release 3.3.1.
   See DSPy's
   [normalized LM API migration](https://dspy.ai/community/normalized-lm-api-migration/).
 - Do not replace the Turn-scoped adapter with global `dspy.configure()`.

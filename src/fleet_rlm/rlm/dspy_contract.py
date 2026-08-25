@@ -19,7 +19,6 @@ from typing import Any, TypeAlias, TypedDict, cast
 
 import dspy
 from dspy.utils.callback import BaseCallback
-from packaging.version import InvalidVersion, Version
 from pydantic import TypeAdapter
 from pydantic_core import PydanticSerializationError
 
@@ -322,22 +321,34 @@ def validate_rlm_usage(value: Mapping[str, object]) -> RLMUsage:
     )
 
 
-def assert_dspy_version() -> None:
-    """Fail composition before resources start when DSPy is not a supported 3.3.x contract.
+CERTIFIED_DSPY_VERSION = "3.3.1"
+"""The exact certified final DSPy release; the runtime fails closed on anything else."""
 
-    Patch releases within the 3.3 line are accepted; pre-releases and other
-    minors (3.4+) are rejected because the interpreter-injection seam is only
-    pinned to the 3.3 line.
+_VERSION_DISPLAY_LIMIT = 64
+
+
+class UncertifiedDSpyVersionError(RuntimeError):
+    """Closed, bounded failure when the installed DSPy is not the certified final release."""
+
+
+def assert_dspy_version() -> None:
+    """Fail composition before resources start unless DSPy is exactly ``3.3.1``.
+
+    The check is a literal string comparison against the certified final
+    published release, not PEP 440 specifier equality: neighboring patches
+    (``3.3.0``/``3.3.2``), prereleases (``3.3.1a1``/``rc1``/``dev1``), post
+    releases (``3.3.1.post1``), local-version builds (``3.3.1+local``), and
+    malformed strings all fail closed before any provider, database, or
+    Daytona resource is constructed.
     """
     installed = dspy.__version__
-    try:
-        version = Version(installed)
-    except InvalidVersion as exc:
-        raise RuntimeError(f"DSPy 3.3.x release is required; installed {installed}") from exc
-    if version.major != 3 or version.minor != 3:
-        raise RuntimeError(f"DSPy 3.3.x is required; installed {installed}")
-    if version.is_prerelease:
-        raise RuntimeError(f"DSPy 3.3.x release is required; installed {installed}")
+    if installed != CERTIFIED_DSPY_VERSION:
+        display = str(installed)
+        if len(display) > _VERSION_DISPLAY_LIMIT:
+            display = display[: _VERSION_DISPLAY_LIMIT - 1] + "…"
+        raise UncertifiedDSpyVersionError(
+            f"Fleet RLM requires exactly DSPy {CERTIFIED_DSPY_VERSION}; installed version is {display!r}"
+        )
 
 
 @dataclass(frozen=True, slots=True)

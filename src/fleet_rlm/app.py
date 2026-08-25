@@ -120,6 +120,12 @@ def create_app(
     Returns:
         FastAPI: The configured application instance.
     """
+    # The certified-DSPy runtime guard runs before any other startup work so a
+    # rejected runtime can never reach provider, database, or Daytona resource
+    # construction, nor bind a public listener.
+    from fleet_rlm.rlm.dspy_contract import assert_dspy_version
+
+    assert_dspy_version()
     _reject_retired_environment_variables()
     resolved = settings if settings is not None else load_runtime_settings()
     configure_logging(resolved)
