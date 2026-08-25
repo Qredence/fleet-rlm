@@ -19,7 +19,6 @@ from fleet_rlm.rlm.child_runtime import ChildRuntimeCleanupError
 from fleet_rlm.rlm.events import Status, ToolCompleted, ToolFailed, ToolStarted
 from fleet_rlm.rlm.model_bundle import RLMModelBundle
 from fleet_rlm.rlm.recursive_calls import (
-    RLM_NATIVE_CHILD_DEPTH,
     RecursiveBatchError,
     RecursiveRLMExecutor,
     RecursiveRLMOptions,
@@ -84,14 +83,39 @@ def _executor(
 
 
 def test_native_child_depth_is_a_fixed_invariant_not_an_options_surface() -> None:
+    import dataclasses
     import inspect
 
+    # The public composition surface accepts no recursion depth setting;
+    # depth is proven through the child's recursive completion evidence and
+    # the absence of any grandchild allocation (see the depth-cap lane).
     parameters = set(inspect.signature(RecursiveRLMOptions).parameters)
     assert "max_depth" not in parameters
-    assert RLM_NATIVE_CHILD_DEPTH == 1
-    assert not hasattr(RecursiveRLMOptions(), "max_depth")
+    assert not any("depth" in field.name for field in dataclasses.fields(RecursiveRLMOptions()))
     with pytest.raises(TypeError, match="max_depth"):
         RecursiveRLMOptions(max_depth=2)  # type: ignore[call-arg]
+
+    created: list[DaytonaCodeInterpreter] = []
+    events: list[object] = []
+    executor = _executor(
+        [
+            {"reasoning": "delegate deeper", "code": "inner = rlm_query(prompt='inner slice')"},
+            {"reasoning": "submit child", "code": "SUBMIT(answer=inner)"},
+        ],
+        sub_actions=[{"answer": "fallback-answer"}],
+        factory_calls=created,
+        observer=events.append,
+    )
+
+    assert executor.tool(prompt="outer slice") == "fallback-answer"
+    # One native child at depth 1; the deeper request completes at depth 2
+    # without a grandchild runtime.
+    assert len(created) == 1
+    completed = [event for event in events if isinstance(event, ToolCompleted)]
+    depths = [event.output["recursive_depth"] for event in completed]
+    assert 2 in depths
+    assert executor.summary().call_count == 2
+    assert executor.summary().depth_fallback_count == 1
 
 
 def test_recursive_tool_runs_fresh_native_child_and_redacts_observation() -> None:

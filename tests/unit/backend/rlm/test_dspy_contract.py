@@ -697,19 +697,8 @@ def test_lm_trace_callback_records_call_specific_usage_and_standard_attribute(mo
     fake_entities = SimpleNamespace(SpanType=SimpleNamespace(CHAIN="CHAIN", LLM="LLM"))
     monkeypatch.setitem(sys.modules, "mlflow", fake_mlflow)
     monkeypatch.setitem(sys.modules, "mlflow.entities", fake_entities)
-    response = SimpleNamespace(
-        _hidden_params={
-            "_response_ms": 401.25,
-            "litellm_overhead_time_ms": 12.5,
-            "callback_duration_ms": 3.75,
-            "litellm_call_id": "fallback-call-id",
-            "additional_headers": {
-                "llm_provider-x-request-id": "provider-request-7",
-                "authorization": "must-not-be-traced",
-            },
-            "provider_response": "must-not-be-traced",
-        }
-    )
+    # P38-RLM-006: raw provider-response probing was removed with the
+    # contraction; the history entry carries only usage and sentinels.
     root = SimpleNamespace(model="root-model", history=[{"usage": {"prompt_tokens": 99}}])
     ticks = iter((20.0, 20.5))
     monkeypatch.setattr("fleet_rlm.rlm.dspy_contract.time.perf_counter", lambda: next(ticks))
@@ -731,7 +720,6 @@ def test_lm_trace_callback_records_call_specific_usage_and_standard_attribute(mo
                     "prompt_cache_hit_tokens": 4,
                     "unsafe_usage": "must-not-be-traced",
                 },
-                "response": response,
                 "prompt": "must-not-be-traced",
                 "outputs": "must-not-be-traced",
             }
@@ -761,11 +749,10 @@ def test_lm_trace_callback_records_call_specific_usage_and_standard_attribute(mo
     }
     assert calls.outputs[-1]["response_keys"] == ["code", "content", "reasoning"]
     assert calls.outputs[-1]["wall_time_ms"] == 500.0
-    assert calls.outputs[-1]["provider_response_ms"] == 401.25
-    assert calls.outputs[-1]["litellm_overhead_ms"] == 12.5
-    assert calls.outputs[-1]["callback_duration_ms"] == 3.75
-    assert calls.outputs[-1]["provider_request_id"] == "provider-request-7"
-    assert "authorization" not in str(calls.outputs[-1])
+    # P38-RLM-006: private provider timing/identity fields are gone.
+    for removed in ("provider_response_ms", "litellm_overhead_ms", "callback_duration_ms", "provider_request_id"):
+        assert removed not in calls.outputs[-1]
+        assert removed not in callback.last_call_summary()
     assert "must-not-be-traced" not in str(calls.outputs[-1])
     assert "child-prompt-sentinel" not in str(calls.inputs)
     assert "child-answer-sentinel" not in str(calls.outputs[-1])
@@ -874,88 +861,52 @@ def test_lm_output_profile_reads_mapping_of_parsed_fields() -> None:
     assert "response_preview" in profile
 
 
-def test_lm_output_profile_reads_model_response_choices_content() -> None:
-    from litellm import ModelResponse
-
+def test_lm_output_profile_degrades_unknown_shapes_without_raw_probing() -> None:
     from fleet_rlm.rlm.dspy_contract import _lm_output_profile
 
-    # Build a ModelResponse whose choices carry the JSON completion in message.content.
-    outputs = ModelResponse(
-        choices=[
-            {
-                "finish_reason": "stop",
-                "index": 0,
-                "message": {
-                    "role": "assistant",
-                    "content": '{"reasoning": "r", "code": "c"}',
-                },
-            }
-        ]
-    )
-    profile = _lm_output_profile(outputs)
-    assert profile["response_keys"] == ("content", "finish_reason")
-    # response_chars sums every string value in the emitted mapping:
-    # content (31) + finish_reason "stop" (4) = 35.
-    assert profile["response_chars"] == len('{"reasoning": "r", "code": "c"}') + len("stop")
-    assert "response_preview" in profile
+    # P38-RLM-006/011: raw LiteLLM ModelResponse shapes are never delivered by
+    # the certified DSPy 3.3.1 legacy contract and are no longer probed.
+    class _ChoicesLike:
+        choices: ClassVar[list[dict[str, object]]] = [{"message": {"content": "secret"}, "finish_reason": "stop"}]
 
-
-def test_lm_output_profile_reads_string_and_unknown_shapes() -> None:
-    from fleet_rlm.rlm.dspy_contract import _lm_output_profile
-
-    # A bare string completion is keyed as ("content",).
-    profile = _lm_output_profile('{"reasoning": "x"}')
-    assert profile["response_keys"] == ("content",)
-    assert profile["response_chars"] == len('{"reasoning": "x"}')
+    assert _lm_output_profile(_ChoicesLike()) == {"response_keys": ()}
 
     # Genuinely unusable shapes still degrade to the historical empty-keys shape.
     assert _lm_output_profile(None) == {"response_keys": ()}
     assert _lm_output_profile(object()) == {"response_keys": ()}
 
 
-def test_latest_lm_telemetry_typed_response_fallback_reads_usage_as_dict() -> None:
+def test_latest_lm_telemetry_reads_only_the_certified_legacy_history_entry() -> None:
+    """P38-RLM-006/011: usage comes from the identity-matched legacy entry.
+
+    The typed ``LMResponse`` fallback (``usage_as_dict``) and raw
+    provider-response probing are deleted: a typed-shaped callback payload
+    with no matching history entry degrades to unavailable, never to an
+    estimate.
+    """
     from types import SimpleNamespace
 
     from fleet_rlm.rlm.dspy_contract import _latest_lm_telemetry
 
-    class TypedResponse:
-        """Mirror of the typed DSPy contract surface (dspy.LMResponse)."""
-
-        def __init__(self, usage: dict[str, int], provider_response: object = None) -> None:
-            """Store usage metrics and the optional provider response associated with them.
-
-            Parameters:
-                usage (dict[str, int]): Usage metrics for the response.
-                provider_response (object): Optional raw provider response.
-            """
-            self._usage = usage
-            self.provider_response = provider_response
-
-        def usage_as_dict(self) -> dict[str, int]:
-            """Return the recorded usage metrics as a dictionary.
-
-            Returns:
-                dict[str, int]: A copy of the recorded usage metrics.
-            """
-            return dict(self._usage)
-
-    lm = SimpleNamespace(history=[])
-    raw_provider = SimpleNamespace(_hidden_params={"_response_ms": 42.5, "litellm_call_id": "req-123"})
-    typed = TypedResponse(
-        {"prompt_tokens": 4, "completion_tokens": 2, "total_tokens": 6},
-        provider_response=raw_provider,
+    outputs = ["parsed"]
+    lm = SimpleNamespace(
+        history=[
+            {"outputs": object(), "usage": {"prompt_tokens": 99, "completion_tokens": 1}},
+            {"outputs": outputs, "usage": {"prompt_tokens": 4, "completion_tokens": 2}},
+        ]
     )
 
-    usage, provider = _latest_lm_telemetry(lm, 0, typed)
+    assert _latest_lm_telemetry(lm, 0, outputs) == {"prompt_tokens": 4, "completion_tokens": 2}
 
-    assert usage == {"prompt_tokens": 4, "completion_tokens": 2, "total_tokens": 6}
-    assert provider == {"provider_response_ms": 42.5, "provider_request_id": "req-123"}
+    class TypedResponse:
+        def usage_as_dict(self) -> dict[str, int]:
+            return {"prompt_tokens": 7}
 
-    # A typed response without usage must surface as unavailable, not zero.
-    empty = TypedResponse({})
-    assert _latest_lm_telemetry(lm, 0, empty) == ({}, {})
-    untyped = SimpleNamespace(model="x")
-    assert _latest_lm_telemetry(lm, 0, untyped) == ({}, {})
+    # A typed response with no matching history entry yields nothing.
+    assert _latest_lm_telemetry(SimpleNamespace(history=[]), 0, TypedResponse()) == {}
+    # Missing history or unknown payloads degrade to unavailable, not zero.
+    assert _latest_lm_telemetry(SimpleNamespace(history=[]), 0, None) == {}
+    assert _latest_lm_telemetry(SimpleNamespace(), 0, outputs) == {}
 
 
 def test_lm_trace_callback_emits_token_usage_output_and_mlflow_attribute(monkeypatch: pytest.MonkeyPatch) -> None:

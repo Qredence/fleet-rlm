@@ -12,7 +12,7 @@ from typing import Any
 
 import pytest
 
-from fleet_rlm.daytona.recursive_child_cleanup import cleanup_child_runtime_async
+from fleet_rlm.daytona.recursive_child_runtime import cleanup_child_runtime_async
 from fleet_rlm.daytona.session_manager import DaytonaAdmission, DaytonaAdmissionPermit
 from fleet_rlm.rlm.child_runtime import ChildRuntimeCleanupError
 

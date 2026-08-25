@@ -633,12 +633,6 @@ def _execution_trace_diagnostics(mlflow_url: str, trace_id: str) -> dict[str, An
             if isinstance(getattr(span, "outputs", None), Mapping)
             and isinstance(span.outputs.get("wall_time_ms"), (int, float))
         ]
-        root_lm_provider_times = [
-            float(span.outputs["provider_response_ms"])
-            for span in root_lm_spans
-            if isinstance(getattr(span, "outputs", None), Mapping)
-            and isinstance(span.outputs.get("provider_response_ms"), (int, float))
-        ]
         root_lm_context_chars = [
             int(span.inputs["context_chars"])
             for span in root_lm_spans
@@ -664,7 +658,6 @@ def _execution_trace_diagnostics(mlflow_url: str, trace_id: str) -> dict[str, An
         return {
             "root_lm_span_count": len(root_lm_spans),
             "root_lm_wall_time_ms": round(sum(root_lm_wall_times), 3),
-            "root_lm_provider_response_ms": round(sum(root_lm_provider_times), 3),
             "root_lm_slowest_wall_time_ms": round(max(root_lm_wall_times), 3) if root_lm_wall_times else 0.0,
             "root_lm_max_context_chars": max(root_lm_context_chars) if root_lm_context_chars else 0,
             "adapter_parse_error_count": adapter_parse_error_count,
@@ -766,9 +759,6 @@ def _aggregate(rows: Sequence[Mapping[str, Any]], *, workload_id: str = EVIDENCE
         "trace_id_match_rate": (sum(trace_matches) / len(trace_matches)) if trace_matches else 0.0,
         "root_lm_span_count": sum(int(item.get("root_lm_span_count", 0)) for item in diagnostics),
         "root_lm_wall_time_ms": round(sum(float(item.get("root_lm_wall_time_ms", 0.0)) for item in diagnostics), 3),
-        "root_lm_provider_response_ms": round(
-            sum(float(item.get("root_lm_provider_response_ms", 0.0)) for item in diagnostics), 3
-        ),
         "root_lm_slowest_wall_time_ms": round(
             max((float(item.get("root_lm_slowest_wall_time_ms", 0.0)) for item in diagnostics), default=0.0), 3
         ),

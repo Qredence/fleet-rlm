@@ -240,19 +240,21 @@ def test_aggregate_excludes_failed_samples_from_latency_percentiles() -> None:
     assert summary["first_runtime_event_ms"] == {"p50": 10.0, "p95": 20.0}
 
 
-def test_execution_trace_diagnostics_exposes_provider_latency_and_parse_failure(
+def test_execution_trace_diagnostics_exposes_wall_time_and_parse_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    # P38-RLM-006: provider-response timing was removed from engineering
+    # spans; the benchmark reports wall-time diagnostics only.
     spans = [
         SimpleNamespace(
             name="RLM.root_lm",
             inputs={"context_chars": 12},
-            outputs={"wall_time_ms": 100.0, "provider_response_ms": 98.0},
+            outputs={"wall_time_ms": 100.0},
         ),
         SimpleNamespace(
             name="RLM.root_lm",
             inputs={"context_chars": 24},
-            outputs={"wall_time_ms": 220.0, "provider_response_ms": 219.0},
+            outputs={"wall_time_ms": 220.0},
         ),
         SimpleNamespace(
             name="RLM.execute",
@@ -274,7 +276,6 @@ def test_execution_trace_diagnostics_exposes_provider_latency_and_parse_failure(
     assert diagnostics == {
         "root_lm_span_count": 2,
         "root_lm_wall_time_ms": 320.0,
-        "root_lm_provider_response_ms": 317.0,
         "root_lm_slowest_wall_time_ms": 220.0,
         "root_lm_max_context_chars": 24,
         "adapter_parse_error_count": 1,

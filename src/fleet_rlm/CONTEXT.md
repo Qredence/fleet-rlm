@@ -366,11 +366,12 @@ delegation uses ordered, bounded sibling execution.
 - `optimization_evaluator.py` — disposable no-volume lifecycle for the offline signature-optimization lane.
 - `platform.py` — live SandboxPlatform and VolumeClient adapters over the Daytona SDK.
 - `provisioning.py` — strict async Sandbox, Volume, mount, and layout provisioning.
-- `recursive_child_runtime.py` — factory/orchestration seam for native DSPy
-  recursive children; `recursive_child_acquisition.py` owns acquisition,
-  `recursive_child_lease.py` owns explicit close state,
-  `recursive_child_cleanup.py` owns shutdown/provider cleanup, and
-  `recursive_child_late.py` owns late/quarantined work.
+- `recursive_child_runtime.py` — contracted single owner for native DSPy
+  recursive children: acquisition with admission/authorization fences, the
+  explicit single-owner joinable lease close state, strict interpreter/broker
+  shutdown with confirmed provider deletion and absence, admission
+  restoration, and late/quarantined cleanup ownership that survives
+  owner-loop and dispatch loss.
 - `run_environment.py` — Run environment inventory and exact Turn capability preparation.
 - `session_manager.py` — interpreter lease acquire/release and Sandbox binding lifecycle.
 - `workspace_agent.py` — Workspace Agent artifact/handshake host adapter; the

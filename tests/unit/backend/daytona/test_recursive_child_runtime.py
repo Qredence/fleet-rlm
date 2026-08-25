@@ -10,12 +10,12 @@ from uuid import uuid4
 
 import pytest
 
-from fleet_rlm.daytona import recursive_child_cleanup, recursive_child_runtime
+from fleet_rlm.daytona import recursive_child_runtime
 from fleet_rlm.daytona.provisioning import (
     recursive_child_volume_subpath,
     require_recursive_child_volume_subpath,
 )
-from fleet_rlm.daytona.recursive_child_lease import ChildRuntimeLease, ChildRuntimeLeaseState
+from fleet_rlm.daytona.recursive_child_runtime import ChildRuntimeLease, ChildRuntimeLeaseState
 from fleet_rlm.daytona.session_manager import DaytonaAdmission
 from fleet_rlm.runtime.bindings import require_scoped_volume_subpath
 
@@ -144,7 +144,7 @@ def test_child_runtime_lease_concurrent_close_joins_one_cleanup() -> None:
 
 @pytest.mark.asyncio
 async def test_child_scope_purge_removes_nested_files_and_directories() -> None:
-    from fleet_rlm.daytona.recursive_child_cleanup import purge_regular_files
+    from fleet_rlm.daytona.recursive_child_runtime import purge_regular_files
 
     root = "/home/daytona/fleet"
     fs = _Fs(
@@ -355,7 +355,7 @@ async def test_quarantine_thread_start_failure_uses_fallback_executor(
     child = _Sandbox("child-sandbox", _Fs({"/home/daytona/fleet/intermediate.txt"}))
     release_shutdown = threading.Event()
     platform = _Platform(child)
-    real_thread = recursive_child_cleanup.Thread
+    real_thread = recursive_child_runtime.Thread
     thread_starts = 0
 
     class FailingQuarantineThread:
@@ -377,7 +377,7 @@ async def test_quarantine_thread_start_failure_uses_fallback_executor(
             assert strict_broker_cleanup is True
             release_shutdown.wait(2)
 
-    monkeypatch.setattr(recursive_child_cleanup, "Thread", FailingQuarantineThread)
+    monkeypatch.setattr(recursive_child_runtime, "Thread", FailingQuarantineThread)
     monkeypatch.setattr(recursive_child_runtime, "DaytonaCodeInterpreter", HangingInterpreter)
     monkeypatch.setattr(recursive_child_runtime, "sandbox_backend", lambda sandbox, **_kwargs: sandbox)
     monkeypatch.setattr(recursive_child_runtime, "_CHILD_CLEANUP_RESULT_TIMEOUT_S", 0.05)

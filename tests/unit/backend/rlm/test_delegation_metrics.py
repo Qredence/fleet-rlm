@@ -86,17 +86,19 @@ def test_metrics_token_totals_partial_usage_is_not_collapsed_to_zero() -> None:
     ]
 
 
-def test_lm_telemetry_matches_callback_response_in_concurrent_history() -> None:
-    first_response = object()
-    second_response = object()
+def test_lm_telemetry_matches_callback_outputs_in_concurrent_history() -> None:
+    # P38-RLM-006: the certified DSPy 3.3.1 legacy contract pairs each
+    # ``on_lm_end`` payload with its history entry by identity on ``outputs``.
+    first_outputs = object()
+    second_outputs = object()
     lm = SimpleNamespace(
         history=[
-            {"response": first_response, "usage": {"input_tokens": 3, "output_tokens": 2}},
-            {"response": second_response, "usage": {"input_tokens": 17, "output_tokens": 11}},
+            {"outputs": first_outputs, "usage": {"input_tokens": 3, "output_tokens": 2}},
+            {"outputs": second_outputs, "usage": {"input_tokens": 17, "output_tokens": 11}},
         ]
     )
 
-    usage, _provider = _latest_lm_telemetry(lm, 0, first_response)
+    usage = _latest_lm_telemetry(lm, 0, first_outputs)
 
     assert usage == {"input_tokens": 3, "output_tokens": 2}
 

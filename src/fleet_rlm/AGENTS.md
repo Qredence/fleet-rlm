@@ -45,7 +45,12 @@ contracts, and tracked docs remain authoritative.
   only `rlm_query` plus native semantic Sub-LM tools, so child batch delegation
   is not exposed. The shared call budget is reserved under a lock, child LM
   runtimes are copied with the Turn deadline, and each native child owns a
-  fresh Sandbox lease.
+  fresh Sandbox lease. The synchronous Tool's wait for the native child
+  `acall` is fenced by the one absolute Turn deadline: the child runs on a
+  dedicated private loop thread, a deadline fire sends one cooperative
+  cancellation plus a bounded settle grace, and an unsettled child stays
+  owned through the executor's cleanup boundary instead of blocking or
+  leaking the wait.
 - Every Signature receives request text, bounded `session_context`, bounded
   `skill_cards`, and bounded Attachment metadata. Older committed messages
   remain behind the Session-scoped `read_session_history` Tool.
