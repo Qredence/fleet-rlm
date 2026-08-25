@@ -16,6 +16,7 @@ T = TypeVar("T")
 class ClaimHeartbeat:
     task: asyncio.Task[None]
     lost: asyncio.Event
+    definitive_loss: bool = False
 
 
 async def shield_cleanup(awaitable: Awaitable[T]) -> T:

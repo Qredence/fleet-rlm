@@ -299,6 +299,67 @@ async def test_repeated_transient_failures_revoke_without_provider_fence() -> No
 
 
 @pytest.mark.asyncio
+async def test_runner_exception_after_claim_loss_still_revokes_and_fences_run() -> None:
+    from fleet_rlm.chat.run_cleanup import RunCleanupSupervisor
+    from fleet_rlm.chat.run_lifecycle import ClaimedRun, RunClaim, RunLifecycleService
+    from fleet_rlm.chat.run_ownership import ClaimHeartbeat
+    from fleet_rlm.chat.turn_coordinator import TurnCoordinator
+    from fleet_rlm.persistence.repositories import InMemoryRunStateStore, InMemorySessionCatalog
+    from fleet_rlm.rlm.events import RunFailed
+    from fleet_rlm.sessions.models import TurnAccess, TurnInput
+
+    authoritative = InMemoryRunStateStore()
+    access = TurnAccess(uuid4(), uuid4())
+    session = await InMemorySessionCatalog(authoritative).create(
+        user_id=access.user_id,
+        workspace_id=access.workspace_id,
+        title="claim loss runner exception",
+    )
+    fenced = asyncio.Event()
+    lifecycle = RunLifecycleService(authoritative, max_artifact_bytes=100)
+    run = await lifecycle.begin(RunClaim(access, session.id, TurnInput("hello"), "runner-error", uuid4()))
+    assert isinstance(run, ClaimedRun)
+
+    class Prepared:
+        execution = SimpleNamespace(run_id=run.run_id, session_id=session.id)
+        artifact_sink = None
+        result_snapshot_sink = None
+        post_commit_memory_promotion = None
+
+        async def aclose(self):
+            return None
+
+    class Runner:
+        def stream(self, _execution):
+            raise RuntimeError("runner failed after claim loss")
+
+    async def fence(_session_id):
+        fenced.set()
+
+    cleanup = RunCleanupSupervisor()
+    coordinator = TurnCoordinator(
+        lifecycle=lifecycle,
+        preparation=object(),  # type: ignore[arg-type] - execution starts after preparation
+        runner=Runner(),
+        cleanup=cleanup,
+        claim_loss_fence=fence,
+    )
+    lost = asyncio.Event()
+    lost.set()
+    heartbeat = ClaimHeartbeat(asyncio.create_task(asyncio.sleep(60)), lost)
+    heartbeat.definitive_loss = True
+
+    events = [event async for event in coordinator._execute_claimed(run, Prepared(), heartbeat, trace_id=None)]
+    await cleanup.shutdown(drain_seconds=1)
+
+    assert isinstance(events[-1].detail, RunFailed)
+    assert events[-1].detail.code == "unavailable"
+    assert fenced.is_set()
+    stored = authoritative._runs[run.run_id]
+    assert (stored.status, stored.failure_code) == ("failed", "stale_claim")
+
+
+@pytest.mark.asyncio
 async def test_claim_loss_wins_finalization_and_prevents_stale_commit() -> None:
     from fleet_rlm.chat.commands import OpenTurnCommand
     from fleet_rlm.chat.run_cleanup import RunCleanupSupervisor
@@ -779,17 +840,14 @@ async def test_driver_claim_loss_cleanup_skips_settlement_release_after_commit(c
     """Driver cleanup with claim_lost still closes resources but never settles a committed Run."""
     import logging
 
-    from fleet_rlm.chat.committed_turn_events import CommittedTurnEventProjector
     from fleet_rlm.chat.run_cleanup import RunCleanupSupervisor
-    from fleet_rlm.chat.run_execution import RunExecutionDriver
     from fleet_rlm.chat.run_lifecycle import (
         ClaimedRun,
         CommittedTurnReceipt,
-        RunAlreadyCompletedError,
         RunClaim,
-        RunFailure,
         RunLifecycleService,
     )
+    from fleet_rlm.chat.turn_coordinator import TurnCoordinator
     from fleet_rlm.persistence.repositories import InMemoryRunStateStore, InMemorySessionCatalog
     from fleet_rlm.rlm.dspy_contract import PredictionResult, empty_rlm_usage
     from fleet_rlm.rlm.outcome import RLMOutcome
@@ -816,14 +874,6 @@ async def test_driver_claim_loss_cleanup_skips_settlement_release_after_commit(c
     async def fence(requested_session_id):
         fenced.append(requested_session_id)
 
-    async def revoke_late(turn, usage):
-        del usage
-        failure = RunFailure("failed", "stale_claim", "Turn failed", empty_rlm_usage())
-        try:
-            return await lifecycle.revoke_claim(turn, failure)
-        except RunAlreadyCompletedError:
-            return None
-
     closed: list[str] = []
 
     class Prepared:
@@ -834,17 +884,16 @@ async def test_driver_claim_loss_cleanup_skips_settlement_release_after_commit(c
         return receipt
 
     cleanup = RunCleanupSupervisor()
-    driver = RunExecutionDriver(
+    coordinator = TurnCoordinator(
         lifecycle=lifecycle,
+        preparation=object(),  # type: ignore[arg-type]
         runner=None,  # type: ignore[arg-type] - cleanup never touches the runner
-        projector=CommittedTurnEventProjector(),
         cleanup=cleanup,
         claim_loss_fence=fence,
         turn_timeout_seconds=60,
-        revoke_claim=revoke_late,
     )
     with caplog.at_level(logging.INFO):
-        driver._submit_cleanup(
+        coordinator._submit_cleanup(
             start,
             None,
             Prepared(),

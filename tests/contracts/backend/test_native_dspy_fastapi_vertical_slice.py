@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
 from types import SimpleNamespace
 from uuid import uuid4
 
@@ -15,14 +14,18 @@ class _OpenedStream:
     def __init__(self, events: tuple[RuntimeEvent, ...]) -> None:
         self.run_id = events[0].run_id
         self._events = events
+        self._index = 0
         self.closed = False
 
-    def __aiter__(self) -> AsyncIterator[RuntimeEvent]:
-        return self._generate()
+    def __aiter__(self) -> _OpenedStream:
+        return self
 
-    async def _generate(self) -> AsyncIterator[RuntimeEvent]:
-        for event in self._events:
-            yield event
+    async def __anext__(self) -> RuntimeEvent:
+        if self._index >= len(self._events):
+            raise StopAsyncIteration
+        event = self._events[self._index]
+        self._index += 1
+        return event
 
     async def aclose(self) -> None:
         self.closed = True
@@ -44,8 +47,10 @@ async def test_native_runtime_deltas_reach_fastapi_sse_before_done() -> None:
     )
 
     class _Coordinator:
-        async def open(self, _command: object) -> _OpenedStream:
-            return opened
+        def open_owned(self, _command: object):
+            from fleet_rlm.chat.turn_coordinator import OpenedTurnStream
+
+            return OpenedTurnStream(opened.run_id, opened)
 
     frames = [
         frame

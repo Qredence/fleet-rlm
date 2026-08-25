@@ -665,10 +665,12 @@ class RunLifecycleService:
             async def _remove_staging() -> None:
                 await self._rollback(sink, staging_paths)
 
+            cleanup_coro = _remove_staging()
             try:
-                self._cleanup.submit(_remove_staging())
+                self._cleanup.submit(cleanup_coro)
                 return
             except RunCleanupUnavailableError:
+                cleanup_coro.close()
                 logger.warning("Turn cleanup capacity unavailable; settling staging inline")
         await self._rollback(sink, (candidate.staging_path for candidate in candidates))
 

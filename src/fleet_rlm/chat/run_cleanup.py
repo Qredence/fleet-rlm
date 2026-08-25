@@ -46,7 +46,7 @@ class RunCleanupSupervisor:
     async def _run(self, cleanup: Awaitable[None]) -> None:
         try:
             await cleanup
-        except Exception:
+        except BaseException:
             logger.exception("detached Run cleanup failed")
 
     async def shutdown(self, *, drain_seconds: float = 30.0) -> None:

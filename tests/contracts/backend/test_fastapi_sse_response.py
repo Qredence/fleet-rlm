@@ -75,7 +75,7 @@ class _ControlledCoordinator:
         self.open_calls = 0
         self.command: object | None = None
 
-    async def open(self, command: object) -> _ControlledOpenedTurn:
+    async def _open(self, command: object) -> _ControlledOpenedTurn:
         self.open_calls += 1
         self.command = command
         if self._gate is not None:
@@ -84,6 +84,14 @@ class _ControlledCoordinator:
             raise self._error
         assert self._opened is not None
         return self._opened
+
+    def open_owned(self, command: object):
+        from fleet_rlm.chat.turn_coordinator import OpenedTurnStream
+
+        return OpenedTurnStream(
+            None,
+            open_task=asyncio.create_task(self._open(command), name="test-turn-open"),
+        )
 
 
 @dataclass

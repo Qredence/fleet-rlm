@@ -15,9 +15,12 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from fleet_rlm.artifacts.models import ArtifactRef
 from fleet_rlm.artifacts.promotion import PromotedArtifact
+from fleet_rlm.chat.run_authority import RunAuthority
 from fleet_rlm.chat.run_claim import (
     ClaimCommand,
+    ClaimFailure,
     CompleteSettlement,
+    RevokeClaim,
     decide_claim_transition,
 )
 from fleet_rlm.chat.run_lifecycle import (
@@ -88,6 +91,7 @@ class _RunState:
     input: TurnInput
     claim: _RunClaimToken
     status: Literal["running", "settling", "completed", "failed", "cancelled", "timeout"]
+    authority: RunAuthority = field(default_factory=RunAuthority)
     failure_code: RunFailureCode | None = None
     terminal_intent: RunFailure | None = None
     cancel_requested: bool = False
@@ -97,6 +101,8 @@ class _RunState:
     user_turn_id: UUID | None = None
     tombstone: CommittedTurn | None = None
     record_sequence: int | None = None
+    recovery_attempts: int = 0
+    recovery_last_error: str | None = None
 
 
 @dataclass(slots=True)
@@ -127,6 +133,7 @@ class InMemoryRunStateStore:
         self._sessions: dict[UUID, _SessionState] = {}
         self._runs: dict[UUID, _RunState] = {}
         self._keys: dict[tuple[UUID, str], UUID] = {}
+        self._recovery_runs: set[UUID] = set()
 
     async def add_session(
         self,
@@ -209,6 +216,7 @@ class InMemoryRunStateStore:
                 SessionHistory(tuple(session.history)),
                 cancelled,
                 claim,
+                run.authority,
             )
 
     async def commit(
@@ -325,35 +333,81 @@ class InMemoryRunStateStore:
         *,
         deadline: float | None = None,
     ) -> ReconciliationSummary:
-        """In-memory workers cannot survive the process that owned them."""
+        """Recover prior-process claims with the same bounded policy as SQL."""
         async with self._lock:
-            pending = [run for run in self._runs.values() if run.status == "settling"]
+            pending = [
+                (run.run_id, run.session_id, run.status, run.claim)
+                for run in self._runs.values()
+                if run.status in {"running", "settling"}
+            ]
         recovered = 0
         fence_failures = 0
         skipped = 0
         budget_exhausted = False
-        for index, pending_run in enumerate(pending):
+        for index, (run_id, session_id, status, original_claim) in enumerate(pending):
             if deadline is not None and asyncio.get_running_loop().time() >= deadline:
                 skipped += len(pending) - index
                 budget_exhausted = True
                 break
-            try:
-                if fence is not None:
-                    await fence(pending_run.session_id)
-            except Exception:
-                fence_failures += 1
-                continue
             async with self._lock:
-                run = self._runs.get(pending_run.run_id)
-                if run is not None and run.status == "settling" and run.terminal_intent is not None:
-                    decision = decide_claim_transition(_memory_claim_state(run), CompleteSettlement()).transition
-                    if decision is not None and decision.next_state is not None:
-                        _apply_memory_next_state(run, decision.next_state)
-                        if decision.next_state.status == "cancelled":
-                            self._persist_cancel_tombstone(run)
-                        recovered += 1
-                else:
+                current = self._runs.get(run_id)
+                if current is None or current.status != status or run_id in self._recovery_runs:
                     skipped += 1
+                    continue
+                self._recovery_runs.add(run_id)
+                current.authority.revoke()
+                current.claim = _RunClaimToken(uuid4())
+            try:
+                try:
+                    if fence is not None:
+                        await _await_recovery_step(fence(session_id), deadline=deadline)
+                except Exception:
+                    fence_failures += 1
+                    if _recovery_deadline_exhausted(deadline):
+                        budget_exhausted = True
+                    else:
+                        async with self._lock:
+                            current = self._runs.get(run_id)
+                            if current is not None and current.status == status:
+                                current.recovery_attempts += 1
+                                current.recovery_last_error = "provider_fence_failed"
+                                current.claim = original_claim
+                    if budget_exhausted:
+                        skipped += len(pending) - index - 1
+                        break
+                    continue
+                async with self._lock:
+                    run = self._runs.get(run_id)
+                    if run is None or run.status != status:
+                        skipped += 1
+                    else:
+                        if run.status == "running":
+                            stale = ClaimFailure("failed", "stale_claim", "Turn failed")
+                            revocation = decide_claim_transition(
+                                _memory_claim_state(run),
+                                RevokeClaim(stale),
+                            ).transition
+                            if revocation is None or revocation.next_state is None:
+                                skipped += 1
+                                continue
+                            _apply_memory_next_state(
+                                run,
+                                revocation.next_state,
+                                usage=empty_rlm_usage(),
+                            )
+                        decision = decide_claim_transition(_memory_claim_state(run), CompleteSettlement()).transition
+                        if decision is None or decision.next_state is None:
+                            skipped += 1
+                        else:
+                            _apply_memory_next_state(run, decision.next_state)
+                            if decision.next_state.status == "cancelled":
+                                self._persist_cancel_tombstone(run)
+                            run.recovery_attempts = 0
+                            run.recovery_last_error = None
+                            recovered += 1
+            finally:
+                async with self._lock:
+                    self._recovery_runs.discard(run_id)
         return ReconciliationSummary(
             candidates=len(pending),
             recovered=recovered,
@@ -511,7 +565,7 @@ class SqlAlchemyRunStateStore:
                 continue
             try:
                 if fence is not None:
-                    await fence(pending_run.session_id)
+                    await _await_recovery_step(fence(pending_run.session_id), deadline=deadline)
             except Exception:
                 fence_failures += 1
                 if _recovery_deadline_exhausted(deadline):

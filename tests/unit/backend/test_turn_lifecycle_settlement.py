@@ -258,6 +258,56 @@ async def test_staging_rollback_stays_inline_without_cleanup_supervisor() -> Non
     assert sink.removed == [candidate.staging_path]
 
 
+@pytest.mark.asyncio
+async def test_staging_rollback_falls_back_to_inline_when_supervisor_at_capacity() -> None:
+    """When the supervisor is full (RunCleanupUnavailableError), staging cleanup runs inline."""
+    turn, access = _make_turn()
+    data = b'{"ok": true}'
+    candidate = _make_candidate(access, turn, "fallback", data)
+
+    class Sink:
+        def __init__(self) -> None:
+            self.values = {candidate.staging_path: data}
+            self.removed: list[str] = []
+
+        async def read(self, location, *, max_bytes):
+            del max_bytes
+            return self.values[location]
+
+        async def write(self, location, value):
+            self.values[location] = value
+
+        async def remove(self, location):
+            self.removed.append(location)
+            self.values.pop(location, None)
+
+    from fleet_rlm.chat.run_cleanup import RunCleanupSupervisor
+
+    supervisor = RunCleanupSupervisor(max_jobs=1)
+
+    # Saturate supervisor capacity with a blocking job
+    block_event = asyncio.Event()
+
+    async def _blocking_job() -> None:
+        await block_event.wait()
+
+    supervisor.submit(_blocking_job())
+    assert not supervisor.available
+
+    sink = Sink()
+    lifecycle = RunLifecycleService(_CommitStore(), max_artifact_bytes=100, cleanup=supervisor)
+
+    receipt = await lifecycle.finish(turn, _outcome(turn, (candidate,)), artifact_sink=sink)
+
+    assert receipt.committed_turn.text == "done"
+    # Even though supervisor was saturated, inline fallback removed the staging file before finish returned
+    assert sink.removed == [candidate.staging_path]
+
+    # Clean up background job
+    block_event.set()
+    await asyncio.sleep(0.01)
+
+
 @pytest.fixture
 def fleet_trace_active() -> Iterator[None]:
     """Open the fleet turn-trace gate so phase spans engage the (fake) MLflow."""

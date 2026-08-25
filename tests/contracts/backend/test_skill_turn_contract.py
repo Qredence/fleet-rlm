@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from collections.abc import AsyncIterator
 from hashlib import sha256
@@ -49,11 +50,18 @@ class _Coordinator:
         self.command: OpenTurnCommand | None = None
         self.error = error
 
-    async def open(self, command: OpenTurnCommand) -> _EmptyOpenedTurn:
+    def open_owned(self, command: OpenTurnCommand):
+        from fleet_rlm.chat.turn_coordinator import OpenedTurnStream
+
         self.command = command
         if self.error is not None:
-            raise self.error
-        return _EmptyOpenedTurn()
+
+            async def fail() -> _EmptyOpenedTurn:
+                raise self.error
+
+            return OpenedTurnStream(None, open_task=asyncio.create_task(fail()))
+        opened = _EmptyOpenedTurn()
+        return OpenedTurnStream(opened.run_id, opened.__aiter__())
 
 
 def _turn_client(coordinator: _Coordinator) -> TestClient:

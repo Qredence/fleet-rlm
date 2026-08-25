@@ -365,7 +365,7 @@ async def test_startup_reconciliation_fences_a_live_prior_claim_without_waiting_
 
 
 @pytest.mark.asyncio
-async def test_reconcile_deadline_recovers_one_run_and_leaves_later_claim_retryable() -> None:
+async def test_reconcile_deadline_bounds_provider_fence_and_leaves_claim_retryable() -> None:
     from fleet_rlm.chat.run_lifecycle import ClaimedRun, RunClaim
     from fleet_rlm.persistence.database import create_async_engine_from_url, create_session_factory, create_tables
     from fleet_rlm.persistence.models import RunRow, SessionRow, UserRow, WorkspaceRow
@@ -408,8 +408,8 @@ async def test_reconcile_deadline_recovers_one_run_and_leaves_later_claim_retrya
 
         # The deadline margin must comfortably exceed the latency of
         # _load_recovery_candidates (a real DB query) that runs before the first
-        # in-loop deadline check, and the fence span must exceed that margin so
-        # the deadline is only crossed after run 0's fence completes.
+        # in-loop deadline check, while the fence span exceeds the remaining
+        # budget and must therefore be cancelled.
         async def fence(session_id):
             """
             Record a fenced session and delay completion.
@@ -423,19 +423,23 @@ async def test_reconcile_deadline_recovers_one_run_and_leaves_later_claim_retrya
         )
 
         assert summary.candidates == 2
-        assert summary.recovered == 1
+        assert summary.recovered == 0
+        assert summary.fence_failures == 1
         assert summary.skipped == 1
         assert summary.budget_exhausted is True
         assert fenced == [session_ids[0]]
         async with factory() as db:
-            recovered = await db.get(RunRow, run_ids[0])
+            timed_out = await db.get(RunRow, run_ids[0])
             pending = await db.get(RunRow, run_ids[1])
-            assert recovered is not None
-            assert recovered.status == "failed"
-            assert recovered.claim_owner is None
+            assert timed_out is not None
+            assert timed_out.status == "running"
+            assert timed_out.claim_owner is not None
             assert pending is not None
             assert pending.status == "running"
             assert pending.claim_owner == owners[run_ids[1]]
+
+        retry = await store.reconcile_settling()
+        assert retry.recovered == 2
     finally:
         await engine.dispose()
 

@@ -1,4 +1,4 @@
-"""Focused coverage for the private post-preparation Run driver."""
+"""Focused coverage for coordinator-owned execution and settlement."""
 
 from __future__ import annotations
 
@@ -109,16 +109,16 @@ class _CleanupLifecycle:
 
 def _driver(lifecycle, runner, cleanup):
     from fleet_rlm.chat.committed_turn_events import CommittedTurnEventProjector
-    from fleet_rlm.chat.run_execution import RunExecutionDriver
+    from fleet_rlm.chat.turn_coordinator import TurnCoordinator
 
-    return RunExecutionDriver(
+    return TurnCoordinator(
         lifecycle=lifecycle,
+        preparation=object(),  # type: ignore[arg-type]
         runner=runner,
         projector=CommittedTurnEventProjector(),
         cleanup=cleanup,
         claim_loss_fence=None,
         turn_timeout_seconds=10,
-        revoke_claim=lifecycle.revoke_claim,
     )
 
 
@@ -180,7 +180,7 @@ async def test_disconnect_cancels_provider_wait_and_orders_detached_cleanup() ->
     prepared = _Prepared(deadline=asyncio.get_running_loop().time() + 10)
 
     async def collect_driver():
-        async for _event in _driver(lifecycle, Runner(), cleanup).stream(
+        async for _event in _driver(lifecycle, Runner(), cleanup)._execute_claimed(
             turn,
             prepared,
             heartbeat,
@@ -204,7 +204,7 @@ async def test_disconnect_cancels_provider_wait_and_orders_detached_cleanup() ->
 @pytest.mark.asyncio
 async def test_finalization_failure_after_claim_loss_routes_to_claim_loss_cleanup() -> None:
     from fleet_rlm.chat.run_cleanup import RunCleanupSupervisor
-    from fleet_rlm.chat.run_execution import _ClaimLost
+    from fleet_rlm.chat.turn_coordinator import _ClaimLost
 
     lifecycle = _CleanupLifecycle(outcome=None)
     driver = _driver(lifecycle, object(), RunCleanupSupervisor())
@@ -292,7 +292,7 @@ async def test_cleanup_capacity_fallback_settles_after_owned_stream_drains() -> 
 async def _collect(driver, turn, prepared, heartbeat):
     return [
         event
-        async for event in driver.stream(
+        async for event in driver._execute_claimed(
             turn,
             prepared,
             heartbeat,
@@ -310,9 +310,9 @@ def test_execution_deadline_reads_the_deep_execution_context() -> None:
     not a fresh fallback window (P25)."""
     from types import SimpleNamespace
 
-    from fleet_rlm.chat.run_execution import RunExecutionDriver
+    from fleet_rlm.chat.turn_coordinator import TurnCoordinator
 
-    driver = RunExecutionDriver.__new__(RunExecutionDriver)
+    driver = TurnCoordinator.__new__(TurnCoordinator)
     driver._turn_timeout_seconds = 99.0
     deep = SimpleNamespace(execution=SimpleNamespace(deadline=1234.5))
     assert driver._execution_deadline(SimpleNamespace(execution=deep)) == 1234.5
@@ -329,9 +329,9 @@ def test_trace_request_reads_the_session_view() -> None:
     """B2 regression: MLflow turn traces record the public request text."""
     from types import SimpleNamespace
 
-    from fleet_rlm.chat.run_execution import RunExecutionDriver
+    from fleet_rlm.chat.turn_coordinator import TurnCoordinator
 
     prepared = SimpleNamespace(execution=SimpleNamespace(session=SimpleNamespace(request="show me")))
-    assert RunExecutionDriver._trace_request(prepared) == "show me"
+    assert TurnCoordinator._trace_request(prepared) == "show me"
     legacy = SimpleNamespace(execution=SimpleNamespace())
-    assert RunExecutionDriver._trace_request(legacy) == ""
+    assert TurnCoordinator._trace_request(legacy) == ""

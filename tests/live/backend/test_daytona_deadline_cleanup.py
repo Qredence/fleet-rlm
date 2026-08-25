@@ -24,9 +24,9 @@ from tests.live.backend.test_fleet_rlm_daytona_mvp import (
     _strict_cleanup,
 )
 
-pytestmark = [pytest.mark.live_daytona, pytest.mark.timeout(300)]
+pytestmark = [pytest.mark.live_daytona, pytest.mark.timeout(600)]
 
-_TURN_TIMEOUT_SECONDS = 45
+_TURN_TIMEOUT_SECONDS = 180
 _TIMEOUT_PROMPT = (
     "Run exactly one Python code cell containing only print('deadline-probe'). Do not call SUBMIT or any tools."
 )
@@ -56,7 +56,7 @@ def _install_blocking_execute_code(
     ) -> Any:
         del self, code, variables, timeout_s, on_stdout
         entered.set()
-        release.wait(timeout=120)
+        release.wait(timeout=240)
         raise TimeoutError("host-forced deadline stall")
 
     monkeypatch.setattr(DaytonaHttpToolBroker, "execute_code", blocking)

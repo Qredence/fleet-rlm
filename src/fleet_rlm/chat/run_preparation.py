@@ -59,52 +59,30 @@ class RunPreparationUnavailableError(RunPreparationError):
     pass
 
 
-@dataclass(frozen=True, slots=True)
-class PreparedResourcesReceipt:
-    """Internal component proof for one idempotent PreparedRun close."""
-
-    attempted: int
-    completed: int
-    failures: tuple[str, ...] = ()
-    results: tuple[Any, ...] = ()
-
-    @property
-    def clean(self) -> bool:
-        return not self.failures and self.completed == self.attempted
-
-
 @dataclass(slots=True)
 class _PreparedRunResources:
     cleanups: tuple[AsyncCleanup, ...]
     _closed: bool = field(default=False, init=False)
     _lock: asyncio.Lock = field(default_factory=asyncio.Lock, init=False)
-    _receipt: PreparedResourcesReceipt | None = field(default=None, init=False)
+    _close_error: BaseException | None = field(default=None, init=False)
 
-    @property
-    def receipt(self) -> PreparedResourcesReceipt | None:
-        return self._receipt
-
-    async def aclose(self) -> PreparedResourcesReceipt:
+    async def aclose(self) -> None:
         async with self._lock:
-            if self._receipt is not None:
-                return self._receipt
+            if self._closed:
+                if self._close_error is not None:
+                    raise self._close_error
+                return
             self._closed = True
-            failures: list[str] = []
-            results: list[Any] = []
-            completed = 0
+            first_error: BaseException | None = None
             for cleanup in reversed(self.cleanups):
                 try:
-                    results.append(await cleanup())
-                    completed += 1
-                except Exception as exc:
-                    failures.append(f"{type(exc).__name__}: {str(exc)[:200]}")
-            self._receipt = PreparedResourcesReceipt(
-                attempted=len(self.cleanups),
-                completed=completed,
-                failures=tuple(failures),
-                results=tuple(results),
-            )
-            return self._receipt
+                    await cleanup()
+                except BaseException as exc:
+                    if first_error is None:
+                        first_error = exc
+            if first_error is not None:
+                self._close_error = RuntimeError("prepared Turn cleanup failed")
+                raise self._close_error from first_error
 
 
 @dataclass(frozen=True, slots=True)
@@ -120,15 +98,10 @@ class PreparedRun:
     # preparation. Never persisted, never projected into SSE/product events.
     preparation_trace_id: str | None = None
 
-    @property
-    def cleanup_receipt(self) -> PreparedResourcesReceipt | None:
-        """Return the cleanup receipt for the prepared run resources, if cleanup has completed."""
-        return self._resources.receipt
-
-    async def aclose(self) -> PreparedResourcesReceipt:
+    async def aclose(self) -> None:
         if self.post_commit_memory_promotion is not None:
             await self.post_commit_memory_promotion.wait_owned()
-        return await self._resources.aclose()
+        await self._resources.aclose()
 
 
 def _workspace_memory_digest(capabilities: PreparedCapabilities) -> str:
