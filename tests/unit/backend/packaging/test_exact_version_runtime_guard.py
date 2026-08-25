@@ -265,9 +265,9 @@ class TestBlackBoxPublicStartupRejection:
     @staticmethod
     def _entry_script(name: str) -> Path:
         candidate = Path(sys.executable).parent / name
-        if candidate.exists():
-            return candidate
-        pytest.fail(f"installed console script {name} not found next to {sys.executable}")
+        if not candidate.exists():
+            pytest.fail(f"installed console script {name} not found next to {sys.executable}")
+        return candidate
 
     @staticmethod
     def _write_version_shim(base: Path, reported_version: str) -> Path:
