@@ -27,9 +27,8 @@ classifiers = [
 ]
 dependencies = [
     # Exact published release: the certified Fleet contract is DSPy 3.3.1.
-    # assert_dspy_version() accepts 3.3.x patches and rejects other minors,
-    # and the runtime relies on the documented RLM interface plus the private
-    # interpreter-injection seam isolated in rlm.dspy_contract.
+    # assert_dspy_version() accepts only the literal final release and rejects
+    # patches, prereleases, post-releases, and local builds.
     "dspy==3.3.1",
     "packaging>=24,<27",
     # Sandboxed execution.
