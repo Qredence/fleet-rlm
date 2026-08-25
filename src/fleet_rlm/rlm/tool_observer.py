@@ -211,6 +211,8 @@ def _resolve_awaitable_result(result: Any) -> Any:
     errors: list[BaseException] = []
 
     def run() -> None:
+        # Ferry every worker-thread failure back to the caller, including
+        # asyncio.CancelledError (a BaseException), rather than losing it.
         try:
             values.append(context.run(asyncio.run, await_result()))
         except BaseException as exc:

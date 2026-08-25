@@ -86,8 +86,6 @@ async def test_sequential_reinjection_removes_old_tool_and_keeps_new_tool() -> N
     first = _rlm(tools=[old_tool])
     second = _rlm(tools=[new_tool])
     first_action = _OneAction("SUBMIT(answer=old_tool())")
-    second_actions = iter(("old_tool()", "SUBMIT(answer=new_tool())"))
-    second_action = _OneAction(next(second_actions))
 
     first.generate_action = first_action
 
