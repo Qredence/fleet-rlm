@@ -56,6 +56,7 @@ class AgentsMdValidator:
         "build",
         ".evo",
         ".claude",
+        ".factory",
     )
 
     def validate_all(self) -> list[ValidationError]:
