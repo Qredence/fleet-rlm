@@ -227,9 +227,7 @@ class TestPackageAssetsAndExclusions:
                 else:
                     # Interpreters older than 3.11.4 lack extraction filters;
                     # skip rather than fall back to an unguarded extraction.
-                    pytest.skip(
-                        "tarfile extraction filters unavailable on this interpreter"
-                    )
+                    pytest.skip("tarfile extraction filters unavailable on this interpreter")
             sdist_root = next(tmp_path.glob("fleet_rlm-*"))
 
             # Build wheel from unpacked sdist
