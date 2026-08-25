@@ -220,9 +220,15 @@ jobs:
           print("artifact identity matches the single build output")
           PY
 
+      - name: Prepare TestPyPI distributions
+        run: |
+          mkdir -p publish-dist
+          cp dist/*.whl dist/*.tar.gz publish-dist/
+
       - name: Publish to TestPyPI
         uses: pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b # release/v1
         with:
+          packages-dir: publish-dist
           repository-url: https://test.pypi.org/legacy/
           skip-existing: true
 
@@ -325,8 +331,15 @@ jobs:
               assert hashlib.sha256((root / item["filename"]).read_bytes()).hexdigest() == item["sha256"]
           PY
 
+      - name: Prepare PyPI distributions
+        run: |
+          mkdir -p publish-dist
+          cp dist/*.whl dist/*.tar.gz publish-dist/
+
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b # release/v1
+        with:
+          packages-dir: publish-dist
 
   create-release:
     name: Create GitHub Release
