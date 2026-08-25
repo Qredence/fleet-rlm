@@ -220,12 +220,16 @@ class TestPackageAssetsAndExclusions:
         direct_wheel, sdist = built_artifacts
         with tempfile.TemporaryDirectory() as tmpdir:
             tmp_path = Path(tmpdir)
-            # Unpack sdist safely
+            # Unpack sdist safely (PEP 706 data filter guards path traversal).
             with tarfile.open(sdist, "r:gz") as tf:
                 if hasattr(tarfile, "data_filter"):
                     tf.extractall(tmp_path, filter="data")
                 else:
-                    tf.extractall(tmp_path)
+                    # Interpreters older than 3.11.4 lack extraction filters;
+                    # skip rather than fall back to an unguarded extraction.
+                    pytest.skip(
+                        "tarfile extraction filters unavailable on this interpreter"
+                    )
             sdist_root = next(tmp_path.glob("fleet_rlm-*"))
 
             # Build wheel from unpacked sdist
