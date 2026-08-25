@@ -109,10 +109,12 @@ def _parse_output(stdout: str) -> dict[str, Any]:
 def _sanitization_offenders(stdout: str, stderr: str) -> list[str]:
     combined = stdout + "\n" + stderr
     offenders: list[str] = []
-    lowered = combined.lower()
-    if "traceback" in lowered:
-        offenders.append("traceback")
-    for env_name in ("DAYTONA_API_KEY", "FLEET_DAYTONA_API_KEY"):
+    # Real crash signature only: stderr may carry engineering logs (dspy INFO,
+    # the documented upstream litellm tracemalloc RuntimeWarning hint), which
+    # are not unsanitized failure surfaces.
+    if "Traceback (most recent call last)" in combined:
+        offenders.append("python-traceback")
+    for env_name in ("DAYTONA_API_KEY", "FLEET_DAYTONA_API_KEY", "DATABRICKS_TOKEN"):
         value = os.environ.get(env_name, "")
         if value and value in combined:
             offenders.append(f"leaked env value {env_name}")
