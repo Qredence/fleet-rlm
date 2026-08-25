@@ -103,7 +103,8 @@ class _TestingVolumeFsAdapter:
     def write_bytes(self, logical_path: str, data: bytes) -> None:
         self._sink.values[logical_path] = bytes(data)
 
-    def read_bytes(self, logical_path: str) -> bytes:
+    def read_bytes(self, logical_path: str, *, use_cache: bool = True) -> bytes:
+        del use_cache
         return self._sink.values[logical_path]
 
     def exists(self, logical_path: str) -> bool:

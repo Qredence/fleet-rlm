@@ -174,6 +174,46 @@ def test_repeated_authorized_host_tool_calls_have_no_fleet_count_limit(tmp_path)
     assert "private skill resource body" not in serialized
 
 
+def test_attachment_read_reverifies_staged_bytes_on_every_call(tmp_path) -> None:
+    from fleet_rlm.files.host_volume import HostVolumeMirror
+    from fleet_rlm.files.models import AttachmentRef, StagedAttachment
+    from fleet_rlm.files.tools import FileToolHost
+    from fleet_rlm.files.volume_paths import VolumePaths
+
+    user_id, workspace_id, session_id, run_id = uuid4(), uuid4(), uuid4(), uuid4()
+    paths = VolumePaths.from_mount("/mnt/fleet")
+    volume = HostVolumeMirror(tmp_path, volume_paths=paths)
+    attachment_id = uuid4()
+    attachment_path = f"/mnt/fleet/sessions/{session_id}/runs/{run_id}/input.txt"
+    original = b"original attachment"
+    volume.write_bytes(attachment_path, original)
+    host = FileToolHost(
+        attachments=(
+            AttachmentRef(
+                attachment_id,
+                "input.txt",
+                "text/plain",
+                len(original),
+                sha256(original).hexdigest(),
+            ),
+        ),
+        staged_attachments=(StagedAttachment(attachment_id, attachment_path),),
+        volume_fs=volume,
+        user_id=user_id,
+        workspace_id=workspace_id,
+        session_id=session_id,
+        run_id=run_id,
+        volume_paths=paths,
+    )
+
+    assert host.read_attachment(str(attachment_id))["ok"] is True
+    host.drain_public_events()
+    volume.write_bytes(attachment_path, b"tampered attachment")
+
+    assert host.read_attachment(str(attachment_id)) == {"ok": False, "error": "not_found"}
+    assert host.drain_public_events() == []
+
+
 @pytest.mark.asyncio
 async def test_live_capability_teardown_removes_drained_artifact_candidate_bytes(tmp_path) -> None:
     from fleet_rlm.daytona.run_environment import LivePreparedCapabilities

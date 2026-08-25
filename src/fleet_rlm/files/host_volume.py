@@ -56,7 +56,8 @@ class HostVolumeMirror:
         destination.parent.mkdir(parents=True, exist_ok=True)
         destination.write_bytes(data)
 
-    def read_bytes(self, logical_path: str) -> bytes:
+    def read_bytes(self, logical_path: str, *, use_cache: bool = True) -> bytes:
+        del use_cache
         destination = self.host_path_for(logical_path)
         if not destination.is_file():
             raise FileNotFoundError(f"volume path not found: {logical_path}")

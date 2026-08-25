@@ -26,9 +26,14 @@ async def list_volume_tree(
     try:
         mount = PurePosixPath(settings.volume_mount_path)
         requested = PurePosixPath(root)
-        logical_root = str(mount / requested) if not requested.is_absolute() else str(requested)
-        if not logical_root.startswith(f"{mount}/") and logical_root != str(mount):
+        if "\x00" in root or "\\" in root or ".." in requested.parts:
             raise ValueError("root escapes volume mount")
+        logical_path = requested if requested.is_absolute() else mount.joinpath(*requested.parts)
+        try:
+            logical_path.relative_to(mount)
+        except ValueError as exc:
+            raise ValueError("root escapes volume mount") from exc
+        logical_root = str(logical_path)
         fetched_files = await gateway.list_files(
             identity.workspace_id,
             logical_root,
@@ -39,12 +44,25 @@ async def list_volume_tree(
         raise http_error(400, "volume_tree_invalid", "Volume tree request is invalid") from exc
     except Exception as exc:
         raise http_error(503, "volume_unavailable", "Workspace Volume is unavailable") from exc
-    prefix = f"{mount}/"
     truncated = len(fetched_files) > max_files
-    files = fetched_files[:max_files]
-    paths = sorted({file.path.removeprefix(prefix) for file in files})
+    relative_paths: set[str] = set()
+    for file in fetched_files:
+        if not isinstance(file.path, str) or "\x00" in file.path or "\\" in file.path:
+            raise http_error(400, "volume_tree_invalid", "Volume tree request is invalid")
+        path = PurePosixPath(file.path)
+        if not path.is_absolute() or ".." in path.parts:
+            raise http_error(400, "volume_tree_invalid", "Volume tree request is invalid")
+        try:
+            relative = path.relative_to(logical_path)
+            relative_to_mount = path.relative_to(mount)
+        except ValueError as exc:
+            raise http_error(400, "volume_tree_invalid", "Volume tree request is invalid") from exc
+        if not relative.parts or not relative_to_mount.parts:
+            raise http_error(400, "volume_tree_invalid", "Volume tree request is invalid")
+        relative_paths.add(str(relative_to_mount))
+    paths = sorted(relative_paths)[:max_files]
     directories: list[str] = []
-    if requested == PurePosixPath("."):
+    if logical_path == mount:
         directories = ["artifacts", "attachments", "files", "projects", "sessions"]
     return VolumeTreeResponse(
         paths=paths,
