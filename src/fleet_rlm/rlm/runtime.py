@@ -76,6 +76,7 @@ from fleet_rlm.rlm.recursion import (
     DelegationMetrics,
     RecursiveRLMExecutor,
     RecursiveRLMOptions,
+    build_recursive_session_snapshot,
 )
 from fleet_rlm.rlm.result import (
     ExecutionDetail,
@@ -1430,6 +1431,13 @@ class RLMRunner:
                 metrics=context.delegation.metrics,
                 observer=observations.publish,
                 is_authorized=lambda: not context.identity.authority.revoked,
+                snapshot=build_recursive_session_snapshot(
+                    request=context.session.request,
+                    history=context.session.history,
+                    session_context=context.session.session_context,
+                    workspace=spec.workspace,
+                    models=context.execution.models,
+                ),
             )
         spec = replace(
             spec,

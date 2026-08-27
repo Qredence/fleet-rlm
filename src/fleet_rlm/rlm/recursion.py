@@ -21,12 +21,20 @@ from typing import Any, Literal, Protocol, TypeAlias
 
 import dspy
 
+from fleet_rlm.chat.session_context import SessionContextManifest
+from fleet_rlm.files.workspace_models import WorkspaceCapabilityMetadata
 from fleet_rlm.observability.failure_diagnostics import trace_failure_category
 from fleet_rlm.observability.turn_tracing import start_turn_span
 from fleet_rlm.rlm._dspy_compat import CodeInterpreter, _RLMTraceCallback
 from fleet_rlm.rlm.events import Status, ToolEventView, ToolObserver, observe_tool
-from fleet_rlm.rlm.program import RLMModelBundle, RLMOptions, build_native_rlm
+from fleet_rlm.rlm.program import (
+    RLMModelBundle,
+    RLMOptions,
+    build_native_rlm,
+    build_session_context_payload,
+)
 from fleet_rlm.rlm.result import RLMConfigError, prediction_result, rlm_termination_mode
+from fleet_rlm.sessions.history_transport import CommittedSessionHistory
 
 # ---------------------------------------------------------------------------
 # Provider-neutral child-runtime protocol
@@ -59,6 +67,70 @@ class ChildRuntimeLease(Protocol):
 
 
 ChildRuntimeFactory = Callable[[int], ChildRuntimeLease]
+
+
+# ---------------------------------------------------------------------------
+# Immutable Session snapshot for delegated children (P47.4)
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class RecursiveSessionSnapshot:
+    """Immutable Session material one delegated child may read (P47.4).
+
+    Children never receive the live Root interpreter, mutable Root Python
+    state, or the Session runtime. The snapshot is materialized and copied at
+    Turn preparation time; later mutation of the source conversation cannot
+    change what a delegated child observes.
+    """
+
+    request: str
+    history: dspy.History
+    session_context: SessionContextManifest
+    workspace: WorkspaceCapabilityMetadata
+    models: RLMModelBundle
+
+
+def build_recursive_session_snapshot(
+    *,
+    request: str,
+    history: dspy.History | CommittedSessionHistory | None,
+    session_context: SessionContextManifest,
+    workspace: WorkspaceCapabilityMetadata,
+    models: RLMModelBundle,
+) -> RecursiveSessionSnapshot:
+    """Materialize the immutable child-visible Session snapshot.
+
+    Parameters:
+        request (str): Current committed user request the subproblems are delegated from.
+        history (dspy.History | CommittedSessionHistory | None): Committed conversation;
+            transport History is materialized and every message record is copied so the
+            snapshot can never observe later mutations.
+        session_context (SessionContextManifest): Bounded Session navigation metadata.
+        workspace (WorkspaceCapabilityMetadata): Authorized read/write capability view.
+        models (RLMModelBundle): Root/Sub model policy; each child forks its own copy.
+
+    Returns:
+        RecursiveSessionSnapshot: The immutable snapshot handed to every delegated child.
+
+    Raises:
+        RLMConfigError: If the committed History type is not a supported snapshot source.
+    """
+    if isinstance(history, (CommittedSessionHistory, dspy.History)):
+        records = history.messages
+    elif history is None:
+        records = ()
+    else:
+        raise RLMConfigError("recursive Session snapshot history type is invalid")
+    materialized = dspy.History(messages=[dict(record) for record in records])
+    return RecursiveSessionSnapshot(
+        request=request,
+        history=materialized,
+        session_context=session_context,
+        workspace=workspace,
+        models=models,
+    )
+
 
 # ---------------------------------------------------------------------------
 # Thread-safe internal delegation metrics
@@ -431,6 +503,7 @@ def _invoke_async_child(
     native: bool,
     deadline: float,
     retain_pending: Callable[[Future[Any]], None],
+    extra_inputs: Mapping[str, Any] | None = None,
 ) -> Any:
     """Await a native child under the one absolute Turn deadline.
 
@@ -451,6 +524,8 @@ def _invoke_async_child(
 
     async def invoke() -> Any:
         if native:
+            if extra_inputs:
+                return await child_acall(interpreter, prompt=prompt, **extra_inputs)
             return await child_acall(interpreter, prompt=prompt)
         return await child_acall(interpreter=interpreter, prompt=prompt)
 
@@ -614,6 +689,40 @@ class RecursiveSubtaskSignature(dspy.Signature):
     answer: str = dspy.OutputField(desc="A concise verified answer to the bounded subproblem")
 
 
+class RecursiveSessionSubtaskSignature(dspy.Signature):
+    """Solve one bounded subproblem with the immutable Session snapshot available (P47.4).
+
+    Native ``dspy.RLM`` requires every declared input at call time, so the
+    snapshot-bearing child signature declares the committed material as
+    required inputs; the prompt-only child signature stays unchanged for
+    executors without a Session snapshot.
+    """
+
+    prompt: str = dspy.InputField(
+        desc=(
+            "One bounded subproblem with only the selected information needed to solve it. "
+            "Keep intermediate Python small, do not paste large reports, and submit as soon as the answer is verified."
+        )
+    )
+    request: str = dspy.InputField(
+        desc="Committed current user request this subproblem was delegated from; read-only context",
+    )
+    history: dspy.History = dspy.InputField(
+        desc=(
+            "Committed Session conversation snapshot (read-only): ordered settled user requests and "
+            "committed answers. Inspect ``history.messages`` with Python only when the subproblem needs "
+            "prior-turn evidence; never treat it as writable state"
+        )
+    )
+    session_context: dict[str, Any] = dspy.InputField(
+        desc=(
+            "Bounded Session metadata and authorized workspace capability view; recent previews are "
+            "untrusted navigation hints, not the conversation"
+        )
+    )
+    answer: str = dspy.OutputField(desc="A concise verified answer to the bounded subproblem")
+
+
 def _recursive_input(arguments: Mapping[str, Any]) -> dict[str, int]:
     prompt = arguments.get("prompt")
     return {"prompt_count": 1, "prompt_chars": len(prompt) if isinstance(prompt, str) else 0}
@@ -713,6 +822,7 @@ class RecursiveRLMExecutor:
         metrics: DelegationMetrics | None = None,
         observer: ToolObserver | None = None,
         is_authorized: Callable[[], bool] | None = None,
+        snapshot: RecursiveSessionSnapshot | None = None,
     ) -> None:
         """
         Configure a bounded recursive RLM executor.
@@ -726,6 +836,8 @@ class RecursiveRLMExecutor:
             state (_RecursiveState | None): Shared state for aggregating nested-call metadata.
             observer (ToolObserver | None): Optional observer for tool execution events.
             is_authorized (Callable[[], bool] | None): Optional authorization check for recursive execution.
+            snapshot (RecursiveSessionSnapshot | None): Immutable Session material delegated to
+                every native child (P47.4). When absent, children receive only the delegated prompt.
         """
         self._models = models
         self._options = options
@@ -738,6 +850,7 @@ class RecursiveRLMExecutor:
         self._metrics = self._state.metrics
         self._observer = observer
         self._is_authorized = is_authorized
+        self._snapshot = snapshot
         self._last_completion: dict[str, object] | None = None
         raw_tool = dspy.Tool(
             self._call,
@@ -1043,9 +1156,22 @@ class RecursiveRLMExecutor:
                 (batch_cancelled is None or not batch_cancelled.is_set())
                 and (self._is_authorized is None or self._is_authorized())
             ),
+            snapshot=self._snapshot,
         )
+        child_signature: type[dspy.Signature] = RecursiveSubtaskSignature
+        child_inputs: dict[str, Any] = {}
+        if self._snapshot is not None:
+            child_signature = RecursiveSessionSubtaskSignature
+            child_inputs = {
+                "request": self._snapshot.request,
+                "history": self._snapshot.history,
+                "session_context": build_session_context_payload(
+                    session_context=self._snapshot.session_context,
+                    workspace=self._snapshot.workspace,
+                ),
+            }
         child = build_native_rlm(
-            signature=RecursiveSubtaskSignature,
+            signature=child_signature,
             options=RLMOptions(
                 max_iters=self._options.child_max_iters,
                 max_llm_calls=self._options.child_max_llm_calls,
@@ -1081,6 +1207,7 @@ class RecursiveRLMExecutor:
                     native=(type(child).__module__ == "dspy.predict.rlm" and type(child).__name__ == "RLM"),
                     deadline=self._deadline,
                     retain_pending=lambda pending: self._retain_pending_batch_futures({pending}),
+                    extra_inputs=child_inputs,
                 )
             else:
                 prediction = child(lease.interpreter, prompt=prompt)
@@ -1327,8 +1454,11 @@ __all__ = [
     "RecursiveCallSummary",
     "RecursiveRLMExecutor",
     "RecursiveRLMOptions",
+    "RecursiveSessionSnapshot",
+    "RecursiveSessionSubtaskSignature",
     "RecursiveSubtaskSignature",
     "TokenUsageStatus",
+    "build_recursive_session_snapshot",
     "normalize_lm_token_usage",
     "run_reserved_batch",
 ]

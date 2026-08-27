@@ -382,9 +382,15 @@ async def test_val_rec_023_root_and_child_are_exact_native_rlm_with_positional_i
     assert len(root_invocations) == 1
     assert child_invocations[0][1] is factory.interpreters[0]
     assert root_invocations[0][1] is not factory.interpreters[0]
-    # Named inputs only: the child carries the recursive subtask prompt, the
-    # Root carries the prepared Turn inputs.
-    assert set(child_invocations[0][2]) == {"prompt"}
+    # Named inputs only: the child carries the recursive subtask prompt plus
+    # the immutable Session snapshot (P47.4: request, committed History,
+    # bounded context with the capability view); the Root carries the
+    # prepared Turn inputs.
+    child_inputs = child_invocations[0][2]
+    assert set(child_inputs) == {"prompt", "request", "history", "session_context"}
+    assert child_inputs["request"] == "delegate"
+    assert isinstance(child_inputs["history"], dspy.History)
+    assert child_inputs["session_context"]["workspace"]["available"] is False
     assert "request" in root_invocations[0][2]
 
     # Native Prediction evidence: the completed Root turn exposes a trajectory

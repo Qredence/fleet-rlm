@@ -422,6 +422,46 @@ class AttachmentContextCapsule(dspy.SandboxSerializable):
         return preview[: max(1, min(max_chars, _MAX_PREVIEW_CHARS))]
 
 
+def build_session_context_payload(
+    *,
+    session_context: SessionContextManifest,
+    workspace: WorkspaceCapabilityMetadata,
+    workspace_memory_digest: str = "",
+) -> dict[str, Any]:
+    """Materialize the bounded Session context and authorized capability view payload.
+
+    This is the canonical ``session_context`` input value shape shared by the
+    Root Turn input assembly and delegated child snapshots (P47.4).
+    """
+    try:
+        workspace_memory = WorkspaceMemoryInput(tail=workspace_memory_digest) if workspace_memory_digest else None
+        context = SessionContextInput(
+            session_id=session_context.session_id,
+            checkpoint_version=session_context.checkpoint_version,
+            message_count=session_context.message_count,
+            recent=tuple(
+                TurnPreviewInput(
+                    ordinal=item.ordinal,
+                    role=item.role,
+                    preview=item.preview,
+                )
+                for item in session_context.recent
+            ),
+            workspace=WorkspaceCapabilityInput(
+                available=workspace.available,
+                root=cast(Literal["."], workspace.root),
+                instructions=workspace.instructions,
+            ),
+            workspace_memory=workspace_memory,
+        )
+    except ValidationError as exc:
+        raise RLMConfigError("Turn input metadata is invalid") from exc
+    payload = context.model_dump(mode="json")
+    if workspace_memory is None:
+        payload.pop("workspace_memory", None)
+    return payload
+
+
 def build_rlm_input_kwargs(
     *,
     request: str,
@@ -446,27 +486,12 @@ def build_rlm_input_kwargs(
 
         if not isinstance(history, CommittedSessionHistory):
             raise RLMConfigError("Turn input metadata is invalid")
+    context_payload = build_session_context_payload(
+        session_context=session_context,
+        workspace=workspace,
+        workspace_memory_digest=workspace_memory_digest,
+    )
     try:
-        workspace_memory = WorkspaceMemoryInput(tail=workspace_memory_digest) if workspace_memory_digest else None
-        context = SessionContextInput(
-            session_id=session_context.session_id,
-            checkpoint_version=session_context.checkpoint_version,
-            message_count=session_context.message_count,
-            recent=tuple(
-                TurnPreviewInput(
-                    ordinal=item.ordinal,
-                    role=item.role,
-                    preview=item.preview,
-                )
-                for item in session_context.recent
-            ),
-            workspace=WorkspaceCapabilityInput(
-                available=workspace.available,
-                root=cast(Literal["."], workspace.root),
-                instructions=workspace.instructions,
-            ),
-            workspace_memory=workspace_memory,
-        )
         cards = tuple(
             SkillCardInput(
                 id=card.id,
@@ -495,9 +520,6 @@ def build_rlm_input_kwargs(
     attachment_value: object = [item.model_dump(mode="json", exclude_none=True) for item in attachment_inputs]
     if attachment_context is not None:
         attachment_value = attachment_context
-    context_payload = context.model_dump(mode="json")
-    if workspace_memory is None:
-        context_payload.pop("workspace_memory", None)
     kwargs: dict[str, Any] = {
         "request": request,
         "session_context": context_payload,
@@ -860,6 +882,7 @@ __all__ = [
     "build_native_rlm",
     "build_program",
     "build_rlm_input_kwargs",
+    "build_session_context_payload",
     "compose_rlm_instructions",
     "fleet_rlm_instruction_fragments",
     "has_llm_credentials",
