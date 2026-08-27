@@ -25,10 +25,10 @@ if TYPE_CHECKING:
     from fleet_rlm.daytona.broker import SyncBridgeDispatcher
 
 from fleet_rlm.artifacts.reader import ArtifactReader
+from fleet_rlm.chat.preparation import RunPreparation
 from fleet_rlm.chat.run_cleanup import RunCleanupSupervisor
 from fleet_rlm.chat.run_lifecycle import RunLifecycle
-from fleet_rlm.chat.run_preparation import RunPreparation
-from fleet_rlm.chat.turn_coordinator import TurnCoordinator
+from fleet_rlm.chat.turn_runtime import TurnRuntime
 from fleet_rlm.config_policy import ConfigPolicyService
 from fleet_rlm.files.lifecycle import AttachmentLifecycle
 from fleet_rlm.files.volume_storage import VolumeTreeFs, WorkspaceVolumeGateway
@@ -86,7 +86,9 @@ class RuntimeDatabaseLifecycle:
 class RuntimeInventory:
     """Complete dynamic service graph installed for one application lifespan."""
 
-    turn_coordinator: TurnCoordinator | None = None
+    # Compatibility field name retained for existing route/dependency users;
+    # TurnRuntime is the implementation owner.
+    turn_coordinator: TurnRuntime | None = None
     attachment_lifecycle: AttachmentLifecycle | None = None
     artifact_reader: ArtifactReader | None = None
     session_catalog: SessionCatalog | None = None
@@ -131,6 +133,11 @@ class RuntimeInventory:
         missing = tuple(name for name in self._REQUIRED_ROUTE_FIELDS if getattr(self, name) is None)
         if missing:
             raise RuntimeInventoryError("runtime inventory missing required service(s): " + ", ".join(missing))
+
+    @property
+    def turn_runtime(self) -> TurnRuntime | None:
+        """Return the canonical TurnRuntime through the transition alias."""
+        return self.turn_coordinator
 
     @property
     def db_engine(self) -> AsyncEngine | None:

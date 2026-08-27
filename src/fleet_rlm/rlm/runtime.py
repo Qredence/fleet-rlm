@@ -1032,6 +1032,23 @@ def _program_fingerprint(
     )
 
 
+def program_fingerprint_for_context(
+    context: RLMExecutionContext,
+    *,
+    spec: RLMExecutionSpec | None = None,
+    tools: Sequence[dspy.Tool] | None = None,
+) -> ProgramFingerprint:
+    """Compute the canonical resident-program identity for a prepared context.
+
+    The runner passes its fully observed Tool set (including recursive Tools).
+    Preparation may pass the composed base Tools before wrappers are attached;
+    both paths use this one description helper and exclude per-Turn values.
+    """
+    resolved_spec = spec or context.capabilities.spec
+    resolved_tools = tuple(context.capabilities.spec.tools if tools is None else tools)
+    return _program_fingerprint(context, resolved_spec, resolved_tools)
+
+
 class RunEventStream:
     """Async observation iterator with its measured outcome after completion."""
 
@@ -1469,7 +1486,7 @@ class RLMRunner:
             (recursive_executor.tool, recursive_executor.batched_tool) if recursive_executor is not None else ()
         )
         all_tools = (*observed_tools, *recursive_tools)
-        fingerprint = _program_fingerprint(context, spec, all_tools)
+        fingerprint = program_fingerprint_for_context(context, spec=spec, tools=all_tools)
         key = SessionKey(
             workspace_id=str(context.identity.access.workspace_id),
             session_id=str(context.identity.session_id),

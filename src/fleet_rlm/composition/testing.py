@@ -15,13 +15,13 @@ import dspy
 from fastapi import FastAPI
 
 from fleet_rlm.chat.capability_preparation import PreparedHostCapabilities, prepare_host_capabilities
-from fleet_rlm.chat.run_lifecycle import ClaimedRun
-from fleet_rlm.chat.run_preparation import (
+from fleet_rlm.chat.preparation import (
     DefaultRunPreparer,
     PreparedRun,
     RunEnvironment,
     RunEnvironmentProvider,
 )
+from fleet_rlm.chat.run_lifecycle import ClaimedRun
 from fleet_rlm.composition.common import (
     build_local_inventory,
     build_local_storage_adapters,

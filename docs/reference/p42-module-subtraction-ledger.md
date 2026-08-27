@@ -1,7 +1,8 @@
 # P42 module-subtraction ledger
 
-**Status:** implementation ledger; P42–P47 are implemented, P48 is in progress,
-and P49–P51 remain planned. The current working tree contains uncommitted P48
+**Status:** implementation ledger; P42–P47 are implemented, P48 remains
+incomplete, and the P49.1–P49.3 canonical owners are implemented but not yet
+fully certified. The current working tree contains uncommitted P48/P49
 migration work.
 **Baseline:** the current checkout after the sealed P36/P41 work, assessed against
 `plans/PLANS.md` P44–P51.
@@ -22,7 +23,10 @@ responsibility map, but its status is now updated by the implementation frontier
   working tree; Root/child lifecycle migration and full parity are still in
   progress. L-22 and L-24 are the completed P48 moves; L-20, L-21, L-23, L-25,
   and L-26 remain compatibility-backed or planned.
-- **P49–P53:** no implementation or certification claim is made yet.
+- **P49:** the first preparation/TurnRuntime ownership slice is implemented;
+  finalization race coverage and current owner documentation are in progress,
+  so no full P49 completion claim is made.
+- **P50–P53:** no implementation or certification claim is made yet.
 
 This is the P42.5 companion to the [P42 session-state behavior
 freeze](p42-session-state-behavior-freeze.md). It makes the proposed subtraction

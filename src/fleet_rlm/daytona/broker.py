@@ -720,13 +720,13 @@ class DaytonaHttpToolBroker:
 
         session_id = f"fleet-clean-broker-{uuid.uuid4().hex[:8]}"
         self._sandbox.process.create_session(session_id)
+        # Retain the session immediately after creation. Startup command
+        # failure must not strand a provider session that ``stop`` still owns.
+        self._broker_session_id = session_id
         self._sandbox.process.execute_session_command(
             session_id,
             SessionExecuteRequest(command=_BROKER_SESSION_COMMAND, run_async=True),
         )
-        # Retain the session before contacting the preview proxy so a failed
-        # preview lookup can still be cleaned up by ``stop``.
-        self._broker_session_id = session_id
         preview = self._get_preview_link_with_retry()
         self._broker_url = str(preview.url).rstrip("/")
         self._broker_token = str(getattr(preview, "token", "") or "")
@@ -1020,7 +1020,7 @@ class DaytonaHttpToolBroker:
         final = extract_final_payload(str(outcome))
         return BackendExecutionResult(stdout=str(outcome), final=final)
 
-    def stop(self, *, strict: bool = False) -> None:
+    def stop(self, *, strict: bool = False) -> bool:
         """
         Stop the broker and release its HTTP client and Daytona session.
 
@@ -1040,26 +1040,31 @@ class DaytonaHttpToolBroker:
         # Strict mode still runs every disposal step; the first failure is
         # recorded and re-raised only after the remaining steps have run.
         first_error: BaseException | None = None
+        settled = True
         if client is not None:
-            if strict:
-                try:
-                    client.close()
-                except BaseException as exc:
+            try:
+                client.close()
+            except BaseException as exc:
+                # Keep failed cleanup ownership attached to the broker so a
+                # later stop() can retry the same resource. Non-strict mode
+                # suppresses the error, but never silently drops ownership.
+                self._client = client
+                settled = False
+                if strict:
                     first_error = exc
-            else:
-                with contextlib.suppress(Exception):
-                    client.close()
         if session_id is not None:
-            if strict:
-                try:
-                    self._sandbox.process.delete_session(session_id)
-                except BaseException as exc:
+            try:
+                self._sandbox.process.delete_session(session_id)
+            except BaseException as exc:
+                # The session is still owned when deletion was rejected. The
+                # broker remains stopped, so this retry cannot race startup.
+                self._broker_session_id = session_id
+                settled = False
+                if strict:
                     first_error = first_error or exc
-            else:
-                with contextlib.suppress(Exception):
-                    self._sandbox.process.delete_session(session_id)
         if first_error is not None:
             raise first_error
+        return settled
 
     def _wait_health(self, *, timeout_s: float) -> None:
         """Wait for the broker health endpoint to become ready.

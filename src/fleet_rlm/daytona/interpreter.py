@@ -22,6 +22,7 @@ import hashlib
 import inspect
 import io
 import json
+import logging
 import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
@@ -87,6 +88,8 @@ from fleet_rlm.rlm.result import (
 
 if TYPE_CHECKING:
     from fleet_rlm.daytona.broker import DaytonaHttpToolBroker
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_EXECUTION_OUTPUT_CHARS = 4_000
 DEFAULT_EXECUTION_TIMEOUT_S = 120
@@ -1021,17 +1024,22 @@ class DaytonaCodeInterpreter:
                     self._execution_lock.release()
             first_error: BaseException | None = None
             broker = self._http_broker
+            broker_settled = True
             if broker is not None:
-                if strict_broker_cleanup:
-                    try:
-                        broker.stop(strict=True)
-                    except BaseException as exc:
-                        first_error = exc
-                else:
-                    with contextlib.suppress(Exception):
-                        broker.stop()
-                if first_error is None:
+                try:
+                    broker_result = broker.stop(strict=strict_broker_cleanup)
+                    # Older injected broker doubles returned None; treat that
+                    # as the historical successful-stop result.
+                    broker_settled = broker_result is not False
+                except BaseException as exc:
+                    first_error = exc
+                if broker_settled:
                     self._http_broker = None
+                else:
+                    # Non-strict shutdown may suppress a provider cleanup
+                    # error, but the broker remains owned and retryable. Do
+                    # not publish interpreter shutdown until it settles.
+                    logger.warning("broker cleanup remains pending during interpreter shutdown")
             backend = self._backend
             if backend is not None:
                 try:
@@ -1042,7 +1050,7 @@ class DaytonaCodeInterpreter:
                     self._backend = None
             if first_error is not None:
                 raise first_error
-            self._shutdown = True
+            self._shutdown = broker_settled
 
     @with_callbacks
     def invoke_tool(self, tool_name: str, kwargs: dict[str, Any]) -> Any:

@@ -121,9 +121,10 @@ contracts, and tracked docs remain authoritative.
   existing `start`/`finish` chunks — never as a new RuntimeEvent kind or
   credential-bearing payload.
 - `RunLifecycle.finish()` owns result-snapshot handling, Artifact publication,
-  and atomic Turn Commit or failure settlement. `TurnCoordinator` owns stream
+  and atomic Turn Commit or failure settlement. `TurnRuntime` owns stream
   orchestration, terminal ordering, heartbeat coordination, and final resource
-  cleanup.
+  cleanup; `chat/turn_coordinator.py` is a compatibility shim for the
+  historical name.
 - `RunLifecycleService` translates lifecycle outcomes into typed Claim commands;
   in-memory and SQL Run state stores share one `transition_claim()` operation and
   pure policy, while successful commit and cancellation remain separate. Internal

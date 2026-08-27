@@ -58,7 +58,7 @@ def sanitize_provider_message(raw: str) -> str:
     message = _URL_PATTERN.sub("[redacted-url]", message)
     message = _ANSI_PATTERN.sub("", message)
     message = _CONTROL_PATTERN.sub(" ", message)
-    return message
+    return message[:DEFAULT_SANITIZED_FAILURE_MAX_CHARS]
 
 
 def sanitize_failure_text(exc: BaseException, *, max_chars: int = DEFAULT_SANITIZED_FAILURE_MAX_CHARS) -> str:

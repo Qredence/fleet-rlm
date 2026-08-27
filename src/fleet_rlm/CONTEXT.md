@@ -388,8 +388,9 @@ ordered, bounded sibling execution.
 - `workspace_memory.py` — Workspace Memory store implementation (see disambiguation above).
 
 The post-P25 maintainability baseline keeps one canonical transformation at
-each seam: `RunLifecycle.finish()` commits, `TurnCoordinator` settles the
-stream, `OwnedEffect` supplies the provider-neutral wait vocabulary, and the
+each seam: `RunLifecycle.finish()` commits, `TurnRuntime` settles the
+stream (`chat/turn_coordinator.py` retains the historical compatibility name),
+`OwnedEffect` supplies the provider-neutral wait vocabulary, and the
 TUI adapters feed one canonical reducer. See the [P34 maintainability freeze
 guide](../../docs/how-to-guides/maintainability-freeze.md) for the certification
 matrix and cleanup guardrails.

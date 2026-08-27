@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import io
 import json
 import urllib.error
 import urllib.request
 from collections.abc import Callable
+from types import SimpleNamespace
 
 import pytest
 
@@ -110,6 +112,86 @@ def test_final_output_frames_round_trip_and_accept_legacy_plain_payload() -> Non
 
     encoded = frame[len(FINAL_OUTPUT_MARKER) : -len(FINAL_OUTPUT_MARKER)]
     assert base64.b64decode(encoded).decode("utf-8") == json.dumps(value, ensure_ascii=False)
+
+
+def test_startup_command_failure_retains_created_session_for_cleanup() -> None:
+    class Filesystem:
+        def __init__(self) -> None:
+            self.uploaded = b""
+
+        def upload_file(self, content: bytes, _path: str) -> None:
+            self.uploaded = content
+
+    class Process:
+        def __init__(self, filesystem: Filesystem) -> None:
+            self.filesystem = filesystem
+            self.created: list[str] = []
+            self.deleted: list[str] = []
+
+        def code_run(self, _code: str) -> SimpleNamespace:
+            return SimpleNamespace(result=hashlib.sha256(self.filesystem.uploaded).hexdigest())
+
+        def create_session(self, session_id: str) -> None:
+            self.created.append(session_id)
+
+        def execute_session_command(self, _session_id: str, _request: object) -> None:
+            raise RuntimeError("broker startup command failed")
+
+        def delete_session(self, session_id: str) -> None:
+            self.deleted.append(session_id)
+
+    filesystem = Filesystem()
+    process = Process(filesystem)
+    sandbox = SimpleNamespace(fs=filesystem, process=process)
+    broker = DaytonaHttpToolBroker(sandbox=sandbox)
+
+    with pytest.raises(RuntimeError, match="startup command failed"):
+        broker.ensure_started()
+
+    assert process.created
+    assert broker._broker_session_id == process.created[0]
+    broker.stop(strict=True)
+    assert process.deleted == process.created
+
+
+def test_stop_retains_failed_cleanup_ownership_for_retry() -> None:
+    class Client:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def close(self) -> None:
+            self.calls += 1
+            if self.calls == 1:
+                raise RuntimeError("client close failed")
+
+    class Process:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def delete_session(self, session_id: str) -> None:
+            assert session_id == "broker-session"
+            self.calls += 1
+            if self.calls == 1:
+                raise RuntimeError("session delete failed")
+
+    client = Client()
+    process = Process()
+    broker = DaytonaHttpToolBroker(sandbox=SimpleNamespace(process=process))
+    broker._client = client  # type: ignore[assignment]
+    broker._broker_session_id = "broker-session"
+    broker._broker_url = "https://preview"
+    broker._broker_token = "token"
+
+    with pytest.raises(RuntimeError, match="client close failed"):
+        broker.stop(strict=True)
+    assert broker._client is client
+    assert broker._broker_session_id == "broker-session"
+
+    broker.stop(strict=True)
+    assert client.calls == 2
+    assert process.calls == 2
+    assert broker._client is None
+    assert broker._broker_session_id is None
 
 
 def test_broker_server_and_wrapper_sources_are_provider_independent() -> None:

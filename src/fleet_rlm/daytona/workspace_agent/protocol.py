@@ -167,9 +167,15 @@ def decode_workspace_agent_response(response: Any, relative: str) -> dict[str, o
     """Decode one provider response and map errors to stable host exceptions."""
     if int(getattr(response, "exit_code", 1)) != 0:
         raise ValueError("workspace path is unsafe")
+    raw_result = getattr(response, "result", "")
+    result_bytes = raw_result if isinstance(raw_result, bytes) else str(raw_result).encode("utf-8")
+    if len(result_bytes) > WORKSPACE_AGENT_RESPONSE_MAX_BYTES:
+        # Enforce the wire bound before JSON parsing to avoid allocating or
+        # traversing an attacker-controlled response payload.
+        raise ValueError("workspace path is unsafe")
     try:
-        payload = json.loads(str(getattr(response, "result", "")))
-    except (TypeError, ValueError) as exc:
+        payload = json.loads(result_bytes.decode("utf-8"))
+    except (TypeError, UnicodeError, ValueError) as exc:
         raise ValueError("workspace path is unsafe") from exc
     if not isinstance(payload, dict) or payload.get("ok") is not True:
         _raise_workspace_error(payload if isinstance(payload, dict) else {}, relative)

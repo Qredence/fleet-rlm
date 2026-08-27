@@ -14,7 +14,7 @@ compatibility runtime and parallel foundation package no longer exist.
 | `snapshot_contract.py` | immutable Daytona Snapshot name policy | none |
 | `result_snapshot.py` | private commit-gated typed-result encoding | RLM prediction/usage |
 | `api/` | HTTP translation, local scope, dependency aliases, OpenAPI/SSE projection, UIMessage reload | domain interfaces and composed modules |
-| `chat/` | `TurnCoordinator` claim-to-cleanup orchestration, Turn preparation, lifecycle finalization, owned post-commit Memory promotion, shared heartbeat/Claim policy | RLM, Sessions, Skills, files |
+| `chat/` | `TurnRuntime` claim-to-cleanup orchestration, Turn preparation, lifecycle finalization, owned post-commit Memory promotion, shared heartbeat/Claim policy; `turn_coordinator.py` is a compatibility shim | RLM, Sessions, Skills, files |
 | `rlm/` | DSPy Signature, Root/Sub model roles, Session-scoped RLM construction/reuse with fresh per-Turn history, delegation metrics, routing evaluation, fixed-depth child executor, options, events, and native execution orchestration | DSPy and domain values |
 | `optimization/` | trusted-host GEPA/evidence lane | Daytona evaluator, evidence types |
 | `daytona/` | exclusive SDK boundary: async platform/provisioning, provider-only Session ownership, DSPy-only sync interpreter seam (injected `SyncBridgeDispatcher`), confirmed Sandbox Lease ownership (`sandbox_lease.py`) with typed cleanup receipts and confirmed deletion lifecycle (`lifecycle.py`), one contracted recursive-child owner covering acquisition, lease close state, strict cleanup, and late ownership (`recursive_child_runtime.py`), versioned installed Workspace Agent protocol with one packaged `handle(request)` artifact for installed and fallback launchers (`workspace_agent/`), canonical broker source plus transport, diagnostics, Session Workspace gateways, and the mounted Workspace Memory adapter | Daytona SDK and domain values |
@@ -36,7 +36,8 @@ compatibility runtime and parallel foundation package no longer exist.
   may recreate only the static in-memory catalog fallback.
 - `RLMRunner` owns execution, not Turn Commit or resource release.
   `RunLifecycle.finish()` owns result/Artifact publication and atomic commit;
-  `TurnCoordinator` owns terminal ordering and final cleanup.
+  `TurnRuntime` owns terminal ordering and final cleanup; `turn_coordinator.py`
+  is a compatibility shim for the historical name.
 - `rlm/runtime.py` keeps `RLMRunner.stream(context)` as the deep execution seam.
   It owns the cancellation-shielded worker/thread/event-loop boundary, bounded
   detail relay/monitoring/drain policy, and trace/recursive-metric projection
@@ -67,9 +68,10 @@ compatibility runtime and parallel foundation package no longer exist.
   `DaytonaRuntime` root/child lifecycle;
   `composition/daytona.py` injects database, binding, model, preparation, limits,
   and cleanup ports.
-- `TurnCoordinator` owns the private claim-to-cleanup Run state machine and
-  public stream facade. `RunLifecycle.finish()` remains the Artifact/atomic-commit
+- `TurnRuntime` owns the private claim-to-cleanup Run state machine and public
+  stream facade. `RunLifecycle.finish()` remains the Artifact/atomic-commit
   owner, while `RunCleanupSupervisor` is only a bounded cleanup fallback.
+  `turn_coordinator.py` is a compatibility shim for the historical name.
 - `daytona/broker.py` is the sole owner of broker source generation,
   HTTP-in-sandbox transport, host-tool/SUBMIT lifecycle, and the injected
   synchronous DSPy bridge.

@@ -443,7 +443,7 @@ async def build_daytona_composition(
     from fleet_rlm.artifacts.workspace_storage import WorkspaceArtifactBlobGateway
     from fleet_rlm.chat.run_cleanup import RunCleanupSupervisor
     from fleet_rlm.chat.run_lifecycle import RunLifecycleService
-    from fleet_rlm.chat.turn_coordinator import TurnCoordinator
+    from fleet_rlm.chat.turn_runtime import TurnRuntime
     from fleet_rlm.daytona.provisioning import sandbox_spec_from_settings
     from fleet_rlm.daytona.run_environment import DaytonaRuntimeResources, build_run_preparation, resolve_settings
     from fleet_rlm.daytona.workspace_gateway import (
@@ -617,7 +617,7 @@ async def build_daytona_composition(
             factory=RLMFactory(verbose=resolved.rlm_verbose),
             runtime_registry=session_runtime_registry,
         )
-        coordinator = TurnCoordinator(
+        coordinator = TurnRuntime(
             lifecycle=lifecycle,
             preparation=run_preparation,
             runner=runner,

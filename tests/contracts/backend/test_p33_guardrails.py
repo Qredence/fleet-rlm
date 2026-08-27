@@ -113,7 +113,7 @@ def test_deleted_dataclass_methods_and_fields_stay_deleted() -> None:
     """Dead compat surfaces removed in P33 do not reappear on the domain models."""
     from fleet_rlm.chat import post_commit_memory
     from fleet_rlm.chat.session_context import SessionContextManifest, TurnPreview
-    from fleet_rlm.chat.turn_coordinator import TurnCoordinator
+    from fleet_rlm.chat.turn_runtime import TurnRuntime
     from fleet_rlm.config import Settings
     from fleet_rlm.daytona import workspace_fs
     from fleet_rlm.daytona.session_manager import InterpreterLease
@@ -124,7 +124,7 @@ def test_deleted_dataclass_methods_and_fields_stay_deleted() -> None:
     assert "__call__" not in vars(post_commit_memory.OwnedPostCommitMemoryPromotion)
     assert not hasattr(TurnPreview, "to_input")
     assert not hasattr(SessionContextManifest, "to_input")
-    assert not hasattr(TurnCoordinator, "_submit_claim_loss_cleanup")
+    assert not hasattr(TurnRuntime, "_submit_claim_loss_cleanup")
     assert not hasattr(workspace_fs.DaytonaSessionWorkspaceFS, "read_text")
     assert not hasattr(workspace_fs.AsyncDaytonaSessionWorkspaceFS, "read_text")
     assert not hasattr(AssistantTurnRecord, "content")

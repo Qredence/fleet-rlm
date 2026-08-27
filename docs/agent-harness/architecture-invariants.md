@@ -41,7 +41,7 @@ and its matching automated check in the same patch.
   one owner.
 - **Ownership seams are one-directional.** Provider objects die under
   `SandboxLease` receipts with typed cleanup; claimed Runs are orchestrated
-  from claim through cleanup by `TurnCoordinator`, with durable transitions
+  from claim through cleanup by `TurnRuntime`, with durable transitions
   owned by `RunLifecycleService`; Workspace operations ride the versioned
   installed agent whose handshake fails closed before use; Memory promotion
   rides the transactional outbox with bounded idempotent reconciliation.
@@ -115,9 +115,9 @@ exist.
   `RuntimeInventory`, publishes readiness last, and detaches it before disposal.
 - `composition/` owns complete common, Daytona, and private testing wiring.
 - `chat/` owns preparation, coordination, Turn Lifecycle, terminal ordering, and
-  cleanup. `TurnCoordinator` owns the claim-to-cleanup Run state machine and
-  public stream facade; `RunLifecycle.finish()` owns Artifact publication and
-  atomic commit.
+  cleanup. `TurnRuntime` owns the claim-to-cleanup Run state machine and
+  public stream facade; `chat/turn_coordinator.py` is a compatibility shim.
+  `RunLifecycle.finish()` owns Artifact publication and atomic commit.
 - Turn Claim persistence has one typed `transition_claim()` operation. Its pure
   command/state policy is shared by in-memory and SQL adapters; successful
   commit and cancellation requests remain separate.

@@ -12,8 +12,8 @@ import pytest
 
 @pytest.mark.asyncio
 async def test_preparation_bounds_history_and_closes_in_dependency_order() -> None:
+    from fleet_rlm.chat.preparation import DefaultRunPreparer, RunEnvironment
     from fleet_rlm.chat.run_lifecycle import ClaimedRun, _RunClaimToken
-    from fleet_rlm.chat.run_preparation import DefaultRunPreparer, RunEnvironment
     from fleet_rlm.files.models import PreparedAttachments
     from fleet_rlm.rlm.program import RLMModelBundle, RLMOptions
     from fleet_rlm.rlm.runtime import RLMExecutionSpec
@@ -113,7 +113,7 @@ async def test_preparation_bounds_history_and_closes_in_dependency_order() -> No
 
 @pytest.mark.asyncio
 async def test_prepared_cleanup_continues_after_cancelled_owner_and_reobserves_failure() -> None:
-    from fleet_rlm.chat.run_preparation import PreparedRun, _PreparedRunResources
+    from fleet_rlm.chat.preparation import PreparedTurn, _PreparedTurnResources
 
     operations: list[str] = []
 
@@ -124,10 +124,10 @@ async def test_prepared_cleanup_continues_after_cancelled_owner_and_reobserves_f
     async def remaining_owner() -> None:
         operations.append("remaining")
 
-    prepared = PreparedRun(
+    prepared = PreparedTurn(
         execution=SimpleNamespace(),
         artifact_sink=None,
-        _resources=_PreparedRunResources((remaining_owner, cancelled_owner)),
+        _resources=_PreparedTurnResources((remaining_owner, cancelled_owner)),
     )
 
     with pytest.raises(RuntimeError, match="prepared Turn cleanup failed"):

@@ -11,22 +11,22 @@ from uuid import UUID, uuid4
 from fastapi import APIRouter, Depends, Header, Request, Response
 from fastapi.sse import EventSourceResponse, ServerSentEvent
 
-from fleet_rlm.api.dependencies import LocalScopeDep, SettingsDep, TurnCoordinatorDep
+from fleet_rlm.api.dependencies import LocalScopeDep, SettingsDep, TurnRuntimeDep
 from fleet_rlm.api.schemas import CreateTurnRequest
 from fleet_rlm.api.sse import AISDKUIProjector
 from fleet_rlm.chat.commands import OpenTurnCommand
+from fleet_rlm.chat.preparation import (
+    RunPreparationCancelledError,
+    RunPreparationTimeoutError,
+    RunPreparationUnavailableError,
+)
 from fleet_rlm.chat.run_lifecycle import (
     RunIdempotencyMismatchError,
     RunInProgressError,
     RunLifecycleUnavailableError,
     RunNotFoundError,
 )
-from fleet_rlm.chat.run_preparation import (
-    RunPreparationCancelledError,
-    RunPreparationTimeoutError,
-    RunPreparationUnavailableError,
-)
-from fleet_rlm.chat.turn_coordinator import OpenedTurnStream
+from fleet_rlm.chat.turn_runtime import OpenedTurnStream
 from fleet_rlm.observability.failure_diagnostics import normalize_turn_failure
 from fleet_rlm.posthog_client import get_client, get_distinct_id
 from fleet_rlm.sessions.models import TurnAccess, TurnInput
@@ -36,7 +36,7 @@ from fleet_rlm.skills.models import SkillSelectionRef
 router = APIRouter(prefix="/api/sessions", tags=["turns"])
 logger = logging.getLogger(__name__)
 
-# Transient client-facing pre-run heartbeat emitted until the coordinator-owned open
+# Transient client-facing pre-run heartbeat emitted until the runtime-owned open
 # resolves; it never enters the durable event log and may repeat.
 _PREPARATION_PRELUDE_CHUNK: Final[dict[str, Any]] = {
     "type": "data-status",
@@ -149,7 +149,7 @@ async def create_turn(
     body: CreateTurnRequest,
     request: Request,
     identity: LocalScopeDep,
-    coordinator: TurnCoordinatorDep,
+    coordinator: TurnRuntimeDep,
     settings: SettingsDep,
     idempotency_key: Annotated[
         str,

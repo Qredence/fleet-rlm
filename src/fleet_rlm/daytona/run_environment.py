@@ -18,13 +18,14 @@ from fleet_rlm.chat.capability_preparation import (
     prepare_host_capabilities,
 )
 from fleet_rlm.chat.post_commit_memory import OwnedPostCommitMemoryPromotion
-from fleet_rlm.chat.run_lifecycle import ClaimedRun
-from fleet_rlm.chat.run_preparation import (
+from fleet_rlm.chat.preparation import (
     DefaultRunPreparer,
     RunEnvironment,
     RunPreparationTimeoutError,
     RunPreparationUnavailableError,
+    claim_history_records,
 )
+from fleet_rlm.chat.run_lifecycle import ClaimedRun
 from fleet_rlm.composition.common import recursive_rlm_options
 from fleet_rlm.config import Settings, load_runtime_settings
 from fleet_rlm.daytona._lease import RootSessionLease
@@ -129,9 +130,7 @@ def build_committed_session_history_for_claim(claim: ClaimedRun) -> CommittedSes
     this Dayona helper exists to keep the broker able to inject the value
     while preserving the canonical record contract.
     """
-    from fleet_rlm.chat.run_preparation import _claim_history_records
-
-    committed_turns, user_requests = _claim_history_records(claim)
+    committed_turns, user_requests = claim_history_records(claim)
     records = to_canonical_history_records(committed_turns, user_requests=user_requests)
     return CommittedSessionHistory(records)
 

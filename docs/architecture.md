@@ -8,7 +8,7 @@ Canonical Run Environment set: `daytona`.
 POST /api/sessions/{session_id}/turns + Idempotency-Key
   -> deterministic local scope and Turn input validation
   -> Attachment ownership and exact Skill selection validation
-  -> TurnCoordinator.open()
+  -> TurnRuntime.open()
      -> RunLifecycle.begin(): replay or atomic Run claim
      -> DefaultRunPreparer.prepare(): context, tools, environment resources
   -> RLMRunner: one compatible native dspy.RLM/interpreter per resident Session
@@ -19,7 +19,7 @@ POST /api/sessions/{session_id}/turns + Idempotency-Key
      -> promote Artifact Candidate bytes (Daytona only)
      -> atomic Turn/Run/Checkpoint/Artifact commit or failure settlement
   -> artifact.created* then exactly one run.completed terminal
-  -> TurnCoordinator cleanup and Interpreter Lease release
+  -> TurnRuntime cleanup and Interpreter Lease release
 ```
 
 Malformed request bodies and structural schema failures remain ordinary safe
@@ -111,8 +111,9 @@ concurrency through `recursion_max_parallel_children`.
   the in-memory and SQL Run state stores apply the same pure policy through one
   `transition_claim()` persistence operation. Successful `commit()` and
   `request_cancel()` remain separate atomic/authorization paths.
-- `TurnCoordinator` owns stream orchestration, heartbeat coordination, terminal
-  ordering, and final cleanup.
+- `TurnRuntime` owns stream orchestration, heartbeat coordination, terminal
+  ordering, and final cleanup. `chat/turn_coordinator.py` is a compatibility
+  shim for the historical name.
 - `daytona/` is the exclusive Daytona SDK boundary.
 - `persistence/` implements domain repository interfaces; Alembic owns the live
   schema. `persistence/repositories/run_codec.py` centralizes ORM/domain and

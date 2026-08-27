@@ -10,7 +10,7 @@ from uuid import UUID
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from fleet_rlm.artifacts.reader import ArtifactReader
-from fleet_rlm.chat.run_preparation import RunPreparation
+from fleet_rlm.chat.preparation import RunPreparation
 from fleet_rlm.composition.inventory import RuntimeDatabaseLifecycle, RuntimeInventory
 from fleet_rlm.config import Settings
 from fleet_rlm.files.lifecycle import AttachmentLifecycle
@@ -140,7 +140,7 @@ def build_local_inventory(
     assert_dspy_version()
     from fleet_rlm.chat.run_cleanup import RunCleanupSupervisor
     from fleet_rlm.chat.run_lifecycle import RunLifecycleService
-    from fleet_rlm.chat.turn_coordinator import TurnCoordinator
+    from fleet_rlm.chat.turn_runtime import TurnRuntime
     from fleet_rlm.config import _CONFIG_PATH, active_profile
     from fleet_rlm.config_policy import ConfigPolicyService
     from fleet_rlm.persistence.repositories import (
@@ -172,7 +172,7 @@ def build_local_inventory(
         cleanup=cleanup,
     )
     runner = RLMRunner(factory=rlm_factory, runtime_registry=session_runtime_registry)
-    coordinator = TurnCoordinator(
+    coordinator = TurnRuntime(
         lifecycle=lifecycle,
         preparation=preparation,
         runner=runner,

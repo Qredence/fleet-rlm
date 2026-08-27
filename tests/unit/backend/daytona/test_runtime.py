@@ -2,6 +2,8 @@
 
 import asyncio
 from dataclasses import dataclass
+from types import SimpleNamespace
+from uuid import uuid4
 
 import pytest
 
@@ -287,3 +289,27 @@ async def test_root_failed_receipt_is_not_published_as_closed() -> None:
         await owner.close()
     assert owner.state is LeaseState.FAILED
     assert owner.closed is False
+
+
+@pytest.mark.asyncio
+async def test_resource_root_lookup_failure_releases_manager_lease() -> None:
+    lease = SimpleNamespace(sandbox_id="sandbox-1")
+    released: list[object] = []
+
+    class Manager:
+        async def acquire(self, request, *, deadline, force_new):
+            del request, deadline, force_new
+            return lease
+
+        async def release(self, value):
+            released.append(value)
+
+    class Platform:
+        async def get(self, sandbox_id):
+            assert sandbox_id == "sandbox-1"
+            raise RuntimeError("provider lookup failed")
+
+    runtime = DaytonaRuntime(resources=SimpleNamespace(session_manager=Manager(), platform=Platform()))
+    with pytest.raises(RuntimeError, match="provider lookup failed"):
+        await runtime._acquire_from_resources(RootSessionSpec(workspace_id=uuid4(), session_id=uuid4()))
+    assert released == [lease]

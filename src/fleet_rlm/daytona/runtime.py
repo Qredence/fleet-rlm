@@ -865,7 +865,15 @@ class DaytonaRuntime:
         )
         deadline = spec.deadline if spec.deadline is not None else float("inf")
         lease = await manager.acquire(request, deadline=deadline, force_new=force_new)
-        sandbox = await platform.get(lease.sandbox_id)
+        try:
+            sandbox = await platform.get(lease.sandbox_id)
+        except BaseException:
+            # The manager lease is owned from acquire onward, including a
+            # provider lookup failure. Release it before propagating so a
+            # transient platform error cannot strand admission capacity.
+            with contextlib.suppress(BaseException):
+                await manager.release(lease)
+            raise
         if sandbox is None:
             await manager.release(lease)
             raise RuntimeError("acquired Daytona Sandbox is unavailable")

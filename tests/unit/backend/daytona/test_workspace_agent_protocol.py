@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import hashlib
 from importlib.resources import files
+from types import SimpleNamespace
+
+import pytest
 
 
 def _base(**overrides: object) -> dict[str, object]:
@@ -95,6 +98,20 @@ def test_error_vocabulary_and_security_markers_are_stable() -> None:
         assert marker in code, marker
     for marker in ("'error': 'not_found'", "'error': 'not_directory'", "'error': 'unsupported_storage'"):
         assert marker in code, marker
+
+
+def test_response_bound_is_checked_before_json_parsing() -> None:
+    from fleet_rlm.daytona.workspace_agent.protocol import (
+        WORKSPACE_AGENT_RESPONSE_MAX_BYTES,
+        decode_workspace_agent_response,
+    )
+
+    response = SimpleNamespace(
+        exit_code=0,
+        result='{"ok": true, "padding": "' + "x" * WORKSPACE_AGENT_RESPONSE_MAX_BYTES + '"}',
+    )
+    with pytest.raises(ValueError, match="workspace path is unsafe"):
+        decode_workspace_agent_response(response, "note.txt")
 
 
 def test_replace_errno_set_keeps_portable_numeric_literals() -> None:
