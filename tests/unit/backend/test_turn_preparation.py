@@ -135,7 +135,9 @@ async def test_prepared_cleanup_continues_after_cancelled_owner_and_reobserves_f
         await prepared.aclose()
     with pytest.raises(RuntimeError, match="prepared Turn cleanup failed"):
         await prepared.aclose()
-    assert operations == ["cancelled", "remaining"]
+    # The successful owner is not repeated; only the canceled owner remains
+    # retryable for the second cleanup attempt.
+    assert operations == ["cancelled", "remaining", "cancelled"]
 
 
 @pytest.mark.asyncio

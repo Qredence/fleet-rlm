@@ -8,7 +8,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Query
 
-from fleet_rlm.api.dependencies import LocalScopeDep, SessionCatalogDep
+from fleet_rlm.api.dependencies import LocalScopeDep, SessionCatalogDep, SessionRuntimeRegistryDep
 from fleet_rlm.api.errors import http_error
 from fleet_rlm.api.schemas import (
     SessionCreateRequest,
@@ -21,6 +21,7 @@ from fleet_rlm.api.schemas import (
 )
 from fleet_rlm.api.ui_message import assistant_turn_to_ui_message, user_turn_to_ui_message
 from fleet_rlm.posthog_client import get_client, get_distinct_id
+from fleet_rlm.rlm.session_runtime import SessionKey
 from fleet_rlm.sessions.catalog import SequenceCursor
 from fleet_rlm.sessions.errors import SessionNotFoundError
 from fleet_rlm.sessions.models import AssistantTurnRecord, SessionRecord
@@ -158,6 +159,7 @@ async def patch_session(
     body: SessionPatchRequest,
     identity: LocalScopeDep,
     repo: SessionCatalogDep,
+    runtime_registry: SessionRuntimeRegistryDep,
 ) -> SessionDetailResponse:
     """
     Update the title or status of a session within the authenticated user's workspace.
@@ -192,6 +194,22 @@ async def patch_session(
         # Internal validation failures must not leak exception text into the
         # public contract; collapse them to the closed invalid_request code.
         raise http_error(422, "invalid_request", "Invalid request") from exc
+    if record.status == "archived" and runtime_registry is not None:
+        # Archiving is the public Session-retirement operation.  It must not
+        # leave an in-memory interpreter carrying stale capabilities alive.
+        try:
+            await runtime_registry.delete_session(
+                SessionKey(workspace_id=str(identity.workspace_id), session_id=str(session_id)),
+                drain_seconds=1.0,
+            )
+        except (RuntimeError, TimeoutError) as exc:
+            # The durable archive already succeeded.  Do not expose provider or
+            # interpreter details if resident retirement cannot finish now.
+            raise http_error(
+                503,
+                "session_runtime_retirement_pending",
+                "Session archived; runtime retirement is pending",
+            ) from exc
     ph = get_client()
     if ph is not None:
         ph.capture(

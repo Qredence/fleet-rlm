@@ -205,9 +205,19 @@ class LiveDaytonaPlatform:
         return await self._client.create(params)
 
     async def delete(self, sandbox_id: Any) -> None:
-        """Delete through Daytona's async client, which requires a Sandbox object."""
-        target = await self._client.get(sandbox_id) if isinstance(sandbox_id, str) else sandbox_id
-        await self._client.delete(target)
+        """Delete through Daytona's async client, treating absence as success."""
+        try:
+            target = await self._client.get(sandbox_id) if isinstance(sandbox_id, str) else sandbox_id
+        except Exception as exc:
+            if is_sandbox_not_found(exc):
+                return
+            raise map_provider_error(exc) from exc
+        try:
+            await self._client.delete(target)
+        except Exception as exc:
+            if is_sandbox_not_found(exc):
+                return
+            raise map_provider_error(exc) from exc
 
     async def start(self, sandbox_id: str) -> None:
         """Start the specified sandbox.

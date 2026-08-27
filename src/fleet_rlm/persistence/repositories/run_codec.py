@@ -265,12 +265,14 @@ def _artifact_refs_from_rows(rows: Iterable[ArtifactRow]) -> tuple[ArtifactRef, 
 
 
 def _history_from_turn_rows(rows: Sequence[TurnRow]) -> SessionHistory:
+    """Project durable Turn rows into the Session History message snapshot."""
     messages: list[HistoryMessage] = []
     for row in rows:
         if row.role == "user" and row.user_input_json is not None:
             messages.append(HistoryMessage("user", _decode_turn_input(row.user_input_json).text))
         elif row.role == "assistant" and row.committed_turn_json is not None:
-            messages.append(HistoryMessage("assistant", _decode_committed_turn(row.committed_turn_json).text))
+            committed = _decode_committed_turn(row.committed_turn_json)
+            messages.append(HistoryMessage("assistant", committed.text, committed))
         else:
             raise RunStateError("stored Turn shape is invalid")
     return SessionHistory(tuple(messages))

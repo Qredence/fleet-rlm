@@ -259,6 +259,11 @@ class _DSPySyncSandboxView:
         self._loop = loop
         self._owner = owner
 
+    @property
+    def id(self) -> object:
+        """Expose the wrapped provider identity to per-Sandbox host caches."""
+        return getattr(self._sandbox, "id", None)
+
     def get_preview_link(self, port: int, **kwargs: Any) -> Any:
         return _sync_await(self._sandbox.get_preview_link(port, **kwargs), self._owner, self._loop)
 

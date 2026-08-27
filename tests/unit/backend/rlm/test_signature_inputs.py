@@ -31,6 +31,7 @@ ATTACHMENT_ID = UUID("00000000-0000-0000-0000-000000000003")
 def _payload() -> dict[str, object]:
     return build_rlm_input_kwargs(
         request="Summarize the report",
+        history=dspy.History(messages=[]),
         session_context=SessionContextManifest(
             session_id=SESSION_ID,
             checkpoint_version=7,
@@ -62,7 +63,7 @@ def _payload() -> dict[str, object]:
 def test_default_input_payload_contains_only_bounded_metadata() -> None:
     payload = _payload()
 
-    assert set(payload) == {"request", "session_context", "skill_cards", "attachments"}
+    assert set(payload) == {"request", "history", "session_context", "skill_cards", "attachments"}
     context = payload["session_context"]
     assert isinstance(context, dict)
     assert set(context) == {
@@ -99,6 +100,7 @@ def test_manifest_skill_affordances_reach_the_model_unchanged() -> None:
     catalog = build_bundled_skill_catalog()
     payload = build_rlm_input_kwargs(
         request="Inspect relevant Skills",
+        history=dspy.History(messages=[]),
         session_context=SessionContextManifest(SESSION_ID, 0, 0, ()),
         skill_cards=catalog.cards(),
     )
@@ -117,6 +119,7 @@ def test_model_visible_skill_discovery_snapshot_matches_the_bundled_catalog() ->
     catalog = build_bundled_skill_catalog()
     payload = build_rlm_input_kwargs(
         request="Inspect relevant Skills",
+        history=dspy.History(messages=[]),
         session_context=SessionContextManifest(SESSION_ID, 0, 0, ()),
         skill_cards=catalog.cards(),
     )
@@ -184,7 +187,10 @@ def test_custom_skill_payload_matches_dspy_rlm_declared_inputs() -> None:
 
 def test_model_visible_payload_excludes_bodies_paths_and_runtime_objects() -> None:
     payload = _payload()
-    serialized = json.dumps(payload, sort_keys=True)
+    # The empty ``dspy.History`` carrier is not JSON-serializable; strip it
+    # for the wire-format check while keeping the body search exhaustive.
+    wire_payload = {name: value for name, value in payload.items() if name != "history"}
+    serialized = json.dumps(wire_payload, sort_keys=True)
 
     for forbidden in (
         "instruction body",
@@ -347,6 +353,7 @@ async def test_volume_attachment_context_round_trips_inside_the_interpreter(tmp_
     )
     kwargs = build_rlm_input_kwargs(
         request="inspect the prepared payload",
+        history=dspy.History(messages=[]),
         session_context=SessionContextManifest(SESSION_ID, 0, 0, ()),
         attachment_context=payload,
     )
@@ -520,6 +527,14 @@ def test_dspy_imports_stay_out_of_deterministic_backend_layers() -> None:
     source_root = Path(__file__).resolve().parents[4] / "src" / "fleet_rlm"
     allowed_tool_adapters = {
         "sessions/history_tools.py",
+        # P43.7 narrow SandboxSerializable transport for committed Session
+        # conversation; the dspy coupling is sanctioned by the plan and
+        # required for the Daytona broker, which cannot inject a raw
+        # dspy.History Pydantic value into a Sandbox.
+        "sessions/history_transport.py",
+        # P44.1 canonical History factory returns the exact installed
+        # dspy.History Pydantic model; the dspy coupling is the point.
+        "sessions/history.py",
         "files/tools.py",
         "files/url_tool.py",
         "files/workspace_tools.py",

@@ -304,6 +304,39 @@ async def _close_stream_owned(
         remember(exc)
 
 
+def _defer_stream_runtime(stream: RunEventStream | None) -> None:
+    """Tell a resident Runner to hold its Session lane through cleanup."""
+    if stream is None:
+        return
+    defer = getattr(stream, "defer_runtime_release", None)
+    if callable(defer):
+        defer()
+
+
+def _mark_stream_runtime(stream: RunEventStream | None, *, committed: bool) -> None:
+    """Record the durable outcome on a resident runtime token when supported."""
+    if stream is None:
+        return
+    method = getattr(stream, "mark_committed" if committed else "mark_tainted", None)
+    if callable(method):
+        method()
+
+
+async def _release_stream_runtime(
+    stream: RunEventStream | None,
+    remember: Callable[[BaseException], None],
+) -> None:
+    """Release a resident Session lane after all prepared resources settle."""
+    if stream is None:
+        return
+    release = getattr(stream, "release_runtime", None)
+    if callable(release):
+        try:
+            await release()
+        except BaseException as exc:
+            remember(exc)
+
+
 @dataclass(slots=True)
 class _ExecutionState:
     recorder: EventRecorder
@@ -726,6 +759,7 @@ class TurnCoordinator:
         trace_request = self._trace_request(prepared)
         try:
             state.stream = self._runner.stream(prepared.execution)
+            _defer_stream_runtime(state.stream)
             async for event in self._drain_events(run, prepared, state, trace_request, trace_id):
                 yield event
             if state.settled:
@@ -738,9 +772,11 @@ class TurnCoordinator:
             self._annotate_outcome(trace_request, outcome)
             receipt = await self._settle_outcome(run, prepared, state, outcome, trace_request)
             if isinstance(receipt, _ClaimLost):
+                _mark_stream_runtime(state.stream, committed=False)
                 yield state.recorder.record(RunFailed(code="unavailable", message="Turn failed"))
                 return
 
+            _mark_stream_runtime(state.stream, committed=isinstance(receipt, CommittedTurnReceipt))
             self._annotate_receipt(trace_request, outcome, receipt)
             state.settled = True
             if isinstance(receipt, CommittedTurnReceipt):
@@ -753,6 +789,7 @@ class TurnCoordinator:
         except Exception:
             if not state.settled:
                 if _heartbeat_claim_lost(state) or run.authority.revoked:
+                    _mark_stream_runtime(state.stream, committed=False)
                     await self._handoff_cleanup_or_drain(
                         run,
                         prepared,
@@ -771,6 +808,7 @@ class TurnCoordinator:
                         yield state.recorder.record(RunFailed(code="unavailable", message="Turn failed"))
         except BaseException:
             if not state.settled and (_heartbeat_claim_lost(state) or run.authority.revoked):
+                _mark_stream_runtime(state.stream, committed=False)
                 try:
                     await self._handoff_cleanup_or_drain(
                         run,
@@ -807,6 +845,7 @@ class TurnCoordinator:
                 if next_event.done():
                     state.pending_event = None
             if isinstance(result, _ClaimLost):
+                _mark_stream_runtime(state.stream, committed=False)
                 await self._handoff_cleanup_or_drain(
                     run,
                     prepared,
@@ -1007,6 +1046,7 @@ class TurnCoordinator:
         prepared: PreparedRun,
         state: _ExecutionState,
     ) -> None:
+        _mark_stream_runtime(state.stream, committed=False)
         if state.settled:
             return
 
@@ -1146,9 +1186,12 @@ class TurnCoordinator:
                     except BaseException as exc:
                         remember(exc)
                     if cleanup_error is not None:
-                        raise cleanup_error
+                        _mark_stream_runtime(state.stream, committed=False)
                 finally:
+                    await _release_stream_runtime(state.stream, remember)
                     await stop_heartbeat(state.heartbeat)
+                if cleanup_error is not None:
+                    raise cleanup_error
             else:
                 await stop_heartbeat(state.heartbeat)
 
@@ -1260,7 +1303,9 @@ class TurnCoordinator:
             try:
                 await prepared.aclose()
             except BaseException as exc:
+                _mark_stream_runtime(stream, committed=False)
                 remember(exc)
+            await _release_stream_runtime(stream, remember)
             if (
                 late_claim_loss_window
                 and heartbeat is not None

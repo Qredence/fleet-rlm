@@ -497,6 +497,7 @@ class DaytonaCodeInterpreter:
         self._binding_generation = 0
         self._installed_binding_generation = -1
         self._execution_lock = Lock()
+        self._shutdown_lock = Lock()
         self._reservation_state_lock = Lock()
         self._reservation_token: object | None = None
         self._reservation_task: asyncio.Task[Any] | None = None
@@ -960,33 +961,35 @@ class DaytonaCodeInterpreter:
             strict_broker_cleanup (bool): Whether broker cleanup errors should be
                 propagated. When false, broker cleanup errors are suppressed.
         """
-        if self._shutdown:
-            return
-        self._shutdown = True
-        reservation_token: object | None = None
-        with self._reservation_state_lock:
-            if self._reservation_token is not None and not self._execution_started:
-                reservation_token = self._reservation_token
-                self._reservation_token = None
-                self._reservation_task = None
-                self._execution_lock.release()
-        if reservation_token is not None and _BINDING_RESERVATION.get() is reservation_token:
-            _BINDING_RESERVATION.set(None)
-        else:
-            current = _BINDING_RESERVATION.get()
+        # Shutdown may be requested by both the owner-loop close path and a
+        # worker-thread release callback.  Single-flight it, and only mark the
+        # interpreter closed after every owned resource has settled so a
+        # strict failure remains retryable.
+        with self._shutdown_lock:
+            if self._shutdown:
+                return
+            reservation_token: object | None = None
             with self._reservation_state_lock:
-                owns_active_execution = (
-                    self._execution_started and self._reservation_token is current and current is not None
-                )
-                execution_active = self._execution_lock.locked()
-            if execution_active and not owns_active_execution:
-                self._execution_lock.acquire()
-                self._execution_lock.release()
-        first_error: BaseException | None = None
-        try:
-            if self._http_broker is not None:
-                broker = self._http_broker
-                self._http_broker = None
+                if self._reservation_token is not None and not self._execution_started:
+                    reservation_token = self._reservation_token
+                    self._reservation_token = None
+                    self._reservation_task = None
+                    self._execution_lock.release()
+            if reservation_token is not None and _BINDING_RESERVATION.get() is reservation_token:
+                _BINDING_RESERVATION.set(None)
+            else:
+                current = _BINDING_RESERVATION.get()
+                with self._reservation_state_lock:
+                    owns_active_execution = (
+                        self._execution_started and self._reservation_token is current and current is not None
+                    )
+                    execution_active = self._execution_lock.locked()
+                if execution_active and not owns_active_execution:
+                    self._execution_lock.acquire()
+                    self._execution_lock.release()
+            first_error: BaseException | None = None
+            broker = self._http_broker
+            if broker is not None:
                 if strict_broker_cleanup:
                     try:
                         broker.stop(strict=True)
@@ -995,14 +998,19 @@ class DaytonaCodeInterpreter:
                 else:
                     with contextlib.suppress(Exception):
                         broker.stop()
-        finally:
-            if self._backend is not None:
+                if first_error is None:
+                    self._http_broker = None
+            backend = self._backend
+            if backend is not None:
                 try:
-                    self._backend.close()
+                    backend.close()
                 except BaseException as exc:
                     first_error = first_error or exc
-        if first_error is not None:
-            raise first_error
+                else:
+                    self._backend = None
+            if first_error is not None:
+                raise first_error
+            self._shutdown = True
 
     @with_callbacks
     def invoke_tool(self, tool_name: str, kwargs: dict[str, Any]) -> Any:

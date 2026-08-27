@@ -168,8 +168,11 @@ def is_transient_provider_failure(exc: object) -> bool:
 
 def is_sandbox_not_found(exc: BaseException) -> bool:
     """True only for explicit provider not-found (404 / DaytonaNotFoundError)."""
-    name = type(exc).__name__
-    if name in {"DaytonaNotFoundError", "NotFoundError", "NotFound"}:
+    names = {type(exc).__name__}
+    cause_type = getattr(exc, "cause_type", None)
+    if isinstance(cause_type, str):
+        names.add(cause_type)
+    if names & {"DaytonaNotFoundError", "NotFoundError", "NotFound"}:
         return True
     status = getattr(exc, "status_code", None)
     if status == 404:

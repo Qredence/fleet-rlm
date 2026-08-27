@@ -233,17 +233,16 @@ async def test_acquire_rejects_binding_with_wrong_workspace_scope_without_replac
     lease = await _acquire(mgr, req)
     await mgr.release(lease)
     wrong_ws = uuid4()
-    # Simulate a corrupted/stale binding pointing at another workspace subpath.
-    await store.upsert(
-        SandboxBinding(
-            session_id=req.session_id,
-            sandbox_id=lease.sandbox_id,
-            workspace_id=wrong_ws,
-            volume_id=lease.volume_id,
-            volume_subpath=f"workspaces/{wrong_ws}",
-            mount_path=lease.mount_path,
-            provider_state="running",
-        )
+    # Simulate a corrupted/stale row without bypassing the store's
+    # cross-workspace write fence.
+    store._items[req.session_id] = SandboxBinding(
+        session_id=req.session_id,
+        sandbox_id=lease.sandbox_id,
+        workspace_id=wrong_ws,
+        volume_id=lease.volume_id,
+        volume_subpath=f"workspaces/{wrong_ws}",
+        mount_path=lease.mount_path,
+        provider_state="running",
     )
     with pytest.raises(DaytonaAdapterError, match="binding does not match"):
         await _acquire(mgr, req)
@@ -306,6 +305,40 @@ async def test_binding_store_rejects_zero_workspace_on_upsert() -> None:
                 provider_state="running",
             )
         )
+
+
+@pytest.mark.asyncio
+async def test_binding_store_cannot_overwrite_session_from_another_workspace() -> None:
+    store = InMemoryBindingStore()
+    session_id = uuid4()
+    first_workspace = uuid4()
+    await store.upsert(
+        SandboxBinding(
+            session_id=session_id,
+            sandbox_id="sb-1",
+            workspace_id=first_workspace,
+            volume_id="vol-1",
+            volume_subpath=workspace_volume_subpath(first_workspace),
+            mount_path="/home/daytona/fleet",
+            provider_state="running",
+        )
+    )
+    other_workspace = uuid4()
+    with pytest.raises(ValueError, match="workspace scope"):
+        await store.upsert(
+            SandboxBinding(
+                session_id=session_id,
+                sandbox_id="sb-2",
+                workspace_id=other_workspace,
+                volume_id="vol-1",
+                volume_subpath=workspace_volume_subpath(other_workspace),
+                mount_path="/home/daytona/fleet",
+                provider_state="running",
+            )
+        )
+    retained = await store.get(session_id)
+    assert retained is not None
+    assert retained.sandbox_id == "sb-1"
 
 
 @pytest.mark.asyncio

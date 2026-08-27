@@ -429,7 +429,7 @@ async def test_admission_timeout_is_sanitized_by_live_preparation() -> None:
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("mode", ["timeout", "cancel"])
-async def test_post_acquisition_sandbox_lookup_settles_before_lease_release(mode: str) -> None:
+async def test_post_acquisition_sandbox_lookup_detaches_before_lease_release(mode: str) -> None:
     from fleet_rlm.chat.run_preparation import RunPreparationTimeoutError
     from fleet_rlm.daytona.run_environment import _DaytonaEnvironmentProvider
 
@@ -472,25 +472,22 @@ async def test_post_acquisition_sandbox_lookup_settles_before_lease_release(mode
         _RunClaimToken(uuid4()),
     )
     deadline = asyncio.get_running_loop().time() + (0.05 if mode == "timeout" else 10)
-    acquisition = asyncio.create_task(
-        _DaytonaEnvironmentProvider(resources, resources.settings).acquire(turn, deadline=deadline)
-    )
+    provider = _DaytonaEnvironmentProvider(resources, resources.settings)
+    acquisition = asyncio.create_task(provider.acquire(turn, deadline=deadline))
     assert await asyncio.to_thread(entered.wait, 2)
     if mode == "cancel":
         acquisition.cancel()
-        await asyncio.sleep(0.05)
-        acquisition.cancel()
-    else:
-        await asyncio.sleep(0.1)
-
-    assert not acquisition.done()
-    assert resources.session_manager.released == 0
-
-    release_lookup.set()
-    if mode == "cancel":
         with pytest.raises(asyncio.CancelledError):
-            await acquisition
+            await asyncio.wait_for(acquisition, timeout=0.2)
     else:
         with pytest.raises(RunPreparationTimeoutError):
-            await acquisition
+            await asyncio.wait_for(acquisition, timeout=0.2)
+
+    # The caller returns at its deadline/cancellation boundary, while the
+    # provider lookup and root release remain owned until the Sandbox identity
+    # can be settled safely.
+    assert resources.session_manager.released == 0
+    release_lookup.set()
+    while provider._late_lookup_tasks:
+        await asyncio.gather(*tuple(provider._late_lookup_tasks))
     assert resources.session_manager.released == 1

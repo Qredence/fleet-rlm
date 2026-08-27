@@ -26,6 +26,7 @@ from fleet_rlm.rlm.input_models import (
     WorkspaceCapabilityInput,
     WorkspaceMemoryInput,
 )
+from fleet_rlm.sessions.history_transport import CommittedSessionHistory
 
 _MAX_REQUEST_CHARS = 100_000
 _MAX_CONTEXT_ATTACHMENT_COUNT = 32
@@ -172,14 +173,31 @@ def build_rlm_input_kwargs(
     attachment_context: AttachmentContextCapsule | None = None,
     workspace: WorkspaceCapabilityMetadata = UNAVAILABLE_WORKSPACE_CAPABILITY,
     workspace_memory_digest: str = "",
+    history: dspy.History | CommittedSessionHistory | None = None,
 ) -> dict[str, Any]:
-    """Kwargs for ``rlm.aforward`` / ``forward`` matching FleetRLMSignature."""
+    """Kwargs for ``rlm.aforward`` / ``forward`` matching FleetRLMSignature.
+
+    The optional ``history`` keyword carries the canonical committed Session
+    conversation as a ``dspy.History`` instance. When provided, the value is
+    passed through unchanged (no transformation, no preview, no replacement)
+    so the in-process composition forwards the exact installed
+    ``dspy.History`` class to ``dspy.RLM.acall``. When omitted the key is
+    not present in the returned dict, so call sites without history keep
+    working unchanged for callers that do not yet supply the durable
+    conversation.
+    """
     if not isinstance(request, str) or not request.strip() or len(request) > _MAX_REQUEST_CHARS:
         raise RLMConfigError("Turn input metadata is invalid")
     if (
         not isinstance(workspace_memory_digest, str)
         or len(workspace_memory_digest.encode("utf-8")) > WORKSPACE_MEMORY_INJECTION_TAIL_BYTES
     ):
+        raise RLMConfigError("Turn input metadata is invalid")
+    if history is not None and type(history) is not dspy.History and not isinstance(history, CommittedSessionHistory):
+        # Fail closed: accept only the exact installed in-process History or
+        # the one typed SandboxSerializable transport used by Daytona.
+        # Arbitrary dicts, Pydantic shadows, and other wrappers cannot silently
+        # degrade the durable conversation contract.
         raise RLMConfigError("Turn input metadata is invalid")
     try:
         workspace_memory = WorkspaceMemoryInput(tail=workspace_memory_digest) if workspace_memory_digest else None
@@ -233,12 +251,15 @@ def build_rlm_input_kwargs(
     context_payload = context.model_dump(mode="json")
     if workspace_memory is None:
         context_payload.pop("workspace_memory", None)
-    return {
+    kwargs: dict[str, Any] = {
         "request": request,
         "session_context": context_payload,
         "skill_cards": [item.model_dump(mode="json") for item in cards],
         "attachments": attachment_value,
     }
+    if history is not None:
+        kwargs["history"] = history
+    return kwargs
 
 
 __all__ = ["AttachmentContextCapsule", "AttachmentContextEntry", "build_rlm_input_kwargs"]

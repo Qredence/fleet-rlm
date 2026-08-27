@@ -41,6 +41,56 @@ from fleet_rlm.daytona.provisioning import SandboxPlatform
 
 logger = logging.getLogger(__name__)
 
+# Strong process-local ownership for ordered cleanup that outlives the public
+# close receipt.  The task retains its SandboxLease until provider settlement.
+_DEFERRED_CLOSE_TASKS: set[asyncio.Task[None]] = set()
+_PROVIDER_REQUEST_OWNERS: set[tuple[asyncio.Future[Any], Any]] = set()
+# The initial close task itself must retain the lease until it publishes a
+# receipt. This covers callers that time out/cancel before ``_close_core`` can
+# create its later deferred continuation.
+_CLOSE_TASK_OWNERS: set[tuple[asyncio.Future[Any], Any]] = set()
+_FAILED_LEASE_OWNERS: dict[int, Any] = {}
+
+
+def has_pending_lease_ownership() -> bool:
+    """Return whether any process-owned Sandbox cleanup still needs its client."""
+    deferred = any(not task.done() for task in _DEFERRED_CLOSE_TASKS)
+    provider = any(not task.done() for task, _lease in _PROVIDER_REQUEST_OWNERS)
+    close = any(not task.done() for task, _lease in _CLOSE_TASK_OWNERS)
+    failed = bool(_FAILED_LEASE_OWNERS)
+    return deferred or provider or close or failed
+
+
+async def wait_lease_ownership(*, timeout: float | None = None) -> bool:
+    """Wait for process-owned lease continuations without cancelling them."""
+    if timeout is not None and timeout < 0:
+        raise ValueError("timeout must be non-negative")
+    tasks = tuple(
+        task
+        for task in (
+            *tuple(task for task in _DEFERRED_CLOSE_TASKS if not task.done()),
+            *tuple(task for task, _lease in _PROVIDER_REQUEST_OWNERS if not task.done()),
+            *tuple(task for task, _lease in _CLOSE_TASK_OWNERS if not task.done()),
+        )
+    )
+    if not tasks:
+        # Completed close tasks can still be retained as failed owners (for
+        # example after an owner loop was destroyed).  Do not report the
+        # provider as disposable merely because no task remains awaitable.
+        return not _FAILED_LEASE_OWNERS
+    current_loop = asyncio.get_running_loop()
+    # A task from a destroyed composition loop cannot be awaited safely from a
+    # replacement loop. Treat it as unresolved ownership; the caller must keep
+    # the provider client fenced rather than attempting cross-loop cancellation.
+    if any(task.get_loop() is not current_loop for task in tasks):
+        return False
+    if timeout is None:
+        await asyncio.gather(*(asyncio.shield(task) for task in tasks), return_exceptions=True)
+        return not has_pending_lease_ownership()
+    _, pending = await asyncio.wait(tasks, timeout=timeout)
+    return not pending and not has_pending_lease_ownership()
+
+
 __all__ = [
     "AdmissionOutcome",
     "CloseComponentOutcome",
@@ -52,6 +102,8 @@ __all__ = [
     "SandboxLease",
     "SandboxLeasePolicy",
     "SandboxLeaseReceipt",
+    "has_pending_lease_ownership",
+    "wait_lease_ownership",
 ]
 
 LeaseKind: TypeAlias = Literal["retained_session", "recursive_child", "volume_io", "recovery_fence"]
@@ -178,6 +230,25 @@ class SandboxLeasePolicy:
     provider_request_timeout_s: float | None = None
 
 
+def _retain_close_task(task: asyncio.Future[Any], lease: Any) -> None:
+    """Retain the lease while its first close task is still settling."""
+    _CLOSE_TASK_OWNERS.add((task, lease))
+
+    def settled(completed: asyncio.Future[Any]) -> None:
+        _CLOSE_TASK_OWNERS.discard((completed, lease))
+        if completed.cancelled():
+            _FAILED_LEASE_OWNERS[id(lease)] = lease
+            return
+        with contextlib.suppress(BaseException):
+            error = completed.exception()
+        if error is None:
+            _FAILED_LEASE_OWNERS.pop(id(lease), None)
+        else:
+            _FAILED_LEASE_OWNERS[id(lease)] = lease
+
+    task.add_done_callback(settled)
+
+
 class SandboxLease:
     """Owns one Sandbox handle and its confirmed, idempotent close.
 
@@ -211,10 +282,26 @@ class SandboxLease:
         self._purge = purge
         self._closed = False
         self._receipt: SandboxLeaseReceipt | None = None
+        self._close_lock = asyncio.Lock()
+        self._close_task: asyncio.Future[SandboxLeaseReceipt] | None = None
+        self._interpreter_task: asyncio.Task[InterpreterCloseOutcome] | None = None
+        self._deferred_close_task: asyncio.Task[None] | None = None
+        # Provider requests can outlive a bounded request wait.  Retain their
+        # task on the lease so cancellation never turns an in-flight delete or
+        # stop into an unowned side effect.
+        self._provider_tasks: set[asyncio.Future[Any]] = set()
 
     @property
     def closed(self) -> bool:
         return self._closed
+
+    @property
+    def has_pending_ownership(self) -> bool:
+        """Whether this lease still owns provider or deferred close work."""
+        return bool(
+            any(not task.done() for task in self._provider_tasks)
+            or (self._deferred_close_task is not None and not self._deferred_close_task.done())
+        )
 
     def _shutdown_interpreter(self) -> InterpreterCloseOutcome:
         interpreter = self._interpreter
@@ -244,10 +331,13 @@ class SandboxLease:
             backend="closed" if has_backend else "not_present",
         )
 
-    async def _shutdown_interpreter_owned(self) -> InterpreterCloseOutcome:
-        """Run the strict interpreter shutdown off-loop under a bounded wait."""
+    async def _shutdown_interpreter_owned(self, *, bounded: bool = True) -> InterpreterCloseOutcome:
+        """Run strict interpreter shutdown off-loop under owned timeout semantics."""
         task = asyncio.create_task(asyncio.to_thread(self._shutdown_interpreter))
+        self._interpreter_task = task
         try:
+            if not bounded:
+                return await task
             return await asyncio.wait_for(asyncio.shield(task), timeout=max(self._policy.close_result_timeout_s, 1.0))
         except TimeoutError:
             # The shutdown thread keeps ownership; the lease reports the
@@ -258,6 +348,78 @@ class SandboxLease:
                 backend="quarantined" if self._interpreter is not None else "not_present",
                 error="interpreter shutdown quarantined past close bound",
             )
+
+    def _retain_provider_task(self, task: asyncio.Future[Any]) -> None:
+        """Keep a timed-out provider request strongly owned until it settles."""
+        self._provider_tasks.add(task)
+        _PROVIDER_REQUEST_OWNERS.add((task, self))
+
+        def settled(completed: asyncio.Future[Any]) -> None:
+            self._provider_tasks.discard(completed)
+            _PROVIDER_REQUEST_OWNERS.discard((completed, self))
+            if completed.cancelled():
+                return
+            with contextlib.suppress(BaseException):
+                error = completed.exception()
+            if error is not None:
+                logger.warning(
+                    "bounded Daytona provider request failed after close returned",
+                    extra={"sandbox_id": self._sandbox_id, "error_type": type(error).__name__},
+                )
+
+        task.add_done_callback(settled)
+
+    async def _run_provider_request(
+        self,
+        request: Awaitable[Any],
+        *,
+        timeout_s: float | None,
+    ) -> str | None:
+        """Run one provider request with owned timeout semantics."""
+        task = asyncio.ensure_future(request)
+        self._retain_provider_task(task)
+        try:
+            if timeout_s is None:
+                await task
+            else:
+                await asyncio.wait_for(asyncio.shield(task), timeout=max(0.0, timeout_s))
+        except TimeoutError:
+            # Short-lived Volume-I/O sandboxes are local cleanup requests:
+            # cancel and settle their coroutine before leaving the gateway.
+            # Retained Session/root leases use the stronger late-provider
+            # ownership path and leave the request running.
+            if self._policy.kind == "volume_io":
+                task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
+            return "provider request TimeoutError"
+        except BaseException as exc:
+            if isinstance(exc, (asyncio.CancelledError, KeyboardInterrupt, SystemExit)):
+                return sanitize_failure_text(exc)
+            return sanitize_failure_text(exc)
+        return None
+
+    async def _bounded_probe(self, sandbox_id: str) -> Any | None:
+        """Bound a single provider lookup while retaining it when necessary."""
+        assert self._platform is not None
+        probe = getattr(self._platform, "get", None)
+        if not callable(probe):
+            raise RuntimeError("absence probe unavailable: platform lacks get")
+        task = asyncio.ensure_future(probe(sandbox_id))
+        self._retain_provider_task(task)
+        # A probe must not consume the whole confirmation budget. A hung SDK
+        # call is itself provider ownership; retained leases keep it, while
+        # ephemeral volume-I/O leases cancel and settle it below.
+        timeout_s = min(
+            max(0.1, self._policy.confirm_poll_interval_s * 2),
+            max(0.1, self._policy.confirm_timeout_s),
+        )
+        try:
+            return await asyncio.wait_for(asyncio.shield(task), timeout=timeout_s)
+        except TimeoutError:
+            if self._policy.kind == "volume_io":
+                task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
+            raise
 
     async def _provider_close(self) -> ProviderCleanupOutcome:
         policy = self._policy
@@ -270,10 +432,7 @@ class SandboxLease:
         if action == "delete":
             try:
                 request = platform.delete(self._sandbox_id)
-                if policy.provider_request_timeout_s is not None:
-                    await asyncio.wait_for(request, timeout=policy.provider_request_timeout_s)
-                else:
-                    await request
+                request_error = await self._run_provider_request(request, timeout_s=policy.provider_request_timeout_s)
             except BaseException as exc:
                 request_error = sanitize_failure_text(exc)
             # Confirmation runs even when the delete request itself failed:
@@ -296,16 +455,22 @@ class SandboxLease:
                 )
             if policy.confirm_absence:
                 confirm_fn = policy.confirm_fn or confirm_absence
-                absence: AbsenceOutcome = await confirm_fn(
-                    probe=platform.get,
-                    sandbox_id=self._sandbox_id,
-                    timeout_s=policy.confirm_timeout_s,
-                    poll_interval_s=policy.confirm_poll_interval_s,
-                )
-                plateau = absence.observations
-                absent = isinstance(absence, AbsenceConfirmation)
-                if not absent:
-                    confirm_error = f"absence unconfirmed: {absence!r}"[:240]
+                try:
+                    absence: AbsenceOutcome = await confirm_fn(
+                        probe=self._bounded_probe,
+                        sandbox_id=self._sandbox_id,
+                        timeout_s=policy.confirm_timeout_s,
+                        poll_interval_s=policy.confirm_poll_interval_s,
+                    )
+                except BaseException as exc:
+                    if isinstance(exc, (asyncio.CancelledError, KeyboardInterrupt, SystemExit)):
+                        raise
+                    confirm_error = sanitize_failure_text(exc)
+                else:
+                    plateau = absence.observations
+                    absent = isinstance(absence, AbsenceConfirmation)
+                    if not absent:
+                        confirm_error = f"absence unconfirmed: {absence!r}"[:240]
             return ProviderCleanupOutcome(
                 action="delete",
                 requested=True,
@@ -314,28 +479,186 @@ class SandboxLease:
                 duration_s=time.monotonic() - started,
                 error=request_error or confirm_error,
             )
+        stop_error: str | None = None
         try:
             stop_request = platform.stop(self._sandbox_id, timeout=60, force=self._policy.stop_force)
-            if policy.provider_request_timeout_s is not None:
-                await asyncio.wait_for(stop_request, timeout=policy.provider_request_timeout_s)
-            else:
-                await stop_request
+            stop_error = await self._run_provider_request(stop_request, timeout_s=policy.provider_request_timeout_s)
         except BaseException as exc:
+            stop_error = sanitize_failure_text(exc)
+            # LiveDaytonaPlatform may fall back from a forced stop to delete.
+            # Fence that destructive fallback exactly like an explicit delete
+            # before releasing ownership.
+            if not policy.stop_force or not policy.confirm_absence:
+                return ProviderCleanupOutcome(
+                    action="stop",
+                    requested=True,
+                    confirmed_absent=False,
+                    duration_s=time.monotonic() - started,
+                    error=stop_error,
+                )
+        if stop_error is not None and policy.stop_force and policy.confirm_absence:
+            probe = getattr(platform, "get", None)
+            if not callable(probe):
+                return ProviderCleanupOutcome(
+                    action="stop",
+                    requested=True,
+                    confirmed_absent=False,
+                    duration_s=time.monotonic() - started,
+                    error=stop_error or "absence probe unavailable: platform lacks get",
+                )
+            confirm_fn = policy.confirm_fn or confirm_absence
+            try:
+                absence: AbsenceOutcome = await confirm_fn(
+                    probe=self._bounded_probe,
+                    sandbox_id=self._sandbox_id,
+                    # A forced stop has already failed at its provider
+                    # request boundary; use a short bounded fence here so
+                    # recovery cannot consume the full delete-confirmation
+                    # budget while the provider error is still unresolved.
+                    timeout_s=min(policy.confirm_timeout_s, 1.0),
+                    poll_interval_s=min(policy.confirm_poll_interval_s, 0.1),
+                )
+            except BaseException as exc:
+                if isinstance(exc, (asyncio.CancelledError, KeyboardInterrupt, SystemExit)):
+                    raise
+                return ProviderCleanupOutcome(
+                    action="stop",
+                    requested=True,
+                    confirmed_absent=False,
+                    duration_s=time.monotonic() - started,
+                    error=stop_error or sanitize_failure_text(exc),
+                )
+            absent = isinstance(absence, AbsenceConfirmation)
             return ProviderCleanupOutcome(
                 action="stop",
                 requested=True,
-                confirmed_absent=False,
+                confirmed_absent=absent,
+                plateau=absence.observations,
                 duration_s=time.monotonic() - started,
-                error=sanitize_failure_text(exc),
+                error=stop_error or (None if absent else f"absence unconfirmed: {absence!r}"[:240]),
             )
         return ProviderCleanupOutcome(
             action="stop",
             requested=True,
             confirmed_absent=False,
             duration_s=time.monotonic() - started,
+            error=stop_error,
         )
 
-    async def _close_core(self) -> SandboxLeaseReceipt:
+    async def _finish_retained_provider_close(self) -> None:
+        """Retry retained provider cleanup without unbounded individual waits."""
+        retry_delay = min(max(self._policy.confirm_poll_interval_s, 0.05), 1.0)
+        while True:
+            pending = tuple(task for task in self._provider_tasks if not task.done())
+            if pending:
+                # Do not await a provider request without a bound. The deferred
+                # close remains the strong owner, while shutdown callers can
+                # observe a pending/quarantined lease and return on their own
+                # deadline.
+                await asyncio.wait(pending, timeout=retry_delay)
+                if any(not task.done() for task in self._provider_tasks):
+                    continue
+            provider = await self._provider_close()
+            confirmed = (
+                (provider.action == "delete" and provider.requested and provider.confirmed_absent)
+                or (provider.action in {"stop", "none"} and provider.error is None)
+            ) and not self._provider_tasks
+            if confirmed:
+                if self._permit is not None:
+                    self._permit.release()
+                    self._permit = None
+                return
+            # Retained Session/root ownership is deliberately not dropped on an
+            # unconfirmed provider result. Keep the continuation alive and
+            # retry the idempotent provider action/confirmation until it settles.
+            await asyncio.sleep(retry_delay)
+
+    async def _finish_deferred_close(
+        self,
+        interpreter_task: asyncio.Task[InterpreterCloseOutcome],
+    ) -> None:
+        """Finish purge/provider/admission only after interpreter shutdown settles."""
+        try:
+            interpreter = await interpreter_task
+        except BaseException as exc:
+            logger.warning(
+                "deferred Daytona interpreter shutdown failed",
+                extra={"sandbox_id": self._sandbox_id, "error_type": type(exc).__name__},
+            )
+            interpreter = InterpreterCloseOutcome(
+                status="failed",
+                broker="failed",
+                backend="failed",
+                error=sanitize_failure_text(exc),
+            )
+
+        # A bounded shutdown can complete with a provider/backend failure even
+        # after its worker thread has settled. Retry the strict interpreter
+        # boundary before touching purge/provider state; otherwise a live
+        # interpreter could race Sandbox deletion. The continuation remains a
+        # strong owner until one attempt reports a clean boundary.
+        while interpreter.status in {"failed", "quarantined"}:
+            interpreter = await self._shutdown_interpreter_owned(bounded=False)
+            if interpreter.status in {"failed", "quarantined"}:
+                await asyncio.sleep(min(max(self._policy.confirm_poll_interval_s, 0.05), 1.0))
+
+        if self._purge is not None and self._sandbox is not None:
+            with contextlib.suppress(BaseException):
+                await self._purge(self._sandbox)
+        provider = await self._provider_close()
+        retained_provider_pending = (
+            self._policy.kind == "retained_session"
+            and (
+                bool(self._provider_tasks)
+                or provider.error is not None
+                or (
+                    self._policy.confirm_absence
+                    and provider.action == "delete"
+                    and provider.requested
+                    and not provider.confirmed_absent
+                )
+            )
+        ) or (self._policy.kind == "recovery_fence" and bool(self._provider_tasks))
+        if retained_provider_pending:
+            # The retained provider request has its own retryable fence. Do not
+            # release admission merely because the first request/confirmation
+            # attempt returned a typed error.
+            await self._finish_retained_provider_close()
+            return
+        if provider.error is not None:
+            logger.warning(
+                "deferred Daytona provider cleanup was not clean",
+                extra={"sandbox_id": self._sandbox_id, "error": provider.error},
+            )
+        if self._permit is not None:
+            self._permit.release()
+            self._permit = None
+
+    def _retain_deferred_close(self, task: asyncio.Task[None]) -> None:
+        """Retain a quarantine continuation until all ordered cleanup settles."""
+        self._deferred_close_task = task
+        _DEFERRED_CLOSE_TASKS.add(task)
+
+        def settled(completed: asyncio.Task[None]) -> None:
+            _DEFERRED_CLOSE_TASKS.discard(completed)
+            if completed.cancelled():
+                _FAILED_LEASE_OWNERS[id(self)] = self
+                logger.warning("deferred Daytona cleanup was cancelled", extra={"sandbox_id": self._sandbox_id})
+                return
+            with contextlib.suppress(BaseException):
+                error = completed.exception()
+            if error is None:
+                _FAILED_LEASE_OWNERS.pop(id(self), None)
+            else:
+                _FAILED_LEASE_OWNERS[id(self)] = self
+                logger.warning(
+                    "deferred Daytona cleanup failed",
+                    extra={"sandbox_id": self._sandbox_id, "error_type": type(error).__name__},
+                )
+
+        task.add_done_callback(settled)
+
+    async def _close_core(self, *, bounded_interpreter: bool = True) -> SandboxLeaseReceipt:
         started = time.monotonic()
         policy = self._policy
         first_error: str | None = None
@@ -343,9 +666,76 @@ class SandboxLease:
         # Interpreter shutdown performs blocking HTTP + broker work; it runs
         # off the owner loop. A shutdown that outlives the close bound is
         # quarantined (the coroutine continues; ownership is not abandoned).
-        interpreter = await self._shutdown_interpreter_owned()
+        interpreter = await self._shutdown_interpreter_owned(bounded=bounded_interpreter)
         if interpreter.status in {"failed", "quarantined"} and first_error is None:
             first_error = interpreter.error
+
+        if interpreter.status in {"failed", "quarantined"}:
+            interpreter_task = self._interpreter_task
+            if interpreter_task is None:
+                raise RuntimeError("interpreter quarantine has no owned task")
+            if not bounded_interpreter:
+                # The synchronous fallback owns a disposable event loop. Do a
+                # retry before that loop is destroyed; never leave a deferred
+                # coroutine tied to a loop that ``asyncio.run`` is about to
+                # close. A still-failing interpreter is returned quarantined
+                # with its permit held for the caller's next retry.
+                interpreter = await self._shutdown_interpreter_owned(bounded=False)
+                if interpreter.status in {"failed", "quarantined"}:
+                    held = self._permit is not None
+                    return SandboxLeaseReceipt(
+                        kind=policy.kind,
+                        sandbox_id=self._sandbox_id,
+                        interpreter=interpreter,
+                        provider=ProviderCleanupOutcome(
+                            action=policy.provider_action,
+                            requested=False,
+                            confirmed_absent=False,
+                            error="provider cleanup deferred until interpreter shutdown settles",
+                        ),
+                        admission=AdmissionOutcome(
+                            held=held,
+                            released=False,
+                            released_after="quarantine_failure" if held else "not_held",
+                        ),
+                        quarantine=QuarantineOutcome(
+                            quarantined=True,
+                            lane="fallback_thread",
+                            error=interpreter.error,
+                        ),
+                        duration_s=time.monotonic() - started,
+                        first_error=interpreter.error or "interpreter shutdown quarantined",
+                    )
+            else:
+                deferred = asyncio.create_task(
+                    self._finish_deferred_close(interpreter_task),
+                    name="fleet-sandbox-lease-deferred-close",
+                )
+                self._retain_deferred_close(deferred)
+                held = self._permit is not None
+                return SandboxLeaseReceipt(
+                    kind=policy.kind,
+                    sandbox_id=self._sandbox_id,
+                    interpreter=interpreter,
+                    provider=ProviderCleanupOutcome(
+                        action=policy.provider_action,
+                        requested=False,
+                        confirmed_absent=False,
+                        error="provider cleanup deferred until interpreter shutdown settles",
+                    ),
+                    admission=AdmissionOutcome(
+                        held=held,
+                        released=False,
+                        released_after="quarantine_failure" if held else "not_held",
+                    ),
+                    quarantine=QuarantineOutcome(
+                        quarantined=True,
+                        lane="owner_loop",
+                        error=interpreter.error,
+                    ),
+                    duration_s=time.monotonic() - started,
+                    first_error=interpreter.error or "interpreter shutdown quarantined",
+                )
 
         if self._purge is not None and self._sandbox is not None:
             try:
@@ -358,8 +748,55 @@ class SandboxLease:
         if provider.error is not None and first_error is None:
             first_error = provider.error
 
+        # Session/root provider requests remain owned after a bounded request
+        # timeout. Return a quarantine receipt now, but keep a retryable
+        # continuation that settles the request and only then releases the
+        # admission permit. Ephemeral volume-I/O leases cancel and settle their
+        # request in ``_run_provider_request`` and do not take this branch.
+        retained_provider_pending = (
+            policy.kind == "retained_session"
+            and (
+                bool(self._provider_tasks)
+                or provider.error is not None
+                or (
+                    policy.confirm_absence
+                    and provider.action == "delete"
+                    and provider.requested
+                    and not provider.confirmed_absent
+                )
+            )
+        ) or (policy.kind == "recovery_fence" and bool(self._provider_tasks))
+        if retained_provider_pending:
+            deferred = asyncio.create_task(
+                self._finish_retained_provider_close(),
+                name="fleet-sandbox-lease-retained-provider-close",
+            )
+            self._retain_deferred_close(deferred)
+            held = self._permit is not None
+            return SandboxLeaseReceipt(
+                kind=policy.kind,
+                sandbox_id=self._sandbox_id,
+                interpreter=interpreter,
+                provider=provider,
+                admission=AdmissionOutcome(
+                    held=held,
+                    released=False,
+                    released_after="quarantine_failure" if held else "not_held",
+                ),
+                quarantine=QuarantineOutcome(
+                    quarantined=True,
+                    lane="owner_loop",
+                    error=provider.error or "provider request remains owned",
+                ),
+                duration_s=time.monotonic() - started,
+                first_error=first_error or "provider request remains owned",
+            )
+
         quarantined = interpreter.status == "quarantined"
         quarantine_error: str | None = interpreter.error if quarantined else None
+        if provider.error is not None:
+            quarantined = True
+            quarantine_error = quarantine_error or provider.error
         if (
             self._policy.confirm_absence
             and provider.action == "delete"
@@ -372,6 +809,7 @@ class SandboxLease:
         held = self._permit is not None
         if self._permit is not None:
             self._permit.release()
+            self._permit = None
         if not held:
             released_after = "not_held"
         elif not quarantined and first_error is None:
@@ -396,13 +834,122 @@ class SandboxLease:
         )
         return receipt
 
-    async def aclose(self) -> SandboxLeaseReceipt:
-        """Close once (idempotent); returns the close receipt."""
-        if self._receipt is not None:
-            return self._receipt
+    async def _run_fallback_close(self) -> SandboxLeaseReceipt:
+        """Complete a close on a disposable loop when the owner loop is stopping."""
+        try:
+            receipt = await self._close_core(bounded_interpreter=False)
+        except BaseException:
+            # This coroutine may run on a disposable loop, so it cannot acquire
+            # the owner loop's asyncio.Lock.  The fallback is installed while
+            # that lock is held and the state transition is a single-threaded
+            # assignment under the GIL.
+            self._close_task = None
+            self._closed = False
+            raise
+        self._receipt = receipt
+        self._close_task = None
         self._closed = True
-        self._receipt = await self._close_core()
-        return self._receipt
+        return receipt
+
+    async def _run_async_close(self) -> SandboxLeaseReceipt:
+        """Own one async close so cancellation cannot abandon its permit."""
+        current = asyncio.current_task()
+        try:
+            receipt = await self._close_core()
+        except BaseException:
+            async with self._close_lock:
+                if self._close_task is current:
+                    self._close_task = None
+                    self._closed = False
+            raise
+        async with self._close_lock:
+            if self._close_task is current:
+                self._receipt = receipt
+                self._close_task = None
+                self._closed = True
+        return receipt
+
+    async def aclose(self, *, deadline: float | None = None) -> SandboxLeaseReceipt:
+        """Close once with an optional absolute deadline; retain late ownership."""
+        task: asyncio.Future[SandboxLeaseReceipt] | None = None
+        async with self._close_lock:
+            if self._receipt is not None:
+                return self._receipt
+            task = self._close_task
+            if task is None:
+                coroutine = self._run_async_close()
+                try:
+                    task = asyncio.create_task(coroutine, name="fleet-sandbox-lease-close")
+                except BaseException:
+                    # ``create_task`` can fail while the owner loop is closing.
+                    # Close the just-built coroutine, then hand a fresh close
+                    # coroutine to the disposable-loop fallback. Its Future is
+                    # retained as the lease's single-flight owner.
+                    coroutine.close()
+                    execution = schedule_owned_close(
+                        loop=asyncio.get_running_loop(),
+                        build=self._run_fallback_close,
+                        thread_name="fleet-sandbox-lease-close-fallback",
+                    )
+                    task = asyncio.ensure_future(asyncio.wrap_future(execution.future))
+                self._close_task = task
+                _retain_close_task(task, self)
+                # A disposable-loop fallback can finish before the wrapper is
+                # installed on this owner loop.  Reconcile an already-failed
+                # result now so the next caller can retry instead of awaiting
+                # the same terminal exception forever.
+                if task.done() and self._receipt is None:
+                    failed = task.cancelled()
+                    if not failed:
+                        with contextlib.suppress(BaseException):
+                            failed = task.exception() is not None
+                    if failed:
+                        self._close_task = None
+                        self._closed = False
+        assert task is not None
+        if deadline is None:
+            return await asyncio.shield(task)
+        remaining = deadline - asyncio.get_running_loop().time()
+        if remaining <= 0:
+            raise TimeoutError("Sandbox lease cleanup timed out")
+        return await asyncio.wait_for(asyncio.shield(task), timeout=remaining)
+
+    async def wait_ownership(self, *, timeout: float | None = None) -> bool:
+        """Wait for every close/provider owner retained by this lease.
+
+        ``aclose`` intentionally returns a quarantine receipt when a retained
+        provider request is still in flight. Callers that own an admission
+        slot (for example failed acquisition cleanup) can use this stronger
+        boundary before releasing that slot. Waiting is shielded so caller
+        cancellation never cancels the provider continuation.
+        """
+        if timeout is not None and timeout < 0:
+            raise ValueError("timeout must be non-negative")
+        close_deadline = None
+        if timeout is not None:
+            close_deadline = asyncio.get_running_loop().time() + timeout
+        try:
+            await self.aclose(deadline=close_deadline)
+        except TimeoutError:
+            return False
+        tasks = tuple(
+            task
+            for task in (
+                self._close_task,
+                self._deferred_close_task,
+                *tuple(self._provider_tasks),
+            )
+            if task is not None and not task.done()
+        )
+        if not tasks:
+            return not self.has_pending_ownership
+        if timeout is None:
+            await asyncio.gather(*(asyncio.shield(task) for task in tasks), return_exceptions=True)
+        else:
+            _, pending = await asyncio.wait(tasks, timeout=timeout)
+            if pending:
+                return False
+        return not self.has_pending_ownership
 
     def close(self) -> SandboxLeaseReceipt:
         """Synchronous close for worker-thread owners.
@@ -416,7 +963,11 @@ class SandboxLease:
             return self._receipt
         self._closed = True
         try:
-            self._receipt = asyncio.run(self._close_core())
+            # Synchronous owners run on a disposable worker loop.  They must
+            # finish the ordered interpreter/provider pipeline before that
+            # loop is destroyed; the async path retains a bounded quarantine
+            # continuation instead.
+            self._receipt = asyncio.run(self._close_core(bounded_interpreter=False))
         except BaseException as exc:
             # Unreachable in the seam (close_core captures), but never let a
             # close raise instead of reporting.

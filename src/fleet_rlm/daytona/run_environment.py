@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import inspect
 import logging
-from dataclasses import dataclass
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass, field
 from functools import partial
+from threading import Lock
 from typing import Any, cast
 from uuid import UUID
 
@@ -25,6 +28,7 @@ from fleet_rlm.chat.run_preparation import (
 from fleet_rlm.composition.common import recursive_rlm_options
 from fleet_rlm.config import Settings, load_runtime_settings
 from fleet_rlm.daytona.dspy_sync_bridge import SyncBridgeDispatcher, sync_sandbox
+from fleet_rlm.daytona.errors import is_sandbox_not_found
 from fleet_rlm.daytona.platform import (
     LiveDaytonaPlatform,
     LiveDaytonaVolumeClient,
@@ -36,6 +40,7 @@ from fleet_rlm.daytona.provisioning import (
     volume_config_from_settings,
 )
 from fleet_rlm.daytona.recursive_child_runtime import build_child_runtime_factory
+from fleet_rlm.daytona.sandbox_lease import has_pending_lease_ownership, wait_lease_ownership
 from fleet_rlm.daytona.session_manager import (
     DEFAULT_IDLE_STOP_SECONDS,
     BindingStoreLike,
@@ -56,10 +61,78 @@ from fleet_rlm.files.workspace_models import DAYTONA_WORKSPACE_CAPABILITY
 from fleet_rlm.rlm.context import RLMExecutionSpec
 from fleet_rlm.rlm.dspy_contract import RLMOptions
 from fleet_rlm.rlm.model_bundle import RLMModelBundle
-from fleet_rlm.runtime.owned_effect import OwnedEffect
+from fleet_rlm.rlm.session_runtime import SessionKey, SessionRLMRegistry
+from fleet_rlm.sessions.history import to_canonical_history_records
+from fleet_rlm.sessions.history_transport import CommittedSessionHistory
 from fleet_rlm.skills.catalog import SkillCatalog
 
 logger = logging.getLogger(__name__)
+
+_LATE_LOOKUP_OWNERS: dict[int, tuple[asyncio.Task[Any], Any]] = {}
+_RESOURCE_CLEANUP_OWNERS: set[tuple[asyncio.Future[Any], Any, str]] = set()
+_CLIENT_CLOSE_OWNERS: set[tuple[asyncio.Future[Any], Any]] = set()
+# Keep a resident environment provider alive while it owns a root, an
+# acquisition, or a late lookup. This prevents loop-bound root leases from
+# disappearing before the composition owner has fenced the Daytona client.
+_ENVIRONMENT_OWNERS: dict[int, Any] = {}
+
+
+def has_pending_resource_cleanup() -> bool:
+    """Return whether any tracked resource deletion still owns provider work."""
+    return (
+        any(not task.done() for task, _owner, _sandbox_id in _RESOURCE_CLEANUP_OWNERS)
+        or any(not task.done() for task, _owner in _CLIENT_CLOSE_OWNERS)
+        or bool(_ENVIRONMENT_OWNERS)
+    )
+
+
+async def wait_resource_cleanup(*, timeout: float | None = None) -> bool:
+    """Wait for tracked resource deletion without cancelling late provider work."""
+    tasks = tuple(task for task, _owner, _sandbox_id in _RESOURCE_CLEANUP_OWNERS if not task.done()) + tuple(
+        task for task, _owner in _CLIENT_CLOSE_OWNERS if not task.done()
+    )
+    if not tasks:
+        return True
+    current_loop = asyncio.get_running_loop()
+    if any(task.get_loop() is not current_loop for task in tasks):
+        return False
+    if timeout is None:
+        await asyncio.gather(*(asyncio.shield(task) for task in tasks), return_exceptions=True)
+    else:
+        _, pending = await asyncio.wait(tasks, timeout=max(0.0, timeout))
+        if pending:
+            return False
+    return not has_pending_resource_cleanup()
+
+
+def build_committed_session_history_for_claim(claim: ClaimedRun) -> CommittedSessionHistory:
+    """Materialize the canonical ``CommittedSessionHistory`` for one claimed checkpoint.
+
+    The Daytona broker cannot inject a raw ``dspy.History`` Pydantic value
+    into a Sandbox. The Daytona composition therefore projects the claimed
+    Session checkpoint to the same canonical ``{"request", "answer"}``
+    records consumed by :func:`to_dspy_history` and wraps them in the
+    P43.7 :class:`CommittedSessionHistory` transport so the interpreter
+    can reconstruct the conversation inside the Sandbox.
+
+    The records used here are the EXACT canonical records produced by
+    :func:`to_canonical_history_records`; failed, cancelled, timed-out, or
+    otherwise uncommitted Turns are excluded by the canonical factory.
+    The ``ClaimedRun`` carries the durable ``SessionHistory`` checkpoint. It
+    may include bounded failure tombstones for audit/retry surfaces, but the
+    shared typed projection excludes those using their attached committed
+    result metadata and never bypasses the claim.
+
+    The in-process composition stays on :class:`dspy.History` (see
+    :func:`fleet_rlm.chat.run_preparation.build_dspy_history_for_claim`);
+    this Dayona helper exists to keep the broker able to inject the value
+    while preserving the canonical record contract.
+    """
+    from fleet_rlm.chat.run_preparation import _claim_history_records
+
+    committed_turns, user_requests = _claim_history_records(claim)
+    records = to_canonical_history_records(committed_turns, user_requests=user_requests)
+    return CommittedSessionHistory(records)
 
 
 def _promote_memory_candidates(
@@ -141,6 +214,85 @@ class LivePreparedCapabilities(PreparedHostCapabilities):
         self.workspace_memory_digest = workspace_memory_digest
 
 
+@dataclass(slots=True)
+class _ResidentRootLease:
+    """Provider-owned root lease retained for one Workspace and Session."""
+
+    key: tuple[UUID, UUID]
+    lease: Any
+    release_callback: Callable[[Any], Awaitable[Any]]
+    on_closed: Callable[[_ResidentRootLease], Awaitable[None]] | None = None
+    _closed: bool = field(default=False, init=False, repr=False)
+    _close_lock: asyncio.Lock = field(default_factory=asyncio.Lock, init=False, repr=False)
+    _close_task: asyncio.Task[None] | None = field(default=None, init=False, repr=False)
+    _notify_on_close: bool = field(default=False, init=False, repr=False)
+    _close_failed: bool = field(default=False, init=False, repr=False)
+
+    @property
+    def closed(self) -> bool:
+        """Whether the provider lease has crossed its successful close boundary."""
+        return self._closed
+
+    @property
+    def failed(self) -> bool:
+        """Whether the last provider-release attempt failed and must be retried."""
+        return self._close_failed
+
+    @property
+    def closing(self) -> bool:
+        """Whether a provider release is currently owned by a close task."""
+        return self._close_task is not None
+
+    async def close(self, *, notify: bool = True, deadline: float | None = None) -> None:
+        """Release the provider lease exactly once with cancellation-safe ownership."""
+        async with self._close_lock:
+            if self._closed:
+                return
+            self._notify_on_close = self._notify_on_close or notify
+            task = self._close_task
+            if task is None:
+                task = asyncio.create_task(self._perform_close())
+                self._close_task = task
+        # The release task is deliberately shielded.  A cancelled caller may
+        # leave it running, and a later owner can await the same task or retry
+        # after a provider failure; neither case loses the admission lease.
+        if deadline is None:
+            await asyncio.shield(task)
+        else:
+            remaining = deadline - asyncio.get_running_loop().time()
+            if remaining <= 0:
+                raise TimeoutError("resident root close timed out")
+            await asyncio.wait_for(asyncio.shield(task), timeout=remaining)
+
+    async def _perform_close(self) -> None:
+        """Own one provider release and publish closure only after success."""
+        current = asyncio.current_task()
+        try:
+            await self.release_callback(self.lease)
+        except BaseException:
+            async with self._close_lock:
+                if self._close_task is current:
+                    self._close_task = None
+                    self._close_failed = True
+            raise
+
+        async with self._close_lock:
+            if self._close_task is not current:
+                return
+            self._closed = True
+            self._close_failed = False
+            self._close_task = None
+            notify = self._notify_on_close
+            self._notify_on_close = False
+        if notify and self.on_closed is not None:
+            with contextlib.suppress(BaseException):
+                await self.on_closed(self)
+
+    async def release(self) -> None:
+        """Alias for :meth:`close` used by lifecycle cleanup callbacks."""
+        await self.close()
+
+
 class _DaytonaRunSink:
     def __init__(
         self,
@@ -191,62 +343,351 @@ class _DaytonaRunSink:
 class _DaytonaEnvironmentProvider:
     resources: DaytonaRuntimeResources
     settings: Settings
+    session_runtime_registry: SessionRLMRegistry | None = None
+    _resident_root_leases: dict[tuple[UUID, UUID], _ResidentRootLease] = field(default_factory=dict, init=False)
+    _resident_context_keys: dict[tuple[UUID, UUID], tuple[tuple[str, ...], tuple[tuple[str, str], ...], str | None]] = (
+        field(default_factory=dict, init=False)
+    )
+    _resident_root_lock: asyncio.Lock = field(default_factory=asyncio.Lock, init=False, repr=False)
+    # Preparation ownership spans environment acquisition through prepared
+    # cleanup.  It prevents a later context/attachment rotation from closing
+    # a root while the earlier Turn is waiting to enter the RLM worker lane.
+    _preparation_gates: dict[tuple[UUID, UUID], asyncio.Lock] = field(default_factory=dict, init=False)
+    _acquisition_tasks: set[asyncio.Task[Any]] = field(default_factory=set, init=False, repr=False)
+    _late_lookup_tasks: set[asyncio.Task[Any]] = field(default_factory=set, init=False, repr=False)
+    _accepting_acquisitions: bool = field(default=True, init=False, repr=False)
+
+    @property
+    def has_pending_acquisitions(self) -> bool:
+        """Whether environment acquisition still owns provider work."""
+        return bool(self._acquisition_tasks or self._late_lookup_tasks)
+
+    def _retain_environment_owner(self) -> None:
+        """Keep this provider alive across caller/lifespan ownership changes."""
+        _ENVIRONMENT_OWNERS[id(self)] = self
+
+    def _maybe_release_environment_owner(self) -> None:
+        """Drop process ownership only after every root/acquisition is gone."""
+        if self._resident_root_leases or self._acquisition_tasks or self._late_lookup_tasks:
+            return
+        if _ENVIRONMENT_OWNERS.get(id(self)) is self:
+            _ENVIRONMENT_OWNERS.pop(id(self), None)
+
+    def _preparation_gate(self, key: tuple[UUID, UUID]) -> asyncio.Lock:
+        gate = self._preparation_gates.get(key)
+        if gate is None:
+            gate = asyncio.Lock()
+            self._preparation_gates[key] = gate
+        return gate
+
+    def _prune_preparation_gate(self, key: tuple[UUID, UUID]) -> None:
+        """Drop an idle Session preparation gate once no root remains."""
+        if key in self._resident_root_leases:
+            return
+        gate = self._preparation_gates.get(key)
+        if gate is None or gate.locked():
+            return
+        waiters = getattr(gate, "_waiters", ()) or ()
+        if any(not waiter.cancelled() for waiter in waiters):
+            return
+        self._preparation_gates.pop(key, None)
+
+    @staticmethod
+    def _context_key(
+        run: ClaimedRun,
+    ) -> tuple[tuple[str, ...], tuple[tuple[str, str], ...], str | None]:
+        """Return selectors that identify the immutable manifest bound to a root.
+
+        Attachment staging is Run-scoped, so even the same durable Attachment
+        IDs receive different manifest paths on the next Run.  The Daytona
+        interpreter cannot replace a bound manifest; include the Run ID while
+        attachments are present so the provider rotates the root before the
+        next context is prepared.
+        """
+        attachment_ids = tuple(str(attachment_id) for attachment_id in run.input.attachment_ids)
+        return (
+            attachment_ids,
+            tuple((str(selection.id), str(selection.expected_version)) for selection in run.input.skill_selections),
+            # Attachment staging paths are Run-scoped.  Include the Run ID
+            # whenever an attachment manifest exists; otherwise the provider
+            # could reuse a root whose interpreter is permanently bound to the
+            # prior Run's path and the next Runner rotation would inherit a
+            # closed interpreter.
+            str(run.run_id) if attachment_ids else None,
+        )
+
+    async def _on_root_closed(self, owner: _ResidentRootLease) -> None:
+        async with self._resident_root_lock:
+            if self._resident_root_leases.get(owner.key) is owner:
+                self._resident_root_leases.pop(owner.key, None)
+                self._resident_context_keys.pop(owner.key, None)
+                self._prune_preparation_gate(owner.key)
+                self._maybe_release_environment_owner()
+
+    def _retain_late_lookup(self, task: asyncio.Task[Any]) -> None:
+        """Keep a provider lookup owned after a canceled/bounded wait."""
+        if task.done():
+            _consume_task_result(task)
+            return
+        _LATE_LOOKUP_OWNERS[id(task)] = (task, self)
+        self._late_lookup_tasks.add(task)
+
+        def settled(completed: asyncio.Task[Any]) -> None:
+            _LATE_LOOKUP_OWNERS.pop(id(completed), None)
+            self._late_lookup_tasks.discard(completed)
+            _consume_task_result(completed)
+            self._maybe_release_environment_owner()
+
+        task.add_done_callback(settled)
+
+    async def _finish_late_lookup(
+        self,
+        lookup: asyncio.Task[Any],
+        owner: _ResidentRootLease,
+        preparation_gate: asyncio.Lock,
+        key: tuple[UUID, UUID],
+        run: ClaimedRun,
+    ) -> None:
+        """Settle a late Sandbox lookup before releasing its root and gate."""
+        try:
+            await asyncio.shield(lookup)
+        except asyncio.CancelledError:
+            # Loop shutdown may cancel this continuation before the provider
+            # identity settles. Retain the lookup itself and keep the root/gate
+            # fenced; a later composition owner can retry the close safely.
+            self._retain_late_lookup(lookup)
+            return
+        except BaseException:
+            # The lookup is already owned by this continuation. Its result is
+            # diagnostic-only; root retirement must still follow it.
+            _consume_task_result(lookup)
+        try:
+            self._taint_resident_runtime(run)
+            await owner.close()
+        except BaseException as exc:
+            # Keep the resident owner strongly reachable for the next
+            # composition/runtime shutdown retry. The preparation gate can be
+            # released because no RunEnvironment was returned to this Turn.
+            logger.warning(
+                "late Daytona Sandbox lookup cleanup failed",
+                extra={"session_id": str(key[1]), "error_type": type(exc).__name__},
+            )
+        finally:
+            if preparation_gate.locked():
+                preparation_gate.release()
+                self._prune_preparation_gate(key)
+            self._maybe_release_environment_owner()
+
+    def _defer_late_lookup_cleanup(
+        self,
+        lookup: asyncio.Task[Any],
+        owner: _ResidentRootLease,
+        preparation_gate: asyncio.Lock,
+        key: tuple[UUID, UUID],
+        run: ClaimedRun,
+    ) -> None:
+        """Transfer late lookup/root cleanup out of a canceled acquisition."""
+        try:
+            cleanup = asyncio.create_task(
+                self._finish_late_lookup(lookup, owner, preparation_gate, key, run),
+                name="fleet-daytona-late-sandbox-lookup-cleanup",
+            )
+        except BaseException:
+            # A closing loop may reject a new task. Keep the provider lookup and
+            # resident owner alive, and release only the preparation gate when
+            # the already-started lookup eventually settles.
+            def retain_settled_lookup(_completed: asyncio.Task[Any]) -> None:
+                # With no task/loop available to close the resident root, keep
+                # its preparation gate fenced rather than allowing a new Turn
+                # to race the still-owned interpreter.
+                _consume_task_result(_completed)
+
+            self._retain_late_lookup(lookup)
+            lookup.add_done_callback(retain_settled_lookup)
+            return
+        self._retain_late_lookup(cleanup)
+
+    async def _acquire_root_lease(
+        self,
+        run: ClaimedRun,
+        *,
+        deadline: float,
+    ) -> tuple[_ResidentRootLease, bool]:
+        """Return the resident root lease and whether this call created it."""
+        key = (run.access.workspace_id, run.session_id)
+        context_key = self._context_key(run)
+        request = LeaseRequest(
+            session_id=run.session_id,
+            user_id=run.access.user_id,
+            workspace_id=run.access.workspace_id,
+            run_id=run.run_id,
+        )
+        force_new_sandbox = False
+        async with self._resident_root_lock:
+            owner = self._resident_root_leases.get(key)
+            if (
+                owner is not None
+                and not owner.closed
+                and not owner.failed
+                and not owner.closing
+                and self._resident_context_keys.get(key) == context_key
+            ):
+                return owner, False
+            if owner is not None:
+                # Retire the matching Session generation before closing its
+                # root.  A changed Run-scoped context must also receive a new
+                # Sandbox; reusing the workspace binding would otherwise build
+                # a fresh interpreter on the old identity after shutdown.
+                force_new_sandbox = True
+                # interpreter/root.  Acquisition of the replacement can fail
+                # after this point; a healthy registry entry must therefore
+                # never continue to advertise the closed old interpreter.
+                if self.session_runtime_registry is not None:
+                    self.session_runtime_registry.mark_tainted(
+                        SessionKey(workspace_id=str(key[0]), session_id=str(key[1]))
+                    )
+                # The provider map lock is held here; suppress the callback
+                # that would otherwise reacquire it from ``owner.close``.
+                # Remove the map entry only after release succeeds so a
+                # provider failure/cancellation leaves a retryable owner
+                # instead of silently leaking its admission lease.
+                await owner.close(notify=False, deadline=deadline)
+                if self._resident_root_leases.get(key) is owner:
+                    self._resident_root_leases.pop(key, None)
+                    self._resident_context_keys.pop(key, None)
+            acquire = self.resources.session_manager.acquire
+            acquire_kwargs: dict[str, Any] = {"deadline": deadline}
+            if force_new_sandbox:
+                try:
+                    supports_force_new = "force_new" in inspect.signature(acquire).parameters
+                except (TypeError, ValueError):
+                    supports_force_new = False
+                if supports_force_new:
+                    acquire_kwargs["force_new"] = True
+            lease = await acquire(request, **acquire_kwargs)
+            owner = _ResidentRootLease(
+                key=key,
+                lease=lease,
+                release_callback=self.resources.session_manager.release,
+                on_closed=self._on_root_closed,
+            )
+            self._resident_root_leases[key] = owner
+            self._resident_context_keys[key] = context_key
+            return owner, True
+
+    async def aclose(self, *, drain_seconds: float = 30.0) -> bool:
+        """Close provider roots only after tracked acquisitions settle."""
+        if drain_seconds < 0:
+            raise ValueError("drain_seconds must be non-negative")
+        self._accepting_acquisitions = False
+        current = asyncio.current_task()
+        acquisitions = tuple(
+            task for task in (*self._acquisition_tasks, *self._late_lookup_tasks) if task is not current
+        )
+        if acquisitions:
+            _, pending = await asyncio.wait(acquisitions, timeout=drain_seconds)
+            if pending:
+                logger.warning(
+                    "Daytona environment acquisition drain expired with %d owned job(s)",
+                    len(pending),
+                )
+                return False
+        # A bounded registry shutdown can leave a state-owned worker active.
+        # Its deferred state close still owns the RetainableEnvironmentRelease
+        # that ultimately closes this root; closing it here would terminate an
+        # interpreter while that worker is still executing.
+        if self.session_runtime_registry is not None and self.session_runtime_registry.has_deferred_closes:
+            return False
+        async with self._resident_root_lock:
+            owners = tuple(self._resident_root_leases.values())
+        first_error: BaseException | None = None
+        owner_deadline = asyncio.get_running_loop().time() + drain_seconds
+        for owner in owners:
+            try:
+                await owner.close(deadline=owner_deadline)
+            except BaseException as exc:
+                if first_error is None:
+                    first_error = exc
+            else:
+                # ``owner.close`` invokes this callback on success in the
+                # normal path.  Identity-checking here also handles a callback
+                # defect without discarding a retryable owner.
+                async with self._resident_root_lock:
+                    if owner.closed and self._resident_root_leases.get(owner.key) is owner:
+                        self._resident_root_leases.pop(owner.key, None)
+                        self._resident_context_keys.pop(owner.key, None)
+        if first_error is not None:
+            raise first_error
+        self._maybe_release_environment_owner()
+        return True
+
+    def _taint_resident_runtime(self, run: ClaimedRun) -> None:
+        """Fence a resident runtime when provider setup proves its root unhealthy."""
+        if self.session_runtime_registry is not None:
+            self.session_runtime_registry.mark_tainted(
+                SessionKey(
+                    workspace_id=str(run.access.workspace_id),
+                    session_id=str(run.session_id),
+                )
+            )
 
     async def acquire(self, run: ClaimedRun, *, deadline: float) -> RunEnvironment:
-        """
-        Acquire and configure a Daytona-backed environment for a run.
-
-        Parameters:
-            run (ClaimedRun): Run whose session, access, and identifiers determine the environment.
-            deadline (float): Absolute time limit for environment acquisition and setup.
-
-        Returns:
-            RunEnvironment: Configured environment with run sinks, cleanup, memory services, and child-runtime creation.
-
-        Raises:
-            RunPreparationUnavailableError: If environment admission times out.
-            RunPreparationTimeoutError: If lease acquisition or environment setup exceeds the deadline.
-            RuntimeError: If the acquired sandbox is unavailable.
-        """
+        """Acquire a Daytona environment while retaining Session preparation ownership."""
+        if not self._accepting_acquisitions:
+            raise RunPreparationUnavailableError("Turn environment is unavailable")
+        self._retain_environment_owner()
+        task = asyncio.current_task()
+        if task is not None:
+            self._acquisition_tasks.add(task)
         try:
-            lease = await self.resources.session_manager.acquire(
-                LeaseRequest(
-                    session_id=run.session_id,
-                    user_id=run.access.user_id,
-                    workspace_id=run.access.workspace_id,
-                    run_id=run.run_id,
-                ),
-                deadline=deadline,
-            )
-        except DaytonaAdmissionTimeoutError as exc:
-            raise RunPreparationUnavailableError("Turn environment is unavailable") from exc
-        except DaytonaLeaseAcquisitionTimeoutError as exc:
-            raise RunPreparationTimeoutError("Turn preparation timed out") from exc
+            return await self._acquire(run, deadline=deadline)
+        finally:
+            if task is not None:
+                self._acquisition_tasks.discard(task)
+            self._maybe_release_environment_owner()
+
+    async def _acquire(self, run: ClaimedRun, *, deadline: float) -> RunEnvironment:
+        """Perform one tracked environment acquisition."""
+        key = (run.access.workspace_id, run.session_id)
+        preparation_gate = self._preparation_gate(key)
+        gate_held = False
+        owner: _ResidentRootLease | None = None
+        created_root = False
         try:
+            try:
+                async with asyncio.timeout_at(deadline):
+                    await preparation_gate.acquire()
+            except TimeoutError:
+                raise RunPreparationTimeoutError("Turn preparation timed out") from None
+            gate_held = True
+            try:
+                owner, created_root = await self._acquire_root_lease(run, deadline=deadline)
+            except DaytonaAdmissionTimeoutError as exc:
+                raise RunPreparationUnavailableError("Turn environment is unavailable") from exc
+            except DaytonaLeaseAcquisitionTimeoutError as exc:
+                raise RunPreparationTimeoutError("Turn preparation timed out") from exc
+            assert owner is not None
+            root_owner = owner
+            lease = root_owner.lease
             self.resources.track_sandbox(lease.sandbox_id)
             lookup = asyncio.create_task(self.resources.platform.get(lease.sandbox_id))
-            lookup_effect = OwnedEffect.from_task(lookup)
             try:
                 async with asyncio.timeout_at(deadline):
                     sandbox = await asyncio.shield(lookup)
             except TimeoutError:
-                if lookup.done():
-                    raise
-                try:
-                    settled = await lookup_effect.settle()
-                except BaseException:
-                    lookup_effect.consume_exception()
-                    cancelled = lookup_effect.caller_cancelled
-                else:
-                    cancelled = settled.caller_cancelled
-                _consume_task_result(lookup)
-                if cancelled:
-                    raise asyncio.CancelledError from None
+                if not lookup.done():
+                    self._defer_late_lookup_cleanup(lookup, owner, preparation_gate, key, run)
+                    owner = None
+                    gate_held = False
                 raise RunPreparationTimeoutError("Turn preparation timed out") from None
             except asyncio.CancelledError:
-                with contextlib.suppress(BaseException):
-                    await lookup_effect.settle()
-                _consume_task_result(lookup)
+                if not lookup.done():
+                    # Cancellation must return promptly. The detached
+                    # continuation settles the provider lookup, retires the
+                    # root, and releases the preparation gate in that order.
+                    self._defer_late_lookup_cleanup(lookup, owner, preparation_gate, key, run)
+                    owner = None
+                    gate_held = False
                 raise
             if sandbox is None:
                 raise RuntimeError("acquired Sandbox is unavailable")
@@ -280,8 +721,18 @@ class _DaytonaEnvironmentProvider:
                     allowed_categories=self.settings.rlm_autonomous_memory_categories,
                 )
 
-            async def release() -> None:
-                await self.resources.session_manager.release(lease)
+            async def release_preparation() -> None:
+                nonlocal gate_held
+                if gate_held:
+                    gate_held = False
+                    preparation_gate.release()
+                    self._prune_preparation_gate(key)
+
+            async def release_root() -> None:
+                # Only the first Turn owns the provider lease directly. Later
+                # Turns reuse the resident root and release only their
+                # preparation reservation.
+                await root_owner.close()
 
             main_loop = asyncio.get_running_loop()
             child_runtime_factory = build_child_runtime_factory(
@@ -303,16 +754,32 @@ class _DaytonaEnvironmentProvider:
                 interpreter=lease.interpreter,
                 attachment_sink=sink,
                 artifact_sink=sink,
-                release=release,
+                # ``release`` is always the per-Turn preparation reservation.
+                # The first resident state receives ``resident_release`` and
+                # owns the root until its generation is retired.
+                release=release_preparation,
                 result_snapshot_sink=sink,
                 child_runtime_factory=child_runtime_factory,
                 context_mount_path=str(paths.mount_path),
                 workspace_memory_store=memory_store,
                 post_commit_memory_promotion=memory_promotion,
                 memory_intent_builder=memory_intent_builder,
+                resident_release=release_root if created_root else None,
+                release_is_resident=False,
+                history_transport=build_committed_session_history_for_claim(run),
             )
         except BaseException:
-            await asyncio.shield(self.resources.session_manager.release(lease))
+            # The preparation gate proves that no earlier same-Session Turn
+            # can still own the resident execution lane.  A borrowed root may
+            # therefore be tainted and closed safely on provider setup failure.
+            if owner is not None:
+                self._taint_resident_runtime(run)
+                with contextlib.suppress(BaseException):
+                    await asyncio.shield(owner.close(deadline=deadline))
+            if gate_held:
+                gate_held = False
+                preparation_gate.release()
+                self._prune_preparation_gate(key)
             raise
 
 
@@ -529,23 +996,164 @@ class DaytonaRuntimeResources:
             dispatcher=dispatcher,
         )
         self._sandbox_ids: list[str] = []
+        self._client_close_lock = Lock()
+        self._client_close_task: asyncio.Task[Any] | None = None
+        self._client_closed = False
 
     def track_sandbox(self, sandbox_id: str | None) -> None:
         if sandbox_id and sandbox_id not in self._sandbox_ids:
             self._sandbox_ids.append(sandbox_id)
 
-    async def cleanup(self) -> None:
-        """Delete tracked sandboxes (best-effort)."""
-        for sid in list(self._sandbox_ids):
-            with contextlib.suppress(Exception):
-                await self.platform.delete(sid)
-        self._sandbox_ids.clear()
+    async def cleanup(self, *, deadline: float | None = None) -> bool:
+        """Delete tracked Sandboxes with bounded, retained provider requests."""
+        settled = True
+        retained: list[str] = []
 
-    async def adispose(self) -> None:
-        """Delete tracked sandboxes and close Daytona clients."""
-        await self.session_manager.aclose()
-        await self.cleanup()
-        await self.client.close()
+        async def request(value: Awaitable[Any], sandbox_id: str) -> tuple[bool, Any]:
+            nonlocal settled
+            task = asyncio.ensure_future(value)
+            try:
+                if deadline is None:
+                    return True, await asyncio.shield(task)
+                remaining = deadline - asyncio.get_running_loop().time()
+                if remaining <= 0:
+                    raise TimeoutError
+                return True, await asyncio.wait_for(asyncio.shield(task), timeout=remaining)
+            except TimeoutError:
+                _RESOURCE_CLEANUP_OWNERS.add((task, self, sandbox_id))
+                task.add_done_callback(lambda completed, sid=sandbox_id: self._settled_resource_cleanup(sid, completed))
+                settled = False
+                return False, None
+            except asyncio.CancelledError:
+                _RESOURCE_CLEANUP_OWNERS.add((task, self, sandbox_id))
+                task.add_done_callback(lambda completed, sid=sandbox_id: self._settled_resource_cleanup(sid, completed))
+                settled = False
+                raise
+            except Exception as exc:
+                # A tracked Sandbox may already have been retired by a
+                # context-rotation replacement. Its absence is successful
+                # cleanup, not a retryable provider failure.
+                if is_sandbox_not_found(exc):
+                    return True, None
+                settled = False
+                return False, None
+
+        owns = getattr(self.session_manager, "owns_sandbox", None)
+        for sid in list(self._sandbox_ids):
+            if callable(owns) and owns(sid):
+                retained.append(sid)
+                settled = False
+                continue
+            try:
+                deleted, _ = await request(self.platform.delete(sid), sid)
+                if not deleted:
+                    retained.append(sid)
+                    continue
+                probe = getattr(self.platform, "get", None)
+                if callable(probe):
+                    confirmed, result = await request(probe(sid), sid)
+                    if not confirmed or result is not None:
+                        retained.append(sid)
+            except Exception:
+                # Keep failed identities for a later owner/retry rather than
+                # forgetting them immediately before client disposal.
+                retained.append(sid)
+                settled = False
+        self._sandbox_ids = retained
+        return settled
+
+    def _settled_resource_cleanup(self, sandbox_id: str, task: asyncio.Future[Any]) -> None:
+        _RESOURCE_CLEANUP_OWNERS.difference_update(
+            owner
+            for owner in _RESOURCE_CLEANUP_OWNERS
+            if owner[1] is self and owner[2] == sandbox_id and owner[0] is task
+        )
+        if task.cancelled():
+            return
+        with contextlib.suppress(BaseException):
+            task.exception()
+
+    async def _close_client(self, *, deadline: float | None) -> bool:
+        """Close the Daytona client under one retained, bounded task."""
+        if self._client_closed:
+            return True
+        with self._client_close_lock:
+            task = self._client_close_task
+            if task is not None and task.done():
+                if not task.cancelled():
+                    with contextlib.suppress(BaseException):
+                        error = task.exception()
+                    if error is None:
+                        self._client_closed = True
+                        return True
+                self._client_close_task = None
+                task = None
+            if task is None:
+                task = asyncio.create_task(self.client.close(), name="fleet-daytona-client-close")
+                self._client_close_task = task
+                _CLIENT_CLOSE_OWNERS.add((task, self))
+
+                def settled(completed: asyncio.Task[Any]) -> None:
+                    _CLIENT_CLOSE_OWNERS.discard((completed, self))
+                    if not completed.cancelled():
+                        with contextlib.suppress(BaseException):
+                            error = completed.exception()
+                        if error is None:
+                            self._client_closed = True
+
+                task.add_done_callback(settled)
+        try:
+            if deadline is None:
+                await asyncio.shield(task)
+            else:
+                remaining = deadline - asyncio.get_running_loop().time()
+                if remaining <= 0:
+                    return False
+                await asyncio.wait_for(asyncio.shield(task), timeout=remaining)
+        except TimeoutError:
+            # Keep the close task and client strongly owned for a later retry.
+            return False
+        except asyncio.CancelledError:
+            # Caller cancellation must not cancel the client close operation.
+            raise
+        except BaseException:
+            with self._client_close_lock:
+                if self._client_close_task is task:
+                    self._client_close_task = None
+            raise
+        else:
+            self._client_closed = True
+            return True
+
+    async def adispose(self, *, drain_seconds: float = 30.0) -> bool:
+        """Bound provider-owned shutdown without abandoning late ownership."""
+        started = asyncio.get_running_loop().time()
+        settled = await self.session_manager.aclose(drain_seconds=drain_seconds)
+        cleanup_settled = await self.cleanup(deadline=started + drain_seconds)
+        pending_ownership = bool(getattr(self.session_manager, "has_pending_ownership", False))
+        resource_ownership = has_pending_resource_cleanup()
+        if resource_ownership:
+            remaining = max(0.0, started + drain_seconds - asyncio.get_running_loop().time())
+            resource_ownership = not await wait_resource_cleanup(timeout=remaining)
+        lease_ownership = has_pending_lease_ownership()
+        if lease_ownership:
+            remaining = max(0.0, started + drain_seconds - asyncio.get_running_loop().time())
+            lease_ownership = not await wait_lease_ownership(timeout=remaining)
+        pending = (
+            not settled
+            or not cleanup_settled
+            or pending_ownership
+            or resource_ownership
+            or lease_ownership
+            or bool(self._sandbox_ids)
+        )
+        if pending:
+            logger.warning(
+                "Daytona provider disposal retained owned Sandbox resources",
+                extra={"sandbox_count": len(self._sandbox_ids)},
+            )
+            return False
+        return await self._close_client(deadline=started + drain_seconds)
 
 
 def build_run_preparation(
@@ -555,6 +1163,7 @@ def build_run_preparation(
     skill_catalog: SkillCatalog,
     settings: Settings,
     models: RLMModelBundle,
+    session_runtime_registry: SessionRLMRegistry | None = None,
 ) -> DefaultRunPreparer:
     """Compose Daytona Run preparation without mutating resource ownership."""
     options = RLMOptions(
@@ -567,6 +1176,7 @@ def build_run_preparation(
         options=options,
         recursive_options=recursive_rlm_options(settings),
         attachments=attachment_lifecycle,
-        environments=_DaytonaEnvironmentProvider(resources, settings),
+        environments=_DaytonaEnvironmentProvider(resources, settings, session_runtime_registry),
         capabilities=_LiveCapabilityPreparer(settings, skill_catalog, volume_paths=resources.volume_paths),
+        session_runtime_registry=session_runtime_registry,
     )

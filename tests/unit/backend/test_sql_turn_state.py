@@ -217,6 +217,53 @@ async def test_sql_state_round_trips_canonical_turn_without_result_mirrors() -> 
 
 
 @pytest.mark.asyncio
+async def test_sql_terminal_replay_and_transition_require_session_scope() -> None:
+    from dataclasses import replace
+
+    from fleet_rlm.chat.run_claim import CompleteSettlement
+    from fleet_rlm.chat.run_lifecycle import ClaimedRun, CommittedRunReplay, RunClaim, RunNotFoundError
+    from fleet_rlm.persistence.database import create_async_engine_from_url, create_session_factory, create_tables
+    from fleet_rlm.persistence.models import SessionRow, UserRow, WorkspaceRow
+    from fleet_rlm.persistence.repositories.turns import SqlAlchemyRunStateStore
+    from fleet_rlm.sessions.committed_turn import CommittedTurn, TextPart, UsagePart
+    from fleet_rlm.sessions.models import TurnAccess, TurnInput
+
+    engine = create_async_engine_from_url("sqlite+aiosqlite:///:memory:")
+    try:
+        await create_tables(engine)
+        factory = create_session_factory(engine)
+        access, session_id, run_id = TurnAccess(uuid4(), uuid4()), uuid4(), uuid4()
+        async with factory() as db, db.begin():
+            db.add_all(
+                (
+                    UserRow(id=access.user_id),
+                    WorkspaceRow(id=access.workspace_id),
+                    SessionRow(id=session_id, user_id=access.user_id, workspace_id=access.workspace_id, title="scope"),
+                )
+            )
+        store = SqlAlchemyRunStateStore(factory)
+        begun = await store.begin(RunClaim(access, session_id, TurnInput("hello"), "key", run_id))
+        assert isinstance(begun, ClaimedRun)
+        committed = CommittedTurn(
+            1,
+            (UsagePart({"iterations": 0, "observed_lm_usage": {}, "duration_ms": 0}), TextPart("world")),
+        )
+        await store.commit(begun, committed, ())
+
+        wrong_access = TurnAccess(uuid4(), uuid4())
+        forged = replace(begun, access=wrong_access)
+        with pytest.raises(RunNotFoundError, match="Turn not found"):
+            await store.commit(forged, committed, ())
+        with pytest.raises(RunNotFoundError, match="Turn not found"):
+            await store.transition_claim(forged, CompleteSettlement())
+
+        replay = await store.begin(RunClaim(access, session_id, TurnInput("hello"), "key", uuid4()))
+        assert isinstance(replay, CommittedRunReplay)
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
 async def test_sql_state_replaces_a_stale_claim_after_recovery() -> None:
     from fleet_rlm.chat.run_lifecycle import ClaimedRun, RunClaim
     from fleet_rlm.persistence.database import create_async_engine_from_url, create_session_factory, create_tables

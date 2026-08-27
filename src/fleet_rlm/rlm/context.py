@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
 from types import MappingProxyType
@@ -25,10 +26,68 @@ from fleet_rlm.rlm.model_bundle import RLMModelBundle
 from fleet_rlm.rlm.recursive_calls import RecursiveRLMOptions
 from fleet_rlm.rlm.signature import FleetRLMSignature
 from fleet_rlm.rlm.tool_observer import ToolEventView
+from fleet_rlm.sessions.history_transport import CommittedSessionHistory
 from fleet_rlm.sessions.models import TurnAccess
 from fleet_rlm.skills.models import SkillCard
 
 AsyncCancellationProbe = Callable[[], Awaitable[bool]]
+
+
+@dataclass(slots=True)
+class RetainableEnvironmentRelease:
+    """Make one prepared environment release transferable to Session state.
+
+    ``PreparedRun.aclose`` calls :meth:`release`, which is a no-op after the
+    Runner transfers ownership.  The resident registry later calls
+    :meth:`aclose` and forces the provider release exactly once.
+    """
+
+    callback: Callable[[], Awaitable[Any]]
+    retained: bool = False
+    released: bool = False
+    _lock: asyncio.Lock = field(default_factory=asyncio.Lock, init=False, repr=False)
+    _release_task: asyncio.Task[Any] | None = field(default=None, init=False, repr=False)
+
+    def retain(self) -> None:
+        """Transfer provider ownership from the current Turn to the resident."""
+        if self.released:
+            raise RuntimeError("environment release is already complete")
+        self.retained = True
+
+    async def release(self) -> None:
+        """Release from prepared cleanup unless resident ownership was retained."""
+        if self.retained:
+            return
+        await self._release_once()
+
+    async def aclose(self) -> None:
+        """Force provider release when the resident runtime is closed."""
+        await self._release_once()
+
+    async def _release_once(self) -> None:
+        async with self._lock:
+            if self.released:
+                return
+            task = self._release_task
+            if task is None:
+                task = asyncio.create_task(self._perform_release(), name="fleet-environment-release")
+                self._release_task = task
+        await asyncio.shield(task)
+
+    async def _perform_release(self) -> None:
+        """Run provider release once and publish completion only after success."""
+        current = asyncio.current_task()
+        try:
+            await self.callback()
+        except BaseException:
+            async with self._lock:
+                if self._release_task is current:
+                    self._release_task = None
+            raise
+        async with self._lock:
+            if self._release_task is current:
+                self.released = True
+                self._release_task = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -102,6 +161,13 @@ class SessionView:
     attachment_context: AttachmentContextCapsule | None = None
     preparation_notices: tuple[PreparationNotice, ...] = ()
     workspace_memory_digest: str = ""
+    # Canonical committed Session conversation materialized from the
+    # claimed checkpoint. Defaults to an empty ``dspy.History`` so
+    # ``dspy.RLM._validate_inputs`` always sees a real instance for the
+    # Signature-declared ``history`` input. The production Turn-input
+    # assembly path (``chat.run_preparation.build_dspy_history_for_claim``)
+    # overrides this default with the checkpoint materialization.
+    history: dspy.History | CommittedSessionHistory = field(default_factory=lambda: dspy.History(messages=[]))
 
 
 @dataclass(frozen=True, slots=True)
@@ -113,6 +179,7 @@ class ExecutionRuntime:
     interpreter: RLMInterpreter | None
     cancellation_requested: AsyncCancellationProbe
     deadline: float
+    environment_release: RetainableEnvironmentRelease | None = None
 
 
 @dataclass(frozen=True, slots=True)

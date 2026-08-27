@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from typing import Any, Protocol
 from uuid import UUID
 
+import dspy
 from sqlalchemy.exc import SQLAlchemyError
 
 from fleet_rlm.artifacts.promotion import RunArtifactSink
@@ -30,15 +31,21 @@ from fleet_rlm.rlm.context import (
     DelegationPolicy,
     ExecutionRuntime,
     PreparedCapabilities,
+    RetainableEnvironmentRelease,
     RLMExecutionContext,
     RLMInterpreter,
     RunIdentity,
     SessionView,
 )
-from fleet_rlm.rlm.dspy_contract import RLMOptions
+from fleet_rlm.rlm.dspy_contract import RLMOptions, empty_rlm_usage
 from fleet_rlm.rlm.inputs import AttachmentContextCapsule, AttachmentContextEntry
 from fleet_rlm.rlm.model_bundle import RLMModelBundle
 from fleet_rlm.rlm.recursive_calls import RecursiveRLMOptions
+from fleet_rlm.rlm.session_runtime import SessionKey, SessionRLMRegistry
+from fleet_rlm.sessions.committed_turn import CommittedTurn, TextPart, UsagePart
+from fleet_rlm.sessions.history import is_committed_conversation_turn, to_dspy_history
+from fleet_rlm.sessions.history_transport import CommittedSessionHistory
+from fleet_rlm.sessions.models import HistoryMessage
 
 AsyncCleanup = Callable[[], Awaitable[Any]]
 
@@ -65,24 +72,34 @@ class _PreparedRunResources:
     _closed: bool = field(default=False, init=False)
     _lock: asyncio.Lock = field(default_factory=asyncio.Lock, init=False)
     _close_error: BaseException | None = field(default=None, init=False)
+    _completed_cleanups: set[int] = field(default_factory=set, init=False, repr=False)
 
     async def aclose(self) -> None:
         async with self._lock:
             if self._closed:
-                if self._close_error is not None:
-                    raise self._close_error
                 return
-            self._closed = True
             first_error: BaseException | None = None
-            for cleanup in reversed(self.cleanups):
+            for index in reversed(range(len(self.cleanups))):
+                if index in self._completed_cleanups:
+                    continue
+                cleanup = self.cleanups[index]
                 try:
                     await cleanup()
                 except BaseException as exc:
                     if first_error is None:
                         first_error = exc
+                else:
+                    # A later retry only needs to re-run owners that did not
+                    # cross their own successful cleanup boundary.
+                    self._completed_cleanups.add(index)
             if first_error is not None:
+                # Do not publish the closed boundary until every cleanup has
+                # settled. A later owner can retry idempotent releases after a
+                # transient provider/gate failure.
                 self._close_error = RuntimeError("prepared Turn cleanup failed")
                 raise self._close_error from first_error
+            self._close_error = None
+            self._closed = True
 
 
 @dataclass(frozen=True, slots=True)
@@ -112,6 +129,77 @@ def _workspace_memory_digest(capabilities: PreparedCapabilities) -> str:
     return digest
 
 
+def _claim_history_records(
+    claim: ClaimedRun,
+) -> tuple[tuple[CommittedTurn, ...], tuple[str, ...]]:
+    """Project the claimed Session checkpoint to canonical ``(committed_turns, user_requests)``.
+
+    The claimed checkpoint is the immutable ``SessionHistory`` already
+    protected by the Run claim. It may include bounded failure tombstones for
+    audit/retry surfaces; their attached ``CommittedTurn`` metadata lets this
+    projection exclude them while preserving the canonical user/assistant
+    pairing for successful Turns.
+    """
+    committed_turns: list[CommittedTurn] = []
+    user_requests: list[str] = []
+    pending_user_text: str | None = None
+    for message in claim.history.messages:
+        if not isinstance(message, HistoryMessage):
+            continue
+        if message.role == "user":
+            # A second user message without an intervening assistant answer
+            # means the previous user request was never committed; drop it so
+            # the canonical factory never pairs an answer with the wrong
+            # request.
+            pending_user_text = message.content
+            continue
+        if message.role == "assistant":
+            if message.committed_turn is not None and not is_committed_conversation_turn(message.committed_turn):
+                # Failure/cancellation tombstones remain in the bounded
+                # Session audit projection, but never become model context.
+                pending_user_text = None
+                continue
+            if pending_user_text is None:
+                # Defensive: an assistant answer without a prior user
+                # request cannot be paired. The canonical factory would
+                # reject the missing user request through its own
+                # validation, but skipping the orphan here keeps the
+                # projection total.
+                continue
+            committed_turns.append(
+                CommittedTurn(
+                    schema_version=1,
+                    parts=(
+                        UsagePart(value=empty_rlm_usage()),
+                        TextPart(text=message.content),
+                    ),
+                )
+            )
+            user_requests.append(pending_user_text)
+            pending_user_text = None
+    return tuple(committed_turns), tuple(user_requests)
+
+
+def build_dspy_history_for_claim(claim: ClaimedRun) -> dspy.History:
+    """Build the canonical ``dspy.History`` snapshot for one claimed Session checkpoint.
+
+    The helper is the single P44.8 entry point that fetches the committed
+    Turns and user requests for the claimed checkpoint and materializes the
+    exact installed ``dspy.History`` instance. The function never bypasses
+    the claim (it consumes ``ClaimedRun.history``), never reads the durable
+    store directly, and never inspects uncommitted state.
+
+    The returned object is the exact installed ``dspy.History`` Pydantic
+    model (DSPy 3.3.1) materialized through :func:`to_dspy_history` so the
+    canonical conversation factory still applies its terminal-exclusion
+    rules. A claim with no committed Turns yields a valid empty
+    ``dspy.History(messages=[])`` that the native ``dspy.RLM._validate_inputs``
+    contract accepts as the canonical empty History.
+    """
+    committed_turns, user_requests = _claim_history_records(claim)
+    return to_dspy_history(committed_turns, user_requests=user_requests)
+
+
 class RunPreparation(Protocol):
     async def prepare(self, run: ClaimedRun, *, deadline: float) -> PreparedRun: ...
 
@@ -128,6 +216,16 @@ class RunEnvironment:
     workspace_memory_store: Any | None = None
     post_commit_memory_promotion: OwnedPostCommitMemoryPromotion | None = None
     memory_intent_builder: MemoryIntentBuilder | None = None
+    # Optional provider-owned root release. ``release`` remains per-Turn when
+    # ``release_is_resident`` is false; the resident Session runtime takes
+    # ``resident_release`` instead.
+    resident_release: AsyncCleanup | None = None
+    release_is_resident: bool = True
+    # Provider-specific transport for the canonical committed conversation.
+    # In-process runs use the exact dspy.History built below; Daytona supplies
+    # CommittedSessionHistory because SandboxSerializable values cross its
+    # interpreter boundary while raw Pydantic History does not.
+    history_transport: dspy.History | CommittedSessionHistory | None = None
 
 
 class RunEnvironmentProvider(Protocol):
@@ -167,6 +265,7 @@ class DefaultRunPreparer:
         environments: RunEnvironmentProvider,
         capabilities: CapabilityPreparer,
         recursive_options: RecursiveRLMOptions | None = None,
+        session_runtime_registry: SessionRLMRegistry | None = None,
     ) -> None:
         self._models = models
         self._options = options
@@ -174,6 +273,7 @@ class DefaultRunPreparer:
         self._environments = environments
         self._capabilities = capabilities
         self._recursive_options = recursive_options or RecursiveRLMOptions()
+        self._session_runtime_registry = session_runtime_registry
 
     async def prepare(self, run: ClaimedRun, *, deadline: float) -> PreparedRun:
         """
@@ -197,6 +297,16 @@ class DefaultRunPreparer:
         except (DatabaseConnectionError, OSError, SQLAlchemyError) as exc:
             raise RunPreparationUnavailableError("Turn cancellation status is unavailable") from exc
 
+        if self._session_runtime_registry is not None:
+            await self._session_runtime_registry.evict_configured_idle(deadline=deadline)
+            await self._session_runtime_registry.close_unhealthy(
+                SessionKey(
+                    workspace_id=str(run.access.workspace_id),
+                    session_id=str(run.session_id),
+                ),
+                deadline=deadline,
+            )
+
         with turn_phase_span("Turn.acquire_environment", inputs={}) as environment_phase:
             try:
                 environment = await self._environments.acquire(run, deadline=deadline)
@@ -211,6 +321,24 @@ class DefaultRunPreparer:
                 }
             )
 
+        # ``resident_release`` owns a provider root that may outlive this
+        # prepared Turn.  ``release`` remains the per-preparation ownership
+        # boundary (for Daytona, it releases the Session preparation gate).
+        # A reused Daytona root has no resident callback and must not retain
+        # that per-Turn gate wrapper in the Session state.
+        if environment.resident_release is not None:
+            environment_release: RetainableEnvironmentRelease | None = RetainableEnvironmentRelease(
+                environment.resident_release
+            )
+            turn_environment_release: RetainableEnvironmentRelease | None = RetainableEnvironmentRelease(
+                environment.release
+            )
+        elif environment.release_is_resident:
+            environment_release = RetainableEnvironmentRelease(environment.release)
+            turn_environment_release = None
+        else:
+            environment_release = None
+            turn_environment_release = RetainableEnvironmentRelease(environment.release)
         staged = PreparedAttachments((), ())
         capabilities: PreparedCapabilities | None = None
 
@@ -275,7 +403,11 @@ class DefaultRunPreparer:
                     mount_root=environment.context_mount_path,
                 )
         except BaseException:
-            cleanups: list[AsyncCleanup] = [environment.release]
+            cleanups: list[AsyncCleanup] = []
+            if environment_release is not None:
+                cleanups.append(environment_release.release)
+            if turn_environment_release is not None:
+                cleanups.append(turn_environment_release.release)
             if capabilities is not None:
                 cleanups.append(capabilities.aclose)
             cleanups.append(remove_staged)
@@ -284,7 +416,13 @@ class DefaultRunPreparer:
 
         assert capabilities is not None
 
-        resources = _PreparedRunResources((environment.release, capabilities.aclose, remove_staged))
+        cleanups: list[AsyncCleanup] = []
+        if environment_release is not None:
+            cleanups.append(environment_release.release)
+        if turn_environment_release is not None:
+            cleanups.append(turn_environment_release.release)
+        cleanups.extend((capabilities.aclose, remove_staged))
+        resources = _PreparedRunResources(tuple(cleanups))
         execution = RLMExecutionContext(
             identity=RunIdentity(
                 run_id=run.run_id,
@@ -312,6 +450,15 @@ class DefaultRunPreparer:
                 attachment_context=attachment_context,
                 preparation_notices=tuple(getattr(capabilities, "preparation_notices", ())),
                 workspace_memory_digest=_workspace_memory_digest(capabilities),
+                # Canonical committed Session conversation materialized from
+                # the claimed checkpoint. Providers may select a typed
+                # transport at their adapter boundary; otherwise the in-process
+                # composition reuses the exact dspy.History instance.
+                history=(
+                    environment.history_transport
+                    if environment.history_transport is not None
+                    else build_dspy_history_for_claim(run)
+                ),
             ),
             execution=ExecutionRuntime(
                 models=self._models,
@@ -319,6 +466,7 @@ class DefaultRunPreparer:
                 interpreter=environment.interpreter,
                 cancellation_requested=run.cancellation_requested,
                 deadline=deadline,
+                environment_release=environment_release,
             ),
             capabilities=capabilities,
             delegation=DelegationPolicy(
@@ -335,6 +483,14 @@ class DefaultRunPreparer:
             environment.post_commit_memory_promotion,
             environment.memory_intent_builder,
         )
+
+    async def aclose(self) -> bool:
+        """Close provider-owned resident root leases during composition shutdown."""
+        close = getattr(self._environments, "aclose", None)
+        if callable(close):
+            result = await close()
+            return result is not False
+        return True
 
     async def _prepare_capabilities(
         self,

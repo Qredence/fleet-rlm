@@ -246,10 +246,14 @@ class InMemoryRunStateStore:
         run.user_turn_id = uuid4()
         run.record_sequence = session.turn_sequence + 1
         session.turn_sequence += 2
+        # Keep the bounded tombstone pair in the Session History/audit
+        # projection.  Its originating CommittedTurn metadata lets the
+        # model-facing canonical projection exclude this non-conversation
+        # result without losing durable listing/retry semantics.
         session.history.extend(
             (
                 HistoryMessage("user", run.input.text),
-                HistoryMessage("assistant", run.tombstone.text),
+                HistoryMessage("assistant", run.tombstone.text, run.tombstone),
             )
         )
 

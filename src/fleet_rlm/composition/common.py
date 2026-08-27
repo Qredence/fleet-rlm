@@ -18,6 +18,7 @@ from fleet_rlm.files.volume_storage import VolumeTreeFs
 from fleet_rlm.rlm.dspy_contract import RLMOptions, assert_dspy_version
 from fleet_rlm.rlm.recursive_calls import RecursiveRLMOptions
 from fleet_rlm.rlm.runner import RLMFactoryLike
+from fleet_rlm.rlm.session_runtime import SessionRLMRegistry
 
 
 class CompositionError(RuntimeError):
@@ -132,6 +133,7 @@ def build_local_inventory(
     preparation: RunPreparation,
     rlm_factory: RLMFactoryLike,
     workspace_volume_mirror: VolumeTreeFs | None,
+    session_runtime_registry: SessionRLMRegistry | None = None,
 ) -> RuntimeInventory:
     """Build the shared in-memory/SQL inventory for one local runtime."""
     assert_dspy_version()
@@ -159,6 +161,8 @@ def build_local_inventory(
         )
         session_catalog = SqlAlchemySessionCatalog(session_factory)
     cleanup = RunCleanupSupervisor(max_jobs=8)
+    if session_runtime_registry is None:
+        session_runtime_registry = SessionRLMRegistry()
     lifecycle = RunLifecycleService(
         run_state,
         max_artifact_bytes=settings.max_artifact_bytes,
@@ -166,10 +170,11 @@ def build_local_inventory(
         stale_after_seconds=settings.run_stale_after_seconds,
         cleanup=cleanup,
     )
+    runner = RLMRunner(factory=rlm_factory, runtime_registry=session_runtime_registry)
     coordinator = TurnCoordinator(
         lifecycle=lifecycle,
         preparation=preparation,
-        runner=RLMRunner(factory=rlm_factory),
+        runner=runner,
         turn_timeout_seconds=settings.turn_timeout_seconds,
         cleanup=cleanup,
         claim_loss_fence=None,
@@ -178,6 +183,7 @@ def build_local_inventory(
     )
     return RuntimeInventory(
         turn_coordinator=coordinator,
+        runner=runner,
         attachment_lifecycle=attachment_lifecycle,
         artifact_reader=artifact_reader,
         workspace_volume_mirror=workspace_volume_mirror,
@@ -186,6 +192,7 @@ def build_local_inventory(
         run_cleanup_supervisor=cleanup,
         run_preparation=preparation,
         run_state_store=run_state,
+        session_runtime_registry=session_runtime_registry,
         config_policy=ConfigPolicyService(
             _CONFIG_PATH,
             active_profile=active_profile(settings),

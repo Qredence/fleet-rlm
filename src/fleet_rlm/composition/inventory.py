@@ -35,6 +35,7 @@ from fleet_rlm.files.volume_storage import VolumeTreeFs, WorkspaceVolumeGateway
 from fleet_rlm.files.workspace_access import WorkspaceFileService
 from fleet_rlm.persistence.repositories.turns import ReconciliationSummary
 from fleet_rlm.rlm.model_bundle import RLMModelBundle
+from fleet_rlm.rlm.session_runtime import SessionRLMRegistry
 from fleet_rlm.sessions.catalog import SessionCatalog
 
 
@@ -52,7 +53,7 @@ class SettlingRunStateStore(Protocol):
 class RuntimeSessionManager(Protocol):
     """Provider session manager surface needed by startup recovery."""
 
-    async def fence_session(self, session_id: UUID) -> None: ...
+    async def fence_session(self, session_id: UUID, *, deadline: float | None = None) -> None: ...
 
 
 class RuntimeProcessResources(Protocol):
@@ -61,7 +62,7 @@ class RuntimeProcessResources(Protocol):
     @property
     def session_manager(self) -> RuntimeSessionManager: ...
 
-    async def adispose(self) -> None: ...
+    async def adispose(self, *, drain_seconds: float = 30.0) -> bool | None: ...
 
 
 class RuntimeInventoryError(RuntimeError):
@@ -97,6 +98,7 @@ class RuntimeInventory:
     database: RuntimeDatabaseLifecycle = field(default_factory=RuntimeDatabaseLifecycle)
     run_environment_resources: RuntimeProcessResources | None = None
     model_bundle: RLMModelBundle | None = None
+    session_runtime_registry: SessionRLMRegistry | None = None
     workspace_volume_gateway: WorkspaceVolumeGateway | None = None
     workspace_file_service: WorkspaceFileService | None = None
     workspace_volume_mirror: VolumeTreeFs | None = None
@@ -109,6 +111,9 @@ class RuntimeInventory:
     # Best-effort post-readiness Memory promotion outbox sweep (P23); cancelled
     # at dispose like the orphan sweep and never readiness-gating.
     memory_outbox_task: asyncio.Task[None] | None = None
+    # Optional explicit runner owner; kept after existing fields for positional
+    # compatibility with provider-neutral inventory construction.
+    runner: object | None = None
 
     _REQUIRED_ROUTE_FIELDS: ClassVar[tuple[str, ...]] = (
         "turn_coordinator",

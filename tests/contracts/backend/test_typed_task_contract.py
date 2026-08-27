@@ -38,8 +38,10 @@ def test_custom_signature_uses_the_same_json_compatible_common_inputs() -> None:
     from tests.unit.backend.rlm.test_signature_inputs import _payload
 
     payload = _payload()
-    assert set(payload) == {"request", "session_context", "skill_cards", "attachments"}
-    assert all(isinstance(value, (str, dict, list)) for value in payload.values())
+    assert set(payload) == {"request", "history", "session_context", "skill_cards", "attachments"}
+    # ``dspy.History`` is a Pydantic model; the wire-format check skips the
+    # History carrier (whose body is empty here) and inspects the rest.
+    assert all(isinstance(value, (str, dict, list, dspy.History)) for value in payload.values())
 
     prediction = dspy.Prediction(
         answer="Analysis complete.",

@@ -12,6 +12,14 @@ class FleetRLMSignature(dspy.Signature):
     """Fleet Root RLM contract assembled from explicit instruction fragments."""
 
     request: str = dspy.InputField(desc="User request for this turn")
+    history: dspy.History = dspy.InputField(
+        desc=(
+            "Canonical committed Session conversation (P44): ordered, settled user requests and their "
+            "committed answers. Inspect ``history.messages`` with Python only when earlier Turns are "
+            "relevant to the current request; do not assume previews are complete, and do not treat "
+            "hidden trajectory or failed Runs as conversation"
+        )
+    )
     session_context: SessionContextInput = dspy.InputField(
         desc=(
             "Bounded Session metadata, workspace capability, and untrusted recent previews; read older "

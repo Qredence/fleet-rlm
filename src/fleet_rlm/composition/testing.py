@@ -40,6 +40,7 @@ from fleet_rlm.files.workspace_models import UNAVAILABLE_WORKSPACE_CAPABILITY
 from fleet_rlm.rlm.dspy_contract import RLMOptions
 from fleet_rlm.rlm.model_bundle import RLMModelBundle
 from fleet_rlm.rlm.recursive_calls import RecursiveRLMOptions
+from fleet_rlm.rlm.session_runtime import SessionRLMRegistry
 from fleet_rlm.rlm.signature import FleetRLMSignature
 from fleet_rlm.skills.catalog import SkillCatalog, build_bundled_skill_catalog
 
@@ -252,6 +253,7 @@ class DeterministicTurnPreparation:
         options: RLMOptions | None = None,
         max_artifact_bytes: int = 10_000_000,
         max_url_bytes: int = 10 * 1024 * 1024,
+        session_runtime_registry: SessionRLMRegistry | None = None,
     ) -> None:
         resolved_options = options or RLMOptions()
         models = RLMModelBundle(TestingLM("testing/root"), TestingLM("testing/sub"))
@@ -268,6 +270,7 @@ class DeterministicTurnPreparation:
                 max_artifact_bytes=max_artifact_bytes,
                 max_url_bytes=max_url_bytes,
             ),
+            session_runtime_registry=session_runtime_registry,
         )
 
     async def prepare(self, run: ClaimedRun, *, deadline: float) -> PreparedRun:
@@ -300,6 +303,7 @@ def install_testing_composition(
         volume_paths=volume_paths_from_settings(settings),
     )
     volume_gateway = OfflineHostVolumeGateway(mirror)
+    session_runtime_registry = SessionRLMRegistry()
     storage = build_local_storage_adapters(
         settings,
         session_factory=database.session_factory,
@@ -319,9 +323,11 @@ def install_testing_composition(
             options=rlm_options(settings),
             max_artifact_bytes=settings.max_artifact_bytes,
             max_url_bytes=settings.max_url_bytes,
+            session_runtime_registry=session_runtime_registry,
         ),
         rlm_factory=TestingRLMFactory(),
         workspace_volume_mirror=mirror,
+        session_runtime_registry=session_runtime_registry,
     )
     # Overlay only the host volume adapters; keep the shared local inventory
     # members so new RuntimeInventory fields cannot silently drop here.

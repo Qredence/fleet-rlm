@@ -95,13 +95,55 @@ async def _local_db_lifespan(
         yield
     finally:
         detached = clear_runtime_inventory(app)
+        shutdown_error: BaseException | None = None
+
         cleanup = getattr(detached, "run_cleanup_supervisor", None)
         if cleanup is not None:
-            await cleanup.shutdown(drain_seconds=30)
+            try:
+                await cleanup.shutdown(drain_seconds=30)
+            except BaseException as exc:
+                shutdown_error = exc
+
+        runner = getattr(detached, "runner", None)
+        close_runner = getattr(runner, "aclose", None)
+        if callable(close_runner):
+            try:
+                await close_runner(drain_seconds=30)
+            except BaseException as exc:
+                if shutdown_error is None:
+                    shutdown_error = exc
+
+        runtime_registry = getattr(detached, "session_runtime_registry", None)
+        if runtime_registry is not None:
+            try:
+                await runtime_registry.shutdown(drain_seconds=30)
+            except BaseException as exc:
+                if shutdown_error is None:
+                    shutdown_error = exc
+
+        preparation = getattr(detached, "run_preparation", None)
+        close_preparation = getattr(preparation, "aclose", None)
+        if callable(close_preparation):
+            try:
+                await close_preparation()
+            except BaseException as exc:
+                if shutdown_error is None:
+                    shutdown_error = exc
+
         if detached is not None:
-            await detached.database.aclose()
+            try:
+                await detached.database.aclose()
+            except BaseException as exc:
+                if shutdown_error is None:
+                    shutdown_error = exc
         if engine is not None and (detached is None or detached.database.engine is not engine):
-            await engine.dispose()
+            try:
+                await engine.dispose()
+            except BaseException as exc:
+                if shutdown_error is None:
+                    shutdown_error = exc
+        if shutdown_error is not None:
+            raise shutdown_error
 
 
 def create_app(

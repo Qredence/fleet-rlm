@@ -76,6 +76,67 @@ async def test_daytona_startup_recovery_bounds_provider_fence() -> None:
 
 
 @pytest.mark.asyncio
+async def test_daytona_build_cancellation_disposes_partial_engine(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Partial live composition cleanup must also run for task cancellation."""
+    import fleet_rlm.composition.daytona as composition
+    import fleet_rlm.daytona.provisioning as provisioning
+    import fleet_rlm.daytona.run_environment as run_environment
+    import fleet_rlm.persistence.database as database
+    import fleet_rlm.rlm.dspy_contract as dspy_contract
+
+    class Engine:
+        def __init__(self) -> None:
+            self.disposed = False
+
+        async def dispose(self) -> None:
+            self.disposed = True
+
+    engine = Engine()
+    monkeypatch.setattr(dspy_contract, "assert_dspy_version", lambda: None)
+    monkeypatch.setattr(composition, "require_daytona_settings", lambda _settings: None)
+    monkeypatch.setattr(run_environment, "resolve_settings", lambda settings: settings)
+    monkeypatch.setattr(provisioning, "sandbox_spec_from_settings", lambda _settings: object())
+    monkeypatch.setattr(database, "create_async_engine_from_url", lambda _url: engine)
+
+    async def cancel_startup(*_args, **_kwargs) -> None:
+        raise asyncio.CancelledError
+
+    monkeypatch.setattr(composition, "ensure_database_compatible", cancel_startup)
+
+    with pytest.raises(asyncio.CancelledError):
+        await composition.build_daytona_composition(
+            SimpleNamespace(database_url="sqlite+aiosqlite:///:memory:"),
+            skill_catalog=SkillCatalog(()),
+        )
+
+    assert engine.disposed is True
+
+
+@pytest.mark.asyncio
+async def test_daytona_install_cancellation_clears_dispatcher(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Cancellation from composition build must not leave bridge loop authority."""
+    import fleet_rlm.composition.daytona as composition
+    from fleet_rlm.daytona.dspy_sync_bridge import SyncBridgeDispatcher
+
+    seen: list[SyncBridgeDispatcher] = []
+
+    async def cancelled_build(_settings, *, skill_catalog, dispatcher=None):
+        del skill_catalog
+        assert dispatcher is not None
+        seen.append(dispatcher)
+        raise asyncio.CancelledError
+
+    monkeypatch.setattr(composition, "build_daytona_composition", cancelled_build)
+    app = SimpleNamespace(state=SimpleNamespace(skill_catalog=SkillCatalog(())))
+
+    with pytest.raises(asyncio.CancelledError):
+        await composition.install_daytona_composition(app, object())
+
+    assert len(seen) == 1
+    assert seen[0].service_loop() is None
+
+
+@pytest.mark.asyncio
 async def test_daytona_startup_recovery_stops_after_shared_deadline() -> None:
     from fleet_rlm.composition.daytona import _reconcile_daytona_settling
     from fleet_rlm.persistence.repositories.turns import ReconciliationSummary
@@ -642,6 +703,15 @@ async def test_live_startup_preserves_original_error_and_attempts_all_cleanup(mo
             orphan_cleanup_cancelled.set()
 
     orphan_cleanup_task = asyncio.create_task(run_orphan_cleanup())
+    memory_outbox_cancelled = asyncio.Event()
+
+    async def run_memory_outbox() -> None:
+        try:
+            await asyncio.Event().wait()
+        finally:
+            memory_outbox_cancelled.set()
+
+    memory_outbox_task = asyncio.create_task(run_memory_outbox())
     await asyncio.sleep(0)
 
     class Resources:
@@ -667,6 +737,7 @@ async def test_live_startup_preserves_original_error_and_attempts_all_cleanup(mo
         artifact_reader=object(),
         workspace_volume_gateway=Gateway(),
         orphan_cleanup_task=orphan_cleanup_task,
+        memory_outbox_task=memory_outbox_task,
     )
 
     async def fake_build(_settings, *, skill_catalog, dispatcher=None):
@@ -687,3 +758,5 @@ async def test_live_startup_preserves_original_error_and_attempts_all_cleanup(mo
 
     assert disposed == ["resources", "gateway"]
     assert orphan_cleanup_task.cancelled()
+    assert memory_outbox_task.cancelled()
+    assert memory_outbox_cancelled.is_set()

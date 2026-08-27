@@ -18,6 +18,7 @@ from fleet_rlm.config_policy import ConfigPolicyService
 from fleet_rlm.files.lifecycle import AttachmentLifecycle
 from fleet_rlm.files.volume_storage import WorkspaceVolumeGateway
 from fleet_rlm.files.workspace_access import WorkspaceFileService
+from fleet_rlm.rlm.session_runtime import SessionRLMRegistry
 from fleet_rlm.sessions.catalog import SessionCatalog
 from fleet_rlm.skills.catalog import SkillCatalog
 
@@ -88,6 +89,11 @@ def get_session_catalog(request: Request) -> SessionCatalog:
     return catalog
 
 
+def get_session_runtime_registry(request: Request) -> SessionRLMRegistry | None:
+    """Return the process-local resident runtime registry when composed."""
+    return get_ready_runtime_inventory(request).session_runtime_registry
+
+
 def get_run_lifecycle(request: Request) -> RunLifecycle:
     lifecycle = get_ready_runtime_inventory(request).run_lifecycle
     if lifecycle is None:
@@ -133,6 +139,7 @@ TurnCoordinatorDep = Annotated[TurnCoordinator, Depends(get_turn_coordinator)]
 ArtifactReaderDep = Annotated[ArtifactReader, Depends(get_artifact_reader)]
 AttachmentLifecycleDep = Annotated[AttachmentLifecycle, Depends(get_attachment_lifecycle)]
 SessionCatalogDep = Annotated[SessionCatalog, Depends(get_session_catalog)]
+SessionRuntimeRegistryDep = Annotated[SessionRLMRegistry | None, Depends(get_session_runtime_registry)]
 RunLifecycleDep = Annotated[RunLifecycle, Depends(get_run_lifecycle)]
 SettingsDep = Annotated[Settings, Depends(get_settings)]
 SkillCatalogDep = Annotated[SkillCatalog, Depends(get_skill_catalog)]
@@ -148,6 +155,7 @@ __all__ = [
     "LocalScopeDep",
     "RunLifecycleDep",
     "SessionCatalogDep",
+    "SessionRuntimeRegistryDep",
     "SettingsDep",
     "SkillCatalogDep",
     "TurnCoordinatorDep",

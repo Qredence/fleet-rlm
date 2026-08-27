@@ -29,6 +29,8 @@ class SandboxBindingStore(Protocol):
 
     async def get(self, session_id: UUID) -> SandboxBinding | None: ...
 
+    async def get_scoped(self, session_id: UUID, *, workspace_id: UUID) -> SandboxBinding | None: ...
+
     async def upsert(self, binding: SandboxBinding) -> SandboxBinding: ...
 
 
@@ -81,8 +83,17 @@ class InMemorySandboxBindingStore:
     async def get(self, session_id: UUID) -> SandboxBinding | None:
         return self._items.get(session_id)
 
+    async def get_scoped(self, session_id: UUID, *, workspace_id: UUID) -> SandboxBinding | None:
+        binding = self._items.get(session_id)
+        if binding is None or binding.workspace_id != workspace_id:
+            return None
+        return binding
+
     async def upsert(self, binding: SandboxBinding) -> SandboxBinding:
         validate_sandbox_binding(binding)
+        existing = self._items.get(binding.session_id)
+        if existing is not None and existing.workspace_id != binding.workspace_id:
+            raise ValueError("sandbox binding workspace scope mismatch")
         self._items[binding.session_id] = binding
         return binding
 

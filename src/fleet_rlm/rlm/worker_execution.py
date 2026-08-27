@@ -4,8 +4,11 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import contextvars
 from collections.abc import Callable, Coroutine, Mapping
-from typing import Any, Generic, TypeVar, cast
+from concurrent.futures import Executor
+from functools import partial
+from typing import Any, Generic, TypeVar
 
 import dspy
 
@@ -130,9 +133,10 @@ def start_rlm_worker(
     kwargs: Mapping[str, Any],
     ownership: WorkerOwnership,
     execute: RLMWorkerExecution[T],
+    executor: Executor | None = None,
 ) -> RLMWorkerHandle[T]:
     """Start one non-cancellable RLM worker on a private event loop."""
-    effect = OwnedEffect.start(_run_in_worker(rlm, context, kwargs, execute))
+    effect = OwnedEffect.start(_run_in_worker(rlm, context, kwargs, execute, executor=executor))
     ownership.attach(effect)
     return RLMWorkerHandle(effect)
 
@@ -142,6 +146,8 @@ async def _run_in_worker(
     context: RLMExecutionContext,
     kwargs: Mapping[str, Any],
     execute: RLMWorkerExecution[T],
+    *,
+    executor: Executor | None = None,
 ) -> T:
     """
     Execute the RLM operation in a worker thread.
@@ -149,7 +155,15 @@ async def _run_in_worker(
     Returns:
         The result produced by the RLM operation.
     """
-    return cast(T, await asyncio.to_thread(_run_private_event_loop, rlm, context, kwargs, execute))
+    call = partial(_run_private_event_loop, rlm, context, kwargs, execute)
+    if executor is None:
+        return await asyncio.to_thread(call)
+    loop = asyncio.get_running_loop()
+    # ``asyncio.to_thread`` propagates ContextVars, while the explicit
+    # per-Session executor does not.  Preserve the active Turn trace and
+    # callback context across the same worker-affinity path.
+    execution_context = contextvars.copy_context()
+    return await loop.run_in_executor(executor, execution_context.run, call)
 
 
 def _run_private_event_loop(

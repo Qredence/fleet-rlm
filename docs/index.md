@@ -23,6 +23,9 @@ FastAPI/SSE contract backed by DSPy, Daytona, and SQLAlchemy/Alembic.
 15. [P35-E certification gate](how-to-guides/p35e-certification-gate.md)
 16. [P36 ownership and deletion contract](how-to-guides/p36-ownership-deletion-inventory.md)
 17. [P41 behavior freeze](reference/behavior-freeze.md)
+18. [P42 Session-state behavior freeze](reference/p42-session-state-behavior-freeze.md)
+19. [P42 module-subtraction ledger](reference/p42-module-subtraction-ledger.md)
+20. [Session-scoped RLM state ADR](decisions/ADR-session-scoped-rlm-state.md)
 
 ## Reference
 

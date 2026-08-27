@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import inspect
 import json
 import math
 import threading
@@ -360,7 +361,13 @@ class _WorkspaceAgentSession:
         payload = self._handshake_sync(sandbox, timeout_s)
         if not self._valid_handshake(payload):
             installed = self._install_source()
-            sandbox.fs.upload_file(installed, WORKSPACE_AGENT_INSTALL_PATH)
+            upload = sandbox.fs.upload_file(installed, WORKSPACE_AGENT_INSTALL_PATH)
+            if inspect.isawaitable(upload):
+                # Test doubles and a few SDK adapters expose the filesystem
+                # through async methods even on the synchronous host-tool path.
+                # Resolve that narrow boundary on the worker thread instead of
+                # silently dropping the install coroutine.
+                asyncio.run(upload)
             self._count_install(installed)
             payload = self._handshake_sync(sandbox, timeout_s)
         self._finish_ensure(payload)

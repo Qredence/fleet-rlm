@@ -54,6 +54,29 @@ from fleet_rlm.persistence.repositories.run_liveness import (
 from fleet_rlm.sessions.models import HistoryMessage
 
 
+async def _authorized_sql_session(db: AsyncSession, run: ClaimedRun, row: RunRow) -> SessionRow:
+    """Load the Run's Session and enforce tenant/workspace ownership.
+
+    A caller can present a stale or forged ``ClaimedRun`` even when the Run
+    is already terminal. Authorization therefore happens before both replay
+    and every state transition, not only before mutable claim validation.
+    """
+    if row.session_id != run.session_id:
+        raise RunNotFoundError("Turn not found")
+    session = await db.scalar(
+        select(SessionRow)
+        .where(
+            SessionRow.id == row.session_id,
+            SessionRow.user_id == run.access.user_id,
+            SessionRow.workspace_id == run.access.workspace_id,
+        )
+        .with_for_update()
+    )
+    if session is None:
+        raise RunNotFoundError("Turn not found")
+    return session
+
+
 def _commit_memory_run(
     state,
     session,
@@ -65,7 +88,7 @@ def _commit_memory_run(
     session.history.extend(
         (
             HistoryMessage("user", run.input.text),
-            HistoryMessage("assistant", committed.text),
+            HistoryMessage("assistant", committed.text, committed),
         )
     )
     session.checkpoint_version += 1
@@ -120,23 +143,13 @@ async def _commit_sql_run(
 ) -> CommittedTurnReceipt:
     """Apply the successful SQL commit inside the facade-owned transaction."""
     row = await db.get(RunRow, run.run_id, with_for_update=True)
-    if row is None or row.session_id != run.session_id:
+    if row is None:
         raise RunNotFoundError("Turn not found")
+    session = await _authorized_sql_session(db, run, row)
     if row.status == "completed":
         from fleet_rlm.persistence.repositories.run_queries import _committed_receipt
 
         return await _committed_receipt(db, row)
-    session = await db.scalar(
-        select(SessionRow)
-        .where(
-            SessionRow.id == run.session_id,
-            SessionRow.user_id == run.access.user_id,
-            SessionRow.workspace_id == run.access.workspace_id,
-        )
-        .with_for_update()
-    )
-    if session is None:
-        raise RunNotFoundError("Turn not found")
     _validate_sql_claim(
         status=row.status,
         claim_owner=row.claim_owner,
@@ -203,8 +216,9 @@ def _memory_intent_row_for_commit(run: ClaimedRun, intent: MemoryPromotionIntent
 async def _transition_sql_claim(db: AsyncSession, run: ClaimedRun, command: ClaimCommand) -> FailedRunReceipt | None:
     """Apply one SQL final-state command inside the facade-owned transaction."""
     row = await db.get(RunRow, run.run_id, with_for_update=True)
-    if row is None or row.session_id != run.session_id:
+    if row is None:
         raise RunNotFoundError("Turn not found")
+    await _authorized_sql_session(db, run, row)
     if row.status == "completed":
         raise RunAlreadyCompletedError("Turn already committed")
     stale_terminal = (
