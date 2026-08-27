@@ -66,7 +66,7 @@ Deterministic evidence is maintained in:
   - callback handler/exporter failure fail-soft behavior;
   - no change to Fleet observation details.
 - `tests/unit/backend/daytona/test_interpreter_tracing.py`;
-- `tests/unit/backend/rlm/test_tool_observer.py`;
+- `tests/unit/backend/rlm/test_events_tool_observer.py`;
 - `tests/contracts/backend/test_native_rlm_tracer.py`.
 
 The focused lane is:
@@ -75,7 +75,7 @@ The focused lane is:
 uv run pytest \
   tests/unit/backend/daytona/test_interpreter_callback_shadow.py \
   tests/unit/backend/daytona/test_interpreter_tracing.py \
-  tests/unit/backend/rlm/test_tool_observer.py \
+  tests/unit/backend/rlm/test_events_tool_observer.py \
   tests/contracts/backend/test_native_rlm_tracer.py -q
 ```
 

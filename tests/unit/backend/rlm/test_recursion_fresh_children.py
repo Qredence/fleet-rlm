@@ -17,51 +17,18 @@ from typing import Any
 import dspy
 import pytest
 
-from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
-from fleet_rlm.daytona.recursive_child_runtime import ChildRuntimeLease
 from fleet_rlm.rlm.program import RLMModelBundle
 from fleet_rlm.rlm.recursion import (
     RecursiveRLMExecutor,
     RecursiveRLMOptions,
 )
-
-
-class _Recorder:
-    def __init__(self) -> None:
-        self.call_indexes: list[int] = []
-        self.leases: list[ChildRuntimeLease] = []
-        self.interpreters: list[DaytonaCodeInterpreter] = []
-        self.backends: list[InProcessInterpreterBackend] = []
-        self.close_calls: dict[int, int] = {}
-        self.close_order: list[int] = []
-
-    def factory(self, call_index: int) -> ChildRuntimeLease:
-        self.call_indexes.append(call_index)
-        backend = InProcessInterpreterBackend()
-        interpreter = DaytonaCodeInterpreter(backend=backend)
-        self.backends.append(backend)
-        self.interpreters.append(interpreter)
-
-        def close() -> None:
-            self.close_calls[call_index] = self.close_calls.get(call_index, 0) + 1
-            self.close_order.append(call_index)
-            interpreter.shutdown()
-
-        lease = ChildRuntimeLease(
-            interpreter,
-            f"fresh-child-{call_index}",
-            "test-volume",
-            f"recursive/test-workspace/test-run/{call_index}",
-            close,
-        )
-        self.leases.append(lease)
-        return lease
+from tests.unit.backend.rlm.fakes import ChildLeaseRecorder
 
 
 def _executor(
     root_lm: dspy.utils.DummyLM,
     sub_lm: dspy.utils.DummyLM,
-    recorder: _Recorder,
+    recorder: ChildLeaseRecorder,
     *,
     options: RecursiveRLMOptions | None = None,
     observer: Callable[[object], None] | None = None,
@@ -88,7 +55,7 @@ def test_val_rec_002_two_sequential_children_are_distinct_fresh_native_runtimes(
     from an empty namespace (it cannot resolve the first child's global)."""
     import fleet_rlm.rlm.recursion as recursive_calls
 
-    recorder = _Recorder()
+    recorder = ChildLeaseRecorder()
     built_rlms: list[Any] = []
     real_build = recursive_calls.build_native_rlm
 
@@ -127,7 +94,7 @@ def test_val_rec_002_two_sequential_children_are_distinct_fresh_native_runtimes(
     assert first == "child-a-global"
     # The first child was closed exactly once BEFORE its answer returned.
     assert recorder.close_calls == {1: 1}
-    assert recorder.interpreters[0]._shutdown
+    assert recorder.interpreters[1]._shutdown
     assert built_rlms and type(built_rlms[0]).__name__ == "RLM"
 
     # Call 2: a second fresh native child starts from an empty namespace.
@@ -143,13 +110,13 @@ def test_val_rec_002_two_sequential_children_are_distinct_fresh_native_runtimes(
     assert recorder.call_indexes == [1, 2]
     assert recorder.leases[0] is not recorder.leases[1]
     assert recorder.leases[0].sandbox_id != recorder.leases[1].sandbox_id
-    assert recorder.interpreters[0] is not recorder.interpreters[1]
+    assert recorder.interpreters[1] is not recorder.interpreters[2]
     assert recorder.backends[0] is not recorder.backends[1]
     # No namespace reuse: the second child's backend namespace never saw the
     # first child's global (its probe answered 'fresh' above).
     assert "sentinel" not in recorder.backends[1].namespace
     # Tool binding closures are distinct interpreter-owned objects.
-    assert recorder.interpreters[0].tools is not recorder.interpreters[1].tools
+    assert recorder.interpreters[1].tools is not recorder.interpreters[2].tools
 
     # Both children closed exactly once, in call order; re-observing a close
     # never runs cleanup again.
@@ -158,7 +125,7 @@ def test_val_rec_002_two_sequential_children_are_distinct_fresh_native_runtimes(
     recorder.leases[0].close()
     recorder.leases[1].close()
     assert recorder.close_calls == {1: 1, 2: 1}
-    assert all(interpreter._shutdown for interpreter in recorder.interpreters)
+    assert all(interpreter._shutdown for interpreter in recorder.interpreters.values())
 
     # Each child's REPL history contained only its own single action.
     summary = executor.summary()
@@ -173,7 +140,7 @@ def test_val_rec_002_sequential_children_report_independent_completion_evidence(
     its own invocation: per-call completion metadata reports its own call
     index and depth, and the second child's evidence carries no state from
     the first."""
-    recorder = _Recorder()
+    recorder = ChildLeaseRecorder()
     events: list[object] = []
     root = _lm(
         [

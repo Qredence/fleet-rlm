@@ -30,7 +30,6 @@ import pytest
 
 from fleet_rlm.chat.session_context import SessionContextManifest
 from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
-from fleet_rlm.daytona.recursive_child_runtime import ChildRuntimeLease
 from fleet_rlm.rlm.events import (
     RunFailed,
     Status,
@@ -49,7 +48,7 @@ from fleet_rlm.rlm.runtime import (
     SessionView,
 )
 from fleet_rlm.sessions.models import TurnAccess
-from tests.unit.backend.rlm.fakes import EmptyCapabilities
+from tests.unit.backend.rlm.fakes import ChildLeaseRecorder, EmptyCapabilities
 
 # Sentinel content injected into every private surface. Each token is unique so
 # a leak can be attributed to the exact surface it was placed in. The
@@ -69,28 +68,6 @@ _SENTINELS = (
 )
 
 
-class _Recorder:
-    """Track child acquisitions so the lane can assert on lease settlement."""
-
-    def __init__(self) -> None:
-        self.call_indexes: list[int] = []
-        self.close_calls: dict[int, int] = {}
-
-    def factory(self, call_index: int) -> ChildRuntimeLease:
-        self.call_indexes.append(call_index)
-        interpreter = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())
-
-        def close() -> None:
-            self.close_calls[call_index] = self.close_calls.get(call_index, 0) + 1
-            interpreter.shutdown()
-
-        return ChildRuntimeLease(
-            interpreter,
-            f"content-safety-child-{call_index}",
-            "content-safety-volume",
-            f"recursive/test-workspace/test-run/{call_index}",
-            close,
-        )
 
 
 class _RootLM(dspy.utils.DummyLM):
@@ -114,7 +91,7 @@ async def _run_turn(
     root_actions: list[dict[str, Any]],
     child_answers: list[dict[str, Any]],
     sub_answers: list[dict[str, Any]],
-    recorder: _Recorder,
+    recorder: ChildLeaseRecorder,
     recursive_options: RecursiveRLMOptions,
     root_options: RLMOptions | None = None,
 ) -> tuple[list[Any], Any]:
@@ -210,7 +187,7 @@ async def test_val_rec_033_success_child_events_expose_only_approved_metadata() 
     """VAL-REC-033 (success): a completed depth-1 child emits bounded
     approved metadata only; sentinels planted in the prompt, answer,
     credential, provider id, and mount path never surface."""
-    recorder = _Recorder()
+    recorder = ChildLeaseRecorder(sandbox_prefix="content-safety-child", volume="content-safety-volume")
     child_prompt = (
         f"{SENTINEL_PROMPT} credential={SENTINEL_CREDENTIAL} "
         f"provider={SENTINEL_PROVIDER_ID} mount={SENTINEL_MOUNT_PATH}"
@@ -289,7 +266,7 @@ async def test_val_rec_033_failed_child_events_stay_bounded_and_sentinel_free() 
     """VAL-REC-033 (failure): an oversized child answer fails closed with a
     bounded failure category and sanitized exception string; no sentinel
     leaks and child_started -> child_failed ordering is preserved."""
-    recorder = _Recorder()
+    recorder = ChildLeaseRecorder(sandbox_prefix="content-safety-child", volume="content-safety-volume")
     oversized_answer = f"{SENTINEL_ANSWER}-" + ("x" * 600)
     child_prompt = f"{SENTINEL_PROMPT} provider={SENTINEL_PROVIDER_ID} credential={SENTINEL_CREDENTIAL}"
     root_actions = [

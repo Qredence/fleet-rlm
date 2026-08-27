@@ -21,8 +21,6 @@ from typing import Any
 import dspy
 import pytest
 
-from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
-from fleet_rlm.daytona.recursive_child_runtime import ChildRuntimeLease
 from fleet_rlm.rlm.events import Status
 from fleet_rlm.rlm.program import RLMModelBundle
 from fleet_rlm.rlm.recursion import (
@@ -30,37 +28,11 @@ from fleet_rlm.rlm.recursion import (
     RecursiveRLMExecutor,
     RecursiveRLMOptions,
 )
-
-
-class _Recorder:
-    def __init__(self) -> None:
-        self.call_indexes: list[int] = []
-        self.leases: list[ChildRuntimeLease] = []
-        self.interpreters: dict[int, DaytonaCodeInterpreter] = {}
-        self.close_calls: dict[int, int] = {}
-
-    def factory(self, call_index: int) -> ChildRuntimeLease:
-        self.call_indexes.append(call_index)
-        interpreter = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())
-        self.interpreters[call_index] = interpreter
-
-        def close() -> None:
-            self.close_calls[call_index] = self.close_calls.get(call_index, 0) + 1
-            interpreter.shutdown()
-
-        lease = ChildRuntimeLease(
-            interpreter,
-            f"fence-child-{call_index}",
-            "test-volume",
-            f"recursive/test-workspace/test-run/{call_index}",
-            close,
-        )
-        self.leases.append(lease)
-        return lease
+from tests.unit.backend.rlm.fakes import ChildLeaseRecorder
 
 
 def _executor(
-    recorder: _Recorder,
+    recorder: ChildLeaseRecorder,
     *,
     deadline: float,
     options: RecursiveRLMOptions | None = None,
@@ -87,7 +59,7 @@ def test_child_acall_wait_is_fenced_by_the_absolute_deadline(
     child lease still settles exactly once, and ownership observes clean."""
     import fleet_rlm.rlm.recursion as recursive_calls
 
-    recorder = _Recorder()
+    recorder = ChildLeaseRecorder()
     entered = threading.Event()
 
     class HangingChild:
@@ -135,7 +107,7 @@ async def test_cancellation_swallowing_child_is_retained_not_blocking(
     import fleet_rlm.rlm.recursion as recursive_calls
 
     monkeypatch.setattr(recursive_calls, "_CHILD_FENCE_SETTLE_GRACE_S", 0.05)
-    recorder = _Recorder()
+    recorder = ChildLeaseRecorder()
     entered = threading.Event()
     release = threading.Event()
 
@@ -191,7 +163,7 @@ async def test_fenced_child_wait_preserves_batch_deadline_semantics(
     hanging child's lease still settles and ownership joins clean."""
     import fleet_rlm.rlm.recursion as recursive_calls
 
-    recorder = _Recorder()
+    recorder = ChildLeaseRecorder()
 
     class HangingChild:
         async def acall(self, interpreter: Any = None, *, prompt: str, **_kwargs: object) -> dspy.Prediction:
@@ -225,7 +197,7 @@ def test_completed_child_is_not_disturbed_by_the_fence(
     the same fenced seam without timeout classification."""
     import fleet_rlm.rlm.recursion as recursive_calls
 
-    recorder = _Recorder()
+    recorder = ChildLeaseRecorder()
 
     class PromptChild:
         async def acall(self, interpreter: Any = None, *, prompt: str, **_kwargs: object) -> dspy.Prediction:
@@ -250,7 +222,7 @@ def test_child_lm_deadline_error_keeps_its_own_classification(
     propagates unchanged while the lease still settles."""
     import fleet_rlm.rlm.recursion as recursive_calls
 
-    recorder = _Recorder()
+    recorder = ChildLeaseRecorder()
 
     class LmDeadlineChild:
         async def acall(self, interpreter: Any = None, *, prompt: str, **_kwargs: object) -> Any:

@@ -20,7 +20,6 @@ import pytest
 
 from fleet_rlm.chat.session_context import SessionContextManifest
 from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
-from fleet_rlm.daytona.recursive_child_runtime import ChildRuntimeLease
 from fleet_rlm.rlm.program import RLMModelBundle, RLMOptions
 from fleet_rlm.rlm.recursion import (
     RecursiveRLMExecutor,
@@ -35,7 +34,7 @@ from fleet_rlm.rlm.runtime import (
     SessionView,
 )
 from fleet_rlm.sessions.models import TurnAccess
-from tests.unit.backend.rlm.fakes import EmptyCapabilities
+from tests.unit.backend.rlm.fakes import ChildLeaseRecorder, EmptyCapabilities
 
 
 class RecordingLM(dspy.utils.DummyLM):
@@ -56,26 +55,6 @@ class RecordingLM(dspy.utils.DummyLM):
         return super().forward(prompt=prompt, messages=messages, **kwargs)
 
 
-class _Recorder:
-    def __init__(self) -> None:
-        self.call_indexes: list[int] = []
-        self.close_calls: dict[int, int] = {}
-
-    def factory(self, call_index: int) -> ChildRuntimeLease:
-        self.call_indexes.append(call_index)
-        interpreter = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())
-
-        def close() -> None:
-            self.close_calls[call_index] = self.close_calls.get(call_index, 0) + 1
-            interpreter.shutdown()
-
-        return ChildRuntimeLease(
-            interpreter,
-            f"role-child-{call_index}",
-            "test-volume",
-            f"recursive/test-workspace/test-run/{call_index}",
-            close,
-        )
 
 
 def _lm(answers: Any) -> dspy.utils.DummyLM:
@@ -106,7 +85,7 @@ async def test_val_rec_025_roles_depths_histories_and_trajectory_are_preserved_t
     # Dict-mode matching keys on the fallback prompt content so only the
     # depth-2 request can be served by the Sub LM.
     sub = RecordingLM({"fallback slice": {"answer": "sub-fallback-answer"}}, adapter=adapter)
-    recorder = _Recorder()
+    recorder = ChildLeaseRecorder()
     metrics_context = DelegationPolicy(
         recursive_options=RecursiveRLMOptions(enabled=True, max_calls=2),
         child_runtime_factory=recorder.factory,
@@ -183,7 +162,7 @@ def test_val_rec_025_child_lm_copies_preserve_callback_ancestry_and_usage_shape(
     """VAL-REC-025: the child receives copied policy-owned LM runtimes whose
     identity differs from the Root's but whose role wiring is preserved; the
     child's completion carries the native trajectory."""
-    recorder = _Recorder()
+    recorder = ChildLeaseRecorder()
     root = _lm(
         [
             {"reasoning": "child action", "code": "x = 1"},
