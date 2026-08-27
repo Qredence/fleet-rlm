@@ -1,5 +1,8 @@
 PYTHON_SOURCES = src tests scripts migrations
-PYTEST_FAST_MARKERS = not live_llm and not live_daytona and not benchmark and not db
+# Release/install matrix tests are intentionally opt-in: they create multiple
+# virtual environments and are covered by the dedicated package gate.
+PYTEST_FAST_MARKERS = not live_llm and not live_daytona and not benchmark and not db and not packaging
+PYTEST_PACKAGING_MARKERS = packaging and not live_llm and not live_daytona and not benchmark and not db
 PYTEST := uv run --no-sync pytest
 PYTEST_ISOLATED := env \
 	FLEET_DAYTONA_API_KEY= \
@@ -8,13 +11,15 @@ PYTEST_ISOLATED := env \
 	FLEET_DATABASE_URL= \
 	$(PYTEST)
 PYTEST_XDIST_MAX_WORKERS ?= 2
-PYTEST_PARALLEL := -n auto --maxprocesses=$(PYTEST_XDIST_MAX_WORKERS)
+# Keep module-scoped fixtures together; this avoids rebuilding expensive test
+# state when xdist splits individual tests from the same module.
+PYTEST_PARALLEL := -n auto --maxprocesses=$(PYTEST_XDIST_MAX_WORKERS) --dist=loadfile
 
 .PHONY: \
 	help \
 	install install-dev install-all \
 	dev format format-check lint typecheck \
-	test test-fast test-unit test-contract test-daytona-cov \
+	test test-fast test-unit test-contract test-packaging test-daytona-cov \
 	check quality-gate check-release check-docs check-security check-deps check-codebase-tree api-check api-sync tui-check \
 	build build-release release release-check \
 	certification-gate certification-verify \
@@ -38,8 +43,9 @@ help:
 	@echo "  make typecheck        - Run ty check"
 	@echo ""
 	@echo "Testing:"
-	@echo "  make test             - Run default non-live/non-benchmark tests"
-	@echo "  make test-unit        - Run unit tests (non-live/non-benchmark)"
+	@echo "  make test             - Run default fast non-live tests (packaging is separate)"
+	@echo "  make test-unit        - Run unit tests (non-live/non-benchmark; packaging separate)"
+	@echo "  make test-packaging   - Run serial artifact/install/release tests"
 	@echo "  make test-contract    - Run backend contracts and CLI smoke tests"
 	@echo "  make test-daytona-cov - Run canonical non-live tests with Daytona branch coverage"
 	@echo "  make benchmark-oolong - Run pinned Prime Oolong smoke (runtime.live_enabled=true; configure credentials)"
@@ -103,6 +109,9 @@ test:
 	$(PYTEST_ISOLATED) -q $(PYTEST_PARALLEL) tests/unit/backend tests/unit/scripts tests/contracts/backend tests/freeze tests/unit/test_litellm_invariant.py tests/e2e -m "$(PYTEST_FAST_MARKERS)"
 
 test-fast: test
+
+test-packaging:
+	$(PYTEST_ISOLATED) -q tests/unit/backend/packaging -m "$(PYTEST_PACKAGING_MARKERS)" -n 0
 
 test-unit:
 	$(PYTEST_ISOLATED) -q $(PYTEST_PARALLEL) tests/unit/backend tests/unit/scripts tests/freeze tests/unit/test_litellm_invariant.py -m "$(PYTEST_FAST_MARKERS)"

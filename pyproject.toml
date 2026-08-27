@@ -183,6 +183,7 @@ markers = [
     "db: requires live database",
     "e2e: full stack smoke tests",
     "benchmark: performance/throughput benchmark tests",
+    "packaging: release/install matrix tests that create isolated artifacts or environments",
     "live_llm: tests that require a live configured LM / LiteLLM backend",
     "live_daytona: tests that require a live Daytona backend and explicit opt-in",
 ]

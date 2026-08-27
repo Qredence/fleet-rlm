@@ -8,11 +8,12 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 _LEDGER = _REPO_ROOT / "docs/reference/p42-module-subtraction-ledger.md"
 
 
-def test_p42_ledger_is_a_non_restructuring_plan_with_complete_phase_register() -> None:
-    """The P42 map names all planned P44--P51 destinations before code moves."""
+def test_p42_ledger_tracks_implementation_status_with_complete_phase_register() -> None:
+    """The P42 ledger records completed and in-progress phase destinations."""
     ledger = _LEDGER.read_text(encoding="utf-8")
 
-    assert "planning ledger; no production restructuring is authorized" in ledger
+    assert "implementation ledger;" in ledger
+    assert "P48 is in progress" in ledger
     assert "## Explicit P42 non-actions" in ledger
     for phase in range(44, 52):
         assert f"P{phase}" in ledger
