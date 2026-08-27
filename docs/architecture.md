@@ -152,9 +152,10 @@ exception text.
 
 ## Runtime profiles
 
-- Daytona owns Sandbox/Interpreter Leases, Workspace Volume Scope, durable
-  Attachment staging, Session Workspace files, Workspace Memory, private result
-  snapshots, and Artifact Candidate promotion.
+- Daytona owns Sandbox/Interpreter Leases and Workspace Volume Scope. The
+  provider-neutral Attachment, Session Workspace, Workspace Memory, Artifact,
+  and URL domains use Daytona-backed storage and lifecycle adapters in
+  composition.
 - The Volume layout provisions only owned namespaces: shared attachments and
   artifacts, `memory/MEMORIES.md` (the legacy root `MEMORIES.md` migrates on
   first open), browsable `projects/<slug>/`, Session Workspace, Run attachments
@@ -206,8 +207,9 @@ the only publication boundary. Workspace files survive failed Runs and Sandbox
 replacement independently of the commit-gated result snapshot and Artifact
 lifecycle.
 
-Daytona Workspace Memory is separate workspace-wide immediate state. Its fixed
-`MEMORIES.md` lives at `memory/` under the already mounted
+Workspace Memory is separate workspace-wide immediate state; Daytona
+composition supplies its production storage adapter. Its fixed `MEMORIES.md`
+lives at `memory/` under the already mounted
 `workspaces/<workspace_id>` Volume subpath (a pre-existing root `MEMORIES.md`
 is migrated there on first open, never losing content); Session and Run state
 retain their nested paths below that root. The RLM accesses memory through

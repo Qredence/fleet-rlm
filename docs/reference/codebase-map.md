@@ -12,15 +12,16 @@ compatibility runtime and parallel foundation package no longer exist.
 | `config.py`, `config_policy.py` | TOML-profile runtime Settings and loopback-only non-secret policy editor | policy document, Settings |
 | `json_types.py` | closed `JsonScalar`/`JsonValue` contract | none |
 | `snapshot_contract.py` | immutable Daytona Snapshot name policy | none |
+| `paths.py` | provider-neutral Volume layout, mount validation, and path identity primitives | standard library |
 | `result_snapshot.py` | private commit-gated typed-result encoding | RLM prediction/usage |
 | `api/` | HTTP translation, local scope, dependency aliases, OpenAPI/SSE projection, UIMessage reload | domain interfaces and composed modules |
-| `chat/` | `TurnRuntime` claim-to-cleanup orchestration, Turn preparation, lifecycle finalization, owned post-commit Memory promotion, shared heartbeat/Claim policy; `turn_coordinator.py` is a compatibility shim | RLM, Sessions, Skills, files |
+| `chat/` | `TurnRuntime` claim-to-cleanup orchestration, Turn preparation, lifecycle finalization, owned post-commit Memory promotion, shared heartbeat/Claim policy; `turn_coordinator.py` is a compatibility shim | RLM, Sessions, Skills, Workspace, Attachments, Artifacts |
 | `rlm/` | DSPy Signature, Root/Sub model roles, Session-scoped RLM construction/reuse with fresh per-Turn history, delegation metrics, routing evaluation, fixed-depth child executor, options, events, and native execution orchestration | DSPy and domain values |
 | `optimization/` | trusted-host GEPA/evidence lane | Daytona evaluator, evidence types |
-| `daytona/` | exclusive SDK boundary: async platform/provisioning, provider-only Session ownership, DSPy-only sync interpreter seam (injected `SyncBridgeDispatcher`), confirmed Sandbox Lease ownership (`sandbox_lease.py`) with typed cleanup receipts and confirmed deletion lifecycle (`lifecycle.py`), one contracted recursive-child owner covering acquisition, lease close state, strict cleanup, and late ownership (`recursive_child_runtime.py`), versioned installed Workspace Agent protocol with one packaged `handle(request)` artifact for installed and fallback launchers (`workspace_agent/`), canonical broker source plus transport, diagnostics, Session Workspace gateways, and the mounted Workspace Memory adapter | Daytona SDK and domain values |
+| `daytona/` | exclusive SDK boundary: async platform/provisioning, provider-only Session ownership, DSPy-only sync interpreter seam (injected `SyncBridgeDispatcher`), confirmed Sandbox Lease ownership (`sandbox_lease.py`) with typed cleanup receipts and confirmed deletion lifecycle (`lifecycle.py`), one contracted recursive-child owner covering acquisition, lease close state, strict cleanup, and late ownership (`recursive_child_runtime.py`), versioned installed Workspace Agent protocol with one packaged `handle(request)` artifact for installed and fallback launchers (`workspace_agent/`), canonical broker source plus transport, and provider error mapping | Daytona SDK and provider transport ports |
 | `runtime/` | provider-neutral `OwnedEffect` settlement primitive plus Sandbox binding records and store ports | domain values |
 | `sessions/` | Session catalog, Turn input/history, canonical AssistantPart vocabulary, versioned Committed Turn | domain values |
-| `files/`, `artifacts/` | Attachment staging, paged/full-lifecycle Session Workspace and Project tools, workspace-wide Memory values/tools, direct Workspace Artifact Candidate staging, Artifact promotion/read | storage interfaces and safe paths |
+| `workspace/`, `attachments/`, `artifacts/` | Provider-neutral Workspace, Projects, Memory, URL, Attachment, and Artifact domain policy over bounded storage interfaces | storage interfaces, safe paths, and persistence adapters |
 | `skills/` | bundled catalog, authorization, progressive loading, capability seam, Tool construction | domain values and package resources |
 | `persistence/` | SQLAlchemy models and internal Run codec, claim decisions, liveness, final-state, query helpers, Memory promotion outbox (P23), and repository adapters | Session/file/Artifact interfaces |
 | `observability/` | sanitized failure diagnostics; opt-in Databricks MLflow DSPy tracing | domain errors, Settings |
@@ -49,7 +50,7 @@ compatibility runtime and parallel foundation package no longer exist.
   Run lifecycle, RLM worker, and equivalent provider waits use it; recursive
   batch futures and Daytona lease/quarantine state retain their specialized
   ownership and cleanup policies.
-- `daytona/memory_diagnostics.py` owns the bounded P31 degradation taxonomy:
+- `workspace/memory.py` owns the bounded Memory degradation taxonomy:
   normalization, provider unavailability, corrupt records, invariant
   violations, search failure, legacy migration, and unexpected internal
   failures. The optional read-side Memory path stays fail-soft; mutations and

@@ -224,9 +224,11 @@ Each Turn's `session_context` also carries a bounded <= 4 KiB
 learnings are visible without a Tool call. Records are durable independently
 of Turn Commit and survive failed or cancelled Runs and Sandbox replacement.
 Optional read-side degradation is classified once by
-`daytona/memory_diagnostics.py` into a bounded sanitized category; mutation and
-list operations remain strict. Do not add a second Memory warning taxonomy or
-leak raw provider, path, query, or record content through diagnostics.
+`workspace/memory.py` into a bounded sanitized category; mutation and list
+operations remain strict. Daytona supplies the production storage adapter, but
+Memory policy and diagnostics remain provider-neutral. Do not add a second
+Memory warning taxonomy or leak raw provider, path, query, or record content
+through diagnostics.
 _Avoid_: Session History, unbounded learned state
 
 **Workspace Volume Tree**:
@@ -337,20 +339,23 @@ _Avoid_: Runtime Event, raw event-log persistence
 
 ### Workspace namespace disambiguation
 
-Five modules carry "workspace" names with different roles; do not conflate
-them. The volume-side gateway also lives in `daytona/workspace_gateway.py`
-(bounded Workspace Volume Tree reads and orphan byte cleanup state); no
-separate `workspace_volume*` module exists.
+Workspace domain policy is provider-neutral; Daytona composition supplies the
+production mounted-agent and ephemeral-Sandbox adapters. Keep these roles
+distinct: Session Workspace files, the Workspace files API, Projects, Memory,
+URL sources, Attachments, and provider transport are not interchangeable.
 
 | Module | Role | Primary callers |
 | --- | --- | --- |
-| `daytona/workspace_fs.py` | Session Workspace FS implementation: `AsyncDaytonaSessionWorkspaceFS` async source of truth, `DaytonaSessionWorkspaceFS` synchronous worker-thread bridge over it, plus the Volume byte adapters (`AsyncDaytonaVolumeFS`, `DaytonaSandboxVolumeFs`) | Turn capability preparation in `daytona/run_environment.py`; `daytona/workspace_gateway.py` |
-| `daytona/workspace_gateway.py` | REST-facing gateway that opens purpose-labelled ephemeral mounted Sandboxes for independent Workspace file/volume access | `files/workspace_access.py` via `composition/daytona.py` |
-| `files/workspace_access.py` | Public service boundary for the `/api/files` Workspace namespace | `api/routes/workspace_files.py`, composition |
-| `files/workspace_tools.py` | RLM Tool host binding Session Workspace operations as Host-Mediated Tools | `daytona/run_environment.py` |
-| `files/project_tools.py` | RLM Tool host for the durable projects-root namespace | `daytona/run_environment.py` |
-| `daytona/workspace_memory.py` | Workspace Memory store implementation over one mounted agent round trip | `daytona/run_environment.py` |
-| `daytona/workspace_agent/` | Host run/decode adapter and versioned artifact/handshake transport for the packaged stdlib-only `workspace_agent/runtime.py` `handle(request)` used by installed and fallback launchers | `daytona/workspace_fs.py`, `daytona/workspace_memory.py` |
+| `paths.py` | Provider-neutral Volume layout, mount validation, and path identity primitives shared by provisioning and domains | standard library |
+| `workspace/storage.py` | Bounded sync/async storage ports, root-bound agent sessions, opaque Memory storage, Volume adapters, and cleanup ports | Workspace and Memory domains; Daytona composition; artifacts |
+| `workspace/workspace.py` | Session Workspace domain, `WorkspaceToolHost`, and the `/api/files` `WorkspaceFileService` | RLM capability preparation, API route, composition |
+| `workspace/projects.py` | Explicit `projects/<slug>/` path policy and `ProjectToolHost` | RLM capability preparation and composition |
+| `workspace/memory.py` | Memory parsing, IDs, search, mutation policy, diagnostics, candidate collection, promotion, and tool hosts | Turn preparation/lifecycle, composition, outbox |
+| `workspace/url.py` | URL safety, bounded public fetching, source stores, and `UrlToolHost` | RLM capability preparation and composition |
+| `attachments/` | Attachment models, authorization/lifecycle policy, blob/catalog adapters, and `AttachmentToolHost` | API, Turn preparation, composition |
+| `artifacts/tools.py` | Commit-gated `ArtifactToolHost` candidate staging and Workspace publication bridge | Turn preparation and Daytona composition |
+| `composition/daytona_workspace.py` | Daytona mounted Workspace Agent sessions, ephemeral Workspace gateways, and orphan-byte cleanup | Daytona composition and API dependencies |
+| `daytona/workspace_agent/` | Host run/decode adapter and versioned handshake transport for the packaged stdlib-only `workspace_agent/runtime.py` `handle(request)` | `workspace/storage.py`, Daytona runtime |
 
 ### `rlm/` package one-liner
 
@@ -378,14 +383,17 @@ ordered, bounded sibling execution.
   shutdown with confirmed provider deletion and absence, admission
   restoration, and late/quarantined cleanup ownership that survives
   owner-loop and dispatch loss.
-- `run_environment.py` — Run environment inventory and exact Turn capability preparation.
 - `session_manager.py` — interpreter lease acquire/release and Sandbox binding lifecycle.
 - `workspace_agent/` — Workspace Agent host protocol/client package; the
   packaged `workspace_agent/runtime.py` owns the explicit stdlib-only
   `handle(request)` used by installed and fallback launchers.
-- `workspace_fs.py` — Session Workspace FS implementation (see disambiguation above).
-- `workspace_gateway.py` — ephemeral mounted-Sandbox gateway (see disambiguation above).
-- `workspace_memory.py` — Workspace Memory store implementation (see disambiguation above).
+
+The established `daytona/run_environment.py` entry point is a side-effect-free
+compatibility export; the canonical run-environment inventory lives in
+`composition/daytona_environment.py`. Mounted Workspace sessions and ephemeral
+Workspace gateways live in `composition/daytona_workspace.py`. Daytona remains
+the exclusive SDK and transport boundary, while domain policy stays under
+`workspace/` and `attachments/`.
 
 The post-P25 maintainability baseline keeps one canonical transformation at
 each seam: `RunLifecycle.finish()` commits, `TurnRuntime` settles the

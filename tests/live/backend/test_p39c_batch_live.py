@@ -617,7 +617,7 @@ def test_live_batch_child_cleanup_failure_is_all_or_nothing(
 
             content = client.portal.call(_memory_content)
             if content.strip():
-                from fleet_rlm.files.memory_models import parse_workspace_memory_lines
+                from fleet_rlm.workspace.models import parse_workspace_memory_lines
 
                 lines = parse_workspace_memory_lines(content, complete_memory_graph=False)
                 promoted = [

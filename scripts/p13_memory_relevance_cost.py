@@ -23,8 +23,9 @@ from fleet_rlm.daytona.provisioning import (
     volume_config_from_settings,
     volume_mount_spec,
 )
-from fleet_rlm.daytona.workspace_memory import DaytonaWorkspaceMemoryStore, read_workspace_memory_injection_digest
-from fleet_rlm.files.memory_models import workspace_memory_record_id
+from fleet_rlm.workspace.memory import WorkspaceMemory, read_workspace_memory_injection_digest
+from fleet_rlm.workspace.models import workspace_memory_record_id
+from fleet_rlm.workspace.storage import AgentStorageSession, WorkspaceMemoryStorage
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 P7_RUN_PREPARATION_P95_SECONDS = 17.453666
@@ -71,11 +72,16 @@ async def _run(output: Path, samples: int) -> int:
         )
         sandbox_created = 1
         bridged_sandbox = sync_sandbox(sandbox, asyncio.get_running_loop())
-        store = DaytonaWorkspaceMemoryStore(
+        volume_paths = volume_config.paths()
+        session = AgentStorageSession(
             bridged_sandbox,
-            volume_paths=volume_config.paths(),
-            max_upload_bytes=settings.max_upload_bytes,
+            volume_root=str(volume_paths.root),
+            root=str(volume_paths.root),
+            max_file_bytes=settings.max_upload_bytes,
+            allow_volume_root=True,
         )
+        storage = WorkspaceMemoryStorage(session)
+        store = WorkspaceMemory.from_storage(storage, max_file_bytes=settings.max_upload_bytes)
         old_timestamp = "2026-07-19T09:00:00Z"
         old_category = "Preference"
         old_learning = "Prefers polars for dataframe joins and concise reports."

@@ -44,8 +44,8 @@ def _make_claim(*, history_messages: tuple[HistoryMessage, ...] = ()):
 async def test_in_process_turn_preparation_forwards_dspy_history_identity_to_rlm() -> None:
     """The in-process Turn preparation path passes the same ``dspy.History`` instance."""
 
+    from fleet_rlm.attachments.models import PreparedAttachments
     from fleet_rlm.chat.run_preparation import DefaultRunPreparer, RunEnvironment
-    from fleet_rlm.files.models import PreparedAttachments
     from fleet_rlm.rlm.program import RLMModelBundle, RLMOptions
     from fleet_rlm.rlm.runtime import RLMExecutionSpec, RLMRunner
     from fleet_rlm.sessions.models import HistoryMessage
@@ -168,8 +168,8 @@ async def test_in_process_turn_preparation_forwards_dspy_history_identity_to_rlm
 async def test_in_process_turn_preparation_passes_empty_history_for_fresh_session() -> None:
     """A claim with no committed Turns still carries a valid empty ``dspy.History``."""
 
+    from fleet_rlm.attachments.models import PreparedAttachments
     from fleet_rlm.chat.run_preparation import DefaultRunPreparer, RunEnvironment
-    from fleet_rlm.files.models import PreparedAttachments
     from fleet_rlm.rlm.program import RLMModelBundle, RLMOptions
     from fleet_rlm.rlm.runtime import RLMExecutionSpec
 
@@ -252,9 +252,9 @@ async def test_in_process_turn_preparation_passes_empty_history_for_fresh_sessio
 async def test_daytona_preparation_forwards_sandbox_history_transport_to_rlm() -> None:
     """A provider-selected Daytona transport reaches the native RLM unchanged."""
 
+    from fleet_rlm.attachments.models import PreparedAttachments
     from fleet_rlm.chat.run_preparation import DefaultRunPreparer, RunEnvironment
-    from fleet_rlm.daytona.run_environment import build_committed_session_history_for_claim
-    from fleet_rlm.files.models import PreparedAttachments
+    from fleet_rlm.composition.daytona_environment import build_committed_session_history_for_claim
     from fleet_rlm.rlm.program import RLMModelBundle, RLMOptions
     from fleet_rlm.rlm.runtime import RLMExecutionSpec, RLMRunner
 

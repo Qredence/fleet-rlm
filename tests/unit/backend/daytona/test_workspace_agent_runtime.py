@@ -36,6 +36,12 @@ def _request(volume: Path, root: Path, operation: str, relative: str, **override
         "overwrite": False,
         "content_b64": "",
         "total_file_bytes": 4096,
+        "allow_volume_root": True,
+        "checksum": False,
+        "expected_sha256": "",
+        "offset": 0,
+        "max_chars": 10_000,
+        "after": "",
     }
     request.update(overrides)
     return request
@@ -88,18 +94,10 @@ def test_response_bound_returns_bounded_error_without_recursing(monkeypatch, tmp
     assert response == {"ok": False, "error": "too_large"}
 
 
-def test_direct_handler_dispatches_every_workspace_operation(tmp_path: Path) -> None:
+def test_direct_handler_dispatches_every_generic_storage_operation(tmp_path: Path) -> None:
     volume = tmp_path / "volume"
     root = volume / "workspace"
     root.mkdir(parents=True)
-    legacy = b"- [2026-08-17T00:00:00Z] **General**: legacy\n"
-    (volume / "MEMORIES.md").write_bytes(legacy)
-
-    migrated_probe = runtime.handle(_request(volume, volume, "stat", "MEMORIES.md"))
-    assert migrated_probe["ok"] is True
-    migrated = runtime.handle(_request(volume, volume, "memory_migrate", "MEMORIES.md"))
-    assert migrated["ok"] is True
-
     written = runtime.handle(
         _request(
             volume,
@@ -131,31 +129,6 @@ def test_direct_handler_dispatches_every_workspace_operation(tmp_path: Path) -> 
     patch_body = base64.b64encode(json.dumps({"old": "!", "new": "?"}).encode("utf-8")).decode("ascii")
     patched = runtime.handle(_request(volume, root, "patch", "note.txt", content_b64=patch_body))
     assert patched["ok"] is True
-
-    memory_root = volume / "memory_ops"
-    record = b"- [2026-08-19T00:00:00Z] **General**: direct\n"
-    memory_append = runtime.handle(
-        _request(
-            volume,
-            memory_root,
-            "memory_append",
-            "MEMORIES.md",
-            content_b64=base64.b64encode(record).decode("ascii"),
-        )
-    )
-    assert memory_append["ok"] is True
-    memory_id = str(memory_append["memory_id"])
-    memory_text = (memory_root / "MEMORIES.md").read_text(encoding="utf-8")
-    assert "direct" in memory_text, (memory_id, memory_text)
-    edit_body = base64.b64encode(
-        b'{"learning": "direct edit", "category": null, "updated_at": "2026-08-19T00:00:01Z"}'
-    ).decode("ascii")
-    edited = runtime.handle(
-        _request(volume, memory_root, "memory_edit", "MEMORIES.md", memory_id=memory_id, content_b64=edit_body)
-    )
-    assert edited["ok"] is True, edited
-    deleted = runtime.handle(_request(volume, memory_root, "memory_delete", "MEMORIES.md", memory_id=memory_id))
-    assert deleted["ok"] is True
 
     unlink_path = root / "unlink.txt"
     unlink_path.write_text("unlink", encoding="utf-8")

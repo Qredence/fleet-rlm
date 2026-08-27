@@ -290,99 +290,81 @@ def test_process_only_sandbox_keeps_legacy_wire(tmp_path: Path) -> None:
 
 
 def _memory_args(volume: Path, root: Path, operation: str, **overrides: object) -> dict[str, object]:
-    """
-    Build memory-operation arguments with defaults and optional overrides.
-
-    Parameters:
-        volume (Path): Root path of the memory volume.
-        root (Path): Root path used by the operation.
-        operation (str): Memory operation to perform.
-        overrides (object): Argument values that replace the defaults.
-
-    Returns:
-        dict[str, object]: Arguments for the memory operation.
-    """
+    """Build generic storage arguments for the Memory adapter integration test."""
     args: dict[str, object] = {
         "volume_root": str(volume),
         "root": str(root),
         "operation": operation,
-        "relative": "MEMORIES.md",
+        "relative": "memory/MEMORIES.md",
         "allow_missing": True,
+        "allow_volume_root": True,
         "max_bytes": 262_144,
         "total_file_bytes": 262_144,
         "limit": 0,
         "overwrite": False,
         "content_b64": "",
+        "after": "",
+        "offset": 0,
+        "max_chars": 0,
+        "checksum": False,
+        "expected_sha256": "",
     }
     args.update(overrides)
     return args
 
 
-def test_installed_memory_roundtrip_releases_locks_in_process(tmp_path: Path) -> None:
-    """Same-process sequence pins the scope-agnostic lock cleanup: every
-    Memory mutator that falls through with a held `.lock` must release it so
-    the next op can flock again (real Daytona also gets this at process exit).
-    """
+def test_installed_generic_memory_storage_roundtrip_releases_locks_in_process(tmp_path: Path) -> None:
+    """The installed agent exposes generic append/write/read/delete only."""
     import base64
 
     sandbox, _process, _fs = _sandbox()
     volume = tmp_path / "vol"
-    memory_root = volume / "memory"
-    memory_root.mkdir(parents=True)
+    volume.mkdir(parents=True)
 
     first = b"- [2026-08-17T00:00:00Z] **General**: hello\n"
     append = wa.run_workspace_agent(
         sandbox,
-        **_memory_args(volume, memory_root, "memory_append", content_b64=base64.b64encode(first).decode("ascii")),
+        **_memory_args(volume, volume, "append", content_b64=base64.b64encode(first).decode("ascii")),
     )
     assert append["ok"] is True
-    memory_id = str(append["memory_id"])
-    assert (memory_root / "MEMORIES.md.lock").exists()
 
-    edit_body = base64.b64encode(
-        b'{"learning": "hello world", "category": null, "updated_at": "2026-08-17T00:00:01Z"}'
-    ).decode("ascii")
     edit = wa.run_workspace_agent(
         sandbox,
-        **_memory_args(volume, memory_root, "memory_edit", memory_id=memory_id, content_b64=edit_body),
+        **_memory_args(
+            volume,
+            volume,
+            "write",
+            overwrite=True,
+            content_b64=base64.b64encode(b"- [2026-08-17T00:00:00Z] **General**: hello world\n").decode("ascii"),
+        ),
     )
     assert edit["ok"] is True
-    assert "hello world" in str(edit["record"])
 
-    tail = wa.run_workspace_agent(sandbox, **_memory_args(volume, memory_root, "tail_read"))
+    tail = wa.run_workspace_agent(sandbox, **_memory_args(volume, volume, "tail_read"))
     assert tail["ok"] is True
     assert "hello world" in str(tail["content"])
 
-    delete = wa.run_workspace_agent(sandbox, **_memory_args(volume, memory_root, "memory_delete", memory_id=memory_id))
+    delete = wa.run_workspace_agent(sandbox, **_memory_args(volume, volume, "delete"))
     assert delete["ok"] is True
 
-    # Idempotent same-record append: no duplicate, lock still cycles cleanly.
     repeat = wa.run_workspace_agent(
         sandbox,
-        **_memory_args(volume, memory_root, "memory_append", content_b64=base64.b64encode(first).decode("ascii")),
+        **_memory_args(volume, volume, "append", content_b64=base64.b64encode(first).decode("ascii")),
     )
     assert repeat["ok"] is True
-    # Content-derived id is stable across the delete+re-append cycle.
-    assert repeat["memory_id"] == memory_id
-    final_tail = wa.run_workspace_agent(sandbox, **_memory_args(volume, memory_root, "tail_read"))
+    final_tail = wa.run_workspace_agent(sandbox, **_memory_args(volume, volume, "tail_read"))
     assert str(final_tail["content"]).count("hello") == 1
 
 
-def test_installed_memory_migrate_roundtrip(tmp_path: Path) -> None:
-
+def test_installed_agent_does_not_own_memory_migration(tmp_path: Path) -> None:
+    """Legacy migration is a Workspace Memory policy concern, not a wire op."""
     sandbox, _process, _fs = _sandbox()
     volume = tmp_path / "vol"
-    volume.mkdir()
+    volume.mkdir(parents=True)
     (volume / "MEMORIES.md").write_bytes(b"- [2026-08-17T00:00:00Z] **General**: legacy\n")
 
-    probe = wa.run_workspace_agent(sandbox, **_memory_args(volume, volume, "stat", relative="MEMORIES.md"))
+    probe = wa.run_workspace_agent(sandbox, **_memory_args(volume, volume, "stat", relative="."))
     assert probe["ok"] is True and probe["entry"] is not None
-
-    migrated = wa.run_workspace_agent(sandbox, **_memory_args(volume, volume, "memory_migrate"))
-    assert migrated["ok"] is True
-    memory_root = volume / "memory"
-    assert (memory_root / "MEMORIES.md").read_bytes().startswith(b"# Fleet Memory v2\n")
-    assert not (volume / "MEMORIES.md").exists()
-
-    tail = wa.run_workspace_agent(sandbox, **_memory_args(volume, memory_root, "tail_read"))
-    assert "legacy" in str(tail["content"])
+    legacy = wa.run_workspace_agent(sandbox, **_memory_args(volume, volume, "read", relative="MEMORIES.md"))
+    assert legacy["ok"] is True and "legacy" in str(legacy["content"])
+    assert (volume / "MEMORIES.md").exists()

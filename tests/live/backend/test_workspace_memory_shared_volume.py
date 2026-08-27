@@ -76,7 +76,7 @@ def _write_receipt(payload: dict[str, Any], *, suffix: str = "memory-shared-volu
 
 
 def _record(learning: str, memory_id: str, *, supersedes_id: str | None = None) -> str:
-    from fleet_rlm.files.memory_models import format_workspace_memory_v3_record
+    from fleet_rlm.workspace.models import format_workspace_memory_v3_record
 
     now = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
     return format_workspace_memory_v3_record(
@@ -186,7 +186,7 @@ class _Probe:
 
 
 def _memory_entries(content: str) -> list[Any]:
-    from fleet_rlm.files.memory_models import parse_workspace_memory_lines
+    from fleet_rlm.workspace.models import parse_workspace_memory_lines
 
     lines = parse_workspace_memory_lines(content, complete_memory_graph=False)
     malformed = [line.raw for line in lines if line.malformed]
@@ -227,7 +227,7 @@ async def _live_scope() -> dict[str, Any]:
     from fleet_rlm.config import load_runtime_settings
     from fleet_rlm.daytona.platform import LiveDaytonaPlatform, build_daytona_client
     from fleet_rlm.daytona.provisioning import DaytonaSandboxSpec
-    from fleet_rlm.files.volume_paths import DEFAULT_VOLUME_MOUNT_PATH
+    from fleet_rlm.workspace.paths import DEFAULT_VOLUME_MOUNT_PATH
 
     _load_repo_env()
     if os.environ.get("FLEET_LIVE", "").strip().lower() not in {"1", "true", "yes"}:

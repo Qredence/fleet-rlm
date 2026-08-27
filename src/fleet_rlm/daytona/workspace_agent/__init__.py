@@ -26,6 +26,7 @@ from fleet_rlm.daytona.workspace_agent.protocol import (
     WORKSPACE_AGENT_REQUEST_MAX_BYTES,
     WORKSPACE_AGENT_RESPONSE_MAX_BYTES,
     WORKSPACE_AGENT_SUPPORTED_OPERATIONS,
+    WorkspaceAgentConflictError,
     WorkspaceAgentProtocolError,
     WorkspaceAgentStorageError,
     _workspace_agent_runtime_checksum,
@@ -46,6 +47,7 @@ __all__ = [
     "WORKSPACE_AGENT_RESPONSE_MAX_BYTES",
     "WORKSPACE_AGENT_SUPPORTED_OPERATIONS",
     "_AGENT_SESSIONS",
+    "WorkspaceAgentConflictError",
     "WorkspaceAgentMetrics",
     "WorkspaceAgentProtocolError",
     "WorkspaceAgentStorageError",
@@ -64,22 +66,3 @@ __all__ = [
     "workspace_agent_runtime_checksum",
     "workspace_agent_runtime_source",
 ]
-
-# Keep legacy ``from ... import workspace_agent as wa`` fixtures working while
-# directing mutable transport constants to the owning protocol/client module.
-# New code should import ``workspace_agent.client as wa`` explicitly.
-import sys as _sys
-import types as _types
-
-
-class _WorkspaceAgentPackage(_types.ModuleType):
-    def __setattr__(self, name: str, value: object) -> None:
-        super().__setattr__(name, value)
-        if name in {"WORKSPACE_AGENT_INSTALL_PATH", "WORKSPACE_AGENT_CODE_RUN_TIMEOUT_S"}:
-            setattr(_protocol, name, value)
-            setattr(_client, name, value)
-
-
-_protocol = _sys.modules["fleet_rlm.daytona.workspace_agent.protocol"]
-_client = _sys.modules["fleet_rlm.daytona.workspace_agent.client"]
-_sys.modules[__name__].__class__ = _WorkspaceAgentPackage

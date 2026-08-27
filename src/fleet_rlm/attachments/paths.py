@@ -6,8 +6,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from uuid import UUID
 
-from fleet_rlm.files.models import AttachmentRun
-from fleet_rlm.files.volume_paths import VolumePaths, as_posix
+from fleet_rlm.attachments.models import AttachmentRun
+from fleet_rlm.workspace.paths import VolumePaths, as_posix
 
 
 @dataclass(frozen=True, slots=True)

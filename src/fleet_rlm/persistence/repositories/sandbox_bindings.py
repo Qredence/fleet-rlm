@@ -9,7 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from fleet_rlm.files.volume_paths import DEFAULT_VOLUME_MOUNT_PATH
+from fleet_rlm.paths import DEFAULT_VOLUME_MOUNT_PATH
 from fleet_rlm.persistence.models import SandboxBindingRow
 from fleet_rlm.runtime.bindings import SandboxBinding, validate_sandbox_binding
 

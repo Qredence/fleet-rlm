@@ -268,7 +268,7 @@ def test_tool_wrapper_falls_back_to_http_status_when_error_body_is_not_json(
 
 def test_project_tool_wrapper_forwards_every_parameter_as_kwargs(monkeypatch: pytest.MonkeyPatch) -> None:
     """PR-E: project deliverable tools keep the kwargs-only wire contract."""
-    from fleet_rlm.files.project_tools import ProjectToolHost
+    from fleet_rlm.workspace.projects import ProjectToolHost
 
     host = ProjectToolHost(None, max_file_bytes=1024)  # type: ignore[arg-type]
     tool = {str(item.name): item for item in host.as_tools()}["write_project_text"]

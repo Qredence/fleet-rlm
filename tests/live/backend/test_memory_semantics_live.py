@@ -51,15 +51,11 @@ from fastapi.testclient import TestClient
 from fleet_rlm.app import create_app
 from fleet_rlm.config import Settings
 from fleet_rlm.daytona.broker import sync_sandbox
-from fleet_rlm.daytona.workspace_fs import DaytonaSandboxVolumeFs
-from fleet_rlm.daytona.workspace_memory import (
-    DaytonaWorkspaceMemoryStore,
-    read_workspace_memory_injection_digest,
-)
-from fleet_rlm.files.memory_models import WORKSPACE_MEMORY_INJECTION_TAIL_BYTES
-from fleet_rlm.files.memory_tools import WorkspaceMemoryToolHost
-from fleet_rlm.files.volume_paths import volume_paths_from_settings
 from fleet_rlm.skills.catalog import stable_skill_id
+from fleet_rlm.workspace.memory import WorkspaceMemory, WorkspaceMemoryToolHost, read_workspace_memory_injection_digest
+from fleet_rlm.workspace.models import WORKSPACE_MEMORY_INJECTION_TAIL_BYTES
+from fleet_rlm.workspace.paths import volume_paths_from_settings
+from fleet_rlm.workspace.storage import AgentStorageSession, DaytonaSandboxVolumeFs, WorkspaceMemoryStorage
 from tests.live.backend.test_fleet_rlm_daytona_mvp import (
     _assert_sse_stop,
     _live_settings,
@@ -203,7 +199,7 @@ class _QRE142Runner:
         self.portal: Any = None
         self.resources: Any = None
         self.preparation: Any = None
-        self._store: DaytonaWorkspaceMemoryStore | None = None
+        self._store: WorkspaceMemory | None = None
         self._volume_fs: DaytonaSandboxVolumeFs | None = None
 
     def __enter__(self) -> _QRE142Runner:
@@ -252,7 +248,7 @@ class _QRE142Runner:
             _assert_sse_stop(chunks, label="qre142_turn")
         return chunks
 
-    def memory_store(self) -> DaytonaWorkspaceMemoryStore:
+    def memory_store(self) -> WorkspaceMemory:
         if self._store is None:
             assert self.session_id is not None
             binding = self.portal.call(self.resources.bindings.get, self.session_id)
@@ -262,10 +258,18 @@ class _QRE142Runner:
             sandbox = sync_sandbox(self.portal.call(self.resources.platform.get, binding.sandbox_id), portal_loop)
             assert sandbox is not None
             self._volume_fs = DaytonaSandboxVolumeFs(sandbox)
-            self._store = DaytonaWorkspaceMemoryStore(
-                sandbox,
-                volume_paths=volume_paths_from_settings(self.settings),
-                max_upload_bytes=self.settings.max_upload_bytes,
+            paths = volume_paths_from_settings(self.settings)
+            self._store = WorkspaceMemory.from_storage(
+                WorkspaceMemoryStorage(
+                    AgentStorageSession(
+                        sandbox,
+                        volume_root=str(paths.root),
+                        root=str(paths.root),
+                        max_file_bytes=self.settings.max_upload_bytes,
+                        allow_volume_root=True,
+                    )
+                ),
+                max_file_bytes=self.settings.max_upload_bytes,
             )
         return self._store
 

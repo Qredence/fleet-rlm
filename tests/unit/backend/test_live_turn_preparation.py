@@ -13,12 +13,12 @@ from uuid import uuid4
 
 import pytest
 
+from fleet_rlm.attachments.models import AttachmentRef
 from fleet_rlm.chat.run_lifecycle import ClaimedRun, _RunClaimToken
 from fleet_rlm.chat.run_preparation import RunPreparationUnavailableError
+from fleet_rlm.composition.daytona_environment import build_run_preparation
 from fleet_rlm.config import Settings
-from fleet_rlm.daytona.run_environment import build_run_preparation
 from fleet_rlm.daytona.session_manager import DaytonaAdmission
-from fleet_rlm.files.models import AttachmentRef
 from fleet_rlm.rlm.program import RLMModelBundle
 from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
 
@@ -48,18 +48,16 @@ async def test_live_preparation_stages_attachment_and_cleans_it(
     volume_root = tmp_path / "volume"
     volume_root.mkdir()
 
-    from fleet_rlm.daytona import workspace_agent as workspace_agent_module
+    from fleet_rlm.daytona.workspace_agent import client as workspace_agent_client
+    from fleet_rlm.daytona.workspace_agent import protocol as workspace_agent_protocol
 
     # Materialize the installed agent OUTSIDE the claimed volume tree so the
     # test's exact volume-content assertion is unaffected (real installs also
     # live outside the mounted Volume).
     agent_remote = tmp_path / "remote" / "home" / "daytona" / "fleet_rlm_workspace_agent_v1.py"
     agent_remote_path = str(agent_remote)
-    monkeypatch.setattr(
-        workspace_agent_module,
-        "WORKSPACE_AGENT_INSTALL_PATH",
-        agent_remote_path,
-    )
+    monkeypatch.setattr(workspace_agent_client, "WORKSPACE_AGENT_INSTALL_PATH", agent_remote_path)
+    monkeypatch.setattr(workspace_agent_protocol, "WORKSPACE_AGENT_INSTALL_PATH", agent_remote_path)
 
     class SandboxFs:
         async def create_folder(self, path: str, mode: str | None = None) -> None:
@@ -117,12 +115,12 @@ async def test_live_preparation_stages_attachment_and_cleans_it(
         async def prepare_run(self, _access, _attachment_ids, _run, sink):
             logical_path = str(volume_root / "attachments" / "notes.txt")
             await sink.write_private(logical_path, data)
-            from fleet_rlm.files.models import PreparedAttachments, StagedAttachment
+            from fleet_rlm.attachments.models import PreparedAttachments, StagedAttachment
 
             return PreparedAttachments((ref,), (StagedAttachment(ref.id, logical_path),))
 
     settings = Settings(run_environment="daytona", volume_mount_path=str(volume_root))
-    from fleet_rlm.files.volume_paths import volume_paths_from_settings
+    from fleet_rlm.workspace.paths import volume_paths_from_settings
 
     resources = SimpleNamespace(
         settings=settings,
@@ -232,7 +230,7 @@ async def test_live_preparation_stages_attachment_and_cleans_it(
     canonical_memory = volume_root / "memory" / "MEMORIES.md"
     canonical_text = canonical_memory.read_text(encoding="utf-8")
     assert canonical_text.startswith("# Fleet Memory v2\n")
-    from fleet_rlm.files.memory_models import (
+    from fleet_rlm.workspace.models import (
         parse_workspace_memory_lines,
         validate_workspace_memory_record,
     )
@@ -265,7 +263,7 @@ async def test_live_preparation_stages_attachment_and_cleans_it(
     # injected workspace_memory tail digest without any tool call.
     class NoAttachments:
         async def prepare_run(self, _access, _attachment_ids, _run, _sink):
-            from fleet_rlm.files.models import PreparedAttachments
+            from fleet_rlm.attachments.models import PreparedAttachments
 
             return PreparedAttachments((), ())
 
@@ -386,7 +384,7 @@ async def test_admission_timeout_is_sanitized_by_live_preparation() -> None:
             raise DaytonaAdmissionTimeoutError("provider secret should not escape")
 
     settings = Settings(run_environment="daytona")
-    from fleet_rlm.files.volume_paths import volume_paths_from_settings
+    from fleet_rlm.workspace.paths import volume_paths_from_settings
 
     resources = SimpleNamespace(
         settings=settings,
@@ -430,7 +428,7 @@ async def test_admission_timeout_is_sanitized_by_live_preparation() -> None:
 @pytest.mark.parametrize("mode", ["timeout", "cancel"])
 async def test_post_acquisition_sandbox_lookup_detaches_before_lease_release(mode: str) -> None:
     from fleet_rlm.chat.run_preparation import RunPreparationTimeoutError
-    from fleet_rlm.daytona.run_environment import _DaytonaEnvironmentProvider
+    from fleet_rlm.composition.daytona_environment import _DaytonaEnvironmentProvider
 
     entered = threading.Event()
     release_lookup = threading.Event()

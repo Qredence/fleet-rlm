@@ -8,6 +8,7 @@
 | `generate_tui_chunk_validation.py` | Generate or check the TUI runtime chunk-validation tables from `openapi.yaml` |
 | `generate_profile_matrix.py` | Generate or check the provider/profile matrix from `config/fleet.toml` |
 | `check_codebase_tree.py` | Enforce canonical import and route boundaries |
+| `check_dependency_boundaries.py` | Check P50 domain dependency directions and Daytona Memory-policy residue |
 | `check_harness_engineering.py` | Validate repository agent-harness contracts |
 | `check_docs_quality.py` | Validate documentation structure and links |
 | `check_agents_md_freshness.py` | Validate agent-guide reachability |

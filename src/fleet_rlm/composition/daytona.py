@@ -10,12 +10,13 @@ from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from threading import Event, Thread, current_thread
-from typing import Any
+from typing import Any, cast
 from uuid import UUID
 
 from fastapi import FastAPI
 
 from fleet_rlm.composition.common import CompositionError
+from fleet_rlm.composition.daytona_environment import DaytonaRuntimeResources
 from fleet_rlm.composition.inventory import (
     RuntimeDatabaseLifecycle,
     RuntimeInventory,
@@ -26,14 +27,14 @@ from fleet_rlm.composition.inventory import (
     install_runtime_inventory,
 )
 from fleet_rlm.config import Settings
-from fleet_rlm.daytona.broker import SyncBridgeDispatcher
-from fleet_rlm.daytona.memory_outbox_reconcile import MemoryOutboxReconciler
+from fleet_rlm.daytona.broker import SyncBridgeDispatcher, sync_sandbox, tombstone_sync_sandbox
 from fleet_rlm.daytona.session_manager import DEFAULT_IDLE_STOP_SECONDS
 from fleet_rlm.persistence.database import ensure_database_compatible
-from fleet_rlm.persistence.repositories.memory_promotion_intents import SqlAlchemyMemoryPromotionOutbox
+from fleet_rlm.persistence.repositories.outbox import SqlAlchemyMemoryPromotionOutbox
 from fleet_rlm.persistence.repositories.turns import ReconciliationSummary
 from fleet_rlm.rlm.session_runtime import SessionRLMRegistry
 from fleet_rlm.skills.catalog import SkillCatalog
+from fleet_rlm.workspace.memory import MemoryOutboxReconciler
 
 logger = logging.getLogger(__name__)
 _ORPHAN_CLEANUP_TIMEOUT_SECONDS = 60
@@ -126,7 +127,7 @@ async def _finish_daytona_disposal(
     composition_loop: asyncio.AbstractEventLoop | None,
 ) -> None:
     """Retry deferred composition teardown before relinquishing bridge authority."""
-    from fleet_rlm.daytona.run_environment import (
+    from fleet_rlm.composition.daytona_environment import (
         has_pending_resource_cleanup,
         wait_resource_cleanup,
     )
@@ -381,7 +382,7 @@ async def run_deferred_orphan_cleanup(
     the readiness-critical path. Failures and timeouts are logged and left for a
     later startup.
     """
-    from fleet_rlm.daytona.workspace_gateway import OrphanCleanupReport, cleanup_orphan_bytes
+    from fleet_rlm.composition.daytona_workspace import OrphanCleanupReport, cleanup_orphan_bytes
 
     committed_storage_refs = await artifact_catalog.list_storage_refs(workspace_id=workspace_id)
     completed_runs = await artifact_catalog.list_completed_runs(workspace_id=workspace_id)
@@ -441,20 +442,17 @@ async def build_daytona_composition(
     from fleet_rlm.api.local_scope import LocalScope
     from fleet_rlm.artifacts.reader import ArtifactReader
     from fleet_rlm.artifacts.workspace_storage import WorkspaceArtifactBlobGateway
-    from fleet_rlm.chat.run_cleanup import RunCleanupSupervisor
+    from fleet_rlm.attachments.lifecycle import AttachmentLifecycleService
+    from fleet_rlm.attachments.local_catalog import WorkspaceAttachmentBlobGateway
+    from fleet_rlm.attachments.paths import WorkspaceAttachmentPathPolicy
     from fleet_rlm.chat.run_lifecycle import RunLifecycleService
     from fleet_rlm.chat.turn_runtime import TurnRuntime
-    from fleet_rlm.daytona.provisioning import sandbox_spec_from_settings
-    from fleet_rlm.daytona.run_environment import DaytonaRuntimeResources, build_run_preparation, resolve_settings
-    from fleet_rlm.daytona.workspace_gateway import (
+    from fleet_rlm.composition.daytona_environment import build_run_preparation, resolve_settings
+    from fleet_rlm.composition.daytona_workspace import (
         DaytonaWorkspaceGateway,
         DaytonaWorkspaceVolumeGateway,
     )
-    from fleet_rlm.files.lifecycle import AttachmentLifecycleService
-    from fleet_rlm.files.local_catalog import WorkspaceAttachmentBlobGateway
-    from fleet_rlm.files.paths import WorkspaceAttachmentPathPolicy
-    from fleet_rlm.files.volume_paths import volume_paths_from_settings
-    from fleet_rlm.files.workspace_access import WorkspaceFileService
+    from fleet_rlm.daytona.provisioning import sandbox_spec_from_settings
     from fleet_rlm.persistence.database import create_async_engine_from_url, create_session_factory
     from fleet_rlm.persistence.repositories import (
         SqlAlchemyArtifactCatalog,
@@ -465,6 +463,9 @@ async def build_daytona_composition(
     )
     from fleet_rlm.rlm.program import RLMFactory, build_model_bundle
     from fleet_rlm.rlm.runtime import RLMRunner
+    from fleet_rlm.runtime.cleanup import RunCleanupSupervisor
+    from fleet_rlm.workspace.paths import volume_paths_from_settings
+    from fleet_rlm.workspace.workspace import WorkspaceAccessGateway, WorkspaceFileService
 
     resolved = resolve_settings(settings)
     require_daytona_settings(resolved)
@@ -520,7 +521,7 @@ async def build_daytona_composition(
             catalog=artifact_catalog,
             blobs=WorkspaceArtifactBlobGateway(gateway),
         )
-        workspace_file_service = WorkspaceFileService(mounted_workspace_gateway)
+        workspace_file_service = WorkspaceFileService(cast(WorkspaceAccessGateway, mounted_workspace_gateway))
         local_scope = LocalScope()
         startup_started = asyncio.get_running_loop().time()
         startup_deadline = startup_started + _STARTUP_CLEANUP_RECOVERY_BUDGET_SECONDS
@@ -600,13 +601,43 @@ async def build_daytona_composition(
             ),
             name="fleet-daytona-orphan-cleanup",
         )
+
+        @contextlib.asynccontextmanager
+        async def open_memory(workspace_id: UUID):
+            """Open provider-neutral Memory over one bounded Workspace Agent root."""
+            from fleet_rlm.workspace.memory import build_workspace_memory_store
+            from fleet_rlm.workspace.storage import AgentStorageSession, WorkspaceMemoryStorage
+
+            memory_view: Any | None = None
+            async with mounted_workspace_gateway.open_sandbox(
+                workspace_id,
+                purpose="memory-outbox-reconcile",
+            ) as sandbox:
+                try:
+                    memory_view = sync_sandbox(
+                        sandbox,
+                        asyncio.get_running_loop(),
+                        dispatcher,
+                    )
+                    memory_session = AgentStorageSession(
+                        memory_view,
+                        volume_root=str(volume_paths.mount_path),
+                        root=str(volume_paths.mount_path),
+                        max_file_bytes=resolved.max_upload_bytes,
+                        allow_volume_root=True,
+                    )
+                    yield build_workspace_memory_store(
+                        WorkspaceMemoryStorage(memory_session),
+                        max_upload_bytes=resolved.max_upload_bytes,
+                    )
+                finally:
+                    if memory_view is not None:
+                        tombstone_sync_sandbox(memory_view)
+
         memory_outbox_reconciler = MemoryOutboxReconciler(
             memory_outbox,
-            gateway=gateway,
-            volume_paths=volume_paths,
-            dispatcher=dispatcher,
+            open_memory=open_memory,
             allowed_categories=lambda: tuple(resolved.rlm_autonomous_memory_categories),
-            max_upload_bytes=resolved.max_upload_bytes,
         )
         memory_outbox_task = asyncio.get_running_loop().create_task(
             run_deferred_memory_outbox_reconcile(memory_outbox_reconciler),

@@ -18,7 +18,7 @@ from fleet_rlm.api.schemas import (
     WorkspaceFileReadResponse,
     WorkspaceFileWriteRequest,
 )
-from fleet_rlm.files.workspace_access import (
+from fleet_rlm.workspace.workspace import (
     MAX_PUBLIC_LIST_LIMIT,
     MAX_PUBLIC_READ_CHARS,
     WorkspaceFileConflictError,

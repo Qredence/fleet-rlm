@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from pathlib import PurePosixPath
 
-from fleet_rlm.files.errors import AttachmentValidationError
+from fleet_rlm.attachments.errors import AttachmentValidationError
 
 _SAFE_NAME = re.compile(r"^[A-Za-z0-9._ -]{1,255}$")
 DEFAULT_MAX_BYTES = 10 * 1024 * 1024

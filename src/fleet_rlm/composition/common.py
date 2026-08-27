@@ -10,16 +10,16 @@ from uuid import UUID
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from fleet_rlm.artifacts.reader import ArtifactReader
+from fleet_rlm.attachments.lifecycle import AttachmentLifecycle
 from fleet_rlm.chat.preparation import RunPreparation
 from fleet_rlm.composition.inventory import RuntimeDatabaseLifecycle, RuntimeInventory
 from fleet_rlm.config import Settings
-from fleet_rlm.files.lifecycle import AttachmentLifecycle
-from fleet_rlm.files.volume_storage import VolumeTreeFs
 from fleet_rlm.rlm._dspy_compat import assert_dspy_version
 from fleet_rlm.rlm.program import RLMOptions
 from fleet_rlm.rlm.recursion import RecursiveRLMOptions
 from fleet_rlm.rlm.runtime import RLMFactoryLike
 from fleet_rlm.rlm.session_runtime import SessionRLMRegistry
+from fleet_rlm.workspace.storage import VolumeTreeFs
 
 
 class CompositionError(RuntimeError):
@@ -59,9 +59,9 @@ def build_local_storage_adapters(
         LocalArtifactReaderCatalog,
     )
     from fleet_rlm.artifacts.reader import ArtifactReader
-    from fleet_rlm.files.lifecycle import AttachmentLifecycleService
-    from fleet_rlm.files.local_catalog import LocalAttachmentBlobGateway, LocalAttachmentCatalog
-    from fleet_rlm.files.paths import LocalAttachmentPathPolicy
+    from fleet_rlm.attachments.lifecycle import AttachmentLifecycleService
+    from fleet_rlm.attachments.local_catalog import LocalAttachmentBlobGateway, LocalAttachmentCatalog
+    from fleet_rlm.attachments.paths import LocalAttachmentPathPolicy
     from fleet_rlm.persistence.repositories import SqlAlchemyArtifactCatalog, SqlAlchemyAttachmentCatalog
 
     upload_root, artifact_root = host_roots(settings)
@@ -138,7 +138,6 @@ def build_local_inventory(
 ) -> RuntimeInventory:
     """Build the shared in-memory/SQL inventory for one local runtime."""
     assert_dspy_version()
-    from fleet_rlm.chat.run_cleanup import RunCleanupSupervisor
     from fleet_rlm.chat.run_lifecycle import RunLifecycleService
     from fleet_rlm.chat.turn_runtime import TurnRuntime
     from fleet_rlm.config import _CONFIG_PATH, active_profile
@@ -150,6 +149,7 @@ def build_local_inventory(
         SqlAlchemySessionCatalog,
     )
     from fleet_rlm.rlm.runtime import RLMRunner
+    from fleet_rlm.runtime.cleanup import RunCleanupSupervisor
 
     session_factory = database.session_factory
     if session_factory is None:

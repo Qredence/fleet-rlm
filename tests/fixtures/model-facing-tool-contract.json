@@ -892,7 +892,7 @@
     {
       "name": "append_workspace_text",
       "category": "workspace",
-      "source": "src/fleet_rlm/files/workspace_tools.py:WorkspaceToolHost",
+      "source": "src/fleet_rlm/workspace/workspace.py:WorkspaceToolHost",
       "description": "Append UTF-8 text immediately into this Session's durable Workspace when incremental state must survive the Run; this durability is independent of Turn Commit.",
       "argument_schema": {
         "type": "object",
@@ -931,13 +931,13 @@
         "omits": [
           "content"
         ],
-        "source": "src/fleet_rlm/files/workspace_tools.py:WorkspaceToolHost.event_views"
+        "source": "src/fleet_rlm/workspace/workspace.py:WorkspaceToolHost.event_views"
       }
     },
     {
       "name": "create_artifact",
       "category": "attachment_artifact",
-      "source": "src/fleet_rlm/files/tools.py:FileToolHost",
+      "source": "src/fleet_rlm/artifacts/tools.py:ArtifactToolHost",
       "description": "Stage generated text, markdown, or JSON as a private Artifact Candidate; it is promoted only by a successful Turn Commit.",
       "argument_schema": {
         "type": "object",
@@ -990,13 +990,13 @@
           "artifact_candidate_id",
           "checksum_sha256"
         ],
-        "source": "src/fleet_rlm/files/tools.py:FileToolHost.event_views"
+        "source": "src/fleet_rlm/artifacts/tools.py:ArtifactToolHost.event_views"
       }
     },
     {
       "name": "delete_project_path",
       "category": "project",
-      "source": "src/fleet_rlm/files/project_tools.py:ProjectToolHost",
+      "source": "src/fleet_rlm/workspace/projects.py:ProjectToolHost",
       "description": "Delete one file or one empty directory immediately under projects/<slug>/; non-empty directories are refused, and a supplied expected_sha256 guards against deleting changed content. This durability is independent of Turn Commit.",
       "argument_schema": {
         "type": "object",
@@ -1037,13 +1037,13 @@
         "omits": [
           "expected_sha256"
         ],
-        "source": "src/fleet_rlm/files/project_tools.py:ProjectToolHost.event_views"
+        "source": "src/fleet_rlm/workspace/projects.py:ProjectToolHost.event_views"
       }
     },
     {
       "name": "delete_workspace_path",
       "category": "workspace",
-      "source": "src/fleet_rlm/files/workspace_tools.py:WorkspaceToolHost",
+      "source": "src/fleet_rlm/workspace/workspace.py:WorkspaceToolHost",
       "description": "Delete one file or one empty directory immediately from this Session's durable Workspace; non-empty directories are refused, and a supplied expected_sha256 guards against deleting changed content. This durability is independent of Turn Commit.",
       "argument_schema": {
         "type": "object",
@@ -1084,13 +1084,13 @@
         "omits": [
           "expected_sha256"
         ],
-        "source": "src/fleet_rlm/files/workspace_tools.py:WorkspaceToolHost.event_views"
+        "source": "src/fleet_rlm/workspace/workspace.py:WorkspaceToolHost.event_views"
       }
     },
     {
       "name": "edit_memory",
       "category": "workspace_memory",
-      "source": "src/fleet_rlm/files/memory_tools.py:WorkspaceMemoryToolHost",
+      "source": "src/fleet_rlm/workspace/memory.py:WorkspaceMemoryToolHost",
       "description": "Replace one remembered learning in place by id, preserving its id and timestamp; pass category only to recategorize.",
       "argument_schema": {
         "type": "object",
@@ -1140,13 +1140,13 @@
         "omits": [
           "key_learning"
         ],
-        "source": "src/fleet_rlm/files/memory_tools.py:WorkspaceMemoryToolHost.event_views"
+        "source": "src/fleet_rlm/workspace/memory.py:WorkspaceMemoryToolHost.event_views"
       }
     },
     {
       "name": "edit_project_text",
       "category": "project",
-      "source": "src/fleet_rlm/files/project_tools.py:ProjectToolHost",
+      "source": "src/fleet_rlm/workspace/projects.py:ProjectToolHost",
       "description": "Replace exactly one unique occurrence of old with new in one UTF-8 Project file under projects/<slug>/; the edit fails when old is absent or occurs more than once, and a supplied expected_sha256 guards against editing changed content. Read the file first and keep old short and unique. This durability is independent of Turn Commit.",
       "argument_schema": {
         "type": "object",
@@ -1200,13 +1200,13 @@
           "new",
           "expected_sha256"
         ],
-        "source": "src/fleet_rlm/files/project_tools.py:ProjectToolHost.event_views"
+        "source": "src/fleet_rlm/workspace/projects.py:ProjectToolHost.event_views"
       }
     },
     {
       "name": "edit_workspace_text",
       "category": "workspace",
-      "source": "src/fleet_rlm/files/workspace_tools.py:WorkspaceToolHost",
+      "source": "src/fleet_rlm/workspace/workspace.py:WorkspaceToolHost",
       "description": "Replace exactly one unique occurrence of old with new in one UTF-8 Session Workspace file; the edit fails when old is absent or occurs more than once, and a supplied expected_sha256 guards against editing changed content. Read the file first and keep old short and unique. This durability is independent of Turn Commit.",
       "argument_schema": {
         "type": "object",
@@ -1260,13 +1260,13 @@
           "new",
           "expected_sha256"
         ],
-        "source": "src/fleet_rlm/files/workspace_tools.py:WorkspaceToolHost.event_views"
+        "source": "src/fleet_rlm/workspace/workspace.py:WorkspaceToolHost.event_views"
       }
     },
     {
       "name": "fetch_url",
       "category": "url",
-      "source": "src/fleet_rlm/files/url_tool.py:UrlToolHost",
+      "source": "src/fleet_rlm/workspace/url.py:UrlToolHost",
       "description": "Fetch one relevant anonymous public HTTPS text URL. The result is a Python value; do not print the complete content. Repeated calls reuse the Session cache.",
       "argument_schema": {
         "type": "object",
@@ -1305,13 +1305,13 @@
           "workspace_path",
           "content"
         ],
-        "source": "src/fleet_rlm/files/url_tool.py:UrlToolHost.event_views"
+        "source": "src/fleet_rlm/workspace/url.py:UrlToolHost.event_views"
       }
     },
     {
       "name": "forget",
       "category": "workspace_memory",
-      "source": "src/fleet_rlm/files/memory_tools.py:WorkspaceMemoryToolHost",
+      "source": "src/fleet_rlm/workspace/memory.py:WorkspaceMemoryToolHost",
       "description": "Remove exactly one Workspace Memory entry by id when the user asks to forget it.",
       "argument_schema": {
         "type": "object",
@@ -1342,13 +1342,13 @@
           "removed"
         ],
         "omits": [],
-        "source": "src/fleet_rlm/files/memory_tools.py:WorkspaceMemoryToolHost.event_views"
+        "source": "src/fleet_rlm/workspace/memory.py:WorkspaceMemoryToolHost.event_views"
       }
     },
     {
       "name": "list_memories",
       "category": "workspace_memory",
-      "source": "src/fleet_rlm/files/memory_tools.py:WorkspaceMemoryToolHost",
+      "source": "src/fleet_rlm/workspace/memory.py:WorkspaceMemoryToolHost",
       "description": "List durable Workspace Memory entries (id, timestamp, category, learning) chronologically with bounded pages; pass the previous page's next_cursor as after to continue.",
       "argument_schema": {
         "type": "object",
@@ -1399,13 +1399,13 @@
         "omits": [
           "entries"
         ],
-        "source": "src/fleet_rlm/files/memory_tools.py:WorkspaceMemoryToolHost.event_views"
+        "source": "src/fleet_rlm/workspace/memory.py:WorkspaceMemoryToolHost.event_views"
       }
     },
     {
       "name": "list_project_files",
       "category": "project",
-      "source": "src/fleet_rlm/files/project_tools.py:ProjectToolHost",
+      "source": "src/fleet_rlm/workspace/projects.py:ProjectToolHost",
       "description": "List immediate entries under projects/<slug>/ (or the projects root) only when existing durable Project deliverables are relevant; do not explore them for a self-contained request.",
       "argument_schema": {
         "type": "object",
@@ -1455,13 +1455,13 @@
         "omits": [
           "entries"
         ],
-        "source": "src/fleet_rlm/files/project_tools.py:ProjectToolHost.event_views"
+        "source": "src/fleet_rlm/workspace/projects.py:ProjectToolHost.event_views"
       }
     },
     {
       "name": "list_workspace_files",
       "category": "workspace",
-      "source": "src/fleet_rlm/files/workspace_tools.py:WorkspaceToolHost",
+      "source": "src/fleet_rlm/workspace/workspace.py:WorkspaceToolHost",
       "description": "List immediate entries in this Session's durable Workspace only when existing durable state is relevant; do not explore it for a self-contained request.",
       "argument_schema": {
         "type": "object",
@@ -1511,7 +1511,7 @@
         "omits": [
           "entries"
         ],
-        "source": "src/fleet_rlm/files/workspace_tools.py:WorkspaceToolHost.event_views"
+        "source": "src/fleet_rlm/workspace/workspace.py:WorkspaceToolHost.event_views"
       }
     },
     {
@@ -1647,7 +1647,7 @@
     {
       "name": "propose_memory",
       "category": "conditional_capability",
-      "source": "src/fleet_rlm/files/memory_candidate_tools.py:MemoryCandidateToolHost",
+      "source": "src/fleet_rlm/workspace/memory.py:MemoryCandidateToolHost",
       "description": "Propose one durable cross-session preference, workflow, or project learning for later commit-gated promotion. Use only for stable, non-secret evidence likely to remain useful beyond this Turn; never for temporary task state, raw documents, credentials, or ordinary conversational facts. This does not immediately change Workspace Memory.",
       "argument_schema": {
         "type": "object",
@@ -1698,13 +1698,13 @@
         "omits": [
           "key_learning"
         ],
-        "source": "src/fleet_rlm/files/memory_candidate_tools.py:MemoryCandidateToolHost.event_views"
+        "source": "src/fleet_rlm/workspace/memory.py:MemoryCandidateToolHost.event_views"
       }
     },
     {
       "name": "publish_workspace_artifact",
       "category": "attachment_artifact",
-      "source": "src/fleet_rlm/files/tools.py:FileToolHost",
+      "source": "src/fleet_rlm/artifacts/tools.py:ArtifactToolHost",
       "description": "Stage an existing durable Session Workspace text file as a private Artifact Candidate; it is promoted only by a successful Turn Commit.",
       "argument_schema": {
         "type": "object",
@@ -1768,13 +1768,13 @@
         "omits": [
           "expected_sha256"
         ],
-        "source": "src/fleet_rlm/files/tools.py:FileToolHost.event_views"
+        "source": "src/fleet_rlm/artifacts/tools.py:ArtifactToolHost.event_views"
       }
     },
     {
       "name": "read_attachment",
       "category": "attachment_artifact",
-      "source": "src/fleet_rlm/files/tools.py:FileToolHost",
+      "source": "src/fleet_rlm/attachments/tools.py:AttachmentToolHost",
       "description": "Read one immutable authorized Attachment by opaque identity only when its advertised metadata is relevant to the current request.",
       "argument_schema": {
         "type": "object",
@@ -1810,7 +1810,7 @@
           "content",
           "content_base64"
         ],
-        "source": "src/fleet_rlm/files/tools.py:FileToolHost.event_views"
+        "source": "src/fleet_rlm/attachments/tools.py:AttachmentToolHost.event_views"
       }
     },
     {
@@ -1867,7 +1867,7 @@
     {
       "name": "read_project_text",
       "category": "project",
-      "source": "src/fleet_rlm/files/project_tools.py:ProjectToolHost",
+      "source": "src/fleet_rlm/workspace/projects.py:ProjectToolHost",
       "description": "Read one relevant UTF-8 Project deliverable page with max_chars in 1..10000 using a projects/<slug>/<path> target. Continue with next_cursor until eof.",
       "argument_schema": {
         "type": "object",
@@ -1917,7 +1917,7 @@
         "omits": [
           "content"
         ],
-        "source": "src/fleet_rlm/files/project_tools.py:ProjectToolHost.event_views"
+        "source": "src/fleet_rlm/workspace/projects.py:ProjectToolHost.event_views"
       }
     },
     {
@@ -2036,7 +2036,7 @@
     {
       "name": "read_workspace_memory",
       "category": "workspace_memory",
-      "source": "src/fleet_rlm/files/memory_tools.py:WorkspaceMemoryToolHost",
+      "source": "src/fleet_rlm/workspace/memory.py:WorkspaceMemoryToolHost",
       "description": "Read the latest bounded cross-session Workspace Memory learnings when prior workspace context is relevant to the current request.",
       "argument_schema": {
         "type": "object",
@@ -2064,13 +2064,13 @@
         "omits": [
           "content"
         ],
-        "source": "src/fleet_rlm/files/memory_tools.py:WorkspaceMemoryToolHost.event_views"
+        "source": "src/fleet_rlm/workspace/memory.py:WorkspaceMemoryToolHost.event_views"
       }
     },
     {
       "name": "read_workspace_text",
       "category": "workspace",
-      "source": "src/fleet_rlm/files/workspace_tools.py:WorkspaceToolHost",
+      "source": "src/fleet_rlm/workspace/workspace.py:WorkspaceToolHost",
       "description": "Read one relevant UTF-8 durable Workspace page with max_chars in 1..10000. Continue with next_cursor until eof.",
       "argument_schema": {
         "type": "object",
@@ -2120,13 +2120,13 @@
         "omits": [
           "content"
         ],
-        "source": "src/fleet_rlm/files/workspace_tools.py:WorkspaceToolHost.event_views"
+        "source": "src/fleet_rlm/workspace/workspace.py:WorkspaceToolHost.event_views"
       }
     },
     {
       "name": "remember",
       "category": "workspace_memory",
-      "source": "src/fleet_rlm/files/memory_tools.py:WorkspaceMemoryToolHost",
+      "source": "src/fleet_rlm/workspace/memory.py:WorkspaceMemoryToolHost",
       "description": "Record one durable Workspace Memory learning or preference only when the user explicitly requests that it be remembered; returns the new entry's id for later edit or forget.",
       "argument_schema": {
         "type": "object",
@@ -2166,13 +2166,13 @@
         "omits": [
           "key_learning"
         ],
-        "source": "src/fleet_rlm/files/memory_tools.py:WorkspaceMemoryToolHost.event_views"
+        "source": "src/fleet_rlm/workspace/memory.py:WorkspaceMemoryToolHost.event_views"
       }
     },
     {
       "name": "rlm_query",
       "category": "recursive",
-      "source": "src/fleet_rlm/rlm/recursive_calls.py:RecursiveRLMExecutor",
+      "source": "src/fleet_rlm/rlm/recursion.py:RecursiveRLMExecutor",
       "description": "Solve one self-contained bounded semantic subproblem. Pass only selected data, not the complete Turn, history, Attachment, or Workspace. Store the concise answer.",
       "argument_schema": {
         "type": "object",
@@ -2208,13 +2208,13 @@
           "prompt",
           "child answer"
         ],
-        "source": "src/fleet_rlm/rlm/recursive_calls.py:RecursiveRLMExecutor"
+        "source": "src/fleet_rlm/rlm/recursion.py:RecursiveRLMExecutor"
       }
     },
     {
       "name": "rlm_query_batched",
       "category": "recursive",
-      "source": "src/fleet_rlm/rlm/recursive_calls.py:RecursiveRLMExecutor",
+      "source": "src/fleet_rlm/rlm/recursion.py:RecursiveRLMExecutor",
       "description": "Solve multiple independent bounded subproblems with isolated child RLMs. Inputs and outputs preserve order; use only when every item needs iterative exploration.",
       "argument_schema": {
         "type": "object",
@@ -2251,13 +2251,13 @@
           "prompts",
           "child answers"
         ],
-        "source": "src/fleet_rlm/rlm/recursive_calls.py:RecursiveRLMExecutor"
+        "source": "src/fleet_rlm/rlm/recursion.py:RecursiveRLMExecutor"
       }
     },
     {
       "name": "search_memories",
       "category": "workspace_memory",
-      "source": "src/fleet_rlm/files/memory_tools.py:WorkspaceMemoryToolHost",
+      "source": "src/fleet_rlm/workspace/memory.py:WorkspaceMemoryToolHost",
       "description": "Search durable Workspace Memory for an older relevant learning by a bounded query, using deterministic lexical ranking; pass category only to constrain recall.",
       "argument_schema": {
         "type": "object",
@@ -2306,13 +2306,13 @@
           "query",
           "entries.learning"
         ],
-        "source": "src/fleet_rlm/files/memory_tools.py:WorkspaceMemoryToolHost.event_views"
+        "source": "src/fleet_rlm/workspace/memory.py:WorkspaceMemoryToolHost.event_views"
       }
     },
     {
       "name": "stat_project_file",
       "category": "project",
-      "source": "src/fleet_rlm/files/project_tools.py:ProjectToolHost",
+      "source": "src/fleet_rlm/workspace/projects.py:ProjectToolHost",
       "description": "Read bounded metadata for a relevant durable Project deliverable path under projects/<slug>/.",
       "argument_schema": {
         "type": "object",
@@ -2345,13 +2345,13 @@
         "omits": [
           "entry"
         ],
-        "source": "src/fleet_rlm/files/project_tools.py:ProjectToolHost.event_views"
+        "source": "src/fleet_rlm/workspace/projects.py:ProjectToolHost.event_views"
       }
     },
     {
       "name": "stat_workspace_file",
       "category": "workspace",
-      "source": "src/fleet_rlm/files/workspace_tools.py:WorkspaceToolHost",
+      "source": "src/fleet_rlm/workspace/workspace.py:WorkspaceToolHost",
       "description": "Read bounded metadata for a relevant durable Session Workspace path.",
       "argument_schema": {
         "type": "object",
@@ -2384,13 +2384,13 @@
         "omits": [
           "entry"
         ],
-        "source": "src/fleet_rlm/files/workspace_tools.py:WorkspaceToolHost.event_views"
+        "source": "src/fleet_rlm/workspace/workspace.py:WorkspaceToolHost.event_views"
       }
     },
     {
       "name": "update_workspace_memory",
       "category": "workspace_memory",
-      "source": "src/fleet_rlm/files/memory_tools.py:WorkspaceMemoryToolHost",
+      "source": "src/fleet_rlm/workspace/memory.py:WorkspaceMemoryToolHost",
       "description": "Legacy alias of remember: record one durable Workspace Memory learning or preference only when the user explicitly requests that it be remembered.",
       "argument_schema": {
         "type": "object",
@@ -2430,13 +2430,13 @@
         "omits": [
           "key_learning"
         ],
-        "source": "src/fleet_rlm/files/memory_tools.py:WorkspaceMemoryToolHost.event_views"
+        "source": "src/fleet_rlm/workspace/memory.py:WorkspaceMemoryToolHost.event_views"
       }
     },
     {
       "name": "write_project_text",
       "category": "project",
-      "source": "src/fleet_rlm/files/project_tools.py:ProjectToolHost",
+      "source": "src/fleet_rlm/workspace/projects.py:ProjectToolHost",
       "description": "Write UTF-8 text immediately as a durable deliverable under projects/<slug>/ when the result must stay browsable across Sessions; choose a short repo/task-derived slug and keep scratch in the Session Workspace. This durability is independent of Turn Commit.",
       "argument_schema": {
         "type": "object",
@@ -2480,13 +2480,13 @@
         "omits": [
           "content"
         ],
-        "source": "src/fleet_rlm/files/project_tools.py:ProjectToolHost.event_views"
+        "source": "src/fleet_rlm/workspace/projects.py:ProjectToolHost.event_views"
       }
     },
     {
       "name": "write_workspace_text",
       "category": "workspace",
-      "source": "src/fleet_rlm/files/workspace_tools.py:WorkspaceToolHost",
+      "source": "src/fleet_rlm/workspace/workspace.py:WorkspaceToolHost",
       "description": "Write UTF-8 text immediately into this Session's durable Workspace when the result must survive the Run; this durability is independent of Turn Commit.",
       "argument_schema": {
         "type": "object",
@@ -2530,7 +2530,7 @@
         "omits": [
           "content"
         ],
-        "source": "src/fleet_rlm/files/workspace_tools.py:WorkspaceToolHost.event_views"
+        "source": "src/fleet_rlm/workspace/workspace.py:WorkspaceToolHost.event_views"
       }
     }
   ]

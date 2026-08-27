@@ -6,14 +6,16 @@ from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 if TYPE_CHECKING:
-    from fleet_rlm.files.url_tool import UrlFetchResult
+    from fleet_rlm.workspace.url import UrlFetchResult
 
 import dspy
 from fastapi import FastAPI
 
+from fleet_rlm.attachments.lifecycle import AttachmentLifecycle
+from fleet_rlm.attachments.models import PreparedAttachments
 from fleet_rlm.chat.capability_preparation import PreparedHostCapabilities, prepare_host_capabilities
 from fleet_rlm.chat.preparation import (
     DefaultRunPreparer,
@@ -34,13 +36,11 @@ from fleet_rlm.composition.inventory import (
     install_runtime_inventory,
 )
 from fleet_rlm.config import Settings
-from fleet_rlm.files.lifecycle import AttachmentLifecycle
-from fleet_rlm.files.models import PreparedAttachments
-from fleet_rlm.files.workspace_models import UNAVAILABLE_WORKSPACE_CAPABILITY
 from fleet_rlm.rlm.program import FleetRLMSignature, RLMModelBundle, RLMOptions
 from fleet_rlm.rlm.recursion import RecursiveRLMOptions
 from fleet_rlm.rlm.session_runtime import SessionRLMRegistry
 from fleet_rlm.skills.catalog import SkillCatalog, build_bundled_skill_catalog
+from fleet_rlm.workspace.models import UNAVAILABLE_WORKSPACE_CAPABILITY
 
 
 class TestingLM:
@@ -99,12 +99,23 @@ class _TestingVolumeFsAdapter:
     def __init__(self, sink: TestingRunSink) -> None:
         self._sink = sink
 
-    def write_bytes(self, logical_path: str, data: bytes) -> None:
+    def write_bytes(self, logical_path: str, data: bytes, *, max_bytes: int | None = None) -> None:
+        if max_bytes is not None and len(data) > max_bytes:
+            raise ValueError("volume value exceeds its byte bound")
         self._sink.values[logical_path] = bytes(data)
 
-    def read_bytes(self, logical_path: str, *, use_cache: bool = True) -> bytes:
+    def read_bytes(
+        self,
+        logical_path: str,
+        *,
+        max_bytes: int | None = None,
+        use_cache: bool = True,
+    ) -> bytes:
         del use_cache
-        return self._sink.values[logical_path]
+        value = self._sink.values[logical_path]
+        if max_bytes is not None and len(value) > max_bytes:
+            raise ValueError("volume value exceeds its byte bound")
+        return value
 
     def exists(self, logical_path: str) -> bool:
         return logical_path in self._sink.values
@@ -128,7 +139,7 @@ class _TestingCacheOnlyUrlFetcher:
     """Deterministic cache-only fetcher: private tests never open the network."""
 
     def fetch(self, url: str, *, max_bytes: int) -> UrlFetchResult:
-        from fleet_rlm.files.url_tool import UrlToolError
+        from fleet_rlm.workspace.url import UrlToolError
 
         del url, max_bytes
         raise UrlToolError(
@@ -148,7 +159,7 @@ class TestingCapabilityPreparer:
         max_url_bytes: int = 10 * 1024 * 1024,
     ) -> None:
         """Initialize a testing capability preparer with configured source limits."""
-        from fleet_rlm.files.url_tool import InMemoryUrlSourceStore
+        from fleet_rlm.workspace.url import InMemoryUrlSourceStore
 
         del models, options
         self._skill_catalog = skill_catalog
@@ -165,34 +176,20 @@ class TestingCapabilityPreparer:
         deadline: float,
     ) -> PreparedHostCapabilities:
         """Prepare host capabilities for one turn within the execution deadline."""
-        from fleet_rlm.files.tools import FileToolHost
-        from fleet_rlm.files.url_tool import UrlToolHost
+        from fleet_rlm.attachments.tools import AttachmentToolHost
+        from fleet_rlm.workspace.url import UrlToolHost
 
         sink = environment.attachment_sink
         if not isinstance(sink, TestingRunSink):
             raise TypeError("testing capabilities require the testing run sink")
         volume_fs = _TestingVolumeFsAdapter(sink)
-        file_host = FileToolHost(
+        attachment_host = AttachmentToolHost(
             attachments=attachments.refs,
             staged_attachments=attachments.staged,
             volume_fs=volume_fs,
-            user_id=run.access.user_id,
-            workspace_id=run.access.workspace_id,
-            session_id=run.session_id,
-            run_id=run.run_id,
-            max_artifact_bytes=self._max_artifact_bytes,
-            volume_paths=None,
         )
-        file_tools = tuple(
-            tool
-            for tool in file_host.as_tools()
-            if str(tool.name) not in {"create_artifact", "publish_workspace_artifact"}
-        )
-        file_event_views = {
-            name: view
-            for name, view in file_host.event_views().items()
-            if name not in {"create_artifact", "publish_workspace_artifact"}
-        }
+        attachment_tools = attachment_host.as_tools()
+        attachment_event_views = dict(attachment_host.event_views())
         url_host = UrlToolHost(
             session_id=run.session_id,
             store=self._url_store,
@@ -204,14 +201,14 @@ class TestingCapabilityPreparer:
         spec, skill_host, notices = await prepare_host_capabilities(
             turn=run,
             skill_catalog=self._skill_catalog,
-            base_tools=(*file_tools, *url_tools),
-            base_event_views={**file_event_views, **url_event_views},
+            base_tools=(*attachment_tools, *url_tools),
+            base_event_views={**attachment_event_views, **url_event_views},
             workspace=UNAVAILABLE_WORKSPACE_CAPABILITY,
             deadline=deadline,
         )
         return PreparedHostCapabilities(
             spec,
-            files=file_host,
+            files=attachment_host,
             skills=skill_host,
             close_files=False,
             artifact_candidates=False,
@@ -283,13 +280,13 @@ def install_testing_composition(
 ) -> RuntimeInventory:
     """Install credential-free deterministic adapters for a test lifespan."""
     from fleet_rlm.artifacts.workspace_storage import WorkspaceArtifactBlobGateway
-    from fleet_rlm.files.host_volume import HostVolumeMirror, OfflineHostVolumeGateway
-    from fleet_rlm.files.local_catalog import (
+    from fleet_rlm.attachments.local_catalog import (
         WorkspaceAttachmentBlobGateway,
     )
-    from fleet_rlm.files.paths import WorkspaceAttachmentPathPolicy
-    from fleet_rlm.files.volume_paths import volume_paths_from_settings
-    from fleet_rlm.files.workspace_access import (
+    from fleet_rlm.attachments.paths import WorkspaceAttachmentPathPolicy
+    from fleet_rlm.workspace.paths import volume_paths_from_settings
+    from fleet_rlm.workspace.storage import HostVolumeMirror, OfflineHostVolumeGateway
+    from fleet_rlm.workspace.workspace import (
         HostWorkspaceAccessGateway,
         WorkspaceFileService,
     )
@@ -308,7 +305,7 @@ def install_testing_composition(
         volume_paths=mirror.volume_paths,
         sql_attachment_blobs=WorkspaceAttachmentBlobGateway(volume_gateway),
         sql_attachment_paths=WorkspaceAttachmentPathPolicy(mirror.volume_paths),
-        sql_artifact_blobs=WorkspaceArtifactBlobGateway(volume_gateway),
+        sql_artifact_blobs=WorkspaceArtifactBlobGateway(cast(Any, volume_gateway)),
     )
     local_inventory = build_local_inventory(
         settings,
@@ -333,9 +330,12 @@ def install_testing_composition(
         local_inventory,
         workspace_volume_gateway=volume_gateway,
         workspace_file_service=WorkspaceFileService(
-            HostWorkspaceAccessGateway(
-                Path(settings.data_root) / "workspace-files",
-                max_file_bytes=settings.max_upload_bytes,
+            cast(
+                Any,
+                HostWorkspaceAccessGateway(
+                    Path(settings.data_root) / "workspace-files",
+                    max_file_bytes=settings.max_upload_bytes,
+                ),
             )
         ),
     )

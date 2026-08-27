@@ -126,7 +126,7 @@ def test_volume_tree_is_not_truncated_when_file_count_equals_requested_limit(tmp
 
 def test_volume_tree_rejects_noncanonical_root_and_provider_path_leaks(tmp_path: Path) -> None:
     from fleet_rlm.api.dependencies import get_workspace_volume_gateway
-    from fleet_rlm.files.volume_storage import VolumeFile
+    from fleet_rlm.workspace.storage import VolumeFile
 
     app = create_testing_app(settings=Settings(run_environment="daytona", data_root=str(tmp_path)))
 

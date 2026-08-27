@@ -29,8 +29,8 @@ from dotenv import load_dotenv
 from fleet_rlm.chat.run_cleanup import RunCleanupSupervisor
 from fleet_rlm.chat.run_lifecycle import ClaimedRun, _RunClaimToken
 from fleet_rlm.chat.session_context import SessionContextManifest
+from fleet_rlm.composition.daytona_environment import DaytonaRuntimeResources, _DaytonaEnvironmentProvider
 from fleet_rlm.config import Settings, load_runtime_settings
-from fleet_rlm.daytona.run_environment import DaytonaRuntimeResources, _DaytonaEnvironmentProvider
 from fleet_rlm.rlm.program import (
     FleetRLMSignature,
     RLMModelBundle,

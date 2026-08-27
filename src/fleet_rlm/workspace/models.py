@@ -1,34 +1,4 @@
-"""Runtime-neutral Workspace Memory values and storage port.
-
-Canonical storage is the volume file ``memory/MEMORIES.md`` (migrated on first
-open from the legacy root ``MEMORIES.md``). The file is a human-browsable log:
-
-- an optional first header line ``# Fleet Memory v2`` marks the migrated store
-  (the header line is exempt from record validation), and
-- each following line is one record in the canonical v1, v2, or v3 shape::
-
-      - [ISO-UTC] **Category**: one-line learning                      (v1)
-      - [ISO-UTC] **Category** <!-- id:8hex -->: one-line learning     (v2)
-
-Provenance-aware v3 records keep that shape while adding fixed-order
-``id/source/updated`` metadata and optional ``supersedes`` metadata. Legacy
-v1/v2 rows project as ``legacy_unknown`` with ``updated_at`` falling back to
-creation time; normal explicit-user writes become v3 while historical v1/v2 remain human-editable.
-
-New explicit-user appends write provenance-aware v3 records. The stable ``id`` is
-``sha256(record-without-id)[:8]`` computed over the v1 text
-``- [ts] **Category**: learning`` (without the trailing newline) at creation;
-edits preserve both the id and the timestamp, so validators check the id's
-*shape* (exactly 8 lowercase hex digits), never a content hash.
-Legacy v1 rows receive that same deterministic id when read, so every listed
-entry is addressable; editing a v1/v2 row upgrades it to v3 while preserving the
-synthesized id and original timestamp.
-
-Humans edit this file, so reads are *tolerant*: malformed lines are skipped
-with a bounded warning count instead of poisoning the whole read. Writes stay
-strict: :func:`validate_workspace_memory_record` rejects anything outside the
-v1/v2/v3 shapes.
-"""
+"""Domain values and port for the durable Session Workspace."""
 
 from __future__ import annotations
 
@@ -37,6 +7,100 @@ import re
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from typing import Literal, Protocol
+
+from fleet_rlm.runtime.errors import WorkspaceConflictError
+
+
+@dataclass(frozen=True, slots=True)
+class WorkspaceEntry:
+    path: str
+    kind: Literal["file", "directory"]
+    byte_size: int | None
+    modified_at: str | None
+    checksum_sha256: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class WorkspaceListResult:
+    entries: tuple[WorkspaceEntry, ...]
+    truncated: bool = False
+    next_cursor: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class WorkspaceTextPage:
+    content: str
+    next_cursor: str | None
+    byte_size: int
+    eof: bool
+
+
+@dataclass(frozen=True, slots=True)
+class WorkspaceCapabilityMetadata:
+    available: bool
+    root: str
+    instructions: str
+
+
+DAYTONA_WORKSPACE_CAPABILITY = WorkspaceCapabilityMetadata(
+    available=True,
+    root=".",
+    instructions=(
+        "REPL variables and sandbox-local files are temporary to the Run. Session Workspace tool writes are "
+        "immediately durable independently of Turn success. Artifact Candidates are promoted only by a "
+        "successful Turn Commit. Use Workspace tools only when durable state is relevant."
+    ),
+)
+
+UNAVAILABLE_WORKSPACE_CAPABILITY = WorkspaceCapabilityMetadata(
+    available=False,
+    root=".",
+    instructions=(
+        "Session Workspace is unavailable. REPL variables and sandbox-local files are temporary to the Run; "
+        "no durable Workspace or Turn Commit artifact workflow is available."
+    ),
+)
+
+
+class SessionWorkspaceFS(Protocol):
+    def list_entries(
+        self,
+        path: str,
+        *,
+        limit: int = 100,
+        after: str | None = None,
+    ) -> WorkspaceListResult: ...
+
+    def stat(self, path: str) -> WorkspaceEntry | None: ...
+
+    def read_text_page(
+        self,
+        path: str,
+        *,
+        cursor: str | None,
+        max_chars: int,
+        max_bytes: int,
+    ) -> WorkspaceTextPage: ...
+
+    def write_text(self, path: str, content: str, *, overwrite: bool) -> WorkspaceEntry: ...
+
+    def append_text(self, path: str, content: str) -> WorkspaceEntry: ...
+
+    def delete_path(self, path: str, *, expected_sha256: str | None = None) -> None: ...
+
+    def patch_text(
+        self,
+        path: str,
+        old: str,
+        new: str,
+        *,
+        expected_sha256: str | None = None,
+    ) -> WorkspaceEntry: ...
+
+
+# ---------------------------------------------------------------------------
+# Workspace Memory values
+# ---------------------------------------------------------------------------
 
 WORKSPACE_MEMORY_BYTE_BUDGET = 262_144
 WORKSPACE_MEMORY_MAX_RECORD_BYTES = 4_096
@@ -467,27 +531,162 @@ class WorkspaceMemoryConflictError(WorkspaceMemoryStoreUnavailableError):
         self.detail = detail
 
 
-class WorkspaceMemoryStore(Protocol):
-    """Runtime-neutral durable Workspace Memory boundary."""
+# ---------------------------------------------------------------------------
+# Run-scoped candidate and outbox values
+# ---------------------------------------------------------------------------
 
-    def read_tail(self, *, byte_budget: int) -> WorkspaceMemoryReadResult: ...
+WORKSPACE_MEMORY_CANDIDATE_NAMESPACE = "workspace_memory"
+WORKSPACE_MEMORY_CANDIDATE_SOURCE: Literal["agent_candidate"] = "agent_candidate"
+WORKSPACE_MEMORY_CANDIDATE_MAX_COUNT = 16
+# Preserve enough canonical-record envelope for the maximum category, source,
+# timestamps, candidate ID, and supersession metadata during promotion.
+WORKSPACE_MEMORY_CANDIDATE_ENVELOPE_RESERVE_BYTES = 192
+WORKSPACE_MEMORY_CANDIDATE_MAX_LEARNING_BYTES = (
+    WORKSPACE_MEMORY_MAX_RECORD_BYTES - WORKSPACE_MEMORY_CANDIDATE_ENVELOPE_RESERVE_BYTES
+)
+WORKSPACE_MEMORY_CANDIDATE_MAX_TOTAL_BYTES = 16_384
+WORKSPACE_MEMORY_CANDIDATE_MAX_CATEGORIES = 16
 
-    def append_record(self, record: str) -> WorkspaceMemoryAppendResult: ...
 
-    def list_entries(
-        self,
-        *,
-        after: str | None = None,
-        limit: int,
-        category: str | None = None,
-    ) -> WorkspaceMemoryListResult: ...
+@dataclass(frozen=True, slots=True)
+class MemoryCandidate:
+    """One immutable proposal owned by one live Run."""
 
-    def delete_entry(self, memory_id: str) -> bool: ...
+    candidate_id: str
+    category: str
+    learning: str
+    byte_size: int
+    supersedes_id: str | None = None
+    source: Literal["agent_candidate"] = WORKSPACE_MEMORY_CANDIDATE_SOURCE
 
-    def edit_entry(
-        self,
-        memory_id: str,
-        key_learning: str,
-        *,
-        category: str | None = None,
-    ) -> str: ...
+
+@dataclass(frozen=True, slots=True)
+class MemoryCandidatePromotionResult:
+    """Bounded operational outcome for one post-commit promotion batch."""
+
+    proposed_count: int = 0
+    promoted_count: int = 0
+    duplicate_count: int = 0
+    dropped_count: int = 0
+    failure_count: int = 0
+    candidate_bytes: int = 0
+    reasons: tuple[str, ...] = ()
+
+
+# Closed outbox outcome vocabulary. These are shared by the domain,
+# persistence facade, and post-commit path; values are host diagnostics only.
+OUTCOME_PROMOTED = "promoted"
+OUTCOME_DUPLICATE = "duplicate"
+OUTCOME_POLICY_DENIED = "policy_denied"
+OUTCOME_SUPERSEDES_NOT_ACTIVE = "supersedes_not_active"
+OUTCOME_MEMORY_ID_COLLISION = "memory_id_collision"
+OUTCOME_STORE_UNAVAILABLE = "store_unavailable"
+OUTCOME_PROMOTION_FAILED = "promotion_failed"
+OUTCOME_DEADLINE_EXCEEDED = "deadline_exceeded"
+OUTCOME_INTERRUPTED = "interrupted"
+TERMINAL_OUTCOMES = frozenset(
+    {
+        OUTCOME_POLICY_DENIED,
+        OUTCOME_SUPERSEDES_NOT_ACTIVE,
+        OUTCOME_MEMORY_ID_COLLISION,
+    }
+)
+
+
+@dataclass(frozen=True, slots=True)
+class MemoryPromotionIntent:
+    """Pinned commit-gated promotion effect for one Memory candidate.
+
+    ``record_text`` is minted before Turn Commit. Replaying this exact text
+    lets the storage adapter converge on the same durable id without changing
+    the domain decision.
+    """
+
+    candidate_id: str
+    candidate_ordinal: int
+    category: str
+    learning: str
+    byte_size: int
+    supersedes_id: str | None
+    memory_id: str
+    record_text: str
+    source: str = WORKSPACE_MEMORY_CANDIDATE_SOURCE
+
+
+@dataclass(frozen=True, slots=True)
+class MemoryOutboxReconcileReceipt:
+    """One bounded outbox drain outcome (counts only; no Memory content)."""
+
+    claimed: int = 0
+    promoted: int = 0
+    dropped: int = 0
+    retried: int = 0
+    dead_lettered: int = 0
+    workspaces: int = 0
+    provider_unavailable: bool = False
+
+
+__all__ = [
+    "DAYTONA_WORKSPACE_CAPABILITY",
+    "OUTCOME_DEADLINE_EXCEEDED",
+    "OUTCOME_DUPLICATE",
+    "OUTCOME_INTERRUPTED",
+    "OUTCOME_MEMORY_ID_COLLISION",
+    "OUTCOME_POLICY_DENIED",
+    "OUTCOME_PROMOTED",
+    "OUTCOME_PROMOTION_FAILED",
+    "OUTCOME_STORE_UNAVAILABLE",
+    "OUTCOME_SUPERSEDES_NOT_ACTIVE",
+    "TERMINAL_OUTCOMES",
+    "UNAVAILABLE_WORKSPACE_CAPABILITY",
+    # Memory constants and values
+    "WORKSPACE_MEMORY_BYTE_BUDGET",
+    "WORKSPACE_MEMORY_CANDIDATE_ENVELOPE_RESERVE_BYTES",
+    "WORKSPACE_MEMORY_CANDIDATE_MAX_CATEGORIES",
+    "WORKSPACE_MEMORY_CANDIDATE_MAX_COUNT",
+    "WORKSPACE_MEMORY_CANDIDATE_MAX_LEARNING_BYTES",
+    "WORKSPACE_MEMORY_CANDIDATE_MAX_TOTAL_BYTES",
+    # Candidate / outbox values
+    "WORKSPACE_MEMORY_CANDIDATE_NAMESPACE",
+    "WORKSPACE_MEMORY_CANDIDATE_SOURCE",
+    "WORKSPACE_MEMORY_HEADER",
+    "WORKSPACE_MEMORY_INJECTION_TAIL_BYTES",
+    "WORKSPACE_MEMORY_MAX_LIST_LIMIT",
+    "WORKSPACE_MEMORY_MAX_RECORD_BYTES",
+    "WORKSPACE_MEMORY_MAX_WARNINGS",
+    "MemoryCandidate",
+    "MemoryCandidatePromotionResult",
+    "MemoryOutboxReconcileReceipt",
+    "MemoryPromotionIntent",
+    "SessionWorkspaceFS",
+    "WorkspaceCapabilityMetadata",
+    # Workspace values
+    "WorkspaceConflictError",
+    "WorkspaceEntry",
+    "WorkspaceListResult",
+    "WorkspaceMemoryAppendResult",
+    "WorkspaceMemoryCategoryError",
+    "WorkspaceMemoryConflictError",
+    "WorkspaceMemoryEntry",
+    "WorkspaceMemoryEntryNotFoundError",
+    "WorkspaceMemoryIdError",
+    "WorkspaceMemoryListResult",
+    "WorkspaceMemoryParsedLine",
+    "WorkspaceMemoryReadResult",
+    "WorkspaceMemoryRecordError",
+    "WorkspaceMemorySource",
+    "WorkspaceMemoryStoreFullError",
+    "WorkspaceMemoryStoreUnavailableError",
+    "WorkspaceTextPage",
+    "count_workspace_memory_warnings",
+    "format_workspace_memory_record",
+    "format_workspace_memory_v3_record",
+    "normalize_workspace_memory_category",
+    "normalize_workspace_memory_id",
+    "normalize_workspace_memory_learning",
+    "normalize_workspace_memory_source",
+    "parse_workspace_memory_lines",
+    "parse_workspace_memory_record",
+    "validate_workspace_memory_record",
+    "workspace_memory_record_id",
+]

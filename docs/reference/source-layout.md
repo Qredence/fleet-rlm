@@ -6,8 +6,9 @@ src/fleet_rlm/
 ├── artifacts/      # candidates, validation, persistent/local stores
 ├── chat/           # Turn context, coordination, and claim policy
 ├── cli/            # supervised TUI/backend launchers and Daytona doctor
-├── daytona/        # Daytona resources, adapters, and Workspace agent
-├── files/          # Attachment upload, staging, host tools
+├── daytona/        # Daytona resources, provider adapters, and transport
+├── attachments/    # Attachment models, lifecycle, storage, and host tools
+├── workspace/      # Workspace, Projects, Memory, URL, and storage domains
 ├── observability/  # failure diagnostics + opt-in MLflow tracing
 ├── optimization/   # trusted-host GEPA/evidence lane
 ├── persistence/    # SQLAlchemy models and repository adapters
@@ -21,6 +22,7 @@ src/fleet_rlm/
 ├── config_policy.py # loopback non-secret policy editor
 ├── json_types.py   # closed JsonScalar/JsonValue contract
 ├── main.py         # ASGI entrypoint
+├── paths.py        # provider-neutral Volume layout and path identity primitives
 ├── result_snapshot.py # private commit-gated typed-result encoding
 └── snapshot_contract.py # immutable Daytona Snapshot name policy
 ```

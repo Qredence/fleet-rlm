@@ -88,12 +88,17 @@ def test_generic_runtime_modules_do_not_import_daytona_implementations() -> None
     root = Path("src/fleet_rlm")
     candidates = [
         path
-        for package in ("chat", "files", "artifacts", "runtime", "skills")
+        for package in ("chat", "artifacts", "runtime", "skills", "workspace", "attachments")
         for path in (root / package).glob("*.py")
     ]
     candidates.append(root / "composition" / "testing.py")
 
-    violations = [str(path) for path in candidates if "fleet_rlm.daytona" in path.read_text(encoding="utf-8")]
+    # ``workspace/storage.py`` is the one documented raw Workspace Agent
+    # transport exception; all other provider imports stay below composition.
+    storage = root / "workspace" / "storage.py"
+    violations = [
+        str(path) for path in candidates if path != storage and "fleet_rlm.daytona" in path.read_text(encoding="utf-8")
+    ]
 
     assert violations == []
 

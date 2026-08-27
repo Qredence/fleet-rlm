@@ -7,9 +7,9 @@ from collections.abc import Sequence
 from pathlib import Path
 from uuid import UUID
 
-from fleet_rlm.files.errors import AttachmentNotFoundError
-from fleet_rlm.files.lifecycle import StoredAttachment
-from fleet_rlm.files.models import AttachmentAccess, AttachmentRef
+from fleet_rlm.attachments.errors import AttachmentNotFoundError
+from fleet_rlm.attachments.lifecycle import StoredAttachment
+from fleet_rlm.attachments.models import AttachmentAccess, AttachmentRef
 
 
 class LocalAttachmentBlobGateway:

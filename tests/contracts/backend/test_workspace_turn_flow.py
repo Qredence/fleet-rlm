@@ -11,22 +11,6 @@ import dspy
 import pytest
 
 from fleet_rlm.chat.session_context import SessionContextManifest
-from fleet_rlm.files.memory_models import (
-    WorkspaceMemoryAppendResult,
-    WorkspaceMemoryEntryNotFoundError,
-    WorkspaceMemoryListResult,
-    WorkspaceMemoryReadResult,
-    format_workspace_memory_v3_record,
-    parse_workspace_memory_lines,
-)
-from fleet_rlm.files.memory_tools import WorkspaceMemoryToolHost
-from fleet_rlm.files.workspace_models import (
-    DAYTONA_WORKSPACE_CAPABILITY,
-    WorkspaceEntry,
-    WorkspaceListResult,
-    WorkspaceTextPage,
-)
-from fleet_rlm.files.workspace_tools import WorkspaceToolError, WorkspaceToolHost
 from fleet_rlm.rlm.events import RuntimeEvent
 from fleet_rlm.rlm.program import RLMOptions
 from fleet_rlm.rlm.result import RunCancelledError
@@ -39,6 +23,20 @@ from fleet_rlm.rlm.runtime import (
     SessionView,
 )
 from fleet_rlm.sessions.models import TurnAccess
+from fleet_rlm.workspace.memory import WorkspaceMemoryToolHost
+from fleet_rlm.workspace.models import (
+    DAYTONA_WORKSPACE_CAPABILITY,
+    WorkspaceEntry,
+    WorkspaceListResult,
+    WorkspaceMemoryAppendResult,
+    WorkspaceMemoryEntryNotFoundError,
+    WorkspaceMemoryListResult,
+    WorkspaceMemoryReadResult,
+    WorkspaceTextPage,
+    format_workspace_memory_v3_record,
+    parse_workspace_memory_lines,
+)
+from fleet_rlm.workspace.workspace import WorkspaceToolError, WorkspaceToolHost
 
 
 class MemoryStore:

@@ -9,13 +9,13 @@ from dataclasses import dataclass
 from typing import Protocol
 from uuid import UUID, uuid4
 
-from fleet_rlm.files.errors import (
+from fleet_rlm.attachments.errors import (
     AttachmentError,
     AttachmentIntegrityError,
     AttachmentStorageError,
     AttachmentValidationError,
 )
-from fleet_rlm.files.models import (
+from fleet_rlm.attachments.models import (
     AttachmentAccess,
     AttachmentRef,
     AttachmentRun,
@@ -24,7 +24,7 @@ from fleet_rlm.files.models import (
     RunAttachmentSink,
     StagedAttachment,
 )
-from fleet_rlm.files.safety import sanitize_filename, validate_upload_size
+from fleet_rlm.attachments.safety import sanitize_filename, validate_upload_size
 
 
 @dataclass(frozen=True, slots=True)

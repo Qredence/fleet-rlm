@@ -8,11 +8,11 @@ from uuid import uuid4
 
 import pytest
 
+from fleet_rlm.composition.daytona_environment import _DaytonaEnvironmentProvider, _ResidentRootLease
 from fleet_rlm.config import Settings
 from fleet_rlm.daytona.admission import DaytonaAdmission
-from fleet_rlm.daytona.run_environment import _DaytonaEnvironmentProvider, _ResidentRootLease
-from fleet_rlm.files.volume_paths import volume_paths_from_settings
 from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
+from fleet_rlm.workspace.paths import volume_paths_from_settings
 
 
 def _turn(*, session_id=None, workspace_id=None, attachment_ids=(), skill_selections=()):
@@ -78,8 +78,8 @@ class _Platform:
 
 
 def _provider(monkeypatch: pytest.MonkeyPatch):
-    import fleet_rlm.daytona.run_environment as module
-    import fleet_rlm.daytona.workspace_memory as workspace_memory
+    import fleet_rlm.composition.daytona_environment as module
+    import fleet_rlm.workspace.memory as workspace_memory
 
     manager = _SessionManager()
     platform = _Platform()

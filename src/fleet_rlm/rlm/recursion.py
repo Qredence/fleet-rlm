@@ -22,8 +22,6 @@ from typing import Any, Literal, NoReturn, Protocol, Self, TypeAlias
 import dspy
 
 from fleet_rlm.chat.session_context import SessionContextManifest
-from fleet_rlm.files.memory_models import WORKSPACE_MEMORY_INJECTION_TAIL_BYTES
-from fleet_rlm.files.workspace_models import WorkspaceCapabilityMetadata
 from fleet_rlm.observability.failure_diagnostics import trace_failure_category
 from fleet_rlm.observability.turn_tracing import start_turn_span
 from fleet_rlm.rlm._dspy_compat import CodeInterpreter, _RLMTraceCallback
@@ -36,6 +34,7 @@ from fleet_rlm.rlm.program import (
 )
 from fleet_rlm.rlm.result import RLMConfigError, prediction_result, rlm_termination_mode
 from fleet_rlm.sessions.history_transport import CommittedSessionHistory
+from fleet_rlm.workspace.models import WORKSPACE_MEMORY_INJECTION_TAIL_BYTES, WorkspaceCapabilityMetadata
 
 # ---------------------------------------------------------------------------
 # Provider-neutral child-runtime protocol

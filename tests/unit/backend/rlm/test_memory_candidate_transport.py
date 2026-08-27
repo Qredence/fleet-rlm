@@ -52,8 +52,8 @@ def _context(*, drain_calls: list[int], returned_candidates=(), cancelled: bool 
 
 @pytest.mark.asyncio
 async def test_runner_attaches_drained_memory_candidates_only_to_completed_outcome() -> None:
-    from fleet_rlm.files.memory_candidates import MemoryCandidate
     from fleet_rlm.rlm.runtime import RLMRunner
+    from fleet_rlm.workspace.memory import MemoryCandidate
 
     candidate = MemoryCandidate(candidate_id="cand00000001", category="Project", learning="durable", byte_size=7)
 
@@ -96,8 +96,8 @@ async def test_runner_discards_memory_candidates_on_execution_failure() -> None:
 
 
 def test_non_completed_outcome_rejects_memory_candidates() -> None:
-    from fleet_rlm.files.memory_candidates import MemoryCandidate
     from fleet_rlm.rlm.result import RLMOutcome
+    from fleet_rlm.workspace.memory import MemoryCandidate
 
     candidate = MemoryCandidate(candidate_id="cand00000001", category="Project", learning="durable", byte_size=7)
 
@@ -112,8 +112,8 @@ def test_non_completed_outcome_rejects_memory_candidates() -> None:
 
 @pytest.mark.asyncio
 async def test_runner_discards_memory_candidates_when_execution_is_cancelled() -> None:
-    from fleet_rlm.files.memory_candidates import MemoryCandidate
     from fleet_rlm.rlm.runtime import RLMRunner
+    from fleet_rlm.workspace.memory import MemoryCandidate
 
     candidate = MemoryCandidate(candidate_id="cand00000001", category="Project", learning="durable", byte_size=7)
     drains: list[int] = []

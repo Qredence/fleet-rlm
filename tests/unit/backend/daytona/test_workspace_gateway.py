@@ -10,8 +10,8 @@ from uuid import uuid4
 
 import pytest
 
+from fleet_rlm.composition.daytona_workspace import DaytonaWorkspaceGateway, DaytonaWorkspaceVolumeGateway
 from fleet_rlm.daytona.provisioning import DaytonaSandboxSpec, VolumeConfig
-from fleet_rlm.daytona.workspace_gateway import DaytonaWorkspaceGateway, DaytonaWorkspaceVolumeGateway
 
 _SPEC = DaytonaSandboxSpec("fleet-test-v1")
 
@@ -129,7 +129,7 @@ async def test_mounted_gateway_creates_and_deletes_exactly_one_ephemeral_sandbox
 async def test_mounted_gateway_cancels_delete_that_exceeds_grace_period(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import fleet_rlm.daytona.workspace_gateway as workspace_gateway
+    import fleet_rlm.composition.daytona_workspace as workspace_gateway
 
     platform = _Platform()
     delete_started = asyncio.Event()
@@ -184,8 +184,8 @@ class _LocalProcess:
 
 
 def _workspace_session(root: Path):
-    from fleet_rlm.daytona.workspace_fs import AsyncDaytonaSessionWorkspaceFS
-    from fleet_rlm.daytona.workspace_gateway import _DaytonaWorkspaceFileSession
+    from fleet_rlm.composition.daytona_workspace import _DaytonaWorkspaceFileSession
+    from fleet_rlm.workspace.storage import AsyncDaytonaSessionWorkspaceFS
 
     process = _LocalProcess()
     workspace = AsyncDaytonaSessionWorkspaceFS(
@@ -259,7 +259,7 @@ async def test_delete_and_patch_run_agent_side_in_one_round_trip(tmp_path: Path)
 
 @pytest.mark.asyncio
 async def test_delete_and_patch_conflicts_surface_as_public_conflict_error(tmp_path: Path) -> None:
-    from fleet_rlm.files.workspace_models import WorkspaceConflictError
+    from fleet_rlm.workspace.models import WorkspaceConflictError
 
     root = tmp_path / "volume" / "sessions" / "session" / "workspace"
     root.mkdir(parents=True)

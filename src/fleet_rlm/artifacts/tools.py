@@ -1,8 +1,7 @@
-"""Host-mediated attachment and artifact tools for dspy.RLM."""
+"""Host-mediated Artifact Candidate tools for :class:`dspy.RLM`."""
 
 from __future__ import annotations
 
-import base64
 import hashlib
 import hmac
 from collections.abc import Mapping
@@ -21,11 +20,10 @@ from fleet_rlm.artifacts.safety import (
     sanitize_title,
     validate_content_size,
 )
-from fleet_rlm.files.models import AttachmentRef, StagedAttachment
-from fleet_rlm.files.volume_paths import VolumePaths, as_posix
-from fleet_rlm.files.volume_storage import VolumeBlobFs
-from fleet_rlm.files.workspace_validation import normalize_workspace_path
-from fleet_rlm.rlm.events import JsonValue, ToolEventView, bound_event_text
+from fleet_rlm.json_types import JsonValue
+from fleet_rlm.tool_events import ToolEventView, bound_event_text
+from fleet_rlm.workspace.paths import VolumePaths, as_posix, normalize_workspace_path
+from fleet_rlm.workspace.storage import VolumeBlobFs
 
 _EVENT_TEXT_MAX_CHARS = 256
 
@@ -43,14 +41,16 @@ def _project_fields(result: object, fields: tuple[str, ...]) -> JsonValue:
     }
 
 
-class FileToolHost:
-    """Bound file tools for one turn: reauthorize every call; track safe public events."""
+class ArtifactToolHost:
+    """Bound Artifact Candidate tools for one Run.
+
+    This host owns only candidate validation, staging, and cleanup.  Durable
+    Artifact publication remains exclusively in ``RunLifecycle.finish``.
+    """
 
     def __init__(
         self,
         *,
-        attachments: tuple[AttachmentRef, ...],
-        staged_attachments: tuple[StagedAttachment, ...],
         volume_fs: VolumeBlobFs,
         user_id: UUID,
         workspace_id: UUID,
@@ -59,8 +59,6 @@ class FileToolHost:
         max_artifact_bytes: int = 10 * 1024 * 1024,
         volume_paths: VolumePaths | None = None,
     ) -> None:
-        self._attachments = {ref.id: ref for ref in attachments}
-        self._staged = {item.attachment_id: item for item in staged_attachments}
         self._volume_fs = volume_fs
         self._user_id = user_id
         self._workspace_id = workspace_id
@@ -73,33 +71,10 @@ class FileToolHost:
         self._artifact_staging_paths: list[str] = []
 
     def drain_public_events(self) -> list[dict[str, Any]]:
-        """Return and clear ledger entries with ``event_kind`` + safe payload fields."""
+        """Return and clear bounded metadata-only artifact events."""
         events = list(self._pending_events)
         self._pending_events.clear()
         return events
-
-    def record_attachment_accesses(self, attachment_ids: tuple[str, ...]) -> None:
-        """Record sandbox-local verified reads without reading the body again."""
-        seen: set[UUID] = set()
-        for value in attachment_ids:
-            try:
-                attachment_id = UUID(str(value))
-            except (TypeError, ValueError, AttributeError):
-                continue
-            if attachment_id in seen:
-                continue
-            ref = self._attachments.get(attachment_id)
-            if ref is None or attachment_id not in self._staged:
-                continue
-            seen.add(attachment_id)
-            self._pending_events.append(
-                {
-                    "event_kind": "attachment.read",
-                    "attachment_id": str(ref.id),
-                    "filename": ref.filename,
-                    "byte_size": ref.byte_size,
-                }
-            )
 
     def drain_artifact_candidates(self) -> tuple[ArtifactCandidate, ...]:
         candidates = tuple(self._artifact_candidates)
@@ -116,59 +91,6 @@ class FileToolHost:
                 self._volume_fs.remove(staging_path)
             except Exception:
                 continue
-
-    def read_attachment(self, attachment_id: str) -> dict[str, Any]:
-        """Return attachment body after reauth. Public event omits content."""
-        try:
-            aid = UUID(str(attachment_id).strip())
-        except (ValueError, AttributeError, TypeError):
-            return {"ok": False, "error": "invalid_id"}
-        ref = self._attachments.get(aid)
-        staged = self._staged.get(aid)
-        if ref is None or staged is None:
-            return {"ok": False, "error": "not_found"}
-        try:
-            data = self._volume_fs.read_bytes(staged.sandbox_path, use_cache=False)
-            if (
-                not isinstance(ref.checksum_sha256, str)
-                or len(data) != ref.byte_size
-                or not hmac.compare_digest(hashlib.sha256(data).hexdigest(), ref.checksum_sha256.lower())
-            ):
-                return {"ok": False, "error": "not_found"}
-        except Exception:
-            return {"ok": False, "error": "not_found"}
-
-        self._pending_events.append(
-            {
-                "event_kind": "attachment.read",
-                "attachment_id": str(ref.id),
-                "filename": ref.filename,
-                "byte_size": ref.byte_size,
-            }
-        )
-
-        # Prefer UTF-8 text; binary as base64
-        try:
-            text = data.decode("utf-8")
-            if "\x00" in text:
-                raise UnicodeDecodeError("utf-8", data, 0, 1, "nul")
-            return {
-                "ok": True,
-                "attachment_id": str(ref.id),
-                "filename": ref.filename,
-                "content_type": ref.content_type,
-                "content": text,
-                "encoding": "utf-8",
-            }
-        except UnicodeDecodeError:
-            return {
-                "ok": True,
-                "attachment_id": str(ref.id),
-                "filename": ref.filename,
-                "content_type": ref.content_type,
-                "content_base64": base64.b64encode(data).decode("ascii"),
-                "encoding": "base64",
-            }
 
     def create_artifact(
         self,
@@ -234,7 +156,7 @@ class FileToolHost:
         title: str | None = None,
         expected_sha256: str | None = None,
     ) -> dict[str, Any]:
-        """Stage an existing Workspace file as a private Artifact Candidate."""
+        """Stage an existing Session Workspace file as a private candidate."""
         try:
             relative = normalize_workspace_path(path)
             parsed_kind = parse_kind(kind)
@@ -267,11 +189,7 @@ class FileToolHost:
             return {"ok": False, "error": "not_found"}
 
     def as_tools(self) -> tuple[dspy.Tool, ...]:
-        """Return the canonical typed Tools owned by this host."""
-
-        def read_attachment(attachment_id: str) -> dict[str, Any]:
-            """Read an authorized attachment by opaque ID (host rechecks every call)."""
-            return self.read_attachment(attachment_id)
+        """Return the two Artifact tools in their frozen registration order."""
 
         def create_artifact(
             kind: str,
@@ -292,14 +210,6 @@ class FileToolHost:
 
         return (
             dspy.Tool(
-                read_attachment,
-                name="read_attachment",
-                desc=(
-                    "Read one immutable authorized Attachment by opaque identity only when its advertised "
-                    "metadata is relevant to the current request."
-                ),
-            ),
-            dspy.Tool(
                 create_artifact,
                 name="create_artifact",
                 desc=(
@@ -318,10 +228,7 @@ class FileToolHost:
         )
 
     def event_views(self) -> Mapping[str, ToolEventView]:
-        """Return bounded public metadata projections for File Tools."""
-
-        def read_input(arguments: Mapping[str, Any]) -> JsonValue:
-            return {"attachment_id": bound_event_text(arguments.get("attachment_id"))}
+        """Return bounded metadata projections for Artifact tools."""
 
         def artifact_input(arguments: Mapping[str, Any]) -> JsonValue:
             content = arguments.get("content")
@@ -341,13 +248,6 @@ class FileToolHost:
 
         return MappingProxyType(
             {
-                "read_attachment": ToolEventView(
-                    input_projection=read_input,
-                    output_projection=lambda result: _project_fields(
-                        result,
-                        ("ok", "error", "attachment_id", "filename", "content_type", "encoding"),
-                    ),
-                ),
                 "create_artifact": ToolEventView(
                     input_projection=artifact_input,
                     output_projection=lambda result: _project_fields(
@@ -364,3 +264,6 @@ class FileToolHost:
                 ),
             }
         )
+
+
+__all__ = ["ArtifactToolHost"]

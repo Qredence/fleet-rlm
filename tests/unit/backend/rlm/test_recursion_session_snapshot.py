@@ -23,7 +23,6 @@ import pytest
 from fleet_rlm.chat.session_context import SessionContextManifest, TurnPreview
 from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend, sandbox_backend
 from fleet_rlm.daytona.recursive_child_runtime import ChildRuntimeLease
-from fleet_rlm.files.workspace_models import WorkspaceCapabilityMetadata
 from fleet_rlm.rlm.program import RLMModelBundle, build_rlm_input_kwargs, build_session_context_payload
 from fleet_rlm.rlm.recursion import (
     RecursiveRLMExecutor,
@@ -34,6 +33,7 @@ from fleet_rlm.rlm.recursion import (
     build_recursive_session_snapshot,
 )
 from fleet_rlm.sessions.history_transport import CommittedSessionHistory
+from fleet_rlm.workspace.models import WorkspaceCapabilityMetadata
 
 
 def _manifest() -> SessionContextManifest:

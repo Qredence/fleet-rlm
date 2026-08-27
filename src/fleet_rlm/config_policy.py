@@ -34,8 +34,8 @@ from fleet_rlm.config import (
     _validate_policy_table,
     config_field_specs,
 )
-from fleet_rlm.files.memory_candidates import normalize_memory_candidate_categories
-from fleet_rlm.files.memory_models import WorkspaceMemoryCategoryError
+from fleet_rlm.workspace.memory import normalize_memory_candidate_categories
+from fleet_rlm.workspace.models import WorkspaceMemoryCategoryError
 
 __all__ = [
     "ConfigPolicyService",

@@ -10,17 +10,17 @@ from fastapi import Depends, HTTPException, Request
 from fleet_rlm.api.errors import http_error
 from fleet_rlm.api.local_scope import LocalScope, get_local_scope
 from fleet_rlm.artifacts.reader import ArtifactReader
+from fleet_rlm.attachments.lifecycle import AttachmentLifecycle
 from fleet_rlm.chat.run_lifecycle import RunLifecycle
 from fleet_rlm.chat.turn_runtime import TurnRuntime
 from fleet_rlm.composition.inventory import RuntimeInventory, get_runtime_inventory
 from fleet_rlm.config import Settings
 from fleet_rlm.config_policy import ConfigPolicyService
-from fleet_rlm.files.lifecycle import AttachmentLifecycle
-from fleet_rlm.files.volume_storage import WorkspaceVolumeGateway
-from fleet_rlm.files.workspace_access import WorkspaceFileService
 from fleet_rlm.rlm.session_runtime import SessionRLMRegistry
 from fleet_rlm.sessions.catalog import SessionCatalog
 from fleet_rlm.skills.catalog import SkillCatalog
+from fleet_rlm.workspace.storage import WorkspaceVolumeGateway
+from fleet_rlm.workspace.workspace import WorkspaceFileService
 
 
 def require_loopback_client(request: Request) -> None:

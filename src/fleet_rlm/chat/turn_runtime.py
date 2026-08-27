@@ -18,7 +18,6 @@ from fleet_rlm.chat.preparation import (
     RunPreparationCancelledError,
     RunPreparationTimeoutError,
 )
-from fleet_rlm.chat.run_cleanup import RunCleanupSupervisor, RunCleanupUnavailableError
 from fleet_rlm.chat.run_lifecycle import (
     ClaimedRun,
     CommittedRunReplay,
@@ -52,6 +51,7 @@ from fleet_rlm.rlm.events import (
 )
 from fleet_rlm.rlm.result import RLMOutcome, RLMUsage, empty_rlm_usage
 from fleet_rlm.rlm.runtime import RLMExecutionContext
+from fleet_rlm.runtime.cleanup import RunCleanupSupervisor, RunCleanupUnavailableError
 
 logger = logging.getLogger(__name__)
 

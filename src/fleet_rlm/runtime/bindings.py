@@ -7,7 +7,7 @@ from datetime import datetime
 from typing import Protocol
 from uuid import UUID
 
-from fleet_rlm.files.volume_paths import DEFAULT_VOLUME_MOUNT_PATH
+from fleet_rlm.paths import DEFAULT_VOLUME_MOUNT_PATH
 
 _ZERO_UUID = UUID(int=0)
 

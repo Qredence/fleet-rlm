@@ -50,9 +50,9 @@ from fleet_rlm.config import Settings
 from fleet_rlm.daytona import recursive_child_runtime
 from fleet_rlm.daytona.broker import DaytonaHttpToolBroker
 from fleet_rlm.daytona.session_manager import get_active_lease_registry
-from fleet_rlm.files.volume_paths import volume_paths_from_settings
 from fleet_rlm.rlm.program import RLMModelBundle
 from fleet_rlm.runtime.bindings import workspace_volume_subpath
+from fleet_rlm.workspace.paths import volume_paths_from_settings
 from tests.live.backend._database import upgrade_to_head
 from tests.live.backend._p35d_evidence import candidate_identity
 from tests.live.backend._p39c_evidence import record_observed_sandbox_ids, write_lane_receipt

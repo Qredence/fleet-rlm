@@ -8,7 +8,8 @@ from datetime import UTC, datetime
 import dspy
 import pytest
 
-from fleet_rlm.files.memory_models import (
+from fleet_rlm.rlm.events import observe_tool
+from fleet_rlm.workspace.models import (
     WorkspaceMemoryAppendResult,
     WorkspaceMemoryEntry,
     WorkspaceMemoryEntryNotFoundError,
@@ -18,7 +19,6 @@ from fleet_rlm.files.memory_models import (
     WorkspaceMemoryStoreUnavailableError,
     workspace_memory_record_id,
 )
-from fleet_rlm.rlm.events import observe_tool
 
 STAMP = datetime(2026, 7, 27, 11, 14, 5, tzinfo=UTC)
 # Deterministic golden v2 record for STAMP + "User Preference"; id =
@@ -102,13 +102,13 @@ class FakeMemoryStore:
 
 
 def _parsed(record: str) -> WorkspaceMemoryEntry:
-    from fleet_rlm.files.memory_models import parse_workspace_memory_record
+    from fleet_rlm.workspace.models import parse_workspace_memory_record
 
     return parse_workspace_memory_record(record)
 
 
 def _reformat(entry: WorkspaceMemoryEntry, key_learning: str, category: str | None) -> str:
-    from fleet_rlm.files.memory_models import format_workspace_memory_v3_record
+    from fleet_rlm.workspace.models import format_workspace_memory_v3_record
 
     return format_workspace_memory_v3_record(
         key_learning,
@@ -121,7 +121,7 @@ def _reformat(entry: WorkspaceMemoryEntry, key_learning: str, category: str | No
 
 
 def _host(store: FakeMemoryStore | None = None):
-    from fleet_rlm.files.memory_tools import WorkspaceMemoryToolHost
+    from fleet_rlm.workspace.memory import WorkspaceMemoryToolHost
 
     return WorkspaceMemoryToolHost(
         store or FakeMemoryStore(),
@@ -240,7 +240,7 @@ def test_rejects_invalid_entry_and_category_values(
     code: str,
     message: str,
 ) -> None:
-    from fleet_rlm.files.memory_tools import MemoryToolError
+    from fleet_rlm.workspace.memory import MemoryToolError
 
     with pytest.raises(MemoryToolError, match=message) as error:
         _host().as_tools()[1](key_learning=key_learning, category=category)
@@ -250,7 +250,7 @@ def test_rejects_invalid_entry_and_category_values(
 
 
 def test_rejects_a_formatted_record_larger_than_4kib() -> None:
-    from fleet_rlm.files.memory_tools import MemoryToolError
+    from fleet_rlm.workspace.memory import MemoryToolError
 
     with pytest.raises(MemoryToolError) as error:
         _host().as_tools()[1](key_learning="x" * 4_096)
@@ -266,7 +266,7 @@ def test_rejects_a_formatted_record_larger_than_4kib() -> None:
     ],
 )
 def test_maps_closed_storage_failures(failure: BaseException, code: str, message: str) -> None:
-    from fleet_rlm.files.memory_tools import MemoryToolError
+    from fleet_rlm.workspace.memory import MemoryToolError
 
     with pytest.raises(MemoryToolError, match=message) as error:
         _host(FakeMemoryStore(failure=failure)).as_tools()[1](key_learning="remember this")
@@ -283,7 +283,7 @@ def _remembered_entries() -> tuple[WorkspaceMemoryEntry, WorkspaceMemoryEntry, W
 
 
 def test_list_memories_pages_filters_and_rejects_bad_arguments() -> None:
-    from fleet_rlm.files.memory_tools import MemoryToolError
+    from fleet_rlm.workspace.memory import MemoryToolError
 
     store = FakeMemoryStore(entries=_remembered_entries())
     tool = _tools(_host(store))["list_memories"]
@@ -315,7 +315,7 @@ def test_list_memories_pages_filters_and_rejects_bad_arguments() -> None:
 
 
 def test_edit_memory_replaces_in_place_and_reports_not_found() -> None:
-    from fleet_rlm.files.memory_tools import MemoryToolError
+    from fleet_rlm.workspace.memory import MemoryToolError
 
     store = FakeMemoryStore(entries=_remembered_entries())
     tool = _tools(_host(store))["edit_memory"]
@@ -350,7 +350,7 @@ def test_edit_memory_replaces_in_place_and_reports_not_found() -> None:
 
 
 def test_forget_removes_one_entry_and_reports_not_found() -> None:
-    from fleet_rlm.files.memory_tools import MemoryToolError
+    from fleet_rlm.workspace.memory import MemoryToolError
 
     store = FakeMemoryStore(entries=_remembered_entries())
     tool = _tools(_host(store))["forget"]
@@ -370,7 +370,7 @@ def test_forget_removes_one_entry_and_reports_not_found() -> None:
 
 
 def test_list_and_search_project_v3_provenance_without_bound_change() -> None:
-    from fleet_rlm.files.memory_models import format_workspace_memory_v3_record
+    from fleet_rlm.workspace.models import format_workspace_memory_v3_record
 
     target_id = workspace_memory_record_id("2026-07-19T08:00:00Z", "Policy", "older policy")
     target = f"- [2026-07-19T08:00:00Z] **Policy** <!-- id:{target_id} -->: older policy\n"
@@ -399,7 +399,7 @@ def test_list_and_search_project_v3_provenance_without_bound_change() -> None:
 
 
 def test_event_views_expose_only_memory_metadata() -> None:
-    from fleet_rlm.files.memory_tools import MemoryToolError
+    from fleet_rlm.workspace.memory import MemoryToolError
 
     secret = "private learning at /home/daytona/fleet/memory/MEMORIES.md"
     store = FakeMemoryStore(
@@ -588,7 +588,7 @@ def test_search_memories_limits_results_and_reports_bounded_malformed_skips() ->
 
 
 def test_search_memories_rejects_invalid_query_filter_and_limit() -> None:
-    from fleet_rlm.files.memory_tools import MemoryToolError
+    from fleet_rlm.workspace.memory import MemoryToolError
 
     tool = _tools(_host(FakeMemoryStore()))["search_memories"]
     with pytest.raises(MemoryToolError, match="Workspace Memory entry is invalid"):

@@ -17,11 +17,11 @@ from fastapi.testclient import TestClient
 from fleet_rlm.api.errors import install_error_handlers
 from fleet_rlm.api.routes.turns import router as turns_router
 from fleet_rlm.api.schemas import CreateTurnRequest
+from fleet_rlm.attachments.models import AttachmentRef, PreparedAttachments, StagedAttachment
 from fleet_rlm.chat.commands import OpenTurnCommand
 from fleet_rlm.chat.run_lifecycle import ClaimedRun, _RunClaimToken
 from fleet_rlm.composition.inventory import RuntimeInventory
 from fleet_rlm.config import Settings
-from fleet_rlm.files.models import AttachmentRef, PreparedAttachments, StagedAttachment
 from fleet_rlm.rlm.events import EventRecorder, RuntimeEvent
 from fleet_rlm.rlm.program import RLMModelBundle, RLMOptions
 from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
@@ -202,8 +202,8 @@ async def test_private_progressive_tools_preload_exact_selection_and_keep_events
 
 @pytest.mark.asyncio
 async def test_progressive_resource_requires_load_and_daytona_preparation_is_provider_free() -> None:
+    from fleet_rlm.composition.daytona_environment import _LiveCapabilityPreparer
     from fleet_rlm.config import Settings
-    from fleet_rlm.daytona.run_environment import _LiveCapabilityPreparer
     from fleet_rlm.skills.tools import SkillToolHost
 
     catalog = _catalog()
@@ -355,9 +355,9 @@ async def test_deterministic_composition_runs_data_analysis_signature() -> None:
 
 @pytest.mark.asyncio
 async def test_daytona_report_builder_workspace_selection_keeps_workspace_host_owned(monkeypatch) -> None:
+    from fleet_rlm.composition.daytona_environment import _LiveCapabilityPreparer
     from fleet_rlm.config import Settings
-    from fleet_rlm.daytona.run_environment import _LiveCapabilityPreparer
-    from fleet_rlm.files.workspace_models import WorkspaceEntry, WorkspaceListResult, WorkspaceTextPage
+    from fleet_rlm.workspace.models import WorkspaceEntry, WorkspaceListResult, WorkspaceTextPage
 
     class FakeWorkspace:
         last_warnings: tuple[dict[str, object], ...] = ()
@@ -404,7 +404,7 @@ async def test_daytona_report_builder_workspace_selection_keeps_workspace_host_o
 
     fake_workspace = FakeWorkspace()
     monkeypatch.setattr(
-        "fleet_rlm.daytona.workspace_fs.DaytonaSessionWorkspaceFS",
+        "fleet_rlm.workspace.storage.AgentStorageSession",
         lambda *_args, **_kwargs: fake_workspace,
     )
     catalog = _catalog()

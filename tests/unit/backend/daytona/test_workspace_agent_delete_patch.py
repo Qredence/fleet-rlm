@@ -142,7 +142,7 @@ def test_delete_non_empty_directory_conflicts(tmp_path: Path) -> None:
     (directory / "kept.txt").write_text("kept", encoding="utf-8")
     sandbox, _process = _sandbox()
 
-    from fleet_rlm.files.workspace_models import WorkspaceConflictError
+    from fleet_rlm.daytona.workspace_agent.protocol import WorkspaceAgentConflictError as WorkspaceConflictError
 
     with pytest.raises(WorkspaceConflictError) as excinfo:
         _run(tmp_path, sandbox, "delete", "notes")
@@ -185,7 +185,7 @@ def test_delete_with_matching_checksum_succeeds_and_mismatch_conflicts(tmp_path:
     _write(tmp_path, "note.txt", b"checksum me")
     sandbox, _process = _sandbox()
 
-    from fleet_rlm.files.workspace_models import WorkspaceConflictError
+    from fleet_rlm.daytona.workspace_agent.protocol import WorkspaceAgentConflictError as WorkspaceConflictError
 
     with pytest.raises(WorkspaceConflictError) as excinfo:
         _run(tmp_path, sandbox, "delete", "note.txt", expected_sha256="0" * 64)
@@ -203,7 +203,7 @@ def test_delete_checksum_precondition_on_directory_conflicts(tmp_path: Path) -> 
     directory.mkdir()
     sandbox, _process = _sandbox()
 
-    from fleet_rlm.files.workspace_models import WorkspaceConflictError
+    from fleet_rlm.daytona.workspace_agent.protocol import WorkspaceAgentConflictError as WorkspaceConflictError
 
     with pytest.raises(WorkspaceConflictError) as excinfo:
         _run(tmp_path, sandbox, "delete", "notes", expected_sha256="f" * 64)
@@ -227,7 +227,7 @@ def test_patch_requires_exactly_one_occurrence(tmp_path: Path) -> None:
     _write(tmp_path, "note.txt", b"dup dup")
     sandbox, _process = _sandbox()
 
-    from fleet_rlm.files.workspace_models import WorkspaceConflictError
+    from fleet_rlm.daytona.workspace_agent.protocol import WorkspaceAgentConflictError as WorkspaceConflictError
 
     with pytest.raises(WorkspaceConflictError) as ambiguous:
         _run(tmp_path, sandbox, "patch", "note.txt", content_b64=_patch_payload("dup", "x"))
@@ -245,7 +245,7 @@ def test_patch_enforces_the_checksum_precondition(tmp_path: Path) -> None:
     _write(tmp_path, "note.txt", b"hello world")
     sandbox, _process = _sandbox()
 
-    from fleet_rlm.files.workspace_models import WorkspaceConflictError
+    from fleet_rlm.daytona.workspace_agent.protocol import WorkspaceAgentConflictError as WorkspaceConflictError
 
     with pytest.raises(WorkspaceConflictError) as excinfo:
         _run(

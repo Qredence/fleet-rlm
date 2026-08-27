@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 
 import pytest
 
-from fleet_rlm.files.memory_models import (
+from fleet_rlm.workspace.models import (
     WORKSPACE_MEMORY_HEADER,
     WORKSPACE_MEMORY_MAX_WARNINGS,
     WorkspaceMemoryEntryNotFoundError,

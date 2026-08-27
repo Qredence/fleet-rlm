@@ -13,8 +13,8 @@ from uuid import uuid4
 import pytest
 
 from fleet_rlm.chat.turn_coordinator import TurnCoordinator
-from fleet_rlm.files.memory_candidates import MemoryCandidate
 from fleet_rlm.rlm.result import PredictionResult, RLMOutcome
+from fleet_rlm.workspace.memory import MemoryCandidate
 
 
 def _turn():
@@ -92,7 +92,7 @@ def _driver(lifecycle) -> TurnCoordinator:
 
 
 def test_memory_candidates_promote_only_after_committed_receipt() -> None:
-    from fleet_rlm.files.memory_candidates import MemoryCandidate
+    from fleet_rlm.workspace.memory import MemoryCandidate
 
     lifecycle = _Lifecycle()
     order: list[str] = []
@@ -138,7 +138,7 @@ def test_memory_candidates_promote_only_after_committed_receipt() -> None:
 
 
 def test_memory_candidates_are_not_promoted_after_failed_commit() -> None:
-    from fleet_rlm.files.memory_candidates import MemoryCandidate
+    from fleet_rlm.workspace.memory import MemoryCandidate
 
     lifecycle = _Lifecycle(commit=False)
     order: list[str] = []
@@ -172,7 +172,7 @@ def test_memory_candidates_are_not_promoted_after_failed_commit() -> None:
 
 
 def test_memory_promotion_failure_preserves_the_committed_receipt() -> None:
-    from fleet_rlm.files.memory_candidates import MemoryCandidate
+    from fleet_rlm.workspace.memory import MemoryCandidate
 
     lifecycle = _Lifecycle()
 

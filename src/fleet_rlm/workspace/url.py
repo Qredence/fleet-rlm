@@ -25,8 +25,9 @@ from uuid import UUID
 import dspy
 import urllib3
 
-from fleet_rlm.files.workspace_models import SessionWorkspaceFS, WorkspaceListResult
-from fleet_rlm.rlm.events import JsonValue, ToolEventView, bound_event_text
+from fleet_rlm.json_types import JsonValue
+from fleet_rlm.tool_events import ToolEventView, bound_event_text
+from fleet_rlm.workspace.models import SessionWorkspaceFS, WorkspaceListResult
 
 MAX_URL_REDIRECTS = 3
 URL_FETCH_CHUNK_BYTES = 64 * 1024
@@ -500,7 +501,7 @@ class InMemoryUrlSourceStore:
 
 
 class WorkspaceUrlSourceStore:
-    """Synchronous adapter over one Daytona Session Workspace filesystem."""
+    """Synchronous adapter over one Session Workspace filesystem."""
 
     def __init__(
         self,

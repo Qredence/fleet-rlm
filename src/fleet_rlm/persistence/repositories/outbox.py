@@ -15,37 +15,37 @@ from uuid import UUID
 from sqlalchemy import CursorResult, and_, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from fleet_rlm.files.memory_candidates import (
+from fleet_rlm.persistence.models import MemoryPromotionIntentRow
+from fleet_rlm.workspace.models import (
     OUTCOME_DEADLINE_EXCEEDED as REASON_DEADLINE_EXCEEDED,
 )
-from fleet_rlm.files.memory_candidates import (
+from fleet_rlm.workspace.models import (
     OUTCOME_DUPLICATE as REASON_DUPLICATE,
 )
-from fleet_rlm.files.memory_candidates import (
+from fleet_rlm.workspace.models import (
     OUTCOME_INTERRUPTED as REASON_INTERRUPTED,
 )
-from fleet_rlm.files.memory_candidates import (
+from fleet_rlm.workspace.models import (
     OUTCOME_MEMORY_ID_COLLISION as REASON_MEMORY_ID_COLLISION,
 )
-from fleet_rlm.files.memory_candidates import (
+from fleet_rlm.workspace.models import (
     OUTCOME_POLICY_DENIED as REASON_POLICY_DENIED,
 )
-from fleet_rlm.files.memory_candidates import (
+from fleet_rlm.workspace.models import (
     OUTCOME_PROMOTED as REASON_PROMOTED,
 )
-from fleet_rlm.files.memory_candidates import (
+from fleet_rlm.workspace.models import (
     OUTCOME_PROMOTION_FAILED as REASON_PROMOTION_FAILED,
 )
-from fleet_rlm.files.memory_candidates import (
+from fleet_rlm.workspace.models import (
     OUTCOME_STORE_UNAVAILABLE as REASON_STORE_UNAVAILABLE,
 )
-from fleet_rlm.files.memory_candidates import (
+from fleet_rlm.workspace.models import (
     OUTCOME_SUPERSEDES_NOT_ACTIVE as REASON_SUPERSEDES_NOT_ACTIVE,
 )
-from fleet_rlm.files.memory_candidates import (
+from fleet_rlm.workspace.models import (
     TERMINAL_OUTCOMES as TERMINAL_REASONS,
 )
-from fleet_rlm.persistence.models import MemoryPromotionIntentRow
 
 
 @dataclass(frozen=True, slots=True)

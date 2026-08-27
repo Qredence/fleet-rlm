@@ -1,11 +1,11 @@
-"""Ephemeral mounted-Sandbox gateway for independent Workspace file access."""
+"""Daytona composition adapters for independent Workspace file access."""
 
 from __future__ import annotations
 
 import asyncio
 import hashlib
 import logging
-from collections.abc import AsyncIterator, Collection
+from collections.abc import AsyncIterator, Collection, Mapping
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -25,16 +25,21 @@ from fleet_rlm.daytona.provisioning import (
     get_or_create_volume_id,
 )
 from fleet_rlm.daytona.sandbox_lease import SandboxLease, SandboxLeasePolicy
-from fleet_rlm.daytona.workspace_fs import AsyncDaytonaSessionWorkspaceFS, AsyncDaytonaVolumeFS
-from fleet_rlm.files.volume_paths import UnsafePathError, VolumePaths, validate_mount_path, validate_path_id
-from fleet_rlm.files.volume_storage import VolumeFile, WorkspaceVolumeGateway, WorkspaceVolumeSession
-from fleet_rlm.files.workspace_access import (
+from fleet_rlm.workspace.models import WorkspaceEntry, WorkspaceTextPage
+from fleet_rlm.workspace.paths import UnsafePathError, VolumePaths, validate_mount_path, validate_path_id
+from fleet_rlm.workspace.storage import (
+    AgentAsyncStorageSession,
+    AgentAsyncVolumeStorage,
+    VolumeFile,
+    WorkspaceVolumeGateway,
+    WorkspaceVolumeSession,
+)
+from fleet_rlm.workspace.workspace import (
     WorkspaceFileConflictError,
     WorkspaceFileEntry,
     WorkspaceFileList,
     WorkspaceFileSession,
 )
-from fleet_rlm.files.workspace_models import WorkspaceEntry, WorkspaceTextPage
 
 logger = logging.getLogger(__name__)
 
@@ -64,16 +69,20 @@ def _public_entry(entry: WorkspaceEntry, checksum: str | None = None) -> Workspa
 
 
 class _DaytonaWorkspaceFileSession:
-    def __init__(self, workspace: AsyncDaytonaSessionWorkspaceFS, *, max_file_bytes: int) -> None:
+    def __init__(self, workspace: AgentAsyncStorageSession, *, max_file_bytes: int) -> None:
         self._workspace = workspace
         self._max_file_bytes = max_file_bytes
+
+    @property
+    def last_warnings(self) -> tuple[Mapping[str, object], ...]:
+        return self._workspace.last_warnings
 
     async def list_entries(
         self,
         path: str,
         *,
-        limit: int,
-        after: str | None,
+        limit: int = 100,
+        after: str | None = None,
     ) -> WorkspaceFileList:
         listing = await self._workspace.list_entries(path, limit=limit, after=after)
         return WorkspaceFileList(
@@ -82,8 +91,8 @@ class _DaytonaWorkspaceFileSession:
             listing.next_cursor,
         )
 
-    async def stat(self, path: str) -> WorkspaceFileEntry | None:
-        entry = await self._workspace.stat(path, include_checksum=True)
+    async def stat(self, path: str, *, include_checksum: bool = False) -> WorkspaceFileEntry | None:
+        entry = await self._workspace.stat(path, include_checksum=include_checksum or True)
         if entry is None:
             return None
         checksum = entry.checksum_sha256 if entry.kind == "file" else None
@@ -95,12 +104,13 @@ class _DaytonaWorkspaceFileSession:
         *,
         cursor: str | None,
         max_chars: int,
+        max_bytes: int | None = None,
     ) -> WorkspaceTextPage:
         return await self._workspace.read_text_page(
             path,
             cursor=cursor,
             max_chars=max_chars,
-            max_bytes=self._max_file_bytes,
+            max_bytes=self._max_file_bytes if max_bytes is None else max_bytes,
         )
 
     async def write_text(
@@ -109,7 +119,7 @@ class _DaytonaWorkspaceFileSession:
         content: str,
         *,
         overwrite: bool,
-        expected_sha256: str | None,
+        expected_sha256: str | None = None,
     ) -> WorkspaceFileEntry:
         # The provider-side agent compares and mutates in one mounted
         # operation; a host read would reopen the TOCTOU window across I/O
@@ -130,7 +140,7 @@ class _DaytonaWorkspaceFileSession:
         path: str,
         content: str,
         *,
-        expected_sha256: str | None,
+        expected_sha256: str | None = None,
     ) -> WorkspaceFileEntry:
         entry = await self._workspace.append_text(
             path,
@@ -146,7 +156,7 @@ class _DaytonaWorkspaceFileSession:
         self,
         path: str,
         *,
-        expected_sha256: str | None,
+        expected_sha256: str | None = None,
     ) -> None:
         # The agent enforces the optional checksum precondition inside the
         # same mounted operation as the unlink/rmdir (one round trip, no
@@ -159,7 +169,7 @@ class _DaytonaWorkspaceFileSession:
         old: str,
         new: str,
         *,
-        expected_sha256: str | None,
+        expected_sha256: str | None = None,
     ) -> WorkspaceFileEntry:
         # Same single-operation contract as delete; the patched-file entry
         # carries the agent-computed checksum of the exact bytes published.
@@ -170,7 +180,7 @@ class _DaytonaWorkspaceFileSession:
 class _DaytonaWorkspaceVolumeSession:
     def __init__(self, sandbox: object, *, mount_path: str) -> None:
         self._mount_path = validate_mount_path(mount_path)
-        self._files = AsyncDaytonaVolumeFS(sandbox, mount_path=str(self._mount_path))
+        self._files = AgentAsyncVolumeStorage(sandbox, mount_path=str(self._mount_path))
 
     def _path(self, logical_path: str) -> str:
         path = PurePosixPath(logical_path)
@@ -182,11 +192,26 @@ class _DaytonaWorkspaceVolumeSession:
             raise UnsafePathError("logical path escapes Workspace Volume Scope")
         return str(path)
 
-    async def write_bytes(self, logical_path: str, data: bytes) -> None:
-        await self._files.write_bytes(self._path(logical_path), data)
+    async def write_bytes(
+        self,
+        logical_path: str,
+        data: bytes,
+        *,
+        max_bytes: int | None = None,
+    ) -> None:
+        await self._files.write_bytes(self._path(logical_path), data, max_bytes=max_bytes)
 
-    async def read_bytes(self, logical_path: str) -> bytes:
-        return await self._files.read_bytes(self._path(logical_path))
+    async def read_bytes(
+        self,
+        logical_path: str,
+        *,
+        max_bytes: int | None = None,
+        use_cache: bool = True,
+    ) -> bytes:
+        return await self._files.read_bytes(self._path(logical_path), max_bytes=max_bytes, use_cache=use_cache)
+
+    async def exists(self, logical_path: str) -> bool:
+        return await self._files.exists(self._path(logical_path))
 
     async def remove_bytes(self, logical_path: str) -> None:
         await self._files.remove(self._path(logical_path))
@@ -243,7 +268,7 @@ class DaytonaWorkspaceGateway:
         async with self.open_sandbox(workspace_id, purpose=purpose) as sandbox:
             paths = self._volume_config.paths()
             yield _DaytonaWorkspaceFileSession(
-                AsyncDaytonaSessionWorkspaceFS(
+                AgentAsyncStorageSession(
                     sandbox,
                     volume_root=str(paths.mount_path),
                     root=str(paths.files_root()),
@@ -349,13 +374,26 @@ class DaytonaWorkspaceVolumeGateway:
                 mount_path=self._mount_path,
             )
 
-    async def write_bytes(self, workspace_id: UUID, logical_path: str, data: bytes) -> None:
+    async def write_bytes(
+        self,
+        workspace_id: UUID,
+        logical_path: str,
+        data: bytes,
+        *,
+        max_bytes: int | None = None,
+    ) -> None:
         async with self.open_workspace(workspace_id) as volume:
-            await volume.write_bytes(logical_path, data)
+            await volume.write_bytes(logical_path, data, max_bytes=max_bytes)
 
-    async def read_bytes(self, workspace_id: UUID, logical_path: str) -> bytes:
+    async def read_bytes(
+        self,
+        workspace_id: UUID,
+        logical_path: str,
+        *,
+        max_bytes: int | None = None,
+    ) -> bytes:
         async with self.open_workspace(workspace_id) as volume:
-            return await volume.read_bytes(logical_path)
+            return await volume.read_bytes(logical_path, max_bytes=max_bytes)
 
     async def remove_bytes(self, workspace_id: UUID, logical_path: str) -> None:
         async with self.open_workspace(workspace_id) as volume:

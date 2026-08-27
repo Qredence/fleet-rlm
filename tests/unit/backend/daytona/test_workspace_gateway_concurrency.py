@@ -14,11 +14,11 @@ from types import SimpleNamespace
 
 import pytest
 
-from fleet_rlm.daytona.workspace_fs import AsyncDaytonaSessionWorkspaceFS
-from fleet_rlm.daytona.workspace_gateway import _DaytonaWorkspaceFileSession
-from fleet_rlm.files.workspace_access import WorkspaceFileConflictError
-from fleet_rlm.files.workspace_models import WorkspaceConflictError as ProviderWorkspaceConflictError
-from fleet_rlm.files.workspace_models import WorkspaceEntry
+from fleet_rlm.composition.daytona_workspace import _DaytonaWorkspaceFileSession
+from fleet_rlm.workspace.models import WorkspaceConflictError as ProviderWorkspaceConflictError
+from fleet_rlm.workspace.models import WorkspaceEntry
+from fleet_rlm.workspace.storage import AsyncDaytonaSessionWorkspaceFS
+from fleet_rlm.workspace.workspace import WorkspaceFileConflictError
 
 
 class _MutationGate:

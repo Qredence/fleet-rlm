@@ -1,4 +1,4 @@
-"""Explicit bounded dspy.Tools for durable Project deliverables."""
+"""Projects domain and its explicit six-tool model-facing boundary."""
 
 from __future__ import annotations
 
@@ -8,8 +8,12 @@ from typing import Any, NoReturn
 
 import dspy
 
-from fleet_rlm.files.filesystem_tool_helpers import (
-    MAX_FILES_READ_CHARS,
+from fleet_rlm.json_types import JsonValue
+from fleet_rlm.tool_events import ToolEventView
+from fleet_rlm.workspace.models import WorkspaceEntry, WorkspaceListResult, WorkspaceTextPage
+from fleet_rlm.workspace.paths import UnsafePathError, normalize_workspace_path, validate_project_slug
+from fleet_rlm.workspace.storage import MAX_STORAGE_LIST_LIMIT, MAX_STORAGE_READ_CHARS, StorageSession
+from fleet_rlm.workspace.workspace import (
     FilesystemToolError,
     add_storage_warnings,
     event_input_fields,
@@ -18,12 +22,8 @@ from fleet_rlm.files.filesystem_tool_helpers import (
     serialize_entry,
     translate_fs_tool_errors,
 )
-from fleet_rlm.files.volume_paths import UnsafePathError, validate_project_slug
-from fleet_rlm.files.workspace_models import SessionWorkspaceFS
-from fleet_rlm.files.workspace_validation import normalize_workspace_path
-from fleet_rlm.rlm.events import JsonValue, ToolEventView
 
-MAX_PROJECT_READ_CHARS = MAX_FILES_READ_CHARS
+MAX_PROJECT_READ_CHARS = MAX_STORAGE_READ_CHARS
 PROJECT_WORKSPACE_NAMESPACE = "project_workspace"
 
 
@@ -31,8 +31,8 @@ class ProjectToolError(FilesystemToolError):
     """Safe, actionable failure returned to generated project-tool callers."""
 
 
-def _normalize_project_path(path: str, *, allow_root: bool = False) -> str:
-    """Return one projects-root-relative path with a validated first-segment slug."""
+def normalize_project_path(path: str, *, allow_root: bool = False) -> str:
+    """Return a projects-root-relative path with a validated first slug."""
     if not allow_root and path in {".", "projects"}:
         raise ProjectToolError("invalid_path", "Project path cannot target the projects root")
     normalized = normalize_workspace_path(path, allow_root=allow_root)
@@ -48,9 +48,13 @@ def _normalize_project_path(path: str, *, allow_root: bool = False) -> str:
     return normalized
 
 
+# Historical private name retained for tests and callers during the move.
+_normalize_project_path = normalize_project_path
+
+
 def _project_file_path(path: str) -> str:
-    """Return one validated ``<slug>/<file...>`` path below the projects root."""
-    normalized = _normalize_project_path(path)
+    """Return one validated ``<slug>/<file...>`` path below projects root."""
+    normalized = normalize_project_path(path)
     if "/" not in normalized:
         raise ProjectToolError(
             "invalid_path",
@@ -59,30 +63,106 @@ def _project_file_path(path: str) -> str:
     return normalized
 
 
+class Projects:
+    """Facade over one already projects-root-bound synchronous storage session."""
+
+    def __init__(self, storage: StorageSession, *, max_file_bytes: int | None = None) -> None:
+        self._storage = storage
+        configured = max_file_bytes
+        if configured is None:
+            configured = getattr(storage, "max_file_bytes", None)
+        self._max_file_bytes = max(1, int(configured if configured is not None else 10_000_000))
+
+    @property
+    def storage(self) -> StorageSession:
+        return self._storage
+
+    @property
+    def max_file_bytes(self) -> int:
+        return self._max_file_bytes
+
+    @property
+    def last_warnings(self) -> tuple[Mapping[str, object], ...]:
+        warnings = getattr(self._storage, "last_warnings", ())
+        return warnings if isinstance(warnings, tuple) else ()
+
+    def list_entries(
+        self,
+        path: str,
+        *,
+        limit: int = MAX_STORAGE_LIST_LIMIT,
+        after: str | None = None,
+    ) -> WorkspaceListResult:
+        return self._storage.list_entries(path, limit=limit, after=after)
+
+    def stat(self, path: str, *, include_checksum: bool = False) -> WorkspaceEntry | None:
+        return self._storage.stat(path, include_checksum=include_checksum)
+
+    def read_text_page(
+        self,
+        path: str,
+        *,
+        cursor: str | None,
+        max_chars: int,
+        max_bytes: int | None = None,
+    ) -> WorkspaceTextPage:
+        return self._storage.read_text_page(
+            path,
+            cursor=cursor,
+            max_chars=max_chars,
+            max_bytes=max_bytes,
+        )
+
+    def write_text(
+        self,
+        path: str,
+        content: str,
+        *,
+        overwrite: bool,
+        expected_sha256: str | None = None,
+    ) -> WorkspaceEntry:
+        return self._storage.write_text(path, content, overwrite=overwrite, expected_sha256=expected_sha256)
+
+    def delete_path(self, path: str, *, expected_sha256: str | None = None) -> None:
+        self._storage.delete_path(path, expected_sha256=expected_sha256)
+
+    def patch_text(
+        self,
+        path: str,
+        old: str,
+        new: str,
+        *,
+        expected_sha256: str | None = None,
+    ) -> WorkspaceEntry:
+        return self._storage.patch_text(path, old, new, expected_sha256=expected_sha256)
+
+    def as_tools(self) -> tuple[dspy.Tool, ...]:
+        return ProjectToolHost(self, max_file_bytes=self._max_file_bytes).as_tools()
+
+    def event_views(self) -> Mapping[str, ToolEventView]:
+        return ProjectToolHost(self, max_file_bytes=self._max_file_bytes).event_views()
+
+
 class ProjectToolHost:
     """Bind the browsable projects root into stable synchronous tools."""
 
-    def __init__(self, workspace: SessionWorkspaceFS, *, max_file_bytes: int) -> None:
-        """Bind a project filesystem adapter and enforce the per-file byte limit."""
+    def __init__(self, workspace: StorageSession | Projects, *, max_file_bytes: int | None = None) -> None:
         self._workspace = workspace
-        self._max_file_bytes = max(1, int(max_file_bytes))
+        configured = max_file_bytes
+        if configured is None:
+            configured = getattr(workspace, "max_file_bytes", None)
+        self._max_file_bytes = max(1, int(configured if configured is not None else 10_000_000))
 
     def as_tools(self) -> tuple[dspy.Tool, ...]:
-        """Build the stable six-tool Project contract."""
-
         def _raise(exc: BaseException) -> NoReturn:
             translate_fs_tool_errors(exc, ProjectToolError, domain="Project")
 
-        def list_project_files(
-            path: str = ".",
-            limit: int = 100,
-            after: str | None = None,
-        ) -> dict[str, object]:
+        def list_project_files(path: str = ".", limit: int = 100, after: str | None = None) -> dict[str, object]:
             """List immediate entries in one Project or the projects root."""
             try:
                 if limit < 1 or limit > 100:
                     raise ProjectToolError("invalid_path", "Project list bound is invalid")
-                normalized = _normalize_project_path(path, allow_root=True)
+                normalized = normalize_project_path(path, allow_root=True)
                 listing = self._workspace.list_entries(normalized, limit=limit, after=after)
                 return {
                     "ok": True,
@@ -99,7 +179,7 @@ class ProjectToolHost:
         def stat_project_file(path: str) -> dict[str, object]:
             """Return bounded metadata for one Project path."""
             try:
-                normalized = _normalize_project_path(path, allow_root=True)
+                normalized = normalize_project_path(path, allow_root=True)
                 entry = self._workspace.stat(normalized)
                 if entry is None:
                     raise ProjectToolError("not_found", "Project file was not found")
@@ -148,11 +228,7 @@ class ProjectToolHost:
                     "ok": True,
                     "namespace": PROJECT_WORKSPACE_NAMESPACE,
                     **serialize_entry(
-                        self._workspace.write_text(
-                            _project_file_path(path),
-                            content,
-                            overwrite=overwrite,
-                        )
+                        self._workspace.write_text(_project_file_path(path), content, overwrite=overwrite)
                     ),
                 }
                 return add_storage_warnings(self._workspace, result)
@@ -162,14 +238,12 @@ class ProjectToolHost:
         def delete_project_path(path: str, expected_sha256: str | None = None) -> dict[str, object]:
             """Delete one file or empty directory immediately under projects/<slug>/."""
             try:
-                normalized = _normalize_project_path(path)
+                normalized = normalize_project_path(path)
                 self._workspace.delete_path(normalized, expected_sha256=expected_sha256)
-                result: dict[str, object] = {
-                    "ok": True,
-                    "namespace": PROJECT_WORKSPACE_NAMESPACE,
-                    "path": normalized,
-                }
-                return add_storage_warnings(self._workspace, result)
+                return add_storage_warnings(
+                    self._workspace,
+                    {"ok": True, "namespace": PROJECT_WORKSPACE_NAMESPACE, "path": normalized},
+                )
             except Exception as exc:
                 return _raise(exc)
 
@@ -187,20 +261,13 @@ class ProjectToolHost:
             try:
                 normalized = _project_file_path(path)
                 entry = serialize_entry(
-                    self._workspace.patch_text(
-                        normalized,
-                        old,
-                        new,
-                        expected_sha256=expected_sha256,
-                    )
+                    self._workspace.patch_text(normalized, old, new, expected_sha256=expected_sha256)
                 )
                 entry.pop("checksum_sha256", None)
-                result: dict[str, object] = {
-                    "ok": True,
-                    "namespace": PROJECT_WORKSPACE_NAMESPACE,
-                    **entry,
-                }
-                return add_storage_warnings(self._workspace, result)
+                return add_storage_warnings(
+                    self._workspace,
+                    {"ok": True, "namespace": PROJECT_WORKSPACE_NAMESPACE, **entry},
+                )
             except Exception as exc:
                 return _raise(exc)
 
@@ -280,29 +347,21 @@ class ProjectToolHost:
         )
 
     def event_views(self) -> Mapping[str, ToolEventView]:
-        """Return explicit metadata-only projections for Project Tools."""
+        """Return metadata-only projections for Project tools."""
 
         def normalize_event_path(path: str, allow_root: bool) -> str:
-            return _normalize_project_path(path, allow_root=allow_root)
+            return normalize_project_path(path, allow_root=allow_root)
 
         def write_input(arguments: Mapping[str, Any]) -> JsonValue:
             content = arguments.get("content")
             return {
-                **event_input_fields(
-                    arguments,
-                    ("path", "overwrite"),
-                    normalize_path=normalize_event_path,
-                ),
+                **event_input_fields(arguments, ("path", "overwrite"), normalize_path=normalize_event_path),
                 "content_chars": len(str(content or "")),
             }
 
         def edit_input(arguments: Mapping[str, Any]) -> JsonValue:
             return {
-                **event_input_fields(
-                    arguments,
-                    ("path",),
-                    normalize_path=normalize_event_path,
-                ),
+                **event_input_fields(arguments, ("path",), normalize_path=normalize_event_path),
                 "old_chars": len(str(arguments.get("old") or "")),
                 "new_chars": len(str(arguments.get("new") or "")),
                 "checksum_precondition": bool(arguments.get("expected_sha256")),
@@ -310,11 +369,7 @@ class ProjectToolHost:
 
         def delete_input(arguments: Mapping[str, Any]) -> JsonValue:
             return {
-                **event_input_fields(
-                    arguments,
-                    ("path",),
-                    normalize_path=normalize_event_path,
-                ),
+                **event_input_fields(arguments, ("path",), normalize_path=normalize_event_path),
                 "checksum_precondition": bool(arguments.get("expected_sha256")),
             }
 
@@ -328,50 +383,53 @@ class ProjectToolHost:
                         allow_root=True,
                     ),
                     output_projection=lambda result: event_output_fields(
-                        result,
-                        ("ok", "error", "path", "count", "truncated", "next_cursor"),
+                        result, ("ok", "error", "path", "count", "truncated", "next_cursor")
                     ),
                 ),
                 "stat_project_file": ToolEventView(
                     input_projection=lambda arguments: event_input_fields(
-                        arguments,
-                        ("path",),
-                        normalize_path=normalize_event_path,
+                        arguments, ("path",), normalize_path=normalize_event_path
                     ),
                     output_projection=event_stat_output,
                 ),
                 "read_project_text": ToolEventView(
                     input_projection=lambda arguments: event_input_fields(
-                        arguments,
-                        ("path", "cursor", "max_chars"),
-                        normalize_path=normalize_event_path,
+                        arguments, ("path", "cursor", "max_chars"), normalize_path=normalize_event_path
                     ),
                     output_projection=lambda result: event_output_fields(
-                        result,
-                        ("ok", "namespace", "path", "next_cursor", "byte_size", "eof"),
+                        result, ("ok", "namespace", "path", "next_cursor", "byte_size", "eof")
                     ),
                     allow_repeated_identical=True,
                 ),
                 "write_project_text": ToolEventView(
                     input_projection=write_input,
                     output_projection=lambda result: event_output_fields(
-                        result,
-                        ("ok", "namespace", "path", "byte_size", "warnings"),
+                        result, ("ok", "namespace", "path", "byte_size", "warnings")
                     ),
                 ),
                 "delete_project_path": ToolEventView(
                     input_projection=delete_input,
                     output_projection=lambda result: event_output_fields(
-                        result,
-                        ("ok", "namespace", "path", "warnings"),
+                        result, ("ok", "namespace", "path", "warnings")
                     ),
                 ),
                 "edit_project_text": ToolEventView(
                     input_projection=edit_input,
                     output_projection=lambda result: event_output_fields(
-                        result,
-                        ("ok", "namespace", "path", "byte_size", "warnings"),
+                        result, ("ok", "namespace", "path", "byte_size", "warnings")
                     ),
                 ),
             }
         )
+
+
+__all__ = [
+    "MAX_PROJECT_READ_CHARS",
+    "PROJECT_WORKSPACE_NAMESPACE",
+    "ProjectToolError",
+    "ProjectToolHost",
+    "Projects",
+    "_normalize_project_path",
+    "_project_file_path",
+    "normalize_project_path",
+]

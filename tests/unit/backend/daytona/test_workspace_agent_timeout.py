@@ -99,7 +99,7 @@ async def test_run_workspace_agent_async_forwards_timeout(tmp_path: Any) -> None
 
 @pytest.mark.asyncio
 async def test_sync_process_facade_forwards_timeout() -> None:
-    from fleet_rlm.daytona.workspace_fs import _SyncProcessFacade
+    from fleet_rlm.workspace.storage import _SyncProcessFacade
 
     process = _RecordingProcess()
     facade = _SyncProcessFacade(process)

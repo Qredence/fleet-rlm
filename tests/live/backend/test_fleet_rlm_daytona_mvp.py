@@ -35,11 +35,11 @@ from fleet_rlm.config import (
     load_runtime_settings,
 )
 from fleet_rlm.daytona.broker import sync_sandbox
-from fleet_rlm.daytona.workspace_fs import DaytonaSandboxVolumeFs
-from fleet_rlm.files.volume_paths import volume_paths_from_settings
 from fleet_rlm.rlm.events import ToolEventView
 from fleet_rlm.runtime.bindings import SandboxBinding
 from fleet_rlm.skills.catalog import stable_skill_id
+from fleet_rlm.workspace.paths import volume_paths_from_settings
+from fleet_rlm.workspace.storage import DaytonaSandboxVolumeFs
 from tests.live.backend._database import upgrade_to_head
 
 pytestmark = [pytest.mark.live_daytona, pytest.mark.timeout(900)]

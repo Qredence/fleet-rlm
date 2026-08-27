@@ -15,13 +15,14 @@ import pytest
 # ---------------------------------------------------------------------------
 
 
-def test_workspace_memory_and_fs_route_through_the_p28_runtime_handlers() -> None:
-    """Installed + fallback workspace execution stays on the one runtime handler."""
-    from fleet_rlm.daytona import workspace_fs, workspace_memory
-    from fleet_rlm.daytona.workspace_agent.client import run_workspace_agent, run_workspace_agent_async
+def test_workspace_agent_exposes_only_generic_storage_operations() -> None:
+    """The installed provider bridge owns generic storage, not Memory policy."""
+    from fleet_rlm.daytona.workspace_agent.protocol import WORKSPACE_AGENT_SUPPORTED_OPERATIONS
 
-    assert workspace_memory.run_workspace_agent is run_workspace_agent
-    assert workspace_fs.run_workspace_agent_async is run_workspace_agent_async
+    assert "memory_append" not in WORKSPACE_AGENT_SUPPORTED_OPERATIONS
+    assert "memory_edit" not in WORKSPACE_AGENT_SUPPORTED_OPERATIONS
+    assert "memory_delete" not in WORKSPACE_AGENT_SUPPORTED_OPERATIONS
+    assert "memory_migrate" not in WORKSPACE_AGENT_SUPPORTED_OPERATIONS
 
 
 def test_owned_effect_primitive_owns_post_commit_promotion() -> None:
@@ -81,12 +82,12 @@ DELETED_SYMBOLS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ),
     ("fleet_rlm.daytona.sandbox_lease", ("acquire_owned_lease", "OwnedAcquisition")),
     ("fleet_rlm.daytona.broker", ("_FINAL_OUTPUT_MARKER",)),
-    ("fleet_rlm.files.host_volume", ("HostWorkspaceVolumeGateway",)),
+    ("fleet_rlm.workspace.storage", ("HostWorkspaceVolumeGateway",)),
     (
-        "fleet_rlm.files.memory_models",
+        "fleet_rlm.workspace.models",
         ("reformat_workspace_memory_record", "build_workspace_memory_digest", "validate_workspace_memory_content"),
     ),
-    ("fleet_rlm.files.tools", ("_bounded_text",)),
+    ("fleet_rlm.attachments.tools", ("_bounded_text",)),
     ("fleet_rlm.sessions.catalog", ("SequenceCursor.from_query",)),
 )
 
@@ -115,9 +116,9 @@ def test_deleted_dataclass_methods_and_fields_stay_deleted() -> None:
     from fleet_rlm.chat.session_context import SessionContextManifest, TurnPreview
     from fleet_rlm.chat.turn_runtime import TurnRuntime
     from fleet_rlm.config import Settings
-    from fleet_rlm.daytona import workspace_fs
     from fleet_rlm.daytona.session_manager import InterpreterLease
     from fleet_rlm.sessions.models import AssistantTurnRecord
+    from fleet_rlm.workspace import storage as workspace_fs
 
     assert not hasattr(Settings, "llm_api_url")
     assert "delete_sandbox" not in InterpreterLease.__dataclass_fields__
@@ -131,6 +132,6 @@ def test_deleted_dataclass_methods_and_fields_stay_deleted() -> None:
 
 
 def test_workspace_capability_metadata_has_no_dead_serializer() -> None:
-    from fleet_rlm.files.workspace_models import WorkspaceCapabilityMetadata
+    from fleet_rlm.workspace.models import WorkspaceCapabilityMetadata
 
     assert not hasattr(WorkspaceCapabilityMetadata, "to_input")

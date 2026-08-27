@@ -12,18 +12,17 @@ import dspy
 from sqlalchemy.exc import SQLAlchemyError
 
 from fleet_rlm.artifacts.promotion import RunArtifactSink
-from fleet_rlm.chat.post_commit_memory import OwnedPostCommitMemoryPromotion
-from fleet_rlm.chat.run_authority import RunAuthority
-from fleet_rlm.chat.run_lifecycle import ClaimedRun, MemoryIntentBuilder
-from fleet_rlm.chat.session_context import build_session_context_manifest
-from fleet_rlm.files.memory_models import WORKSPACE_MEMORY_INJECTION_TAIL_BYTES
-from fleet_rlm.files.models import (
+from fleet_rlm.attachments.models import (
     AttachmentAccess,
     AttachmentRun,
     PreparedAttachment,
     PreparedAttachments,
     RunAttachmentSink,
 )
+from fleet_rlm.chat.post_commit_memory import OwnedPostCommitMemoryPromotion
+from fleet_rlm.chat.run_authority import RunAuthority
+from fleet_rlm.chat.run_lifecycle import ClaimedRun, MemoryIntentBuilder
+from fleet_rlm.chat.session_context import build_session_context_manifest
 from fleet_rlm.observability.turn_tracing import turn_phase_span
 from fleet_rlm.persistence.database import DatabaseConnectionError
 from fleet_rlm.result_snapshot import ResultSnapshotSink
@@ -47,6 +46,7 @@ from fleet_rlm.sessions.committed_turn import CommittedTurn, TextPart, UsagePart
 from fleet_rlm.sessions.history import is_committed_conversation_turn, to_dspy_history
 from fleet_rlm.sessions.history_transport import CommittedSessionHistory
 from fleet_rlm.sessions.models import HistoryMessage
+from fleet_rlm.workspace.models import WORKSPACE_MEMORY_INJECTION_TAIL_BYTES
 
 AsyncCleanup = Callable[[], Awaitable[Any]]
 

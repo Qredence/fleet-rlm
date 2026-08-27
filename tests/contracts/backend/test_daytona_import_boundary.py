@@ -18,8 +18,6 @@ EXPECTED_DAYTONA_MODULES = {
     "interpreter.py",
     "interpreter_output.py",
     "lifecycle.py",
-    "memory_diagnostics.py",
-    "memory_outbox_reconcile.py",
     "optimization_evaluator.py",
     "platform.py",
     "provisioning.py",
@@ -28,9 +26,6 @@ EXPECTED_DAYTONA_MODULES = {
     "runtime.py",
     "sandbox_lease.py",
     "session_manager.py",
-    "workspace_fs.py",
-    "workspace_gateway.py",
-    "workspace_memory.py",
     "_cleanup.py",
     "_lease.py",
 }

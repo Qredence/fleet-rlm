@@ -1,7 +1,20 @@
-"""Lexical policy for Session Workspace paths."""
+"""Workspace-relative lexical path policy and shared Volume layout exports."""
 
 from __future__ import annotations
 
+from fleet_rlm.paths import (
+    DEFAULT_VOLUME_MOUNT_PATH,
+    UnsafePathError,
+    VolumePaths,
+    as_posix,
+    resolve_under_root,
+    validate_mount_path,
+    validate_path_id,
+    validate_project_slug,
+    volume_paths_from_settings,
+)
+
+# Session Workspace lexical validation
 MAX_WORKSPACE_DEPTH = 8
 MAX_WORKSPACE_SEGMENT_BYTES = 255
 MAX_WORKSPACE_PATH_BYTES = 1_024
@@ -39,3 +52,21 @@ def normalize_workspace_path(path: str, *, allow_root: bool = False) -> str:
         if len(part.encode("utf-8")) > MAX_WORKSPACE_SEGMENT_BYTES:
             raise WorkspacePathError("workspace path segment is too long")
     return "/".join(parts)
+
+
+__all__ = [
+    "DEFAULT_VOLUME_MOUNT_PATH",
+    "MAX_WORKSPACE_DEPTH",
+    "MAX_WORKSPACE_PATH_BYTES",
+    "MAX_WORKSPACE_SEGMENT_BYTES",
+    "UnsafePathError",
+    "VolumePaths",
+    "WorkspacePathError",
+    "as_posix",
+    "normalize_workspace_path",
+    "resolve_under_root",
+    "validate_mount_path",
+    "validate_path_id",
+    "validate_project_slug",
+    "volume_paths_from_settings",
+]

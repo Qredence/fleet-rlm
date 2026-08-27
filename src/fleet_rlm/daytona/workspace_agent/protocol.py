@@ -12,10 +12,7 @@ import json
 from importlib.resources import files
 from typing import Any
 
-from fleet_rlm.daytona.interpreter import DEFAULT_EXECUTION_TIMEOUT_S
-from fleet_rlm.files.workspace_models import WorkspaceConflictError
-
-WORKSPACE_AGENT_CODE_RUN_TIMEOUT_S = DEFAULT_EXECUTION_TIMEOUT_S
+WORKSPACE_AGENT_CODE_RUN_TIMEOUT_S = 120
 WORKSPACE_AGENT_PROTOCOL_VERSION = "fleet.workspace-agent/v1"
 WORKSPACE_AGENT_INSTALL_PATH = "/home/daytona/fleet_rlm_workspace_agent_v1.py"
 WORKSPACE_AGENT_MODULE_NAME = "fleet_rlm_workspace_agent_v1"
@@ -28,10 +25,6 @@ WORKSPACE_AGENT_SUPPORTED_OPERATIONS = (
     "read",
     "read_page",
     "append",
-    "memory_migrate",
-    "memory_append",
-    "memory_edit",
-    "memory_delete",
     "unlink",
     "delete",
     "patch",
@@ -41,6 +34,14 @@ WORKSPACE_AGENT_SUPPORTED_OPERATIONS = (
 
 class WorkspaceAgentStorageError(OSError):
     """Remote mounted-volume mutation failure."""
+
+
+class WorkspaceAgentConflictError(FileExistsError):
+    """Transport-level conflict; the storage adapter owns domain translation."""
+
+    def __init__(self, relative: str, *, detail: str = "") -> None:
+        super().__init__(relative)
+        self.detail = detail
 
 
 class WorkspaceAgentProtocolError(RuntimeError):
@@ -55,7 +56,6 @@ _PATH_ERRORS = {
 _VALUE_ERRORS = {
     "read_bound": "workspace file exceeds read bound",
     "too_large": "workspace file exceeds maximum size",
-    "invalid_record": "workspace memory record is invalid",
     "invalid_utf8": "workspace file is not valid UTF-8",
     "cursor": "workspace cursor is invalid",
 }
@@ -93,8 +93,8 @@ def build_workspace_agent_code(
     max_chars: int = 0,
     total_file_bytes: int = 0,
     checksum: bool = False,
-    memory_id: str = "",
     expected_sha256: str = "",
+    allow_volume_root: bool = False,
 ) -> str:
     """Build the full fallback source plus one bounded operation request."""
     request = {
@@ -113,8 +113,8 @@ def build_workspace_agent_code(
         "max_chars": int(max_chars),
         "total_file_bytes": int(total_file_bytes),
         "checksum": checksum,
-        "memory_id": memory_id,
         "expected_sha256": expected_sha256,
+        "allow_volume_root": allow_volume_root,
     }
     encoded = json.dumps(request, ensure_ascii=False, separators=(",", ":"))
     if len(encoded.encode("utf-8")) > WORKSPACE_AGENT_REQUEST_MAX_BYTES:
@@ -187,7 +187,7 @@ def _raise_workspace_error(payload: dict[str, object], relative: str) -> None:
     if error == "conflict":
         detail = payload.get("detail")
         if isinstance(detail, str) and detail:
-            raise WorkspaceConflictError(relative, detail=detail)
+            raise WorkspaceAgentConflictError(relative, detail=detail)
         raise FileExistsError(relative)
     path_error = _PATH_ERRORS.get(error)
     if path_error is not None:
@@ -214,6 +214,7 @@ __all__ = [
     "WORKSPACE_AGENT_REQUEST_MAX_BYTES",
     "WORKSPACE_AGENT_RESPONSE_MAX_BYTES",
     "WORKSPACE_AGENT_SUPPORTED_OPERATIONS",
+    "WorkspaceAgentConflictError",
     "WorkspaceAgentProtocolError",
     "WorkspaceAgentStorageError",
     "_workspace_agent_runtime_checksum",

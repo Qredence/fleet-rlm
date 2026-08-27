@@ -14,15 +14,16 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from math import isfinite
 from types import MappingProxyType
-from typing import TYPE_CHECKING, Any, Literal, TypeAlias, TypedDict, cast
+from typing import TYPE_CHECKING, Any, Literal, TypeAlias, cast
 
 import dspy
 from pydantic import TypeAdapter
 from pydantic_core import PydanticSerializationError
 
 from fleet_rlm.artifacts.models import ArtifactCandidate
-from fleet_rlm.files.memory_candidates import MemoryCandidate
 from fleet_rlm.json_types import JsonValue
+from fleet_rlm.runtime.usage import RLMUsage, empty_rlm_usage
+from fleet_rlm.workspace.memory import MemoryCandidate
 
 if TYPE_CHECKING:
     pass
@@ -532,19 +533,6 @@ def validate_prediction(
 # ---------------------------------------------------------------------------
 # Usage Metadata
 # ---------------------------------------------------------------------------
-
-
-class RLMUsage(TypedDict):
-    """Closed public and durable usage observed for one RLM Turn."""
-
-    iterations: int
-    observed_lm_usage: dict[str, dict[str, JsonValue]]
-    duration_ms: int
-
-
-def empty_rlm_usage() -> RLMUsage:
-    """Return a canonical empty observation for outcomes without a Prediction."""
-    return RLMUsage(iterations=0, observed_lm_usage={}, duration_ms=0)
 
 
 def _nonnegative_integer(value: object, *, field: str) -> int:

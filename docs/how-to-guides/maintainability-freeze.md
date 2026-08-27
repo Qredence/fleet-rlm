@@ -15,7 +15,7 @@ provider lifecycle, or native DSPy execution contract.
 | Waits for already-started asynchronous effects | `runtime/owned_effect.py` | owned-effect and cancellation suites |
 | Recursive child acquisition, settlement, and late ownership | `daytona/recursive_child_runtime.py` | child cleanup, cancellation, and provider-boundary suites |
 | Installed and fallback Workspace agent protocol | `daytona/workspace_agent/`, `daytona/workspace_agent/runtime.py` | Workspace agent handshake and file/Memory suites |
-| Workspace Memory fail-soft classification | `daytona/memory_diagnostics.py` | Memory diagnostics and observability sanitation suites |
+| Workspace Memory fail-soft classification | `workspace/memory.py` | Memory diagnostics and observability sanitation suites |
 | Configuration field metadata and editor inventory | `config.py`, `config_policy.py` | configuration policy and settings API suites |
 | Canonical live/durable TUI projection | `tools/fleet-tui/src/tui/canonical.ts`, `live-adapter.ts`, `durable-adapter.ts`, `turn-reducer.ts` | `turn-reducer-invariants.test.ts` |
 

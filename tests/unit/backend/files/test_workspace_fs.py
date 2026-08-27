@@ -11,7 +11,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from fleet_rlm.files.workspace_models import WorkspaceEntry
+from fleet_rlm.workspace.models import WorkspaceEntry
 
 
 class LocalProcess:
@@ -27,7 +27,7 @@ class LocalProcess:
 
 
 def _workspace(tmp_path: Path, *, max_file_bytes: int = 32, root_exists: bool = True):
-    from fleet_rlm.daytona.workspace_fs import DaytonaSessionWorkspaceFS
+    from fleet_rlm.workspace.storage import DaytonaSessionWorkspaceFS
 
     volume_root = tmp_path / "volume"
     session_parent = volume_root / "sessions" / "session"
@@ -81,7 +81,7 @@ def test_workspace_agent_runs_locally_and_falls_back_from_atomic_overwrite(
 
 
 def test_rejects_workspace_root_outside_trusted_volume() -> None:
-    from fleet_rlm.daytona.workspace_fs import DaytonaSessionWorkspaceFS
+    from fleet_rlm.workspace.storage import DaytonaSessionWorkspaceFS
 
     with pytest.raises(ValueError, match="trusted volume"):
         DaytonaSessionWorkspaceFS(
@@ -94,7 +94,7 @@ def test_rejects_workspace_root_outside_trusted_volume() -> None:
 
 @pytest.mark.parametrize("reserved", ["attachments", "artifacts"])
 def test_rejects_workspace_root_aliasing_managed_storage(reserved: str) -> None:
-    from fleet_rlm.daytona.workspace_fs import DaytonaSessionWorkspaceFS
+    from fleet_rlm.workspace.storage import DaytonaSessionWorkspaceFS
 
     with pytest.raises(ValueError, match="attachment or artifact"):
         DaytonaSessionWorkspaceFS(
@@ -349,7 +349,7 @@ def test_fallback_overwrite_restores_previous_contents_after_write_failure(
 
     monkeypatch.setattr(os, "write", fail_first_write)
 
-    from fleet_rlm.daytona.workspace_fs import WorkspaceStorageError
+    from fleet_rlm.workspace.storage import WorkspaceStorageError
 
     with pytest.raises(WorkspaceStorageError):
         workspace.write_text("date.txt", "replacement", overwrite=True)
@@ -372,7 +372,7 @@ def test_unrelated_atomic_replace_error_remains_unsupported_storage(
         lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError(errno.EIO, "rename failed")),
     )
 
-    from fleet_rlm.daytona.workspace_fs import WorkspaceStorageError
+    from fleet_rlm.workspace.storage import WorkspaceStorageError
 
     with pytest.raises(WorkspaceStorageError):
         workspace.write_text("date.txt", "replacement", overwrite=True)
@@ -476,7 +476,7 @@ def test_failed_overwrite_preserves_previous_contents(
 
     monkeypatch.setattr(os, "fsync", fail_staged_file_fsync)
 
-    from fleet_rlm.daytona.workspace_fs import WorkspaceStorageError
+    from fleet_rlm.workspace.storage import WorkspaceStorageError
 
     with pytest.raises(WorkspaceStorageError):
         workspace.write_text("date.txt", "replacement", overwrite=True)
@@ -514,7 +514,7 @@ def test_unrelated_link_errors_do_not_trigger_exclusive_fallback(
 
     monkeypatch.setattr(os, "link", rejected_link)
 
-    from fleet_rlm.daytona.workspace_fs import WorkspaceStorageError
+    from fleet_rlm.workspace.storage import WorkspaceStorageError
 
     with pytest.raises(WorkspaceStorageError):
         workspace.write_text("date.txt", "2026-07-19", overwrite=False)
@@ -588,7 +588,7 @@ def test_partial_failure_fsync_cleans_destination_and_temporary_file(
     )
     monkeypatch.setattr(os, "fsync", fail_direct_file_fsync)
 
-    from fleet_rlm.daytona.workspace_fs import WorkspaceStorageError
+    from fleet_rlm.workspace.storage import WorkspaceStorageError
 
     with pytest.raises(WorkspaceStorageError):
         workspace.write_text("date.txt", "partial", overwrite=False)
@@ -636,7 +636,7 @@ def test_partial_failure_does_not_remove_replacement_destination(
     monkeypatch.setattr(os, "fsync", fail_direct_file_fsync)
     monkeypatch.setattr(os, "stat", replace_before_cleanup)
 
-    from fleet_rlm.daytona.workspace_fs import WorkspaceStorageError
+    from fleet_rlm.workspace.storage import WorkspaceStorageError
 
     with pytest.raises(WorkspaceStorageError):
         workspace.write_text("date.txt", "partial", overwrite=False)
@@ -674,7 +674,7 @@ def test_missing_workspace_root_behaves_as_an_empty_virtual_directory(tmp_path: 
 
 
 def test_real_guard_allows_a_missing_virtual_workspace_root(tmp_path: Path) -> None:
-    from fleet_rlm.daytona.workspace_fs import DaytonaSessionWorkspaceFS
+    from fleet_rlm.workspace.storage import DaytonaSessionWorkspaceFS
 
     volume_root = tmp_path / "volume"
     volume_root.mkdir()
@@ -821,7 +821,7 @@ def test_provider_guard_rejects_symlinks_below_the_trusted_volume(
     tmp_path: Path,
     link_kind: str,
 ) -> None:
-    from fleet_rlm.daytona.workspace_fs import DaytonaSessionWorkspaceFS
+    from fleet_rlm.workspace.storage import DaytonaSessionWorkspaceFS
 
     volume_root = tmp_path / "volume"
     sessions = volume_root / "sessions"
@@ -867,7 +867,7 @@ def test_provider_guard_rejects_symlinks_below_the_trusted_volume(
 
 def test_sync_workspace_fs_delete_path_round_trip_and_conflicts(tmp_path: Path) -> None:
     workspace, _sandbox, root, process = _workspace(tmp_path, max_file_bytes=1024)
-    from fleet_rlm.files.workspace_models import WorkspaceConflictError
+    from fleet_rlm.workspace.models import WorkspaceConflictError
 
     workspace.write_text("notes/stale.txt", "stale", overwrite=False)
     calls_before = len(process.calls)
@@ -897,7 +897,7 @@ def test_sync_workspace_fs_patch_text_round_trip_and_conflicts(tmp_path: Path) -
     import hashlib
 
     workspace, _sandbox, root, process = _workspace(tmp_path, max_file_bytes=1024)
-    from fleet_rlm.files.workspace_models import WorkspaceConflictError
+    from fleet_rlm.workspace.models import WorkspaceConflictError
 
     entry = workspace.write_text("notes/report.txt", "hello world", overwrite=False)
     assert entry is not None
@@ -934,7 +934,7 @@ def test_sync_workspace_fs_patch_text_round_trip_and_conflicts(tmp_path: Path) -
 async def test_async_workspace_fs_delete_and_patch_passthrough(tmp_path: Path) -> None:
     import hashlib
 
-    from fleet_rlm.daytona.workspace_fs import AsyncDaytonaSessionWorkspaceFS
+    from fleet_rlm.workspace.storage import AsyncDaytonaSessionWorkspaceFS
 
     volume_root = tmp_path / "volume"
     root = volume_root / "sessions" / "session" / "workspace"
@@ -957,7 +957,7 @@ async def test_async_workspace_fs_delete_and_patch_passthrough(tmp_path: Path) -
     assert patched.checksum_sha256 == hashlib.sha256(b"one three one").hexdigest()
     assert (root / "notes" / "report.txt").read_text(encoding="utf-8") == "one three one"
 
-    from fleet_rlm.files.workspace_models import WorkspaceConflictError
+    from fleet_rlm.workspace.models import WorkspaceConflictError
 
     with pytest.raises(WorkspaceConflictError):
         await workspace.patch_text("notes/report.txt", "one", "x")

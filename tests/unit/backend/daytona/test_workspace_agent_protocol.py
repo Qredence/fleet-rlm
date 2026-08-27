@@ -47,11 +47,11 @@ def test_build_embeds_operation_params_and_runtime_source() -> None:
     assert "handle(json.loads(" in code
     assert '"checksum":true' in code
     assert '"expected_sha256":"abc"' in code
-    assert "import base64, datetime, errno, fcntl, hashlib, json, os, re, stat, time" in code
+    assert "import base64, errno, fcntl, hashlib, json, os, stat, time" in code
     assert "def handle(request):" in code
 
 
-def test_runtime_retains_every_operation_branch() -> None:
+def test_runtime_retains_every_generic_operation_branch() -> None:
     from fleet_rlm.daytona.workspace_agent.protocol import build_workspace_agent_code
 
     code = build_workspace_agent_code(**_base())
@@ -61,15 +61,16 @@ def test_runtime_retains_every_operation_branch() -> None:
         "if operation == 'tail_read':",
         "if operation in ('read', 'read_page'):",
         "if operation == 'append':",
-        "if operation == 'memory_migrate':",
-        "if operation == 'memory_append':",
-        "if operation in ('memory_edit', 'memory_delete'):",
         "if operation == 'unlink':",
         "if operation == 'delete':",
         "if operation == 'patch':",
         "if operation == 'write':",
     ):
         assert marker in code, marker
+    assert "memory_migrate" not in code
+    assert "memory_append" not in code
+    assert "memory_edit" not in code
+    assert "memory_delete" not in code
 
 
 def test_error_vocabulary_and_security_markers_are_stable() -> None:
@@ -98,6 +99,18 @@ def test_error_vocabulary_and_security_markers_are_stable() -> None:
         assert marker in code, marker
     for marker in ("'error': 'not_found'", "'error': 'not_directory'", "'error': 'unsupported_storage'"):
         assert marker in code, marker
+
+
+def test_conflict_response_stays_transport_owned_until_storage_mapping() -> None:
+    from fleet_rlm.daytona.workspace_agent.protocol import (
+        WorkspaceAgentConflictError,
+        decode_workspace_agent_response,
+    )
+
+    response = SimpleNamespace(exit_code=0, result='{"ok": false, "error": "conflict", "detail": "checksum_mismatch"}')
+    with pytest.raises(WorkspaceAgentConflictError) as caught:
+        decode_workspace_agent_response(response, "note.txt")
+    assert caught.value.detail == "checksum_mismatch"
 
 
 def test_response_bound_is_checked_before_json_parsing() -> None:

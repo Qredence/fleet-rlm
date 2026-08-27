@@ -8,9 +8,9 @@ from dataclasses import replace
 import dspy
 import pytest
 
-from fleet_rlm.files.workspace_models import WorkspaceEntry, WorkspaceListResult, WorkspaceTextPage
 from fleet_rlm.rlm.events import ToolFailed, WarningEvent, observe_tool
 from fleet_rlm.rlm.runtime import RunToolGuards
+from fleet_rlm.workspace.models import WorkspaceEntry, WorkspaceListResult, WorkspaceTextPage
 
 
 class FakeWorkspace:
@@ -64,7 +64,7 @@ class FakeWorkspace:
         return WorkspaceEntry(path, "file", len(self.files[path].encode()), "2026-07-16T12:00:00Z")
 
     def delete_path(self, path: str, *, expected_sha256: str | None = None) -> None:
-        from fleet_rlm.files.workspace_models import WorkspaceConflictError
+        from fleet_rlm.workspace.models import WorkspaceConflictError
 
         if expected_sha256 is not None and path in self.files:
             actual = hashlib.sha256(self.files[path].encode()).hexdigest()
@@ -86,7 +86,7 @@ class FakeWorkspace:
         *,
         expected_sha256: str | None = None,
     ) -> WorkspaceEntry:
-        from fleet_rlm.files.workspace_models import WorkspaceConflictError
+        from fleet_rlm.workspace.models import WorkspaceConflictError
 
         if path not in self.files:
             raise FileNotFoundError(path)
@@ -112,7 +112,7 @@ class FakeWorkspace:
 
 
 def _tools(workspace: FakeWorkspace | None = None) -> tuple[FakeWorkspace, dict[str, dspy.Tool]]:
-    from fleet_rlm.files.workspace_tools import WorkspaceToolHost
+    from fleet_rlm.workspace.workspace import WorkspaceToolHost
 
     value = workspace or FakeWorkspace()
     tools = WorkspaceToolHost(value, max_file_bytes=32).as_tools()
@@ -196,7 +196,7 @@ def test_round_trips_text_with_bounded_json_results() -> None:
 
 
 def test_workspace_event_views_expose_metadata_without_file_bodies_or_entries() -> None:
-    from fleet_rlm.files.workspace_tools import WorkspaceToolHost
+    from fleet_rlm.workspace.workspace import WorkspaceToolHost
 
     workspace = FakeWorkspace()
     host = WorkspaceToolHost(workspace, max_file_bytes=64)
@@ -250,7 +250,7 @@ def test_workspace_event_views_expose_metadata_without_file_bodies_or_entries() 
 
     observed.clear()
     oversized_path = "x" * 2_000
-    from fleet_rlm.files.workspace_tools import WorkspaceToolError
+    from fleet_rlm.workspace.workspace import WorkspaceToolError
 
     with pytest.raises(WorkspaceToolError):
         observe_tool(tools["stat_workspace_file"], observed.append, views["stat_workspace_file"])(path=oversized_path)
@@ -269,7 +269,7 @@ def test_workspace_event_views_expose_metadata_without_file_bodies_or_entries() 
 def test_repeated_workspace_reads_are_idempotent_but_still_observed() -> None:
     workspace, tools = _tools()
     workspace.files["date.txt"] = "2026-07-21"
-    from fleet_rlm.files.workspace_tools import WorkspaceToolHost
+    from fleet_rlm.workspace.workspace import WorkspaceToolHost
 
     host = WorkspaceToolHost(workspace, max_file_bytes=32)
     view = host.event_views()["read_workspace_text"]
@@ -286,7 +286,7 @@ def test_repeated_workspace_reads_are_idempotent_but_still_observed() -> None:
 def test_raises_stable_safe_errors_without_exception_details() -> None:
     workspace, tools = _tools()
 
-    from fleet_rlm.files.workspace_tools import WorkspaceToolError
+    from fleet_rlm.workspace.workspace import WorkspaceToolError
 
     with pytest.raises(WorkspaceToolError, match="not found") as missing:
         tools["stat_workspace_file"](path="missing.txt")
@@ -305,8 +305,8 @@ def test_raises_stable_safe_errors_without_exception_details() -> None:
 
 def test_workspace_storage_failure_has_structured_host_error() -> None:
     workspace, tools = _tools()
-    from fleet_rlm.daytona.workspace_fs import WorkspaceStorageError
-    from fleet_rlm.files.workspace_tools import WorkspaceToolError
+    from fleet_rlm.workspace.storage import WorkspaceStorageError
+    from fleet_rlm.workspace.workspace import WorkspaceToolError
 
     def unavailable(*_args: object, **_kwargs: object) -> WorkspaceEntry:
         raise WorkspaceStorageError(1)
@@ -367,7 +367,7 @@ def test_delete_workspace_path_happy_missing_and_closed_errors() -> None:
     assert deleted == {"ok": True, "namespace": "session_workspace", "path": "notes/stale.md"}
     assert workspace.files == {}
 
-    from fleet_rlm.files.workspace_tools import WorkspaceToolError
+    from fleet_rlm.workspace.workspace import WorkspaceToolError
 
     with pytest.raises(WorkspaceToolError) as missing:
         tools["delete_workspace_path"](path="notes/stale.md")
@@ -385,7 +385,7 @@ def test_delete_workspace_path_happy_missing_and_closed_errors() -> None:
 
 def test_delete_workspace_path_conflict_messages_are_actionable() -> None:
     _workspace, tools = _tools()
-    from fleet_rlm.files.workspace_tools import WorkspaceToolError
+    from fleet_rlm.workspace.workspace import WorkspaceToolError
 
     with pytest.raises(WorkspaceToolError, match="checksum precondition") as checksum:
         tools["delete_workspace_path"](path="conflicted.txt", expected_sha256="f" * 64)
@@ -416,7 +416,7 @@ def test_edit_workspace_text_replaces_one_unique_occurrence() -> None:
 
 def test_edit_workspace_text_conflict_and_scope_errors() -> None:
     workspace, tools = _tools()
-    from fleet_rlm.files.workspace_tools import WorkspaceToolError
+    from fleet_rlm.workspace.workspace import WorkspaceToolError
 
     workspace.files["notes/report.md"] = "alpha alpha"
     with pytest.raises(WorkspaceToolError, match="more than once") as ambiguous:
@@ -458,8 +458,8 @@ def test_edit_workspace_text_conflict_and_scope_errors() -> None:
 
 
 def test_delete_and_edit_event_views_expose_metadata_without_fragments() -> None:
-    from fleet_rlm.files.workspace_tools import WorkspaceToolHost
     from fleet_rlm.rlm.events import observe_tool
+    from fleet_rlm.workspace.workspace import WorkspaceToolHost
 
     workspace = FakeWorkspace()
     workspace.files["notes/private.md"] = "private fragment body"

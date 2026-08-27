@@ -16,7 +16,6 @@ from threading import Lock
 from typing import Any, Protocol
 from uuid import UUID, uuid4
 
-from fleet_rlm.chat.run_cleanup import RunCleanupSupervisor
 from fleet_rlm.daytona._lease import LeaseState
 
 # Admission ownership lives in fleet_rlm.daytona.admission (QRE-156); the
@@ -61,6 +60,7 @@ from fleet_rlm.runtime.bindings import (
     require_scoped_volume_subpath,
     workspace_volume_subpath,
 )
+from fleet_rlm.runtime.cleanup import RunCleanupSupervisor
 from fleet_rlm.runtime.owned_effect import OwnedEffect
 
 logger = logging.getLogger(__name__)

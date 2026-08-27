@@ -10,17 +10,17 @@ from uuid import uuid4
 import dspy
 import pytest
 
-from fleet_rlm.files.memory_candidate_tools import MemoryCandidateToolHost
-from fleet_rlm.files.memory_candidates import (
+from fleet_rlm.rlm.events import observe_tool
+from fleet_rlm.workspace.memory import (
     WORKSPACE_MEMORY_CANDIDATE_MAX_COUNT,
     WORKSPACE_MEMORY_CANDIDATE_MAX_LEARNING_BYTES,
     WORKSPACE_MEMORY_CANDIDATE_MAX_TOTAL_BYTES,
     MemoryCandidateCollector,
     MemoryCandidatePromotionResult,
     MemoryCandidateToolError,
+    MemoryCandidateToolHost,
     promote_memory_candidates,
 )
-from fleet_rlm.rlm.events import observe_tool
 
 
 def _collector(**kwargs: Any) -> MemoryCandidateCollector:
@@ -199,7 +199,7 @@ class _PromotionStore:
         self.list_calls = 0
 
     def read_tail(self, *, byte_budget: int):
-        from fleet_rlm.files.memory_models import WorkspaceMemoryReadResult
+        from fleet_rlm.workspace.models import WorkspaceMemoryReadResult
 
         return WorkspaceMemoryReadResult(
             content="", truncated=False, bytes_returned=0, byte_budget=byte_budget, total_bytes=0, warnings=0
@@ -214,7 +214,7 @@ class _PromotionStore:
         raise AssertionError("promotion tests do not edit")
 
     def list_entries(self, *, after: str | None = None, limit: int, category: str | None = None):
-        from fleet_rlm.files.memory_models import WorkspaceMemoryListResult
+        from fleet_rlm.workspace.models import WorkspaceMemoryListResult
 
         del after
         self.list_calls += 1
@@ -224,7 +224,7 @@ class _PromotionStore:
         return WorkspaceMemoryListResult(entries=tuple(entries), truncated=False, next_cursor=None, warnings=0)
 
     def append_record(self, record: str):
-        from fleet_rlm.files.memory_models import WorkspaceMemoryAppendResult, parse_workspace_memory_record
+        from fleet_rlm.workspace.models import WorkspaceMemoryAppendResult, parse_workspace_memory_record
 
         if self.fail_next:
             self.fail_next = False
@@ -235,8 +235,8 @@ class _PromotionStore:
 
 
 def test_candidate_promotion_writes_fresh_v3_agent_records_and_metadata() -> None:
-    from fleet_rlm.files.memory_candidates import MemoryCandidate
-    from fleet_rlm.files.memory_models import parse_workspace_memory_record
+    from fleet_rlm.workspace.memory import MemoryCandidate
+    from fleet_rlm.workspace.models import parse_workspace_memory_record
 
     candidate = MemoryCandidate(
         candidate_id="cand00000001",
@@ -262,8 +262,8 @@ def test_candidate_promotion_writes_fresh_v3_agent_records_and_metadata() -> Non
 
 
 def test_candidate_promotion_dedupes_exact_active_content_and_repeats() -> None:
-    from fleet_rlm.files.memory_candidates import MemoryCandidate
-    from fleet_rlm.files.memory_models import WorkspaceMemoryEntry
+    from fleet_rlm.workspace.memory import MemoryCandidate
+    from fleet_rlm.workspace.models import WorkspaceMemoryEntry
 
     active = WorkspaceMemoryEntry(
         memory_id="aaaa0001",
@@ -299,8 +299,8 @@ def test_candidate_promotion_dedupes_exact_active_content_and_repeats() -> None:
 
 
 def test_candidate_promotion_revalidates_current_active_supersession_target() -> None:
-    from fleet_rlm.files.memory_candidates import MemoryCandidate
-    from fleet_rlm.files.memory_models import WorkspaceMemoryEntry
+    from fleet_rlm.workspace.memory import MemoryCandidate
+    from fleet_rlm.workspace.models import WorkspaceMemoryEntry
 
     target = WorkspaceMemoryEntry(
         memory_id="aaaa0001",
@@ -332,7 +332,7 @@ def test_candidate_promotion_revalidates_current_active_supersession_target() ->
 
 
 def test_candidate_promotion_drop_and_failure_are_fail_soft_and_bounded() -> None:
-    from fleet_rlm.files.memory_candidates import MemoryCandidate
+    from fleet_rlm.workspace.memory import MemoryCandidate
 
     denied = MemoryCandidate(
         candidate_id="cand00000001",
@@ -369,8 +369,8 @@ def test_candidate_promotion_drop_and_failure_are_fail_soft_and_bounded() -> Non
 
 
 def test_candidate_promotion_uses_one_active_snapshot_and_preserves_conflict_detail() -> None:
-    from fleet_rlm.files.memory_candidates import MemoryCandidate
-    from fleet_rlm.files.memory_models import WorkspaceMemoryConflictError
+    from fleet_rlm.workspace.memory import MemoryCandidate
+    from fleet_rlm.workspace.models import WorkspaceMemoryConflictError
 
     class ConflictStore(_PromotionStore):
         def append_record(self, record: str):
@@ -399,7 +399,7 @@ def test_candidate_promotion_uses_one_active_snapshot_and_preserves_conflict_det
 
 
 def test_candidate_promotion_rejects_overrun_mismatch_and_empty_policy_without_store_access() -> None:
-    from fleet_rlm.files.memory_candidates import MemoryCandidate
+    from fleet_rlm.workspace.memory import MemoryCandidate
 
     store = _PromotionStore()
     overrun = tuple(
@@ -427,8 +427,8 @@ def test_candidate_promotion_rejects_overrun_mismatch_and_empty_policy_without_s
 
 
 def test_candidate_promotion_classifies_store_full_and_stops_the_tail() -> None:
-    from fleet_rlm.files.memory_candidates import MemoryCandidate
-    from fleet_rlm.files.memory_models import WorkspaceMemoryStoreFullError
+    from fleet_rlm.workspace.memory import MemoryCandidate
+    from fleet_rlm.workspace.models import WorkspaceMemoryStoreFullError
 
     class FullStore(_PromotionStore):
         def append_record(self, record: str):
@@ -457,8 +457,8 @@ def test_candidate_promotion_classifies_store_full_and_stops_the_tail() -> None:
 
 
 def test_candidate_promotion_preserves_append_time_conflict_and_continues() -> None:
-    from fleet_rlm.files.memory_candidates import MemoryCandidate
-    from fleet_rlm.files.memory_models import WorkspaceMemoryConflictError, WorkspaceMemoryEntry
+    from fleet_rlm.workspace.memory import MemoryCandidate
+    from fleet_rlm.workspace.models import WorkspaceMemoryConflictError, WorkspaceMemoryEntry
 
     class RacingConflictStore(_PromotionStore):
         def append_record(self, record: str):
@@ -505,7 +505,7 @@ def test_intent_builder_and_post_commit_promotion_mint_identical_records() -> No
     """Both promotion paths share one validation + record-minting pipeline (P33 fold)."""
     from datetime import UTC, datetime
 
-    from fleet_rlm.files.memory_candidates import MemoryCandidate, build_memory_promotion_intents
+    from fleet_rlm.workspace.memory import MemoryCandidate, build_memory_promotion_intents
 
     def clock() -> datetime:
         return datetime(2026, 8, 17, 12, 0, 0, tzinfo=UTC)

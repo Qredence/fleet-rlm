@@ -31,11 +31,9 @@ import dspy
 from dspy.utils.exceptions import AdapterParseError
 
 from fleet_rlm.artifacts.models import ArtifactCandidate
+from fleet_rlm.attachments.models import PreparedAttachment
 from fleet_rlm.chat.run_authority import RunAuthority
 from fleet_rlm.config import Settings
-from fleet_rlm.files.memory_candidates import MemoryCandidate
-from fleet_rlm.files.models import PreparedAttachment
-from fleet_rlm.files.workspace_models import UNAVAILABLE_WORKSPACE_CAPABILITY, WorkspaceCapabilityMetadata
 from fleet_rlm.observability.failure_diagnostics import normalize_turn_failure
 from fleet_rlm.rlm._dspy_compat import (
     CodeInterpreter,
@@ -107,6 +105,8 @@ from fleet_rlm.runtime.owned_effect import OwnedEffect
 from fleet_rlm.sessions.history_transport import CommittedSessionHistory
 from fleet_rlm.sessions.models import TurnAccess
 from fleet_rlm.skills.models import SkillCard
+from fleet_rlm.workspace.memory import MemoryCandidate
+from fleet_rlm.workspace.models import UNAVAILABLE_WORKSPACE_CAPABILITY, WorkspaceCapabilityMetadata
 
 if TYPE_CHECKING:
     from fleet_rlm.chat.session_context import SessionContextManifest
@@ -347,7 +347,7 @@ def _canonical_target(path: object, *, namespace: str | None = None) -> str | No
     if not isinstance(path, str):
         return None
     try:
-        from fleet_rlm.files.workspace_validation import WorkspacePathError, normalize_workspace_path
+        from fleet_rlm.workspace.paths import WorkspacePathError, normalize_workspace_path
 
         normalized = normalize_workspace_path(path)
     except (TypeError, WorkspacePathError):

@@ -10,8 +10,8 @@ from fastapi import APIRouter, File, UploadFile
 from fleet_rlm.api.dependencies import AttachmentLifecycleDep, LocalScopeDep
 from fleet_rlm.api.errors import http_error
 from fleet_rlm.api.schemas import AttachmentResponse
-from fleet_rlm.files.errors import AttachmentError, AttachmentNotFoundError
-from fleet_rlm.files.models import AttachmentAccess, AttachmentUpload
+from fleet_rlm.attachments.errors import AttachmentError, AttachmentNotFoundError
+from fleet_rlm.attachments.models import AttachmentAccess, AttachmentUpload
 
 router = APIRouter(prefix="/api/attachments", tags=["attachments"])
 

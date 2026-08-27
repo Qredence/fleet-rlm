@@ -9,9 +9,9 @@ from uuid import uuid4
 import pytest
 
 from fleet_rlm.artifacts.models import CompletedRun
-from fleet_rlm.daytona.workspace_gateway import OrphanCleanupReport, cleanup_orphan_bytes
-from fleet_rlm.files.host_volume import HostVolumeMirror, OfflineHostVolumeGateway
-from fleet_rlm.files.volume_paths import VolumePaths
+from fleet_rlm.composition.daytona_workspace import OrphanCleanupReport, cleanup_orphan_bytes
+from fleet_rlm.workspace.paths import VolumePaths
+from fleet_rlm.workspace.storage import HostVolumeMirror, OfflineHostVolumeGateway
 
 
 @pytest.mark.asyncio
@@ -86,7 +86,7 @@ async def test_startup_orphan_cleanup_skips_provisioning_for_empty_workspace(mon
             self.calls.append(("storage", workspace_id))
             return []
 
-    monkeypatch.setattr("fleet_rlm.daytona.workspace_gateway.cleanup_orphan_bytes", fail_if_called)
+    monkeypatch.setattr("fleet_rlm.composition.daytona_workspace.cleanup_orphan_bytes", fail_if_called)
 
     await run_deferred_orphan_cleanup(
         object(),
@@ -264,7 +264,7 @@ async def test_run_deferred_orphan_cleanup_enumerates_and_reports(monkeypatch: p
         assert workspace_id == workspace_id
         return OrphanCleanupReport(scanned=3, removed=1, retained=1, skipped_fresh=1)
 
-    monkeypatch.setattr("fleet_rlm.daytona.workspace_gateway.cleanup_orphan_bytes", fake_cleanup)
+    monkeypatch.setattr("fleet_rlm.composition.daytona_workspace.cleanup_orphan_bytes", fake_cleanup)
 
     await run_deferred_orphan_cleanup(
         "gateway",
@@ -287,7 +287,7 @@ async def test_run_deferred_orphan_cleanup_swallows_timeout(monkeypatch: pytest.
         await asyncio.sleep(1.0)
         raise AssertionError("cleanup timeout should have interrupted the sweep")
 
-    monkeypatch.setattr("fleet_rlm.daytona.workspace_gateway.cleanup_orphan_bytes", hang)
+    monkeypatch.setattr("fleet_rlm.composition.daytona_workspace.cleanup_orphan_bytes", hang)
 
     # Must return (not raise) when the sweep exceeds its budget.
     await run_deferred_orphan_cleanup(
@@ -305,7 +305,7 @@ async def test_run_deferred_orphan_cleanup_swallows_provider_error(monkeypatch: 
     async def boom(_gateway: object, **_kwargs: object) -> OrphanCleanupReport:
         raise RuntimeError("provider down")
 
-    monkeypatch.setattr("fleet_rlm.daytona.workspace_gateway.cleanup_orphan_bytes", boom)
+    monkeypatch.setattr("fleet_rlm.composition.daytona_workspace.cleanup_orphan_bytes", boom)
 
     await run_deferred_orphan_cleanup(
         "gateway",

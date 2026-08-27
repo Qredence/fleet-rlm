@@ -680,9 +680,9 @@ async def test_memory_candidate_promotion_happens_after_atomic_commit_and_fails_
 
     from fleet_rlm.chat.post_commit_memory import OwnedPostCommitMemoryPromotion
     from fleet_rlm.chat.run_lifecycle import ClaimedRun, CommittedTurnReceipt, RunLifecycleService, _RunClaimToken
-    from fleet_rlm.files.memory_candidates import MemoryCandidate
     from fleet_rlm.rlm.result import PredictionResult, RLMOutcome
     from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
+    from fleet_rlm.workspace.memory import MemoryCandidate
 
     run_id, session_id = uuid4(), uuid4()
     access = TurnAccess(uuid4(), uuid4())
@@ -740,9 +740,9 @@ async def test_memory_candidate_promotion_never_runs_after_a_commit_failure() ->
 
     from fleet_rlm.chat.post_commit_memory import OwnedPostCommitMemoryPromotion
     from fleet_rlm.chat.run_lifecycle import ClaimedRun, FailedRunReceipt, RunLifecycleService, _RunClaimToken
-    from fleet_rlm.files.memory_candidates import MemoryCandidate
     from fleet_rlm.rlm.result import PredictionResult, RLMOutcome
     from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
+    from fleet_rlm.workspace.memory import MemoryCandidate
 
     run_id, session_id = uuid4(), uuid4()
 
@@ -806,9 +806,9 @@ async def test_memory_candidate_promotion_trace_never_copies_learning(monkeypatc
 
     from fleet_rlm.chat.post_commit_memory import OwnedPostCommitMemoryPromotion
     from fleet_rlm.chat.run_lifecycle import ClaimedRun, CommittedTurnReceipt, RunLifecycleService, _RunClaimToken
-    from fleet_rlm.files.memory_candidates import MemoryCandidate, MemoryCandidatePromotionResult
     from fleet_rlm.rlm.result import PredictionResult, RLMOutcome
     from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
+    from fleet_rlm.workspace.memory import MemoryCandidate, MemoryCandidatePromotionResult
 
     run_id, session_id = uuid4(), uuid4()
 

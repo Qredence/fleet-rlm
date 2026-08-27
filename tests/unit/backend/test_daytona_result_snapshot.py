@@ -80,7 +80,7 @@ def test_result_snapshot_rejects_non_strict_usage() -> None:
 
 
 def test_volume_result_path_is_unique_and_path_safe() -> None:
-    from fleet_rlm.files.volume_paths import UnsafePathError, VolumePaths
+    from fleet_rlm.workspace.paths import UnsafePathError, VolumePaths
 
     paths = VolumePaths.from_mount()
     session_id, first_run, second_run = uuid4(), uuid4(), uuid4()
@@ -92,7 +92,7 @@ def test_volume_result_path_is_unique_and_path_safe() -> None:
 
 
 def test_daytona_volume_adapter_removes_exact_file_path() -> None:
-    from fleet_rlm.daytona.workspace_fs import DaytonaSandboxVolumeFs
+    from fleet_rlm.workspace.storage import DaytonaSandboxVolumeFs
 
     calls: list[tuple[str, str]] = []
 
@@ -114,10 +114,10 @@ async def test_live_daytona_sink_commit_failure_deletes_snapshot_through_adapter
         RunLifecycleService,
         _RunClaimToken,
     )
-    from fleet_rlm.daytona.run_environment import _DaytonaRunSink
-    from fleet_rlm.files.volume_paths import VolumePaths
+    from fleet_rlm.composition.daytona_environment import _DaytonaRunSink
     from fleet_rlm.rlm.result import PredictionResult, RLMOutcome
     from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
+    from fleet_rlm.workspace.paths import VolumePaths
 
     values: dict[str, bytes] = {}
     deleted: list[str] = []

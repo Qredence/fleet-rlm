@@ -20,7 +20,7 @@ PYTEST_PARALLEL := -n auto --maxprocesses=$(PYTEST_XDIST_MAX_WORKERS) --dist=loa
 	install install-dev install-all \
 	dev format format-check lint typecheck \
 	test test-fast test-unit test-contract test-packaging test-daytona-cov \
-	check quality-gate check-release check-docs check-security check-deps check-codebase-tree api-check api-sync tui-check \
+	check quality-gate check-release check-docs check-security check-deps check-codebase-tree check-dependency-boundaries api-check api-sync tui-check \
 	build build-release release release-check \
 	certification-gate certification-verify \
 	clean cli precommit-install precommit-run precommit \
@@ -58,6 +58,7 @@ help:
 	@echo "  make check-security   - Run pip-audit + bandit"
 	@echo "  make check-deps       - Check Python dependencies with deptry"
 	@echo "  make check-codebase-tree - Enforce import boundaries defined in codebase map"
+	@echo "  make check-dependency-boundaries - Enforce provider/domain dependency directions"
 	@echo "  make api-check        - Verify OpenAPI and generated TUI HTTP types"
 	@echo "  make api-sync         - Regenerate OpenAPI and generated TUI HTTP types"
 	@echo "  make stream-check     - Verify the TUI turn-stream fixture is current"
@@ -161,7 +162,7 @@ tui-check:
 	cd tools/fleet-tui && pnpm run typecheck
 	cd tools/fleet-tui && pnpm run test
 
-check: lint format-check typecheck test-daytona-cov api-check tui-check check-codebase-tree check-docs
+check: lint format-check typecheck test-daytona-cov api-check tui-check check-codebase-tree check-dependency-boundaries check-docs
 
 quality-gate: check
 
@@ -190,6 +191,9 @@ check-deps:
 
 check-codebase-tree:
 	uv run python scripts/check_codebase_tree.py
+
+check-dependency-boundaries:
+	uv run python scripts/check_dependency_boundaries.py
 
 api-check:
 	uv run python scripts/openapi_tools.py check

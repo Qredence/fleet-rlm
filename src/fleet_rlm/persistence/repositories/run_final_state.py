@@ -33,7 +33,6 @@ from fleet_rlm.chat.run_lifecycle import (
     RunNotFoundError,
     RunStateError,
 )
-from fleet_rlm.files.memory_candidates import MemoryPromotionIntent
 from fleet_rlm.persistence.models import MemoryPromotionIntentRow, RunRow, SessionRow, TurnRow
 from fleet_rlm.persistence.repositories.run_claim_decisions import _claim_owner_matches, _validate_sql_claim
 from fleet_rlm.persistence.repositories.run_codec import (
@@ -52,6 +51,7 @@ from fleet_rlm.persistence.repositories.run_liveness import (
     _touch_claim_heartbeat,
 )
 from fleet_rlm.sessions.models import HistoryMessage
+from fleet_rlm.workspace.memory import MemoryPromotionIntent
 
 
 async def _authorized_sql_session(db: AsyncSession, run: ClaimedRun, row: RunRow) -> SessionRow:

@@ -45,9 +45,9 @@ from fleet_rlm.daytona import recursive_child_runtime
 from fleet_rlm.daytona.broker import sync_sandbox
 from fleet_rlm.daytona.sandbox_lease import SandboxLeaseReceipt
 from fleet_rlm.daytona.session_manager import get_active_lease_registry
-from fleet_rlm.files.volume_paths import volume_paths_from_settings
 from fleet_rlm.rlm.program import RLMModelBundle
 from fleet_rlm.runtime.bindings import workspace_volume_subpath
+from fleet_rlm.workspace.paths import volume_paths_from_settings
 from tests.live.backend._database import upgrade_to_head
 from tests.live.backend._p35d_evidence import candidate_identity
 from tests.live.backend._p39c_evidence import record_observed_sandbox_ids, write_lane_receipt
@@ -568,12 +568,20 @@ def test_live_root_flow_settles_child_ownership_before_publication(
             portal_loop = portal.call(lambda: asyncio.get_running_loop())
             root_sandbox = sync_sandbox(portal.call(resources.platform.get, root_sandbox_id), portal_loop)
             paths = volume_paths_from_settings(settings)
-            memory_store = __import__(
-                "fleet_rlm.daytona.workspace_memory", fromlist=["DaytonaWorkspaceMemoryStore"]
-            ).DaytonaWorkspaceMemoryStore(
-                root_sandbox,
-                volume_paths=paths,
-                max_upload_bytes=settings.max_upload_bytes,
+            from fleet_rlm.workspace.memory import WorkspaceMemory
+            from fleet_rlm.workspace.storage import AgentStorageSession, WorkspaceMemoryStorage
+
+            memory_store = WorkspaceMemory.from_storage(
+                WorkspaceMemoryStorage(
+                    AgentStorageSession(
+                        root_sandbox,
+                        volume_root=str(paths.root),
+                        root=str(paths.root),
+                        max_file_bytes=settings.max_upload_bytes,
+                        allow_volume_root=True,
+                    )
+                ),
+                max_file_bytes=settings.max_upload_bytes,
             )
             entries = memory_store.list_entries(limit=16).entries
             promoted = [

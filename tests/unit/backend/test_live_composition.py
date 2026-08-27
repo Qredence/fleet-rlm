@@ -79,8 +79,8 @@ async def test_daytona_startup_recovery_bounds_provider_fence() -> None:
 async def test_daytona_build_cancellation_disposes_partial_engine(monkeypatch: pytest.MonkeyPatch) -> None:
     """Partial live composition cleanup must also run for task cancellation."""
     import fleet_rlm.composition.daytona as composition
+    import fleet_rlm.composition.daytona_environment as run_environment
     import fleet_rlm.daytona.provisioning as provisioning
-    import fleet_rlm.daytona.run_environment as run_environment
     import fleet_rlm.persistence.database as database
     import fleet_rlm.rlm._dspy_compat as dspy_contract
 
@@ -183,7 +183,7 @@ async def test_daytona_startup_recovery_stops_after_shared_deadline() -> None:
 def test_common_storage_adapter_builder_owns_local_and_sql_catalog_branches(tmp_path, session_factory) -> None:
     import fleet_rlm.composition.common as common
     from fleet_rlm.artifacts.local_catalog import LocalArtifactReaderCatalog
-    from fleet_rlm.files.local_catalog import LocalAttachmentCatalog
+    from fleet_rlm.attachments.local_catalog import LocalAttachmentCatalog
     from fleet_rlm.persistence.repositories import SqlAlchemyArtifactCatalog, SqlAlchemyAttachmentCatalog
 
     builder = getattr(common, "build_local_storage_adapters", None)

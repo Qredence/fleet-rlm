@@ -11,9 +11,8 @@ import dspy
 import pytest
 from pydantic import ValidationError
 
+from fleet_rlm.attachments.models import PreparedAttachment
 from fleet_rlm.chat.session_context import SessionContextManifest, TurnPreview
-from fleet_rlm.files.models import PreparedAttachment
-from fleet_rlm.files.workspace_models import DAYTONA_WORKSPACE_CAPABILITY
 from fleet_rlm.rlm.program import (
     AttachmentContextCapsule,
     AttachmentContextEntry,
@@ -24,6 +23,7 @@ from fleet_rlm.rlm.program import (
 )
 from fleet_rlm.rlm.result import RLMConfigError
 from fleet_rlm.skills.models import SkillCard
+from fleet_rlm.workspace.models import DAYTONA_WORKSPACE_CAPABILITY
 
 SESSION_ID = UUID("00000000-0000-0000-0000-000000000001")
 SKILL_ID = UUID("00000000-0000-0000-0000-000000000002")
@@ -537,15 +537,15 @@ def test_dspy_imports_stay_out_of_deterministic_backend_layers() -> None:
         # P44.1 canonical History factory returns the exact installed
         # dspy.History Pydantic model; the dspy coupling is the point.
         "sessions/history.py",
-        "files/tools.py",
-        "files/url_tool.py",
-        "files/workspace_tools.py",
-        "files/memory_tools.py",
-        "files/memory_candidate_tools.py",
-        "files/project_tools.py",
+        "attachments/tools.py",
+        "artifacts/tools.py",
+        "workspace/memory.py",
+        "workspace/projects.py",
+        "workspace/url.py",
+        "workspace/workspace.py",
     }
     offenders: list[str] = []
-    for package in ("api", "persistence", "sessions", "files", "artifacts"):
+    for package in ("api", "persistence", "sessions", "workspace", "attachments", "artifacts"):
         for path in sorted((source_root / package).rglob("*.py")):
             relative = path.relative_to(source_root).as_posix()
             if relative in allowed_tool_adapters:

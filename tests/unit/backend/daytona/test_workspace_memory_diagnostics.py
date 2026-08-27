@@ -14,21 +14,20 @@ from types import SimpleNamespace
 
 import pytest
 
-from fleet_rlm.daytona import workspace_memory
-from fleet_rlm.daytona.memory_diagnostics import (
+from fleet_rlm.workspace import memory as workspace_memory
+from fleet_rlm.workspace.memory import (
     MemoryFailureCategory,
     MemoryInvariantError,
     MemoryPayloadError,
     classify_memory_failure,
     record_memory_degradation,
 )
-from fleet_rlm.files.memory_models import (
+from fleet_rlm.workspace.models import (
     WORKSPACE_MEMORY_HEADER,
     WorkspaceMemoryListResult,
     WorkspaceMemoryReadResult,
     WorkspaceMemoryStoreUnavailableError,
 )
-from fleet_rlm.files.volume_paths import VolumePaths
 
 HEADER = WORKSPACE_MEMORY_HEADER + "\n"
 
@@ -46,13 +45,19 @@ class LocalProcess:
 
 
 def _store(tmp_path: Path, *, max_bytes: int = 262_144):
+    from fleet_rlm.workspace.memory import WorkspaceMemory
+    from fleet_rlm.workspace.storage import AgentStorageSession, WorkspaceMemoryStorage
+
     root = tmp_path / "volume"
     root.mkdir()
-    store = workspace_memory.DaytonaWorkspaceMemoryStore(
+    session = AgentStorageSession(
         SimpleNamespace(process=LocalProcess()),
-        volume_paths=VolumePaths.from_mount(str(root)),
-        max_upload_bytes=max_bytes,
+        volume_root=str(root),
+        root=str(root),
+        max_file_bytes=max_bytes,
+        allow_volume_root=True,
     )
+    store = WorkspaceMemory.from_storage(WorkspaceMemoryStorage(session), max_file_bytes=max_bytes)
     return store, root
 
 
@@ -75,9 +80,7 @@ def annotated(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, object]]:
 
 
 def _degraded_warnings(caplog: pytest.LogCaptureFixture) -> list[logging.LogRecord]:
-    return [
-        r for r in caplog.records if r.name == "fleet_rlm.daytona.memory_diagnostics" and r.levelno >= logging.WARNING
-    ]
+    return [r for r in caplog.records if r.name == "fleet_rlm.workspace.memory" and r.levelno >= logging.WARNING]
 
 
 # -- classification at the adapter seam (T1) ---------------------------------
@@ -93,7 +96,7 @@ def test_normalization_failure_degrades_to_recency_digest_with_diagnostic(
     secret_learning = "TOPSECRET normalizable learning should never appear in telemetry"
     _write_store_file(root, HEADER + f"- [2026-07-27T11:14:05Z] **General** <!-- id:aaaa0001 -->: {secret_learning}\n")
 
-    import fleet_rlm.files.memory_tools as memory_tools
+    import fleet_rlm.workspace.memory as memory_tools
 
     def explode(_query: object) -> str:
         raise memory_tools.MemoryToolError("invalid_entry", "Workspace Memory entry is invalid")
@@ -124,7 +127,7 @@ def test_relevance_search_failure_falls_back_with_diagnostic(
     store, root = _store(tmp_path)
     _write_store_file(root, HEADER + "- [2026-07-27T11:14:05Z] **General** <!-- id:aaaa0001 -->: durable lesson\n")
 
-    import fleet_rlm.files.memory_tools as memory_tools
+    import fleet_rlm.workspace.memory as memory_tools
 
     def explode(_store: object, *, normalized_query: str) -> object:
         del normalized_query
@@ -150,7 +153,7 @@ def test_unexpected_search_defect_is_classified_explicitly(
     store, root = _store(tmp_path)
     _write_store_file(root, HEADER + "- [2026-07-27T11:14:05Z] **General** <!-- id:aaaa0001 -->: durable lesson\n")
 
-    import fleet_rlm.files.memory_tools as memory_tools
+    import fleet_rlm.workspace.memory as memory_tools
 
     def explode(_store: object, *, normalized_query: str) -> object:
         del normalized_query
@@ -176,7 +179,7 @@ def test_provider_outage_is_classified_and_still_fail_soft(
     def down(*_args, **_kwargs):
         raise WorkspaceAgentStorageError("simulated outage; do not echo payloads")
 
-    monkeypatch.setattr(workspace_memory, "run_workspace_agent", down)
+    monkeypatch.setattr(store._storage, "read_bytes", down)
     with caplog.at_level(logging.WARNING), pytest.raises(WorkspaceMemoryStoreUnavailableError):
         workspace_memory.read_workspace_memory_injection_digest(store, request="anything")
 
@@ -204,7 +207,7 @@ def test_corrupt_payload_is_distinct_from_provider_outage(tmp_path: Path, monkey
     def corrupt(*_args, **_kwargs):
         raise MemoryPayloadError("invalid memory response")
 
-    monkeypatch.setattr(store, "_checked_tail_payload", corrupt)
+    monkeypatch.setattr(store._storage, "read_bytes", corrupt)
     exc = _capture(store)
     assert isinstance(exc, WorkspaceMemoryStoreUnavailableError)
     category, cause_type = classify_memory_failure(exc, operation="injection_digest")
@@ -218,7 +221,7 @@ def test_unexpected_read_defect_is_unexpected_internal(tmp_path: Path, monkeypat
     def boom(*_args, **_kwargs):
         raise TypeError("programming defect canary")
 
-    monkeypatch.setattr(store, "_checked_tail_payload", boom)
+    monkeypatch.setattr(store._storage, "read_bytes", boom)
     exc = _capture(store)
     category, cause_type = classify_memory_failure(exc, operation="injection_digest")
     assert category == MemoryFailureCategory.UNEXPECTED_INTERNAL
@@ -262,17 +265,23 @@ def test_legacy_migration_failure_is_its_own_category(tmp_path: Path) -> None:
     root.mkdir()
     # a directory named MEMORIES.md is a legacy-store shape failure
     (root / "MEMORIES.md").mkdir()
-    store = workspace_memory.DaytonaWorkspaceMemoryStore(
+    from fleet_rlm.workspace.memory import WorkspaceMemory
+    from fleet_rlm.workspace.storage import AgentStorageSession, WorkspaceMemoryStorage
+
+    session = AgentStorageSession(
         SimpleNamespace(process=LocalProcess()),
-        volume_paths=VolumePaths.from_mount(str(root)),
-        max_upload_bytes=262_144,
+        volume_root=str(root),
+        root=str(root),
+        max_file_bytes=262_144,
+        allow_volume_root=True,
     )
+    store = WorkspaceMemory.from_storage(WorkspaceMemoryStorage(session), max_file_bytes=262_144)
 
     exc = _capture(store)
     assert isinstance(exc, WorkspaceMemoryStoreUnavailableError)
     category, cause_type = classify_memory_failure(exc, operation="injection_digest")
     assert category == MemoryFailureCategory.LEGACY_MIGRATION
-    assert cause_type == "MemoryMigrationError"
+    assert cause_type == "IsADirectoryError"
 
 
 # -- emission contract (T2) ----------------------------------------------------
@@ -355,7 +364,7 @@ def test_emitted_fields_are_bounded_and_sanitized(annotated: list[dict[str, obje
 
 @pytest.mark.asyncio
 async def test_turn_preparation_seam_degrades_silently_but_observably(caplog: pytest.LogCaptureFixture) -> None:
-    from fleet_rlm.daytona.run_environment import _prepare_memory_digest
+    from fleet_rlm.composition.daytona_environment import _prepare_memory_digest
 
     class EmptyStore:
         def read_tail(self, *, byte_budget: int) -> WorkspaceMemoryReadResult:
@@ -391,7 +400,7 @@ async def test_turn_preparation_seam_degrades_silently_but_observably(caplog: py
 async def test_turn_preparation_outer_seam_classes_digest_failures(
     caplog: pytest.LogCaptureFixture, annotated: list[dict[str, object]]
 ) -> None:
-    from fleet_rlm.daytona.run_environment import _prepare_memory_digest
+    from fleet_rlm.composition.daytona_environment import _prepare_memory_digest
 
     class CorruptStore:
         def read_tail(self, *, byte_budget: int) -> WorkspaceMemoryReadResult:

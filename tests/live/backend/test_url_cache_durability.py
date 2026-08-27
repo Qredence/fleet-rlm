@@ -12,16 +12,16 @@ from uuid import UUID, uuid4
 import pytest
 
 from fleet_rlm.chat.run_cleanup import RunCleanupSupervisor
+from fleet_rlm.composition.daytona_environment import DaytonaRuntimeResources
 from fleet_rlm.config import Settings, load_runtime_settings
 from fleet_rlm.daytona.broker import sync_sandbox
-from fleet_rlm.daytona.run_environment import DaytonaRuntimeResources
 from fleet_rlm.daytona.session_manager import LeaseRequest
-from fleet_rlm.daytona.workspace_fs import DaytonaSessionWorkspaceFS
-from fleet_rlm.files.url_tool import UrlFetchResult, UrlToolHost, WorkspaceUrlSourceStore
-from fleet_rlm.files.volume_paths import volume_paths_from_settings
 from fleet_rlm.observability.turn_tracing import turn_trace
 from fleet_rlm.rlm.events import ToolCompleted, observe_tool
 from fleet_rlm.runtime.bindings import InMemorySandboxBindingStore, SandboxBinding
+from fleet_rlm.workspace.paths import volume_paths_from_settings
+from fleet_rlm.workspace.storage import DaytonaSessionWorkspaceFS
+from fleet_rlm.workspace.url import UrlFetchResult, UrlToolHost, WorkspaceUrlSourceStore
 
 pytestmark = [pytest.mark.live_daytona]
 

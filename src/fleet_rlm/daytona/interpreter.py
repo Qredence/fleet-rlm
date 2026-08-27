@@ -56,7 +56,6 @@ from fleet_rlm.daytona.interpreter_output import (
     _OutputStreamState,
     _PublicStdoutProjector,
 )
-from fleet_rlm.files.filesystem_tool_helpers import FilesystemToolError
 from fleet_rlm.observability.turn_tracing import trace_preview_limit, turn_phase_span
 from fleet_rlm.rlm._dspy_compat import (
     PUBLIC_FINAL_OUTPUT_LABEL,
@@ -85,6 +84,7 @@ from fleet_rlm.rlm.result import (
     truncate_head_tail,
     truncate_public_text,
 )
+from fleet_rlm.runtime.errors import FilesystemToolError
 
 if TYPE_CHECKING:
     from fleet_rlm.daytona.broker import DaytonaHttpToolBroker

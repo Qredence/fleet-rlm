@@ -13,9 +13,10 @@ def test_p42_ledger_tracks_implementation_status_with_complete_phase_register() 
     ledger = _LEDGER.read_text(encoding="utf-8")
 
     assert "implementation ledger;" in ledger
-    assert "P48 remains" in ledger
-    assert "P49.1" in ledger
-    assert "canonical owners are implemented" in ledger
+    assert "P50" in ledger
+    assert "provider-neutral Workspace/Memory/Attachments migration is implemented" in ledger
+    assert "Standard quality and release gates are green" in ledger
+    assert "No P51 implementation claim" in ledger
     assert "## Explicit P42 non-actions" in ledger
     for phase in range(44, 52):
         assert f"P{phase}" in ledger

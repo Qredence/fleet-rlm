@@ -8,7 +8,9 @@ from uuid import uuid4
 
 import pytest
 
-from fleet_rlm.files.url_tool import (
+from fleet_rlm.rlm.events import ToolCompleted, ToolStarted, observe_tool
+from fleet_rlm.workspace.models import WorkspaceEntry, WorkspaceListResult, WorkspaceTextPage
+from fleet_rlm.workspace.url import (
     InMemoryUrlSourceStore,
     UrlFetchResult,
     UrllibPublicTextFetcher,
@@ -16,8 +18,6 @@ from fleet_rlm.files.url_tool import (
     UrlToolHost,
     WorkspaceUrlSourceStore,
 )
-from fleet_rlm.files.workspace_models import WorkspaceEntry, WorkspaceListResult, WorkspaceTextPage
-from fleet_rlm.rlm.events import ToolCompleted, ToolStarted, observe_tool
 
 
 @dataclass
@@ -329,7 +329,7 @@ def test_url_tool_rejects_unsafe_url_shapes(url: str) -> None:
 
 def test_public_fetcher_rejects_private_dns_results(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
-        "fleet_rlm.files.url_tool.socket.getaddrinfo",
+        "fleet_rlm.workspace.url.socket.getaddrinfo",
         lambda *_args, **_kwargs: [(0, 0, 0, "", ("127.0.0.1", 443))],
     )
 
@@ -341,7 +341,7 @@ def test_public_fetcher_streams_and_pins_validated_address(monkeypatch: pytest.M
     calls: dict[str, object] = {}
 
     monkeypatch.setattr(
-        "fleet_rlm.files.url_tool.socket.getaddrinfo",
+        "fleet_rlm.workspace.url.socket.getaddrinfo",
         lambda *_args, **_kwargs: [(0, 0, 0, "", ("93.184.216.34", 443))],
     )
 
@@ -378,7 +378,7 @@ def test_public_fetcher_streams_and_pins_validated_address(monkeypatch: pytest.M
             calls["request_kwargs"] = kwargs
             return Response()
 
-    monkeypatch.setattr("fleet_rlm.files.url_tool.urllib3.HTTPSConnectionPool", Pool)
+    monkeypatch.setattr("fleet_rlm.workspace.url.urllib3.HTTPSConnectionPool", Pool)
 
     result = UrllibPublicTextFetcher().fetch("https://example.com/report", max_bytes=1_024)
 
@@ -393,11 +393,11 @@ def test_public_fetcher_streams_and_pins_validated_address(monkeypatch: pytest.M
 
 def test_public_fetcher_enforces_total_wall_clock_deadline(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
-        "fleet_rlm.files.url_tool.socket.getaddrinfo",
+        "fleet_rlm.workspace.url.socket.getaddrinfo",
         lambda *_args, **_kwargs: [(0, 0, 0, "", ("93.184.216.34", 443))],
     )
     clock = iter((0.0, 0.0, 2.0))
-    monkeypatch.setattr("fleet_rlm.files.url_tool.time.monotonic", lambda: next(clock))
+    monkeypatch.setattr("fleet_rlm.workspace.url.time.monotonic", lambda: next(clock))
 
     class Response:
         status = 200
@@ -429,7 +429,7 @@ def test_public_fetcher_enforces_total_wall_clock_deadline(monkeypatch: pytest.M
             """
             return Response()
 
-    monkeypatch.setattr("fleet_rlm.files.url_tool.urllib3.HTTPSConnectionPool", Pool)
+    monkeypatch.setattr("fleet_rlm.workspace.url.urllib3.HTTPSConnectionPool", Pool)
 
     with pytest.raises(UrlToolError, match="time limit"):
         UrllibPublicTextFetcher(timeout_seconds=1).fetch("https://example.com/report", max_bytes=1_024)
@@ -437,7 +437,7 @@ def test_public_fetcher_enforces_total_wall_clock_deadline(monkeypatch: pytest.M
 
 def test_public_fetcher_closes_pool_when_response_processing_fails(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
-        "fleet_rlm.files.url_tool.socket.getaddrinfo",
+        "fleet_rlm.workspace.url.socket.getaddrinfo",
         lambda *_args, **_kwargs: [(0, 0, 0, "", ("93.184.216.34", 443))],
     )
     calls: dict[str, bool] = {}
@@ -466,7 +466,7 @@ def test_public_fetcher_closes_pool_when_response_processing_fails(monkeypatch: 
         def urlopen(self, _method: str, _target: str, **_kwargs: object) -> Response:
             return Response()
 
-    monkeypatch.setattr("fleet_rlm.files.url_tool.urllib3.HTTPSConnectionPool", Pool)
+    monkeypatch.setattr("fleet_rlm.workspace.url.urllib3.HTTPSConnectionPool", Pool)
 
     with pytest.raises(UrlToolError, match="unsuccessful"):
         UrllibPublicTextFetcher().fetch("https://example.com/report", max_bytes=1_024)
@@ -476,7 +476,7 @@ def test_public_fetcher_closes_pool_when_response_processing_fails(monkeypatch: 
 
 def test_public_fetcher_requires_tls_certificate_verification(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
-        "fleet_rlm.files.url_tool.socket.getaddrinfo",
+        "fleet_rlm.workspace.url.socket.getaddrinfo",
         lambda *_args, **_kwargs: [(0, 0, 0, "", ("93.184.216.34", 443))],
     )
     pool_kwargs: dict[str, object] = {}
@@ -505,7 +505,7 @@ def test_public_fetcher_requires_tls_certificate_verification(monkeypatch: pytes
         def urlopen(self, _method: str, _target: str, **_kwargs: object) -> Response:
             return Response()
 
-    monkeypatch.setattr("fleet_rlm.files.url_tool.urllib3.HTTPSConnectionPool", Pool)
+    monkeypatch.setattr("fleet_rlm.workspace.url.urllib3.HTTPSConnectionPool", Pool)
 
     result = UrllibPublicTextFetcher().fetch("https://example.com/report", max_bytes=1_024)
 
@@ -517,7 +517,7 @@ def test_public_fetcher_requires_tls_certificate_verification(monkeypatch: pytes
 
 def test_public_fetcher_stops_at_configured_redirect_limit(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
-        "fleet_rlm.files.url_tool.socket.getaddrinfo",
+        "fleet_rlm.workspace.url.socket.getaddrinfo",
         lambda *_args, **_kwargs: [(0, 0, 0, "", ("93.184.216.34", 443))],
     )
 
@@ -559,7 +559,7 @@ def test_public_fetcher_stops_at_configured_redirect_limit(monkeypatch: pytest.M
             """Serve one hop per connection: redirects, then a terminal 200 response."""
             return next(responses)
 
-    monkeypatch.setattr("fleet_rlm.files.url_tool.urllib3.HTTPSConnectionPool", Pool)
+    monkeypatch.setattr("fleet_rlm.workspace.url.urllib3.HTTPSConnectionPool", Pool)
 
     with pytest.raises(UrlToolError, match="redirect limit"):
         UrllibPublicTextFetcher(max_redirects=3).fetch("https://example.com/start", max_bytes=1_024)

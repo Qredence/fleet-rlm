@@ -6,7 +6,7 @@ import pytest
 
 
 def _normalize(path: str, *, allow_root: bool = False) -> str:
-    from fleet_rlm.files.workspace_validation import normalize_workspace_path
+    from fleet_rlm.workspace.paths import normalize_workspace_path
 
     return normalize_workspace_path(path, allow_root=allow_root)
 

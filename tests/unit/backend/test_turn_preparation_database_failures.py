@@ -9,13 +9,13 @@ import pytest
 
 @pytest.mark.asyncio
 async def test_connection_reset_during_capability_preparation_is_unavailable() -> None:
+    from fleet_rlm.attachments.models import PreparedAttachments
     from fleet_rlm.chat.run_lifecycle import ClaimedRun, _RunClaimToken
     from fleet_rlm.chat.run_preparation import (
         DefaultRunPreparer,
         RunEnvironment,
         RunPreparationUnavailableError,
     )
-    from fleet_rlm.files.models import PreparedAttachments
     from fleet_rlm.persistence.database import DatabaseConnectionError
     from fleet_rlm.rlm.program import RLMModelBundle, RLMOptions
     from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
@@ -125,13 +125,13 @@ async def test_connection_reset_during_attachment_staging_is_unavailable() -> No
 
 @pytest.mark.asyncio
 async def test_connection_reset_during_post_capability_cancellation_probe_is_unavailable() -> None:
+    from fleet_rlm.attachments.models import PreparedAttachments
     from fleet_rlm.chat.run_lifecycle import ClaimedRun, _RunClaimToken
     from fleet_rlm.chat.run_preparation import (
         DefaultRunPreparer,
         RunEnvironment,
         RunPreparationUnavailableError,
     )
-    from fleet_rlm.files.models import PreparedAttachments
     from fleet_rlm.persistence.database import DatabaseConnectionError
     from fleet_rlm.rlm.program import RLMModelBundle, RLMOptions
     from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput

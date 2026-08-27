@@ -134,7 +134,6 @@ async def test_runner_uses_supported_async_call_and_returns_typed_outcome(
     The outcome includes events, usage metrics, configured tools, and execution tracing.
     """
     from fleet_rlm.chat.session_context import SessionContextManifest
-    from fleet_rlm.files.workspace_models import WorkspaceCapabilityMetadata
     from fleet_rlm.rlm.events import RLMCode, RLMOutput, StepFinished, StepStarted
     from fleet_rlm.rlm.program import RLMOptions
     from fleet_rlm.rlm.runtime import (
@@ -147,6 +146,7 @@ async def test_runner_uses_supported_async_call_and_returns_typed_outcome(
     )
     from fleet_rlm.sessions.models import TurnAccess
     from fleet_rlm.skills.models import SkillCard
+    from fleet_rlm.workspace.models import WorkspaceCapabilityMetadata
     from tests.unit.backend.rlm.fakes import EmptyCapabilities
 
     class Factory:

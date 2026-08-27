@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib
 import inspect
 import json
 from pathlib import Path
@@ -76,18 +77,46 @@ def _argument_schema(properties: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _import_moved_symbol(symbol: str, *module_names: str) -> Any:
+    """Load a moved contract owner, falling back only while its destination is absent.
+
+    Import failures from a present destination module are intentionally surfaced.
+    A destination that imports successfully but does not export the requested symbol
+    is still being wired, so the legacy owner remains a temporary test fallback.
+    """
+    for module_name in module_names:
+        try:
+            module = importlib.import_module(module_name)
+        except ModuleNotFoundError as exc:
+            missing = exc.name
+            if missing and (module_name == missing or module_name.startswith(f"{missing}.")):
+                continue
+            raise
+        try:
+            return getattr(module, symbol)
+        except AttributeError:
+            # Destination modules may land before all symbols move. Keep the
+            # pre-migration factory usable until that destination is wired.
+            continue
+    names = ", ".join(module_names)
+    raise ImportError(f"Unable to import {symbol}; tried {names}")
+
+
 def _source_tools() -> dict[str, dspy.Tool]:
     """Construct Tool metadata only; no host capability is invoked."""
-    from fleet_rlm.files.memory_candidate_tools import MemoryCandidateToolHost
-    from fleet_rlm.files.memory_candidates import MemoryCandidateCollector
-    from fleet_rlm.files.memory_models import WorkspaceMemoryStore
-    from fleet_rlm.files.memory_tools import WorkspaceMemoryToolHost
-    from fleet_rlm.files.project_tools import ProjectToolHost
-    from fleet_rlm.files.tools import FileToolHost
-    from fleet_rlm.files.url_tool import UrlSourceStore, UrlToolHost
-    from fleet_rlm.files.volume_storage import VolumeBlobFs
-    from fleet_rlm.files.workspace_models import SessionWorkspaceFS
-    from fleet_rlm.files.workspace_tools import WorkspaceToolHost
+    memory_candidate_tool_host = _import_moved_symbol("MemoryCandidateToolHost", "fleet_rlm.workspace.memory")
+    memory_candidate_collector = _import_moved_symbol("MemoryCandidateCollector", "fleet_rlm.workspace.memory")
+    workspace_memory_store = _import_moved_symbol("WorkspaceMemoryStore", "fleet_rlm.workspace.memory")
+    workspace_memory_tool_host = _import_moved_symbol("WorkspaceMemoryToolHost", "fleet_rlm.workspace.memory")
+    project_tool_host = _import_moved_symbol("ProjectToolHost", "fleet_rlm.workspace.projects")
+    from fleet_rlm.artifacts.tools import ArtifactToolHost
+    from fleet_rlm.attachments.tools import AttachmentToolHost
+
+    url_source_store = _import_moved_symbol("UrlSourceStore", "fleet_rlm.workspace.url")
+    url_tool_host = _import_moved_symbol("UrlToolHost", "fleet_rlm.workspace.url")
+    volume_blob_fs = _import_moved_symbol("VolumeBlobFs", "fleet_rlm.workspace.storage")
+    session_workspace_fs = _import_moved_symbol("SessionWorkspaceFS", "fleet_rlm.workspace.models")
+    workspace_tool_host = _import_moved_symbol("WorkspaceToolHost", "fleet_rlm.workspace.workspace")
     from fleet_rlm.optimization.curated_input import CuratedEvaluationStore
     from fleet_rlm.optimization.types import OptimizationRecord
     from fleet_rlm.rlm.program import RLMModelBundle
@@ -120,20 +149,23 @@ def _source_tools() -> dict[str, dspy.Tool]:
     curated = CuratedEvaluationStore(candidate="fixture candidate", record=cast(OptimizationRecord, _Record()))
     tools = (
         *SessionHistoryToolHost(cast(SessionHistory, object())).as_tools(),
-        *WorkspaceToolHost(cast(SessionWorkspaceFS, object()), max_file_bytes=1).as_tools(),
-        *ProjectToolHost(cast(SessionWorkspaceFS, object()), max_file_bytes=1).as_tools(),
-        *WorkspaceMemoryToolHost(cast(WorkspaceMemoryStore, object())).as_tools(),
-        *MemoryCandidateToolHost(cast(MemoryCandidateCollector, object())).as_tools(),
-        *FileToolHost(
+        *workspace_tool_host(cast(session_workspace_fs, object()), max_file_bytes=1).as_tools(),
+        *project_tool_host(cast(session_workspace_fs, object()), max_file_bytes=1).as_tools(),
+        *workspace_memory_tool_host(cast(workspace_memory_store, object())).as_tools(),
+        *memory_candidate_tool_host(cast(memory_candidate_collector, object())).as_tools(),
+        *AttachmentToolHost(
             attachments=(),
             staged_attachments=(),
-            volume_fs=cast(VolumeBlobFs, object()),
+            volume_fs=cast(volume_blob_fs, object()),
+        ).as_tools(),
+        *ArtifactToolHost(
+            volume_fs=cast(volume_blob_fs, object()),
             user_id=identifier,
             workspace_id=identifier,
             session_id=identifier,
             run_id=identifier,
         ).as_tools(),
-        *UrlToolHost(session_id=identifier, store=cast(UrlSourceStore, object()), max_bytes=1).as_tools(),
+        *url_tool_host(session_id=identifier, store=cast(url_source_store, object()), max_bytes=1).as_tools(),
         *SkillToolHost(cast(SkillCatalog, object())).as_tools(),
         recursive.tool,
         recursive.batched_tool,
@@ -200,8 +232,8 @@ def test_model_facing_tool_contract_fixture_has_complete_policies_and_current_co
         assert isinstance(projection["source"], str) and projection["source"]
 
     from fleet_rlm.chat import capability_preparation
+    from fleet_rlm.composition import daytona_environment as run_environment
     from fleet_rlm.composition import testing
-    from fleet_rlm.daytona import run_environment
     from fleet_rlm.rlm import recursion as recursive_calls
     from fleet_rlm.rlm import runtime as runner
 
@@ -212,7 +244,8 @@ def test_model_facing_tool_contract_fixture_has_complete_policies_and_current_co
     runner_source = inspect.getsource(runner.RLMRunner._start_worker)
 
     assert "SessionHistoryToolHost" in prepared_source
-    assert "create_artifact", "publish_workspace_artifact" in testing_source
+    assert "AttachmentToolHost" in testing_source
+    assert "ArtifactToolHost" in live_source
     assert "if self.settings.rlm_autonomous_memory_categories:" in live_source
     assert "tools=[child_executor.tool]" in recursive_source
     assert "is_authorized=lambda: not context.identity.authority.revoked" in runner_source

@@ -241,7 +241,7 @@ async def test_sync_sandbox_rejects_calls_from_owning_loop() -> None:
 
 @pytest.mark.asyncio
 async def test_async_volume_fs_normalizes_text_and_missing_files() -> None:
-    from fleet_rlm.daytona.workspace_fs import AsyncDaytonaVolumeFS
+    from fleet_rlm.workspace.storage import AsyncDaytonaVolumeFS
 
     class Fs:
         async def download_file(self, path: str):
@@ -253,7 +253,7 @@ async def test_async_volume_fs_normalizes_text_and_missing_files() -> None:
             raise FileNotFoundError(path)
 
     volume = AsyncDaytonaVolumeFS(SimpleNamespace(fs=Fs()))
-    assert await volume.read_bytes("/text") == b"text"
-    assert await volume.exists("/text") is True
-    assert await volume.exists("/missing") is False
-    await volume.remove("/missing")
+    assert await volume.read_bytes("/home/daytona/fleet/text") == b"text"
+    assert await volume.exists("/home/daytona/fleet/text") is True
+    assert await volume.exists("/home/daytona/fleet/missing") is False
+    await volume.remove("/home/daytona/fleet/missing")

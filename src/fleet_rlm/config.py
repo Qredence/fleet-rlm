@@ -838,7 +838,7 @@ class Settings(BaseModel):
     def _validate_autonomous_memory_categories(cls, value: tuple[str, ...]) -> tuple[str, ...]:
         if type(value) not in (list, tuple):
             raise ValueError("rlm_autonomous_memory_categories must be a category list")
-        from fleet_rlm.files.memory_candidates import normalize_memory_candidate_categories
+        from fleet_rlm.workspace.memory import normalize_memory_candidate_categories
 
         try:
             return normalize_memory_candidate_categories(value)

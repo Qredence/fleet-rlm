@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from fleet_rlm.files.volume_storage import WorkspaceVolumeGateway
+from fleet_rlm.workspace.storage import WorkspaceVolumeGateway
 
 
 class WorkspaceArtifactBlobGateway:

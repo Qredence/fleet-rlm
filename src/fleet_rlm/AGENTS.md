@@ -86,7 +86,7 @@ contracts, and tracked docs remain authoritative.
   4 KiB relevant+recent `workspace_memory tail` digest inside
   `session_context`. Memory preparation stays fail-soft, but every degraded
   operation records one bounded, sanitized diagnostic (category, operation,
-  runtime, cause type, fallback outcome) through `daytona/memory_diagnostics.py`
+  runtime, cause type, fallback outcome) through `workspace/memory.py`
   at the adapter seam; strict mutation/list failures (including duplicate
   stable ids) keep failing closed.
 - Resolve zero to four exact Skill selections against the immutable bundled

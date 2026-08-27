@@ -21,15 +21,15 @@ the behaviors below keep passing their lanes.
 | Exact `dspy==3.3.1` published dependency | Runtime version guard; locked install; wheel/sdist metadata | Release policy | `tests/unit/backend/packaging/`, `tests/unit/backend/rlm/` |
 | Native RLM execution per Turn | Typed outputs, one native `dspy.RLM` per Turn, caller-owned interpreter lifecycle | RLM runner | `tests/unit/backend/rlm/` |
 | Recursion contract | Root depth 0, one native child depth, Root-only batch, shared budgets, Sub-LM fallback | Recursion policy | `tests/unit/backend/rlm/`, `tests/live/backend/` |
-| Turn orchestration | Claim/open/cancellation/deadline/heartbeat, stream settlement, replay determinism | Turn orchestration (`TurnCoordinator`) | `tests/unit/backend/chat/` |
+| Turn orchestration | Claim/open/cancellation/deadline/heartbeat, stream settlement, replay determinism | Turn orchestration (`TurnRuntime`) | `tests/unit/backend/chat/` |
 | Atomic Turn settlement | Commit, failure, cancellation settlement; result snapshot and Memory intents | Turn settlement (`RunLifecycleService`) | `tests/unit/backend/chat/`, `tests/unit/backend/test_committed_turn*.py` |
 | Runtime Event vocabulary | Closed v1 event kinds, immutable identity, contiguous ordering, terminal semantics | Runtime Event recorder | `tests/freeze/test_public_stream_gate.py` |
 | SSE transport | Closed projected chunk vocabulary and ordering; wire terminator per ending | SSE projector and stream route | `tests/freeze/test_public_stream_gate.py`, `make api-check` |
 | pi-tui client | Live/durable projection convergence, timeline/cards/viewport behavior | pi-tui terminal client | `make tui-check`, tuistory interactive lanes |
 | Public failure taxonomy | Closed sanitized HTTP/open-path/terminal categories, messages, phases | Public failure adapters | `tests/freeze/test_failure_taxonomy_golden.py` |
 | Session Workspace and Project products | Explicit tool hosts, tool catalogs, path rules, delete/edit preconditions | Workspace/Project tool hosts | `tests/contracts/backend/test_p40_explicit_hosts` |
-| Workspace Memory | Format, caps, digests, process-local append serialization | Workspace Memory host | `tests/unit/backend/files/`, `tests/live/backend/` |
-| Attachments and Artifacts | Upload/list/read, commit-gated publication, checksum integrity | Attachment/Artifact pipeline | `tests/unit/backend/files/`, `tests/contracts/backend/` |
+| Workspace Memory | Format, caps, digests, process-local append serialization | Workspace Memory host | `tests/unit/backend/files/test_memory_*.py`, `tests/unit/backend/daytona/test_workspace_memory*.py`, `tests/live/backend/` |
+| Attachments and Artifacts | Upload/list/read, commit-gated publication, checksum integrity | Attachment/Artifact pipeline | `tests/unit/backend/test_attachment_*.py`, `tests/contracts/backend/` |
 | Daytona provider lifecycle | Admission accounting, leases, cleanup and confirmed absence, Volume safety | Daytona runtime owner | `tests/live/backend/` (serial, `FLEET_LIVE=1`) |
 | FastAPI and OpenAPI surface | Route set, one stream route, generated client types | API surface | `make api-check`, `tests/freeze/test_public_stream_gate.py` |
 | Packaging | Wheel/sdist metadata, entry points, supported Python releases | Release machinery | `make build-release`, `make check-release` |

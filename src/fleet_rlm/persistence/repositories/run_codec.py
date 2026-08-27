@@ -33,7 +33,7 @@ from fleet_rlm.chat.run_lifecycle import (
 )
 from fleet_rlm.chat.turn_detail_policy import commit_cancelled_tombstone
 from fleet_rlm.persistence.models import ArtifactRow, RunRow, TurnRow
-from fleet_rlm.rlm.result import RLMUsage, empty_rlm_usage
+from fleet_rlm.runtime.usage import RLMUsage, empty_rlm_usage
 from fleet_rlm.sessions.committed_turn import CommittedTurn, CommittedTurnCodec
 from fleet_rlm.sessions.models import HistoryMessage, SessionHistory, TurnInput, TurnInputCodec
 

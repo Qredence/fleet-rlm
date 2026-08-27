@@ -1,7 +1,8 @@
-"""Safe Volume path layout for Fleet-controlled mounted Workspace storage.
+"""Provider-neutral validated Volume layout and path identity primitives.
 
-Paths are *logical* Sandbox/Volume locations (PurePosixPath). They are not host
-paths. Callers never interpolate untrusted tokens without ``validate_path_id``.
+The layout is shared by provider provisioning, Workspace domains, persistence,
+and artifact/attachment adapters.  Session Workspace lexical policy remains in
+``workspace.paths``.
 """
 
 from __future__ import annotations
@@ -269,3 +270,16 @@ def volume_paths_from_settings(settings: Any) -> VolumePaths:
     """Build VolumePaths from clean Settings (mount path field)."""
     mount = getattr(settings, "volume_mount_path", None) or DEFAULT_VOLUME_MOUNT_PATH
     return VolumePaths.from_mount(str(mount))
+
+
+__all__ = [
+    "DEFAULT_VOLUME_MOUNT_PATH",
+    "UnsafePathError",
+    "VolumePaths",
+    "as_posix",
+    "resolve_under_root",
+    "validate_mount_path",
+    "validate_path_id",
+    "validate_project_slug",
+    "volume_paths_from_settings",
+]

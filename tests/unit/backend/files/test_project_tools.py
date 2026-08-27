@@ -5,8 +5,8 @@ from __future__ import annotations
 import dspy
 import pytest
 
-from fleet_rlm.files.project_tools import ProjectToolError, ProjectToolHost
-from fleet_rlm.files.workspace_models import WorkspaceEntry, WorkspaceListResult, WorkspaceTextPage
+from fleet_rlm.workspace.models import WorkspaceEntry, WorkspaceListResult, WorkspaceTextPage
+from fleet_rlm.workspace.projects import ProjectToolError, ProjectToolHost
 
 
 class FakeProjectFS:
@@ -77,7 +77,7 @@ class FakeProjectFS:
         return WorkspaceEntry(path, "file", len(self.files[path].encode()), "2026-07-16T12:00:00Z")
 
     def delete_path(self, path: str, *, expected_sha256: str | None = None) -> None:
-        from fleet_rlm.files.workspace_models import WorkspaceConflictError
+        from fleet_rlm.workspace.models import WorkspaceConflictError
 
         if expected_sha256 is not None and path in self.files:
             import hashlib
@@ -99,7 +99,7 @@ class FakeProjectFS:
         *,
         expected_sha256: str | None = None,
     ) -> WorkspaceEntry:
-        from fleet_rlm.files.workspace_models import WorkspaceConflictError
+        from fleet_rlm.workspace.models import WorkspaceConflictError
 
         if path in self.directories or path == ".":
             raise IsADirectoryError(path)

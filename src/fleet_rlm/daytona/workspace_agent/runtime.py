@@ -5,7 +5,7 @@ the only operation entrypoint used by both the installed and fallback launchers;
 the host never edits, searches, or re-indents this source.
 """
 
-import base64, datetime, errno, fcntl, hashlib, json, os, re, stat, time
+import base64, errno, fcntl, hashlib, json, os, stat, time
 from typing import NoReturn
 # Portable errno membership sets owned by this remote program (include numeric
 # ENOSYS/EOPNOTSUPP literals that some volume backends surface without names).
@@ -66,10 +66,6 @@ AGENT_SUPPORTED_OPERATIONS = (
     'read',
     'read_page',
     'append',
-    'memory_migrate',
-    'memory_append',
-    'memory_edit',
-    'memory_delete',
     'unlink',
     'delete',
     'patch',
@@ -130,23 +126,6 @@ def decode_page(data):
             valid = data[:exc.start]
             return valid.decode('utf-8'), len(valid)
         raise
-def check_memory_log_encoding(data):
-    # The existing log body gates appends only on UTF-8 decodability:
-    # humans edit MEMORIES.md, so one malformed text line must stay
-    # tolerated (the appended record itself is host-validated strictly).
-    try:
-        data.decode('utf-8')
-    except UnicodeDecodeError:
-        raise StorageError(errno.EILSEQ)
-memory_record = re.compile(r'- \[(?P<timestamp>\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z)\] \*\*(?P<category>[A-Za-z0-9][A-Za-z0-9 _-]*)\*\*(?: <!-- id:(?P<memory_id>[0-9a-f]{8})(?: source:(?P<source>user_explicit|agent_candidate|operator_import|legacy_unknown) updated:(?P<updated_at>\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z)(?: supersedes:(?P<supersedes_id>[0-9a-f]{8}))?)? -->)?: (?P<learning>[^\r\n]+)\n')
-def effective_memory_id(match, ordinal=0):
-    persisted = match.group('memory_id')
-    if persisted is not None:
-        return persisted
-    canonical = f"- [{match.group('timestamp')}] **{match.group('category')}**: {match.group('learning')}"
-    if ordinal:
-        canonical += f'\n# legacy occurrence {ordinal}'
-    return hashlib.sha256(canonical.encode('utf-8')).hexdigest()[:8]
 class UnsafePath(Exception):
     pass
 class StorageError(Exception):
@@ -406,30 +385,6 @@ def read_existing(parent_fd, name, max_bytes, expected_stat=None):
     finally:
         if fd is not None:
             os.close(fd)
-def lock_memory_change(parent_fd, name):
-    # A stable volume-root lock inode bounds one
-    # read/validate/compose/publish-memory sequence across processes.
-    lock_name = name + '.lock'
-    attempts = 0
-    while True:
-        fd = None
-        try:
-            fd = os.open(lock_name, os.O_RDWR | os.O_CREAT | getattr(os, 'O_NOFOLLOW', 0) | getattr(os, 'O_NONBLOCK', 0), 0o600, dir_fd=parent_fd)
-            fcntl.flock(fd, fcntl.LOCK_EX)
-            locked_stat = os.fstat(fd)
-            current_stat = os.stat(lock_name, dir_fd=parent_fd, follow_symlinks=False)
-            if stat.S_ISREG(locked_stat.st_mode) and (locked_stat.st_dev, locked_stat.st_ino) == (current_stat.st_dev, current_stat.st_ino):
-                return fd, locked_stat
-            os.close(fd)
-        except OSError as exc:
-            if fd is not None and fd >= 0:
-                try: os.close(fd)
-                except OSError: pass
-            if exc.errno not in (errno.ENOENT, errno.EINTR):
-                raise StorageError(exc.errno) from exc
-        attempts += 1
-        if attempts >= 8:
-            raise StorageError(errno.EBUSY)
 def lock_existing(parent_fd, name):
     # File lock + inode revalidation protects the compare/mutate
     # window across independent mounted Sandboxes that honor POSIX locks.
@@ -557,14 +512,14 @@ def recreate_existing(parent_fd, name, payload, previous):
     return os.stat(name, dir_fd=parent_fd, follow_symlinks=False), cleanup_errno
 
 
-def _valid_root_paths(volume_root, root, operation):
+def _valid_root_paths(volume_root, root, operation, allow_volume_root=False):
     """
     Validate that a requested root is an absolute path within the volume root.
 
     Parameters:
         volume_root (str): Absolute path defining the permitted volume.
         root (str): Absolute requested root path.
-        operation (str): Operation being performed; `stat` and `memory_migrate` may target the volume root itself.
+        operation (str): Operation being performed; `stat` may target the volume root itself.
 
     Returns:
         bool: `True` if the paths and operation satisfy the workspace root constraints, `False` otherwise.
@@ -578,7 +533,7 @@ def _valid_root_paths(volume_root, root, operation):
     normalized_volume = os.path.normpath(volume_root)
     normalized_root = os.path.normpath(root)
     if normalized_volume == normalized_root:
-        return operation in ('stat', 'memory_migrate')
+        return bool(allow_volume_root) or operation == 'stat'
     try:
         if os.path.commonpath((normalized_volume, normalized_root)) != normalized_volume:
             return False
@@ -620,8 +575,8 @@ def _valid_request_values(request):
     Returns:
         bool: `true` if all supported values have valid types and bounds, `false` otherwise.
     """
-    boolean_fields = ('allow_missing', 'overwrite', 'checksum')
-    string_fields = ('content_b64', 'after', 'memory_id', 'expected_sha256')
+    boolean_fields = ('allow_missing', 'overwrite', 'checksum', 'allow_volume_root')
+    string_fields = ('content_b64', 'after', 'expected_sha256')
     integer_fields = ('max_bytes', 'limit', 'offset', 'max_chars', 'total_file_bytes')
     if any(type(request.get(name, False)) is not bool for name in boolean_fields):
         return False
@@ -666,7 +621,12 @@ def handle(request):
         return {'ok': False, 'error': 'request_invalid'}
     if request['operation'] not in AGENT_SUPPORTED_OPERATIONS:
         return {'ok': False, 'error': 'unsupported'}
-    if not _valid_root_paths(request['volume_root'], request['root'], request['operation']):
+    if not _valid_root_paths(
+        request['volume_root'],
+        request['root'],
+        request['operation'],
+        request.get('allow_volume_root', False),
+    ):
         return {'ok': False, 'error': 'request_invalid'}
     if not _valid_relative_path(request['relative'], request['operation']):
         return {'ok': False, 'error': 'request_invalid'}
@@ -686,19 +646,18 @@ def handle(request):
     max_chars = request.get('max_chars', 0)
     total_file_bytes = request.get('total_file_bytes', 0)
     checksum = request.get('checksum', False)
-    memory_id = request.get('memory_id', '')
+    allow_volume_root = request.get('allow_volume_root', False)
     expected_sha256 = request.get('expected_sha256', '')
     if not isinstance(content_b64, str) or not isinstance(expected_sha256, str):
         return {'ok': False, 'error': 'request_invalid'}
     locked_fd = None
     base_fds = []
-    append_memory_id = ''
     try:
         try:
             base_fds, root_fd = open_chain(
                 volume_root=volume_root,
                 root=root,
-                create=operation in ('write', 'append', 'memory_append'),
+                create=operation in ('write', 'append'),
             )
         except FileNotFoundError:
             if relative == '.' and operation == 'list':
@@ -780,7 +739,7 @@ def handle(request):
                     target_stat = os.stat(relative_parts[-1], dir_fd=parent_fd, follow_symlinks=False)
                 except FileNotFoundError:
                     if allow_missing:
-                        response = {'ok': True, 'content': '', 'truncated': False}
+                        response = {'ok': True, 'content': '', 'truncated': False, 'missing': True}
                         response.update({'bytes_returned': 0, 'total_bytes': 0})
                         respond(response)
                     raise
@@ -971,267 +930,6 @@ def handle(request):
                 if warnings:
                     response['warnings'] = warnings
                 respond(response)
-        if operation == 'memory_migrate':
-            if not relative_parts or len(relative_parts) != 1:
-                fail('is_directory')
-            memory_header_bytes = b'# Fleet Memory v2' + bytes([10])
-            parent_fds, parent_fd = open_parent(root_fd, ['memory'], create=True)
-            locked_fd, _lock_stat = lock_memory_change(parent_fd, relative)
-            try:
-                try:
-                    legacy_stat = os.stat(relative_parts[-1], dir_fd=root_fd, follow_symlinks=False)
-                except FileNotFoundError:
-                    try:
-                        target_stat = os.stat(relative_parts[-1], dir_fd=parent_fd, follow_symlinks=False)
-                        if stat.S_ISREG(target_stat.st_mode):
-                            respond({'ok': True, 'entry': entry_for(target_stat, 'memory/' + relative_parts[-1])})
-                    except FileNotFoundError:
-                        # Absence in the migrated memory path means there is no replacement to preserve.
-                        pass
-                    fail('not_found')
-                if not stat.S_ISREG(legacy_stat.st_mode):
-                    fail('unsafe')
-                if legacy_stat.st_size > max_bytes - len(memory_header_bytes):
-                    fail('too_large')
-                body = read_existing(root_fd, relative_parts[-1], max_bytes, expected_stat=legacy_stat)
-                try:
-                    body.decode('utf-8')
-                except UnicodeDecodeError:
-                    fail('invalid_utf8')
-                if body and not body.endswith(bytes([10])):
-                    body += bytes([10])
-                payload = memory_header_bytes + body
-                try:
-                    target_stat = os.stat(relative_parts[-1], dir_fd=parent_fd, follow_symlinks=False)
-                except FileNotFoundError:
-                    target_stat = None
-                if target_stat is not None:
-                    if not stat.S_ISREG(target_stat.st_mode):
-                        fail('unsafe')
-                    current = read_existing(parent_fd, relative_parts[-1], max_bytes, expected_stat=target_stat)
-                    if hashlib.sha256(current).hexdigest() != hashlib.sha256(payload).hexdigest():
-                        # An operator-managed replacement store wins; leave the
-                        # legacy root untouched rather than discarding evidence.
-                        respond({'ok': True, 'entry': entry_for(target_stat, 'memory/' + relative_parts[-1])})
-                    try:
-                        os.unlink(relative_parts[-1], dir_fd=root_fd)
-                        fsync_directory(root_fd)
-                    except FileNotFoundError:
-                        # A concurrent removal already leaves the legacy entry absent.
-                        pass
-                    except StorageError:
-                        # Volume directory durability is best effort after publishing the replacement.
-                        pass
-                    respond({'ok': True, 'entry': entry_for(target_stat, 'memory/' + relative_parts[-1])})
-                written_stat = publish_new(parent_fd, relative_parts[-1], payload)
-                if type(written_stat) is tuple and len(written_stat) == 2:
-                    written_stat, _cleanup_errno = written_stat
-                try:
-                    fsync_directory(parent_fd)
-                except StorageError:
-                    # The replacement is published even when the volume cannot fsync its directory.
-                    pass
-                try:
-                    os.unlink(relative_parts[-1], dir_fd=root_fd)
-                    try:
-                        fsync_directory(root_fd)
-                    except StorageError:
-                        # The legacy removal remains successful when its directory fsync is unsupported.
-                        pass
-                except FileNotFoundError:
-                    # A concurrent removal already achieved the desired post-migration state.
-                    pass
-                respond({'ok': True, 'entry': entry_for(written_stat, 'memory/' + relative_parts[-1])})
-            finally:
-                if locked_fd is not None:
-                    os.close(locked_fd)
-                    locked_fd = None
-                close_all(parent_fds)
-        if operation == 'memory_append':
-            payload = base64.b64decode(content_b64.encode('ascii'))
-            if len(payload) > max_bytes:
-                fail('too_large')
-            # This Volume backend forbids every in-place write mode on existing
-            # files (O_APPEND opens fail EPERM; O_RDWR writes fail EBADF); only
-            # temp-file publish and O_TRUNC fallback work. Appends therefore
-            # compose the final bytes here and fall through to the 'write'
-            # branch, whose publish/replace machinery is the proven path.
-            parent_fds, parent_fd = open_parent(root_fd, relative_parts[:-1], create=True)
-            locked_fd, _lock_stat = lock_memory_change(parent_fd, relative)
-            try:
-                try:
-                    existing_stat = os.stat(relative_parts[-1], dir_fd=parent_fd, follow_symlinks=False)
-                except FileNotFoundError:
-                    existing_stat = None
-                if existing_stat is not None:
-                    if not stat.S_ISREG(existing_stat.st_mode):
-                        fail('unsafe')
-                    if existing_stat.st_size + len(payload) > max_bytes:
-                        fail('too_large')
-                    # The stat->read gap is pinned by re-validating the inode
-                    # identity over the read handle (stable on this backend).
-                    read_fd = os.open(relative_parts[-1], os.O_RDONLY | getattr(os, 'O_NOFOLLOW', 0), dir_fd=parent_fd)
-                    try:
-                        opened_stat = os.fstat(read_fd)
-                        if (opened_stat.st_dev, opened_stat.st_ino) != (existing_stat.st_dev, existing_stat.st_ino):
-                            fail('unsafe')
-                        existing_data = b''
-                        while len(existing_data) <= max_bytes:
-                            chunk = os.read(read_fd, max_bytes + 1 - len(existing_data))
-                            if not chunk:
-                                break
-                            existing_data += chunk
-                        if len(existing_data) > max_bytes or len(existing_data) != existing_stat.st_size:
-                            fail('unsafe')
-                    finally:
-                        os.close(read_fd)
-                else:
-                    existing_data = b''
-                if operation == 'memory_append':
-                    candidate = memory_record.fullmatch(payload.decode('utf-8'))
-                    if candidate is None:
-                        fail('cursor')
-                    candidate_id = effective_memory_id(candidate)
-                    append_memory_id = candidate_id
-                    if existing_stat is None:
-                        payload = b'# Fleet Memory v2\n' + payload
-                    else:
-                        try:
-                            check_memory_log_encoding(existing_data)
-                        except StorageError:
-                            fail('unsafe')
-                        record_ordinal = 0
-                        active_ids = set()
-                        for line in existing_data.decode('utf-8').splitlines(keepends=True):
-                            existing = memory_record.fullmatch(line)
-                            if existing is None:
-                                continue
-                            existing_id = effective_memory_id(existing, record_ordinal)
-                            if (existing.group('timestamp'), existing.group('category'), existing.group('learning')) == (candidate.group('timestamp'), candidate.group('category'), candidate.group('learning')):
-                                response = {'ok': True, 'entry': entry_for(existing_stat, relative),
-                                    'memory_id': existing_id}
-                                respond(response)
-                            if existing_id == candidate_id:
-                                fail('conflict', detail='memory_id_collision')
-                            existing_supersedes_id = existing.group('supersedes_id')
-                            if existing_supersedes_id is not None:
-                                if existing_supersedes_id not in active_ids:
-                                    fail('unsafe')
-                                active_ids.remove(existing_supersedes_id)
-                            active_ids.add(existing_id)
-                            record_ordinal += 1
-                        if existing_data and not existing_data.endswith(bytes([10])):
-                            fail('unsafe')
-                        candidate_supersedes_id = candidate.group('supersedes_id')
-                        if candidate_supersedes_id is not None and candidate_supersedes_id not in active_ids:
-                            fail('conflict', detail='supersedes_not_active')
-                payload = existing_data + payload
-                if len(payload) > max_bytes:
-                    fail('too_large')
-                content_b64 = base64.b64encode(payload).decode('ascii')
-                operation = 'write'
-                overwrite = existing_stat is not None
-            finally:
-                close_all(parent_fds)
-        if operation in ('memory_edit', 'memory_delete'):
-            if not relative_parts:
-                fail('is_directory')
-            if re.fullmatch(r'[0-9a-f]{8}', memory_id) is None:
-                fail('cursor')
-            replacement = None
-            if operation == 'memory_edit':
-                try:
-                    update = json.loads(base64.b64decode(content_b64.encode('ascii')).decode('utf-8'))
-                except (UnicodeDecodeError, ValueError):
-                    fail('cursor')
-                learning = update.get('learning') if isinstance(update, dict) else None
-                requested_category = update.get('category') if isinstance(update, dict) else None
-                updated_at = update.get('updated_at') if isinstance(update, dict) else None
-                try:
-                    updated_text = str(updated_at)
-                    datetime.datetime.strptime(updated_text, '%Y-%m-%dT%H:%M:%SZ')
-                except (TypeError, ValueError):
-                    fail('cursor')
-                if not isinstance(learning, str) or requested_category is not None and not isinstance(requested_category, str):
-                    fail('cursor')
-            fallback_overwrite = False
-            warnings = []
-            parent_fds, parent_fd = open_parent(root_fd, relative_parts[:-1])
-            locked_fd, _lock_stat = lock_memory_change(parent_fd, relative)
-            try:
-                target_stat = os.stat(relative_parts[-1], dir_fd=parent_fd, follow_symlinks=False)
-                if not stat.S_ISREG(target_stat.st_mode):
-                    fail('unsafe')
-                if target_stat.st_size > max_bytes:
-                    fail('too_large')
-                source = read_existing(parent_fd, relative_parts[-1], max_bytes, expected_stat=target_stat)
-                if len(source) != target_stat.st_size:
-                    fail('unsafe')
-                try:
-                    source_text = source.decode('utf-8')
-                except UnicodeDecodeError:
-                    fail('invalid_utf8')
-                lines = source_text.splitlines(keepends=True)
-                targets = []
-                record_ordinal = 0
-                for index, line in enumerate(lines):
-                    match = memory_record.fullmatch(line)
-                    if match is not None:
-                        if effective_memory_id(match, record_ordinal) == memory_id:
-                            targets.append((index, match))
-                        record_ordinal += 1
-                if not targets:
-                    fail('not_found')
-                if len(targets) != 1:
-                    fail('conflict')
-                target, target_match = targets[0]
-                if operation == 'memory_edit':
-                    category = requested_category if requested_category is not None else target_match.group('category')
-                    source = target_match.group('source') or 'legacy_unknown'
-                    supersedes = target_match.group('supersedes_id')
-                    supersession = f' supersedes:{supersedes}' if supersedes is not None else ''
-                    replacement = (
-                        f"- [{target_match.group('timestamp')}] **{category}** <!-- id:{memory_id} source:{source} updated:{updated_text}{supersession} -->: {learning}\n"
-                    )
-                    if len(replacement.encode('utf-8')) > 4096:
-                        fail('invalid_record')
-                    lines[target] = replacement
-                else:
-                    del lines[target]
-                payload = ''.join(lines).encode('utf-8')
-                if len(payload) > max_bytes:
-                    fail('too_large')
-                try:
-                    written_stat = replace_existing(parent_fd, relative_parts[-1], payload)
-                except ReplacementUnsupported:
-                    previous = read_existing(
-                        parent_fd, relative_parts[-1], max_bytes, expected_stat=target_stat
-                    )
-                    try:
-                        written_stat = overwrite_existing_direct(parent_fd, relative_parts[-1], payload, previous)
-                    except StorageError as direct_exc:
-                        if direct_exc.errno not in _WORM_RECREATE_ERRNOS:
-                            raise
-                        written_stat = recreate_existing(parent_fd, relative_parts[-1], payload, previous)
-                    fallback_overwrite = True
-            finally:
-                if locked_fd is not None:
-                    os.close(locked_fd)
-                    locked_fd = None
-                close_all(parent_fds)
-            cleanup_errno = None
-            if fallback_overwrite:
-                warnings.append({'code': 'non_atomic_overwrite'})
-            if type(written_stat) is tuple and len(written_stat) == 2:
-                written_stat, cleanup_errno = written_stat
-            response = {'ok': True, 'entry': entry_for(written_stat, relative)}
-            if replacement is not None:
-                response['record'] = replacement
-            if cleanup_errno is not None:
-                warnings.append({'code': 'cleanup_failed', 'errno': cleanup_errno})
-            if warnings:
-                response['warnings'] = warnings
-            respond(response)
         if operation == 'unlink':
             if not relative_parts:
                 fail('is_directory')
@@ -1429,8 +1127,6 @@ def handle(request):
             if checksum and stat.S_ISREG(written_stat.st_mode):
                 entry['checksum'] = hashlib.sha256(payload).hexdigest()
             response = {'ok': True, 'entry': entry}
-            if append_memory_id:
-                response['memory_id'] = append_memory_id
             if cleanup_errno is not None:
                 warnings.append({'code': 'cleanup_failed', 'errno': cleanup_errno})
             if warnings:

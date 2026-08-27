@@ -1,9 +1,9 @@
 # P42 module-subtraction ledger
 
-**Status:** implementation ledger; P42–P47 are implemented, P48 remains
-incomplete, and the P49.1–P49.3 canonical owners are implemented but not yet
-fully certified. The current working tree contains uncommitted P48/P49
-migration work.
+**Status:** implementation ledger; P42–P49 are implemented, and the P50
+provider-neutral Workspace/Memory/Attachments migration is implemented in the
+current working tree. Standard quality and release gates are green; optional
+credentialed live lanes remain separate. No P51 implementation claim is made.
 **Baseline:** the current checkout after the sealed P36/P41 work, assessed against
 `plans/PLANS.md` P44–P51.
 **Replacement PRs:** the phase commits are recorded in repository history; rows
@@ -26,13 +26,18 @@ responsibility map, but its status is now updated by the implementation frontier
 - **P49:** the first preparation/TurnRuntime ownership slice is implemented;
   finalization race coverage and current owner documentation are in progress,
   so no full P49 completion claim is made.
-- **P50–P53:** no implementation or certification claim is made yet.
+- **P50:** provider-neutral Workspace, Projects, Memory, Attachments, URL,
+  storage, composition, and outbox owners are implemented. The legacy
+  `fleet_rlm.files` package and obsolete Daytona domain modules are deleted;
+  focused and repository quality/release checks provide the parity evidence.
+- **P51–P53:** no implementation or certification claim is made yet.
 
 This is the P42.5 companion to the [P42 session-state behavior
-freeze](p42-session-state-behavior-freeze.md). It makes the proposed subtraction
-work reviewable before a file moves or is deleted. It does **not** change the
-sealed [P41 behavior freeze](behavior-freeze.md), production code, public HTTP
-contract, OpenAPI, generated artifacts, or the current runtime topology.
+freeze](p42-session-state-behavior-freeze.md). It records the proposed
+subtraction and the realized P50 ownership so later changes remain reviewable.
+It does not change the sealed [P41 behavior freeze](behavior-freeze.md) or the
+public HTTP contract, OpenAPI, generated artifacts, and Runtime Event
+vocabulary.
 
 ## How to read this ledger
 
@@ -76,7 +81,7 @@ is an ADD-only destination; its provenance is listed in the relevant row.
 | P47 | `rlm/recursion.py` and the disposable Daytona child boundary | L-18–L-19 |
 | P48 | `daytona/runtime.py`, `interpreter.py`, `platform.py`, `provisioning.py`, `broker.py`, `_lease.py`, `_cleanup.py`, and `daytona/workspace_agent/` | L-20–L-26 |
 | P49 | `chat/preparation.py`, `chat/turn_runtime.py`, `chat/models.py`, and `chat/committed_events.py` | L-27–L-31 |
-| P50 | `workspace/{models,paths,storage,workspace,projects,memory,url}.py`, `attachments/`, and `persistence/repositories/outbox.py` | L-32–L-39 |
+| P50 | `fleet_rlm/paths.py`; `workspace/{models,paths,storage,workspace,projects,memory,url}.py`, `attachments/`, and `persistence/repositories/outbox.py` | L-32–L-39 |
 | P51 | `config/{settings,loader,policy}.py`, `composition/{live,testing}.py`, `observability/{diagnostics,tracing,dspy_callbacks,mlflow,posthog}.py`, `optimization/daytona.py`, and narrowed persistence/effect seams | L-40–L-45 |
 
 The public `api/`, `artifacts/`, `skills/`, `events/canonical.py`, and durable
@@ -132,7 +137,7 @@ remain unchanged.
 | L-22 | `daytona/{broker_source,http_broker,dspy_sync_bridge,interpreter_output}.py` — code generation, submit framing, HTTP Tool dispatch, synchronous bridge, and output decoding. | Callers: `daytona/interpreter.py`, composition, session/child managers, outbox reconciliation. Adapters: sandbox HTTP broker and DSPy synchronous interpreter interface. | Tool dispatch remains current-Turn authorized; FinalOutput extraction and bounded corrective feedback stay exact; broker shutdown precedes provider cleanup. | `daytona/broker.py` (with `interpreter_output.py` kept separate); **MERGE**. **P48 implemented.** |
 | L-23 | `daytona/interpreter.py` — `DaytonaCodeInterpreter`, backend selection, execution observation and recoverable/terminal error taxonomy. | Callers: runtime acquisition, child runtime, diagnostics, optimization evaluator, Workspace Agent. Adapter: Daytona Sandbox interpreter and broker. | Existing repair/no-progress behavior, error classification, caller-owned shutdown, live code/output evidence, and public sanitation remain. | `daytona/interpreter.py` under `DaytonaRuntime`; **DEEPEN**. Planned P48 PR; P36 P38 gate applies (TBD). |
 | L-24 | `daytona/{workspace_agent,workspace_agent_runtime}.py` — installed agent protocol/source and host-side response validation. | Callers: `daytona/{workspace_fs,workspace_memory,memory_diagnostics}.py`. Adapter: code running inside a mounted Daytona Sandbox. | Relative-path-only requests, symlink/nonregular-node rejection, bounded pages/bytes, checksum preconditions, and fail-closed protocol parsing stay intact. | `daytona/workspace_agent/{protocol,client,runtime}.py`; **MOVE**. **P48 implemented.** |
-| L-25 | `daytona/{workspace_fs,workspace_gateway}.py` — Volume/Session Workspace adapter, I/O Sandbox gateway, orphan cleanup. | Callers: Daytona composition/run environment and `api/routes/workspace_files.py`; Files Volume interfaces. Adapters: mounted Daytona Volume and ephemeral I/O Sandbox. | Workspace/Project writes are immediate and scope-safe; reads retain cursor/byte bounds; no caller gets a provider path; Artifact publication keeps its separate commit gate. | `workspace/storage.py` behind `daytona/workspace_agent/`; **MOVE** in P50 after the P48 protocol move. Planned P48/P50 PRs (TBD). |
+| L-25 | `daytona/{workspace_fs,workspace_gateway}.py` — Volume/Session Workspace adapter, I/O Sandbox gateway, orphan cleanup. | Callers: Daytona composition/run environment and `api/routes/workspace_files.py`; Files Volume interfaces. Adapters: mounted Daytona Volume and ephemeral I/O Sandbox. | Workspace/Project writes are immediate and scope-safe; reads retain cursor/byte bounds; no caller gets a provider path; Artifact publication keeps its separate commit gate. | `workspace/storage.py` behind `daytona/workspace_agent/`; **MOVE**. **P50 implemented; proof: storage and Workspace Agent contract tests.** |
 | L-26 | `daytona/{diagnostics,errors,optimization_evaluator}.py` and `rlm/provider_probe.py` — disposable doctor/probe behavior, provider error mapping, and strict evaluation Sandbox lifecycle. | Callers: CLI, Daytona diagnostics, development optimization. Adapters: disposable live Daytona Sandbox and provider SDK; no Turn settlement adapter. | Diagnostics stay bounded, sanitized, explicit, and non-authoritative for Turns; strict evaluation remains disposable and provider-clean. | `daytona/errors.py` **KEEP**; `observability/diagnostics.py` and `optimization/daytona.py` **MOVE**. Planned P48/P51 PRs (TBD). |
 
 ## P49 — one durable TurnRuntime
@@ -149,14 +154,14 @@ remain unchanged.
 
 | ID | Current path and responsibility | Callers; real production adapters | Invariants | Target module; disposition; planned replacement |
 | --- | --- | --- | --- | --- |
-| L-32 | `files/{workspace_access,workspace_models,workspace_tools,workspace_validation,filesystem_tool_helpers}.py` — Session Workspace host, models, path validation, Tool construction, error/event serialization. | Callers: API Workspace files route, Daytona run environment/interpreter, capability preparation. Adapter: `DaytonaSessionWorkspaceFS`/Workspace Agent. | Seven Workspace Tools retain exact names/order/schemas; immediate durability, paged bounds, nonrecursive empty-dir deletion, checksum preconditions, and safe event views remain. | `workspace/{workspace,models,paths}.py`; **MOVE/MERGE**. Planned P50 PR, gated by P36 P40 (TBD). |
-| L-33 | `files/project_tools.py` — explicit Project host and path policy. | Caller: `daytona/run_environment.py`. Adapter: mounted Workspace Volume through Workspace Agent. | Six Project Tools, `projects/<slug>/` scope, root browsing exception, no append, strict slug/path rules, and safe Tool event metadata remain. | `workspace/projects.py`; **MOVE**. Planned P50 PR, gated by P36 P40 (TBD). |
-| L-34 | `files/{memory_models,memory_tools,memory_candidates,memory_candidate_tools}.py` and `daytona/{workspace_memory,memory_diagnostics,memory_outbox_reconcile}.py` — Memory records, Tool host, candidates, digest, durable store, diagnostics, and reconciliation. | Callers: run preparation/lifecycle, Daytona run environment, persistence memory intent repository. Adapter: mounted `memory/MEMORIES.md` Workspace Agent plus SQLAlchemy outbox. | Workspace Memory stays distinct from Session History; stable IDs/provenance/search/edit/delete/supersession/digest/malformed tolerance/current coordination limits and commit-gated promotion stay exact. | `workspace/{memory,models}.py` and `persistence/repositories/outbox.py`; **MOVE/MERGE**. Planned P50 PR (TBD). |
-| L-35 | `files/{lifecycle,local_catalog,models,paths,errors,safety}.py` — Attachment catalog/blob lifecycle, models, path policy, and upload safety. | Callers: attachment API route, composition, run preparation, repositories. Adapters: SQLAlchemy metadata plus Workspace Volume blob store. | Attachments remain Workspace-owned authorized inputs; validation, integrity checks, and candidate isolation do not become Workspace-file Tools. | `attachments/` modules; **MOVE**. Planned P50 PR (TBD). |
-| L-36 | `files/{volume_storage,volume_paths,host_volume}.py` — Volume interfaces, path identity/normalization, and deterministic local mirror. | Callers: API dependencies, artifacts, composition, Daytona FS/gateway, persistence sandbox bindings. Adapters: production mounted Daytona Volume; `HostVolumeMirror` is testing-only. | One canonical relative-path normalization; no provider path leaks; deterministic fake remains private-test-only and does not define public behavior. | `workspace/{storage,paths}.py`; test mirror to `composition/testing.py`; **MOVE**. Planned P50 PR (TBD). |
-| L-37 | `files/{tools,url_tool}.py` — shared file host and URL Tool/source store. | Callers: Daytona run environment and deterministic composition. Adapter: public-text URL fetcher and Workspace-backed URL source store. | Tool names/schemas/event views and URL safety/time/size bounds remain; generic File host must not recreate an undifferentiated Workspace abstraction. | `workspace/url.py`; common host code absorbed into explicit hosts; **MERGE/DELETE after parity**. Planned P50 PR (TBD). |
-| L-38 | `persistence/repositories/memory_promotion_intents.py` — durable intent query/write adapter. | Callers: chat lifecycle, Files Memory candidates, run state repositories. Adapter: SQLAlchemy. | Intent is atomically committed with the successful Turn, becomes promotable only after commit, and recovery remains idempotent. | `persistence/repositories/outbox.py`; **MERGE**. Planned P50 PR (TBD). |
-| L-39 | `api/routes/workspace_files.py`, `api/dependencies.py`, and composition consumers of `files/` interfaces. | Callers: FastAPI router registration and TUI HTTP client. Adapters: FastAPI translation plus L-32 storage adapter. | Route URL/response schema, OpenAPI, generated TUI types, Volume tree read-only boundary, and no provider paths remain unchanged. | `api/routes/workspace.py` with new workspace owners; **MOVE** only after `make api-check`. Planned P50 PR (TBD). |
+| L-32 | `files/{workspace_access,workspace_models,workspace_tools,workspace_validation,filesystem_tool_helpers}.py` — Session Workspace host, models, path validation, Tool construction, error/event serialization. | Callers: API Workspace files route, Daytona run environment/interpreter, capability preparation. Adapter: `DaytonaSessionWorkspaceFS`/Workspace Agent. | Seven Workspace Tools retain exact names/order/schemas; immediate durability, paged bounds, nonrecursive empty-dir deletion, checksum preconditions, and safe event views remain. | `workspace/{workspace,models,paths,storage}.py`; **MOVE/MERGE**. **P50 implemented; proof: make check and contract tests.** |
+| L-33 | `files/project_tools.py` — explicit Project host and path policy. | Caller: `daytona/run_environment.py`. Adapter: mounted Workspace Volume through Workspace Agent. | Six Project Tools, `projects/<slug>/` scope, root browsing exception, no append, strict slug/path rules, and safe Tool event metadata remain. | `workspace/projects.py`; **MOVE**. **P50 implemented; proof: make check and project contract tests.** |
+| L-34 | `files/{memory_models,memory_tools,memory_candidates,memory_candidate_tools}.py` and `daytona/{workspace_memory,memory_diagnostics,memory_outbox_reconcile}.py` — Memory records, Tool host, candidates, digest, durable store, diagnostics, and reconciliation. | Callers: run preparation/lifecycle, Daytona run environment, persistence memory intent repository. Adapter: mounted `memory/MEMORIES.md` Workspace Agent plus SQLAlchemy outbox. | Workspace Memory stays distinct from Session History; stable IDs/provenance/search/edit/delete/supersession/digest/malformed tolerance/current coordination limits and commit-gated promotion stay exact. | `workspace/{memory,models}.py` and `persistence/repositories/outbox.py`; **MOVE/MERGE**. **P50 implemented; proof: Memory/outbox tests and make check.** |
+| L-35 | `files/{lifecycle,local_catalog,models,paths,errors,safety}.py` — Attachment catalog/blob lifecycle, models, path policy, and upload safety. | Callers: attachment API route, composition, run preparation, repositories. Adapters: SQLAlchemy metadata plus Workspace Volume blob store. | Attachments remain Workspace-owned authorized inputs; validation, integrity checks, and candidate isolation do not become Workspace-file Tools. | `attachments/` modules; **MOVE**. **P50 implemented; proof: attachment lifecycle/catalog tests and make check.** |
+| L-36 | `files/{volume_storage,volume_paths,host_volume}.py` — Volume interfaces, path identity/normalization, and deterministic local mirror. | Callers: API dependencies, artifacts, composition, Daytona FS/gateway, persistence sandbox bindings. Adapters: production mounted Daytona Volume; `HostVolumeMirror` is testing-only. | One canonical relative-path normalization; no provider path leaks; deterministic fake remains private-test-only and does not define public behavior. | `fleet_rlm/paths.py` (neutral Volume layout) + `workspace/{paths,storage}.py` (Workspace lexical/storage seam); test mirror to `composition/testing.py`; **MOVE/DEEPEN**. **P50 implemented; proof: storage/path tests and make check.** |
+| L-37 | `files/{tools,url_tool}.py` — shared file host and URL Tool/source store. | Callers: Daytona run environment and deterministic composition. Adapter: public-text URL fetcher and Workspace-backed URL source store. | Tool names/schemas/event views and URL safety/time/size bounds remain; generic File host must not recreate an undifferentiated Workspace abstraction. | `workspace/url.py`, `attachments/tools.py`, and `artifacts/tools.py` explicit hosts; common host code split by durable domain; **MERGE/DELETE**. **P50 implemented; proof: URL/cache, Attachment/Artifact host, and make check tests.** |
+| L-38 | `persistence/repositories/memory_promotion_intents.py` — durable intent query/write adapter. | Callers: chat lifecycle, Files Memory candidates, run state repositories. Adapter: SQLAlchemy. | Intent is atomically committed with the successful Turn, becomes promotable only after commit, and recovery remains idempotent. | `persistence/repositories/outbox.py`; **MERGE**. **P50 implemented; proof: outbox state-machine tests and make check.** |
+| L-39 | `api/routes/workspace_files.py`, `api/dependencies.py`, and composition consumers of `files/` interfaces. | Callers: FastAPI router registration and TUI HTTP client. Adapters: FastAPI translation plus L-32 storage adapter. | Route URL/response schema, OpenAPI, generated TUI types, Volume tree read-only boundary, and no provider paths remain unchanged. | existing `api/routes/workspace_files.py` with the new workspace owners; **KEEP/DEEPEN**. **P50 implemented; proof: make api-check.** |
 
 `files/__init__.py` is therefore **DELETE after parity in P50**, not a separate
 owner. Its complete current contents are represented by L-32–L-37; no `files/`
@@ -191,8 +196,8 @@ and every current supporting module required to make those target owners real:
   diagnostic, and disposable evaluation modules (L-18–L-26).
 - Durable Turn control: every `chat/` orchestration/preparation/claim/cleanup
   module and the current result/effect support seams (L-27–L-31).
-- `files/`: every current production module is mapped in L-32–L-37, with its
-  Memory persistence adapter in L-38 and HTTP translator in L-39.
+- Former `files/`: every production responsibility is mapped in L-32–L-37,
+  with its Memory persistence adapter in L-38 and HTTP translator in L-39.
 - Secondary architecture: both flat configuration modules, all composition
   modules, all observability modules, root PostHog, evaluation modules, and
   residual persistence/effect seams are mapped in L-40–L-45.

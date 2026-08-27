@@ -64,8 +64,8 @@ and its matching automated check in the same patch.
   helper is acceptable when it keeps a boundary local; duplicate adapters,
   pass-through wrappers, repeated normalization/serialization, and dead aliases
   are not.
-- `daytona/memory_diagnostics.py` classifies optional read-side degradation into
-  the closed `MemoryFailureCategory` vocabulary. Diagnostics are bounded and
+- `workspace/memory.py` classifies optional read-side degradation into the
+  closed `MemoryFailureCategory` vocabulary. Diagnostics are bounded and
   sanitized; mutation and list paths remain strict. A new catch site must use
   the existing classifier rather than inventing a parallel warning format.
 - `config.py` is the source of truth for `FleetFieldPolicy` metadata and
@@ -133,8 +133,9 @@ exist.
   `DaytonaRuntimeResources` owns provider resources and exposes the public
   `DaytonaRuntime` root/child lifecycle; composition injects database,
   binding, model, preparation, limits, and cleanup ports.
-- `sessions/`, `files/`, `artifacts/`, and `skills/` own domain interfaces and
-  deterministic policy. `persistence/` owns SQLAlchemy adapters.
+- `sessions/`, `workspace/`, `attachments/`, `artifacts/`, and `skills/` own
+  domain interfaces and deterministic policy. `persistence/` owns SQLAlchemy
+  adapters.
 - Imports remain credential-free and side-effect-free.
 
 - `daytona/broker.py` is the sole owner of broker source generation,

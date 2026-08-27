@@ -6,7 +6,7 @@ from pathlib import PurePosixPath
 
 import pytest
 
-from fleet_rlm.files.volume_paths import (
+from fleet_rlm.workspace.paths import (
     UnsafePathError,
     VolumePaths,
     validate_project_slug,

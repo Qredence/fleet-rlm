@@ -25,14 +25,17 @@ import dspy
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from fleet_rlm.config import LLMRoleSettings, Settings
-from fleet_rlm.files.memory_models import WORKSPACE_MEMORY_INJECTION_TAIL_BYTES
-from fleet_rlm.files.volume_paths import DEFAULT_VOLUME_MOUNT_PATH, validate_mount_path
-from fleet_rlm.files.workspace_models import UNAVAILABLE_WORKSPACE_CAPABILITY, WorkspaceCapabilityMetadata
 from fleet_rlm.json_types import strict_json_dumps
+from fleet_rlm.paths import DEFAULT_VOLUME_MOUNT_PATH, validate_mount_path
 from fleet_rlm.rlm._dspy_compat import (
     daytona_provider_contract,
 )
 from fleet_rlm.rlm.result import RLMConfigError, RLMModelBundleError
+from fleet_rlm.workspace.models import (
+    UNAVAILABLE_WORKSPACE_CAPABILITY,
+    WORKSPACE_MEMORY_INJECTION_TAIL_BYTES,
+    WorkspaceCapabilityMetadata,
+)
 
 # ---------------------------------------------------------------------------
 # Input Models (defined early for clean dependency direction)

@@ -21,8 +21,8 @@ from fastapi.testclient import TestClient
 from fleet_rlm.app import create_app
 from fleet_rlm.config import Settings
 from fleet_rlm.daytona.broker import sync_sandbox
-from fleet_rlm.daytona.workspace_memory import read_workspace_memory_injection_digest
-from fleet_rlm.files.volume_paths import volume_paths_from_settings
+from fleet_rlm.workspace.memory import read_workspace_memory_injection_digest
+from fleet_rlm.workspace.paths import volume_paths_from_settings
 from tests.live.backend._database import upgrade_to_head
 from tests.live.backend.test_fleet_rlm_daytona_mvp import (
     _SECRET_NAMES,
@@ -234,12 +234,20 @@ def test_live_memory_candidate_promotes_after_commit_and_retrieves_on_next_turn(
                 sandbox_ids.add(binding.sandbox_id)
                 sandbox = sync_sandbox(portal.call(resources.platform.get, binding.sandbox_id), portal_loop)
                 paths = volume_paths_from_settings(settings)
-                memory_store = __import__(
-                    "fleet_rlm.daytona.workspace_memory", fromlist=["DaytonaWorkspaceMemoryStore"]
-                ).DaytonaWorkspaceMemoryStore(
-                    sandbox,
-                    volume_paths=paths,
-                    max_upload_bytes=settings.max_upload_bytes,
+                from fleet_rlm.workspace.memory import WorkspaceMemory
+                from fleet_rlm.workspace.storage import AgentStorageSession, WorkspaceMemoryStorage
+
+                memory_store = WorkspaceMemory.from_storage(
+                    WorkspaceMemoryStorage(
+                        AgentStorageSession(
+                            sandbox,
+                            volume_root=str(paths.root),
+                            root=str(paths.root),
+                            max_file_bytes=settings.max_upload_bytes,
+                            allow_volume_root=True,
+                        )
+                    ),
+                    max_file_bytes=settings.max_upload_bytes,
                 )
                 entries = memory_store.list_entries(limit=16).entries
                 promoted = [

@@ -28,9 +28,9 @@ def test_p34_freeze_guide_is_indexed_and_names_the_final_gate() -> None:
 def test_p34_canonical_ownership_seams_remain_available() -> None:
     from fleet_rlm.chat.run_lifecycle import RunLifecycleService
     from fleet_rlm.chat.turn_coordinator import TurnCoordinator
-    from fleet_rlm.daytona.memory_diagnostics import MemoryFailureCategory
     from fleet_rlm.daytona.recursive_child_runtime import ChildRuntimeLeaseState
     from fleet_rlm.runtime.owned_effect import OwnedEffect
+    from fleet_rlm.workspace.memory import MemoryFailureCategory
 
     assert callable(RunLifecycleService.finish)
     assert callable(TurnCoordinator.open)
@@ -52,7 +52,7 @@ def test_p34_regression_proof_paths_remain_committed() -> None:
         "tests/contracts/backend/test_p33_guardrails.py",
         "tools/fleet-tui/src/tui/tests/turn-reducer-invariants.test.ts",
         "tools/fleet-tui/src/tui/tests/reducer-sequence-gen.ts",
-        "src/fleet_rlm/daytona/memory_diagnostics.py",
+        "src/fleet_rlm/workspace/memory.py",
         "src/fleet_rlm/daytona/workspace_agent/runtime.py",
     )
     for relative_path in paths:
