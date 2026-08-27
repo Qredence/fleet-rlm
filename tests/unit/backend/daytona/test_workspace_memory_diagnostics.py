@@ -169,7 +169,7 @@ def test_unexpected_search_defect_is_classified_explicitly(
 def test_provider_outage_is_classified_and_still_fail_soft(
     tmp_path: Path, caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from fleet_rlm.daytona.workspace_agent import WorkspaceAgentStorageError
+    from fleet_rlm.daytona.workspace_agent.protocol import WorkspaceAgentStorageError
 
     store, _root = _store(tmp_path)
 

@@ -10,7 +10,7 @@ Host-tool / SUBMIT mediation (B1):
 
 Public per-step output projection (stdout delta replay, stream closure, final
 flush, native-error privacy) lives in ``interpreter_output.py``. The sync
-view over async Daytona sandboxes lives in ``dspy_sync_bridge.py``.
+view over async Daytona sandboxes lives in ``broker.py``.
 """
 
 from __future__ import annotations
@@ -32,18 +32,21 @@ from uuid import uuid4
 import dspy
 from dspy.utils.callback import BaseCallback, with_callbacks
 
-from fleet_rlm.daytona.broker_source import (
+from fleet_rlm.daytona.broker import (
+    DEFAULT_BROKER_PORT,
     FINAL_OUTPUT_MARKER,
+    FleetFinalOutputError,
+    SyncBridgeDispatcher,
     build_submit_setup_code,
     extract_final_payload,
+    sync_sandbox,
+    tombstone_sync_sandbox,
 )
-from fleet_rlm.daytona.dspy_sync_bridge import SyncBridgeDispatcher, sync_sandbox, tombstone_sync_sandbox
 from fleet_rlm.daytona.errors import (
     DaytonaAdapterError,
     map_provider_error,
     sanitize_provider_message,
 )
-from fleet_rlm.daytona.http_broker import DEFAULT_BROKER_PORT, FleetFinalOutputError
 from fleet_rlm.daytona.interpreter_output import (
     OutputCallback,
     _close_output_stream,
@@ -83,7 +86,7 @@ from fleet_rlm.rlm.result import (
 )
 
 if TYPE_CHECKING:
-    from fleet_rlm.daytona.http_broker import DaytonaHttpToolBroker
+    from fleet_rlm.daytona.broker import DaytonaHttpToolBroker
 
 DEFAULT_EXECUTION_OUTPUT_CHARS = 4_000
 DEFAULT_EXECUTION_TIMEOUT_S = 120
@@ -539,6 +542,21 @@ class DaytonaCodeInterpreter:
     @property
     def tools(self) -> dict[str, Callable[..., Any]]:
         return self._tools
+
+    @property
+    def supports_sandbox_serializable_inputs(self) -> bool:
+        """Whether non-primitive inputs are injected through the remote broker.
+
+        Native DSPy treats ``SandboxSerializable`` inputs specially.  Fleet's
+        in-process test backend can retain a dspy.History object directly, while
+        the Daytona HTTP broker must receive the typed transport form.
+        """
+        return isinstance(self._backend, _SandboxProcessBackend)
+
+    @property
+    def broker(self) -> DaytonaHttpToolBroker | None:
+        """Return the broker context owned by this interpreter, when started."""
+        return self._http_broker
 
     @property
     def output_fields(self) -> list[dict[str, Any]] | None:
@@ -1089,7 +1107,7 @@ class DaytonaCodeInterpreter:
         ):
             return
         if not broker_ready:
-            from fleet_rlm.daytona.http_broker import DaytonaHttpToolBroker
+            from fleet_rlm.daytona.broker import DaytonaHttpToolBroker
 
             context_binding = self._context_binding
             if self._http_broker is None or bool(getattr(self._http_broker, "_stopped", False)):

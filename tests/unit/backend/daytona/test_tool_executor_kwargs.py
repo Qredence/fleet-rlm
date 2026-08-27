@@ -20,7 +20,7 @@ import dspy
 import pytest
 from dspy.predict.rlm import RLM
 
-from fleet_rlm.daytona.http_broker import DaytonaHttpToolBroker
+from fleet_rlm.daytona.broker import DaytonaHttpToolBroker
 from fleet_rlm.files.memory_tools import WorkspaceMemoryToolHost
 from fleet_rlm.files.project_tools import ProjectToolHost
 from fleet_rlm.files.tools import FileToolHost

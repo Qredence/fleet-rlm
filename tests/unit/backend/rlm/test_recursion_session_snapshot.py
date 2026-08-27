@@ -21,7 +21,7 @@ import dspy
 import pytest
 
 from fleet_rlm.chat.session_context import SessionContextManifest, TurnPreview
-from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
+from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend, sandbox_backend
 from fleet_rlm.daytona.recursive_child_runtime import ChildRuntimeLease
 from fleet_rlm.files.workspace_models import WorkspaceCapabilityMetadata
 from fleet_rlm.rlm.program import RLMModelBundle, build_rlm_input_kwargs, build_session_context_payload
@@ -124,6 +124,10 @@ def test_p47_4_snapshot_is_frozen_and_committed_history_is_copied() -> None:
 
     with pytest.raises(dataclasses.FrozenInstanceError):
         snapshot.request = "mutated"  # type: ignore[misc]
+    with pytest.raises(TypeError, match="immutable"):
+        snapshot.history.messages.append({})
+    with pytest.raises(TypeError, match="immutable"):
+        snapshot.history.messages[0]["answer"] = "mutated"
 
     # Mutating the source conversation after materialization cannot leak in.
     source = dspy.History(messages=[{"request": "one", "answer": "two"}])
@@ -136,6 +140,22 @@ def test_p47_4_snapshot_is_frozen_and_committed_history_is_copied() -> None:
     )
     source.messages.append({"request": "late", "answer": "mutation"})
     assert snapshot_from_history.history.messages == [{"request": "one", "answer": "two"}]
+
+
+def test_p47_4_snapshot_deep_copies_nested_history_values() -> None:
+    source = dspy.History(messages=[{"request": "one", "answer": {"nested": [1]}}])
+    snapshot = build_recursive_session_snapshot(
+        request="r",
+        history=source,
+        session_context=_manifest(),
+        workspace=_workspace(),
+        models=_models(),
+    )
+
+    source.messages[0]["answer"]["nested"].append(2)
+    assert snapshot.history.messages[0]["answer"] == {"nested": [1]}
+    with pytest.raises(TypeError, match="immutable"):
+        snapshot.history.messages[0]["answer"]["nested"].append(3)
 
 
 def test_p47_4_snapshot_materializes_transport_history_and_none() -> None:
@@ -151,6 +171,39 @@ def test_p47_4_snapshot_materializes_transport_history_and_none() -> None:
         models=_models(),
     )
     assert empty.history.messages == []
+
+
+def test_p47_4_remote_native_child_receives_transport_history(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: list[dict[str, Any]] = []
+    snapshot = _snapshot(
+        history=dspy.History(messages=[{"request": "prior ask", "answer": "prior answer"}]),
+        workspace_memory_digest="recent memory",
+    )
+    _, built = _install_child(monkeypatch, _native_child_recorder(captured))
+
+    def remote_factory(call_index: int) -> ChildRuntimeLease:
+        interpreter = DaytonaCodeInterpreter(backend=sandbox_backend(object()))
+        return ChildRuntimeLease(
+            interpreter,
+            f"remote-child-{call_index}",
+            "test-volume",
+            f"recursive/test-workspace/test-run/{call_index}",
+            lambda: None,
+        )
+
+    executor = RecursiveRLMExecutor(
+        models=snapshot.models,
+        options=RecursiveRLMOptions(enabled=True, max_calls=1),
+        child_runtime_factory=remote_factory,
+        deadline=time.monotonic() + 30,
+        snapshot=snapshot,
+    )
+    assert executor._call("read the prior answer") == "child-ok"
+
+    assert captured[0]["history"] is snapshot.history_transport
+    assert isinstance(captured[0]["history"], CommittedSessionHistory)
+    assert captured[0]["session_context"]["workspace_memory"]["tail"] == "recent memory"
+    assert built[0]["signature"] is RecursiveSessionSubtaskSignature
 
 
 def test_p47_4_native_child_receives_snapshot_inputs_and_forked_policy(

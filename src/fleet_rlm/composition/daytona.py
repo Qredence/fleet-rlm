@@ -26,7 +26,7 @@ from fleet_rlm.composition.inventory import (
     install_runtime_inventory,
 )
 from fleet_rlm.config import Settings
-from fleet_rlm.daytona.dspy_sync_bridge import SyncBridgeDispatcher
+from fleet_rlm.daytona.broker import SyncBridgeDispatcher
 from fleet_rlm.daytona.memory_outbox_reconcile import MemoryOutboxReconciler
 from fleet_rlm.daytona.session_manager import DEFAULT_IDLE_STOP_SECONDS
 from fleet_rlm.persistence.database import ensure_database_compatible

@@ -48,7 +48,7 @@ from fleet_rlm.app import create_app
 from fleet_rlm.chat.run_lifecycle import TurnAccess
 from fleet_rlm.config import Settings
 from fleet_rlm.daytona import recursive_child_runtime
-from fleet_rlm.daytona.http_broker import DaytonaHttpToolBroker
+from fleet_rlm.daytona.broker import DaytonaHttpToolBroker
 from fleet_rlm.daytona.session_manager import get_active_lease_registry
 from fleet_rlm.files.volume_paths import volume_paths_from_settings
 from fleet_rlm.rlm.program import RLMModelBundle

@@ -165,7 +165,8 @@ The Root may call `rlm_query` for one isolated iterative specialist or
 `rlm_query_batched` for ordered independent specialists. Fleet computes each
 reservation as `child_depth = executor_depth + 1`: Root depth 0 produces native
 child depth 1 with a fresh Sandbox and copied DSPy LM runtimes. A child receives
-only `rlm_query` plus native semantic tools; if it delegates, depth 2 is settled
+an immutable committed Session History snapshot, bounded Session context, only
+`rlm_query` plus native semantic tools; if it delegates, depth 2 is settled
 by the bounded Sub-LM fallback rather than another native RLM or Sandbox. A
 batch is Root-only, every item remains depth 1, shared call budget is reserved
 atomically, concurrency is bounded, and settlement is all-or-nothing.
@@ -173,17 +174,20 @@ _Avoid_: Child Session, recursive swarm, shared LM history, configurable native
 `max_depth`
 
 **Code-Interpreter Context**:
-Python REPL state for one Run inside a Sandbox. Fleet RLM backend uses **per-Run**
-Context only: it does not survive across Runs. Continuity between Runs is
-Session History and Workspace Volume Scope, never REPL variables.
-Sandbox replacement therefore creates fresh interpreter state even when the
-replacement remounts the same Workspace Volume Scope.
-_Avoid_: durable Memory, Session History, warm multi-run REPL (not a clean claim)
+Python REPL state for one resident Session runtime inside a Root Sandbox. Fleet
+RLM reuses the caller-owned context across sequential clean Turns while the
+runtime remains compatible, healthy, and resident. Every Turn still receives
+fresh request/capability bindings and DSPy `REPLHistory`; failure, eviction,
+restart, or Sandbox replacement may lose arbitrary globals. Durable continuity
+is the committed Session History and Workspace Volume Scope.
+_Avoid_: durable Memory, hidden trajectory as History, cross-Session REPL sharing
 
 **Interpreter Lease**:
-Temporary right to use a Code-Interpreter Context for one Run. Release ends that
-Context and never destroys the Sandbox by itself.
-_Avoid_: Sandbox ownership, process handle alone, cross-Run REPL continuity
+Temporary right to use a Code-Interpreter Context. A disposable child lease is
+Turn-scoped; a Root Session lease may span sequential clean Turns. Release
+ends the owned interpreter context and never destroys the durable Volume by
+itself.
+_Avoid_: Sandbox ownership, process handle alone, cross-Session REPL continuity
 
 **Sandbox Binding**:
 Remembered association between a Session and a Sandbox plus the mount identity
@@ -346,21 +350,23 @@ separate `workspace_volume*` module exists.
 | `files/workspace_tools.py` | RLM Tool host binding Session Workspace operations as Host-Mediated Tools | `daytona/run_environment.py` |
 | `files/project_tools.py` | RLM Tool host for the durable projects-root namespace | `daytona/run_environment.py` |
 | `daytona/workspace_memory.py` | Workspace Memory store implementation over one mounted agent round trip | `daytona/run_environment.py` |
-| `daytona/workspace_agent.py` | Host run/decode adapter and versioned artifact/handshake transport for the packaged stdlib-only `workspace_agent_runtime.py` `handle(request)` used by installed and fallback launchers | `daytona/workspace_fs.py`, `daytona/workspace_memory.py` |
+| `daytona/workspace_agent/` | Host run/decode adapter and versioned artifact/handshake transport for the packaged stdlib-only `workspace_agent/runtime.py` `handle(request)` used by installed and fallback launchers | `daytona/workspace_fs.py`, `daytona/workspace_memory.py` |
 
 ### `rlm/` package one-liner
 
-`rlm/` owns the DSPy contract, Root/Sub model roles, delegation metrics,
-routing evaluation, and fixed-depth recursive child executor. Root-only batch
-delegation uses ordered, bounded sibling execution.
+`rlm/` owns the native DSPy program/result/event seams, Root/Sub model roles,
+Session-scoped RLM/interpreter reuse, delegation metrics, routing evaluation,
+and fixed-depth recursive child executor. Root-only batch delegation uses
+ordered, bounded sibling execution.
 
 ### `daytona/` package one-liners
 
 - `__init__.py` — ownership package: side-effect-free; import adapter types from owning modules.
-- `broker_source.py` — pure source-string generation for the in-sandbox host-tool broker.
+- `broker.py` — canonical source, HTTP transport, and sync bridge boundary for the in-sandbox host-tool broker.
 - `diagnostics.py` — opt-in disposable provider/mount probes (`fleet doctor daytona`).
 - `errors.py` — Fleet-facing error types and sanitized mapping for Daytona failures.
-- `http_broker.py` — HTTP-in-sandbox broker executing host tools and SUBMIT polls over localhost.
+- `_cleanup.py` — private callback and late-cleanup invocation boundary.
+- `_lease.py` — private cancellation-safe root/child lease state machine.
 - `interpreter.py` — `DaytonaCodeInterpreter`: DSPy RLM interpreter adapter (execution, observation, SUBMIT mediation, sync bridge).
 - `interpreter_output.py` — public per-step output projection: marker-hiding stdout replay, capped deltas, stream-closed tracking, final flush.
 - `optimization_evaluator.py` — disposable no-volume lifecycle for the offline signature-optimization lane.
@@ -374,8 +380,8 @@ delegation uses ordered, bounded sibling execution.
   owner-loop and dispatch loss.
 - `run_environment.py` — Run environment inventory and exact Turn capability preparation.
 - `session_manager.py` — interpreter lease acquire/release and Sandbox binding lifecycle.
-- `workspace_agent.py` — Workspace Agent artifact/handshake host adapter; the
-  packaged `workspace_agent_runtime.py` owns the explicit stdlib-only
+- `workspace_agent/` — Workspace Agent host protocol/client package; the
+  packaged `workspace_agent/runtime.py` owns the explicit stdlib-only
   `handle(request)` used by installed and fallback launchers.
 - `workspace_fs.py` — Session Workspace FS implementation (see disambiguation above).
 - `workspace_gateway.py` — ephemeral mounted-Sandbox gateway (see disambiguation above).

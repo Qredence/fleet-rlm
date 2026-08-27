@@ -15,7 +15,7 @@ from fastapi.testclient import TestClient
 from fleet_rlm.api.local_scope import LocalScope
 from fleet_rlm.app import create_app
 from fleet_rlm.config import Settings
-from fleet_rlm.daytona.http_broker import DaytonaHttpToolBroker
+from fleet_rlm.daytona.broker import DaytonaHttpToolBroker
 from fleet_rlm.daytona.session_manager import get_active_lease_registry
 from fleet_rlm.rlm.program import RLMModelBundle
 from fleet_rlm.sessions.models import TurnAccess

@@ -116,7 +116,7 @@ async def test_daytona_build_cancellation_disposes_partial_engine(monkeypatch: p
 async def test_daytona_install_cancellation_clears_dispatcher(monkeypatch: pytest.MonkeyPatch) -> None:
     """Cancellation from composition build must not leave bridge loop authority."""
     import fleet_rlm.composition.daytona as composition
-    from fleet_rlm.daytona.dspy_sync_bridge import SyncBridgeDispatcher
+    from fleet_rlm.daytona.broker import SyncBridgeDispatcher
 
     seen: list[SyncBridgeDispatcher] = []
 
@@ -443,7 +443,7 @@ async def test_daytona_install_registers_and_dispose_clears_bridge_dispatcher(
     was removed in P33.
     """
     import fleet_rlm.composition.daytona as composition
-    from fleet_rlm.daytona.dspy_sync_bridge import SyncBridgeDispatcher
+    from fleet_rlm.daytona.broker import SyncBridgeDispatcher
 
     inventory = RuntimeInventory(
         turn_coordinator=object(),

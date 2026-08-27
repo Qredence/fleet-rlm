@@ -10,7 +10,7 @@ from typing import Any, cast
 
 import pytest
 
-from fleet_rlm.daytona.workspace_agent import (
+from fleet_rlm.daytona.workspace_agent.client import (
     WORKSPACE_AGENT_CODE_RUN_TIMEOUT_S,
     run_workspace_agent,
     run_workspace_agent_async,

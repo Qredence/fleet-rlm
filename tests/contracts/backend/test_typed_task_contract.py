@@ -35,7 +35,7 @@ def test_default_signature_schema_remains_fleet_default() -> None:
 
 
 def test_custom_signature_uses_the_same_json_compatible_common_inputs() -> None:
-    from tests.unit.backend.rlm.test_signature_inputs import _payload
+    from tests.unit.backend.rlm.test_program_inputs import _payload
 
     payload = _payload()
     assert set(payload) == {"request", "history", "session_context", "skill_cards", "attachments"}

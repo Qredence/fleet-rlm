@@ -17,11 +17,12 @@ from concurrent.futures import FIRST_EXCEPTION, Future, ThreadPoolExecutor, wait
 from contextvars import Context, copy_context
 from dataclasses import dataclass, field
 from threading import Event, Lock, RLock, Thread
-from typing import Any, Literal, Protocol, TypeAlias
+from typing import Any, Literal, NoReturn, Protocol, Self, TypeAlias
 
 import dspy
 
 from fleet_rlm.chat.session_context import SessionContextManifest
+from fleet_rlm.files.memory_models import WORKSPACE_MEMORY_INJECTION_TAIL_BYTES
 from fleet_rlm.files.workspace_models import WorkspaceCapabilityMetadata
 from fleet_rlm.observability.failure_diagnostics import trace_failure_category
 from fleet_rlm.observability.turn_tracing import start_turn_span
@@ -74,6 +75,98 @@ ChildRuntimeFactory = Callable[[int], ChildRuntimeLease]
 # ---------------------------------------------------------------------------
 
 
+class _ImmutableMessageDict(dict[str, Any]):
+    """Dictionary-shaped history record that rejects in-place mutation."""
+
+    def __setitem__(self, _key: str, _value: Any) -> NoReturn:
+        raise TypeError("recursive Session snapshot history is immutable")
+
+    def __delitem__(self, _key: str) -> NoReturn:
+        raise TypeError("recursive Session snapshot history is immutable")
+
+    def __ior__(self, _value: Mapping[str, Any]) -> Self:  # ty: ignore[invalid-method-override]
+        raise TypeError("recursive Session snapshot history is immutable")
+
+    def clear(self) -> NoReturn:
+        raise TypeError("recursive Session snapshot history is immutable")
+
+    def pop(self, _key: str, _default: Any = None) -> NoReturn:  # ty: ignore[invalid-method-override]
+        raise TypeError("recursive Session snapshot history is immutable")
+
+    def popitem(self) -> NoReturn:
+        raise TypeError("recursive Session snapshot history is immutable")
+
+    def setdefault(self, _key: str, _default: Any = None) -> NoReturn:
+        raise TypeError("recursive Session snapshot history is immutable")
+
+    def update(self, *_args: Any, **_kwargs: Any) -> NoReturn:
+        raise TypeError("recursive Session snapshot history is immutable")
+
+
+class _ImmutableMessageList(list[Any]):
+    """List-shaped history container that rejects in-place mutation."""
+
+    def __setitem__(self, _index: int | slice, _value: Any) -> NoReturn:  # ty: ignore[invalid-method-override]
+        raise TypeError("recursive Session snapshot history is immutable")
+
+    def __delitem__(self, _index: int | slice) -> NoReturn:  # ty: ignore[invalid-method-override]
+        raise TypeError("recursive Session snapshot history is immutable")
+
+    def __iadd__(self, _value: Any) -> Self:
+        raise TypeError("recursive Session snapshot history is immutable")
+
+    def __imul__(self, _value: int) -> Self:  # ty: ignore[invalid-method-override]
+        raise TypeError("recursive Session snapshot history is immutable")
+
+    def append(self, _value: Any) -> NoReturn:
+        raise TypeError("recursive Session snapshot history is immutable")
+
+    def clear(self) -> NoReturn:
+        raise TypeError("recursive Session snapshot history is immutable")
+
+    def extend(self, _value: Any) -> NoReturn:
+        raise TypeError("recursive Session snapshot history is immutable")
+
+    def insert(self, _index: int, _value: Any) -> NoReturn:  # ty: ignore[invalid-method-override]
+        raise TypeError("recursive Session snapshot history is immutable")
+
+    def pop(self, _index: int = -1) -> NoReturn:  # ty: ignore[invalid-method-override]
+        raise TypeError("recursive Session snapshot history is immutable")
+
+    def remove(self, _value: Any) -> NoReturn:
+        raise TypeError("recursive Session snapshot history is immutable")
+
+    def reverse(self) -> NoReturn:
+        raise TypeError("recursive Session snapshot history is immutable")
+
+    def sort(self, **_kwargs: Any) -> NoReturn:
+        raise TypeError("recursive Session snapshot history is immutable")
+
+
+def _freeze_history_value(value: Any) -> Any:
+    """Recursively copy JSON-shaped history values into immutable containers."""
+    if isinstance(value, Mapping):
+        return _ImmutableMessageDict({key: _freeze_history_value(item) for key, item in value.items()})
+    if isinstance(value, list):
+        return _ImmutableMessageList(_freeze_history_value(item) for item in value)
+    if isinstance(value, tuple):
+        return tuple(_freeze_history_value(item) for item in value)
+    if isinstance(value, set):
+        return frozenset(_freeze_history_value(item) for item in value)
+    return value
+
+
+def _immutable_history(records: Sequence[Mapping[str, Any]]) -> dspy.History:
+    """Create a dspy-compatible history whose nested records cannot be changed."""
+    frozen_records = _ImmutableMessageList(_freeze_history_value(dict(record)) for record in records)
+    materialized = dspy.History(messages=list(frozen_records))
+    # DSPy freezes field assignment but intentionally keeps ``messages`` a list.
+    # The child-visible snapshot has a stronger contract: neither the list nor a
+    # nested record may be mutated by one child and observed by another.
+    object.__setattr__(materialized, "messages", frozen_records)
+    return materialized
+
+
 @dataclass(frozen=True, slots=True)
 class RecursiveSessionSnapshot:
     """Immutable Session material one delegated child may read (P47.4).
@@ -81,7 +174,9 @@ class RecursiveSessionSnapshot:
     Children never receive the live Root interpreter, mutable Root Python
     state, or the Session runtime. The snapshot is materialized and copied at
     Turn preparation time; later mutation of the source conversation cannot
-    change what a delegated child observes.
+    change what a delegated child observes. ``history_transport`` retains the
+    typed DSPy ``SandboxSerializable`` form for remote interpreters; the
+    regular ``history`` remains the preferred in-process dspy value.
     """
 
     request: str
@@ -89,6 +184,8 @@ class RecursiveSessionSnapshot:
     session_context: SessionContextManifest
     workspace: WorkspaceCapabilityMetadata
     models: RLMModelBundle
+    history_transport: CommittedSessionHistory | None = None
+    workspace_memory_digest: str = ""
 
 
 def build_recursive_session_snapshot(
@@ -98,6 +195,7 @@ def build_recursive_session_snapshot(
     session_context: SessionContextManifest,
     workspace: WorkspaceCapabilityMetadata,
     models: RLMModelBundle,
+    workspace_memory_digest: str = "",
 ) -> RecursiveSessionSnapshot:
     """Materialize the immutable child-visible Session snapshot.
 
@@ -105,30 +203,51 @@ def build_recursive_session_snapshot(
         request (str): Current committed user request the subproblems are delegated from.
         history (dspy.History | CommittedSessionHistory | None): Committed conversation;
             transport History is materialized and every message record is copied so the
-            snapshot can never observe later mutations.
+            snapshot can never observe later mutations. A typed transport copy is retained
+            when the source is ``CommittedSessionHistory``.
         session_context (SessionContextManifest): Bounded Session navigation metadata.
         workspace (WorkspaceCapabilityMetadata): Authorized read/write capability view.
         models (RLMModelBundle): Root/Sub model policy; each child forks its own copy.
+        workspace_memory_digest (str): Bounded memory tail included in the child context payload.
 
     Returns:
-        RecursiveSessionSnapshot: The immutable snapshot handed to every delegated child.
+        RecursiveSessionSnapshot: The immutable Session material handed to every delegated child.
 
     Raises:
-        RLMConfigError: If the committed History type is not a supported snapshot source.
+        RLMConfigError: If the committed History type or memory digest is invalid.
     """
-    if isinstance(history, (CommittedSessionHistory, dspy.History)):
+    if (
+        not isinstance(workspace_memory_digest, str)
+        or len(workspace_memory_digest.encode("utf-8")) > WORKSPACE_MEMORY_INJECTION_TAIL_BYTES
+    ):
+        raise RLMConfigError("recursive Session snapshot memory context is invalid")
+    transport: CommittedSessionHistory | None = None
+    if isinstance(history, CommittedSessionHistory):
         records = history.messages
+        transport = CommittedSessionHistory([dict(record) for record in records])
+    elif isinstance(history, dspy.History):
+        records = history.messages
+        # Production Turn preparation starts with dspy.History, but the remote
+        # Daytona interpreter needs DSPy's explicit SandboxSerializable form.
+        # Keep the native value above for in-process children and retain a
+        # transport copy when the canonical committed record shape is present.
+        try:
+            transport = CommittedSessionHistory([dict(record) for record in records])
+        except (TypeError, ValueError):
+            transport = None
     elif history is None:
         records = ()
     else:
         raise RLMConfigError("recursive Session snapshot history type is invalid")
-    materialized = dspy.History(messages=[dict(record) for record in records])
+    materialized = _immutable_history(records)
     return RecursiveSessionSnapshot(
         request=request,
         history=materialized,
         session_context=session_context,
         workspace=workspace,
         models=models,
+        history_transport=transport,
+        workspace_memory_digest=workspace_memory_digest,
     )
 
 
@@ -1162,12 +1281,22 @@ class RecursiveRLMExecutor:
         child_inputs: dict[str, Any] = {}
         if self._snapshot is not None:
             child_signature = RecursiveSessionSubtaskSignature
+            # A remote Daytona interpreter cannot carry a raw dspy.History as
+            # a per-iteration variable.  Keep that preferred value for the
+            # in-process seam, but use the complete SandboxSerializable copy
+            # when the interpreter advertises remote variable injection.
+            child_history: dspy.History | CommittedSessionHistory = self._snapshot.history
+            if self._snapshot.history_transport is not None and bool(
+                getattr(lease.interpreter, "supports_sandbox_serializable_inputs", False)
+            ):
+                child_history = self._snapshot.history_transport
             child_inputs = {
                 "request": self._snapshot.request,
-                "history": self._snapshot.history,
+                "history": child_history,
                 "session_context": build_session_context_payload(
                     session_context=self._snapshot.session_context,
                     workspace=self._snapshot.workspace,
+                    workspace_memory_digest=self._snapshot.workspace_memory_digest,
                 ),
             }
         child = build_native_rlm(

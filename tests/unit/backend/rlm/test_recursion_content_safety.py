@@ -68,8 +68,6 @@ _SENTINELS = (
 )
 
 
-
-
 class _RootLM(dspy.utils.DummyLM):
     """Root LM whose copy() hands the child a distinct scripted runtime."""
 

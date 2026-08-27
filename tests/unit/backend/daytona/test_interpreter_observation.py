@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 from dspy.primitives.code_interpreter import CodeExecutionError
 
-from fleet_rlm.daytona.broker_source import FINAL_OUTPUT_MARKER
+from fleet_rlm.daytona.broker import FINAL_OUTPUT_MARKER
 from fleet_rlm.daytona.errors import DaytonaAdapterError
 from fleet_rlm.daytona.interpreter import (
     BackendExecutionResult,

@@ -23,9 +23,9 @@ def _base(**overrides: object) -> dict[str, object]:
 
 
 def test_runtime_source_is_packaged_and_loaded_via_importlib_resources() -> None:
-    from fleet_rlm.daytona import workspace_agent as host
+    from fleet_rlm.daytona.workspace_agent import protocol as host
 
-    packaged = files("fleet_rlm.daytona").joinpath("workspace_agent_runtime.py").read_text(encoding="utf-8")
+    packaged = files("fleet_rlm.daytona.workspace_agent").joinpath("runtime.py").read_text(encoding="utf-8")
     assert "def handle(request):" in packaged
     assert "def get_metadata():" in packaged
     assert "class UnsafePath(Exception):" in packaged
@@ -37,7 +37,7 @@ def test_runtime_source_is_packaged_and_loaded_via_importlib_resources() -> None
 
 
 def test_build_embeds_operation_params_and_runtime_source() -> None:
-    from fleet_rlm.daytona.workspace_agent import build_workspace_agent_code
+    from fleet_rlm.daytona.workspace_agent.protocol import build_workspace_agent_code
 
     code = build_workspace_agent_code(**_base(checksum=True, expected_sha256="abc"))
     assert code.startswith('"""Stdlib-only Session Workspace agent')
@@ -49,7 +49,7 @@ def test_build_embeds_operation_params_and_runtime_source() -> None:
 
 
 def test_runtime_retains_every_operation_branch() -> None:
-    from fleet_rlm.daytona.workspace_agent import build_workspace_agent_code
+    from fleet_rlm.daytona.workspace_agent.protocol import build_workspace_agent_code
 
     code = build_workspace_agent_code(**_base())
     for marker in (
@@ -70,7 +70,7 @@ def test_runtime_retains_every_operation_branch() -> None:
 
 
 def test_error_vocabulary_and_security_markers_are_stable() -> None:
-    from fleet_rlm.daytona.workspace_agent import build_workspace_agent_code
+    from fleet_rlm.daytona.workspace_agent.protocol import build_workspace_agent_code
 
     code = build_workspace_agent_code(**_base())
     for marker in (
@@ -99,7 +99,7 @@ def test_error_vocabulary_and_security_markers_are_stable() -> None:
 
 def test_replace_errno_set_keeps_portable_numeric_literals() -> None:
     """Volume backends may surface ENOSYS/EOPNOTSUPP as bare 38/95."""
-    from fleet_rlm.daytona.workspace_agent import build_workspace_agent_code
+    from fleet_rlm.daytona.workspace_agent.protocol import build_workspace_agent_code
 
     code = build_workspace_agent_code(**_base())
     assert "38," in code or "38\n" in code

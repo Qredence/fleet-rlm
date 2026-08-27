@@ -1,6 +1,6 @@
 # ADR: Session-scoped RLM state
 
-**Status:** accepted — P45 implementation in progress  
+**Status:** accepted — P48 implementation in progress
 **Decision date:** 2026-08-11
 
 Fleet will make committed Session conversation the durable authority and will pass

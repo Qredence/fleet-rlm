@@ -13,7 +13,8 @@ Authority: supported DSPy 3.3.x and [dspy.ai RLM](https://dspy.ai/api/modules/RL
 ## How it works
 
 1. The Root LM inspects bound inputs and REPL history, then emits reasoning plus Python code.
-2. Code runs in a sandboxed interpreter. Variables persist for the Run.
+2. Code runs in a sandboxed interpreter. Variables may persist across sequential
+   clean Turns while the compatible Session runtime remains resident.
 3. Built-ins include `llm_query(prompt)`, `llm_query_batched(prompts)`, and `SUBMIT(...)`.
 4. Fleet adds `rlm_query(prompt=prompt)` for one bounded child-RLM subproblem.
 5. Host Tools (Fleet) are additional callables registered for the Turn.
@@ -34,7 +35,9 @@ Use `rlm_query(prompt=prompt)` when the selected subproblem benefits from its ow
 bounded REPL loop. Keep large input-specific values in parent REPL variables,
 pass only the smallest sufficient slice, and retain the child answer in a
 parent variable. Child RLMs have fresh interpreter contexts and no Fleet
-durable Tools; the Root remains responsible for the public typed submission.
+durable Tools. They receive an immutable committed Session History snapshot
+and bounded context; the Root remains responsible for the public typed
+submission.
 Use keyword arguments for the one typed submission and provide every active
 Signature output. The default `answer` output is a string: call
 `SUBMIT(answer=answer)` for text, but serialize a mapping or list first with
@@ -54,7 +57,7 @@ independent verification in separate iterations.
 
 Fleet uses DSPy 3.3.x's `max_iters` spelling end-to-end: `RLMOptions.max_iters`,
 `Settings.rlm_max_iters`, and the TOML policy key `rlm.max_iters` are passed
-directly to `dspy.RLM(max_iters=...)` in `rlm.dspy_contract` with no alias.
+directly to `dspy.RLM(max_iters=...)` in `rlm.program` with no alias.
 Settings resolve only from the selected TOML policy; ambient `FLEET_*`
 environment variables are ignored.
 
@@ -77,8 +80,8 @@ keyword-only and are not routed through the native positional call contract.
 
 ## Fleet mapping
 
-- Normal primary Turns build a fresh native `dspy.RLM` with the active Fleet Signature. Greetings also
-  use this native path. The default for RLM Turns is
+- Normal primary Turns use one compatible native `dspy.RLM` per resident Session runtime; a changed
+  program, taint, eviction, or failure creates a replacement. Greetings also use this native path. The default for RLM Turns is
   `FleetRLMSignature` (`answer: str`), but a selected Skill may supply additional required output fields.
 - Fleet scopes the stock `dspy.JSONAdapter()` to each Turn. Provider-native
   token streams and sectioned text are not silently salvaged into RLM actions;

@@ -51,7 +51,7 @@ def test_workspace_agent_runs_locally_and_falls_back_from_atomic_overwrite(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from fleet_rlm.daytona.workspace_agent import run_workspace_agent
+    from fleet_rlm.daytona.workspace_agent.client import run_workspace_agent
 
     volume_root = tmp_path / "volume"
     root = volume_root / "sessions" / "session" / "workspace"

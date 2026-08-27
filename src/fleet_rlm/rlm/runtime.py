@@ -1437,6 +1437,7 @@ class RLMRunner:
                     session_context=context.session.session_context,
                     workspace=spec.workspace,
                     models=context.execution.models,
+                    workspace_memory_digest=context.session.workspace_memory_digest,
                 ),
             )
         spec = replace(

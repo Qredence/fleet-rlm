@@ -3,7 +3,7 @@
 The async adapters are the single source of truth for every operation. The
 synchronous ``DaytonaSessionWorkspaceFS`` is a thin bridge for DSPy
 worker-thread host tools: it facades the caller-provided synchronous sandbox
-view from :func:`fleet_rlm.daytona.dspy_sync_bridge.sync_sandbox` (or a test
+view from :func:`fleet_rlm.daytona.broker.sync_sandbox` (or a test
 double) into the async shape and drives each delegation coroutine to
 completion inline, since the underlying synchronous bridge calls already block.
 """
@@ -23,7 +23,8 @@ from threading import Lock
 from typing import Any, TypeVar, cast
 
 from fleet_rlm.daytona.errors import is_sandbox_not_found, map_provider_error
-from fleet_rlm.daytona.workspace_agent import WorkspaceAgentStorageError, run_workspace_agent_async
+from fleet_rlm.daytona.workspace_agent.client import run_workspace_agent_async
+from fleet_rlm.daytona.workspace_agent.protocol import WorkspaceAgentStorageError
 from fleet_rlm.files.volume_paths import DEFAULT_VOLUME_MOUNT_PATH, as_posix, validate_mount_path
 from fleet_rlm.files.volume_storage import VolumeFile
 from fleet_rlm.files.workspace_models import WorkspaceEntry, WorkspaceListResult, WorkspaceTextPage

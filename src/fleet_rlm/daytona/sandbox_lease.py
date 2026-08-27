@@ -34,6 +34,7 @@ from dataclasses import dataclass
 from threading import Thread
 from typing import Any, Literal, Protocol, TypeAlias
 
+from fleet_rlm.daytona._lease import LeaseState
 from fleet_rlm.daytona.admission import DaytonaAdmissionPermit
 from fleet_rlm.daytona.errors import sanitize_failure_text
 from fleet_rlm.daytona.lifecycle import AbsenceConfirmation, AbsenceOutcome, confirm_absence
@@ -281,6 +282,7 @@ class SandboxLease:
         self._interpreter = interpreter
         self._purge = purge
         self._closed = False
+        self._state = LeaseState.OPEN
         self._receipt: SandboxLeaseReceipt | None = None
         self._close_lock = asyncio.Lock()
         self._close_task: asyncio.Future[SandboxLeaseReceipt] | None = None
@@ -292,8 +294,23 @@ class SandboxLease:
         self._provider_tasks: set[asyncio.Future[Any]] = set()
 
     @property
+    def state(self) -> LeaseState:
+        """Return the explicit cleanup state for this provider lease."""
+        return self._state
+
+    @property
     def closed(self) -> bool:
+        # Historical callers use this as "the close receipt was published";
+        # inspect ``state`` to distinguish a clean close from a failed one.
         return self._closed
+
+    @property
+    def closing(self) -> bool:
+        return self._state is LeaseState.CLOSING
+
+    @property
+    def failed(self) -> bool:
+        return self._state is LeaseState.FAILED
 
     @property
     def has_pending_ownership(self) -> bool:
@@ -844,10 +861,12 @@ class SandboxLease:
             # that lock is held and the state transition is a single-threaded
             # assignment under the GIL.
             self._close_task = None
+            self._state = LeaseState.FAILED
             self._closed = False
             raise
         self._receipt = receipt
         self._close_task = None
+        self._state = _receipt_state(receipt)
         self._closed = True
         return receipt
 
@@ -860,12 +879,14 @@ class SandboxLease:
             async with self._close_lock:
                 if self._close_task is current:
                     self._close_task = None
+                    self._state = LeaseState.FAILED
                     self._closed = False
             raise
         async with self._close_lock:
             if self._close_task is current:
                 self._receipt = receipt
                 self._close_task = None
+                self._state = _receipt_state(receipt)
                 self._closed = True
         return receipt
 
@@ -898,6 +919,7 @@ class SandboxLease:
                 # installed on this owner loop.  Reconcile an already-failed
                 # result now so the next caller can retry instead of awaiting
                 # the same terminal exception forever.
+                self._state = LeaseState.CLOSING
                 if task.done() and self._receipt is None:
                     failed = task.cancelled()
                     if not failed:
@@ -905,6 +927,7 @@ class SandboxLease:
                             failed = task.exception() is not None
                     if failed:
                         self._close_task = None
+                        self._state = LeaseState.FAILED
                         self._closed = False
         assert task is not None
         if deadline is None:
@@ -961,13 +984,16 @@ class SandboxLease:
         """
         if self._receipt is not None:
             return self._receipt
-        self._closed = True
+        self._state = LeaseState.CLOSING
+        self._closed = False
         try:
             # Synchronous owners run on a disposable worker loop.  They must
             # finish the ordered interpreter/provider pipeline before that
             # loop is destroyed; the async path retains a bounded quarantine
             # continuation instead.
             self._receipt = asyncio.run(self._close_core(bounded_interpreter=False))
+            self._state = _receipt_state(self._receipt)
+            self._closed = True
         except BaseException as exc:
             # Unreachable in the seam (close_core captures), but never let a
             # close raise instead of reporting.
@@ -987,9 +1013,18 @@ class SandboxLease:
                 duration_s=0.0,
                 first_error=sanitize_failure_text(exc),
             )
+            self._state = LeaseState.FAILED
+            self._closed = False
             if self._permit is not None:
                 self._permit.release()
         return self._receipt
+
+
+def _receipt_state(receipt: SandboxLeaseReceipt) -> LeaseState:
+    """Map a typed receipt to the explicit lifecycle state."""
+    if receipt.first_error is not None or receipt.quarantine.quarantined:
+        return LeaseState.FAILED
+    return LeaseState.CLOSED
 
 
 @dataclass(slots=True)

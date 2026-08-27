@@ -76,7 +76,7 @@ def test_dspy_rlm_accepts_file_tool_names_and_fresh_custom_interpreters() -> Non
 
 def test_pinned_json_adapter_formats_typed_inputs_and_native_rlm_action_outputs() -> None:
     from fleet_rlm.rlm.program import FleetRLMSignature
-    from tests.unit.backend.rlm.test_signature_inputs import _payload
+    from tests.unit.backend.rlm.test_program_inputs import _payload
 
     adapter = dspy.JSONAdapter(use_native_function_calling=True)
     messages = adapter.format(FleetRLMSignature, [], _payload())

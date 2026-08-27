@@ -11,7 +11,8 @@ POST /api/sessions/{session_id}/turns + Idempotency-Key
   -> TurnCoordinator.open()
      -> RunLifecycle.begin(): replay or atomic Run claim
      -> DefaultRunPreparer.prepare(): context, tools, environment resources
-  -> RLMRunner: one fresh native dspy.RLM and interpreter context
+  -> RLMRunner: one compatible native dspy.RLM/interpreter per resident Session
+     runtime, with fresh per-Turn bindings and DSPy REPLHistory
   -> Runtime Events from native trajectory, interpreter, and host-tool boundaries
   -> RunLifecycle.finish()
      -> validate typed result and private snapshot
@@ -27,17 +28,22 @@ the stream opens emit closed `error` + `finish` chunks instead of late HTTP
 responses. A failed commit advances no Session history, publishes no Artifact
 identity, and still releases owned resources.
 
-Within one Run, interpreter calls reuse one context so Python state persists
-across RLM iterations. Every later Run receives a fresh context. Replacing a
-Daytona Sandbox remounts the Workspace Volume Scope but does not preserve Python
-globals.
+Within one resident Session runtime, interpreter calls reuse one context so
+Python state persists across sequential clean Turns. Each Turn receives fresh
+request/capability bindings, output metadata, budgets, and DSPy `REPLHistory`.
+Failure, taint, idle eviction, or Sandbox replacement rotates the runtime;
+committed History and Volume-backed state survive, while arbitrary Python globals
+may not. A different Session never shares the runtime.
 
-Every Signature receives request text, bounded `session_context`, bounded
-`skill_cards`, and bounded Attachment metadata. Full committed history remains
-host-side behind `read_session_history`. The default Signature uses strict local
-Pydantic DTOs; conversion and JSON serialization happen once immediately before
-native `await rlm.acall(interpreter, **named_inputs)`. Custom Skill Signatures
-retain their existing JSON-compatible common input annotations.
+Every Signature receives request text, complete committed `dspy.History`, bounded
+`session_context`, bounded `skill_cards`, and bounded Attachment metadata. The
+History contains only canonical `{"request": ..., "answer": ...}` records from
+the claimed checkpoint; hidden trajectory and failed Turns are excluded. The
+existing `read_session_history` Tool remains for explicit retrieval and
+compatibility. The default Signature uses strict local Pydantic DTOs; conversion
+and JSON serialization happen once immediately before native
+`await rlm.acall(interpreter, **named_inputs)`. Custom Skill Signatures retain
+their JSON-compatible common input annotations.
 
 `rlm/program.py` owns the default Fleet Root instruction fragments. Base,
 REPL, tool, optional recursion, verification, and bounded-context guidance are
@@ -50,7 +56,8 @@ iterative isolated subproblem, and Root-only `rlm_query_batched` for ordered
 independent child RLMs. The Root starts at recursive depth 0; direct recursive
 calls run as native depth-1 children, while a child’s further recursive call is
 a bounded Sub-LM fallback with no grandchild Sandbox. Children receive copied
-DSPy Root/Sub runtimes and return evidence for Root verification and synthesis.
+DSPy Root/Sub runtimes, an immutable committed Session History snapshot, and
+bounded context; they return evidence for Root verification and synthesis.
 Fleet reserves the shared recursive budget atomically and controls sibling
 concurrency through `recursion_max_parallel_children`.
 
@@ -79,7 +86,10 @@ concurrency through `recursion_max_parallel_children`.
   async-to-sync view, and it blocks only the DSPy worker thread.
   `WorkspaceVolumeGateway.open_workspace()` scopes each grouped I/O operation
   to one ephemeral Sandbox, which is deleted before the context exits.
-- `RLMRunner` executes one fresh DSPy RLM and emits no terminal event. The
+- `RLMRunner` executes one compatible Session-scoped DSPy RLM and emits no
+  terminal event. It binds current-Turn Tools through stable authorization-aware
+  proxies and keeps the per-Session execution lane through durable settlement.
+  The
   caller-owned interpreter observes ordinary stdout at the execution boundary,
   publishes bounded `RLMOutput` deltas with one per-step stream identity, and
   emits a final non-delta correction; trajectory reconciliation and durable

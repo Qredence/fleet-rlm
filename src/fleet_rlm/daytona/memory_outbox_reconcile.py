@@ -134,7 +134,7 @@ class MemoryOutboxReconciler:
         intents: list[ClaimedMemoryPromotionIntent],
         now: datetime,
     ) -> tuple[int, int, int, int]:
-        from fleet_rlm.daytona.dspy_sync_bridge import sync_sandbox
+        from fleet_rlm.daytona.broker import sync_sandbox
         from fleet_rlm.daytona.workspace_memory import build_workspace_memory_store
 
         loop = asyncio.get_running_loop()

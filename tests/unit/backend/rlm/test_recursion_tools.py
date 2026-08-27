@@ -12,7 +12,7 @@ import pytest
 from dspy.predict.rlm import RLM
 
 from fleet_rlm.chat.run_authority import RunAuthority
-from fleet_rlm.daytona.http_broker import DaytonaHttpToolBroker
+from fleet_rlm.daytona.broker import DaytonaHttpToolBroker
 from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
 from fleet_rlm.daytona.recursive_child_runtime import ChildRuntimeLease
 from fleet_rlm.rlm.events import Status, ToolCompleted, ToolFailed, ToolStarted

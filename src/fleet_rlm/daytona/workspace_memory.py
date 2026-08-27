@@ -24,7 +24,8 @@ from fleet_rlm.daytona.memory_diagnostics import (
     MemoryPayloadError,
     record_memory_degradation,
 )
-from fleet_rlm.daytona.workspace_agent import WorkspaceAgentStorageError, run_workspace_agent
+from fleet_rlm.daytona.workspace_agent.client import run_workspace_agent
+from fleet_rlm.daytona.workspace_agent.protocol import WorkspaceAgentStorageError
 from fleet_rlm.files.memory_models import (
     WORKSPACE_MEMORY_BYTE_BUDGET,
     WORKSPACE_MEMORY_HEADER,

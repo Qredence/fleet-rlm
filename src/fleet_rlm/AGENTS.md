@@ -26,13 +26,17 @@ contracts, and tracked docs remain authoritative.
   Direct `Settings(...)` construction rejects unknown keys without echoing
   their values.
 - Keep Daytona SDK imports inside `daytona/`.
-- Create a fresh native DSPy RLM per Turn through `rlm.dspy_contract`. Native
-  `RLMOptions` mirrors DSPy 3.3.x exactly: `max_iters` bounds action/REPL
+- Keep one compatible native DSPy RLM per active Session runtime through
+  `rlm.program`, `rlm.runtime`, and `rlm.session_runtime`; reuse it across
+  sequential successful Turns and rotate it after taint, incompatibility, or
+  failed cleanup. Native `RLMOptions`
+  mirrors DSPy 3.3.x exactly: `max_iters` bounds action/REPL
   iterations, `max_llm_calls` bounds prompts sent through native
   `llm_query`/`llm_query_batched`, and `max_output_chars` bounds retained REPL
   output. `verbose` is host logging only; it is not the live evidence path.
-  Inject and `FinalOutput` protocol knowledge lives in
-  `rlm.dspy_interpreter_contract`. Daytona supplies a fresh custom interpreter.
+  DSPy version, interpreter injection, and `FinalOutput` protocol knowledge
+  lives in `rlm._dspy_compat`; Daytona supplies a caller-owned custom
+  interpreter.
   Native calls use the supported `await rlm.acall(interpreter, **named_inputs)`
   surface; deterministic testing doubles remain keyword-only. Fleet owns
   shutdown for caller-provided interpreters.
@@ -51,9 +55,10 @@ contracts, and tracked docs remain authoritative.
   cancellation plus a bounded settle grace, and an unsettled child stays
   owned through the executor's cleanup boundary instead of blocking or
   leaking the wait.
-- Every Signature receives request text, bounded `session_context`, bounded
-  `skill_cards`, and bounded Attachment metadata. Older committed messages
-  remain behind the Session-scoped `read_session_history` Tool.
+- Every Signature receives request text, complete committed `dspy.History`,
+  bounded `session_context`, bounded `skill_cards`, and bounded Attachment
+  metadata. The Session-scoped `read_session_history` Tool remains available
+  for explicit retrieval and compatibility.
 - The default `FleetRLMSignature` uses strict Pydantic DTOs local to `rlm/`;
   `rlm.inputs` validates and JSON-serializes the bounded payload once before
   native `rlm.acall(interpreter, ...)`. Custom Skill Signatures retain JSON-compatible common

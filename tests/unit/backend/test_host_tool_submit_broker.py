@@ -26,10 +26,10 @@ class _RecordingTool:
 
 
 def test_co_located_worker_preserves_state_and_services_callbacks(tmp_path: Path) -> None:
-    from fleet_rlm.daytona.broker_source import BROKER_SERVER_CODE
-    from fleet_rlm.daytona.http_broker import (
+    from fleet_rlm.daytona.broker import (
         _MAX_EXECUTE_OUTPUT_CHARS,
         _MAX_EXECUTE_REQUEST_BYTES,
+        BROKER_SERVER_CODE,
         DaytonaHttpToolBroker,
     )
 
@@ -236,7 +236,7 @@ def test_host_tool_public_errors_are_sanitized() -> None:
 
 
 def test_http_broker_wrapper_source_and_fulfill_sanitize() -> None:
-    from fleet_rlm.daytona.http_broker import DaytonaHttpToolBroker
+    from fleet_rlm.daytona.broker import DaytonaHttpToolBroker
 
     class _Sandbox:
         pass
@@ -276,7 +276,7 @@ def test_http_broker_wrapper_source_and_fulfill_sanitize() -> None:
 def test_http_broker_uses_isolated_port_for_server_and_wrappers() -> None:
     import hashlib
 
-    from fleet_rlm.daytona.http_broker import DaytonaHttpToolBroker
+    from fleet_rlm.daytona.broker import DaytonaHttpToolBroker
 
     class _Process:
         def __init__(self, sandbox: Any) -> None:
@@ -329,8 +329,8 @@ def test_http_broker_uses_isolated_port_for_server_and_wrappers() -> None:
 
 
 def test_http_broker_health_fails_fast_on_http_401(monkeypatch: pytest.MonkeyPatch) -> None:
+    from fleet_rlm.daytona.broker import DaytonaHttpToolBroker
     from fleet_rlm.daytona.errors import DaytonaAdapterError
-    from fleet_rlm.daytona.http_broker import DaytonaHttpToolBroker
 
     class _Sandbox:
         pass
@@ -358,7 +358,7 @@ def test_http_broker_health_fails_fast_on_http_401(monkeypatch: pytest.MonkeyPat
 
 
 def test_http_broker_preview_headers_use_preview_token_only() -> None:
-    from fleet_rlm.daytona.http_broker import DaytonaHttpToolBroker
+    from fleet_rlm.daytona.broker import DaytonaHttpToolBroker
 
     class _Sandbox:
         pass
@@ -374,8 +374,8 @@ def test_http_broker_preview_headers_use_preview_token_only() -> None:
 
 
 def test_http_broker_health_401_notes_missing_preview_token(monkeypatch: pytest.MonkeyPatch) -> None:
+    from fleet_rlm.daytona.broker import DaytonaHttpToolBroker
     from fleet_rlm.daytona.errors import DaytonaAdapterError
-    from fleet_rlm.daytona.http_broker import DaytonaHttpToolBroker
 
     class _Sandbox:
         pass
@@ -399,8 +399,8 @@ def test_http_broker_health_401_notes_missing_preview_token(monkeypatch: pytest.
 
 
 def test_http_broker_retries_transient_preview_link_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    from fleet_rlm.daytona.broker import DaytonaHttpToolBroker
     from fleet_rlm.daytona.errors import ProviderRequestError
-    from fleet_rlm.daytona.http_broker import DaytonaHttpToolBroker
 
     class _Process:
         def __init__(self, sandbox: Any) -> None:
@@ -461,8 +461,8 @@ def test_http_broker_retries_transient_preview_link_failure(monkeypatch: pytest.
 def test_http_broker_preview_link_failure_is_bounded_and_cleanup_safe(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    from fleet_rlm.daytona.broker import DaytonaHttpToolBroker
     from fleet_rlm.daytona.errors import ProviderRequestError
-    from fleet_rlm.daytona.http_broker import DaytonaHttpToolBroker
 
     class _Process:
         def __init__(self, sandbox: Any) -> None:
@@ -527,8 +527,8 @@ def test_http_broker_preview_link_failure_is_bounded_and_cleanup_safe(
 
 
 def test_http_broker_does_not_retry_preview_auth_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    from fleet_rlm.daytona.broker import DaytonaHttpToolBroker
     from fleet_rlm.daytona.errors import ProviderRequestError
-    from fleet_rlm.daytona.http_broker import DaytonaHttpToolBroker
 
     class _Process:
         def __init__(self, sandbox: Any) -> None:
@@ -576,7 +576,7 @@ def test_http_broker_does_not_retry_preview_auth_failure(monkeypatch: pytest.Mon
 
 
 def test_http_broker_poll_and_fulfill_route_through_pooled_client() -> None:
-    from fleet_rlm.daytona.http_broker import DaytonaHttpToolBroker
+    from fleet_rlm.daytona.broker import DaytonaHttpToolBroker
 
     class _Sandbox:
         pass
@@ -624,7 +624,7 @@ def test_http_broker_poll_and_fulfill_route_through_pooled_client() -> None:
 def test_http_broker_copies_context_independently_into_parallel_fulfillment() -> None:
     from contextvars import ContextVar
 
-    from fleet_rlm.daytona.http_broker import DaytonaHttpToolBroker
+    from fleet_rlm.daytona.broker import DaytonaHttpToolBroker
 
     class _Sandbox:
         pass
@@ -689,7 +689,7 @@ def test_http_broker_copies_context_independently_into_parallel_fulfillment() ->
 
 
 def test_execute_with_callbacks_records_per_execution_stats(monkeypatch: pytest.MonkeyPatch) -> None:
-    from fleet_rlm.daytona.http_broker import DaytonaHttpToolBroker
+    from fleet_rlm.daytona.broker import DaytonaHttpToolBroker
 
     class _Sandbox:
         pass
@@ -730,7 +730,7 @@ def test_execute_with_callbacks_records_per_execution_stats(monkeypatch: pytest.
 def test_execute_code_attempts_final_output_release_after_poll_failures(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from fleet_rlm.daytona.http_broker import DaytonaHttpToolBroker
+    from fleet_rlm.daytona.broker import DaytonaHttpToolBroker
 
     class _Sandbox:
         pass
@@ -772,7 +772,7 @@ def test_execute_code_attempts_final_output_release_after_poll_failures(
 
 
 def test_stop_closes_pooled_client() -> None:
-    from fleet_rlm.daytona.http_broker import DaytonaHttpToolBroker
+    from fleet_rlm.daytona.broker import DaytonaHttpToolBroker
 
     class _Process:
         def delete_session(self, _session_id: str) -> None:

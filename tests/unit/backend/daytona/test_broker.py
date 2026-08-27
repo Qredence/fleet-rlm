@@ -11,17 +11,17 @@ from collections.abc import Callable
 
 import pytest
 
-from fleet_rlm.daytona.broker_source import (
+from fleet_rlm.daytona.broker import (
     BROKER_SERVER_CODE,
     FINAL_OUTPUT_MARKER,
     TOOL_WRAPPER_TEMPLATE,
+    DaytonaHttpToolBroker,
     build_submit_setup_code,
     extract_final_payload,
     final_output_frame,
     remote_submit_setup_code,
     reset_binding_source,
 )
-from fleet_rlm.daytona.http_broker import DaytonaHttpToolBroker
 
 
 def _build_sandbox_wrapper(tool_name: str, tool_func: Callable[..., object]) -> Callable[..., object]:

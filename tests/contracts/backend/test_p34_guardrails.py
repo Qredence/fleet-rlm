@@ -53,7 +53,7 @@ def test_p34_regression_proof_paths_remain_committed() -> None:
         "tools/fleet-tui/src/tui/tests/turn-reducer-invariants.test.ts",
         "tools/fleet-tui/src/tui/tests/reducer-sequence-gen.ts",
         "src/fleet_rlm/daytona/memory_diagnostics.py",
-        "src/fleet_rlm/daytona/workspace_agent_runtime.py",
+        "src/fleet_rlm/daytona/workspace_agent/runtime.py",
     )
     for relative_path in paths:
         assert (REPO_ROOT / relative_path).is_file(), relative_path

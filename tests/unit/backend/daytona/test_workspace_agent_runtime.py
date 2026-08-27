@@ -7,7 +7,7 @@ import hashlib
 import json
 from pathlib import Path
 
-from fleet_rlm.daytona import workspace_agent_runtime as runtime
+from fleet_rlm.daytona.workspace_agent import runtime
 
 
 def _request(volume: Path, root: Path, operation: str, relative: str, **overrides: object) -> dict[str, object]:

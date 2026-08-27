@@ -1,11 +1,28 @@
 # P42 module-subtraction ledger
 
-**Status:** planning ledger; no production restructuring is authorized or made by
-this document.
+**Status:** implementation ledger; P42–P47 are implemented, P48 is in progress,
+and P49–P51 remain planned. The current working tree contains uncommitted P48
+migration work.
 **Baseline:** the current checkout after the sealed P36/P41 work, assessed against
 `plans/PLANS.md` P44–P51.
-**Replacement PRs:** none exists at P42. Every “planned PR” below is deliberately
-TBD and must be a later, separately reviewed implementation PR.
+**Replacement PRs:** the phase commits are recorded in repository history; rows
+that remain planned are deliberately TBD and require separately reviewed
+implementation work.
+
+## Current implementation status
+
+This ledger was authored as the P42 pre-change inventory. It is retained as the
+responsibility map, but its status is now updated by the implementation frontier:
+
+- **P42–P45:** Session-state contract, complete committed History, and resident
+  Root RLM/interpreter runtime are implemented.
+- **P46–P47:** the native DSPy kernel contraction and isolated child snapshot
+  path are implemented.
+- **P48:** broker consolidation and Workspace Agent packaging are present in the
+  working tree; Root/child lifecycle migration and full parity are still in
+  progress. L-22 and L-24 are the completed P48 moves; L-20, L-21, L-23, L-25,
+  and L-26 remain compatibility-backed or planned.
+- **P49–P53:** no implementation or certification claim is made yet.
 
 This is the P42.5 companion to the [P42 session-state behavior
 freeze](p42-session-state-behavior-freeze.md). It makes the proposed subtraction
@@ -108,9 +125,9 @@ remain unchanged.
 | --- | --- | --- | --- | --- |
 | L-20 | `daytona/{session_manager,run_environment,admission,provisioning,platform}.py` — root acquisition, SDK specification, admission, bindings, mounts, and retries. | Callers: `composition/daytona.py`, diagnostics, recursive child runtime, Workspace gateway. Adapters: `LiveDaytonaPlatform` and `AsyncDaytona` SDK. | Callers above Daytona do not learn permits, provisioning retries, provider bindings, mount preparation, or delete polling; root lease is reusable only while healthy. | `daytona/runtime.py` public `DaytonaRuntime.acquire_root_session`; **MERGE/DEEPEN**. Planned P48 lifecycle PR (TBD). |
 | L-21 | `daytona/{sandbox_lease,lifecycle}.py` — owned close, purge, provider deletion and absence state. | Callers: session manager, child runtime, run cleanup. Adapters: live provider deletion/status checks. | `OPEN`, `CLOSING`, `CLOSED`, and `FAILED` remain behaviorally distinct; one close joins; all cleanup failures are re-observable; admission is restored only after required ownership settles. | `daytona/{_lease,_cleanup}.py`; **MOVE**. Planned P48 PR, gated by P36 P37/P39 (TBD). |
-| L-22 | `daytona/{broker_source,http_broker,dspy_sync_bridge,interpreter_output}.py` — code generation, submit framing, HTTP Tool dispatch, synchronous bridge, and output decoding. | Callers: `daytona/interpreter.py`, composition, session/child managers, outbox reconciliation. Adapters: sandbox HTTP broker and DSPy synchronous interpreter interface. | Tool dispatch remains current-Turn authorized; FinalOutput extraction and bounded corrective feedback stay exact; broker shutdown precedes provider cleanup. | `daytona/broker.py`; **MERGE**. Planned P48 PR (TBD). |
+| L-22 | `daytona/{broker_source,http_broker,dspy_sync_bridge,interpreter_output}.py` — code generation, submit framing, HTTP Tool dispatch, synchronous bridge, and output decoding. | Callers: `daytona/interpreter.py`, composition, session/child managers, outbox reconciliation. Adapters: sandbox HTTP broker and DSPy synchronous interpreter interface. | Tool dispatch remains current-Turn authorized; FinalOutput extraction and bounded corrective feedback stay exact; broker shutdown precedes provider cleanup. | `daytona/broker.py` (with `interpreter_output.py` kept separate); **MERGE**. **P48 implemented.** |
 | L-23 | `daytona/interpreter.py` — `DaytonaCodeInterpreter`, backend selection, execution observation and recoverable/terminal error taxonomy. | Callers: runtime acquisition, child runtime, diagnostics, optimization evaluator, Workspace Agent. Adapter: Daytona Sandbox interpreter and broker. | Existing repair/no-progress behavior, error classification, caller-owned shutdown, live code/output evidence, and public sanitation remain. | `daytona/interpreter.py` under `DaytonaRuntime`; **DEEPEN**. Planned P48 PR; P36 P38 gate applies (TBD). |
-| L-24 | `daytona/{workspace_agent,workspace_agent_runtime}.py` — installed agent protocol/source and host-side response validation. | Callers: `daytona/{workspace_fs,workspace_memory,memory_diagnostics}.py`. Adapter: code running inside a mounted Daytona Sandbox. | Relative-path-only requests, symlink/nonregular-node rejection, bounded pages/bytes, checksum preconditions, and fail-closed protocol parsing stay intact. | `daytona/workspace_agent/{protocol,client,runtime}.py`; **MOVE**. Planned P48 PR (TBD). |
+| L-24 | `daytona/{workspace_agent,workspace_agent_runtime}.py` — installed agent protocol/source and host-side response validation. | Callers: `daytona/{workspace_fs,workspace_memory,memory_diagnostics}.py`. Adapter: code running inside a mounted Daytona Sandbox. | Relative-path-only requests, symlink/nonregular-node rejection, bounded pages/bytes, checksum preconditions, and fail-closed protocol parsing stay intact. | `daytona/workspace_agent/{protocol,client,runtime}.py`; **MOVE**. **P48 implemented.** |
 | L-25 | `daytona/{workspace_fs,workspace_gateway}.py` — Volume/Session Workspace adapter, I/O Sandbox gateway, orphan cleanup. | Callers: Daytona composition/run environment and `api/routes/workspace_files.py`; Files Volume interfaces. Adapters: mounted Daytona Volume and ephemeral I/O Sandbox. | Workspace/Project writes are immediate and scope-safe; reads retain cursor/byte bounds; no caller gets a provider path; Artifact publication keeps its separate commit gate. | `workspace/storage.py` behind `daytona/workspace_agent/`; **MOVE** in P50 after the P48 protocol move. Planned P48/P50 PRs (TBD). |
 | L-26 | `daytona/{diagnostics,errors,optimization_evaluator}.py` and `rlm/provider_probe.py` — disposable doctor/probe behavior, provider error mapping, and strict evaluation Sandbox lifecycle. | Callers: CLI, Daytona diagnostics, development optimization. Adapters: disposable live Daytona Sandbox and provider SDK; no Turn settlement adapter. | Diagnostics stay bounded, sanitized, explicit, and non-authoritative for Turns; strict evaluation remains disposable and provider-clean. | `daytona/errors.py` **KEEP**; `observability/diagnostics.py` and `optimization/daytona.py` **MOVE**. Planned P48/P51 PRs (TBD). |
 

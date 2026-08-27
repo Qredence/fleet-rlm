@@ -318,7 +318,7 @@ def test_observed_url_tool_is_nested_under_turn_root_with_bounded_metadata(
 def test_daytona_broker_preserves_batched_tool_span_under_turn_root(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from fleet_rlm.daytona.http_broker import DaytonaHttpToolBroker
+    from fleet_rlm.daytona.broker import DaytonaHttpToolBroker
 
     calls = _install_fake_mlflow(monkeypatch)
     observed: list[Any] = []

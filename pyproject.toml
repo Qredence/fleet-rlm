@@ -51,7 +51,7 @@ dependencies = [
     "httpx2>=2.5.0",
     # Pooled HTTP client for the Daytona tool broker poll/fulfill loop:
     # connection reuse through the preview proxy. Transitive via the Daytona
-    # SDK; declared direct because http_broker imports it.
+    # SDK; declared direct because daytona.broker imports it.
     "httpx>=0.28,<1",
     # Host-side public URL Tools pin validated addresses and stream bounded
     # responses without inheriting ambient proxy configuration.
@@ -213,7 +213,7 @@ exclude = [
     "dist",
     ".egg-info",
     # Remote Daytona Workspace Agent program (loaded as text, not host-styled).
-    "src/fleet_rlm/daytona/workspace_agent_runtime.py",
+    "src/fleet_rlm/daytona/workspace_agent/runtime.py",
 ]
 
 [tool.ruff.lint]
@@ -276,7 +276,7 @@ exclude = [
     "tests/",
     "scripts/",
     # Remote agent entrypoint expects host-injected parameters; not host-typed.
-    "src/fleet_rlm/daytona/workspace_agent_runtime.py",
+    "src/fleet_rlm/daytona/workspace_agent/runtime.py",
 ]
 
 [tool.deptry]

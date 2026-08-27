@@ -5,7 +5,7 @@ from __future__ import annotations
 import base64
 import json
 
-from fleet_rlm.daytona.broker_source import extract_final_payload, remote_submit_setup_code
+from fleet_rlm.daytona.broker import extract_final_payload, remote_submit_setup_code
 from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
 from fleet_rlm.rlm._dspy_compat import FinalOutput
 from fleet_rlm.rlm.program import (
@@ -33,7 +33,7 @@ def test_remote_submit_setup_emits_marker_payload() -> None:
 
 
 def test_submit_payload_encoding_survives_marker_text_in_json() -> None:
-    from fleet_rlm.daytona.broker_source import FINAL_OUTPUT_MARKER
+    from fleet_rlm.daytona.broker import FINAL_OUTPUT_MARKER
 
     encoded = base64.b64encode(
         json.dumps({"answer": f"left {FINAL_OUTPUT_MARKER} right"}, ensure_ascii=False).encode("utf-8")

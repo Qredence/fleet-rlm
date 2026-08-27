@@ -71,7 +71,7 @@ def classify_memory_failure(exc: BaseException, *, operation: str) -> tuple[Memo
     ``unexpected_internal`` rather than disappearing into a generic fallback.
     """
 
-    from fleet_rlm.daytona.workspace_agent import WorkspaceAgentStorageError
+    from fleet_rlm.daytona.workspace_agent.protocol import WorkspaceAgentStorageError
     from fleet_rlm.files.memory_tools import MemoryToolError
 
     chain = list(walk_cause_chain(exc))

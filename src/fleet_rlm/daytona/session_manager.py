@@ -17,6 +17,7 @@ from typing import Any, Protocol
 from uuid import UUID, uuid4
 
 from fleet_rlm.chat.run_cleanup import RunCleanupSupervisor
+from fleet_rlm.daytona._lease import LeaseState
 
 # Admission ownership lives in fleet_rlm.daytona.admission (QRE-156); the
 # re-export here keeps the historical session_manager import surface working.
@@ -25,7 +26,7 @@ from fleet_rlm.daytona.admission import (
     DaytonaAdmissionPermit,
     DaytonaAdmissionTimeoutError,
 )
-from fleet_rlm.daytona.dspy_sync_bridge import SyncBridgeDispatcher
+from fleet_rlm.daytona.broker import SyncBridgeDispatcher
 from fleet_rlm.daytona.errors import (
     DaytonaAdapterError,
     ProviderRequestError,
@@ -153,7 +154,7 @@ def get_active_lease_registry() -> ActiveLeaseRegistry:
 
 @dataclass(slots=True)
 class InterpreterLease:
-    """Acquired interpreter binding for one Run."""
+    """Acquired interpreter binding for one Run with an explicit close state."""
 
     sandbox_id: str
     interpreter_id: str
@@ -165,9 +166,28 @@ class InterpreterLease:
     workspace_id: str | None = None
     volume_subpath: str | None = None
     created_sandbox: bool = False
+    sandbox: Any | None = field(default=None, repr=False)
     _released: bool = field(default=False, init=False, repr=False)
+    _state: LeaseState = field(default=LeaseState.OPEN, init=False, repr=False)
     _on_release: Callable[[], None] | None = field(default=None, init=False, repr=False)
     _release_lock: Lock = field(default_factory=Lock, init=False, repr=False)
+
+    @property
+    def state(self) -> LeaseState:
+        """Return OPEN/CLOSING/CLOSED/FAILED without exposing provider details."""
+        return self._state
+
+    @property
+    def closed(self) -> bool:
+        return self._state is LeaseState.CLOSED
+
+    @property
+    def closing(self) -> bool:
+        return self._state is LeaseState.CLOSING
+
+    @property
+    def failed(self) -> bool:
+        return self._state is LeaseState.FAILED
 
     def release(self) -> None:
         # ``DaytonaSessionManager.release`` may be called concurrently by a
@@ -177,12 +197,18 @@ class InterpreterLease:
         with self._release_lock:
             if self._released:
                 return
+            self._state = LeaseState.CLOSING
             # Keep admission and the active Session claim until interpreter
             # shutdown succeeds. A failed release must remain retryable;
             # clearing ownership in ``finally`` would let a root lease be
             # discarded while its provider/interpreter is still live.
-            self.interpreter.shutdown(strict_broker_cleanup=True)
+            try:
+                self.interpreter.shutdown(strict_broker_cleanup=True)
+            except BaseException:
+                self._state = LeaseState.FAILED
+                raise
             self._released = True
+            self._state = LeaseState.CLOSED
             if self._on_release is not None:
                 with contextlib.suppress(BaseException):
                     self._on_release()
@@ -1284,6 +1310,7 @@ class DaytonaSessionManager:
             mount_path=expected.mount_path,
             volume_subpath=expected.volume_subpath,
             interpreter=interpreter,
+            sandbox=sandbox,
             session_id=str(session_id),
             run_id=str(run_id),
             workspace_id=str(request.workspace_id),

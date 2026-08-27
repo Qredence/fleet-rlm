@@ -22,7 +22,7 @@ from fastapi import FastAPI
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 if TYPE_CHECKING:
-    from fleet_rlm.daytona.dspy_sync_bridge import SyncBridgeDispatcher
+    from fleet_rlm.daytona.broker import SyncBridgeDispatcher
 
 from fleet_rlm.artifacts.reader import ArtifactReader
 from fleet_rlm.chat.run_cleanup import RunCleanupSupervisor

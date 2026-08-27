@@ -18,7 +18,7 @@ import pytest
 def test_workspace_memory_and_fs_route_through_the_p28_runtime_handlers() -> None:
     """Installed + fallback workspace execution stays on the one runtime handler."""
     from fleet_rlm.daytona import workspace_fs, workspace_memory
-    from fleet_rlm.daytona.workspace_agent import run_workspace_agent, run_workspace_agent_async
+    from fleet_rlm.daytona.workspace_agent.client import run_workspace_agent, run_workspace_agent_async
 
     assert workspace_memory.run_workspace_agent is run_workspace_agent
     assert workspace_fs.run_workspace_agent_async is run_workspace_agent_async
@@ -76,11 +76,11 @@ DELETED_SYMBOLS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("fleet_rlm.rlm._dspy_compat", ("initial_tools_registered", "mark_tools_registered")),
     ("fleet_rlm.rlm.result", ("sanitize_public_error",)),
     (
-        "fleet_rlm.daytona.dspy_sync_bridge",
+        "fleet_rlm.daytona.broker",
         ("default_bridge_dispatcher", "set_bridge_service_loop", "bridge_service_loop"),
     ),
     ("fleet_rlm.daytona.sandbox_lease", ("acquire_owned_lease", "OwnedAcquisition")),
-    ("fleet_rlm.daytona.broker_source", ("_FINAL_OUTPUT_MARKER",)),
+    ("fleet_rlm.daytona.broker", ("_FINAL_OUTPUT_MARKER",)),
     ("fleet_rlm.files.host_volume", ("HostWorkspaceVolumeGateway",)),
     (
         "fleet_rlm.files.memory_models",

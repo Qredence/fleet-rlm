@@ -1063,9 +1063,11 @@ class _Actions:
         self.calls += 1
         return dspy.Prediction(reasoning=f"native action {self.calls}", code=next(self._codes))
 
+
 class _NeverExtract:
     async def acall(self, **_kwargs: Any) -> dspy.Prediction:
         raise AssertionError("native typed SUBMIT should have completed before extraction")
+
 
 @pytest.mark.asyncio
 async def test_native_submit_honors_required_defaults_and_nullable_outputs() -> None:
@@ -1096,6 +1098,7 @@ async def test_native_submit_honors_required_defaults_and_nullable_outputs() -> 
     assert prediction.final_reasoning == "native action 1"
     assert prediction.trajectory[0]["output"].startswith("FINAL:")
 
+
 @pytest.mark.asyncio
 async def test_native_submit_preserves_explicit_none_and_rejects_non_nullable_none() -> None:
     class Report(dspy.Signature):
@@ -1120,6 +1123,7 @@ async def test_native_submit_preserves_explicit_none_and_rejects_non_nullable_no
     assert prediction.note is None
     assert actions.calls == 2
     assert "Type Error" in prediction.trajectory[0]["output"]
+
 
 @pytest.mark.asyncio
 async def test_native_submit_rejects_non_json_values_and_non_finite_numbers() -> None:
@@ -1146,6 +1150,7 @@ async def test_native_submit_rejects_non_json_values_and_non_finite_numbers() ->
     assert actions.calls == 2
     assert "non-finite" in prediction.trajectory[0]["output"].lower()
 
+
 def test_prediction_result_applies_declared_defaults_without_mutating_prediction() -> None:
     class Report(dspy.Signature):
         request: str = dspy.InputField()
@@ -1160,6 +1165,7 @@ def test_prediction_result_applies_declared_defaults_without_mutating_prediction
     assert not hasattr(prediction, "tags")
     assert not hasattr(prediction, "note")
 
+
 def test_tool_result_serialization_rejects_non_json_values_without_coercion() -> None:
     events: list[object] = []
 
@@ -1170,6 +1176,7 @@ def test_tool_result_serialization_rejects_non_json_values_without_coercion() ->
     with pytest.raises(Exception, match="Tool result is invalid"):
         wrapped.func()
     assert not any(type(event).__name__ == "ToolCompleted" for event in events)
+
 
 @pytest.mark.asyncio
 async def test_sync_and_async_tools_have_equivalent_results_and_lifecycle() -> None:
@@ -1199,9 +1206,10 @@ async def test_sync_and_async_tools_have_equivalent_results_and_lifecycle() -> N
         "ToolCompleted",
     ]
 
+
 def test_broker_value_encoding_is_strict_and_preserves_supported_values() -> None:
+    from fleet_rlm.daytona.broker import DaytonaHttpToolBroker
     from fleet_rlm.daytona.errors import DaytonaAdapterError
-    from fleet_rlm.daytona.http_broker import DaytonaHttpToolBroker
 
     assert DaytonaHttpToolBroker._encode_value({"nested": [True, None, 1.5]}) == {"nested": [True, None, 1.5]}
     with pytest.raises(DaytonaAdapterError, match="unsupported"):
@@ -1210,6 +1218,7 @@ def test_broker_value_encoding_is_strict_and_preserves_supported_values() -> Non
         DaytonaHttpToolBroker._encode_value(float("nan"))
     with pytest.raises(DaytonaAdapterError, match="unsupported"):
         DaytonaHttpToolBroker._encode_value({1, 2})
+
 
 def test_native_option_mapping_is_one_to_one_for_root_and_child_policy() -> None:
     options = RLMOptions(max_iters=3, max_llm_calls=5, max_output_chars=17)
@@ -1222,6 +1231,7 @@ def test_native_option_mapping_is_one_to_one_for_root_and_child_policy() -> None
     assert (rlm.max_iters, rlm.max_llm_calls, rlm.max_output_chars) == (3, 5, 17)
     assert bundle.root_lm is root
     assert bundle.sub_lm is sub
+
 
 def test_native_contract_does_not_construct_or_shutdown_caller_owned_interpreter() -> None:
     class Sentinel:

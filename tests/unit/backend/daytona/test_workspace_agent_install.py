@@ -16,7 +16,7 @@ from typing import Any
 
 import pytest
 
-from fleet_rlm.daytona import workspace_agent as wa
+from fleet_rlm.daytona.workspace_agent import client as wa
 
 _FULL_SOURCE_MARKERS = ("def respond(payload) -> NoReturn:", "O_NOFOLLOW", "fcntl.flock")
 

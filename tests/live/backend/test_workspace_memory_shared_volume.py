@@ -103,7 +103,7 @@ class _Probe:
     warnings: list[dict[str, Any]] = field(default_factory=list)
 
     async def op(self, sandbox: Any, **kwargs: Any) -> dict[str, Any]:
-        from fleet_rlm.daytona.workspace_agent import run_workspace_agent_async
+        from fleet_rlm.daytona.workspace_agent.client import run_workspace_agent_async
 
         args: dict[str, Any] = {
             "volume_root": self.mount_path,

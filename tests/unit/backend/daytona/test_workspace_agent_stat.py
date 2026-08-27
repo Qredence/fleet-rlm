@@ -44,7 +44,7 @@ def _run_stat(tmp_path: Path, relative: str, **overrides: object) -> tuple[dict[
     Returns:
         tuple[dict[str, object], LocalProcess]: The stat payload and simulated process.
     """
-    from fleet_rlm.daytona.workspace_agent import run_workspace_agent
+    from fleet_rlm.daytona.workspace_agent.client import run_workspace_agent
 
     volume_root, root = _layout(tmp_path)
     process = LocalProcess()
@@ -64,7 +64,7 @@ def _run_stat(tmp_path: Path, relative: str, **overrides: object) -> tuple[dict[
 
 
 def test_stat_checksum_flag_is_encoded_in_the_handler_request() -> None:
-    from fleet_rlm.daytona.workspace_agent import build_workspace_agent_code
+    from fleet_rlm.daytona.workspace_agent.protocol import build_workspace_agent_code
 
     base = {
         "volume_root": "/home/daytona/fleet",

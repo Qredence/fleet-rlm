@@ -24,7 +24,7 @@ from types import SimpleNamespace
 import pytest
 
 from fleet_rlm.daytona import recursive_child_runtime
-from fleet_rlm.daytona.dspy_sync_bridge import (
+from fleet_rlm.daytona.broker import (
     SyncBridgeDispatcher,
     sync_sandbox,
 )

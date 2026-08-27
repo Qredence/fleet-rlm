@@ -55,8 +55,6 @@ class RecordingLM(dspy.utils.DummyLM):
         return super().forward(prompt=prompt, messages=messages, **kwargs)
 
 
-
-
 def _lm(answers: Any) -> dspy.utils.DummyLM:
     return dspy.utils.DummyLM(answers, adapter=dspy.JSONAdapter())
 
