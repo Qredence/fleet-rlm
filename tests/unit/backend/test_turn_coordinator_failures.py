@@ -58,7 +58,7 @@ async def test_open_non_success_has_one_last_terminal_and_never_promotes(
         RunTimedOut,
         Status,
     )
-    from fleet_rlm.rlm.outcome import RLMOutcome
+    from fleet_rlm.rlm.result import RLMOutcome
     from fleet_rlm.sessions.models import TurnAccess, TurnInput
 
     expected_terminal = {"RunCancelled": RunCancelled, "RunTimedOut": RunTimedOut}[terminal_type]
@@ -191,7 +191,7 @@ async def test_open_preparation_failure_is_durable_before_stream_and_releases_cl
     from fleet_rlm.chat.run_preparation import RunPreparationUnavailableError
     from fleet_rlm.chat.turn_coordinator import TurnCoordinator
     from fleet_rlm.persistence.repositories import InMemoryRunStateStore, InMemorySessionCatalog
-    from fleet_rlm.rlm.dspy_contract import empty_rlm_usage
+    from fleet_rlm.rlm.result import empty_rlm_usage
     from fleet_rlm.sessions.models import TurnAccess, TurnInput
 
     access = TurnAccess(uuid4(), uuid4())
@@ -412,9 +412,8 @@ async def test_open_commit_failure_projects_commit_failure_terminal(monkeypatch:
     from fleet_rlm.chat.run_lifecycle import RunLifecycleService
     from fleet_rlm.chat.turn_coordinator import TurnCoordinator
     from fleet_rlm.persistence.repositories import InMemoryRunStateStore, InMemorySessionCatalog
-    from fleet_rlm.rlm.dspy_contract import PredictionResult
     from fleet_rlm.rlm.events import TERMINAL_DETAIL_TYPES, EventRecorder, RunFailed, RunStarted
-    from fleet_rlm.rlm.outcome import RLMOutcome
+    from fleet_rlm.rlm.result import PredictionResult, RLMOutcome
     from fleet_rlm.sessions.models import TurnAccess, TurnInput
 
     updates: list[dict[str, object]] = []
@@ -545,7 +544,7 @@ async def test_failed_turn_emits_settlement_claim_and_cleanup_spans(
     from fleet_rlm.observability import turn_tracing
     from fleet_rlm.persistence.repositories import InMemoryRunStateStore, InMemorySessionCatalog
     from fleet_rlm.rlm.events import EventRecorder, RunFailed, RunStarted, Status
-    from fleet_rlm.rlm.outcome import RLMOutcome
+    from fleet_rlm.rlm.result import RLMOutcome
     from fleet_rlm.sessions.models import TurnAccess, TurnInput
 
     token = turn_tracing._fleet_trace_active.set(True)

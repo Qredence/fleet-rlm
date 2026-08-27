@@ -145,12 +145,11 @@ async def _run_success_turn(
     from fleet_rlm.chat.run_lifecycle import RunLifecycleService
     from fleet_rlm.chat.turn_coordinator import TurnCoordinator
     from fleet_rlm.persistence.repositories import InMemoryRunStateStore, InMemorySessionCatalog
-    from fleet_rlm.rlm.dspy_contract import PredictionResult
     from fleet_rlm.rlm.events import EventRecorder, RunStarted, Status
-    from fleet_rlm.rlm.outcome import RLMOutcome
+    from fleet_rlm.rlm.result import PredictionResult, RLMOutcome
     from fleet_rlm.sessions.models import TurnAccess, TurnInput
 
-    importlib.import_module("fleet_rlm.rlm.outcome")
+    importlib.import_module("fleet_rlm.rlm.result")
 
     access = TurnAccess(uuid4(), uuid4())
     store = InMemoryRunStateStore()

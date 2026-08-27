@@ -13,7 +13,10 @@ import pytest
 
 from fleet_rlm.daytona.errors import DaytonaAdapterError
 from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
-from fleet_rlm.rlm.dspy_contract import RLMOptions, build_native_rlm
+from fleet_rlm.rlm.program import (
+    RLMOptions,
+    build_native_rlm,
+)
 
 
 def _rlm(*, tools: list[Callable[..., Any]] | None = None, signature: str = "request -> answer: str") -> Any:
@@ -37,7 +40,7 @@ class _OneAction:
 
 @pytest.mark.asyncio
 async def test_daytona_provider_contract_is_zero_arg_metadata_only() -> None:
-    from fleet_rlm.rlm.dspy_contract import DAYTONA_EXECUTION_INSTRUCTIONS
+    from fleet_rlm.rlm._dspy_compat import DAYTONA_EXECUTION_INSTRUCTIONS
 
     rlm = _rlm()
     provider = rlm._interpreter_factory
@@ -51,7 +54,7 @@ async def test_daytona_provider_contract_is_zero_arg_metadata_only() -> None:
 
 
 def test_daytona_action_prompt_contains_each_runtime_fact_once() -> None:
-    from fleet_rlm.rlm.dspy_contract import DAYTONA_EXECUTION_INSTRUCTIONS
+    from fleet_rlm.rlm._dspy_compat import DAYTONA_EXECUTION_INSTRUCTIONS
 
     prompt = str(_rlm().generate_action.signature.instructions)
     facts = (

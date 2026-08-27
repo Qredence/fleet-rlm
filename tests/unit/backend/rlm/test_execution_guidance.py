@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from fleet_rlm.files.workspace_models import DAYTONA_WORKSPACE_CAPABILITY, UNAVAILABLE_WORKSPACE_CAPABILITY
-from fleet_rlm.rlm.signature import FleetRLMSignature
+from fleet_rlm.rlm.program import FleetRLMSignature
 
 
 def test_default_signature_orders_capabilities_before_semantic_calls() -> None:

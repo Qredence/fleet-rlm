@@ -32,8 +32,8 @@ import pytest
 
 from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
 from fleet_rlm.daytona.recursive_child_runtime import ChildRuntimeLease
-from fleet_rlm.rlm.model_bundle import RLMModelBundle
-from fleet_rlm.rlm.recursive_calls import (
+from fleet_rlm.rlm.program import RLMModelBundle
+from fleet_rlm.rlm.recursion import (
     RecursiveBatchError,
     RecursiveRLMExecutor,
     RecursiveRLMOptions,
@@ -527,7 +527,7 @@ def test_val_rec_009_child_receives_exact_certified_options(
     """VAL-REC-009: the native child is built with the exact certified
     ``child_max_iters``/``child_max_llm_calls``/``child_max_output_chars``
     options, one reservation and one Sandbox per child."""
-    import fleet_rlm.rlm.recursive_calls as recursive_calls
+    import fleet_rlm.rlm.recursion as recursive_calls
 
     captured_options: list[Any] = []
     real_build = recursive_calls.build_native_rlm
@@ -607,8 +607,8 @@ def test_val_rec_011_all_or_nothing_batch_exposes_no_partial_answers(
     all-or-nothing failure with the primary cause, exposes no result list and
     no successful sibling answer through events, and keeps every started
     sibling owned through close."""
-    import fleet_rlm.rlm.recursive_batch as recursive_batch
-    import fleet_rlm.rlm.recursive_calls as recursive_calls
+    import fleet_rlm.rlm.recursion as recursive_batch
+    import fleet_rlm.rlm.recursion as recursive_calls
 
     recorder = _Recorder()
     events: list[object] = []

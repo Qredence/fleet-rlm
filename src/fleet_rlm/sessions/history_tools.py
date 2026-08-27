@@ -9,8 +9,7 @@ from typing import Any, cast
 
 import dspy
 
-from fleet_rlm.rlm.events import JsonValue
-from fleet_rlm.rlm.tool_observer import ToolEventView
+from fleet_rlm.rlm.events import JsonValue, ToolEventView
 from fleet_rlm.sessions.models import SessionHistory
 
 SESSION_HISTORY_RESULT_BYTE_BUDGET = 262_144

@@ -61,7 +61,7 @@ def test_tui_canonical_convergence_guardrail_exists() -> None:
 
 def test_daytona_sdk_stays_inside_the_daytona_boundary() -> None:
     """Native DSPy execution authority stays in rlm/; Daytona SDK stays in daytona/."""
-    from fleet_rlm.rlm.dspy_contract import RLMOptions
+    from fleet_rlm.rlm.program import RLMOptions
 
     assert RLMOptions is not None
 
@@ -73,8 +73,8 @@ def test_daytona_sdk_stays_inside_the_daytona_boundary() -> None:
 DELETED_SYMBOLS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("fleet_rlm.chat.run_preparation", ("RunPreparationValidationError", "RunPreparationIntegrityError")),
     ("fleet_rlm.chat.run_ownership", ("consume_task_exception",)),
-    ("fleet_rlm.rlm.dspy_interpreter_contract", ("initial_tools_registered", "mark_tools_registered")),
-    ("fleet_rlm.rlm.sanitize", ("sanitize_public_error",)),
+    ("fleet_rlm.rlm._dspy_compat", ("initial_tools_registered", "mark_tools_registered")),
+    ("fleet_rlm.rlm.result", ("sanitize_public_error",)),
     (
         "fleet_rlm.daytona.dspy_sync_bridge",
         ("default_bridge_dispatcher", "set_bridge_service_loop", "bridge_service_loop"),

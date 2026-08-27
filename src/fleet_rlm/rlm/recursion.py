@@ -1,4 +1,10 @@
-"""Bounded native DSPy child-RLM calls for the Root REPL harness."""
+"""Bounded native DSPy recursion for the Root REPL harness.
+
+Owns the provider-neutral child-runtime protocol, thread-safe delegation
+metrics, bounded ThreadPool batch settlement, and the native child-RLM
+executor. Root depth stays at 0, native children run at depth 1, and every
+child lease is cleaned up under strict ownership.
+"""
 
 from __future__ import annotations
 
@@ -6,41 +12,399 @@ import asyncio
 import contextlib
 import contextvars
 import time
-from collections.abc import Callable, Mapping
-from concurrent.futures import Future, wait
+from collections.abc import Callable, Mapping, Sequence
+from concurrent.futures import FIRST_EXCEPTION, Future, ThreadPoolExecutor, wait
+from contextvars import Context, copy_context
 from dataclasses import dataclass, field
-from threading import Event, RLock, Thread
-from typing import Any
+from threading import Event, Lock, RLock, Thread
+from typing import Any, Literal, Protocol, TypeAlias
 
 import dspy
 
 from fleet_rlm.observability.failure_diagnostics import trace_failure_category
 from fleet_rlm.observability.turn_tracing import start_turn_span
-from fleet_rlm.rlm.child_runtime import (
-    ChildRuntimeAuthorizationError,
-    ChildRuntimeCleanupError,
-    ChildRuntimeFactory,
-    ChildRuntimeLease,
-)
-from fleet_rlm.rlm.delegation_metrics import DelegationMetrics, DelegationMetricsSnapshot
-from fleet_rlm.rlm.dspy_contract import (
-    RLMOptions,
-    _RLMTraceCallback,
-    build_native_rlm,
-    prediction_result,
-    rlm_termination_mode,
-)
-from fleet_rlm.rlm.errors import RLMConfigError
-from fleet_rlm.rlm.events import Status
-from fleet_rlm.rlm.model_bundle import RLMModelBundle
-from fleet_rlm.rlm.recursive_batch import (
-    RecursiveBatchError,
-    RecursiveCallReservation,
-    run_reserved_batch,
-)
-from fleet_rlm.rlm.tool_observer import ToolEventView, ToolObserver, observe_tool
+from fleet_rlm.rlm._dspy_compat import CodeInterpreter, _RLMTraceCallback
+from fleet_rlm.rlm.events import Status, ToolEventView, ToolObserver, observe_tool
+from fleet_rlm.rlm.program import RLMModelBundle, RLMOptions, build_native_rlm
+from fleet_rlm.rlm.result import RLMConfigError, prediction_result, rlm_termination_mode
 
-# Fleet supports exactly one native recursive child level followed by a
+# ---------------------------------------------------------------------------
+# Provider-neutral child-runtime protocol
+# ---------------------------------------------------------------------------
+
+
+class ChildRuntimeCleanupError(RuntimeError):
+    """A child runtime could not be proved clean before Root commit."""
+
+
+class ChildRuntimeAuthorizationError(RuntimeError):
+    """A child runtime operation was attempted after Run authority was revoked."""
+
+
+class ChildRuntimeLease(Protocol):
+    """A dedicated child interpreter and its strictly owned cleanup operation."""
+
+    @property
+    def interpreter(self) -> CodeInterpreter:
+        """Return the caller-owned interpreter for this child lease."""
+        ...
+
+    sandbox_id: str
+    volume_id: str
+    volume_subpath: str
+
+    def close(self) -> None:
+        """Close the child runtime lease and release its resources."""
+        ...
+
+
+ChildRuntimeFactory = Callable[[int], ChildRuntimeLease]
+
+# ---------------------------------------------------------------------------
+# Thread-safe internal delegation metrics
+# ---------------------------------------------------------------------------
+
+# Closed observability contract: token totals are either truly observed from a
+# provider/history entry or unavailable. There is no "estimated" state.
+TokenUsageStatus: TypeAlias = Literal["observed", "unavailable"]
+
+_TOKEN_USAGE_ALIASES: dict[str, tuple[str, ...]] = {
+    "input_tokens": ("input_tokens", "prompt_tokens"),
+    "output_tokens": ("output_tokens", "completion_tokens"),
+    "total_tokens": ("total_tokens",),
+    "cache_read_tokens": (
+        "cache_read_tokens",
+        "cache_read_input_tokens",
+        "prompt_cache_hit_tokens",
+    ),
+    "cache_creation_tokens": ("cache_creation_tokens", "cache_creation_input_tokens"),
+}
+
+
+@dataclass(frozen=True, slots=True)
+class DelegationMetricsSnapshot:
+    """Bounded, content-free delegation measurements."""
+
+    root_lm_calls_depth_0: int = 0
+    sub_lm_calls_depth_0: int = 0
+    child_root_lm_calls_depth_1: int = 0
+    child_sub_lm_calls_depth_1: int = 0
+    recursive_child_calls: int = 0
+    recursive_batch_calls: int = 0
+    recursive_children_started: int = 0
+    recursive_children_completed: int = 0
+    depth_fallback_calls: int = 0
+    peak_child_concurrency: int = 0
+    lm_call_counts: tuple[tuple[str, int, int], ...] = ()
+    lm_latency_ms: tuple[tuple[str, int, float], ...] = ()
+    # Entries are (role, recursive_depth, input_tokens, output_tokens, total_tokens);
+    # input/output are kept alongside the total so partial usage never reads as 0.
+    # Entries exist only for calls where usage was actually observed; a call
+    # whose provider reported no usage must never emit an all-zero entry.
+    lm_token_totals: tuple[tuple[str, int, int, int, int], ...] = ()
+    token_usage_status: TokenUsageStatus = "unavailable"
+
+    def as_dict(self) -> dict[str, object]:
+        """
+        Return a bounded JSON- and MLflow-compatible representation of the metrics snapshot.
+
+        Returns:
+            dict[str, object]: Serialized metrics, including call counts, latency
+                totals rounded to three decimal places, observed token totals, and
+                token usage status.
+        """
+        return {
+            "root_lm_calls_depth_0": self.root_lm_calls_depth_0,
+            "sub_lm_calls_depth_0": self.sub_lm_calls_depth_0,
+            "child_root_lm_calls_depth_1": self.child_root_lm_calls_depth_1,
+            "child_sub_lm_calls_depth_1": self.child_sub_lm_calls_depth_1,
+            "recursive_child_calls": self.recursive_child_calls,
+            "recursive_batch_calls": self.recursive_batch_calls,
+            "recursive_children_started": self.recursive_children_started,
+            "recursive_children_completed": self.recursive_children_completed,
+            "depth_fallback_calls": self.depth_fallback_calls,
+            "peak_child_concurrency": self.peak_child_concurrency,
+            "lm_call_counts": [
+                {"role": role, "recursive_depth": depth, "count": count} for role, depth, count in self.lm_call_counts
+            ],
+            "lm_latency_ms": [
+                {"role": role, "recursive_depth": depth, "total_ms": round(total, 3)}
+                for role, depth, total in self.lm_latency_ms
+            ],
+            "lm_token_totals": [
+                {
+                    "role": role,
+                    "recursive_depth": depth,
+                    "input_tokens": input_tokens,
+                    "output_tokens": output_tokens,
+                    "tokens": tokens,
+                }
+                for role, depth, input_tokens, output_tokens, tokens in self.lm_token_totals
+            ],
+            "token_usage_status": self.token_usage_status,
+        }
+
+
+class DelegationMetrics:
+    """Accumulate role/depth and bounded recursive fan-out metrics safely."""
+
+    def __init__(self) -> None:
+        self._lock = Lock()
+        self._lm_calls: dict[tuple[str, int], int] = {}
+        self._lm_latency_ms: dict[tuple[str, int], float] = {}
+        self._lm_input_tokens: dict[tuple[str, int], int] = {}
+        self._lm_output_tokens: dict[tuple[str, int], int] = {}
+        self._lm_tokens: dict[tuple[str, int], int] = {}
+        self._lm_usage_observed: set[tuple[str, int]] = set()
+        self._recursive_child_calls = 0
+        self._recursive_batch_calls = 0
+        self._recursive_children_started = 0
+        self._recursive_children_completed = 0
+        self._depth_fallback_calls = 0
+        self._active_children = 0
+        self._peak_child_concurrency = 0
+
+    def record_lm_call(
+        self,
+        role: str,
+        recursive_depth: int,
+        *,
+        duration_ms: float = 0.0,
+        usage: Mapping[str, Any] | None = None,
+    ) -> None:
+        """
+        Record a language-model request and its aggregate metrics.
+
+        Parameters:
+            role (str): Model role, normalized to ``"root"``, ``"sub"``, or ``"unknown"``.
+            recursive_depth (int): Recursion depth associated with the request.
+            duration_ms (float): Request duration in milliseconds.
+            usage (Mapping[str, Any] | None): Provider token-usage data, if available.
+                Token totals are recorded only when usage is observed.
+        """
+        normalized_role = role if role in {"root", "sub"} else "unknown"
+        key = (normalized_role, max(0, int(recursive_depth)))
+        normalized_usage = normalize_lm_token_usage(usage)
+        # Only an actually-observed usage mapping creates token buckets. Call
+        # counts and latency stay unconditional; token totals remain absent
+        # when the provider reported nothing, so zero can never masquerade as
+        # a measurement.
+        usage_observed = bool(normalized_usage)
+        input_tokens = normalized_usage.get("input_tokens", 0)
+        output_tokens = normalized_usage.get("output_tokens", 0)
+        tokens = normalized_usage.get("total_tokens", 0)
+        with self._lock:
+            self._lm_calls[key] = self._lm_calls.get(key, 0) + 1
+            self._lm_latency_ms[key] = self._lm_latency_ms.get(key, 0.0) + max(0.0, float(duration_ms))
+            if usage_observed:
+                self._lm_usage_observed.add(key)
+                self._lm_input_tokens[key] = self._lm_input_tokens.get(key, 0) + input_tokens
+                self._lm_output_tokens[key] = self._lm_output_tokens.get(key, 0) + output_tokens
+                self._lm_tokens[key] = self._lm_tokens.get(key, 0) + tokens
+
+    def record_recursive_call(self) -> None:
+        """Record one recursive child call."""
+        with self._lock:
+            self._recursive_child_calls += 1
+
+    def record_recursive_batch(self) -> None:
+        with self._lock:
+            self._recursive_batch_calls += 1
+
+    def record_depth_fallback(self) -> None:
+        with self._lock:
+            self._depth_fallback_calls += 1
+
+    def child_started(self) -> None:
+        with self._lock:
+            self._recursive_children_started += 1
+            self._active_children += 1
+            self._peak_child_concurrency = max(self._peak_child_concurrency, self._active_children)
+
+    def child_completed(self) -> None:
+        with self._lock:
+            self._recursive_children_completed += 1
+            self._active_children = max(0, self._active_children - 1)
+
+    def snapshot(self) -> DelegationMetricsSnapshot:
+        """Create an immutable snapshot of the accumulated delegation metrics.
+
+        Returns:
+            DelegationMetricsSnapshot: The current metrics, including call counts,
+                latency totals, concurrency data, and token usage status.
+        """
+        with self._lock:
+            calls = tuple(sorted((role, depth, count) for (role, depth), count in self._lm_calls.items()))
+            latency = tuple(sorted((role, depth, total) for (role, depth), total in self._lm_latency_ms.items()))
+            token_keys = self._lm_input_tokens.keys() | self._lm_output_tokens.keys() | self._lm_tokens.keys()
+            tokens = tuple(
+                sorted(
+                    (
+                        role,
+                        depth,
+                        self._lm_input_tokens.get((role, depth), 0),
+                        self._lm_output_tokens.get((role, depth), 0),
+                        self._lm_tokens.get((role, depth), 0),
+                    )
+                    for (role, depth) in token_keys
+                )
+            )
+            return DelegationMetricsSnapshot(
+                root_lm_calls_depth_0=self._lm_calls.get(("root", 0), 0),
+                sub_lm_calls_depth_0=self._lm_calls.get(("sub", 0), 0),
+                child_root_lm_calls_depth_1=self._lm_calls.get(("root", 1), 0),
+                child_sub_lm_calls_depth_1=self._lm_calls.get(("sub", 1), 0),
+                recursive_child_calls=self._recursive_child_calls,
+                recursive_batch_calls=self._recursive_batch_calls,
+                recursive_children_started=self._recursive_children_started,
+                recursive_children_completed=self._recursive_children_completed,
+                depth_fallback_calls=self._depth_fallback_calls,
+                peak_child_concurrency=self._peak_child_concurrency,
+                lm_call_counts=calls,
+                lm_latency_ms=latency,
+                lm_token_totals=tokens,
+                token_usage_status="observed" if self._lm_usage_observed else "unavailable",
+            )
+
+
+def normalize_lm_token_usage(usage: Mapping[str, Any] | None) -> dict[str, int]:
+    """
+    Normalize provider token usage fields into canonical token names.
+
+    Parameters:
+        usage (Mapping[str, Any] | None): Provider usage data containing supported token field aliases.
+
+    Returns:
+        dict[str, int]: Canonical nonnegative token counts, with total tokens derived
+            from input and output counts when unavailable.
+    """
+    if not isinstance(usage, Mapping):
+        return {}
+    normalized: dict[str, int] = {}
+    for target, aliases in _TOKEN_USAGE_ALIASES.items():
+        value = next(
+            (
+                candidate
+                for alias in aliases
+                if isinstance((candidate := usage.get(alias)), (int, float)) and not isinstance(candidate, bool)
+            ),
+            None,
+        )
+        if value is not None:
+            normalized[target] = max(0, int(value))
+    if "total_tokens" not in normalized and ("input_tokens" in normalized or "output_tokens" in normalized):
+        normalized["total_tokens"] = normalized.get("input_tokens", 0) + normalized.get("output_tokens", 0)
+    return normalized
+
+
+# ---------------------------------------------------------------------------
+# Bounded ThreadPool scheduling for reserved recursive child batches
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class RecursiveCallReservation:
+    """One already-reserved recursive child slot with its prompt."""
+
+    prompt: str
+    call_index: int
+    child_depth: int
+
+
+class RecursiveBatchError(RuntimeError):
+    """Bounded all-or-nothing failure for one recursive batch."""
+
+    def __init__(self) -> None:
+        super().__init__("recursive child batch failed")
+
+
+def run_reserved_batch(
+    reservations: Sequence[RecursiveCallReservation],
+    *,
+    execute: Callable[[RecursiveCallReservation, Event], str],
+    deadline_monotonic: float,
+    max_parallel: int,
+    on_retain_running: Callable[[set[Future[str]]], None],
+) -> list[str]:
+    """Run reserved child work with bounded fan-out and input-order results.
+
+    Preserves atomic submit failure retention, first-failure cancellation of
+    queued work, deadline-aware aggregation, and running-worker retention via
+    ``on_retain_running`` (Futures are the retain tokens for still-running
+    workers). Does not own recursive child construction or leases.
+    """
+    if not reservations:
+        raise ValueError("reserved batch must not be empty")
+    workers = min(max_parallel, len(reservations))
+    answers: list[str] = []
+    batch_cancelled = Event()
+    pool = ThreadPoolExecutor(max_workers=workers, thread_name_prefix="fleet-rlm-child")
+    futures: list[Future[str]] = []
+    try:
+        try:
+            for reservation in reservations:
+                # Capture the submitter ContextVar state (MLflow turn span, etc.)
+                # before the worker starts; copy_context() inside the worker would
+                # see an empty thread-local context.
+                ctx = copy_context()
+
+                def _run(
+                    reserved: RecursiveCallReservation = reservation,
+                    context: Context = ctx,
+                ) -> str:
+                    return context.run(execute, reserved, batch_cancelled)
+
+                futures.append(pool.submit(_run))
+        except BaseException:
+            batch_cancelled.set()
+            pending = {future for future in futures if not future.done()}
+            for future in pending:
+                future.cancel()
+            on_retain_running(pending)
+            raise
+        remaining = max(0.0, deadline_monotonic - time.monotonic())
+        done, not_done = wait(futures, timeout=remaining, return_when=FIRST_EXCEPTION)
+        failures = _future_failures(done)
+        if failures or not_done:
+            batch_cancelled.set()
+            for future in not_done:
+                future.cancel()
+        if not_done:
+            # Running Python threads cannot be force-cancelled. Each worker
+            # retains its own lease until its deadline-bound LM call exits;
+            # queued work is cancelled and executor teardown never performs
+            # a second unbounded join on the Root worker.
+            on_retain_running(not_done)
+            if failures:
+                raise RecursiveBatchError() from failures[0]
+            raise TimeoutError("recursive child batch deadline exceeded")
+        if failures:
+            raise RecursiveBatchError() from failures[0]
+        answers = [future.result(timeout=0) for future in futures]
+    finally:
+        pool.shutdown(wait=False, cancel_futures=True)
+    return answers
+
+
+def _future_failures(futures: set[Future[str]]) -> list[BaseException]:
+    failures: list[BaseException] = []
+    for future in futures:
+        if future.cancelled():
+            continue
+        try:
+            failure = future.exception(timeout=0)
+        except BaseException as exc:
+            failures.append(exc)
+        else:
+            if failure is not None:
+                failures.append(failure)
+    return failures
+
+
+# ---------------------------------------------------------------------------
+# Bounded native DSPy child-RLM calls
+# ---------------------------------------------------------------------------
+
 # bounded Sub fallback. This is a product invariant owned here, not an
 # operator-facing policy knob.
 RLM_NATIVE_CHILD_DEPTH = 1
@@ -952,10 +1316,19 @@ class RecursiveRLMExecutor:
 
 __all__ = [
     "RLM_NATIVE_CHILD_DEPTH",
+    "ChildRuntimeAuthorizationError",
+    "ChildRuntimeCleanupError",
     "ChildRuntimeFactory",
+    "ChildRuntimeLease",
+    "DelegationMetrics",
+    "DelegationMetricsSnapshot",
     "RecursiveBatchError",
+    "RecursiveCallReservation",
     "RecursiveCallSummary",
     "RecursiveRLMExecutor",
     "RecursiveRLMOptions",
     "RecursiveSubtaskSignature",
+    "TokenUsageStatus",
+    "normalize_lm_token_usage",
+    "run_reserved_batch",
 ]

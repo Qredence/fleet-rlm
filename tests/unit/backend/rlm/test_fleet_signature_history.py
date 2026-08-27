@@ -21,9 +21,8 @@ from __future__ import annotations
 import dspy
 import pytest
 
-from fleet_rlm.rlm.errors import RLMConfigError
-from fleet_rlm.rlm.inputs import build_rlm_input_kwargs
-from fleet_rlm.rlm.signature import FleetRLMSignature
+from fleet_rlm.rlm.program import FleetRLMSignature, build_rlm_input_kwargs
+from fleet_rlm.rlm.result import RLMConfigError
 
 _SESSION_ID = "00000000-0000-0000-0000-000000000001"
 

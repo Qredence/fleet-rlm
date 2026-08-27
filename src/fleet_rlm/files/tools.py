@@ -25,8 +25,7 @@ from fleet_rlm.files.models import AttachmentRef, StagedAttachment
 from fleet_rlm.files.volume_paths import VolumePaths, as_posix
 from fleet_rlm.files.volume_storage import VolumeBlobFs
 from fleet_rlm.files.workspace_validation import normalize_workspace_path
-from fleet_rlm.rlm.events import JsonValue
-from fleet_rlm.rlm.tool_observer import ToolEventView, bound_event_text
+from fleet_rlm.rlm.events import JsonValue, ToolEventView, bound_event_text
 
 _EVENT_TEXT_MAX_CHARS = 256
 

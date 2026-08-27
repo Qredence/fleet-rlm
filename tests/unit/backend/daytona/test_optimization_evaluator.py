@@ -31,7 +31,7 @@ from fleet_rlm.optimization.evidence import (
     validate_strict_daytona_proof,
 )
 from fleet_rlm.optimization.types import OptimizationRecord
-from fleet_rlm.rlm.dspy_contract import RLMOptions
+from fleet_rlm.rlm.program import RLMOptions
 
 
 @dataclass

@@ -379,8 +379,7 @@ async def test_fast_path_success_completes_outbox_rows() -> None:
         build_memory_promotion_intents,
     )
     from fleet_rlm.persistence.repositories.memory_promotion_intents import SqlAlchemyMemoryPromotionOutbox
-    from fleet_rlm.rlm.dspy_contract import PredictionResult
-    from fleet_rlm.rlm.outcome import RLMOutcome
+    from fleet_rlm.rlm.result import PredictionResult, RLMOutcome
 
     candidate = MemoryCandidate(
         candidate_id="cand00000000", category="General", learning="fast path learning", byte_size=18
@@ -428,8 +427,7 @@ async def test_fast_path_failure_notes_rows_and_leaves_reconciler_work() -> None
         build_memory_promotion_intents,
     )
     from fleet_rlm.persistence.repositories.memory_promotion_intents import SqlAlchemyMemoryPromotionOutbox
-    from fleet_rlm.rlm.dspy_contract import PredictionResult
-    from fleet_rlm.rlm.outcome import RLMOutcome
+    from fleet_rlm.rlm.result import PredictionResult, RLMOutcome
 
     candidate = MemoryCandidate(candidate_id="cand00000000", category="General", learning="kept", byte_size=4)
     intents = build_memory_promotion_intents(

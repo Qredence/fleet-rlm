@@ -24,8 +24,8 @@ import httpx
 from dotenv import load_dotenv
 
 from fleet_rlm.config import FleetConfigurationError, require_live_execution
-from fleet_rlm.rlm.dspy_interpreter_contract import PUBLIC_FINAL_OUTPUT_LABEL
-from fleet_rlm.rlm.signature import FleetRLMSignature
+from fleet_rlm.rlm._dspy_compat import PUBLIC_FINAL_OUTPUT_LABEL
+from fleet_rlm.rlm.program import FleetRLMSignature
 
 RECEIPT_SCHEMA = "fleet.prime-oolong/v1"
 DEFAULT_API_URL = "http://127.0.0.1:8000"

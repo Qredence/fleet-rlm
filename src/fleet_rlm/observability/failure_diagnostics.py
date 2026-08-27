@@ -14,7 +14,6 @@ from fleet_rlm.daytona.errors import (
     provider_status_category,
     sanitize_provider_message,
 )
-from fleet_rlm.rlm.child_runtime import ChildRuntimeAuthorizationError, ChildRuntimeCleanupError
 
 
 @dataclass(frozen=True, slots=True)
@@ -52,6 +51,8 @@ def trace_failure_category(exc: BaseException) -> str:
         str: A failure category such as ``unauthorized``, ``cleanup_failed``, ``timeout``,
             ``cancelled``, or the normalized diagnostic cause type.
     """
+    from fleet_rlm.rlm.recursion import ChildRuntimeAuthorizationError, ChildRuntimeCleanupError
+
     if isinstance(exc, ChildRuntimeAuthorizationError):
         return "unauthorized"
     if isinstance(exc, ChildRuntimeCleanupError):

@@ -1,15 +1,16 @@
 """Root instruction-fragment composition contracts."""
 
-from fleet_rlm.rlm.instructions import (
+from fleet_rlm.rlm.program import (
     BASE_RLM_INSTRUCTIONS,
     DISCOVERY_RLM_INSTRUCTIONS,
     RECURSION_RLM_INSTRUCTIONS,
     REPL_RLM_INSTRUCTIONS,
     TOOL_RLM_INSTRUCTIONS,
+    FleetRLMSignature,
     compose_rlm_instructions,
     fleet_rlm_instruction_fragments,
+    root_signature_for_recursion,
 )
-from fleet_rlm.rlm.signature import FleetRLMSignature, root_signature_for_recursion
 
 
 def test_default_fleet_signature_uses_composed_recursive_fragments() -> None:

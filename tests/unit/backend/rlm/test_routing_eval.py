@@ -9,10 +9,7 @@ import pytest
 
 from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
 from fleet_rlm.daytona.recursive_child_runtime import ChildRuntimeLease
-from fleet_rlm.rlm.events import ToolCompleted, ToolStarted
-from fleet_rlm.rlm.model_bundle import RLMModelBundle
-from fleet_rlm.rlm.recursive_calls import RecursiveRLMExecutor, RecursiveRLMOptions
-from fleet_rlm.rlm.routing_eval import (
+from fleet_rlm.optimization.routing import (
     CURATED_ROUTING_SCENARIOS,
     RoutingFacts,
     RoutingScenario,
@@ -23,6 +20,12 @@ from fleet_rlm.rlm.routing_eval import (
     run_routing_scenario,
     score_routing_execution,
     summarize_scores,
+)
+from fleet_rlm.rlm.events import ToolCompleted, ToolStarted
+from fleet_rlm.rlm.program import RLMModelBundle
+from fleet_rlm.rlm.recursion import (
+    RecursiveRLMExecutor,
+    RecursiveRLMOptions,
 )
 
 
@@ -287,7 +290,7 @@ async def test_harness_routes_native_semantic_batch_to_configured_sub_lm() -> No
 def test_tracking_child_factory_forwards_optional_factory_cleanup() -> None:
     """The routing harness forwards factory-owned cleanup hooks it does not use."""
 
-    from fleet_rlm.rlm.routing_eval import _TrackingChildRuntimeFactory
+    from fleet_rlm.optimization.routing import _TrackingChildRuntimeFactory
 
     class _FakeLease:
         pass

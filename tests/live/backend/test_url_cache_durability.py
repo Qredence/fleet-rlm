@@ -20,8 +20,7 @@ from fleet_rlm.daytona.workspace_fs import DaytonaSessionWorkspaceFS
 from fleet_rlm.files.url_tool import UrlFetchResult, UrlToolHost, WorkspaceUrlSourceStore
 from fleet_rlm.files.volume_paths import volume_paths_from_settings
 from fleet_rlm.observability.turn_tracing import turn_trace
-from fleet_rlm.rlm.events import ToolCompleted
-from fleet_rlm.rlm.tool_observer import observe_tool
+from fleet_rlm.rlm.events import ToolCompleted, observe_tool
 from fleet_rlm.runtime.bindings import InMemorySandboxBindingStore, SandboxBinding
 
 pytestmark = [pytest.mark.live_daytona]

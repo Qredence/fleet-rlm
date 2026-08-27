@@ -19,7 +19,7 @@ from fleet_rlm.config import Settings
 from fleet_rlm.daytona.run_environment import build_run_preparation
 from fleet_rlm.daytona.session_manager import DaytonaAdmission
 from fleet_rlm.files.models import AttachmentRef
-from fleet_rlm.rlm.model_bundle import RLMModelBundle
+from fleet_rlm.rlm.program import RLMModelBundle
 from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
 
 
@@ -288,7 +288,7 @@ async def test_live_preparation_stages_attachment_and_cleans_it(
     digest = prepared2.execution.session.workspace_memory_digest
     assert f" -->: {learning}\n" in digest
     assert len(digest.encode("utf-8")) <= 4_096
-    from fleet_rlm.rlm.inputs import build_rlm_input_kwargs
+    from fleet_rlm.rlm.program import build_rlm_input_kwargs
 
     kwargs = build_rlm_input_kwargs(
         request="follow up",
@@ -332,8 +332,7 @@ async def test_live_preparation_stages_attachment_and_cleans_it(
     )
 
     from fleet_rlm.chat.run_lifecycle import CommittedTurnReceipt, RunLifecycleService
-    from fleet_rlm.rlm.dspy_contract import PredictionResult
-    from fleet_rlm.rlm.outcome import RLMOutcome
+    from fleet_rlm.rlm.result import PredictionResult, RLMOutcome
 
     class Store:
         async def commit(self, claimed, committed, artifacts):
@@ -342,7 +341,7 @@ async def test_live_preparation_stages_attachment_and_cleans_it(
         async def transition_claim(self, claimed, command):
             from fleet_rlm.chat.run_claim import FailClaim
             from fleet_rlm.chat.run_lifecycle import RunFailure
-            from fleet_rlm.rlm.dspy_contract import empty_rlm_usage
+            from fleet_rlm.rlm.result import empty_rlm_usage
 
             assert isinstance(command, FailClaim)
             failure = RunFailure(

@@ -28,19 +28,20 @@ import pytest
 from fleet_rlm.chat.session_context import SessionContextManifest
 from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
 from fleet_rlm.daytona.recursive_child_runtime import ChildRuntimeLease
-from fleet_rlm.rlm.context import (
+from fleet_rlm.rlm.events import Status, ToolCompleted
+from fleet_rlm.rlm.program import RLMFactory, RLMModelBundle, RLMOptions
+from fleet_rlm.rlm.recursion import (
+    RecursiveRLMExecutor,
+    RecursiveRLMOptions,
+)
+from fleet_rlm.rlm.runtime import (
     DelegationPolicy,
     ExecutionRuntime,
     RLMExecutionContext,
+    RLMRunner,
     RunIdentity,
     SessionView,
 )
-from fleet_rlm.rlm.dspy_contract import RLMOptions
-from fleet_rlm.rlm.events import Status, ToolCompleted
-from fleet_rlm.rlm.factory import RLMFactory
-from fleet_rlm.rlm.model_bundle import RLMModelBundle
-from fleet_rlm.rlm.recursive_calls import RecursiveRLMExecutor, RecursiveRLMOptions
-from fleet_rlm.rlm.runner import RLMRunner
 from fleet_rlm.sessions.models import TurnAccess
 from tests.unit.backend.rlm.fakes import EmptyCapabilities
 
@@ -308,7 +309,7 @@ async def test_val_rec_023_root_and_child_are_exact_native_rlm_with_positional_i
     instances built through the certified constructor; both are invoked with
     the positional caller-owned interpreter plus named inputs; both produce
     native Predictions with trajectory evidence."""
-    import fleet_rlm.rlm.recursive_calls as recursive_calls
+    import fleet_rlm.rlm.recursion as recursive_calls
 
     child_invocations: list[tuple[type, object, dict[str, object]]] = []
     root_invocations: list[tuple[type, object, dict[str, object]]] = []

@@ -42,24 +42,28 @@ from fleet_rlm.chat.run_authority import RunAuthority
 from fleet_rlm.chat.session_context import SessionContextManifest
 from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
 from fleet_rlm.daytona.recursive_child_runtime import ChildRuntimeLease
-from fleet_rlm.rlm.child_runtime import ChildRuntimeAuthorizationError, ChildRuntimeCleanupError
-from fleet_rlm.rlm.context import (
-    DelegationPolicy,
-    ExecutionRuntime,
-    RLMExecutionContext,
-    RunIdentity,
-    SessionView,
-)
-from fleet_rlm.rlm.dspy_contract import RLMOptions, build_native_rlm
-from fleet_rlm.rlm.dspy_interpreter_contract import wrap_final_output
+from fleet_rlm.rlm._dspy_compat import wrap_final_output
 from fleet_rlm.rlm.events import RunCompleted, Status
-from fleet_rlm.rlm.model_bundle import RLMModelBundle
-from fleet_rlm.rlm.recursive_calls import (
+from fleet_rlm.rlm.program import (
+    RLMModelBundle,
+    RLMOptions,
+    build_native_rlm,
+)
+from fleet_rlm.rlm.recursion import (
+    ChildRuntimeAuthorizationError,
+    ChildRuntimeCleanupError,
     RecursiveBatchError,
     RecursiveRLMExecutor,
     RecursiveRLMOptions,
 )
-from fleet_rlm.rlm.runner import RLMRunner
+from fleet_rlm.rlm.runtime import (
+    DelegationPolicy,
+    ExecutionRuntime,
+    RLMExecutionContext,
+    RLMRunner,
+    RunIdentity,
+    SessionView,
+)
 from fleet_rlm.sessions.models import TurnAccess
 from tests.unit.backend.rlm.fakes import EmptyCapabilities
 
@@ -166,7 +170,7 @@ def test_val_rec_012_first_failure_cancels_queued_acquisition_before_any_lease(
     fast-failing first child cancels the queued sibling before lease
     acquisition; the batch fails all-or-nothing with the child's cause and
     ownership settles clean."""
-    import fleet_rlm.rlm.recursive_calls as recursive_calls
+    import fleet_rlm.rlm.recursion as recursive_calls
 
     recorder = _Recorder()
     first_failure = threading.Event()
@@ -245,7 +249,7 @@ def test_val_rec_012_deadline_cancels_queued_acquisition_and_join_waits_for_runn
     siblings returns at the deadline; only the running index reaches the
     factory, lease-close observation reports pending ownership, and the owned
     join completes only after the running lease closes."""
-    import fleet_rlm.rlm.recursive_calls as recursive_calls
+    import fleet_rlm.rlm.recursion as recursive_calls
 
     started = threading.Event()
     release = threading.Event()
@@ -292,7 +296,7 @@ def test_val_rec_016_revoked_authority_cancels_queued_sibling_and_retains_runnin
     runs and another is queued cancels the queued acquisition, discards the
     running child's answer through the same fence, yields no successful batch
     output, and still settles the running lease's cleanup exactly once."""
-    import fleet_rlm.rlm.recursive_calls as recursive_calls
+    import fleet_rlm.rlm.recursion as recursive_calls
 
     authority = RunAuthority()
     started = threading.Event()
@@ -355,7 +359,7 @@ async def test_val_rec_016_runner_cancellation_terminal_outcome_with_same_fence(
     terminal outcome (never timeout or success), and the owned join settles
     only after the running child's cleanup completes with its permit
     restored."""
-    import fleet_rlm.rlm.recursive_calls as recursive_calls
+    import fleet_rlm.rlm.recursion as recursive_calls
 
     adapter = dspy.JSONAdapter()
     root = dspy.utils.DummyLM(
@@ -489,7 +493,7 @@ def test_val_rec_017_one_absolute_deadline_covers_fork_and_batch_join(
     """VAL-REC-017: the model fork and the batch join both receive the one
     absolute Root deadline; a blocked batch reports the deadline error within
     a bounded tolerance and the retained child still settles."""
-    import fleet_rlm.rlm.recursive_calls as recursive_calls
+    import fleet_rlm.rlm.recursion as recursive_calls
 
     started = threading.Event()
     release = threading.Event()

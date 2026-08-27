@@ -11,13 +11,7 @@ import dspy
 import pytest
 
 from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
-from fleet_rlm.rlm.context import (
-    ExecutionRuntime,
-    RLMExecutionSpec,
-    RunIdentity,
-    SessionView,
-)
-from fleet_rlm.rlm.dspy_contract import RLMOptions, bind_native_rlm_observer
+from fleet_rlm.rlm._dspy_compat import bind_native_rlm_observer
 from fleet_rlm.rlm.events import (
     RLMCode,
     RLMOutput,
@@ -25,13 +19,19 @@ from fleet_rlm.rlm.events import (
     StepFinished,
     StepStarted,
     ToolCompleted,
+    ToolEventView,
     ToolFailed,
     ToolStarted,
+    observe_tool,
 )
-from fleet_rlm.rlm.factory import RLMFactory
-from fleet_rlm.rlm.model_bundle import RLMModelBundle
-from fleet_rlm.rlm.runner import RLMRunner
-from fleet_rlm.rlm.tool_observer import ToolEventView, observe_tool
+from fleet_rlm.rlm.program import RLMFactory, RLMModelBundle, RLMOptions
+from fleet_rlm.rlm.runtime import (
+    ExecutionRuntime,
+    RLMExecutionSpec,
+    RLMRunner,
+    RunIdentity,
+    SessionView,
+)
 from fleet_rlm.sessions.models import TurnAccess
 
 
@@ -354,9 +354,7 @@ async def test_native_rlm_rejects_invalid_host_tool_type_before_host_logic() -> 
 @pytest.mark.parametrize("fallback", [False, True], ids=["invalid-submit-repair", "typed-extract"])
 async def test_runner_completes_native_repair_and_extract_as_prediction_result(fallback: bool) -> None:
     from fleet_rlm.chat.session_context import SessionContextManifest
-    from fleet_rlm.rlm.context import (
-        RLMExecutionContext,
-    )
+    from fleet_rlm.rlm.runtime import RLMExecutionContext
 
     class Capabilities:
         spec = RLMExecutionSpec()

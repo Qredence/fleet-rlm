@@ -41,7 +41,7 @@ from fleet_rlm.config import Settings
 from fleet_rlm.daytona import recursive_child_runtime
 from fleet_rlm.daytona.http_broker import DaytonaHttpToolBroker
 from fleet_rlm.daytona.session_manager import get_active_lease_registry
-from fleet_rlm.rlm.model_bundle import RLMModelBundle
+from fleet_rlm.rlm.program import RLMModelBundle
 from fleet_rlm.sessions.models import TurnAccess
 from tests.live.backend._database import upgrade_to_head
 from tests.live.backend._p35d_evidence import candidate_identity
@@ -157,7 +157,7 @@ def _install_volume_evidence(monkeypatch: pytest.MonkeyPatch, evidence: _VolumeE
         return lease
 
     async def faultable_cleanup(**kwargs: Any) -> None:
-        from fleet_rlm.rlm.child_runtime import ChildRuntimeCleanupError
+        from fleet_rlm.rlm.recursion import ChildRuntimeCleanupError
 
         if evidence.fault_armed:
             from fleet_rlm.daytona.lifecycle import AbsenceProbeError

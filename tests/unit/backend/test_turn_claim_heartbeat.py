@@ -13,8 +13,12 @@ def test_host_tool_rejects_calls_after_authority_revocation() -> None:
     import dspy
 
     from fleet_rlm.chat.run_authority import RunAuthority
-    from fleet_rlm.rlm.events import ToolFailed, ToolStarted
-    from fleet_rlm.rlm.tool_observer import ToolEventView, observe_tool
+    from fleet_rlm.rlm.events import (
+        ToolEventView,
+        ToolFailed,
+        ToolStarted,
+        observe_tool,
+    )
 
     authority = RunAuthority()
     effects: list[str] = []
@@ -110,9 +114,8 @@ async def test_transient_heartbeat_failure_recovers_without_ending_run() -> None
     from fleet_rlm.chat.run_lifecycle import RunLifecycleService
     from fleet_rlm.chat.turn_coordinator import TurnCoordinator
     from fleet_rlm.persistence.repositories import InMemoryRunStateStore, InMemorySessionCatalog
-    from fleet_rlm.rlm.dspy_contract import PredictionResult
     from fleet_rlm.rlm.events import EventRecorder, RunCompleted, RunStarted
-    from fleet_rlm.rlm.outcome import RLMOutcome
+    from fleet_rlm.rlm.result import PredictionResult, RLMOutcome
     from fleet_rlm.sessions.models import TurnAccess, TurnInput
 
     authoritative = InMemoryRunStateStore()
@@ -366,9 +369,8 @@ async def test_claim_loss_wins_finalization_and_prevents_stale_commit() -> None:
     from fleet_rlm.chat.run_lifecycle import RunLifecycleService, RunStateError
     from fleet_rlm.chat.turn_coordinator import TurnCoordinator
     from fleet_rlm.persistence.repositories import InMemoryRunStateStore, InMemorySessionCatalog
-    from fleet_rlm.rlm.dspy_contract import PredictionResult
     from fleet_rlm.rlm.events import RunFailed
-    from fleet_rlm.rlm.outcome import RLMOutcome
+    from fleet_rlm.rlm.result import PredictionResult, RLMOutcome
     from fleet_rlm.sessions.models import TurnAccess, TurnInput
 
     authoritative = InMemoryRunStateStore()
@@ -587,9 +589,8 @@ async def test_post_commit_heartbeat_does_not_fail_committed_turn(caplog) -> Non
     from fleet_rlm.chat.run_lifecycle import RunLifecycleService
     from fleet_rlm.chat.turn_coordinator import TurnCoordinator
     from fleet_rlm.persistence.repositories import InMemoryRunStateStore, InMemorySessionCatalog
-    from fleet_rlm.rlm.dspy_contract import PredictionResult
     from fleet_rlm.rlm.events import EventRecorder, RunCompleted, RunFailed, RunStarted
-    from fleet_rlm.rlm.outcome import RLMOutcome
+    from fleet_rlm.rlm.result import PredictionResult, RLMOutcome
     from fleet_rlm.sessions.models import TurnAccess, TurnInput
 
     authoritative = InMemoryRunStateStore()
@@ -711,8 +712,11 @@ async def test_claim_loss_cleanup_after_commit_is_a_benign_no_op(caplog) -> None
     from fleet_rlm.chat.run_ownership import ClaimHeartbeat
     from fleet_rlm.chat.turn_coordinator import TurnCoordinator
     from fleet_rlm.persistence.repositories import InMemoryRunStateStore, InMemorySessionCatalog
-    from fleet_rlm.rlm.dspy_contract import PredictionResult, empty_rlm_usage
-    from fleet_rlm.rlm.outcome import RLMOutcome
+    from fleet_rlm.rlm.result import (
+        PredictionResult,
+        RLMOutcome,
+        empty_rlm_usage,
+    )
     from fleet_rlm.sessions.models import TurnAccess, TurnInput
 
     assert issubclass(RunAlreadyCompletedError, RunStateError)
@@ -786,8 +790,11 @@ async def test_revoke_claim_guard_only_relaxes_committed_runs(caplog) -> None:
     )
     from fleet_rlm.chat.turn_coordinator import TurnCoordinator
     from fleet_rlm.persistence.repositories import InMemoryRunStateStore, InMemorySessionCatalog
-    from fleet_rlm.rlm.dspy_contract import PredictionResult, empty_rlm_usage
-    from fleet_rlm.rlm.outcome import RLMOutcome
+    from fleet_rlm.rlm.result import (
+        PredictionResult,
+        RLMOutcome,
+        empty_rlm_usage,
+    )
     from fleet_rlm.sessions.models import TurnAccess, TurnInput
 
     authoritative = InMemoryRunStateStore()
@@ -849,8 +856,11 @@ async def test_driver_claim_loss_cleanup_skips_settlement_release_after_commit(c
     )
     from fleet_rlm.chat.turn_coordinator import TurnCoordinator
     from fleet_rlm.persistence.repositories import InMemoryRunStateStore, InMemorySessionCatalog
-    from fleet_rlm.rlm.dspy_contract import PredictionResult, empty_rlm_usage
-    from fleet_rlm.rlm.outcome import RLMOutcome
+    from fleet_rlm.rlm.result import (
+        PredictionResult,
+        RLMOutcome,
+        empty_rlm_usage,
+    )
     from fleet_rlm.sessions.models import TurnAccess, TurnInput
 
     authoritative = InMemoryRunStateStore()

@@ -504,7 +504,7 @@ def test_runtime_settings_resolves_only_toml_declared_environment_values(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     import fleet_rlm.config as config
-    from fleet_rlm.rlm.lm_factory import resolve_role_api_key
+    from fleet_rlm.rlm.program import resolve_role_api_key
 
     policy = tmp_path / "fleet.toml"
     _policy(policy)
@@ -566,7 +566,7 @@ def test_runtime_settings_loads_custom_role_keys_from_repository_dotenv(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     import fleet_rlm.config as config
-    from fleet_rlm.rlm.lm_factory import resolve_role_api_key
+    from fleet_rlm.rlm.program import resolve_role_api_key
 
     policy = tmp_path / "fleet.toml"
     _policy(policy)

@@ -29,8 +29,7 @@ def _turn():
 
 
 def _outcome(*, candidates=()):
-    from fleet_rlm.rlm.dspy_contract import PredictionResult
-    from fleet_rlm.rlm.outcome import RLMOutcome
+    from fleet_rlm.rlm.result import PredictionResult, RLMOutcome
 
     return RLMOutcome(
         "completed",
@@ -268,7 +267,7 @@ async def test_cancelled_commit_that_succeeds_retains_snapshot_and_receipt() -> 
 async def test_cancelled_settlement_persists_bounded_tombstone_in_turn_listing() -> None:
     from fleet_rlm.chat.run_lifecycle import ClaimedRun, RunClaim, RunFailure, RunLifecycleService
     from fleet_rlm.persistence.repositories import InMemoryRunStateStore, InMemorySessionCatalog
-    from fleet_rlm.rlm.dspy_contract import empty_rlm_usage
+    from fleet_rlm.rlm.result import empty_rlm_usage
     from fleet_rlm.sessions.models import TurnAccess, TurnInput
 
     access = TurnAccess(uuid4(), uuid4())
@@ -348,8 +347,11 @@ async def test_preparation_failclaim_cancelled_persists_tombstone_with_observed_
 async def test_tombstone_sequences_interleave_with_committed_turns() -> None:
     from fleet_rlm.chat.run_lifecycle import CommittedTurnReceipt, RunClaim, RunFailure, RunLifecycleService
     from fleet_rlm.persistence.repositories import InMemoryRunStateStore, InMemorySessionCatalog
-    from fleet_rlm.rlm.dspy_contract import PredictionResult, empty_rlm_usage
-    from fleet_rlm.rlm.outcome import RLMOutcome
+    from fleet_rlm.rlm.result import (
+        PredictionResult,
+        RLMOutcome,
+        empty_rlm_usage,
+    )
     from fleet_rlm.sessions.committed_turn import CommittedTurnCodec
     from fleet_rlm.sessions.models import TurnAccess, TurnInput
 

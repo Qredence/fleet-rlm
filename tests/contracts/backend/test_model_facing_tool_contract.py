@@ -90,8 +90,11 @@ def _source_tools() -> dict[str, dspy.Tool]:
     from fleet_rlm.files.workspace_tools import WorkspaceToolHost
     from fleet_rlm.optimization.curated_input import CuratedEvaluationStore
     from fleet_rlm.optimization.types import OptimizationRecord
-    from fleet_rlm.rlm.model_bundle import RLMModelBundle
-    from fleet_rlm.rlm.recursive_calls import RecursiveRLMExecutor, RecursiveRLMOptions
+    from fleet_rlm.rlm.program import RLMModelBundle
+    from fleet_rlm.rlm.recursion import (
+        RecursiveRLMExecutor,
+        RecursiveRLMOptions,
+    )
     from fleet_rlm.sessions.history_tools import SessionHistoryToolHost
     from fleet_rlm.sessions.models import SessionHistory
     from fleet_rlm.skills.catalog import SkillCatalog
@@ -199,7 +202,8 @@ def test_model_facing_tool_contract_fixture_has_complete_policies_and_current_co
     from fleet_rlm.chat import capability_preparation
     from fleet_rlm.composition import testing
     from fleet_rlm.daytona import run_environment
-    from fleet_rlm.rlm import recursive_calls, runner
+    from fleet_rlm.rlm import recursion as recursive_calls
+    from fleet_rlm.rlm import runtime as runner
 
     prepared_source = inspect.getsource(capability_preparation.prepare_host_capabilities)
     testing_source = inspect.getsource(testing.TestingCapabilityPreparer.prepare)

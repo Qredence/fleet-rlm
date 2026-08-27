@@ -8,7 +8,7 @@ from unittest.mock import MagicMock
 import pytest
 from pydantic import SecretStr
 
-import fleet_rlm.rlm.lm_factory as factory
+import fleet_rlm.rlm.program as factory
 from fleet_rlm.config import Settings
 
 

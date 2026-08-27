@@ -38,9 +38,8 @@ from fleet_rlm.files.memory_candidates import (
 )
 from fleet_rlm.observability.turn_tracing import turn_phase_span
 from fleet_rlm.result_snapshot import ResultSnapshotSink, encode_result_snapshot
-from fleet_rlm.rlm.context import AsyncCancellationProbe
-from fleet_rlm.rlm.dspy_contract import RLMUsage
-from fleet_rlm.rlm.outcome import RLMOutcome
+from fleet_rlm.rlm.result import RLMOutcome, RLMUsage
+from fleet_rlm.rlm.runtime import AsyncCancellationProbe
 from fleet_rlm.runtime.owned_effect import OwnedEffect
 from fleet_rlm.sessions.committed_turn import CommittedTurn
 from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput

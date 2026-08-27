@@ -34,7 +34,7 @@ from fleet_rlm.files.lifecycle import AttachmentLifecycle
 from fleet_rlm.files.volume_storage import VolumeTreeFs, WorkspaceVolumeGateway
 from fleet_rlm.files.workspace_access import WorkspaceFileService
 from fleet_rlm.persistence.repositories.turns import ReconciliationSummary
-from fleet_rlm.rlm.model_bundle import RLMModelBundle
+from fleet_rlm.rlm.program import RLMModelBundle
 from fleet_rlm.rlm.session_runtime import SessionRLMRegistry
 from fleet_rlm.sessions.catalog import SessionCatalog
 

@@ -36,7 +36,7 @@ from dotenv import load_dotenv
 from dspy.primitives.repl_types import REPLHistory
 
 from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, sandbox_backend
-from fleet_rlm.rlm.dspy_contract import CERTIFIED_DSPY_VERSION
+from fleet_rlm.rlm._dspy_compat import CERTIFIED_DSPY_VERSION
 from fleet_rlm.rlm.events import RLMCode, RLMOutput
 from fleet_rlm.sessions.history_transport import CommittedSessionHistory
 

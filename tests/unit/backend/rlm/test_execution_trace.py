@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from fleet_rlm.rlm.execution_trace import record_phase_failure
+from fleet_rlm.rlm.events import record_phase_failure
 
 
 def test_record_phase_failure_preserves_sanitized_last_lm_call_structure() -> None:
@@ -35,8 +35,8 @@ def test_record_phase_failure_marks_token_usage_unavailable_without_observed_usa
 
 
 def test_record_phase_success_marks_token_usage_observed_from_lm_metrics() -> None:
-    from fleet_rlm.rlm.delegation_metrics import DelegationMetrics
-    from fleet_rlm.rlm.execution_trace import record_phase_success
+    from fleet_rlm.rlm.events import record_phase_success
+    from fleet_rlm.rlm.recursion import DelegationMetrics
 
     metrics = DelegationMetrics()
     metrics.record_lm_call("root", 0, usage={"input_tokens": 40, "output_tokens": 7})
@@ -56,8 +56,8 @@ def test_record_phase_success_marks_token_usage_observed_from_lm_metrics() -> No
 
 
 def test_record_phase_success_marks_token_usage_unavailable_without_any_usage_signal() -> None:
-    from fleet_rlm.rlm.delegation_metrics import DelegationMetrics
-    from fleet_rlm.rlm.execution_trace import record_phase_success
+    from fleet_rlm.rlm.events import record_phase_success
+    from fleet_rlm.rlm.recursion import DelegationMetrics
 
     metrics = DelegationMetrics()
     metrics.record_lm_call("root", 0)  # completed call, but provider reported no usage
@@ -75,8 +75,8 @@ def test_record_phase_success_marks_token_usage_unavailable_without_any_usage_si
 
 
 def test_record_phase_success_cost_only_prediction_usage_reports_unavailable() -> None:
-    from fleet_rlm.rlm.delegation_metrics import DelegationMetrics
-    from fleet_rlm.rlm.execution_trace import record_phase_success
+    from fleet_rlm.rlm.events import record_phase_success
+    from fleet_rlm.rlm.recursion import DelegationMetrics
 
     outputs: list[dict[str, object]] = []
     phase = SimpleNamespace(set_outputs=outputs.append)
@@ -93,8 +93,8 @@ def test_record_phase_success_cost_only_prediction_usage_reports_unavailable() -
 
 
 def test_record_phase_success_marks_token_usage_observed_from_prediction_usage() -> None:
-    from fleet_rlm.rlm.delegation_metrics import DelegationMetrics
-    from fleet_rlm.rlm.execution_trace import record_phase_success
+    from fleet_rlm.rlm.events import record_phase_success
+    from fleet_rlm.rlm.recursion import DelegationMetrics
 
     outputs: list[dict[str, object]] = []
     phase = SimpleNamespace(set_outputs=outputs.append)

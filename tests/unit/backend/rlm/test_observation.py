@@ -6,8 +6,7 @@ from uuid import uuid4
 
 import pytest
 
-from fleet_rlm.rlm.events import RLMOutput, RunStarted, Status
-from fleet_rlm.rlm.observation import ObservationSession
+from fleet_rlm.rlm.events import ObservationSession, RLMOutput, RunStarted, Status
 
 
 @pytest.mark.asyncio

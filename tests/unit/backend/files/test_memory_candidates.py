@@ -20,7 +20,7 @@ from fleet_rlm.files.memory_candidates import (
     MemoryCandidateToolError,
     promote_memory_candidates,
 )
-from fleet_rlm.rlm.tool_observer import observe_tool
+from fleet_rlm.rlm.events import observe_tool
 
 
 def _collector(**kwargs: Any) -> MemoryCandidateCollector:

@@ -44,16 +44,16 @@ def _trace_value(value: object) -> object:
         object: A bounded sanitized value, the original primitive value, or the value's type name.
     """
     if isinstance(value, str):
-        from fleet_rlm.rlm.sanitize import sanitize_public_text
+        from fleet_rlm.rlm.result import sanitize_public_text
 
         return sanitize_public_text(value, max_len=trace_preview_limit())
     if isinstance(value, Mapping):
-        from fleet_rlm.rlm.sanitize import sanitize_public_value
+        from fleet_rlm.rlm.result import sanitize_public_value
 
         normalized = {str(key): _trace_value(item) for key, item in list(value.items())[:32]}
         return sanitize_public_value(normalized, max_len=trace_preview_limit())
     if isinstance(value, (list, tuple)):
-        from fleet_rlm.rlm.sanitize import sanitize_public_value
+        from fleet_rlm.rlm.result import sanitize_public_value
 
         normalized = [_trace_value(item) for item in value[:32]]
         return sanitize_public_value(normalized, max_len=trace_preview_limit())

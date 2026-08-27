@@ -92,7 +92,7 @@ def test_only_daytona_package_imports_daytona_sdk() -> None:
 
 
 def test_rlm_recursive_executor_uses_provider_neutral_child_runtime_contract() -> None:
-    path = PACKAGE_ROOT / "rlm" / "recursive_calls.py"
+    path = PACKAGE_ROOT / "rlm" / "recursion.py"
     imports = _imported_modules(ast.parse(path.read_text(encoding="utf-8")))
     assert "fleet_rlm.daytona.recursive_child_runtime" not in imports
 
@@ -102,7 +102,7 @@ def test_child_runtime_cleanup_and_authorization_errors_have_provider_neutral_id
         ChildRuntimeAuthorizationError as DaytonaAuthorizationError,
     )
     from fleet_rlm.daytona.recursive_child_runtime import ChildRuntimeCleanupError as DaytonaCleanupError
-    from fleet_rlm.rlm.child_runtime import (
+    from fleet_rlm.rlm.recursion import (
         ChildRuntimeAuthorizationError,
         ChildRuntimeCleanupError,
     )

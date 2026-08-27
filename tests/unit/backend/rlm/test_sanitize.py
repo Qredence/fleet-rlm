@@ -6,7 +6,7 @@ import pytest
 
 
 def test_declared_output_validator_accepts_identifiers_placeholders_and_security_terms() -> None:
-    from fleet_rlm.rlm.sanitize import validate_declared_public_value
+    from fleet_rlm.rlm.result import validate_declared_public_value
 
     value = {
         "answer": "API_KEY and token are security identifiers; system prompt dumps must not be returned.",
@@ -19,7 +19,7 @@ def test_declared_output_validator_accepts_identifiers_placeholders_and_security
 
 
 def test_declared_output_validator_accepts_benign_lowercase_bearer_prose() -> None:
-    from fleet_rlm.rlm.sanitize import validate_declared_public_value
+    from fleet_rlm.rlm.result import validate_declared_public_value
 
     validate_declared_public_value("Use a bearer token supplied by the caller.")
 
@@ -41,7 +41,7 @@ def test_declared_output_validator_accepts_benign_lowercase_bearer_prose() -> No
     ],
 )
 def test_declared_output_validator_rejects_private_material(value: object) -> None:
-    from fleet_rlm.rlm.sanitize import validate_declared_public_value
+    from fleet_rlm.rlm.result import validate_declared_public_value
 
     with pytest.raises(ValueError):
         validate_declared_public_value(value)

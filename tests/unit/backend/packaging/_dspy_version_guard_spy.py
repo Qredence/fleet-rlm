@@ -42,13 +42,16 @@ class _UnsettledGuardRejectionError(Exception):
 
 
 def _install_ordered_spies(order: list[str], counts: dict[str, int]) -> None:
+    import fleet_rlm.app as app_module
+    import fleet_rlm.cli as cli_module
     import fleet_rlm.composition.common as composition_common
+    import fleet_rlm.composition.daytona as composition_daytona
     import fleet_rlm.daytona.platform as daytona_platform
     import fleet_rlm.persistence.database as persistence_database
-    import fleet_rlm.rlm.dspy_contract as dspy_contract
-    import fleet_rlm.rlm.lm_factory as lm_factory
+    import fleet_rlm.rlm._dspy_compat as dspy_compat
+    import fleet_rlm.rlm.program as program
 
-    real_guard = dspy_contract.assert_dspy_version
+    real_guard = dspy_compat.assert_dspy_version
 
     def recording_guard() -> None:
         order.append("guard")
@@ -58,13 +61,16 @@ def _install_ordered_spies(order: list[str], counts: dict[str, int]) -> None:
     # ``composition.common`` binds the guard at module import time, while
     # ``composition.daytona``, ``fleet_rlm.app``, and the CLI rebind it lazily
     # at call time; patch both binding styles.
-    dspy_contract.assert_dspy_version = recording_guard
+    dspy_compat.assert_dspy_version = recording_guard
     composition_common.assert_dspy_version = recording_guard
+    composition_daytona.assert_dspy_version = recording_guard
+    app_module.assert_dspy_version = recording_guard
+    cli_module.assert_dspy_version = recording_guard
 
     seam_bindings = (
         (persistence_database, "create_async_engine_from_url", "database"),
         (daytona_platform, "build_daytona_client", "daytona"),
-        (lm_factory, "build_model_bundle", "provider"),
+        (program, "build_model_bundle", "provider"),
     )
     for module, attribute, label in seam_bindings:
 
@@ -215,9 +221,13 @@ def main(argv: list[str]) -> int:
 
     dspy.__version__ = reported_version
 
-    import fleet_rlm.rlm.dspy_contract as dspy_contract
+    import fleet_rlm.rlm._dspy_compat as dspy_compat
 
-    rejection_error_type = getattr(dspy_contract, "UncertifiedDSpyVersionError", _UnsettledGuardRejectionError)
+    rejection_error_type = getattr(
+        dspy_compat,
+        "UncertifiedDSpyVersionError",
+        _UnsettledGuardRejectionError,
+    )
 
     order: list[str] = []
     counts = {label: 0 for label in _COUNTER_LABELS}

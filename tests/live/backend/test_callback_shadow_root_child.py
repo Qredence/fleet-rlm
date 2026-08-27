@@ -24,7 +24,7 @@ from fastapi.testclient import TestClient
 from fleet_rlm.app import create_app
 from fleet_rlm.daytona import recursive_child_runtime, session_manager
 from fleet_rlm.observability.callback_shadow import CallbackRecord, CallbackShadowRecorder
-from fleet_rlm.rlm.model_bundle import RLMModelBundle
+from fleet_rlm.rlm.program import RLMModelBundle
 from tests.live.backend._database import upgrade_to_head
 from tests.live.backend.test_fleet_rlm_daytona_mvp import _live_settings
 from tests.live.backend.test_phase1_daytona_stream import _strict_cleanup

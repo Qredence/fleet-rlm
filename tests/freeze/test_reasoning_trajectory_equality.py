@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-from fleet_rlm.rlm.dspy_contract import TrajectoryStep
-from fleet_rlm.rlm.events import RLMReasoning, StepFinished, StepStarted
-from fleet_rlm.rlm.trajectory_projection import reconcile_trajectory
+from fleet_rlm.rlm.events import RLMReasoning, StepFinished, StepStarted, reconcile_trajectory
+from fleet_rlm.rlm.result import TrajectoryStep
 
 
 def test_reasoning_deltas_equal_native_trajectory_after_correction() -> None:

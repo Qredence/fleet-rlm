@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import pytest
 
-from fleet_rlm.rlm.tool_guards import RunToolGuards, workspace_obligations
+from fleet_rlm.rlm.runtime import (
+    RunToolGuards,
+    workspace_obligations,
+)
 
 
 def test_workspace_failure_is_cleared_only_by_successful_same_workspace_write() -> None:

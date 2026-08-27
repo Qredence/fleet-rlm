@@ -33,7 +33,7 @@ def test_dspy_rlm_constructor_uses_max_iters_and_caller_owned_interpreters() -> 
 def test_dspy_rlm_accepts_file_tool_names_and_fresh_custom_interpreters() -> None:
     import dspy
 
-    from fleet_rlm.rlm.signature import FleetRLMSignature
+    from fleet_rlm.rlm.program import FleetRLMSignature
 
     class Interpreter:
         pass
@@ -75,7 +75,7 @@ def test_dspy_rlm_accepts_file_tool_names_and_fresh_custom_interpreters() -> Non
 
 
 def test_pinned_json_adapter_formats_typed_inputs_and_native_rlm_action_outputs() -> None:
-    from fleet_rlm.rlm.signature import FleetRLMSignature
+    from fleet_rlm.rlm.program import FleetRLMSignature
     from tests.unit.backend.rlm.test_signature_inputs import _payload
 
     adapter = dspy.JSONAdapter(use_native_function_calling=True)

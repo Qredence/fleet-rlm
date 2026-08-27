@@ -120,7 +120,7 @@ class _SequentialActions:
 @pytest.mark.asyncio
 async def test_p43_6_custom_skill_history_preserves_structured_outputs_and_canonical_records() -> None:
     """Prove a planned custom Skill Signature can receive canonical Fleet History."""
-    from fleet_rlm.rlm.dspy_contract import CERTIFIED_DSPY_VERSION
+    from fleet_rlm.rlm._dspy_compat import CERTIFIED_DSPY_VERSION
 
     assert CERTIFIED_DSPY_VERSION == dspy.__version__ == "3.3.1"
     assert list(FleetStyleSkillHistorySignature.output_fields) == ["answer", "findings", "metrics", "anomalies"]

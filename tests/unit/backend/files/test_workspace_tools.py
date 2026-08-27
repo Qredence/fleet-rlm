@@ -9,9 +9,8 @@ import dspy
 import pytest
 
 from fleet_rlm.files.workspace_models import WorkspaceEntry, WorkspaceListResult, WorkspaceTextPage
-from fleet_rlm.rlm.events import ToolFailed, WarningEvent
-from fleet_rlm.rlm.tool_guards import RunToolGuards
-from fleet_rlm.rlm.tool_observer import observe_tool
+from fleet_rlm.rlm.events import ToolFailed, WarningEvent, observe_tool
+from fleet_rlm.rlm.runtime import RunToolGuards
 
 
 class FakeWorkspace:
@@ -460,7 +459,7 @@ def test_edit_workspace_text_conflict_and_scope_errors() -> None:
 
 def test_delete_and_edit_event_views_expose_metadata_without_fragments() -> None:
     from fleet_rlm.files.workspace_tools import WorkspaceToolHost
-    from fleet_rlm.rlm.tool_observer import observe_tool
+    from fleet_rlm.rlm.events import observe_tool
 
     workspace = FakeWorkspace()
     workspace.files["notes/private.md"] = "private fragment body"

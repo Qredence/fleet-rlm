@@ -14,7 +14,7 @@ def test_repeated_authorized_host_tool_calls_have_no_fleet_count_limit(tmp_path)
     from fleet_rlm.files.models import AttachmentRef, StagedAttachment
     from fleet_rlm.files.tools import FileToolHost
     from fleet_rlm.files.volume_paths import VolumePaths
-    from fleet_rlm.rlm.tool_observer import observe_tool
+    from fleet_rlm.rlm.events import observe_tool
     from fleet_rlm.skills.catalog import SkillCatalog
     from fleet_rlm.skills.models import SkillCard, SkillDefinition, SkillResource
     from fleet_rlm.skills.tools import SkillToolHost
@@ -220,7 +220,7 @@ async def test_live_capability_teardown_removes_drained_artifact_candidate_bytes
     from fleet_rlm.files.host_volume import HostVolumeMirror
     from fleet_rlm.files.tools import FileToolHost
     from fleet_rlm.files.volume_paths import VolumePaths
-    from fleet_rlm.rlm.context import RLMExecutionSpec
+    from fleet_rlm.rlm.runtime import RLMExecutionSpec
 
     user_id, workspace_id, session_id, run_id = uuid4(), uuid4(), uuid4(), uuid4()
     paths = VolumePaths.from_mount("/mnt/fleet")

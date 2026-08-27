@@ -7,9 +7,12 @@ import json
 
 from fleet_rlm.daytona.broker_source import extract_final_payload, remote_submit_setup_code
 from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
-from fleet_rlm.rlm.dspy_contract import RLMOptions, build_native_rlm
-from fleet_rlm.rlm.dspy_interpreter_contract import FinalOutput
-from fleet_rlm.rlm.signature import FleetRLMSignature
+from fleet_rlm.rlm._dspy_compat import FinalOutput
+from fleet_rlm.rlm.program import (
+    FleetRLMSignature,
+    RLMOptions,
+    build_native_rlm,
+)
 
 
 def test_interpreter_declares_rlm_injection_surface() -> None:

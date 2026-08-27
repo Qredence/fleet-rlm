@@ -17,9 +17,8 @@ async def test_two_sessions_execute_concurrently_with_disjoint_stream_identities
     from fleet_rlm.chat.run_preparation import PreparedRun, _PreparedRunResources
     from fleet_rlm.chat.turn_coordinator import TurnCoordinator
     from fleet_rlm.persistence.repositories import InMemoryRunStateStore, InMemorySessionCatalog
-    from fleet_rlm.rlm.dspy_contract import PredictionResult
     from fleet_rlm.rlm.events import EventRecorder, RunStarted
-    from fleet_rlm.rlm.outcome import RLMOutcome
+    from fleet_rlm.rlm.result import PredictionResult, RLMOutcome
     from fleet_rlm.sessions.models import TurnAccess, TurnInput
 
     store = InMemoryRunStateStore()

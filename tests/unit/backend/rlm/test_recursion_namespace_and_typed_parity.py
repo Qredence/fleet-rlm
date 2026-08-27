@@ -24,28 +24,30 @@ import pytest
 from fleet_rlm.chat.session_context import SessionContextManifest
 from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
 from fleet_rlm.daytona.recursive_child_runtime import ChildRuntimeLease
-from fleet_rlm.rlm.context import (
-    DelegationPolicy,
-    ExecutionRuntime,
-    RLMExecutionContext,
-    RunIdentity,
-    SessionView,
-)
-from fleet_rlm.rlm.dspy_contract import (
-    PredictionOutputError,
-    PredictionOutputTooLargeError,
+from fleet_rlm.rlm.program import (
+    RLMModelBundle,
     RLMOptions,
     build_native_rlm,
-    prediction_result,
-    rlm_termination_mode,
 )
-from fleet_rlm.rlm.model_bundle import RLMModelBundle
-from fleet_rlm.rlm.recursive_calls import (
+from fleet_rlm.rlm.recursion import (
     RecursiveRLMExecutor,
     RecursiveRLMOptions,
     RecursiveSubtaskSignature,
 )
-from fleet_rlm.rlm.runner import RLMRunner
+from fleet_rlm.rlm.result import (
+    PredictionOutputError,
+    PredictionOutputTooLargeError,
+    prediction_result,
+    rlm_termination_mode,
+)
+from fleet_rlm.rlm.runtime import (
+    DelegationPolicy,
+    ExecutionRuntime,
+    RLMExecutionContext,
+    RLMRunner,
+    RunIdentity,
+    SessionView,
+)
 from fleet_rlm.sessions.models import TurnAccess
 from tests.unit.backend.rlm.fakes import EmptyCapabilities
 
@@ -202,7 +204,7 @@ def test_val_rec_024_root_and_child_boundaries_classify_identical_output_matrix(
     """VAL-REC-024: the same output matrix run through the Root and child
     signatures yields identical accepted values and identical closed failure
     categories at the Fleet typed-result boundary."""
-    from fleet_rlm.rlm.signature import FleetRLMSignature
+    from fleet_rlm.rlm.program import FleetRLMSignature
 
     # Both boundaries declare exactly one required ``answer: str`` output.
     assert set(FleetRLMSignature.output_fields) == {"answer"}

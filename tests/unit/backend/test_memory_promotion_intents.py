@@ -227,7 +227,7 @@ async def test_completed_commit_replay_cannot_duplicate_intents() -> None:
 async def test_failed_transition_never_touches_the_outbox() -> None:
     from fleet_rlm.chat.run_claim import FailClaim
     from fleet_rlm.chat.run_lifecycle import RunFailure, _claim_failure
-    from fleet_rlm.rlm.dspy_contract import empty_rlm_usage
+    from fleet_rlm.rlm.result import empty_rlm_usage
 
     engine, factory, store, run = await _seed_store()
     try:
@@ -243,8 +243,7 @@ async def test_failed_transition_never_touches_the_outbox() -> None:
 async def test_finish_inserts_intents_through_the_lifecycle() -> None:
     from fleet_rlm.chat.run_lifecycle import RunLifecycleService
     from fleet_rlm.files.memory_candidates import build_memory_promotion_intents
-    from fleet_rlm.rlm.dspy_contract import PredictionResult
-    from fleet_rlm.rlm.outcome import RLMOutcome
+    from fleet_rlm.rlm.result import PredictionResult, RLMOutcome
 
     engine, factory, store, run = await _seed_store()
     try:
@@ -273,8 +272,7 @@ async def test_finish_inserts_intents_through_the_lifecycle() -> None:
 @pytest.mark.asyncio
 async def test_finish_without_builder_or_candidates_inserts_no_intents() -> None:
     from fleet_rlm.chat.run_lifecycle import RunLifecycleService
-    from fleet_rlm.rlm.dspy_contract import PredictionResult
-    from fleet_rlm.rlm.outcome import RLMOutcome
+    from fleet_rlm.rlm.result import PredictionResult, RLMOutcome
 
     engine, factory, store, run = await _seed_store()
     try:

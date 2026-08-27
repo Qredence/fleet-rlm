@@ -31,7 +31,7 @@ from fleet_rlm.daytona.dspy_sync_bridge import (
 from fleet_rlm.daytona.errors import DaytonaAdapterError
 from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, sandbox_backend
 from fleet_rlm.daytona.session_manager import DaytonaAdmission, DaytonaAdmissionPermit
-from fleet_rlm.rlm.child_runtime import ChildRuntimeCleanupError
+from fleet_rlm.rlm.recursion import ChildRuntimeCleanupError
 
 _DEADLOCK_BOUND_S = 5.0
 _POLL_BOUND_S = 0.5

@@ -18,7 +18,7 @@ from fleet_rlm.files.memory_models import (
     WorkspaceMemoryStoreUnavailableError,
     workspace_memory_record_id,
 )
-from fleet_rlm.rlm.tool_observer import observe_tool
+from fleet_rlm.rlm.events import observe_tool
 
 STAMP = datetime(2026, 7, 27, 11, 14, 5, tzinfo=UTC)
 # Deterministic golden v2 record for STAMP + "User Preference"; id =

@@ -22,9 +22,8 @@ from fleet_rlm.chat.run_lifecycle import ClaimedRun, _RunClaimToken
 from fleet_rlm.composition.inventory import RuntimeInventory
 from fleet_rlm.config import Settings
 from fleet_rlm.files.models import AttachmentRef, PreparedAttachments, StagedAttachment
-from fleet_rlm.rlm.dspy_contract import RLMOptions
 from fleet_rlm.rlm.events import EventRecorder, RuntimeEvent
-from fleet_rlm.rlm.model_bundle import RLMModelBundle
+from fleet_rlm.rlm.program import RLMModelBundle, RLMOptions
 from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
 from fleet_rlm.skills.catalog import SkillCatalog, build_bundled_skill_catalog, stable_skill_id
 from fleet_rlm.skills.errors import InvalidSkillSelectionError
@@ -327,7 +326,7 @@ async def test_data_analysis_signature_and_report_builder_selection_use_host_too
 @pytest.mark.asyncio
 async def test_deterministic_composition_runs_data_analysis_signature() -> None:
     from fleet_rlm.composition.testing import DeterministicTurnPreparation, TestingRLMFactory
-    from fleet_rlm.rlm.runner import RLMRunner
+    from fleet_rlm.rlm.runtime import RLMRunner
 
     class NoAttachments:
         async def prepare_run(self, access, attachment_ids, run, sink) -> PreparedAttachments:

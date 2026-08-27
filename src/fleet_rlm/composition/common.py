@@ -15,9 +15,10 @@ from fleet_rlm.composition.inventory import RuntimeDatabaseLifecycle, RuntimeInv
 from fleet_rlm.config import Settings
 from fleet_rlm.files.lifecycle import AttachmentLifecycle
 from fleet_rlm.files.volume_storage import VolumeTreeFs
-from fleet_rlm.rlm.dspy_contract import RLMOptions, assert_dspy_version
-from fleet_rlm.rlm.recursive_calls import RecursiveRLMOptions
-from fleet_rlm.rlm.runner import RLMFactoryLike
+from fleet_rlm.rlm._dspy_compat import assert_dspy_version
+from fleet_rlm.rlm.program import RLMOptions
+from fleet_rlm.rlm.recursion import RecursiveRLMOptions
+from fleet_rlm.rlm.runtime import RLMFactoryLike
 from fleet_rlm.rlm.session_runtime import SessionRLMRegistry
 
 
@@ -148,7 +149,7 @@ def build_local_inventory(
         SqlAlchemyRunStateStore,
         SqlAlchemySessionCatalog,
     )
-    from fleet_rlm.rlm.runner import RLMRunner
+    from fleet_rlm.rlm.runtime import RLMRunner
 
     session_factory = database.session_factory
     if session_factory is None:

@@ -5,7 +5,7 @@ from __future__ import annotations
 import dspy
 import pytest
 
-from fleet_rlm.rlm.session_tools import (
+from fleet_rlm.rlm.session_runtime import (
     SessionToolAuthorizationError,
     SessionToolProxyFactory,
     SessionToolRegistry,

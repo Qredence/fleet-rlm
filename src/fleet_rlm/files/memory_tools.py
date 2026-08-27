@@ -27,8 +27,7 @@ from fleet_rlm.files.memory_models import (
     normalize_workspace_memory_id,
     parse_workspace_memory_lines,
 )
-from fleet_rlm.rlm.events import JsonValue
-from fleet_rlm.rlm.tool_observer import ToolEventView, bound_event_text
+from fleet_rlm.rlm.events import JsonValue, ToolEventView, bound_event_text
 
 WORKSPACE_MEMORY_NAMESPACE = "workspace_memory"
 _LIST_MEMORIES_DEFAULT_LIMIT = 50

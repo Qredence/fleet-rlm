@@ -30,7 +30,7 @@ def host_echo(value: str = "ok") -> str:
 
 
 def test_model_bundle_keeps_root_and_sub_roles_distinct() -> None:
-    from fleet_rlm.rlm.model_bundle import RLMModelBundle
+    from fleet_rlm.rlm.program import RLMModelBundle
 
     root = MagicMock(name="root_lm")
     sub = MagicMock(name="sub_lm")
@@ -43,8 +43,8 @@ def test_model_bundle_keeps_root_and_sub_roles_distinct() -> None:
 
 
 def test_model_bundle_rejects_missing_roles() -> None:
-    from fleet_rlm.rlm.errors import RLMModelBundleError
-    from fleet_rlm.rlm.model_bundle import RLMModelBundle
+    from fleet_rlm.rlm.program import RLMModelBundle
+    from fleet_rlm.rlm.result import RLMModelBundleError
 
     with pytest.raises(RLMModelBundleError):
         RLMModelBundle(root_lm=None, sub_lm=MagicMock())  # type: ignore[arg-type]
@@ -55,7 +55,7 @@ def test_model_bundle_rejects_missing_roles() -> None:
 def test_model_bundle_forks_isolated_deadline_bound_child_lms() -> None:
     import time
 
-    from fleet_rlm.rlm.model_bundle import RLMModelBundle
+    from fleet_rlm.rlm.program import RLMModelBundle
 
     root = _CopyableLM()
     sub = _CopyableLM()
@@ -82,7 +82,7 @@ def test_model_bundle_forks_isolated_deadline_bound_child_lms() -> None:
 def test_model_bundle_child_lm_rejects_calls_after_turn_deadline() -> None:
     import time
 
-    from fleet_rlm.rlm.model_bundle import RLMModelBundle
+    from fleet_rlm.rlm.program import RLMModelBundle
 
     child = RLMModelBundle(_CopyableLM(), _CopyableLM()).fork_for_child(deadline=time.monotonic() - 1)
 
@@ -91,8 +91,8 @@ def test_model_bundle_child_lm_rejects_calls_after_turn_deadline() -> None:
 
 
 def test_invalid_options_fail_before_construction() -> None:
-    from fleet_rlm.rlm.dspy_contract import RLMOptions
-    from fleet_rlm.rlm.errors import RLMConfigError
+    from fleet_rlm.rlm.program import RLMOptions
+    from fleet_rlm.rlm.result import RLMConfigError
 
     with pytest.raises(RLMConfigError):
         RLMOptions(max_iters=0)
@@ -105,10 +105,7 @@ def test_invalid_options_fail_before_construction() -> None:
 def test_factory_passes_explicit_constructor_kwargs() -> None:
     import dspy
 
-    from fleet_rlm.rlm.dspy_contract import RLMOptions
-    from fleet_rlm.rlm.factory import RLMFactory
-    from fleet_rlm.rlm.model_bundle import RLMModelBundle
-    from fleet_rlm.rlm.signature import FleetRLMSignature
+    from fleet_rlm.rlm.program import FleetRLMSignature, RLMFactory, RLMModelBundle, RLMOptions
 
     root = MagicMock(name="root_lm")
     sub = MagicMock(name="sub_lm")
@@ -141,9 +138,7 @@ def test_factory_passes_explicit_constructor_kwargs() -> None:
 
 
 def test_each_factory_call_returns_new_rlm_instance() -> None:
-    from fleet_rlm.rlm.dspy_contract import RLMOptions
-    from fleet_rlm.rlm.factory import RLMFactory
-    from fleet_rlm.rlm.model_bundle import RLMModelBundle
+    from fleet_rlm.rlm.program import RLMFactory, RLMModelBundle, RLMOptions
 
     factory = RLMFactory()
     models = RLMModelBundle(root_lm=MagicMock(), sub_lm=MagicMock())
@@ -155,9 +150,7 @@ def test_each_factory_call_returns_new_rlm_instance() -> None:
 
 
 def test_factory_accepts_policy_controlled_host_verbosity() -> None:
-    from fleet_rlm.rlm.dspy_contract import RLMOptions
-    from fleet_rlm.rlm.factory import RLMFactory
-    from fleet_rlm.rlm.model_bundle import RLMModelBundle
+    from fleet_rlm.rlm.program import RLMFactory, RLMModelBundle, RLMOptions
 
     rlm = RLMFactory(verbose=False).create(
         models=RLMModelBundle(root_lm=MagicMock(), sub_lm=MagicMock()),
@@ -175,7 +168,7 @@ def test_dspy_contract_is_only_native_dspy_rlm_call_site_in_rlm_package() -> Non
     rlm_dir = Path(__file__).resolve().parents[3] / "src" / "fleet_rlm" / "rlm"
     offenders: list[str] = []
     for path in sorted(rlm_dir.glob("*.py")):
-        if path.name == "dspy_contract.py":
+        if path.name in ("dspy_contract.py", "program.py"):
             continue
         tree = ast.parse(path.read_text(encoding="utf-8"))
         for node in ast.walk(tree):
@@ -195,7 +188,7 @@ def test_dspy_primitives_imports_are_confined_to_interpreter_contract() -> None:
     from pathlib import Path
 
     src_root = Path(__file__).resolve().parents[3] / "src" / "fleet_rlm"
-    allowed = {"rlm/dspy_interpreter_contract.py"}
+    allowed = {"rlm/dspy_interpreter_contract.py", "rlm/_dspy_compat.py"}
     offenders: list[str] = []
     for path in sorted(src_root.rglob("*.py")):
         rel = path.relative_to(src_root).as_posix()

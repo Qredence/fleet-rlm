@@ -140,7 +140,7 @@ class _OneAction:
 @pytest.mark.asyncio
 async def test_p43_history_repl_variable_reuse_and_per_call_resets() -> None:
     """Prove the P43 in-process facts against the literal certified release."""
-    from fleet_rlm.rlm.dspy_contract import CERTIFIED_DSPY_VERSION
+    from fleet_rlm.rlm._dspy_compat import CERTIFIED_DSPY_VERSION
 
     assert CERTIFIED_DSPY_VERSION == dspy.__version__ == "3.3.1"
     first_messages = [

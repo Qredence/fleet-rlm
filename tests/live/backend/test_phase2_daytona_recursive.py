@@ -20,8 +20,8 @@ from fastapi.testclient import TestClient
 from fleet_rlm.app import create_app
 from fleet_rlm.config import FleetConfigurationError, Settings, active_profile, require_live_execution
 from fleet_rlm.daytona import recursive_child_runtime
-from fleet_rlm.rlm.lm_factory import has_llm_credentials
-from fleet_rlm.rlm.tool_observer import ToolEventView
+from fleet_rlm.rlm.events import ToolEventView
+from fleet_rlm.rlm.program import has_llm_credentials
 from tests.live.backend._database import upgrade_to_head
 from tests.live.backend.test_phase1_daytona_stream import _strict_cleanup
 

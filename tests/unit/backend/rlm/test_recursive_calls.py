@@ -15,10 +15,10 @@ from fleet_rlm.chat.run_authority import RunAuthority
 from fleet_rlm.daytona.http_broker import DaytonaHttpToolBroker
 from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
 from fleet_rlm.daytona.recursive_child_runtime import ChildRuntimeLease
-from fleet_rlm.rlm.child_runtime import ChildRuntimeCleanupError
 from fleet_rlm.rlm.events import Status, ToolCompleted, ToolFailed, ToolStarted
-from fleet_rlm.rlm.model_bundle import RLMModelBundle
-from fleet_rlm.rlm.recursive_calls import (
+from fleet_rlm.rlm.program import RLMModelBundle
+from fleet_rlm.rlm.recursion import (
+    ChildRuntimeCleanupError,
     RecursiveBatchError,
     RecursiveRLMExecutor,
     RecursiveRLMOptions,
@@ -258,7 +258,7 @@ def test_recursive_batched_tool_preserves_order_and_bounds_child_concurrency() -
 def test_recursive_batch_starts_each_trace_span_in_its_worker(monkeypatch: pytest.MonkeyPatch) -> None:
     import threading
 
-    import fleet_rlm.rlm.recursive_calls as recursive_calls
+    import fleet_rlm.rlm.recursion as recursive_calls
 
     parent_thread = threading.get_ident()
     span_threads: list[int] = []
@@ -291,7 +291,7 @@ def test_recursive_batch_join_stops_at_turn_deadline_and_worker_retains_lease(
 ) -> None:
     import threading
 
-    import fleet_rlm.rlm.recursive_calls as recursive_calls
+    import fleet_rlm.rlm.recursion as recursive_calls
 
     release = threading.Event()
     started = threading.Event()
@@ -527,7 +527,7 @@ def test_rlm_query_wrapper_forwards_kwargs_only(monkeypatch: pytest.MonkeyPatch)
 
 
 def test_recursive_child_receives_only_rlm_query_again(monkeypatch: pytest.MonkeyPatch) -> None:
-    import fleet_rlm.rlm.recursive_calls as recursive_calls
+    import fleet_rlm.rlm.recursion as recursive_calls
 
     captured: list[dict[str, object]] = []
 
@@ -552,7 +552,7 @@ def test_recursive_child_receives_only_rlm_query_again(monkeypatch: pytest.Monke
 def test_recursive_batch_preserves_order_when_workers_finish_out_of_order(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import fleet_rlm.rlm.recursive_calls as recursive_calls
+    import fleet_rlm.rlm.recursion as recursive_calls
 
     adapter = dspy.JSONAdapter()
     root = dspy.utils.DummyLM([{"answer": "unused"}], adapter=adapter)
@@ -599,8 +599,8 @@ def test_recursive_batch_preserves_order_when_workers_finish_out_of_order(
 def test_recursive_batch_wraps_failure_when_all_children_are_done(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import fleet_rlm.rlm.recursive_batch as recursive_batch
-    import fleet_rlm.rlm.recursive_calls as recursive_calls
+    import fleet_rlm.rlm.recursion as recursive_batch
+    import fleet_rlm.rlm.recursion as recursive_calls
 
     adapter = dspy.JSONAdapter()
     root = dspy.utils.DummyLM([{"answer": "unused"}], adapter=adapter)
@@ -651,7 +651,7 @@ def test_recursive_batch_wraps_failure_when_all_children_are_done(
 def test_recursive_batch_failure_returns_before_running_sibling_and_cleanup_waits(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import fleet_rlm.rlm.recursive_calls as recursive_calls
+    import fleet_rlm.rlm.recursion as recursive_calls
 
     adapter = dspy.JSONAdapter()
     root = dspy.utils.DummyLM([{"answer": "unused"}], adapter=adapter)
@@ -719,8 +719,8 @@ def test_recursive_batch_failure_returns_before_running_sibling_and_cleanup_wait
 def test_recursive_batch_submit_failure_retains_already_submitted_worker(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import fleet_rlm.rlm.recursive_batch as recursive_batch
-    import fleet_rlm.rlm.recursive_calls as recursive_calls
+    import fleet_rlm.rlm.recursion as recursive_batch
+    import fleet_rlm.rlm.recursion as recursive_calls
 
     release = threading.Event()
     started = threading.Event()
@@ -793,7 +793,7 @@ def test_recursive_batch_submit_failure_retains_already_submitted_worker(
 def test_executor_wait_owned_times_out_when_child_worker_never_completes(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import fleet_rlm.rlm.recursive_calls as recursive_calls
+    import fleet_rlm.rlm.recursion as recursive_calls
 
     adapter = dspy.JSONAdapter()
     executor = RecursiveRLMExecutor(
@@ -824,8 +824,8 @@ def test_executor_wait_owned_times_out_when_child_worker_never_completes(
 def test_recursive_batch_cancels_queued_children_before_they_acquire_a_lease(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import fleet_rlm.rlm.recursive_batch as recursive_batch
-    import fleet_rlm.rlm.recursive_calls as recursive_calls
+    import fleet_rlm.rlm.recursion as recursive_batch
+    import fleet_rlm.rlm.recursion as recursive_calls
 
     adapter = dspy.JSONAdapter()
     root = dspy.utils.DummyLM([{"answer": "unused"}], adapter=adapter)

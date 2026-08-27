@@ -11,7 +11,7 @@ import pytest
 
 from fleet_rlm.daytona.errors import DaytonaAdapterError, ProviderRequestError
 from fleet_rlm.daytona.interpreter import BackendExecutionResult, DaytonaCodeInterpreter
-from fleet_rlm.rlm.errors import RunNoProgressError
+from fleet_rlm.rlm.result import RunNoProgressError
 
 
 class _ScriptBackend:
@@ -264,7 +264,7 @@ def test_repair_text_is_bounded_and_safe_for_native_context() -> None:
 
 def test_provider_failure_trace_keeps_category_but_not_private_message(monkeypatch: pytest.MonkeyPatch) -> None:
     from fleet_rlm.observability import turn_tracing
-    from fleet_rlm.rlm.dspy_contract import _RLMTraceCallback
+    from fleet_rlm.rlm._dspy_compat import _RLMTraceCallback
 
     captured: dict[str, object] = {}
 

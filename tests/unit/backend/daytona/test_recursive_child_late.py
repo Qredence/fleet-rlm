@@ -8,7 +8,7 @@ from threading import Event
 import pytest
 
 from fleet_rlm.daytona import recursive_child_runtime
-from fleet_rlm.rlm.child_runtime import ChildRuntimeCleanupError
+from fleet_rlm.rlm.recursion import ChildRuntimeCleanupError
 
 
 def test_thread_start_failure_dispatches_cleanup_without_loop_thread_close(

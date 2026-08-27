@@ -46,12 +46,8 @@ async def test_in_process_turn_preparation_forwards_dspy_history_identity_to_rlm
 
     from fleet_rlm.chat.run_preparation import DefaultRunPreparer, RunEnvironment
     from fleet_rlm.files.models import PreparedAttachments
-    from fleet_rlm.rlm.context import (
-        RLMExecutionSpec,
-    )
-    from fleet_rlm.rlm.dspy_contract import RLMOptions
-    from fleet_rlm.rlm.model_bundle import RLMModelBundle
-    from fleet_rlm.rlm.runner import RLMRunner
+    from fleet_rlm.rlm.program import RLMModelBundle, RLMOptions
+    from fleet_rlm.rlm.runtime import RLMExecutionSpec, RLMRunner
     from fleet_rlm.sessions.models import HistoryMessage
 
     history_messages = (
@@ -174,9 +170,8 @@ async def test_in_process_turn_preparation_passes_empty_history_for_fresh_sessio
 
     from fleet_rlm.chat.run_preparation import DefaultRunPreparer, RunEnvironment
     from fleet_rlm.files.models import PreparedAttachments
-    from fleet_rlm.rlm.context import RLMExecutionSpec
-    from fleet_rlm.rlm.dspy_contract import RLMOptions
-    from fleet_rlm.rlm.model_bundle import RLMModelBundle
+    from fleet_rlm.rlm.program import RLMModelBundle, RLMOptions
+    from fleet_rlm.rlm.runtime import RLMExecutionSpec
 
     claim = _make_claim(history_messages=())
 
@@ -260,10 +255,8 @@ async def test_daytona_preparation_forwards_sandbox_history_transport_to_rlm() -
     from fleet_rlm.chat.run_preparation import DefaultRunPreparer, RunEnvironment
     from fleet_rlm.daytona.run_environment import build_committed_session_history_for_claim
     from fleet_rlm.files.models import PreparedAttachments
-    from fleet_rlm.rlm.context import RLMExecutionSpec
-    from fleet_rlm.rlm.dspy_contract import RLMOptions
-    from fleet_rlm.rlm.model_bundle import RLMModelBundle
-    from fleet_rlm.rlm.runner import RLMRunner
+    from fleet_rlm.rlm.program import RLMModelBundle, RLMOptions
+    from fleet_rlm.rlm.runtime import RLMExecutionSpec, RLMRunner
 
     claim = _make_claim(
         history_messages=(

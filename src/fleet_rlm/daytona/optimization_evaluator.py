@@ -21,12 +21,11 @@ from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, sandbox_backen
 from fleet_rlm.daytona.provisioning import DaytonaSandboxSpec
 from fleet_rlm.optimization.curated_input import CuratedEvaluationStore
 from fleet_rlm.optimization.evidence import ValidatedStrictDaytonaProof
-from fleet_rlm.rlm.dspy_contract import (
+from fleet_rlm.rlm.program import RLMOptions, build_native_rlm
+from fleet_rlm.rlm.result import (
     PredictionOutputError,
     PredictionResult,
-    RLMOptions,
     RLMUsage,
-    build_native_rlm,
     observed_usage,
     prediction_result,
     rlm_termination_mode,

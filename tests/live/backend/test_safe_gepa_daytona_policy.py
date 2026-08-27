@@ -34,7 +34,7 @@ from fleet_rlm.optimization.evidence import (
     write_development_daytona_canary_report,
 )
 from fleet_rlm.optimization.types import OptimizationRecord
-from fleet_rlm.rlm.dspy_interpreter_contract import is_final_output
+from fleet_rlm.rlm._dspy_compat import is_final_output
 
 _LIVE_VALUES = frozenset({"1", "true", "yes"})
 _PROBE_TIMEOUT_SECONDS = 20

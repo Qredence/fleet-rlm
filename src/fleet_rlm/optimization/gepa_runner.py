@@ -21,8 +21,7 @@ from typing import Any
 from fleet_rlm.optimization.dataset import OptimizationDatasetError, load_export, split_records
 from fleet_rlm.optimization.evidence import EvidenceStore
 from fleet_rlm.optimization.mlflow_observability import development_gepa_trace
-from fleet_rlm.rlm.lm_factory import LMTier, build_lm_for_tier
-from fleet_rlm.rlm.signature import FleetRLMSignature
+from fleet_rlm.rlm.program import FleetRLMSignature, LMTier, build_lm_for_tier
 
 _DEVELOPMENT_SCHEMA = "fleet.development-gepa-smoke/v1"
 _LIVE_VALUES = frozenset({"1", "true", "yes"})

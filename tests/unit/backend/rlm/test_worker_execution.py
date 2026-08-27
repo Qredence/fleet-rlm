@@ -10,8 +10,11 @@ from typing import cast
 
 import pytest
 
-from fleet_rlm.rlm.context import RLMExecutionContext
-from fleet_rlm.rlm.worker_execution import WorkerOwnership, start_rlm_worker
+from fleet_rlm.rlm.runtime import (
+    RLMExecutionContext,
+    WorkerOwnership,
+    start_rlm_worker,
+)
 
 
 @pytest.mark.asyncio

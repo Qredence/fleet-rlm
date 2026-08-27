@@ -37,11 +37,9 @@ from fleet_rlm.config import Settings
 from fleet_rlm.files.lifecycle import AttachmentLifecycle
 from fleet_rlm.files.models import PreparedAttachments
 from fleet_rlm.files.workspace_models import UNAVAILABLE_WORKSPACE_CAPABILITY
-from fleet_rlm.rlm.dspy_contract import RLMOptions
-from fleet_rlm.rlm.model_bundle import RLMModelBundle
-from fleet_rlm.rlm.recursive_calls import RecursiveRLMOptions
+from fleet_rlm.rlm.program import FleetRLMSignature, RLMModelBundle, RLMOptions
+from fleet_rlm.rlm.recursion import RecursiveRLMOptions
 from fleet_rlm.rlm.session_runtime import SessionRLMRegistry
-from fleet_rlm.rlm.signature import FleetRLMSignature
 from fleet_rlm.skills.catalog import SkillCatalog, build_bundled_skill_catalog
 
 

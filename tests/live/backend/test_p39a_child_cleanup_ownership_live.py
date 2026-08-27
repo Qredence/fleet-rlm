@@ -37,8 +37,8 @@ from fleet_rlm.config import Settings
 from fleet_rlm.daytona import recursive_child_runtime
 from fleet_rlm.daytona.sandbox_lease import SandboxLeaseReceipt
 from fleet_rlm.daytona.session_manager import get_active_lease_registry
-from fleet_rlm.rlm.child_runtime import ChildRuntimeCleanupError
-from fleet_rlm.rlm.model_bundle import RLMModelBundle
+from fleet_rlm.rlm.program import RLMModelBundle
+from fleet_rlm.rlm.recursion import ChildRuntimeCleanupError
 from tests.live.backend._database import upgrade_to_head
 from tests.live.backend._p35d_evidence import candidate_identity
 from tests.live.backend.test_fleet_rlm_daytona_mvp import _live_settings

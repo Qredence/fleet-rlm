@@ -16,11 +16,14 @@ from typing import Any, Literal, cast
 
 import dspy
 
-from fleet_rlm.rlm.dspy_contract import RLMOptions, _RLMTraceCallback, build_native_rlm
+from fleet_rlm.rlm._dspy_compat import _RLMTraceCallback
 from fleet_rlm.rlm.events import ObservationDetail, ToolCompleted, ToolFailed, ToolStarted
-from fleet_rlm.rlm.model_bundle import RLMModelBundle
-from fleet_rlm.rlm.recursive_calls import RecursiveCallSummary, RecursiveRLMExecutor, RecursiveRLMOptions
-from fleet_rlm.rlm.signature import root_signature_for_recursion
+from fleet_rlm.rlm.program import RLMModelBundle, RLMOptions, build_native_rlm, root_signature_for_recursion
+from fleet_rlm.rlm.recursion import (
+    RecursiveCallSummary,
+    RecursiveRLMExecutor,
+    RecursiveRLMOptions,
+)
 
 RoutingClass = Literal[
     "python_native",

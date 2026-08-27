@@ -40,7 +40,7 @@ async def test_sql_failure_code_is_typed_cause_not_public_message() -> None:
     from fleet_rlm.persistence.database import create_async_engine_from_url, create_session_factory, create_tables
     from fleet_rlm.persistence.models import RunRow, SessionRow, UserRow, WorkspaceRow
     from fleet_rlm.persistence.repositories.turns import SqlAlchemyRunStateStore
-    from fleet_rlm.rlm.dspy_contract import empty_rlm_usage
+    from fleet_rlm.rlm.result import empty_rlm_usage
     from fleet_rlm.sessions.models import TurnAccess, TurnInput
 
     engine = create_async_engine_from_url("sqlite+aiosqlite:///:memory:")
@@ -97,7 +97,7 @@ async def test_sql_revoke_completion_uses_policy_terminal_intent() -> None:
     from fleet_rlm.persistence.database import create_async_engine_from_url, create_session_factory, create_tables
     from fleet_rlm.persistence.models import RunRow, SessionRow, UserRow, WorkspaceRow
     from fleet_rlm.persistence.repositories.turns import SqlAlchemyRunStateStore
-    from fleet_rlm.rlm.dspy_contract import empty_rlm_usage
+    from fleet_rlm.rlm.result import empty_rlm_usage
     from fleet_rlm.sessions.models import TurnAccess, TurnInput
 
     engine = create_async_engine_from_url("sqlite+aiosqlite:///:memory:")
@@ -498,7 +498,7 @@ async def test_reconcile_retries_failed_settling_fence_without_losing_intent() -
     from fleet_rlm.persistence.database import create_async_engine_from_url, create_session_factory, create_tables
     from fleet_rlm.persistence.models import RunRow, SessionRow, UserRow, WorkspaceRow
     from fleet_rlm.persistence.repositories.turns import SqlAlchemyRunStateStore
-    from fleet_rlm.rlm.dspy_contract import empty_rlm_usage
+    from fleet_rlm.rlm.result import empty_rlm_usage
     from fleet_rlm.sessions.models import TurnAccess, TurnInput
 
     engine = create_async_engine_from_url("sqlite+aiosqlite:///:memory:")
@@ -749,7 +749,7 @@ async def test_sql_cancelled_settlement_persists_bounded_tombstone_rows() -> Non
     from fleet_rlm.persistence.models import RunRow, SessionRow, TurnRow, UserRow, WorkspaceRow
     from fleet_rlm.persistence.repositories.session_catalog import SqlAlchemySessionCatalog
     from fleet_rlm.persistence.repositories.turns import SqlAlchemyRunStateStore
-    from fleet_rlm.rlm.dspy_contract import empty_rlm_usage
+    from fleet_rlm.rlm.result import empty_rlm_usage
     from fleet_rlm.sessions.catalog import SequenceCursor
     from fleet_rlm.sessions.models import TurnAccess, TurnInput
 

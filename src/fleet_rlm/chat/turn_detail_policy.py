@@ -8,7 +8,6 @@ from typing import Any
 
 from fleet_rlm.artifacts.models import ArtifactRef
 from fleet_rlm.observability.turn_tracing import current_turn_trace_id
-from fleet_rlm.rlm.dspy_contract import RLMUsage
 from fleet_rlm.rlm.events import (
     AttachmentRead,
     RLMCode,
@@ -23,7 +22,7 @@ from fleet_rlm.rlm.events import (
     ToolStarted,
     WarningEvent,
 )
-from fleet_rlm.rlm.outcome import RLMOutcome
+from fleet_rlm.rlm.result import RLMOutcome, RLMUsage
 from fleet_rlm.sessions.committed_turn import (
     ArtifactPart,
     AttachmentPart,

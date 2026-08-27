@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import dspy
 
-from fleet_rlm.rlm.dspy_contract import prediction_result
+from fleet_rlm.rlm.result import prediction_result
 from fleet_rlm.skills.signatures import DataAnalysisSignature
 
 
@@ -28,7 +28,7 @@ def test_custom_signature_outputs_are_validated_with_skill_schema_identity() -> 
 
 
 def test_default_signature_schema_remains_fleet_default() -> None:
-    from fleet_rlm.rlm.signature import FleetRLMSignature
+    from fleet_rlm.rlm.program import FleetRLMSignature
 
     result = prediction_result(SimpleNamespace(answer="done"), FleetRLMSignature)
     assert (result.schema_id, result.schema_version) == ("fleet.default", "1")

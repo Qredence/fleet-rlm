@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import dspy
 
-from fleet_rlm.rlm.signature import FleetRLMSignature, root_signature_for_recursion
+from fleet_rlm.rlm.program import FleetRLMSignature, root_signature_for_recursion
 from fleet_rlm.skills.catalog import SkillCatalog
 from fleet_rlm.skills.errors import InvalidSkillSelectionError
 from fleet_rlm.skills.models import ResolvedSkills, SkillSelectionRef

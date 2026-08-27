@@ -21,8 +21,7 @@ from fleet_rlm.chat.run_lifecycle import (
     RunLifecycleService,
     _RunClaimToken,
 )
-from fleet_rlm.rlm.dspy_contract import PredictionResult
-from fleet_rlm.rlm.outcome import RLMOutcome
+from fleet_rlm.rlm.result import PredictionResult, RLMOutcome
 from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
 
 
@@ -369,7 +368,7 @@ async def test_settle_emits_claim_transition_span_with_command_name(
 ) -> None:
     del fleet_trace_active
     from fleet_rlm.chat.run_lifecycle import RunFailure
-    from fleet_rlm.rlm.dspy_contract import empty_rlm_usage
+    from fleet_rlm.rlm.result import empty_rlm_usage
 
     calls = _install_fake_mlflow(monkeypatch)
     turn, _access = _make_turn()

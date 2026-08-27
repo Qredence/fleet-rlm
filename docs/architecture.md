@@ -39,7 +39,7 @@ Pydantic DTOs; conversion and JSON serialization happen once immediately before
 native `await rlm.acall(interpreter, **named_inputs)`. Custom Skill Signatures
 retain their existing JSON-compatible common input annotations.
 
-`rlm/instructions.py` owns the default Fleet Root instruction fragments. Base,
+`rlm/program.py` owns the default Fleet Root instruction fragments. Base,
 REPL, tool, optional recursion, verification, and bounded-context guidance are
 composed directly; disabling recursion no longer deletes text from one large
 monolithic Signature docstring.

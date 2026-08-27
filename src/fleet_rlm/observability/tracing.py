@@ -115,7 +115,7 @@ def _normalize_trace_key(key: str | None) -> str:
 
 def trace_content_preview(value: object) -> str:
     """Return a readable, bounded preview for MLflow trace-level metadata."""
-    from fleet_rlm.rlm.sanitize import sanitize_public_text
+    from fleet_rlm.rlm.result import sanitize_public_text
 
     return sanitize_public_text(str(value or ""), max_len=_TRACE_CONTENT_MAX_CHARS)
 
@@ -152,7 +152,7 @@ def _sanitize_mlflow_value(
             for item in list(value)[:50]
         ]
     if isinstance(value, str):
-        from fleet_rlm.rlm.sanitize import sanitize_public_text
+        from fleet_rlm.rlm.result import sanitize_public_text
 
         if normalized_key in _OPERATIONAL_TEXT_KEYS:
             return sanitize_public_text(value, max_len=256)

@@ -12,7 +12,7 @@ from pydantic import ValidationError
 
 from fleet_rlm.json_types import JsonScalar as JsonScalar
 from fleet_rlm.json_types import JsonValue as JsonValue
-from fleet_rlm.rlm.dspy_contract import RLMUsage, validate_rlm_usage
+from fleet_rlm.rlm.result import RLMUsage, validate_rlm_usage
 
 
 class CommittedTurnValidationError(ValueError):

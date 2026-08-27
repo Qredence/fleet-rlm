@@ -12,19 +12,17 @@ from fleet_rlm.chat.run_authority import RunAuthority
 from fleet_rlm.chat.session_context import SessionContextManifest
 from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
 from fleet_rlm.daytona.recursive_child_runtime import ChildRuntimeLease
-from fleet_rlm.rlm.context import (
+from fleet_rlm.rlm.events import Status, ToolCompleted, ToolStarted
+from fleet_rlm.rlm.program import RLMFactory, RLMModelBundle, RLMOptions
+from fleet_rlm.rlm.recursion import RecursiveRLMOptions
+from fleet_rlm.rlm.runtime import (
     DelegationPolicy,
     ExecutionRuntime,
     RLMExecutionContext,
+    RLMRunner,
     RunIdentity,
     SessionView,
 )
-from fleet_rlm.rlm.dspy_contract import RLMOptions
-from fleet_rlm.rlm.events import Status, ToolCompleted, ToolStarted
-from fleet_rlm.rlm.factory import RLMFactory
-from fleet_rlm.rlm.model_bundle import RLMModelBundle
-from fleet_rlm.rlm.recursive_calls import RecursiveRLMOptions
-from fleet_rlm.rlm.runner import RLMRunner
 from fleet_rlm.sessions.models import TurnAccess
 from tests.unit.backend.rlm.fakes import EmptyCapabilities
 
@@ -336,7 +334,7 @@ async def test_runner_wait_owned_retains_pending_recursive_workers_until_child_l
             release_child.wait(2)
             return dspy.Prediction(answer="late", trajectory=[])
 
-    import fleet_rlm.rlm.recursive_calls as recursive_calls
+    import fleet_rlm.rlm.recursion as recursive_calls
 
     monkeypatch.setattr(recursive_calls, "build_native_rlm", lambda **_kwargs: BlockingChild())
 

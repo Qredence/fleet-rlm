@@ -15,8 +15,12 @@ import pytest
 
 @pytest.mark.asyncio
 async def test_detail_relay_keeps_1024_ordinary_events_and_lifecycle_details() -> None:
-    from fleet_rlm.rlm.events import RLMOutput, SkillLoaded
-    from fleet_rlm.rlm.observation import MAX_DETAIL_EVENTS, DetailRelay
+    from fleet_rlm.rlm.events import (
+        MAX_DETAIL_EVENTS,
+        DetailRelay,
+        RLMOutput,
+        SkillLoaded,
+    )
 
     relay = DetailRelay()
     for index in range(MAX_DETAIL_EVENTS):
@@ -33,8 +37,7 @@ async def test_detail_relay_keeps_1024_ordinary_events_and_lifecycle_details() -
 
 @pytest.mark.asyncio
 async def test_detail_relay_retains_step_lifecycle_when_ordinary_queue_is_full() -> None:
-    from fleet_rlm.rlm.events import RLMOutput, StepFinished, StepStarted
-    from fleet_rlm.rlm.observation import DetailRelay
+    from fleet_rlm.rlm.events import DetailRelay, RLMOutput, StepFinished, StepStarted
 
     relay = DetailRelay(maxsize=1)
     relay.publish(RLMOutput("queued", 1))
@@ -50,14 +53,14 @@ async def test_detail_relay_retains_step_lifecycle_when_ordinary_queue_is_full()
 @pytest.mark.asyncio
 async def test_runner_uses_native_path_for_plain_greeting() -> None:
     from fleet_rlm.chat.session_context import SessionContextManifest
-    from fleet_rlm.rlm.context import (
+    from fleet_rlm.rlm.program import RLMOptions
+    from fleet_rlm.rlm.runtime import (
         ExecutionRuntime,
         RLMExecutionContext,
+        RLMRunner,
         RunIdentity,
         SessionView,
     )
-    from fleet_rlm.rlm.dspy_contract import RLMOptions
-    from fleet_rlm.rlm.runner import RLMRunner
     from fleet_rlm.sessions.models import TurnAccess
     from tests.unit.backend.rlm.fakes import EmptyCapabilities
 
@@ -132,16 +135,16 @@ async def test_runner_uses_supported_async_call_and_returns_typed_outcome(
     """
     from fleet_rlm.chat.session_context import SessionContextManifest
     from fleet_rlm.files.workspace_models import WorkspaceCapabilityMetadata
-    from fleet_rlm.rlm.context import (
+    from fleet_rlm.rlm.events import RLMCode, RLMOutput, StepFinished, StepStarted
+    from fleet_rlm.rlm.program import RLMOptions
+    from fleet_rlm.rlm.runtime import (
         ExecutionRuntime,
         RLMExecutionContext,
         RLMExecutionSpec,
+        RLMRunner,
         RunIdentity,
         SessionView,
     )
-    from fleet_rlm.rlm.dspy_contract import RLMOptions
-    from fleet_rlm.rlm.events import RLMCode, RLMOutput, StepFinished, StepStarted
-    from fleet_rlm.rlm.runner import RLMRunner
     from fleet_rlm.sessions.models import TurnAccess
     from fleet_rlm.skills.models import SkillCard
     from tests.unit.backend.rlm.fakes import EmptyCapabilities
@@ -244,7 +247,7 @@ async def test_runner_uses_supported_async_call_and_returns_typed_outcome(
         yield SimpleNamespace(set_outputs=lambda _outputs: None)
 
     monkeypatch.setattr(dspy, "context", tracked_context)
-    monkeypatch.setattr("fleet_rlm.rlm.execution_trace.turn_phase_span", tracked_phase_span)
+    monkeypatch.setattr("fleet_rlm.rlm.events.turn_phase_span", tracked_phase_span)
     context = RLMExecutionContext(
         identity=RunIdentity(run_id=uuid4(), session_id=uuid4(), access=TurnAccess(uuid4(), uuid4())),
         session=SessionView(
@@ -328,15 +331,18 @@ def test_runner_uses_stock_json_adapter_without_protocol_salvage() -> None:
 @pytest.mark.asyncio
 async def test_runner_passes_prepared_attachment_context_to_rlm() -> None:
     from fleet_rlm.chat.session_context import SessionContextManifest
-    from fleet_rlm.rlm.context import (
+    from fleet_rlm.rlm.program import (
+        AttachmentContextCapsule,
+        AttachmentContextEntry,
+        RLMOptions,
+    )
+    from fleet_rlm.rlm.runtime import (
         ExecutionRuntime,
         RLMExecutionContext,
+        RLMRunner,
         RunIdentity,
         SessionView,
     )
-    from fleet_rlm.rlm.dspy_contract import RLMOptions
-    from fleet_rlm.rlm.inputs import AttachmentContextCapsule, AttachmentContextEntry
-    from fleet_rlm.rlm.runner import RLMRunner
     from fleet_rlm.sessions.models import TurnAccess
     from tests.unit.backend.rlm.fakes import EmptyCapabilities
 
@@ -393,14 +399,14 @@ async def test_runner_passes_prepared_attachment_context_to_rlm() -> None:
 @pytest.mark.asyncio
 async def test_runner_validates_host_metadata_before_provider_execution() -> None:
     from fleet_rlm.chat.session_context import SessionContextManifest, TurnPreview
-    from fleet_rlm.rlm.context import (
+    from fleet_rlm.rlm.program import RLMOptions
+    from fleet_rlm.rlm.runtime import (
         ExecutionRuntime,
         RLMExecutionContext,
+        RLMRunner,
         RunIdentity,
         SessionView,
     )
-    from fleet_rlm.rlm.dspy_contract import RLMOptions
-    from fleet_rlm.rlm.runner import RLMRunner
     from fleet_rlm.sessions.models import TurnAccess
     from tests.unit.backend.rlm.fakes import EmptyCapabilities
 
@@ -457,15 +463,15 @@ async def test_runner_validates_host_metadata_before_provider_execution() -> Non
 async def test_runner_loads_two_skills_reads_python_resource_and_completes_submit() -> None:
     from fleet_rlm.chat.capability_preparation import PreparedHostCapabilities
     from fleet_rlm.chat.session_context import SessionContextManifest
-    from fleet_rlm.rlm.context import (
+    from fleet_rlm.rlm.program import RLMOptions
+    from fleet_rlm.rlm.runtime import (
         ExecutionRuntime,
         RLMExecutionContext,
         RLMExecutionSpec,
+        RLMRunner,
         RunIdentity,
         SessionView,
     )
-    from fleet_rlm.rlm.dspy_contract import RLMOptions
-    from fleet_rlm.rlm.runner import RLMRunner
     from fleet_rlm.sessions.models import TurnAccess
     from fleet_rlm.skills.catalog import SkillCatalog
     from fleet_rlm.skills.models import SkillCard, SkillDefinition, SkillResource

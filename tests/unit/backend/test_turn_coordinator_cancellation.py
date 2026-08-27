@@ -22,8 +22,7 @@ async def test_coordinator_settles_commit_after_cancellation(commit_succeeds: bo
         _RunClaimToken,
     )
     from fleet_rlm.chat.turn_coordinator import TurnCoordinator
-    from fleet_rlm.rlm.dspy_contract import PredictionResult
-    from fleet_rlm.rlm.outcome import RLMOutcome
+    from fleet_rlm.rlm.result import PredictionResult, RLMOutcome
     from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
 
     access, session_id, run_id = TurnAccess(uuid4(), uuid4()), uuid4(), uuid4()
@@ -60,7 +59,7 @@ async def test_coordinator_settles_commit_after_cancellation(commit_succeeds: bo
         async def transition_claim(self, claimed, command):
             from fleet_rlm.chat.run_claim import FailClaim
             from fleet_rlm.chat.run_lifecycle import RunFailure
-            from fleet_rlm.rlm.dspy_contract import empty_rlm_usage
+            from fleet_rlm.rlm.result import empty_rlm_usage
 
             assert isinstance(command, FailClaim)
             failure = RunFailure(

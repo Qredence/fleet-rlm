@@ -2,8 +2,14 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from fleet_rlm.rlm.delegation_metrics import DelegationMetrics, normalize_lm_token_usage
-from fleet_rlm.rlm.dspy_contract import _latest_lm_telemetry, _RLMTraceCallback
+from fleet_rlm.rlm._dspy_compat import (
+    _latest_lm_telemetry,
+    _RLMTraceCallback,
+)
+from fleet_rlm.rlm.recursion import (
+    DelegationMetrics,
+    normalize_lm_token_usage,
+)
 
 
 def test_dspy_callback_records_role_and_recursive_depth_without_content() -> None:

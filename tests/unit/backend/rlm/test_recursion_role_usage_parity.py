@@ -21,17 +21,19 @@ import pytest
 from fleet_rlm.chat.session_context import SessionContextManifest
 from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
 from fleet_rlm.daytona.recursive_child_runtime import ChildRuntimeLease
-from fleet_rlm.rlm.context import (
+from fleet_rlm.rlm.program import RLMModelBundle, RLMOptions
+from fleet_rlm.rlm.recursion import (
+    RecursiveRLMExecutor,
+    RecursiveRLMOptions,
+)
+from fleet_rlm.rlm.runtime import (
     DelegationPolicy,
     ExecutionRuntime,
     RLMExecutionContext,
+    RLMRunner,
     RunIdentity,
     SessionView,
 )
-from fleet_rlm.rlm.dspy_contract import RLMOptions
-from fleet_rlm.rlm.model_bundle import RLMModelBundle
-from fleet_rlm.rlm.recursive_calls import RecursiveRLMExecutor, RecursiveRLMOptions
-from fleet_rlm.rlm.runner import RLMRunner
 from fleet_rlm.sessions.models import TurnAccess
 from tests.unit.backend.rlm.fakes import EmptyCapabilities
 

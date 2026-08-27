@@ -73,9 +73,8 @@ def _make_turn() -> Any:
 def _make_preparer(*, environments: Any = None) -> Any:
     from fleet_rlm.chat.run_preparation import DefaultRunPreparer, RunEnvironment
     from fleet_rlm.files.models import PreparedAttachments
-    from fleet_rlm.rlm.context import RLMExecutionSpec
-    from fleet_rlm.rlm.dspy_contract import RLMOptions
-    from fleet_rlm.rlm.model_bundle import RLMModelBundle
+    from fleet_rlm.rlm.program import RLMModelBundle, RLMOptions
+    from fleet_rlm.rlm.runtime import RLMExecutionSpec
 
     class Sink:
         async def remove_private(self, location: str) -> None:

@@ -11,9 +11,11 @@ import pytest
 
 
 def test_trajectory_normalization_is_strict_and_preserves_absent_fields() -> None:
-    from fleet_rlm.rlm.dspy_contract import PredictionOutputError, normalize_prediction_trajectory
-    from fleet_rlm.rlm.events import RLMCode, RLMOutput, RLMReasoning, StepFinished, StepStarted
-    from fleet_rlm.rlm.trajectory_projection import trajectory_details
+    from fleet_rlm.rlm.events import RLMCode, RLMOutput, RLMReasoning, StepFinished, StepStarted, trajectory_details
+    from fleet_rlm.rlm.result import (
+        PredictionOutputError,
+        normalize_prediction_trajectory,
+    )
 
     with pytest.raises(PredictionOutputError):
         normalize_prediction_trajectory(SimpleNamespace())
@@ -38,9 +40,8 @@ def test_trajectory_normalization_is_strict_and_preserves_absent_fields() -> Non
 
 
 def test_trajectory_semantic_details_are_verbatim_and_share_the_run_bound() -> None:
-    from fleet_rlm.rlm.dspy_contract import normalize_prediction_trajectory
-    from fleet_rlm.rlm.events import RLMCode, RLMOutput, RLMReasoning
-    from fleet_rlm.rlm.trajectory_projection import trajectory_details
+    from fleet_rlm.rlm.events import RLMCode, RLMOutput, RLMReasoning, trajectory_details
+    from fleet_rlm.rlm.result import normalize_prediction_trajectory
 
     semantic = "api_key=visible-user-text /Users/example BEGIN SYSTEM"
     details = trajectory_details(
@@ -69,9 +70,8 @@ def test_trajectory_semantic_details_are_verbatim_and_share_the_run_bound() -> N
 
 
 def test_trajectory_reconciliation_replaces_live_details_without_duplicates() -> None:
-    from fleet_rlm.rlm.dspy_contract import TrajectoryStep
-    from fleet_rlm.rlm.events import RLMCode, RLMOutput, RLMReasoning, StepFinished, StepStarted
-    from fleet_rlm.rlm.trajectory_projection import reconcile_trajectory
+    from fleet_rlm.rlm.events import RLMCode, RLMOutput, RLMReasoning, StepFinished, StepStarted, reconcile_trajectory
+    from fleet_rlm.rlm.result import TrajectoryStep
 
     details = [
         StepStarted(1),
@@ -109,9 +109,8 @@ def test_trajectory_reconciliation_replaces_live_details_without_duplicates() ->
 
 
 def test_trajectory_reconciliation_inserts_missing_earlier_step_before_later_live_step() -> None:
-    from fleet_rlm.rlm.dspy_contract import TrajectoryStep
-    from fleet_rlm.rlm.events import RLMCode, RLMOutput, RLMReasoning, StepFinished, StepStarted
-    from fleet_rlm.rlm.trajectory_projection import reconcile_trajectory
+    from fleet_rlm.rlm.events import RLMCode, RLMOutput, RLMReasoning, StepFinished, StepStarted, reconcile_trajectory
+    from fleet_rlm.rlm.result import TrajectoryStep
 
     details = [
         StepStarted(2),
@@ -152,9 +151,8 @@ def test_trajectory_reconciliation_inserts_missing_earlier_step_before_later_liv
 
 
 def test_trajectory_reconciliation_replaces_incremental_output_with_one_canonical_part() -> None:
-    from fleet_rlm.rlm.dspy_contract import TrajectoryStep
-    from fleet_rlm.rlm.events import RLMCode, RLMOutput, RLMReasoning, StepFinished, StepStarted
-    from fleet_rlm.rlm.trajectory_projection import reconcile_trajectory
+    from fleet_rlm.rlm.events import RLMCode, RLMOutput, RLMReasoning, StepFinished, StepStarted, reconcile_trajectory
+    from fleet_rlm.rlm.result import TrajectoryStep
 
     details = [
         StepStarted(1),
@@ -182,9 +180,8 @@ def test_trajectory_reconciliation_replaces_incremental_output_with_one_canonica
 
 
 def test_trajectory_reconciliation_keeps_live_reasoning_emitted_before_step_started() -> None:
-    from fleet_rlm.rlm.dspy_contract import TrajectoryStep
-    from fleet_rlm.rlm.events import RLMCode, RLMOutput, RLMReasoning, StepFinished, StepStarted
-    from fleet_rlm.rlm.trajectory_projection import reconcile_trajectory
+    from fleet_rlm.rlm.events import RLMCode, RLMOutput, RLMReasoning, StepFinished, StepStarted, reconcile_trajectory
+    from fleet_rlm.rlm.result import TrajectoryStep
 
     details = [
         RLMReasoning("native reasoning", 1),
@@ -212,9 +209,8 @@ def test_trajectory_reconciliation_keeps_live_reasoning_emitted_before_step_star
 
 
 def test_trajectory_reconciliation_updates_pre_step_live_reasoning_when_canonical_differs() -> None:
-    from fleet_rlm.rlm.dspy_contract import TrajectoryStep
-    from fleet_rlm.rlm.events import RLMCode, RLMOutput, RLMReasoning, StepFinished, StepStarted
-    from fleet_rlm.rlm.trajectory_projection import reconcile_trajectory
+    from fleet_rlm.rlm.events import RLMCode, RLMOutput, RLMReasoning, StepFinished, StepStarted, reconcile_trajectory
+    from fleet_rlm.rlm.result import TrajectoryStep
 
     details = [
         RLMReasoning("stale reasoning", 1),
@@ -237,16 +233,16 @@ def test_trajectory_reconciliation_updates_pre_step_live_reasoning_when_canonica
 @pytest.mark.asyncio
 async def test_runner_deduplicates_final_reasoning_against_nonadjacent_normalized_trajectory() -> None:
     from fleet_rlm.chat.session_context import SessionContextManifest
-    from fleet_rlm.rlm.context import (
+    from fleet_rlm.rlm.events import RLMReasoning
+    from fleet_rlm.rlm.program import RLMOptions
+    from fleet_rlm.rlm.result import truncate_public_text
+    from fleet_rlm.rlm.runtime import (
         ExecutionRuntime,
         RLMExecutionContext,
+        RLMRunner,
         RunIdentity,
         SessionView,
     )
-    from fleet_rlm.rlm.dspy_contract import RLMOptions
-    from fleet_rlm.rlm.events import RLMReasoning
-    from fleet_rlm.rlm.runner import RLMRunner
-    from fleet_rlm.rlm.sanitize import truncate_public_text
     from fleet_rlm.sessions.models import TurnAccess
     from tests.unit.backend.rlm.fakes import EmptyCapabilities
 
@@ -298,9 +294,8 @@ async def test_runner_deduplicates_final_reasoning_against_nonadjacent_normalize
 
 def test_trajectory_reconciliation_silently_upserts_flag_drifted_identical_streams() -> None:
     """RC-4a: live deltas equal to the canonical text emit nothing at turn end."""
-    from fleet_rlm.rlm.dspy_contract import TrajectoryStep
-    from fleet_rlm.rlm.events import RLMCode, RLMOutput, RLMReasoning, StepFinished, StepStarted
-    from fleet_rlm.rlm.trajectory_projection import reconcile_trajectory
+    from fleet_rlm.rlm.events import RLMCode, RLMOutput, RLMReasoning, StepFinished, StepStarted, reconcile_trajectory
+    from fleet_rlm.rlm.result import TrajectoryStep
 
     details = [
         StepStarted(1),
@@ -331,9 +326,8 @@ def test_trajectory_reconciliation_silently_upserts_flag_drifted_identical_strea
 
 def test_trajectory_reconciliation_treats_submit_label_and_live_terminal_frame_as_identical() -> None:
     """RC-4a: the pre-fix live log (delta + full final frame) reconciles silently."""
-    from fleet_rlm.rlm.dspy_contract import TrajectoryStep
-    from fleet_rlm.rlm.events import RLMCode, RLMOutput, RLMReasoning, StepFinished, StepStarted
-    from fleet_rlm.rlm.trajectory_projection import reconcile_trajectory
+    from fleet_rlm.rlm.events import RLMCode, RLMOutput, RLMReasoning, StepFinished, StepStarted, reconcile_trajectory
+    from fleet_rlm.rlm.result import TrajectoryStep
 
     details = [
         StepStarted(1),
@@ -364,9 +358,8 @@ def test_trajectory_reconciliation_treats_submit_label_and_live_terminal_frame_a
 
 def test_trajectory_reconciliation_re_emits_once_for_a_true_correction() -> None:
     """RC-4a: corrected text still emits exactly one canonical replacement."""
-    from fleet_rlm.rlm.dspy_contract import TrajectoryStep
-    from fleet_rlm.rlm.events import RLMCode, RLMOutput, RLMReasoning, StepFinished, StepStarted
-    from fleet_rlm.rlm.trajectory_projection import reconcile_trajectory
+    from fleet_rlm.rlm.events import RLMCode, RLMOutput, RLMReasoning, StepFinished, StepStarted, reconcile_trajectory
+    from fleet_rlm.rlm.result import TrajectoryStep
 
     details = [
         StepStarted(1),
@@ -395,9 +388,8 @@ def test_trajectory_reconciliation_re_emits_once_for_a_true_correction() -> None
 
 def test_trajectory_reconciliation_aligns_canonical_steps_after_setup_execution() -> None:
     """A context setup execution must not cause a duplicate canonical action stream."""
-    from fleet_rlm.rlm.dspy_contract import TrajectoryStep
-    from fleet_rlm.rlm.events import RLMCode, RLMOutput, RLMReasoning, StepFinished, StepStarted
-    from fleet_rlm.rlm.trajectory_projection import reconcile_trajectory
+    from fleet_rlm.rlm.events import RLMCode, RLMOutput, RLMReasoning, StepFinished, StepStarted, reconcile_trajectory
+    from fleet_rlm.rlm.result import TrajectoryStep
 
     details = [
         StepStarted(1),

@@ -14,13 +14,15 @@ from pydantic import ValidationError
 from fleet_rlm.chat.session_context import SessionContextManifest, TurnPreview
 from fleet_rlm.files.models import PreparedAttachment
 from fleet_rlm.files.workspace_models import DAYTONA_WORKSPACE_CAPABILITY
-from fleet_rlm.rlm.errors import RLMConfigError
-from fleet_rlm.rlm.input_models import (
+from fleet_rlm.rlm.program import (
+    AttachmentContextCapsule,
+    AttachmentContextEntry,
     AttachmentInput,
     SessionContextInput,
     SkillCardInput,
+    build_rlm_input_kwargs,
 )
-from fleet_rlm.rlm.inputs import AttachmentContextCapsule, AttachmentContextEntry, build_rlm_input_kwargs
+from fleet_rlm.rlm.result import RLMConfigError
 from fleet_rlm.skills.models import SkillCard
 
 SESSION_ID = UUID("00000000-0000-0000-0000-000000000001")
@@ -333,7 +335,7 @@ async def test_volume_attachment_context_round_trips_inside_the_interpreter(tmp_
 
     from fleet_rlm.chat.session_context import SessionContextManifest
     from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
-    from fleet_rlm.rlm.signature import FleetRLMSignature
+    from fleet_rlm.rlm.program import FleetRLMSignature
 
     body = b"Fleet context"
     context_file = tmp_path / "report.txt"
@@ -400,7 +402,7 @@ def test_attachment_context_manifest_requires_the_host_bound_digest(tmp_path: Pa
     import hashlib
 
     from fleet_rlm.daytona.interpreter import InProcessInterpreterBackend
-    from fleet_rlm.rlm.inputs import _materialize_context_manifest
+    from fleet_rlm.rlm.program import _materialize_context_manifest
 
     body = b"bound context"
     context_file = tmp_path / "report.txt"

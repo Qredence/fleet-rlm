@@ -19,6 +19,7 @@ from fleet_rlm.events.canonical import CANONICAL_EVENT_KINDS
 from fleet_rlm.rlm.events import (
     RUNTIME_DETAIL_TYPES,
     EventRecorder,
+    ObservationSession,
     RLMCode,
     RLMOutput,
     RLMReasoning,
@@ -36,7 +37,6 @@ from fleet_rlm.rlm.events import (
     Usage,
     WarningEvent,
 )
-from fleet_rlm.rlm.observation import ObservationSession
 from fleet_rlm.sessions.assistant_parts import AssistantPartModelUnion
 
 _FIXTURE = (

@@ -508,7 +508,7 @@ async def test_runtime_cleanup_handle_is_awaitable_and_state_close_is_idempotent
 
 
 def test_signature_field_descriptions_and_defaults_change_runner_fingerprint_shape() -> None:
-    from fleet_rlm.rlm.runner import _signature_shape
+    from fleet_rlm.rlm.runtime import _signature_shape
 
     class First(dspy.Signature):
         request: str = dspy.InputField(desc="First request", default="one")
@@ -522,7 +522,7 @@ def test_signature_field_descriptions_and_defaults_change_runner_fingerprint_sha
 
 
 def test_signature_field_order_changes_runner_fingerprint_shape() -> None:
-    from fleet_rlm.rlm.runner import _signature_shape
+    from fleet_rlm.rlm.runtime import _signature_shape
 
     class First(dspy.Signature):
         request: str = dspy.InputField()
@@ -576,7 +576,7 @@ def test_program_fingerprint_rejects_mismatched_dspy_version() -> None:
 def test_runner_lm_shape_tracks_open_ended_policy_without_content_or_secrets() -> None:
     from types import SimpleNamespace
 
-    from fleet_rlm.rlm.runner import _lm_shape
+    from fleet_rlm.rlm.runtime import _lm_shape
 
     first = SimpleNamespace(
         model="openai/root",
@@ -615,7 +615,10 @@ def test_runner_lm_shape_tracks_open_ended_policy_without_content_or_secrets() -
 def test_fingerprint_omits_unknown_lm_values_and_secret_tool_text() -> None:
     from types import SimpleNamespace
 
-    from fleet_rlm.rlm.runner import _lm_shape, _tool_shape
+    from fleet_rlm.rlm.runtime import (
+        _lm_shape,
+        _tool_shape,
+    )
 
     lm_a = SimpleNamespace(model="openai/root", kwargs={"custom_value": "secret-a"})
     lm_b = SimpleNamespace(model="openai/root", kwargs={"custom_value": "secret-with-a-different-length"})
@@ -666,7 +669,10 @@ def test_requests_history_attachments_memory_and_secrets_do_not_change_digest() 
 
 
 def test_exact_installed_dspy_type_can_be_stored_without_registry_construction() -> None:
-    from fleet_rlm.rlm.dspy_contract import RLMOptions, build_native_rlm
+    from fleet_rlm.rlm.program import (
+        RLMOptions,
+        build_native_rlm,
+    )
 
     rlm = build_native_rlm(
         signature="request -> answer",
@@ -749,7 +755,12 @@ def test_fingerprint_canonicalization_shapes_nested_unknown_and_free_text_values
 
     # Runner-side projections are canonical inputs too; they must not retain
     # the same values before the shared component boundary runs.
-    from fleet_rlm.rlm.runner import _field_shape, _signature_shape, _tool_schema_shape, _tool_shape
+    from fleet_rlm.rlm.runtime import (
+        _field_shape,
+        _signature_shape,
+        _tool_schema_shape,
+        _tool_shape,
+    )
 
     class SecretSignature(dspy.Signature):
         request: str = dspy.InputField(default="super-secret-a")
@@ -806,7 +817,7 @@ def test_fingerprint_shape_keeps_public_model_limits_schema_type_and_field_order
 
 def test_runner_tool_shape_preserves_public_argument_schema_type() -> None:
     """The outer Tool argument-name mapping does not erase JSON-schema types."""
-    from fleet_rlm.rlm.runner import _tool_shape
+    from fleet_rlm.rlm.runtime import _tool_shape
 
     def lookup(value: str) -> str:
         return value

@@ -23,10 +23,13 @@ import pytest
 
 from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
 from fleet_rlm.daytona.recursive_child_runtime import ChildRuntimeLease
-from fleet_rlm.rlm.child_runtime import ChildRuntimeCleanupError
 from fleet_rlm.rlm.events import Status
-from fleet_rlm.rlm.model_bundle import RLMModelBundle
-from fleet_rlm.rlm.recursive_calls import RecursiveRLMExecutor, RecursiveRLMOptions
+from fleet_rlm.rlm.program import RLMModelBundle
+from fleet_rlm.rlm.recursion import (
+    ChildRuntimeCleanupError,
+    RecursiveRLMExecutor,
+    RecursiveRLMOptions,
+)
 
 
 class _Recorder:
@@ -82,7 +85,7 @@ def test_child_acall_wait_is_fenced_by_the_absolute_deadline(
     synchronous recursive Tool past the one absolute deadline: the call fails
     with the bounded timeout classification within a bounded tolerance, the
     child lease still settles exactly once, and ownership observes clean."""
-    import fleet_rlm.rlm.recursive_calls as recursive_calls
+    import fleet_rlm.rlm.recursion as recursive_calls
 
     recorder = _Recorder()
     entered = threading.Event()
@@ -129,7 +132,7 @@ async def test_cancellation_swallowing_child_is_retained_not_blocking(
     deadline: the wait is retained under cleanup ownership (observable as
     pending), the lease closes anyway, and the owned join settles only once
     the retained child future completes."""
-    import fleet_rlm.rlm.recursive_calls as recursive_calls
+    import fleet_rlm.rlm.recursion as recursive_calls
 
     monkeypatch.setattr(recursive_calls, "_CHILD_FENCE_SETTLE_GRACE_S", 0.05)
     recorder = _Recorder()
@@ -186,7 +189,7 @@ async def test_fenced_child_wait_preserves_batch_deadline_semantics(
     """In a batch, the fenced child wait returns at the absolute deadline and
     the batch settles all-or-nothing with the bounded timeout cause; the
     hanging child's lease still settles and ownership joins clean."""
-    import fleet_rlm.rlm.recursive_calls as recursive_calls
+    import fleet_rlm.rlm.recursion as recursive_calls
 
     recorder = _Recorder()
 
@@ -201,7 +204,7 @@ async def test_fenced_child_wait_preserves_batch_deadline_semantics(
     executor = _executor(recorder, deadline=deadline)
 
     began = time.monotonic()
-    from fleet_rlm.rlm.recursive_calls import RecursiveBatchError
+    from fleet_rlm.rlm.recursion import RecursiveBatchError
 
     with pytest.raises((TimeoutError, RecursiveBatchError)) as raised:
         executor.batched_tool(prompts=["hanging"])
@@ -220,7 +223,7 @@ def test_completed_child_is_not_disturbed_by_the_fence(
 ) -> None:
     """A child that completes within the deadline returns its answer through
     the same fenced seam without timeout classification."""
-    import fleet_rlm.rlm.recursive_calls as recursive_calls
+    import fleet_rlm.rlm.recursion as recursive_calls
 
     recorder = _Recorder()
 
@@ -245,7 +248,7 @@ def test_child_lm_deadline_error_keeps_its_own_classification(
     """A child that fails with its own deadline-bound LM error (raised inside
     the child future) is not relabelled by the fence: the original error
     propagates unchanged while the lease still settles."""
-    import fleet_rlm.rlm.recursive_calls as recursive_calls
+    import fleet_rlm.rlm.recursion as recursive_calls
 
     recorder = _Recorder()
 

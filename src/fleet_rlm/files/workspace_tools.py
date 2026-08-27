@@ -20,8 +20,7 @@ from fleet_rlm.files.filesystem_tool_helpers import (
 )
 from fleet_rlm.files.workspace_models import SessionWorkspaceFS
 from fleet_rlm.files.workspace_validation import normalize_workspace_path
-from fleet_rlm.rlm.events import JsonValue
-from fleet_rlm.rlm.tool_observer import ToolEventView
+from fleet_rlm.rlm.events import JsonValue, ToolEventView
 
 MAX_WORKSPACE_READ_CHARS = MAX_FILES_READ_CHARS
 SESSION_WORKSPACE_NAMESPACE = "session_workspace"

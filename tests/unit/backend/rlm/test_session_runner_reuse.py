@@ -10,10 +10,14 @@ import dspy
 import pytest
 
 from fleet_rlm.chat.session_context import SessionContextManifest
-from fleet_rlm.rlm.context import ExecutionRuntime, RLMExecutionContext, RunIdentity, SessionView
-from fleet_rlm.rlm.dspy_contract import RLMOptions
-from fleet_rlm.rlm.model_bundle import RLMModelBundle
-from fleet_rlm.rlm.runner import RLMRunner
+from fleet_rlm.rlm.program import RLMModelBundle, RLMOptions
+from fleet_rlm.rlm.runtime import (
+    ExecutionRuntime,
+    RLMExecutionContext,
+    RLMRunner,
+    RunIdentity,
+    SessionView,
+)
 from fleet_rlm.rlm.session_runtime import SessionRLMRegistry
 from fleet_rlm.sessions.models import TurnAccess
 from tests.unit.backend.rlm.fakes import EmptyCapabilities

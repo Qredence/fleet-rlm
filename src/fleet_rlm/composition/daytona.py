@@ -53,7 +53,7 @@ def require_daytona_settings(settings: Settings) -> None:
         missing.append("FLEET_DAYTONA_API_KEY")
     if not (settings.daytona_snapshot or "").strip():
         missing.append("FLEET_DAYTONA_SNAPSHOT")
-    from fleet_rlm.rlm.lm_factory import has_llm_credentials, sanitize_base_url
+    from fleet_rlm.rlm.program import has_llm_credentials, sanitize_base_url
 
     if not has_llm_credentials(settings):
         missing.append("configured provider API key")
@@ -433,7 +433,7 @@ async def build_daytona_composition(
     dispatcher: SyncBridgeDispatcher | None = None,
 ) -> RuntimeInventory:
     """Construct the Daytona runtime inventory; clean up partial init on failure."""
-    from fleet_rlm.rlm.dspy_contract import assert_dspy_version
+    from fleet_rlm.rlm._dspy_compat import assert_dspy_version
 
     assert_dspy_version()
     require_daytona_settings(settings)
@@ -463,9 +463,8 @@ async def build_daytona_composition(
         SqlAlchemySandboxBindingStore,
         SqlAlchemySessionCatalog,
     )
-    from fleet_rlm.rlm.factory import RLMFactory
-    from fleet_rlm.rlm.lm_factory import build_model_bundle
-    from fleet_rlm.rlm.runner import RLMRunner
+    from fleet_rlm.rlm.program import RLMFactory, build_model_bundle
+    from fleet_rlm.rlm.runtime import RLMRunner
 
     resolved = resolve_settings(settings)
     require_daytona_settings(resolved)

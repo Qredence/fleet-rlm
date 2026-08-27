@@ -37,7 +37,7 @@ from fleet_rlm.config import (
 from fleet_rlm.daytona.dspy_sync_bridge import sync_sandbox
 from fleet_rlm.daytona.workspace_fs import DaytonaSandboxVolumeFs
 from fleet_rlm.files.volume_paths import volume_paths_from_settings
-from fleet_rlm.rlm.tool_observer import ToolEventView
+from fleet_rlm.rlm.events import ToolEventView
 from fleet_rlm.runtime.bindings import SandboxBinding
 from fleet_rlm.skills.catalog import stable_skill_id
 from tests.live.backend._database import upgrade_to_head

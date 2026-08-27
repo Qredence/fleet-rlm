@@ -38,8 +38,6 @@ from fleet_rlm.chat.run_preparation import (
     RunPreparationTimeoutError,
 )
 from fleet_rlm.observability.turn_tracing import annotate_trace_io, turn_phase_span, turn_trace
-from fleet_rlm.rlm.context import RLMExecutionContext
-from fleet_rlm.rlm.dspy_contract import RLMUsage, empty_rlm_usage
 from fleet_rlm.rlm.events import (
     TERMINAL_DETAIL_TYPES,
     EventRecorder,
@@ -52,7 +50,8 @@ from fleet_rlm.rlm.events import (
     RuntimeEvent,
     Status,
 )
-from fleet_rlm.rlm.outcome import RLMOutcome
+from fleet_rlm.rlm.result import RLMOutcome, RLMUsage, empty_rlm_usage
+from fleet_rlm.rlm.runtime import RLMExecutionContext
 
 logger = logging.getLogger(__name__)
 

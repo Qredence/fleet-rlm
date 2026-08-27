@@ -7,7 +7,8 @@ from collections.abc import Mapping
 from typing import Protocol, cast
 from uuid import UUID
 
-from fleet_rlm.rlm.dspy_contract import JsonValue, PredictionResult, validate_rlm_usage
+from fleet_rlm.json_types import JsonValue
+from fleet_rlm.rlm.result import PredictionResult, validate_rlm_usage
 
 RESULT_SNAPSHOT_SCHEMA_VERSION = 1
 

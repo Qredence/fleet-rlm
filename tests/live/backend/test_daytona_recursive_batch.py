@@ -20,9 +20,9 @@ from fleet_rlm.app import create_app
 from fleet_rlm.config import FleetConfigurationError, Settings, active_profile, require_live_execution
 from fleet_rlm.daytona import recursive_child_runtime
 from fleet_rlm.daytona.session_manager import get_active_lease_registry
-from fleet_rlm.rlm.lm_factory import has_llm_credentials
-from fleet_rlm.rlm.recursive_calls import RecursiveRLMExecutor
-from fleet_rlm.rlm.tool_observer import ToolEventView
+from fleet_rlm.rlm.events import ToolEventView
+from fleet_rlm.rlm.program import has_llm_credentials
+from fleet_rlm.rlm.recursion import RecursiveRLMExecutor
 from tests.live.backend._database import upgrade_to_head
 from tests.live.backend._p35d_evidence import candidate_identity, write_receipt
 from tests.live.backend.test_phase1_daytona_stream import _strict_cleanup

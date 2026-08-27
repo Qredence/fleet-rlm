@@ -15,10 +15,8 @@ async def test_prepared_rlm_kwargs_bound_a_large_session_to_recent_previews() ->
     from fleet_rlm.chat.run_lifecycle import ClaimedRun, _RunClaimToken
     from fleet_rlm.chat.run_preparation import DefaultRunPreparer, RunEnvironment
     from fleet_rlm.files.models import PreparedAttachments
-    from fleet_rlm.rlm.context import RLMExecutionSpec
-    from fleet_rlm.rlm.dspy_contract import RLMOptions
-    from fleet_rlm.rlm.model_bundle import RLMModelBundle
-    from fleet_rlm.rlm.runner import RLMRunner
+    from fleet_rlm.rlm.program import RLMModelBundle, RLMOptions
+    from fleet_rlm.rlm.runtime import RLMExecutionSpec, RLMRunner
     from fleet_rlm.sessions.models import HistoryMessage, SessionHistory, TurnAccess, TurnInput
 
     session_id = uuid4()

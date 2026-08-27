@@ -17,8 +17,7 @@ from fleet_rlm.files.url_tool import (
     WorkspaceUrlSourceStore,
 )
 from fleet_rlm.files.workspace_models import WorkspaceEntry, WorkspaceListResult, WorkspaceTextPage
-from fleet_rlm.rlm.events import ToolCompleted, ToolStarted
-from fleet_rlm.rlm.tool_observer import observe_tool
+from fleet_rlm.rlm.events import ToolCompleted, ToolStarted, observe_tool
 
 
 @dataclass

@@ -58,9 +58,8 @@ from fleet_rlm.files.models import (
 )
 from fleet_rlm.files.volume_paths import VolumePaths, volume_paths_from_settings
 from fleet_rlm.files.workspace_models import DAYTONA_WORKSPACE_CAPABILITY
-from fleet_rlm.rlm.context import RLMExecutionSpec
-from fleet_rlm.rlm.dspy_contract import RLMOptions
-from fleet_rlm.rlm.model_bundle import RLMModelBundle
+from fleet_rlm.rlm.program import RLMModelBundle, RLMOptions
+from fleet_rlm.rlm.runtime import RLMExecutionSpec
 from fleet_rlm.rlm.session_runtime import SessionKey, SessionRLMRegistry
 from fleet_rlm.sessions.history import to_canonical_history_records
 from fleet_rlm.sessions.history_transport import CommittedSessionHistory

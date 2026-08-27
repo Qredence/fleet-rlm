@@ -26,8 +26,7 @@ import dspy
 import urllib3
 
 from fleet_rlm.files.workspace_models import SessionWorkspaceFS, WorkspaceListResult
-from fleet_rlm.rlm.events import JsonValue
-from fleet_rlm.rlm.tool_observer import ToolEventView, bound_event_text
+from fleet_rlm.rlm.events import JsonValue, ToolEventView, bound_event_text
 
 MAX_URL_REDIRECTS = 3
 URL_FETCH_CHUNK_BYTES = 64 * 1024

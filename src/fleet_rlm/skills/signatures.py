@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import dspy
 
-from fleet_rlm.rlm.input_models import AttachmentInput, SessionContextInput, SkillCardInput
+from fleet_rlm.rlm.program import AttachmentInput, SessionContextInput, SkillCardInput
 
 _REQUIRED_INPUTS = {
     "request": (str,),

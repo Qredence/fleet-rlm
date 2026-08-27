@@ -31,20 +31,23 @@ from fleet_rlm.chat.run_lifecycle import ClaimedRun, _RunClaimToken
 from fleet_rlm.chat.session_context import SessionContextManifest
 from fleet_rlm.config import Settings, load_runtime_settings
 from fleet_rlm.daytona.run_environment import DaytonaRuntimeResources, _DaytonaEnvironmentProvider
-from fleet_rlm.rlm.context import (
+from fleet_rlm.rlm.program import (
+    FleetRLMSignature,
+    RLMModelBundle,
+    RLMOptions,
+    build_native_rlm,
+)
+from fleet_rlm.rlm.runtime import (
     ExecutionRuntime,
     PreparedCapabilities,
     RetainableEnvironmentRelease,
     RLMExecutionContext,
     RLMExecutionSpec,
+    RLMRunner,
     RunIdentity,
     SessionView,
 )
-from fleet_rlm.rlm.dspy_contract import RLMOptions, build_native_rlm
-from fleet_rlm.rlm.model_bundle import RLMModelBundle
-from fleet_rlm.rlm.runner import RLMRunner
 from fleet_rlm.rlm.session_runtime import SessionKey, SessionRLMRegistry
-from fleet_rlm.rlm.signature import FleetRLMSignature
 from fleet_rlm.runtime.bindings import InMemorySandboxBindingStore
 from fleet_rlm.sessions.history_transport import CommittedSessionHistory
 from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput

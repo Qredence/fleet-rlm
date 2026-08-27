@@ -13,7 +13,7 @@ from typing import Any
 import httpx
 import pytest
 
-from fleet_rlm.rlm.dspy_interpreter_contract import FinalOutput
+from fleet_rlm.rlm._dspy_compat import FinalOutput
 
 
 class _RecordingTool:

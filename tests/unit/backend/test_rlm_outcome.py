@@ -8,9 +8,8 @@ import pytest
 
 
 def test_rlm_outcome_is_internal_immutable_and_terminally_typed() -> None:
-    from fleet_rlm.rlm.dspy_contract import PredictionResult
     from fleet_rlm.rlm.events import RLMReasoning
-    from fleet_rlm.rlm.outcome import RLMOutcome
+    from fleet_rlm.rlm.result import PredictionResult, RLMOutcome
 
     outcome = RLMOutcome(
         terminal_status="completed",
@@ -27,8 +26,7 @@ def test_rlm_outcome_is_internal_immutable_and_terminally_typed() -> None:
 
 
 def test_success_requires_prediction_and_failure_forbids_it() -> None:
-    from fleet_rlm.rlm.dspy_contract import PredictionResult
-    from fleet_rlm.rlm.outcome import RLMOutcome
+    from fleet_rlm.rlm.result import PredictionResult, RLMOutcome
 
     with pytest.raises(ValueError, match="prediction"):
         RLMOutcome(terminal_status="completed")

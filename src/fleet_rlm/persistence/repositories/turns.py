@@ -69,7 +69,7 @@ from fleet_rlm.persistence.repositories.run_liveness import (
     _restore_after_fence_failure,
 )
 from fleet_rlm.persistence.repositories.run_queries import _committed_receipt, _committed_replay, _session_history
-from fleet_rlm.rlm.dspy_contract import RLMUsage, empty_rlm_usage
+from fleet_rlm.rlm.result import RLMUsage, empty_rlm_usage
 from fleet_rlm.sessions.committed_turn import CommittedTurn
 from fleet_rlm.sessions.models import (
     AssistantTurnRecord,

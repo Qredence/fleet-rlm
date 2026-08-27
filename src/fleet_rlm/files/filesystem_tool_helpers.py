@@ -7,8 +7,7 @@ from dataclasses import asdict
 from typing import Any, NoReturn, cast
 
 from fleet_rlm.files.workspace_models import WorkspaceEntry
-from fleet_rlm.rlm.events import JsonValue
-from fleet_rlm.rlm.tool_observer import bound_event_text
+from fleet_rlm.rlm.events import JsonValue, bound_event_text
 
 MAX_FILES_READ_CHARS = 10_000
 

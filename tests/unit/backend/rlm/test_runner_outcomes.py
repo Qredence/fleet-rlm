@@ -13,14 +13,14 @@ import pytest
 @pytest.mark.asyncio
 async def test_runner_retains_prediction_usage_when_typed_output_is_invalid() -> None:
     from fleet_rlm.chat.session_context import SessionContextManifest
-    from fleet_rlm.rlm.context import (
+    from fleet_rlm.rlm.program import RLMOptions
+    from fleet_rlm.rlm.runtime import (
         ExecutionRuntime,
         RLMExecutionContext,
+        RLMRunner,
         RunIdentity,
         SessionView,
     )
-    from fleet_rlm.rlm.dspy_contract import RLMOptions
-    from fleet_rlm.rlm.runner import RLMRunner
     from fleet_rlm.sessions.models import TurnAccess
     from tests.unit.backend.rlm.fakes import EmptyCapabilities
 
@@ -75,14 +75,14 @@ async def test_runner_retains_prediction_usage_when_typed_output_is_invalid() ->
 @pytest.mark.asyncio
 async def test_runner_reports_turn_output_too_large_for_oversized_answer() -> None:
     from fleet_rlm.chat.session_context import SessionContextManifest
-    from fleet_rlm.rlm.context import (
+    from fleet_rlm.rlm.program import RLMOptions
+    from fleet_rlm.rlm.runtime import (
         ExecutionRuntime,
         RLMExecutionContext,
+        RLMRunner,
         RunIdentity,
         SessionView,
     )
-    from fleet_rlm.rlm.dspy_contract import RLMOptions
-    from fleet_rlm.rlm.runner import RLMRunner
     from fleet_rlm.sessions.models import TurnAccess
     from tests.unit.backend.rlm.fakes import EmptyCapabilities
 
@@ -136,15 +136,15 @@ async def test_runner_reports_turn_output_too_large_for_oversized_answer() -> No
 @pytest.mark.asyncio
 async def test_runner_emits_preloaded_skill_events_before_later_output_failure() -> None:
     from fleet_rlm.chat.session_context import SessionContextManifest
-    from fleet_rlm.rlm.context import (
+    from fleet_rlm.rlm.events import SkillActivated, SkillLoaded
+    from fleet_rlm.rlm.program import RLMOptions
+    from fleet_rlm.rlm.runtime import (
         ExecutionRuntime,
         RLMExecutionContext,
+        RLMRunner,
         RunIdentity,
         SessionView,
     )
-    from fleet_rlm.rlm.dspy_contract import RLMOptions
-    from fleet_rlm.rlm.events import SkillActivated, SkillLoaded
-    from fleet_rlm.rlm.runner import RLMRunner
     from fleet_rlm.sessions.models import TurnAccess
     from tests.unit.backend.rlm.fakes import EmptyCapabilities
 
@@ -206,15 +206,15 @@ async def test_runner_emits_preloaded_skill_events_before_later_output_failure()
 @pytest.mark.parametrize("terminal_status", ["cancelled", "timeout"])
 async def test_runner_emits_preloaded_skill_events_before_cancel_or_timeout(terminal_status: str) -> None:
     from fleet_rlm.chat.session_context import SessionContextManifest
-    from fleet_rlm.rlm.context import (
+    from fleet_rlm.rlm.events import SkillActivated, SkillLoaded
+    from fleet_rlm.rlm.program import RLMOptions
+    from fleet_rlm.rlm.runtime import (
         ExecutionRuntime,
         RLMExecutionContext,
+        RLMRunner,
         RunIdentity,
         SessionView,
     )
-    from fleet_rlm.rlm.dspy_contract import RLMOptions
-    from fleet_rlm.rlm.events import SkillActivated, SkillLoaded
-    from fleet_rlm.rlm.runner import RLMRunner
     from fleet_rlm.sessions.models import TurnAccess
     from tests.unit.backend.rlm.fakes import EmptyCapabilities
 
@@ -274,8 +274,8 @@ async def test_runner_emits_preloaded_skill_events_before_cancel_or_timeout(term
 
 
 def test_public_failure_message_honors_instance_override() -> None:
-    from fleet_rlm.rlm.errors import RunTerminalError
-    from fleet_rlm.rlm.runner import _public_failure_message
+    from fleet_rlm.rlm.result import RunTerminalError
+    from fleet_rlm.rlm.runtime import _public_failure_message
 
     # A parametrized terminal error sets an instance ``public_message``; the
     # runner must honor the instance attribute instead of reading
@@ -288,14 +288,14 @@ def test_public_failure_message_honors_instance_override() -> None:
 @pytest.mark.asyncio
 async def test_stream_closed_before_iteration_synthesizes_cancelled_outcome() -> None:
     from fleet_rlm.chat.session_context import SessionContextManifest
-    from fleet_rlm.rlm.context import (
+    from fleet_rlm.rlm.program import RLMOptions
+    from fleet_rlm.rlm.runtime import (
         ExecutionRuntime,
         RLMExecutionContext,
+        RLMRunner,
         RunIdentity,
         SessionView,
     )
-    from fleet_rlm.rlm.dspy_contract import RLMOptions
-    from fleet_rlm.rlm.runner import RLMRunner
     from fleet_rlm.sessions.models import TurnAccess
     from tests.unit.backend.rlm.fakes import EmptyCapabilities
 

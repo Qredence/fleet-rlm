@@ -23,7 +23,10 @@ from fleet_rlm.observability.turn_tracing import (
     turn_phase_span,
     turn_trace,
 )
-from fleet_rlm.rlm.tool_observer import ToolEventView, observe_tool
+from fleet_rlm.rlm.events import (
+    ToolEventView,
+    observe_tool,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -622,8 +625,11 @@ def test_turn_phase_span_without_active_trace_preserves_body_exception(
 def test_recursive_child_span_records_bounded_metadata(monkeypatch: pytest.MonkeyPatch) -> None:
     import time
 
-    from fleet_rlm.rlm.model_bundle import RLMModelBundle
-    from fleet_rlm.rlm.recursive_calls import RecursiveRLMExecutor, RecursiveRLMOptions
+    from fleet_rlm.rlm.program import RLMModelBundle
+    from fleet_rlm.rlm.recursion import (
+        RecursiveRLMExecutor,
+        RecursiveRLMOptions,
+    )
 
     calls = _install_fake_mlflow(monkeypatch)
     adapter = dspy.JSONAdapter()
@@ -669,9 +675,12 @@ def test_recursive_batch_spans_finish_with_active_mlflow(
 ) -> None:
     import time
 
-    import fleet_rlm.rlm.recursive_calls as recursive_calls
-    from fleet_rlm.rlm.model_bundle import RLMModelBundle
-    from fleet_rlm.rlm.recursive_calls import RecursiveRLMExecutor, RecursiveRLMOptions
+    import fleet_rlm.rlm.recursion as recursive_calls
+    from fleet_rlm.rlm.program import RLMModelBundle
+    from fleet_rlm.rlm.recursion import (
+        RecursiveRLMExecutor,
+        RecursiveRLMOptions,
+    )
 
     class Child:
         def __call__(self, _interpreter: object, *, prompt: str) -> dspy.Prediction:
@@ -708,9 +717,12 @@ def test_recursive_child_span_marks_shutdown_failure(monkeypatch: pytest.MonkeyP
     import time
 
     from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter
-    from fleet_rlm.rlm.child_runtime import ChildRuntimeCleanupError
-    from fleet_rlm.rlm.model_bundle import RLMModelBundle
-    from fleet_rlm.rlm.recursive_calls import RecursiveRLMExecutor, RecursiveRLMOptions
+    from fleet_rlm.rlm.program import RLMModelBundle
+    from fleet_rlm.rlm.recursion import (
+        ChildRuntimeCleanupError,
+        RecursiveRLMExecutor,
+        RecursiveRLMOptions,
+    )
 
     calls = _install_fake_mlflow(monkeypatch)
     adapter = dspy.JSONAdapter()
@@ -748,8 +760,11 @@ def test_recursive_child_span_marks_shutdown_failure(monkeypatch: pytest.MonkeyP
 def test_recursive_child_span_marks_native_setup_failure(monkeypatch: pytest.MonkeyPatch) -> None:
     import time
 
-    from fleet_rlm.rlm.model_bundle import RLMModelBundle
-    from fleet_rlm.rlm.recursive_calls import RecursiveRLMExecutor, RecursiveRLMOptions
+    from fleet_rlm.rlm.program import RLMModelBundle
+    from fleet_rlm.rlm.recursion import (
+        RecursiveRLMExecutor,
+        RecursiveRLMOptions,
+    )
 
     calls = _install_fake_mlflow(monkeypatch)
     adapter = dspy.JSONAdapter()
@@ -781,8 +796,12 @@ def test_recursive_child_span_marks_native_setup_failure(monkeypatch: pytest.Mon
 def test_recursive_depth_fallback_span_records_mode(monkeypatch: pytest.MonkeyPatch) -> None:
     import time
 
-    from fleet_rlm.rlm.model_bundle import RLMModelBundle
-    from fleet_rlm.rlm.recursive_calls import RLM_NATIVE_CHILD_DEPTH, RecursiveRLMExecutor, RecursiveRLMOptions
+    from fleet_rlm.rlm.program import RLMModelBundle
+    from fleet_rlm.rlm.recursion import (
+        RLM_NATIVE_CHILD_DEPTH,
+        RecursiveRLMExecutor,
+        RecursiveRLMOptions,
+    )
 
     calls = _install_fake_mlflow(monkeypatch)
     adapter = dspy.JSONAdapter()
@@ -808,8 +827,12 @@ def test_recursive_depth_fallback_span_records_mode(monkeypatch: pytest.MonkeyPa
 def test_recursive_call_span_marks_failure_with_bounded_category(monkeypatch: pytest.MonkeyPatch) -> None:
     import time
 
-    from fleet_rlm.rlm.model_bundle import RLMModelBundle
-    from fleet_rlm.rlm.recursive_calls import RLM_NATIVE_CHILD_DEPTH, RecursiveRLMExecutor, RecursiveRLMOptions
+    from fleet_rlm.rlm.program import RLMModelBundle
+    from fleet_rlm.rlm.recursion import (
+        RLM_NATIVE_CHILD_DEPTH,
+        RecursiveRLMExecutor,
+        RecursiveRLMOptions,
+    )
 
     calls = _install_fake_mlflow(monkeypatch)
     adapter = dspy.JSONAdapter()

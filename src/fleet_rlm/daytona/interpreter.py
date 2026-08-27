@@ -54,7 +54,7 @@ from fleet_rlm.daytona.interpreter_output import (
 )
 from fleet_rlm.files.filesystem_tool_helpers import FilesystemToolError
 from fleet_rlm.observability.turn_tracing import trace_preview_limit, turn_phase_span
-from fleet_rlm.rlm.dspy_interpreter_contract import (
+from fleet_rlm.rlm._dspy_compat import (
     PUBLIC_FINAL_OUTPUT_LABEL,
     CodeExecutionError,
     CodeInterpreterError,
@@ -63,10 +63,24 @@ from fleet_rlm.rlm.dspy_interpreter_contract import (
     needs_binding_refresh,
     wrap_final_output,
 )
-from fleet_rlm.rlm.errors import RunNoProgressError, RunTerminalError
-from fleet_rlm.rlm.events import ObservationObserver, RLMCode, RLMOutput, StepFinished, StepStarted
-from fleet_rlm.rlm.sanitize import sanitize_public_text, sanitize_repair_text, truncate_head_tail, truncate_public_text
-from fleet_rlm.rlm.tool_observer import ToolEventView, ToolObserver, observe_tool
+from fleet_rlm.rlm.events import (
+    ObservationObserver,
+    RLMCode,
+    RLMOutput,
+    StepFinished,
+    StepStarted,
+    ToolEventView,
+    ToolObserver,
+    observe_tool,
+)
+from fleet_rlm.rlm.result import (
+    RunNoProgressError,
+    RunTerminalError,
+    sanitize_public_text,
+    sanitize_repair_text,
+    truncate_head_tail,
+    truncate_public_text,
+)
 
 if TYPE_CHECKING:
     from fleet_rlm.daytona.http_broker import DaytonaHttpToolBroker
@@ -216,7 +230,7 @@ class InProcessInterpreterBackend:
         def load_context(
             raw_manifest: bytes | str,
         ) -> list[dict[str, Any]]:
-            from fleet_rlm.rlm.inputs import _materialize_context_manifest
+            from fleet_rlm.rlm.program import _materialize_context_manifest
 
             binding = self._context_binding
             if binding is None:
@@ -656,7 +670,7 @@ class DaytonaCodeInterpreter:
 
     def bind_context_capsule(self, capsule: Any) -> None:
         """Bind one host-created context capsule before DSPy starts the RLM."""
-        from fleet_rlm.rlm.inputs import AttachmentContextCapsule
+        from fleet_rlm.rlm.program import AttachmentContextCapsule
 
         if not isinstance(capsule, AttachmentContextCapsule):
             raise DaytonaAdapterError(

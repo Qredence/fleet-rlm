@@ -15,7 +15,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, field_validator, model_validator
 
-from fleet_rlm.rlm.dspy_contract import RLMUsage
+from fleet_rlm.rlm.result import RLMUsage
 from fleet_rlm.sessions.committed_turn import (
     ArtifactPart,
     AttachmentPart,
@@ -206,7 +206,7 @@ class UsageAssistantPart(AssistantPartModel):
     @classmethod
     def _validate_usage(cls, value: Mapping[str, Any]) -> Mapping[str, Any]:
         try:
-            from fleet_rlm.rlm.dspy_contract import validate_rlm_usage
+            from fleet_rlm.rlm.result import validate_rlm_usage
 
             usage = validate_rlm_usage(value)
             return _validated_json_value(usage, path="usage.value")
@@ -335,7 +335,7 @@ def assistant_part_to_model(part: CommittedPart) -> AssistantPart:
         )
     if isinstance(part, UsagePart):
         value = dict(part.value)
-        from fleet_rlm.rlm.dspy_contract import validate_rlm_usage
+        from fleet_rlm.rlm.result import validate_rlm_usage
 
         return UsageAssistantPart(value=validate_rlm_usage(value))
     if isinstance(part, StructuredResultPart):

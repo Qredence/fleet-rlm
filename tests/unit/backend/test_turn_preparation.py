@@ -15,9 +15,8 @@ async def test_preparation_bounds_history_and_closes_in_dependency_order() -> No
     from fleet_rlm.chat.run_lifecycle import ClaimedRun, _RunClaimToken
     from fleet_rlm.chat.run_preparation import DefaultRunPreparer, RunEnvironment
     from fleet_rlm.files.models import PreparedAttachments
-    from fleet_rlm.rlm.context import RLMExecutionSpec
-    from fleet_rlm.rlm.dspy_contract import RLMOptions
-    from fleet_rlm.rlm.model_bundle import RLMModelBundle
+    from fleet_rlm.rlm.program import RLMModelBundle, RLMOptions
+    from fleet_rlm.rlm.runtime import RLMExecutionSpec
     from fleet_rlm.sessions.models import HistoryMessage, SessionHistory, TurnAccess, TurnInput
 
     operations: list[str] = []
@@ -147,8 +146,7 @@ async def test_capability_preparation_is_bounded_by_turn_deadline_and_releases_e
     from fleet_rlm.chat.run_lifecycle import ClaimedRun, _RunClaimToken
     from fleet_rlm.chat.run_preparation import DefaultRunPreparer, RunEnvironment, RunPreparationTimeoutError
     from fleet_rlm.files.models import PreparedAttachments
-    from fleet_rlm.rlm.dspy_contract import RLMOptions
-    from fleet_rlm.rlm.model_bundle import RLMModelBundle
+    from fleet_rlm.rlm.program import RLMModelBundle, RLMOptions
     from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
 
     released = False
@@ -210,8 +208,7 @@ async def test_preparation_failure_removes_staged_run_bytes_but_not_session_work
     from fleet_rlm.chat.run_lifecycle import ClaimedRun, _RunClaimToken
     from fleet_rlm.chat.run_preparation import DefaultRunPreparer, RunEnvironment
     from fleet_rlm.files.models import AttachmentRef, PreparedAttachments, StagedAttachment
-    from fleet_rlm.rlm.dspy_contract import RLMOptions
-    from fleet_rlm.rlm.model_bundle import RLMModelBundle
+    from fleet_rlm.rlm.program import RLMModelBundle, RLMOptions
     from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
 
     access, run_id, session_id, attachment_id = TurnAccess(uuid4(), uuid4()), uuid4(), uuid4(), uuid4()
@@ -286,9 +283,8 @@ async def test_capsule_validation_failure_releases_all_prepared_resources() -> N
     from fleet_rlm.chat.run_lifecycle import ClaimedRun, _RunClaimToken
     from fleet_rlm.chat.run_preparation import DefaultRunPreparer, RunEnvironment
     from fleet_rlm.files.models import AttachmentRef, PreparedAttachments, StagedAttachment
-    from fleet_rlm.rlm.context import RLMExecutionSpec
-    from fleet_rlm.rlm.dspy_contract import RLMOptions
-    from fleet_rlm.rlm.model_bundle import RLMModelBundle
+    from fleet_rlm.rlm.program import RLMModelBundle, RLMOptions
+    from fleet_rlm.rlm.runtime import RLMExecutionSpec
     from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
 
     attachment_id, run_id, session_id = uuid4(), uuid4(), uuid4()

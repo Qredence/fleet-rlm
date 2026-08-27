@@ -46,7 +46,7 @@ from fleet_rlm.daytona.session_manager import (
     DaytonaAdmissionPermit,
     DaytonaAdmissionTimeoutError,
 )
-from fleet_rlm.rlm.child_runtime import (
+from fleet_rlm.rlm.recursion import (
     ChildRuntimeAuthorizationError,
     ChildRuntimeCleanupError,
     ChildRuntimeFactory,

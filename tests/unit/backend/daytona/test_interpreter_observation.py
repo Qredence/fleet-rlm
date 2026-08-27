@@ -13,8 +13,8 @@ from fleet_rlm.daytona.interpreter import (
     InProcessInterpreterBackend,
     sandbox_backend,
 )
-from fleet_rlm.rlm.errors import RunNoProgressError
 from fleet_rlm.rlm.events import RLMCode, RLMOutput, StepFinished, StepStarted, ToolCompleted, ToolStarted
+from fleet_rlm.rlm.result import RunNoProgressError
 
 
 def test_interpreter_observes_ordered_stateful_steps() -> None:

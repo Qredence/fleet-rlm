@@ -17,8 +17,7 @@ async def test_connection_reset_during_capability_preparation_is_unavailable() -
     )
     from fleet_rlm.files.models import PreparedAttachments
     from fleet_rlm.persistence.database import DatabaseConnectionError
-    from fleet_rlm.rlm.dspy_contract import RLMOptions
-    from fleet_rlm.rlm.model_bundle import RLMModelBundle
+    from fleet_rlm.rlm.program import RLMModelBundle, RLMOptions
     from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
 
     class Sink:
@@ -78,8 +77,7 @@ async def test_connection_reset_during_attachment_staging_is_unavailable() -> No
         RunPreparationUnavailableError,
     )
     from fleet_rlm.persistence.database import DatabaseConnectionError
-    from fleet_rlm.rlm.dspy_contract import RLMOptions
-    from fleet_rlm.rlm.model_bundle import RLMModelBundle
+    from fleet_rlm.rlm.program import RLMModelBundle, RLMOptions
     from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
 
     class Sink:
@@ -135,8 +133,7 @@ async def test_connection_reset_during_post_capability_cancellation_probe_is_una
     )
     from fleet_rlm.files.models import PreparedAttachments
     from fleet_rlm.persistence.database import DatabaseConnectionError
-    from fleet_rlm.rlm.dspy_contract import RLMOptions
-    from fleet_rlm.rlm.model_bundle import RLMModelBundle
+    from fleet_rlm.rlm.program import RLMModelBundle, RLMOptions
     from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
 
     class Sink:

@@ -201,7 +201,7 @@ Fleet exposes two bounded ways for the RLM to delegate work to a smaller model.
 
 The default lane is DSPy's native sub-LM: `llm_query(prompt)` for one bounded
 semantic judgment or `llm_query_batched(prompts)` for independent judgments in
-one round trip (`rlm/signature.py` guidance). These run inside the Root
+one round trip (`rlm/program.py` guidance). These run inside the Root
 interpreter namespace as plain LM completions against `RLMModelBundle.sub_lm`,
 so they cost one provider call and inherit the Root trust domain. That
 inheritance is acceptable for prompt-only judgments because the Root's own
@@ -348,7 +348,7 @@ and human-review evidence defined by the release process.
 
 ## Routing evaluation
 
-`src/fleet_rlm/rlm/routing_eval.py` owns a bounded routes benchmark that measures
+`src/fleet_rlm/optimization/routing.py` owns a bounded routes benchmark that measures
 cost rather than inspecting private model reasoning. The curated classes are:
 
 1. `python_native` for deterministic Python/REPL work.

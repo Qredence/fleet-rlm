@@ -41,37 +41,37 @@ def _source(relative: str) -> str:
 # these obligations.
 RETAINED_OWNERS: tuple[tuple[str, str], ...] = (
     # P38-RLM-001/003: native kernel seam plus Fleet result trust boundary.
-    ("rlm/dspy_contract.py", "PredictionResult"),
-    ("rlm/dspy_contract.py", "prediction_result"),
-    ("rlm/dspy_contract.py", "validate_rlm_usage"),
-    ("rlm/dspy_contract.py", "observed_usage"),
-    ("rlm/dspy_contract.py", "normalize_prediction_trajectory"),
-    ("rlm/dspy_contract.py", "RLMOptions"),
-    ("rlm/dspy_contract.py", "assert_dspy_version"),
-    ("rlm/dspy_contract.py", "build_native_rlm"),
+    ("rlm/result.py", "PredictionResult"),
+    ("rlm/result.py", "prediction_result"),
+    ("rlm/result.py", "validate_rlm_usage"),
+    ("rlm/result.py", "observed_usage"),
+    ("rlm/result.py", "normalize_prediction_trajectory"),
+    ("rlm/program.py", "RLMOptions"),
+    ("rlm/_dspy_compat.py", "assert_dspy_version"),
+    ("rlm/program.py", "build_native_rlm"),
     # P38-RLM-004: worker/cancellation ownership.
-    ("rlm/runner.py", "RLMRunner"),
-    ("rlm/worker_execution.py", "WorkerOwnership"),
-    ("rlm/worker_execution.py", "invoke_native_rlm"),
+    ("rlm/runtime.py", "RLMRunner"),
+    ("rlm/runtime.py", "WorkerOwnership"),
+    ("rlm/runtime.py", "invoke_native_rlm"),
     # P38-RLM-005/008: Fleet observation projection and product observers.
-    ("rlm/trajectory_projection.py", "reconcile_trajectory"),
-    ("rlm/observation.py", "ObservationSession"),
-    ("rlm/observation.py", "DetailRelay"),
-    ("rlm/tool_observer.py", "observe_tool"),
-    ("rlm/execution_trace.py", "ExecutionTraceAssembler"),
+    ("rlm/events.py", "reconcile_trajectory"),
+    ("rlm/events.py", "ObservationSession"),
+    ("rlm/events.py", "DetailRelay"),
+    ("rlm/events.py", "observe_tool"),
+    ("rlm/events.py", "ExecutionTraceAssembler"),
     # P38-RLM-006 retained half: truthful observed usage per LM call.
-    ("rlm/dspy_contract.py", "_RLMTraceCallback"),
-    ("rlm/dspy_contract.py", "_latest_lm_telemetry"),
-    ("rlm/delegation_metrics.py", "DelegationMetrics"),
+    ("rlm/_dspy_compat.py", "_RLMTraceCallback"),
+    ("rlm/_dspy_compat.py", "_latest_lm_telemetry"),
+    ("rlm/recursion.py", "DelegationMetrics"),
     # P38-RLM-007: bounded diagnostic probe, never a second production path.
-    ("rlm/provider_probe.py", "probe_root_lm"),
+    ("rlm/runtime.py", "probe_root_lm"),
     ("daytona/diagnostics.py", "DaytonaDoctorDependencies"),
     # P38-RLM-009: shadow recorder stays, shadow-only.
     ("observability/callback_shadow.py", "CallbackShadowRecorder"),
     ("observability/callback_shadow.py", "compare_callback_records"),
     # P38-RLM-015: error taxonomy and repair classification.
-    ("rlm/dspy_interpreter_contract.py", "CodeExecutionError"),
-    ("rlm/dspy_interpreter_contract.py", "CodeInterpreterError"),
+    ("rlm/_dspy_compat.py", "CodeExecutionError"),
+    ("rlm/_dspy_compat.py", "CodeInterpreterError"),
     ("daytona/errors.py", "sanitize_provider_message"),
     # P37-ORCH-007/010 durable settlement and coordinator ownership.
     ("chat/run_lifecycle.py", "RunLifecycleService"),
@@ -88,7 +88,9 @@ def test_p38_build_native_rlm_keeps_the_execution_context_metadata_seam() -> Non
     # P38-RLM-012: DSPy 3.3.1's `_get_output_fields_info` exposes only simple
     # types, so the certified adoption condition is NOT met; the wrapper that
     # refreshes required/default output metadata must stay.
-    source = _source("rlm/dspy_contract.py")
+    source = (
+        _source("rlm/program.py") if (PACKAGE_ROOT / "rlm/program.py").exists() else _source("rlm/dspy_contract.py")
+    )
     assert "_inject_execution_context" in source
     assert "build_output_fields" in source
 

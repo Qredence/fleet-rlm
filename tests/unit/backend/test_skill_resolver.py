@@ -125,7 +125,7 @@ def test_custom_skill_signature_omits_recursive_guidance_when_the_tool_is_unavai
 
 
 def test_runner_signature_recomposition_uses_actual_policy_without_duplicate_bodies() -> None:
-    from fleet_rlm.rlm.signature import root_signature_for_recursion
+    from fleet_rlm.rlm.program import root_signature_for_recursion
 
     catalog = build_bundled_skill_catalog()
     data_analysis = catalog.require(catalog.cards()[0].id)

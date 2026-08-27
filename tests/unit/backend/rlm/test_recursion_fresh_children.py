@@ -19,8 +19,11 @@ import pytest
 
 from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
 from fleet_rlm.daytona.recursive_child_runtime import ChildRuntimeLease
-from fleet_rlm.rlm.model_bundle import RLMModelBundle
-from fleet_rlm.rlm.recursive_calls import RecursiveRLMExecutor, RecursiveRLMOptions
+from fleet_rlm.rlm.program import RLMModelBundle
+from fleet_rlm.rlm.recursion import (
+    RecursiveRLMExecutor,
+    RecursiveRLMOptions,
+)
 
 
 class _Recorder:
@@ -83,7 +86,7 @@ def test_val_rec_002_two_sequential_children_are_distinct_fresh_native_runtimes(
     native RLMs, acquire distinct leases/interpreters/Sandbox ids, close each
     child exactly once before its answer returns, and the second child starts
     from an empty namespace (it cannot resolve the first child's global)."""
-    import fleet_rlm.rlm.recursive_calls as recursive_calls
+    import fleet_rlm.rlm.recursion as recursive_calls
 
     recorder = _Recorder()
     built_rlms: list[Any] = []

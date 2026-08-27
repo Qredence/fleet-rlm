@@ -216,7 +216,7 @@ async def test_in_memory_recovery_preserves_settling_intent_after_fence_failure(
     from fleet_rlm.chat.run_claim import BeginSettlement, ClaimFailure
     from fleet_rlm.chat.run_lifecycle import ClaimedRun, RunClaim, RunFailure
     from fleet_rlm.persistence.repositories.turns import InMemoryRunStateStore
-    from fleet_rlm.rlm.dspy_contract import empty_rlm_usage
+    from fleet_rlm.rlm.result import empty_rlm_usage
     from fleet_rlm.sessions.models import TurnAccess, TurnInput
 
     store = InMemoryRunStateStore()

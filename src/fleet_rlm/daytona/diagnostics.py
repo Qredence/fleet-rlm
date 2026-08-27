@@ -203,7 +203,7 @@ class _ProductionDaytonaDoctorDependencies:
         await self._client.close()
 
     async def check_rlm_readiness(self, settings: Settings) -> None:
-        from fleet_rlm.rlm.provider_probe import probe_configured_root_lm
+        from fleet_rlm.rlm.runtime import probe_configured_root_lm
 
         await probe_configured_root_lm(
             settings,

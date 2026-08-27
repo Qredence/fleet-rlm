@@ -120,9 +120,9 @@ exist.
 - `rlm/` owns model roles, Signature inputs, fresh native RLM construction,
   options, Runtime Events, delegation metrics, routing evaluation, cancellation,
   and fixed-depth child execution. `RLMRunner.stream(context)` remains the deep
-  execution seam; `rlm/worker_execution.py` owns the cancellation-shielded
-  worker/thread/event-loop boundary, `rlm/observation.py` owns bounded detail
-  relay/monitoring/drain policy, and `rlm/execution_trace.py` owns trace and
+  execution seam; `rlm/runtime.py` owns the cancellation-shielded
+  worker/thread/event-loop boundary and the bounded detail
+  relay/monitoring/drain policy, and `rlm/events.py` owns trace and
   recursive-metric projection. These remain private implementation seams.
 - `daytona/` is the exclusive SDK boundary and owns provider-error normalization.
   `DaytonaRuntimeResources` remains provider-only; composition injects database,

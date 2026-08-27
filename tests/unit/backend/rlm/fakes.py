@@ -6,7 +6,7 @@ from typing import Any
 
 from fleet_rlm.artifacts.models import ArtifactCandidate
 from fleet_rlm.files.memory_candidates import MemoryCandidate
-from fleet_rlm.rlm.context import RLMExecutionSpec
+from fleet_rlm.rlm.runtime import RLMExecutionSpec
 
 
 class EmptyCapabilities:

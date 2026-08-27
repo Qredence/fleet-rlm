@@ -300,7 +300,7 @@ def test_raises_stable_safe_errors_without_exception_details() -> None:
 
 
 def test_project_event_views_expose_metadata_without_file_bodies_or_entries() -> None:
-    from fleet_rlm.rlm.tool_observer import observe_tool
+    from fleet_rlm.rlm.events import observe_tool
 
     fs = FakeProjectFS()
     host = ProjectToolHost(fs, max_file_bytes=64)
@@ -470,7 +470,7 @@ def test_edit_project_text_conflict_and_missing_errors() -> None:
 
 
 def test_delete_and_edit_project_event_views_expose_metadata_only() -> None:
-    from fleet_rlm.rlm.tool_observer import observe_tool
+    from fleet_rlm.rlm.events import observe_tool
 
     fs = FakeProjectFS()
     fs.files["fleet-rlm/reports/private.md"] = "private project fragment"

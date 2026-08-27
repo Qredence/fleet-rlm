@@ -14,8 +14,7 @@ import pytest
 
 from fleet_rlm.chat.turn_coordinator import TurnCoordinator
 from fleet_rlm.files.memory_candidates import MemoryCandidate
-from fleet_rlm.rlm.dspy_contract import PredictionResult
-from fleet_rlm.rlm.outcome import RLMOutcome
+from fleet_rlm.rlm.result import PredictionResult, RLMOutcome
 
 
 def _turn():

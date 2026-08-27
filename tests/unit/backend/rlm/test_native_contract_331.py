@@ -17,9 +17,16 @@ import dspy
 import pytest
 
 from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
-from fleet_rlm.rlm.dspy_contract import RLMOptions, build_native_rlm, prediction_result
-from fleet_rlm.rlm.model_bundle import RLMModelBundle
-from fleet_rlm.rlm.tool_observer import ToolEventView, observe_tool
+from fleet_rlm.rlm.events import (
+    ToolEventView,
+    observe_tool,
+)
+from fleet_rlm.rlm.program import (
+    RLMModelBundle,
+    RLMOptions,
+    build_native_rlm,
+)
+from fleet_rlm.rlm.result import prediction_result
 
 
 class _Actions:

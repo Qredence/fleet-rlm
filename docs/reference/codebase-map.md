@@ -37,11 +37,11 @@ compatibility runtime and parallel foundation package no longer exist.
 - `RLMRunner` owns execution, not Turn Commit or resource release.
   `RunLifecycle.finish()` owns result/Artifact publication and atomic commit;
   `TurnCoordinator` owns terminal ordering and final cleanup.
-- `rlm/runner.py` keeps `RLMRunner.stream(context)` as the deep execution seam.
-  `worker_execution.py` owns the cancellation-shielded worker/thread/event-loop
-  boundary, `observation.py` owns bounded detail relay/monitoring/drain policy,
-  and `execution_trace.py` owns trace and recursive-metric projection. These
-  are private implementation modules, not new public orchestration surfaces.
+- `rlm/runtime.py` keeps `RLMRunner.stream(context)` as the deep execution seam.
+  It owns the cancellation-shielded worker/thread/event-loop boundary, bounded
+  detail relay/monitoring/drain policy, and trace/recursive-metric projection
+  via `rlm/events.py`. These are private implementation modules, not new public
+  orchestration surfaces.
 - `runtime/owned_effect.py` defines the one provider-neutral wait vocabulary for
   already-started async effects: caller cancellation is shielded, an optional
   bounded wait never cancels the effect, and terminal errors remain surfaced.

@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 from fleet_rlm.api.local_scope import LocalScope
 from fleet_rlm.chat.run_lifecycle import ClaimedRun, RunClaim
 from fleet_rlm.composition.testing import create_testing_app
-from fleet_rlm.rlm.outcome import RLMOutcome
+from fleet_rlm.rlm.result import RLMOutcome
 from fleet_rlm.sessions.models import TurnAccess, TurnInput
 
 
@@ -74,7 +74,7 @@ def test_caller_supplied_identity_headers_do_not_change_local_scope() -> None:
 
 @pytest.mark.asyncio
 async def test_session_turns_are_canonical_ui_messages() -> None:
-    from fleet_rlm.rlm.dspy_contract import PredictionResult
+    from fleet_rlm.rlm.result import PredictionResult
 
     app = create_testing_app()
     scope = LocalScope()
