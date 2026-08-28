@@ -275,8 +275,9 @@ def test_p35d_live_root_direct(tmp_path: Path) -> None:
             assert sum(chunk.get("type") == "finish" for chunk in chunks) == 1
             assert any(chunk.get("type") == "reasoning-delta" for chunk in chunks)
             code_chunks = [chunk for chunk in chunks if chunk.get("type") == "data-rlm-code"]
-            assert len(code_chunks) == 1
-            assert "SUBMIT" in str(code_chunks[0].get("data", {}).get("code", ""))
+            submit_chunks = [chunk for chunk in code_chunks if "SUBMIT" in str(chunk.get("data", {}).get("code", ""))]
+            assert len(submit_chunks) == 1
+            assert code_chunks[-1] == submit_chunks[0]
             output_chunks = [chunk for chunk in chunks if chunk.get("type") == "data-rlm-output"]
             assert any("root-direct-ready" in str(chunk.get("data", {}).get("output", "")) for chunk in output_chunks)
             text = "".join(str(chunk.get("delta", "")) for chunk in chunks if chunk.get("type") == "text-delta")
