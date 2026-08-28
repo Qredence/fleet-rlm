@@ -154,6 +154,10 @@ def test_daytona_cancel_during_execution_through_fastapi(
             assert any(chunk.get("type") == "abort" and chunk.get("reason") == "Turn cancelled" for chunk in chunks)
             finish = chunks[-1]
             assert finish.get("type") != "finish" or finish.get("finishReason") != "stop"
+            runtime = getattr(resources, "runtime", None)
+            close = getattr(runtime, "close_root_session", None)
+            if callable(close):
+                client.portal.call(lambda: close(LocalScope().workspace_id, session_id))
             release_deadline = time.perf_counter() + 45
             while time.perf_counter() < release_deadline:
                 if (
