@@ -337,7 +337,13 @@ async def _run(
 
 
 @pytest.mark.asyncio
-async def test_workspace_survives_fresh_turn_context_and_repl_state_does_not() -> None:
+async def test_workspace_survives_fresh_turn_context() -> None:
+    """Durable Workspace content survives a fresh Turn context.
+
+    This drives the fresh-runner seam (one RLMRunner per Turn); it makes no
+    claim about interpreter identity, which the P45 session-scoped runtime
+    owns.
+    """
     workspace = MemoryWorkspace()
     factory = WorkspaceFlowFactory()
 
@@ -347,8 +353,6 @@ async def test_workspace_survives_fresh_turn_context_and_repl_state_does_not() -
     assert written is not None and written.succeeded
     assert read is not None and read.prediction is not None
     assert read.prediction.display_text == "durable decision"
-    assert len(factory.interpreters) == 2
-    assert factory.interpreters[0] is not factory.interpreters[1]
 
 
 @pytest.mark.asyncio

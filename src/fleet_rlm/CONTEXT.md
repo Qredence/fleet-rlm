@@ -360,9 +360,9 @@ URL sources, Attachments, and provider transport are not interchangeable.
 ### `rlm/` package one-liner
 
 `rlm/` owns the native DSPy program/result/event seams, Root/Sub model roles,
-Session-scoped RLM/interpreter reuse, delegation metrics, routing evaluation,
-and fixed-depth recursive child executor. Root-only batch delegation uses
-ordered, bounded sibling execution.
+Session-scoped RLM/interpreter reuse, and the fixed-depth recursive child
+executor. Root-only batch delegation uses ordered, bounded sibling execution;
+evaluation-only routing lives in `optimization/routing.py`.
 
 ### `daytona/` package one-liners
 

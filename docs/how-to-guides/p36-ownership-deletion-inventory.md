@@ -1,5 +1,9 @@
 # P36 ownership and deletion contract
 
+> **Historical record (P36, completed).** Rows name symbols deleted in P36; the
+> document is retained as migration evidence, not as living architecture
+> guidance. Current ownership rules live in `docs/reference/codebase-map.md`.
+
 Status: **sealed gate artifact for P37-P40**.
 
 P36 establishes the ownership and parity contract for the subtractive work that

@@ -104,3 +104,39 @@ async def test_two_sessions_execute_concurrently_with_disjoint_stream_identities
     assert {event.run_id for event in events_one}.isdisjoint({event.run_id for event in events_two})
     assert [event.run_id for event in events_one] == [events_one[0].run_id] * len(events_one)
     assert [event.run_id for event in events_two] == [events_two[0].run_id] * len(events_two)
+
+
+@pytest.mark.asyncio
+async def test_concurrent_sessions_hold_distinct_resident_interpreters() -> None:
+    """P52.7(d): no interpreter is shared across concurrent Sessions."""
+    from fleet_rlm.rlm.session_runtime import SessionKey, SessionRLMRegistry, SessionRLMState
+
+    class _Interpreter:
+        def __init__(self) -> None:
+            self.namespace: dict[str, object] = {}
+
+    built: list[SessionRLMState] = []
+    entered = asyncio.Event()
+    proceed = asyncio.Event()
+
+    async def factory(key: SessionKey, fingerprint: str) -> SessionRLMState:
+        state = SessionRLMState(key, fingerprint, object(), _Interpreter())
+        built.append(state)
+        if len(built) == 2:
+            entered.set()
+        await proceed.wait()
+        return state
+
+    registry = SessionRLMRegistry(factory)
+    first_key = SessionKey("workspace", "session-a")
+    second_key = SessionKey("workspace", "session-b")
+
+    first_task = asyncio.create_task(registry.acquire(first_key, "fp"))
+    second_task = asyncio.create_task(registry.acquire(second_key, "fp"))
+    await asyncio.wait_for(entered.wait(), timeout=5)
+    proceed.set()
+    first, second = await asyncio.gather(first_task, second_task)
+
+    assert first is not second
+    assert first.interpreter is not second.interpreter
+    assert len(built) == 2

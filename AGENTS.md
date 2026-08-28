@@ -100,7 +100,7 @@ Run `make check-docs` when docs, commands, Codex config, generated contracts, or
 - Do not commit `AGENTS.md` unless changes are intentional team workflow guidance; continual-learning workspace-fact deltas may stay uncommitted.
 - Avoid introducing direct `litellm` usage in application code; reach LLM providers through `dspy.LM` instead.
 - Prefer wire-protocol-named Literal unions (`openai_responses`, `openai_chat_completion`, `anthropic_messages`) over vendor-flavored or `_compatible`-suffixed provider-type enums, and keep LLM profiles flat (profile name, provider type, base endpoint, API key) rather than over-abstracting.
-- Cite ONLY DSPy (installed 3.3.0 source + dspy.ai docs) as the reference contract for LLM/runtime design; do NOT cite the `/daytona` or `daytona-signature` skill as authority for DSPy/RLM decisions. For Daytona sandbox/interpreter and FastAPI API work, use the `/daytona` and `/fastapi` skills for provider/framework best practices.
+- Cite ONLY DSPy (installed 3.3.1 source + dspy.ai docs) as the reference contract for LLM/runtime design; do NOT cite the `/daytona` or `daytona-signature` skill as authority for DSPy/RLM decisions. For Daytona sandbox/interpreter and FastAPI API work, use the `/daytona` and `/fastapi` skills for provider/framework best practices.
 - When asked for a plan, make it code-tree-explicit: exact file paths, line ranges, and ADD/REMOVE/EDIT tables; include expected behavior, capability, and code-change impacts; and cite DSPy, Daytona, and/or FastAPI docs when justifying relevance — not generic prose. When grilling or collecting decisions, prefer AskUser/AskQuestion over long inline multi-question dumps when that tool is available.
 - Prefer live per-iteration RLM reasoning on the existing SSE/`RLMReasoning` → TUI path; treat `dspy.RLM(verbose=…)` as host-logger-only and insufficient for operator-visible streaming.
 
@@ -140,7 +140,7 @@ Run `make check-docs` when docs, commands, Codex config, generated contracts, or
   include the maintained TUI. Live promotion uses `tests/live/backend/` with
   explicit `FLEET_LIVE=1`. `make api-sync` owns root OpenAPI and generated TUI
   HTTP types; a future graphical client is separate work.
-- Under pinned DSPy 3.3.0, every `dspy.LM` must resolve a provider; profile roles
+- Under pinned DSPy 3.3.1, every `dspy.LM` must resolve a provider; profile roles
   and bare IDs use `normalize_model_id`; native `RLMOptions` map one-to-one to
   DSPy. `max_iters` bounds iterations, `max_llm_calls` semantic prompts, and
   `max_output_chars` retained REPL output. Root-only `rlm_query_batched` reserves

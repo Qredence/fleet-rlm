@@ -830,3 +830,53 @@ async def test_sql_cancelled_settlement_persists_bounded_tombstone_rows() -> Non
             assert (run.status, run.claim_owner, run.finished_at is not None) == ("cancelled", None, True)
     finally:
         await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_sql_racing_begins_fence_one_claimant() -> None:
+    """P52.7(c): two racing begin claims on one Session commit exactly one winner."""
+    from fleet_rlm.chat.run_lifecycle import ClaimedRun, RunClaim, RunInProgressError
+    from fleet_rlm.persistence.database import create_async_engine_from_url, create_session_factory, create_tables
+    from fleet_rlm.persistence.models import SessionRow, UserRow, WorkspaceRow
+    from fleet_rlm.persistence.repositories.turns import SqlAlchemyRunStateStore
+    from fleet_rlm.sessions.models import TurnAccess, TurnInput
+
+    engine = create_async_engine_from_url("sqlite+aiosqlite:///:memory:")
+    try:
+        await create_tables(engine)
+        factory = create_session_factory(engine)
+        access, session_id = TurnAccess(uuid4(), uuid4()), uuid4()
+        async with factory() as db, db.begin():
+            db.add_all(
+                (
+                    UserRow(id=access.user_id),
+                    WorkspaceRow(id=access.workspace_id),
+                    SessionRow(
+                        id=session_id,
+                        user_id=access.user_id,
+                        workspace_id=access.workspace_id,
+                        title="racing begins",
+                    ),
+                )
+            )
+        store = SqlAlchemyRunStateStore(factory, stale_after_seconds=30)
+
+        async def begin(run_id, key: str):
+            return await store.begin(RunClaim(access, session_id, TurnInput(f"turn-{key}"), key, run_id))
+
+        results = await asyncio.gather(
+            begin(uuid4(), "worker-a"),
+            begin(uuid4(), "worker-b"),
+            return_exceptions=True,
+        )
+        winners = [r for r in results if isinstance(r, ClaimedRun)]
+        losers = [r for r in results if isinstance(r, BaseException)]
+        assert len(winners) == 1
+        assert len(losers) == 1
+        # The loser fails closed: either a clean in-progress refusal or, under
+        # SQLite lock contention, the lifecycle-unavailable fencing error.
+        from fleet_rlm.chat.run_lifecycle import RunLifecycleUnavailableError
+
+        assert isinstance(losers[0], (RunInProgressError, RunLifecycleUnavailableError))
+    finally:
+        await engine.dispose()

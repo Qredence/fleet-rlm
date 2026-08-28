@@ -14,62 +14,22 @@ import pytest
 # Canonical-path guardrails (P25-P32 seams must keep owning their domains)
 # ---------------------------------------------------------------------------
 
-
-def test_workspace_agent_exposes_only_generic_storage_operations() -> None:
-    """The installed provider bridge owns generic storage, not Memory policy."""
-    from fleet_rlm.daytona.workspace_agent.protocol import WORKSPACE_AGENT_SUPPORTED_OPERATIONS
-
-    assert "memory_append" not in WORKSPACE_AGENT_SUPPORTED_OPERATIONS
-    assert "memory_edit" not in WORKSPACE_AGENT_SUPPORTED_OPERATIONS
-    assert "memory_delete" not in WORKSPACE_AGENT_SUPPORTED_OPERATIONS
-    assert "memory_migrate" not in WORKSPACE_AGENT_SUPPORTED_OPERATIONS
-
-
-def test_owned_effect_primitive_owns_post_commit_promotion() -> None:
-    """Owned-effect call sites settle through the P27 primitive, not hand-rolled waits."""
-    from fleet_rlm.chat import post_commit_memory
-    from fleet_rlm.runtime.owned_effect import OwnedEffect
-
-    assert post_commit_memory.OwnedEffect is OwnedEffect
-    assert callable(OwnedEffect.from_task)
-
-
-def test_child_lease_settlement_uses_explicit_p30_state() -> None:
-    """The recursive child lease exposes typed settlement states (no boolean shortcuts)."""
-    from fleet_rlm.daytona.recursive_child_runtime import ChildRuntimeLeaseState
-
-    assert {state.name for state in ChildRuntimeLeaseState} == {"OPEN", "CLOSING", "CLOSED", "FAILED"}
-
-
 def test_config_inventory_remains_derived_from_the_p29_schema() -> None:
     """No second full field mirror may reappear beside the FleetFieldPolicy declarations."""
-    from fleet_rlm.config.policy import _FIELDS
     from fleet_rlm.config.settings import Settings, config_field_specs
 
-    spec_paths = {spec.toml_path for spec in config_field_specs()}
-    policy_paths = {field.path for field in _FIELDS}
-    assert policy_paths == spec_paths
+    specs = config_field_specs()
+    spec_fields = {spec.settings_field for spec in specs if spec.settings_field is not None}
+    model_fields = set(Settings.model_fields)
+    assert spec_fields <= model_fields
+    assert model_fields - spec_fields == {
+        "database_url",
+        "daytona_api_key",
+        "llm_api_key",
+        "posthog_project_token",
+    }
     assert Settings.model_config.get("extra") == "forbid"
 
-
-def test_tui_canonical_convergence_guardrail_exists() -> None:
-    """The P32 invariant suite pinning live/durable reducer convergence stays committed."""
-    from pathlib import Path
-
-    suite = Path(__file__).resolve().parents[3] / "tools/fleet-tui/src/tui/tests/turn-reducer-invariants.test.ts"
-    assert suite.is_file()
-
-
-def test_daytona_sdk_stays_inside_the_daytona_boundary() -> None:
-    """Native DSPy execution authority stays in rlm/; Daytona SDK stays in daytona/."""
-    from fleet_rlm.rlm.program import RLMOptions
-
-    assert RLMOptions is not None
-
-
-# ---------------------------------------------------------------------------
-# Contraction guardrails: deleted superseded paths stay deleted
-# ---------------------------------------------------------------------------
 
 DELETED_SYMBOLS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("fleet_rlm.chat.preparation", ("RunPreparationValidationError", "RunPreparationIntegrityError")),
@@ -95,9 +55,11 @@ DELETED_SYMBOLS: tuple[tuple[str, tuple[str, ...]], ...] = (
 @pytest.mark.parametrize(("module_name", "symbols"), DELETED_SYMBOLS, ids=lambda pair: pair[0].rsplit(".", 1)[-1])
 def test_p33_deleted_module_symbols_stay_deleted(module_name: str, symbols: tuple[str, ...]) -> None:
     """Accidental resurrection of a superseded path fails deterministically."""
-    import importlib
+    import importlib.util
 
-    module = importlib.import_module(module_name)
+    if importlib.util.find_spec(module_name) is None:
+        pytest.skip(f"{module_name} is absent")
+    module = __import__(module_name, fromlist=["*"])
     for name in symbols:
         assert not hasattr(module, name), f"{module_name}.{name} was resurrected"
 

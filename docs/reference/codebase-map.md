@@ -8,18 +8,18 @@ compatibility runtime and parallel foundation package no longer exist.
 | Module | Ownership | May depend on |
 | --- | --- | --- |
 | `app.py`, `main.py` | FastAPI factory, handlers/routers, static Skill catalog, lifespan selection, ASGI entrypoint | composition, API routers, Skill catalog |
-| `composition/` | common inventory plus explicit Daytona and private testing wiring | domain modules and adapters |
+| `composition/` | `live.py` Daytona wiring, `inventory.py` shared runtime graph, `testing.py` private deterministic composition | domain modules and adapters |
 | `config/` | TOML-profile runtime Settings schema, loader, and loopback-only non-secret policy editor | policy document, Settings |
 | `json_types.py` | closed `JsonScalar`/`JsonValue` contract | none |
 | `snapshot_contract.py` | immutable Daytona Snapshot name policy | none |
 | `paths.py` | provider-neutral Volume layout, mount validation, and path identity primitives | standard library |
 | `result_snapshot.py` | private commit-gated typed-result encoding | RLM prediction/usage |
 | `api/` | HTTP translation, local scope, dependency aliases, OpenAPI/SSE projection, UIMessage reload | domain interfaces and composed modules |
-| `chat/` | `TurnRuntime` claim-to-cleanup orchestration, Turn preparation, lifecycle finalization, owned post-commit Memory promotion, shared heartbeat/Claim policy; `turn_coordinator.py` is a compatibility shim | RLM, Sessions, Skills, Workspace, Attachments, Artifacts |
+| `chat/` | `TurnRuntime` claim-to-cleanup orchestration, Turn preparation, lifecycle finalization, owned post-commit Memory promotion, shared heartbeat/Claim policy | RLM, Sessions, Skills, Workspace, Attachments, Artifacts |
 | `rlm/` | DSPy Signature, Root/Sub model roles, Session-scoped RLM construction/reuse with fresh per-Turn history, delegation metrics, routing evaluation, fixed-depth child executor, options, events, and native execution orchestration | DSPy and domain values |
 | `optimization/` | trusted-host GEPA/evidence lane | Daytona evaluator, evidence types |
 | `daytona/` | exclusive SDK boundary: async platform/provisioning, provider-only Session ownership, DSPy-only sync interpreter seam (injected `SyncBridgeDispatcher`), confirmed Sandbox Lease ownership (`sandbox_lease.py`) with typed cleanup receipts and confirmed deletion lifecycle (`lifecycle.py`), one contracted recursive-child owner covering acquisition, lease close state, strict cleanup, and late ownership (`recursive_child_runtime.py`), versioned installed Workspace Agent protocol with one packaged `handle(request)` artifact for installed and fallback launchers (`workspace_agent/`), canonical broker source plus transport, and provider error mapping | Daytona SDK and provider transport ports |
-| `runtime/` | provider-neutral `OwnedEffect` settlement primitive plus Sandbox binding records and store ports | domain values |
+| `runtime/` | provider-neutral `OwnedEffect` settlement primitive, Sandbox binding records, and `runtime/daytona/` provider assembly (Turn adapters, Workspace gateway) | domain values |
 | `sessions/` | Session catalog, Turn input/history, canonical AssistantPart vocabulary, versioned Committed Turn | domain values |
 | `workspace/`, `attachments/`, `artifacts/` | Provider-neutral Workspace, Projects, Memory, URL, Attachment, and Artifact domain policy over bounded storage interfaces | storage interfaces, safe paths, and persistence adapters |
 | `skills/` | bundled catalog, authorization, progressive loading, capability seam, Tool construction | domain values and package resources |

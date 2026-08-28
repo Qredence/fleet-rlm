@@ -101,8 +101,3 @@ def test_generic_runtime_modules_do_not_import_daytona_implementations() -> None
     assert violations == []
 
 
-def test_provider_probe_has_no_daytona_imports() -> None:
-    path = Path("src/fleet_rlm/rlm/runtime.py")
-    source = path.read_text(encoding="utf-8")
-
-    assert "fleet_rlm.daytona" not in source

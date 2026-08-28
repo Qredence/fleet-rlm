@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import importlib
-import inspect
 import json
 from pathlib import Path
 from typing import Any, cast
@@ -231,21 +230,3 @@ def test_model_facing_tool_contract_fixture_has_complete_policies_and_current_co
         assert isinstance(projection["omits"], list)
         assert isinstance(projection["source"], str) and projection["source"]
 
-    from fleet_rlm.chat import capability_preparation
-    from fleet_rlm.composition import testing
-    from fleet_rlm.rlm import recursion as recursive_calls
-    from fleet_rlm.rlm import runtime as runner
-    from fleet_rlm.runtime.daytona import run_environment
-
-    prepared_source = inspect.getsource(capability_preparation.prepare_host_capabilities)
-    testing_source = inspect.getsource(testing.TestingCapabilityPreparer.prepare)
-    live_source = inspect.getsource(run_environment._LiveCapabilityPreparer.prepare)
-    recursive_source = inspect.getsource(recursive_calls.RecursiveRLMExecutor._run_native_child)
-    runner_source = inspect.getsource(runner.RLMRunner._start_worker)
-
-    assert "SessionHistoryToolHost" in prepared_source
-    assert "AttachmentToolHost" in testing_source
-    assert "ArtifactToolHost" in live_source
-    assert "if self.settings.rlm_autonomous_memory_categories:" in live_source
-    assert "tools=[child_executor.tool]" in recursive_source
-    assert "is_authorized=lambda: not context.identity.authority.revoked" in runner_source

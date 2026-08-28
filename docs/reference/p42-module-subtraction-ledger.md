@@ -1,14 +1,11 @@
 # P42 module-subtraction ledger
 
-**Status:** implementation ledger; P42–P49 are implemented, and the P50
-provider-neutral Workspace/Memory/Attachments migration is implemented in the
-current working tree. Standard quality and release gates are green; optional
-credentialed live lanes remain separate. No P51 implementation claim is made.
-**Baseline:** the current checkout after the sealed P36/P41 work, assessed against
-`plans/PLANS.md` P44–P51.
-**Replacement PRs:** the phase commits are recorded in repository history; rows
-that remain planned are deliberately TBD and require separately reviewed
-implementation work.
+**Status:** historical migration ledger (P42–P51 implemented; rows record the
+phase commits in repository history). Retained as the P53.4 close-out audit
+input, not as living architecture guidance; its dedicated documentation freeze
+test was removed in P52.9.
+**Baseline:** the sealed P36/P41 work, assessed against `plans/PLANS.md` P44–P53.
+**Replacement PRs:** the phase commits are recorded in repository history.
 
 ## Current implementation status
 
