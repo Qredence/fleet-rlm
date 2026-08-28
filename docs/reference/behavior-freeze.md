@@ -28,7 +28,7 @@ the behaviors below keep passing their lanes.
 | pi-tui client | Live/durable projection convergence, timeline/cards/viewport behavior | pi-tui terminal client | `make tui-check`, tuistory interactive lanes |
 | Public failure taxonomy | Closed sanitized HTTP/open-path/terminal categories, messages, phases | Public failure adapters | `tests/freeze/test_failure_taxonomy_golden.py` |
 | Session Workspace and Project products | Explicit tool hosts, tool catalogs, path rules, delete/edit preconditions | Workspace/Project tool hosts | `tests/contracts/backend/test_p40_explicit_hosts` |
-| Workspace Memory | Format, caps, digests, process-local append serialization | Workspace Memory host | `tests/unit/backend/files/test_memory_*.py`, `tests/unit/backend/daytona/test_workspace_memory*.py`, `tests/live/backend/` |
+| Workspace Memory | Format, caps, digests, process-local append serialization | Workspace Memory host | `tests/unit/backend/workspace/test_memory_*.py`, `tests/unit/backend/daytona/test_workspace_memory*.py`, `tests/live/backend/` |
 | Attachments and Artifacts | Upload/list/read, commit-gated publication, checksum integrity | Attachment/Artifact pipeline | `tests/unit/backend/test_attachment_*.py`, `tests/contracts/backend/` |
 | Daytona provider lifecycle | Admission accounting, leases, cleanup and confirmed absence, Volume safety | Daytona runtime owner | `tests/live/backend/` (serial, `FLEET_LIVE=1`) |
 | FastAPI and OpenAPI surface | Route set, one stream route, generated client types | API surface | `make api-check`, `tests/freeze/test_public_stream_gate.py` |
