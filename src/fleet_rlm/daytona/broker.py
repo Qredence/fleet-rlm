@@ -32,6 +32,7 @@ from daytona import SessionExecuteRequest
 from fleet_rlm.daytona.errors import (
     DaytonaAdapterError,
     ProviderRequestError,
+    is_sandbox_not_found,
     is_transient_provider_failure,
     map_provider_error,
     provider_status_code,
@@ -1053,15 +1054,37 @@ class DaytonaHttpToolBroker:
                 if strict:
                     first_error = exc
         if session_id is not None:
-            try:
-                self._sandbox.process.delete_session(session_id)
-            except BaseException as exc:
+            # Sandbox deletion propagates asynchronously provider-side, so a
+            # session delete racing it can surface as transient 5xx before the
+            # final 404. Retry through that window; once the Sandbox is gone the
+            # session is definitionally deleted with it.
+            delete_error: BaseException | None = None
+            for attempt, retry_delay in enumerate((0.0, 2.0, 4.0, 8.0)):
+                if retry_delay:
+                    time.sleep(retry_delay)
+                try:
+                    self._sandbox.process.delete_session(session_id)
+                except BaseException as exc:
+                    if _is_session_delete_settled(exc):
+                        # The sandbox (and with it the session) is already gone,
+                        # stopped, or unreachable, so the desired end state is
+                        # reached; treat it as deleted instead of retrying
+                        # against a torn-down Sandbox.
+                        delete_error = None
+                        break
+                    delete_error = exc
+                    if not is_transient_provider_failure(exc) or attempt == 3:
+                        break
+                else:
+                    delete_error = None
+                    break
+            if delete_error is not None:
                 # The session is still owned when deletion was rejected. The
                 # broker remains stopped, so this retry cannot race startup.
                 self._broker_session_id = session_id
                 settled = False
                 if strict:
-                    first_error = first_error or exc
+                    first_error = first_error or delete_error
         if first_error is not None:
             raise first_error
         return settled
@@ -1232,6 +1255,24 @@ class DaytonaHttpToolBroker:
             broker_port=self._broker_port,
             broker_secret=self._broker_secret,
         )
+
+
+def _is_session_delete_settled(exc: BaseException) -> bool:
+    """Whether a failed session delete already reached the desired end state.
+
+    Deleting a session inside a Sandbox races provider-side Sandbox teardown:
+    depending on how far teardown progressed, the provider reports 404 (unknown
+    Sandbox), 5xx (toolbox unreachable while the Sandbox is being deleted), or
+    400 (no container IP because the Sandbox is no longer started).  In all of
+    those states the session cannot outlive its Sandbox, so the delete is
+    treated as settled instead of failing the whole strict cleanup.
+    """
+    if is_sandbox_not_found(exc):
+        return True
+    if getattr(exc, "status_code", None) == 400:
+        message = str(exc)
+        return "resolve container IP" in message or "Is the Sandbox started?" in message
+    return False
 
 
 _BRIDGE_SERVICE_POLL_S = 0.5

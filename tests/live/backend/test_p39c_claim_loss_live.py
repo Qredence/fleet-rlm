@@ -420,7 +420,7 @@ def test_live_claim_loss_fencing_leaves_no_recursive_resources(
             assert receipt["admission_released"] is True
             assert receipt["clean"] is True
 
-            _wait_for_admission_baseline(resources, session_id, permits=settings.max_active_daytona_leases)
+            _wait_for_admission_baseline(resources, session_id, permits=settings.max_active_daytona_leases, portal=portal)
             assert get_active_lease_registry().holder(session_id) is None
             absence = portal.call(_all_absent, resources, list(evidence.sandbox_ids))
             assert all(absence.values())

@@ -430,7 +430,7 @@ def test_live_volume_preservation_across_all_child_outcomes(
                 assert len(scenario_children) == 1
                 child_by_scenario[name] = scenario_children[0]
 
-                _wait_for_admission_baseline(resources, session_id, permits=settings.max_active_daytona_leases)
+                _wait_for_admission_baseline(resources, session_id, permits=settings.max_active_daytona_leases, portal=portal)
                 assert get_active_lease_registry().holder(session_id) is None
                 binding = portal.call(resources.bindings.get, session_id)
                 if binding is not None and binding.sandbox_id is not None:

@@ -2349,6 +2349,25 @@ def _copy_tool_metadata(
         raise ValueError("Tool metadata is not copyable") from exc
 
 
+def _spoof_proxy_signature(invoke: Callable[..., Any], source: dspy.Tool) -> None:
+    """Give a ``**kwargs`` proxy the source Tool's visible signature.
+
+    DSPy 3.3.1 ``RLM._make_interpreter_tool`` copies ``inspect.signature(tool.func)``
+    onto its interpreter-facing wrapper, and the Daytona broker generates the
+    in-sandbox forwarding wrapper from that signature.  A plain ``**kwargs``
+    proxy would erase every parameter name, so host Tools would reject the
+    forwarded keyword arguments.  Spoofing keeps the interpreter-facing
+    signature identical to the source Tool's own function; the model-facing
+    contract still comes from the copied metadata only.  Stale proxies keep
+    their permissive ``**kwargs`` shape and fail closed in the registry.
+    """
+    try:
+        signature = inspect.signature(source.func)
+    except (TypeError, ValueError):
+        return
+    invoke.__signature__ = signature  # type: ignore[attr-defined]
+
+
 def _set_tool_metadata(
     proxy: dspy.Tool,
     metadata: tuple[str | None, dict[str, Any] | None, dict[str, Any] | None, dict[str, str] | None],
@@ -2492,6 +2511,7 @@ class SessionToolRegistry:
             )
         else:
             metadata = _copy_tool_metadata(source)
+            _spoof_proxy_signature(invoke, source)
         # Keep this constructor spelling aligned with the exact DSPy 3.3.1
         # public Tool signature.  In particular, explicit metadata prevents
         # the proxy's ``**kwargs`` callable from being reflected as its model
@@ -2522,6 +2542,10 @@ class SessionToolRegistry:
     def _update_proxy(self, proxy: dspy.Tool, source: dspy.Tool, name: str) -> None:
         del name
         _set_tool_metadata(proxy, _copy_tool_metadata(source))
+        # The interpreter-facing signature follows the current source Tool as
+        # well, so wrapper generation (DSPy ``_make_interpreter_tool`` and the
+        # Daytona broker) never reflects a stale parameter set.
+        _spoof_proxy_signature(proxy.func, source)
 
     def _validate_sources(self, tools: Iterable[dspy.Tool]) -> tuple[dspy.Tool, ...]:
         values = tuple(tools)
@@ -2604,6 +2628,9 @@ class SessionToolRegistry:
                     proxy = self._new_proxy(name)
                     self._proxies[name] = proxy
                 _set_tool_metadata(proxy, metadata[name])
+                # The interpreter-facing signature follows the source Tool so
+                # DSPy/broker wrapper generation sees real parameter names.
+                _spoof_proxy_signature(proxy.func, source)
                 active_tools[name] = source
             for old_name, proxy in self._proxies.items():
                 if old_name not in active_tools:

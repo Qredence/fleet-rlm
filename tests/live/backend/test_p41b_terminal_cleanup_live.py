@@ -406,7 +406,7 @@ def test_p41b_success_terminal_cleanup(tmp_path: Path, monkeypatch: pytest.Monke
 
             assert evidence.child_sandbox_ids, "success ending must exercise one native child"
 
-            _wait_for_admission_baseline(resources, session_id, permits=settings.max_active_daytona_leases)
+            _wait_for_admission_baseline(resources, session_id, permits=settings.max_active_daytona_leases, portal=portal)
             # Turn-owned cleanliness: every recursion child is destroyed-or-archived
             # at the cleanup boundary (the Root Sandbox is retained for Session
             # reuse and released by validator teardown below).
@@ -518,7 +518,7 @@ def test_p41b_provider_failure_terminal_cleanup(tmp_path: Path) -> None:
             assert page.status_code == 200
             assert _CANARY not in page.text
 
-            _wait_for_admission_baseline(resources, session_id, permits=settings.max_active_daytona_leases)
+            _wait_for_admission_baseline(resources, session_id, permits=settings.max_active_daytona_leases, portal=portal)
             assert portal.call(_volume_exists, resources, settings.volume_name) is True
         finally:
             sandbox_ids = _chained_sandbox_ids(
@@ -647,7 +647,7 @@ def _stall_scenario(
                 # admission-baseline window.
                 gate.set()
 
-            _wait_for_admission_baseline(resources, session_id, permits=settings.max_active_daytona_leases)
+            _wait_for_admission_baseline(resources, session_id, permits=settings.max_active_daytona_leases, portal=portal)
             sandbox_ids = _chained_sandbox_ids(
                 portal=portal, resources=resources, session_id=session_id, evidence=evidence
             )
