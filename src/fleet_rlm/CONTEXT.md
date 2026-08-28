@@ -101,7 +101,7 @@ _Avoid_: HTTP request, Chat Execution Context (live term)
 
 **RLM Options**:
 The native DSPy limits for one Root or Recursive Child invocation. The default
-Root values mirror DSPy 3.3.x: `max_iters = 20` for action/REPL iterations,
+Root values mirror certified DSPy 3.3.1: `max_iters = 20` for action/REPL iterations,
 `max_llm_calls = 50` for prompts sent through native
 `llm_query`/`llm_query_batched`, and `max_output_chars = 10000` for retained REPL
 output. Fleet child defaults are smaller (`8`, `12`, and `4000` respectively).
@@ -382,7 +382,7 @@ evaluation-only routing lives in `optimization/routing.py`.
   shutdown with confirmed provider deletion and absence, admission
   restoration, and late/quarantined cleanup ownership that survives
   owner-loop and dispatch loss.
-- `session_manager.py` — interpreter lease acquire/release and Sandbox binding lifecycle.
+- `session_manager.py` — low-level interpreter-lease acquire/release and Sandbox-binding adapter used by the Daytona runtime facade.
 - `workspace_agent/` — Workspace Agent host protocol/client package; the
   packaged `workspace_agent/runtime.py` owns the explicit stdlib-only
   `handle(request)` used by installed and fallback launchers.
@@ -395,12 +395,12 @@ sessions and ephemeral Workspace gateways live in
 boundary, while domain policy stays under `workspace/` and `attachments/`.
 
 The post-P25 maintainability baseline keeps one canonical transformation at
-each seam: `RunLifecycle.finish()` commits, `TurnRuntime` settles the
-stream,
-`OwnedEffect` supplies the provider-neutral wait vocabulary, and the
-TUI adapters feed one canonical reducer. See the [P34 maintainability freeze
-guide](../../docs/how-to-guides/maintainability-freeze.md) for the certification
-matrix and cleanup guardrails.
+each seam: `RunLifecycle.finish()` commits, `TurnRuntime` settles the stream,
+`OwnedEffect` supplies the provider-neutral wait vocabulary, and the TUI
+adapters feed one canonical reducer. See the [historical P34 maintainability
+freeze guide](../../docs/how-to-guides/maintainability-freeze.md) and the
+[current P42 Session-state freeze](../../docs/reference/p42-session-state-behavior-freeze.md)
+for the applicable certification matrix and cleanup guardrails.
 
 ## Out of this context (for now)
 
@@ -411,6 +411,6 @@ These shared or live terms are **not** clean product claims until promoted:
 - **Child Session**
 - **Execution Mode** client switch (`simple` vs `rlm`)
 - **Managed Target**, GEPA selection, and promotion artifacts
-- Warm multi-run **Code-Interpreter Context** (clean is per-Run only)
+- Cross-process identity of a resident **Code-Interpreter Context** (restart may rotate it)
 - Optional third model role beyond Root Model and Sub Model
 - Shared-root **Volume** without Workspace Volume Scope as a multi-tenant claim

@@ -20,11 +20,10 @@ candidate tree. The manifest is re-sealed at the current HEAD whenever code
 moves between milestones. The manifest records the certified candidate SHA
 and lockfile digest under `.fleet-evidence/receipts/p35e-certification-manifest.json`.
 
-Verification reads the recorded candidate SHA directly from the manifest:
+Verification binds the manifest to the current clean HEAD and `uv.lock`:
 
 ```bash
-uv run python scripts/certification_gate.py verify \
-  --sha $(jq -r '.candidate.sha' .fleet-evidence/receipts/p35e-certification-manifest.json)
+uv run python scripts/certification_gate.py verify
 ```
 
 The manifest and all live receipts remain ignored local evidence. They are
@@ -63,7 +62,7 @@ test name.
 
 | Evidence ID | Deterministic evidence | Required live evidence |
 | --- | --- | --- |
-| `E-BASE` | Verify the sealed P35-E manifest against its recorded candidate SHA with `uv run python scripts/certification_gate.py verify --sha $(jq -r '.candidate.sha' .fleet-evidence/receipts/p35e-certification-manifest.json)`. Reject missing, failed, stale, or foreign-SHA manifests. | The manifest already contains the required P35-E serial Daytona and validator receipts. No new live run is authorized by P36 alone. |
+| `E-BASE` | Verify the sealed P35-E manifest against the current clean HEAD and `uv.lock` with `uv run python scripts/certification_gate.py verify`; an explicit `--sha` is only an additional current-HEAD assertion, never a stale-receipt override. Reject missing, failed, stale, or foreign-SHA manifests. | The manifest already contains the required P35-E serial Daytona and validator receipts. No new live run is authorized by P36 alone. |
 | `E-P37-CLAIM` | `uv run pytest tests/unit/backend/test_turn_claim_heartbeat.py tests/unit/backend/test_turn_lifecycle.py tests/unit/backend/test_turn_lifecycle_cancellation.py tests/unit/backend/test_in_memory_turn_state.py tests/unit/backend/test_sql_turn_state.py tests/contracts/backend/test_turn_claim_adapter_parity.py -q`. The post-contraction replacement tests must retain claim-before-work, heartbeat retry and revocation, race fencing, deadline-bounded recovery, cancellation-safe recovery, and SQL/in-memory parity. | Required when a change alters provider acquisition or cleanup after claim loss: run the serial `FLEET_LIVE=1` cancellation, timeout, and claim-loss lanes and retain absence plus admission receipts. |
 | `E-P37-STREAM` | `uv run pytest tests/unit/backend/chat/test_turn_coordinator_execution.py tests/unit/backend/test_turn_coordinator_cancellation.py tests/unit/backend/test_turn_coordinator_failures.py tests/contracts/backend/test_coordinator_runner_failures.py tests/contracts/backend/test_ai_sdk_ui_turn_contract.py tests/contracts/backend/test_run_cancellation_api.py -q`. The replacement owner must preserve close-before-first-event, one absolute deadline, runner-terminal prohibition, exactly one terminal, and cancellation semantics. | Required for a provider-facing stream ownership change. Use the mission's serial Daytona deadline and cancellation lanes; do not substitute a local fake for absence proof. |
 | `E-P37-SETTLEMENT` | `uv run pytest tests/unit/backend/test_turn_coordinator_commit.py tests/unit/backend/test_turn_lifecycle_settlement.py tests/unit/backend/test_artifact_reader_and_promotion.py tests/unit/backend/chat/test_memory_candidate_promotion.py tests/contracts/backend/test_result_snapshot_commit.py -q`. Success remains lifecycle-owned and failure never publishes success identities. | Required if cleanup ordering or late post-commit ownership changes. The live receipt must show terminal ordering, resource absence, and admission restoration. |
@@ -165,7 +164,7 @@ result without that receipt is **not** parity and cannot authorize deletion.
 
 Before a P37-P40 change deletes or absorbs a row:
 
-1. verify `E-BASE` at the candidate SHA;
+1. verify `E-BASE` against the current clean HEAD and `uv.lock` (an explicit SHA may only assert that same HEAD);
 2. cite the inventory ID in the change description and tests;
 3. run every deterministic entry named by the row;
 4. run every required live entry serially, with confirmed provider absence and

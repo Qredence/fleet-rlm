@@ -8,7 +8,7 @@ compatibility runtime and parallel foundation package no longer exist.
 | Module | Ownership | May depend on |
 | --- | --- | --- |
 | `app.py`, `main.py` | FastAPI factory, handlers/routers, static Skill catalog, lifespan selection, ASGI entrypoint | composition, API routers, Skill catalog |
-| `composition/` | `live.py` Daytona wiring, `inventory.py` shared runtime graph, `testing.py` private deterministic composition | domain modules and adapters |
+| `composition/` | `live.py` Daytona wiring, `inventory.py` shared runtime graph, `testing.py` private deterministic composition; wiring only, no Turn behavior | domain modules and adapters |
 | `config/` | TOML-profile runtime Settings schema, loader, and loopback-only non-secret policy editor | policy document, Settings |
 | `json_types.py` | closed `JsonScalar`/`JsonValue` contract | none |
 | `snapshot_contract.py` | immutable Daytona Snapshot name policy | none |
@@ -16,10 +16,10 @@ compatibility runtime and parallel foundation package no longer exist.
 | `result_snapshot.py` | private commit-gated typed-result encoding | RLM prediction/usage |
 | `api/` | HTTP translation, local scope, dependency aliases, OpenAPI/SSE projection, UIMessage reload | domain interfaces and composed modules |
 | `chat/` | `TurnRuntime` claim-to-cleanup orchestration, Turn preparation, lifecycle finalization, owned post-commit Memory promotion, shared heartbeat/Claim policy | RLM, Sessions, Skills, Workspace, Attachments, Artifacts |
-| `rlm/` | DSPy Signature, Root/Sub model roles, Session-scoped RLM construction/reuse with fresh per-Turn history, delegation metrics, routing evaluation, fixed-depth child executor, options, events, and native execution orchestration | DSPy and domain values |
+| `rlm/` | DSPy Signature, Root/Sub model roles, Session-scoped RLM construction/reuse with fresh per-Turn history, delegation metrics, fixed-depth child executor, options, events, and native execution orchestration; evaluation-only routing lives in `optimization/routing.py` | DSPy and domain values |
 | `optimization/` | trusted-host GEPA/evidence lane | Daytona evaluator, evidence types |
 | `daytona/` | exclusive SDK boundary: async platform/provisioning, provider-only Session ownership, DSPy-only sync interpreter seam (injected `SyncBridgeDispatcher`), confirmed Sandbox Lease ownership (`sandbox_lease.py`) with typed cleanup receipts and confirmed deletion lifecycle (`lifecycle.py`), one contracted recursive-child owner covering acquisition, lease close state, strict cleanup, and late ownership (`recursive_child_runtime.py`), versioned installed Workspace Agent protocol with one packaged `handle(request)` artifact for installed and fallback launchers (`workspace_agent/`), canonical broker source plus transport, and provider error mapping | Daytona SDK and provider transport ports |
-| `runtime/` | provider-neutral `OwnedEffect` settlement primitive, Sandbox binding records, and `runtime/daytona/` provider assembly (Turn adapters, Workspace gateway) | domain values |
+| `runtime/` | provider-neutral `OwnedEffect` settlement, Sandbox binding records, cleanup/error/usage policy, and `runtime/daytona/` provider assembly (Turn adapters, Workspace gateway) | domain values |
 | `sessions/` | Session catalog, Turn input/history, canonical AssistantPart vocabulary, versioned Committed Turn | domain values |
 | `workspace/`, `attachments/`, `artifacts/` | Provider-neutral Workspace, Projects, Memory, URL, Attachment, and Artifact domain policy over bounded storage interfaces | storage interfaces, safe paths, and persistence adapters |
 | `skills/` | bundled catalog, authorization, progressive loading, capability seam, Tool construction | domain values and package resources |
@@ -103,8 +103,11 @@ compatibility runtime and parallel foundation package no longer exist.
 The authoritative route inventory and shapes are in
 [HTTP API](http-api.md) and `openapi.yaml`.
 
-The final P34 ownership matrix, freeze constraints, and certification commands
-are maintained in [Maintainability freeze](../how-to-guides/maintainability-freeze.md).
+The historical P34 ownership matrix and freeze constraints are maintained in
+[Maintainability freeze](../how-to-guides/maintainability-freeze.md). Current
+Session-state behavior is frozen in
+[p42-session-state-behavior-freeze.md](p42-session-state-behavior-freeze.md),
+and final certification remains the P53 gate.
 
 ## Maintained terminal client
 

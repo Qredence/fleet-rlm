@@ -1,9 +1,10 @@
 # P42 session-state behavior freeze
 
-**Status:** sealed — certified through P53 (`make check` and the deterministic
-certification lanes; credentialed live lanes are recorded separately).  
+**Status:** approved behavior contract — deterministic implementation is present;
+final P53 certification remains pending until current-candidate live evidence is sealed.
 **Supersedes:** only the P41 *Native RLM execution per Turn* behavior, which is
-now certified as superseded by the Session-scoped resident contract below.  It
+is targeted for supersession by the approved Session-scoped resident contract below;
+final P53 certification remains pending. It
 does **not** rewrite the sealed [P41 behavior freeze](behavior-freeze.md), which
 remains the historical, certified baseline for
 `1801d24a938eda37b53ebb2f543fd01e3c6bdaf6`.
@@ -11,7 +12,7 @@ remains the historical, certified baseline for
 This contract records the approved product behavior. It permits private module
 restructuring — private filenames, module layouts, helper boundaries, local
 classes, and file counts are **never frozen** — and freezes only the observable
-state semantics that P43–P53 prove. The exact evidence baseline is
+state semantics that P43–P53 are required to prove. The exact evidence baseline is
 `dspy==3.3.1`, the dependency pinned by `pyproject.toml`.
 
 ## Versioned behavior change

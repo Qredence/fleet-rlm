@@ -40,7 +40,7 @@ def _success_receipt(sha: str) -> dict[str, object]:
             "tracked_tree_clean": True,
             "versions": {
                 "python": "3.13.13",
-                "dspy": "3.3.0",
+                "dspy": "3.3.1",
                 "daytona": "0.199.0",
             },
             "lockfile_sha256": "d" * 64,
@@ -167,14 +167,14 @@ def test_installed_versions_are_read_from_the_detached_candidate_worktree(
     ) -> subprocess.CompletedProcess[str]:
         del check, capture_output, text
         calls.append((command, cwd, env))
-        return subprocess.CompletedProcess(command, 0, stdout='{"python":"3.13.13","dspy":"3.3.0","daytona":"0.199.0"}')
+        return subprocess.CompletedProcess(command, 0, stdout='{"python":"3.13.13","dspy":"3.3.1","daytona":"0.199.0"}')
 
     monkeypatch.setattr(verifier.subprocess, "run", run)
     environment = {"FLEET_LIVE": "1"}
 
     assert verifier._installed_versions(tmp_path, environment) == {
         "python": "3.13.13",
-        "dspy": "3.3.0",
+        "dspy": "3.3.1",
         "daytona": "0.199.0",
     }
     assert calls[0][1] == tmp_path
@@ -359,7 +359,7 @@ def test_main_invokes_pytest_once_and_accepts_valid_receipt(
         "_installed_versions",
         lambda *_args: {
             "python": "3.13.13",
-            "dspy": "3.3.0",
+            "dspy": "3.3.1",
             "daytona": "0.199.0",
         },
     )

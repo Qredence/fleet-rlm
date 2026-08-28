@@ -23,7 +23,6 @@ from fleet_rlm.workspace.workspace import (
     translate_fs_tool_errors,
 )
 
-MAX_PROJECT_READ_CHARS = MAX_STORAGE_READ_CHARS
 PROJECT_WORKSPACE_NAMESPACE = "project_workspace"
 
 
@@ -192,10 +191,10 @@ class ProjectToolHost:
         def read_project_text(
             path: str,
             cursor: str | None = None,
-            max_chars: int = MAX_PROJECT_READ_CHARS,
+            max_chars: int = MAX_STORAGE_READ_CHARS,
         ) -> dict[str, object]:
             """Read one UTF-8 Project file page without returning more than max_chars."""
-            if max_chars < 1 or max_chars > MAX_PROJECT_READ_CHARS:
+            if max_chars < 1 or max_chars > MAX_STORAGE_READ_CHARS:
                 raise ProjectToolError("invalid_path", "Project read bound is invalid")
             try:
                 normalized = _project_file_path(path)
@@ -301,7 +300,7 @@ class ProjectToolHost:
                 args={
                     "path": {"type": "string"},
                     "cursor": {"type": ["string", "null"]},
-                    "max_chars": {"type": "integer", "minimum": 1, "maximum": MAX_PROJECT_READ_CHARS},
+                    "max_chars": {"type": "integer", "minimum": 1, "maximum": MAX_STORAGE_READ_CHARS},
                 },
             ),
             dspy.Tool(
@@ -424,7 +423,6 @@ class ProjectToolHost:
 
 
 __all__ = [
-    "MAX_PROJECT_READ_CHARS",
     "PROJECT_WORKSPACE_NAMESPACE",
     "ProjectToolError",
     "ProjectToolHost",

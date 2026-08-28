@@ -286,7 +286,16 @@ async def _scratch_marker(resources: Any, settings: Settings) -> tuple[Any, str,
     Sandbox after read-back.
     """
     paths = volume_paths_from_settings(settings)
-    volume = await resources.client.volume.get(settings.volume_name, create=True)
+    # Mirror the production readiness wait (LiveDaytonaVolumeClient.get): a
+    # freshly created Volume is not immediately mountable provider-side.
+    for _attempt in range(30):
+        volume = await resources.client.volume.get(settings.volume_name, create=True)
+        state = str(getattr(getattr(volume, "state", None), "value", getattr(volume, "state", None)) or "").lower()
+        if not state or state == "ready":
+            break
+        await asyncio.sleep(2.0)
+    else:
+        raise AssertionError("volume did not become ready")
     subpath = workspace_volume_subpath(LocalScope().workspace_id)
     sandbox = await resources.platform.create(
         volume_id=volume.id,
@@ -406,7 +415,9 @@ def test_p41b_success_terminal_cleanup(tmp_path: Path, monkeypatch: pytest.Monke
 
             assert evidence.child_sandbox_ids, "success ending must exercise one native child"
 
-            _wait_for_admission_baseline(resources, session_id, permits=settings.max_active_daytona_leases, portal=portal)
+            _wait_for_admission_baseline(
+                resources, session_id, permits=settings.max_active_daytona_leases, portal=portal
+            )
             # Turn-owned cleanliness: every recursion child is destroyed-or-archived
             # at the cleanup boundary (the Root Sandbox is retained for Session
             # reuse and released by validator teardown below).
@@ -518,7 +529,9 @@ def test_p41b_provider_failure_terminal_cleanup(tmp_path: Path) -> None:
             assert page.status_code == 200
             assert _CANARY not in page.text
 
-            _wait_for_admission_baseline(resources, session_id, permits=settings.max_active_daytona_leases, portal=portal)
+            _wait_for_admission_baseline(
+                resources, session_id, permits=settings.max_active_daytona_leases, portal=portal
+            )
             assert portal.call(_volume_exists, resources, settings.volume_name) is True
         finally:
             sandbox_ids = _chained_sandbox_ids(
@@ -647,7 +660,9 @@ def _stall_scenario(
                 # admission-baseline window.
                 gate.set()
 
-            _wait_for_admission_baseline(resources, session_id, permits=settings.max_active_daytona_leases, portal=portal)
+            _wait_for_admission_baseline(
+                resources, session_id, permits=settings.max_active_daytona_leases, portal=portal
+            )
             sandbox_ids = _chained_sandbox_ids(
                 portal=portal, resources=resources, session_id=session_id, evidence=evidence
             )
@@ -734,9 +749,9 @@ async def test_p41b_disconnect_terminal_cleanup(tmp_path: Path, monkeypatch: pyt
     settings = _case_settings(tmp_path, name="disconnect", recursion=False, turn_timeout_seconds=600)
     evidence = _EndingEvidence()
     app = create_app(settings=settings)
-    port = 8020
     with socket.socket() as probe:
-        probe.bind(("127.0.0.1", port))
+        probe.bind(("127.0.0.1", 0))
+        port = probe.getsockname()[1]
     config = uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning", access_log=False)
     server = uvicorn.Server(config)
     serve_task = asyncio.create_task(server.serve())
@@ -773,14 +788,22 @@ async def test_p41b_disconnect_terminal_cleanup(tmp_path: Path, monkeypatch: pyt
                 seen: list[str] = []
                 started_stream = time.perf_counter()
                 engaged_at: float | None = None
-                async with client.stream(
+                stream_context = client.stream(
                     "POST",
                     f"/api/sessions/{session_id}/turns",
                     json={"text": "Run the bounded P41b disconnect proof."},
                     headers={"Idempotency-Key": f"p41b-disconnect-{uuid4()}"},
-                ) as response:
-                    assert response.status_code == 200
-                    lines = response.aiter_lines()
+                )
+                response = await stream_context.__aenter__()
+                assert response.status_code == 200
+                lines = response.aiter_lines()
+                # Keep one reader alive across polling timeouts.  Cancelling
+                # ``aiter_lines().__anext__`` directly can tear down the
+                # streaming transport while preparation is intentionally
+                # sparse, which would make this disconnect proof race the
+                # server rather than exercise a client disconnect.
+                read_task: asyncio.Task[str] = asyncio.create_task(lines.__anext__())
+                try:
                     # Poll-safe loop: sparse streams must not starve the break
                     # condition while the Root stall is engaged.
                     while True:
@@ -793,14 +816,30 @@ async def test_p41b_disconnect_terminal_cleanup(tmp_path: Path, monkeypatch: pyt
                         if now - started_stream >= 240.0:
                             break
                         try:
-                            line = await asyncio.wait_for(lines.__anext__(), timeout=1.0)
+                            line = await asyncio.wait_for(asyncio.shield(read_task), timeout=1.0)
                         except TimeoutError:
                             continue
                         except StopAsyncIteration:
                             break
                         if line.startswith("data: "):
                             seen.append(line)
-                    # Leaving the context closes the stream mid-Turn: client disconnect.
+                        read_task = asyncio.create_task(lines.__anext__())
+                finally:
+                    if not read_task.done():
+                        read_task.cancel()
+                    await asyncio.gather(read_task, return_exceptions=True)
+                    # Close the response transport, then release the gated provider
+                    # call.  Calling the response close directly avoids waiting for
+                    # the context manager's full response-drain handshake while the
+                    # server is intentionally settling a disconnected Run.
+                    close_task = asyncio.create_task(response.aclose())
+                    await asyncio.sleep(0)
+                    gate.set()
+                    try:
+                        await asyncio.wait_for(close_task, timeout=15.0)
+                    except TimeoutError:
+                        close_task.cancel()
+                        await asyncio.gather(close_task, return_exceptions=True)
 
             assert seen, "the client must observe streamed chunks before disconnecting"
             assert evidence.block_calls >= 1, "the stall must engage before the disconnect"
@@ -819,20 +858,26 @@ async def test_p41b_disconnect_terminal_cleanup(tmp_path: Path, monkeypatch: pyt
             deadline = time.perf_counter() + 450
             async with httpx.AsyncClient(base_url=base, timeout=httpx.Timeout(30.0, read=30.0)) as client:
                 while time.perf_counter() < deadline:
-                    holder = get_active_lease_registry().holder(session_id)
                     page = await client.get(f"/api/sessions/{session_id}/turns")
                     assert page.status_code == 200
                     items = page.json()["items"]
                     assistant = [item for item in items if item["role"] == "assistant"]
                     if assistant:
                         parts = assistant[-1]["parts"]
-                        status_parts = [part for part in parts if part["type"] == "status"]
+                        status_parts = [part for part in parts if part["type"] == "data-status"]
                         if any(
-                            part.get("phase") == "cancelled" and part.get("status") == "cancelled"
+                            isinstance(part.get("data"), dict)
+                            and part["data"].get("phase") == "cancelled"
+                            and part["data"].get("status") == "cancelled"
                             for part in status_parts
                         ):
                             tombstone_seen = True
-                    if tombstone_seen and holder is None and resources.daytona_admission._semaphore._value == permits:
+                    # The retained Root owns the active lease and admission
+                    # permit until the validator explicitly retires it below.
+                    # A durable cancellation tombstone is the detached Turn
+                    # settlement boundary; waiting for a released holder or
+                    # permit here would deadlock the proof.
+                    if tombstone_seen:
                         break
                     await asyncio.sleep(2.0)
                 else:
@@ -840,6 +885,14 @@ async def test_p41b_disconnect_terminal_cleanup(tmp_path: Path, monkeypatch: pyt
                         f"disconnected Turn did not settle within the bounded window (tombstone_seen={tombstone_seen})"
                     )
             assert tombstone_seen, "the disconnected Turn must land the cancellation tombstone durably"
+            # A resident Root keeps the provider lease while the Session is
+            # reusable. Explicitly retire that validator-owned root before
+            # asserting the process-wide lease/admission baseline, matching
+            # the other P41b endings and preventing a false leak report.
+            await asyncio.wait_for(
+                resources.runtime.close_root_session(LocalScope().workspace_id, session_id),
+                timeout=120.0,
+            )
             assert get_active_lease_registry().holder(session_id) is None
             assert resources.daytona_admission._semaphore._value == permits
             assert not evidence.child_sandbox_ids, "root-only disconnect must not acquire children"

@@ -1,6 +1,6 @@
 # ADR: Session-scoped RLM state
 
-**Status:** accepted — implemented and certified through P53
+**Status:** accepted — implemented; final P53 certification remains pending
 **Decision date:** 2026-08-11
 
 Fleet will make committed Session conversation the durable authority and will pass
@@ -66,5 +66,5 @@ interpreter.
   `dspy/predict/rlm.py`; [DSPy RLM API](https://dspy.ai/api/modules/RLM/).
 - FastAPI lifespan keeps startup/shutdown resource ownership explicit:
   [FastAPI lifespan events](https://fastapi.tiangolo.com/advanced/events/).
-- The certified Fleet dependency is `dspy==3.3.1` in `pyproject.toml`; the
-  plan's references to 3.3.0 are not the current runtime evidence baseline.
+- The certified Fleet dependency is `dspy==3.3.1` in `pyproject.toml`; older
+  plan references are not the current runtime evidence baseline.

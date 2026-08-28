@@ -1792,9 +1792,6 @@ class AgentVolumeStorage:
         return results
 
 
-# Historical names are useful to callers migrating one provider at a time.
-
-
 class AsyncDaytonaVolumeFS(AgentAsyncVolumeStorage):
     """Async mounted-volume adapter with the historical ``sandbox`` view."""
 

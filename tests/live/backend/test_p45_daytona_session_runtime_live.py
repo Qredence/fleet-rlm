@@ -2,9 +2,9 @@
 
 The proof uses a deterministic native RLM action double, so it exercises the
 production Daytona interpreter and root-lease provider without sending model
-requests.  It proves same-session RLM/interpreter/Sandbox reuse, persistent
-Python namespace state, and root rotation for attachment selectors A -> B ->
-none.
+requests. It proves same-session RLM/interpreter/Sandbox reuse, persistent
+Python namespace state, complete committed History rehydration, exact resident
+RLM identity, and root rotation for attachment selectors A -> B -> none.
 
 Run with explicit provider authority::
 
@@ -51,7 +51,7 @@ from fleet_rlm.runtime.bindings import InMemorySandboxBindingStore
 from fleet_rlm.runtime.cleanup import RunCleanupSupervisor
 from fleet_rlm.runtime.daytona.run_environment import DaytonaRuntimeResources, _DaytonaEnvironmentProvider
 from fleet_rlm.sessions.history_transport import CommittedSessionHistory
-from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
+from fleet_rlm.sessions.models import HistoryMessage, SessionHistory, TurnAccess, TurnInput
 
 pytestmark = [pytest.mark.live_daytona, pytest.mark.timeout(600)]
 _REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -65,7 +65,14 @@ class _LiveAction:
         self._responses = iter(
             (
                 ("initialize the Session namespace", "p45_marker = 'retained'\nSUBMIT(answer='turn-a1')"),
-                ("reuse the Session namespace", "assert p45_marker == 'retained'\nSUBMIT(answer='turn-a2')"),
+                (
+                    "reuse the Session namespace and inspect complete History",
+                    "assert p45_marker == 'retained'\n"
+                    "assert len(history.messages) == 1\n"
+                    "assert history.messages[0]['request'] == 'P45 live Session runtime proof'\n"
+                    "assert history.messages[0]['answer'] == 'turn-a1'\n"
+                    "SUBMIT(answer='turn-a2')",
+                ),
             )
         )
 
@@ -77,6 +84,7 @@ class _LiveAction:
 class _LiveRLMFactory:
     def __init__(self, action: _LiveAction) -> None:
         self._action = action
+        self.created: list[Any] = []
 
     def create(
         self,
@@ -96,6 +104,7 @@ class _LiveRLMFactory:
             verbose=False,
         )
         rlm.generate_action = self._action
+        self.created.append(rlm)
         return rlm
 
 
@@ -142,13 +151,14 @@ def _claim(
     workspace_id: UUID,
     session_id: UUID,
     attachment_ids: tuple[UUID, ...] = (),
+    history: SessionHistory | None = None,
 ) -> ClaimedRun:
     return ClaimedRun(
         run_id=uuid4(),
         session_id=session_id,
         access=TurnAccess(user_id, workspace_id),
         input=TurnInput("P45 live Session runtime proof", attachment_ids),
-        history=SessionHistory(),
+        history=history or SessionHistory(),
         cancellation_requested=_never_cancelled,
         _claim=_RunClaimToken(uuid4()),
     )
@@ -230,7 +240,8 @@ async def test_live_daytona_reuses_session_runtime_and_rotates_attachment_roots(
     resources = _resources(settings, cleanup)
     registry = SessionRLMRegistry()
     provider = _DaytonaEnvironmentProvider(resources, settings, registry)
-    runner = RLMRunner(factory=_LiveRLMFactory(_LiveAction()), runtime_registry=registry)
+    factory = _LiveRLMFactory(_LiveAction())
+    runner = RLMRunner(factory=factory, runtime_registry=registry)
     models = RLMModelBundle(
         dspy.utils.DummyLM([{"answer": "unused"}], adapter=dspy.JSONAdapter()),
         dspy.utils.DummyLM([{"answer": "unused"}], adapter=dspy.JSONAdapter()),
@@ -258,7 +269,17 @@ async def test_live_daytona_reuses_session_runtime_and_rotates_attachment_roots(
             preparation_release=environment_a.release,
         )
 
-        run_2 = _claim(user_id=user_id, workspace_id=workspace_id, session_id=session_id)
+        run_2 = _claim(
+            user_id=user_id,
+            workspace_id=workspace_id,
+            session_id=session_id,
+            history=SessionHistory(
+                (
+                    HistoryMessage("user", "P45 live Session runtime proof"),
+                    HistoryMessage("assistant", "turn-a1"),
+                )
+            ),
+        )
         environment_a2 = await provider.acquire(run_2, deadline=time.monotonic() + 180)
         assert _sandbox_id(environment_a2) == sandbox_a
         assert environment_a2.interpreter is environment_a.interpreter
@@ -279,6 +300,8 @@ async def test_live_daytona_reuses_session_runtime_and_rotates_attachment_roots(
         assert state_a is not None
         assert state_a.interpreter is environment_a.interpreter
         assert state_a.rlm is not None
+        assert len(factory.created) == 1
+        assert state_a.rlm is factory.created[0]
 
         # Attachment staging is Run-scoped.  Even the same durable Attachment
         # ID gets a new manifest path, so every transition rotates the root.

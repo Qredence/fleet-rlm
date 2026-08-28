@@ -39,7 +39,6 @@ from fleet_rlm.workspace.storage import (
 PUBLIC_WORKSPACE_NAMESPACE = "files"
 MAX_PUBLIC_LIST_LIMIT = MAX_STORAGE_LIST_LIMIT
 MAX_PUBLIC_READ_CHARS = MAX_STORAGE_READ_CHARS
-MAX_WORKSPACE_READ_CHARS = MAX_STORAGE_READ_CHARS
 SESSION_WORKSPACE_NAMESPACE = "session_workspace"
 
 # The old public DTO names are aliases, not second value models.  They make
@@ -401,10 +400,10 @@ class WorkspaceToolHost:
         def read_workspace_text(
             path: str,
             cursor: str | None = None,
-            max_chars: int = MAX_WORKSPACE_READ_CHARS,
+            max_chars: int = MAX_STORAGE_READ_CHARS,
         ) -> dict[str, object]:
             """Read one UTF-8 workspace page without returning more than max_chars."""
-            if max_chars < 1 or max_chars > MAX_WORKSPACE_READ_CHARS:
+            if max_chars < 1 or max_chars > MAX_STORAGE_READ_CHARS:
                 raise WorkspaceToolError("invalid_path", "Session Workspace read bound is invalid")
             try:
                 page = self._workspace.read_text_page(
@@ -523,7 +522,7 @@ class WorkspaceToolHost:
                 args={
                     "path": {"type": "string"},
                     "cursor": {"type": ["string", "null"]},
-                    "max_chars": {"type": "integer", "minimum": 1, "maximum": MAX_WORKSPACE_READ_CHARS},
+                    "max_chars": {"type": "integer", "minimum": 1, "maximum": MAX_STORAGE_READ_CHARS},
                 },
             ),
             dspy.Tool(
@@ -669,7 +668,6 @@ class WorkspaceToolHost:
 __all__ = [
     "DAYTONA_WORKSPACE_CAPABILITY" if False else "MAX_PUBLIC_LIST_LIMIT",
     "MAX_PUBLIC_READ_CHARS",
-    "MAX_WORKSPACE_READ_CHARS",
     "PUBLIC_WORKSPACE_NAMESPACE",
     "SESSION_WORKSPACE_NAMESPACE",
     "FilesystemToolError",

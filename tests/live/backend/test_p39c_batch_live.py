@@ -428,7 +428,9 @@ def test_live_batch_two_children_ordered_concurrent_leak_free(
             assert all(item["absent"] for item in evidence.confirmations)
 
             # Admission restored and no lease holder before Turn success settles.
-            _wait_for_admission_baseline(resources, session_id, permits=settings.max_active_daytona_leases, portal=client.portal)
+            _wait_for_admission_baseline(
+                resources, session_id, permits=settings.max_active_daytona_leases, portal=client.portal
+            )
             assert get_active_lease_registry().holder(session_id) is None
             # Provider-side re-confirmed absence for every child Sandbox id.
             absence = client.portal.call(_all_absent, resources, list(evidence.sandbox_ids))
@@ -573,7 +575,9 @@ def test_live_batch_child_cleanup_failure_is_all_or_nothing(
                 assert receipt["provider_action"] == "delete"
                 assert receipt["admission_released"] is True
 
-            _wait_for_admission_baseline(resources, session_id, permits=settings.max_active_daytona_leases, portal=client.portal)
+            _wait_for_admission_baseline(
+                resources, session_id, permits=settings.max_active_daytona_leases, portal=client.portal
+            )
             assert get_active_lease_registry().holder(session_id) is None
             # Provider-side absence for every child despite the faulted
             # confirmation (ownership settles; the delete request did run).

@@ -1,6 +1,6 @@
 /**
- * Canonical semantic Turn event vocabulary (P24/QRE-168; mirrors
- * src/fleet_rlm/events/canonical.py). Live SSE and durable reload adapt INTO
+ * Canonical semantic Turn event vocabulary (P24/QRE-168; aligned with the
+ * backend RuntimeEvent vocabulary). Live SSE and durable reload adapt INTO
  * these types; wire casing/wrapper compat belongs to the adapters only.
  * The shared turn reducer consumes nothing but this union.
  */
@@ -207,8 +207,8 @@ export type CanonicalEvent =
   | StructuredResultEvent;
 
 /**
- * Mirror of `canonical_event_to_json` (src/fleet_rlm/events/canonical.py):
- * stable snake_case wire JSON for cross-language fixtures — undefined/null
+ * Serialize the client-side canonical event to stable snake_case JSON for
+ * cross-language fixtures — undefined/null
  * fields are omitted.
  */
 export function serializeCanonicalEvent(event: CanonicalEvent): Record<string, unknown> {

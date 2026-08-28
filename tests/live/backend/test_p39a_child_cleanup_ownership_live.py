@@ -21,7 +21,6 @@ pre-existing issue note). Two scenarios run on one SHA:
 from __future__ import annotations
 
 import asyncio
-
 import json
 import os
 import time
@@ -324,7 +323,9 @@ def test_live_child_cleanup_success_records_ordered_complete_cleanup(
             assert receipt["first_error"] is None
 
             # Admission restored to baseline; no leaked lease.
-            _wait_for_admission_baseline(resources, session_id, permits=settings.max_active_daytona_leases, portal=client.portal)
+            _wait_for_admission_baseline(
+                resources, session_id, permits=settings.max_active_daytona_leases, portal=client.portal
+            )
             # Provider-side confirmed absence of the child Sandbox (re-probed).
             assert _child_sandbox_absent(client, resources, evidence.child_sandbox_ids[0])
         finally:
@@ -425,7 +426,9 @@ def test_live_child_cleanup_failure_fails_closed_with_explicit_classification(
             assert receipt["first_error"] is not None
 
             # Admission still restored; the failed cleanup never leaked the permit.
-            _wait_for_admission_baseline(resources, session_id, permits=settings.max_active_daytona_leases, portal=client.portal)
+            _wait_for_admission_baseline(
+                resources, session_id, permits=settings.max_active_daytona_leases, portal=client.portal
+            )
             # The delete request did run provider-side: the child Sandbox is
             # absent despite the faulted confirmation (ownership settles).
             assert _child_sandbox_absent(client, resources, evidence.child_sandbox_ids[0])

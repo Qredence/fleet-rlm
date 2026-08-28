@@ -1066,9 +1066,6 @@ def digest_program_components(
     return compute_program_fingerprint(components, **overrides)
 
 
-# Friendly aliases used by callers during the P45 migration.
-
-
 # ---------------------------------------------------------------------------
 # Session state and provider-neutral cleanup
 # ---------------------------------------------------------------------------
@@ -2248,17 +2245,12 @@ class SessionRLMRegistry:
         await self.shutdown()
 
 
-# Public migration alias: callers may refer to the resident object as either
-# an RLM registry or a Session runtime registry.
-
-
 # ---------------------------------------------------------------------------
 # Stable, provider-neutral Tool proxies for reusable Session interpreters
 # ---------------------------------------------------------------------------
 
-# Retained for import compatibility with the pre-P45 proxy API.  These values
-# no longer constrain model-facing Tool metadata: the Session proxy snapshots
-# the frozen source contract exactly and sanitizes only event/result payloads.
+# Bound the generated proxy name while leaving the model-facing Tool metadata
+# contract to the source catalog.
 MAX_TOOL_NAME_CHARS = 96
 
 MAX_SESSION_TOOL_COUNT = 64
@@ -2272,10 +2264,6 @@ class SessionToolAuthorizationError(RuntimeError):
 
     def __init__(self) -> None:
         super().__init__(self.public_message)
-
-
-# A more specific spelling is useful at integration seams while retaining one
-# public failure shape for all fail-closed cases.
 
 
 class ToolAuthorization(Protocol):
@@ -2365,7 +2353,7 @@ def _spoof_proxy_signature(invoke: Callable[..., Any], source: dspy.Tool) -> Non
         signature = inspect.signature(source.func)
     except (TypeError, ValueError):
         return
-    invoke.__signature__ = signature  # type: ignore[attr-defined]
+    vars(invoke)["__signature__"] = signature
 
 
 def _set_tool_metadata(

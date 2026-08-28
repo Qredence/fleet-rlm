@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import argparse
 import hashlib
 import json
 from pathlib import Path
@@ -15,6 +16,11 @@ def _receipt(*, sha: str = "a" * 40) -> dict[str, object]:
     lanes = {
         lane: {
             "passed": True,
+            "candidate": {
+                "sha": sha,
+                "lockfile_sha256": "b" * 64,
+                "dspy": "3.3.1",
+            },
             "cleanup": {"confirmed_absent": True, "admission_restored": True},
         }
         for lane in certification_gate.REQUIRED_LIVE_LANES
@@ -26,6 +32,7 @@ def _receipt(*, sha: str = "a" * 40) -> dict[str, object]:
             "sha": sha,
             "lockfile_sha256": "b" * 64,
             "dspy": "3.3.1",
+            "tracked_tree_clean": True,
         },
         "cleanup": {
             "confirmed_absent": True,
@@ -89,6 +96,107 @@ def test_release_artifact_manifest_is_content_addressed(tmp_path: Path) -> None:
     wheel.write_bytes(b"tampered")
     with pytest.raises(validate_release.ReleaseValidationError, match="hash"):
         validate_release.verify_artifact_manifest(output, dist)
+
+
+def _verifiable_manifest(tmp_path: Path) -> tuple[dict[str, object], Path]:
+    golden = tmp_path / "golden.jsonl"
+    golden.write_text('{"stable":true}\n', encoding="utf-8")
+    baseline = {
+        "schema": certification_gate.BASELINE_SCHEMA,
+        "baseline_commit": "a" * 40,
+        "files": [{"path": "golden.jsonl", "sha256": hashlib.sha256(golden.read_bytes()).hexdigest()}],
+        "human_decision": None,
+    }
+    baseline_path = tmp_path / "baseline.json"
+    baseline_path.write_text(json.dumps(baseline), encoding="utf-8")
+    live_path = tmp_path / "live.json"
+    live_path.write_text(json.dumps(_receipt()), encoding="utf-8")
+    gate_results = [
+        certification_gate.GateResult(
+            name=name,
+            lane="test",
+            command=("true",),
+            returncode=0,
+            output_sha256="c" * 64,
+            output_clean=True,
+        )
+        for name in certification_gate.REQUIRED_GATES
+    ]
+    manifest = certification_gate.build_certification_manifest(
+        sha="a" * 40,
+        lockfile_sha256="b" * 64,
+        baseline_path=baseline_path,
+        repo_root=tmp_path,
+        live_manifest_path=live_path,
+        gate_results=gate_results,
+        artifacts=_artifacts(),
+        service_isolation={"passed": True},
+    )
+    return manifest, live_path
+
+
+def test_verify_command_rejects_explicit_sha_that_is_not_current(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(certification_gate, "_current_identity", lambda: ("a" * 40, "b" * 64))
+    args = argparse.Namespace(manifest=tmp_path / "missing.json", sha="d" * 40)
+
+    with pytest.raises(certification_gate.CertificationGateError, match="explicit candidate SHA"):
+        certification_gate.verify_command(args)
+
+
+def test_verify_manifest_revalidates_nested_live_identity(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    manifest, live_path = _verifiable_manifest(tmp_path)
+    manifest_path = tmp_path / "certification.json"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    monkeypatch.setattr(certification_gate, "REPO_ROOT", tmp_path)
+
+    certification_gate.verify_manifest(manifest_path, expected_sha="a" * 40, expected_lockfile_sha256="b" * 64)
+
+    live = _receipt()
+    candidate = live["candidate"]
+    assert isinstance(candidate, dict)
+    live["candidate"] = {**candidate, "sha": "d" * 40}
+    unsigned_live = {key: value for key, value in live.items() if key != "manifest_sha256"}
+    live["manifest_sha256"] = hashlib.sha256(
+        json.dumps(unsigned_live, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    live_path.write_text(json.dumps(live), encoding="utf-8")
+
+    with pytest.raises(certification_gate.CertificationGateError, match="live certification manifest SHA"):
+        certification_gate.verify_manifest(manifest_path, expected_sha="a" * 40, expected_lockfile_sha256="b" * 64)
+
+
+def test_verify_manifest_rejects_nested_live_lane_identity_mismatch(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    manifest, live_path = _verifiable_manifest(tmp_path)
+    monkeypatch.setattr(certification_gate, "REPO_ROOT", tmp_path)
+    live = json.loads(live_path.read_text(encoding="utf-8"))
+    lane = live["lanes"]["root-direct"]
+    assert isinstance(lane, dict)
+    candidate = lane["candidate"]
+    assert isinstance(candidate, dict)
+    lane["candidate"] = {**candidate, "sha": "d" * 40}
+    unsigned_live = {key: value for key, value in live.items() if key != "manifest_sha256"}
+    live["manifest_sha256"] = hashlib.sha256(
+        json.dumps(unsigned_live, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    live_path.write_text(json.dumps(live), encoding="utf-8")
+
+    live_summary = manifest["live"]
+    assert isinstance(live_summary, dict)
+    manifest["live"] = {**live_summary, "manifest_sha256": live["manifest_sha256"]}
+    manifest["manifest_sha256"] = certification_gate.manifest_digest(manifest)
+    manifest_path = tmp_path / "certification.json"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    with pytest.raises(certification_gate.CertificationGateError, match="lane candidate identity"):
+        certification_gate.verify_manifest(
+            manifest_path,
+            expected_sha="a" * 40,
+            expected_lockfile_sha256="b" * 64,
+        )
 
 
 def test_certification_manifest_requires_same_sha_live_receipt_and_clean_goldens(tmp_path: Path) -> None:

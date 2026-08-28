@@ -92,9 +92,10 @@ _FAILED_PROBE = "QRE142-DISCARD-5150: timed-out runs must never promote candidat
 _SEED_TEXT = f"""
 First call remember(key_learning={_RELC_LEARNING!r}, category="Project") exactly once in
 the first code cell, without any SUBMIT in that cell; require saved["ok"] is True and
-print("MEMORY_SEEDED"). Only after reading that observation, SUBMIT(answer=<one short
-sentence containing the returned memory_id verbatim>) alone in the next code cell. Use no
-other tools, do not call llm_query/rlm_query, and use exactly two code cells.
+saved["memory_id"] is an 8-character string, then print("MEMORY_SEEDED"). Only after
+reading that observation, SUBMIT(answer=<one short sentence containing saved["memory_id"]
+verbatim>) alone in the next code cell. Use no other tools, do not call llm_query/rlm_query,
+and use exactly two code cells.
 """.strip()
 
 _RECALL_TEXT = """
@@ -363,10 +364,7 @@ def test_live_old_relevant_memory_recovered_beyond_tail_window(tmp_path: Path) -
         seed_chunks = run.post_turn(_SEED_TEXT)
         remember_inputs, remember_outputs, remember_errors = _paired_tool_chunks(seed_chunks, "remember")
         assert remember_errors == []
-        # QRE-142-validated models call remember once; the validation matrix
-        # tolerates provider variance in batch count as long as every call is
-        # error-free (the seeded record identity comes from the first output).
-        assert len(remember_inputs) == len(remember_outputs) >= 1
+        assert len(remember_inputs) == len(remember_outputs) == 1
         old_memory_id = str(remember_outputs[0]["output"].get("memory_id", ""))
         assert len(old_memory_id) == 8
 
@@ -394,22 +392,6 @@ def test_live_old_relevant_memory_recovered_beyond_tail_window(tmp_path: Path) -
         assert old_memory_id in search_outputs[0]["output"].get("top_memory_ids", ())
         assert old_memory_id in _final_text(recall_chunks)
 
-        # Diagnostics for the store state right after the recall Turn (report-only).
-        store_entries = run.memory_store().list_entries(limit=48).entries
-        tool_histogram: dict[str, int] = {}
-        for chunk in recall_chunks:
-            if chunk.get("type") == "tool-input-available":
-                name = str(chunk.get("toolName", "?"))
-                tool_histogram[name] = tool_histogram.get(name, 0) + 1
-        tail_now = run.memory_store().read_tail(byte_budget=WORKSPACE_MEMORY_INJECTION_TAIL_BYTES).content
-        print(  # noqa: T201 (live-failure diagnostics only)
-            "RELEVANCE DIAG entries=\n",
-            [(entry.memory_id, entry.active, entry.category) for entry in store_entries],
-            "\ntool_histogram=\n",
-            tool_histogram,
-            "\ntail_now_ids=\n",
-            [line[-120:] for line in tail_now.splitlines()],
-        )
         digest = read_workspace_memory_injection_digest(run.memory_store(), request=recall_text)
         assert old_memory_id in digest
         injected = ledger.digests[-1]

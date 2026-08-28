@@ -221,12 +221,22 @@ def _live_identity(manifest_path: Path, *, sha: str, lockfile_sha256: str) -> di
         raise CertificationGateError("live certification manifest lockfile SHA does not match candidate")
     if candidate.get("dspy") != "3.3.1":
         raise CertificationGateError("live certification manifest is not certified for DSPy 3.3.1")
+    if candidate.get("tracked_tree_clean") is not True:
+        raise CertificationGateError("live certification manifest candidate is not a clean tree")
     lanes = live.get("lanes")
     if not isinstance(lanes, dict) or set(lanes) != set(REQUIRED_LIVE_LANES):
         raise CertificationGateError("live certification manifest has incomplete lane coverage")
     for lane_name, lane in lanes.items():
         if not isinstance(lane, dict) or lane.get("passed") is not True:
             raise CertificationGateError(f"live lane did not pass: {lane_name}")
+        lane_candidate = lane.get("candidate")
+        if (
+            not isinstance(lane_candidate, dict)
+            or lane_candidate.get("sha") != sha
+            or lane_candidate.get("lockfile_sha256") != lockfile_sha256
+            or lane_candidate.get("dspy") != "3.3.1"
+        ):
+            raise CertificationGateError(f"live lane candidate identity is stale: {lane_name}")
         cleanup = lane.get("cleanup")
         if (
             not isinstance(cleanup, dict)
@@ -390,8 +400,18 @@ def write_manifest(path: Path, manifest: dict[str, Any]) -> None:
         temporary.unlink(missing_ok=True)
 
 
-def verify_manifest(path: Path, *, expected_sha: str | None = None) -> dict[str, Any]:
-    """Fail closed when a P35-E manifest is absent, stale, or incomplete."""
+def verify_manifest(
+    path: Path,
+    *,
+    expected_sha: str | None = None,
+    expected_lockfile_sha256: str | None = None,
+) -> dict[str, Any]:
+    """Fail closed when a P35-E manifest is absent, stale, or incomplete.
+
+    The nested P35-D receipt is re-read instead of trusting the identity summary
+    copied into the outer manifest.  This keeps verification content-addressed
+    when a receipt is replaced after the outer manifest was sealed.
+    """
     manifest = _read_json(path, description="P35-E certification manifest")
     if manifest.get("schema") != MANIFEST_SCHEMA:
         raise CertificationGateError("P35-E certification manifest schema is invalid")
@@ -408,6 +428,8 @@ def verify_manifest(path: Path, *, expected_sha: str | None = None) -> dict[str,
         raise CertificationGateError("P35-E certification manifest candidate is invalid")
     if expected_sha is not None and candidate["sha"] != expected_sha:
         raise CertificationGateError("P35-E certification manifest SHA does not match candidate")
+    if expected_lockfile_sha256 is not None and candidate["lockfile_sha256"] != expected_lockfile_sha256:
+        raise CertificationGateError("P35-E certification manifest lockfile SHA does not match candidate")
     if manifest.get("passed") is not True:
         raise CertificationGateError("P35-E certification manifest is not sealed")
     golden = manifest.get("golden_baseline")
@@ -423,18 +445,33 @@ def verify_manifest(path: Path, *, expected_sha: str | None = None) -> dict[str,
     if not isinstance(service_isolation, dict) or service_isolation.get("passed") is not True:
         raise CertificationGateError("P35-E service isolation evidence is not sealed")
     live = manifest.get("live")
-    if not isinstance(live, dict) or not live.get("lanes"):
+    if not isinstance(live, dict):
         raise CertificationGateError("P35-E live evidence is missing")
+    live_path_value = live.get("path")
+    if not isinstance(live_path_value, str) or not live_path_value.strip():
+        raise CertificationGateError("P35-E live evidence path is missing")
+    nested_live = _live_identity(
+        Path(live_path_value).expanduser().resolve(),
+        sha=candidate["sha"],
+        lockfile_sha256=candidate["lockfile_sha256"],
+    )
+    for key in ("schema", "sha", "lockfile_sha256", "lanes", "manifest_sha256"):
+        if live.get(key) != nested_live.get(key):
+            raise CertificationGateError(f"P35-E nested live evidence identity is stale: {key}")
     _validate_artifact_evidence(manifest.get("artifacts"))
     return manifest
 
 
 def verify_command(args: argparse.Namespace) -> int:
-    """Verify a manifest against the current clean candidate by default."""
-    expected_sha = args.sha
-    if expected_sha is None:
-        expected_sha, _ = _current_identity()
-    verify_manifest(args.manifest.resolve(), expected_sha=expected_sha)
+    """Verify a manifest against the current clean candidate."""
+    current_sha, current_lockfile_sha256 = _current_identity()
+    if args.sha is not None and args.sha != current_sha:
+        raise CertificationGateError("explicit candidate SHA does not match current candidate")
+    verify_manifest(
+        args.manifest.resolve(),
+        expected_sha=current_sha,
+        expected_lockfile_sha256=current_lockfile_sha256,
+    )
     print(f"P35-E certification verified: {args.manifest}")
     return 0
 

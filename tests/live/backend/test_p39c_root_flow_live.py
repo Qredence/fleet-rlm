@@ -453,9 +453,6 @@ def test_live_root_flow_settles_child_ownership_before_publication(
             )
             pos_artifact = _chunk_position(chunks, lambda chunk: chunk.get("type") == "data-artifact")
             pos_finish = _chunk_position(chunks, lambda chunk: chunk.get("type") == "finish")
-            if pos_child_completed == -1:
-                import sys as _sys
-                _sys.stderr.write('DEBUG-CHUNKS ' + json.dumps([c for c in chunks if c.get('type') != 'text-delta'], default=str)[:9000] + '\n')
             assert pos_child_completed != -1
             assert pos_create_artifact != -1
             assert pos_artifact != -1
@@ -692,7 +689,9 @@ def test_live_root_flow_settles_child_ownership_before_publication(
             )
             assert attempted_child_scope_files == []
 
-            _wait_for_admission_baseline(resources, session_id, permits=settings.max_active_daytona_leases, portal=portal)
+            _wait_for_admission_baseline(
+                resources, session_id, permits=settings.max_active_daytona_leases, portal=portal
+            )
             assert get_active_lease_registry().holder(session_id) is None
             sandbox_ids.update(resources._sandbox_ids)
         finally:

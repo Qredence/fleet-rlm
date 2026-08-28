@@ -17,8 +17,9 @@ One JSONL file per scenario. Each line is one wire item:
   parts that only exist durably.
 - `reload_part` is a durable `UIMessagePart` wire item; `null` for live-only
   lifecycle edges (turn start/finish/status).
-- Both adapters must agree on `canonical`; the TUI reducer must derive the same
-  semantic transcript from either route (asserted message-level, not id-level).
+- The TypeScript live and durable adapters must agree on `canonical`; the TUI
+  reducer must derive the same semantic transcript from either route (asserted
+  message-level, not id-level).
 
 Durable reload carries no Run lifecycle/status edges — those entries pin the
 live-only shapes so adapters stay explicit about routing.
