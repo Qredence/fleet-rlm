@@ -340,7 +340,7 @@ def _canonical_target(path: object, *, namespace: str | None = None) -> str | No
     infers the namespace from a ``projects/`` or ``workspace/`` path prefix.
     With ``namespace`` (tool-derived targets) prefixes never cross namespaces:
     project tools tolerate only a redundant leading ``projects/`` segment
-    (mirroring ``_normalize_project_path``), and session-workspace tools use
+    (mirroring ``normalize_project_path``), and session-workspace tools use
     their paths verbatim, so a ``projects/...`` path passed to a session tool
     stays a ``session_workspace:`` target.
     """

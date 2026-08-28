@@ -47,10 +47,6 @@ def normalize_project_path(path: str, *, allow_root: bool = False) -> str:
     return normalized
 
 
-# Historical private name retained for tests and callers during the move.
-_normalize_project_path = normalize_project_path
-
-
 def _project_file_path(path: str) -> str:
     """Return one validated ``<slug>/<file...>`` path below projects root."""
     normalized = normalize_project_path(path)
@@ -427,7 +423,6 @@ __all__ = [
     "ProjectToolError",
     "ProjectToolHost",
     "Projects",
-    "_normalize_project_path",
     "_project_file_path",
     "normalize_project_path",
 ]
