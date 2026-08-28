@@ -11,7 +11,7 @@ LIVE-VERIFIED VERDICT (2026-08-17, v5 snapshot):
 - ``fcntl.flock`` is NOT coordinated across independently mounted Sandboxes on
   the real Daytona shared Volume (contender acquires while a peer holds
   ``LOCK_EX``) — the in-sandbox lock protocol cannot exclude a foreign mount.
-- Concurrent cross-Sandbox ``memory_append`` therefore loses records SILENTLY:
+- Concurrent cross-Sandbox Memory appends therefore lose records SILENTLY:
   appends return ``ok`` while their record never reaches the final file
   (fail-closed conflict errors cover only part of the races).
 - What DOES hold on the real provider: sequential cross-Sandbox appends remain
@@ -41,6 +41,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import contextlib
+import hashlib
 import json
 import os
 from dataclasses import dataclass, field
@@ -57,6 +58,7 @@ _EVIDENCE_ENV = "FLEET_LIVE_EVIDENCE_PATH"
 _RECEIPT_SCHEMA = "fleet.qre152-memory-concurrency/v1"
 _AGENT_TIMEOUT_S = 120.0
 _MAX_MEMORY_BYTES = 1_048_576
+_MEMORY_RELATIVE = "memory/MEMORIES.md"
 
 
 def _load_repo_env() -> None:
@@ -107,9 +109,9 @@ class _Probe:
 
         args: dict[str, Any] = {
             "volume_root": self.mount_path,
-            "root": f"{self.mount_path}/memory",
+            "root": self.mount_path,
             "operation": "read",
-            "relative": "MEMORIES.md",
+            "relative": _MEMORY_RELATIVE,
             "allow_missing": True,
             "max_bytes": _MAX_MEMORY_BYTES,
             "limit": 0,
@@ -120,8 +122,8 @@ class _Probe:
             "max_chars": 0,
             "total_file_bytes": _MAX_MEMORY_BYTES,
             "checksum": False,
-            "memory_id": "",
             "expected_sha256": "",
+            "allow_volume_root": True,
         }
         args.update(kwargs)
         label = f"{args['operation']}:{args.get('memory_id') or ''}"
@@ -156,32 +158,113 @@ class _Probe:
         content = result["payload"].get("content")
         return content if isinstance(content, str) else ""
 
-    async def append(self, sandbox: Any, record: str) -> dict[str, Any]:
-        return await self.op(sandbox, operation="memory_append", content_b64=_b64(record))
+    async def _read_state(self, sandbox: Any) -> tuple[str, str | None]:
+        """Return the current Memory log content and its CAS sha256 (None when missing)."""
+        result = await self.op(sandbox, operation="tail_read", allow_missing=True, max_bytes=_MAX_MEMORY_BYTES)
+        if not result.get("ok"):
+            raise RuntimeError(f"Memory read failed: {result}")
+        payload = result["payload"]
+        if payload.get("truncated") is True:
+            raise RuntimeError("Memory read truncated; refusing to mutate a partially read log")
+        if payload.get("missing") is True:
+            return "", None
+        content = payload.get("content")
+        if not isinstance(content, str) or not content:
+            return "", None
+        return content, hashlib.sha256(content.encode("utf-8")).hexdigest()
 
-    async def edit(self, sandbox: Any, memory_id: str, learning: str) -> dict[str, Any]:
-        request = json.dumps(
-            {
-                "learning": learning,
-                "category": None,
-                "updated_at": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
-            },
-            separators=(",", ":"),
-        )
+    async def append(self, sandbox: Any, record: str) -> dict[str, Any]:
+        """Mirror the production store discipline: seed the header once, then append."""
+        from fleet_rlm.workspace.models import WORKSPACE_MEMORY_HEADER
+
+        content, _sha = await self._read_state(sandbox)
+        if not content:
+            return await self.op(
+                sandbox,
+                operation="write",
+                overwrite=True,
+                content_b64=_b64(WORKSPACE_MEMORY_HEADER + "\n" + record),
+            )
         return await self.op(
             sandbox,
-            operation="memory_edit",
-            allow_missing=False,
-            memory_id=memory_id,
-            content_b64=_b64(request),
+            operation="append",
+            content_b64=_b64(record),
+        )
+
+    async def edit(self, sandbox: Any, memory_id: str, learning: str) -> dict[str, Any]:
+        """Rewrite one record in place through the production CAS replace path."""
+        from fleet_rlm.workspace.models import (
+            format_workspace_memory_v3_record,
+            parse_workspace_memory_record,
+        )
+
+        content, sha = await self._read_state(sandbox)
+        if sha is None:
+            return {"ok": False, "error": "not_found"}
+        updated_at = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+        kept: list[str] = []
+        replaced = False
+        for line in content.splitlines(keepends=True):
+            raw = line.rstrip("\n")
+            try:
+                entry = parse_workspace_memory_record(raw)
+            except Exception:
+                kept.append(line)
+                continue
+            if entry.memory_id != memory_id:
+                kept.append(line)
+                continue
+            kept.append(
+                format_workspace_memory_v3_record(
+                    learning,
+                    entry.category,
+                    memory_id=entry.memory_id,
+                    created_at=entry.timestamp,
+                    updated_at=updated_at,
+                    source=entry.source,
+                    supersedes_id=entry.supersedes_id,
+                )
+                + "\n"
+            )
+            replaced = True
+        if not replaced:
+            return {"ok": False, "error": "not_found"}
+        return await self.op(
+            sandbox,
+            operation="write",
+            overwrite=True,
+            content_b64=_b64("".join(kept)),
+            expected_sha256=sha,
         )
 
     async def delete(self, sandbox: Any, memory_id: str) -> dict[str, Any]:
+        """Drop one record through the production CAS replace path."""
+        from fleet_rlm.workspace.models import parse_workspace_memory_record
+
+        content, sha = await self._read_state(sandbox)
+        if sha is None:
+            return {"ok": False, "error": "not_found"}
+        kept: list[str] = []
+        removed = False
+        for line in content.splitlines(keepends=True):
+            raw = line.rstrip("\n")
+            try:
+                entry = parse_workspace_memory_record(raw)
+            except Exception:
+                kept.append(line)
+                continue
+            if entry.memory_id == memory_id:
+                removed = True
+                continue
+            kept.append(line)
+        if not removed:
+            return {"ok": False, "error": "not_found"}
         return await self.op(
             sandbox,
-            operation="memory_delete",
-            allow_missing=False,
-            memory_id=memory_id,
+            operation="write",
+            overwrite=True,
+            content_b64=_b64("".join(kept)),
+            expected_sha256=sha,
         )
 
 
@@ -474,7 +557,7 @@ async def test_live_shared_volume_memory_baseline_contracts() -> None:
 @pytest.mark.xfail(
     reason=(
         "FALSIFIED 2026-08-17: flock is not coordinated across mounts on the real Daytona "
-        "Volume, so concurrent cross-Sandbox memory_appends silently lose records. XPASS "
+        "Volume, so concurrent cross-Sandbox Memory appends silently lose records. XPASS "
         "signals the Fleet-side per-Workspace mutation lease landed; remove the mark then."
     ),
     strict=False,
