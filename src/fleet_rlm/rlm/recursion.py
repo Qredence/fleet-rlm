@@ -22,6 +22,7 @@ from typing import Any, Literal, NoReturn, Protocol, Self, TypeAlias
 import dspy
 
 from fleet_rlm.chat.session_context import SessionContextManifest
+from fleet_rlm.config.settings import Settings
 from fleet_rlm.observability.diagnostics import trace_failure_category
 from fleet_rlm.observability.tracing import start_turn_span
 from fleet_rlm.rlm._dspy_compat import CodeInterpreter, _RLMTraceCallback
@@ -735,6 +736,19 @@ class RecursiveRLMOptions:
                 raise RLMConfigError(f"{name} must be a positive integer, got {value!r}")
         if self.max_parallel_children > 8:
             raise RLMConfigError("max_parallel_children must not exceed 8")
+
+
+def recursive_rlm_options(settings: Settings) -> RecursiveRLMOptions:
+    """Project Settings onto the bounded recursive child RLM options."""
+    return RecursiveRLMOptions(
+        enabled=settings.rlm_recursion_enabled,
+        max_calls=settings.rlm_recursion_max_calls,
+        max_prompt_chars=settings.rlm_recursion_max_prompt_chars,
+        child_max_iters=settings.rlm_recursion_child_max_iters,
+        child_max_llm_calls=settings.rlm_recursion_child_max_llm_calls,
+        child_max_output_chars=settings.rlm_recursion_child_max_output_chars,
+        max_parallel_children=settings.rlm_recursion_max_parallel_children,
+    )
 
 
 @dataclass(frozen=True, slots=True)

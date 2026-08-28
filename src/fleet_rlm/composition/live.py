@@ -1,4 +1,9 @@
-"""Daytona runtime composition and process-lifetime resource ownership."""
+"""Daytona runtime composition and process-lifetime resource ownership.
+
+Composition constructs Modules; it contains no Turn behavior.  The per-Turn
+environment/capability adapters live in ``runtime.daytona.run_environment``
+and the Workspace Volume gateway assembly in ``runtime.daytona.workspace_gateway``.
+"""
 
 from __future__ import annotations
 
@@ -15,9 +20,9 @@ from uuid import UUID
 
 from fastapi import FastAPI
 
-from fleet_rlm.composition.common import CompositionError
-from fleet_rlm.composition.daytona_environment import DaytonaRuntimeResources
+from fleet_rlm.chat.preparation import DefaultRunPreparer
 from fleet_rlm.composition.inventory import (
+    CompositionError,
     RuntimeDatabaseLifecycle,
     RuntimeInventory,
     RuntimeProcessResources,
@@ -32,7 +37,10 @@ from fleet_rlm.daytona.session_manager import DEFAULT_IDLE_STOP_SECONDS
 from fleet_rlm.persistence.database import ensure_database_compatible
 from fleet_rlm.persistence.repositories.outbox import SqlAlchemyMemoryPromotionOutbox
 from fleet_rlm.persistence.repositories.turns import ReconciliationSummary
+from fleet_rlm.rlm.program import RLMModelBundle, rlm_options
+from fleet_rlm.rlm.recursion import recursive_rlm_options
 from fleet_rlm.rlm.session_runtime import SessionRLMRegistry
+from fleet_rlm.runtime.daytona.run_environment import DaytonaRuntimeResources
 from fleet_rlm.skills.catalog import SkillCatalog
 from fleet_rlm.workspace.memory import MemoryOutboxReconciler
 
@@ -127,11 +135,11 @@ async def _finish_daytona_disposal(
     composition_loop: asyncio.AbstractEventLoop | None,
 ) -> None:
     """Retry deferred composition teardown before relinquishing bridge authority."""
-    from fleet_rlm.composition.daytona_environment import (
+    from fleet_rlm.daytona.sandbox_lease import has_pending_lease_ownership, wait_lease_ownership
+    from fleet_rlm.runtime.daytona.run_environment import (
         has_pending_resource_cleanup,
         wait_resource_cleanup,
     )
-    from fleet_rlm.daytona.sandbox_lease import has_pending_lease_ownership, wait_lease_ownership
 
     retry_deadline = asyncio.get_running_loop().time() + _COMPOSITION_DISPOSAL_RETRY_BUDGET_SECONDS
     while asyncio.get_running_loop().time() < retry_deadline:
@@ -382,7 +390,7 @@ async def run_deferred_orphan_cleanup(
     the readiness-critical path. Failures and timeouts are logged and left for a
     later startup.
     """
-    from fleet_rlm.composition.daytona_workspace import OrphanCleanupReport, cleanup_orphan_bytes
+    from fleet_rlm.runtime.daytona.workspace_gateway import OrphanCleanupReport, cleanup_orphan_bytes
 
     committed_storage_refs = await artifact_catalog.list_storage_refs(workspace_id=workspace_id)
     completed_runs = await artifact_catalog.list_completed_runs(workspace_id=workspace_id)
@@ -447,11 +455,6 @@ async def build_daytona_composition(
     from fleet_rlm.attachments.paths import WorkspaceAttachmentPathPolicy
     from fleet_rlm.chat.run_lifecycle import RunLifecycleService
     from fleet_rlm.chat.turn_runtime import TurnRuntime
-    from fleet_rlm.composition.daytona_environment import build_run_preparation, resolve_settings
-    from fleet_rlm.composition.daytona_workspace import (
-        DaytonaWorkspaceGateway,
-        DaytonaWorkspaceVolumeGateway,
-    )
     from fleet_rlm.daytona.provisioning import sandbox_spec_from_settings
     from fleet_rlm.persistence.database import create_async_engine_from_url, create_session_factory
     from fleet_rlm.persistence.repositories import (
@@ -464,6 +467,11 @@ async def build_daytona_composition(
     from fleet_rlm.rlm.program import RLMFactory, build_model_bundle
     from fleet_rlm.rlm.runtime import RLMRunner
     from fleet_rlm.runtime.cleanup import RunCleanupSupervisor
+    from fleet_rlm.runtime.daytona.run_environment import resolve_settings
+    from fleet_rlm.runtime.daytona.workspace_gateway import (
+        DaytonaWorkspaceGateway,
+        DaytonaWorkspaceVolumeGateway,
+    )
     from fleet_rlm.workspace.paths import volume_paths_from_settings
     from fleet_rlm.workspace.workspace import WorkspaceAccessGateway, WorkspaceFileService
 
@@ -834,3 +842,29 @@ async def dispose_daytona_composition(app: FastAPI) -> None:
         raise errors[0]
     if errors:
         raise BaseExceptionGroup("Daytona composition disposal failed", errors)
+
+
+def build_run_preparation(
+    resources: DaytonaRuntimeResources,
+    *,
+    attachment_lifecycle: Any,
+    skill_catalog: SkillCatalog,
+    settings: Settings,
+    models: RLMModelBundle,
+    session_runtime_registry: SessionRLMRegistry | None = None,
+) -> DefaultRunPreparer:
+    """Compose Daytona Run preparation without mutating resource ownership."""
+    from fleet_rlm.runtime.daytona.run_environment import (
+        _DaytonaEnvironmentProvider,
+        _LiveCapabilityPreparer,
+    )
+
+    return DefaultRunPreparer(
+        models=models,
+        options=rlm_options(settings),
+        recursive_options=recursive_rlm_options(settings),
+        attachments=attachment_lifecycle,
+        environments=_DaytonaEnvironmentProvider(resources, settings, session_runtime_registry),
+        capabilities=_LiveCapabilityPreparer(settings, skill_catalog, volume_paths=resources.volume_paths),
+        session_runtime_registry=session_runtime_registry,
+    )

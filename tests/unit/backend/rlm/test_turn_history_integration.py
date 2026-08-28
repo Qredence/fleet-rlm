@@ -254,9 +254,9 @@ async def test_daytona_preparation_forwards_sandbox_history_transport_to_rlm() -
 
     from fleet_rlm.attachments.models import PreparedAttachments
     from fleet_rlm.chat.run_preparation import DefaultRunPreparer, RunEnvironment
-    from fleet_rlm.composition.daytona_environment import build_committed_session_history_for_claim
     from fleet_rlm.rlm.program import RLMModelBundle, RLMOptions
     from fleet_rlm.rlm.runtime import RLMExecutionSpec, RLMRunner
+    from fleet_rlm.runtime.daytona.run_environment import build_committed_session_history_for_claim
 
     claim = _make_claim(
         history_messages=(

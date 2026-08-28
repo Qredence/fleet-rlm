@@ -91,7 +91,7 @@ async def _local_db_lifespan(
         run_state = inventory.run_state_store
         reconcile = getattr(run_state, "reconcile_settling", None)
         if callable(reconcile):
-            from fleet_rlm.composition.common import no_provider_recovery_fence
+            from fleet_rlm.composition.inventory import no_provider_recovery_fence
 
             await reconcile(no_provider_recovery_fence)
         yield

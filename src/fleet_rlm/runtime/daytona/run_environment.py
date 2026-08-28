@@ -1,4 +1,11 @@
-"""Daytona composition environment inventory and Run preparation adapter."""
+"""Daytona runtime environment and per-Turn Run preparation adapters.
+
+Owns provider resource lifecycle (``DaytonaRuntimeResources``) and the
+Turn-facing adapters invoked by ``chat.preparation.DefaultRunPreparer``:
+environment acquisition, capability preparation, result sinking, Session
+history projection, and Memory promotion.  Composition wires these adapters;
+it must not re-own them.
+"""
 
 from __future__ import annotations
 
@@ -22,15 +29,12 @@ from fleet_rlm.chat.capability_preparation import (
 )
 from fleet_rlm.chat.post_commit_memory import OwnedPostCommitMemoryPromotion
 from fleet_rlm.chat.preparation import (
-    DefaultRunPreparer,
     RunEnvironment,
     RunPreparationTimeoutError,
     RunPreparationUnavailableError,
     claim_history_records,
 )
 from fleet_rlm.chat.run_lifecycle import ClaimedRun
-from fleet_rlm.composition.common import recursive_rlm_options
-from fleet_rlm.config.loader import load_runtime_settings
 from fleet_rlm.config.settings import Settings
 from fleet_rlm.daytona._lease import RootSessionLease
 from fleet_rlm.daytona.broker import SyncBridgeDispatcher, sync_sandbox
@@ -57,7 +61,6 @@ from fleet_rlm.daytona.session_manager import (
     DaytonaSessionManager,
     LeaseRequest,
 )
-from fleet_rlm.rlm.program import RLMModelBundle, RLMOptions
 from fleet_rlm.rlm.runtime import RLMExecutionSpec
 from fleet_rlm.rlm.session_runtime import SessionKey, SessionRLMRegistry
 from fleet_rlm.sessions.history import to_canonical_history_records
@@ -968,6 +971,8 @@ class _LiveCapabilityPreparer:
 
 def resolve_settings(settings: Settings | None = None) -> Settings:
     """Return explicit settings or load the resolved TOML policy."""
+    from fleet_rlm.config.loader import load_runtime_settings
+
     return settings or load_runtime_settings()
 
 
@@ -1180,32 +1185,6 @@ class DaytonaRuntimeResources:
         return await self._close_client(deadline=started + drain_seconds)
 
 
-def build_run_preparation(
-    resources: DaytonaRuntimeResources,
-    *,
-    attachment_lifecycle: Any,
-    skill_catalog: SkillCatalog,
-    settings: Settings,
-    models: RLMModelBundle,
-    session_runtime_registry: SessionRLMRegistry | None = None,
-) -> DefaultRunPreparer:
-    """Compose Daytona Run preparation without mutating resource ownership."""
-    options = RLMOptions(
-        max_iters=settings.rlm_max_iters,
-        max_llm_calls=settings.rlm_max_llm_calls,
-        max_output_chars=settings.rlm_max_output_chars,
-    )
-    return DefaultRunPreparer(
-        models=models,
-        options=options,
-        recursive_options=recursive_rlm_options(settings),
-        attachments=attachment_lifecycle,
-        environments=_DaytonaEnvironmentProvider(resources, settings, session_runtime_registry),
-        capabilities=_LiveCapabilityPreparer(settings, skill_catalog, volume_paths=resources.volume_paths),
-        session_runtime_registry=session_runtime_registry,
-    )
-
-
 __all__ = [
     "DaytonaRuntimeResources",
     "LivePreparedCapabilities",
@@ -1216,7 +1195,6 @@ __all__ = [
     "_prepare_memory_digest",
     "_promote_memory_candidates",
     "build_committed_session_history_for_claim",
-    "build_run_preparation",
     "has_pending_resource_cleanup",
     "resolve_settings",
     "wait_resource_cleanup",

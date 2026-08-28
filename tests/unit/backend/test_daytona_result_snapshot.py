@@ -114,8 +114,8 @@ async def test_live_daytona_sink_commit_failure_deletes_snapshot_through_adapter
         RunLifecycleService,
         _RunClaimToken,
     )
-    from fleet_rlm.composition.daytona_environment import _DaytonaRunSink
     from fleet_rlm.rlm.result import PredictionResult, RLMOutcome
+    from fleet_rlm.runtime.daytona.run_environment import _DaytonaRunSink
     from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
     from fleet_rlm.workspace.paths import VolumePaths
 

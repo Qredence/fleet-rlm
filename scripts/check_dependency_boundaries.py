@@ -128,6 +128,13 @@ def _forbidden_imports(relative: Path) -> tuple[tuple[str, str], ...]:
             ("workspace must not import FastAPI", "fastapi"),
             ("workspace must not import Daytona provider modules", "fleet_rlm.daytona"),
         )
+    if scope == "runtime" and relative.parts[1:2] != ("daytona",):
+        return (
+            ("provider-neutral runtime must not import Daytona provider modules", "fleet_rlm.daytona"),
+            ("provider-neutral runtime must not import workspace domain", "fleet_rlm.workspace"),
+            ("provider-neutral runtime must not import chat", "fleet_rlm.chat"),
+            ("provider-neutral runtime must not import api", "fleet_rlm.api"),
+        )
     if scope == "persistence":
         return (("persistence must not import rlm", "fleet_rlm.rlm"),)
     if scope == "rlm":

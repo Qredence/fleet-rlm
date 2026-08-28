@@ -65,6 +65,10 @@ class RuntimeProcessResources(Protocol):
     async def adispose(self, *, drain_seconds: float = 30.0) -> bool | None: ...
 
 
+class CompositionError(RuntimeError):
+    """Raised when a runtime composition cannot be assembled."""
+
+
 class RuntimeInventoryError(RuntimeError):
     """Raised when a runtime inventory is incomplete or invalid."""
 
@@ -174,7 +178,12 @@ def clear_runtime_inventory(app: FastAPI) -> RuntimeInventory | None:
     return detached
 
 
+async def no_provider_recovery_fence(_session_id: UUID) -> None:
+    """Declare that deterministic compositions have no provider state to fence."""
+
+
 __all__ = [
+    "CompositionError",
     "RuntimeDatabaseLifecycle",
     "RuntimeInventory",
     "RuntimeInventoryError",
@@ -184,4 +193,5 @@ __all__ = [
     "clear_runtime_inventory",
     "get_runtime_inventory",
     "install_runtime_inventory",
+    "no_provider_recovery_fence",
 ]

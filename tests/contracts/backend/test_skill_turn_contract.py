@@ -202,8 +202,8 @@ async def test_private_progressive_tools_preload_exact_selection_and_keep_events
 
 @pytest.mark.asyncio
 async def test_progressive_resource_requires_load_and_daytona_preparation_is_provider_free() -> None:
-    from fleet_rlm.composition.daytona_environment import _LiveCapabilityPreparer
     from fleet_rlm.config.settings import Settings
+    from fleet_rlm.runtime.daytona.run_environment import _LiveCapabilityPreparer
     from fleet_rlm.skills.tools import SkillToolHost
 
     catalog = _catalog()
@@ -355,8 +355,8 @@ async def test_deterministic_composition_runs_data_analysis_signature() -> None:
 
 @pytest.mark.asyncio
 async def test_daytona_report_builder_workspace_selection_keeps_workspace_host_owned(monkeypatch) -> None:
-    from fleet_rlm.composition.daytona_environment import _LiveCapabilityPreparer
     from fleet_rlm.config.settings import Settings
+    from fleet_rlm.runtime.daytona.run_environment import _LiveCapabilityPreparer
     from fleet_rlm.workspace.models import WorkspaceEntry, WorkspaceListResult, WorkspaceTextPage
 
     class FakeWorkspace:

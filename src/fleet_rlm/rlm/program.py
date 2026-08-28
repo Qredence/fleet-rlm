@@ -137,6 +137,15 @@ class RLMOptions:
                 raise RLMConfigError(f"{name} must be a positive integer, got {value!r}")
 
 
+def rlm_options(settings: Settings) -> RLMOptions:
+    """Project Settings onto the exact native DSPy RLM options."""
+    return RLMOptions(
+        max_iters=settings.rlm_max_iters,
+        max_llm_calls=settings.rlm_max_llm_calls,
+        max_output_chars=settings.rlm_max_output_chars,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Instructions & Signatures
 # ---------------------------------------------------------------------------

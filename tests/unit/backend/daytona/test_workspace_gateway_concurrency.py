@@ -14,7 +14,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from fleet_rlm.composition.daytona_workspace import _DaytonaWorkspaceFileSession
+from fleet_rlm.runtime.daytona.workspace_gateway import _DaytonaWorkspaceFileSession
 from fleet_rlm.workspace.models import WorkspaceConflictError as ProviderWorkspaceConflictError
 from fleet_rlm.workspace.models import WorkspaceEntry
 from fleet_rlm.workspace.storage import AsyncDaytonaSessionWorkspaceFS

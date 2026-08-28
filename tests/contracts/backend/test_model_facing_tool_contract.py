@@ -232,10 +232,10 @@ def test_model_facing_tool_contract_fixture_has_complete_policies_and_current_co
         assert isinstance(projection["source"], str) and projection["source"]
 
     from fleet_rlm.chat import capability_preparation
-    from fleet_rlm.composition import daytona_environment as run_environment
     from fleet_rlm.composition import testing
     from fleet_rlm.rlm import recursion as recursive_calls
     from fleet_rlm.rlm import runtime as runner
+    from fleet_rlm.runtime.daytona import run_environment
 
     prepared_source = inspect.getsource(capability_preparation.prepare_host_capabilities)
     testing_source = inspect.getsource(testing.TestingCapabilityPreparer.prepare)

@@ -8,9 +8,9 @@ from uuid import uuid4
 
 import pytest
 
-from fleet_rlm.composition.daytona_environment import _DaytonaEnvironmentProvider, _ResidentRootLease
 from fleet_rlm.config.settings import Settings
 from fleet_rlm.daytona.admission import DaytonaAdmission
+from fleet_rlm.runtime.daytona.run_environment import _DaytonaEnvironmentProvider, _ResidentRootLease
 from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
 from fleet_rlm.workspace.paths import volume_paths_from_settings
 
@@ -78,7 +78,7 @@ class _Platform:
 
 
 def _provider(monkeypatch: pytest.MonkeyPatch):
-    import fleet_rlm.composition.daytona_environment as module
+    import fleet_rlm.runtime.daytona.run_environment as module
     import fleet_rlm.workspace.memory as workspace_memory
 
     manager = _SessionManager()

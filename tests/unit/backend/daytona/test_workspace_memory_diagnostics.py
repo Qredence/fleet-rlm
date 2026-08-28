@@ -364,7 +364,7 @@ def test_emitted_fields_are_bounded_and_sanitized(annotated: list[dict[str, obje
 
 @pytest.mark.asyncio
 async def test_turn_preparation_seam_degrades_silently_but_observably(caplog: pytest.LogCaptureFixture) -> None:
-    from fleet_rlm.composition.daytona_environment import _prepare_memory_digest
+    from fleet_rlm.runtime.daytona.run_environment import _prepare_memory_digest
 
     class EmptyStore:
         def read_tail(self, *, byte_budget: int) -> WorkspaceMemoryReadResult:
@@ -400,7 +400,7 @@ async def test_turn_preparation_seam_degrades_silently_but_observably(caplog: py
 async def test_turn_preparation_outer_seam_classes_digest_failures(
     caplog: pytest.LogCaptureFixture, annotated: list[dict[str, object]]
 ) -> None:
-    from fleet_rlm.composition.daytona_environment import _prepare_memory_digest
+    from fleet_rlm.runtime.daytona.run_environment import _prepare_memory_digest
 
     class CorruptStore:
         def read_tail(self, *, byte_budget: int) -> WorkspaceMemoryReadResult:

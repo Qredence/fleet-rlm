@@ -252,7 +252,7 @@ def test_daytona_ignores_managed_mlflow_environment_values_when_not_selected(
 def test_recursive_depth_is_a_recursive_execution_invariant_not_a_setting() -> None:
     import dataclasses
 
-    from fleet_rlm.composition.common import recursive_rlm_options
+    from fleet_rlm.rlm.recursion import recursive_rlm_options
 
     settings = Settings()
     assert not hasattr(settings, "rlm_recursion_max_depth")

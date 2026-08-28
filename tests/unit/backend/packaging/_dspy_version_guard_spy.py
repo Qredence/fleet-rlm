@@ -44,8 +44,8 @@ class _UnsettledGuardRejectionError(Exception):
 def _install_ordered_spies(order: list[str], counts: dict[str, int]) -> None:
     import fleet_rlm.app as app_module
     import fleet_rlm.cli as cli_module
-    import fleet_rlm.composition.common as composition_common
-    import fleet_rlm.composition.daytona as composition_daytona
+    import fleet_rlm.composition.live as composition_daytona
+    import fleet_rlm.composition.testing as composition_common
     import fleet_rlm.daytona.platform as daytona_platform
     import fleet_rlm.persistence.database as persistence_database
     import fleet_rlm.rlm._dspy_compat as dspy_compat
@@ -58,8 +58,8 @@ def _install_ordered_spies(order: list[str], counts: dict[str, int]) -> None:
         counts["guard"] += 1
         real_guard()
 
-    # ``composition.common`` binds the guard at module import time, while
-    # ``composition.daytona``, ``fleet_rlm.app``, and the CLI rebind it lazily
+    # ``composition.testing`` binds the guard at module import time, while
+    # ``composition.live``, ``fleet_rlm.app``, and the CLI rebind it lazily
     # at call time; patch both binding styles.
     dspy_compat.assert_dspy_version = recording_guard
     composition_common.assert_dspy_version = recording_guard
@@ -95,7 +95,7 @@ def _stub_daytona_settings_gates() -> None:
     function, so the stub lives on its source module; ``require_daytona_settings``
     is a module-global resolved at call time.
     """
-    import fleet_rlm.composition.daytona as composition_daytona
+    import fleet_rlm.composition.live as composition_daytona
     import fleet_rlm.daytona.provisioning as daytona_provisioning
 
     composition_daytona.require_daytona_settings = lambda _settings: None
@@ -124,7 +124,7 @@ def _run_composition_local(*, payload: dict[str, Any]) -> None:
 
 
 def _run_composition_daytona(*, payload: dict[str, Any]) -> None:
-    from fleet_rlm.composition import daytona as composition_daytona
+    from fleet_rlm.composition import live as composition_daytona
     from fleet_rlm.config.settings import Settings
     from fleet_rlm.skills.catalog import build_bundled_skill_catalog
 

@@ -21,7 +21,6 @@ EXPECTED_DAYTONA_MODULES = {
     "platform.py",
     "provisioning.py",
     "recursive_child_runtime.py",
-    "run_environment.py",
     "runtime.py",
     "sandbox_lease.py",
     "session_manager.py",

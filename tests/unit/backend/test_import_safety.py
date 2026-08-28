@@ -57,10 +57,8 @@ def test_settings_exclude_secrets_from_serialization() -> None:
 
 
 def test_composition_common_import_does_not_configure_dspy_providers() -> None:
-    """Importing composition.common alone must not configure a DSPy provider LM."""
-    script = (
-        "import fleet_rlm.composition.common\nimport dspy\nassert dspy.settings.lm is None, repr(dspy.settings.lm)\n"
-    )
+    """Importing composition.live alone must not configure a DSPy provider LM."""
+    script = "import fleet_rlm.composition.live\nimport dspy\nassert dspy.settings.lm is None, repr(dspy.settings.lm)\n"
     result = subprocess.run(
         [sys.executable, "-c", script],
         capture_output=True,

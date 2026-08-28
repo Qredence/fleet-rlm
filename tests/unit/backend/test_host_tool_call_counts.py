@@ -216,8 +216,8 @@ def test_attachment_read_reverifies_staged_bytes_on_every_call(tmp_path) -> None
 async def test_live_capability_teardown_removes_drained_artifact_candidate_bytes(tmp_path) -> None:
     from fleet_rlm.artifacts.tools import ArtifactToolHost
     from fleet_rlm.attachments.tools import AttachmentToolHost
-    from fleet_rlm.composition.daytona_environment import LivePreparedCapabilities
     from fleet_rlm.rlm.runtime import RLMExecutionSpec
+    from fleet_rlm.runtime.daytona.run_environment import LivePreparedCapabilities
     from fleet_rlm.workspace.paths import VolumePaths
     from fleet_rlm.workspace.storage import HostVolumeMirror
 
