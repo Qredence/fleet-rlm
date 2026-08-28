@@ -1,9 +1,8 @@
 # P42 module-subtraction ledger
 
 **Status:** active P53 close-out ledger. P42–P52 implementation is present in
-this checkout, but P53 certification is not sealed for the current candidate.
-Rows record the phase commits and current owners; they are not evidence for an
-unrun deterministic or credentialed live lane.
+this checkout. Rows record the phase commits and current owners; they are not
+evidence for an unrun deterministic or credentialed live lane. P53 certification closes when the P35-E gate verifies the current clean candidate (ignored `.fleet-evidence/` evidence).
 **Baseline:** the sealed P36/P41 work, assessed against `plans/PLANS.md` P44–P53.
 **Replacement PRs:** the phase commits are recorded in repository history.
 

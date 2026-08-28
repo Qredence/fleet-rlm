@@ -1,10 +1,9 @@
 # P42 session-state behavior freeze
 
-**Status:** approved behavior contract — deterministic implementation is present;
-final P53 certification remains pending until current-candidate live evidence is sealed.
+**Status:** approved behavior contract — deterministic implementation is present; P53
+certification closes when the P35-E gate verifies the current clean candidate.
 **Supersedes:** only the P41 *Native RLM execution per Turn* behavior, which is
-is targeted for supersession by the approved Session-scoped resident contract below;
-final P53 certification remains pending. It
+targeted for supersession by the approved Session-scoped resident contract below. It
 does **not** rewrite the sealed [P41 behavior freeze](behavior-freeze.md), which
 remains the historical, certified baseline for
 `1801d24a938eda37b53ebb2f543fd01e3c6bdaf6`.

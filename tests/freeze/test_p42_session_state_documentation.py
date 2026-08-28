@@ -51,7 +51,7 @@ def test_p53_closeout_docs_pin_current_owners_and_unsealed_evidence() -> None:
 
     assert "**Status:** active P53 close-out ledger." in ledger
     assert "P42\N{EN DASH}P52 implementation is present" in ledger
-    assert "P53 certification is not sealed for the current candidate." in ledger
+    assert "P53 certification closes when the P35-E gate verifies the current clean candidate" in ledger
     assert "No certification claim is made for an" in ledger
     assert "TBD" not in ledger
     assert "Planned" not in ledger
