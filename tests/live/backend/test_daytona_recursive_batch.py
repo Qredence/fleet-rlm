@@ -43,6 +43,7 @@ class BatchResult(dspy.Signature):
     """Return a multi-field Root result so completion is necessarily typed."""
 
     request: str = dspy.InputField()
+    history: dspy.History = dspy.InputField()
     session_context: dict = dspy.InputField()
     skill_cards: list[dict] = dspy.InputField()
     attachments: list[dict] = dspy.InputField()
