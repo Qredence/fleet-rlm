@@ -152,7 +152,7 @@ def test_daytona_deadline_cleanup_through_fastapi(
             assert not any(
                 chunk.get("type") == "tool-output-available" and "propose_memory" in str(chunk) for chunk in chunks
             )
-            _wait_for_release(resources, session_id, permits=settings.max_active_daytona_leases)
+            _wait_for_release(resources, session_id, permits=settings.max_active_daytona_leases, portal=client.portal)
             sandbox_ids.update(resources._sandbox_ids)
         finally:
             release.set()
