@@ -13,6 +13,7 @@ import dspy
 import pytest
 from fastapi.testclient import TestClient
 
+from fleet_rlm.api.local_scope import LocalScope
 from fleet_rlm.app import create_app
 from fleet_rlm.config.settings import Settings
 from fleet_rlm.daytona.broker import DaytonaHttpToolBroker
@@ -90,7 +91,11 @@ def _sse_chunks(response: Any) -> tuple[list[dict[str, Any]], int]:
     return chunks, done
 
 
-def _wait_for_release(resources: Any, session_id: UUID, *, permits: int) -> None:
+def _wait_for_release(resources: Any, session_id: UUID, *, permits: int, portal: Any) -> None:
+    runtime = getattr(resources, "runtime", None)
+    close = getattr(runtime, "close_root_session", None)
+    if callable(close):
+        portal.call(lambda: close(LocalScope().workspace_id, session_id))
     deadline = time.perf_counter() + 45
     while time.perf_counter() < deadline:
         if (
