@@ -280,7 +280,7 @@ async def test_staging_rollback_falls_back_to_inline_when_supervisor_at_capacity
             self.removed.append(location)
             self.values.pop(location, None)
 
-    from fleet_rlm.chat.run_cleanup import RunCleanupSupervisor
+    from fleet_rlm.runtime.cleanup import RunCleanupSupervisor
 
     supervisor = RunCleanupSupervisor(max_jobs=1)
 

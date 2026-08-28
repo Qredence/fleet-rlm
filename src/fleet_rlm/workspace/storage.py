@@ -1793,8 +1793,6 @@ class AgentVolumeStorage:
 
 
 # Historical names are useful to callers migrating one provider at a time.
-AsyncAgentVolumeStorage = AgentAsyncVolumeStorage
-SyncAgentVolumeStorage = AgentVolumeStorage
 
 
 class AsyncDaytonaVolumeFS(AgentAsyncVolumeStorage):
@@ -2369,7 +2367,6 @@ __all__ = [
     "AgentAsyncVolumeStorage",
     "AgentStorageSession",
     "AgentVolumeStorage",
-    "AsyncAgentVolumeStorage",
     "AsyncStorageSession",
     "AsyncVolumeStorage",
     "AsyncWorkspaceAgentTransport",
@@ -2379,7 +2376,6 @@ __all__ = [
     "OfflineHostVolumeGateway",
     "OrphanCleanupReport",
     "StorageSession",
-    "SyncAgentVolumeStorage",
     "SyncWorkspaceAgentTransport",
     "VolumeBlobFs",
     "VolumeFSCacheState",

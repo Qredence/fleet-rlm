@@ -518,11 +518,11 @@ async def test_disconnect_before_open_resolves_settles_cancelled_and_persists_to
     from uuid import uuid4
 
     from fleet_rlm.api.routes.turns import create_turn
-    from fleet_rlm.chat.run_cleanup import RunCleanupSupervisor
     from fleet_rlm.chat.run_lifecycle import RunLifecycleService
     from fleet_rlm.chat.turn_runtime import TurnRuntime
     from fleet_rlm.persistence.repositories import InMemoryRunStateStore, InMemorySessionCatalog
     from fleet_rlm.rlm.events import EventRecorder, RunStarted, RuntimeEvent
+    from fleet_rlm.runtime.cleanup import RunCleanupSupervisor
     from fleet_rlm.sessions.models import TurnAccess
 
     access = TurnAccess(uuid4(), uuid4())

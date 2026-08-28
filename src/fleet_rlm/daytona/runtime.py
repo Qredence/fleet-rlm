@@ -31,11 +31,6 @@ class DaytonaRuntimeState(StrEnum):
     FAILED = "FAILED"
 
 
-RuntimeState = DaytonaRuntimeState
-RootSessionLeaseState = LeaseState
-ChildEnvironmentState = LeaseState
-
-
 def _identity_text(value: UUID | str | None, name: str) -> str:
     if value is None:
         raise ValueError(f"{name} is required")
@@ -968,12 +963,9 @@ async def _maybe_await(value: Any) -> Any:
 __all__ = [
     "ChildEnvironment",
     "ChildEnvironmentSpec",
-    "ChildEnvironmentState",
     "DaytonaRuntime",
     "DaytonaRuntimeState",
     "LeaseState",
     "RootSessionLease",
-    "RootSessionLeaseState",
     "RootSessionSpec",
-    "RuntimeState",
 ]

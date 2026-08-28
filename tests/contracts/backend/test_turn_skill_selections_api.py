@@ -59,7 +59,7 @@ def _client(coordinator: _CapturingCoordinator) -> TestClient:
     app = FastAPI()
     app.state.settings = Settings()
     app.state.composition_ready = True
-    app.state.runtime_inventory = RuntimeInventory(turn_coordinator=coordinator)
+    app.state.runtime_inventory = RuntimeInventory(turn_runtime=coordinator)
     install_error_handlers(app)
     app.include_router(router)
     return TestClient(app)

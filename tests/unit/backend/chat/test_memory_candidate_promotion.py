@@ -374,7 +374,7 @@ class _DriverLifecycle:
 
 
 def _streaming_driver(lifecycle, stream, *, revoke_claim=None):
-    from fleet_rlm.chat.run_cleanup import RunCleanupSupervisor
+    from fleet_rlm.runtime.cleanup import RunCleanupSupervisor
 
     cleanup = RunCleanupSupervisor()
 

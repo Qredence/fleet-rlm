@@ -24,13 +24,13 @@ from uuid import uuid4
 import pytest
 
 from fleet_rlm.chat.commands import OpenTurnCommand
-from fleet_rlm.chat.run_cleanup import RunCleanupSupervisor
 from fleet_rlm.chat.run_lifecycle import ClaimedRun, RunLifecycleService, RunStateError
 from fleet_rlm.chat.turn_runtime import TurnRuntime
 from fleet_rlm.persistence.repositories import InMemoryRunStateStore, InMemorySessionCatalog
 from fleet_rlm.rlm.events import EventRecorder, RunCancelled, RunCompleted, RunFailed, RunStarted, RuntimeEvent
 from fleet_rlm.rlm.result import PredictionResult, RLMOutcome
 from fleet_rlm.rlm.session_runtime import SessionKey, SessionRLMRegistry, SessionRLMState, SessionRuntimeLease
+from fleet_rlm.runtime.cleanup import RunCleanupSupervisor
 from fleet_rlm.sessions.models import TurnAccess, TurnInput
 
 _FINGERPRINT = "fp-taint-contract"

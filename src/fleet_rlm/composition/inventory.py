@@ -90,9 +90,7 @@ class RuntimeDatabaseLifecycle:
 class RuntimeInventory:
     """Complete dynamic service graph installed for one application lifespan."""
 
-    # Compatibility field name retained for existing route/dependency users;
-    # TurnRuntime is the implementation owner.
-    turn_coordinator: TurnRuntime | None = None
+    turn_runtime: TurnRuntime | None = None
     attachment_lifecycle: AttachmentLifecycle | None = None
     artifact_reader: ArtifactReader | None = None
     session_catalog: SessionCatalog | None = None
@@ -121,7 +119,7 @@ class RuntimeInventory:
     runner: object | None = None
 
     _REQUIRED_ROUTE_FIELDS: ClassVar[tuple[str, ...]] = (
-        "turn_coordinator",
+        "turn_runtime",
         "attachment_lifecycle",
         "artifact_reader",
         "session_catalog",
@@ -136,11 +134,6 @@ class RuntimeInventory:
         missing = tuple(name for name in self._REQUIRED_ROUTE_FIELDS if getattr(self, name) is None)
         if missing:
             raise RuntimeInventoryError("runtime inventory missing required service(s): " + ", ".join(missing))
-
-    @property
-    def turn_runtime(self) -> TurnRuntime | None:
-        """Return the canonical TurnRuntime through the transition alias."""
-        return self.turn_coordinator
 
     @property
     def db_engine(self) -> AsyncEngine | None:

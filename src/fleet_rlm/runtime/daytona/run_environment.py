@@ -225,11 +225,6 @@ class LivePreparedCapabilities(PreparedHostCapabilities):
         self.workspace_memory_digest = workspace_memory_digest
 
 
-# Compatibility alias for provider-local callers.  The lifecycle state machine
-# is now the public/private ``RootSessionLease`` primitive in ``daytona._lease``.
-_ResidentRootLease = RootSessionLease
-
-
 class _DaytonaRunSink:
     def __init__(
         self,
@@ -281,7 +276,7 @@ class _DaytonaEnvironmentProvider:
     resources: DaytonaRuntimeResources
     settings: Settings
     session_runtime_registry: SessionRLMRegistry | None = None
-    _resident_root_leases: dict[tuple[UUID, UUID], _ResidentRootLease] = field(default_factory=dict, init=False)
+    _resident_root_leases: dict[tuple[UUID, UUID], RootSessionLease] = field(default_factory=dict, init=False)
     _resident_context_keys: dict[tuple[UUID, UUID], tuple[tuple[str, ...], tuple[tuple[str, str], ...], str | None]] = (
         field(default_factory=dict, init=False)
     )
@@ -356,7 +351,7 @@ class _DaytonaEnvironmentProvider:
             str(run.run_id) if attachment_ids else None,
         )
 
-    async def _remove_resident_root(self, key: tuple[UUID, UUID], owner: _ResidentRootLease) -> None:
+    async def _remove_resident_root(self, key: tuple[UUID, UUID], owner: RootSessionLease) -> None:
         """Remove one exact provider root after successful cleanup."""
         async with self._resident_root_lock:
             if self._resident_root_leases.get(key) is owner:
@@ -365,20 +360,20 @@ class _DaytonaEnvironmentProvider:
                 self._prune_preparation_gate(key)
                 self._maybe_release_environment_owner()
 
-    async def _on_root_closed(self, owner: _ResidentRootLease) -> None:
+    async def _on_root_closed(self, owner: RootSessionLease) -> None:
         """Remove a directly-owned root using its legacy UUID key."""
         key = owner.key
         if not isinstance(key, tuple) or len(key) != 2:
             return
         await self._remove_resident_root(key, owner)
 
-    def _bind_runtime_root(self, key: tuple[UUID, UUID], owner: _ResidentRootLease) -> None:
+    def _bind_runtime_root(self, key: tuple[UUID, UUID], owner: RootSessionLease) -> None:
         """Chain provider-map cleanup onto the public runtime callback once."""
         if getattr(owner, "_environment_provider_owner", None) is self:
             return
         previous = owner.on_closed
 
-        async def chained(closed: _ResidentRootLease) -> None:
+        async def chained(closed: RootSessionLease) -> None:
             if previous is not None:
                 result = previous(closed)
                 if inspect.isawaitable(result):
@@ -407,7 +402,7 @@ class _DaytonaEnvironmentProvider:
     async def _finish_late_lookup(
         self,
         lookup: asyncio.Task[Any],
-        owner: _ResidentRootLease,
+        owner: RootSessionLease,
         preparation_gate: asyncio.Lock,
         key: tuple[UUID, UUID],
         run: ClaimedRun,
@@ -445,7 +440,7 @@ class _DaytonaEnvironmentProvider:
     def _defer_late_lookup_cleanup(
         self,
         lookup: asyncio.Task[Any],
-        owner: _ResidentRootLease,
+        owner: RootSessionLease,
         preparation_gate: asyncio.Lock,
         key: tuple[UUID, UUID],
         run: ClaimedRun,
@@ -476,7 +471,7 @@ class _DaytonaEnvironmentProvider:
         run: ClaimedRun,
         *,
         deadline: float,
-    ) -> tuple[_ResidentRootLease, bool]:
+    ) -> tuple[RootSessionLease, bool]:
         """Return the resident root lease and whether this call created it."""
         key = (run.access.workspace_id, run.session_id)
         context_key = self._context_key(run)
@@ -553,7 +548,7 @@ class _DaytonaEnvironmentProvider:
                 if supports_force_new:
                     acquire_kwargs["force_new"] = True
             lease = await acquire(request, **acquire_kwargs)
-            owner = _ResidentRootLease(
+            owner = RootSessionLease(
                 key=key,
                 lease=lease,
                 release_callback=self.resources.session_manager.release,
@@ -641,7 +636,7 @@ class _DaytonaEnvironmentProvider:
         key = (run.access.workspace_id, run.session_id)
         preparation_gate = self._preparation_gate(key)
         gate_held = False
-        owner: _ResidentRootLease | None = None
+        owner: RootSessionLease | None = None
         created_root = False
         try:
             try:
@@ -1188,10 +1183,10 @@ class DaytonaRuntimeResources:
 __all__ = [
     "DaytonaRuntimeResources",
     "LivePreparedCapabilities",
+    "RootSessionLease",
     "_DaytonaEnvironmentProvider",
     "_DaytonaRunSink",
     "_LiveCapabilityPreparer",
-    "_ResidentRootLease",
     "_prepare_memory_digest",
     "_promote_memory_candidates",
     "build_committed_session_history_for_claim",

@@ -28,7 +28,7 @@ from fleet_rlm.skills.catalog import SkillCatalog
 
 def _complete_runtime_inventory() -> RuntimeInventory:
     return RuntimeInventory(
-        turn_coordinator=object(),
+        turn_runtime=object(),
         attachment_lifecycle=object(),
         artifact_reader=object(),
         session_catalog=object(),
@@ -293,7 +293,7 @@ def test_testing_app_composes_only_inside_lifespan() -> None:
         assert app.state.composition_ready is True
         inventory = app.state.runtime_inventory
         assert isinstance(inventory, RuntimeInventory)
-        assert inventory.turn_coordinator is not None
+        assert inventory.turn_runtime is not None
         assert inventory.attachment_lifecycle is not None
         assert inventory.artifact_reader is not None
         assert app.state.skill_catalog is not None
@@ -349,7 +349,7 @@ def test_runtime_inventory_rejects_incomplete_graph_without_readiness() -> None:
 
     app = SimpleNamespace(state=RecordingState())
 
-    with pytest.raises(RuntimeInventoryError, match="turn_coordinator"):
+    with pytest.raises(RuntimeInventoryError, match="turn_runtime"):
         install_runtime_inventory(app, RuntimeInventory())
 
     assert events == []
@@ -446,7 +446,7 @@ async def test_daytona_install_registers_and_dispose_clears_bridge_dispatcher(
     from fleet_rlm.daytona.broker import SyncBridgeDispatcher
 
     inventory = RuntimeInventory(
-        turn_coordinator=object(),
+        turn_runtime=object(),
         attachment_lifecycle=object(),
         artifact_reader=object(),
         session_catalog=object(),
@@ -560,7 +560,7 @@ def test_local_startup_failure_rolls_back_partial_inventory(monkeypatch) -> None
 
     def fail_install(app, _settings, *, database=None):
         del database
-        app.state.runtime_inventory = RuntimeInventory(turn_coordinator=object())
+        app.state.runtime_inventory = RuntimeInventory(turn_runtime=object())
         app.state.composition_ready = True
         raise RuntimeError("local wiring unavailable")
 
@@ -629,7 +629,7 @@ async def test_install_daytona_composition_does_not_create_schema(monkeypatch) -
     preparation = object()
     inventory = RuntimeInventory(
         run_environment_resources=Resources(),
-        turn_coordinator=object(),
+        turn_runtime=object(),
         session_catalog=object(),
         run_lifecycle=object(),
         attachment_lifecycle=object(),
@@ -729,7 +729,7 @@ async def test_live_startup_preserves_original_error_and_attempts_all_cleanup(mo
 
     inventory = RuntimeInventory(
         run_environment_resources=Resources(),
-        turn_coordinator=object(),
+        turn_runtime=object(),
         session_catalog=object(),
         run_lifecycle=object(),
         attachment_lifecycle=object(),

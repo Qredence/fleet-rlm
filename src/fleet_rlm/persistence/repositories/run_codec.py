@@ -37,8 +37,6 @@ from fleet_rlm.runtime.usage import RLMUsage, empty_rlm_usage
 from fleet_rlm.sessions.committed_turn import CommittedTurn, CommittedTurnCodec
 from fleet_rlm.sessions.models import HistoryMessage, SessionHistory, TurnInput, TurnInputCodec
 
-_MEMORY_RUN_STATE = Any
-
 
 def _decode_failure_status(value: str) -> Literal["failed", "cancelled", "timeout"]:
     """Validate and return a persisted Run failure status."""
@@ -87,7 +85,7 @@ def _turn_failure(intent: ClaimFailure, usage: RLMUsage) -> RunFailure:
     return RunFailure(intent.status, intent.code, intent.public_message, usage)
 
 
-def _memory_claim_state(run: _MEMORY_RUN_STATE) -> ClaimState:
+def _memory_claim_state(run: Any) -> ClaimState:
     intent = _claim_failure(run.terminal_intent) if run.terminal_intent is not None else None
     return ClaimState(_decode_claim_status(run.status), _decode_claim_code(run.failure_code), intent)
 
@@ -116,7 +114,7 @@ def _transition_receipt(run_id: UUID, decision: ClaimTransition) -> FailedRunRec
 
 
 def _apply_memory_next_state(
-    run: _MEMORY_RUN_STATE,
+    run: Any,
     next_state: ClaimState,
     *,
     usage: RLMUsage | None = None,

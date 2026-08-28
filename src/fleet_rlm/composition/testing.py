@@ -167,7 +167,7 @@ def build_local_inventory(
         mlflow_expose_trace_id=settings.mlflow_expose_trace_id,
     )
     return RuntimeInventory(
-        turn_coordinator=coordinator,
+        turn_runtime=coordinator,
         runner=runner,
         attachment_lifecycle=attachment_lifecycle,
         artifact_reader=artifact_reader,

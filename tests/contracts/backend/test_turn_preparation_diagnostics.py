@@ -44,7 +44,7 @@ def _client(cause: BaseException) -> TestClient:
     app = FastAPI()
     app.state.settings = Settings()
     app.state.composition_ready = True
-    app.state.runtime_inventory = RuntimeInventory(turn_coordinator=_FailingCoordinator(cause))
+    app.state.runtime_inventory = RuntimeInventory(turn_runtime=_FailingCoordinator(cause))
     install_error_handlers(app)
     app.include_router(router)
     return TestClient(app)

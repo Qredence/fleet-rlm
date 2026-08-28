@@ -43,10 +43,7 @@ logger = logging.getLogger(__name__)
 
 __all__ = [
     "MAX_SESSION_TOOL_COUNT",
-    "MAX_TOOL_ARGUMENTS",
-    "MAX_TOOL_DESCRIPTION_CHARS",
     "MAX_TOOL_NAME_CHARS",
-    "MAX_TOOL_SCHEMA_BYTES",
     "AuthorizationCheck",
     "ClaimCheck",
     "CleanupCallback",
@@ -59,16 +56,12 @@ __all__ = [
     "SessionRLMRegistry",
     "SessionRLMState",
     "SessionRuntimeLease",
-    "SessionRuntimeRegistry",
     "SessionToolAuthorizationError",
     "SessionToolBinding",
     "SessionToolRegistry",
-    "SessionToolUnavailableError",
     "ToolAuthorization",
     "compute_program_fingerprint",
     "digest_program_components",
-    "fingerprint_components",
-    "program_fingerprint",
 ]
 
 
@@ -1074,8 +1067,6 @@ def digest_program_components(
 
 
 # Friendly aliases used by callers during the P45 migration.
-fingerprint_components = digest_program_components
-program_fingerprint = compute_program_fingerprint
 
 
 # ---------------------------------------------------------------------------
@@ -2259,7 +2250,6 @@ class SessionRLMRegistry:
 
 # Public migration alias: callers may refer to the resident object as either
 # an RLM registry or a Session runtime registry.
-SessionRuntimeRegistry = SessionRLMRegistry
 
 
 # ---------------------------------------------------------------------------
@@ -2270,11 +2260,7 @@ SessionRuntimeRegistry = SessionRLMRegistry
 # no longer constrain model-facing Tool metadata: the Session proxy snapshots
 # the frozen source contract exactly and sanitizes only event/result payloads.
 MAX_TOOL_NAME_CHARS = 96
-MAX_TOOL_DESCRIPTION_CHARS = 512
-MAX_TOOL_ARGUMENTS = 32
-MAX_TOOL_ARGUMENT_NAME_CHARS = 96
-MAX_TOOL_ARGUMENT_DESCRIPTION_CHARS = 256
-MAX_TOOL_SCHEMA_BYTES = 8_192
+
 MAX_SESSION_TOOL_COUNT = 64
 MAX_SESSION_ID_CHARS = 128
 
@@ -2290,7 +2276,6 @@ class SessionToolAuthorizationError(RuntimeError):
 
 # A more specific spelling is useful at integration seams while retaining one
 # public failure shape for all fail-closed cases.
-SessionToolUnavailableError = SessionToolAuthorizationError
 
 
 class ToolAuthorization(Protocol):

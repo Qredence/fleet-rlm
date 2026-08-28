@@ -9,8 +9,9 @@ from uuid import uuid4
 import pytest
 
 from fleet_rlm.config.settings import Settings
+from fleet_rlm.daytona._lease import RootSessionLease
 from fleet_rlm.daytona.admission import DaytonaAdmission
-from fleet_rlm.runtime.daytona.run_environment import _DaytonaEnvironmentProvider, _ResidentRootLease
+from fleet_rlm.runtime.daytona.run_environment import _DaytonaEnvironmentProvider
 from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
 from fleet_rlm.workspace.paths import volume_paths_from_settings
 
@@ -199,17 +200,17 @@ async def test_resident_root_close_survives_caller_cancellation() -> None:
     entered = asyncio.Event()
     release = asyncio.Event()
     releases: list[object] = []
-    closed: list[_ResidentRootLease] = []
+    closed: list[RootSessionLease] = []
 
     async def release_callback(value: object) -> None:
         releases.append(value)
         entered.set()
         await release.wait()
 
-    async def on_closed(owner: _ResidentRootLease) -> None:
+    async def on_closed(owner: RootSessionLease) -> None:
         closed.append(owner)
 
-    owner = _ResidentRootLease((uuid4(), uuid4()), lease, release_callback, on_closed)
+    owner = RootSessionLease((uuid4(), uuid4()), lease, release_callback, on_closed)
     first = asyncio.create_task(owner.close())
     await entered.wait()
     first.cancel()
@@ -284,10 +285,10 @@ async def test_resident_root_release_and_close_are_idempotent() -> None:
     async def release(value: object) -> None:
         releases.append(value)
 
-    async def on_closed(owner: _ResidentRootLease) -> None:
+    async def on_closed(owner: RootSessionLease) -> None:
         closed.append(owner)
 
-    owner = _ResidentRootLease((uuid4(), uuid4()), lease, release, on_closed)
+    owner = RootSessionLease((uuid4(), uuid4()), lease, release, on_closed)
     await owner.release()
     await owner.close()
 

@@ -111,32 +111,6 @@ class WorkspaceMemoryStore(Protocol):
     ) -> str: ...
 
 
-class _LegacyMemoryStore(Protocol):
-    """Structural migration-window view of the historical domain store."""
-
-    def read_tail(self, *, byte_budget: int) -> WorkspaceMemoryReadResult: ...
-
-    def append_record(self, record: str) -> WorkspaceMemoryAppendResult: ...
-
-    def list_entries(
-        self,
-        *,
-        after: str | None = None,
-        limit: int,
-        category: str | None = None,
-    ) -> WorkspaceMemoryListResult: ...
-
-    def delete_entry(self, memory_id: str) -> bool: ...
-
-    def edit_entry(
-        self,
-        memory_id: str,
-        key_learning: str,
-        *,
-        category: str | None = None,
-    ) -> str: ...
-
-
 WORKSPACE_MEMORY_NAMESPACE = "workspace_memory"
 _LIST_MEMORIES_DEFAULT_LIMIT = 50
 SEARCH_MEMORIES_MAX_LIMIT = 32
@@ -1440,20 +1414,6 @@ class WorkspaceMemory:
         self._canonical_present = False
         self._canonical_has_header = False
         self._migration_lock = threading.Lock()
-        # A short-lived compatibility path accepts the historical store port
-        # while callers migrate. It is structural only and has no provider
-        # dependency; new storage adapters use opaque bytes below.
-        compat_store = (
-            storage
-            if all(
-                callable(getattr(storage, name, None))
-                for name in ("read_tail", "append_record", "list_entries", "delete_entry", "edit_entry")
-            )
-            and not callable(getattr(storage, "read_bytes", None))
-            and not callable(getattr(storage, "read_text_page", None))
-            else None
-        )
-        self._compat_store: _LegacyMemoryStore | None = cast(_LegacyMemoryStore | None, compat_store)
 
     @classmethod
     def from_storage(cls, storage: object, **kwargs: Any) -> WorkspaceMemory:
@@ -1465,8 +1425,6 @@ class WorkspaceMemory:
     def read_tail(self, *, byte_budget: int) -> WorkspaceMemoryReadResult:
         if type(byte_budget) is not int or not 0 < byte_budget <= WORKSPACE_MEMORY_BYTE_BUDGET:
             raise WorkspaceMemoryStoreUnavailableError()
-        if self._compat_store is not None:
-            return self._compat_store.read_tail(byte_budget=byte_budget)
         self._ensure_migrated()
         try:
             try:
@@ -1499,8 +1457,6 @@ class WorkspaceMemory:
             raise WorkspaceMemoryStoreUnavailableError() from exc
         if not payload or len(payload) > self._max_file_bytes - len(_HEADER_BYTES):
             raise WorkspaceMemoryStoreFullError()
-        if self._compat_store is not None:
-            return self._compat_store.append_record(record)
         self._ensure_migrated()
         with _memory_write_lock(self._lock_key):
             try:
@@ -1559,8 +1515,6 @@ class WorkspaceMemory:
             normalize_workspace_memory_id(after)
         if category is not None:
             category = normalize_workspace_memory_category(category)
-        if self._compat_store is not None:
-            return self._compat_store.list_entries(after=after, limit=limit, category=category)
         self._ensure_migrated()
         content = self._read_all_content()
         lines = parse_workspace_memory_lines(content)
@@ -1604,8 +1558,6 @@ class WorkspaceMemory:
 
     def delete_entry(self, memory_id: str) -> bool:
         normalize_workspace_memory_id(memory_id)
-        if self._compat_store is not None:
-            return bool(self._compat_store.delete_entry(memory_id))
         self._ensure_migrated()
         with _memory_write_lock(self._lock_key):
             content = self._read_all_content()
@@ -1640,8 +1592,6 @@ class WorkspaceMemory:
         normalize_workspace_memory_id(memory_id)
         learning = normalize_workspace_memory_learning(key_learning)
         normalized_category = normalize_workspace_memory_category(category) if category is not None else None
-        if self._compat_store is not None:
-            return self._compat_store.edit_entry(memory_id, key_learning, category=normalized_category)
         self._ensure_migrated()
         with _memory_write_lock(self._lock_key):
             content = self._read_all_content()
@@ -1934,9 +1884,6 @@ class WorkspaceMemory:
             raise MemoryInvariantError()
 
     def _ensure_migrated(self) -> None:
-        if self._compat_store is not None:
-            self._migrated = True
-            return
         if self._migrated:
             return
         with self._migration_lock:

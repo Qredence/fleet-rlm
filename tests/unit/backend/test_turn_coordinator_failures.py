@@ -46,7 +46,6 @@ async def test_open_non_success_has_one_last_terminal_and_never_promotes(
 
     from fleet_rlm.artifacts.models import ArtifactCandidate
     from fleet_rlm.chat.commands import OpenTurnCommand
-    from fleet_rlm.chat.run_cleanup import RunCleanupSupervisor
     from fleet_rlm.chat.run_lifecycle import RunLifecycleService
     from fleet_rlm.chat.turn_runtime import TurnRuntime
     from fleet_rlm.persistence.repositories import InMemoryRunStateStore, InMemorySessionCatalog
@@ -59,6 +58,7 @@ async def test_open_non_success_has_one_last_terminal_and_never_promotes(
         Status,
     )
     from fleet_rlm.rlm.result import RLMOutcome
+    from fleet_rlm.runtime.cleanup import RunCleanupSupervisor
     from fleet_rlm.sessions.models import TurnAccess, TurnInput
 
     expected_terminal = {"RunCancelled": RunCancelled, "RunTimedOut": RunTimedOut}[terminal_type]
@@ -538,13 +538,13 @@ async def test_failed_turn_emits_settlement_claim_and_cleanup_spans(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from fleet_rlm.chat.commands import OpenTurnCommand
-    from fleet_rlm.chat.run_cleanup import RunCleanupSupervisor
     from fleet_rlm.chat.run_lifecycle import RunLifecycleService
     from fleet_rlm.chat.turn_runtime import TurnRuntime
     from fleet_rlm.observability import tracing as turn_tracing
     from fleet_rlm.persistence.repositories import InMemoryRunStateStore, InMemorySessionCatalog
     from fleet_rlm.rlm.events import EventRecorder, RunFailed, RunStarted, Status
     from fleet_rlm.rlm.result import RLMOutcome
+    from fleet_rlm.runtime.cleanup import RunCleanupSupervisor
     from fleet_rlm.sessions.models import TurnAccess, TurnInput
 
     token = turn_tracing._fleet_trace_active.set(True)

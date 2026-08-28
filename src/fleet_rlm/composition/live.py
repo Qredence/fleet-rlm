@@ -667,7 +667,7 @@ async def build_daytona_composition(
         return RuntimeInventory(
             run_environment_resources=resources,
             bridge_dispatcher=dispatcher,
-            turn_coordinator=coordinator,
+            turn_runtime=coordinator,
             runner=runner,
             session_catalog=session_catalog,
             run_lifecycle=lifecycle,

@@ -67,7 +67,7 @@ def _turn_client(coordinator: _Coordinator) -> TestClient:
     app = FastAPI()
     app.state.settings = Settings()
     app.state.composition_ready = True
-    app.state.runtime_inventory = RuntimeInventory(turn_coordinator=coordinator)
+    app.state.runtime_inventory = RuntimeInventory(turn_runtime=coordinator)
     install_error_handlers(app)
     app.include_router(turns_router)
     return TestClient(app)

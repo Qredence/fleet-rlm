@@ -26,7 +26,6 @@ import dspy
 import pytest
 from dotenv import load_dotenv
 
-from fleet_rlm.chat.run_cleanup import RunCleanupSupervisor
 from fleet_rlm.chat.run_lifecycle import ClaimedRun, _RunClaimToken
 from fleet_rlm.chat.session_context import SessionContextManifest
 from fleet_rlm.config.loader import load_runtime_settings
@@ -49,6 +48,7 @@ from fleet_rlm.rlm.runtime import (
 )
 from fleet_rlm.rlm.session_runtime import SessionKey, SessionRLMRegistry
 from fleet_rlm.runtime.bindings import InMemorySandboxBindingStore
+from fleet_rlm.runtime.cleanup import RunCleanupSupervisor
 from fleet_rlm.runtime.daytona.run_environment import DaytonaRuntimeResources, _DaytonaEnvironmentProvider
 from fleet_rlm.sessions.history_transport import CommittedSessionHistory
 from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput

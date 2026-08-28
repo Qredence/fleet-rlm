@@ -124,10 +124,10 @@ def _driver(lifecycle, runner, cleanup):
 
 @pytest.mark.asyncio
 async def test_finalization_wins_simultaneous_claim_loss() -> None:
-    from fleet_rlm.chat.run_cleanup import RunCleanupSupervisor
     from fleet_rlm.chat.run_ownership import ClaimHeartbeat
     from fleet_rlm.rlm.events import RunFailed
     from fleet_rlm.rlm.result import RLMOutcome
+    from fleet_rlm.runtime.cleanup import RunCleanupSupervisor
 
     release_finish = asyncio.Event()
     lifecycle = _CleanupLifecycle(
@@ -162,11 +162,11 @@ async def test_finalization_wins_simultaneous_claim_loss() -> None:
 @pytest.mark.asyncio
 async def test_claim_loss_reconciles_a_commit_that_finishes_after_the_waiter_race() -> None:
     """A claim-loss waiter must not turn a concurrently committed Turn into failure."""
-    from fleet_rlm.chat.run_cleanup import RunCleanupSupervisor
     from fleet_rlm.chat.run_lifecycle import CommittedTurnReceipt
     from fleet_rlm.chat.run_ownership import ClaimHeartbeat
     from fleet_rlm.rlm.events import RunCompleted, RunFailed, TextCompleted, TextDelta
     from fleet_rlm.rlm.result import RLMOutcome, empty_rlm_usage
+    from fleet_rlm.runtime.cleanup import RunCleanupSupervisor
     from fleet_rlm.sessions.committed_turn import CommittedTurn, TextPart, UsagePart
 
     release_finish = asyncio.Event()
@@ -213,9 +213,9 @@ async def test_claim_loss_reconciles_a_commit_that_finishes_after_the_waiter_rac
 
 @pytest.mark.asyncio
 async def test_disconnect_cancels_provider_wait_and_orders_detached_cleanup() -> None:
-    from fleet_rlm.chat.run_cleanup import RunCleanupSupervisor
     from fleet_rlm.chat.run_ownership import ClaimHeartbeat
     from fleet_rlm.rlm.result import RLMOutcome
+    from fleet_rlm.runtime.cleanup import RunCleanupSupervisor
 
     order: list[str] = []
     lifecycle = _CleanupLifecycle(outcome=RLMOutcome("failed", public_error_message="Turn failed"))
@@ -255,8 +255,8 @@ async def test_disconnect_cancels_provider_wait_and_orders_detached_cleanup() ->
 
 @pytest.mark.asyncio
 async def test_finalization_failure_after_claim_loss_routes_to_claim_loss_cleanup() -> None:
-    from fleet_rlm.chat.run_cleanup import RunCleanupSupervisor
     from fleet_rlm.chat.turn_runtime import _ClaimLost
+    from fleet_rlm.runtime.cleanup import RunCleanupSupervisor
 
     lifecycle = _CleanupLifecycle(outcome=None)
     driver = _driver(lifecycle, object(), RunCleanupSupervisor())
@@ -283,8 +283,8 @@ async def test_finalization_failure_after_claim_loss_routes_to_claim_loss_cleanu
 
 @pytest.mark.asyncio
 async def test_normal_failure_waits_for_recursive_ownership_before_prepared_close() -> None:
-    from fleet_rlm.chat.run_cleanup import RunCleanupSupervisor
     from fleet_rlm.rlm.result import RLMOutcome
+    from fleet_rlm.runtime.cleanup import RunCleanupSupervisor
 
     lifecycle = _CleanupLifecycle(outcome=RLMOutcome("failed", public_error_message="Turn failed"))
     release = asyncio.Event()
@@ -314,8 +314,8 @@ async def test_normal_failure_waits_for_recursive_ownership_before_prepared_clos
 
 @pytest.mark.asyncio
 async def test_cleanup_capacity_fallback_settles_after_owned_stream_drains() -> None:
-    from fleet_rlm.chat.run_cleanup import RunCleanupSupervisor
     from fleet_rlm.rlm.result import RLMOutcome
+    from fleet_rlm.runtime.cleanup import RunCleanupSupervisor
 
     lifecycle = _CleanupLifecycle(outcome=RLMOutcome("timeout", public_error_message="Turn timed out"))
     stream = _Stream(outcome=lifecycle.outcome, blocking=False)

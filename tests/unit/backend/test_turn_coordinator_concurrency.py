@@ -13,12 +13,12 @@ import pytest
 async def test_two_sessions_execute_concurrently_with_disjoint_stream_identities() -> None:
     from fleet_rlm.chat.commands import OpenTurnCommand
     from fleet_rlm.chat.preparation import PreparedRun, _PreparedRunResources
-    from fleet_rlm.chat.run_cleanup import RunCleanupSupervisor
     from fleet_rlm.chat.run_lifecycle import RunLifecycleService
     from fleet_rlm.chat.turn_runtime import TurnRuntime
     from fleet_rlm.persistence.repositories import InMemoryRunStateStore, InMemorySessionCatalog
     from fleet_rlm.rlm.events import EventRecorder, RunStarted
     from fleet_rlm.rlm.result import PredictionResult, RLMOutcome
+    from fleet_rlm.runtime.cleanup import RunCleanupSupervisor
     from fleet_rlm.sessions.models import TurnAccess, TurnInput
 
     store = InMemoryRunStateStore()
