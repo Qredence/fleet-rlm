@@ -1085,11 +1085,12 @@ class DaytonaRuntimeResources:
         return settled
 
     def _settled_resource_cleanup(self, sandbox_id: str, task: asyncio.Future[Any]) -> None:
-        _RESOURCE_CLEANUP_OWNERS.difference_update(
+        owners = [
             owner
             for owner in _RESOURCE_CLEANUP_OWNERS
             if owner[1] is self and owner[2] == sandbox_id and owner[0] is task
-        )
+        ]
+        _RESOURCE_CLEANUP_OWNERS.difference_update(owners)
         if task.cancelled():
             return
         with contextlib.suppress(BaseException):
