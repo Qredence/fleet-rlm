@@ -40,11 +40,14 @@ class _LiveAttachmentBlob:
     def __init__(self, volume_fs) -> None:
         self.volume_fs = volume_fs
 
-    async def write(self, _workspace_id, logical_path: str, data: bytes) -> None:
+    async def write_bytes(self, _workspace_id, logical_path: str, data: bytes) -> None:
         await asyncio.to_thread(self.volume_fs.write_bytes, logical_path, data)
 
-    async def read(self, _workspace_id, logical_path: str) -> bytes:
+    async def read_bytes(self, _workspace_id, logical_path: str) -> bytes:
         return await asyncio.to_thread(self.volume_fs.read_bytes, logical_path)
+
+    async def remove_bytes(self, _workspace_id, logical_path: str) -> None:
+        await asyncio.to_thread(self.volume_fs.remove, logical_path)
 
 
 class _LiveSink:
