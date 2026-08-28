@@ -255,7 +255,7 @@ class SessionView:
     # claimed checkpoint. Defaults to an empty ``dspy.History`` so
     # ``dspy.RLM._validate_inputs`` always sees a real instance for the
     # Signature-declared ``history`` input. The production Turn-input
-    # assembly path (``chat.run_preparation.build_dspy_history_for_claim``)
+    # assembly path (``fleet_rlm.chat.preparation.build_dspy_history_for_claim``)
     # overrides this default with the checkpoint materialization.
     history: dspy.History | CommittedSessionHistory = field(default_factory=lambda: dspy.History(messages=[]))
 
