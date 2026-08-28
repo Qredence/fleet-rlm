@@ -281,8 +281,8 @@ def test_daytona_recursive_batch_two_children_through_fastapi(
                         " Do not call rlm_query, do not call llm_query, and do not nest batching."
                         " After the batch returns, in a later iteration call"
                         " verify_batch(results=results) exactly once and require its ok result. Finally"
-                        ' issue exactly one typed SUBMIT(answer="batch complete", evidence="two-child'
-                        ' rlm_query_batched"). Do not retry and do not use extraction fallback.'
+                        " issue exactly one typed SUBMIT with a brief completion answer and evidence='two-child"
+                        " rlm_query_batched'. Do not retry and do not use extraction fallback."
                     ),
                 },
                 headers={"Idempotency-Key": f"daytona-recursive-batch-{uuid4()}"},
