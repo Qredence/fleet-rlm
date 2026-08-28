@@ -14,6 +14,7 @@ import pytest
 # Canonical-path guardrails (P25-P32 seams must keep owning their domains)
 # ---------------------------------------------------------------------------
 
+
 def test_config_inventory_remains_derived_from_the_p29_schema() -> None:
     """No second full field mirror may reappear beside the FleetFieldPolicy declarations."""
     from fleet_rlm.config.settings import Settings, config_field_specs

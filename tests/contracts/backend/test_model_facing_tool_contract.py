@@ -229,4 +229,3 @@ def test_model_facing_tool_contract_fixture_has_complete_policies_and_current_co
         assert isinstance(projection["output"], list)
         assert isinstance(projection["omits"], list)
         assert isinstance(projection["source"], str) and projection["source"]
-

@@ -155,5 +155,3 @@ def test_p38_callback_shadow_is_isolated_from_product_modules() -> None:
     shadow_source = _source("observability/dspy_callbacks.py")
     assert "RuntimeEvent" not in shadow_source
     assert "fleet_rlm.rlm.events" not in shadow_source
-
-
