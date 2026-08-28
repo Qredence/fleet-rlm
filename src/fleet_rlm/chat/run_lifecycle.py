@@ -27,7 +27,7 @@ from fleet_rlm.chat.run_claim import (
     failure_code_for_terminal_status,
 )
 from fleet_rlm.chat.turn_detail_policy import commit_success
-from fleet_rlm.observability.turn_tracing import turn_phase_span
+from fleet_rlm.observability.tracing import turn_phase_span
 from fleet_rlm.result_snapshot import ResultSnapshotSink, encode_result_snapshot
 from fleet_rlm.rlm.result import RLMOutcome, RLMUsage
 from fleet_rlm.rlm.runtime import AsyncCancellationProbe

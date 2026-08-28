@@ -73,7 +73,7 @@ def _write_store_file(root: Path, content: str) -> Path:
 def annotated(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, object]]:
     """Capture tracing annotations without any active Turn span."""
     captured: list[dict[str, object]] = []
-    from fleet_rlm.observability import turn_tracing
+    from fleet_rlm.observability import tracing as turn_tracing
 
     monkeypatch.setattr(turn_tracing, "annotate_turn_attributes", lambda attrs: captured.append(dict(attrs)))
     return captured
@@ -316,7 +316,7 @@ def test_recency_fallback_without_matches_is_not_a_degradation(
 
 
 def test_diagnostics_survive_tracing_and_logging_failures(monkeypatch: pytest.MonkeyPatch) -> None:
-    from fleet_rlm.observability import turn_tracing
+    from fleet_rlm.observability import tracing as turn_tracing
 
     def explode(attrs: dict[str, object]) -> None:
         del attrs

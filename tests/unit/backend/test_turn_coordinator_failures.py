@@ -541,7 +541,7 @@ async def test_failed_turn_emits_settlement_claim_and_cleanup_spans(
     from fleet_rlm.chat.run_cleanup import RunCleanupSupervisor
     from fleet_rlm.chat.run_lifecycle import RunLifecycleService
     from fleet_rlm.chat.turn_coordinator import TurnCoordinator
-    from fleet_rlm.observability import turn_tracing
+    from fleet_rlm.observability import tracing as turn_tracing
     from fleet_rlm.persistence.repositories import InMemoryRunStateStore, InMemorySessionCatalog
     from fleet_rlm.rlm.events import EventRecorder, RunFailed, RunStarted, Status
     from fleet_rlm.rlm.result import RLMOutcome

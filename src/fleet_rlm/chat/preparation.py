@@ -23,7 +23,7 @@ from fleet_rlm.chat.post_commit_memory import OwnedPostCommitMemoryPromotion
 from fleet_rlm.chat.run_authority import RunAuthority
 from fleet_rlm.chat.run_lifecycle import ClaimedRun, MemoryIntentBuilder
 from fleet_rlm.chat.session_context import build_session_context_manifest
-from fleet_rlm.observability.turn_tracing import turn_phase_span
+from fleet_rlm.observability.tracing import turn_phase_span
 from fleet_rlm.persistence.database import DatabaseConnectionError
 from fleet_rlm.result_snapshot import ResultSnapshotSink
 from fleet_rlm.rlm.program import AttachmentContextCapsule, AttachmentContextEntry, RLMModelBundle, RLMOptions

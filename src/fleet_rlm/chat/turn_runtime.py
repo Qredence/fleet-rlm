@@ -36,7 +36,7 @@ from fleet_rlm.chat.run_ownership import (
     shield_cleanup,
     stop_heartbeat,
 )
-from fleet_rlm.observability.turn_tracing import annotate_trace_io, turn_phase_span, turn_trace
+from fleet_rlm.observability.tracing import annotate_trace_io, turn_phase_span, turn_trace
 from fleet_rlm.rlm.events import (
     TERMINAL_DETAIL_TYPES,
     EventRecorder,

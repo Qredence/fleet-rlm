@@ -24,7 +24,7 @@ from fleet_rlm.rlm.runtime import RunToolGuards
 def test_observe_tool_creates_bounded_mlflow_tool_span(monkeypatch: pytest.MonkeyPatch) -> None:
     from types import SimpleNamespace
 
-    from fleet_rlm.observability import turn_tracing
+    from fleet_rlm.observability import tracing as turn_tracing
 
     spans: list[dict[str, Any]] = []
 

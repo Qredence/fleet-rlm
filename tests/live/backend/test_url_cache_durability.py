@@ -17,7 +17,7 @@ from fleet_rlm.config.loader import load_runtime_settings
 from fleet_rlm.config.settings import Settings
 from fleet_rlm.daytona.broker import sync_sandbox
 from fleet_rlm.daytona.session_manager import LeaseRequest
-from fleet_rlm.observability.turn_tracing import turn_trace
+from fleet_rlm.observability.tracing import turn_trace
 from fleet_rlm.rlm.events import ToolCompleted, observe_tool
 from fleet_rlm.runtime.bindings import InMemorySandboxBindingStore, SandboxBinding
 from fleet_rlm.workspace.paths import volume_paths_from_settings

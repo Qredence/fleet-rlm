@@ -67,8 +67,8 @@ RETAINED_OWNERS: tuple[tuple[str, str], ...] = (
     ("rlm/runtime.py", "probe_root_lm"),
     ("daytona/diagnostics.py", "DaytonaDoctorDependencies"),
     # P38-RLM-009: shadow recorder stays, shadow-only.
-    ("observability/callback_shadow.py", "CallbackShadowRecorder"),
-    ("observability/callback_shadow.py", "compare_callback_records"),
+    ("observability/dspy_callbacks.py", "CallbackShadowRecorder"),
+    ("observability/dspy_callbacks.py", "compare_callback_records"),
     # P38-RLM-015: error taxonomy and repair classification.
     ("rlm/_dspy_compat.py", "CodeExecutionError"),
     ("rlm/_dspy_compat.py", "CodeInterpreterError"),
@@ -195,16 +195,16 @@ def test_p38_callback_shadow_is_isolated_from_product_modules() -> None:
     # and the recorder itself never touches Runtime Events.
     importers: list[str] = []
     for path in _production_python_files():
-        if path == PACKAGE_ROOT / "observability" / "callback_shadow.py":
+        if path == PACKAGE_ROOT / "observability" / "dspy_callbacks.py":
             continue
         tree = ast.parse(path.read_text(encoding="utf-8"))
         for node in ast.walk(tree):
-            if isinstance(node, ast.ImportFrom) and node.module and "callback_shadow" in node.module:
+            if isinstance(node, ast.ImportFrom) and node.module and "dspy_callbacks" in node.module:
                 importers.append(str(path.relative_to(REPO_ROOT)))
             if isinstance(node, ast.Import):
-                importers.extend(alias.name for alias in node.names if "callback_shadow" in alias.name)
+                importers.extend(alias.name for alias in node.names if "dspy_callbacks" in alias.name)
     assert importers == [], importers
-    shadow_source = _source("observability/callback_shadow.py")
+    shadow_source = _source("observability/dspy_callbacks.py")
     assert "RuntimeEvent" not in shadow_source
     assert "fleet_rlm.rlm.events" not in shadow_source
 

@@ -9,7 +9,7 @@ from fastapi.testclient import TestClient
 
 from fleet_rlm.app import create_app
 from fleet_rlm.config.settings import FleetConfigurationError, Settings
-from fleet_rlm.observability.mlflow_runtime import MLflowRuntime, MLflowRuntimeState
+from fleet_rlm.observability.mlflow import MLflowRuntime, MLflowRuntimeState
 
 
 def _settings(**overrides: object) -> Settings:
@@ -164,7 +164,7 @@ def test_app_lifespan_starts_tracing_and_closes_explicitly(monkeypatch: pytest.M
 
 def test_mlflow_runtime_start_failure_still_shuts_down_posthog(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify shutdown_posthog() is called even when mlflow_runtime.start() raises."""
-    from fleet_rlm.posthog_client import shutdown_posthog
+    from fleet_rlm.observability.posthog import shutdown_posthog
 
     shutdown_posthog()
     posthog_calls: list[str] = []
@@ -203,7 +203,7 @@ def test_mlflow_runtime_start_failure_still_shuts_down_posthog(monkeypatch: pyte
 
 def test_mlflow_runtime_close_failure_still_shuts_down_posthog(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify shutdown_posthog() is called even when mlflow_runtime.close() raises."""
-    from fleet_rlm.posthog_client import shutdown_posthog
+    from fleet_rlm.observability.posthog import shutdown_posthog
 
     shutdown_posthog()
     posthog_calls: list[str] = []

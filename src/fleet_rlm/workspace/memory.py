@@ -1310,7 +1310,7 @@ def record_memory_degradation(
             degradation.fallback_outcome,
         )
     with suppress(Exception):
-        from fleet_rlm.observability.turn_tracing import annotate_turn_attributes
+        from fleet_rlm.observability.tracing import annotate_turn_attributes
 
         annotate_turn_attributes(
             {

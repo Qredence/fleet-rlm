@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from fleet_rlm.artifacts.models import ArtifactRef
-from fleet_rlm.observability.turn_tracing import current_turn_trace_id
+from fleet_rlm.observability.tracing import current_turn_trace_id
 from fleet_rlm.rlm.events import (
     AttachmentRead,
     RLMCode,

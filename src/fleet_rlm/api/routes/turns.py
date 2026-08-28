@@ -27,8 +27,8 @@ from fleet_rlm.chat.run_lifecycle import (
     RunNotFoundError,
 )
 from fleet_rlm.chat.turn_runtime import OpenedTurnStream
-from fleet_rlm.observability.failure_diagnostics import normalize_turn_failure
-from fleet_rlm.posthog_client import get_client, get_distinct_id
+from fleet_rlm.observability.diagnostics import normalize_turn_failure
+from fleet_rlm.observability.posthog import get_client, get_distinct_id
 from fleet_rlm.sessions.models import TurnAccess, TurnInput
 from fleet_rlm.skills.errors import InvalidSkillSelectionError
 from fleet_rlm.skills.models import SkillSelectionRef

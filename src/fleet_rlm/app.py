@@ -10,10 +10,11 @@ from typing import TYPE_CHECKING, Protocol
 
 from fastapi import FastAPI
 
+from fleet_rlm.observability.posthog import init_posthog, shutdown_posthog
+
 from . import __version__
 from .config.loader import configure_logging, load_runtime_settings
 from .config.settings import Settings
-from .posthog_client import init_posthog, shutdown_posthog
 
 if TYPE_CHECKING:
     from fleet_rlm.composition.inventory import RuntimeDatabaseLifecycle, RuntimeInventory
@@ -184,7 +185,7 @@ def create_app(
         Raises:
             RuntimeError: If the configured runtime environment is unsupported.
         """
-        from fleet_rlm.observability.mlflow_runtime import MLflowRuntime
+        from fleet_rlm.observability.mlflow import MLflowRuntime
 
         settings_obj: Settings = app.state.settings
         mlflow_runtime = app.state.mlflow_runtime
@@ -233,7 +234,7 @@ def create_app(
     app.state.settings = resolved
     app.state.composition_ready = False
     app.state.runtime_inventory = None
-    from fleet_rlm.observability.mlflow_runtime import MLflowRuntime
+    from fleet_rlm.observability.mlflow import MLflowRuntime
 
     app.state.mlflow_runtime = MLflowRuntime(resolved)
 

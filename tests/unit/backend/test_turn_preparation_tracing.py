@@ -15,7 +15,7 @@ import pytest
 @pytest.fixture
 def fleet_trace_active() -> Iterator[None]:
     """Open the fleet turn-trace gate so phase spans engage the (fake) MLflow."""
-    from fleet_rlm.observability import turn_tracing
+    from fleet_rlm.observability import tracing as turn_tracing
 
     token = turn_tracing._fleet_trace_active.set(True)
     yield

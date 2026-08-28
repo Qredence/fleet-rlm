@@ -22,8 +22,8 @@ from typing import Any, Literal, NoReturn, Protocol, Self, TypeAlias
 import dspy
 
 from fleet_rlm.chat.session_context import SessionContextManifest
-from fleet_rlm.observability.failure_diagnostics import trace_failure_category
-from fleet_rlm.observability.turn_tracing import start_turn_span
+from fleet_rlm.observability.diagnostics import trace_failure_category
+from fleet_rlm.observability.tracing import start_turn_span
 from fleet_rlm.rlm._dspy_compat import CodeInterpreter, _RLMTraceCallback
 from fleet_rlm.rlm.events import Status, ToolEventView, ToolObserver, observe_tool
 from fleet_rlm.rlm.program import (

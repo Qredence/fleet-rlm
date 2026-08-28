@@ -22,7 +22,7 @@ from fleet_rlm.api.routes.turns import _log_preparation_unavailable
 from fleet_rlm.app import create_app
 from fleet_rlm.daytona.broker import sync_sandbox
 from fleet_rlm.daytona.errors import map_provider_error
-from fleet_rlm.observability.failure_diagnostics import normalize_turn_failure
+from fleet_rlm.observability.diagnostics import normalize_turn_failure
 from fleet_rlm.rlm.program import RLMModelBundle
 from tests.live.backend._database import upgrade_to_head
 from tests.live.backend.test_fleet_rlm_daytona_mvp import (

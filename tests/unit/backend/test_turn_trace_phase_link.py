@@ -361,7 +361,7 @@ async def test_hidden_expose_trace_id_keeps_link_out_of_sse(
 def test_preparation_link_tag_only_records_on_execution_phase(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from fleet_rlm.observability.turn_tracing import turn_trace
+    from fleet_rlm.observability.tracing import turn_trace
 
     calls = _install_fake_mlflow(monkeypatch)
     with turn_trace(

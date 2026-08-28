@@ -13,9 +13,9 @@ import dspy
 import httpx
 import pytest
 
-from fleet_rlm.observability import turn_tracing
-from fleet_rlm.observability.failure_diagnostics import trace_failure_category
-from fleet_rlm.observability.turn_tracing import (
+from fleet_rlm.observability import tracing as turn_tracing
+from fleet_rlm.observability.diagnostics import trace_failure_category
+from fleet_rlm.observability.tracing import (
     annotate_trace_io,
     annotate_turn_attributes,
     current_turn_trace_id,

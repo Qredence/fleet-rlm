@@ -20,7 +20,7 @@ from fleet_rlm.api.schemas import (
     UIMessageResponse,
 )
 from fleet_rlm.api.ui_message import assistant_turn_to_ui_message, user_turn_to_ui_message
-from fleet_rlm.posthog_client import get_client, get_distinct_id
+from fleet_rlm.observability.posthog import get_client, get_distinct_id
 from fleet_rlm.rlm.session_runtime import SessionKey
 from fleet_rlm.sessions.catalog import SequenceCursor
 from fleet_rlm.sessions.errors import SessionNotFoundError

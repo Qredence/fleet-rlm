@@ -23,8 +23,8 @@ from uuid import UUID, uuid4
 import dspy
 
 from fleet_rlm.json_types import JsonValue, validate_json_value
-from fleet_rlm.observability.failure_diagnostics import trace_failure_category
-from fleet_rlm.observability.turn_tracing import turn_phase_span
+from fleet_rlm.observability.diagnostics import trace_failure_category
+from fleet_rlm.observability.tracing import turn_phase_span
 from fleet_rlm.rlm._dspy_compat import _RLMTraceCallback
 from fleet_rlm.rlm.result import (
     ExecutionDetail,
@@ -433,7 +433,7 @@ class _ToolTrace:
 
     def start(self, input_value: JsonValue) -> None:
         try:
-            from fleet_rlm.observability.turn_tracing import start_turn_span
+            from fleet_rlm.observability.tracing import start_turn_span
 
             self.span = start_turn_span(
                 f"tool.{self.source.name}",

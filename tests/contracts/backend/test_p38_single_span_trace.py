@@ -22,7 +22,7 @@ import pytest
 
 from fleet_rlm.chat.session_context import SessionContextManifest
 from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
-from fleet_rlm.observability import turn_tracing
+from fleet_rlm.observability import tracing as turn_tracing
 from fleet_rlm.rlm.events import TERMINAL_DETAIL_TYPES
 from fleet_rlm.rlm.program import RLMModelBundle, RLMOptions
 from fleet_rlm.rlm.runtime import (

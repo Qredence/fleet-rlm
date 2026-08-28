@@ -56,7 +56,7 @@ from fleet_rlm.daytona.interpreter_output import (
     _OutputStreamState,
     _PublicStdoutProjector,
 )
-from fleet_rlm.observability.turn_tracing import trace_preview_limit, turn_phase_span
+from fleet_rlm.observability.tracing import trace_preview_limit, turn_phase_span
 from fleet_rlm.rlm._dspy_compat import (
     PUBLIC_FINAL_OUTPUT_LABEL,
     CodeExecutionError,

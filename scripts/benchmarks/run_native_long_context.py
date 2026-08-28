@@ -27,7 +27,7 @@ from uuid import uuid4
 import dspy
 
 from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
-from fleet_rlm.observability.turn_tracing import turn_trace
+from fleet_rlm.observability.tracing import turn_trace
 from fleet_rlm.rlm.events import ToolStarted, observe_tool
 from fleet_rlm.rlm.program import RLMFactory, RLMModelBundle, RLMOptions
 from fleet_rlm.workspace.models import WorkspaceEntry, WorkspaceListResult, WorkspaceTextPage

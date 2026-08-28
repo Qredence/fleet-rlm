@@ -499,7 +499,7 @@ def test_observed_usage_never_exposes_call_or_retry_counters(forbidden: str) -> 
 def test_lm_trace_callback_records_role_and_failure_category(monkeypatch: pytest.MonkeyPatch) -> None:
     from types import SimpleNamespace
 
-    from fleet_rlm.observability import turn_tracing
+    from fleet_rlm.observability import tracing as turn_tracing
     from fleet_rlm.rlm._dspy_compat import _RLMTraceCallback
 
     calls = SimpleNamespace(outputs=[])
@@ -586,7 +586,7 @@ def test_lm_trace_callback_records_classified_failure_detail(monkeypatch: pytest
     from types import SimpleNamespace
 
     from fleet_rlm.daytona.errors import ProviderRequestError
-    from fleet_rlm.observability import turn_tracing
+    from fleet_rlm.observability import tracing as turn_tracing
     from fleet_rlm.rlm._dspy_compat import _RLMTraceCallback
 
     captured = SimpleNamespace(outputs=[])
@@ -707,7 +707,7 @@ def test_lm_trace_profiles_include_bounded_readable_payloads(monkeypatch: pytest
 def test_lm_trace_callback_records_call_specific_usage_and_standard_attribute(monkeypatch: pytest.MonkeyPatch) -> None:
     from types import SimpleNamespace
 
-    from fleet_rlm.observability import turn_tracing
+    from fleet_rlm.observability import tracing as turn_tracing
     from fleet_rlm.rlm._dspy_compat import _RLMTraceCallback
 
     calls = SimpleNamespace(outputs=[], attributes=[])
@@ -815,7 +815,7 @@ def test_lm_trace_callback_records_call_specific_usage_and_standard_attribute(mo
 def test_reasoning_callback_spans_the_complete_root_action(monkeypatch: pytest.MonkeyPatch) -> None:
     from types import SimpleNamespace
 
-    from fleet_rlm.observability import turn_tracing
+    from fleet_rlm.observability import tracing as turn_tracing
     from fleet_rlm.rlm._dspy_compat import _RLMReasoningCallback
 
     outputs: list[dict[str, object]] = []
@@ -960,7 +960,7 @@ def test_lm_trace_callback_emits_token_usage_output_and_mlflow_attribute(monkeyp
     """
     from types import SimpleNamespace
 
-    from fleet_rlm.observability import turn_tracing
+    from fleet_rlm.observability import tracing as turn_tracing
     from fleet_rlm.rlm._dspy_compat import _RLMTraceCallback
     from fleet_rlm.rlm.recursion import DelegationMetrics
 

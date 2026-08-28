@@ -98,7 +98,7 @@ class _RLMReasoningCallback(BaseCallback):
     ) -> None:
         del instance, inputs
         try:
-            from fleet_rlm.observability.turn_tracing import start_turn_span
+            from fleet_rlm.observability.tracing import start_turn_span
 
             self._action_spans[call_id] = start_turn_span(
                 "RLM.root_action",
@@ -202,7 +202,7 @@ class _RLMTraceCallback(BaseCallback):
             pass
         span = None
         try:
-            from fleet_rlm.observability.turn_tracing import start_turn_span
+            from fleet_rlm.observability.tracing import start_turn_span
 
             span = start_turn_span(
                 f"RLM.{role}_lm",
@@ -314,7 +314,7 @@ def _trace_preview(value: object, *, max_chars: int = 900) -> str:
     Returns:
         str: Sanitized text representation of the value, limited to the configured length.
     """
-    from fleet_rlm.observability.turn_tracing import trace_preview_limit
+    from fleet_rlm.observability.tracing import trace_preview_limit
 
     limit = trace_preview_limit(max_chars)
     return sanitize_public_text(str(value or ""), max_len=limit)
@@ -494,7 +494,7 @@ def _mlflow_token_usage(usage: Mapping[str, JsonValue]) -> dict[str, JsonValue]:
 
 def _trace_failure_category(exc: BaseException) -> str:
     """Resolve failure classification lazily to preserve the package boundary."""
-    from fleet_rlm.observability.failure_diagnostics import trace_failure_category
+    from fleet_rlm.observability.diagnostics import trace_failure_category
 
     return trace_failure_category(exc)
 

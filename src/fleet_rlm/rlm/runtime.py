@@ -34,7 +34,7 @@ from fleet_rlm.artifacts.models import ArtifactCandidate
 from fleet_rlm.attachments.models import PreparedAttachment
 from fleet_rlm.chat.run_authority import RunAuthority
 from fleet_rlm.config.settings import Settings
-from fleet_rlm.observability.failure_diagnostics import normalize_turn_failure
+from fleet_rlm.observability.diagnostics import normalize_turn_failure
 from fleet_rlm.rlm._dspy_compat import (
     CodeInterpreter,
     bind_native_rlm_observer,
