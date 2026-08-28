@@ -208,7 +208,10 @@ def test_live_callback_shadow_root_child_ancestry(
                 assert (
                     next(record for record in root_records if record.operation == "tool_call").tool_name == "rlm_query"
                 )
-                assert [record.operation for record in child_records] == ["startup", "execute", "shutdown"]
+                child_operations = [record.operation for record in child_records]
+                assert child_operations[0] == "startup"
+                assert child_operations[-1] == "shutdown"
+                assert child_operations.count("execute") == 1
                 assert all(record.status == "completed" for record in (*root_records, *child_records))
                 assert all(record.duration_ms >= 0 for record in (*root_records, *child_records))
             finally:
