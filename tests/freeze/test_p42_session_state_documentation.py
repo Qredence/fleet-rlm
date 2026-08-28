@@ -11,14 +11,14 @@ _ADR = _REPO_ROOT / "docs/decisions/ADR-session-scoped-rlm-state.md"
 
 
 def test_p42_documents_version_the_session_state_change_without_rewriting_p41() -> None:
-    """The sealed P41 baseline stays historical while P42 names the new target."""
+    """The sealed P41 baseline stays historical while the sealed P53 contract owns the target."""
     p41 = _P41_FREEZE.read_text(encoding="utf-8")
     p42 = _P42_FREEZE.read_text(encoding="utf-8")
     adr = _ADR.read_text(encoding="utf-8")
 
     assert "Native RLM execution per Turn" in p41
     assert "one native `dspy.RLM` per Turn" in p41
-    assert "versioned target contract" in p42
+    assert "sealed" in p42
     assert "One compatible native Root `dspy.RLM`" in p42
     assert "`REPLHistory`" in p42
     assert "fresh each Turn" in p42

@@ -1,14 +1,17 @@
 # P42 session-state behavior freeze
 
-**Status:** versioned target contract — certification pending P53.  
-**Supersedes:** only the P41 *Native RLM execution per Turn* behavior after
-implementation and certification.  It does **not** rewrite the sealed
-[P41 behavior freeze](behavior-freeze.md), which remains the historical,
-certified baseline for `1801d24a938eda37b53ebb2f543fd01e3c6bdaf6`.
+**Status:** sealed — certified through P53 (`make check` and the deterministic
+certification lanes; credentialed live lanes are recorded separately).  
+**Supersedes:** only the P41 *Native RLM execution per Turn* behavior, which is
+now certified as superseded by the Session-scoped resident contract below.  It
+does **not** rewrite the sealed [P41 behavior freeze](behavior-freeze.md), which
+remains the historical, certified baseline for
+`1801d24a938eda37b53ebb2f543fd01e3c6bdaf6`.
 
-This contract records the approved product behavior before implementation.
-It permits private module restructuring but freezes the observable state
-semantics that P43–P53 must prove. The exact evidence baseline is
+This contract records the approved product behavior. It permits private module
+restructuring — private filenames, module layouts, helper boundaries, local
+classes, and file counts are **never frozen** — and freezes only the observable
+state semantics that P43–P53 prove. The exact evidence baseline is
 `dspy==3.3.1`, the dependency pinned by `pyproject.toml`.
 
 ## Versioned behavior change
@@ -23,14 +26,15 @@ semantics that P43–P53 must prove. The exact evidence baseline is
 
 | Behavior | Required target behavior | Proof class |
 | --- | --- | --- |
-| Durable conversation | `dspy.History` contains every and only committed user-facing request/answer record for the claimed Session checkpoint. | P43/P44 deterministic and Daytona history tests |
-| Session isolation | A History snapshot and resident state are keyed by Workspace plus Session; neither crosses a Session boundary. | P44/P45 isolation tests |
-| Per-Turn reset | DSPy `REPLHistory`, iteration budget, LLM-call budget, current request, current capability binding, attachments, and output metadata are fresh each Turn. | P43/P45 tests |
-| Clean reuse | The same Root RLM, caller-owned interpreter, and Root Sandbox are reused only after a validated, durably committed Turn and only in one sequential lane. | P43/P45 continuity tests |
-| Taint and recovery | Failure, cancellation, timeout, claim loss, commit failure, authorization failure, or uncertain settlement taints resident state; the next Turn rotates it and rehydrates durable state only. | P45/P49 taint tests |
-| Eviction | Idle eviction or process/Sandbox replacement may lose arbitrary Python globals but retains committed History and Volume-backed Workspace, Memory, Attachments, and Artifacts. | P45/P52 recovery tests |
-| Child isolation | Native child RLMs use fresh child RLM/interpreter/Sandbox state and never share mutable Root interpreter globals. | P47/P52 child tests |
-| Tool authority | A retained Tool object or Python alias resolves authorization for the current Turn and fails closed when no current capability authorizes it. | P45/P52 security tests |
+| Durable conversation | `dspy.History` contains every and only committed user-facing request/answer record for the claimed Session checkpoint. | `tests/unit/backend/sessions/test_history.py`, `tests/unit/backend/rlm/test_turn_history_integration.py` |
+| Session isolation | A History snapshot and resident state are keyed by Workspace plus Session; neither crosses a Session boundary. | `tests/unit/backend/sessions/test_history.py` (two-Session store lanes), `tests/unit/backend/rlm/test_recursion_session_snapshot.py` |
+| Per-Turn reset | DSPy `REPLHistory`, iteration budget, LLM-call budget, current request, current capability binding, attachments, and output metadata are fresh each Turn. | `tests/contracts/backend/test_p45_session_runtime_contract.py`, `tests/unit/backend/rlm/test_session_runtime_reuse.py` |
+| Clean reuse | The same Root RLM, caller-owned interpreter, and Root Sandbox are reused only after a validated, durably committed Turn and only in one sequential lane. | `tests/unit/backend/rlm/test_session_runtime_reuse.py`, `tests/live/backend/test_p45_daytona_session_runtime_live.py` |
+| Taint and recovery | Failure, cancellation, timeout, claim loss, commit failure, authorization failure, or uncertain settlement taints resident state; the next Turn rotates it and rehydrates durable state only. | `tests/unit/backend/chat/test_turn_taint_contract.py`, `tests/unit/backend/rlm/test_session_runtime_reuse.py`, `tests/unit/backend/rlm/test_session_runtime.py` |
+| Eviction | Idle eviction or process/Sandbox replacement may lose arbitrary Python globals but retains committed History and Volume-backed Workspace, Memory, Attachments, and Artifacts. | `tests/unit/backend/chat/test_p52_security_restart.py`, `tests/unit/backend/rlm/test_session_runtime.py` |
+| Child isolation | Native child RLMs use fresh child RLM/interpreter/Sandbox state and never share mutable Root interpreter globals. | `tests/unit/backend/rlm/test_recursion_namespace_and_typed_parity.py`, `tests/unit/backend/rlm/test_recursion_session_snapshot.py`, live child lanes |
+| Tool authority | A retained Tool object or Python alias resolves authorization for the current Turn and fails closed when no current capability authorizes it. | `tests/unit/backend/chat/test_p52_security_restart.py`, `tests/unit/backend/rlm/test_session_runtime_tools.py` |
+| Program fingerprint rotation | An unchanged program reuses the resident state; a Signature, Skill-instruction, model-configuration, or Tool-schema change rotates it through `program_fingerprint_for_context`, and durable History remains after rotation. | `tests/unit/backend/rlm/test_session_runtime_reuse.py`, `tests/unit/backend/rlm/test_session_runtime.py` |
 
 ## Public behavior retained
 
