@@ -16,14 +16,13 @@ from typing import Any
 
 from dotenv import load_dotenv
 
-from fleet_rlm.config import (
-    FleetConfigurationError,
+from fleet_rlm.config.loader import (
     ProfileEnvironmentContract,
-    Settings,
     active_profile_contract,
     load_runtime_settings,
     require_live_execution,
 )
+from fleet_rlm.config.settings import FleetConfigurationError, Settings
 
 RECEIPT_SCHEMA = "fleet.daytona-mvp-proof/v1"
 EVIDENCE_ENV = "FLEET_LIVE_EVIDENCE_PATH"

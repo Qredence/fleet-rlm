@@ -134,7 +134,7 @@ def _require_live_platform() -> tuple[Any, Any, Any]:
         pytest.skip("Set FLEET_LIVE=1 for the P43.2 Daytona History proof")
 
     load_dotenv(_REPO_ROOT / ".env", override=False)
-    from fleet_rlm.config import load_runtime_settings
+    from fleet_rlm.config.loader import load_runtime_settings
     from fleet_rlm.daytona.platform import LiveDaytonaPlatform, build_daytona_client
     from fleet_rlm.daytona.provisioning import DaytonaSandboxSpec
 

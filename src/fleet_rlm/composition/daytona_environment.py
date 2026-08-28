@@ -30,7 +30,8 @@ from fleet_rlm.chat.preparation import (
 )
 from fleet_rlm.chat.run_lifecycle import ClaimedRun
 from fleet_rlm.composition.common import recursive_rlm_options
-from fleet_rlm.config import Settings, load_runtime_settings
+from fleet_rlm.config.loader import load_runtime_settings
+from fleet_rlm.config.settings import Settings
 from fleet_rlm.daytona._lease import RootSessionLease
 from fleet_rlm.daytona.broker import SyncBridgeDispatcher, sync_sandbox
 from fleet_rlm.daytona.errors import is_sandbox_not_found

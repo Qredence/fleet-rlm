@@ -229,7 +229,7 @@ def test_val_rec_001_public_settings_surface_exposes_no_recursion_depth() -> Non
     """VAL-REC-001: the public settings surface (the composition input for
     recursion policy) carries bounded width/budget knobs and no recursion
     depth knob under any recursion setting name."""
-    from fleet_rlm.config import Settings
+    from fleet_rlm.config.settings import Settings
 
     recursion_settings = [name for name in Settings.model_fields if name.startswith("rlm_recursion")]
     assert recursion_settings

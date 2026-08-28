@@ -15,7 +15,8 @@ from typing import Any
 
 from dotenv import load_dotenv
 
-from fleet_rlm.config import FleetConfigurationError, active_profile, require_live_execution
+from fleet_rlm.config.loader import active_profile, require_live_execution
+from fleet_rlm.config.settings import FleetConfigurationError
 
 RECEIPT_SCHEMA = "fleet.phase2-daytona-recursive/v1"
 EVIDENCE_ENV = "FLEET_PHASE2_RECURSIVE_EVIDENCE_PATH"

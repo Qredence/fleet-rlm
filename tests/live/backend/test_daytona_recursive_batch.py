@@ -17,7 +17,8 @@ from dotenv import load_dotenv
 from fastapi.testclient import TestClient
 
 from fleet_rlm.app import create_app
-from fleet_rlm.config import FleetConfigurationError, Settings, active_profile, require_live_execution
+from fleet_rlm.config.loader import active_profile, require_live_execution
+from fleet_rlm.config.settings import FleetConfigurationError, Settings
 from fleet_rlm.daytona import recursive_child_runtime
 from fleet_rlm.daytona.session_manager import get_active_lease_registry
 from fleet_rlm.rlm.events import ToolEventView
@@ -105,7 +106,7 @@ def _load_live_settings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Sett
     if not _live_enabled():
         pytest.skip("Set FLEET_LIVE=1 for the two-child rlm_query_batched canary")
     load_dotenv(_REPO_ROOT / ".env", override=False)
-    import fleet_rlm.config as configuration
+    import fleet_rlm.config.loader as configuration
 
     copied_policy = tmp_path / "batch-fleet.toml"
     target_profile = os.environ.get("FLEET_LIVE_PROFILE", "daytona-recursive")

@@ -8,7 +8,7 @@ from types import SimpleNamespace
 import pytest
 from pydantic import ValidationError
 
-from fleet_rlm.config import Settings
+from fleet_rlm.config.settings import Settings
 from fleet_rlm.posthog_client import (
     _load_or_create_instance_id,
     get_client,
@@ -166,7 +166,7 @@ def test_load_or_create_instance_id_writes_fresh_id(tmp_path: Path) -> None:
 
 
 def test_default_profile_enables_posthog_and_resolves_token(monkeypatch) -> None:
-    import fleet_rlm.config as config
+    import fleet_rlm.config.loader as config
 
     monkeypatch.setenv("FLEET_DAYTONA_API_KEY", "test-daytona-key")
     monkeypatch.setenv("DATABRICKS_TOKEN", "test-databricks-token")
@@ -182,7 +182,7 @@ def test_default_profile_enables_posthog_and_resolves_token(monkeypatch) -> None
 
 
 def test_benchmark_profiles_disable_posthog() -> None:
-    from fleet_rlm.config import _deep_merge, _flatten_policy, _read_policy_document
+    from fleet_rlm.config.loader import _deep_merge, _flatten_policy, _read_policy_document
 
     document = _read_policy_document(Path("config/fleet.toml"))
 

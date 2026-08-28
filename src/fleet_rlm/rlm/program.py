@@ -24,7 +24,7 @@ from uuid import UUID
 import dspy
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from fleet_rlm.config import LLMRoleSettings, Settings
+from fleet_rlm.config.settings import LLMRoleSettings, Settings
 from fleet_rlm.json_types import strict_json_dumps
 from fleet_rlm.paths import DEFAULT_VOLUME_MOUNT_PATH, validate_mount_path
 from fleet_rlm.rlm._dspy_compat import (

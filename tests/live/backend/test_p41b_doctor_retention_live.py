@@ -173,7 +173,7 @@ def test_p41b_fleet_doctor_daytona_retention_live(tmp_path: Path) -> None:
     assert all(ok for _name, ok, _message in parsed["steps"])
     assert not _sanitization_offenders(run.stdout, run.stderr)
 
-    from fleet_rlm.config import load_runtime_settings
+    from fleet_rlm.config.loader import load_runtime_settings
 
     settings = load_runtime_settings()
 

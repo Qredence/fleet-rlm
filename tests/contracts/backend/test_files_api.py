@@ -9,7 +9,7 @@ from uuid import uuid4
 from fastapi.testclient import TestClient
 
 from fleet_rlm.composition.testing import create_testing_app
-from fleet_rlm.config import Settings
+from fleet_rlm.config.settings import Settings
 
 
 def test_api_upload_get_has_no_path_leak(tmp_path: Path) -> None:

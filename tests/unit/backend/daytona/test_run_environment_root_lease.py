@@ -9,7 +9,7 @@ from uuid import uuid4
 import pytest
 
 from fleet_rlm.composition.daytona_environment import _DaytonaEnvironmentProvider, _ResidentRootLease
-from fleet_rlm.config import Settings
+from fleet_rlm.config.settings import Settings
 from fleet_rlm.daytona.admission import DaytonaAdmission
 from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
 from fleet_rlm.workspace.paths import volume_paths_from_settings

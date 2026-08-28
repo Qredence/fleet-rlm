@@ -21,7 +21,7 @@ from pathlib import Path
 
 from posthog import Posthog
 
-from fleet_rlm.config import Settings
+from fleet_rlm.config.settings import Settings
 
 logger = logging.getLogger(__name__)
 

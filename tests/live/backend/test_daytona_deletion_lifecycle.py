@@ -40,7 +40,7 @@ def _live_client_and_platform() -> tuple[Any, Any]:
         pytest.skip("Set FLEET_LIVE=1 for the live Daytona deletion-lifecycle proof")
     if not os.environ.get("DAYTONA_API_KEY") and not os.environ.get("FLEET_DAYTONA_API_KEY"):
         pytest.fail("live deletion proof requires DAYTONA_API_KEY credentials")
-    from fleet_rlm.config import load_runtime_settings
+        from fleet_rlm.config.loader import load_runtime_settings
     from fleet_rlm.daytona.platform import LiveDaytonaPlatform, build_daytona_client
     from fleet_rlm.daytona.provisioning import DaytonaSandboxSpec
 

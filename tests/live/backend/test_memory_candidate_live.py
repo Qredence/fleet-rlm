@@ -19,7 +19,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from fleet_rlm.app import create_app
-from fleet_rlm.config import Settings
+from fleet_rlm.config.settings import Settings
 from fleet_rlm.daytona.broker import sync_sandbox
 from fleet_rlm.workspace.memory import read_workspace_memory_injection_digest
 from fleet_rlm.workspace.paths import volume_paths_from_settings

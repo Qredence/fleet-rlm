@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from typing import Any, Literal, Protocol
 from uuid import uuid4
 
-from fleet_rlm.config import Settings
+from fleet_rlm.config.settings import Settings
 from fleet_rlm.daytona.errors import DaytonaAdapterError, classify_provider_error
 from fleet_rlm.daytona.platform import (
     LiveDaytonaPlatform,

@@ -13,7 +13,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from enum import StrEnum
 
-from fleet_rlm.config import FleetConfigurationError, Settings
+from fleet_rlm.config.settings import FleetConfigurationError, Settings
 
 logger = logging.getLogger(__name__)
 

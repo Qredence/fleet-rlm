@@ -16,7 +16,7 @@ import typing
 
 import pytest
 
-import fleet_rlm.config
+import fleet_rlm.config.loader
 from fleet_rlm.cli import supervisor
 from fleet_rlm.cli.bind_safety import UnsafeBindError, require_safe_bind_host
 from fleet_rlm.cli.main import _DOCTOR_ACTIONS, _fleet_parser, fleet_main
@@ -90,7 +90,7 @@ def test_doctor_missing_settings_fails_closed_and_sanitized(
     def boom() -> object:
         raise RuntimeError(f"provider replied with bearer {_CANARY}")
 
-    monkeypatch.setattr(fleet_rlm.config, "load_runtime_settings", boom)
+    monkeypatch.setattr(fleet_rlm.config.loader, "load_runtime_settings", boom)
 
     with pytest.raises(SystemExit) as error:
         fleet_main(["doctor", "daytona"])

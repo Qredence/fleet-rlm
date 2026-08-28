@@ -16,7 +16,7 @@ from fleet_rlm.api.routes.turns import router
 from fleet_rlm.chat.run_lifecycle import RunLifecycleUnavailableError
 from fleet_rlm.chat.run_preparation import RunPreparationTimeoutError, RunPreparationUnavailableError
 from fleet_rlm.composition.inventory import RuntimeInventory
-from fleet_rlm.config import Settings
+from fleet_rlm.config.settings import Settings
 from fleet_rlm.daytona.errors import ProviderRequestError
 
 

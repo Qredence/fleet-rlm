@@ -9,7 +9,7 @@ import pytest
 from pydantic import SecretStr
 
 import fleet_rlm.rlm.program as factory
-from fleet_rlm.config import Settings
+from fleet_rlm.config.settings import Settings
 
 
 def test_model_bundle_applies_independent_role_policy(monkeypatch: pytest.MonkeyPatch) -> None:

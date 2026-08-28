@@ -15,7 +15,7 @@ from uuid import UUID, uuid4
 
 from dotenv import load_dotenv
 
-from fleet_rlm.config import require_live_execution
+from fleet_rlm.config.loader import require_live_execution
 from fleet_rlm.daytona.broker import sync_sandbox
 from fleet_rlm.daytona.platform import LiveDaytonaPlatform, LiveDaytonaVolumeClient, build_daytona_client
 from fleet_rlm.daytona.provisioning import (

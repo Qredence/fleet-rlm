@@ -26,7 +26,9 @@ GENERATED_COMMANDS = ("make api-sync", "make api-check")
 HEAVY_IMPORTS = ("dspy", "mlflow", "posthog", "daytona")
 CONFIG_MODULES = (
     "src/fleet_rlm/__init__.py",
-    "src/fleet_rlm/config.py",
+    "src/fleet_rlm/config/__init__.py",
+    "src/fleet_rlm/config/settings.py",
+    "src/fleet_rlm/config/loader.py",
 )
 REMOVED_PATHS = (
     ".factory",

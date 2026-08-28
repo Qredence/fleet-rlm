@@ -10,7 +10,8 @@ from pathlib import Path
 import pytest
 from pydantic import SecretStr, ValidationError
 
-from fleet_rlm.config import Settings, active_profile_contract, load_profile_environment_contracts
+from fleet_rlm.config.loader import active_profile_contract, load_profile_environment_contracts
+from fleet_rlm.config.settings import FleetConfigurationError, Settings
 
 
 def test_profile_environment_matrix_follows_selected_toml_policy() -> None:
@@ -137,7 +138,7 @@ def test_daytona_managed_profile_resolves_lakebase_and_managed_mlflow_values(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    import fleet_rlm.config as config
+    import fleet_rlm.config.loader as config
 
     _select_profile(tmp_path, profile="daytona-managed", monkeypatch=monkeypatch)
     (tmp_path / ".env").write_text(
@@ -184,7 +185,7 @@ def test_daytona_managed_profile_requires_declared_database_and_mlflow_values(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    import fleet_rlm.config as config
+    import fleet_rlm.config.loader as config
 
     _select_profile(tmp_path, profile="daytona-managed", monkeypatch=monkeypatch)
     monkeypatch.chdir(tmp_path)
@@ -201,14 +202,14 @@ def test_daytona_managed_profile_requires_declared_database_and_mlflow_values(
     ):
         monkeypatch.delenv(name, raising=False)
 
-    with pytest.raises(config.FleetConfigurationError, match="required environment value"):
+    with pytest.raises(FleetConfigurationError, match="required environment value"):
         config.load_runtime_settings()
 
 
 def test_daytona_profile_resolves_root_and_sub_with_gateway_params(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import fleet_rlm.config as config
+    import fleet_rlm.config.loader as config
 
     monkeypatch.setenv("FLEET_DAYTONA_API_KEY", "test-daytona-key")
     monkeypatch.setenv("DATABRICKS_TOKEN", "test-databricks-token")
@@ -233,7 +234,7 @@ def test_daytona_profile_resolves_root_and_sub_with_gateway_params(
 def test_daytona_ignores_managed_mlflow_environment_values_when_not_selected(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import fleet_rlm.config as config
+    import fleet_rlm.config.loader as config
 
     monkeypatch.setenv("FLEET_DAYTONA_API_KEY", "test-daytona-key")
     monkeypatch.setenv("DATABRICKS_TOKEN", "test-databricks-token")
@@ -264,7 +265,7 @@ def test_recursive_depth_is_a_recursive_execution_invariant_not_a_setting() -> N
 
 
 def test_stale_recursive_depth_policy_key_fails_validation(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    import fleet_rlm.config as config
+    import fleet_rlm.config.loader as config
 
     policy = tmp_path / "fleet.toml"
     _policy(policy)
@@ -278,7 +279,7 @@ def test_stale_recursive_depth_policy_key_fails_validation(monkeypatch: pytest.M
     )
     monkeypatch.setattr(config, "_CONFIG_PATH", policy)
 
-    with pytest.raises(config.FleetConfigurationError, match="recursion_max_depth"):
+    with pytest.raises(FleetConfigurationError, match="recursion_max_depth"):
         config.load_runtime_settings()
 
 
@@ -328,7 +329,7 @@ def _select_profile(tmp_path: Path, *, profile: str, monkeypatch: pytest.MonkeyP
     )
     assert updated != content or f'default_profile = "{profile}"' in content
     policy.write_text(updated, encoding="utf-8")
-    monkeypatch.setattr("fleet_rlm.config._CONFIG_PATH", policy)
+    monkeypatch.setattr("fleet_rlm.config.loader._CONFIG_PATH", policy)
     return policy
 
 
@@ -339,7 +340,7 @@ def test_daytona_benchmark_profiles_resolve_without_mlflow(
     profile: str,
     iterations: int,
 ) -> None:
-    import fleet_rlm.config as config
+    import fleet_rlm.config.loader as config
 
     _select_profile(tmp_path, profile=profile, monkeypatch=monkeypatch)
     monkeypatch.setenv("FLEET_DAYTONA_API_KEY", "test-daytona-key")
@@ -361,13 +362,13 @@ def test_daytona_benchmark_profiles_resolve_without_mlflow(
 
 
 def test_removed_databricks_daytona_profile_is_rejected(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    import fleet_rlm.config as config
+    import fleet_rlm.config.loader as config
 
     # unknown default_profile in the committed policy is rejected even when it
     # names a previously existing profile
     _select_profile(tmp_path, profile="databricks-daytona", monkeypatch=monkeypatch)
 
-    with pytest.raises(config.FleetConfigurationError, match="configured profile does not exist"):
+    with pytest.raises(FleetConfigurationError, match="configured profile does not exist"):
         config.load_runtime_settings()
 
 
@@ -426,7 +427,7 @@ def test_runtime_settings_deep_merge_profile_and_keep_role_policy(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """Verify that profile settings are deeply merged while preserving separate root and sub-model policies."""
-    import fleet_rlm.config as config
+    import fleet_rlm.config.loader as config
 
     policy = tmp_path / "fleet.toml"
     _policy(policy)
@@ -449,7 +450,7 @@ def test_runtime_settings_deep_merge_profile_and_keep_role_policy(
 def test_omitted_role_cache_and_retry_defaults_resolve_to_settings_defaults(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    import fleet_rlm.config as config
+    import fleet_rlm.config.loader as config
 
     policy = tmp_path / "fleet.toml"
     _policy(policy)
@@ -465,7 +466,7 @@ def test_omitted_role_cache_and_retry_defaults_resolve_to_settings_defaults(
 
 
 def test_require_live_execution_honors_the_toml_switch(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    import fleet_rlm.config as config
+    import fleet_rlm.config.loader as config
 
     policy = tmp_path / "fleet.toml"
     _policy(policy)
@@ -477,14 +478,14 @@ def test_require_live_execution_honors_the_toml_switch(monkeypatch: pytest.Monke
     policy.write_text(
         policy.read_text(encoding="utf-8").replace("live_enabled = true", "live_enabled = false"), encoding="utf-8"
     )
-    with pytest.raises(config.FleetConfigurationError, match=r"runtime\.live_enabled=false"):
+    with pytest.raises(FleetConfigurationError, match=r"runtime\.live_enabled=false"):
         config.require_live_execution()
 
 
 def test_runtime_settings_ignores_stale_environment_policy_overrides(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    import fleet_rlm.config as config
+    import fleet_rlm.config.loader as config
 
     policy = tmp_path / "fleet.toml"
     _policy(policy)
@@ -503,7 +504,7 @@ def test_runtime_settings_ignores_stale_environment_policy_overrides(
 def test_runtime_settings_resolves_only_toml_declared_environment_values(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    import fleet_rlm.config as config
+    import fleet_rlm.config.loader as config
     from fleet_rlm.rlm.program import resolve_role_api_key
 
     policy = tmp_path / "fleet.toml"
@@ -565,7 +566,7 @@ tracing_sql_warehouse_id_env = "TRACE_WAREHOUSE"
 def test_runtime_settings_loads_custom_role_keys_from_repository_dotenv(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    import fleet_rlm.config as config
+    import fleet_rlm.config.loader as config
     from fleet_rlm.rlm.program import resolve_role_api_key
 
     policy = tmp_path / "fleet.toml"
@@ -583,7 +584,7 @@ def test_runtime_settings_loads_custom_role_keys_from_repository_dotenv(
 
 
 def test_runtime_settings_reject_unknown_toml_key(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    import fleet_rlm.config as config
+    import fleet_rlm.config.loader as config
 
     policy = tmp_path / "fleet.toml"
     _policy(policy)
@@ -594,12 +595,12 @@ def test_runtime_settings_reject_unknown_toml_key(monkeypatch: pytest.MonkeyPatc
     )
     monkeypatch.setattr(config, "_CONFIG_PATH", policy)
 
-    with pytest.raises(config.FleetConfigurationError, match="unknown configuration key"):
+    with pytest.raises(FleetConfigurationError, match="unknown configuration key"):
         config.load_runtime_settings()
 
 
 def test_redacted_policy_summary_never_includes_secret_values() -> None:
-    from fleet_rlm.config import redacted_policy_summary
+    from fleet_rlm.config.loader import redacted_policy_summary
 
     summary = redacted_policy_summary(
         Settings(llm_api_key=SecretStr("private-llm-key")),
@@ -719,7 +720,7 @@ def test_autonomous_memory_candidate_categories_default_off() -> None:
 def test_autonomous_memory_candidate_categories_resolve_from_toml(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    import fleet_rlm.config as config
+    import fleet_rlm.config.loader as config
 
     policy = tmp_path / "fleet.toml"
     _policy(policy)

@@ -43,8 +43,8 @@ def test_child_lease_settlement_uses_explicit_p30_state() -> None:
 
 def test_config_inventory_remains_derived_from_the_p29_schema() -> None:
     """No second full field mirror may reappear beside the FleetFieldPolicy declarations."""
-    from fleet_rlm.config import Settings, config_field_specs
-    from fleet_rlm.config_policy import _FIELDS
+    from fleet_rlm.config.policy import _FIELDS
+    from fleet_rlm.config.settings import Settings, config_field_specs
 
     spec_paths = {spec.toml_path for spec in config_field_specs()}
     policy_paths = {field.path for field in _FIELDS}
@@ -104,7 +104,7 @@ def test_p33_deleted_module_symbols_stay_deleted(module_name: str, symbols: tupl
 
 def test_settings_keeps_no_legacy_llm_fields() -> None:
     """The zero-consumer legacy Settings fields deleted in P33 stay deleted."""
-    from fleet_rlm.config import Settings
+    from fleet_rlm.config.settings import Settings
 
     assert "llm_base_url" not in Settings.model_fields
     assert "llm_max_tokens" not in Settings.model_fields
@@ -115,7 +115,7 @@ def test_deleted_dataclass_methods_and_fields_stay_deleted() -> None:
     from fleet_rlm.chat import post_commit_memory
     from fleet_rlm.chat.session_context import SessionContextManifest, TurnPreview
     from fleet_rlm.chat.turn_runtime import TurnRuntime
-    from fleet_rlm.config import Settings
+    from fleet_rlm.config.settings import Settings
     from fleet_rlm.daytona.session_manager import InterpreterLease
     from fleet_rlm.sessions.models import AssistantTurnRecord
     from fleet_rlm.workspace import storage as workspace_fs

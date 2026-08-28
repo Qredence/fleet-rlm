@@ -17,7 +17,7 @@ from fleet_rlm.attachments.models import AttachmentRef
 from fleet_rlm.chat.run_lifecycle import ClaimedRun, _RunClaimToken
 from fleet_rlm.chat.run_preparation import RunPreparationUnavailableError
 from fleet_rlm.composition.daytona_environment import build_run_preparation
-from fleet_rlm.config import Settings
+from fleet_rlm.config.settings import Settings
 from fleet_rlm.daytona.session_manager import DaytonaAdmission
 from fleet_rlm.rlm.program import RLMModelBundle
 from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput

@@ -28,9 +28,9 @@ from typing import TYPE_CHECKING, cast
 from urllib.parse import urlparse
 
 if TYPE_CHECKING:
-    from fleet_rlm.config import Settings
+    from fleet_rlm.config.settings import Settings
 
-from fleet_rlm.config import FleetConfigurationError
+from fleet_rlm.config.settings import FleetConfigurationError
 
 logger = logging.getLogger(__name__)
 

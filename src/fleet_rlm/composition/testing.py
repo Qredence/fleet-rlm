@@ -35,7 +35,7 @@ from fleet_rlm.composition.inventory import (
     RuntimeInventory,
     install_runtime_inventory,
 )
-from fleet_rlm.config import Settings
+from fleet_rlm.config.settings import Settings
 from fleet_rlm.rlm.program import FleetRLMSignature, RLMModelBundle, RLMOptions
 from fleet_rlm.rlm.recursion import RecursiveRLMOptions
 from fleet_rlm.rlm.session_runtime import SessionRLMRegistry

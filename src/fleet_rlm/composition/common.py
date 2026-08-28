@@ -13,7 +13,7 @@ from fleet_rlm.artifacts.reader import ArtifactReader
 from fleet_rlm.attachments.lifecycle import AttachmentLifecycle
 from fleet_rlm.chat.preparation import RunPreparation
 from fleet_rlm.composition.inventory import RuntimeDatabaseLifecycle, RuntimeInventory
-from fleet_rlm.config import Settings
+from fleet_rlm.config.settings import Settings
 from fleet_rlm.rlm._dspy_compat import assert_dspy_version
 from fleet_rlm.rlm.program import RLMOptions
 from fleet_rlm.rlm.recursion import RecursiveRLMOptions
@@ -140,8 +140,7 @@ def build_local_inventory(
     assert_dspy_version()
     from fleet_rlm.chat.run_lifecycle import RunLifecycleService
     from fleet_rlm.chat.turn_runtime import TurnRuntime
-    from fleet_rlm.config import _CONFIG_PATH, active_profile
-    from fleet_rlm.config_policy import ConfigPolicyService
+    from fleet_rlm.config.policy import ConfigPolicyService
     from fleet_rlm.persistence.repositories import (
         InMemoryRunStateStore,
         InMemorySessionCatalog,
@@ -194,9 +193,6 @@ def build_local_inventory(
         run_preparation=preparation,
         run_state_store=run_state,
         session_runtime_registry=session_runtime_registry,
-        config_policy=ConfigPolicyService(
-            _CONFIG_PATH,
-            active_profile=active_profile(settings),
-        ),
+        config_policy=ConfigPolicyService.from_settings(settings),
         database=database,
     )

@@ -16,7 +16,8 @@ from typing import Any
 
 from dotenv import load_dotenv
 
-from fleet_rlm.config import FleetConfigurationError, active_profile, require_live_execution
+from fleet_rlm.config.loader import active_profile, require_live_execution
+from fleet_rlm.config.settings import FleetConfigurationError
 
 RECEIPT_SCHEMA = "fleet.phase1-daytona-stream/v1"
 EVIDENCE_ENV = "FLEET_PHASE1_STREAM_EVIDENCE_PATH"

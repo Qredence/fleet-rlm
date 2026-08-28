@@ -26,7 +26,7 @@ from fleet_rlm.composition.inventory import (
     clear_runtime_inventory,
     install_runtime_inventory,
 )
-from fleet_rlm.config import Settings
+from fleet_rlm.config.settings import Settings
 from fleet_rlm.daytona.broker import SyncBridgeDispatcher, sync_sandbox, tombstone_sync_sandbox
 from fleet_rlm.daytona.session_manager import DEFAULT_IDLE_STOP_SECONDS
 from fleet_rlm.persistence.database import ensure_database_compatible
@@ -714,17 +714,13 @@ async def install_daytona_composition(
         dispatcher.clear_loop(composition_loop)
         raise
     try:
-        from fleet_rlm.config import _CONFIG_PATH, active_profile
-        from fleet_rlm.config_policy import ConfigPolicyService
+        from fleet_rlm.config.policy import ConfigPolicyService
 
         # Replace only the restart-facing policy service; keep every other
         # already-built inventory member to avoid field-by-field drift.
         inventory = replace(
             inventory,
-            config_policy=ConfigPolicyService(
-                _CONFIG_PATH,
-                active_profile=active_profile(settings),
-            ),
+            config_policy=ConfigPolicyService.from_settings(settings),
         )
         return install_runtime_inventory(app, inventory)
     except BaseException:

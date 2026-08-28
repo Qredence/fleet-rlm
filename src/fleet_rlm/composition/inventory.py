@@ -29,7 +29,7 @@ from fleet_rlm.attachments.lifecycle import AttachmentLifecycle
 from fleet_rlm.chat.preparation import RunPreparation
 from fleet_rlm.chat.run_lifecycle import RunLifecycle
 from fleet_rlm.chat.turn_runtime import TurnRuntime
-from fleet_rlm.config_policy import ConfigPolicyService
+from fleet_rlm.config.policy import ConfigPolicyService
 from fleet_rlm.persistence.repositories.turns import ReconciliationSummary
 from fleet_rlm.rlm.program import RLMModelBundle
 from fleet_rlm.rlm.session_runtime import SessionRLMRegistry

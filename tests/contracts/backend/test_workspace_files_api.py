@@ -7,7 +7,7 @@ from uuid import NAMESPACE_URL, uuid5
 from fastapi.testclient import TestClient
 
 from fleet_rlm.composition.testing import create_testing_app
-from fleet_rlm.config import Settings
+from fleet_rlm.config.settings import Settings
 
 
 def test_independent_workspace_files_survive_requests_and_enforce_checksums(tmp_path: Path) -> None:

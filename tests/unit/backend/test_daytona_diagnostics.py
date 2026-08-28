@@ -6,7 +6,7 @@ from typing import Any
 import pytest
 from daytona import DaytonaError
 
-from fleet_rlm.config import Settings
+from fleet_rlm.config.settings import Settings
 from fleet_rlm.daytona.errors import DaytonaAdapterError
 
 

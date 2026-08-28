@@ -157,7 +157,7 @@ async def test_get_or_create_volume_id_uses_injected_client() -> None:
 
 
 def test_settings_volume_fields() -> None:
-    from fleet_rlm.config import Settings
+    from fleet_rlm.config.settings import Settings
 
     settings = Settings()
     assert settings.volume_name == DEFAULT_VOLUME_NAME

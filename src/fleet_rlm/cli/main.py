@@ -136,7 +136,7 @@ _DOCTOR_ACTIONS = {
 def _run_doctor(parser: argparse.ArgumentParser, provider: str) -> None:
     if provider != "daytona":
         parser.error(f"unsupported doctor provider: {provider}")
-    from fleet_rlm.config import active_profile, load_runtime_settings, redacted_policy_summary
+    from fleet_rlm.config.loader import active_profile, load_runtime_settings, redacted_policy_summary
     from fleet_rlm.daytona.diagnostics import run_daytona_doctor
 
     try:

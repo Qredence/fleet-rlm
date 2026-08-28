@@ -14,8 +14,8 @@ from fleet_rlm.attachments.lifecycle import AttachmentLifecycle
 from fleet_rlm.chat.run_lifecycle import RunLifecycle
 from fleet_rlm.chat.turn_runtime import TurnRuntime
 from fleet_rlm.composition.inventory import RuntimeInventory, get_runtime_inventory
-from fleet_rlm.config import Settings
-from fleet_rlm.config_policy import ConfigPolicyService
+from fleet_rlm.config.policy import ConfigPolicyService
+from fleet_rlm.config.settings import Settings
 from fleet_rlm.rlm.session_runtime import SessionRLMRegistry
 from fleet_rlm.sessions.catalog import SessionCatalog
 from fleet_rlm.skills.catalog import SkillCatalog

@@ -307,7 +307,7 @@ def _flock_scripts(mount_path: str) -> tuple[str, str]:
 
 
 async def _live_scope() -> dict[str, Any]:
-    from fleet_rlm.config import load_runtime_settings
+    from fleet_rlm.config.loader import load_runtime_settings
     from fleet_rlm.daytona.platform import LiveDaytonaPlatform, build_daytona_client
     from fleet_rlm.daytona.provisioning import DaytonaSandboxSpec
     from fleet_rlm.workspace.paths import DEFAULT_VOLUME_MOUNT_PATH

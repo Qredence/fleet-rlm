@@ -8,7 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from fleet_rlm.app import create_app
-from fleet_rlm.config import FleetConfigurationError, Settings
+from fleet_rlm.config.settings import FleetConfigurationError, Settings
 from fleet_rlm.observability.mlflow_runtime import MLflowRuntime, MLflowRuntimeState
 
 

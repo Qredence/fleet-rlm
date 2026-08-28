@@ -28,12 +28,8 @@ from fastapi.testclient import TestClient
 
 from fleet_rlm.api.local_scope import LocalScope
 from fleet_rlm.app import create_app
-from fleet_rlm.config import (
-    Settings,
-    active_profile_contract,
-    load_profile_environment_contracts,
-    load_runtime_settings,
-)
+from fleet_rlm.config.loader import active_profile_contract, load_profile_environment_contracts, load_runtime_settings
+from fleet_rlm.config.settings import Settings
 from fleet_rlm.daytona.broker import sync_sandbox
 from fleet_rlm.rlm.events import ToolEventView
 from fleet_rlm.runtime.bindings import SandboxBinding

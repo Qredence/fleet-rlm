@@ -21,7 +21,7 @@ def test_package_imports_without_network() -> None:
     socket.socket = guarded_socket  # type: ignore[method-assign, assignment]
     try:
         import fleet_rlm
-        from fleet_rlm.config import Settings
+        from fleet_rlm.config.settings import Settings
 
         assert fleet_rlm.__version__
         settings = Settings()
@@ -33,7 +33,7 @@ def test_package_imports_without_network() -> None:
 
 def test_settings_exclude_secrets_from_serialization() -> None:
     """Secret fields must not appear as plaintext in public dumps."""
-    from fleet_rlm.config import Settings
+    from fleet_rlm.config.settings import Settings
 
     settings = Settings(
         daytona_api_key="super-secret-daytona",

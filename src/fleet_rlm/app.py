@@ -11,7 +11,8 @@ from typing import TYPE_CHECKING, Protocol
 from fastapi import FastAPI
 
 from . import __version__
-from .config import Settings, configure_logging, load_runtime_settings
+from .config.loader import configure_logging, load_runtime_settings
+from .config.settings import Settings
 from .posthog_client import init_posthog, shutdown_posthog
 
 if TYPE_CHECKING:

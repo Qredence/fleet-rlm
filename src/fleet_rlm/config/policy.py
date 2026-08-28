@@ -5,7 +5,7 @@ This module owns the committed policy document only.  It never reads values from
 credentials or runtime overrides.
 
 The editable-field inventory derives from the authoritative
-:class:`fleet_rlm.config.FleetFieldPolicy` declarations on ``Settings`` fields
+:class:`fleet_rlm.config.settings.FleetFieldPolicy` declarations on ``Settings`` fields
 plus their ``*_env`` reference specs; nothing here mirrors field names by hand.
 """
 
@@ -23,15 +23,19 @@ from typing import Any
 import tomlkit
 from tomlkit import TOMLDocument
 
-from fleet_rlm.config import (
-    EditorKind,
-    FleetConfigurationError,
-    Settings,
+from fleet_rlm.config.loader import (
+    _MISSING,
     _deep_merge,
     _flatten_policy,
+    _lookup_toml,
     _policy_document_from_mapping,
     _require_mapping,
     _validate_policy_table,
+)
+from fleet_rlm.config.settings import (
+    EditorKind,
+    FleetConfigurationError,
+    Settings,
     config_field_specs,
 )
 from fleet_rlm.workspace.memory import normalize_memory_candidate_categories
@@ -95,6 +99,13 @@ class ConfigPolicyService:
         self._path = path.resolve()
         self._active_profile = active_profile or None
         self._lock = threading.Lock()
+
+    @classmethod
+    def from_settings(cls, settings: Settings, *, path: Path | None = None) -> ConfigPolicyService:
+        """Construct the service for the canonical policy path and active profile."""
+        from fleet_rlm.config.loader import _CONFIG_PATH, active_profile
+
+        return cls(path or _CONFIG_PATH, active_profile=active_profile(settings))
 
     def read(self) -> PolicySnapshot:
         with self._lock:
@@ -223,11 +234,9 @@ class ConfigPolicyService:
 
     @staticmethod
     def _lookup(table: dict[str, Any], path: str) -> Any:
-        current: Any = table
-        for part in path.split("."):
-            if not isinstance(current, dict) or part not in current:
-                return _MISSING
-            current = current[part]
+        current = _lookup_toml(table, path)
+        if current is _MISSING:
+            return current
         return current.unwrap() if hasattr(current, "unwrap") else current
 
     @staticmethod
@@ -304,6 +313,3 @@ class ConfigPolicyService:
                 os.close(directory)
         finally:
             Path(temporary).unlink(missing_ok=True)
-
-
-_MISSING = object()

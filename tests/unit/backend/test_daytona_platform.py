@@ -8,7 +8,7 @@ from importlib.metadata import version
 import pytest
 from pydantic import SecretStr
 
-from fleet_rlm.config import Settings
+from fleet_rlm.config.settings import Settings
 from fleet_rlm.daytona.platform import build_daytona_client
 
 

@@ -22,7 +22,7 @@ from fleet_rlm.composition.inventory import (
     install_runtime_inventory,
 )
 from fleet_rlm.composition.testing import create_testing_app
-from fleet_rlm.config import Settings
+from fleet_rlm.config.settings import Settings
 from fleet_rlm.skills.catalog import SkillCatalog
 
 
@@ -475,8 +475,8 @@ async def test_daytona_install_registers_and_dispose_clears_bridge_dispatcher(
     from dataclasses import replace
 
     monkeypatch.setattr(composition, "build_daytona_composition", fake_build)
-    monkeypatch.setattr("fleet_rlm.config_policy.ConfigPolicyService", lambda *_a, **_k: object())
-    monkeypatch.setattr("fleet_rlm.config.active_profile", lambda _settings: "test-profile")
+    monkeypatch.setattr("fleet_rlm.config.policy.ConfigPolicyService.from_settings", lambda *_a, **_k: object())
+    monkeypatch.setattr("fleet_rlm.config.loader.active_profile", lambda _settings: "test-profile")
 
     app = SimpleNamespace(state=SimpleNamespace())
     app.state.skill_catalog = SkillCatalog(())

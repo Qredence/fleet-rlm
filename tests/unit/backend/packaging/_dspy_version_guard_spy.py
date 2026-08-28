@@ -104,7 +104,7 @@ def _stub_daytona_settings_gates() -> None:
 
 def _run_create_app(*, payload: dict[str, Any]) -> None:
     from fleet_rlm.app import create_app
-    from fleet_rlm.config import Settings
+    from fleet_rlm.config.settings import Settings
 
     create_app(settings=Settings(run_environment="daytona"))
     payload["outcome"] = "accepted"
@@ -114,7 +114,7 @@ def _run_composition_local(*, payload: dict[str, Any]) -> None:
     from fastapi import FastAPI
 
     from fleet_rlm.composition.testing import install_testing_composition
-    from fleet_rlm.config import Settings
+    from fleet_rlm.config.settings import Settings
     from fleet_rlm.skills.catalog import build_bundled_skill_catalog
 
     app = FastAPI()
@@ -125,7 +125,7 @@ def _run_composition_local(*, payload: dict[str, Any]) -> None:
 
 def _run_composition_daytona(*, payload: dict[str, Any]) -> None:
     from fleet_rlm.composition import daytona as composition_daytona
-    from fleet_rlm.config import Settings
+    from fleet_rlm.config.settings import Settings
     from fleet_rlm.skills.catalog import build_bundled_skill_catalog
 
     _stub_daytona_settings_gates()

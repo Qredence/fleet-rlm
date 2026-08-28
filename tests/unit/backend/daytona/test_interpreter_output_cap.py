@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 from dspy.primitives.code_interpreter import CodeExecutionError
 
-from fleet_rlm.config import Settings
+from fleet_rlm.config.settings import Settings
 from fleet_rlm.daytona.interpreter import (
     BackendExecutionResult,
     DaytonaCodeInterpreter,
