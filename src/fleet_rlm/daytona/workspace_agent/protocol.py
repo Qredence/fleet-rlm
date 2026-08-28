@@ -72,11 +72,6 @@ def workspace_agent_runtime_source() -> str:
     return _RUNTIME_SOURCE
 
 
-# Historical private name retained for source/test compatibility.
-def _workspace_agent_runtime_source() -> str:
-    return workspace_agent_runtime_source()
-
-
 def build_workspace_agent_code(
     *,
     volume_root: str,
@@ -127,7 +122,7 @@ def build_workspace_agent_code(
     )
 
 
-def _workspace_agent_runtime_checksum() -> str:
+def workspace_agent_runtime_checksum() -> str:
     """Return the SHA-256 digest of the packaged remote source."""
     return hashlib.sha256(workspace_agent_runtime_source().encode("utf-8")).hexdigest()
 
@@ -202,10 +197,6 @@ def _raise_workspace_error(payload: dict[str, object], relative: str) -> None:
     raise ValueError("workspace path is unsafe")
 
 
-# Public aliases make the protocol artifact seam explicit while preserving the
-# old private helper names used by deterministic tests.
-workspace_agent_runtime_checksum = _workspace_agent_runtime_checksum
-
 __all__ = [
     "WORKSPACE_AGENT_CODE_RUN_TIMEOUT_S",
     "WORKSPACE_AGENT_INSTALL_PATH",
@@ -217,8 +208,6 @@ __all__ = [
     "WorkspaceAgentConflictError",
     "WorkspaceAgentProtocolError",
     "WorkspaceAgentStorageError",
-    "_workspace_agent_runtime_checksum",
-    "_workspace_agent_runtime_source",
     "build_installed_workspace_agent_source",
     "build_workspace_agent_code",
     "build_workspace_agent_request_code",

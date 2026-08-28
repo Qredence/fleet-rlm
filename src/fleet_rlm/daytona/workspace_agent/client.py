@@ -19,11 +19,11 @@ from fleet_rlm.daytona.workspace_agent.protocol import (
     WORKSPACE_AGENT_RESPONSE_MAX_BYTES,
     WorkspaceAgentProtocolError,
     WorkspaceAgentStorageError,
-    _workspace_agent_runtime_checksum,
     build_installed_workspace_agent_source,
     build_workspace_agent_code,
     build_workspace_agent_request_code,
     decode_workspace_agent_response,
+    workspace_agent_runtime_checksum,
 )
 
 
@@ -78,7 +78,7 @@ class _WorkspaceAgentSession:
 
         if payload.get("protocol_version") != WORKSPACE_AGENT_PROTOCOL_VERSION:
             return False
-        if payload.get("source_checksum") != _workspace_agent_runtime_checksum():
+        if payload.get("source_checksum") != workspace_agent_runtime_checksum():
             return False
         operations = payload.get("operations")
         if not isinstance(operations, list) or list(operations) != list(WORKSPACE_AGENT_SUPPORTED_OPERATIONS):

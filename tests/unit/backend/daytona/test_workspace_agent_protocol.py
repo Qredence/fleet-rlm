@@ -32,9 +32,9 @@ def test_runtime_source_is_packaged_and_loaded_via_importlib_resources() -> None
     assert "def handle(request):" in packaged
     assert "def get_metadata():" in packaged
     assert "class UnsafePath(Exception):" in packaged
-    assert host._workspace_agent_runtime_source() == packaged
+    assert host.workspace_agent_runtime_source() == packaged
     assert host.build_installed_workspace_agent_source() == packaged
-    assert hashlib.sha256(packaged.encode("utf-8")).hexdigest() == host._workspace_agent_runtime_checksum()
+    assert hashlib.sha256(packaged.encode("utf-8")).hexdigest() == host.workspace_agent_runtime_checksum()
     # Host must never treat the runtime module as callable agent behavior.
     assert not hasattr(host, "respond")
 
