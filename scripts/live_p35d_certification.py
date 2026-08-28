@@ -185,7 +185,12 @@ _REDACTED_VALUES = frozenset({"***", "...", "<redacted>", "[redacted]", "redacte
 
 def _is_non_redacted_credential(value: str) -> bool:
     normalized = value.rstrip(",;.)").strip("'\"").lower()
-    return normalized not in _REDACTED_VALUES and not normalized.startswith(("http://", "https://"))
+    return (
+        bool(normalized)
+        and not re.fullmatch(r"[a-z_][a-z0-9_]*=", normalized)
+        and normalized not in _REDACTED_VALUES
+        and not normalized.startswith(("http://", "https://"))
+    )
 
 
 def _has_credential_assignment(text: str, *, names: tuple[str, ...]) -> bool:

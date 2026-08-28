@@ -65,6 +65,19 @@ def test_secret_scan_reports_only_bounded_relative_findings(tmp_path: Path) -> N
     assert canary not in json.dumps(result)
 
 
+def test_secret_scan_ignores_empty_credential_assignments(tmp_path: Path) -> None:
+    logs = tmp_path / ".fleet_rlm" / "logs"
+    logs.mkdir(parents=True)
+    (logs / "deterministic.log").write_text(
+        "env FLEET_DAYTONA_API_KEY= FLEET_OPENAI_API_KEY= FLEET_LLM_BASE_URL=\n",
+        encoding="utf-8",
+    )
+
+    result = scan_host_log_surfaces(tmp_path, secret_names=("FLEET_DAYTONA_API_KEY", "FLEET_OPENAI_API_KEY"))
+
+    assert result["passed"] is True
+
+
 def test_secret_scan_ignores_redacted_and_audience_values(tmp_path: Path) -> None:
     logs = tmp_path / ".fleet_rlm" / "logs"
     logs.mkdir(parents=True)
