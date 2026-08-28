@@ -1816,7 +1816,7 @@
     {
       "name": "read_curated_input",
       "category": "conditional_capability",
-      "source": "src/fleet_rlm/daytona/optimization_evaluator.py:StrictDaytonaEvaluationLifecycle",
+      "source": "src/fleet_rlm/optimization/daytona.py:StrictDaytonaEvaluationLifecycle",
       "description": "Read bounded canonical curated evaluation input with the supplied capability handle.",
       "argument_schema": {
         "type": "object",
@@ -1861,7 +1861,7 @@
           "json",
           "curated input"
         ],
-        "source": "src/fleet_rlm/daytona/optimization_evaluator.py:StrictDaytonaEvaluationLifecycle.evaluate"
+        "source": "src/fleet_rlm/optimization/daytona.py:StrictDaytonaEvaluationLifecycle.evaluate"
       }
     },
     {

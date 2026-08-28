@@ -18,7 +18,6 @@ EXPECTED_DAYTONA_MODULES = {
     "interpreter.py",
     "interpreter_output.py",
     "lifecycle.py",
-    "optimization_evaluator.py",
     "platform.py",
     "provisioning.py",
     "recursive_child_runtime.py",
