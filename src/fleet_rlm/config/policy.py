@@ -66,7 +66,7 @@ class PolicyField:
     settings_field: str | None = None
 
 
-# Derived from the authoritative Settings policy declarations (config.py);
+# Derived from the authoritative Settings policy declarations (config/settings.py);
 # no Settings field names or TOML paths are authored here by hand.
 _FIELDS: tuple[PolicyField, ...] = tuple(
     PolicyField(

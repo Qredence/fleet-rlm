@@ -8,7 +8,7 @@ the same instance is forwarded to the native ``dspy.RLM`` call through
 The test wires a minimal in-process ``ClaimedRun`` through
 ``DefaultRunPreparer.prepare`` and records the kwargs the runner forwards
 to the inner program. Identity is asserted on the ``history`` value so
-the helper in ``chat/run_preparation.py`` cannot mutate, copy, or replace
+the preparation implementation cannot mutate, copy, or replace
 the canonical conversation between the claim and the native call.
 """
 
