@@ -15,8 +15,9 @@ contracts, and tracked docs remain authoritative.
   in-memory bundled Skill catalog. Lifespan composition installs and disposes
   one complete Daytona or explicitly injected private-test inventory.
 - Production startup resolves one required profile from `config/fleet.toml`.
-  `config.py` owns strict runtime resolution; `config_policy.py` and the
-  loopback-only `/api/settings` routes edit only non-secret policy for restart.
+  `config/` owns strict runtime resolution (`settings` schema, `loader`
+  resolution, `policy` editor); the loopback-only `/api/settings` routes edit
+  only non-secret policy for restart.
   Do not restore ambient environment aliases or expose referenced secret values.
   Every `Settings` field carries one authoritative `FleetFieldPolicy`
   declaration; `_TABLE_KEYS`, policy flattening, and the editor inventory
@@ -106,11 +107,11 @@ contracts, and tracked docs remain authoritative.
   answer text up to configured bounds. Tool event views expose only bounded
   allowlisted metadata; Tools without a view expose no arguments or results.
   Provider failures use closed public messages.
-- Databricks MLflow (`observability/mlflow_runtime.py`, `tracing.py`, and
-  `turn_tracing.py`) is fail-soft engineering observability controlled by the
-  selected TOML profile. `mlflow_runtime.py` is owned by FastAPI lifespan for
-  explicit startup state and flush; `tracing.py` owns configuration and
-  sanitation; `turn_tracing.py` owns Turn spans. Tracing must never change Turn
+- Databricks MLflow (`observability/mlflow.py` and `observability/tracing.py`)
+  is fail-soft engineering observability controlled by the
+  selected TOML profile. `mlflow.py` is owned by FastAPI lifespan for
+  explicit startup state and flush; `tracing.py` owns configuration,
+  sanitation, and Turn spans. Tracing must never change Turn
   outcomes. A live Turn can produce two `fleet_turn` roots—preparation and
   execution—each tagged `fleet.trace_phase`; the execution root carries the
   internal one-way `fleet.preparation_trace_id` while only the execution trace
@@ -123,8 +124,7 @@ contracts, and tracked docs remain authoritative.
 - `RunLifecycle.finish()` owns result-snapshot handling, Artifact publication,
   and atomic Turn Commit or failure settlement. `TurnRuntime` owns stream
   orchestration, terminal ordering, heartbeat coordination, and final resource
-  cleanup; `chat/turn_coordinator.py` is a compatibility shim for the
-  historical name.
+  cleanup.
 - `RunLifecycleService` translates lifecycle outcomes into typed Claim commands;
   in-memory and SQL Run state stores share one `transition_claim()` operation and
   pure policy, while successful commit and cancellation remain separate. Internal

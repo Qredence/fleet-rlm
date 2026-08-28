@@ -9,7 +9,7 @@ compatibility runtime and parallel foundation package no longer exist.
 | --- | --- | --- |
 | `app.py`, `main.py` | FastAPI factory, handlers/routers, static Skill catalog, lifespan selection, ASGI entrypoint | composition, API routers, Skill catalog |
 | `composition/` | common inventory plus explicit Daytona and private testing wiring | domain modules and adapters |
-| `config.py`, `config_policy.py` | TOML-profile runtime Settings and loopback-only non-secret policy editor | policy document, Settings |
+| `config/` | TOML-profile runtime Settings schema, loader, and loopback-only non-secret policy editor | policy document, Settings |
 | `json_types.py` | closed `JsonScalar`/`JsonValue` contract | none |
 | `snapshot_contract.py` | immutable Daytona Snapshot name policy | none |
 | `paths.py` | provider-neutral Volume layout, mount validation, and path identity primitives | standard library |
@@ -37,8 +37,7 @@ compatibility runtime and parallel foundation package no longer exist.
   may recreate only the static in-memory catalog fallback.
 - `RLMRunner` owns execution, not Turn Commit or resource release.
   `RunLifecycle.finish()` owns result/Artifact publication and atomic commit;
-  `TurnRuntime` owns terminal ordering and final cleanup; `turn_coordinator.py`
-  is a compatibility shim for the historical name.
+  `TurnRuntime` owns terminal ordering and final cleanup.
 - `rlm/runtime.py` keeps `RLMRunner.stream(context)` as the deep execution seam.
   It owns the cancellation-shielded worker/thread/event-loop boundary, bounded
   detail relay/monitoring/drain policy, and trace/recursive-metric projection
@@ -67,12 +66,11 @@ compatibility runtime and parallel foundation package no longer exist.
   detaches the inventory before disposing its closeable resources.
 - `DaytonaRuntimeResources` owns provider resources and exposes the public
   `DaytonaRuntime` root/child lifecycle;
-  `composition/daytona.py` injects database, binding, model, preparation, limits,
+  `composition/live.py` injects database, binding, model, preparation, limits,
   and cleanup ports.
 - `TurnRuntime` owns the private claim-to-cleanup Run state machine and public
   stream facade. `RunLifecycle.finish()` remains the Artifact/atomic-commit
   owner, while `RunCleanupSupervisor` is only a bounded cleanup fallback.
-  `turn_coordinator.py` is a compatibility shim for the historical name.
 - `daytona/broker.py` is the sole owner of broker source generation,
   HTTP-in-sandbox transport, host-tool/SUBMIT lifecycle, and the injected
   synchronous DSPy bridge.

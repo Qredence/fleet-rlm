@@ -68,7 +68,7 @@ concurrency through `recursion_max_parallel_children`.
 - FastAPI lifespan validates settings and installs exactly one complete Daytona
   or explicitly injected private-test runtime inventory. It owns
   startup rollback and shutdown.
-- `composition/common.py`, `daytona.py`, and `testing.py` own runtime wiring. A
+- `composition/live.py`, `inventory.py`, and `testing.py` own runtime wiring. A
   locally owned database engine creates tables only for SQLite.
   Import `fleet_rlm.composition.testing` directly in tests; it is not re-exported
   from `composition` and is never installed by lifespan.
@@ -112,8 +112,7 @@ concurrency through `recursion_max_parallel_children`.
   `transition_claim()` persistence operation. Successful `commit()` and
   `request_cancel()` remain separate atomic/authorization paths.
 - `TurnRuntime` owns stream orchestration, heartbeat coordination, terminal
-  ordering, and final cleanup. `chat/turn_coordinator.py` is a compatibility
-  shim for the historical name.
+  ordering, and final cleanup.
 - `daytona/` is the exclusive Daytona SDK boundary.
 - `persistence/` implements domain repository interfaces; Alembic owns the live
   schema. `persistence/repositories/run_codec.py` centralizes ORM/domain and

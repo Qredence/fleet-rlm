@@ -156,7 +156,7 @@ FLEET_LIVE=1 uv run python scripts/benchmarks/annotate_traces.py annotate \
 Optional `--tag <key>` restricts annotation to traces carrying
 `tag.<key>='true'` (e.g. the eval-candidate tag). This is a post-hoc,
 scripts-only tagger: it never changes span emission in
-`src/fleet_rlm/observability/turn_tracing.py`.
+`src/fleet_rlm/observability/tracing.py`.
 
 ### 4.2 Prompt registry and trace linking (`manage_prompts.py`)
 

@@ -354,7 +354,7 @@ URL sources, Attachments, and provider transport are not interchangeable.
 | `workspace/url.py` | URL safety, bounded public fetching, source stores, and `UrlToolHost` | RLM capability preparation and composition |
 | `attachments/` | Attachment models, authorization/lifecycle policy, blob/catalog adapters, and `AttachmentToolHost` | API, Turn preparation, composition |
 | `artifacts/tools.py` | Commit-gated `ArtifactToolHost` candidate staging and Workspace publication bridge | Turn preparation and Daytona composition |
-| `composition/daytona_workspace.py` | Daytona mounted Workspace Agent sessions, ephemeral Workspace gateways, and orphan-byte cleanup | Daytona composition and API dependencies |
+| `runtime/daytona/workspace_gateway.py` | Daytona mounted Workspace Agent sessions, ephemeral Workspace gateways, and orphan-byte cleanup | Daytona composition and API dependencies |
 | `daytona/workspace_agent/` | Host run/decode adapter and versioned handshake transport for the packaged stdlib-only `workspace_agent/runtime.py` `handle(request)` | `workspace/storage.py`, Daytona runtime |
 
 ### `rlm/` package one-liner
@@ -374,7 +374,6 @@ ordered, bounded sibling execution.
 - `_lease.py` — private cancellation-safe root/child lease state machine.
 - `interpreter.py` — `DaytonaCodeInterpreter`: DSPy RLM interpreter adapter (execution, observation, SUBMIT mediation, sync bridge).
 - `interpreter_output.py` — public per-step output projection: marker-hiding stdout replay, capped deltas, stream-closed tracking, final flush.
-- `optimization_evaluator.py` — disposable no-volume lifecycle for the offline signature-optimization lane.
 - `platform.py` — live SandboxPlatform and VolumeClient adapters over the Daytona SDK.
 - `provisioning.py` — strict async Sandbox, Volume, mount, and layout provisioning.
 - `recursive_child_runtime.py` — contracted single owner for native DSPy
@@ -388,16 +387,16 @@ ordered, bounded sibling execution.
   packaged `workspace_agent/runtime.py` owns the explicit stdlib-only
   `handle(request)` used by installed and fallback launchers.
 
-The established `daytona/run_environment.py` entry point is a side-effect-free
-compatibility export; the canonical run-environment inventory lives in
-`composition/daytona_environment.py`. Mounted Workspace sessions and ephemeral
-Workspace gateways live in `composition/daytona_workspace.py`. Daytona remains
-the exclusive SDK and transport boundary, while domain policy stays under
-`workspace/` and `attachments/`.
+The canonical per-Turn run-environment adapters and provider resource
+lifecycle live in `runtime/daytona/run_environment.py`; mounted Workspace
+sessions and ephemeral Workspace gateways live in
+`runtime/daytona/workspace_gateway.py`; composition wiring lives in
+`composition/live.py`. Daytona remains the exclusive SDK and transport
+boundary, while domain policy stays under `workspace/` and `attachments/`.
 
 The post-P25 maintainability baseline keeps one canonical transformation at
 each seam: `RunLifecycle.finish()` commits, `TurnRuntime` settles the
-stream (`chat/turn_coordinator.py` retains the historical compatibility name),
+stream,
 `OwnedEffect` supplies the provider-neutral wait vocabulary, and the
 TUI adapters feed one canonical reducer. See the [P34 maintainability freeze
 guide](../../docs/how-to-guides/maintainability-freeze.md) for the certification

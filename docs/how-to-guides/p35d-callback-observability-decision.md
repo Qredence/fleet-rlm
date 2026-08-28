@@ -33,7 +33,7 @@ status, duration, Tool name, parent identity, and exception category.
 
 ## Normalization and parity
 
-`fleet_rlm.observability.callback_shadow.CallbackShadowRecorder` produces one
+`fleet_rlm.observability.dspy_callbacks.CallbackShadowRecorder` produces one
 completed record per callback start/end pair. `compare_callback_records`
 ignores generated DSPy call IDs and classifies differences as:
 

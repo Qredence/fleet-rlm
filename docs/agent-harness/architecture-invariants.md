@@ -68,9 +68,9 @@ and its matching automated check in the same patch.
   closed `MemoryFailureCategory` vocabulary. Diagnostics are bounded and
   sanitized; mutation and list paths remain strict. A new catch site must use
   the existing classifier rather than inventing a parallel warning format.
-- `config.py` is the source of truth for `FleetFieldPolicy` metadata and
-  `config_policy.py` derives its editor inventory from it. No second complete
-  configuration-field mirror is allowed.
+- `config/settings.py` is the source of truth for `FleetFieldPolicy` metadata
+  and `config/policy.py` derives its editor inventory from it. No second
+  complete configuration-field mirror is allowed.
 - `tools/fleet-tui/src/tui/tests/turn-reducer-invariants.test.ts` is the
   deterministic P32 proof that live and durable projections converge through
   one canonical reducer. Wire adapters own casing and framing compatibility;
@@ -114,10 +114,10 @@ exist.
   catalog/authorizer/empty capability registry. Lifespan owns a validated
   `RuntimeInventory`, publishes readiness last, and detaches it before disposal.
 - `composition/` owns complete common, Daytona, and private testing wiring.
-- `chat/` owns preparation, coordination, Turn Lifecycle, terminal ordering, and
+- `chat/` owns preparation, Turn runtime, Turn Lifecycle, terminal ordering, and
   cleanup. `TurnRuntime` owns the claim-to-cleanup Run state machine and
-  public stream facade; `chat/turn_coordinator.py` is a compatibility shim.
-  `RunLifecycle.finish()` owns Artifact publication and atomic commit.
+  public stream facade. `RunLifecycle.finish()` owns Artifact publication and
+  atomic commit.
 - Turn Claim persistence has one typed `transition_claim()` operation. Its pure
   command/state policy is shared by in-memory and SQL adapters; successful
   commit and cancellation requests remain separate.
