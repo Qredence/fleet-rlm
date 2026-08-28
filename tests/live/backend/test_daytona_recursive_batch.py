@@ -16,6 +16,7 @@ import pytest
 from dotenv import load_dotenv
 from fastapi.testclient import TestClient
 
+from fleet_rlm.api.local_scope import LocalScope
 from fleet_rlm.app import create_app
 from fleet_rlm.config.loader import active_profile, require_live_execution
 from fleet_rlm.config.settings import FleetConfigurationError, Settings
@@ -308,6 +309,10 @@ def test_daytona_recursive_batch_two_children_through_fastapi(
             assert child_evidence.peak_observed == 2
             assert child_evidence.cleanups == 2
             assert child_evidence._active == 0
+            runtime = getattr(resources, "runtime", None)
+            close = getattr(runtime, "close_root_session", None)
+            if callable(close):
+                client.portal.call(lambda: close(LocalScope().workspace_id, session_id))
             assert resources.daytona_admission._semaphore._value == settings.max_active_daytona_leases
             assert get_active_lease_registry().holder(session_id) is None
             structured = [chunk for chunk in chunks if chunk.get("type") == "data-structured-result"]
