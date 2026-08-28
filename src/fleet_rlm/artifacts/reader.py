@@ -28,7 +28,7 @@ class ArtifactCatalog(Protocol):
 
 
 class ArtifactBlobGateway(Protocol):
-    async def read(self, workspace_id: UUID, logical_path: str) -> bytes: ...
+    async def read_bytes(self, workspace_id: UUID, logical_path: str) -> bytes: ...
 
 
 class ArtifactReader:
@@ -52,7 +52,7 @@ class ArtifactReader:
     async def content(self, access: ArtifactAccess, artifact_id: UUID) -> ArtifactContent:
         stored = await self._stored(access, artifact_id)
         try:
-            data = await self._blobs.read(access.workspace_id, stored.storage_ref)
+            data = await self._blobs.read_bytes(access.workspace_id, stored.storage_ref)
         except ArtifactError:
             raise
         except (FileNotFoundError, KeyError) as exc:

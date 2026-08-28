@@ -150,7 +150,7 @@ def _workspace_memory_digest(capabilities: PreparedCapabilities) -> str:
     return digest
 
 
-def _claim_history_records(
+def claim_history_records(
     claim: ClaimedRun,
 ) -> tuple[tuple[CommittedTurn, ...], tuple[str, ...]]:
     """Project the claimed Session checkpoint to canonical ``(committed_turns, user_requests)``.
@@ -199,13 +199,6 @@ def _claim_history_records(
             user_requests.append(pending_user_text)
             pending_user_text = None
     return tuple(committed_turns), tuple(user_requests)
-
-
-def claim_history_records(
-    claim: ClaimedRun,
-) -> tuple[tuple[CommittedTurn, ...], tuple[str, ...]]:
-    """Return canonical committed Turns and requests for a claimed checkpoint."""
-    return _claim_history_records(claim)
 
 
 def build_dspy_history_for_claim(claim: ClaimedRun) -> dspy.History:

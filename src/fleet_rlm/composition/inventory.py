@@ -35,7 +35,7 @@ from fleet_rlm.rlm.program import RLMModelBundle
 from fleet_rlm.rlm.session_runtime import SessionRLMRegistry
 from fleet_rlm.runtime.cleanup import RunCleanupSupervisor
 from fleet_rlm.sessions.catalog import SessionCatalog
-from fleet_rlm.workspace.storage import VolumeTreeFs, WorkspaceVolumeGateway
+from fleet_rlm.workspace.storage import WorkspaceVolumeGateway
 from fleet_rlm.workspace.workspace import WorkspaceFileService
 
 
@@ -107,7 +107,6 @@ class RuntimeInventory:
     session_runtime_registry: SessionRLMRegistry | None = None
     workspace_volume_gateway: WorkspaceVolumeGateway | None = None
     workspace_file_service: WorkspaceFileService | None = None
-    workspace_volume_mirror: VolumeTreeFs | None = None
     # Composition-owned Daytona sync-bridge dispatcher (QRE-154); disposed
     # compositions clear their own loop authority via clear_loop().
     bridge_dispatcher: SyncBridgeDispatcher | None = None

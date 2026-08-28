@@ -75,7 +75,6 @@ RETAINED_OWNERS: tuple[tuple[str, str], ...] = (
     ("daytona/errors.py", "sanitize_provider_message"),
     # P37-ORCH-007/010 durable settlement and coordinator ownership.
     ("chat/run_lifecycle.py", "RunLifecycleService"),
-    ("chat/turn_coordinator.py", "TurnCoordinator"),
 )
 
 

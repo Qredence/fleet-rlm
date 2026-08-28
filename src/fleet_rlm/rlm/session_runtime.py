@@ -62,12 +62,10 @@ __all__ = [
     "SessionRuntimeRegistry",
     "SessionToolAuthorizationError",
     "SessionToolBinding",
-    "SessionToolProxyFactory",
     "SessionToolRegistry",
     "SessionToolUnavailableError",
     "ToolAuthorization",
     "compute_program_fingerprint",
-    "create_session_tool_registry",
     "digest_program_components",
     "fingerprint_components",
     "program_fingerprint",
@@ -1456,27 +1454,18 @@ class SessionRLMRegistry:
         self,
         factory: RuntimeFactory | None = None,
         *,
-        create_runtime: RuntimeFactory | None = None,
         cleanup: CleanupCallback | None = None,
-        close_runtime: CleanupCallback | None = None,
         idle_timeout: float | None = None,
         clock: Callable[[], datetime] = _utcnow,
         event_sink: Callable[[str, Mapping[str, str]], None] | None = None,
-        on_event: Callable[[str, Mapping[str, str]], None] | None = None,
     ) -> None:
-        if factory is not None and create_runtime is not None:
-            raise ValueError("provide one runtime factory")
-        if cleanup is not None and close_runtime is not None:
-            raise ValueError("provide one cleanup callback")
         if idle_timeout is not None and idle_timeout <= 0:
             raise ValueError("idle_timeout must be positive")
-        if event_sink is not None and on_event is not None:
-            raise ValueError("provide one runtime event sink")
-        self._factory = factory or create_runtime
-        self._cleanup = cleanup or close_runtime
+        self._factory = factory
+        self._cleanup = cleanup
         self._idle_timeout = idle_timeout
         self._clock = clock
-        self._event_sink = event_sink or on_event
+        self._event_sink = event_sink
         self._event_counts: Counter[str] = Counter()
         self._close_observers: list[Callable[[SessionRLMState], None]] = []
         self._deferred_close_tasks: set[asyncio.Task[None]] = set()
@@ -1744,8 +1733,6 @@ class SessionRLMRegistry:
         session_key: SessionKey,
         program_fingerprint: str | ProgramFingerprint | Mapping[str, object],
         factory: RuntimeFactory | None = None,
-        *,
-        create_runtime: RuntimeFactory | None = None,
     ) -> SessionRLMState:
         """Reuse or create one compatible resident state.
 
@@ -1759,7 +1746,7 @@ class SessionRLMRegistry:
                 raise RuntimeUnavailableError("Session RLM registry is shut down")
             key = session_key
             fingerprint = self._fingerprint(program_fingerprint)
-            selected_factory = factory or create_runtime or self._factory
+            selected_factory = factory or self._factory
             if selected_factory is None:
                 raise ValueError("a Session RLM factory is required")
 
@@ -1778,7 +1765,6 @@ class SessionRLMRegistry:
         program_fingerprint: str | ProgramFingerprint | Mapping[str, object],
         factory: RuntimeFactory | None = None,
         *,
-        create_runtime: RuntimeFactory | None = None,
         context_binding: str | None = None,
         preserve_interpreter: object | None = None,
     ) -> SessionRuntimeLease:
@@ -1793,7 +1779,7 @@ class SessionRLMRegistry:
                 raise RuntimeUnavailableError("Session RLM registry is shut down")
             key = session_key
             fingerprint = self._fingerprint(program_fingerprint)
-            selected_factory = factory or create_runtime or self._factory
+            selected_factory = factory or self._factory
             if selected_factory is None:
                 raise ValueError("a Session RLM factory is required")
             async with self._key_gate(key):
@@ -2841,42 +2827,3 @@ class SessionToolRegistry:
                                 self._inflight.pop(active.generation, None)
 
         return await_authorized()
-
-
-class SessionToolProxyFactory:
-    """Create one independent stable Tool registry per Session id."""
-
-    def __init__(self, *, max_tools: int = MAX_SESSION_TOOL_COUNT) -> None:
-        self._max_tools = max_tools
-        self._lock = RLock()
-        self._registries: dict[tuple[tuple[str, str | int], ...], SessionToolRegistry] = {}
-
-    def for_session(self, session_id: object, workspace_id: object | None = None) -> SessionToolRegistry:
-        """Return a registry keyed by full Workspace+Session tenancy.
-
-        The one-argument form remains a compatibility convenience for callers
-        whose process already has a workspace-scoped factory.  Production
-        callers should pass both IDs so equal Session UUID text across
-        Workspaces cannot share authorization bindings.
-        """
-        session_key = _identity_key(session_id, label="session_id")
-        key = (session_key,)
-        if workspace_id is not None:
-            key = (_identity_key(workspace_id, label="workspace_id"), session_key)
-        with self._lock:
-            registry = self._registries.get(key)
-            if registry is None:
-                registry = SessionToolRegistry(max_tools=self._max_tools)
-                self._registries[key] = registry
-            return registry
-
-    create = for_session
-    registry_for = for_session
-
-    def __call__(self, session_id: object) -> SessionToolRegistry:
-        return self.for_session(session_id)
-
-
-def create_session_tool_registry(*, max_tools: int = MAX_SESSION_TOOL_COUNT) -> SessionToolRegistry:
-    """Return a provider-neutral registry for one Session."""
-    return SessionToolRegistry(max_tools=max_tools)

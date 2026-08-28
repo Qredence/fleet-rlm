@@ -816,10 +816,9 @@ def build_memory_promotion_intents(
     claims: set[tuple[str, str]] = set()
     total_bytes = 0
     for ordinal, candidate in enumerate(candidates):
-        normalized = normalize_memory_candidate_categories((candidate.category,))[0]
-        if normalized not in allowed:
-            raise WorkspaceMemoryCategoryError("candidate category is not allowed")
         validated = _validate_promotion_candidate(candidate)
+        if validated.category not in allowed:
+            raise WorkspaceMemoryCategoryError("candidate category is not allowed")
         claim = (validated.category, validated.learning)
         if claim in claims:
             raise WorkspaceMemoryRecordError("duplicate candidate in batch")
@@ -1569,11 +1568,18 @@ class WorkspaceMemory:
         # annotation marked later rows malformed.  Never page an ambiguous id.
         shape_ids: list[str] = []
         for line in lines:
-            if line.raw.strip():
-                try:
-                    shape_ids.append(parse_workspace_memory_record(line.raw).memory_id)
-                except WorkspaceMemoryRecordError:
-                    continue
+            if not line.raw.strip():
+                continue
+            if line.entry is not None:
+                shape_ids.append(line.entry.memory_id)
+                continue
+            try:
+                # Graph-nulled rows (duplicates, bad supersession) keep a
+                # shape-valid raw line; re-parse only those so duplicate ids
+                # still fail closed instead of being skipped.
+                shape_ids.append(parse_workspace_memory_record(line.raw).memory_id)
+            except WorkspaceMemoryRecordError:
+                continue
         if len(shape_ids) != len(set(shape_ids)):
             raise MemoryInvariantError()
         entries = [line.entry for line in lines if line.entry is not None]
@@ -1912,11 +1918,18 @@ class WorkspaceMemory:
     def _assert_unique_entries(self, lines: tuple[WorkspaceMemoryParsedLine, ...]) -> None:
         shape_ids: list[str] = []
         for line in lines:
-            if line.raw.strip():
-                try:
-                    shape_ids.append(parse_workspace_memory_record(line.raw).memory_id)
-                except WorkspaceMemoryRecordError:
-                    continue
+            if not line.raw.strip():
+                continue
+            if line.entry is not None:
+                shape_ids.append(line.entry.memory_id)
+                continue
+            try:
+                # Graph-nulled rows (duplicates, bad supersession) keep a
+                # shape-valid raw line; re-parse only those so duplicate ids
+                # still fail closed instead of being skipped.
+                shape_ids.append(parse_workspace_memory_record(line.raw).memory_id)
+            except WorkspaceMemoryRecordError:
+                continue
         if len(shape_ids) != len(set(shape_ids)):
             raise MemoryInvariantError()
 

@@ -72,7 +72,7 @@ def test_daytona_sdk_stays_inside_the_daytona_boundary() -> None:
 # ---------------------------------------------------------------------------
 
 DELETED_SYMBOLS: tuple[tuple[str, tuple[str, ...]], ...] = (
-    ("fleet_rlm.chat.run_preparation", ("RunPreparationValidationError", "RunPreparationIntegrityError")),
+    ("fleet_rlm.chat.preparation", ("RunPreparationValidationError", "RunPreparationIntegrityError")),
     ("fleet_rlm.chat.run_ownership", ("consume_task_exception",)),
     ("fleet_rlm.rlm._dspy_compat", ("initial_tools_registered", "mark_tools_registered")),
     ("fleet_rlm.rlm.result", ("sanitize_public_error",)),

@@ -280,7 +280,7 @@ class LocalArtifactBlobGateway:
     def __init__(self, store: LocalArtifactCatalog) -> None:
         self._store = store
 
-    async def read(self, workspace_id: UUID, logical_path: str) -> bytes:
+    async def read_bytes(self, workspace_id: UUID, logical_path: str) -> bytes:
         _user, encoded_workspace, encoded_id = logical_path.split(":", 2)
         if UUID(encoded_workspace) != workspace_id:
             raise ArtifactNotFoundError("artifact not found")

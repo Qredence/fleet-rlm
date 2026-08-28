@@ -86,7 +86,7 @@ class _ControlledCoordinator:
         return self._opened
 
     def open_owned(self, command: object):
-        from fleet_rlm.chat.turn_coordinator import OpenedTurnStream
+        from fleet_rlm.chat.turn_runtime import OpenedTurnStream
 
         return OpenedTurnStream(
             None,
@@ -109,14 +109,14 @@ class _ASGIProbe:
 
 
 async def _start_route(coordinator: _ControlledCoordinator) -> _ASGIProbe:
-    from fleet_rlm.api.dependencies import get_turn_coordinator
+    from fleet_rlm.api.dependencies import get_turn_runtime
     from fleet_rlm.api.routes.turns import router
 
     app = FastAPI()
     app.state.settings = SimpleNamespace(run_heartbeat_seconds=10)
     app.include_router(router)
 
-    app.dependency_overrides[get_turn_coordinator] = lambda: coordinator
+    app.dependency_overrides[get_turn_runtime] = lambda: coordinator
     body = json.dumps({"text": "hello"}).encode()
     incoming: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
     incoming.put_nowait({"type": "http.request", "body": body, "more_body": False})

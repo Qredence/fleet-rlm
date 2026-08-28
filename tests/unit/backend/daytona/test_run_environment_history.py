@@ -76,7 +76,7 @@ def test_daytona_helper_returns_committed_session_history_not_dspy_history() -> 
 def test_daytona_helper_records_equal_canonical_history_records() -> None:
     """The Dayona transport records equal :func:`to_canonical_history_records` output."""
 
-    from fleet_rlm.chat.run_preparation import _claim_history_records
+    from fleet_rlm.chat.preparation import claim_history_records
     from fleet_rlm.runtime.daytona.run_environment import build_committed_session_history_for_claim
 
     claim = _make_claim(
@@ -89,7 +89,7 @@ def test_daytona_helper_records_equal_canonical_history_records() -> None:
     )
     transport = build_committed_session_history_for_claim(claim)
 
-    committed_turns, user_requests = _claim_history_records(claim)
+    committed_turns, user_requests = claim_history_records(claim)
     canonical = to_canonical_history_records(committed_turns, user_requests=user_requests)
 
     # Records are deep-equal and the transport carries them in order.

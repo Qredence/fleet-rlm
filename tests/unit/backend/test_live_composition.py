@@ -457,7 +457,6 @@ async def test_daytona_install_registers_and_dispose_clears_bridge_dispatcher(
         run_environment_resources=object(),
         workspace_volume_gateway=object(),
         workspace_file_service=object(),
-        workspace_volume_mirror=object(),
     )
 
     async def fake_build(

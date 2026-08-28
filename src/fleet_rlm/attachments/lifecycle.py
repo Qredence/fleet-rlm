@@ -53,11 +53,11 @@ class AttachmentCatalog(Protocol):
 
 
 class AttachmentBlobGateway(Protocol):
-    async def write(self, workspace_id: UUID, logical_path: str, data: bytes) -> None: ...
+    async def write_bytes(self, workspace_id: UUID, logical_path: str, data: bytes) -> None: ...
 
-    async def read(self, workspace_id: UUID, logical_path: str) -> bytes: ...
+    async def read_bytes(self, workspace_id: UUID, logical_path: str) -> bytes: ...
 
-    async def remove(self, workspace_id: UUID, logical_path: str) -> None: ...
+    async def remove_bytes(self, workspace_id: UUID, logical_path: str) -> None: ...
 
 
 class AttachmentPathPolicy(Protocol):
@@ -137,7 +137,7 @@ class AttachmentLifecycleService:
         )
         storage_ref = self._paths.attachment_blob(attachment_id)
         try:
-            await self._blobs.write(access.workspace_id, storage_ref, bytes(data))
+            await self._blobs.write_bytes(access.workspace_id, storage_ref, bytes(data))
             await self._catalog.create(access=access, ref=ref, storage_ref=storage_ref)
         except AttachmentError:
             await self._rollback_blob(access.workspace_id, storage_ref)
@@ -149,7 +149,7 @@ class AttachmentLifecycleService:
 
     async def _rollback_blob(self, workspace_id: UUID, storage_ref: str) -> None:
         with suppress(Exception):
-            await self._blobs.remove(workspace_id, storage_ref)
+            await self._blobs.remove_bytes(workspace_id, storage_ref)
 
     async def metadata(
         self,
@@ -194,7 +194,7 @@ class AttachmentLifecycleService:
         validated: list[tuple[StoredAttachment, bytes]] = []
         for item in stored:
             try:
-                data = await self._blobs.read(access.workspace_id, item.storage_ref)
+                data = await self._blobs.read_bytes(access.workspace_id, item.storage_ref)
             except AttachmentError:
                 raise
             except (FileNotFoundError, KeyError) as exc:

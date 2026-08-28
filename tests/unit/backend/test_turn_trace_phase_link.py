@@ -143,7 +143,7 @@ async def _run_success_turn(
     """
     from fleet_rlm.chat.commands import OpenTurnCommand
     from fleet_rlm.chat.run_lifecycle import RunLifecycleService
-    from fleet_rlm.chat.turn_coordinator import TurnCoordinator
+    from fleet_rlm.chat.turn_runtime import TurnRuntime
     from fleet_rlm.persistence.repositories import InMemoryRunStateStore, InMemorySessionCatalog
     from fleet_rlm.rlm.events import EventRecorder, RunStarted, Status
     from fleet_rlm.rlm.result import PredictionResult, RLMOutcome
@@ -221,7 +221,7 @@ async def _run_success_turn(
             """
             return Stream(execution)
 
-    coordinator = TurnCoordinator(
+    coordinator = TurnRuntime(
         lifecycle=RunLifecycleService(store, max_artifact_bytes=1024),
         preparation=Preparation(),
         runner=Runner(),
@@ -241,7 +241,7 @@ def _real_prepared_run(run_id: Any, session_id: Any) -> Any:
     """
     Create a prepared run with the specified run and session identifiers.
     """
-    from fleet_rlm.chat.run_preparation import PreparedRun, _PreparedRunResources
+    from fleet_rlm.chat.preparation import PreparedRun, _PreparedRunResources
 
     return PreparedRun(
         execution=cast("Any", SimpleNamespace(run_id=run_id, session_id=session_id)),

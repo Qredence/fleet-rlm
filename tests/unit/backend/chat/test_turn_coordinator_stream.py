@@ -8,7 +8,7 @@ from uuid import uuid4
 
 import pytest
 
-from fleet_rlm.chat.turn_coordinator import OpenedTurnStream
+from fleet_rlm.chat.turn_runtime import OpenedTurnStream
 
 
 @dataclass

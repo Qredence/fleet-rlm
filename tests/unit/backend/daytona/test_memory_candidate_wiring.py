@@ -45,7 +45,7 @@ def _turn():
 
 
 async def _capabilities(tmp_path, *, categories: tuple[str, ...]):
-    from fleet_rlm.chat.run_preparation import RunEnvironment
+    from fleet_rlm.chat.preparation import RunEnvironment
     from fleet_rlm.runtime.daytona.run_environment import _LiveCapabilityPreparer
     from fleet_rlm.skills.catalog import build_bundled_skill_catalog
 

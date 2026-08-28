@@ -12,7 +12,7 @@ from collections.abc import Callable, Mapping
 from contextlib import AbstractAsyncContextManager
 from dataclasses import asdict
 from types import MappingProxyType
-from typing import Any, NoReturn, cast
+from typing import Any, NoReturn, Protocol, cast
 from uuid import UUID
 
 import dspy
@@ -50,7 +50,7 @@ WorkspaceFileList = WorkspaceListResult
 WorkspaceFileSession = AsyncStorageSession
 
 
-class WorkspaceAccessGateway:
+class WorkspaceAccessGateway(Protocol):
     """Async opener for the Workspace-level public ``files/`` root."""
 
     def open_workspace(
@@ -58,8 +58,7 @@ class WorkspaceAccessGateway:
         workspace_id: UUID,
         *,
         purpose: str,
-    ) -> AbstractAsyncContextManager[AsyncStorageSession]:
-        raise NotImplementedError
+    ) -> AbstractAsyncContextManager[AsyncStorageSession]: ...
 
 
 class WorkspaceFileService:

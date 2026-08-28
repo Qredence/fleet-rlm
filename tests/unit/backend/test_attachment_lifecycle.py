@@ -42,15 +42,15 @@ class _Blobs:
     calls: list[tuple[str, object]]
     stored: dict[str, bytes] = field(default_factory=dict)
 
-    async def write(self, workspace_id: UUID, logical_path: str, data: bytes) -> None:
+    async def write_bytes(self, workspace_id: UUID, logical_path: str, data: bytes) -> None:
         self.calls.append(("blob", (workspace_id, logical_path, data)))
         self.stored[logical_path] = data
 
-    async def read(self, workspace_id: UUID, logical_path: str) -> bytes:
+    async def read_bytes(self, workspace_id: UUID, logical_path: str) -> bytes:
         self.calls.append(("read", (workspace_id, logical_path)))
         return self.stored[logical_path]
 
-    async def remove(self, workspace_id: UUID, logical_path: str) -> None:
+    async def remove_bytes(self, workspace_id: UUID, logical_path: str) -> None:
         self.calls.append(("remove-blob", (workspace_id, logical_path)))
         self.stored.pop(logical_path, None)
 

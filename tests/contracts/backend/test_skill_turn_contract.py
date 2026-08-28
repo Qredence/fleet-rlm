@@ -50,7 +50,7 @@ class _Coordinator:
         self.error = error
 
     def open_owned(self, command: OpenTurnCommand):
-        from fleet_rlm.chat.turn_coordinator import OpenedTurnStream
+        from fleet_rlm.chat.turn_runtime import OpenedTurnStream
 
         self.command = command
         if self.error is not None:

@@ -21,7 +21,7 @@ class _Catalog:
 class _Blobs:
     data: bytes
 
-    async def read(self, workspace_id: UUID, logical_path: str) -> bytes:
+    async def read_bytes(self, workspace_id: UUID, logical_path: str) -> bytes:
         del workspace_id, logical_path
         return self.data
 

@@ -27,13 +27,13 @@ def test_p34_freeze_guide_is_indexed_and_names_the_final_gate() -> None:
 
 def test_p34_canonical_ownership_seams_remain_available() -> None:
     from fleet_rlm.chat.run_lifecycle import RunLifecycleService
-    from fleet_rlm.chat.turn_coordinator import TurnCoordinator
+    from fleet_rlm.chat.turn_runtime import TurnRuntime
     from fleet_rlm.daytona.recursive_child_runtime import ChildRuntimeLeaseState
     from fleet_rlm.runtime.owned_effect import OwnedEffect
     from fleet_rlm.workspace.memory import MemoryFailureCategory
 
     assert callable(RunLifecycleService.finish)
-    assert callable(TurnCoordinator.open)
+    assert callable(TurnRuntime.open)
     assert callable(OwnedEffect.settle)
     assert {state.name for state in ChildRuntimeLeaseState} == {"OPEN", "CLOSING", "CLOSED", "FAILED"}
     assert {category.value for category in MemoryFailureCategory} == {

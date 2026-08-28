@@ -23,18 +23,18 @@ class LocalAttachmentBlobGateway:
             raise ValueError("invalid Attachment storage reference")
         return path
 
-    async def write(self, workspace_id: UUID, logical_path: str, data: bytes) -> None:
+    async def write_bytes(self, workspace_id: UUID, logical_path: str, data: bytes) -> None:
         del workspace_id
         self._path(logical_path).write_bytes(data)
 
-    async def read(self, workspace_id: UUID, logical_path: str) -> bytes:
+    async def read_bytes(self, workspace_id: UUID, logical_path: str) -> bytes:
         del workspace_id
         try:
             return self._path(logical_path).read_bytes()
         except FileNotFoundError as exc:
             raise AttachmentNotFoundError("attachment not found") from exc
 
-    async def remove(self, workspace_id: UUID, logical_path: str) -> None:
+    async def remove_bytes(self, workspace_id: UUID, logical_path: str) -> None:
         del workspace_id
         self._path(logical_path).unlink(missing_ok=True)
 
@@ -92,19 +92,3 @@ class LocalAttachmentCatalog:
                 )
             )
         return tuple(values)
-
-
-class WorkspaceAttachmentBlobGateway:
-    """Adapt Workspace Volume byte I/O to AttachmentLifecycleService's blob port."""
-
-    def __init__(self, gateway) -> None:
-        self._gateway = gateway
-
-    async def write(self, workspace_id: UUID, logical_path: str, data: bytes) -> None:
-        await self._gateway.write_bytes(workspace_id, logical_path, data)
-
-    async def read(self, workspace_id: UUID, logical_path: str) -> bytes:
-        return await self._gateway.read_bytes(workspace_id, logical_path)
-
-    async def remove(self, workspace_id: UUID, logical_path: str) -> None:
-        await self._gateway.remove_bytes(workspace_id, logical_path)

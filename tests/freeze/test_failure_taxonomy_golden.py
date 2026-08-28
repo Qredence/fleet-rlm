@@ -17,6 +17,10 @@ from uuid import uuid4
 from fleet_rlm.api.errors import _STATUS_DEFAULTS
 from fleet_rlm.api.routes.turns import _open_failure_frames, _open_failure_message
 from fleet_rlm.api.sse import AISDKUIProjector
+from fleet_rlm.chat.preparation import (
+    RunPreparationTimeoutError,
+    RunPreparationUnavailableError,
+)
 from fleet_rlm.chat.run_lifecycle import (
     FailedRunReceipt,
     RunIdempotencyMismatchError,
@@ -24,11 +28,7 @@ from fleet_rlm.chat.run_lifecycle import (
     RunLifecycleUnavailableError,
     RunNotFoundError,
 )
-from fleet_rlm.chat.run_preparation import (
-    RunPreparationTimeoutError,
-    RunPreparationUnavailableError,
-)
-from fleet_rlm.chat.turn_coordinator import terminal
+from fleet_rlm.chat.turn_runtime import terminal
 from fleet_rlm.rlm.events import EventRecorder
 from fleet_rlm.skills.errors import InvalidSkillSelectionError
 

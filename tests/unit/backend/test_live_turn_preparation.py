@@ -14,8 +14,8 @@ from uuid import uuid4
 import pytest
 
 from fleet_rlm.attachments.models import AttachmentRef
+from fleet_rlm.chat.preparation import RunPreparationUnavailableError
 from fleet_rlm.chat.run_lifecycle import ClaimedRun, _RunClaimToken
-from fleet_rlm.chat.run_preparation import RunPreparationUnavailableError
 from fleet_rlm.composition.live import build_run_preparation
 from fleet_rlm.config.settings import Settings
 from fleet_rlm.daytona.session_manager import DaytonaAdmission
@@ -427,7 +427,7 @@ async def test_admission_timeout_is_sanitized_by_live_preparation() -> None:
 @pytest.mark.asyncio
 @pytest.mark.parametrize("mode", ["timeout", "cancel"])
 async def test_post_acquisition_sandbox_lookup_detaches_before_lease_release(mode: str) -> None:
-    from fleet_rlm.chat.run_preparation import RunPreparationTimeoutError
+    from fleet_rlm.chat.preparation import RunPreparationTimeoutError
     from fleet_rlm.runtime.daytona.run_environment import _DaytonaEnvironmentProvider
 
     entered = threading.Event()

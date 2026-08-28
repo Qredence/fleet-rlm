@@ -449,9 +449,7 @@ async def build_daytona_composition(
 
     from fleet_rlm.api.local_scope import LocalScope
     from fleet_rlm.artifacts.reader import ArtifactReader
-    from fleet_rlm.artifacts.workspace_storage import WorkspaceArtifactBlobGateway
     from fleet_rlm.attachments.lifecycle import AttachmentLifecycleService
-    from fleet_rlm.attachments.local_catalog import WorkspaceAttachmentBlobGateway
     from fleet_rlm.attachments.paths import WorkspaceAttachmentPathPolicy
     from fleet_rlm.chat.run_lifecycle import RunLifecycleService
     from fleet_rlm.chat.turn_runtime import TurnRuntime
@@ -520,14 +518,14 @@ async def build_daytona_composition(
         volume_paths = volume_paths_from_settings(resolved)
         attachment_lifecycle = AttachmentLifecycleService(
             catalog=SqlAlchemyAttachmentCatalog(session_factory),
-            blobs=WorkspaceAttachmentBlobGateway(gateway),
+            blobs=gateway,
             paths=WorkspaceAttachmentPathPolicy(volume_paths),
             max_bytes=resolved.max_upload_bytes,
         )
         artifact_catalog = SqlAlchemyArtifactCatalog(session_factory)
         artifact_reader = ArtifactReader(
             catalog=artifact_catalog,
-            blobs=WorkspaceArtifactBlobGateway(gateway),
+            blobs=gateway,
         )
         workspace_file_service = WorkspaceFileService(cast(WorkspaceAccessGateway, mounted_workspace_gateway))
         local_scope = LocalScope()

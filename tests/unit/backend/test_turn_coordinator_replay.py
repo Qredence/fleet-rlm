@@ -11,7 +11,7 @@ import pytest
 async def test_replay_bypasses_preparation_and_runner() -> None:
     from fleet_rlm.chat.commands import OpenTurnCommand
     from fleet_rlm.chat.run_lifecycle import CommittedRunReplay
-    from fleet_rlm.chat.turn_coordinator import TurnCoordinator
+    from fleet_rlm.chat.turn_runtime import TurnRuntime
     from fleet_rlm.sessions.committed_turn import CommittedTurn, TextPart, UsagePart
     from fleet_rlm.sessions.models import TurnAccess, TurnInput
 
@@ -36,7 +36,7 @@ async def test_replay_bypasses_preparation_and_runner() -> None:
             raise AssertionError(name)
 
     command = OpenTurnCommand(TurnAccess(uuid4(), uuid4()), session_id, TurnInput("hi"), "key", run_id)
-    opened = await TurnCoordinator(lifecycle=Lifecycle(), preparation=Never(), runner=Never()).open(command)
+    opened = await TurnRuntime(lifecycle=Lifecycle(), preparation=Never(), runner=Never()).open(command)
     events = [event async for event in opened]
 
     assert [event.kind for event in events] == [

@@ -124,7 +124,7 @@ async def test_prepared_run_aclose_waits_for_timed_out_workspace_agent_promotion
     tmp_path: Any,
 ) -> None:
     from fleet_rlm.chat.post_commit_memory import OwnedPostCommitMemoryPromotion
-    from fleet_rlm.chat.run_preparation import PreparedRun, _PreparedRunResources
+    from fleet_rlm.chat.preparation import PreparedRun, _PreparedRunResources
 
     process = _HangingProcess()
     release_count = 0

@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+from uuid import uuid4
+
 import dspy
 import pytest
 
 from fleet_rlm.rlm.session_runtime import (
     SessionToolAuthorizationError,
-    SessionToolProxyFactory,
     SessionToolRegistry,
 )
 
@@ -205,36 +206,23 @@ def test_proxy_preserves_exact_source_metadata_without_retaining_source_tool() -
     assert proxy.func(value="public") == "public"
 
 
-def test_factory_keeps_active_bindings_isolated_between_sessions() -> None:
-    factory = SessionToolProxyFactory()
-    first_session = factory.for_session("session-1")
-    second_session = factory.for_session("session-2")
+@pytest.mark.asyncio
+async def test_runner_caches_one_tool_registry_per_session_key() -> None:
+    """The runner's inline tenancy cache keys registries by full Session identity."""
+    from fleet_rlm.rlm.runtime import RLMRunner
+    from fleet_rlm.rlm.session_runtime import SessionKey
 
-    first = first_session.install(
-        (_tool("echo", "first"),),
-        run_id="run-1",
-        claim_valid=lambda: True,
-        authorized_names={"echo"},
-    )[0]
-    second = second_session.install(
-        (_tool("echo", "second"),),
-        run_id="run-2",
-        claim_valid=lambda: True,
-        authorized_names={"echo"},
-    )[0]
-
-    assert first is not second
-    assert first_session is factory.for_session("session-1")
-    assert first.func(value="a") == "first:a"
-    assert second.func(value="b") == "second:b"
-
-    first_session.clear()
-    with pytest.raises(SessionToolAuthorizationError):
-        first.func(value="cleared")
-    assert second.func(value="still-live") == "second:still-live"
-
-
-def test_factory_separates_equal_session_ids_across_workspaces() -> None:
-    factory = SessionToolProxyFactory()
-    assert factory.for_session("same", "workspace-a") is not factory.for_session("same", "workspace-b")
-    assert factory.for_session("same", "workspace-a") is factory.for_session("same", "workspace-a")
+    runner = RLMRunner()
+    try:
+        cache = runner._session_tool_registries
+        assert cache == {}
+        first = SessionKey(workspace_id=uuid4(), session_id=uuid4())
+        second = SessionKey(workspace_id=first.workspace_id, session_id=uuid4())
+        registry_a, registry_b = SessionToolRegistry(), SessionToolRegistry()
+        cache[first] = registry_a
+        cache[second] = registry_b
+        assert cache[first] is registry_a
+        assert cache[second] is registry_b
+        assert cache[first] is not cache[second]
+    finally:
+        await runner.aclose()

@@ -135,7 +135,7 @@ def build_committed_session_history_for_claim(claim: ClaimedRun) -> CommittedSes
     result metadata and never bypasses the claim.
 
     The in-process composition stays on :class:`dspy.History` (see
-    :func:`fleet_rlm.chat.run_preparation.build_dspy_history_for_claim`);
+    :func:`fleet_rlm.chat.preparation.build_dspy_history_for_claim`);
     this Dayona helper exists to keep the broker able to inject the value
     while preserving the canonical record contract.
     """

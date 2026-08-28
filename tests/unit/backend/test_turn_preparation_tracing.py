@@ -72,7 +72,7 @@ def _make_turn() -> Any:
 
 def _make_preparer(*, environments: Any = None) -> Any:
     from fleet_rlm.attachments.models import PreparedAttachments
-    from fleet_rlm.chat.run_preparation import DefaultRunPreparer, RunEnvironment
+    from fleet_rlm.chat.preparation import DefaultRunPreparer, RunEnvironment
     from fleet_rlm.rlm.program import RLMModelBundle, RLMOptions
     from fleet_rlm.rlm.runtime import RLMExecutionSpec
 
@@ -156,7 +156,7 @@ async def test_acquire_environment_failure_marks_phase_failed(
     monkeypatch: pytest.MonkeyPatch, fleet_trace_active: None
 ) -> None:
     del fleet_trace_active
-    from fleet_rlm.chat.run_preparation import RunPreparationUnavailableError
+    from fleet_rlm.chat.preparation import RunPreparationUnavailableError
 
     calls = _install_fake_mlflow(monkeypatch)
 

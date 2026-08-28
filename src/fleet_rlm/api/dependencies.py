@@ -67,12 +67,6 @@ def get_turn_runtime(request: Request) -> TurnRuntime:
     return runtime
 
 
-# Compatibility dependency name retained as an identity alias. Keeping one
-# callable object means FastAPI overrides for either spelling affect both the
-# canonical and historical dependency annotations.
-get_turn_coordinator = get_turn_runtime
-
-
 def get_attachment_lifecycle(request: Request) -> AttachmentLifecycle:
     lifecycle = get_ready_runtime_inventory(request).attachment_lifecycle
     if lifecycle is None:
@@ -140,10 +134,7 @@ def get_workspace_volume_gateway(request: Request) -> WorkspaceVolumeGateway:
     return gateway
 
 
-# The canonical annotation names the canonical dependency. The historical
-# alias is the same callable object, so old overrides remain effective.
 TurnRuntimeDep = Annotated[TurnRuntime, Depends(get_turn_runtime)]
-TurnCoordinatorDep = Annotated[TurnRuntime, Depends(get_turn_coordinator)]
 ArtifactReaderDep = Annotated[ArtifactReader, Depends(get_artifact_reader)]
 AttachmentLifecycleDep = Annotated[AttachmentLifecycle, Depends(get_attachment_lifecycle)]
 SessionCatalogDep = Annotated[SessionCatalog, Depends(get_session_catalog)]
@@ -166,7 +157,6 @@ __all__ = [
     "SessionRuntimeRegistryDep",
     "SettingsDep",
     "SkillCatalogDep",
-    "TurnCoordinatorDep",
     "TurnRuntimeDep",
     "WorkspaceFileServiceDep",
     "WorkspaceVolumeGatewayDep",

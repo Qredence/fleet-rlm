@@ -41,7 +41,6 @@ from fleet_rlm.rlm.runtime import RLMFactoryLike
 from fleet_rlm.rlm.session_runtime import SessionRLMRegistry
 from fleet_rlm.skills.catalog import SkillCatalog, build_bundled_skill_catalog
 from fleet_rlm.workspace.models import UNAVAILABLE_WORKSPACE_CAPABILITY
-from fleet_rlm.workspace.storage import VolumeTreeFs
 
 
 @dataclass(frozen=True, slots=True)
@@ -120,7 +119,6 @@ def build_local_inventory(
     artifact_reader: ArtifactReader,
     preparation: RunPreparation,
     rlm_factory: RLMFactoryLike,
-    workspace_volume_mirror: VolumeTreeFs | None,
     session_runtime_registry: SessionRLMRegistry | None = None,
 ) -> RuntimeInventory:
     """Build the shared in-memory/SQL inventory for one local runtime."""
@@ -173,7 +171,6 @@ def build_local_inventory(
         runner=runner,
         attachment_lifecycle=attachment_lifecycle,
         artifact_reader=artifact_reader,
-        workspace_volume_mirror=workspace_volume_mirror,
         session_catalog=session_catalog,
         run_lifecycle=lifecycle,
         run_cleanup_supervisor=cleanup,
@@ -421,10 +418,6 @@ def install_testing_composition(
     database: RuntimeDatabaseLifecycle | None = None,
 ) -> RuntimeInventory:
     """Install credential-free deterministic adapters for a test lifespan."""
-    from fleet_rlm.artifacts.workspace_storage import WorkspaceArtifactBlobGateway
-    from fleet_rlm.attachments.local_catalog import (
-        WorkspaceAttachmentBlobGateway,
-    )
     from fleet_rlm.attachments.paths import WorkspaceAttachmentPathPolicy
     from fleet_rlm.workspace.paths import volume_paths_from_settings
     from fleet_rlm.workspace.storage import HostVolumeMirror, OfflineHostVolumeGateway
@@ -445,9 +438,9 @@ def install_testing_composition(
         settings,
         session_factory=database.session_factory,
         volume_paths=mirror.volume_paths,
-        sql_attachment_blobs=WorkspaceAttachmentBlobGateway(volume_gateway),
+        sql_attachment_blobs=volume_gateway,
         sql_attachment_paths=WorkspaceAttachmentPathPolicy(mirror.volume_paths),
-        sql_artifact_blobs=WorkspaceArtifactBlobGateway(cast(Any, volume_gateway)),
+        sql_artifact_blobs=volume_gateway,
     )
     local_inventory = build_local_inventory(
         settings,
@@ -463,7 +456,6 @@ def install_testing_composition(
             session_runtime_registry=session_runtime_registry,
         ),
         rlm_factory=TestingRLMFactory(),
-        workspace_volume_mirror=mirror,
         session_runtime_registry=session_runtime_registry,
     )
     # Overlay only the host volume adapters; keep the shared local inventory
