@@ -17,7 +17,9 @@
 | `live_phase2_recursive_verify.py` | Run the narrow Phase 2 dedicated-child native DSPy canary on `daytona-recursive` |
 | `live_daytona_verify.py` | Run the opt-in Daytona MVP proof and validate its bounded JSON receipt |
 | `live_p35d_certification.py` | Run the serial P35-D credentialed live certification matrix and aggregate ignored evidence receipts |
-| `certification_gate.py` | Seal or verify the fail-closed, same-SHA P35-E certification manifest |
+| `live_p53_certification.py` | Run the serial P53.2 Daytona Session rotation and native-child certification, archiving stale receipts |
+| `p53_certification.py` | Build and verify the fail-closed P53.2 continuity/rotation/child evidence manifest |
+| `certification_gate.py` | Seal or verify the fail-closed, same-SHA P35-E certification manifest, including P53.2 evidence |
 | `release_smoke.py` | Smoke-test installed wheel bytes, bundled assets, CLI entry points, and OpenAPI without provider startup |
 | `live_daytona_tunnel_probe.py` | Run the development-only strict Daytona egress smoke through two Cloudflare HTTPS origins |
 | `benchmark_daytona_lifecycle.py` | Benchmark full Daytona create-through-first-execution lifecycle and select retained versus per-Turn mode |
@@ -115,3 +117,22 @@ The Databricks-backed quality loop composes three opt-in steps that all require
    SME labeling session, distills judge guidelines with MemAlign, and re-runs
    the aligned baseline under a named run.
 See `docs/how-to-guides/evaluation-optimization.md` for the full workflow.
+
+## P53.2 Daytona Session certification
+
+P53.2 is a separate live proof from the ten-lane P35-D transport matrix. It
+requires a clean candidate, `FLEET_LIVE=1`, the credentialed Daytona provider,
+and serial execution (`-n 0`). The runner archives stale receipts before each
+lane and seals one manifest only after resident continuity, all seven runtime
+rotation triggers, and the seven native-child outcome lanes pass.
+
+```bash
+make p53-live-certification
+make certification-gate
+make certification-verify
+```
+
+`certification-gate` consumes the current P35-D receipt and the P53.2 manifest;
+`certification-verify` rejects stale SHA, lockfile, DSPy, nested receipt, or
+content-digest identity. Do not report certification from a green P35-D matrix
+alone.

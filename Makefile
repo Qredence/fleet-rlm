@@ -22,7 +22,7 @@ PYTEST_PARALLEL := -n auto --maxprocesses=$(PYTEST_XDIST_MAX_WORKERS) --dist=loa
 	test test-fast test-unit test-contract test-packaging test-daytona-cov \
 	check quality-gate check-release check-docs check-security check-deps check-codebase-tree check-dependency-boundaries api-check api-sync tui-check \
 	build build-release release release-check \
-	certification-gate certification-verify \
+	certification-gate certification-verify p53-live-certification \
 	clean cli precommit-install precommit-run precommit \
 	sync sync-dev sync-all metadata-check docs-check security-check dependency-check release-artifacts cli-help \
 	cloud-preflight \
@@ -48,6 +48,7 @@ help:
 	@echo "  make test-packaging   - Run serial artifact/install/release tests"
 	@echo "  make test-contract    - Run backend contracts and CLI smoke tests"
 	@echo "  make test-daytona-cov - Run canonical non-live tests with Daytona branch coverage"
+	@echo "  make p53-live-certification - Run serial credentialed P53 Session certification"
 	@echo "  make benchmark-oolong - Run pinned Prime Oolong smoke (runtime.live_enabled=true; configure credentials)"
 	@echo "  make benchmark-native-long-context - Measure native whole-value URL context at 1/5/10 MiB"
 	@echo ""
@@ -211,6 +212,9 @@ build-release: build
 	uv run python scripts/validate_release.py wheel
 	uvx twine check --strict dist/*
 	uv run python scripts/validate_release.py artifacts
+
+p53-live-certification:
+	FLEET_LIVE=1 uv run python scripts/live_p53_certification.py
 
 certification-gate:
 	uv run python scripts/certification_gate.py run

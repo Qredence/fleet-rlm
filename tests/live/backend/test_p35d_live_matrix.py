@@ -81,6 +81,9 @@ def test_p35d_runtime_identity() -> None:
 
 
 def _write_receipt(payload: dict[str, Any]) -> None:
+    run_id = os.environ.get("FLEET_P35D_RUN_ID")
+    if run_id:
+        payload = {**payload, "run_id": run_id}
     raw_path = os.environ.get(_EVIDENCE_ENV)
     if not raw_path:
         return
@@ -339,6 +342,7 @@ def test_p35d_fault_logs_are_secret_free(caplog: pytest.LogCaptureFixture) -> No
             "schema": "fleet.p35d-fault-logs/v1",
             "candidate": {**_identity(), "versions": {"dspy": "3.3.1"}},
             "faults": ["provider_auth", "daytona_error", "interpreter_exception"],
+            "assertions": {"secret_free_fault_logs": True},
             "scans": {
                 "caplog": {
                     "passed": True,

@@ -14,7 +14,7 @@ import asyncio
 import contextlib
 import inspect
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
 from uuid import UUID, uuid4
@@ -69,6 +69,23 @@ class RootSessionSpec:
         return self.context_fingerprint
 
 
+@dataclass(slots=True)
+class _UnpublishedResourceOwner:
+    """Retain compatibility-resource cleanup until provider fencing succeeds."""
+
+    lease: Any
+    request: Any
+    manager: Any
+    release_callback: Callable[[], Any] | None = None
+    released: bool = False
+    quarantined: bool = False
+    callback_started: bool = False
+    callback_settled: bool = False
+    cleanup_lock: asyncio.Lock = field(default_factory=asyncio.Lock, repr=False)
+    cleanup_task: asyncio.Task[Any] | None = field(default=None, repr=False)
+    deadline: float | None = None
+
+
 @dataclass(frozen=True, slots=True)
 class ChildEnvironmentSpec:
     """Immutable selectors and bounds for one disposable child."""
@@ -96,6 +113,19 @@ class ChildEnvironmentSpec:
         if self.workspace_id is None or self.session_id is None:
             return None
         return (_identity_text(self.workspace_id, "workspace_id"), _identity_text(self.session_id, "session_id"))
+
+
+def _optional_deadline_kwargs(function: Callable[..., Any], deadline: float | None) -> dict[str, Any]:
+    """Pass a deadline only to lifecycle seams that advertise the argument."""
+    try:
+        parameters = inspect.signature(function).parameters
+    except (TypeError, ValueError):
+        return {"deadline": deadline}
+    if "deadline" in parameters or any(
+        parameter.kind is inspect.Parameter.VAR_KEYWORD for parameter in parameters.values()
+    ):
+        return {"deadline": deadline}
+    return {}
 
 
 def _call_factory(factory: Callable[..., Any], spec: Any, *, extras: dict[str, Any] | None = None) -> Any:
@@ -276,13 +306,26 @@ class DaytonaRuntime:
         self._root_owner_acquisition_tasks: set[asyncio.Task[Any]] = set()
         self._late_root_acquisitions: dict[asyncio.Task[Any], RootSessionSpec] = {}
         self._late_root_cleanup_tasks: set[asyncio.Task[Any]] = set()
+        self._late_raw_root_owners: dict[int, Any] = {}
+        self._late_raw_root_tasks: dict[int, asyncio.Task[Any]] = {}
         self._late_root_leases: set[RootSessionLease] = set()
+        # Compatibility resources without the combined release/fence boundary
+        # remain owned here until both phases have completed.
+        self._unpublished_resource_owners: dict[int, _UnpublishedResourceOwner] = {}
+        self._unpublished_resource_tasks: set[asyncio.Task[Any]] = set()
+        # Combined-manager retirement tasks are retained independently of the
+        # manager's private map. This covers custom resource seams that do not
+        # retain an unpublished lease after a failed ordered cleanup.
+        self._unpublished_retirement_owners: dict[int, tuple[Any, Callable[[], Any]]] = {}
+        self._unpublished_retirement_tasks: dict[int, asyncio.Task[Any]] = {}
         self._child_lock = asyncio.Lock()
         self._children: set[ChildEnvironment] = set()
         self._child_acquisition_tasks: set[asyncio.Task[Any]] = set()
         self._child_owner_acquisition_tasks: set[asyncio.Task[Any]] = set()
         self._late_child_acquisitions: dict[asyncio.Task[Any], ChildEnvironmentSpec] = {}
         self._late_child_cleanup_tasks: set[asyncio.Task[Any]] = set()
+        self._late_raw_child_owners: dict[int, Any] = {}
+        self._late_raw_child_tasks: dict[int, asyncio.Task[Any]] = {}
         self._late_child_environments: set[ChildEnvironment] = set()
         self._close_lock = asyncio.Lock()
         self._close_task: asyncio.Task[bool] | None = None
@@ -343,6 +386,8 @@ class DaytonaRuntime:
                         or spec.force_new
                         or _lease_fingerprint(current) != spec.context_fingerprint
                     )
+                    if current is None and key in self._tainted:
+                        must_replace = True
                     if current is not None and not must_replace:
                         return current
                 if current is not None:
@@ -350,13 +395,13 @@ class DaytonaRuntime:
                     async with self._root_lock:
                         if self._roots.get(key) is current:
                             self._roots.pop(key, None)
-                        self._tainted.discard(key)
                 raw = await self._acquire_root_from_provider(spec, force_new=must_replace or spec.force_new)
                 owner = self._coerce_root(spec, raw)
                 published = False
                 try:
                     async with self._root_lock:
                         self._roots[key] = owner
+                        self._tainted.discard(key)
                         published = True
                     # Shutdown may have started while the provider request was
                     # in flight. Publish the owner before closing it so a
@@ -469,7 +514,81 @@ class DaytonaRuntime:
         # the next event-loop turn after ``wait`` observes task completion.
         await asyncio.sleep(0)
         await wait_owned(self._late_root_cleanup_tasks, "Daytona late root cleanup timed out")
+        for raw_id, raw in tuple(self._late_raw_root_owners.items()):
+            existing_raw_task = self._late_raw_root_tasks.get(raw_id)
+            if existing_raw_task is not None and not existing_raw_task.done():
+                continue
+            try:
+                cleanup = asyncio.create_task(self._close_raw_root(raw), name="fleet-daytona-raw-root-retry")
+            except BaseException as exc:
+                if first_error is None:
+                    first_error = exc
+                continue
+            self._late_root_cleanup_tasks.add(cleanup)
+            self._late_raw_root_tasks[raw_id] = cleanup
+            cleanup.add_done_callback(self._settled_late_root_cleanup_for(raw))
+        await wait_owned(self._late_root_cleanup_tasks, "Daytona raw root cleanup timed out")
+        if self._late_raw_root_owners and first_error is None:
+            first_error = RuntimeError("Daytona raw root cleanup is unresolved")
+        await wait_owned(self._unpublished_resource_tasks, "Daytona unpublished resource cleanup timed out")
+        # Compatibility resource managers may not expose the combined
+        # release/fence boundary. Retry their unpublished owners before root
+        # shutdown and keep the runtime failed while any fence is unresolved.
+        unpublished_tasks: set[asyncio.Task[Any]] = set()
+        for owner in tuple(self._unpublished_resource_owners.values()):
+            try:
+                unpublished_tasks.add(self._schedule_unpublished_resource_cleanup(owner, deadline=deadline))
+            except BaseException as exc:
+                if first_error is None:
+                    first_error = exc
+        await wait_owned(unpublished_tasks, "Daytona unpublished resource cleanup timed out")
+        retry_unpublished: set[asyncio.Task[Any]] = set()
+        for key, (_lease, retry_factory) in tuple(self._unpublished_retirement_owners.items()):
+            existing_retry = self._unpublished_retirement_tasks.get(key)
+            if existing_retry is not None and not existing_retry.done():
+                retry_unpublished.add(existing_retry)
+                continue
+            try:
+                retry = asyncio.create_task(retry_factory(), name="fleet-daytona-unpublished-root-retry")
+            except BaseException as exc:
+                if first_error is None:
+                    first_error = exc
+                continue
+            retry_unpublished.add(retry)
+            self._unpublished_resource_tasks.add(retry)
+            self._unpublished_retirement_tasks[key] = retry
+
+            def settled(done: asyncio.Task[Any], owner_key: int = key) -> None:
+                self._unpublished_resource_tasks.discard(done)
+                if self._unpublished_retirement_tasks.get(owner_key) is done:
+                    self._unpublished_retirement_tasks.pop(owner_key, None)
+                if not done.cancelled() and done.exception() is None:
+                    self._unpublished_retirement_owners.pop(owner_key, None)
+                if not done.cancelled():
+                    with contextlib.suppress(BaseException):
+                        done.exception()
+
+            retry.add_done_callback(settled)
+        await wait_owned(retry_unpublished, "Daytona unpublished resource retry timed out")
+        if (self._unpublished_resource_owners or self._unpublished_retirement_owners) and first_error is None:
+            first_error = RuntimeError("Daytona unpublished resource cleanup is unresolved")
         await wait_owned(self._late_child_cleanup_tasks, "Daytona late child cleanup timed out")
+        for raw_id, raw in tuple(self._late_raw_child_owners.items()):
+            existing_raw_task = self._late_raw_child_tasks.get(raw_id)
+            if existing_raw_task is not None and not existing_raw_task.done():
+                continue
+            try:
+                cleanup = asyncio.create_task(self._close_raw_child(raw), name="fleet-daytona-raw-child-retry")
+            except BaseException as exc:
+                if first_error is None:
+                    first_error = exc
+                continue
+            self._late_child_cleanup_tasks.add(cleanup)
+            self._late_raw_child_tasks[raw_id] = cleanup
+            cleanup.add_done_callback(self._settled_late_child_cleanup_for(raw))
+        await wait_owned(self._late_child_cleanup_tasks, "Daytona raw child cleanup timed out")
+        if self._late_raw_child_owners and first_error is None:
+            first_error = RuntimeError("Daytona raw child cleanup is unresolved")
         # A late close can fail after the provider request itself settled.
         # Retry those visible failed owners during the next runtime shutdown
         # instead of treating the first failed attempt as terminal.
@@ -589,6 +708,18 @@ class DaytonaRuntime:
 
         cleanup.add_done_callback(cleanup_settled)
 
+    async def _close_raw_root(self, raw: Any) -> None:
+        """Best-effort cleanup for an uncoercible late provider result."""
+        candidate = raw[0] if isinstance(raw, tuple) and len(raw) == 2 else raw
+        close = getattr(candidate, "release", None)
+        if not callable(close):
+            close = getattr(candidate, "close", None)
+        if not callable(close):
+            raise TypeError("late root result is not releasable")
+        result = close()
+        if inspect.isawaitable(result):
+            await result
+
     def _retain_late_root_acquisition(self, acquisition: asyncio.Task[Any], spec: RootSessionSpec) -> None:
         """Close a provider lease that settles after its caller is gone."""
         self._late_root_acquisitions[acquisition] = spec
@@ -602,10 +733,42 @@ class DaytonaRuntime:
                 raw = completed.result()
                 owner = self._coerce_root(late_spec, raw)
             except BaseException:
+                if "raw" in locals():
+                    try:
+                        cleanup = asyncio.create_task(
+                            self._close_raw_root(raw),
+                            name="fleet-daytona-raw-root-cleanup",
+                        )
+                    except BaseException:
+                        self._late_raw_root_owners[id(raw)] = raw
+                        return
+                    self._late_raw_root_owners[id(raw)] = raw
+                    self._late_raw_root_tasks[id(raw)] = cleanup
+                    self._late_root_cleanup_tasks.add(cleanup)
+                    cleanup.add_done_callback(self._settled_late_root_cleanup_for(raw))
                 return
             self._retain_late_root_lease(owner)
 
         acquisition.add_done_callback(settled)
+
+    def _settled_late_root_cleanup_for(self, raw: Any) -> Callable[[asyncio.Task[Any]], None]:
+        def settled(completed: asyncio.Task[Any]) -> None:
+            self._late_root_cleanup_tasks.discard(completed)
+            if self._late_raw_root_tasks.get(id(raw)) is completed:
+                self._late_raw_root_tasks.pop(id(raw), None)
+            if not completed.cancelled() and completed.exception() is None:
+                self._late_raw_root_owners.pop(id(raw), None)
+            if not completed.cancelled():
+                with contextlib.suppress(BaseException):
+                    completed.exception()
+
+        return settled
+
+    def _settled_late_root_cleanup(self, completed: asyncio.Task[Any]) -> None:
+        self._late_root_cleanup_tasks.discard(completed)
+        if not completed.cancelled():
+            with contextlib.suppress(BaseException):
+                completed.exception()
 
     async def _close_late_root(self, owner: RootSessionLease) -> None:
         """Close one root acquired after its original caller timed out."""
@@ -799,6 +962,11 @@ class DaytonaRuntime:
 
         cleanup.add_done_callback(cleanup_settled)
 
+    async def _close_raw_child(self, raw: Any) -> None:
+        """Best-effort cleanup for an uncoercible late child result."""
+        candidate = raw[0] if isinstance(raw, tuple) and len(raw) == 2 else raw
+        await _close_child_lease(candidate)
+
     def _retain_late_child_acquisition(self, acquisition: asyncio.Task[Any], spec: ChildEnvironmentSpec) -> None:
         """Close a child lease that settles after its caller is gone."""
         self._late_child_acquisitions[acquisition] = spec
@@ -812,10 +980,41 @@ class DaytonaRuntime:
                 raw = completed.result()
                 environment = self._coerce_child(late_spec, raw)
             except BaseException:
+                if "raw" in locals():
+                    try:
+                        cleanup = asyncio.create_task(
+                            self._close_raw_child(raw), name="fleet-daytona-raw-child-cleanup"
+                        )
+                    except BaseException:
+                        self._late_raw_child_owners[id(raw)] = raw
+                        return
+                    self._late_raw_child_owners[id(raw)] = raw
+                    self._late_raw_child_tasks[id(raw)] = cleanup
+                    self._late_child_cleanup_tasks.add(cleanup)
+                    cleanup.add_done_callback(self._settled_late_child_cleanup_for(raw))
                 return
             self._retain_late_child_environment(environment)
 
         acquisition.add_done_callback(settled)
+
+    def _settled_late_child_cleanup_for(self, raw: Any) -> Callable[[asyncio.Task[Any]], None]:
+        def settled(completed: asyncio.Task[Any]) -> None:
+            self._late_child_cleanup_tasks.discard(completed)
+            if self._late_raw_child_tasks.get(id(raw)) is completed:
+                self._late_raw_child_tasks.pop(id(raw), None)
+            if not completed.cancelled() and completed.exception() is None:
+                self._late_raw_child_owners.pop(id(raw), None)
+            if not completed.cancelled():
+                with contextlib.suppress(BaseException):
+                    completed.exception()
+
+        return settled
+
+    def _settled_late_child_cleanup(self, completed: asyncio.Task[Any]) -> None:
+        self._late_child_cleanup_tasks.discard(completed)
+        if not completed.cancelled():
+            with contextlib.suppress(BaseException):
+                completed.exception()
 
     async def _close_late_child(self, environment: ChildEnvironment) -> None:
         """Close one child acquired after its original caller timed out."""
@@ -844,6 +1043,116 @@ class DaytonaRuntime:
         environment._owner.on_closed = chained
         environment._daytona_runtime_owner = self
 
+    def _schedule_unpublished_resource_cleanup(
+        self,
+        owner: _UnpublishedResourceOwner,
+        *,
+        deadline: float | None = None,
+    ) -> asyncio.Task[Any]:
+        """Start one retained compatibility cleanup task and keep it owned."""
+        owner.deadline = deadline
+        task = owner.cleanup_task
+        if task is not None and not task.done():
+            return task
+        cleanup_awaitable = self._finish_unpublished_resource(owner)
+        try:
+            cleanup = asyncio.create_task(
+                cleanup_awaitable,
+                name="fleet-daytona-unpublished-resource-cleanup",
+            )
+        except BaseException:
+            cleanup_awaitable.close()
+            raise
+        owner.cleanup_task = cleanup
+        self._unpublished_resource_tasks.add(cleanup)
+
+        def settled(done: asyncio.Task[Any]) -> None:
+            self._unpublished_resource_tasks.discard(done)
+            if not done.cancelled():
+                with contextlib.suppress(BaseException):
+                    done.exception()
+
+        cleanup.add_done_callback(settled)
+        return cleanup
+
+    async def _finish_unpublished_resource(self, owner: _UnpublishedResourceOwner) -> None:
+        """Run release-then-quarantine for a compatibility resource owner."""
+        async with owner.cleanup_lock:
+            if owner.quarantined:
+                pass
+            else:
+                lease = owner.lease
+                # Keep an InterpreterLease's owner callback deferred.  This
+                # preserves admission/claim ownership while the separate
+                # compatibility quarantine call is still unresolved.
+                if hasattr(lease, "_defer_owner_release"):
+                    lease._defer_owner_release = True
+                if hasattr(lease, "_defer_idle_cleanup"):
+                    lease._defer_idle_cleanup = True
+                if owner.release_callback is not None and hasattr(lease, "_on_release"):
+                    lease._on_release = lambda: None
+                if not owner.released:
+                    result = owner.manager.release(lease)
+                    if inspect.isawaitable(result):
+                        await result
+                    owner.released = True
+                quarantine = getattr(owner.manager, "quarantine", None)
+                if not callable(quarantine):
+                    raise RuntimeError("compatibility Daytona manager cannot quarantine a Sandbox")
+                result = quarantine(lease, owner.request, **_optional_deadline_kwargs(quarantine, owner.deadline))
+                if inspect.isawaitable(result):
+                    await result
+                owner.quarantined = True
+            callback = owner.release_callback
+            if not owner.callback_settled:
+                if owner.callback_started:
+                    raise RuntimeError("unpublished resource finalization remains unresolved")
+                owner.callback_started = True
+                if callback is not None:
+                    result = callback()
+                    if inspect.isawaitable(result):
+                        await result
+                owner.callback_settled = True
+            self._unpublished_resource_owners.pop(id(owner.lease), None)
+            lease = owner.lease
+            if owner.release_callback is not None and hasattr(lease, "_on_release"):
+                # The manager release has settled, so restoring the callback is
+                # now race-free. The lease is already closed and cannot invoke
+                # it a second time.
+                lease._on_release = owner.release_callback
+            if hasattr(lease, "_defer_owner_release"):
+                lease._defer_owner_release = False
+            if hasattr(lease, "_defer_idle_cleanup"):
+                lease._defer_idle_cleanup = False
+
+    async def _release_and_quarantine_compatibility(
+        self,
+        lease: Any,
+        request: Any,
+        *,
+        deadline: float | None,
+    ) -> None:
+        """Own fallback cleanup until interpreter release and fencing pass."""
+        manager = getattr(self._resources, "session_manager", None)
+        if manager is None:
+            raise RuntimeError("Daytona resources do not expose a session manager")
+        owner = self._unpublished_resource_owners.get(id(lease))
+        if owner is None:
+            callback = getattr(lease, "_on_release", None)
+            owner = _UnpublishedResourceOwner(
+                lease=lease,
+                request=request,
+                manager=manager,
+                release_callback=callback if callable(callback) else None,
+                deadline=deadline,
+            )
+            self._unpublished_resource_owners[id(lease)] = owner
+        else:
+            owner.request = request
+            owner.deadline = deadline
+        task = self._schedule_unpublished_resource_cleanup(owner, deadline=deadline)
+        await asyncio.shield(task)
+
     async def _acquire_from_resources(self, spec: RootSessionSpec, *, force_new: bool = False, **_kwargs: Any) -> Any:
         from fleet_rlm.daytona.session_manager import LeaseRequest
 
@@ -860,17 +1169,87 @@ class DaytonaRuntime:
         )
         deadline = spec.deadline if spec.deadline is not None else float("inf")
         lease = await manager.acquire(request, deadline=deadline, force_new=force_new)
+
+        async def retire_unpublished_lease() -> None:
+            # A lookup failure happens before this facade can publish a
+            # RootSessionLease. Prefer the manager's single ordered boundary:
+            # interpreter shutdown first, then provider fence/delete, while
+            # retaining admission and retry ownership if either phase fails.
+            ordered = getattr(manager, "release_and_quarantine", None)
+            if callable(ordered):
+                result = ordered(lease, request, **_optional_deadline_kwargs(ordered, deadline))
+                if inspect.isawaitable(result):
+                    await result
+                return
+            # Compatibility managers predate the ordered boundary. Retain a
+            # runtime owner while release runs first and quarantine follows;
+            # a failed fence must not strand the lease after this method exits.
+            await self._release_and_quarantine_compatibility(lease, request, deadline=deadline)
+
+        def schedule_retirement(lookup_task: asyncio.Task[Any] | None = None) -> asyncio.Task[Any]:
+            existing_task = self._unpublished_retirement_tasks.get(id(lease))
+            if existing_task is not None and not existing_task.done():
+                return existing_task
+
+            async def finish_retirement() -> None:
+                if lookup_task is not None:
+                    with contextlib.suppress(BaseException):
+                        await asyncio.shield(lookup_task)
+                await retire_unpublished_lease()
+
+            self._unpublished_retirement_owners[id(lease)] = (lease, finish_retirement)
+            retirement = finish_retirement()
+            try:
+                task = asyncio.create_task(retirement, name="fleet-daytona-unpublished-root-retirement")
+            except BaseException:
+                retirement.close()
+                raise
+            self._unpublished_resource_tasks.add(task)
+            self._unpublished_retirement_tasks[id(lease)] = task
+
+            def settled(done: asyncio.Task[Any]) -> None:
+                self._unpublished_resource_tasks.discard(done)
+                if self._unpublished_retirement_tasks.get(id(lease)) is done:
+                    self._unpublished_retirement_tasks.pop(id(lease), None)
+                if not done.cancelled() and done.exception() is None:
+                    self._unpublished_retirement_owners.pop(id(lease), None)
+                if not done.cancelled():
+                    with contextlib.suppress(BaseException):
+                        done.exception()
+
+            task.add_done_callback(settled)
+            return task
+
+        async def lookup_sandbox() -> Any:
+            return await _maybe_await(platform.get(lease.sandbox_id))
+
+        lookup_task = asyncio.create_task(lookup_sandbox(), name="fleet-daytona-root-sandbox-lookup")
         try:
-            sandbox = await platform.get(lease.sandbox_id)
-        except BaseException:
+            if spec.deadline is None:
+                sandbox = await asyncio.shield(lookup_task)
+            else:
+                remaining = spec.deadline - asyncio.get_running_loop().time()
+                if remaining <= 0:
+                    raise TimeoutError("Daytona Sandbox lookup timed out")
+                sandbox = await asyncio.wait_for(asyncio.shield(lookup_task), timeout=remaining)
+        except BaseException as provider_error:
             # The manager lease is owned from acquire onward, including a
-            # provider lookup failure. Release it before propagating so a
-            # transient platform error cannot strand admission capacity.
-            with contextlib.suppress(BaseException):
-                await manager.release(lease)
+            # provider lookup failure. Fence and release it before propagating
+            # so neither admission capacity nor a stale provider binding is
+            # stranded. Preserve caller cancellation even if cleanup reports
+            # a secondary failure.
+            retirement_task = schedule_retirement(lookup_task)
+            try:
+                await asyncio.shield(retirement_task)
+            except BaseException as cleanup_error:
+                if isinstance(provider_error, asyncio.CancelledError):
+                    provider_error.add_note(f"unpublished lease cleanup failed: {type(cleanup_error).__name__}")
+                    raise provider_error from None
+                raise cleanup_error from provider_error
             raise
         if sandbox is None:
-            await manager.release(lease)
+            retirement_task = schedule_retirement(lookup_task)
+            await asyncio.shield(retirement_task)
             raise RuntimeError("acquired Daytona Sandbox is unavailable")
         return lease, sandbox
 
@@ -878,7 +1257,10 @@ class DaytonaRuntime:
         manager = getattr(self._resources, "session_manager", None)
         if manager is None:
             return await _close_child_lease(lease)
-        return await manager.release(lease)
+        result = manager.release(lease)
+        if inspect.isawaitable(result):
+            return await result
+        return result
 
     async def _acquire_child_from_resources(self, spec: ChildEnvironmentSpec, **_kwargs: Any) -> Any:
         from fleet_rlm.daytona.recursive_child_runtime import build_child_runtime_factory

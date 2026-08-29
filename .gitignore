@@ -68,6 +68,8 @@ outputs/
 
 # Local runtime state
 .fleet_rlm/
+.fleet-evidence/
+.factory/mission-services.yaml
 
 # Agent/tooling state
 .claude/

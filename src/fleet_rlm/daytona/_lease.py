@@ -78,6 +78,7 @@ class RootSessionLease:
         self._close_task: asyncio.Task[None] | None = None
         self._close_error: BaseException | None = None
         self._notify_on_close = False
+        self._close_barrier: Callable[[], Awaitable[Any] | Any] | None = None
 
     @property
     def state(self) -> LeaseState:
@@ -109,6 +110,23 @@ class RootSessionLease:
         """Return the last cleanup error without exposing provider text."""
         return self._close_error
 
+    def set_close_barrier(self, barrier: Callable[[], Awaitable[Any] | Any] | None) -> None:
+        """Install an ordered cleanup barrier before the raw lease callback."""
+        self._close_barrier = barrier
+
+    async def try_set_close_barrier(self, barrier: Callable[[], Awaitable[Any] | Any] | None) -> bool:
+        """Install a barrier unless close already owns the lease.
+
+        The state check and installation share the close lock. This prevents a
+        quarantine task from installing a barrier after a public close has
+        started, which otherwise creates a barrier-to-quarantine deadlock.
+        """
+        async with self._close_lock:
+            if self._state is not LeaseState.OPEN:
+                return False
+            self._close_barrier = barrier
+            return True
+
     async def close(self, *, notify: bool = True, deadline: float | None = None) -> None:
         """Release the provider lease exactly once, joining concurrent closes."""
         async with self._close_lock:
@@ -131,6 +149,9 @@ class RootSessionLease:
     async def _perform_close(self) -> None:
         current = asyncio.current_task()
         try:
+            barrier = self._close_barrier
+            if barrier is not None:
+                await await_cleanup(barrier)
             result = await await_cleanup(self.release_callback, self.lease)
             if _cleanup_failed(self.lease) or _cleanup_failed(result):
                 raise RuntimeError("root Session cleanup failed")

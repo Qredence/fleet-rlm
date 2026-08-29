@@ -94,6 +94,9 @@ def _safe_record(
 
 
 def _write_receipt(payload: dict[str, object]) -> None:
+    run_id = os.environ.get("FLEET_P35D_RUN_ID")
+    if run_id:
+        payload = {**payload, "run_id": run_id}
     path = _receipt_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")

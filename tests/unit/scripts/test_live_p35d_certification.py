@@ -41,13 +41,20 @@ def test_manifest_rejects_mixed_candidate_identity() -> None:
         "lockfile_sha256": "b" * 64,
         "dspy": "3.3.1",
     }
-    with pytest.raises(CertificationError, match="candidate SHA"):
+    with pytest.raises(CertificationError, match="live lane coverage"):
         build_manifest(
             sha="a" * 40,
             lockfile_sha256="b" * 64,
             receipts={"root": receipt, "child": mismatched},
-            scans={"host_logs": {"passed": True}},
-            runtime={"metadata": "3.3.1", "module": "3.3.1"},
+            scans={"host_logs": {"passed": True, "files_scanned": 1, "findings": [], "surfaces": ["logs"]}},
+            runtime={
+                "metadata": "3.3.1",
+                "module": "3.3.1",
+                "python": "3.13.11",
+                "doctor_identity": True,
+                "daytona_snapshot": "fleet-rlm-python313-v5",
+                "daytona_target": "us",
+            },
         )
 
 

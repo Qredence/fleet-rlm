@@ -84,6 +84,17 @@ _LATE_LEASE_OWNERS: dict[int, _LateLeaseOwner] = {}
 
 
 @dataclass(slots=True)
+class _UnpublishedLeaseOwner:
+    """Retain a released interpreter until its provider fence is confirmed."""
+
+    lease: InterpreterLease
+    request: LeaseRequest
+    cleanup_lock: asyncio.Lock = field(default_factory=asyncio.Lock, repr=False)
+    callback_started: bool = False
+    callback_settled: bool = False
+
+
+@dataclass(slots=True)
 class _LateAcquisitionOwner:
     """Strong owner retained even when no event-loop task can be scheduled."""
 
@@ -170,6 +181,12 @@ class InterpreterLease:
     _released: bool = field(default=False, init=False, repr=False)
     _state: LeaseState = field(default=LeaseState.OPEN, init=False, repr=False)
     _on_release: Callable[[], None] | None = field(default=None, init=False, repr=False)
+    # Unpublished provider lookups must shut down the interpreter before the
+    # Sandbox is fenced/deleted, while retaining admission until fencing is
+    # confirmed. The manager toggles these flags for that ordered operation.
+    _defer_owner_release: bool = field(default=False, init=False, repr=False)
+    _defer_idle_cleanup: bool = field(default=False, init=False, repr=False)
+    _provider_retired: bool = field(default=False, init=False, repr=False)
     _release_lock: Lock = field(default_factory=Lock, init=False, repr=False)
 
     @property
@@ -209,7 +226,7 @@ class InterpreterLease:
                 raise
             self._released = True
             self._state = LeaseState.CLOSED
-            if self._on_release is not None:
+            if self._on_release is not None and not self._defer_owner_release:
                 with contextlib.suppress(BaseException):
                     self._on_release()
 
@@ -410,6 +427,10 @@ class DaytonaSessionManager:
         # Provider calls which outlive the Turn deadline remain owned until the
         # SDK task settles; this fence is independent of caller references.
         self._provider_tasks: set[asyncio.Future[Any]] = set()
+        # A provider lookup can fail after interpreter acquisition. Keep the
+        # exact lease, request, and admission owner until release-then-fence
+        # succeeds; a failed fence is retryable rather than silently released.
+        self._unpublished_leases: dict[int, _UnpublishedLeaseOwner] = {}
         self._provisioner = SandboxProvisioner(
             platform=platform,
             volume_config=volume_config,
@@ -438,6 +459,7 @@ class DaytonaSessionManager:
             or sandbox_owned
             or any(owner.manager is self for owner in _LATE_LEASE_OWNERS.values())
             or any(owner.manager is self for owner in _LATE_ACQUISITION_OWNERS.values())
+            or bool(self._unpublished_leases)
         )
 
     def owns_sandbox(self, sandbox_id: str) -> bool:
@@ -1331,14 +1353,99 @@ class DaytonaSessionManager:
         release_task.add_done_callback(lambda task: self._settled_release_task(lease, task))
         return release_task
 
-    async def release(self, lease: InterpreterLease) -> None:
-        """Release an interpreter with owned thread settlement and idle fencing."""
+    async def _release_interpreter(self, lease: InterpreterLease) -> None:
+        """Release only the interpreter, retaining deferred owner callbacks."""
         release_task = self._start_release_task(lease)
         await asyncio.shield(release_task)
         # A done callback runs on the next loop turn. Settle it here too so
         # normal callers observe the idle task before release() returns; the
         # callback becomes a no-op.
         self._settled_release_task(lease, release_task)
+
+    async def release(self, lease: InterpreterLease) -> None:
+        """Release an interpreter with owned thread settlement and idle fencing."""
+        unpublished = self._unpublished_leases.get(id(lease))
+        if unpublished is not None:
+            await self._finish_unpublished_lease(unpublished)
+            return
+        await self._release_interpreter(lease)
+
+    async def _finish_unpublished_lease(
+        self,
+        owner: _UnpublishedLeaseOwner,
+        *,
+        deadline: float | None = None,
+    ) -> None:
+        """Shutdown an unpublished interpreter before fencing its Sandbox."""
+        async with owner.cleanup_lock:
+            lease = owner.lease
+            if lease._provider_retired:
+                self._unpublished_leases.pop(id(lease), None)
+                return
+            # Keep the admission permit, active Session claim, and sandbox owner
+            # callback until the provider fence/delete is confirmed.
+            lease._defer_owner_release = True
+            lease._defer_idle_cleanup = True
+            if not lease._released:
+                await self._release_interpreter(lease)
+            await self._quarantine(lease, owner.request, deadline=deadline)
+
+            callback = lease._on_release
+            if not owner.callback_settled:
+                if owner.callback_started:
+                    raise RuntimeError("unpublished lease finalization remains unresolved")
+                owner.callback_started = True
+                try:
+                    if callback is not None:
+                        callback()
+                except BaseException:
+                    # Do not invoke a possibly partially-effective admission
+                    # callback twice. Keep the owner retained and fail closed.
+                    raise
+                owner.callback_settled = True
+            lease._provider_retired = True
+            lease._defer_owner_release = False
+            lease._defer_idle_cleanup = False
+            self._unpublished_leases.pop(id(lease), None)
+
+    async def release_and_quarantine(
+        self,
+        lease: InterpreterLease,
+        request: LeaseRequest,
+        *,
+        deadline: float | None = None,
+    ) -> None:
+        """Release an unpublished interpreter, then fence/delete its Sandbox.
+
+        The owner remains retained when either phase fails. This ordering is
+        required by the Daytona broker: deleting/stopping a Sandbox while its
+        interpreter is still live can leave provider state and admission
+        ownership irreconcilable.
+        """
+        owner = self._unpublished_leases.get(id(lease))
+        if owner is None:
+            owner = _UnpublishedLeaseOwner(lease=lease, request=request)
+            self._unpublished_leases[id(lease)] = owner
+        else:
+            owner.request = request
+        await self._finish_unpublished_lease(owner, deadline=deadline)
+
+    async def quarantine(
+        self,
+        lease: InterpreterLease,
+        request: LeaseRequest,
+        *,
+        deadline: float | None = None,
+    ) -> None:
+        """Fence a lease whose root lookup failed before it reached a caller.
+
+        A root provider acquisition owns the returned lease before the public
+        Daytona runtime can publish its ``RootSessionLease``.  If the follow-up
+        Sandbox lookup fails, releasing only the interpreter would leave a
+        reusable ``running`` binding behind.  Quarantine through the same
+        ordered fence/delete path used by recovery before admission is freed.
+        """
+        await self._quarantine(lease, request, deadline=deadline)
 
     def _settled_release_task(self, lease: InterpreterLease, task: asyncio.Task[None]) -> None:
         """Schedule idle policy only after the worker-thread release settles."""
@@ -1363,6 +1470,8 @@ class DaytonaSessionManager:
         for owned_task, owned_lease in tuple(self._release_leases.items()):
             if owned_lease is lease:
                 self._release_leases.pop(owned_task, None)
+        if lease._defer_idle_cleanup or lease._provider_retired:
+            return
         if self._idle_stop_seconds is None or lease.session_id is None:
             return
         session_id = UUID(lease.session_id)
@@ -1520,6 +1629,31 @@ class DaytonaSessionManager:
             await OwnedEffect.from_task(update).settle()
             raise
 
+    async def _retry_unpublished_leases(self, deadline: float) -> bool:
+        """Retry ordered cleanup for leases retained after a failed fence."""
+        tasks: list[asyncio.Task[None]] = []
+        for owner in tuple(self._unpublished_leases.values()):
+            task = asyncio.create_task(
+                self._finish_unpublished_lease(owner, deadline=deadline),
+                name="fleet-daytona-unpublished-lease-retry",
+            )
+            tasks.append(task)
+            self._late_cleanup_tasks.add(task)
+
+            def settled(completed: asyncio.Task[Any]) -> None:
+                self._late_cleanup_tasks.discard(completed)
+                if not completed.cancelled():
+                    with contextlib.suppress(BaseException):
+                        completed.exception()
+
+            task.add_done_callback(settled)
+        if tasks:
+            remaining = max(0.0, deadline - asyncio.get_running_loop().time())
+            _, pending = await asyncio.wait(tuple(tasks), timeout=remaining)
+            if pending:
+                return False
+        return not self._unpublished_leases
+
     async def aclose(self, *, drain_seconds: float = 30.0) -> bool:
         """Bound policy-task draining without abandoning late ownership."""
         if drain_seconds < 0:
@@ -1564,9 +1698,10 @@ class DaytonaSessionManager:
                 logger.warning("Daytona interpreter release ownership remains pending")
                 return False
 
+        unpublished_settled = await self._retry_unpublished_leases(deadline)
         retry_settled = await self._retry_late_owners(deadline)
         pending_owner = any(owner.manager is self for owner in _LATE_LEASE_OWNERS.values())
-        return retry_settled and not pending_owner
+        return unpublished_settled and retry_settled and not pending_owner
 
     def _retain_late_created_sandbox(self, task: asyncio.Future[Any]) -> None:
         """Retire a Sandbox produced after a bounded creation call returned."""

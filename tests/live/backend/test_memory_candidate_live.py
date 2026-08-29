@@ -110,6 +110,9 @@ def _failure_receipt(
 
 
 def _write_receipt(payload: dict[str, object]) -> None:
+    run_id = os.environ.get("FLEET_P35D_RUN_ID")
+    if run_id:
+        payload = {**payload, "run_id": run_id}
     raw_path = os.environ.get(_EVIDENCE_ENV)
     if raw_path:
         path = Path(raw_path).expanduser().resolve()

@@ -49,9 +49,10 @@ class _SessionManager:
     def __init__(self) -> None:
         self.acquired: list[object] = []
         self.released: list[object] = []
+        self.quarantined: list[object] = []
 
-    async def acquire(self, request, *, deadline):
-        del deadline
+    async def acquire(self, request, *, deadline, force_new=False):
+        del deadline, force_new
         lease = SimpleNamespace(
             sandbox_id=f"sandbox-{len(self.acquired) + 1}",
             interpreter=object(),
@@ -60,6 +61,10 @@ class _SessionManager:
         )
         self.acquired.append(lease)
         return lease
+
+    async def quarantine(self, lease, request, *, deadline=None) -> None:
+        del request, deadline
+        self.quarantined.append(lease)
 
     async def release(self, lease) -> None:
         self.released.append(lease)
@@ -70,9 +75,13 @@ class _Platform:
         self.lookups: list[str] = []
         self.sandboxes: dict[str, object] = {}
         self.return_none = False
+        self.raise_once = False
 
     async def get(self, sandbox_id: str):
         self.lookups.append(sandbox_id)
+        if self.raise_once:
+            self.raise_once = False
+            raise RuntimeError("provider lookup failed")
         if self.return_none:
             return None
         return self.sandboxes.setdefault(sandbox_id, object())
@@ -189,7 +198,60 @@ async def test_reused_provider_failure_quarantines_root(monkeypatch: pytest.Monk
         await provider.acquire(_turn(session_id=session_id, workspace_id=workspace_id), deadline=float("inf"))
 
     assert manager.released == [manager.acquired[0]]
+    assert manager.quarantined == [manager.acquired[0]]
     assert provider._resident_root_leases == {}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure_mode", ["none", "raises"])
+async def test_production_runtime_lookup_failure_quarantines_before_root_publication(
+    monkeypatch: pytest.MonkeyPatch,
+    failure_mode: str,
+) -> None:
+    """A pre-publication provider failure fences admission and rotates the registry."""
+    from fleet_rlm.daytona.runtime import DaytonaRuntime
+    from fleet_rlm.rlm.session_runtime import SessionKey, SessionRLMRegistry, SessionRLMState
+
+    provider, manager, platform = _provider(monkeypatch)
+    resources = provider.resources
+    resources.runtime = DaytonaRuntime(resources)
+    session_id = uuid4()
+    workspace_id = uuid4()
+    key = SessionKey(workspace_id=str(workspace_id), session_id=str(session_id))
+
+    async def factory(state_key: SessionKey, fingerprint: str) -> SessionRLMState:
+        return SessionRLMState(state_key, fingerprint, object(), object())
+
+    registry = SessionRLMRegistry(factory)
+    provider.session_runtime_registry = registry
+    resident = await registry.acquire(key, "fingerprint")
+    if failure_mode == "none":
+        platform.return_none = True
+    else:
+        platform.raise_once = True
+
+    expected_error = "Sandbox is unavailable" if failure_mode == "none" else "provider lookup failed"
+    with pytest.raises(RuntimeError, match=expected_error):
+        await provider.acquire(_turn(session_id=session_id, workspace_id=workspace_id), deadline=float("inf"))
+
+    assert manager.quarantined == manager.acquired
+    assert manager.released == manager.acquired
+    assert resources.runtime.roots == ()
+    assert provider._resident_root_leases == {}
+    assert resident.tainted
+    platform.return_none = False
+
+    fresh_environment = await provider.acquire(
+        _turn(session_id=session_id, workspace_id=workspace_id), deadline=float("inf")
+    )
+    assert len(manager.acquired) == 2
+    fresh = await registry.acquire(key, "fingerprint")
+    assert fresh is not resident
+    await fresh_environment.release()
+    assert fresh_environment.resident_release is not None
+    await fresh_environment.resident_release()
+    await provider.aclose()
+    await registry.shutdown()
 
 
 @pytest.mark.asyncio

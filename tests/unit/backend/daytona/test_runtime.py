@@ -295,11 +295,16 @@ async def test_root_failed_receipt_is_not_published_as_closed() -> None:
 async def test_resource_root_lookup_failure_releases_manager_lease() -> None:
     lease = SimpleNamespace(sandbox_id="sandbox-1")
     released: list[object] = []
+    quarantined: list[tuple[object, object]] = []
 
     class Manager:
         async def acquire(self, request, *, deadline, force_new):
             del request, deadline, force_new
             return lease
+
+        async def quarantine(self, value, request, *, deadline):
+            del deadline
+            quarantined.append((value, request))
 
         async def release(self, value):
             released.append(value)
@@ -311,5 +316,63 @@ async def test_resource_root_lookup_failure_releases_manager_lease() -> None:
 
     runtime = DaytonaRuntime(resources=SimpleNamespace(session_manager=Manager(), platform=Platform()))
     with pytest.raises(RuntimeError, match="provider lookup failed"):
+        await runtime._acquire_from_resources(RootSessionSpec(workspace_id=uuid4(), session_id=uuid4()))
+    assert quarantined and quarantined[0][0] is lease
+    assert released == [lease]
+
+
+@pytest.mark.asyncio
+async def test_resource_root_missing_sandbox_quarantines_and_releases_manager_lease() -> None:
+    lease = SimpleNamespace(sandbox_id="sandbox-missing")
+    calls: list[str] = []
+
+    class Manager:
+        async def acquire(self, request, *, deadline, force_new):
+            del request, deadline, force_new
+            return lease
+
+        async def quarantine(self, value, request, *, deadline):
+            del value, request, deadline
+            calls.append("quarantine")
+
+        async def release(self, value):
+            assert value is lease
+            calls.append("release")
+
+    class Platform:
+        async def get(self, sandbox_id):
+            assert sandbox_id == lease.sandbox_id
+            return None
+
+    runtime = DaytonaRuntime(resources=SimpleNamespace(session_manager=Manager(), platform=Platform()))
+    with pytest.raises(RuntimeError, match="Sandbox is unavailable"):
+        await runtime._acquire_from_resources(RootSessionSpec(workspace_id=uuid4(), session_id=uuid4()))
+    assert calls == ["release", "quarantine"]
+
+
+@pytest.mark.asyncio
+async def test_resource_root_lookup_cleanup_error_is_not_hidden() -> None:
+    lease = SimpleNamespace(sandbox_id="sandbox-1")
+    released: list[object] = []
+
+    class Manager:
+        async def acquire(self, request, *, deadline, force_new):
+            del request, deadline, force_new
+            return lease
+
+        async def quarantine(self, value, request, *, deadline):
+            del value, request, deadline
+            raise RuntimeError("quarantine failed")
+
+        async def release(self, value):
+            released.append(value)
+
+    class Platform:
+        async def get(self, sandbox_id):
+            del sandbox_id
+            return None
+
+    runtime = DaytonaRuntime(resources=SimpleNamespace(session_manager=Manager(), platform=Platform()))
+    with pytest.raises(RuntimeError, match="quarantine failed"):
         await runtime._acquire_from_resources(RootSessionSpec(workspace_id=uuid4(), session_id=uuid4()))
     assert released == [lease]

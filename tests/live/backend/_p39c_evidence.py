@@ -152,6 +152,9 @@ def write_lane_receipt(
     receives an additional byte-identical copy -- never a replacement for the
     canonical name. Returns the written paths (canonical first).
     """
+    run_id = os.environ.get("FLEET_P53_RUN_ID")
+    if run_id:
+        payload = {**payload, "run_id": run_id}
     canonical_dir = receipts_dir if receipts_dir is not None else _RECEIPTS_DIR
     paths = [canonical_dir / default_name]
     configured = os.environ.get(_EVIDENCE_ENV)

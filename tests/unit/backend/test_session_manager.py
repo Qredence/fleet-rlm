@@ -337,6 +337,70 @@ async def _acquire(mgr: DaytonaSessionManager, request: LeaseRequest):
 
 
 @pytest.mark.asyncio
+async def test_release_and_quarantine_shuts_interpreter_before_provider_fence() -> None:
+    mgr, platform, _store, _volumes = _manager()
+    request = _request()
+    lease = await _acquire(mgr, request)
+    order: list[str] = []
+
+    class OrderedInterpreter:
+        def shutdown(self, *, strict_broker_cleanup: bool) -> None:
+            assert strict_broker_cleanup is True
+            order.append("interpreter-shutdown")
+
+    original_stop = platform.stop
+    original_delete = platform.delete
+
+    async def stop(sandbox_id: str, *, timeout: float = 60, force: bool = False) -> None:
+        order.append("sandbox-stop")
+        await original_stop(sandbox_id, timeout=timeout, force=force)
+
+    async def delete(sandbox_id: str) -> None:
+        order.append("sandbox-delete")
+        await original_delete(sandbox_id)
+
+    platform.stop = stop  # type: ignore[method-assign]
+    platform.delete = delete  # type: ignore[method-assign]
+    lease.interpreter = OrderedInterpreter()  # type: ignore[assignment]
+
+    await mgr.release_and_quarantine(lease, request)
+
+    assert order[0] == "interpreter-shutdown"
+    assert order.index("interpreter-shutdown") < order.index("sandbox-stop")
+    assert lease.closed
+    assert not mgr.has_pending_ownership
+
+
+@pytest.mark.asyncio
+async def test_release_and_quarantine_retains_admission_when_fence_fails() -> None:
+    mgr, platform, _store, _volumes = _manager()
+    request = _request()
+    lease = await _acquire(mgr, request)
+    failures = 1
+    original_stop = platform.stop
+
+    async def stop(sandbox_id: str, *, timeout: float = 60, force: bool = False) -> None:
+        nonlocal failures
+        if failures:
+            failures -= 1
+            raise RuntimeError("one-shot fence failure")
+        await original_stop(sandbox_id, timeout=timeout, force=force)
+
+    platform.stop = stop  # type: ignore[method-assign]
+    with pytest.raises(RuntimeError, match="fence"):
+        await mgr.release_and_quarantine(lease, request)
+    assert lease.closed
+    assert mgr.has_pending_ownership
+    assert mgr._unpublished_leases
+
+    # A later owner can retry the same request/lease; no new admission slot is
+    # made available until provider quarantine and callback finalization pass.
+    await mgr.release(lease)
+    assert not mgr.has_pending_ownership
+    assert not mgr._unpublished_leases
+
+
+@pytest.mark.asyncio
 async def test_acquire_creates_running_sandbox_and_lease() -> None:
     mgr, plat, store, volumes = _manager()
     req = _request()

@@ -247,6 +247,9 @@ def _child_sandbox_absent(client: TestClient, resources: Any, sandbox_id: str) -
 
 
 def _write_receipt(scenario: str, payload: dict[str, object]) -> None:
+    run_id = os.environ.get("FLEET_P53_RUN_ID")
+    if run_id:
+        payload = {**payload, "run_id": run_id}
     configured = os.environ.get(_EVIDENCE_ENV)
     if configured:
         base = Path(configured).expanduser().resolve()

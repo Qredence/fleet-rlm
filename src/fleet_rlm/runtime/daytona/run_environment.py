@@ -13,7 +13,7 @@ import asyncio
 import contextlib
 import inspect
 import logging
-from collections.abc import Awaitable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from functools import partial
 from threading import Lock
@@ -272,6 +272,18 @@ class _DaytonaRunSink:
 
 
 @dataclass(slots=True)
+class _CompatibilityQuarantine:
+    """Retain fallback release/fence ownership across a failed quarantine."""
+
+    manager: Any
+    lease: Any
+    request: LeaseRequest
+    owner: RootSessionLease
+    released: bool = False
+    quarantined: bool = False
+
+
+@dataclass(slots=True)
 class _DaytonaEnvironmentProvider:
     resources: DaytonaRuntimeResources
     settings: Settings
@@ -290,12 +302,36 @@ class _DaytonaEnvironmentProvider:
     _preparation_gates: dict[tuple[UUID, UUID], asyncio.Lock] = field(default_factory=dict, init=False)
     _acquisition_tasks: set[asyncio.Task[Any]] = field(default_factory=set, init=False, repr=False)
     _late_lookup_tasks: set[asyncio.Task[Any]] = field(default_factory=set, init=False, repr=False)
+    _late_root_gate_owners: dict[int, tuple[asyncio.Lock, tuple[UUID, UUID]]] = field(
+        default_factory=dict, init=False, repr=False
+    )
+    _late_root_cleanup_tasks: set[asyncio.Task[Any]] = field(default_factory=set, init=False, repr=False)
+    _late_root_cleanup_owners: dict[int, RootSessionLease] = field(default_factory=dict, init=False, repr=False)
+    _late_root_cleanup_runs: dict[int, ClaimedRun] = field(default_factory=dict, init=False, repr=False)
+    _root_quarantine_tasks: dict[int, asyncio.Task[Any]] = field(default_factory=dict, init=False, repr=False)
+    _retained_root_owners: dict[int, RootSessionLease] = field(default_factory=dict, init=False, repr=False)
+    _suppressed_root_release_callbacks: dict[int, Any] = field(default_factory=dict, init=False, repr=False)
+    _late_lookup_finalizers: dict[int, asyncio.Task[Any]] = field(default_factory=dict, init=False, repr=False)
+    _compatibility_quarantines: dict[int, _CompatibilityQuarantine] = field(
+        default_factory=dict, init=False, repr=False
+    )
     _accepting_acquisitions: bool = field(default=True, init=False, repr=False)
 
     @property
     def has_pending_acquisitions(self) -> bool:
         """Whether environment acquisition still owns provider work."""
-        return bool(self._acquisition_tasks or self._late_lookup_tasks)
+        return bool(
+            self._acquisition_tasks
+            or self._late_lookup_tasks
+            or self._late_root_cleanup_tasks
+            or self._late_root_cleanup_owners
+            or self._late_root_gate_owners
+            or self._root_quarantine_tasks
+            or self._retained_root_owners
+            or self._suppressed_root_release_callbacks
+            or self._late_lookup_finalizers
+            or self._compatibility_quarantines
+        )
 
     def _retain_environment_owner(self) -> None:
         """Keep this provider alive across caller/lifespan ownership changes."""
@@ -303,7 +339,19 @@ class _DaytonaEnvironmentProvider:
 
     def _maybe_release_environment_owner(self) -> None:
         """Drop process ownership only after every root/acquisition is gone."""
-        if self._resident_root_leases or self._acquisition_tasks or self._late_lookup_tasks:
+        if (
+            self._resident_root_leases
+            or self._acquisition_tasks
+            or self._late_lookup_tasks
+            or self._late_root_cleanup_tasks
+            or self._late_root_cleanup_owners
+            or self._late_root_gate_owners
+            or self._root_quarantine_tasks
+            or self._retained_root_owners
+            or self._suppressed_root_release_callbacks
+            or self._late_lookup_finalizers
+            or self._compatibility_quarantines
+        ):
             return
         if _ENVIRONMENT_OWNERS.get(id(self)) is self:
             _ENVIRONMENT_OWNERS.pop(id(self), None)
@@ -358,7 +406,35 @@ class _DaytonaEnvironmentProvider:
                 self._resident_root_leases.pop(key, None)
                 self._resident_context_keys.pop(key, None)
                 self._prune_preparation_gate(key)
-                self._maybe_release_environment_owner()
+        # A retained failed-root cleanup may complete through a callback after
+        # its retry task has already been dropped. Never leave per-owner
+        # metadata keyed by a recycled object id after the exact owner closes.
+        owner_id = id(owner)
+        quarantine_task = self._root_quarantine_tasks.get(owner_id)
+        compatibility = self._compatibility_quarantines.get(owner_id)
+        quarantine_succeeded = (
+            owner_id in self._suppressed_root_release_callbacks
+            or (
+                quarantine_task is not None
+                and quarantine_task.done()
+                and not quarantine_task.cancelled()
+                and quarantine_task.exception() is None
+            )
+            or (quarantine_task is None and owner_id not in self._late_root_cleanup_runs and compatibility is None)
+        )
+        quarantine_pending = not quarantine_succeeded or (compatibility is not None and not compatibility.quarantined)
+        if not quarantine_pending:
+            self._late_root_cleanup_runs.pop(owner_id, None)
+            self._suppressed_root_release_callbacks.pop(owner_id, None)
+            self._compatibility_quarantines.pop(owner_id, None)
+            self._retained_root_owners.pop(owner_id, None)
+            self._release_late_root_gate(owner)
+        elif compatibility is not None:
+            retained = self._late_root_gate_owners.get(owner_id)
+            if retained is not None and not any(known is owner for known in self._late_root_cleanup_owners.values()):
+                gate, retained_key = retained
+                self._retain_failed_root(owner, gate, retained_key)
+        self._maybe_release_environment_owner()
 
     async def _on_root_closed(self, owner: RootSessionLease) -> None:
         """Remove a directly-owned root using its legacy UUID key."""
@@ -383,10 +459,115 @@ class _DaytonaEnvironmentProvider:
         owner.on_closed = chained
         owner._environment_provider_owner = self
 
-    def _retain_late_lookup(self, task: asyncio.Task[Any]) -> None:
+    def _release_late_root_gate(self, owner: RootSessionLease) -> None:
+        """Release the preparation gate retained by an unresolved root."""
+        retained = self._late_root_gate_owners.pop(id(owner), None)
+        if retained is None:
+            return
+        gate, key = retained
+        if gate.locked():
+            gate.release()
+            self._prune_preparation_gate(key)
+
+    def _retain_failed_root(
+        self,
+        owner: RootSessionLease,
+        preparation_gate: asyncio.Lock,
+        key: tuple[UUID, UUID],
+        run: ClaimedRun | None = None,
+    ) -> None:
+        """Retry root cleanup while retaining the gate that fences new Turns."""
+        self._late_root_gate_owners[id(owner)] = (preparation_gate, key)
+        self._retained_root_owners[id(owner)] = owner
+        if run is not None:
+            self._late_root_cleanup_runs[id(owner)] = run
+        if (
+            owner.closed
+            and id(owner) not in self._compatibility_quarantines
+            and id(owner) not in self._late_root_cleanup_runs
+        ):
+            self._release_late_root_gate(owner)
+            return
+        if any(known is owner for known in self._late_root_cleanup_owners.values()):
+            return
+        cleanup_awaitable = self._retry_failed_root(owner)
+        try:
+            cleanup = asyncio.create_task(
+                cleanup_awaitable,
+                name="fleet-daytona-failed-root-cleanup",
+            )
+        except BaseException:
+            cleanup_awaitable.close()
+            return
+        self._late_root_cleanup_owners[id(cleanup)] = owner
+        self._late_root_cleanup_tasks.add(cleanup)
+
+        def settled(done: asyncio.Task[Any]) -> None:
+            self._late_root_cleanup_tasks.discard(done)
+            self._late_root_cleanup_owners.pop(id(done), None)
+            if owner.closed:
+                self._late_root_cleanup_runs.pop(id(owner), None)
+                self._release_late_root_gate(owner)
+            if not done.cancelled():
+                with contextlib.suppress(BaseException):
+                    done.exception()
+            self._maybe_release_environment_owner()
+
+        cleanup.add_done_callback(settled)
+
+    async def _retry_failed_root(self, owner: RootSessionLease, *, deadline: float | None = None) -> bool:
+        """Retry a failed ordered root cleanup without dropping its gate."""
+        compatibility = self._compatibility_quarantines.get(id(owner))
+        if compatibility is not None and compatibility.owner is not owner:
+            self._compatibility_quarantines.pop(id(owner), None)
+            compatibility = None
+        if compatibility is not None:
+            try:
+                await self._run_compatibility_quarantine(owner, compatibility.request, deadline=deadline)
+            except asyncio.CancelledError:
+                raise
+            except BaseException:
+                return False
+            if not compatibility.quarantined:
+                return False
+            try:
+                await self._close_compatibility_owner(owner, notify=True, deadline=deadline)
+            except asyncio.CancelledError:
+                raise
+            except BaseException:
+                return False
+        else:
+            run = self._late_root_cleanup_runs.get(id(owner))
+            if run is not None and id(owner) not in self._suppressed_root_release_callbacks:
+                try:
+                    await self._await_root_quarantine(owner, run, deadline=deadline)
+                except asyncio.CancelledError:
+                    raise
+                except BaseException:
+                    return False
+            try:
+                if id(owner) in self._suppressed_root_release_callbacks:
+                    await self._close_suppressed_root(owner, notify=True, deadline=deadline)
+                else:
+                    await owner.close(notify=True, deadline=deadline)
+            except asyncio.CancelledError:
+                raise
+            except BaseException:
+                return False
+        self._release_late_root_gate(owner)
+        return owner.closed and id(owner) not in self._compatibility_quarantines
+
+    def _retain_late_lookup(
+        self,
+        task: asyncio.Task[Any],
+        *,
+        on_settled: Callable[[], None] | None = None,
+    ) -> None:
         """Keep a provider lookup owned after a canceled/bounded wait."""
         if task.done():
             _consume_task_result(task)
+            if on_settled is not None:
+                on_settled()
             return
         _LATE_LOOKUP_OWNERS[id(task)] = (task, self)
         self._late_lookup_tasks.add(task)
@@ -395,9 +576,350 @@ class _DaytonaEnvironmentProvider:
             _LATE_LOOKUP_OWNERS.pop(id(completed), None)
             self._late_lookup_tasks.discard(completed)
             _consume_task_result(completed)
+            if on_settled is not None:
+                on_settled()
             self._maybe_release_environment_owner()
 
         task.add_done_callback(settled)
+
+    def _suppress_root_release_callback(self, owner: RootSessionLease) -> None:
+        """Prevent a second manager release after provider cleanup succeeds."""
+        self._retained_root_owners[id(owner)] = owner
+        if id(owner) not in self._suppressed_root_release_callbacks:
+            self._suppressed_root_release_callbacks[id(owner)] = owner.release_callback
+        owner.release_callback = lambda _lease: None
+
+    async def _close_suppressed_root(
+        self,
+        owner: RootSessionLease,
+        *,
+        notify: bool = True,
+        deadline: float | None = None,
+    ) -> None:
+        """Close a public root whose raw manager lease already settled."""
+        if id(owner) not in self._suppressed_root_release_callbacks:
+            await owner.close(notify=notify, deadline=deadline)
+            return
+        callback = self._suppressed_root_release_callbacks[id(owner)]
+        try:
+            await owner.close(notify=notify, deadline=deadline)
+        except BaseException:
+            # Keep the no-op callback installed until this close task settles;
+            # restoring it here could race RootSessionLease._perform_close.
+            raise
+        self._suppressed_root_release_callbacks.pop(id(owner), None)
+        owner.release_callback = callback
+
+    async def _schedule_root_quarantine(
+        self,
+        owner: RootSessionLease,
+        run: ClaimedRun,
+        *,
+        deadline: float | None = None,
+    ) -> asyncio.Task[Any]:
+        """Start and retain one ordered root quarantine operation."""
+        existing = self._root_quarantine_tasks.get(id(owner))
+        if existing is not None and not existing.done():
+            return existing
+        start = asyncio.Event()
+        barrier_installed = False
+
+        if id(owner) in self._suppressed_root_release_callbacks:
+
+            async def ordered_quarantine() -> None:
+                await start.wait()
+
+        else:
+
+            async def ordered_quarantine() -> None:
+                await start.wait()
+                # If a public close won the atomic barrier-install race, join
+                # its raw release first, then fence the provider. If the
+                # barrier was installed first, public close waits for this
+                # task and the combined manager performs ordered release.
+                if not barrier_installed:
+                    await owner.close(notify=False, deadline=deadline)
+                await self._quarantine_root_lease(owner, run, deadline=deadline)
+
+        quarantine_awaitable = ordered_quarantine()
+        try:
+            task = asyncio.create_task(quarantine_awaitable, name="fleet-daytona-root-quarantine")
+        except BaseException:
+            quarantine_awaitable.close()
+            raise
+        self._root_quarantine_tasks[id(owner)] = task
+        self._retained_root_owners[id(owner)] = owner
+
+        async def barrier() -> None:
+            await asyncio.shield(task)
+
+        try:
+            install = getattr(owner, "try_set_close_barrier", None)
+            if callable(install):
+                barrier_installed = await install(barrier)
+            elif owner.closing or owner.closed:
+                barrier_installed = False
+            else:
+                owner.set_close_barrier(barrier)
+                barrier_installed = True
+        except BaseException:
+            task.cancel()
+            with contextlib.suppress(BaseException):
+                await task
+            raise
+        finally:
+            # Let the quarantine task run only after the atomic ordering
+            # decision. This is essential when a public close starts first.
+            start.set()
+
+        def settled(done: asyncio.Task[Any]) -> None:
+            if self._root_quarantine_tasks.get(id(owner)) is done:
+                self._root_quarantine_tasks.pop(id(owner), None)
+            if not done.cancelled():
+                with contextlib.suppress(BaseException):
+                    done.exception()
+            quarantine_succeeded = not done.cancelled() and done.exception() is None
+            if quarantine_succeeded and owner.closed and id(owner) not in self._compatibility_quarantines:
+                self._late_root_cleanup_runs.pop(id(owner), None)
+                self._suppressed_root_release_callbacks.pop(id(owner), None)
+                self._retained_root_owners.pop(id(owner), None)
+                self._release_late_root_gate(owner)
+            self._maybe_release_environment_owner()
+
+        task.add_done_callback(settled)
+        return task
+
+    async def _await_root_quarantine(
+        self,
+        owner: RootSessionLease,
+        run: ClaimedRun,
+        *,
+        deadline: float | None = None,
+    ) -> None:
+        """Await root quarantine without abandoning its owned task on cancel."""
+        task = await self._schedule_root_quarantine(owner, run, deadline=deadline)
+        await asyncio.shield(task)
+
+    async def _run_compatibility_quarantine(
+        self,
+        owner: RootSessionLease,
+        request: LeaseRequest,
+        *,
+        deadline: float | None = None,
+    ) -> None:
+        """Release, then quarantine through a pre-combined-manager seam."""
+        manager = getattr(self.resources, "session_manager", None)
+        if manager is None:
+            return
+        pending = self._compatibility_quarantines.get(id(owner))
+        if pending is not None and pending.owner is not owner:
+            self._compatibility_quarantines.pop(id(owner), None)
+            pending = None
+        if pending is None:
+            pending = _CompatibilityQuarantine(
+                manager=manager,
+                lease=owner.lease,
+                request=request,
+                owner=owner,
+            )
+            self._compatibility_quarantines[id(owner)] = pending
+        else:
+            pending.request = request
+        if pending.quarantined:
+            self._suppress_root_release_callback(owner)
+            return
+        if not pending.released:
+            result = pending.manager.release(pending.lease)
+            if inspect.isawaitable(result):
+                await result
+            pending.released = True
+        quarantine = getattr(pending.manager, "quarantine", None)
+        if not callable(quarantine):
+            raise RuntimeError("compatibility Daytona manager cannot quarantine a Sandbox")
+        kwargs: dict[str, Any] = {}
+        try:
+            parameters = inspect.signature(quarantine).parameters
+        except (TypeError, ValueError):
+            parameters = {}
+        if "deadline" in parameters or any(
+            parameter.kind is inspect.Parameter.VAR_KEYWORD for parameter in parameters.values()
+        ):
+            kwargs["deadline"] = deadline
+        result = quarantine(pending.lease, pending.request, **kwargs)
+        if inspect.isawaitable(result):
+            await result
+        # Keep the record until the public root handle is closed without a
+        # second manager.release call. This also lets a retry task finish the
+        # provider-map/gate handoff atomically.
+        pending.quarantined = True
+        self._suppress_root_release_callback(owner)
+
+    async def _close_compatibility_owner(
+        self,
+        owner: RootSessionLease,
+        *,
+        notify: bool = True,
+        deadline: float | None = None,
+    ) -> None:
+        """Close a fallback root after manager.release already ran once."""
+        self._suppress_root_release_callback(owner)
+        await self._close_suppressed_root(owner, notify=notify, deadline=deadline)
+        self._compatibility_quarantines.pop(id(owner), None)
+
+    async def _quarantine_root_lease(
+        self,
+        owner: RootSessionLease,
+        run: ClaimedRun,
+        *,
+        deadline: float | None = None,
+    ) -> None:
+        """Release the interpreter before fencing an unpublished root."""
+        manager = getattr(self.resources, "session_manager", None)
+        if manager is None:
+            return
+        request = LeaseRequest(
+            session_id=run.session_id,
+            user_id=run.access.user_id,
+            workspace_id=run.access.workspace_id,
+            run_id=run.run_id,
+        )
+        ordered = getattr(manager, "release_and_quarantine", None)
+        if callable(ordered):
+            kwargs: dict[str, Any] = {}
+            try:
+                parameters = inspect.signature(ordered).parameters
+            except (TypeError, ValueError):
+                parameters = {}
+            if "deadline" in parameters or any(
+                parameter.kind is inspect.Parameter.VAR_KEYWORD for parameter in parameters.values()
+            ):
+                kwargs["deadline"] = deadline
+            result = ordered(owner.lease, request, **kwargs)
+            if inspect.isawaitable(result):
+                await result
+            self._suppress_root_release_callback(owner)
+            return
+        # Compatibility managers predate the combined boundary. Release the
+        # interpreter first, but retain this owner and its preparation gate
+        # until the separate quarantine call also succeeds.
+        await self._run_compatibility_quarantine(owner, request, deadline=deadline)
+
+    async def _complete_late_root_cleanup(
+        self,
+        owner: RootSessionLease,
+        preparation_gate: asyncio.Lock,
+        key: tuple[UUID, UUID],
+        run: ClaimedRun,
+    ) -> None:
+        """Fence/close a late root and retain its gate when cleanup fails."""
+        self._late_root_gate_owners.setdefault(id(owner), (preparation_gate, key))
+        quarantine_failed = False
+        try:
+            self._taint_resident_runtime(run)
+            await self._await_root_quarantine(owner, run)
+        except BaseException as exc:
+            quarantine_failed = True
+            logger.warning(
+                "late Daytona Sandbox lookup quarantine remains owned",
+                extra={"session_id": str(key[1]), "error_type": type(exc).__name__},
+            )
+        # Do not close the public root after any unresolved quarantine error.
+        # The ordered manager may still be between interpreter shutdown and
+        # provider fencing; the retry owner must settle that boundary first.
+        compatibility = self._compatibility_quarantines.get(id(owner))
+        if quarantine_failed:
+            self._retain_failed_root(owner, preparation_gate, key, run=run)
+            self._maybe_release_environment_owner()
+            return
+        try:
+            if compatibility is not None and compatibility.quarantined:
+                await self._close_compatibility_owner(owner)
+            elif id(owner) in self._suppressed_root_release_callbacks:
+                await self._close_suppressed_root(owner)
+            else:
+                await owner.close()
+        except BaseException as exc:
+            logger.warning(
+                "late Daytona Sandbox lookup cleanup remains owned",
+                extra={"session_id": str(key[1]), "error_type": type(exc).__name__},
+            )
+        if owner.closed:
+            self._release_late_root_gate(owner)
+        else:
+            # Keep the gate locked. The retained retry owns both provider
+            # cleanup and the preparation reservation until close succeeds.
+            self._retain_failed_root(owner, preparation_gate, key)
+        self._maybe_release_environment_owner()
+
+    def _schedule_late_lookup_finalizer(
+        self,
+        lookup: asyncio.Task[Any],
+        owner: RootSessionLease,
+        preparation_gate: asyncio.Lock,
+        key: tuple[UUID, UUID],
+        run: ClaimedRun,
+    ) -> None:
+        """Resume root cleanup once a canceled lookup task finally settles."""
+        existing = self._late_lookup_finalizers.get(id(lookup))
+        if existing is not None and not existing.done():
+            return
+        finalizer_awaitable = self._finish_late_lookup_after_settlement(
+            lookup,
+            owner,
+            preparation_gate,
+            key,
+            run,
+        )
+        try:
+            finalizer = asyncio.create_task(
+                finalizer_awaitable,
+                name="fleet-late-sandbox-lookup-finalizer",
+            )
+        except BaseException:
+            finalizer_awaitable.close()
+            return
+        self._late_lookup_finalizers[id(lookup)] = finalizer
+        self._late_lookup_tasks.add(finalizer)
+
+        def settled(done: asyncio.Task[Any]) -> None:
+            self._late_lookup_finalizers.pop(id(lookup), None)
+            self._late_lookup_tasks.discard(done)
+            if not done.cancelled():
+                with contextlib.suppress(BaseException):
+                    done.exception()
+            self._maybe_release_environment_owner()
+
+        finalizer.add_done_callback(settled)
+
+    async def _finish_late_lookup_after_settlement(
+        self,
+        lookup: asyncio.Task[Any],
+        owner: RootSessionLease,
+        preparation_gate: asyncio.Lock,
+        key: tuple[UUID, UUID],
+        run: ClaimedRun,
+    ) -> None:
+        """Wait for a retained lookup and then finish ordered root cleanup."""
+        try:
+            await asyncio.shield(lookup)
+        except asyncio.CancelledError:
+            if lookup.cancelled():
+                await self._complete_late_root_cleanup(owner, preparation_gate, key, run)
+                return
+            self._retain_late_lookup(
+                lookup,
+                on_settled=lambda: self._schedule_late_lookup_finalizer(
+                    lookup,
+                    owner,
+                    preparation_gate,
+                    key,
+                    run,
+                ),
+            )
+            return
+        except BaseException:
+            _consume_task_result(lookup)
+        await self._complete_late_root_cleanup(owner, preparation_gate, key, run)
 
     async def _finish_late_lookup(
         self,
@@ -411,31 +933,25 @@ class _DaytonaEnvironmentProvider:
         try:
             await asyncio.shield(lookup)
         except asyncio.CancelledError:
-            # Loop shutdown may cancel this continuation before the provider
-            # identity settles. Retain the lookup itself and keep the root/gate
-            # fenced; a later composition owner can retry the close safely.
-            self._retain_late_lookup(lookup)
+            # A canceled continuation must not lose the root or its gate. Keep
+            # the lookup owned and resume cleanup from its settlement callback.
+            if lookup.cancelled():
+                await self._complete_late_root_cleanup(owner, preparation_gate, key, run)
+                return
+            self._retain_late_lookup(
+                lookup,
+                on_settled=lambda: self._schedule_late_lookup_finalizer(
+                    lookup,
+                    owner,
+                    preparation_gate,
+                    key,
+                    run,
+                ),
+            )
             return
         except BaseException:
-            # The lookup is already owned by this continuation. Its result is
-            # diagnostic-only; root retirement must still follow it.
             _consume_task_result(lookup)
-        try:
-            self._taint_resident_runtime(run)
-            await owner.close()
-        except BaseException as exc:
-            # Keep the resident owner strongly reachable for the next
-            # composition/runtime shutdown retry. The preparation gate can be
-            # released because no RunEnvironment was returned to this Turn.
-            logger.warning(
-                "late Daytona Sandbox lookup cleanup failed",
-                extra={"session_id": str(key[1]), "error_type": type(exc).__name__},
-            )
-        finally:
-            if preparation_gate.locked():
-                preparation_gate.release()
-                self._prune_preparation_gate(key)
-            self._maybe_release_environment_owner()
+        await self._complete_late_root_cleanup(owner, preparation_gate, key, run)
 
     def _defer_late_lookup_cleanup(
         self,
@@ -446,23 +962,32 @@ class _DaytonaEnvironmentProvider:
         run: ClaimedRun,
     ) -> None:
         """Transfer late lookup/root cleanup out of a canceled acquisition."""
+        # Retain the gate before any task creation can fail during loop
+        # shutdown. The provider/root owner then remains fenced until a later
+        # finalizer or provider.aclose closes it.
+        self._late_root_gate_owners.setdefault(id(owner), (preparation_gate, key))
+        self._retained_root_owners[id(owner)] = owner
+        cleanup_awaitable = self._finish_late_lookup(lookup, owner, preparation_gate, key, run)
         try:
             cleanup = asyncio.create_task(
-                self._finish_late_lookup(lookup, owner, preparation_gate, key, run),
+                cleanup_awaitable,
                 name="fleet-daytona-late-sandbox-lookup-cleanup",
             )
         except BaseException:
+            cleanup_awaitable.close()
             # A closing loop may reject a new task. Keep the provider lookup and
-            # resident owner alive, and release only the preparation gate when
-            # the already-started lookup eventually settles.
-            def retain_settled_lookup(_completed: asyncio.Task[Any]) -> None:
-                # With no task/loop available to close the resident root, keep
-                # its preparation gate fenced rather than allowing a new Turn
-                # to race the still-owned interpreter.
-                _consume_task_result(_completed)
-
-            self._retain_late_lookup(lookup)
-            lookup.add_done_callback(retain_settled_lookup)
+            # resident owner alive; its settlement callback retries finalizer
+            # scheduling, while provider shutdown can still close the root.
+            self._retain_late_lookup(
+                lookup,
+                on_settled=lambda: self._schedule_late_lookup_finalizer(
+                    lookup,
+                    owner,
+                    preparation_gate,
+                    key,
+                    run,
+                ),
+            )
             return
         self._retain_late_lookup(cleanup)
 
@@ -500,24 +1025,45 @@ class _DaytonaEnvironmentProvider:
             # Sandbox replacement, and root cleanup remain owned by the facade.
             runtime = getattr(self.resources, "runtime", None)
             if isinstance(runtime, DaytonaRuntime):
-                runtime_owner = await runtime.acquire_root_session(
-                    RootSessionSpec(
-                        workspace_id=key[0],
-                        session_id=key[1],
-                        user_id=run.access.user_id,
-                        run_id=run.run_id,
-                        context_fingerprint=context_key,
-                        deadline=deadline,
-                        force_new=had_previous,
+                try:
+                    runtime_owner = await runtime.acquire_root_session(
+                        RootSessionSpec(
+                            workspace_id=key[0],
+                            session_id=key[1],
+                            user_id=run.access.user_id,
+                            run_id=run.run_id,
+                            context_fingerprint=context_key,
+                            deadline=deadline,
+                            force_new=had_previous,
+                        )
                     )
-                )
-                self._bind_runtime_root(key, runtime_owner)
-                async with self._resident_root_lock:
-                    if owner is not None and owner is not runtime_owner:
-                        self._resident_root_leases.pop(key, None)
-                        self._resident_context_keys.pop(key, None)
-                    self._resident_root_leases[key] = runtime_owner
-                    self._resident_context_keys[key] = context_key
+                except BaseException:
+                    # DaytonaRuntime may fail after the manager acquired and
+                    # retired an unpublished lease, before this adapter can
+                    # bind the provider owner.  Fence the resident RLM too;
+                    # otherwise it could reuse an interpreter whose provider
+                    # lookup already failed on the next Turn.
+                    if self.session_runtime_registry is not None:
+                        self.session_runtime_registry.mark_tainted(
+                            SessionKey(workspace_id=str(key[0]), session_id=str(key[1]))
+                        )
+                    raise
+                try:
+                    self._bind_runtime_root(key, runtime_owner)
+                    async with self._resident_root_lock:
+                        if owner is not None and owner is not runtime_owner:
+                            self._resident_root_leases.pop(key, None)
+                            self._resident_context_keys.pop(key, None)
+                        self._resident_root_leases[key] = runtime_owner
+                        self._resident_context_keys[key] = context_key
+                except BaseException:
+                    # The runtime facade published this owner before the
+                    # adapter could publish its local sink index. Close it (or
+                    # leave it retained by the facade) rather than creating an
+                    # untracked root across the handoff cancellation window.
+                    with contextlib.suppress(BaseException):
+                        await asyncio.shield(runtime_owner.close(notify=True, deadline=deadline))
+                    raise
                 return runtime_owner, not reusable
 
             # Compatibility path for test/provider resources that predate the
@@ -531,9 +1077,15 @@ class _DaytonaEnvironmentProvider:
             )
             force_new_sandbox = had_previous
             if owner is not None:
-                # Remove the map entry only after release succeeds so a
-                # provider failure/cancellation leaves a retryable owner.
-                await owner.close(notify=False, deadline=deadline)
+                # Remove the map entry only after release and any compatibility
+                # quarantine succeed so a provider failure/cancellation leaves
+                # a retryable owner.
+                if id(owner) in self._compatibility_quarantines:
+                    await self._retry_failed_root(owner, deadline=deadline)
+                    if not owner.closed:
+                        raise RuntimeError("root Session cleanup remains unresolved")
+                else:
+                    await owner.close(notify=True, deadline=deadline)
                 async with self._resident_root_lock:
                     if self._resident_root_leases.get(key) is owner:
                         self._resident_root_leases.pop(key, None)
@@ -554,9 +1106,17 @@ class _DaytonaEnvironmentProvider:
                 release_callback=self.resources.session_manager.release,
                 on_closed=self._on_root_closed,
             )
-            async with self._resident_root_lock:
-                self._resident_root_leases[key] = owner
-                self._resident_context_keys[key] = context_key
+            try:
+                async with self._resident_root_lock:
+                    self._resident_root_leases[key] = owner
+                    self._resident_context_keys[key] = context_key
+            except BaseException:
+                # The raw manager lease became ours before local publication.
+                # Retire it even if cancellation wins while the index lock is
+                # contended; otherwise admission can be leaked indefinitely.
+                with contextlib.suppress(BaseException):
+                    await asyncio.shield(owner.close(notify=False, deadline=deadline))
+                raise
             return owner, True
 
     async def aclose(self, *, drain_seconds: float = 30.0) -> bool:
@@ -566,7 +1126,14 @@ class _DaytonaEnvironmentProvider:
         self._accepting_acquisitions = False
         current = asyncio.current_task()
         acquisitions = tuple(
-            task for task in (*self._acquisition_tasks, *self._late_lookup_tasks) if task is not current
+            task
+            for task in (
+                *self._acquisition_tasks,
+                *self._late_lookup_tasks,
+                *self._late_root_cleanup_tasks,
+                *self._root_quarantine_tasks.values(),
+            )
+            if task is not current
         )
         if acquisitions:
             _, pending = await asyncio.wait(acquisitions, timeout=drain_seconds)
@@ -586,21 +1153,54 @@ class _DaytonaEnvironmentProvider:
         owner_deadline = asyncio.get_running_loop().time() + drain_seconds
         async with self._resident_root_transition_lock:
             async with self._resident_root_lock:
-                owners = tuple(self._resident_root_leases.values())
+                owner_values = list(self._resident_root_leases.values())
+            owner_values.extend(self._retained_root_owners.values())
+            owner_values.extend(self._late_root_cleanup_owners.values())
+            owner_values.extend(pending.owner for pending in self._compatibility_quarantines.values())
+            owners_by_id = {id(owner): owner for owner in owner_values}
+            owners = tuple(owners_by_id.values())
             for owner in owners:
                 try:
-                    await owner.close(deadline=owner_deadline)
+                    if (
+                        id(owner) in self._compatibility_quarantines
+                        or id(owner) in self._late_root_cleanup_runs
+                        or id(owner) in self._root_quarantine_tasks
+                        or id(owner) in self._suppressed_root_release_callbacks
+                    ):
+                        cleanup_ok = await self._retry_failed_root(owner, deadline=owner_deadline)
+                    else:
+                        await owner.close(deadline=owner_deadline)
+                        cleanup_ok = owner.closed
                 except BaseException as exc:
+                    cleanup_ok = False
                     if first_error is None:
                         first_error = exc
-                else:
-                    # ``owner.close`` invokes this callback on success in the
-                    # normal path. Identity-checking here also handles a
-                    # callback defect without discarding a retryable owner.
-                    async with self._resident_root_lock:
-                        if owner.closed and self._resident_root_leases.get(owner.key) is owner:
-                            self._resident_root_leases.pop(owner.key, None)
-                            self._resident_context_keys.pop(owner.key, None)
+                if not cleanup_ok:
+                    if first_error is None:
+                        first_error = RuntimeError("Daytona root cleanup remains unresolved")
+                    continue
+                self._release_late_root_gate(owner)
+                # ``owner.close`` invokes this callback on success in the
+                # normal path. Identity-checking here also handles a callback
+                # defect without discarding a retryable owner.
+                async with self._resident_root_lock:
+                    if owner.closed and self._resident_root_leases.get(owner.key) is owner:
+                        self._resident_root_leases.pop(owner.key, None)
+                        self._resident_context_keys.pop(owner.key, None)
+        unresolved = (
+            self._late_root_gate_owners
+            or self._late_root_cleanup_runs
+            or self._root_quarantine_tasks
+            or self._retained_root_owners
+            or self._suppressed_root_release_callbacks
+            or self._compatibility_quarantines
+            or self._late_root_cleanup_owners
+            or self._late_lookup_finalizers
+            or self._acquisition_tasks
+            or self._late_lookup_tasks
+        )
+        if unresolved and first_error is None:
+            first_error = RuntimeError("Daytona root cleanup remains unresolved")
         if first_error is not None:
             raise first_error
         self._maybe_release_environment_owner()
@@ -608,13 +1208,15 @@ class _DaytonaEnvironmentProvider:
 
     def _taint_resident_runtime(self, run: ClaimedRun) -> None:
         """Fence a resident runtime when provider setup proves its root unhealthy."""
+        key = SessionKey(
+            workspace_id=str(run.access.workspace_id),
+            session_id=str(run.session_id),
+        )
         if self.session_runtime_registry is not None:
-            self.session_runtime_registry.mark_tainted(
-                SessionKey(
-                    workspace_id=str(run.access.workspace_id),
-                    session_id=str(run.session_id),
-                )
-            )
+            self.session_runtime_registry.mark_tainted(key)
+        runtime = getattr(self.resources, "runtime", None)
+        if isinstance(runtime, DaytonaRuntime):
+            runtime.mark_root_tainted(key.workspace_id, key.session_id)
 
     async def acquire(self, run: ClaimedRun, *, deadline: float) -> RunEnvironment:
         """Acquire a Daytona environment while retaining Session preparation ownership."""
@@ -638,6 +1240,7 @@ class _DaytonaEnvironmentProvider:
         gate_held = False
         owner: RootSessionLease | None = None
         created_root = False
+        sandbox_lookup_failed = False
         try:
             try:
                 async with asyncio.timeout_at(deadline):
@@ -660,12 +1263,14 @@ class _DaytonaEnvironmentProvider:
                 async with asyncio.timeout_at(deadline):
                     sandbox = await asyncio.shield(lookup)
             except TimeoutError:
+                sandbox_lookup_failed = True
                 if not lookup.done():
                     self._defer_late_lookup_cleanup(lookup, owner, preparation_gate, key, run)
                     owner = None
                     gate_held = False
                 raise RunPreparationTimeoutError("Turn preparation timed out") from None
             except asyncio.CancelledError:
+                sandbox_lookup_failed = True
                 if not lookup.done():
                     # Cancellation must return promptly. The detached
                     # continuation settles the provider lookup, retires the
@@ -674,7 +1279,11 @@ class _DaytonaEnvironmentProvider:
                     owner = None
                     gate_held = False
                 raise
+            except BaseException:
+                sandbox_lookup_failed = True
+                raise
             if sandbox is None:
+                sandbox_lookup_failed = True
                 raise RuntimeError("acquired Sandbox is unavailable")
             from fleet_rlm.workspace.memory import build_workspace_memory_store
 
@@ -762,12 +1371,43 @@ class _DaytonaEnvironmentProvider:
             )
         except BaseException:
             # The preparation gate proves that no earlier same-Session Turn
-            # can still own the resident execution lane.  A borrowed root may
-            # therefore be tainted and closed safely on provider setup failure.
+            # can still own the resident execution lane. A failed provider
+            # fence must nevertheless retain that gate until the ordered
+            # interpreter/fence cleanup succeeds.
+            self._taint_resident_runtime(run)
             if owner is not None:
-                self._taint_resident_runtime(run)
-                with contextlib.suppress(BaseException):
-                    await asyncio.shield(owner.close(deadline=deadline))
+                cleanup_failed = False
+                quarantine_failed = False
+                if sandbox_lookup_failed:
+                    try:
+                        await self._await_root_quarantine(owner, run, deadline=deadline)
+                    except BaseException as exc:
+                        cleanup_failed = True
+                        quarantine_failed = True
+                        logger.warning(
+                            "Daytona root lookup quarantine remains owned",
+                            extra={"session_id": str(key[1]), "error_type": type(exc).__name__},
+                        )
+                if not quarantine_failed:
+                    try:
+                        compatibility = self._compatibility_quarantines.get(id(owner))
+                        if compatibility is not None and compatibility.quarantined:
+                            await asyncio.shield(self._close_compatibility_owner(owner, deadline=deadline))
+                        elif id(owner) in self._suppressed_root_release_callbacks:
+                            await asyncio.shield(self._close_suppressed_root(owner, deadline=deadline))
+                        else:
+                            await asyncio.shield(owner.close(deadline=deadline))
+                    except BaseException as exc:
+                        cleanup_failed = True
+                        logger.warning(
+                            "Daytona root cleanup remains owned",
+                            extra={"session_id": str(key[1]), "error_type": type(exc).__name__},
+                        )
+                if cleanup_failed and not owner.closed:
+                    self._retain_failed_root(owner, preparation_gate, key, run=run)
+                    gate_held = False
+                elif owner.closed and not quarantine_failed:
+                    self._release_late_root_gate(owner)
             if gate_held:
                 gate_held = False
                 preparation_gate.release()
