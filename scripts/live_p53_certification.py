@@ -269,10 +269,14 @@ def _command(test: str, timeout: int) -> tuple[str, ...]:
 def _pytest_exactly_one_passed(output: str) -> bool:
     """Accept only a terminal pytest summary for one non-skipped test."""
     status_words = r"passed|failed|error(?:s)?|skipped|xfailed|xpassed|deselected"
+    # pytest's format_session_duration appends a human-readable (H:MM:SS)
+    # suffix for sessions >= 60s, so the summary need not end with the
+    # seconds value.  Live Daytona lanes always cross that threshold.
+    duration = r"\bin\s+[0-9.]+s(?:\s+\(\d+:\d{2}:\d{2}\))?\s*$"
     summaries = [
         line
         for line in output.splitlines()
-        if re.search(r"\bin\s+[0-9.]+s\s*$", line) and re.search(rf"\d+\s+(?:{status_words})", line)
+        if re.search(duration, line) and re.search(rf"\d+\s+(?:{status_words})", line)
     ]
     if not summaries:
         return False
