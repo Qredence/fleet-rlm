@@ -696,7 +696,22 @@ def _identity() -> tuple[str, str, dict[str, object]]:
 
 
 def _lane_command(test: str, timeout: int) -> list[str]:
-    return ["uv", "run", "pytest", test, "-q", "-n", "0", f"--timeout={timeout}"]
+    # Keep plugin autoload disabled for deterministic certification workers, but
+    # load the two plugins required by the repository config and serial command.
+    return [
+        "uv",
+        "run",
+        "pytest",
+        "-p",
+        "pytest_timeout",
+        "-p",
+        "xdist.plugin",
+        test,
+        "-q",
+        "-n",
+        "0",
+        f"--timeout={timeout}",
+    ]
 
 
 def run_matrix(*, timeout: int, output: Path) -> int:

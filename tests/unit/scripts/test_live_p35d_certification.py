@@ -9,6 +9,7 @@ from scripts.live_p35d_certification import (
     CLAIM_LANES,
     LIVE_LANES,
     CertificationError,
+    _lane_command,
     build_manifest,
     scan_host_log_surfaces,
 )
@@ -26,6 +27,21 @@ def test_claim_lane_table_covers_assigned_contract() -> None:
     }
     assert all(lanes for lanes in CLAIM_LANES.values())
     assert all(lane in LIVE_LANES for lanes in CLAIM_LANES.values() for lane in lanes)
+
+
+def test_lane_command_explicitly_loads_plugins_when_autoload_is_disabled() -> None:
+    command = _lane_command("tests/live/backend/test_example.py::test_example", 1200)
+
+    assert command[:7] == [
+        "uv",
+        "run",
+        "pytest",
+        "-p",
+        "pytest_timeout",
+        "-p",
+        "xdist.plugin",
+    ]
+    assert command[-3:] == ["-n", "0", "--timeout=1200"]
 
 
 def test_manifest_rejects_mixed_candidate_identity() -> None:

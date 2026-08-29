@@ -2,6 +2,148 @@
 
 All notable changes to this project are documented in this file.
 
+## [0.7.5] - 2026-08-29
+
+### Changed
+
+- **Change (P42):** Established a versioned Session-state contract and ADR
+  distinguishing durable committed conversation, resident interpreter state,
+  per-Turn DSPy `REPLHistory`, and durable Workspace/Memory state.
+  **Outcome:** The state guarantees are explicit: committed History survives
+  runtime recovery, while failed, cancelled, timed-out, and uncommitted work
+  never becomes conversation state.
+- **Change (P42-P44):** Made complete committed Session History the canonical
+  input to every Root Turn through `dspy.History`, with the stable
+  `request`/`answer` record shape and checkpoint-bound materialization.
+  **Outcome:** Later Turns can inspect the full prior conversation without
+  relying on six-item previews or the history Tool; previews and
+  `read_session_history` remain compatible navigation surfaces.
+- **Change (P44):** Added History to the default and custom Skill Signatures,
+  retained bounded `session_context` metadata, excluded private reasoning,
+  Python source, raw Tool results, provider messages, failed output, and
+  uncommitted candidates, and preserved idempotent replay semantics.
+  **Outcome:** Conversation state advances only after durable commit and is
+  isolated by Session.
+- **Change (P45):** Introduced a Session-scoped Root runtime keyed by the full
+  Workspace-plus-Session tenancy scope, with program fingerprints covering
+  DSPy configuration, Signature, Tools, Skills, recursion policy, budgets,
+  output contract, and interpreter compatibility.
+  **Outcome:** A healthy compatible Session reuses one native RLM, caller-owned
+  interpreter, and Root Sandbox across sequential Turns; incompatible state
+  rotates without losing durable History, Workspace, or Memory.
+- **Change (P45):** Added one execution lane per Session, worker/thread
+  affinity, namespace reconciliation, current-Turn Tool installation, and
+  stable authorization-aware Tool proxies.
+  **Outcome:** Same-Session calls cannot overlap, different Sessions remain
+  concurrent, stale capabilities fail closed, and clean Turns retain ordinary
+  Python variables without retaining prior Run authorization.
+- **Change (P46):** Contracted the DSPy kernel around native `dspy.RLM.acall`
+  through focused `program`, `runtime`, `result`, `events`, and compatibility
+  seams, isolating exact-version and private-DSPy adaptations.
+  **Outcome:** Fleet owns preparation, validation, event projection, and
+  Session reuse while DSPy owns the RLM loop; evaluation-only routing moved to
+  `optimization`.
+- **Change (P47):** Consolidated native child-RLM recursion while preserving
+  Root depth zero, native child depth one, Sub-LM fallback, shared budgets,
+  bounded batch concurrency, input ordering, and all-or-nothing settlement.
+  **Outcome:** Each child receives an immutable Session snapshot and its own
+  fresh RLM, interpreter, Sandbox, and `REPLHistory`; Root Python state is never
+  shared with children.
+- **Change (P48):** Deepened the Daytona lifecycle around Root Session leases,
+  persistent broker/interpreter context, separate disposable child acquisition,
+  explicit close states, admission accounting, provider absence confirmation,
+  and shared-Volume preservation.
+  **Outcome:** Provider mechanics remain behind the Daytona Interface while
+  Root state survives clean Turns and tainted or incompatible runtimes close
+  and rotate deterministically.
+- **Change (P49):** Collapsed Turn orchestration into `PreparedTurn` and
+  `TurnRuntime`, covering claim/replay, checkpoint History, capabilities,
+  execution, streaming, validation, commit, finalization, and post-commit work.
+  **Outcome:** Success, failure, timeout, cancellation, disconnect, claim
+  loss, and commit failure share one ownership model, one terminal settlement,
+  correct commit ordering, and a Session lock held through durable commit.
+- **Change (P50):** Re-homed Workspace storage, explicit Session Workspace and
+  Project modules, and long-term Memory under their durable domains.
+  **Outcome:** Session History, live Python state, Session files, Workspace
+  Memory, Projects, Attachments, and Artifacts have distinct responsibilities;
+  stable IDs, provenance, search, relevant/recent digests, edit/delete,
+  supersession, proposals, promotion, and malformed-record tolerance remain
+  supported.
+- **Change (P51):** Simplified configuration, composition, observability, and
+  evaluation ownership, applied the seam-deletion and canonical-representation
+  passes, and retained shared owned-effect machinery only where its semantics
+  are still required.
+  **Outcome:** Configuration has one authority, composition is wiring,
+  observability is consolidated, and redundant conversion and shallow
+  forwarding layers are removed without changing optimization behavior.
+
+### Added
+
+- **Change (P42-P43):** Added the Session-state ADR, versioned behavior freeze,
+  public model-facing Tool fixtures, import inventory, subtraction ledger, and
+  exact DSPy/Daytona feasibility proofs.
+  **Outcome:** `dspy.History`, caller-owned interpreter reuse, fresh per-call
+  `REPLHistory`, Tool mutation, custom Skill Signature compatibility, and the
+  narrow compatibility fallback are tested against the certified DSPy release.
+- **Change (P52):** Replaced topology-focused tests with behavior and
+  Interface tests for History continuity/isolation, resident Python state,
+  taint and rotation, fingerprint changes, stale authorization, eviction and
+  recovery, concurrency, child isolation, and dependency direction.
+  **Outcome:** Tests protect production guarantees rather than private file
+  names, helper classes, enum names, or old import paths.
+- **Change (P53):** Added content-addressed P53 Session certification with
+  schema-v2 receipts for resident continuity, seven runtime rotations, and
+  seven native-child lanes.
+  **Outcome:** Evidence binds to one candidate SHA, lockfile, DSPy release,
+  Daytona snapshot, and target while checking History rehydration, admission
+  restoration, cleanup, child isolation, Volume preservation, and failed-state
+  absence.
+- **Change (P53):** Added explicit provider lifecycle evidence distinguishing
+  healthy fingerprint handoff from tainted replacement: handoff preserves the
+  provider root and interpreter, while tainted rotation requires a new
+  Sandbox, new interpreter, and confirmed old-Sandbox absence. Runtime
+  generations are validated as positive local incarnations and freshness is
+  proven by runtime/provider identities.
+  **Outcome:** Certification no longer relies on globally increasing
+  generation counters or ambiguous provider state.
+- **Change (P53):** Made serial P35-D certification workers explicitly load
+  `pytest_timeout` and `xdist.plugin` while keeping plugin autoload disabled.
+  **Outcome:** The live runner can honor its configured timeout and serial
+  execution flags instead of failing during pytest argument parsing.
+- **Change (release):** Bumped the package and generated release metadata to
+  `0.7.5`, including the lockfile, OpenAPI version, and built wheel/sdist
+  identity.
+  **Outcome:** Package, API metadata, and release validation use one version.
+
+### Removed
+
+- **Change (P46-P51):** Removed superseded RLM execution, Turn lifecycle, and
+  recursion forwarding Modules; the `files/` catch-all domain; obsolete path
+  and private Daytona source aliases; temporary compatibility residue; and
+  duplicate representations after caller and test migration.
+  **Outcome:** The maintained tree follows the contracted `chat` → `rlm` →
+  Daytona/Workspace boundaries without a dual runtime or migration-only
+  forwarding path.
+- **Change (P52-P53):** Removed obsolete structural tests and stale ownership,
+  module-map, and architecture documentation after the deletion ledger was
+  reconciled.
+  **Outcome:** Private topology remains free to evolve while the public
+  contracts and behavior freeze stay explicit.
+
+### Preserved
+
+- **Compatibility:** HTTP routes, OpenAPI, SSE vocabulary and ordering,
+  Runtime Events, maintained TUI projections, Tool names/descriptions/schemas,
+  configuration and database contracts, CLI behavior, package imports,
+  Attachments, Artifacts, Skills, Workspace, Memory, cancellation, deadlines,
+  replay, native child-RLM behavior, batch semantics, and release surfaces
+  remain unchanged.
+- **Non-goals:** Fleet does not persist arbitrary Python objects across
+  restart, carry DSPy private `REPLHistory` between Turns, remove native child
+  RLMs, change recursion depth/concurrency/batch settlement, rename Tools,
+  redesign the API or TUI, pool Sandboxes, or change optimization prompts,
+  model selection, latency, cost, or Memory-ranking policy.
+
 ## [0.7.4] - 2026-08-25
 
 ### Changed
