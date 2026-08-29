@@ -561,8 +561,11 @@ async def test_live_p53_daytona_session_rotations_and_history(tmp_path: Path) ->
     lifecycle = RunLifecycleService(
         store,
         max_artifact_bytes=settings.max_artifact_bytes,
-        heartbeat_seconds=0.05,
-        stale_after_seconds=0.15,
+        # Live provider preparation holds the SQLite writer for seconds at a
+        # time; a sub-second staleness window misreads that contention as
+        # claim loss before the first RLM event. Use realistic intervals.
+        heartbeat_seconds=1.0,
+        stale_after_seconds=15.0,
         cleanup=cleanup,
     )
     coordinator = TurnRuntime(
