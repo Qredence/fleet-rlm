@@ -130,6 +130,8 @@ Backend logs for supervised runs: `.fleet_rlm/logs/`.
 | `/api/attachments` | Durable attachment upload and lookup |
 | `/api/artifacts/{artifact_id}` | Committed artifact metadata and content |
 | `GET /api/volume/tree` | Bounded read-only workspace volume tree (Daytona) |
+| `/api/workspace/files` | Session workspace file management |
+| `/api/settings` | Loopback-only non-secret runtime policy inspection and editing |
 | `/api/skills` | Bundled skill card discovery |
 | `PUT /api/runs/{run_id}/cancellation` | Durable run cancellation |
 

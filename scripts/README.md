@@ -23,12 +23,16 @@
 | `release_smoke.py` | Smoke-test installed wheel bytes, bundled assets, CLI entry points, and OpenAPI without provider startup |
 | `live_daytona_tunnel_probe.py` | Run the development-only strict Daytona egress smoke through two Cloudflare HTTPS origins |
 | `benchmark_daytona_lifecycle.py` | Benchmark full Daytona create-through-first-execution lifecycle and select retained versus per-Turn mode |
-| `p13_memory_relevance_cost.py` | Measure live Daytona relevance-aware Workspace Memory preparation cost against the P7 Turn preparation baseline |
 | `benchmarks/run_prime_oolong.py` | Run the pinned PrimeIntellect Oolong environment against a live Fleet API using Attachments |
 | `benchmarks/prime_oolong_sidecar.py` | Isolated JSONL export/scoring bridge for the pinned PrimeIntellect environment |
+| `benchmarks/corpus_chain.py` | Deterministic corpus-chain benchmark fixtures and report validation |
 | `benchmarks/run_native_long_context.py` | Measure native whole-value URL context at 1/5/10 MiB and emit the paging decision receipt |
 | `benchmarks/run_rlm_latency.py` | Compare live Fleet RLM configuration variants and run the MLflow-native five-task quality gate |
 | `benchmarks/run_routing_eval.py` | Run the deterministic or opt-in live delegation-ladder benchmark, including bounded recursive batches |
+| `benchmarks/judges.py` | Shared Fleet evaluation judge definitions and registration |
+| `benchmarks/scorers.py` | MLflow 3 GenAI custom scorers and evaluation metric definitions |
+| `benchmarks/manage_prompts.py` | Manage and version Fleet signature prompts in MLflow Prompt Registry |
+| `benchmarks/annotate_traces.py` | Annotate persisted `fleet_turn` traces with derived aggregate attributes |
 | `daytona_snapshot.py` | Explicitly create or check the immutable Fleet Daytona Snapshot |
 | `codex_feedback_loop.py` | Run the local Codex feedback-loop probes |
 | `deployment_observability.py` | Inspect deployment observability inputs |
