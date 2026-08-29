@@ -31,8 +31,13 @@ dependencies = [
     # patches, prereleases, post-releases, and local builds.
     "dspy==3.3.1",
     "packaging>=24,<27",
-    # Sandboxed execution.
-    "daytona==0.202.0",
+    # Sandboxed execution. Bumped to 0.207.0: validated additive-compatible
+    # against our SDK surface (AsyncDaytona, DaytonaConfig,
+    # CreateSandboxFromSnapshotParams, VolumeMount, Image,
+    # SessionExecuteRequest are all unchanged or gain optional fields only).
+    # The new warm-pool service and typed errors are not exploited by our
+    # volume-mounted sandboxes, so this is a maintenance bump, not a feature.
+    "daytona==0.207.0",
     # Persistence and migrations.
     "aiosqlite>=0.20.0",
     "alembic>=1.18.5,<2",
