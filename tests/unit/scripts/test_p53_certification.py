@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any, cast
 
 import pytest
 
@@ -35,7 +36,10 @@ def _rotation_receipt(sha: str, lockfile_sha256: str) -> dict[str, object]:
                 "interpreter_id": f"old-interpreter-{index}",
             },
             "new_runtime": {
-                "generation": index + 1,
+                # Registry generations are local incarnations and may restart
+                # after coordination metadata is pruned. Runtime identities
+                # prove replacement independently of the counter value.
+                "generation": index,
                 "rlm_id": f"new-rlm-{index}",
                 "interpreter_id": (
                     f"old-interpreter-{index}" if name == "fingerprint_change" else f"new-interpreter-{index}"
@@ -48,6 +52,8 @@ def _rotation_receipt(sha: str, lockfile_sha256: str) -> dict[str, object]:
                 ),
                 "before_state": "running",
                 "after_state": "running",
+                "lifecycle": "handed_off" if name == "fingerprint_change" else "replaced",
+                "old_sandbox_absent": name != "fingerprint_change",
             },
             "continuation": {
                 "history_before_count": index,
@@ -90,6 +96,10 @@ def _rotation_receipt(sha: str, lockfile_sha256: str) -> dict[str, object]:
         json.dumps(unsigned, sort_keys=True, separators=(",", ":")).encode("utf-8")
     )
     return receipt
+
+
+def _resign(value: dict[str, object]) -> None:
+    value["manifest_sha256"] = p53_certification._digest(cast(dict[str, Any], value))
 
 
 def _child_receipt(sha: str, lockfile_sha256: str, name: str) -> dict[str, object]:
@@ -178,6 +188,84 @@ def test_build_rejects_missing_rotation(monkeypatch: pytest.MonkeyPatch, tmp_pat
     del rotation["rotations"]["claim_loss"]
     sha, lockfile_sha256 = _identity()
     with pytest.raises(p53_certification.P53CertificationError, match="rotation coverage"):
+        p53_certification.build_manifest(
+            sha=sha,
+            lockfile_sha256=lockfile_sha256,
+            rotation_receipt_path=rotation_path,
+            rotation_receipt=rotation,
+            child_receipts=children,
+        )
+
+
+def test_build_rejects_missing_old_sandbox_absence(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    rotation_path, rotation, children = _write_fixture(monkeypatch, tmp_path)
+    del rotation["rotations"]["timeout"]["provider"]["old_sandbox_absent"]
+    _resign(rotation)
+    sha, lockfile_sha256 = _identity()
+    with pytest.raises(p53_certification.P53CertificationError, match="provider lifecycle"):
+        p53_certification.build_manifest(
+            sha=sha,
+            lockfile_sha256=lockfile_sha256,
+            rotation_receipt_path=rotation_path,
+            rotation_receipt=rotation,
+            child_receipts=children,
+        )
+
+
+def test_build_rejects_wrong_tainted_provider_lifecycle(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    rotation_path, rotation, children = _write_fixture(monkeypatch, tmp_path)
+    timeout_provider = rotation["rotations"]["timeout"]["provider"]
+    timeout_provider["lifecycle"] = "handed_off"
+    timeout_provider["old_sandbox_absent"] = False
+    _resign(rotation)
+    sha, lockfile_sha256 = _identity()
+    with pytest.raises(p53_certification.P53CertificationError, match="tainted rotation"):
+        p53_certification.build_manifest(
+            sha=sha,
+            lockfile_sha256=lockfile_sha256,
+            rotation_receipt_path=rotation_path,
+            rotation_receipt=rotation,
+            child_receipts=children,
+        )
+
+
+def test_build_rejects_unconfirmed_tainted_sandbox_absence(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    rotation_path, rotation, children = _write_fixture(monkeypatch, tmp_path)
+    rotation["rotations"]["timeout"]["provider"]["old_sandbox_absent"] = False
+    _resign(rotation)
+    sha, lockfile_sha256 = _identity()
+    with pytest.raises(p53_certification.P53CertificationError, match="tainted rotation"):
+        p53_certification.build_manifest(
+            sha=sha,
+            lockfile_sha256=lockfile_sha256,
+            rotation_receipt_path=rotation_path,
+            rotation_receipt=rotation,
+            child_receipts=children,
+        )
+
+
+def test_build_rejects_invalid_fingerprint_handoff(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    rotation_path, rotation, children = _write_fixture(monkeypatch, tmp_path)
+    fingerprint_handoff = rotation["rotations"]["fingerprint_change"]["handoff"]
+    fingerprint_handoff["interpreter_preserved"] = False
+    _resign(rotation)
+    sha, lockfile_sha256 = _identity()
+    with pytest.raises(p53_certification.P53CertificationError, match="interpreter handoff"):
+        p53_certification.build_manifest(
+            sha=sha,
+            lockfile_sha256=lockfile_sha256,
+            rotation_receipt_path=rotation_path,
+            rotation_receipt=rotation,
+            child_receipts=children,
+        )
+
+
+def test_build_rejects_legacy_p53_receipt_schema(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    rotation_path, rotation, children = _write_fixture(monkeypatch, tmp_path)
+    rotation["schema"] = "fleet.p53-live-session-certification/v1"
+    _resign(rotation)
+    sha, lockfile_sha256 = _identity()
+    with pytest.raises(p53_certification.P53CertificationError, match="schema"):
         p53_certification.build_manifest(
             sha=sha,
             lockfile_sha256=lockfile_sha256,

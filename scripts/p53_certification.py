@@ -29,7 +29,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 CERTIFIED_DSPY = "3.3.1"
 CERTIFIED_DAYTONA_SNAPSHOT = "fleet-rlm-python313-v5"
 CERTIFIED_DAYTONA_TARGET = "us"
-MANIFEST_SCHEMA = "fleet.p53-live-session-certification/v1"
+MANIFEST_SCHEMA = "fleet.p53-live-session-certification/v2"
 DEFAULT_OUTPUT = REPO_ROOT / ".fleet-evidence" / "receipts" / "p53-live-session-certification.json"
 
 REQUIRED_ROTATIONS = (
@@ -274,6 +274,7 @@ _EXPECTED_TERMINALS: dict[str, tuple[str | None, str | None, bool]] = {
 _PROVIDER_STATES = frozenset(
     {"running", "stopped", "paused", "archived", "unrecoverable", "missing", "fencing", "quarantined", "deleted"}
 )
+_PROVIDER_LIFECYCLES = frozenset({"replaced", "handed_off"})
 
 
 def _validate_rotation(name: str, value: object) -> dict[str, Any]:
@@ -310,7 +311,7 @@ def _validate_rotation(name: str, value: object) -> dict[str, Any]:
         or not _strict_int(old_generation)
         or old_generation < 1
         or not _strict_int(new_generation)
-        or new_generation <= old_generation
+        or new_generation < 1
         or not isinstance(old_rlm, str)
         or not old_rlm
         or not isinstance(new_rlm, str)
@@ -348,6 +349,8 @@ def _validate_rotation(name: str, value: object) -> dict[str, Any]:
     after_sandbox = provider.get("after_sandbox_id")
     before_state = provider.get("before_state")
     after_state = provider.get("after_state")
+    lifecycle = provider.get("lifecycle")
+    old_sandbox_absent = provider.get("old_sandbox_absent")
     if (
         not isinstance(before_sandbox, str)
         or not before_sandbox
@@ -357,11 +360,15 @@ def _validate_rotation(name: str, value: object) -> dict[str, Any]:
         or before_state.lower() != "running"
         or not isinstance(after_state, str)
         or after_state.lower() != "running"
+        or not isinstance(lifecycle, str)
+        or lifecycle not in _PROVIDER_LIFECYCLES
+        or not isinstance(old_sandbox_absent, bool)
     ):
-        raise P53CertificationError(f"P53 rotation provider probe is incomplete: {name}")
-    if name == "fingerprint_change" and before_sandbox != after_sandbox:
-        raise P53CertificationError("P53 fingerprint rotation did not preserve its provider root")
-    if name != "fingerprint_change" and before_sandbox == after_sandbox:
+        raise P53CertificationError(f"P53 rotation provider lifecycle evidence is incomplete: {name}")
+    if name == "fingerprint_change":
+        if lifecycle != "handed_off" or old_sandbox_absent or before_sandbox != after_sandbox:
+            raise P53CertificationError("P53 fingerprint rotation did not preserve its provider root")
+    elif lifecycle != "replaced" or not old_sandbox_absent or before_sandbox == after_sandbox:
         raise P53CertificationError(f"P53 tainted rotation did not replace its provider Sandbox: {name}")
     handoff = value.get("handoff")
     if not isinstance(handoff, dict) or handoff.get("interpreter_preserved") is not (name == "fingerprint_change"):
@@ -386,6 +393,8 @@ def _validate_rotation(name: str, value: object) -> dict[str, Any]:
             "after_sandbox_id": after_sandbox,
             "before_state": before_state.lower(),
             "after_state": after_state.lower(),
+            "lifecycle": lifecycle,
+            "old_sandbox_absent": old_sandbox_absent,
         },
         "continuation": {
             "history_before_count": history_before,

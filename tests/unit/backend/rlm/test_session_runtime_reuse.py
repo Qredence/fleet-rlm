@@ -167,6 +167,33 @@ async def test_uncommitted_stream_taints_before_next_session_turn() -> None:
     assert len(factory.programs) == 2
 
 
+@pytest.mark.asyncio
+async def test_pruned_registry_generation_restarts_with_fresh_runtime_identities() -> None:
+    """A pruned coordination key may restart its local generation counter."""
+    key = SessionKey(str(uuid4()), str(uuid4()))
+    created: list[SessionRLMState] = []
+
+    async def factory(state_key: SessionKey, fingerprint: str) -> SessionRLMState:
+        state = SessionRLMState(state_key, fingerprint, object(), object())
+        created.append(state)
+        return state
+
+    registry = SessionRLMRegistry(factory)
+    try:
+        first = await registry.acquire(key, "fingerprint")
+        await registry.close(first)
+        second = await registry.acquire(key, "fingerprint")
+
+        assert first.generation == 1
+        assert second.generation == 1
+        assert second is not first
+        assert second.rlm is not first.rlm
+        assert second.interpreter is not first.interpreter
+        assert len(created) == 2
+    finally:
+        await registry.shutdown()
+
+
 # ---------------------------------------------------------------------------
 # P52 Runner-level taint / fingerprint / history behavior
 # ---------------------------------------------------------------------------

@@ -11,6 +11,7 @@ import pytest
 from fleet_rlm.config.settings import Settings
 from fleet_rlm.daytona._lease import RootSessionLease
 from fleet_rlm.daytona.admission import DaytonaAdmission
+from fleet_rlm.daytona.runtime import DaytonaRuntime
 from fleet_rlm.runtime.daytona.run_environment import _DaytonaEnvironmentProvider
 from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
 from fleet_rlm.workspace.paths import volume_paths_from_settings
@@ -48,11 +49,13 @@ class _Sink:
 class _SessionManager:
     def __init__(self) -> None:
         self.acquired: list[object] = []
+        self.force_new_calls: list[bool] = []
         self.released: list[object] = []
         self.quarantined: list[object] = []
 
     async def acquire(self, request, *, deadline, force_new=False):
-        del deadline, force_new
+        del deadline
+        self.force_new_calls.append(force_new)
         lease = SimpleNamespace(
             sandbox_id=f"sandbox-{len(self.acquired) + 1}",
             interpreter=object(),
@@ -118,6 +121,7 @@ async def test_root_lease_reuses_workspace_session_but_rebuilds_turn_sinks(monke
     second = await provider.acquire(_turn(session_id=session_id, workspace_id=workspace_id), deadline=float("inf"))
 
     assert len(manager.acquired) == 1
+    assert manager.force_new_calls == [False]
     assert len(platform.lookups) == 2
     assert first.interpreter is second.interpreter
     assert first.attachment_sink is not second.attachment_sink
@@ -133,6 +137,40 @@ async def test_root_lease_reuses_workspace_session_but_rebuilds_turn_sinks(monke
     await first.resident_release()  # type: ignore[misc]
     assert manager.released == [manager.acquired[0]]
     assert provider._resident_root_leases == {}
+
+
+@pytest.mark.asyncio
+async def test_tainted_root_forces_new_sandbox_and_preserves_volume(monkeypatch: pytest.MonkeyPatch) -> None:
+    provider, manager, _platform = _provider(monkeypatch)
+    provider.resources.runtime = DaytonaRuntime(provider.resources)
+    session_id = uuid4()
+    workspace_id = uuid4()
+    first = await provider.acquire(_turn(session_id=session_id, workspace_id=workspace_id), deadline=float("inf"))
+    key = (workspace_id, session_id)
+    old_owner = provider._resident_root_leases[key]
+    old_sandbox = manager.acquired[0].sandbox_id
+    old_volume = manager.acquired[0].volume_id
+    await first.release()
+
+    assert first.mark_tainted is not None
+    first.mark_tainted()
+    assert key in provider._tainted_root_keys
+    assert first.resident_release is not None
+    await first.resident_release()
+    assert old_owner.closed
+    assert provider.resources.runtime.roots == ()
+
+    second = await provider.acquire(_turn(session_id=session_id, workspace_id=workspace_id), deadline=float("inf"))
+    assert len(manager.acquired) == 2
+    assert manager.force_new_calls == [False, True]
+    assert manager.acquired[1].sandbox_id != old_sandbox
+    assert manager.acquired[1].volume_id == old_volume
+    assert manager.released == [manager.acquired[0]]
+    assert key not in provider._tainted_root_keys
+
+    await second.release()
+    await provider.aclose()
+    assert manager.released == [manager.acquired[0], manager.acquired[1]]
 
 
 @pytest.mark.asyncio
@@ -156,6 +194,7 @@ async def test_same_attachment_id_rotates_run_scoped_manifest_root(monkeypatch: 
     # replace a bound manifest, so the root must rotate even when the durable
     # Attachment ID is unchanged.
     assert len(manager.acquired) == 2
+    assert manager.force_new_calls == [False, True]
     assert manager.released == [manager.acquired[0]]
     assert first.interpreter is not second.interpreter
     await provider.aclose()
@@ -178,6 +217,7 @@ async def test_context_selector_change_rotates_provider_root_before_reuse(monkey
     )
 
     assert len(manager.acquired) == 2
+    assert manager.force_new_calls == [False, True]
     assert manager.released == [manager.acquired[0]]
     assert first.interpreter is not second.interpreter
     assert len(platform.lookups) == 2

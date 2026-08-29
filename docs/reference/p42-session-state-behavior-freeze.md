@@ -36,6 +36,21 @@ state semantics that P43–P53 are required to prove. The exact evidence baselin
 | Tool authority | A retained Tool object or Python alias resolves authorization for the current Turn and fails closed when no current capability authorizes it. | `tests/unit/backend/chat/test_p52_security_restart.py`, `tests/unit/backend/rlm/test_session_runtime_tools.py` |
 | Program fingerprint rotation | An unchanged program reuses the resident state; a Signature, Skill-instruction, model-configuration, or Tool-schema change rotates it through `program_fingerprint_for_context`, and durable History remains after rotation. | `tests/unit/backend/rlm/test_session_runtime_reuse.py`, `tests/unit/backend/rlm/test_session_runtime.py` |
 
+### Rotation distinction
+
+A healthy program-fingerprint change is a program rotation: Fleet creates a new
+native Root RLM/program, while handing off the existing caller-owned interpreter
+and Root provider Sandbox. The new RLM identity proves the program changed; the
+interpreter and Sandbox identities prove that healthy state was intentionally
+retained. A tainted rotation (including failure, timeout, cancellation, claim
+loss, commit failure, provider failure, or idle eviction) follows the
+`force_new` path: Fleet closes the old runtime, acquires a fresh interpreter and
+provider Sandbox, and confirms the old Sandbox is absent before certification.
+The local runtime generation is only a positive registry incarnation and may
+restart after registry metadata is pruned; identity receipts, not generation
+ordering, prove freshness. Both paths rehydrate durable History and retain
+Volume-backed Workspace, Memory, Attachments, and Artifacts.
+
 ## Public behavior retained
 
 The following behavior remains unchanged throughout the migration:

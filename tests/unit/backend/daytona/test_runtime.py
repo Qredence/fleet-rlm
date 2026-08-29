@@ -26,9 +26,11 @@ class FakeRoot:
 @pytest.mark.asyncio
 async def test_root():
     roots = []
+    force_new_calls = []
 
     async def factory(*, spec: RootSessionSpec, force_new: bool = False):
-        del spec, force_new
+        del spec
+        force_new_calls.append(force_new)
         x = FakeRoot(str(len(roots)))
         roots.append(x)
         return x
@@ -45,9 +47,34 @@ async def test_root():
     third = await runtime.acquire_root_session(RootSessionSpec("w", "s", context_fingerprint="b"))
     assert third is not second
     assert second.state is LeaseState.CLOSED
+    assert force_new_calls == [False, True, True]
     assert await runtime.aclose() is True
     assert runtime.state is DaytonaRuntimeState.CLOSED
     assert third.state is LeaseState.CLOSED
+
+
+@pytest.mark.asyncio
+async def test_taint_marker_survives_root_close_until_fresh_acquisition() -> None:
+    roots: list[FakeRoot] = []
+    force_new_calls: list[bool] = []
+
+    async def factory(*, spec: RootSessionSpec, force_new: bool = False):
+        del spec
+        force_new_calls.append(force_new)
+        root = FakeRoot(str(len(roots)))
+        roots.append(root)
+        return root
+
+    runtime = DaytonaRuntime(root_acquirer=factory)
+    first = await runtime.acquire_root_session(RootSessionSpec("w", "s", context_fingerprint="a"))
+    runtime.mark_root_tainted("w", "s")
+    await runtime.close_root_session("w", "s")
+
+    second = await runtime.acquire_root_session(RootSessionSpec("w", "s", context_fingerprint="a"))
+    assert second is not first
+    assert roots[0].released == 1
+    assert force_new_calls == [False, True]
+    assert await runtime.aclose() is True
 
 
 @pytest.mark.asyncio

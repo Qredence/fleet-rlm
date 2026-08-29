@@ -37,6 +37,15 @@ conversation, Workspace, Memory, Attachments, and Artifacts. Native child RLMs
 always use isolated RLMs and interpreters; they never share the mutable Root
 interpreter.
 
+Program-fingerprint rotation has a separate healthy path. When the resident
+runtime is healthy, Fleet creates a new Root RLM/program for the new fingerprint
+and hands off the existing caller-owned interpreter and provider Sandbox. A
+tainted rotation, provider failure, or idle eviction uses `force_new`, replaces
+both the interpreter and provider Sandbox, and confirms the old Sandbox is
+absent. The generation value is a positive process-local registry incarnation;
+freshness is established by the runtime and provider identities rather than by
+global generation monotonicity.
+
 ## Consequences
 
 - The application, not DSPy, owns durable conversation construction and
@@ -68,3 +77,16 @@ interpreter.
   [FastAPI lifespan events](https://fastapi.tiangolo.com/advanced/events/).
 - The certified Fleet dependency is `dspy==3.3.1` in `pyproject.toml`; older
   plan references are not the current runtime evidence baseline.
+- P53.2 and P35-E are certified on the same clean candidate in this order:
+
+  ```bash
+  FLEET_LIVE=1 uv run python scripts/live_p35d_certification.py
+  make p53-live-certification
+  uv run python scripts/validate_release.py service-isolation --services <mission-services-manifest>
+  uv run python scripts/certification_gate.py run --services <mission-services-manifest>
+  uv run python scripts/certification_gate.py verify
+  ```
+
+  The P53 manifest is an ignored internal v2 receipt and must bind the current
+  SHA, lockfile, certified DSPy/Daytona identity, all seven rotations, and all
+  seven child lanes before the P35-E gate can close.

@@ -209,6 +209,13 @@ A deletion PR must cite the P36 inventory IDs named above and record the
 same-SHA deterministic and, where required, live evidence. A green unit test
 alone does not authorize a provider-lifecycle deletion.
 
+During P53 closeout, rows marked **KEEP/DEEPEN** remain in force: they are not
+deletion candidates unless a later reviewed change updates the exact row first.
+Only an exact current row explicitly marked **DELETE** may authorize removal,
+and the removal must happen before the final clean-candidate P53/P35-E run.
+Any candidate change after live evidence invalidates that evidence and requires
+the affected certification sequence to run again.
+
 ## Historical P42 non-actions
 
 P42 recorded a future responsibility map only. The following statements describe

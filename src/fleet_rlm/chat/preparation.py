@@ -247,6 +247,9 @@ class RunEnvironment:
     # CommittedSessionHistory because SandboxSerializable values cross its
     # interpreter boundary while raw Pydantic History does not.
     history_transport: dspy.History | CommittedSessionHistory | None = None
+    # Synchronous provider fence used when the resident RLM becomes tainted.
+    # This is an internal lifecycle hook; it does not cross the HTTP/SSE seam.
+    mark_tainted: Callable[[], None] | None = None
 
 
 class RunEnvironmentProvider(Protocol):
@@ -349,13 +352,17 @@ class DefaultRunPreparer:
         # that per-Turn gate wrapper in the Session state.
         if environment.resident_release is not None:
             environment_release: RetainableEnvironmentRelease | None = RetainableEnvironmentRelease(
-                environment.resident_release
+                environment.resident_release,
+                taint_callback=environment.mark_tainted,
             )
             turn_environment_release: RetainableEnvironmentRelease | None = RetainableEnvironmentRelease(
                 environment.release
             )
         elif environment.release_is_resident:
-            environment_release = RetainableEnvironmentRelease(environment.release)
+            environment_release = RetainableEnvironmentRelease(
+                environment.release,
+                taint_callback=environment.mark_tainted,
+            )
             turn_environment_release = None
         else:
             environment_release = None

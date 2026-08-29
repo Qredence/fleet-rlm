@@ -1220,6 +1220,10 @@ class SessionRLMState:
         self.tainted = True
         if not self._closed:
             self.health = RuntimeHealth.TAINTED
+        root_lease = self.root_lease
+        mark_tainted = getattr(root_lease, "mark_tainted", None)
+        if callable(mark_tainted):
+            mark_tainted()
 
     async def _wait_inactive(self) -> None:
         # The event covers registry-mediated execution.  The lock acquisition

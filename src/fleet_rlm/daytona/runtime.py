@@ -843,7 +843,6 @@ class DaytonaRuntime:
         async with self._root_lock:
             if self._roots.get(owner.key) is owner:
                 self._roots.pop(owner.key, None)
-                self._tainted.discard(owner.key)
 
     async def _acquire_child(self, spec: ChildEnvironmentSpec) -> ChildEnvironment:
         # Track the complete acquisition, not only the provider request.  A

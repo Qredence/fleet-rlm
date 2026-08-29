@@ -135,6 +135,7 @@ class RetainableEnvironmentRelease:
     callback: Callable[[], Awaitable[Any]]
     retained: bool = False
     released: bool = False
+    taint_callback: Callable[[], None] | None = None
     _lock: asyncio.Lock = field(default_factory=asyncio.Lock, init=False, repr=False)
     _release_task: asyncio.Task[Any] | None = field(default=None, init=False, repr=False)
 
@@ -143,6 +144,11 @@ class RetainableEnvironmentRelease:
         if self.released:
             raise RuntimeError("environment release is already complete")
         self.retained = True
+
+    def mark_tainted(self) -> None:
+        """Tell the provider that the retained root must not be reused."""
+        if self.taint_callback is not None:
+            self.taint_callback()
 
     async def release(self) -> None:
         """Release from prepared cleanup unless resident ownership was retained."""

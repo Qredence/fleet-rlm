@@ -131,6 +131,8 @@ def _p53_manifest(tmp_path: Path) -> Path:
                 ),
                 "before_state": "running",
                 "after_state": "running",
+                "lifecycle": "handed_off" if name == "fingerprint_change" else "replaced",
+                "old_sandbox_absent": name != "fingerprint_change",
             },
             "continuation": {
                 "history_before_count": index,

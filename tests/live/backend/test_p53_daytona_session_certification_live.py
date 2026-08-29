@@ -51,6 +51,7 @@ from fleet_rlm.chat.run_lifecycle import (
 from fleet_rlm.chat.turn_runtime import TurnRuntime
 from fleet_rlm.config.loader import load_runtime_settings
 from fleet_rlm.config.settings import Settings
+from fleet_rlm.daytona.lifecycle import confirm_absence
 from fleet_rlm.persistence.database import create_async_engine_from_url, create_session_factory
 from fleet_rlm.persistence.repositories import (
     SqlAlchemyRunStateStore,
@@ -73,7 +74,7 @@ _EVIDENCE_ENV = "FLEET_LIVE_EVIDENCE_PATH"
 _CERTIFIED_DSPY = "3.3.1"
 _CERTIFIED_DAYTONA_SNAPSHOT = "fleet-rlm-python313-v5"
 _CERTIFIED_DAYTONA_TARGET = "us"
-_SCHEMA = "fleet.p53-live-session-certification/v1"
+_SCHEMA = "fleet.p53-live-session-certification/v2"
 _RUN_ID_ENV = "FLEET_P53_RUN_ID"
 
 
@@ -380,6 +381,18 @@ async def _wait_cleanup(cleanup: RunCleanupSupervisor) -> None:
     raise AssertionError("P53 detached cleanup did not settle")
 
 
+async def _confirm_sandbox_absent(platform: Any, sandbox_id: str) -> bool:
+    """Confirm a replaced root Sandbox is no longer provider-owned."""
+    outcome = await confirm_absence(
+        probe=platform.get,
+        sandbox_id=sandbox_id,
+        timeout_s=180.0,
+        poll_interval_s=0.5,
+    )
+    assert outcome.absent, f"P53 old Sandbox was not confirmed absent: {sandbox_id}"
+    return True
+
+
 @dataclass(frozen=True, slots=True)
 class _TurnResult:
     events: tuple[Any, ...]
@@ -446,6 +459,7 @@ def _scenario_record(
     history_count: int,
     failed_markers_absent: bool,
     provider_state: str | None,
+    old_sandbox_absent: bool,
     provider_before: Any | None = None,
     provider_after: Any | None = None,
     provider_before_state: str | None = None,
@@ -480,6 +494,8 @@ def _scenario_record(
             "after_sandbox_id": after_sandbox,
             "before_state": provider_before_state or "running",
             "after_state": provider_state,
+            "lifecycle": "handed_off" if name == "fingerprint_change" else "replaced",
+            "old_sandbox_absent": old_sandbox_absent,
         },
         "continuation": {
             "history_before_count": history_count - 1,
@@ -636,6 +652,8 @@ async def test_live_p53_daytona_session_rotations_and_history(tmp_path: Path) ->
         after_commit_binding = await resources.bindings.get(session_id)
         after_commit_sandbox = _sandbox_id(after_commit_binding)
         assert after_commit_sandbox is not None
+        assert after_commit_sandbox != before_commit_sandbox
+        commit_old_sandbox_absent = await _confirm_sandbox_absent(resources.platform, before_commit_sandbox)
         scenarios["commit_failure"] = _scenario_record(
             name="commit_failure",
             before=before_commit,
@@ -647,6 +665,7 @@ async def test_live_p53_daytona_session_rotations_and_history(tmp_path: Path) ->
             provider_before=before_commit_sandbox,
             provider_after=after_commit_sandbox,
             provider_before_state=getattr(before_commit_binding, "provider_state", None),
+            old_sandbox_absent=commit_old_sandbox_absent,
         )
 
         before_timeout = registry.get(key)
@@ -664,6 +683,8 @@ async def test_live_p53_daytona_session_rotations_and_history(tmp_path: Path) ->
         after_timeout_binding = await resources.bindings.get(session_id)
         after_timeout_sandbox = _sandbox_id(after_timeout_binding)
         assert after_timeout_sandbox is not None
+        assert after_timeout_sandbox != before_timeout_sandbox
+        timeout_old_sandbox_absent = await _confirm_sandbox_absent(resources.platform, before_timeout_sandbox)
         scenarios["timeout"] = _scenario_record(
             name="timeout",
             before=before_timeout,
@@ -675,6 +696,7 @@ async def test_live_p53_daytona_session_rotations_and_history(tmp_path: Path) ->
             provider_before=before_timeout_sandbox,
             provider_after=after_timeout_sandbox,
             provider_before_state=getattr(before_timeout_binding, "provider_state", None),
+            old_sandbox_absent=timeout_old_sandbox_absent,
         )
 
         before_cancel = registry.get(key)
@@ -692,6 +714,8 @@ async def test_live_p53_daytona_session_rotations_and_history(tmp_path: Path) ->
         after_cancel_binding = await resources.bindings.get(session_id)
         after_cancel_sandbox = _sandbox_id(after_cancel_binding)
         assert after_cancel_sandbox is not None
+        assert after_cancel_sandbox != before_cancel_sandbox
+        cancellation_old_sandbox_absent = await _confirm_sandbox_absent(resources.platform, before_cancel_sandbox)
         scenarios["cancellation"] = _scenario_record(
             name="cancellation",
             before=before_cancel,
@@ -703,6 +727,7 @@ async def test_live_p53_daytona_session_rotations_and_history(tmp_path: Path) ->
             provider_before=before_cancel_sandbox,
             provider_after=after_cancel_sandbox,
             provider_before_state=getattr(before_cancel_binding, "provider_state", None),
+            old_sandbox_absent=cancellation_old_sandbox_absent,
         )
 
         binding_before_provider = await resources.bindings.get(session_id)
@@ -728,6 +753,7 @@ async def test_live_p53_daytona_session_rotations_and_history(tmp_path: Path) ->
         assert new_sandbox is not None
         sandbox_ids.add(new_sandbox)
         assert new_sandbox != old_sandbox
+        provider_old_sandbox_absent = await _confirm_sandbox_absent(resources.platform, old_sandbox)
         assert provider_state_before.closed
         scenarios["provider_failure"] = _scenario_record(
             name="provider_failure",
@@ -740,6 +766,7 @@ async def test_live_p53_daytona_session_rotations_and_history(tmp_path: Path) ->
             provider_before=old_sandbox,
             provider_after=new_sandbox,
             provider_before_state=getattr(binding_before_provider, "provider_state", None),
+            old_sandbox_absent=provider_old_sandbox_absent,
         )
 
         store.fail_heartbeats = True
@@ -759,6 +786,8 @@ async def test_live_p53_daytona_session_rotations_and_history(tmp_path: Path) ->
         after_claim_binding = await resources.bindings.get(session_id)
         after_claim_sandbox = _sandbox_id(after_claim_binding)
         assert after_claim_sandbox is not None
+        assert after_claim_sandbox != before_claim_sandbox
+        claim_old_sandbox_absent = await _confirm_sandbox_absent(resources.platform, before_claim_sandbox)
         scenarios["claim_loss"] = _scenario_record(
             name="claim_loss",
             before=before_claim,
@@ -770,6 +799,7 @@ async def test_live_p53_daytona_session_rotations_and_history(tmp_path: Path) ->
             provider_before=before_claim_sandbox,
             provider_after=after_claim_sandbox,
             provider_before_state=getattr(before_claim_binding, "provider_state", None),
+            old_sandbox_absent=claim_old_sandbox_absent,
         )
 
         before_fingerprint = registry.get(key)
@@ -788,6 +818,7 @@ async def test_live_p53_daytona_session_rotations_and_history(tmp_path: Path) ->
         after_fingerprint_binding = await resources.bindings.get(session_id)
         after_fingerprint_sandbox = _sandbox_id(after_fingerprint_binding)
         assert after_fingerprint_sandbox is not None
+        assert after_fingerprint_sandbox == before_fingerprint_sandbox
         scenarios["fingerprint_change"] = _scenario_record(
             name="fingerprint_change",
             before=before_fingerprint,
@@ -799,6 +830,7 @@ async def test_live_p53_daytona_session_rotations_and_history(tmp_path: Path) ->
             provider_before=before_fingerprint_sandbox,
             provider_after=after_fingerprint_sandbox,
             provider_before_state=getattr(before_fingerprint_binding, "provider_state", None),
+            old_sandbox_absent=False,
         )
 
         before_idle = registry.get(key)
@@ -821,6 +853,8 @@ async def test_live_p53_daytona_session_rotations_and_history(tmp_path: Path) ->
         after_idle_binding = await resources.bindings.get(session_id)
         after_idle_sandbox = _sandbox_id(after_idle_binding)
         assert after_idle_sandbox is not None
+        assert after_idle_sandbox != before_idle_sandbox
+        idle_old_sandbox_absent = await _confirm_sandbox_absent(resources.platform, before_idle_sandbox)
         scenarios["idle_eviction"] = _scenario_record(
             name="idle_eviction",
             before=before_idle,
@@ -832,6 +866,7 @@ async def test_live_p53_daytona_session_rotations_and_history(tmp_path: Path) ->
             provider_before=before_idle_sandbox,
             provider_after=after_idle_sandbox,
             provider_before_state=getattr(before_idle_binding, "provider_state", None),
+            old_sandbox_absent=idle_old_sandbox_absent,
         )
 
         assert len(factory.created) == 8

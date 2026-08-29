@@ -292,6 +292,10 @@ class _DaytonaEnvironmentProvider:
     _resident_context_keys: dict[tuple[UUID, UUID], tuple[tuple[str, ...], tuple[tuple[str, str], ...], str | None]] = (
         field(default_factory=dict, init=False)
     )
+    # A tainted RLM may close its root before the next provider acquisition.
+    # Retain this marker across that close so a durable binding cannot silently
+    # reuse the retired Sandbox.
+    _tainted_root_keys: set[tuple[UUID, UUID]] = field(default_factory=set, init=False, repr=False)
     _resident_root_lock: asyncio.Lock = field(default_factory=asyncio.Lock, init=False, repr=False)
     # Serialize root replacement and shutdown without holding the registry
     # lock across provider callbacks.
@@ -362,6 +366,13 @@ class _DaytonaEnvironmentProvider:
             gate = asyncio.Lock()
             self._preparation_gates[key] = gate
         return gate
+
+    def _mark_provider_root_tainted(self, key: tuple[UUID, UUID]) -> None:
+        """Require a fresh provider root on the next acquisition for ``key``."""
+        self._tainted_root_keys.add(key)
+        runtime = getattr(self.resources, "runtime", None)
+        if isinstance(runtime, DaytonaRuntime):
+            runtime.mark_root_tainted(*key)
 
     def _prune_preparation_gate(self, key: tuple[UUID, UUID]) -> None:
         """Drop an idle Session preparation gate once no root remains."""
@@ -1012,10 +1023,12 @@ class _DaytonaEnvironmentProvider:
                     and not owner.failed
                     and not owner.closing
                     and self._resident_context_keys.get(key) == context_key
+                    and key not in self._tainted_root_keys
                 )
                 if reusable:
                     return owner, False
-                had_previous = owner is not None
+            had_previous = owner is not None
+            force_new = had_previous or key in self._tainted_root_keys
 
             if owner is not None and self.session_runtime_registry is not None:
                 self.session_runtime_registry.mark_tainted(SessionKey(workspace_id=str(key[0]), session_id=str(key[1])))
@@ -1034,7 +1047,7 @@ class _DaytonaEnvironmentProvider:
                             run_id=run.run_id,
                             context_fingerprint=context_key,
                             deadline=deadline,
-                            force_new=had_previous,
+                            force_new=force_new,
                         )
                     )
                 except BaseException:
@@ -1056,6 +1069,7 @@ class _DaytonaEnvironmentProvider:
                             self._resident_context_keys.pop(key, None)
                         self._resident_root_leases[key] = runtime_owner
                         self._resident_context_keys[key] = context_key
+                        self._tainted_root_keys.discard(key)
                 except BaseException:
                     # The runtime facade published this owner before the
                     # adapter could publish its local sink index. Close it (or
@@ -1075,7 +1089,7 @@ class _DaytonaEnvironmentProvider:
                 workspace_id=run.access.workspace_id,
                 run_id=run.run_id,
             )
-            force_new_sandbox = had_previous
+            force_new_sandbox = force_new
             if owner is not None:
                 # Remove the map entry only after release and any compatibility
                 # quarantine succeed so a provider failure/cancellation leaves
@@ -1110,6 +1124,7 @@ class _DaytonaEnvironmentProvider:
                 async with self._resident_root_lock:
                     self._resident_root_leases[key] = owner
                     self._resident_context_keys[key] = context_key
+                    self._tainted_root_keys.discard(key)
             except BaseException:
                 # The raw manager lease became ours before local publication.
                 # Retire it even if cancellation wins while the index lock is
@@ -1214,9 +1229,7 @@ class _DaytonaEnvironmentProvider:
         )
         if self.session_runtime_registry is not None:
             self.session_runtime_registry.mark_tainted(key)
-        runtime = getattr(self.resources, "runtime", None)
-        if isinstance(runtime, DaytonaRuntime):
-            runtime.mark_root_tainted(key.workspace_id, key.session_id)
+        self._mark_provider_root_tainted((run.access.workspace_id, run.session_id))
 
     async def acquire(self, run: ClaimedRun, *, deadline: float) -> RunEnvironment:
         """Acquire a Daytona environment while retaining Session preparation ownership."""
@@ -1368,6 +1381,7 @@ class _DaytonaEnvironmentProvider:
                 resident_release=release_root if created_root else None,
                 release_is_resident=False,
                 history_transport=build_committed_session_history_for_claim(run),
+                mark_tainted=lambda key=key: self._mark_provider_root_tainted(key),
             )
         except BaseException:
             # The preparation gate proves that no earlier same-Session Turn
