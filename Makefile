@@ -1,5 +1,8 @@
 PYTHON_SOURCES = src tests scripts migrations
-PYTEST_FAST_MARKERS = not live_llm and not live_daytona and not benchmark and not db
+# Release/install matrix tests are intentionally opt-in: they create multiple
+# virtual environments and are covered by the dedicated package gate.
+PYTEST_FAST_MARKERS = not live_llm and not live_daytona and not benchmark and not db and not packaging
+PYTEST_PACKAGING_MARKERS = packaging and not live_llm and not live_daytona and not benchmark and not db
 PYTEST := uv run --no-sync pytest
 PYTEST_ISOLATED := env \
 	FLEET_DAYTONA_API_KEY= \
@@ -8,16 +11,18 @@ PYTEST_ISOLATED := env \
 	FLEET_DATABASE_URL= \
 	$(PYTEST)
 PYTEST_XDIST_MAX_WORKERS ?= 2
-PYTEST_PARALLEL := -n auto --maxprocesses=$(PYTEST_XDIST_MAX_WORKERS)
+# Keep module-scoped fixtures together; this avoids rebuilding expensive test
+# state when xdist splits individual tests from the same module.
+PYTEST_PARALLEL := -n auto --maxprocesses=$(PYTEST_XDIST_MAX_WORKERS) --dist=loadfile
 
 .PHONY: \
 	help \
 	install install-dev install-all \
 	dev format format-check lint typecheck \
-	test test-fast test-unit test-contract test-daytona-cov \
-	check quality-gate check-release check-docs check-security check-deps check-codebase-tree api-check api-sync tui-check \
+	test test-fast test-unit test-contract test-packaging test-daytona-cov \
+	check quality-gate check-release check-docs check-security check-deps check-codebase-tree check-dependency-boundaries api-check api-sync tui-check \
 	build build-release release release-check \
-	certification-gate certification-verify \
+	certification-gate certification-verify p53-live-certification \
 	clean cli precommit-install precommit-run precommit \
 	sync sync-dev sync-all metadata-check docs-check security-check dependency-check release-artifacts cli-help \
 	cloud-preflight \
@@ -38,10 +43,12 @@ help:
 	@echo "  make typecheck        - Run ty check"
 	@echo ""
 	@echo "Testing:"
-	@echo "  make test             - Run default non-live/non-benchmark tests"
-	@echo "  make test-unit        - Run unit tests (non-live/non-benchmark)"
+	@echo "  make test             - Run default fast non-live tests (packaging is separate)"
+	@echo "  make test-unit        - Run unit tests (non-live/non-benchmark; packaging separate)"
+	@echo "  make test-packaging   - Run serial artifact/install/release tests"
 	@echo "  make test-contract    - Run backend contracts and CLI smoke tests"
 	@echo "  make test-daytona-cov - Run canonical non-live tests with Daytona branch coverage"
+	@echo "  make p53-live-certification - Run serial credentialed P53 Session certification"
 	@echo "  make benchmark-oolong - Run pinned Prime Oolong smoke (runtime.live_enabled=true; configure credentials)"
 	@echo "  make benchmark-native-long-context - Measure native whole-value URL context at 1/5/10 MiB"
 	@echo ""
@@ -52,6 +59,7 @@ help:
 	@echo "  make check-security   - Run pip-audit + bandit"
 	@echo "  make check-deps       - Check Python dependencies with deptry"
 	@echo "  make check-codebase-tree - Enforce import boundaries defined in codebase map"
+	@echo "  make check-dependency-boundaries - Enforce provider/domain dependency directions"
 	@echo "  make api-check        - Verify OpenAPI and generated TUI HTTP types"
 	@echo "  make api-sync         - Regenerate OpenAPI and generated TUI HTTP types"
 	@echo "  make stream-check     - Verify the TUI turn-stream fixture is current"
@@ -104,6 +112,9 @@ test:
 
 test-fast: test
 
+test-packaging:
+	$(PYTEST_ISOLATED) -q tests/unit/backend/packaging -m "$(PYTEST_PACKAGING_MARKERS)" -n 0
+
 test-unit:
 	$(PYTEST_ISOLATED) -q $(PYTEST_PARALLEL) tests/unit/backend tests/unit/scripts tests/freeze tests/unit/test_litellm_invariant.py -m "$(PYTEST_FAST_MARKERS)"
 
@@ -152,7 +163,7 @@ tui-check:
 	cd tools/fleet-tui && pnpm run typecheck
 	cd tools/fleet-tui && pnpm run test
 
-check: lint format-check typecheck test-daytona-cov api-check tui-check check-codebase-tree check-docs
+check: lint format-check typecheck test-daytona-cov api-check tui-check check-codebase-tree check-dependency-boundaries check-docs
 
 quality-gate: check
 
@@ -167,13 +178,7 @@ check-docs:
 	uv run python scripts/check_harness_engineering.py
 
 check-security:
-	# TODO: Remove this ignore once Pygments ships a patched release for
-	# GHSA-5239-wwwm-4pmq / CVE-2026-4539.
-	# TODO: Remove the pip ignore once the uvx pip-audit runtime no longer
-	# pulls pip 26.0.1 / CVE-2026-3219.
-	# TODO: Remove the DiskCache ignore once upstream ships a patched release
-	# or DSPy removes the transitive dependency.
-	uvx pip-audit --ignore-vuln GHSA-5239-wwwm-4pmq --ignore-vuln CVE-2026-3219 --ignore-vuln CVE-2025-69872
+	uvx pip-audit
 	uvx bandit -q -r src/fleet_rlm -x tests -lll
 
 check-deps:
@@ -181,6 +186,9 @@ check-deps:
 
 check-codebase-tree:
 	uv run python scripts/check_codebase_tree.py
+
+check-dependency-boundaries:
+	uv run python scripts/check_dependency_boundaries.py
 
 api-check:
 	uv run python scripts/openapi_tools.py check
@@ -204,6 +212,9 @@ build-release: build
 	uv run python scripts/validate_release.py wheel
 	uvx twine check --strict dist/*
 	uv run python scripts/validate_release.py artifacts
+
+p53-live-certification:
+	FLEET_LIVE=1 uv run python scripts/live_p53_certification.py
 
 certification-gate:
 	uv run python scripts/certification_gate.py run

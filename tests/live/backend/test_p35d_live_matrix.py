@@ -20,10 +20,10 @@ from fastapi.testclient import TestClient
 
 from fleet_rlm.api.routes.turns import _log_preparation_unavailable
 from fleet_rlm.app import create_app
-from fleet_rlm.daytona.dspy_sync_bridge import sync_sandbox
+from fleet_rlm.daytona.broker import sync_sandbox
 from fleet_rlm.daytona.errors import map_provider_error
-from fleet_rlm.observability.failure_diagnostics import normalize_turn_failure
-from fleet_rlm.rlm.model_bundle import RLMModelBundle
+from fleet_rlm.observability.diagnostics import normalize_turn_failure
+from fleet_rlm.rlm.program import RLMModelBundle
 from tests.live.backend._database import upgrade_to_head
 from tests.live.backend.test_fleet_rlm_daytona_mvp import (
     _SECRET_NAMES,
@@ -81,6 +81,9 @@ def test_p35d_runtime_identity() -> None:
 
 
 def _write_receipt(payload: dict[str, Any]) -> None:
+    run_id = os.environ.get("FLEET_P35D_RUN_ID")
+    if run_id:
+        payload = {**payload, "run_id": run_id}
     raw_path = os.environ.get(_EVIDENCE_ENV)
     if not raw_path:
         return
@@ -275,8 +278,9 @@ def test_p35d_live_root_direct(tmp_path: Path) -> None:
             assert sum(chunk.get("type") == "finish" for chunk in chunks) == 1
             assert any(chunk.get("type") == "reasoning-delta" for chunk in chunks)
             code_chunks = [chunk for chunk in chunks if chunk.get("type") == "data-rlm-code"]
-            assert len(code_chunks) == 1
-            assert "SUBMIT" in str(code_chunks[0].get("data", {}).get("code", ""))
+            submit_chunks = [chunk for chunk in code_chunks if "SUBMIT" in str(chunk.get("data", {}).get("code", ""))]
+            assert len(submit_chunks) == 1
+            assert code_chunks[-1] == submit_chunks[0]
             output_chunks = [chunk for chunk in chunks if chunk.get("type") == "data-rlm-output"]
             assert any("root-direct-ready" in str(chunk.get("data", {}).get("output", "")) for chunk in output_chunks)
             text = "".join(str(chunk.get("delta", "")) for chunk in chunks if chunk.get("type") == "text-delta")
@@ -338,6 +342,7 @@ def test_p35d_fault_logs_are_secret_free(caplog: pytest.LogCaptureFixture) -> No
             "schema": "fleet.p35d-fault-logs/v1",
             "candidate": {**_identity(), "versions": {"dspy": "3.3.1"}},
             "faults": ["provider_auth", "daytona_error", "interpreter_exception"],
+            "assertions": {"secret_free_fault_logs": True},
             "scans": {
                 "caplog": {
                     "passed": True,

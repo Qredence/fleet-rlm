@@ -39,7 +39,6 @@ from fleet_rlm.chat.run_lifecycle import (
     RunStateError,
     _RunClaimToken,
 )
-from fleet_rlm.files.memory_candidates import MemoryPromotionIntent
 from fleet_rlm.persistence.database import DatabaseConnectionError
 from fleet_rlm.persistence.models import RunRow, SessionRow
 from fleet_rlm.persistence.repositories.run_claim_decisions import (
@@ -69,7 +68,7 @@ from fleet_rlm.persistence.repositories.run_liveness import (
     _restore_after_fence_failure,
 )
 from fleet_rlm.persistence.repositories.run_queries import _committed_receipt, _committed_replay, _session_history
-from fleet_rlm.rlm.dspy_contract import RLMUsage, empty_rlm_usage
+from fleet_rlm.runtime.usage import RLMUsage, empty_rlm_usage
 from fleet_rlm.sessions.committed_turn import CommittedTurn
 from fleet_rlm.sessions.models import (
     AssistantTurnRecord,
@@ -79,6 +78,7 @@ from fleet_rlm.sessions.models import (
     TurnInput,
     UserTurnRecord,
 )
+from fleet_rlm.workspace.memory import MemoryPromotionIntent
 
 
 @dataclass(slots=True)
@@ -246,10 +246,14 @@ class InMemoryRunStateStore:
         run.user_turn_id = uuid4()
         run.record_sequence = session.turn_sequence + 1
         session.turn_sequence += 2
+        # Keep the bounded tombstone pair in the Session History/audit
+        # projection.  Its originating CommittedTurn metadata lets the
+        # model-facing canonical projection exclude this non-conversation
+        # result without losing durable listing/retry semantics.
         session.history.extend(
             (
                 HistoryMessage("user", run.input.text),
-                HistoryMessage("assistant", run.tombstone.text),
+                HistoryMessage("assistant", run.tombstone.text, run.tombstone),
             )
         )
 

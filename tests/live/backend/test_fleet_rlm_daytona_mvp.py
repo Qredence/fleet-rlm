@@ -28,18 +28,14 @@ from fastapi.testclient import TestClient
 
 from fleet_rlm.api.local_scope import LocalScope
 from fleet_rlm.app import create_app
-from fleet_rlm.config import (
-    Settings,
-    active_profile_contract,
-    load_profile_environment_contracts,
-    load_runtime_settings,
-)
-from fleet_rlm.daytona.dspy_sync_bridge import sync_sandbox
-from fleet_rlm.daytona.workspace_fs import DaytonaSandboxVolumeFs
-from fleet_rlm.files.volume_paths import volume_paths_from_settings
-from fleet_rlm.rlm.tool_observer import ToolEventView
+from fleet_rlm.config.loader import active_profile_contract, load_profile_environment_contracts, load_runtime_settings
+from fleet_rlm.config.settings import Settings
+from fleet_rlm.daytona.broker import sync_sandbox
+from fleet_rlm.rlm.events import ToolEventView
 from fleet_rlm.runtime.bindings import SandboxBinding
 from fleet_rlm.skills.catalog import stable_skill_id
+from fleet_rlm.workspace.paths import volume_paths_from_settings
+from fleet_rlm.workspace.storage import DaytonaSandboxVolumeFs
 from tests.live.backend._database import upgrade_to_head
 
 pytestmark = [pytest.mark.live_daytona, pytest.mark.timeout(900)]
@@ -547,8 +543,12 @@ async def _strict_cleanup(resources: Any, sandbox_ids: set[str], volume_name: st
 
         async def delete_sandbox(sandbox_id: str = sandbox_id) -> None:
             sandbox = await resources.platform.get(sandbox_id)
-            if sandbox is not None:
-                await resources.platform.delete(sandbox)
+            if sandbox is None:
+                return
+            state = str(getattr(getattr(sandbox, "state", None), "value", getattr(sandbox, "state", None)) or "")
+            if state.strip().lower() in {"destroyed", "deleted", "archived"}:
+                return
+            await resources.platform.delete(sandbox)
 
         if not await _retry_cleanup(delete_sandbox):
             failures.append("sandbox")

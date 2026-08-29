@@ -23,8 +23,8 @@ from fastapi.testclient import TestClient
 
 from fleet_rlm.app import create_app
 from fleet_rlm.daytona import recursive_child_runtime, session_manager
-from fleet_rlm.observability.callback_shadow import CallbackRecord, CallbackShadowRecorder
-from fleet_rlm.rlm.model_bundle import RLMModelBundle
+from fleet_rlm.observability.dspy_callbacks import CallbackRecord, CallbackShadowRecorder
+from fleet_rlm.rlm.program import RLMModelBundle
 from tests.live.backend._database import upgrade_to_head
 from tests.live.backend.test_fleet_rlm_daytona_mvp import _live_settings
 from tests.live.backend.test_phase1_daytona_stream import _strict_cleanup
@@ -94,6 +94,9 @@ def _safe_record(
 
 
 def _write_receipt(payload: dict[str, object]) -> None:
+    run_id = os.environ.get("FLEET_P35D_RUN_ID")
+    if run_id:
+        payload = {**payload, "run_id": run_id}
     path = _receipt_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
@@ -208,7 +211,10 @@ def test_live_callback_shadow_root_child_ancestry(
                 assert (
                     next(record for record in root_records if record.operation == "tool_call").tool_name == "rlm_query"
                 )
-                assert [record.operation for record in child_records] == ["startup", "execute", "shutdown"]
+                child_operations = [record.operation for record in child_records]
+                assert child_operations[0] == "startup"
+                assert child_operations[-1] == "shutdown"
+                assert child_operations.count("execute") == 2
                 assert all(record.status == "completed" for record in (*root_records, *child_records))
                 assert all(record.duration_ms >= 0 for record in (*root_records, *child_records))
             finally:

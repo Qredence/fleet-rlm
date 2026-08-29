@@ -1,8 +1,11 @@
 # DSPy RLM and Daytona integration
 
-Fleet executes every primary Turn through a fresh native `dspy.RLM`. The Root
-Model generates iterative Python, while the Sub Model answers `llm_query()` and
-ordered `llm_query_batched()` calls. The committed Daytona policies also expose
+Fleet executes primary Turns through one compatible native `dspy.RLM` per
+resident Session runtime. The caller-owned interpreter and Root Sandbox may be
+reused across sequential successful Turns; DSPy's private `REPLHistory` and
+Turn capabilities are fresh for every invocation. The Root Model generates
+iterative Python, while the Sub Model answers `llm_query()` and ordered
+`llm_query_batched()` calls. The committed Daytona policies also expose
 `rlm_query(prompt=prompt)` and the Root-only ordered
 `rlm_query_batched(prompts=prompts)` for isolated iterative subproblems through
 bounded child `dspy.RLM` runtimes. Both model roles are host-configured; API
@@ -10,8 +13,14 @@ clients cannot provide models, Signatures, or executable capabilities.
 
 ## Execution contract
 
-- One Run owns one Code-Interpreter Context. Variables, imports, and functions
-  persist across RLM iterations in that Run only.
+- One resident Session runtime owns one caller-provided Code-Interpreter
+  Context. Variables, imports, and functions persist across sequential clean
+  Turns while that compatible runtime remains healthy and resident. A failed,
+  cancelled, timed-out, or evicted runtime is rotated; durable History and
+  Volume-backed state are rehydrated, but arbitrary Python globals may be lost.
+- Every Turn receives the complete committed `dspy.History` for its claimed
+  Session checkpoint. It contains only canonical `{"request": ..., "answer": ...}`
+  records; hidden reasoning, Tool output, and failed Turns are excluded.
 - `rlm_query(prompt=prompt)` and Root-only `rlm_query_batched(prompts=prompts)`
   are the recursive primitives exposed by the committed Daytona policies.
   Under the selected recursive policy, Root code keeps large input-specific
@@ -22,11 +31,14 @@ clients cannot provide models, Signatures, or executable capabilities.
   private sibling scope `recursive/<workspace-id>/<run-id>/<call-index>`, never
   at the Root's `workspaces/<workspace-id>` scope. The child receives no
   Session/Workspace/Attachment/Artifact/Skill capability, broker, credentials,
-  or history; it receives only its recursive `rlm_query` tool and DSPy's native
-  semantic Sub-LM tools. Its scope is purged and its Sandbox deleted before a
-  successful Root Turn can commit. A child's further recursive request is a
+  or mutable Root globals; it receives an immutable committed Session
+  History snapshot, bounded Session metadata, its recursive `rlm_query` tool,
+  and DSPy's native semantic Sub-LM tools. Its scope is purged and its Sandbox
+  deleted before a successful Root Turn can commit. A child's further recursive request is a
   depth-2 Sub-LM fallback and does not create another Sandbox.
-- A later Run receives a fresh context, even when it reuses the same Sandbox.
+- A later Turn receives a fresh request/capability binding, output metadata,
+  budget, and DSPy `REPLHistory`; it may reuse the same healthy Session
+  interpreter and Sandbox after the previous Turn commits.
 - Host capabilities enter the Turn blueprint as explicit `dspy.Tool` objects.
   Fleet preserves schema validation at the callable boundary used by DSPy's
   interpreter and exposes only host-approved bounded event views.
@@ -123,12 +135,13 @@ Sub Model instead of creating a grandchild RLM or Sandbox.
 Fleet uses DSPy 3.3.x's `max_iters` spelling end-to-end. The public
 configuration key is `rlm.max_iters` (`Settings.rlm_max_iters`), and
 `RLMOptions.max_iters` is passed directly to `dspy.RLM(max_iters=...)` in
-`rlm.dspy_contract` with no adapter or alias. Policies that still set the
-legacy pre-3.3 iteration-budget key fail validation.
-Native RLM construction does not accept an interpreter. It installs a
-fail-closed `interpreter_factory` so an invocation without a caller-owned
+`rlm.program` with no adapter or alias. Policies that still set the legacy
+pre-3.3 iteration-budget key fail validation. Native RLM construction installs
+a fail-closed interpreter factory so an invocation without a caller-owned
 interpreter becomes a bounded `RLMConfigError` rather than silently creating a
-DSPy interpreter.
+DSPy interpreter; production execution passes the acquired interpreter to
+`rlm.acall(...)`. Exact-version and FinalOutput adaptation lives in
+`rlm._dspy_compat`.
 
 At execution time, Fleet passes its existing interpreter positionally:
 `await rlm.acall(interpreter, **named_inputs)`. Fleet or the child lease owns
@@ -201,7 +214,7 @@ Fleet exposes two bounded ways for the RLM to delegate work to a smaller model.
 
 The default lane is DSPy's native sub-LM: `llm_query(prompt)` for one bounded
 semantic judgment or `llm_query_batched(prompts)` for independent judgments in
-one round trip (`rlm/signature.py` guidance). These run inside the Root
+one round trip (`rlm/program.py` guidance). These run inside the Root
 interpreter namespace as plain LM completions against `RLMModelBundle.sub_lm`,
 so they cost one provider call and inherit the Root trust domain. That
 inheritance is acceptable for prompt-only judgments because the Root's own
@@ -348,7 +361,7 @@ and human-review evidence defined by the release process.
 
 ## Routing evaluation
 
-`src/fleet_rlm/rlm/routing_eval.py` owns a bounded routes benchmark that measures
+`src/fleet_rlm/optimization/routing.py` owns a bounded routes benchmark that measures
 cost rather than inspecting private model reasoning. The curated classes are:
 
 1. `python_native` for deterministic Python/REPL work.

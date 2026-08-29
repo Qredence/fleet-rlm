@@ -3,8 +3,12 @@
 import dspy
 import pytest
 
-from fleet_rlm.rlm.input_models import AttachmentInput, SessionContextInput, SkillCardInput
-from fleet_rlm.rlm.signature import FleetRLMSignature
+from fleet_rlm.rlm.program import (
+    AttachmentInput,
+    FleetRLMSignature,
+    SessionContextInput,
+    SkillCardInput,
+)
 from fleet_rlm.skills.signatures import DataAnalysisSignature, validate_skill_signature
 
 

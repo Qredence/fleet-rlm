@@ -14,7 +14,7 @@ def _fixed_clock() -> datetime:
 
 
 def _candidate(candidate_id: str, learning: str, *, category: str = "General", supersedes_id: str | None = None):
-    from fleet_rlm.files.memory_candidates import MemoryCandidate
+    from fleet_rlm.workspace.memory import MemoryCandidate
 
     return MemoryCandidate(
         candidate_id=candidate_id,
@@ -26,7 +26,7 @@ def _candidate(candidate_id: str, learning: str, *, category: str = "General", s
 
 
 def test_builder_pins_canonical_records_and_identity() -> None:
-    from fleet_rlm.files.memory_candidates import build_memory_promotion_intents
+    from fleet_rlm.workspace.memory import build_memory_promotion_intents
 
     run_id = uuid4()
     intents = build_memory_promotion_intents(
@@ -58,11 +58,11 @@ def test_builder_pins_canonical_records_and_identity() -> None:
 
 
 def test_builder_fails_closed_on_bounds_and_policy() -> None:
-    from fleet_rlm.files.memory_candidates import (
+    from fleet_rlm.workspace.memory import (
         WORKSPACE_MEMORY_CANDIDATE_MAX_COUNT,
         build_memory_promotion_intents,
     )
-    from fleet_rlm.files.memory_models import WorkspaceMemoryCategoryError, WorkspaceMemoryRecordError
+    from fleet_rlm.workspace.models import WorkspaceMemoryCategoryError, WorkspaceMemoryRecordError
 
     run_id = uuid4()
     with pytest.raises(WorkspaceMemoryRecordError):
@@ -145,7 +145,7 @@ def _committed_turn():
 
 
 def _intents_for(count: int = 2):
-    from fleet_rlm.files.memory_candidates import build_memory_promotion_intents
+    from fleet_rlm.workspace.memory import build_memory_promotion_intents
 
     return build_memory_promotion_intents(
         run_id=uuid4(),
@@ -227,7 +227,7 @@ async def test_completed_commit_replay_cannot_duplicate_intents() -> None:
 async def test_failed_transition_never_touches_the_outbox() -> None:
     from fleet_rlm.chat.run_claim import FailClaim
     from fleet_rlm.chat.run_lifecycle import RunFailure, _claim_failure
-    from fleet_rlm.rlm.dspy_contract import empty_rlm_usage
+    from fleet_rlm.rlm.result import empty_rlm_usage
 
     engine, factory, store, run = await _seed_store()
     try:
@@ -242,9 +242,8 @@ async def test_failed_transition_never_touches_the_outbox() -> None:
 @pytest.mark.asyncio
 async def test_finish_inserts_intents_through_the_lifecycle() -> None:
     from fleet_rlm.chat.run_lifecycle import RunLifecycleService
-    from fleet_rlm.files.memory_candidates import build_memory_promotion_intents
-    from fleet_rlm.rlm.dspy_contract import PredictionResult
-    from fleet_rlm.rlm.outcome import RLMOutcome
+    from fleet_rlm.rlm.result import PredictionResult, RLMOutcome
+    from fleet_rlm.workspace.memory import build_memory_promotion_intents
 
     engine, factory, store, run = await _seed_store()
     try:
@@ -273,8 +272,7 @@ async def test_finish_inserts_intents_through_the_lifecycle() -> None:
 @pytest.mark.asyncio
 async def test_finish_without_builder_or_candidates_inserts_no_intents() -> None:
     from fleet_rlm.chat.run_lifecycle import RunLifecycleService
-    from fleet_rlm.rlm.dspy_contract import PredictionResult
-    from fleet_rlm.rlm.outcome import RLMOutcome
+    from fleet_rlm.rlm.result import PredictionResult, RLMOutcome
 
     engine, factory, store, run = await _seed_store()
     try:

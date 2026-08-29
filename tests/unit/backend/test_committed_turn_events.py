@@ -78,8 +78,8 @@ def test_live_suffix_excludes_execution_parts() -> None:
 def test_projector_maps_status_parts_back_to_transient_status_events() -> None:
     from fleet_rlm.chat.committed_turn_events import CommittedTurnEventProjector
     from fleet_rlm.chat.turn_detail_policy import commit_cancelled_tombstone
-    from fleet_rlm.rlm.dspy_contract import empty_rlm_usage
     from fleet_rlm.rlm.events import EventRecorder, Status
+    from fleet_rlm.rlm.result import empty_rlm_usage
 
     turn = commit_cancelled_tombstone(empty_rlm_usage())
 

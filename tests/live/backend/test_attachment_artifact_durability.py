@@ -21,17 +21,18 @@ from uuid import uuid4
 import pytest
 
 from fleet_rlm.artifacts.local_catalog import LocalArtifactCatalog
-from fleet_rlm.chat.run_cleanup import RunCleanupSupervisor
-from fleet_rlm.config import Settings, load_runtime_settings
-from fleet_rlm.daytona.dspy_sync_bridge import sync_sandbox
-from fleet_rlm.daytona.run_environment import DaytonaRuntimeResources
+from fleet_rlm.attachments.lifecycle import AttachmentLifecycleService
+from fleet_rlm.attachments.local_catalog import LocalAttachmentCatalog
+from fleet_rlm.attachments.models import AttachmentAccess, AttachmentRun, AttachmentUpload
+from fleet_rlm.attachments.paths import WorkspaceAttachmentPathPolicy
+from fleet_rlm.config.loader import load_runtime_settings
+from fleet_rlm.config.settings import Settings
+from fleet_rlm.daytona.broker import sync_sandbox
 from fleet_rlm.daytona.session_manager import LeaseRequest
-from fleet_rlm.daytona.workspace_fs import DaytonaSandboxVolumeFs
-from fleet_rlm.files.lifecycle import AttachmentLifecycleService
-from fleet_rlm.files.local_catalog import LocalAttachmentCatalog
-from fleet_rlm.files.models import AttachmentAccess, AttachmentRun, AttachmentUpload
-from fleet_rlm.files.paths import WorkspaceAttachmentPathPolicy
 from fleet_rlm.runtime.bindings import InMemorySandboxBindingStore, SandboxBinding
+from fleet_rlm.runtime.cleanup import RunCleanupSupervisor
+from fleet_rlm.runtime.daytona.run_environment import DaytonaRuntimeResources
+from fleet_rlm.workspace.storage import DaytonaSandboxVolumeFs
 from tests.live.backend._p35d_evidence import candidate_identity, write_receipt
 
 
@@ -39,11 +40,14 @@ class _LiveAttachmentBlob:
     def __init__(self, volume_fs) -> None:
         self.volume_fs = volume_fs
 
-    async def write(self, _workspace_id, logical_path: str, data: bytes) -> None:
+    async def write_bytes(self, _workspace_id, logical_path: str, data: bytes) -> None:
         await asyncio.to_thread(self.volume_fs.write_bytes, logical_path, data)
 
-    async def read(self, _workspace_id, logical_path: str) -> bytes:
+    async def read_bytes(self, _workspace_id, logical_path: str) -> bytes:
         return await asyncio.to_thread(self.volume_fs.read_bytes, logical_path)
+
+    async def remove_bytes(self, _workspace_id, logical_path: str) -> None:
+        await asyncio.to_thread(self.volume_fs.remove, logical_path)
 
 
 class _LiveSink:

@@ -13,8 +13,13 @@ import pytest
 
 def _context(*, drain_calls: list[int], returned_candidates=(), cancelled: bool = False):
     from fleet_rlm.chat.session_context import SessionContextManifest
-    from fleet_rlm.rlm.context import ExecutionRuntime, RLMExecutionContext, RunIdentity, SessionView
-    from fleet_rlm.rlm.dspy_contract import RLMOptions
+    from fleet_rlm.rlm.program import RLMOptions
+    from fleet_rlm.rlm.runtime import (
+        ExecutionRuntime,
+        RLMExecutionContext,
+        RunIdentity,
+        SessionView,
+    )
     from fleet_rlm.sessions.models import TurnAccess
     from tests.unit.backend.rlm.fakes import EmptyCapabilities
 
@@ -47,8 +52,8 @@ def _context(*, drain_calls: list[int], returned_candidates=(), cancelled: bool 
 
 @pytest.mark.asyncio
 async def test_runner_attaches_drained_memory_candidates_only_to_completed_outcome() -> None:
-    from fleet_rlm.files.memory_candidates import MemoryCandidate
-    from fleet_rlm.rlm.runner import RLMRunner
+    from fleet_rlm.rlm.runtime import RLMRunner
+    from fleet_rlm.workspace.memory import MemoryCandidate
 
     candidate = MemoryCandidate(candidate_id="cand00000001", category="Project", learning="durable", byte_size=7)
 
@@ -73,7 +78,7 @@ async def test_runner_attaches_drained_memory_candidates_only_to_completed_outco
 
 @pytest.mark.asyncio
 async def test_runner_discards_memory_candidates_on_execution_failure() -> None:
-    from fleet_rlm.rlm.runner import RLMRunner
+    from fleet_rlm.rlm.runtime import RLMRunner
 
     class Factory:
         def create(self, **_kwargs):
@@ -91,8 +96,8 @@ async def test_runner_discards_memory_candidates_on_execution_failure() -> None:
 
 
 def test_non_completed_outcome_rejects_memory_candidates() -> None:
-    from fleet_rlm.files.memory_candidates import MemoryCandidate
-    from fleet_rlm.rlm.outcome import RLMOutcome
+    from fleet_rlm.rlm.result import RLMOutcome
+    from fleet_rlm.workspace.memory import MemoryCandidate
 
     candidate = MemoryCandidate(candidate_id="cand00000001", category="Project", learning="durable", byte_size=7)
 
@@ -107,8 +112,8 @@ def test_non_completed_outcome_rejects_memory_candidates() -> None:
 
 @pytest.mark.asyncio
 async def test_runner_discards_memory_candidates_when_execution_is_cancelled() -> None:
-    from fleet_rlm.files.memory_candidates import MemoryCandidate
-    from fleet_rlm.rlm.runner import RLMRunner
+    from fleet_rlm.rlm.runtime import RLMRunner
+    from fleet_rlm.workspace.memory import MemoryCandidate
 
     candidate = MemoryCandidate(candidate_id="cand00000001", category="Project", learning="durable", byte_size=7)
     drains: list[int] = []

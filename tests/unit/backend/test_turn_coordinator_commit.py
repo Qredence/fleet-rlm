@@ -14,13 +14,12 @@ async def test_open_commits_typed_result_then_replays_without_rerun() -> None:
     import importlib
     from hashlib import sha256
 
-    importlib.import_module("fleet_rlm.rlm.outcome")
+    importlib.import_module("fleet_rlm.rlm.result")
     from fleet_rlm.artifacts.models import ArtifactCandidate
     from fleet_rlm.chat.commands import OpenTurnCommand
     from fleet_rlm.chat.run_lifecycle import RunClaim, RunLifecycleService
-    from fleet_rlm.chat.turn_coordinator import TurnCoordinator
+    from fleet_rlm.chat.turn_runtime import TurnRuntime
     from fleet_rlm.persistence.repositories import InMemoryRunStateStore, InMemorySessionCatalog
-    from fleet_rlm.rlm.dspy_contract import PredictionResult
     from fleet_rlm.rlm.events import (
         TERMINAL_DETAIL_TYPES,
         ArtifactCreated,
@@ -30,7 +29,7 @@ async def test_open_commits_typed_result_then_replays_without_rerun() -> None:
         Status,
         StructuredResult,
     )
-    from fleet_rlm.rlm.outcome import RLMOutcome
+    from fleet_rlm.rlm.result import PredictionResult, RLMOutcome
     from fleet_rlm.sessions.committed_turn import ArtifactPart
     from fleet_rlm.sessions.models import AssistantTurnRecord, TurnAccess, TurnInput
 
@@ -128,7 +127,7 @@ async def test_open_commits_typed_result_then_replays_without_rerun() -> None:
             operations.append("run")
             return Stream(execution)
 
-    coordinator = TurnCoordinator(
+    coordinator = TurnRuntime(
         lifecycle=RunLifecycleService(store, max_artifact_bytes=100),
         preparation=Preparation(),
         runner=Runner(),
@@ -169,14 +168,14 @@ async def test_open_invalid_typed_output_never_promotes_candidate() -> None:
     import importlib
     from hashlib import sha256
 
-    importlib.import_module("fleet_rlm.rlm.outcome")
+    importlib.import_module("fleet_rlm.rlm.result")
     from fleet_rlm.artifacts.models import ArtifactCandidate
     from fleet_rlm.chat.commands import OpenTurnCommand
     from fleet_rlm.chat.run_lifecycle import RunLifecycleService
-    from fleet_rlm.chat.turn_coordinator import TurnCoordinator
+    from fleet_rlm.chat.turn_runtime import TurnRuntime
     from fleet_rlm.persistence.repositories import InMemoryRunStateStore, InMemorySessionCatalog
     from fleet_rlm.rlm.events import TERMINAL_DETAIL_TYPES, ArtifactCreated, EventRecorder, RunFailed, RunStarted
-    from fleet_rlm.rlm.outcome import RLMOutcome
+    from fleet_rlm.rlm.result import RLMOutcome
     from fleet_rlm.sessions.models import TurnAccess, TurnInput
 
     access = TurnAccess(uuid4(), uuid4())
@@ -256,7 +255,7 @@ async def test_open_invalid_typed_output_never_promotes_candidate() -> None:
             del execution
             return Stream()
 
-    coordinator = TurnCoordinator(
+    coordinator = TurnRuntime(
         lifecycle=RunLifecycleService(store, max_artifact_bytes=100),
         preparation=Preparation(),
         runner=Runner(),
@@ -283,17 +282,16 @@ async def test_open_invalid_typed_output_never_promotes_candidate() -> None:
 async def test_open_commits_typed_result_through_temporary_sql(tmp_path) -> None:
     import importlib
 
-    importlib.import_module("fleet_rlm.rlm.outcome")
+    importlib.import_module("fleet_rlm.rlm.result")
     from fleet_rlm.chat.commands import OpenTurnCommand
     from fleet_rlm.chat.run_lifecycle import RunLifecycleService
-    from fleet_rlm.chat.turn_coordinator import TurnCoordinator
+    from fleet_rlm.chat.turn_runtime import TurnRuntime
     from fleet_rlm.persistence.database import create_async_engine_from_url, create_session_factory, create_tables
     from fleet_rlm.persistence.models import SessionRow, UserRow, WorkspaceRow
     from fleet_rlm.persistence.repositories import SqlAlchemySessionCatalog
     from fleet_rlm.persistence.repositories.turns import SqlAlchemyRunStateStore
-    from fleet_rlm.rlm.dspy_contract import PredictionResult
     from fleet_rlm.rlm.events import TERMINAL_DETAIL_TYPES, EventRecorder, RunCompleted, RunStarted
-    from fleet_rlm.rlm.outcome import RLMOutcome
+    from fleet_rlm.rlm.result import PredictionResult, RLMOutcome
     from fleet_rlm.sessions.catalog import SequenceCursor
     from fleet_rlm.sessions.committed_turn import TextPart, UsagePart
     from fleet_rlm.sessions.models import AssistantTurnRecord, TurnAccess, TurnInput, UserTurnRecord
@@ -363,7 +361,7 @@ async def test_open_commits_typed_result_through_temporary_sql(tmp_path) -> None
 
         runner = Runner()
         store = SqlAlchemyRunStateStore(factory)
-        coordinator = TurnCoordinator(
+        coordinator = TurnRuntime(
             lifecycle=RunLifecycleService(store, max_artifact_bytes=100),
             preparation=Preparation(),
             runner=runner,
@@ -405,9 +403,8 @@ async def test_open_commits_typed_result_through_temporary_sql(tmp_path) -> None
 async def test_live_commit_projects_suffix_before_terminal_and_then_closes() -> None:
     from fleet_rlm.chat.commands import OpenTurnCommand
     from fleet_rlm.chat.run_lifecycle import ClaimedRun, CommittedTurnReceipt, _RunClaimToken
-    from fleet_rlm.chat.turn_coordinator import TurnCoordinator
-    from fleet_rlm.rlm.dspy_contract import PredictionResult
-    from fleet_rlm.rlm.outcome import RLMOutcome
+    from fleet_rlm.chat.turn_runtime import TurnRuntime
+    from fleet_rlm.rlm.result import PredictionResult, RLMOutcome
     from fleet_rlm.sessions.committed_turn import CommittedTurn, TextPart, UsagePart
     from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
 
@@ -504,7 +501,7 @@ async def test_live_commit_projects_suffix_before_terminal_and_then_closes() -> 
             return Stream()
 
     command = OpenTurnCommand(access, session_id, TurnInput("hi"), "key", run_id)
-    opened = await TurnCoordinator(lifecycle=Lifecycle(), preparation=Preparation(), runner=Runner()).open(command)
+    opened = await TurnRuntime(lifecycle=Lifecycle(), preparation=Preparation(), runner=Runner()).open(command)
     events = [event async for event in opened]
 
     assert [event.kind for event in events] == ["usage", "text.delta", "text.completed", "run.completed"]

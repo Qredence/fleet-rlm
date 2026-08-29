@@ -20,15 +20,16 @@ import dspy
 import pytest
 from dspy.predict.rlm import RLM
 
-from fleet_rlm.daytona.http_broker import DaytonaHttpToolBroker
-from fleet_rlm.files.memory_tools import WorkspaceMemoryToolHost
-from fleet_rlm.files.project_tools import ProjectToolHost
-from fleet_rlm.files.tools import FileToolHost
-from fleet_rlm.files.url_tool import UrlToolHost
-from fleet_rlm.files.workspace_tools import WorkspaceToolHost
+from fleet_rlm.artifacts.tools import ArtifactToolHost
+from fleet_rlm.attachments.tools import AttachmentToolHost
+from fleet_rlm.daytona.broker import DaytonaHttpToolBroker
 from fleet_rlm.sessions.history_tools import SessionHistoryToolHost
 from fleet_rlm.sessions.models import SessionHistory
 from fleet_rlm.skills.tools import SkillToolHost
+from fleet_rlm.workspace.memory import WorkspaceMemoryToolHost
+from fleet_rlm.workspace.projects import ProjectToolHost
+from fleet_rlm.workspace.url import UrlToolHost
+from fleet_rlm.workspace.workspace import WorkspaceToolHost
 
 
 def _write_workspace_text(path: str, content: str, overwrite: bool = False) -> dict[str, object]:
@@ -143,9 +144,12 @@ def test_host_tool_surface_declares_no_positional_only_parameters() -> None:
         WorkspaceMemoryToolHost(None),  # type: ignore[arg-type]
         ProjectToolHost(None, max_file_bytes=1024),  # type: ignore[arg-type]
         UrlToolHost(session_id=uuid4(), store=None, max_bytes=1024),  # type: ignore[arg-type]
-        FileToolHost(
+        AttachmentToolHost(
             attachments=(),
             staged_attachments=(),
+            volume_fs=None,  # type: ignore[arg-type]
+        ),
+        ArtifactToolHost(
             volume_fs=None,  # type: ignore[arg-type]
             user_id=uuid4(),
             workspace_id=uuid4(),

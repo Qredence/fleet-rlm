@@ -10,11 +10,10 @@ from uuid import UUID
 
 import dspy
 
-from fleet_rlm.files.workspace_models import SessionWorkspaceFS
-from fleet_rlm.rlm.events import JsonValue
-from fleet_rlm.rlm.tool_observer import ToolEventView, bound_event_text
+from fleet_rlm.rlm.events import JsonValue, ToolEventView, bound_event_text
 from fleet_rlm.skills.catalog import SkillCatalog
 from fleet_rlm.skills.models import SkillDefinition
+from fleet_rlm.workspace.models import SessionWorkspaceFS
 
 
 def skill_activated_public_payload(skill: SkillDefinition) -> dict[str, Any]:

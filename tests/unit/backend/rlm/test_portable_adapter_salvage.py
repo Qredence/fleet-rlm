@@ -6,8 +6,8 @@ import dspy
 import pytest
 from dspy.utils.exceptions import AdapterParseError
 
-from fleet_rlm.observability.failure_diagnostics import normalize_turn_failure
-from fleet_rlm.rlm.runner import _public_failure_message
+from fleet_rlm.observability.diagnostics import normalize_turn_failure
+from fleet_rlm.rlm.runtime import _public_failure_message
 
 
 class _ActionSignature(dspy.Signature):

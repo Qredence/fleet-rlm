@@ -13,17 +13,9 @@ import pytest
 
 from fleet_rlm.chat.commands import OpenTurnCommand
 from fleet_rlm.chat.run_lifecycle import ClaimedRun, RunLifecycleService
-from fleet_rlm.chat.turn_coordinator import TurnCoordinator
+from fleet_rlm.chat.turn_runtime import TurnRuntime
 from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
 from fleet_rlm.persistence.repositories import InMemoryRunStateStore
-from fleet_rlm.rlm.context import (
-    ExecutionRuntime,
-    RLMExecutionContext,
-    RLMExecutionSpec,
-    RunIdentity,
-    SessionView,
-)
-from fleet_rlm.rlm.dspy_contract import RLMOptions
 from fleet_rlm.rlm.events import (
     TERMINAL_DETAIL_TYPES,
     RunCancelled,
@@ -33,8 +25,15 @@ from fleet_rlm.rlm.events import (
     RunTimedOut,
     RuntimeEvent,
 )
-from fleet_rlm.rlm.factory import RLMFactory
-from fleet_rlm.rlm.runner import RLMRunner
+from fleet_rlm.rlm.program import RLMFactory, RLMOptions
+from fleet_rlm.rlm.runtime import (
+    ExecutionRuntime,
+    RLMExecutionContext,
+    RLMExecutionSpec,
+    RLMRunner,
+    RunIdentity,
+    SessionView,
+)
 from fleet_rlm.sessions.models import AssistantTurnRecord, TurnAccess, TurnInput
 
 FailureMode = Literal["invalid_output", "malformed_trajectory", "internal_cancel", "timeout"]
@@ -160,7 +159,7 @@ class _Harness:
 
     async def collect(self) -> list[RuntimeEvent]:
         await self.start()
-        coordinator = TurnCoordinator(
+        coordinator = TurnRuntime(
             lifecycle=self.lifecycle,
             preparation=self,
             runner=RLMRunner(factory=_Factory(self.mode, self.program_started)),

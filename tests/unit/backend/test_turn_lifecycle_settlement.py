@@ -21,8 +21,7 @@ from fleet_rlm.chat.run_lifecycle import (
     RunLifecycleService,
     _RunClaimToken,
 )
-from fleet_rlm.rlm.dspy_contract import PredictionResult
-from fleet_rlm.rlm.outcome import RLMOutcome
+from fleet_rlm.rlm.result import PredictionResult, RLMOutcome
 from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
 
 
@@ -281,7 +280,7 @@ async def test_staging_rollback_falls_back_to_inline_when_supervisor_at_capacity
             self.removed.append(location)
             self.values.pop(location, None)
 
-    from fleet_rlm.chat.run_cleanup import RunCleanupSupervisor
+    from fleet_rlm.runtime.cleanup import RunCleanupSupervisor
 
     supervisor = RunCleanupSupervisor(max_jobs=1)
 
@@ -311,7 +310,7 @@ async def test_staging_rollback_falls_back_to_inline_when_supervisor_at_capacity
 @pytest.fixture
 def fleet_trace_active() -> Iterator[None]:
     """Open the fleet turn-trace gate so phase spans engage the (fake) MLflow."""
-    from fleet_rlm.observability import turn_tracing
+    from fleet_rlm.observability import tracing as turn_tracing
 
     token = turn_tracing._fleet_trace_active.set(True)
     yield
@@ -369,7 +368,7 @@ async def test_settle_emits_claim_transition_span_with_command_name(
 ) -> None:
     del fleet_trace_active
     from fleet_rlm.chat.run_lifecycle import RunFailure
-    from fleet_rlm.rlm.dspy_contract import empty_rlm_usage
+    from fleet_rlm.rlm.result import empty_rlm_usage
 
     calls = _install_fake_mlflow(monkeypatch)
     turn, _access = _make_turn()

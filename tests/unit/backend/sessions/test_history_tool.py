@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from fleet_rlm.rlm.tool_observer import observe_tool
+from fleet_rlm.rlm.events import observe_tool
 from fleet_rlm.sessions.history_tools import SESSION_HISTORY_RESULT_BYTE_BUDGET
 
 

@@ -9,7 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from fleet_rlm.files.volume_paths import DEFAULT_VOLUME_MOUNT_PATH
+from fleet_rlm.paths import DEFAULT_VOLUME_MOUNT_PATH
 from fleet_rlm.persistence.models import SandboxBindingRow
 from fleet_rlm.runtime.bindings import SandboxBinding, validate_sandbox_binding
 
@@ -41,6 +41,20 @@ class SqlAlchemySandboxBindingStore:
                 return None
             return _row_to_binding(row)
 
+    async def get_scoped(self, session_id: UUID, *, workspace_id: UUID) -> SandboxBinding | None:
+        """Read one binding only when its Workspace scope also matches."""
+        async with self._session_factory() as db:
+            result = await db.execute(
+                select(SandboxBindingRow).where(
+                    SandboxBindingRow.session_id == session_id,
+                    SandboxBindingRow.workspace_id == workspace_id,
+                )
+            )
+            row = result.scalar_one_or_none()
+            if row is None:
+                return None
+            return _row_to_binding(row)
+
     async def upsert(self, binding: SandboxBinding) -> SandboxBinding:
         validate_sandbox_binding(binding)
         try:
@@ -57,6 +71,10 @@ class SqlAlchemySandboxBindingStore:
                 select(SandboxBindingRow).where(SandboxBindingRow.session_id == binding.session_id)
             )
             row = result.scalar_one_or_none()
+            if row is not None and row.workspace_id != binding.workspace_id:
+                # Session ids are not tenant keys. Never let a caller from a
+                # different Workspace overwrite the existing provider fence.
+                raise ValueError("sandbox binding workspace scope mismatch")
             now = datetime.now(UTC)
             mount_path = binding.mount_path or DEFAULT_VOLUME_MOUNT_PATH
             if row is None:

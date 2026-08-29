@@ -13,9 +13,8 @@ from typing import Any
 
 import pytest
 
-from fleet_rlm.rlm.dspy_contract import PredictionResult
 from fleet_rlm.rlm.events import TERMINAL_DETAIL_TYPES, RunCompleted
-from fleet_rlm.rlm.outcome import RLMOutcome
+from fleet_rlm.rlm.result import PredictionResult, RLMOutcome
 from tests.contracts.backend.test_coordinator_runner_failures import _Harness
 
 

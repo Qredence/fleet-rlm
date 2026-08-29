@@ -26,9 +26,16 @@ from fleet_rlm.chat.run_claim import (
     RevokeClaim,
     failure_code_for_terminal_status,
 )
-from fleet_rlm.chat.run_cleanup import RunCleanupSupervisor, RunCleanupUnavailableError
 from fleet_rlm.chat.turn_detail_policy import commit_success
-from fleet_rlm.files.memory_candidates import (
+from fleet_rlm.observability.tracing import turn_phase_span
+from fleet_rlm.result_snapshot import ResultSnapshotSink, encode_result_snapshot
+from fleet_rlm.rlm.result import RLMOutcome, RLMUsage
+from fleet_rlm.rlm.runtime import AsyncCancellationProbe
+from fleet_rlm.runtime.cleanup import RunCleanupSupervisor, RunCleanupUnavailableError
+from fleet_rlm.runtime.owned_effect import OwnedEffect
+from fleet_rlm.sessions.committed_turn import CommittedTurn
+from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
+from fleet_rlm.workspace.memory import (
     OUTCOME_DEADLINE_EXCEEDED,
     OUTCOME_INTERRUPTED,
     OUTCOME_PROMOTED,
@@ -36,14 +43,6 @@ from fleet_rlm.files.memory_candidates import (
     MemoryCandidate,
     MemoryPromotionIntent,
 )
-from fleet_rlm.observability.turn_tracing import turn_phase_span
-from fleet_rlm.result_snapshot import ResultSnapshotSink, encode_result_snapshot
-from fleet_rlm.rlm.context import AsyncCancellationProbe
-from fleet_rlm.rlm.dspy_contract import RLMUsage
-from fleet_rlm.rlm.outcome import RLMOutcome
-from fleet_rlm.runtime.owned_effect import OwnedEffect
-from fleet_rlm.sessions.committed_turn import CommittedTurn
-from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
 
 MemoryIntentBuilder = Callable[[UUID, tuple[MemoryCandidate, ...]], tuple[MemoryPromotionIntent, ...]]
 

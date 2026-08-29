@@ -12,7 +12,7 @@ from fleet_rlm.api.errors import http_error
 from fleet_rlm.api.schemas import ArtifactResponse
 from fleet_rlm.artifacts.errors import ArtifactNotFoundError
 from fleet_rlm.artifacts.models import ArtifactAccess, ArtifactRef
-from fleet_rlm.posthog_client import get_client, get_distinct_id
+from fleet_rlm.observability.posthog import get_client, get_distinct_id
 
 router = APIRouter(prefix="/api/artifacts", tags=["artifacts"])
 _SAFE_FILENAME = re.compile(r"[^A-Za-z0-9._-]+")

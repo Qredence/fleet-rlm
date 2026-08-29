@@ -83,7 +83,7 @@ async def test_load_missing_session_raises() -> None:
 
 
 def test_settings_accept_database_url() -> None:
-    from fleet_rlm.config import Settings
+    from fleet_rlm.config.settings import Settings
 
     settings = Settings(database_url="sqlite+aiosqlite:///:memory:")
     assert settings.database_url == "sqlite+aiosqlite:///:memory:"

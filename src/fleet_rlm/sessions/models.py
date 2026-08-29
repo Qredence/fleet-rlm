@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from hashlib import sha256
 from typing import Literal, cast
@@ -187,6 +187,11 @@ class TurnInputCodec:
 class HistoryMessage:
     role: Literal["user", "assistant"]
     content: str
+    # The originating durable result is checkpoint metadata, not part of the
+    # public message projection.  Keeping it here lets canonical model-facing
+    # History exclude failure tombstones without losing the bounded audit pair
+    # exposed by Session History and turn listing.
+    committed_turn: CommittedTurn | None = field(default=None, repr=False, compare=False)
 
 
 @dataclass(frozen=True, slots=True)

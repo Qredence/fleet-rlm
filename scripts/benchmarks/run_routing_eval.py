@@ -25,8 +25,8 @@ from fastapi.testclient import TestClient
 from httpx import Response
 
 from fleet_rlm.app import create_app
-from fleet_rlm.config import require_live_execution
-from fleet_rlm.rlm.routing_eval import (
+from fleet_rlm.config.loader import require_live_execution
+from fleet_rlm.optimization.routing import (
     CURATED_ROUTING_SCENARIOS,
     RoutingFacts,
     RoutingScenario,

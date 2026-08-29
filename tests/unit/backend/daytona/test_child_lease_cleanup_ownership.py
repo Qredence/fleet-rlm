@@ -34,7 +34,7 @@ from fleet_rlm.daytona.recursive_child_runtime import (
     build_child_runtime_factory,
 )
 from fleet_rlm.daytona.session_manager import DaytonaAdmission
-from fleet_rlm.rlm.child_runtime import ChildRuntimeCleanupError
+from fleet_rlm.rlm.recursion import ChildRuntimeCleanupError
 
 _MOUNT = "/home/daytona/fleet"
 

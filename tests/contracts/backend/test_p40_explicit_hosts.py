@@ -2,14 +2,13 @@
 
 from __future__ import annotations
 
-import ast
 import inspect
 from pathlib import Path
 
-from fleet_rlm.files.project_tools import ProjectToolHost
-from fleet_rlm.files.workspace_tools import WorkspaceToolHost
+from fleet_rlm.workspace.projects import ProjectToolHost
+from fleet_rlm.workspace.workspace import WorkspaceToolHost
 
-FILES_SOURCE = Path(__file__).parents[3] / "src" / "fleet_rlm" / "files"
+WORKSPACE_SOURCE = Path(__file__).parents[3] / "src" / "fleet_rlm" / "workspace"
 FORBIDDEN_GENERIC_SYMBOLS = (
     "WorkspaceLikeConfig",
     "workspace_like_tools",
@@ -18,7 +17,7 @@ FORBIDDEN_GENERIC_SYMBOLS = (
 
 
 def _filesystem_sources() -> tuple[Path, ...]:
-    return tuple(sorted(FILES_SOURCE.glob("*.py")))
+    return tuple(sorted(WORKSPACE_SOURCE.glob("*.py")))
 
 
 def test_workspace_like_factory_and_dynamic_event_views_are_deleted() -> None:
@@ -29,27 +28,13 @@ def test_workspace_like_factory_and_dynamic_event_views_are_deleted() -> None:
 
 
 def test_session_and_project_hosts_are_explicit_classes_with_owned_tools() -> None:
-    workspace_tree = ast.parse(
-        (FILES_SOURCE / "workspace_tools.py").read_text(encoding="utf-8"),
-        filename="workspace_tools.py",
-    )
-    project_tree = ast.parse(
-        (FILES_SOURCE / "project_tools.py").read_text(encoding="utf-8"),
-        filename="project_tools.py",
-    )
+    """The capability contract: Session/Project hosts expose owned tool and event surfaces."""
+    from fleet_rlm.workspace.projects import ProjectToolHost
+    from fleet_rlm.workspace.workspace import WorkspaceToolHost
 
-    workspace_hosts = [
-        node for node in workspace_tree.body if isinstance(node, ast.ClassDef) and node.name == "WorkspaceToolHost"
-    ]
-    project_hosts = [
-        node for node in project_tree.body if isinstance(node, ast.ClassDef) and node.name == "ProjectToolHost"
-    ]
-    assert len(workspace_hosts) == 1
-    assert len(project_hosts) == 1
-
-    for host in (*workspace_hosts, *project_hosts):
-        assert any(isinstance(node, ast.FunctionDef) and node.name == "as_tools" for node in host.body)
-        assert any(isinstance(node, ast.FunctionDef) and node.name == "event_views" for node in host.body)
+    for host in (WorkspaceToolHost, ProjectToolHost):
+        assert callable(host.as_tools)
+        assert callable(host.event_views)
 
 
 def test_canonical_tool_catalogs_match_the_frozen_snapshots() -> None:

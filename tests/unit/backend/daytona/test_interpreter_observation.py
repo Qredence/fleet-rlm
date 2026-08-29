@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 from dspy.primitives.code_interpreter import CodeExecutionError
 
-from fleet_rlm.daytona.broker_source import FINAL_OUTPUT_MARKER
+from fleet_rlm.daytona.broker import FINAL_OUTPUT_MARKER
 from fleet_rlm.daytona.errors import DaytonaAdapterError
 from fleet_rlm.daytona.interpreter import (
     BackendExecutionResult,
@@ -13,8 +13,34 @@ from fleet_rlm.daytona.interpreter import (
     InProcessInterpreterBackend,
     sandbox_backend,
 )
-from fleet_rlm.rlm.errors import RunNoProgressError
 from fleet_rlm.rlm.events import RLMCode, RLMOutput, StepFinished, StepStarted, ToolCompleted, ToolStarted
+from fleet_rlm.rlm.result import RunNoProgressError
+
+
+def test_non_strict_shutdown_retains_a_broker_with_pending_cleanup() -> None:
+    class Broker:
+        def __init__(self) -> None:
+            self.results = iter((False, True))
+
+        def stop(self, *, strict: bool = False) -> bool:
+            del strict
+            return next(self.results)
+
+    class Backend:
+        def close(self) -> None:
+            return None
+
+    interpreter = DaytonaCodeInterpreter(backend=Backend())
+    broker = Broker()
+    interpreter._http_broker = broker  # type: ignore[assignment]
+
+    interpreter.shutdown()
+    assert interpreter._http_broker is broker
+    assert interpreter._shutdown is False
+
+    interpreter.shutdown()
+    assert interpreter._http_broker is None
+    assert interpreter._shutdown is True
 
 
 def test_interpreter_observes_ordered_stateful_steps() -> None:

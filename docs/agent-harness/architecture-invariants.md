@@ -6,9 +6,12 @@ and its matching automated check in the same patch.
 ## Foundations (frozen at ownership-architecture integration, P25)
 
 - **DSPy is Fleet's foundational cognitive framework, not a compatibility
-  layer.** Every Turn constructs a fresh `dspy.RLM` per the DSPy 3.3.0 contract,
-  Tools are `dspy.Tool` objects, and execution goes through the caller-owned
-  `await rlm.acall(interpreter, **named_inputs)` surface. `RLMOptions.max_iters`
+  layer.** Each compatible resident Session runtime owns one native `dspy.RLM`
+  and caller-owned interpreter; sequential clean Turns reuse them while each
+  invocation receives fresh DSPy `REPLHistory` and Turn bindings. Tools are
+  `dspy.Tool` objects, and execution goes through the caller-owned
+  `await rlm.acall(interpreter, **named_inputs)` surface under the pinned DSPy
+  3.3.1 contract. `RLMOptions.max_iters`
   enforces DSPy's iteration budget end-to-end; native `max_llm_calls` and
   `max_output_chars` retain their DSPy meanings. Bounded child RLMs provide
   controlled width at fixed native depth one. Pinned framework constructor,
@@ -38,7 +41,7 @@ and its matching automated check in the same patch.
   one owner.
 - **Ownership seams are one-directional.** Provider objects die under
   `SandboxLease` receipts with typed cleanup; claimed Runs are orchestrated
-  from claim through cleanup by `TurnCoordinator`, with durable transitions
+  from claim through cleanup by `TurnRuntime`, with durable transitions
   owned by `RunLifecycleService`; Workspace operations ride the versioned
   installed agent whose handshake fails closed before use; Memory promotion
   rides the transactional outbox with bounded idempotent reconciliation.
@@ -61,13 +64,13 @@ and its matching automated check in the same patch.
   helper is acceptable when it keeps a boundary local; duplicate adapters,
   pass-through wrappers, repeated normalization/serialization, and dead aliases
   are not.
-- `daytona/memory_diagnostics.py` classifies optional read-side degradation into
-  the closed `MemoryFailureCategory` vocabulary. Diagnostics are bounded and
+- `workspace/memory.py` classifies optional read-side degradation into the
+  closed `MemoryFailureCategory` vocabulary. Diagnostics are bounded and
   sanitized; mutation and list paths remain strict. A new catch site must use
   the existing classifier rather than inventing a parallel warning format.
-- `config.py` is the source of truth for `FleetFieldPolicy` metadata and
-  `config_policy.py` derives its editor inventory from it. No second complete
-  configuration-field mirror is allowed.
+- `config/settings.py` is the source of truth for `FleetFieldPolicy` metadata
+  and `config/policy.py` derives its editor inventory from it. No second
+  complete configuration-field mirror is allowed.
 - `tools/fleet-tui/src/tui/tests/turn-reducer-invariants.test.ts` is the
   deterministic P32 proof that live and durable projections converge through
   one canonical reducer. Wire adapters own casing and framing compatibility;
@@ -84,8 +87,9 @@ Fleet is one product: a durable conversational RLM Session. Judge every change
 by whether it makes one of the following substantially better; if it does not,
 question it:
 
-- the conversational RLM agent — one fresh `dspy.RLM` per Turn; DSPy primitives
-  support that agent, while bounded child RLM siblings provide controlled width
+- the conversational RLM agent — one compatible `dspy.RLM` per active Session
+  runtime, reused across sequential successful Turns with a fresh per-Turn
+  REPLHistory; bounded child RLM siblings provide controlled width
   at a fixed native depth
 - Session continuity — a Session is a context boundary: new Sessions start
   cold, continuity exists only inside one Session; cross-session persistence
@@ -110,40 +114,47 @@ exist.
   catalog/authorizer/empty capability registry. Lifespan owns a validated
   `RuntimeInventory`, publishes readiness last, and detaches it before disposal.
 - `composition/` owns complete common, Daytona, and private testing wiring.
-- `chat/` owns preparation, coordination, Turn Lifecycle, terminal ordering, and
-  cleanup. `TurnCoordinator` owns the claim-to-cleanup Run state machine and
-  public stream facade; `RunLifecycle.finish()` owns Artifact publication and
+- `chat/` owns preparation, Turn runtime, Turn Lifecycle, terminal ordering, and
+  cleanup. `TurnRuntime` owns the claim-to-cleanup Run state machine and
+  public stream facade. `RunLifecycle.finish()` owns Artifact publication and
   atomic commit.
 - Turn Claim persistence has one typed `transition_claim()` operation. Its pure
   command/state policy is shared by in-memory and SQL adapters; successful
   commit and cancellation requests remain separate.
-- `rlm/` owns model roles, Signature inputs, fresh native RLM construction,
+- `rlm/` owns model roles, Signature inputs, Session-scoped native RLM
+  construction/reuse, fresh per-Turn REPLHistory,
   options, Runtime Events, delegation metrics, routing evaluation, cancellation,
   and fixed-depth child execution. `RLMRunner.stream(context)` remains the deep
-  execution seam; `rlm/worker_execution.py` owns the cancellation-shielded
-  worker/thread/event-loop boundary, `rlm/observation.py` owns bounded detail
-  relay/monitoring/drain policy, and `rlm/execution_trace.py` owns trace and
+  execution seam; `rlm/runtime.py` owns the cancellation-shielded
+  worker/thread/event-loop boundary and the bounded detail
+  relay/monitoring/drain policy, and `rlm/events.py` owns trace and
   recursive-metric projection. These remain private implementation seams.
 - `daytona/` is the exclusive SDK boundary and owns provider-error normalization.
-  `DaytonaRuntimeResources` remains provider-only; composition injects database,
+  `DaytonaRuntimeResources` owns provider resources and exposes the public
+  `DaytonaRuntime` root/child lifecycle; composition injects database,
   binding, model, preparation, limits, and cleanup ports.
-- `sessions/`, `files/`, `artifacts/`, and `skills/` own domain interfaces and
-  deterministic policy. `persistence/` owns SQLAlchemy adapters.
+- `sessions/`, `workspace/`, `attachments/`, `artifacts/`, and `skills/` own
+  domain interfaces and deterministic policy. `persistence/` owns SQLAlchemy
+  adapters.
 - Imports remain credential-free and side-effect-free.
 
-- `daytona/broker_source.py` contains pure broker source generation.
-  `http_broker.py` owns HTTP-in-sandbox transport and host-tool/SUBMIT lifecycle.
+- `daytona/broker.py` is the sole owner of broker source generation,
+  HTTP-in-sandbox transport, host-tool/SUBMIT lifecycle, and the injected
+  synchronous DSPy bridge.
   Source generation does not own provider lifecycle or persistence.
 
 ## Turn and async boundary
 
-- Construct a fresh `dspy.RLM` and host-tool list per Turn. Daytona constructs a
-  fresh custom interpreter. Interpreters are never shared across Runs or
-  concurrently.
-- Pass request text, bounded `session_context`, authorized `skill_cards`, and
-  bounded Attachment metadata to the default Fleet Signature. Custom Task
-  Contracts receive only declared host-bounded inputs. Keep older history behind
-  `read_session_history` and call `await rlm.acall(interpreter, **named_inputs)`;
+- Reuse one compatible `dspy.RLM` and custom interpreter for a resident Session
+  runtime across sequential successful Turns. Bind a fresh host-tool set and
+  REPLHistory per Turn; rotate the resident runtime after taint,
+  incompatibility, or failed cleanup. Interpreters are never shared across
+  Runs concurrently.
+- Pass request text, complete committed `dspy.History`, bounded
+  `session_context`, authorized `skill_cards`, and bounded Attachment metadata
+  to the default Fleet Signature. Custom Task Contracts receive only declared
+  host-bounded inputs. Keep `read_session_history` as an explicit compatibility
+  Tool and call `await rlm.acall(interpreter, **named_inputs)`;
   the interpreter is caller-owned and its lease remains with Fleet.
 - The Turn stream opens immediately with transient `data-status` preparation
   heartbeats (never recorded); claim, preparation, Attachment-ownership, and
@@ -208,7 +219,7 @@ routes or public events.
   `create_all`. Explicit SQLite test/local helpers may call `create_tables`.
 - Durable Attachment and Artifact bytes live in Workspace Volume Scope.
 - The mounted Workspace Agent is installed once per Sandbox as the complete,
-  versioned `workspace_agent_runtime.py` artifact. Its explicit
+  versioned `workspace_agent/runtime.py` artifact. Its explicit
   `handle(request)` validates and dispatches the same operation contract for
   installed and process-only fallback launchers; operations then run as
   compact handshake-bound JSON requests. Protocol, artifact digest, or

@@ -8,8 +8,8 @@ from types import SimpleNamespace
 import pytest
 from pydantic import ValidationError
 
-from fleet_rlm.config import Settings
-from fleet_rlm.posthog_client import (
+from fleet_rlm.config.settings import Settings
+from fleet_rlm.observability.posthog import (
     _load_or_create_instance_id,
     get_client,
     get_distinct_id,
@@ -42,7 +42,7 @@ def _fake_posthog(created: list[tuple[str, str | None, bool]], shutdowns: list[s
 def test_init_disabled_policy_leaves_client_disabled(monkeypatch) -> None:
     shutdown_posthog()
     created: list[tuple[str, str | None, bool]] = []
-    monkeypatch.setattr("fleet_rlm.posthog_client.Posthog", _fake_posthog(created))
+    monkeypatch.setattr("fleet_rlm.observability.posthog.Posthog", _fake_posthog(created))
 
     init_posthog(Settings(posthog_enabled=False))
 
@@ -53,7 +53,7 @@ def test_init_disabled_policy_leaves_client_disabled(monkeypatch) -> None:
 def test_init_enabled_without_token_stays_disabled(monkeypatch) -> None:
     shutdown_posthog()
     created: list[tuple[str, str | None, bool]] = []
-    monkeypatch.setattr("fleet_rlm.posthog_client.Posthog", _fake_posthog(created))
+    monkeypatch.setattr("fleet_rlm.observability.posthog.Posthog", _fake_posthog(created))
 
     init_posthog(Settings(posthog_enabled=True))
 
@@ -65,7 +65,7 @@ def test_reinit_with_disabled_policy_shuts_down_previous_client(monkeypatch, tmp
     shutdown_posthog()
     created: list[tuple[str, str | None, bool]] = []
     shutdowns: list[str] = []
-    monkeypatch.setattr("fleet_rlm.posthog_client.Posthog", _fake_posthog(created, shutdowns))
+    monkeypatch.setattr("fleet_rlm.observability.posthog.Posthog", _fake_posthog(created, shutdowns))
     settings = Settings(
         posthog_enabled=True,
         posthog_project_token="phc-test-token",
@@ -96,7 +96,7 @@ def test_posthog_host_normalizes_trailing_slash() -> None:
 def test_init_enabled_with_token_creates_client_and_disables_exception_autocapture(monkeypatch, tmp_path: Path) -> None:
     shutdown_posthog()
     created: list[tuple[str, str | None, bool]] = []
-    monkeypatch.setattr("fleet_rlm.posthog_client.Posthog", _fake_posthog(created))
+    monkeypatch.setattr("fleet_rlm.observability.posthog.Posthog", _fake_posthog(created))
 
     init_posthog(
         Settings(
@@ -115,7 +115,7 @@ def test_init_enabled_with_token_creates_client_and_disables_exception_autocaptu
 def test_distinct_id_is_stable_and_persisted_across_restarts(monkeypatch, tmp_path: Path) -> None:
     shutdown_posthog()
     created: list[tuple[str, str | None, bool]] = []
-    monkeypatch.setattr("fleet_rlm.posthog_client.Posthog", _fake_posthog(created))
+    monkeypatch.setattr("fleet_rlm.observability.posthog.Posthog", _fake_posthog(created))
     settings = Settings(
         posthog_enabled=True,
         posthog_project_token="phc-test-token",
@@ -136,7 +136,7 @@ def test_distinct_id_is_stable_and_persisted_across_restarts(monkeypatch, tmp_pa
 def test_distinct_id_is_persisted_instance_id_not_deterministic_local_user_id(monkeypatch, tmp_path: Path) -> None:
     shutdown_posthog()
     created: list[tuple[str, str | None, bool]] = []
-    monkeypatch.setattr("fleet_rlm.posthog_client.Posthog", _fake_posthog(created))
+    monkeypatch.setattr("fleet_rlm.observability.posthog.Posthog", _fake_posthog(created))
     settings = Settings(
         posthog_enabled=True,
         posthog_project_token="phc-test-token",
@@ -166,7 +166,7 @@ def test_load_or_create_instance_id_writes_fresh_id(tmp_path: Path) -> None:
 
 
 def test_default_profile_enables_posthog_and_resolves_token(monkeypatch) -> None:
-    import fleet_rlm.config as config
+    import fleet_rlm.config.loader as config
 
     monkeypatch.setenv("FLEET_DAYTONA_API_KEY", "test-daytona-key")
     monkeypatch.setenv("DATABRICKS_TOKEN", "test-databricks-token")
@@ -182,7 +182,7 @@ def test_default_profile_enables_posthog_and_resolves_token(monkeypatch) -> None
 
 
 def test_benchmark_profiles_disable_posthog() -> None:
-    from fleet_rlm.config import _deep_merge, _flatten_policy, _read_policy_document
+    from fleet_rlm.config.loader import _deep_merge, _flatten_policy, _read_policy_document
 
     document = _read_policy_document(Path("config/fleet.toml"))
 

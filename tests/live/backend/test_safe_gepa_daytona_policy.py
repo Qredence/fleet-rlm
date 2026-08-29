@@ -19,22 +19,22 @@ from urllib.request import Request, urlopen
 
 import pytest
 
-from fleet_rlm.config import load_runtime_settings
+from fleet_rlm.config.loader import load_runtime_settings
 from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, sandbox_backend
-from fleet_rlm.daytona.optimization_evaluator import (
-    DisposableOptimizationSandboxFactory,
-    OptimizationSandboxPolicy,
-)
 from fleet_rlm.daytona.platform import LiveDaytonaPlatform, build_daytona_client
 from fleet_rlm.daytona.provisioning import DaytonaSandboxSpec
 from fleet_rlm.optimization.curated_input import CuratedEvaluationStore
+from fleet_rlm.optimization.daytona import (
+    DisposableOptimizationSandboxFactory,
+    OptimizationSandboxPolicy,
+)
 from fleet_rlm.optimization.evidence import (
     DevelopmentDaytonaCanaryReport,
     EvidenceStore,
     write_development_daytona_canary_report,
 )
 from fleet_rlm.optimization.types import OptimizationRecord
-from fleet_rlm.rlm.dspy_interpreter_contract import is_final_output
+from fleet_rlm.rlm._dspy_compat import is_final_output
 
 _LIVE_VALUES = frozenset({"1", "true", "yes"})
 _PROBE_TIMEOUT_SECONDS = 20

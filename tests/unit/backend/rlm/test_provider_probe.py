@@ -5,7 +5,10 @@ from types import SimpleNamespace
 import dspy
 import pytest
 
-from fleet_rlm.rlm.provider_probe import RLMProviderContractError, probe_root_lm
+from fleet_rlm.rlm.runtime import (
+    RLMProviderContractError,
+    probe_root_lm,
+)
 
 
 def _interpreter():
@@ -61,7 +64,7 @@ async def test_provider_probe_rejects_unparseable_native_provider_output() -> No
 async def test_provider_probe_reports_native_extraction_fallback_for_forced_final_output(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import fleet_rlm.rlm.provider_probe as provider_probe
+    import fleet_rlm.rlm.runtime as provider_probe
 
     class FakeRecursiveExecutor:
         def __init__(self, *args, **kwargs) -> None:

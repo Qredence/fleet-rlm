@@ -47,7 +47,7 @@ async def _seed_with_intents(database_url: str, *, intents: tuple = (), commit: 
 
 
 def _intents(count: int = 2, *, clock=None):
-    from fleet_rlm.files.memory_candidates import MemoryCandidate, build_memory_promotion_intents
+    from fleet_rlm.workspace.memory import MemoryCandidate, build_memory_promotion_intents
 
     clock = clock or (lambda: datetime(2026, 8, 17, 12, 0, 0, tzinfo=UTC))
     return build_memory_promotion_intents(
@@ -83,7 +83,7 @@ async def test_claim_due_fences_concurrent_claimers() -> None:
         "sqlite+aiosqlite:///:memory:", intents=_intents(count=3)
     )
     try:
-        from fleet_rlm.persistence.repositories.memory_promotion_intents import SqlAlchemyMemoryPromotionOutbox
+        from fleet_rlm.persistence.repositories.outbox import SqlAlchemyMemoryPromotionOutbox
 
         outbox = SqlAlchemyMemoryPromotionOutbox(factory)
         # The database assigns the initial due time at commit; claim against
@@ -111,7 +111,7 @@ async def test_stale_completing_claims_are_reclaimable() -> None:
         "sqlite+aiosqlite:///:memory:", intents=_intents(count=1)
     )
     try:
-        from fleet_rlm.persistence.repositories.memory_promotion_intents import SqlAlchemyMemoryPromotionOutbox
+        from fleet_rlm.persistence.repositories.outbox import SqlAlchemyMemoryPromotionOutbox
 
         outbox = SqlAlchemyMemoryPromotionOutbox(factory, stale_claim_after_seconds=60)
         now = datetime.now(UTC)
@@ -137,7 +137,7 @@ async def test_requeue_backoff_then_deadletter_at_attempt_cap() -> None:
         "sqlite+aiosqlite:///:memory:", intents=_intents(count=1)
     )
     try:
-        from fleet_rlm.persistence.repositories.memory_promotion_intents import SqlAlchemyMemoryPromotionOutbox
+        from fleet_rlm.persistence.repositories.outbox import SqlAlchemyMemoryPromotionOutbox
 
         outbox = SqlAlchemyMemoryPromotionOutbox(factory, max_attempts=2, backoff_base_seconds=30)
         now = datetime.now(UTC)
@@ -172,12 +172,11 @@ class _RecordingMemoryStore:
     appends: ClassVar[list[str]] = []
     raise_mode: ClassVar[str | None] = None
 
-    def __init__(self, _sandbox, *, volume_paths, max_upload_bytes) -> None:
-        del volume_paths, max_upload_bytes
+    def __init__(self, *_args, **_kwargs) -> None:
         _RecordingMemoryStore.instances.append(self)
 
     def append_record(self, record_text: str):
-        from fleet_rlm.files.memory_models import (
+        from fleet_rlm.workspace.models import (
             WorkspaceMemoryAppendResult,
             WorkspaceMemoryConflictError,
             WorkspaceMemoryStoreUnavailableError,
@@ -209,7 +208,7 @@ class _FakeGateway:
                 if _FakeGateway.fail_open:
                     raise RuntimeError("provider unavailable")
                 gateway.open_count += 1
-                return object()
+                return _RecordingMemoryStore()
 
             async def __aexit__(self, *_exc):
                 return False
@@ -218,27 +217,21 @@ class _FakeGateway:
 
 
 def _reconciler(outbox, gateway, *, allowed=("General",)):
-    from fleet_rlm.daytona.memory_outbox_reconcile import MemoryOutboxReconciler
+    from fleet_rlm.workspace.memory import MemoryOutboxReconciler
 
     return MemoryOutboxReconciler(
         outbox,
-        gateway=gateway,
-        volume_paths=None,
-        dispatcher=None,
+        open_memory=lambda _workspace_id: gateway.open_sandbox(_workspace_id, purpose="memory-outbox-reconcile"),
         allowed_categories=lambda: allowed,
-        max_upload_bytes=1_048_576,
     )
 
 
 @pytest.fixture(autouse=True)
-def _fake_store(monkeypatch: pytest.MonkeyPatch):
-    import fleet_rlm.daytona.workspace_memory as workspace_memory
-
+def _fake_store():
     _RecordingMemoryStore.instances.clear()
     _RecordingMemoryStore.appends.clear()
     _RecordingMemoryStore.raise_mode = None
     _FakeGateway.fail_open = False
-    monkeypatch.setattr(workspace_memory, "DaytonaWorkspaceMemoryStore", _RecordingMemoryStore)
     yield
 
 
@@ -251,7 +244,7 @@ async def test_reconcile_delivers_intents_once_and_idempotent_replay_is_safe(tmp
 
     # Simulate crash+restart: a fresh engine/outbox sees the same intents.
     from fleet_rlm.persistence.database import create_async_engine_from_url, create_session_factory
-    from fleet_rlm.persistence.repositories.memory_promotion_intents import SqlAlchemyMemoryPromotionOutbox
+    from fleet_rlm.persistence.repositories.outbox import SqlAlchemyMemoryPromotionOutbox
 
     engine2 = create_async_engine_from_url(database_url)
     factory2 = create_session_factory(engine2)
@@ -284,7 +277,7 @@ async def test_provider_outage_requeues_whole_batch_transiently() -> None:
         "sqlite+aiosqlite:///:memory:", intents=_intents(count=2)
     )
     try:
-        from fleet_rlm.persistence.repositories.memory_promotion_intents import SqlAlchemyMemoryPromotionOutbox
+        from fleet_rlm.persistence.repositories.outbox import SqlAlchemyMemoryPromotionOutbox
 
         outbox = SqlAlchemyMemoryPromotionOutbox(factory)
         _FakeGateway.fail_open = True
@@ -306,7 +299,7 @@ async def test_transient_delivery_failure_retries_then_succeeds() -> None:
         "sqlite+aiosqlite:///:memory:", intents=_intents(count=1)
     )
     try:
-        from fleet_rlm.persistence.repositories.memory_promotion_intents import SqlAlchemyMemoryPromotionOutbox
+        from fleet_rlm.persistence.repositories.outbox import SqlAlchemyMemoryPromotionOutbox
 
         outbox = SqlAlchemyMemoryPromotionOutbox(factory)
         gateway = _FakeGateway()
@@ -336,7 +329,7 @@ async def test_permanent_memory_conflicts_resolve_without_retry(mode: str, reaso
         "sqlite+aiosqlite:///:memory:", intents=_intents(count=1)
     )
     try:
-        from fleet_rlm.persistence.repositories.memory_promotion_intents import SqlAlchemyMemoryPromotionOutbox
+        from fleet_rlm.persistence.repositories.outbox import SqlAlchemyMemoryPromotionOutbox
 
         outbox = SqlAlchemyMemoryPromotionOutbox(factory)
         _RecordingMemoryStore.raise_mode = mode
@@ -355,7 +348,7 @@ async def test_policy_change_at_delivery_completes_without_provider() -> None:
         "sqlite+aiosqlite:///:memory:", intents=_intents(count=1)
     )
     try:
-        from fleet_rlm.persistence.repositories.memory_promotion_intents import SqlAlchemyMemoryPromotionOutbox
+        from fleet_rlm.persistence.repositories.outbox import SqlAlchemyMemoryPromotionOutbox
 
         outbox = SqlAlchemyMemoryPromotionOutbox(factory)
         gateway = _FakeGateway()
@@ -373,14 +366,13 @@ async def test_policy_change_at_delivery_completes_without_provider() -> None:
 async def test_fast_path_success_completes_outbox_rows() -> None:
     from fleet_rlm.chat.post_commit_memory import OwnedPostCommitMemoryPromotion
     from fleet_rlm.chat.run_lifecycle import RunLifecycleService
-    from fleet_rlm.files.memory_candidates import (
+    from fleet_rlm.persistence.repositories.outbox import SqlAlchemyMemoryPromotionOutbox
+    from fleet_rlm.rlm.result import PredictionResult, RLMOutcome
+    from fleet_rlm.workspace.memory import (
         MemoryCandidate,
         MemoryCandidatePromotionResult,
         build_memory_promotion_intents,
     )
-    from fleet_rlm.persistence.repositories.memory_promotion_intents import SqlAlchemyMemoryPromotionOutbox
-    from fleet_rlm.rlm.dspy_contract import PredictionResult
-    from fleet_rlm.rlm.outcome import RLMOutcome
 
     candidate = MemoryCandidate(
         candidate_id="cand00000000", category="General", learning="fast path learning", byte_size=18
@@ -422,14 +414,13 @@ async def test_fast_path_success_completes_outbox_rows() -> None:
 async def test_fast_path_failure_notes_rows_and_leaves_reconciler_work() -> None:
     from fleet_rlm.chat.post_commit_memory import OwnedPostCommitMemoryPromotion
     from fleet_rlm.chat.run_lifecycle import RunLifecycleService
-    from fleet_rlm.files.memory_candidates import (
+    from fleet_rlm.persistence.repositories.outbox import SqlAlchemyMemoryPromotionOutbox
+    from fleet_rlm.rlm.result import PredictionResult, RLMOutcome
+    from fleet_rlm.workspace.memory import (
         MemoryCandidate,
         MemoryCandidatePromotionResult,
         build_memory_promotion_intents,
     )
-    from fleet_rlm.persistence.repositories.memory_promotion_intents import SqlAlchemyMemoryPromotionOutbox
-    from fleet_rlm.rlm.dspy_contract import PredictionResult
-    from fleet_rlm.rlm.outcome import RLMOutcome
 
     candidate = MemoryCandidate(candidate_id="cand00000000", category="General", learning="kept", byte_size=4)
     intents = build_memory_promotion_intents(

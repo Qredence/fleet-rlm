@@ -55,6 +55,7 @@ make api-sync              # OpenAPI + generated TUI types (openapi_tools.py)
 | Script | Gate |
 |--------|------|
 | `check_codebase_tree.py` | Daytona SDK isolation + route injection boundary + nested `IfExp` clarity |
+| `check_dependency_boundaries.py` | P50 domain dependency directions and Daytona Memory-policy residue |
 | `check_docs_quality.py` | Canonical doc presence and freshness |
 | `check_harness_engineering.py` | Agent-harness engineering invariants |
 | `check_agents_md_freshness.py` | AGENTS.md drift detection |

@@ -23,59 +23,38 @@ import pytest
 
 from fleet_rlm.chat.session_context import SessionContextManifest
 from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
-from fleet_rlm.daytona.recursive_child_runtime import ChildRuntimeLease
-from fleet_rlm.rlm.context import (
-    DelegationPolicy,
-    ExecutionRuntime,
-    RLMExecutionContext,
-    RunIdentity,
-    SessionView,
-)
-from fleet_rlm.rlm.dspy_contract import (
-    PredictionOutputError,
-    PredictionOutputTooLargeError,
+from fleet_rlm.rlm.program import (
+    RLMModelBundle,
     RLMOptions,
     build_native_rlm,
-    prediction_result,
-    rlm_termination_mode,
 )
-from fleet_rlm.rlm.model_bundle import RLMModelBundle
-from fleet_rlm.rlm.recursive_calls import (
+from fleet_rlm.rlm.recursion import (
     RecursiveRLMExecutor,
     RecursiveRLMOptions,
     RecursiveSubtaskSignature,
 )
-from fleet_rlm.rlm.runner import RLMRunner
+from fleet_rlm.rlm.result import (
+    PredictionOutputError,
+    PredictionOutputTooLargeError,
+    prediction_result,
+    rlm_termination_mode,
+)
+from fleet_rlm.rlm.runtime import (
+    DelegationPolicy,
+    ExecutionRuntime,
+    RLMExecutionContext,
+    RLMRunner,
+    RunIdentity,
+    SessionView,
+)
 from fleet_rlm.sessions.models import TurnAccess
-from tests.unit.backend.rlm.fakes import EmptyCapabilities
-
-
-class _Recorder:
-    def __init__(self) -> None:
-        self.interpreters: list[DaytonaCodeInterpreter] = []
-        self.close_calls: dict[int, int] = {}
-
-    def factory(self, call_index: int) -> ChildRuntimeLease:
-        interpreter = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())
-        self.interpreters.append(interpreter)
-
-        def close() -> None:
-            self.close_calls[call_index] = self.close_calls.get(call_index, 0) + 1
-            interpreter.shutdown()
-
-        return ChildRuntimeLease(
-            interpreter,
-            f"ns-child-{call_index}",
-            "test-volume",
-            f"recursive/test-workspace/test-run/{call_index}",
-            close,
-        )
+from tests.unit.backend.rlm.fakes import ChildLeaseRecorder, EmptyCapabilities
 
 
 def _executor(
     root_lm: dspy.utils.DummyLM,
     sub_lm: dspy.utils.DummyLM,
-    recorder: _Recorder,
+    recorder: ChildLeaseRecorder,
     *,
     options: RecursiveRLMOptions | None = None,
 ) -> RecursiveRLMExecutor:
@@ -99,7 +78,7 @@ def test_val_rec_022_root_child_and_sibling_interpreter_namespaces_are_isolated(
     """VAL-REC-022: through the public Runner composition, Root globals
     survive child return but are absent in every child; each child's own
     globals are absent from Root and from its sibling."""
-    recorder = _Recorder()
+    recorder = ChildLeaseRecorder()
     root = _lm(
         [
             # Root action 1: install a Root-only sentinel.
@@ -194,7 +173,7 @@ def test_val_rec_022_root_child_and_sibling_interpreter_namespaces_are_isolated(
 
     # Distinct interpreter namespaces per child; no shared namespace object.
     assert len(recorder.interpreters) == 2
-    assert recorder.interpreters[0] is not recorder.interpreters[1]
+    assert recorder.interpreters[1] is not recorder.interpreters[2]
     assert recorder.close_calls == {1: 1, 2: 1}
 
 
@@ -202,7 +181,7 @@ def test_val_rec_024_root_and_child_boundaries_classify_identical_output_matrix(
     """VAL-REC-024: the same output matrix run through the Root and child
     signatures yields identical accepted values and identical closed failure
     categories at the Fleet typed-result boundary."""
-    from fleet_rlm.rlm.signature import FleetRLMSignature
+    from fleet_rlm.rlm.program import FleetRLMSignature
 
     # Both boundaries declare exactly one required ``answer: str`` output.
     assert set(FleetRLMSignature.output_fields) == {"answer"}
@@ -251,7 +230,7 @@ def test_val_rec_024_child_oversized_submit_fails_at_the_child_boundary() -> Non
     """VAL-REC-024: an oversized child SUBMIT is rejected at the child's own
     Fleet result boundary with the closed too-large category; the child is
     still settled exactly once."""
-    recorder = _Recorder()
+    recorder = ChildLeaseRecorder()
     root = _lm(
         [
             {"reasoning": "child submits oversized", "code": "SUBMIT(answer='x' * 500)"},
@@ -278,7 +257,7 @@ async def test_val_rec_024_root_oversized_submit_fails_with_the_same_closed_cate
     adapter = dspy.JSONAdapter()
     root = dspy.utils.DummyLM([{"reasoning": "submit oversized", "code": "SUBMIT(answer='x' * 500)"}], adapter=adapter)
     sub = dspy.utils.DummyLM([{"answer": "unused"}], adapter=adapter)
-    recorder = _Recorder()
+    recorder = ChildLeaseRecorder()
 
     async def never_cancelled() -> bool:
         return False
@@ -319,7 +298,7 @@ def test_val_rec_024_extraction_fallback_termination_parity_between_root_and_chi
     """VAL-REC-024: an RLM that never submits terminates through the same
     certified extraction fallback at Root and child scope: the child's
     recorded termination mode matches the Root RLM's classified mode."""
-    recorder = _Recorder()
+    recorder = ChildLeaseRecorder()
     # Child scope: the child never submits within its single iteration, so
     # the forced extraction fallback answers from the next scripted entry.
     root = _lm(

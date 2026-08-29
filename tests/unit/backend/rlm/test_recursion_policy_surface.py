@@ -28,19 +28,20 @@ import pytest
 from fleet_rlm.chat.session_context import SessionContextManifest
 from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
 from fleet_rlm.daytona.recursive_child_runtime import ChildRuntimeLease
-from fleet_rlm.rlm.context import (
+from fleet_rlm.rlm.events import Status, ToolCompleted
+from fleet_rlm.rlm.program import RLMFactory, RLMModelBundle, RLMOptions
+from fleet_rlm.rlm.recursion import (
+    RecursiveRLMExecutor,
+    RecursiveRLMOptions,
+)
+from fleet_rlm.rlm.runtime import (
     DelegationPolicy,
     ExecutionRuntime,
     RLMExecutionContext,
+    RLMRunner,
     RunIdentity,
     SessionView,
 )
-from fleet_rlm.rlm.dspy_contract import RLMOptions
-from fleet_rlm.rlm.events import Status, ToolCompleted
-from fleet_rlm.rlm.factory import RLMFactory
-from fleet_rlm.rlm.model_bundle import RLMModelBundle
-from fleet_rlm.rlm.recursive_calls import RecursiveRLMExecutor, RecursiveRLMOptions
-from fleet_rlm.rlm.runner import RLMRunner
 from fleet_rlm.sessions.models import TurnAccess
 from tests.unit.backend.rlm.fakes import EmptyCapabilities
 
@@ -228,7 +229,7 @@ def test_val_rec_001_public_settings_surface_exposes_no_recursion_depth() -> Non
     """VAL-REC-001: the public settings surface (the composition input for
     recursion policy) carries bounded width/budget knobs and no recursion
     depth knob under any recursion setting name."""
-    from fleet_rlm.config import Settings
+    from fleet_rlm.config.settings import Settings
 
     recursion_settings = [name for name in Settings.model_fields if name.startswith("rlm_recursion")]
     assert recursion_settings
@@ -308,7 +309,7 @@ async def test_val_rec_023_root_and_child_are_exact_native_rlm_with_positional_i
     instances built through the certified constructor; both are invoked with
     the positional caller-owned interpreter plus named inputs; both produce
     native Predictions with trajectory evidence."""
-    import fleet_rlm.rlm.recursive_calls as recursive_calls
+    import fleet_rlm.rlm.recursion as recursive_calls
 
     child_invocations: list[tuple[type, object, dict[str, object]]] = []
     root_invocations: list[tuple[type, object, dict[str, object]]] = []
@@ -381,9 +382,15 @@ async def test_val_rec_023_root_and_child_are_exact_native_rlm_with_positional_i
     assert len(root_invocations) == 1
     assert child_invocations[0][1] is factory.interpreters[0]
     assert root_invocations[0][1] is not factory.interpreters[0]
-    # Named inputs only: the child carries the recursive subtask prompt, the
-    # Root carries the prepared Turn inputs.
-    assert set(child_invocations[0][2]) == {"prompt"}
+    # Named inputs only: the child carries the recursive subtask prompt plus
+    # the immutable Session snapshot (P47.4: request, committed History,
+    # bounded context with the capability view); the Root carries the
+    # prepared Turn inputs.
+    child_inputs = child_invocations[0][2]
+    assert set(child_inputs) == {"prompt", "request", "history", "session_context"}
+    assert child_inputs["request"] == "delegate"
+    assert isinstance(child_inputs["history"], dspy.History)
+    assert child_inputs["session_context"]["workspace"]["available"] is False
     assert "request" in root_invocations[0][2]
 
     # Native Prediction evidence: the completed Root turn exposes a trajectory

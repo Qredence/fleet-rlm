@@ -22,20 +22,21 @@ from fastapi import FastAPI
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 if TYPE_CHECKING:
-    from fleet_rlm.daytona.dspy_sync_bridge import SyncBridgeDispatcher
+    from fleet_rlm.daytona.broker import SyncBridgeDispatcher
 
 from fleet_rlm.artifacts.reader import ArtifactReader
-from fleet_rlm.chat.run_cleanup import RunCleanupSupervisor
+from fleet_rlm.attachments.lifecycle import AttachmentLifecycle
+from fleet_rlm.chat.preparation import RunPreparation
 from fleet_rlm.chat.run_lifecycle import RunLifecycle
-from fleet_rlm.chat.run_preparation import RunPreparation
-from fleet_rlm.chat.turn_coordinator import TurnCoordinator
-from fleet_rlm.config_policy import ConfigPolicyService
-from fleet_rlm.files.lifecycle import AttachmentLifecycle
-from fleet_rlm.files.volume_storage import VolumeTreeFs, WorkspaceVolumeGateway
-from fleet_rlm.files.workspace_access import WorkspaceFileService
+from fleet_rlm.chat.turn_runtime import TurnRuntime
+from fleet_rlm.config.policy import ConfigPolicyService
 from fleet_rlm.persistence.repositories.turns import ReconciliationSummary
-from fleet_rlm.rlm.model_bundle import RLMModelBundle
+from fleet_rlm.rlm.program import RLMModelBundle
+from fleet_rlm.rlm.session_runtime import SessionRLMRegistry
+from fleet_rlm.runtime.cleanup import RunCleanupSupervisor
 from fleet_rlm.sessions.catalog import SessionCatalog
+from fleet_rlm.workspace.storage import WorkspaceVolumeGateway
+from fleet_rlm.workspace.workspace import WorkspaceFileService
 
 
 class SettlingRunStateStore(Protocol):
@@ -52,7 +53,7 @@ class SettlingRunStateStore(Protocol):
 class RuntimeSessionManager(Protocol):
     """Provider session manager surface needed by startup recovery."""
 
-    async def fence_session(self, session_id: UUID) -> None: ...
+    async def fence_session(self, session_id: UUID, *, deadline: float | None = None) -> None: ...
 
 
 class RuntimeProcessResources(Protocol):
@@ -61,7 +62,11 @@ class RuntimeProcessResources(Protocol):
     @property
     def session_manager(self) -> RuntimeSessionManager: ...
 
-    async def adispose(self) -> None: ...
+    async def adispose(self, *, drain_seconds: float = 30.0) -> bool | None: ...
+
+
+class CompositionError(RuntimeError):
+    """Raised when a runtime composition cannot be assembled."""
 
 
 class RuntimeInventoryError(RuntimeError):
@@ -85,7 +90,7 @@ class RuntimeDatabaseLifecycle:
 class RuntimeInventory:
     """Complete dynamic service graph installed for one application lifespan."""
 
-    turn_coordinator: TurnCoordinator | None = None
+    turn_runtime: TurnRuntime | None = None
     attachment_lifecycle: AttachmentLifecycle | None = None
     artifact_reader: ArtifactReader | None = None
     session_catalog: SessionCatalog | None = None
@@ -97,9 +102,9 @@ class RuntimeInventory:
     database: RuntimeDatabaseLifecycle = field(default_factory=RuntimeDatabaseLifecycle)
     run_environment_resources: RuntimeProcessResources | None = None
     model_bundle: RLMModelBundle | None = None
+    session_runtime_registry: SessionRLMRegistry | None = None
     workspace_volume_gateway: WorkspaceVolumeGateway | None = None
     workspace_file_service: WorkspaceFileService | None = None
-    workspace_volume_mirror: VolumeTreeFs | None = None
     # Composition-owned Daytona sync-bridge dispatcher (QRE-154); disposed
     # compositions clear their own loop authority via clear_loop().
     bridge_dispatcher: SyncBridgeDispatcher | None = None
@@ -109,9 +114,12 @@ class RuntimeInventory:
     # Best-effort post-readiness Memory promotion outbox sweep (P23); cancelled
     # at dispose like the orphan sweep and never readiness-gating.
     memory_outbox_task: asyncio.Task[None] | None = None
+    # Optional explicit runner owner; kept after existing fields for positional
+    # compatibility with provider-neutral inventory construction.
+    runner: object | None = None
 
     _REQUIRED_ROUTE_FIELDS: ClassVar[tuple[str, ...]] = (
-        "turn_coordinator",
+        "turn_runtime",
         "attachment_lifecycle",
         "artifact_reader",
         "session_catalog",
@@ -162,7 +170,12 @@ def clear_runtime_inventory(app: FastAPI) -> RuntimeInventory | None:
     return detached
 
 
+async def no_provider_recovery_fence(_session_id: UUID) -> None:
+    """Declare that deterministic compositions have no provider state to fence."""
+
+
 __all__ = [
+    "CompositionError",
     "RuntimeDatabaseLifecycle",
     "RuntimeInventory",
     "RuntimeInventoryError",
@@ -172,4 +185,5 @@ __all__ = [
     "clear_runtime_inventory",
     "get_runtime_inventory",
     "install_runtime_inventory",
+    "no_provider_recovery_fence",
 ]

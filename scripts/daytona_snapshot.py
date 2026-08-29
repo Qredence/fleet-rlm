@@ -100,7 +100,7 @@ async def check_snapshot(client: Any, spec: DaytonaSandboxSpec) -> None:
 
 async def _run(args: argparse.Namespace) -> int:
     spec = _spec(args.name)
-    from fleet_rlm.config import load_runtime_settings
+    from fleet_rlm.config.loader import load_runtime_settings
 
     # Snapshot operations still use the selected policy profile for credentials
     # and dotenv loading, but do not require the profile's runtime to be live.

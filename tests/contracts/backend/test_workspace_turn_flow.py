@@ -11,34 +11,32 @@ import dspy
 import pytest
 
 from fleet_rlm.chat.session_context import SessionContextManifest
-from fleet_rlm.files.memory_models import (
+from fleet_rlm.rlm.events import RuntimeEvent
+from fleet_rlm.rlm.program import RLMOptions
+from fleet_rlm.rlm.result import RunCancelledError
+from fleet_rlm.rlm.runtime import (
+    ExecutionRuntime,
+    RLMExecutionContext,
+    RLMExecutionSpec,
+    RLMRunner,
+    RunIdentity,
+    SessionView,
+)
+from fleet_rlm.sessions.models import TurnAccess
+from fleet_rlm.workspace.memory import WorkspaceMemoryToolHost
+from fleet_rlm.workspace.models import (
+    DAYTONA_WORKSPACE_CAPABILITY,
+    WorkspaceEntry,
+    WorkspaceListResult,
     WorkspaceMemoryAppendResult,
     WorkspaceMemoryEntryNotFoundError,
     WorkspaceMemoryListResult,
     WorkspaceMemoryReadResult,
+    WorkspaceTextPage,
     format_workspace_memory_v3_record,
     parse_workspace_memory_lines,
 )
-from fleet_rlm.files.memory_tools import WorkspaceMemoryToolHost
-from fleet_rlm.files.workspace_models import (
-    DAYTONA_WORKSPACE_CAPABILITY,
-    WorkspaceEntry,
-    WorkspaceListResult,
-    WorkspaceTextPage,
-)
-from fleet_rlm.files.workspace_tools import WorkspaceToolError, WorkspaceToolHost
-from fleet_rlm.rlm.context import (
-    ExecutionRuntime,
-    RLMExecutionContext,
-    RLMExecutionSpec,
-    RunIdentity,
-    SessionView,
-)
-from fleet_rlm.rlm.dspy_contract import RLMOptions
-from fleet_rlm.rlm.errors import RunCancelledError
-from fleet_rlm.rlm.events import RuntimeEvent
-from fleet_rlm.rlm.runner import RLMRunner
-from fleet_rlm.sessions.models import TurnAccess
+from fleet_rlm.workspace.workspace import WorkspaceToolError, WorkspaceToolHost
 
 
 class MemoryStore:
@@ -339,7 +337,13 @@ async def _run(
 
 
 @pytest.mark.asyncio
-async def test_workspace_survives_fresh_turn_context_and_repl_state_does_not() -> None:
+async def test_workspace_survives_fresh_turn_context() -> None:
+    """Durable Workspace content survives a fresh Turn context.
+
+    This drives the fresh-runner seam (one RLMRunner per Turn); it makes no
+    claim about interpreter identity, which the P45 session-scoped runtime
+    owns.
+    """
     workspace = MemoryWorkspace()
     factory = WorkspaceFlowFactory()
 
@@ -349,8 +353,6 @@ async def test_workspace_survives_fresh_turn_context_and_repl_state_does_not() -
     assert written is not None and written.succeeded
     assert read is not None and read.prediction is not None
     assert read.prediction.display_text == "durable decision"
-    assert len(factory.interpreters) == 2
-    assert factory.interpreters[0] is not factory.interpreters[1]
 
 
 @pytest.mark.asyncio

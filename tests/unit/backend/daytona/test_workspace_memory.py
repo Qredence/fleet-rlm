@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import base64
 import os
 import subprocess
 import sys
@@ -14,7 +13,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from fleet_rlm.files.memory_models import (
+from fleet_rlm.workspace.models import (
     WORKSPACE_MEMORY_BYTE_BUDGET,
     WORKSPACE_MEMORY_HEADER,
     WORKSPACE_MEMORY_MAX_LIST_LIMIT,
@@ -25,9 +24,36 @@ from fleet_rlm.files.memory_models import (
     parse_workspace_memory_record,
     workspace_memory_record_id,
 )
-from fleet_rlm.files.volume_paths import VolumePaths
+from fleet_rlm.workspace.paths import VolumePaths
 
 HEADER = WORKSPACE_MEMORY_HEADER + "\n"
+
+
+def build_workspace_memory_store_for_test(
+    sandbox: object,
+    *,
+    volume_paths: object,
+    max_upload_bytes: int,
+):
+    """Build the canonical Memory service over the generic Agent storage port."""
+    from fleet_rlm.workspace.memory import WorkspaceMemory
+    from fleet_rlm.workspace.storage import AgentStorageSession, WorkspaceMemoryStorage
+
+    root = getattr(volume_paths, "root", None)
+    memory_file = getattr(volume_paths, "memory_file", None)
+    expected = PurePosixPath(root) / "memory" / "MEMORIES.md" if root is not None else None
+    if expected is not None and PurePosixPath(memory_file) != expected:
+        raise ValueError("configured volume root does not contain canonical Memory path")
+    if not isinstance(root, (str, PurePosixPath, Path)):
+        raise ValueError("configured volume root is invalid")
+    session = AgentStorageSession(
+        sandbox,
+        volume_root=str(root),
+        root=str(root),
+        max_file_bytes=max_upload_bytes,
+        allow_volume_root=True,
+    )
+    return WorkspaceMemory.from_storage(WorkspaceMemoryStorage(session), max_file_bytes=max_upload_bytes)
 
 
 class LocalProcess:
@@ -62,12 +88,11 @@ class BoundedSubprocess:
 
 
 def _store(tmp_path: Path, *, max_bytes: int = 262_144):
-    from fleet_rlm.daytona.workspace_memory import DaytonaWorkspaceMemoryStore
 
     root = tmp_path / "volume"
     root.mkdir()
     process = LocalProcess()
-    store = DaytonaWorkspaceMemoryStore(
+    store = build_workspace_memory_store_for_test(
         SimpleNamespace(process=process),
         volume_paths=VolumePaths.from_mount(str(root)),
         max_upload_bytes=max_bytes,
@@ -94,10 +119,12 @@ def test_binds_only_the_canonical_memory_subdir_file(tmp_path: Path) -> None:
     target = root / "memory" / "MEMORIES.md"
     assert target.is_file()
     assert target.read_text(encoding="utf-8") == HEADER + "- [2026-07-27T11:14:05Z] **General**: hello\n"
-    assert all('"relative":"MEMORIES.md"' in code for code in process.calls)
-    # the migration probe reads at the volume root; durable ops stay under memory/
-    assert any(f'"root":"{root}"' in code for code in process.calls)
-    assert any(f'"root":"{target.parent}"' in code for code in process.calls)
+    assert any('"relative":"memory/MEMORIES.md"' in code for code in process.calls)
+    assert all(
+        "memory_append" not in code and "memory_edit" not in code and "memory_delete" not in code
+        for code in process.calls
+    )
+    assert all(f'"root":"{root}"' in code for code in process.calls)
 
 
 def test_fresh_store_starts_with_the_v2_header(tmp_path: Path) -> None:
@@ -109,13 +136,12 @@ def test_fresh_store_starts_with_the_v2_header(tmp_path: Path) -> None:
 
 
 def test_rejects_any_noncanonical_memory_target(tmp_path: Path) -> None:
-    from fleet_rlm.daytona.workspace_memory import DaytonaWorkspaceMemoryStore
 
     root = PurePosixPath(tmp_path / "volume")
     unsafe_paths = SimpleNamespace(root=root, memory_dir=root / "memory", memory_file=root / "other.md")
 
     with pytest.raises(ValueError, match="configured volume root"):
-        DaytonaWorkspaceMemoryStore(
+        build_workspace_memory_store_for_test(
             SimpleNamespace(process=LocalProcess()),
             volume_paths=unsafe_paths,  # ty: ignore[invalid-argument-type]
             max_upload_bytes=128,
@@ -127,10 +153,9 @@ def test_migrates_a_legacy_root_memories_file_once(tmp_path: Path) -> None:
     root.mkdir()
     legacy = root / "MEMORIES.md"
     legacy.write_bytes(b"- [2026-07-27T11:14:05Z] **General**: legacy\n- [torn final")
-    from fleet_rlm.daytona.workspace_memory import DaytonaWorkspaceMemoryStore
 
     process = LocalProcess()
-    store = DaytonaWorkspaceMemoryStore(
+    store = build_workspace_memory_store_for_test(
         SimpleNamespace(process=process),
         volume_paths=VolumePaths.from_mount(str(root)),
         max_upload_bytes=262_144,
@@ -155,12 +180,12 @@ def test_migrates_a_legacy_root_memories_file_once(tmp_path: Path) -> None:
     assert target.exists() and not legacy.exists()
 
 
-def test_memory_lock_is_a_stable_control_sidecar_outside_the_memory_log(tmp_path: Path) -> None:
-    from fleet_rlm.files.memory_models import format_workspace_memory_v3_record
+def test_memory_lock_is_process_local_and_does_not_create_sidecars(tmp_path: Path) -> None:
+    from fleet_rlm.workspace.models import format_workspace_memory_v3_record
 
     store, root, _process = _store(tmp_path)
     first = format_workspace_memory_v3_record(
-        "sidecar is not a record",
+        "process-local lock",
         "Policy",
         memory_id="aaaa0001",
         created_at="2026-07-19T09:00:00Z",
@@ -168,7 +193,7 @@ def test_memory_lock_is_a_stable_control_sidecar_outside_the_memory_log(tmp_path
         source="user_explicit",
     )
     second = format_workspace_memory_v3_record(
-        "a stale lock inode remains reusable",
+        "lock cache is bounded",
         "Policy",
         memory_id="bbbb0002",
         created_at="2026-07-19T09:01:00Z",
@@ -177,20 +202,16 @@ def test_memory_lock_is_a_stable_control_sidecar_outside_the_memory_log(tmp_path
     )
 
     store.append_record(first)
-    sidecar = root / "memory" / "MEMORIES.md.lock"
-    assert sidecar.is_file() and sidecar.stat().st_size == 0
-    assert not (root / "MEMORIES.md.lock").exists()
-
-    # A lock left by an interrupted runner is metadata, not memory content.
     store.append_record(second)
     entries = store.list_entries(limit=WORKSPACE_MEMORY_MAX_LIST_LIMIT).entries
     assert [entry.memory_id for entry in entries] == ["aaaa0001", "bbbb0002"]
     log = (root / "memory" / "MEMORIES.md").read_text(encoding="utf-8")
     assert first in log and second in log and ".lock" not in log
+    assert not (root / "memory" / "MEMORIES.md.lock").exists()
 
 
 @pytest.mark.parametrize("sidecar_kind", ["symlink", "directory"])
-def test_a_tampered_memory_lock_fails_closed_without_touching_the_log(tmp_path: Path, sidecar_kind: str) -> None:
+def test_stale_lock_sidecars_do_not_participate_in_memory_mutations(tmp_path: Path, sidecar_kind: str) -> None:
     store, root, _process = _store(tmp_path)
     target = root / "memory" / "MEMORIES.md"
     (root / "memory").mkdir()
@@ -200,10 +221,9 @@ def test_a_tampered_memory_lock_fails_closed_without_touching_the_log(tmp_path: 
     else:
         lock_path.mkdir()
 
-    with pytest.raises(WorkspaceMemoryStoreUnavailableError):
-        store.append_record("- [2026-07-27T11:14:05Z] **General** <!-- id:aaaa0001 -->: bounded\n")
+    store.append_record("- [2026-07-27T11:14:05Z] **General** <!-- id:aaaa0001 -->: bounded\n")
 
-    assert not target.exists()
+    assert target.is_file()
 
 
 def test_migration_leaves_an_existing_new_store_and_legacy_file_untouched(tmp_path: Path) -> None:
@@ -316,13 +336,12 @@ def test_rejects_an_append_after_a_torn_memory_record_without_rewriting(tmp_path
 
 @pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="platform has no mkfifo")
 def test_tail_read_rejects_a_fifo_before_opening_it(tmp_path: Path) -> None:
-    from fleet_rlm.daytona.workspace_memory import DaytonaWorkspaceMemoryStore
 
     root = tmp_path / "volume"
     (root / "memory").mkdir(parents=True)
     os.mkfifo(root / "memory" / "MEMORIES.md")
     process = BoundedSubprocess()
-    store = DaytonaWorkspaceMemoryStore(
+    store = build_workspace_memory_store_for_test(
         SimpleNamespace(process=process),
         volume_paths=VolumePaths.from_mount(str(root)),
         max_upload_bytes=128,
@@ -362,13 +381,12 @@ def test_tail_read_opens_target_nonblocking_before_descriptor_validation(
 
 @pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="platform has no mkfifo")
 def test_legacy_memory_migration_rejects_a_fifo_before_opening_it(tmp_path: Path) -> None:
-    from fleet_rlm.daytona.workspace_memory import DaytonaWorkspaceMemoryStore
 
     root = tmp_path / "volume"
     root.mkdir()
     os.mkfifo(root / "MEMORIES.md")
     process = BoundedSubprocess()
-    store = DaytonaWorkspaceMemoryStore(
+    store = build_workspace_memory_store_for_test(
         SimpleNamespace(process=process),
         volume_paths=VolumePaths.from_mount(str(root)),
         max_upload_bytes=128,
@@ -447,7 +465,7 @@ def test_memory_operations_revalidate_open_file_identity(
 
 
 def test_generic_session_workspace_append_keeps_nonnewline_memories_filename_behavior(tmp_path: Path) -> None:
-    from fleet_rlm.daytona.workspace_fs import DaytonaSessionWorkspaceFS
+    from fleet_rlm.workspace.storage import DaytonaSessionWorkspaceFS
 
     volume_root = tmp_path / "volume"
     workspace_root = volume_root / "sessions" / "session" / "workspace"
@@ -471,7 +489,7 @@ def test_generic_session_workspace_append_works_with_write_only_access(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from fleet_rlm.daytona.workspace_fs import DaytonaSessionWorkspaceFS
+    from fleet_rlm.workspace.storage import DaytonaSessionWorkspaceFS
 
     volume_root = tmp_path / "volume"
     workspace_root = volume_root / "sessions" / "session" / "workspace"
@@ -514,14 +532,19 @@ def test_generic_session_workspace_append_works_with_write_only_access(
         },
     ],
 )
-def test_rejects_malformed_remote_tail_responses(
+def test_rejects_malformed_opaque_tail_responses(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
     payload: dict[str, object],
 ) -> None:
-    store, _root, _process = _store(tmp_path)
-    monkeypatch.setattr(store, "_run", lambda **_kwargs: payload)
+    del tmp_path
+    from fleet_rlm.workspace.memory import WorkspaceMemory
 
+    class BadStorage:
+        def read_bytes(self, _path: str, *, max_bytes: int) -> dict[str, object]:
+            del max_bytes
+            return payload
+
+    store = WorkspaceMemory.from_storage(BadStorage(), max_file_bytes=262_144)
     with pytest.raises(WorkspaceMemoryStoreUnavailableError):
         store.read_tail(byte_budget=2)
 
@@ -567,7 +590,7 @@ def test_appends_survive_a_human_malformed_line_and_preserve_it(tmp_path: Path) 
 
 
 def test_append_fails_closed_over_a_dangling_existing_supersession(tmp_path: Path) -> None:
-    from fleet_rlm.files.memory_models import format_workspace_memory_v3_record
+    from fleet_rlm.workspace.models import format_workspace_memory_v3_record
 
     dangling = format_workspace_memory_v3_record(
         "preexisting stale branch",
@@ -596,55 +619,63 @@ def test_rejects_remote_append_response_over_the_configured_cap(
     record = "- [2026-07-27T11:14:05Z] **General**: first\n"
     cap = len(record.encode("utf-8")) + len(HEADER.encode("utf-8")) + 8
     store, _root, _process = _store(tmp_path, max_bytes=cap)
-    monkeypatch.setattr(store, "_run", lambda **_kwargs: {"entry": {"byte_size": cap + 1}})
+    monkeypatch.setattr(store._storage, "replace_bytes", lambda *_args, **_kwargs: {"byte_size": cap + 1})
 
     with pytest.raises(WorkspaceMemoryStoreUnavailableError):
         store.append_record(record)
 
 
-def test_process_local_lock_serializes_store_instances_and_preserves_the_cap(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from fleet_rlm.daytona import workspace_memory
-    from fleet_rlm.daytona.workspace_memory import DaytonaWorkspaceMemoryStore
-    from fleet_rlm.files.memory_models import WorkspaceMemoryStoreFullError
+def test_process_local_lock_serializes_store_instances_and_preserves_the_cap(tmp_path: Path) -> None:
+    from fleet_rlm.workspace.memory import WorkspaceMemory
+    from fleet_rlm.workspace.models import WorkspaceMemoryStoreFullError
 
-    root = tmp_path / "volume"
-    root.mkdir()
-    paths = VolumePaths.from_mount(str(root))
     record = "- [2026-07-27T11:14:05Z] **G**: one\n"
+    second_record = "- [2026-07-27T11:14:06Z] **G**: two\n"
     record_bytes = len(record.encode("utf-8"))
     cap = record_bytes + len(HEADER.encode("utf-8"))
-    stores = [
-        DaytonaWorkspaceMemoryStore(SimpleNamespace(), volume_paths=paths, max_upload_bytes=cap),
-        DaytonaWorkspaceMemoryStore(SimpleNamespace(), volume_paths=paths, max_upload_bytes=cap),
-    ]
-    barrier = threading.Barrier(2)
     stored = bytearray()
 
-    def racing_agent(_sandbox, **arguments):
-        if arguments["operation"] != "memory_append":
-            return {"entry": None}
-        payload = base64.b64decode(arguments["content_b64"])
-        observed_size = len(stored)
-        with suppress(threading.BrokenBarrierError):
-            barrier.wait(timeout=0.1)
-        if observed_size + len(payload) > cap:
-            raise ValueError("workspace file exceeds maximum size")
-        stored.extend(payload)
-        return {"entry": {"byte_size": len(stored)}}
+    class SharedStorage:
+        def read_bytes(self, _path: str, *, max_bytes: int) -> dict[str, object]:
+            if len(stored) > max_bytes:
+                raise ValueError("workspace file exceeds maximum size")
+            return {
+                "content": bytes(stored),
+                "truncated": False,
+                "bytes_returned": len(stored),
+                "total_bytes": len(stored),
+            }
 
-    monkeypatch.setattr(workspace_memory, "run_workspace_agent", racing_agent)
+        def replace_bytes(self, _path: str, content: bytes, *, expected_sha256: str | None = None) -> dict[str, int]:
+            del expected_sha256
+            if len(content) > cap:
+                raise ValueError("workspace file exceeds maximum size")
+            stored[:] = content
+            return {"byte_size": len(stored)}
+
+        def append_bytes(self, _path: str, content: bytes) -> dict[str, int]:
+            if len(stored) + len(content) > cap:
+                raise ValueError("workspace file exceeds maximum size")
+            stored.extend(content)
+            return {"byte_size": len(stored)}
+
+    shared = SharedStorage()
+    stores = [
+        WorkspaceMemory.from_storage(shared, max_file_bytes=cap, lock_key=str(tmp_path)),
+        WorkspaceMemory.from_storage(shared, max_file_bytes=cap, lock_key=str(tmp_path)),
+    ]
     outcomes: list[object] = []
 
-    def append(store) -> None:
+    def append(store: WorkspaceMemory, value: str) -> None:
         try:
-            outcomes.append(store.append_record(record))
-        except Exception as exc:  # assertions below keep concurrent failures visible
+            outcomes.append(store.append_record(value))
+        except Exception as exc:
             outcomes.append(exc)
 
-    threads = [threading.Thread(target=append, args=(store,)) for store in stores]
+    threads = [
+        threading.Thread(target=append, args=(stores[0], record)),
+        threading.Thread(target=append, args=(stores[1], second_record)),
+    ]
     for thread in threads:
         thread.start()
     for thread in threads:
@@ -652,7 +683,28 @@ def test_process_local_lock_serializes_store_instances_and_preserves_the_cap(
 
     assert sum(not isinstance(outcome, Exception) for outcome in outcomes) == 1
     assert sum(isinstance(outcome, WorkspaceMemoryStoreFullError) for outcome in outcomes) == 1
-    assert bytes(stored) == record.encode("utf-8")
+    assert bytes(stored).startswith(HEADER.encode("utf-8"))
+    assert (b"one" in stored) ^ (b"two" in stored)
+
+
+def test_append_after_an_empty_store_open_preserves_another_writer(tmp_path: Path) -> None:
+    first, root, _ = _store(tmp_path)
+    second = build_workspace_memory_store_for_test(
+        SimpleNamespace(process=LocalProcess()),
+        volume_paths=VolumePaths.from_mount(str(root)),
+        max_upload_bytes=262_144,
+    )
+
+    assert first.read_tail(byte_budget=262_144).content == ""
+    first_record = "- [2026-07-27T11:14:05Z] **General**: first writer\n"
+    second_record = "- [2026-07-27T11:14:06Z] **General**: second writer\n"
+    second.append_record(first_record)
+    first.append_record(second_record)
+
+    assert [entry.learning for entry in first.list_entries(limit=10).entries] == [
+        "first writer",
+        "second writer",
+    ]
 
 
 def test_missing_memory_is_empty_and_append_enforces_total_upload_cap(tmp_path: Path) -> None:
@@ -663,7 +715,7 @@ def test_missing_memory_is_empty_and_append_enforces_total_upload_cap(tmp_path: 
     assert store.read_tail(byte_budget=20).content == ""
     store.append_record(record)
 
-    from fleet_rlm.files.memory_models import WorkspaceMemoryStoreFullError
+    from fleet_rlm.workspace.models import WorkspaceMemoryStoreFullError
 
     with pytest.raises(WorkspaceMemoryStoreFullError):
         store.append_record("- [2026-07-27T11:14:06Z] **General**: second\n")
@@ -689,7 +741,6 @@ def test_closed_unavailable_mapping_for_unsafe_or_invalid_memory_file(tmp_path: 
 
 
 def test_provider_failure_is_closed_and_does_not_leak_raw_error(tmp_path: Path) -> None:
-    from fleet_rlm.daytona.workspace_memory import DaytonaWorkspaceMemoryStore
 
     class FailingProcess:
         def code_run(self, _code: str, **_kwargs):
@@ -697,7 +748,7 @@ def test_provider_failure_is_closed_and_does_not_leak_raw_error(tmp_path: Path) 
 
     root = tmp_path / "volume"
     root.mkdir()
-    store = DaytonaWorkspaceMemoryStore(
+    store = build_workspace_memory_store_for_test(
         SimpleNamespace(process=FailingProcess()),
         volume_paths=VolumePaths.from_mount(str(root)),
         max_upload_bytes=128,
@@ -758,7 +809,7 @@ def test_torn_final_record_is_skipped_by_list_and_other_lifecycle_ops_work(tmp_p
 
     listed = store.list_entries(limit=10)
     assert [entry.memory_id for entry in listed.entries] == ["aaaa0001", "bbbb0002"]
-    assert listed.warnings == 0
+    assert listed.warnings == 1
 
     edited = store.edit_entry("aaaa0001", "revised")
     assert "revised" in edited
@@ -858,13 +909,15 @@ def test_edits_and_deletes_use_one_workspace_agent_round_trip(tmp_path: Path) ->
     process.calls.clear()
 
     store.edit_entry("aaaa0001", "revised")
-    assert len(process.calls) == 1
-    assert '"operation":"memory_edit"' in process.calls[0]
+    assert len(process.calls) == 2
+    assert '"operation":"read"' in process.calls[0]
+    assert '"operation":"write"' in process.calls[1]
 
     process.calls.clear()
     assert store.delete_entry("aaaa0001") is True
-    assert len(process.calls) == 1
-    assert '"operation":"memory_delete"' in process.calls[0]
+    assert len(process.calls) == 2
+    assert '"operation":"read"' in process.calls[0]
+    assert '"operation":"write"' in process.calls[1]
 
 
 def test_edit_and_delete_under_a_missing_store_are_empty_not_found(tmp_path: Path) -> None:
@@ -880,7 +933,7 @@ def test_edit_and_delete_under_a_missing_store_are_empty_not_found(tmp_path: Pat
 
 
 def test_injection_digest_is_bounded_tolerant_deterministic_and_query_sensitive(tmp_path: Path) -> None:
-    from fleet_rlm.daytona.workspace_memory import read_workspace_memory_injection_digest
+    from fleet_rlm.workspace.memory import read_workspace_memory_injection_digest
 
     store, root, process = _store(tmp_path)
     _write_store_file((HEADER + R1 + "human note\n" + R2).encode("utf-8"), root)
@@ -904,8 +957,8 @@ def test_injection_digest_is_bounded_tolerant_deterministic_and_query_sensitive(
 
 def test_relevant_old_memory_is_injected_with_recent_context_under_the_budget(tmp_path: Path) -> None:
     """A preferred older record survives outside the newest 4 KiB tail."""
-    from fleet_rlm.daytona.workspace_memory import read_workspace_memory_injection_digest
-    from fleet_rlm.files.memory_models import workspace_memory_record_id
+    from fleet_rlm.workspace.memory import read_workspace_memory_injection_digest
+    from fleet_rlm.workspace.models import workspace_memory_record_id
 
     old_ts = "2026-07-20T10:00:00Z"
     old_category = "Preference"
@@ -940,9 +993,8 @@ def test_relevant_old_memory_is_injected_with_recent_context_under_the_budget(tm
 
 def test_relevance_injection_search_list_edit_forget_agree_on_valid_records(tmp_path: Path) -> None:
     """P13 deterministic corpus: old relevant preference plus noise and malformed rows."""
-    from fleet_rlm.daytona.workspace_memory import read_workspace_memory_injection_digest
-    from fleet_rlm.files.memory_models import WORKSPACE_MEMORY_MAX_LIST_LIMIT, workspace_memory_record_id
-    from fleet_rlm.files.memory_tools import WorkspaceMemoryToolHost
+    from fleet_rlm.workspace.memory import WorkspaceMemoryToolHost, read_workspace_memory_injection_digest
+    from fleet_rlm.workspace.models import WORKSPACE_MEMORY_MAX_LIST_LIMIT, workspace_memory_record_id
 
     old_ts = "2026-07-19T09:00:00Z"
     older = "Prefers polars for dataframe joins and concise reports."
@@ -986,7 +1038,7 @@ def test_relevance_injection_search_list_edit_forget_agree_on_valid_records(tmp_
 def test_append_writes_v3_over_historical_v1_and_v2_without_rewriting_old_rows(tmp_path: Path) -> None:
     from datetime import UTC, datetime
 
-    from fleet_rlm.files.memory_models import format_workspace_memory_record
+    from fleet_rlm.workspace.models import format_workspace_memory_record
 
     store, root, _process = _store(tmp_path)  # type: ignore[name-defined]
     v1 = "- [2026-07-20T09:00:00Z] **General**: old operator note\n"
@@ -1007,8 +1059,8 @@ def test_append_writes_v3_over_historical_v1_and_v2_without_rewriting_old_rows(t
 
 
 def test_v3_relevant_injection_preserves_provenance_and_legacy_version_ratings(tmp_path: Path) -> None:
-    from fleet_rlm.daytona.workspace_memory import read_workspace_memory_injection_digest
-    from fleet_rlm.files.memory_models import format_workspace_memory_v3_record
+    from fleet_rlm.workspace.memory import read_workspace_memory_injection_digest
+    from fleet_rlm.workspace.models import format_workspace_memory_v3_record
 
     old = format_workspace_memory_v3_record(
         "Superseding release policy",
@@ -1029,7 +1081,7 @@ def test_v3_relevant_injection_preserves_provenance_and_legacy_version_ratings(t
 
 
 def test_workspace_agent_edits_and_deletes_v3_without_losing_provenance(tmp_path: Path) -> None:
-    from fleet_rlm.files.memory_models import format_workspace_memory_v3_record
+    from fleet_rlm.workspace.models import format_workspace_memory_v3_record
 
     v3 = format_workspace_memory_v3_record(
         "Keep provenance through targeting",
@@ -1054,7 +1106,7 @@ def test_workspace_agent_edits_and_deletes_v3_without_losing_provenance(tmp_path
 
 
 def test_workspace_agent_edit_preserves_v3_supersession_and_mixed_file_bytes(tmp_path: Path) -> None:
-    from fleet_rlm.files.memory_models import format_workspace_memory_v3_record
+    from fleet_rlm.workspace.models import format_workspace_memory_v3_record
 
     older_id = workspace_memory_record_id("2026-07-18T08:00:00Z", "Policy", "older policy")
     target_policy = f"- [2026-07-18T08:00:00Z] **Policy** <!-- id:{older_id} -->: older policy\n"
@@ -1085,7 +1137,7 @@ def test_workspace_agent_edit_preserves_v3_supersession_and_mixed_file_bytes(tmp
 
 
 def test_mounted_memory_conflict_details_survive_for_candidate_promotion(tmp_path: Path) -> None:
-    from fleet_rlm.files.memory_models import WorkspaceMemoryConflictError, format_workspace_memory_v3_record
+    from fleet_rlm.workspace.models import WorkspaceMemoryConflictError, format_workspace_memory_v3_record
 
     store, _root, _process = _store(tmp_path)
     store.append_record("- [2026-08-11T00:00:00Z] **Project** <!-- id:55550001 -->: existing policy\n")
@@ -1106,7 +1158,7 @@ def test_mounted_memory_conflict_details_survive_for_candidate_promotion(tmp_pat
 
 
 def test_v3_memory_id_participates_in_append_collision_targeting(tmp_path: Path) -> None:
-    from fleet_rlm.files.memory_models import format_workspace_memory_v3_record, workspace_memory_record_id
+    from fleet_rlm.workspace.models import format_workspace_memory_v3_record, workspace_memory_record_id
 
     created = "2026-07-19T09:00:00Z"
     learning = "Shared id collision check"
@@ -1129,9 +1181,8 @@ def test_v3_memory_id_participates_in_append_collision_targeting(tmp_path: Path)
 
 
 def test_active_supersession_filters_search_and_injection_and_forgetting_reactivates(tmp_path: Path) -> None:
-    from fleet_rlm.daytona.workspace_memory import read_workspace_memory_injection_digest
-    from fleet_rlm.files.memory_models import format_workspace_memory_v3_record
-    from fleet_rlm.files.memory_tools import WorkspaceMemoryToolHost
+    from fleet_rlm.workspace.memory import WorkspaceMemoryToolHost, read_workspace_memory_injection_digest
+    from fleet_rlm.workspace.models import format_workspace_memory_v3_record
 
     old = format_workspace_memory_v3_record(
         "Old dataframe preference",
@@ -1172,7 +1223,7 @@ def test_active_supersession_filters_search_and_injection_and_forgetting_reactiv
 
 
 def test_windowed_tail_keeps_a_valid_row_whose_target_is_before_the_window(tmp_path: Path) -> None:
-    from fleet_rlm.files.memory_models import format_workspace_memory_v3_record
+    from fleet_rlm.workspace.models import format_workspace_memory_v3_record
 
     older = "- [2026-07-18T08:00:00Z] **Preference** <!-- id:aaaa0001 -->: older preference\n"
     new = format_workspace_memory_v3_record(
@@ -1198,8 +1249,8 @@ def test_windowed_tail_keeps_a_valid_row_whose_target_is_before_the_window(tmp_p
 
 
 def test_forgetting_an_inactive_superseder_still_removes_it_and_reactivates_the_target(tmp_path: Path) -> None:
-    from fleet_rlm.daytona.workspace_memory import read_workspace_memory_injection_digest
-    from fleet_rlm.files.memory_models import format_workspace_memory_v3_record
+    from fleet_rlm.workspace.memory import read_workspace_memory_injection_digest
+    from fleet_rlm.workspace.models import format_workspace_memory_v3_record
 
     first = format_workspace_memory_v3_record(
         "superseded once",
@@ -1228,7 +1279,7 @@ def test_forgetting_an_inactive_superseder_still_removes_it_and_reactivates_the_
 
 
 def test_search_failure_or_no_match_uses_the_recency_only_fallback(tmp_path: Path) -> None:
-    from fleet_rlm.daytona.workspace_memory import read_workspace_memory_injection_digest
+    from fleet_rlm.workspace.memory import read_workspace_memory_injection_digest
 
     store, root, _process = _store(tmp_path)
     _write_store_file((HEADER + R1 + R2).encode("utf-8"), root)
@@ -1248,7 +1299,7 @@ def test_search_failure_or_no_match_uses_the_recency_only_fallback(tmp_path: Pat
 
 
 def test_injection_digest_is_empty_for_missing_or_empty_stores(tmp_path: Path) -> None:
-    from fleet_rlm.daytona.workspace_memory import read_workspace_memory_injection_digest
+    from fleet_rlm.workspace.memory import read_workspace_memory_injection_digest
 
     store, _root, _process = _store(tmp_path)
 
@@ -1342,16 +1393,15 @@ class _WormSubprocess:
         return SimpleNamespace(exit_code=completed.returncode, result=completed.stdout.strip())
 
 
-def test_worm_volume_backends_mutate_memory_via_unlink_and_recreate(tmp_path: Path) -> None:
-    """Sep 2026 probe-certified ladder: rename ENOSYS, write-open EPERM, recreate wins."""
-    from fleet_rlm.files.memory_models import format_workspace_memory_v3_record
+def test_worm_volume_backends_mutate_memory_via_generic_storage_fallback(tmp_path: Path) -> None:
+    """Generic storage fallback survives rename and in-place-write denial."""
+    from fleet_rlm.workspace.models import format_workspace_memory_v3_record
 
     root = tmp_path / "volume"
     root.mkdir()
     process = _WormSubprocess()
-    from fleet_rlm.daytona.workspace_memory import DaytonaWorkspaceMemoryStore
 
-    store = DaytonaWorkspaceMemoryStore(
+    store = build_workspace_memory_store_for_test(
         SimpleNamespace(process=process),
         volume_paths=VolumePaths.from_mount(str(root)),
         max_upload_bytes=262_144,
@@ -1380,8 +1430,6 @@ def test_worm_volume_backends_mutate_memory_via_unlink_and_recreate(tmp_path: Pa
     memory_file = root / "memory" / "MEMORIES.md"
     raw = memory_file.read_text(encoding="utf-8")
     assert "first learning" in raw and "second learning" in raw
-    assert (root / "memory" / "MEMORIES.md.lock").is_file()
-
     edited = store.edit_entry("bbbb0002", "second learning revised")
     assert "second learning revised" in edited
     raw_after_edit = memory_file.read_text(encoding="utf-8")
@@ -1399,13 +1447,11 @@ def test_worm_volume_backends_mutate_memory_via_unlink_and_recreate(tmp_path: Pa
 
 def test_worm_volume_recreate_restores_previous_bytes_when_the_new_write_fails(tmp_path: Path) -> None:
     """A failed recreate must never silently destroy the prior log bytes."""
-    from fleet_rlm.files.memory_models import format_workspace_memory_v3_record
+    from fleet_rlm.workspace.models import format_workspace_memory_v3_record
 
     root = tmp_path / "volume"
     root.mkdir()
-    store = __import__(
-        "fleet_rlm.daytona.workspace_memory", fromlist=["DaytonaWorkspaceMemoryStore"]
-    ).DaytonaWorkspaceMemoryStore(
+    store = build_workspace_memory_store_for_test(
         SimpleNamespace(process=_WormSubprocess()),
         volume_paths=VolumePaths.from_mount(str(root)),
         max_upload_bytes=262_144,
@@ -1423,9 +1469,7 @@ def test_worm_volume_recreate_restores_previous_bytes_when_the_new_write_fails(t
 
     # The next mutation's recreate create fails once (EIO): the prior bytes must
     # be restored and the store must surface a bounded unavailable failure.
-    failing_store = __import__(
-        "fleet_rlm.daytona.workspace_memory", fromlist=["DaytonaWorkspaceMemoryStore"]
-    ).DaytonaWorkspaceMemoryStore(
+    failing_store = build_workspace_memory_store_for_test(
         SimpleNamespace(process=_WormSubprocess(fail_first_exclusive_create="MEMORIES.md")),
         volume_paths=VolumePaths.from_mount(str(root)),
         max_upload_bytes=262_144,

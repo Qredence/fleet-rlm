@@ -12,6 +12,7 @@ from fleet_rlm.daytona.sandbox_lease import (
     SandboxLease,
     SandboxLeasePolicy,
     SandboxLeaseReceipt,
+    wait_lease_ownership,
 )
 from fleet_rlm.daytona.session_manager import DaytonaAdmission, DaytonaAdmissionPermit
 
@@ -197,6 +198,64 @@ async def test_delete_request_error_still_confirms_and_reports_both() -> None:
 
 
 @pytest.mark.asyncio
+async def test_async_close_keeps_owned_cleanup_after_caller_cancellation() -> None:
+    platform = _ScriptedPlatform(["destroying"] * 100)
+    _, permit = await _permit()
+    lease = SandboxLease(
+        kind="recursive_child",
+        sandbox=None,
+        sandbox_id="sb-cancel",
+        platform=platform,
+        permit=permit,
+        policy=SandboxLeasePolicy(kind="recursive_child", confirm_timeout_s=0.05, confirm_poll_interval_s=0.01),
+    )
+    closing = asyncio.create_task(lease.aclose())
+    await asyncio.sleep(0)
+    closing.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await closing
+
+    receipt = await lease.aclose()
+    assert receipt.provider.confirmed_absent is False
+    assert permit._released is True
+    assert lease.closed is True
+
+
+@pytest.mark.asyncio
+async def test_forced_stop_delete_fallback_confirms_absence() -> None:
+    class _ForceDeletePlatform(_ScriptedPlatform):
+        async def stop(self, sandbox_id: str, *, timeout: float = 60, force: bool = False) -> None:
+            del sandbox_id, timeout
+            assert force is True
+            self.stops.append("forced")
+            raise RuntimeError("stop failed; delete accepted")
+
+    platform = _ForceDeletePlatform([None])
+    _, permit = await _permit()
+    lease = SandboxLease(
+        kind="recovery_fence",
+        sandbox=None,
+        sandbox_id="sb-force",
+        platform=platform,
+        permit=permit,
+        policy=SandboxLeasePolicy(
+            kind="recovery_fence",
+            provider_action="stop",
+            stop_force=True,
+            confirm_timeout_s=0.2,
+            confirm_poll_interval_s=0.01,
+        ),
+    )
+
+    receipt = await lease.aclose()
+
+    assert receipt.provider.confirmed_absent is True
+    assert receipt.provider.plateau == ("not_found",)
+    assert receipt.provider.error is not None
+    assert receipt.admission.released_after == "quarantine_failure"
+
+
+@pytest.mark.asyncio
 async def test_repeated_close_is_idempotent_and_returns_same_receipt() -> None:
     platform = _ScriptedPlatform([None])
     _, permit = await _permit()
@@ -291,6 +350,7 @@ async def test_interpreter_failure_surfaces_on_receipt_without_raising() -> None
         interpreter=_FakeInterpreter(fail=True),
     )
     receipt = await lease.aclose()
+    await lease.wait_ownership(timeout=2)
     assert receipt.interpreter.status == "failed"
     assert receipt.interpreter.broker == "failed"
     assert "broker stop failed" in str(receipt.first_error)
@@ -326,3 +386,42 @@ async def test_hung_delete_request_is_classified_not_wedged() -> None:
     assert "TimeoutError" in str(receipt.provider.error)
     assert receipt.provider.confirmed_absent is True  # probe (scripted absent) still ran
     assert permit._released is True
+
+
+@pytest.mark.asyncio
+async def test_retained_provider_timeout_keeps_admission_until_late_delete_settles() -> None:
+    """A retained Session lease never drops ownership on a timed-out delete."""
+
+    release_delete = asyncio.Event()
+
+    class _LateDeletePlatform(_ScriptedPlatform):
+        async def delete(self, sandbox_id: str) -> None:
+            self.deletes.append(sandbox_id)
+            if len(self.deletes) == 1:
+                await release_delete.wait()
+
+    platform = _LateDeletePlatform([None])
+    _, permit = await _permit()
+    lease = SandboxLease(
+        kind="retained_session",
+        sandbox=None,
+        sandbox_id="sb-late",
+        platform=platform,
+        permit=permit,
+        policy=SandboxLeasePolicy(
+            kind="retained_session",
+            provider_request_timeout_s=0.01,
+            confirm_timeout_s=0.2,
+            confirm_poll_interval_s=0.01,
+        ),
+    )
+
+    receipt = await asyncio.wait_for(lease.aclose(), timeout=2)
+    assert receipt.provider.error is not None
+    assert permit._released is False
+    assert lease.has_pending_ownership is True
+
+    release_delete.set()
+    assert await wait_lease_ownership(timeout=2) is True
+    assert permit._released is True
+    assert platform.deletes == ["sb-late", "sb-late"]

@@ -13,8 +13,12 @@ def test_host_tool_rejects_calls_after_authority_revocation() -> None:
     import dspy
 
     from fleet_rlm.chat.run_authority import RunAuthority
-    from fleet_rlm.rlm.events import ToolFailed, ToolStarted
-    from fleet_rlm.rlm.tool_observer import ToolEventView, observe_tool
+    from fleet_rlm.rlm.events import (
+        ToolEventView,
+        ToolFailed,
+        ToolStarted,
+        observe_tool,
+    )
 
     authority = RunAuthority()
     effects: list[str] = []
@@ -41,10 +45,10 @@ def test_host_tool_rejects_calls_after_authority_revocation() -> None:
 @pytest.mark.asyncio
 async def test_heartbeat_supervision_covers_preparation() -> None:
     from fleet_rlm.chat.commands import OpenTurnCommand
-    from fleet_rlm.chat.run_cleanup import RunCleanupSupervisor
     from fleet_rlm.chat.run_lifecycle import RunLifecycleService, RunLifecycleUnavailableError, RunStateError
-    from fleet_rlm.chat.turn_coordinator import TurnCoordinator
+    from fleet_rlm.chat.turn_runtime import TurnRuntime
     from fleet_rlm.persistence.repositories import InMemoryRunStateStore, InMemorySessionCatalog
+    from fleet_rlm.runtime.cleanup import RunCleanupSupervisor
     from fleet_rlm.sessions.models import TurnAccess, TurnInput
 
     authoritative = InMemoryRunStateStore()
@@ -84,7 +88,7 @@ async def test_heartbeat_supervision_covers_preparation() -> None:
         fenced.set()
 
     cleanup = RunCleanupSupervisor()
-    coordinator = TurnCoordinator(
+    coordinator = TurnRuntime(
         lifecycle=RunLifecycleService(
             Store(),
             max_artifact_bytes=100,
@@ -106,13 +110,12 @@ async def test_heartbeat_supervision_covers_preparation() -> None:
 @pytest.mark.asyncio
 async def test_transient_heartbeat_failure_recovers_without_ending_run() -> None:
     from fleet_rlm.chat.commands import OpenTurnCommand
-    from fleet_rlm.chat.run_cleanup import RunCleanupSupervisor
     from fleet_rlm.chat.run_lifecycle import RunLifecycleService
-    from fleet_rlm.chat.turn_coordinator import TurnCoordinator
+    from fleet_rlm.chat.turn_runtime import TurnRuntime
     from fleet_rlm.persistence.repositories import InMemoryRunStateStore, InMemorySessionCatalog
-    from fleet_rlm.rlm.dspy_contract import PredictionResult
     from fleet_rlm.rlm.events import EventRecorder, RunCompleted, RunStarted
-    from fleet_rlm.rlm.outcome import RLMOutcome
+    from fleet_rlm.rlm.result import PredictionResult, RLMOutcome
+    from fleet_rlm.runtime.cleanup import RunCleanupSupervisor
     from fleet_rlm.sessions.models import TurnAccess, TurnInput
 
     authoritative = InMemoryRunStateStore()
@@ -181,7 +184,7 @@ async def test_transient_heartbeat_failure_recovers_without_ending_run() -> None
             return Stream()
 
     cleanup = RunCleanupSupervisor()
-    coordinator = TurnCoordinator(
+    coordinator = TurnRuntime(
         lifecycle=RunLifecycleService(
             Store(),
             max_artifact_bytes=100,
@@ -208,11 +211,11 @@ async def test_transient_heartbeat_failure_recovers_without_ending_run() -> None
 @pytest.mark.asyncio
 async def test_repeated_transient_failures_revoke_without_provider_fence() -> None:
     from fleet_rlm.chat.commands import OpenTurnCommand
-    from fleet_rlm.chat.run_cleanup import RunCleanupSupervisor
     from fleet_rlm.chat.run_lifecycle import RunLifecycleService
-    from fleet_rlm.chat.turn_coordinator import TurnCoordinator
+    from fleet_rlm.chat.turn_runtime import TurnRuntime
     from fleet_rlm.persistence.repositories import InMemoryRunStateStore, InMemorySessionCatalog
     from fleet_rlm.rlm.events import EventRecorder, RunFailed, RunStarted
+    from fleet_rlm.runtime.cleanup import RunCleanupSupervisor
     from fleet_rlm.sessions.models import TurnAccess, TurnInput
 
     authoritative = InMemoryRunStateStore()
@@ -275,7 +278,7 @@ async def test_repeated_transient_failures_revoke_without_provider_fence() -> No
             return Stream()
 
     cleanup = RunCleanupSupervisor()
-    coordinator = TurnCoordinator(
+    coordinator = TurnRuntime(
         lifecycle=RunLifecycleService(
             Store(),
             max_artifact_bytes=100,
@@ -300,12 +303,12 @@ async def test_repeated_transient_failures_revoke_without_provider_fence() -> No
 
 @pytest.mark.asyncio
 async def test_runner_exception_after_claim_loss_still_revokes_and_fences_run() -> None:
-    from fleet_rlm.chat.run_cleanup import RunCleanupSupervisor
     from fleet_rlm.chat.run_lifecycle import ClaimedRun, RunClaim, RunLifecycleService
     from fleet_rlm.chat.run_ownership import ClaimHeartbeat
-    from fleet_rlm.chat.turn_coordinator import TurnCoordinator
+    from fleet_rlm.chat.turn_runtime import TurnRuntime
     from fleet_rlm.persistence.repositories import InMemoryRunStateStore, InMemorySessionCatalog
     from fleet_rlm.rlm.events import RunFailed
+    from fleet_rlm.runtime.cleanup import RunCleanupSupervisor
     from fleet_rlm.sessions.models import TurnAccess, TurnInput
 
     authoritative = InMemoryRunStateStore()
@@ -337,7 +340,7 @@ async def test_runner_exception_after_claim_loss_still_revokes_and_fences_run() 
         fenced.set()
 
     cleanup = RunCleanupSupervisor()
-    coordinator = TurnCoordinator(
+    coordinator = TurnRuntime(
         lifecycle=lifecycle,
         preparation=object(),  # type: ignore[arg-type] - execution starts after preparation
         runner=Runner(),
@@ -362,13 +365,12 @@ async def test_runner_exception_after_claim_loss_still_revokes_and_fences_run() 
 @pytest.mark.asyncio
 async def test_claim_loss_wins_finalization_and_prevents_stale_commit() -> None:
     from fleet_rlm.chat.commands import OpenTurnCommand
-    from fleet_rlm.chat.run_cleanup import RunCleanupSupervisor
     from fleet_rlm.chat.run_lifecycle import RunLifecycleService, RunStateError
-    from fleet_rlm.chat.turn_coordinator import TurnCoordinator
+    from fleet_rlm.chat.turn_runtime import TurnRuntime
     from fleet_rlm.persistence.repositories import InMemoryRunStateStore, InMemorySessionCatalog
-    from fleet_rlm.rlm.dspy_contract import PredictionResult
     from fleet_rlm.rlm.events import RunFailed
-    from fleet_rlm.rlm.outcome import RLMOutcome
+    from fleet_rlm.rlm.result import PredictionResult, RLMOutcome
+    from fleet_rlm.runtime.cleanup import RunCleanupSupervisor
     from fleet_rlm.sessions.models import TurnAccess, TurnInput
 
     authoritative = InMemoryRunStateStore()
@@ -438,7 +440,7 @@ async def test_claim_loss_wins_finalization_and_prevents_stale_commit() -> None:
         release_commit.set()
 
     cleanup = RunCleanupSupervisor()
-    coordinator = TurnCoordinator(
+    coordinator = TurnRuntime(
         lifecycle=RunLifecycleService(
             Store(),
             max_artifact_bytes=100,
@@ -467,11 +469,11 @@ async def test_claim_loss_wins_finalization_and_prevents_stale_commit() -> None:
 @pytest.mark.asyncio
 async def test_invalid_heartbeat_revokes_run_fences_before_releasing_claim() -> None:
     from fleet_rlm.chat.commands import OpenTurnCommand
-    from fleet_rlm.chat.run_cleanup import RunCleanupSupervisor
     from fleet_rlm.chat.run_lifecycle import RunLifecycleService, RunStateError
-    from fleet_rlm.chat.turn_coordinator import TurnCoordinator
+    from fleet_rlm.chat.turn_runtime import TurnRuntime
     from fleet_rlm.persistence.repositories import InMemoryRunStateStore, InMemorySessionCatalog
     from fleet_rlm.rlm.events import EventRecorder, RunFailed, RunStarted
+    from fleet_rlm.runtime.cleanup import RunCleanupSupervisor
     from fleet_rlm.sessions.models import TurnAccess, TurnInput
 
     authoritative = InMemoryRunStateStore()
@@ -542,7 +544,7 @@ async def test_invalid_heartbeat_revokes_run_fences_before_releasing_claim() -> 
         cleanup_order.append("sandbox-fenced")
 
     cleanup = RunCleanupSupervisor()
-    coordinator = TurnCoordinator(
+    coordinator = TurnRuntime(
         lifecycle=RunLifecycleService(
             Store(),
             max_artifact_bytes=100,
@@ -583,13 +585,12 @@ async def test_post_commit_heartbeat_does_not_fail_committed_turn(caplog) -> Non
     import logging
 
     from fleet_rlm.chat.commands import OpenTurnCommand
-    from fleet_rlm.chat.run_cleanup import RunCleanupSupervisor
     from fleet_rlm.chat.run_lifecycle import RunLifecycleService
-    from fleet_rlm.chat.turn_coordinator import TurnCoordinator
+    from fleet_rlm.chat.turn_runtime import TurnRuntime
     from fleet_rlm.persistence.repositories import InMemoryRunStateStore, InMemorySessionCatalog
-    from fleet_rlm.rlm.dspy_contract import PredictionResult
     from fleet_rlm.rlm.events import EventRecorder, RunCompleted, RunFailed, RunStarted
-    from fleet_rlm.rlm.outcome import RLMOutcome
+    from fleet_rlm.rlm.result import PredictionResult, RLMOutcome
+    from fleet_rlm.runtime.cleanup import RunCleanupSupervisor
     from fleet_rlm.sessions.models import TurnAccess, TurnInput
 
     authoritative = InMemoryRunStateStore()
@@ -654,7 +655,7 @@ async def test_post_commit_heartbeat_does_not_fail_committed_turn(caplog) -> Non
             return Stream()
 
     cleanup = RunCleanupSupervisor()
-    coordinator = TurnCoordinator(
+    coordinator = TurnRuntime(
         lifecycle=RunLifecycleService(
             authoritative,
             max_artifact_bytes=100,
@@ -698,7 +699,6 @@ async def test_claim_loss_cleanup_after_commit_is_a_benign_no_op(caplog) -> None
     """Claim-loss cleanup racing a committed Turn logs and no-ops; commit state is untouched."""
     import logging
 
-    from fleet_rlm.chat.run_cleanup import RunCleanupSupervisor
     from fleet_rlm.chat.run_lifecycle import (
         ClaimedRun,
         CommittedTurnReceipt,
@@ -709,10 +709,14 @@ async def test_claim_loss_cleanup_after_commit_is_a_benign_no_op(caplog) -> None
         RunStateError,
     )
     from fleet_rlm.chat.run_ownership import ClaimHeartbeat
-    from fleet_rlm.chat.turn_coordinator import TurnCoordinator
+    from fleet_rlm.chat.turn_runtime import TurnRuntime
     from fleet_rlm.persistence.repositories import InMemoryRunStateStore, InMemorySessionCatalog
-    from fleet_rlm.rlm.dspy_contract import PredictionResult, empty_rlm_usage
-    from fleet_rlm.rlm.outcome import RLMOutcome
+    from fleet_rlm.rlm.result import (
+        PredictionResult,
+        RLMOutcome,
+        empty_rlm_usage,
+    )
+    from fleet_rlm.runtime.cleanup import RunCleanupSupervisor
     from fleet_rlm.sessions.models import TurnAccess, TurnInput
 
     assert issubclass(RunAlreadyCompletedError, RunStateError)
@@ -749,7 +753,7 @@ async def test_claim_loss_cleanup_after_commit_is_a_benign_no_op(caplog) -> None
         def stream(self, _execution):
             raise AssertionError("execution must not start")
 
-    coordinator = TurnCoordinator(
+    coordinator = TurnRuntime(
         lifecycle=lifecycle,
         preparation=Preparation(),
         runner=Runner(),
@@ -784,10 +788,13 @@ async def test_revoke_claim_guard_only_relaxes_committed_runs(caplog) -> None:
         RunClaim,
         RunLifecycleService,
     )
-    from fleet_rlm.chat.turn_coordinator import TurnCoordinator
+    from fleet_rlm.chat.turn_runtime import TurnRuntime
     from fleet_rlm.persistence.repositories import InMemoryRunStateStore, InMemorySessionCatalog
-    from fleet_rlm.rlm.dspy_contract import PredictionResult, empty_rlm_usage
-    from fleet_rlm.rlm.outcome import RLMOutcome
+    from fleet_rlm.rlm.result import (
+        PredictionResult,
+        RLMOutcome,
+        empty_rlm_usage,
+    )
     from fleet_rlm.sessions.models import TurnAccess, TurnInput
 
     authoritative = InMemoryRunStateStore()
@@ -808,7 +815,7 @@ async def test_revoke_claim_guard_only_relaxes_committed_runs(caplog) -> None:
         def stream(self, _execution):
             raise AssertionError("execution must not start")
 
-    coordinator = TurnCoordinator(lifecycle=lifecycle, preparation=Preparation(), runner=Runner())
+    coordinator = TurnRuntime(lifecycle=lifecycle, preparation=Preparation(), runner=Runner())
 
     committed = await lifecycle.begin(RunClaim(access, session.id, TurnInput("first"), "first", uuid4()))
     assert isinstance(committed, ClaimedRun)
@@ -840,17 +847,20 @@ async def test_driver_claim_loss_cleanup_skips_settlement_release_after_commit(c
     """Driver cleanup with claim_lost still closes resources but never settles a committed Run."""
     import logging
 
-    from fleet_rlm.chat.run_cleanup import RunCleanupSupervisor
     from fleet_rlm.chat.run_lifecycle import (
         ClaimedRun,
         CommittedTurnReceipt,
         RunClaim,
         RunLifecycleService,
     )
-    from fleet_rlm.chat.turn_coordinator import TurnCoordinator
+    from fleet_rlm.chat.turn_runtime import TurnRuntime
     from fleet_rlm.persistence.repositories import InMemoryRunStateStore, InMemorySessionCatalog
-    from fleet_rlm.rlm.dspy_contract import PredictionResult, empty_rlm_usage
-    from fleet_rlm.rlm.outcome import RLMOutcome
+    from fleet_rlm.rlm.result import (
+        PredictionResult,
+        RLMOutcome,
+        empty_rlm_usage,
+    )
+    from fleet_rlm.runtime.cleanup import RunCleanupSupervisor
     from fleet_rlm.sessions.models import TurnAccess, TurnInput
 
     authoritative = InMemoryRunStateStore()
@@ -884,7 +894,7 @@ async def test_driver_claim_loss_cleanup_skips_settlement_release_after_commit(c
         return receipt
 
     cleanup = RunCleanupSupervisor()
-    coordinator = TurnCoordinator(
+    coordinator = TurnRuntime(
         lifecycle=lifecycle,
         preparation=object(),  # type: ignore[arg-type]
         runner=None,  # type: ignore[arg-type] - cleanup never touches the runner

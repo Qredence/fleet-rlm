@@ -7,9 +7,9 @@ from fastapi import APIRouter, Depends
 from fleet_rlm.api.dependencies import ConfigPolicyDep, require_loopback_client
 from fleet_rlm.api.errors import http_error
 from fleet_rlm.api.schemas import SettingsPolicyPatchRequest, SettingsPolicyResponse
-from fleet_rlm.config import FleetConfigurationError
-from fleet_rlm.config_policy import PolicyAccessError, PolicyConflictError
-from fleet_rlm.posthog_client import get_client, get_distinct_id
+from fleet_rlm.config.policy import PolicyAccessError, PolicyConflictError
+from fleet_rlm.config.settings import FleetConfigurationError
+from fleet_rlm.observability.posthog import get_client, get_distinct_id
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
 

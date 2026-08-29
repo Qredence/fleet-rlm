@@ -9,17 +9,16 @@ from uuid import UUID
 
 import dspy
 
+from fleet_rlm.chat.preparation import RunPreparationCancelledError, RunPreparationTimeoutError
 from fleet_rlm.chat.run_lifecycle import ClaimedRun
-from fleet_rlm.chat.run_preparation import RunPreparationCancelledError, RunPreparationTimeoutError
-from fleet_rlm.files.memory_candidates import MemoryCandidate, MemoryCandidateCollector
-from fleet_rlm.files.workspace_models import SessionWorkspaceFS, WorkspaceCapabilityMetadata
-from fleet_rlm.rlm.context import PreparationNotice, RLMExecutionSpec
-from fleet_rlm.rlm.events import AttachmentRead, SkillActivated, SkillLoaded
-from fleet_rlm.rlm.tool_observer import ToolEventView
+from fleet_rlm.rlm.events import AttachmentRead, SkillActivated, SkillLoaded, ToolEventView
+from fleet_rlm.rlm.runtime import PreparationNotice, RLMExecutionSpec
 from fleet_rlm.sessions.history_tools import SessionHistoryToolHost
 from fleet_rlm.skills.catalog import SkillCatalog
 from fleet_rlm.skills.resolver import resolve_selected_skills, resolved_schema, resolved_signature
 from fleet_rlm.skills.tools import SkillToolHost
+from fleet_rlm.workspace.memory import MemoryCandidate, MemoryCandidateCollector
+from fleet_rlm.workspace.models import SessionWorkspaceFS, WorkspaceCapabilityMetadata
 
 
 class EmptySkillHost:
@@ -52,6 +51,7 @@ class PreparedHostCapabilities:
         skills: Any,
         close_files: bool,
         artifact_candidates: bool,
+        artifacts: Any | None = None,
         preparation_notices: tuple[PreparationNotice, ...] = (),
         memory_candidates: MemoryCandidateCollector | None = None,
     ) -> None:
@@ -60,32 +60,43 @@ class PreparedHostCapabilities:
         self._skills = skills
         self._close_files = close_files
         self._artifact_candidates = artifact_candidates
+        self._artifacts = artifacts
         self._memory_candidates = memory_candidates
         self.preparation_notices = preparation_notices
 
     def drain_public_details(self) -> tuple[AttachmentRead | SkillActivated | SkillLoaded, ...]:
         values: list[AttachmentRead | SkillActivated | SkillLoaded] = []
-        for item in self._files.drain_public_events():
-            # Only canonical attachment-read payloads project here. Artifact
-            # candidate notices (``artifact.workspace_publish``) carry ``path``
-            # instead of ``attachment_id`` and reach the stream through the
-            # promotion path in ``RunLifecycle.finish``.
-            if item.get("event_kind", "attachment.read") != "attachment.read":
+        # Attachment and Artifact hosts each own their event ledger.  Only
+        # attachment reads become capability details; artifact notices are
+        # deliberately drained here but remain private promotion metadata.
+        for host in (self._files, self._artifacts):
+            if host is None:
                 continue
-            values.append(
-                AttachmentRead(
-                    UUID(str(item["attachment_id"])),
-                    str(item["filename"]),
-                    int(item["byte_size"]),
+            drain = getattr(host, "drain_public_events", None)
+            if not callable(drain):
+                continue
+            for item in drain():
+                if item.get("event_kind", "attachment.read") != "attachment.read":
+                    continue
+                values.append(
+                    AttachmentRead(
+                        UUID(str(item["attachment_id"])),
+                        str(item["filename"]),
+                        int(item["byte_size"]),
+                    )
                 )
-            )
         values.extend(skill_event(item) for item in self._skills.drain_public_events())
         return tuple(values)
 
     def drain_artifact_candidates(self) -> Any:
         if not self._artifact_candidates:
             return ()
-        return self._files.drain_artifact_candidates()
+        if self._artifacts is not None:
+            return self._artifacts.drain_artifact_candidates()
+        # Keep older injected test seams usable while callers migrate to the
+        # explicit ArtifactToolHost.
+        drain = getattr(self._files, "drain_artifact_candidates", None)
+        return drain() if callable(drain) else ()
 
     def drain_memory_candidates(self) -> tuple[MemoryCandidate, ...]:
         """Drain Run-scoped memory proposals; empty when the policy did not expose them."""
@@ -99,8 +110,11 @@ class PreparedHostCapabilities:
             recorder(attachment_ids)
 
     async def aclose(self) -> None:
-        if self._close_files:
-            await self._files.aclose()
+        if not self._close_files:
+            return
+        await self._files.aclose()
+        if self._artifacts is not None:
+            await self._artifacts.aclose()
 
 
 async def prepare_host_capabilities(

@@ -12,14 +12,13 @@ import pytest
 
 def test_execution_context_is_immutable_and_contains_prepared_runner_inputs() -> None:
     from fleet_rlm.chat.session_context import SessionContextManifest, TurnPreview
-    from fleet_rlm.rlm.context import (
+    from fleet_rlm.rlm.program import RLMModelBundle, RLMOptions
+    from fleet_rlm.rlm.runtime import (
         ExecutionRuntime,
         RLMExecutionContext,
         RunIdentity,
         SessionView,
     )
-    from fleet_rlm.rlm.dspy_contract import RLMOptions
-    from fleet_rlm.rlm.model_bundle import RLMModelBundle
     from fleet_rlm.sessions.models import TurnAccess
 
     session_id = uuid4()

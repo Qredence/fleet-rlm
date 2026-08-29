@@ -46,6 +46,12 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
         if suite is not None:
             item.add_marker(getattr(pytest.mark, suite))
 
+        # Packaging tests build artifacts and isolated virtual environments.
+        # Keep them out of the fast non-live lanes; the dedicated packaging
+        # lane runs them serially so source-tree build metadata cannot race.
+        if suite == "unit" and "packaging" in item_path.parts:
+            item.add_marker(pytest.mark.packaging)
+
         # Auto-mark DB-dependent integration tests.
         if suite == "integration" and item_path.name.startswith("test_db_"):
             item.add_marker(pytest.mark.db)

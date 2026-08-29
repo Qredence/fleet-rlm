@@ -38,7 +38,7 @@ def test_development_gepa_trace_uses_only_aggregate_metadata(monkeypatch) -> Non
     entities.SpanType = SimpleNamespace(CHAIN="CHAIN")  # type: ignore[attr-defined]
     monkeypatch.setitem(sys.modules, "mlflow", mlflow)
     monkeypatch.setitem(sys.modules, "mlflow.entities", entities)
-    monkeypatch.setattr("fleet_rlm.config.load_runtime_settings", lambda: object())
+    monkeypatch.setattr("fleet_rlm.config.loader.load_runtime_settings", lambda: object())
     monkeypatch.setattr("fleet_rlm.observability.tracing.configure_tracing", lambda _settings: None)
 
     metadata = {

@@ -1,4 +1,4 @@
-"""Cross-Session TurnCoordinator concurrency contracts."""
+"""Cross-Session TurnRuntime concurrency contracts."""
 
 from __future__ import annotations
 
@@ -12,14 +12,13 @@ import pytest
 @pytest.mark.asyncio
 async def test_two_sessions_execute_concurrently_with_disjoint_stream_identities() -> None:
     from fleet_rlm.chat.commands import OpenTurnCommand
-    from fleet_rlm.chat.run_cleanup import RunCleanupSupervisor
+    from fleet_rlm.chat.preparation import PreparedRun, _PreparedRunResources
     from fleet_rlm.chat.run_lifecycle import RunLifecycleService
-    from fleet_rlm.chat.run_preparation import PreparedRun, _PreparedRunResources
-    from fleet_rlm.chat.turn_coordinator import TurnCoordinator
+    from fleet_rlm.chat.turn_runtime import TurnRuntime
     from fleet_rlm.persistence.repositories import InMemoryRunStateStore, InMemorySessionCatalog
-    from fleet_rlm.rlm.dspy_contract import PredictionResult
     from fleet_rlm.rlm.events import EventRecorder, RunStarted
-    from fleet_rlm.rlm.outcome import RLMOutcome
+    from fleet_rlm.rlm.result import PredictionResult, RLMOutcome
+    from fleet_rlm.runtime.cleanup import RunCleanupSupervisor
     from fleet_rlm.sessions.models import TurnAccess, TurnInput
 
     store = InMemoryRunStateStore()
@@ -73,7 +72,7 @@ async def test_two_sessions_execute_concurrently_with_disjoint_stream_identities
             return Stream(execution.run_id, execution.session_id)
 
     cleanup = RunCleanupSupervisor()
-    coordinator = TurnCoordinator(
+    coordinator = TurnRuntime(
         lifecycle=RunLifecycleService(store, max_artifact_bytes=1024),
         preparation=Preparation(),
         runner=Runner(),
@@ -105,3 +104,39 @@ async def test_two_sessions_execute_concurrently_with_disjoint_stream_identities
     assert {event.run_id for event in events_one}.isdisjoint({event.run_id for event in events_two})
     assert [event.run_id for event in events_one] == [events_one[0].run_id] * len(events_one)
     assert [event.run_id for event in events_two] == [events_two[0].run_id] * len(events_two)
+
+
+@pytest.mark.asyncio
+async def test_concurrent_sessions_hold_distinct_resident_interpreters() -> None:
+    """P52.7(d): no interpreter is shared across concurrent Sessions."""
+    from fleet_rlm.rlm.session_runtime import SessionKey, SessionRLMRegistry, SessionRLMState
+
+    class _Interpreter:
+        def __init__(self) -> None:
+            self.namespace: dict[str, object] = {}
+
+    built: list[SessionRLMState] = []
+    entered = asyncio.Event()
+    proceed = asyncio.Event()
+
+    async def factory(key: SessionKey, fingerprint: str) -> SessionRLMState:
+        state = SessionRLMState(key, fingerprint, object(), _Interpreter())
+        built.append(state)
+        if len(built) == 2:
+            entered.set()
+        await proceed.wait()
+        return state
+
+    registry = SessionRLMRegistry(factory)
+    first_key = SessionKey("workspace", "session-a")
+    second_key = SessionKey("workspace", "session-b")
+
+    first_task = asyncio.create_task(registry.acquire(first_key, "fp"))
+    second_task = asyncio.create_task(registry.acquire(second_key, "fp"))
+    await asyncio.wait_for(entered.wait(), timeout=5)
+    proceed.set()
+    first, second = await asyncio.gather(first_task, second_task)
+
+    assert first is not second
+    assert first.interpreter is not second.interpreter
+    assert len(built) == 2

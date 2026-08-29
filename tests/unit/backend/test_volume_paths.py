@@ -14,7 +14,8 @@ from fleet_rlm.daytona.provisioning import (
     volume_config_from_settings,
     volume_mount_spec,
 )
-from fleet_rlm.files.volume_paths import (
+from fleet_rlm.runtime.bindings import require_scoped_volume_subpath
+from fleet_rlm.workspace.paths import (
     DEFAULT_VOLUME_MOUNT_PATH,
     UnsafePathError,
     VolumePaths,
@@ -22,7 +23,6 @@ from fleet_rlm.files.volume_paths import (
     validate_mount_path,
     validate_path_id,
 )
-from fleet_rlm.runtime.bindings import require_scoped_volume_subpath
 
 
 def test_default_mount_matches_design() -> None:
@@ -157,7 +157,7 @@ async def test_get_or_create_volume_id_uses_injected_client() -> None:
 
 
 def test_settings_volume_fields() -> None:
-    from fleet_rlm.config import Settings
+    from fleet_rlm.config.settings import Settings
 
     settings = Settings()
     assert settings.volume_name == DEFAULT_VOLUME_NAME

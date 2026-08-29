@@ -8,8 +8,8 @@ from uuid import UUID, uuid4
 
 import pytest
 
-from fleet_rlm.daytona.workspace_gateway import DaytonaWorkspaceVolumeGateway, cleanup_orphan_bytes
-from fleet_rlm.files.volume_paths import VolumePaths
+from fleet_rlm.runtime.daytona.workspace_gateway import DaytonaWorkspaceVolumeGateway, cleanup_orphan_bytes
+from fleet_rlm.workspace.paths import VolumePaths
 
 
 @dataclass

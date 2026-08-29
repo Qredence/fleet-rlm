@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import dspy
 
-from fleet_rlm.rlm.dspy_contract import prediction_result
+from fleet_rlm.rlm.result import prediction_result
 from fleet_rlm.skills.signatures import DataAnalysisSignature
 
 
@@ -28,18 +28,20 @@ def test_custom_signature_outputs_are_validated_with_skill_schema_identity() -> 
 
 
 def test_default_signature_schema_remains_fleet_default() -> None:
-    from fleet_rlm.rlm.signature import FleetRLMSignature
+    from fleet_rlm.rlm.program import FleetRLMSignature
 
     result = prediction_result(SimpleNamespace(answer="done"), FleetRLMSignature)
     assert (result.schema_id, result.schema_version) == ("fleet.default", "1")
 
 
 def test_custom_signature_uses_the_same_json_compatible_common_inputs() -> None:
-    from tests.unit.backend.rlm.test_signature_inputs import _payload
+    from tests.unit.backend.rlm.test_program_inputs import _payload
 
     payload = _payload()
-    assert set(payload) == {"request", "session_context", "skill_cards", "attachments"}
-    assert all(isinstance(value, (str, dict, list)) for value in payload.values())
+    assert set(payload) == {"request", "history", "session_context", "skill_cards", "attachments"}
+    # ``dspy.History`` is a Pydantic model; the wire-format check skips the
+    # History carrier (whose body is empty here) and inspects the rest.
+    assert all(isinstance(value, (str, dict, list, dspy.History)) for value in payload.values())
 
     prediction = dspy.Prediction(
         answer="Analysis complete.",

@@ -27,14 +27,11 @@ from uuid import uuid4
 import dspy
 
 from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
-from fleet_rlm.files.url_tool import UrlFetchResult, UrlToolHost, WorkspaceUrlSourceStore
-from fleet_rlm.files.workspace_models import WorkspaceEntry, WorkspaceListResult, WorkspaceTextPage
-from fleet_rlm.observability.turn_tracing import turn_trace
-from fleet_rlm.rlm.dspy_contract import RLMOptions
-from fleet_rlm.rlm.events import ToolStarted
-from fleet_rlm.rlm.factory import RLMFactory
-from fleet_rlm.rlm.model_bundle import RLMModelBundle
-from fleet_rlm.rlm.tool_observer import observe_tool
+from fleet_rlm.observability.tracing import turn_trace
+from fleet_rlm.rlm.events import ToolStarted, observe_tool
+from fleet_rlm.rlm.program import RLMFactory, RLMModelBundle, RLMOptions
+from fleet_rlm.workspace.models import WorkspaceEntry, WorkspaceListResult, WorkspaceTextPage
+from fleet_rlm.workspace.url import UrlFetchResult, UrlToolHost, WorkspaceUrlSourceStore
 
 RECEIPT_SCHEMA = "fleet.native-long-context-benchmark/v2"
 DEFAULT_SIZES = (1 * 1024 * 1024, 5 * 1024 * 1024, 10 * 1024 * 1024)

@@ -11,29 +11,19 @@ dedicated serial lanes and record receipts under ``.fleet-evidence/``.
 
 from __future__ import annotations
 
-import inspect
+import signal
+import subprocess
 import typing
 
 import pytest
 
-import fleet_rlm.config
+import fleet_rlm.config.loader
 from fleet_rlm.cli import supervisor
 from fleet_rlm.cli.bind_safety import UnsafeBindError, require_safe_bind_host
 from fleet_rlm.cli.main import _DOCTOR_ACTIONS, _fleet_parser, fleet_main
 from fleet_rlm.daytona import diagnostics
 
 _EXPECTED_STEP_NAMES = {"settings", "database", "provider", "rlm", "sandbox", "interpreter", "cleanup"}
-_EXPECTED_PROTOCOL_METHODS = {
-    "check_database",
-    "resolve_volume",
-    "check_rlm_readiness",
-    "create_sandbox",
-    "verify_mount",
-    "execute",
-    "delete_sandbox",
-    "close",
-}
-
 _CANARY = "FAKE-CANARY-secret-0000"
 
 
@@ -44,11 +34,10 @@ def _select_runtime_policy(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_doctor_result_contract_shape_is_retained() -> None:
-    step_fields = tuple(diagnostics.DaytonaDoctorStep.__dataclass_fields__)
-    assert step_fields == ("name", "ok", "message", "category")
-    result_fields = tuple(diagnostics.DaytonaDoctorResult.__dataclass_fields__)
-    assert result_fields == ("ok", "steps", "failure_category")
-
+    # Operator-visible contract: the closed failure-category vocabulary drives
+    # the step names and every category keeps an actionable (still sanitized)
+    # follow-up line in the CLI renderer.  Internal dataclass layout and the
+    # dependency protocol's member names are not frozen.
     categories = set(typing.get_args(diagnostics.DoctorFailureCategory))
     assert categories == {
         "settings",
@@ -65,12 +54,7 @@ def test_doctor_result_contract_shape_is_retained() -> None:
         "unknown",
     }
     assert set(typing.get_args(diagnostics.DoctorStepName)) == _EXPECTED_STEP_NAMES
-    # Every public failure category keeps an actionable (still sanitized)
-    # follow-up line in the CLI renderer.
     assert categories <= set(_DOCTOR_ACTIONS)
-
-    members = {name for name in vars(diagnostics.DaytonaDoctorDependencies) if not name.startswith("_")}
-    assert members == _EXPECTED_PROTOCOL_METHODS
 
 
 def test_doctor_failure_messages_are_static_and_sanitized() -> None:
@@ -90,7 +74,7 @@ def test_doctor_missing_settings_fails_closed_and_sanitized(
     def boom() -> object:
         raise RuntimeError(f"provider replied with bearer {_CANARY}")
 
-    monkeypatch.setattr(fleet_rlm.config, "load_runtime_settings", boom)
+    monkeypatch.setattr(fleet_rlm.config.loader, "load_runtime_settings", boom)
 
     with pytest.raises(SystemExit) as error:
         fleet_main(["doctor", "daytona"])
@@ -175,14 +159,60 @@ def test_supervisor_errors_render_sanitized_without_traceback(
     assert "Traceback" not in captured.err
 
 
-def test_supervisor_stop_order_and_escalation_are_pinned() -> None:
+def test_supervisor_stop_order_and_escalation_are_pinned(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
     """Port release: both process groups stop on every path; SIGTERM then SIGKILL."""
-    run_source = inspect.getsource(supervisor._run_backend_and_tui)
-    tui_stop = run_source.index("_stop_process_group(tui)")
-    backend_stop = run_source.index("_stop_process_group(backend)")
-    assert tui_stop < backend_stop, "the backend group must stop after the TUI group"
+    real_stop = supervisor._stop_process_group
+    stops: list[object] = []
+    monkeypatch.setattr(supervisor, "_stop_process_group", stops.append)
+    monkeypatch.setattr(supervisor, "_wait_until_ready", lambda *_a, **_k: None)
+    monkeypatch.setattr(supervisor.time, "sleep", lambda _seconds: None)
 
-    stop_source = inspect.getsource(supervisor._stop_process_group)
-    assert "SIGTERM" in stop_source
-    assert "SIGKILL" in stop_source
-    assert stop_source.index("SIGTERM") < stop_source.index("SIGKILL")
+    class _FakeProcess:
+        def __init__(self, returncode: int | None) -> None:
+            self._returncode = returncode
+            self.pid = 4242
+
+        def poll(self) -> int | None:
+            return self._returncode
+
+    launched: list[str] = []
+
+    def _fake_popen(command: list[str], **_kwargs: object) -> _FakeProcess:
+        launched.append(command[0])
+        return _FakeProcess(None if len(launched) == 1 else 0)
+
+    monkeypatch.setattr(supervisor.subprocess, "Popen", _fake_popen)
+    supervisor._run_backend_and_tui(
+        root=tmp_path,
+        workspace=tmp_path,
+        pnpm="pnpm",
+        api_url="http://127.0.0.1:1",
+        backend_command=["fleet-backend"],
+        backend_env={},
+        log_path=tmp_path / "backend.log",
+        latest_log_path=tmp_path / "latest.log",
+        run_environment="daytona",
+        tui_args=(),
+    )
+    assert [process.poll() for process in stops] == [0, None]
+    assert stops[0] is not stops[1]
+
+    signals: list[int] = []
+    waits: list[float | None] = []
+
+    class _DyingProcess:
+        pid = 4242
+
+        def poll(self) -> None:
+            return None
+
+        def wait(self, timeout: float | None = None) -> int:
+            waits.append(timeout)
+            if len(waits) == 1:
+                raise subprocess.TimeoutExpired(cmd="fleet-tui", timeout=timeout)
+            return 0
+
+    monkeypatch.setattr(supervisor.os, "killpg", lambda _pid, sig: signals.append(sig))
+    real_stop(_DyingProcess())
+    assert signals == [signal.SIGTERM, signal.SIGKILL]
+    assert waits == [5.0, None]

@@ -10,7 +10,7 @@ from typing import Any, Protocol
 from uuid import UUID
 
 from fleet_rlm.daytona.errors import DaytonaAdapterError, map_provider_error
-from fleet_rlm.files.volume_paths import DEFAULT_VOLUME_MOUNT_PATH, VolumePaths, validate_mount_path
+from fleet_rlm.paths import DEFAULT_VOLUME_MOUNT_PATH, VolumePaths, validate_mount_path
 
 # Workspace-scoped subpath validation lives in the provider-neutral owner
 # (fleet_rlm.runtime.bindings); Daytona provisioning reuses it directly.

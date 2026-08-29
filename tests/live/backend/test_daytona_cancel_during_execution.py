@@ -14,10 +14,10 @@ from fastapi.testclient import TestClient
 
 from fleet_rlm.api.local_scope import LocalScope
 from fleet_rlm.app import create_app
-from fleet_rlm.config import Settings
-from fleet_rlm.daytona.http_broker import DaytonaHttpToolBroker
+from fleet_rlm.config.settings import Settings
+from fleet_rlm.daytona.broker import DaytonaHttpToolBroker
 from fleet_rlm.daytona.session_manager import get_active_lease_registry
-from fleet_rlm.rlm.model_bundle import RLMModelBundle
+from fleet_rlm.rlm.program import RLMModelBundle
 from fleet_rlm.sessions.models import TurnAccess
 from tests.live.backend._p35d_evidence import candidate_identity, write_receipt
 from tests.live.backend.test_fleet_rlm_daytona_mvp import (
@@ -154,6 +154,10 @@ def test_daytona_cancel_during_execution_through_fastapi(
             assert any(chunk.get("type") == "abort" and chunk.get("reason") == "Turn cancelled" for chunk in chunks)
             finish = chunks[-1]
             assert finish.get("type") != "finish" or finish.get("finishReason") != "stop"
+            runtime = getattr(resources, "runtime", None)
+            close = getattr(runtime, "close_root_session", None)
+            if callable(close):
+                client.portal.call(lambda: close(LocalScope().workspace_id, session_id))
             release_deadline = time.perf_counter() + 45
             while time.perf_counter() < release_deadline:
                 if (

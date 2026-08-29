@@ -10,16 +10,17 @@ from fastapi import Depends, HTTPException, Request
 from fleet_rlm.api.errors import http_error
 from fleet_rlm.api.local_scope import LocalScope, get_local_scope
 from fleet_rlm.artifacts.reader import ArtifactReader
+from fleet_rlm.attachments.lifecycle import AttachmentLifecycle
 from fleet_rlm.chat.run_lifecycle import RunLifecycle
-from fleet_rlm.chat.turn_coordinator import TurnCoordinator
+from fleet_rlm.chat.turn_runtime import TurnRuntime
 from fleet_rlm.composition.inventory import RuntimeInventory, get_runtime_inventory
-from fleet_rlm.config import Settings
-from fleet_rlm.config_policy import ConfigPolicyService
-from fleet_rlm.files.lifecycle import AttachmentLifecycle
-from fleet_rlm.files.volume_storage import WorkspaceVolumeGateway
-from fleet_rlm.files.workspace_access import WorkspaceFileService
+from fleet_rlm.config.policy import ConfigPolicyService
+from fleet_rlm.config.settings import Settings
+from fleet_rlm.rlm.session_runtime import SessionRLMRegistry
 from fleet_rlm.sessions.catalog import SessionCatalog
 from fleet_rlm.skills.catalog import SkillCatalog
+from fleet_rlm.workspace.storage import WorkspaceVolumeGateway
+from fleet_rlm.workspace.workspace import WorkspaceFileService
 
 
 def require_loopback_client(request: Request) -> None:
@@ -59,12 +60,11 @@ def get_ready_runtime_inventory(request: Request) -> RuntimeInventory:
     return inventory
 
 
-def get_turn_coordinator(request: Request) -> TurnCoordinator:
-    inventory = get_ready_runtime_inventory(request)
-    coordinator = inventory.turn_coordinator
-    if coordinator is None:
+def get_turn_runtime(request: Request) -> TurnRuntime:
+    runtime = get_ready_runtime_inventory(request).turn_runtime
+    if runtime is None:
         raise _composition_unavailable()
-    return coordinator
+    return runtime
 
 
 def get_attachment_lifecycle(request: Request) -> AttachmentLifecycle:
@@ -86,6 +86,11 @@ def get_session_catalog(request: Request) -> SessionCatalog:
     if catalog is None:
         raise _composition_unavailable()
     return catalog
+
+
+def get_session_runtime_registry(request: Request) -> SessionRLMRegistry | None:
+    """Return the process-local resident runtime registry when composed."""
+    return get_ready_runtime_inventory(request).session_runtime_registry
 
 
 def get_run_lifecycle(request: Request) -> RunLifecycle:
@@ -129,10 +134,11 @@ def get_workspace_volume_gateway(request: Request) -> WorkspaceVolumeGateway:
     return gateway
 
 
-TurnCoordinatorDep = Annotated[TurnCoordinator, Depends(get_turn_coordinator)]
+TurnRuntimeDep = Annotated[TurnRuntime, Depends(get_turn_runtime)]
 ArtifactReaderDep = Annotated[ArtifactReader, Depends(get_artifact_reader)]
 AttachmentLifecycleDep = Annotated[AttachmentLifecycle, Depends(get_attachment_lifecycle)]
 SessionCatalogDep = Annotated[SessionCatalog, Depends(get_session_catalog)]
+SessionRuntimeRegistryDep = Annotated[SessionRLMRegistry | None, Depends(get_session_runtime_registry)]
 RunLifecycleDep = Annotated[RunLifecycle, Depends(get_run_lifecycle)]
 SettingsDep = Annotated[Settings, Depends(get_settings)]
 SkillCatalogDep = Annotated[SkillCatalog, Depends(get_skill_catalog)]
@@ -148,9 +154,10 @@ __all__ = [
     "LocalScopeDep",
     "RunLifecycleDep",
     "SessionCatalogDep",
+    "SessionRuntimeRegistryDep",
     "SettingsDep",
     "SkillCatalogDep",
-    "TurnCoordinatorDep",
+    "TurnRuntimeDep",
     "WorkspaceFileServiceDep",
     "WorkspaceVolumeGatewayDep",
     "require_loopback_client",

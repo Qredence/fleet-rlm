@@ -34,7 +34,7 @@ from fastapi.testclient import TestClient
 
 from fleet_rlm.app import create_app
 from fleet_rlm.daytona import recursive_child_runtime
-from fleet_rlm.rlm.model_bundle import RLMModelBundle
+from fleet_rlm.rlm.program import RLMModelBundle
 from tests.live.backend._database import upgrade_to_head
 from tests.live.backend._p35d_evidence import candidate_identity, write_receipt
 from tests.live.backend.test_fleet_rlm_daytona_mvp import _live_settings

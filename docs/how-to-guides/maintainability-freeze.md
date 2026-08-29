@@ -9,14 +9,14 @@ provider lifecycle, or native DSPy execution contract.
 
 | Concern | Canonical owner | Regression proof |
 | --- | --- | --- |
-| Turn stream, terminal ordering, and final cleanup | `chat/turn_coordinator.py` | coordinator and stream contract suites |
+| Turn stream, terminal ordering, and final cleanup | `chat/turn_runtime.py` | TurnRuntime stream contract suites |
 | Result validation, Artifact publication, and atomic Turn commit | `chat/run_lifecycle.py` | result snapshot and lifecycle contract suites |
-| Native RLM execution and worker observation | `rlm/runner.py`, `rlm/worker_execution.py`, `rlm/observation.py`, `rlm/execution_trace.py` | native RLM and recursive delegation suites |
+| Native RLM execution and worker observation | `rlm/runtime.py`, `rlm/events.py` | native RLM and recursive delegation suites |
 | Waits for already-started asynchronous effects | `runtime/owned_effect.py` | owned-effect and cancellation suites |
 | Recursive child acquisition, settlement, and late ownership | `daytona/recursive_child_runtime.py` | child cleanup, cancellation, and provider-boundary suites |
-| Installed and fallback Workspace agent protocol | `daytona/workspace_agent.py`, `daytona/workspace_agent_runtime.py` | Workspace agent handshake and file/Memory suites |
-| Workspace Memory fail-soft classification | `daytona/memory_diagnostics.py` | Memory diagnostics and observability sanitation suites |
-| Configuration field metadata and editor inventory | `config.py`, `config_policy.py` | configuration policy and settings API suites |
+| Installed and fallback Workspace agent protocol | `daytona/workspace_agent/`, `daytona/workspace_agent/runtime.py` | Workspace agent handshake and file/Memory suites |
+| Workspace Memory fail-soft classification | `workspace/memory.py` | Memory diagnostics and observability sanitation suites |
+| Configuration field metadata and editor inventory | `config/settings.py`, `config/policy.py` | configuration policy and settings API suites |
 | Canonical live/durable TUI projection | `tools/fleet-tui/src/tui/canonical.ts`, `live-adapter.ts`, `durable-adapter.ts`, `turn-reducer.ts` | `turn-reducer-invariants.test.ts` |
 
 Each row has one transformation owner at its seam. Adapters may translate a

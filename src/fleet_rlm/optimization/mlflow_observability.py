@@ -33,7 +33,7 @@ def development_gepa_trace(*, metadata: Mapping[str, bool | float | int | str]) 
     """
     safe_metadata = _safe_metadata(metadata)
     try:
-        from fleet_rlm.config import load_runtime_settings
+        from fleet_rlm.config.loader import load_runtime_settings
         from fleet_rlm.observability.tracing import configure_tracing
 
         configure_tracing(load_runtime_settings())

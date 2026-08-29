@@ -13,11 +13,12 @@ import dspy
 import pytest
 from fastapi.testclient import TestClient
 
+from fleet_rlm.api.local_scope import LocalScope
 from fleet_rlm.app import create_app
-from fleet_rlm.config import Settings
-from fleet_rlm.daytona.http_broker import DaytonaHttpToolBroker
+from fleet_rlm.config.settings import Settings
+from fleet_rlm.daytona.broker import DaytonaHttpToolBroker
 from fleet_rlm.daytona.session_manager import get_active_lease_registry
-from fleet_rlm.rlm.model_bundle import RLMModelBundle
+from fleet_rlm.rlm.program import RLMModelBundle
 from tests.live.backend._p35d_evidence import candidate_identity, write_receipt
 from tests.live.backend.test_fleet_rlm_daytona_mvp import (
     _live_settings,
@@ -90,7 +91,11 @@ def _sse_chunks(response: Any) -> tuple[list[dict[str, Any]], int]:
     return chunks, done
 
 
-def _wait_for_release(resources: Any, session_id: UUID, *, permits: int) -> None:
+def _wait_for_release(resources: Any, session_id: UUID, *, permits: int, portal: Any) -> None:
+    runtime = getattr(resources, "runtime", None)
+    close = getattr(runtime, "close_root_session", None)
+    if callable(close):
+        portal.call(lambda: close(LocalScope().workspace_id, session_id))
     deadline = time.perf_counter() + 45
     while time.perf_counter() < deadline:
         if (
@@ -147,7 +152,7 @@ def test_daytona_deadline_cleanup_through_fastapi(
             assert not any(
                 chunk.get("type") == "tool-output-available" and "propose_memory" in str(chunk) for chunk in chunks
             )
-            _wait_for_release(resources, session_id, permits=settings.max_active_daytona_leases)
+            _wait_for_release(resources, session_id, permits=settings.max_active_daytona_leases, portal=client.portal)
             sandbox_ids.update(resources._sandbox_ids)
         finally:
             release.set()

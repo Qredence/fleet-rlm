@@ -18,10 +18,11 @@ from dotenv import load_dotenv
 from fastapi.testclient import TestClient
 
 from fleet_rlm.app import create_app
-from fleet_rlm.config import FleetConfigurationError, Settings, active_profile, require_live_execution
+from fleet_rlm.config.loader import active_profile, require_live_execution
+from fleet_rlm.config.settings import FleetConfigurationError, Settings
 from fleet_rlm.daytona import recursive_child_runtime
-from fleet_rlm.rlm.lm_factory import has_llm_credentials
-from fleet_rlm.rlm.tool_observer import ToolEventView
+from fleet_rlm.rlm.events import ToolEventView
+from fleet_rlm.rlm.program import has_llm_credentials
 from tests.live.backend._database import upgrade_to_head
 from tests.live.backend.test_phase1_daytona_stream import _strict_cleanup
 
@@ -128,7 +129,7 @@ def _load_live_settings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Sett
     if not os.environ.get(_EVIDENCE_ENV):
         pytest.skip("Run this credentialed canary via scripts/live_phase2_recursive_verify.py")
     load_dotenv(_REPO_ROOT / ".env", override=False)
-    import fleet_rlm.config as configuration
+    import fleet_rlm.config.loader as configuration
 
     copied_policy = tmp_path / "phase2-fleet.toml"
     copied_policy.write_text(

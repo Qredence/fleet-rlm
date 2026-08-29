@@ -16,7 +16,7 @@ from fleet_rlm.api.routes.turns import router
 from fleet_rlm.api.schemas import CreateTurnRequest
 from fleet_rlm.chat.commands import OpenTurnCommand
 from fleet_rlm.composition.inventory import RuntimeInventory
-from fleet_rlm.config import Settings
+from fleet_rlm.config.settings import Settings
 from fleet_rlm.rlm.events import RuntimeEvent
 from fleet_rlm.skills.errors import InvalidSkillSelectionError
 
@@ -42,7 +42,7 @@ class _CapturingCoordinator:
         self.error = error
 
     def open_owned(self, command: OpenTurnCommand):
-        from fleet_rlm.chat.turn_coordinator import OpenedTurnStream
+        from fleet_rlm.chat.turn_runtime import OpenedTurnStream
 
         self.command = command
         if self.error is not None:
@@ -59,7 +59,7 @@ def _client(coordinator: _CapturingCoordinator) -> TestClient:
     app = FastAPI()
     app.state.settings = Settings()
     app.state.composition_ready = True
-    app.state.runtime_inventory = RuntimeInventory(turn_coordinator=coordinator)
+    app.state.runtime_inventory = RuntimeInventory(turn_runtime=coordinator)
     install_error_handlers(app)
     app.include_router(router)
     return TestClient(app)

@@ -16,7 +16,8 @@ from typing import Any
 
 from dotenv import load_dotenv
 
-from fleet_rlm.config import Settings, load_runtime_settings
+from fleet_rlm.config.loader import load_runtime_settings
+from fleet_rlm.config.settings import Settings
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 

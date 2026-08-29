@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from fleet_rlm.config import Settings
+from fleet_rlm.config.settings import Settings
 
 
 def test_public_runtime_profiles_are_exactly_daytona() -> None:

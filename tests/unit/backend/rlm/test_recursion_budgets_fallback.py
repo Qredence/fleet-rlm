@@ -30,39 +30,13 @@ from typing import Any
 import dspy
 import pytest
 
-from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
-from fleet_rlm.daytona.recursive_child_runtime import ChildRuntimeLease
-from fleet_rlm.rlm.model_bundle import RLMModelBundle
-from fleet_rlm.rlm.recursive_calls import (
+from fleet_rlm.rlm.program import RLMModelBundle
+from fleet_rlm.rlm.recursion import (
     RecursiveBatchError,
     RecursiveRLMExecutor,
     RecursiveRLMOptions,
 )
-
-
-class _Recorder:
-    def __init__(self) -> None:
-        self.call_indexes: list[int] = []
-        self.leases: list[ChildRuntimeLease] = []
-        self.close_calls: dict[int, int] = {}
-
-    def factory(self, call_index: int) -> ChildRuntimeLease:
-        self.call_indexes.append(call_index)
-        interpreter = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())
-
-        def close() -> None:
-            self.close_calls[call_index] = self.close_calls.get(call_index, 0) + 1
-            interpreter.shutdown()
-
-        lease = ChildRuntimeLease(
-            interpreter,
-            f"budget-child-{call_index}",
-            "test-volume",
-            f"recursive/test-workspace/test-run/{call_index}",
-            close,
-        )
-        self.leases.append(lease)
-        return lease
+from tests.unit.backend.rlm.fakes import ChildLeaseRecorder
 
 
 class RecordingLM(dspy.utils.DummyLM):
@@ -90,7 +64,7 @@ class RecordingLM(dspy.utils.DummyLM):
 def _executor(
     root_lm: dspy.utils.DummyLM,
     sub_lm: dspy.utils.DummyLM,
-    recorder: _Recorder | None,
+    recorder: ChildLeaseRecorder | None,
     *,
     options: RecursiveRLMOptions | None = None,
     deadline: float | None = None,
@@ -121,7 +95,7 @@ def test_val_rec_004_depth_fallback_uses_only_the_policy_sub_lm() -> None:
     so using it would fail parsing; the Sub LM answers it, and the delegation
     ledger records exactly one sub-role call at depth 2 and no root-role call
     at depth 2."""
-    recorder = _Recorder()
+    recorder = ChildLeaseRecorder()
     # Root LM (drives child actions) has NO entry for the fallback prompt.
     root = _lm(
         [
@@ -149,7 +123,7 @@ def test_val_rec_004_depth_fallback_consumes_the_shared_ledger_without_a_sandbox
     """VAL-REC-004: the depth-2 fallback consumes the shared call-index and
     prompt-byte ledger and is rejected once the budget is exhausted, all
     without allocating a Sandbox or invoking any LM for the rejected request."""
-    recorder = _Recorder()
+    recorder = ChildLeaseRecorder()
     root = _lm(
         [
             {"reasoning": "delegate deeper", "code": "inner = rlm_query(prompt='over-budget')"},
@@ -177,7 +151,7 @@ def test_val_rec_004_expired_deadline_rejects_fallback_before_reservation() -> N
     fallback path is never entered: no second call index is reserved, no
     Sandbox is allocated, the Sub LM never receives the late prompt, and the
     parent outcome fails closed with the deadline category."""
-    recorder = _Recorder()
+    recorder = ChildLeaseRecorder()
     # Burn the deadline and then attempt the nested delegation inside ONE
     # child REPL cell, so the child's Root LM action is produced before the
     # deadline and only the nested reservation gate rejects it.
@@ -218,7 +192,7 @@ def test_val_rec_004_expired_deadline_rejects_fallback_before_reservation() -> N
 def test_val_rec_004_revoked_authority_discards_late_fallback_result() -> None:
     """VAL-REC-004: revoking authority after the Sub LM answered discards the
     fallback result through the same authorization fence."""
-    recorder = _Recorder()
+    recorder = ChildLeaseRecorder()
     root = _lm(
         [
             {"reasoning": "delegate deeper", "code": "inner = rlm_query(prompt='revoked-fallback')"},
@@ -252,7 +226,7 @@ def test_val_rec_004_oversized_fallback_output_fails_typed_validation() -> None:
     ``child_max_output_chars`` at the typed-result boundary: an oversized
     Sub-LM answer fails closed as a bounded error inside the child REPL and
     never becomes a child result or escapes into Root-visible content."""
-    recorder = _Recorder()
+    recorder = ChildLeaseRecorder()
     # The child script observes the rejection: the oversized fallback raises
     # the typed output error at the boundary, and the child submits a short
     # bounded marker instead of any oversized content.
@@ -307,7 +281,7 @@ def test_val_rec_007_non_text_single_prompt_fails_before_any_mutation(invalid_pr
     """VAL-REC-007: non-text prompts fail closed with the bounded Tool-surface
     schema rejection before the executor body, budget mutation, or child
     acquisition."""
-    recorder = _Recorder()
+    recorder = ChildLeaseRecorder()
     executor = _executor(_lm([{"answer": "unused"}]), _lm([{"answer": "unused"}]), recorder)
 
     with pytest.raises(ValueError, match=message):
@@ -330,7 +304,7 @@ def test_val_rec_007_blank_or_oversized_single_prompt_fails_before_any_mutation(
 ) -> None:
     """VAL-REC-007: blank and oversized text prompts fail in the executor
     validation before reservation."""
-    recorder = _Recorder()
+    recorder = ChildLeaseRecorder()
     executor = _executor(
         _lm([{"answer": "unused"}]),
         _lm([{"answer": "unused"}]),
@@ -369,7 +343,7 @@ def test_val_rec_007_invalid_batch_prompts_fail_before_reservation_or_allocation
     """VAL-REC-007: every invalid batch shape fails closed before any call
     index, prompt byte, worker, or Sandbox is allocated; accounting cannot be
     bypassed with whitespace or mixed invalid entries."""
-    recorder = _Recorder()
+    recorder = ChildLeaseRecorder()
     executor = _executor(
         _lm([{"answer": "unused"}]),
         _lm([{"answer": "unused"}]),
@@ -391,7 +365,7 @@ def test_val_rec_007_invalid_batch_prompts_fail_before_reservation_or_allocation
 def test_val_rec_007_prompt_accounting_uses_normalized_prompts() -> None:
     """VAL-REC-007: accepted prompts are normalized (stripped) before byte
     accounting; the ledger records normalized lengths only."""
-    recorder = _Recorder()
+    recorder = ChildLeaseRecorder()
     # Dict-mode Root LM matches by substring containment; these padded
     # prompts share no substring with any batch sibling key.
     root = _lm(
@@ -413,7 +387,7 @@ def test_val_rec_006_atomic_reservation_under_competing_single_and_batch_pressur
     """VAL-REC-006: competing single and batch reservations under one lock
     allocate unique, contiguous call indexes; an over-budget batch racing the
     same ledger never partially reserves."""
-    recorder = _Recorder()
+    recorder = ChildLeaseRecorder()
     responses = {
         "single-1": {"reasoning": "s1", "code": "SUBMIT(answer='S1')"},
         "batch-1": {"reasoning": "b1", "code": "SUBMIT(answer='B1')"},
@@ -464,7 +438,7 @@ def test_val_rec_008_shared_ledger_across_singles_batch_and_in_child_calls() -> 
     """VAL-REC-008: one invocation-scoped ledger serves a Root single, a
     depth-2 call initiated inside the native child, and a Root batch, with
     monotonically unique indexes and exact cumulative normalized bytes."""
-    recorder = _Recorder()
+    recorder = ChildLeaseRecorder()
     # Dict-mode Root LM matches each prompt by substring: it drives the
     # single child's nested delegation AND each batch child's action through
     # one shared LM, exactly as the production fork does. The nested depth-2
@@ -501,7 +475,7 @@ def test_val_rec_008_budget_consumed_by_in_child_call_is_unavailable_to_later_si
     """VAL-REC-008: a call budget consumed by a request initiated inside a
     native child is unavailable to a later Root batch: the batch is rejected
     atomically before any sibling worker or Sandbox."""
-    recorder = _Recorder()
+    recorder = ChildLeaseRecorder()
     root = _lm(
         [
             {"reasoning": "delegate inside child", "code": "inner = rlm_query(prompt='nested-slice')"},
@@ -527,7 +501,7 @@ def test_val_rec_009_child_receives_exact_certified_options(
     """VAL-REC-009: the native child is built with the exact certified
     ``child_max_iters``/``child_max_llm_calls``/``child_max_output_chars``
     options, one reservation and one Sandbox per child."""
-    import fleet_rlm.rlm.recursive_calls as recursive_calls
+    import fleet_rlm.rlm.recursion as recursive_calls
 
     captured_options: list[Any] = []
     real_build = recursive_calls.build_native_rlm
@@ -537,7 +511,7 @@ def test_val_rec_009_child_receives_exact_certified_options(
         return real_build(**kwargs)
 
     monkeypatch.setattr(recursive_calls, "build_native_rlm", spy_build)
-    recorder = _Recorder()
+    recorder = ChildLeaseRecorder()
     root = _lm(
         [
             {"reasoning": "use the budget", "code": "first = llm_query('q1')"},
@@ -570,7 +544,7 @@ def test_val_rec_010_child_sub_lm_budget_is_terminal_without_unreserved_retry() 
     """VAL-REC-010: exhausting the child sub-LM call budget is terminal for
     that budget: the over-limit call never reaches the Sub LM, triggers no
     unreserved retry, and allocates no replacement Sandbox."""
-    recorder = _Recorder()
+    recorder = ChildLeaseRecorder()
     root = _lm(
         [
             {"reasoning": "use the budget", "code": "first = llm_query('q1')"},
@@ -607,10 +581,10 @@ def test_val_rec_011_all_or_nothing_batch_exposes_no_partial_answers(
     all-or-nothing failure with the primary cause, exposes no result list and
     no successful sibling answer through events, and keeps every started
     sibling owned through close."""
-    import fleet_rlm.rlm.recursive_batch as recursive_batch
-    import fleet_rlm.rlm.recursive_calls as recursive_calls
+    import fleet_rlm.rlm.recursion as recursive_batch
+    import fleet_rlm.rlm.recursion as recursive_calls
 
-    recorder = _Recorder()
+    recorder = ChildLeaseRecorder()
     events: list[object] = []
 
     class MixedChild:

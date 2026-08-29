@@ -40,13 +40,12 @@ from fastapi.testclient import TestClient
 
 from fleet_rlm.api.local_scope import LocalScope
 from fleet_rlm.app import create_app
-from fleet_rlm.config import Settings
+from fleet_rlm.config.settings import Settings
 from fleet_rlm.daytona import recursive_child_runtime
 from fleet_rlm.daytona.sandbox_lease import SandboxLeaseReceipt
 from fleet_rlm.daytona.session_manager import get_active_lease_registry
-from fleet_rlm.rlm.child_runtime import ChildRuntimeCleanupError
-from fleet_rlm.rlm.model_bundle import RLMModelBundle
-from fleet_rlm.rlm.recursive_calls import RecursiveRLMExecutor
+from fleet_rlm.rlm.program import RLMModelBundle
+from fleet_rlm.rlm.recursion import ChildRuntimeCleanupError, RecursiveRLMExecutor
 from tests.live.backend._database import upgrade_to_head
 from tests.live.backend._p35d_evidence import candidate_identity
 from tests.live.backend._p39c_evidence import record_observed_sandbox_ids, write_lane_receipt
@@ -429,7 +428,9 @@ def test_live_batch_two_children_ordered_concurrent_leak_free(
             assert all(item["absent"] for item in evidence.confirmations)
 
             # Admission restored and no lease holder before Turn success settles.
-            _wait_for_admission_baseline(resources, session_id, permits=settings.max_active_daytona_leases)
+            _wait_for_admission_baseline(
+                resources, session_id, permits=settings.max_active_daytona_leases, portal=client.portal
+            )
             assert get_active_lease_registry().holder(session_id) is None
             # Provider-side re-confirmed absence for every child Sandbox id.
             absence = client.portal.call(_all_absent, resources, list(evidence.sandbox_ids))
@@ -574,7 +575,9 @@ def test_live_batch_child_cleanup_failure_is_all_or_nothing(
                 assert receipt["provider_action"] == "delete"
                 assert receipt["admission_released"] is True
 
-            _wait_for_admission_baseline(resources, session_id, permits=settings.max_active_daytona_leases)
+            _wait_for_admission_baseline(
+                resources, session_id, permits=settings.max_active_daytona_leases, portal=client.portal
+            )
             assert get_active_lease_registry().holder(session_id) is None
             # Provider-side absence for every child despite the faulted
             # confirmation (ownership settles; the delete request did run).
@@ -618,7 +621,7 @@ def test_live_batch_child_cleanup_failure_is_all_or_nothing(
 
             content = client.portal.call(_memory_content)
             if content.strip():
-                from fleet_rlm.files.memory_models import parse_workspace_memory_lines
+                from fleet_rlm.workspace.models import parse_workspace_memory_lines
 
                 lines = parse_workspace_memory_lines(content, complete_memory_graph=False)
                 promoted = [

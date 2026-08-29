@@ -24,7 +24,7 @@ Fleet RLM runs [DSPy](https://github.com/stanfordnlp/dspy) `dspy.RLM` behind a c
 
 ## Current state
 
-- **Certified dependency baseline** — The runtime is pinned to published releases only: `dspy==3.3.1` (plus `gepa==0.1.4` under the `optimize` extra). The lockfile is registry-only with no VCS pins, and an exact-version guard (`CERTIFIED_DSPY_VERSION`) fails startup on any drift. `uv run python scripts/certification_gate.py` re-verifies the certified baseline.
+- **Certified dependency baseline** — The runtime is pinned to published releases only: `dspy==3.3.1` (plus `gepa==0.1.4` under the `optimize` extra). The lockfile is registry-only with no VCS pins, and an exact-version guard (`CERTIFIED_DSPY_VERSION`) fails startup on any drift. `uv run python scripts/certification_gate.py` re-verifies the certified baseline and the sealed P53.2 live Session evidence.
 - **Turn orchestration** — `TurnCoordinator` is the sole owner of the claim → cleanup path with atomic turn commit; the stream vocabulary is the closed v1 Runtime Event set (freeze suites in `tests/freeze/`).
 - **Recursive RLM** — Native DSPy 3.3.1 child RLMs run under one contracted runtime owner (`src/fleet_rlm/daytona/recursive_child_runtime.py`) with a child deadline fence and zero-leak certification lanes in `tests/live/backend/`.
 - **Tools** — Explicit Session Workspace (7 tools) and Project (6 tools) hosts; cross-sandbox Workspace Memory append coordination is unsupported by design.
@@ -130,6 +130,8 @@ Backend logs for supervised runs: `.fleet_rlm/logs/`.
 | `/api/attachments` | Durable attachment upload and lookup |
 | `/api/artifacts/{artifact_id}` | Committed artifact metadata and content |
 | `GET /api/volume/tree` | Bounded read-only workspace volume tree (Daytona) |
+| `/api/workspace/files` | Session workspace file management |
+| `/api/settings` | Loopback-only non-secret runtime policy inspection and editing |
 | `/api/skills` | Bundled skill card discovery |
 | `PUT /api/runs/{run_id}/cancellation` | Durable run cancellation |
 

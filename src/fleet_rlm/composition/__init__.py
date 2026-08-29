@@ -5,21 +5,19 @@ The public runtime profile is ``daytona`` (re-exported below).
 directly in tests; it is never installed by lifespan and is not re-exported here.
 """
 
-from fleet_rlm.composition.common import (
-    CompositionError,
-)
-from fleet_rlm.composition.daytona import (
-    build_daytona_composition,
-    dispose_daytona_composition,
-    install_daytona_composition,
-    require_daytona_settings,
-)
 from fleet_rlm.composition.inventory import (
+    CompositionError,
     RuntimeDatabaseLifecycle,
     RuntimeInventory,
     clear_runtime_inventory,
     get_runtime_inventory,
     install_runtime_inventory,
+)
+from fleet_rlm.composition.live import (
+    build_daytona_composition,
+    dispose_daytona_composition,
+    install_daytona_composition,
+    require_daytona_settings,
 )
 
 __all__ = [

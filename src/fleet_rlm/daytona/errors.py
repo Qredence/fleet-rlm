@@ -58,7 +58,7 @@ def sanitize_provider_message(raw: str) -> str:
     message = _URL_PATTERN.sub("[redacted-url]", message)
     message = _ANSI_PATTERN.sub("", message)
     message = _CONTROL_PATTERN.sub(" ", message)
-    return message
+    return message[:DEFAULT_SANITIZED_FAILURE_MAX_CHARS]
 
 
 def sanitize_failure_text(exc: BaseException, *, max_chars: int = DEFAULT_SANITIZED_FAILURE_MAX_CHARS) -> str:
@@ -168,8 +168,11 @@ def is_transient_provider_failure(exc: object) -> bool:
 
 def is_sandbox_not_found(exc: BaseException) -> bool:
     """True only for explicit provider not-found (404 / DaytonaNotFoundError)."""
-    name = type(exc).__name__
-    if name in {"DaytonaNotFoundError", "NotFoundError", "NotFound"}:
+    names = {type(exc).__name__}
+    cause_type = getattr(exc, "cause_type", None)
+    if isinstance(cause_type, str):
+        names.add(cause_type)
+    if names & {"DaytonaNotFoundError", "NotFoundError", "NotFound"}:
         return True
     status = getattr(exc, "status_code", None)
     if status == 404:

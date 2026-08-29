@@ -37,7 +37,7 @@ async def _check_openapi() -> dict[str, Any]:
     import httpx
 
     from fleet_rlm.app import create_app
-    from fleet_rlm.config import Settings
+    from fleet_rlm.config.settings import Settings
 
     settings = Settings(run_environment="daytona", data_root=str(Path.cwd() / ".release-smoke-data"))
     transport = httpx.ASGITransport(app=create_app(settings=settings))

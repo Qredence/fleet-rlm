@@ -44,7 +44,7 @@ def _run_stat(tmp_path: Path, relative: str, **overrides: object) -> tuple[dict[
     Returns:
         tuple[dict[str, object], LocalProcess]: The stat payload and simulated process.
     """
-    from fleet_rlm.daytona.workspace_agent import run_workspace_agent
+    from fleet_rlm.daytona.workspace_agent.client import run_workspace_agent
 
     volume_root, root = _layout(tmp_path)
     process = LocalProcess()
@@ -64,7 +64,7 @@ def _run_stat(tmp_path: Path, relative: str, **overrides: object) -> tuple[dict[
 
 
 def test_stat_checksum_flag_is_encoded_in_the_handler_request() -> None:
-    from fleet_rlm.daytona.workspace_agent import build_workspace_agent_code
+    from fleet_rlm.daytona.workspace_agent.protocol import build_workspace_agent_code
 
     base = {
         "volume_root": "/home/daytona/fleet",
@@ -80,9 +80,7 @@ def test_stat_checksum_flag_is_encoded_in_the_handler_request() -> None:
 
     assert '"checksum":false' in build_workspace_agent_code(**base)
     assert '"checksum":true' in build_workspace_agent_code(**base, checksum=True)
-    assert "import base64, datetime, errno, fcntl, hashlib, json, os, re, stat, time" in build_workspace_agent_code(
-        **base
-    )
+    assert "import base64, errno, fcntl, hashlib, json, os, stat, time" in build_workspace_agent_code(**base)
 
 
 def test_stat_with_checksum_hashes_regular_file_bytes(tmp_path: Path) -> None:
@@ -149,7 +147,7 @@ def test_stat_checksum_spans_chunked_reads(tmp_path: Path) -> None:
 
 
 def test_sync_workspace_fs_stat_passthrough_exposes_checksum(tmp_path: Path) -> None:
-    from fleet_rlm.daytona.workspace_fs import DaytonaSessionWorkspaceFS
+    from fleet_rlm.workspace.storage import DaytonaSessionWorkspaceFS
 
     volume_root, root = _layout(tmp_path)
     content = b"via fs"

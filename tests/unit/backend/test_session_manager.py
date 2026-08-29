@@ -13,6 +13,7 @@ from fleet_rlm.daytona.errors import DaytonaAdapterError, ProviderRequestError
 from fleet_rlm.daytona.provisioning import DaytonaSandboxSpec, VolumeConfig
 from fleet_rlm.daytona.session_manager import (
     ActiveLeaseConflictError,
+    ActiveLeaseRegistry,
     DaytonaAdmission,
     DaytonaSessionManager,
     LeaseRequest,
@@ -21,6 +22,28 @@ from fleet_rlm.runtime.bindings import InMemorySandboxBindingStore as InMemoryBi
 from fleet_rlm.runtime.bindings import SandboxBinding
 
 _SPEC = DaytonaSandboxSpec("fleet-test-v1")
+
+
+def test_active_lease_registry_is_scoped_by_workspace_and_session() -> None:
+    registry = ActiveLeaseRegistry()
+    session_id = uuid4()
+    workspace_a = uuid4()
+    workspace_b = uuid4()
+    run_a = uuid4()
+    run_b = uuid4()
+
+    registry.acquire(session_id, run_a, workspace_id=workspace_a)
+    registry.acquire(session_id, run_b, workspace_id=workspace_b)
+
+    assert registry.holder(session_id, workspace_id=workspace_a) == run_a
+    assert registry.holder(session_id, workspace_id=workspace_b) == run_b
+    with pytest.raises(ActiveLeaseConflictError):
+        registry.acquire(session_id, uuid4(), workspace_id=workspace_a)
+
+    registry.release(session_id, run_a, workspace_id=workspace_a)
+    assert registry.holder(session_id, workspace_id=workspace_a) is None
+    assert registry.holder(session_id, workspace_id=workspace_b) == run_b
+    registry.release(session_id, run_b, workspace_id=workspace_b)
 
 
 class _FakeVolume:
@@ -311,6 +334,70 @@ def _request() -> LeaseRequest:
 
 async def _acquire(mgr: DaytonaSessionManager, request: LeaseRequest):
     return await mgr.acquire(request, deadline=asyncio.get_running_loop().time() + 10)
+
+
+@pytest.mark.asyncio
+async def test_release_and_quarantine_shuts_interpreter_before_provider_fence() -> None:
+    mgr, platform, _store, _volumes = _manager()
+    request = _request()
+    lease = await _acquire(mgr, request)
+    order: list[str] = []
+
+    class OrderedInterpreter:
+        def shutdown(self, *, strict_broker_cleanup: bool) -> None:
+            assert strict_broker_cleanup is True
+            order.append("interpreter-shutdown")
+
+    original_stop = platform.stop
+    original_delete = platform.delete
+
+    async def stop(sandbox_id: str, *, timeout: float = 60, force: bool = False) -> None:
+        order.append("sandbox-stop")
+        await original_stop(sandbox_id, timeout=timeout, force=force)
+
+    async def delete(sandbox_id: str) -> None:
+        order.append("sandbox-delete")
+        await original_delete(sandbox_id)
+
+    platform.stop = stop  # type: ignore[method-assign]
+    platform.delete = delete  # type: ignore[method-assign]
+    lease.interpreter = OrderedInterpreter()  # type: ignore[assignment]
+
+    await mgr.release_and_quarantine(lease, request)
+
+    assert order[0] == "interpreter-shutdown"
+    assert order.index("interpreter-shutdown") < order.index("sandbox-stop")
+    assert lease.closed
+    assert not mgr.has_pending_ownership
+
+
+@pytest.mark.asyncio
+async def test_release_and_quarantine_retains_admission_when_fence_fails() -> None:
+    mgr, platform, _store, _volumes = _manager()
+    request = _request()
+    lease = await _acquire(mgr, request)
+    failures = 1
+    original_stop = platform.stop
+
+    async def stop(sandbox_id: str, *, timeout: float = 60, force: bool = False) -> None:
+        nonlocal failures
+        if failures:
+            failures -= 1
+            raise RuntimeError("one-shot fence failure")
+        await original_stop(sandbox_id, timeout=timeout, force=force)
+
+    platform.stop = stop  # type: ignore[method-assign]
+    with pytest.raises(RuntimeError, match="fence"):
+        await mgr.release_and_quarantine(lease, request)
+    assert lease.closed
+    assert mgr.has_pending_ownership
+    assert mgr._unpublished_leases
+
+    # A later owner can retry the same request/lease; no new admission slot is
+    # made available until provider quarantine and callback finalization pass.
+    await mgr.release(lease)
+    assert not mgr.has_pending_ownership
+    assert not mgr._unpublished_leases
 
 
 @pytest.mark.asyncio
@@ -636,6 +723,28 @@ async def test_acquire_rejects_zero_workspace_id() -> None:
 
 
 @pytest.mark.asyncio
+async def test_acquire_rejects_binding_from_another_workspace_without_overwrite() -> None:
+    mgr, _plat, store, _volumes = _manager()
+    first_request = _request()
+    first = await _acquire(mgr, first_request)
+    await mgr.release(first)
+    binding_before = await store.get(first_request.session_id)
+    assert binding_before is not None
+
+    with pytest.raises(DaytonaAdapterError, match="workspace scope"):
+        await mgr.acquire(
+            LeaseRequest(
+                session_id=first_request.session_id,
+                user_id=first_request.user_id,
+                workspace_id=uuid4(),
+            ),
+            deadline=asyncio.get_running_loop().time() + 2,
+        )
+
+    assert await store.get(first_request.session_id) == binding_before
+
+
+@pytest.mark.asyncio
 async def test_acquire_reuses_running_sandbox() -> None:
     mgr, plat, _store, _volumes = _manager()
     req = _request()
@@ -687,6 +796,71 @@ async def test_release_stops_retained_sandbox_after_explicit_idle_timeout() -> N
     assert binding is not None
     assert binding.provider_state == "stopped"
     assert plat.deleted == []
+    await mgr.aclose()
+
+
+@pytest.mark.asyncio
+async def test_replacement_deadline_retains_late_created_sandbox_cleanup() -> None:
+    """A timed-out replacement owns a late-created Sandbox until deletion settles."""
+    platform = _BlockingCreatePlatform(expected_entries=1)
+    mgr, _platform, store, _volumes = _manager(platform=platform)
+    session_id = uuid4()
+    workspace_id = uuid4()
+    binding = SandboxBinding(
+        session_id=session_id,
+        sandbox_id="old-sandbox",
+        workspace_id=workspace_id,
+        volume_id="volume-1",
+        volume_subpath=f"workspaces/{workspace_id}",
+        mount_path="/home/daytona/fleet",
+        provider_state="unrecoverable",
+    )
+    await store.upsert(binding)
+    replacement = asyncio.create_task(
+        mgr.replace(
+            binding,
+            user_id=uuid4(),
+            deadline=asyncio.get_running_loop().time() + 0.05,
+        )
+    )
+    assert await asyncio.to_thread(platform.all_entered.wait, 2)
+    with pytest.raises(RuntimeError, match="timed out"):
+        await asyncio.wait_for(replacement, timeout=0.2)
+    assert any(not task.done() for task in mgr._provider_tasks)
+
+    platform.release_creates.set()
+    await asyncio.gather(*tuple(mgr._provider_tasks), return_exceptions=True)
+    assert "old-sandbox" in platform.deleted
+    assert "sb-1" in platform.deleted
+    await mgr.aclose()
+
+
+@pytest.mark.asyncio
+async def test_fence_session_deadline_detaches_hanging_binding_lookup() -> None:
+    """A bounded fence must return while its provider lookup remains owned."""
+    mgr, _platform, store, _volumes = _manager()
+    release_lookup = asyncio.Event()
+
+    async def hanging_scoped(_session_id: UUID, *, workspace_id: UUID) -> None:
+        del workspace_id
+        await release_lookup.wait()
+        return None
+
+    store.get_scoped = hanging_scoped  # type: ignore[method-assign]
+    request = _request()
+    with pytest.raises(TimeoutError):
+        await asyncio.wait_for(
+            mgr.fence_session(
+                request.session_id,
+                workspace_id=request.workspace_id,
+                deadline=asyncio.get_running_loop().time() + 0.05,
+            ),
+            timeout=0.2,
+        )
+    assert any(not task.done() for task in mgr._provider_tasks)
+
+    release_lookup.set()
+    await asyncio.gather(*tuple(mgr._provider_tasks), return_exceptions=True)
     await mgr.aclose()
 
 

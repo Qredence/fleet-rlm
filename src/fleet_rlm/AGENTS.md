@@ -15,8 +15,9 @@ contracts, and tracked docs remain authoritative.
   in-memory bundled Skill catalog. Lifespan composition installs and disposes
   one complete Daytona or explicitly injected private-test inventory.
 - Production startup resolves one required profile from `config/fleet.toml`.
-  `config.py` owns strict runtime resolution; `config_policy.py` and the
-  loopback-only `/api/settings` routes edit only non-secret policy for restart.
+  `config/` owns strict runtime resolution (`settings` schema, `loader`
+  resolution, `policy` editor); the loopback-only `/api/settings` routes edit
+  only non-secret policy for restart.
   Do not restore ambient environment aliases or expose referenced secret values.
   Every `Settings` field carries one authoritative `FleetFieldPolicy`
   declaration; `_TABLE_KEYS`, policy flattening, and the editor inventory
@@ -26,13 +27,17 @@ contracts, and tracked docs remain authoritative.
   Direct `Settings(...)` construction rejects unknown keys without echoing
   their values.
 - Keep Daytona SDK imports inside `daytona/`.
-- Create a fresh native DSPy RLM per Turn through `rlm.dspy_contract`. Native
-  `RLMOptions` mirrors DSPy 3.3.x exactly: `max_iters` bounds action/REPL
+- Keep one compatible native DSPy RLM per active Session runtime through
+  `rlm.program`, `rlm.runtime`, and `rlm.session_runtime`; reuse it across
+  sequential successful Turns and rotate it after taint, incompatibility, or
+  failed cleanup. Native `RLMOptions`
+  mirrors DSPy 3.3.x exactly: `max_iters` bounds action/REPL
   iterations, `max_llm_calls` bounds prompts sent through native
   `llm_query`/`llm_query_batched`, and `max_output_chars` bounds retained REPL
   output. `verbose` is host logging only; it is not the live evidence path.
-  Inject and `FinalOutput` protocol knowledge lives in
-  `rlm.dspy_interpreter_contract`. Daytona supplies a fresh custom interpreter.
+  DSPy version, interpreter injection, and `FinalOutput` protocol knowledge
+  lives in `rlm._dspy_compat`; Daytona supplies a caller-owned custom
+  interpreter.
   Native calls use the supported `await rlm.acall(interpreter, **named_inputs)`
   surface; deterministic testing doubles remain keyword-only. Fleet owns
   shutdown for caller-provided interpreters.
@@ -51,9 +56,10 @@ contracts, and tracked docs remain authoritative.
   cancellation plus a bounded settle grace, and an unsettled child stays
   owned through the executor's cleanup boundary instead of blocking or
   leaking the wait.
-- Every Signature receives request text, bounded `session_context`, bounded
-  `skill_cards`, and bounded Attachment metadata. Older committed messages
-  remain behind the Session-scoped `read_session_history` Tool.
+- Every Signature receives request text, complete committed `dspy.History`,
+  bounded `session_context`, bounded `skill_cards`, and bounded Attachment
+  metadata. The Session-scoped `read_session_history` Tool remains available
+  for explicit retrieval and compatibility.
 - The default `FleetRLMSignature` uses strict Pydantic DTOs local to `rlm/`;
   `rlm.inputs` validates and JSON-serializes the bounded payload once before
   native `rlm.acall(interpreter, ...)`. Custom Skill Signatures retain JSON-compatible common
@@ -81,7 +87,7 @@ contracts, and tracked docs remain authoritative.
   4 KiB relevant+recent `workspace_memory tail` digest inside
   `session_context`. Memory preparation stays fail-soft, but every degraded
   operation records one bounded, sanitized diagnostic (category, operation,
-  runtime, cause type, fallback outcome) through `daytona/memory_diagnostics.py`
+  runtime, cause type, fallback outcome) through `workspace/memory.py`
   at the adapter seam; strict mutation/list failures (including duplicate
   stable ids) keep failing closed.
 - Resolve zero to four exact Skill selections against the immutable bundled
@@ -101,11 +107,11 @@ contracts, and tracked docs remain authoritative.
   answer text up to configured bounds. Tool event views expose only bounded
   allowlisted metadata; Tools without a view expose no arguments or results.
   Provider failures use closed public messages.
-- Databricks MLflow (`observability/mlflow_runtime.py`, `tracing.py`, and
-  `turn_tracing.py`) is fail-soft engineering observability controlled by the
-  selected TOML profile. `mlflow_runtime.py` is owned by FastAPI lifespan for
-  explicit startup state and flush; `tracing.py` owns configuration and
-  sanitation; `turn_tracing.py` owns Turn spans. Tracing must never change Turn
+- Databricks MLflow (`observability/mlflow.py` and `observability/tracing.py`)
+  is fail-soft engineering observability controlled by the
+  selected TOML profile. `mlflow.py` is owned by FastAPI lifespan for
+  explicit startup state and flush; `tracing.py` owns configuration,
+  sanitation, and Turn spans. Tracing must never change Turn
   outcomes. A live Turn can produce two `fleet_turn` roots—preparation and
   execution—each tagged `fleet.trace_phase`; the execution root carries the
   internal one-way `fleet.preparation_trace_id` while only the execution trace
@@ -116,7 +122,7 @@ contracts, and tracked docs remain authoritative.
   existing `start`/`finish` chunks — never as a new RuntimeEvent kind or
   credential-bearing payload.
 - `RunLifecycle.finish()` owns result-snapshot handling, Artifact publication,
-  and atomic Turn Commit or failure settlement. `TurnCoordinator` owns stream
+  and atomic Turn Commit or failure settlement. `TurnRuntime` owns stream
   orchestration, terminal ordering, heartbeat coordination, and final resource
   cleanup.
 - `RunLifecycleService` translates lifecycle outcomes into typed Claim commands;

@@ -3,45 +3,183 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from pathlib import Path
 from types import SimpleNamespace
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 if TYPE_CHECKING:
-    from fleet_rlm.files.url_tool import UrlFetchResult
+    from fleet_rlm.workspace.url import UrlFetchResult
 
 import dspy
 from fastapi import FastAPI
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from fleet_rlm.artifacts.reader import ArtifactReader
+from fleet_rlm.attachments.lifecycle import AttachmentLifecycle
+from fleet_rlm.attachments.models import PreparedAttachments
 from fleet_rlm.chat.capability_preparation import PreparedHostCapabilities, prepare_host_capabilities
-from fleet_rlm.chat.run_lifecycle import ClaimedRun
-from fleet_rlm.chat.run_preparation import (
+from fleet_rlm.chat.preparation import (
     DefaultRunPreparer,
     PreparedRun,
     RunEnvironment,
     RunEnvironmentProvider,
+    RunPreparation,
 )
-from fleet_rlm.composition.common import (
-    build_local_inventory,
-    build_local_storage_adapters,
-    host_roots,
-    rlm_options,
-)
+from fleet_rlm.chat.run_lifecycle import ClaimedRun
 from fleet_rlm.composition.inventory import (
+    CompositionError,
     RuntimeDatabaseLifecycle,
     RuntimeInventory,
     install_runtime_inventory,
 )
-from fleet_rlm.config import Settings
-from fleet_rlm.files.lifecycle import AttachmentLifecycle
-from fleet_rlm.files.models import PreparedAttachments
-from fleet_rlm.files.workspace_models import UNAVAILABLE_WORKSPACE_CAPABILITY
-from fleet_rlm.rlm.dspy_contract import RLMOptions
-from fleet_rlm.rlm.model_bundle import RLMModelBundle
-from fleet_rlm.rlm.recursive_calls import RecursiveRLMOptions
-from fleet_rlm.rlm.signature import FleetRLMSignature
+from fleet_rlm.config.settings import Settings
+from fleet_rlm.rlm._dspy_compat import assert_dspy_version
+from fleet_rlm.rlm.program import FleetRLMSignature, RLMModelBundle, RLMOptions, rlm_options
+from fleet_rlm.rlm.recursion import RecursiveRLMOptions
+from fleet_rlm.rlm.runtime import RLMFactoryLike
+from fleet_rlm.rlm.session_runtime import SessionRLMRegistry
 from fleet_rlm.skills.catalog import SkillCatalog, build_bundled_skill_catalog
+from fleet_rlm.workspace.models import UNAVAILABLE_WORKSPACE_CAPABILITY
+
+
+@dataclass(frozen=True, slots=True)
+class LocalStorageAdapters:
+    """Attachment and Artifact adapters shared by local runtime profiles."""
+
+    attachment_lifecycle: AttachmentLifecycle
+    artifact_reader: ArtifactReader
+
+
+def host_roots(settings: Settings) -> tuple[str, str]:
+    data_root = Path(settings.data_root)
+    return str(data_root / "attachments"), str(data_root / "artifacts")
+
+
+def build_local_storage_adapters(
+    settings: Settings,
+    *,
+    session_factory: async_sessionmaker[AsyncSession] | None,
+    volume_paths: Any | None,
+    sql_attachment_blobs: Any | None,
+    sql_attachment_paths: Any | None,
+    sql_artifact_blobs: Any | None,
+) -> LocalStorageAdapters:
+    """Build the local or SQL metadata adapters for a local runtime."""
+    from fleet_rlm.artifacts.local_catalog import (
+        LocalArtifactBlobGateway,
+        LocalArtifactCatalog,
+        LocalArtifactReaderCatalog,
+    )
+    from fleet_rlm.artifacts.reader import ArtifactReader
+    from fleet_rlm.attachments.lifecycle import AttachmentLifecycleService
+    from fleet_rlm.attachments.local_catalog import LocalAttachmentBlobGateway, LocalAttachmentCatalog
+    from fleet_rlm.attachments.paths import LocalAttachmentPathPolicy
+    from fleet_rlm.persistence.repositories import SqlAlchemyArtifactCatalog, SqlAlchemyAttachmentCatalog
+
+    upload_root, artifact_root = host_roots(settings)
+    if session_factory is None:
+        attachment_lifecycle = AttachmentLifecycleService(
+            catalog=LocalAttachmentCatalog(upload_root),
+            blobs=LocalAttachmentBlobGateway(Path(upload_root)),
+            paths=LocalAttachmentPathPolicy(Path(upload_root)),
+            max_bytes=settings.max_upload_bytes,
+        )
+        artifact_catalog = LocalArtifactCatalog(
+            artifact_root,
+            max_bytes=settings.max_artifact_bytes,
+            volume_paths=volume_paths,
+        )
+        artifact_reader = ArtifactReader(
+            catalog=LocalArtifactReaderCatalog(artifact_catalog),
+            blobs=LocalArtifactBlobGateway(artifact_catalog),
+        )
+        return LocalStorageAdapters(attachment_lifecycle, artifact_reader)
+
+    if sql_attachment_blobs is None or sql_attachment_paths is None or sql_artifact_blobs is None:
+        raise CompositionError("SQL local storage adapters require runtime-specific blob and path gateways")
+    attachment_lifecycle = AttachmentLifecycleService(
+        catalog=SqlAlchemyAttachmentCatalog(session_factory),
+        blobs=sql_attachment_blobs,
+        paths=sql_attachment_paths,
+        max_bytes=settings.max_upload_bytes,
+    )
+    artifact_reader = ArtifactReader(
+        catalog=SqlAlchemyArtifactCatalog(session_factory),
+        blobs=sql_artifact_blobs,
+    )
+    return LocalStorageAdapters(attachment_lifecycle, artifact_reader)
+
+
+def build_local_inventory(
+    settings: Settings,
+    *,
+    database: RuntimeDatabaseLifecycle,
+    attachment_lifecycle: AttachmentLifecycle,
+    artifact_reader: ArtifactReader,
+    preparation: RunPreparation,
+    rlm_factory: RLMFactoryLike,
+    session_runtime_registry: SessionRLMRegistry | None = None,
+) -> RuntimeInventory:
+    """Build the shared in-memory/SQL inventory for one local runtime."""
+    assert_dspy_version()
+    from fleet_rlm.chat.run_lifecycle import RunLifecycleService
+    from fleet_rlm.chat.turn_runtime import TurnRuntime
+    from fleet_rlm.config.policy import ConfigPolicyService
+    from fleet_rlm.persistence.repositories import (
+        InMemoryRunStateStore,
+        InMemorySessionCatalog,
+        SqlAlchemyRunStateStore,
+        SqlAlchemySessionCatalog,
+    )
+    from fleet_rlm.rlm.runtime import RLMRunner
+    from fleet_rlm.runtime.cleanup import RunCleanupSupervisor
+
+    session_factory = database.session_factory
+    if session_factory is None:
+        run_state = InMemoryRunStateStore()
+        session_catalog = InMemorySessionCatalog(run_state)
+    else:
+        run_state = SqlAlchemyRunStateStore(
+            session_factory,
+            stale_after_seconds=settings.run_stale_after_seconds,
+        )
+        session_catalog = SqlAlchemySessionCatalog(session_factory)
+    cleanup = RunCleanupSupervisor(max_jobs=8)
+    if session_runtime_registry is None:
+        session_runtime_registry = SessionRLMRegistry()
+    lifecycle = RunLifecycleService(
+        run_state,
+        max_artifact_bytes=settings.max_artifact_bytes,
+        heartbeat_seconds=settings.run_heartbeat_seconds,
+        stale_after_seconds=settings.run_stale_after_seconds,
+        cleanup=cleanup,
+    )
+    runner = RLMRunner(factory=rlm_factory, runtime_registry=session_runtime_registry)
+    coordinator = TurnRuntime(
+        lifecycle=lifecycle,
+        preparation=preparation,
+        runner=runner,
+        turn_timeout_seconds=settings.turn_timeout_seconds,
+        cleanup=cleanup,
+        claim_loss_fence=None,
+        mlflow_tracing_enabled=settings.mlflow_tracing_enabled,
+        mlflow_expose_trace_id=settings.mlflow_expose_trace_id,
+    )
+    return RuntimeInventory(
+        turn_runtime=coordinator,
+        runner=runner,
+        attachment_lifecycle=attachment_lifecycle,
+        artifact_reader=artifact_reader,
+        session_catalog=session_catalog,
+        run_lifecycle=lifecycle,
+        run_cleanup_supervisor=cleanup,
+        run_preparation=preparation,
+        run_state_store=run_state,
+        session_runtime_registry=session_runtime_registry,
+        config_policy=ConfigPolicyService.from_settings(settings),
+        database=database,
+    )
 
 
 class TestingLM:
@@ -100,12 +238,23 @@ class _TestingVolumeFsAdapter:
     def __init__(self, sink: TestingRunSink) -> None:
         self._sink = sink
 
-    def write_bytes(self, logical_path: str, data: bytes) -> None:
+    def write_bytes(self, logical_path: str, data: bytes, *, max_bytes: int | None = None) -> None:
+        if max_bytes is not None and len(data) > max_bytes:
+            raise ValueError("volume value exceeds its byte bound")
         self._sink.values[logical_path] = bytes(data)
 
-    def read_bytes(self, logical_path: str, *, use_cache: bool = True) -> bytes:
+    def read_bytes(
+        self,
+        logical_path: str,
+        *,
+        max_bytes: int | None = None,
+        use_cache: bool = True,
+    ) -> bytes:
         del use_cache
-        return self._sink.values[logical_path]
+        value = self._sink.values[logical_path]
+        if max_bytes is not None and len(value) > max_bytes:
+            raise ValueError("volume value exceeds its byte bound")
+        return value
 
     def exists(self, logical_path: str) -> bool:
         return logical_path in self._sink.values
@@ -129,7 +278,7 @@ class _TestingCacheOnlyUrlFetcher:
     """Deterministic cache-only fetcher: private tests never open the network."""
 
     def fetch(self, url: str, *, max_bytes: int) -> UrlFetchResult:
-        from fleet_rlm.files.url_tool import UrlToolError
+        from fleet_rlm.workspace.url import UrlToolError
 
         del url, max_bytes
         raise UrlToolError(
@@ -149,7 +298,7 @@ class TestingCapabilityPreparer:
         max_url_bytes: int = 10 * 1024 * 1024,
     ) -> None:
         """Initialize a testing capability preparer with configured source limits."""
-        from fleet_rlm.files.url_tool import InMemoryUrlSourceStore
+        from fleet_rlm.workspace.url import InMemoryUrlSourceStore
 
         del models, options
         self._skill_catalog = skill_catalog
@@ -166,34 +315,20 @@ class TestingCapabilityPreparer:
         deadline: float,
     ) -> PreparedHostCapabilities:
         """Prepare host capabilities for one turn within the execution deadline."""
-        from fleet_rlm.files.tools import FileToolHost
-        from fleet_rlm.files.url_tool import UrlToolHost
+        from fleet_rlm.attachments.tools import AttachmentToolHost
+        from fleet_rlm.workspace.url import UrlToolHost
 
         sink = environment.attachment_sink
         if not isinstance(sink, TestingRunSink):
             raise TypeError("testing capabilities require the testing run sink")
         volume_fs = _TestingVolumeFsAdapter(sink)
-        file_host = FileToolHost(
+        attachment_host = AttachmentToolHost(
             attachments=attachments.refs,
             staged_attachments=attachments.staged,
             volume_fs=volume_fs,
-            user_id=run.access.user_id,
-            workspace_id=run.access.workspace_id,
-            session_id=run.session_id,
-            run_id=run.run_id,
-            max_artifact_bytes=self._max_artifact_bytes,
-            volume_paths=None,
         )
-        file_tools = tuple(
-            tool
-            for tool in file_host.as_tools()
-            if str(tool.name) not in {"create_artifact", "publish_workspace_artifact"}
-        )
-        file_event_views = {
-            name: view
-            for name, view in file_host.event_views().items()
-            if name not in {"create_artifact", "publish_workspace_artifact"}
-        }
+        attachment_tools = attachment_host.as_tools()
+        attachment_event_views = dict(attachment_host.event_views())
         url_host = UrlToolHost(
             session_id=run.session_id,
             store=self._url_store,
@@ -205,14 +340,14 @@ class TestingCapabilityPreparer:
         spec, skill_host, notices = await prepare_host_capabilities(
             turn=run,
             skill_catalog=self._skill_catalog,
-            base_tools=(*file_tools, *url_tools),
-            base_event_views={**file_event_views, **url_event_views},
+            base_tools=(*attachment_tools, *url_tools),
+            base_event_views={**attachment_event_views, **url_event_views},
             workspace=UNAVAILABLE_WORKSPACE_CAPABILITY,
             deadline=deadline,
         )
         return PreparedHostCapabilities(
             spec,
-            files=file_host,
+            files=attachment_host,
             skills=skill_host,
             close_files=False,
             artifact_candidates=False,
@@ -252,6 +387,7 @@ class DeterministicTurnPreparation:
         options: RLMOptions | None = None,
         max_artifact_bytes: int = 10_000_000,
         max_url_bytes: int = 10 * 1024 * 1024,
+        session_runtime_registry: SessionRLMRegistry | None = None,
     ) -> None:
         resolved_options = options or RLMOptions()
         models = RLMModelBundle(TestingLM("testing/root"), TestingLM("testing/sub"))
@@ -268,6 +404,7 @@ class DeterministicTurnPreparation:
                 max_artifact_bytes=max_artifact_bytes,
                 max_url_bytes=max_url_bytes,
             ),
+            session_runtime_registry=session_runtime_registry,
         )
 
     async def prepare(self, run: ClaimedRun, *, deadline: float) -> PreparedRun:
@@ -281,14 +418,10 @@ def install_testing_composition(
     database: RuntimeDatabaseLifecycle | None = None,
 ) -> RuntimeInventory:
     """Install credential-free deterministic adapters for a test lifespan."""
-    from fleet_rlm.artifacts.workspace_storage import WorkspaceArtifactBlobGateway
-    from fleet_rlm.files.host_volume import HostVolumeMirror, OfflineHostVolumeGateway
-    from fleet_rlm.files.local_catalog import (
-        WorkspaceAttachmentBlobGateway,
-    )
-    from fleet_rlm.files.paths import WorkspaceAttachmentPathPolicy
-    from fleet_rlm.files.volume_paths import volume_paths_from_settings
-    from fleet_rlm.files.workspace_access import (
+    from fleet_rlm.attachments.paths import WorkspaceAttachmentPathPolicy
+    from fleet_rlm.workspace.paths import volume_paths_from_settings
+    from fleet_rlm.workspace.storage import HostVolumeMirror, OfflineHostVolumeGateway
+    from fleet_rlm.workspace.workspace import (
         HostWorkspaceAccessGateway,
         WorkspaceFileService,
     )
@@ -300,13 +433,14 @@ def install_testing_composition(
         volume_paths=volume_paths_from_settings(settings),
     )
     volume_gateway = OfflineHostVolumeGateway(mirror)
+    session_runtime_registry = SessionRLMRegistry()
     storage = build_local_storage_adapters(
         settings,
         session_factory=database.session_factory,
         volume_paths=mirror.volume_paths,
-        sql_attachment_blobs=WorkspaceAttachmentBlobGateway(volume_gateway),
+        sql_attachment_blobs=volume_gateway,
         sql_attachment_paths=WorkspaceAttachmentPathPolicy(mirror.volume_paths),
-        sql_artifact_blobs=WorkspaceArtifactBlobGateway(volume_gateway),
+        sql_artifact_blobs=volume_gateway,
     )
     local_inventory = build_local_inventory(
         settings,
@@ -319,9 +453,10 @@ def install_testing_composition(
             options=rlm_options(settings),
             max_artifact_bytes=settings.max_artifact_bytes,
             max_url_bytes=settings.max_url_bytes,
+            session_runtime_registry=session_runtime_registry,
         ),
         rlm_factory=TestingRLMFactory(),
-        workspace_volume_mirror=mirror,
+        session_runtime_registry=session_runtime_registry,
     )
     # Overlay only the host volume adapters; keep the shared local inventory
     # members so new RuntimeInventory fields cannot silently drop here.
@@ -329,9 +464,12 @@ def install_testing_composition(
         local_inventory,
         workspace_volume_gateway=volume_gateway,
         workspace_file_service=WorkspaceFileService(
-            HostWorkspaceAccessGateway(
-                Path(settings.data_root) / "workspace-files",
-                max_file_bytes=settings.max_upload_bytes,
+            cast(
+                Any,
+                HostWorkspaceAccessGateway(
+                    Path(settings.data_root) / "workspace-files",
+                    max_file_bytes=settings.max_upload_bytes,
+                ),
             )
         ),
     )

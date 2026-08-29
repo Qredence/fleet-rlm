@@ -12,7 +12,7 @@ import asyncio
 import threading
 from types import SimpleNamespace
 
-from fleet_rlm.daytona.dspy_sync_bridge import (
+from fleet_rlm.daytona.broker import (
     SyncBridgeDispatcher,
     sync_sandbox,
     tombstone_sync_sandbox,

@@ -11,7 +11,7 @@ The complete behavioral matrix remaining green at the same SHA is proven by
 `make check`; this lane is the regression guard that keeps the suite bound
 to public surfaces only. The contract inventory lanes that NAME the deleted
 symbols to assert their absence
-(``tests/contracts/backend/test_p3{3,6,7,8}_*.py`` and
+(``tests/contracts/backend/test_p3{3,7,8}_*.py`` and
 ``test_p40_explicit_hosts.py``) are the only excluded files.
 """
 
@@ -28,7 +28,6 @@ _TESTS_ROOT = _REPO_ROOT / "tests"
 _INVENTORY_OR_ABSENCE_LANES = frozenset(
     {
         "contracts/backend/test_p33_guardrails.py",
-        "contracts/backend/test_p36_ownership_inventory.py",
         "contracts/backend/test_p37_coordinator_ownership.py",
         "contracts/backend/test_p38_native_contraction.py",
         "contracts/backend/test_p40_explicit_hosts.py",

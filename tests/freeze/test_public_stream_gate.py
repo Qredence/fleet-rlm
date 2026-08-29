@@ -11,14 +11,13 @@ from uuid import UUID, uuid4, uuid5
 
 import pytest
 
-from fleet_rlm.api.canonical_wire import canonical_from_live_chunk
 from fleet_rlm.api.sse import FLEET_UI_CHUNK_TYPES, AISDKUIProjector
 from fleet_rlm.api.ui_stream import FleetUIMessageChunkAdapter
 from fleet_rlm.composition.testing import create_testing_app
-from fleet_rlm.events.canonical import CANONICAL_EVENT_KINDS
 from fleet_rlm.rlm.events import (
     RUNTIME_DETAIL_TYPES,
     EventRecorder,
+    ObservationSession,
     RLMCode,
     RLMOutput,
     RLMReasoning,
@@ -36,7 +35,6 @@ from fleet_rlm.rlm.events import (
     Usage,
     WarningEvent,
 )
-from fleet_rlm.rlm.observation import ObservationSession
 from fleet_rlm.sessions.assistant_parts import AssistantPartModelUnion
 
 _FIXTURE = (
@@ -271,13 +269,11 @@ def test_trace_metadata_is_confined_to_existing_start_finish_chunks() -> None:
     assert all(trace_id not in json.dumps(chunk) for chunk in chunks[1:-1])
 
 
-def test_canonical_live_fixture_has_closed_kinds_and_no_unbounded_values() -> None:
+def test_live_fixture_has_closed_wire_kinds_and_no_unbounded_values() -> None:
     lines = [line for line in _FIXTURE.read_text(encoding="utf-8").splitlines() if line and line != "[DONE]"]
     assert lines
     for line in lines:
         chunk = json.loads(line)
         validated = FleetUIMessageChunkAdapter.validate_python(chunk, strict=False)
         assert validated is not None
-        assert canonical_from_live_chunk(validated)
     assert {event["type"] for line in lines for event in [json.loads(line)]} == set(FLEET_UI_CHUNK_TYPES)
-    assert CANONICAL_EVENT_KINDS

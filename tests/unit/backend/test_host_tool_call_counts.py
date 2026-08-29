@@ -10,14 +10,15 @@ import pytest
 
 
 def test_repeated_authorized_host_tool_calls_have_no_fleet_count_limit(tmp_path) -> None:
-    from fleet_rlm.files.host_volume import HostVolumeMirror
-    from fleet_rlm.files.models import AttachmentRef, StagedAttachment
-    from fleet_rlm.files.tools import FileToolHost
-    from fleet_rlm.files.volume_paths import VolumePaths
-    from fleet_rlm.rlm.tool_observer import observe_tool
+    from fleet_rlm.artifacts.tools import ArtifactToolHost
+    from fleet_rlm.attachments.models import AttachmentRef, StagedAttachment
+    from fleet_rlm.attachments.tools import AttachmentToolHost
+    from fleet_rlm.rlm.events import observe_tool
     from fleet_rlm.skills.catalog import SkillCatalog
     from fleet_rlm.skills.models import SkillCard, SkillDefinition, SkillResource
     from fleet_rlm.skills.tools import SkillToolHost
+    from fleet_rlm.workspace.paths import VolumePaths
+    from fleet_rlm.workspace.storage import HostVolumeMirror
 
     user_id, workspace_id, session_id, run_id = uuid4(), uuid4(), uuid4(), uuid4()
     skill = SkillDefinition(
@@ -37,7 +38,7 @@ def test_repeated_authorized_host_tool_calls_have_no_fleet_count_limit(tmp_path)
     attachment_path = f"/mnt/fleet/sessions/{session_id}/runs/{run_id}/input.txt"
     attachment_bytes = b"authorized input"
     volume.write_bytes(attachment_path, attachment_bytes)
-    file_host = FileToolHost(
+    attachment_host = AttachmentToolHost(
         attachments=(
             AttachmentRef(
                 attachment_id,
@@ -49,6 +50,9 @@ def test_repeated_authorized_host_tool_calls_have_no_fleet_count_limit(tmp_path)
         ),
         staged_attachments=(StagedAttachment(attachment_id, attachment_path),),
         volume_fs=volume,
+    )
+    artifact_host = ArtifactToolHost(
+        volume_fs=volume,
         user_id=user_id,
         workspace_id=workspace_id,
         session_id=session_id,
@@ -58,17 +62,17 @@ def test_repeated_authorized_host_tool_calls_have_no_fleet_count_limit(tmp_path)
     )
 
     skill_results = [skill_host.load_skill(str(skill.card.id)) for _ in range(20)]
-    attachment_results = [file_host.read_attachment(str(attachment_id)) for _ in range(20)]
-    artifact_results = [file_host.create_artifact("text", f"result {index}") for index in range(20)]
+    attachment_results = [attachment_host.read_attachment(str(attachment_id)) for _ in range(20)]
+    artifact_results = [artifact_host.create_artifact("text", f"result {index}") for index in range(20)]
 
     assert all(result["ok"] is True for result in skill_results)
     assert all(result["ok"] is True for result in attachment_results)
     assert all(result["ok"] is True for result in artifact_results)
     skill_events = skill_host.drain_public_events()
     assert [event["kind"] for event in skill_events] == ["skill.activated", "skill.loaded"]
-    assert len(file_host.drain_public_events()) == 20
-    file_host.record_attachment_accesses((str(attachment_id), str(attachment_id), "invalid"))
-    local_access_events = file_host.drain_public_events()
+    assert len(attachment_host.drain_public_events()) == 20
+    attachment_host.record_attachment_accesses((str(attachment_id), str(attachment_id), "invalid"))
+    local_access_events = attachment_host.drain_public_events()
     assert local_access_events == [
         {
             "event_kind": "attachment.read",
@@ -77,16 +81,15 @@ def test_repeated_authorized_host_tool_calls_have_no_fleet_count_limit(tmp_path)
             "byte_size": len(attachment_bytes),
         }
     ]
-    assert len(file_host.drain_artifact_candidates()) == 20
-    assert all(type(tool) is dspy.Tool for tool in (*skill_host.as_tools(), *file_host.as_tools()))
+    assert len(artifact_host.drain_artifact_candidates()) == 20
+    all_tools = (*skill_host.as_tools(), *attachment_host.as_tools(), *artifact_host.as_tools())
+    assert all(type(tool) is dspy.Tool for tool in all_tools)
     assert set(skill_host.event_views()) == {"load_skill", "read_skill_resource"}
-    assert set(file_host.event_views()) == {
-        "read_attachment",
-        "create_artifact",
-        "publish_workspace_artifact",
-    }
+    assert set(attachment_host.event_views()) == {"read_attachment"}
+    assert set(artifact_host.event_views()) == {"create_artifact", "publish_workspace_artifact"}
 
-    file_tools = {str(tool.name): tool for tool in file_host.as_tools()}
+    file_tools = {str(tool.name): tool for tool in attachment_host.as_tools()}
+    artifact_tools = {str(tool.name): tool for tool in artifact_host.as_tools()}
     skill_tools = {str(tool.name): tool for tool in skill_host.as_tools()}
     assert file_tools["read_attachment"].args == {
         "attachment_id": {"type": "string"},
@@ -94,7 +97,7 @@ def test_repeated_authorized_host_tool_calls_have_no_fleet_count_limit(tmp_path)
     assert file_tools["read_attachment"].arg_types == {"attachment_id": str}
     assert "immutable authorized Attachment" in file_tools["read_attachment"].desc
     assert "only when" in file_tools["read_attachment"].desc
-    assert file_tools["create_artifact"].args == {
+    assert artifact_tools["create_artifact"].args == {
         "kind": {"type": "string"},
         "content": {"type": "string"},
         "title": {
@@ -102,12 +105,12 @@ def test_repeated_authorized_host_tool_calls_have_no_fleet_count_limit(tmp_path)
             "default": None,
         },
     }
-    assert file_tools["create_artifact"].arg_types == {
+    assert artifact_tools["create_artifact"].arg_types == {
         "kind": str,
         "content": str,
         "title": str | None,
     }
-    assert "promoted only by a successful Turn Commit" in file_tools["create_artifact"].desc
+    assert "promoted only by a successful Turn Commit" in artifact_tools["create_artifact"].desc
     assert skill_tools["load_skill"].args == {
         "skill_id": {"type": "string"},
         "expected_version": {
@@ -133,10 +136,10 @@ def test_repeated_authorized_host_tool_calls_have_no_fleet_count_limit(tmp_path)
         "expected_version": str | None,
     }
     observed: list[object] = []
-    observe_tool(file_tools["read_attachment"], observed.append, file_host.event_views()["read_attachment"])(
+    observe_tool(attachment_host.as_tools()[0], observed.append, attachment_host.event_views()["read_attachment"])(
         attachment_id=str(attachment_id)
     )
-    observe_tool(file_tools["create_artifact"], observed.append, file_host.event_views()["create_artifact"])(
+    observe_tool(artifact_tools["create_artifact"], observed.append, artifact_host.event_views()["create_artifact"])(
         kind="text",
         content="private artifact body",
         title="Report",
@@ -175,19 +178,19 @@ def test_repeated_authorized_host_tool_calls_have_no_fleet_count_limit(tmp_path)
 
 
 def test_attachment_read_reverifies_staged_bytes_on_every_call(tmp_path) -> None:
-    from fleet_rlm.files.host_volume import HostVolumeMirror
-    from fleet_rlm.files.models import AttachmentRef, StagedAttachment
-    from fleet_rlm.files.tools import FileToolHost
-    from fleet_rlm.files.volume_paths import VolumePaths
+    from fleet_rlm.attachments.models import AttachmentRef, StagedAttachment
+    from fleet_rlm.attachments.tools import AttachmentToolHost
+    from fleet_rlm.workspace.paths import VolumePaths
+    from fleet_rlm.workspace.storage import HostVolumeMirror
 
-    user_id, workspace_id, session_id, run_id = uuid4(), uuid4(), uuid4(), uuid4()
+    session_id, run_id = uuid4(), uuid4()
     paths = VolumePaths.from_mount("/mnt/fleet")
     volume = HostVolumeMirror(tmp_path, volume_paths=paths)
     attachment_id = uuid4()
     attachment_path = f"/mnt/fleet/sessions/{session_id}/runs/{run_id}/input.txt"
     original = b"original attachment"
     volume.write_bytes(attachment_path, original)
-    host = FileToolHost(
+    host = AttachmentToolHost(
         attachments=(
             AttachmentRef(
                 attachment_id,
@@ -199,11 +202,6 @@ def test_attachment_read_reverifies_staged_bytes_on_every_call(tmp_path) -> None
         ),
         staged_attachments=(StagedAttachment(attachment_id, attachment_path),),
         volume_fs=volume,
-        user_id=user_id,
-        workspace_id=workspace_id,
-        session_id=session_id,
-        run_id=run_id,
-        volume_paths=paths,
     )
 
     assert host.read_attachment(str(attachment_id))["ok"] is True
@@ -216,18 +214,17 @@ def test_attachment_read_reverifies_staged_bytes_on_every_call(tmp_path) -> None
 
 @pytest.mark.asyncio
 async def test_live_capability_teardown_removes_drained_artifact_candidate_bytes(tmp_path) -> None:
-    from fleet_rlm.daytona.run_environment import LivePreparedCapabilities
-    from fleet_rlm.files.host_volume import HostVolumeMirror
-    from fleet_rlm.files.tools import FileToolHost
-    from fleet_rlm.files.volume_paths import VolumePaths
-    from fleet_rlm.rlm.context import RLMExecutionSpec
+    from fleet_rlm.artifacts.tools import ArtifactToolHost
+    from fleet_rlm.attachments.tools import AttachmentToolHost
+    from fleet_rlm.rlm.runtime import RLMExecutionSpec
+    from fleet_rlm.runtime.daytona.run_environment import LivePreparedCapabilities
+    from fleet_rlm.workspace.paths import VolumePaths
+    from fleet_rlm.workspace.storage import HostVolumeMirror
 
     user_id, workspace_id, session_id, run_id = uuid4(), uuid4(), uuid4(), uuid4()
     paths = VolumePaths.from_mount("/mnt/fleet")
     volume = HostVolumeMirror(tmp_path, volume_paths=paths)
-    files = FileToolHost(
-        attachments=(),
-        staged_attachments=(),
+    artifacts = ArtifactToolHost(
         volume_fs=volume,
         user_id=user_id,
         workspace_id=workspace_id,
@@ -236,23 +233,28 @@ async def test_live_capability_teardown_removes_drained_artifact_candidate_bytes
         volume_paths=paths,
     )
 
-    assert files.create_artifact("text", "uncommitted")["ok"] is True
-    candidate = files.drain_artifact_candidates()[0]
+    assert artifacts.create_artifact("text", "uncommitted")["ok"] is True
+    candidate = artifacts.drain_artifact_candidates()[0]
 
     class Skills:
         def drain_public_events(self) -> list[dict[str, str]]:
             return []
 
-    capabilities = LivePreparedCapabilities(RLMExecutionSpec(), files=files, skills=Skills())
+    capabilities = LivePreparedCapabilities(
+        RLMExecutionSpec(),
+        files=AttachmentToolHost(attachments=(), staged_attachments=(), volume_fs=volume),
+        artifacts=artifacts,
+        skills=Skills(),
+    )
     await capabilities.aclose()
 
     assert not volume.exists(candidate.staging_path)
 
 
 def test_workspace_artifact_publication_reads_source_and_stages_only_a_candidate(tmp_path) -> None:
-    from fleet_rlm.files.host_volume import HostVolumeMirror
-    from fleet_rlm.files.tools import FileToolHost
-    from fleet_rlm.files.volume_paths import VolumePaths
+    from fleet_rlm.artifacts.tools import ArtifactToolHost
+    from fleet_rlm.workspace.paths import VolumePaths
+    from fleet_rlm.workspace.storage import HostVolumeMirror
 
     user_id, workspace_id, session_id, run_id = uuid4(), uuid4(), uuid4(), uuid4()
     paths = VolumePaths.from_mount("/mnt/fleet")
@@ -260,9 +262,7 @@ def test_workspace_artifact_publication_reads_source_and_stages_only_a_candidate
     source = paths.session_workspace_dir(session_id) / "report.md"
     body = b"# Durable report\n"
     volume.write_bytes(str(source), body)
-    host = FileToolHost(
-        attachments=(),
-        staged_attachments=(),
+    host = ArtifactToolHost(
         volume_fs=volume,
         user_id=user_id,
         workspace_id=workspace_id,

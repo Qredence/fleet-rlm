@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from fleet_rlm.daytona.errors import (
+    DEFAULT_SANITIZED_FAILURE_MAX_CHARS,
     ProviderRequestError,
     classify_provider_error,
     is_sandbox_not_found,
@@ -128,6 +129,12 @@ def test_sanitize_provider_message_redacts_secrets_and_private_paths() -> None:
     assert "/Users/zach" not in sanitized
     assert "/Volumes/SSD" not in sanitized
     assert sanitized.count("[redacted]") >= 4
+
+
+def test_sanitize_provider_message_is_bounded_after_redaction() -> None:
+    sanitized = sanitize_provider_message("provider failure " + "x" * 1000)
+
+    assert len(sanitized) == DEFAULT_SANITIZED_FAILURE_MAX_CHARS
 
 
 def test_sanitize_failure_text_types_and_redacts_exception() -> None:

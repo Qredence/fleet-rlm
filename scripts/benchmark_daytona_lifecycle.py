@@ -23,7 +23,8 @@ from pathlib import Path
 from typing import Any, cast
 from uuid import uuid4
 
-from fleet_rlm.daytona.dspy_sync_bridge import sync_sandbox
+from fleet_rlm.config.loader import load_runtime_settings
+from fleet_rlm.daytona.broker import sync_sandbox
 from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, sandbox_backend
 from fleet_rlm.daytona.platform import (
     LiveDaytonaPlatform,
@@ -310,7 +311,6 @@ async def _run(argv: Sequence[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     if os.environ.get("FLEET_LIVE", "").strip().lower() not in {"1", "true", "yes"}:
         raise SystemExit("FLEET_LIVE=1 is required")
-    from fleet_rlm.config import load_runtime_settings
 
     settings = load_runtime_settings()
     if settings.daytona_api_key is None or not settings.daytona_api_key.get_secret_value().strip():

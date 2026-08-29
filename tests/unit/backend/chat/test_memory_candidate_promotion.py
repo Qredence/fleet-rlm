@@ -12,10 +12,9 @@ from uuid import uuid4
 
 import pytest
 
-from fleet_rlm.chat.turn_coordinator import TurnCoordinator
-from fleet_rlm.files.memory_candidates import MemoryCandidate
-from fleet_rlm.rlm.dspy_contract import PredictionResult
-from fleet_rlm.rlm.outcome import RLMOutcome
+from fleet_rlm.chat.turn_runtime import TurnRuntime
+from fleet_rlm.rlm.result import PredictionResult, RLMOutcome
+from fleet_rlm.workspace.memory import MemoryCandidate
 
 
 def _turn():
@@ -83,8 +82,8 @@ class _Lifecycle:
         )
 
 
-def _driver(lifecycle) -> TurnCoordinator:
-    return TurnCoordinator(
+def _driver(lifecycle) -> TurnRuntime:
+    return TurnRuntime(
         lifecycle=lifecycle,
         preparation=object(),  # type: ignore[arg-type]
         runner=cast("Any", object()),
@@ -93,7 +92,7 @@ def _driver(lifecycle) -> TurnCoordinator:
 
 
 def test_memory_candidates_promote_only_after_committed_receipt() -> None:
-    from fleet_rlm.files.memory_candidates import MemoryCandidate
+    from fleet_rlm.workspace.memory import MemoryCandidate
 
     lifecycle = _Lifecycle()
     order: list[str] = []
@@ -122,7 +121,7 @@ def test_memory_candidates_promote_only_after_committed_receipt() -> None:
         byte_size=25,
     )
     receipt = __import__("asyncio").run(  # convenience only for this focused seam; child class owns bridge
-        TurnCoordinator._finish_with_trace(
+        TurnRuntime._finish_with_trace(
             _driver(lifecycle),
             _turn(),
             _outcome(candidate),
@@ -139,7 +138,7 @@ def test_memory_candidates_promote_only_after_committed_receipt() -> None:
 
 
 def test_memory_candidates_are_not_promoted_after_failed_commit() -> None:
-    from fleet_rlm.files.memory_candidates import MemoryCandidate
+    from fleet_rlm.workspace.memory import MemoryCandidate
 
     lifecycle = _Lifecycle(commit=False)
     order: list[str] = []
@@ -156,7 +155,7 @@ def test_memory_candidates_are_not_promoted_after_failed_commit() -> None:
         byte_size=25,
     )
     receipt = __import__("asyncio").run(
-        TurnCoordinator._finish_with_trace(
+        TurnRuntime._finish_with_trace(
             _driver(lifecycle),
             _turn(),
             _outcome(candidate),
@@ -173,7 +172,7 @@ def test_memory_candidates_are_not_promoted_after_failed_commit() -> None:
 
 
 def test_memory_promotion_failure_preserves_the_committed_receipt() -> None:
-    from fleet_rlm.files.memory_candidates import MemoryCandidate
+    from fleet_rlm.workspace.memory import MemoryCandidate
 
     lifecycle = _Lifecycle()
 
@@ -189,7 +188,7 @@ def test_memory_promotion_failure_preserves_the_committed_receipt() -> None:
         byte_size=25,
     )
     receipt = __import__("asyncio").run(
-        TurnCoordinator._finish_with_trace(
+        TurnRuntime._finish_with_trace(
             _driver(lifecycle),
             _turn(),
             _outcome(candidate),
@@ -250,7 +249,7 @@ async def test_post_commit_memory_promotion_has_a_bounded_wait(monkeypatch) -> N
 @pytest.mark.asyncio
 async def test_prepared_run_retains_resources_until_timed_out_promotion_settles() -> None:
     from fleet_rlm.chat.post_commit_memory import OwnedPostCommitMemoryPromotion
-    from fleet_rlm.chat.run_preparation import PreparedRun, _PreparedRunResources
+    from fleet_rlm.chat.preparation import PreparedRun, _PreparedRunResources
 
     started = threading.Event()
     release_promotion = threading.Event()
@@ -375,7 +374,7 @@ class _DriverLifecycle:
 
 
 def _streaming_driver(lifecycle, stream, *, revoke_claim=None):
-    from fleet_rlm.chat.run_cleanup import RunCleanupSupervisor
+    from fleet_rlm.runtime.cleanup import RunCleanupSupervisor
 
     cleanup = RunCleanupSupervisor()
 
@@ -383,7 +382,7 @@ def _streaming_driver(lifecycle, stream, *, revoke_claim=None):
         def stream(self, _execution):
             return stream
 
-    driver = TurnCoordinator(
+    driver = TurnRuntime(
         lifecycle=cast("Any", lifecycle),
         preparation=object(),  # type: ignore[arg-type]
         runner=Runner(),

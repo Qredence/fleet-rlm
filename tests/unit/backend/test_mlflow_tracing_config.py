@@ -11,7 +11,7 @@ from typing import Any
 import pytest
 
 import fleet_rlm.observability.tracing as tracing
-from fleet_rlm.config import Settings
+from fleet_rlm.config.settings import Settings
 
 
 @pytest.fixture(autouse=True)

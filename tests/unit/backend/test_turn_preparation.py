@@ -12,12 +12,11 @@ import pytest
 
 @pytest.mark.asyncio
 async def test_preparation_bounds_history_and_closes_in_dependency_order() -> None:
+    from fleet_rlm.attachments.models import PreparedAttachments
+    from fleet_rlm.chat.preparation import DefaultRunPreparer, RunEnvironment
     from fleet_rlm.chat.run_lifecycle import ClaimedRun, _RunClaimToken
-    from fleet_rlm.chat.run_preparation import DefaultRunPreparer, RunEnvironment
-    from fleet_rlm.files.models import PreparedAttachments
-    from fleet_rlm.rlm.context import RLMExecutionSpec
-    from fleet_rlm.rlm.dspy_contract import RLMOptions
-    from fleet_rlm.rlm.model_bundle import RLMModelBundle
+    from fleet_rlm.rlm.program import RLMModelBundle, RLMOptions
+    from fleet_rlm.rlm.runtime import RLMExecutionSpec
     from fleet_rlm.sessions.models import HistoryMessage, SessionHistory, TurnAccess, TurnInput
 
     operations: list[str] = []
@@ -114,7 +113,7 @@ async def test_preparation_bounds_history_and_closes_in_dependency_order() -> No
 
 @pytest.mark.asyncio
 async def test_prepared_cleanup_continues_after_cancelled_owner_and_reobserves_failure() -> None:
-    from fleet_rlm.chat.run_preparation import PreparedRun, _PreparedRunResources
+    from fleet_rlm.chat.preparation import PreparedTurn, _PreparedTurnResources
 
     operations: list[str] = []
 
@@ -125,28 +124,29 @@ async def test_prepared_cleanup_continues_after_cancelled_owner_and_reobserves_f
     async def remaining_owner() -> None:
         operations.append("remaining")
 
-    prepared = PreparedRun(
+    prepared = PreparedTurn(
         execution=SimpleNamespace(),
         artifact_sink=None,
-        _resources=_PreparedRunResources((remaining_owner, cancelled_owner)),
+        _resources=_PreparedTurnResources((remaining_owner, cancelled_owner)),
     )
 
     with pytest.raises(RuntimeError, match="prepared Turn cleanup failed"):
         await prepared.aclose()
     with pytest.raises(RuntimeError, match="prepared Turn cleanup failed"):
         await prepared.aclose()
-    assert operations == ["cancelled", "remaining"]
+    # The successful owner is not repeated; only the canceled owner remains
+    # retryable for the second cleanup attempt.
+    assert operations == ["cancelled", "remaining", "cancelled"]
 
 
 @pytest.mark.asyncio
 async def test_capability_preparation_is_bounded_by_turn_deadline_and_releases_environment() -> None:
     import asyncio
 
+    from fleet_rlm.attachments.models import PreparedAttachments
+    from fleet_rlm.chat.preparation import DefaultRunPreparer, RunEnvironment, RunPreparationTimeoutError
     from fleet_rlm.chat.run_lifecycle import ClaimedRun, _RunClaimToken
-    from fleet_rlm.chat.run_preparation import DefaultRunPreparer, RunEnvironment, RunPreparationTimeoutError
-    from fleet_rlm.files.models import PreparedAttachments
-    from fleet_rlm.rlm.dspy_contract import RLMOptions
-    from fleet_rlm.rlm.model_bundle import RLMModelBundle
+    from fleet_rlm.rlm.program import RLMModelBundle, RLMOptions
     from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
 
     released = False
@@ -205,11 +205,10 @@ async def test_capability_preparation_is_bounded_by_turn_deadline_and_releases_e
 
 @pytest.mark.asyncio
 async def test_preparation_failure_removes_staged_run_bytes_but_not_session_workspace() -> None:
+    from fleet_rlm.attachments.models import AttachmentRef, PreparedAttachments, StagedAttachment
+    from fleet_rlm.chat.preparation import DefaultRunPreparer, RunEnvironment
     from fleet_rlm.chat.run_lifecycle import ClaimedRun, _RunClaimToken
-    from fleet_rlm.chat.run_preparation import DefaultRunPreparer, RunEnvironment
-    from fleet_rlm.files.models import AttachmentRef, PreparedAttachments, StagedAttachment
-    from fleet_rlm.rlm.dspy_contract import RLMOptions
-    from fleet_rlm.rlm.model_bundle import RLMModelBundle
+    from fleet_rlm.rlm.program import RLMModelBundle, RLMOptions
     from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
 
     access, run_id, session_id, attachment_id = TurnAccess(uuid4(), uuid4()), uuid4(), uuid4(), uuid4()
@@ -281,12 +280,11 @@ async def test_preparation_failure_removes_staged_run_bytes_but_not_session_work
 
 @pytest.mark.asyncio
 async def test_capsule_validation_failure_releases_all_prepared_resources() -> None:
+    from fleet_rlm.attachments.models import AttachmentRef, PreparedAttachments, StagedAttachment
+    from fleet_rlm.chat.preparation import DefaultRunPreparer, RunEnvironment
     from fleet_rlm.chat.run_lifecycle import ClaimedRun, _RunClaimToken
-    from fleet_rlm.chat.run_preparation import DefaultRunPreparer, RunEnvironment
-    from fleet_rlm.files.models import AttachmentRef, PreparedAttachments, StagedAttachment
-    from fleet_rlm.rlm.context import RLMExecutionSpec
-    from fleet_rlm.rlm.dspy_contract import RLMOptions
-    from fleet_rlm.rlm.model_bundle import RLMModelBundle
+    from fleet_rlm.rlm.program import RLMModelBundle, RLMOptions
+    from fleet_rlm.rlm.runtime import RLMExecutionSpec
     from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
 
     attachment_id, run_id, session_id = uuid4(), uuid4(), uuid4()
@@ -434,7 +432,7 @@ async def test_prelude_heartbeats_are_transient_repeat_at_cadence_and_stop_when_
             self.open_calls = 0
 
         def open_owned(self, _command):
-            from fleet_rlm.chat.turn_coordinator import OpenedTurnStream
+            from fleet_rlm.chat.turn_runtime import OpenedTurnStream
 
             self.open_calls += 1
 
@@ -473,7 +471,7 @@ async def test_prelude_emits_once_before_instant_open_and_failure_maps_to_error_
 
     class Coordinator:
         def open_owned(self, _command):
-            from fleet_rlm.chat.turn_coordinator import OpenedTurnStream
+            from fleet_rlm.chat.turn_runtime import OpenedTurnStream
 
             async def fail():
                 raise RunNotFoundError("claim says no")
@@ -496,11 +494,11 @@ async def test_preparation_cancel_projects_single_abort_frame() -> None:
     from types import SimpleNamespace
 
     from fleet_rlm.api.routes.turns import create_turn
-    from fleet_rlm.chat.run_preparation import RunPreparationCancelledError
+    from fleet_rlm.chat.preparation import RunPreparationCancelledError
 
     class Coordinator:
         def open_owned(self, _command):
-            from fleet_rlm.chat.turn_coordinator import OpenedTurnStream
+            from fleet_rlm.chat.turn_runtime import OpenedTurnStream
 
             async def fail():
                 raise RunPreparationCancelledError("Turn cancelled")
@@ -520,11 +518,11 @@ async def test_disconnect_before_open_resolves_settles_cancelled_and_persists_to
     from uuid import uuid4
 
     from fleet_rlm.api.routes.turns import create_turn
-    from fleet_rlm.chat.run_cleanup import RunCleanupSupervisor
     from fleet_rlm.chat.run_lifecycle import RunLifecycleService
-    from fleet_rlm.chat.turn_coordinator import TurnCoordinator
+    from fleet_rlm.chat.turn_runtime import TurnRuntime
     from fleet_rlm.persistence.repositories import InMemoryRunStateStore, InMemorySessionCatalog
     from fleet_rlm.rlm.events import EventRecorder, RunStarted, RuntimeEvent
+    from fleet_rlm.runtime.cleanup import RunCleanupSupervisor
     from fleet_rlm.sessions.models import TurnAccess
 
     access = TurnAccess(uuid4(), uuid4())
@@ -581,7 +579,7 @@ async def test_disconnect_before_open_resolves_settles_cancelled_and_persists_to
         def stream(self, _execution):
             return Stream()
 
-    coordinator = TurnCoordinator(
+    coordinator = TurnRuntime(
         lifecycle=RunLifecycleService(store, max_artifact_bytes=1024),
         preparation=Preparation(),
         runner=Runner(),

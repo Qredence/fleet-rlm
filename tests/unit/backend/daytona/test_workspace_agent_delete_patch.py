@@ -45,7 +45,7 @@ def _sandbox() -> tuple[SimpleNamespace, LocalProcess]:
 
 
 def _run(tmp_path: Path, sandbox: SimpleNamespace, operation: str, relative: str, **overrides: object):
-    from fleet_rlm.daytona.workspace_agent import run_workspace_agent
+    from fleet_rlm.daytona.workspace_agent.client import run_workspace_agent
 
     volume_root, root = _layout(tmp_path)
     arguments = {
@@ -89,7 +89,7 @@ def _write(tmp_path: Path, relative: str, content: bytes) -> dict[str, object]:
 
 
 def test_delete_and_patch_params_are_encoded_in_the_handler_request() -> None:
-    from fleet_rlm.daytona.workspace_agent import build_workspace_agent_code
+    from fleet_rlm.daytona.workspace_agent.protocol import build_workspace_agent_code
 
     base = {
         "volume_root": "/home/daytona/fleet",
@@ -142,7 +142,7 @@ def test_delete_non_empty_directory_conflicts(tmp_path: Path) -> None:
     (directory / "kept.txt").write_text("kept", encoding="utf-8")
     sandbox, _process = _sandbox()
 
-    from fleet_rlm.files.workspace_models import WorkspaceConflictError
+    from fleet_rlm.daytona.workspace_agent.protocol import WorkspaceAgentConflictError as WorkspaceConflictError
 
     with pytest.raises(WorkspaceConflictError) as excinfo:
         _run(tmp_path, sandbox, "delete", "notes")
@@ -185,7 +185,7 @@ def test_delete_with_matching_checksum_succeeds_and_mismatch_conflicts(tmp_path:
     _write(tmp_path, "note.txt", b"checksum me")
     sandbox, _process = _sandbox()
 
-    from fleet_rlm.files.workspace_models import WorkspaceConflictError
+    from fleet_rlm.daytona.workspace_agent.protocol import WorkspaceAgentConflictError as WorkspaceConflictError
 
     with pytest.raises(WorkspaceConflictError) as excinfo:
         _run(tmp_path, sandbox, "delete", "note.txt", expected_sha256="0" * 64)
@@ -203,7 +203,7 @@ def test_delete_checksum_precondition_on_directory_conflicts(tmp_path: Path) -> 
     directory.mkdir()
     sandbox, _process = _sandbox()
 
-    from fleet_rlm.files.workspace_models import WorkspaceConflictError
+    from fleet_rlm.daytona.workspace_agent.protocol import WorkspaceAgentConflictError as WorkspaceConflictError
 
     with pytest.raises(WorkspaceConflictError) as excinfo:
         _run(tmp_path, sandbox, "delete", "notes", expected_sha256="f" * 64)
@@ -227,7 +227,7 @@ def test_patch_requires_exactly_one_occurrence(tmp_path: Path) -> None:
     _write(tmp_path, "note.txt", b"dup dup")
     sandbox, _process = _sandbox()
 
-    from fleet_rlm.files.workspace_models import WorkspaceConflictError
+    from fleet_rlm.daytona.workspace_agent.protocol import WorkspaceAgentConflictError as WorkspaceConflictError
 
     with pytest.raises(WorkspaceConflictError) as ambiguous:
         _run(tmp_path, sandbox, "patch", "note.txt", content_b64=_patch_payload("dup", "x"))
@@ -245,7 +245,7 @@ def test_patch_enforces_the_checksum_precondition(tmp_path: Path) -> None:
     _write(tmp_path, "note.txt", b"hello world")
     sandbox, _process = _sandbox()
 
-    from fleet_rlm.files.workspace_models import WorkspaceConflictError
+    from fleet_rlm.daytona.workspace_agent.protocol import WorkspaceAgentConflictError as WorkspaceConflictError
 
     with pytest.raises(WorkspaceConflictError) as excinfo:
         _run(
@@ -354,7 +354,7 @@ def test_patch_composes_and_falls_through_the_publish_machinery(
 def test_patch_read_is_identity_pinned() -> None:
     """The patch branch reuses the (dev, ino, size) identity pin over an
     O_RDONLY handle, matching the memory_edit/append read discipline."""
-    from fleet_rlm.daytona.workspace_agent import build_workspace_agent_code
+    from fleet_rlm.daytona.workspace_agent.protocol import build_workspace_agent_code
 
     code = build_workspace_agent_code(
         volume_root="/home/daytona/fleet",
@@ -393,7 +393,7 @@ def test_guarded_delete_symlink_and_fifo_fail_closed(tmp_path: Path) -> None:
 
 
 def test_guarded_delete_locks_and_revalidates_the_exact_compared_revision() -> None:
-    from fleet_rlm.daytona.workspace_agent import build_workspace_agent_code
+    from fleet_rlm.daytona.workspace_agent.protocol import build_workspace_agent_code
 
     code = build_workspace_agent_code(
         volume_root="/home/daytona/fleet",

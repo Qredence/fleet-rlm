@@ -218,9 +218,9 @@ async def test_prepare_host_capabilities_installs_preloaded_skill_resources() ->
 
     from fleet_rlm.chat.capability_preparation import prepare_host_capabilities
     from fleet_rlm.chat.run_lifecycle import ClaimedRun, _RunClaimToken
-    from fleet_rlm.files.workspace_models import UNAVAILABLE_WORKSPACE_CAPABILITY
     from fleet_rlm.sessions.models import HistoryMessage, SessionHistory, TurnAccess, TurnInput
     from fleet_rlm.skills.models import SkillSelectionRef
+    from fleet_rlm.workspace.models import UNAVAILABLE_WORKSPACE_CAPABILITY
 
     async def not_cancelled() -> bool:
         return False

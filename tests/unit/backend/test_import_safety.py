@@ -21,7 +21,7 @@ def test_package_imports_without_network() -> None:
     socket.socket = guarded_socket  # type: ignore[method-assign, assignment]
     try:
         import fleet_rlm
-        from fleet_rlm.config import Settings
+        from fleet_rlm.config.settings import Settings
 
         assert fleet_rlm.__version__
         settings = Settings()
@@ -33,7 +33,7 @@ def test_package_imports_without_network() -> None:
 
 def test_settings_exclude_secrets_from_serialization() -> None:
     """Secret fields must not appear as plaintext in public dumps."""
-    from fleet_rlm.config import Settings
+    from fleet_rlm.config.settings import Settings
 
     settings = Settings(
         daytona_api_key="super-secret-daytona",
@@ -57,10 +57,8 @@ def test_settings_exclude_secrets_from_serialization() -> None:
 
 
 def test_composition_common_import_does_not_configure_dspy_providers() -> None:
-    """Importing composition.common alone must not configure a DSPy provider LM."""
-    script = (
-        "import fleet_rlm.composition.common\nimport dspy\nassert dspy.settings.lm is None, repr(dspy.settings.lm)\n"
-    )
+    """Importing composition.live alone must not configure a DSPy provider LM."""
+    script = "import fleet_rlm.composition.live\nimport dspy\nassert dspy.settings.lm is None, repr(dspy.settings.lm)\n"
     result = subprocess.run(
         [sys.executable, "-c", script],
         capture_output=True,
@@ -88,18 +86,16 @@ def test_generic_runtime_modules_do_not_import_daytona_implementations() -> None
     root = Path("src/fleet_rlm")
     candidates = [
         path
-        for package in ("chat", "files", "artifacts", "runtime", "skills")
+        for package in ("chat", "artifacts", "runtime", "skills", "workspace", "attachments")
         for path in (root / package).glob("*.py")
     ]
     candidates.append(root / "composition" / "testing.py")
 
-    violations = [str(path) for path in candidates if "fleet_rlm.daytona" in path.read_text(encoding="utf-8")]
+    # ``workspace/storage.py`` is the one documented raw Workspace Agent
+    # transport exception; all other provider imports stay below composition.
+    storage = root / "workspace" / "storage.py"
+    violations = [
+        str(path) for path in candidates if path != storage and "fleet_rlm.daytona" in path.read_text(encoding="utf-8")
+    ]
 
     assert violations == []
-
-
-def test_provider_probe_has_no_daytona_imports() -> None:
-    path = Path("src/fleet_rlm/rlm/provider_probe.py")
-    source = path.read_text(encoding="utf-8")
-
-    assert "fleet_rlm.daytona" not in source

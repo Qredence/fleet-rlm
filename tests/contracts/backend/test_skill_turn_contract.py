@@ -17,14 +17,13 @@ from fastapi.testclient import TestClient
 from fleet_rlm.api.errors import install_error_handlers
 from fleet_rlm.api.routes.turns import router as turns_router
 from fleet_rlm.api.schemas import CreateTurnRequest
+from fleet_rlm.attachments.models import AttachmentRef, PreparedAttachments, StagedAttachment
 from fleet_rlm.chat.commands import OpenTurnCommand
 from fleet_rlm.chat.run_lifecycle import ClaimedRun, _RunClaimToken
 from fleet_rlm.composition.inventory import RuntimeInventory
-from fleet_rlm.config import Settings
-from fleet_rlm.files.models import AttachmentRef, PreparedAttachments, StagedAttachment
-from fleet_rlm.rlm.dspy_contract import RLMOptions
+from fleet_rlm.config.settings import Settings
 from fleet_rlm.rlm.events import EventRecorder, RuntimeEvent
-from fleet_rlm.rlm.model_bundle import RLMModelBundle
+from fleet_rlm.rlm.program import RLMModelBundle, RLMOptions
 from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
 from fleet_rlm.skills.catalog import SkillCatalog, build_bundled_skill_catalog, stable_skill_id
 from fleet_rlm.skills.errors import InvalidSkillSelectionError
@@ -51,7 +50,7 @@ class _Coordinator:
         self.error = error
 
     def open_owned(self, command: OpenTurnCommand):
-        from fleet_rlm.chat.turn_coordinator import OpenedTurnStream
+        from fleet_rlm.chat.turn_runtime import OpenedTurnStream
 
         self.command = command
         if self.error is not None:
@@ -68,7 +67,7 @@ def _turn_client(coordinator: _Coordinator) -> TestClient:
     app = FastAPI()
     app.state.settings = Settings()
     app.state.composition_ready = True
-    app.state.runtime_inventory = RuntimeInventory(turn_coordinator=coordinator)
+    app.state.runtime_inventory = RuntimeInventory(turn_runtime=coordinator)
     install_error_handlers(app)
     app.include_router(turns_router)
     return TestClient(app)
@@ -203,8 +202,8 @@ async def test_private_progressive_tools_preload_exact_selection_and_keep_events
 
 @pytest.mark.asyncio
 async def test_progressive_resource_requires_load_and_daytona_preparation_is_provider_free() -> None:
-    from fleet_rlm.config import Settings
-    from fleet_rlm.daytona.run_environment import _LiveCapabilityPreparer
+    from fleet_rlm.config.settings import Settings
+    from fleet_rlm.runtime.daytona.run_environment import _LiveCapabilityPreparer
     from fleet_rlm.skills.tools import SkillToolHost
 
     catalog = _catalog()
@@ -327,7 +326,7 @@ async def test_data_analysis_signature_and_report_builder_selection_use_host_too
 @pytest.mark.asyncio
 async def test_deterministic_composition_runs_data_analysis_signature() -> None:
     from fleet_rlm.composition.testing import DeterministicTurnPreparation, TestingRLMFactory
-    from fleet_rlm.rlm.runner import RLMRunner
+    from fleet_rlm.rlm.runtime import RLMRunner
 
     class NoAttachments:
         async def prepare_run(self, access, attachment_ids, run, sink) -> PreparedAttachments:
@@ -356,9 +355,9 @@ async def test_deterministic_composition_runs_data_analysis_signature() -> None:
 
 @pytest.mark.asyncio
 async def test_daytona_report_builder_workspace_selection_keeps_workspace_host_owned(monkeypatch) -> None:
-    from fleet_rlm.config import Settings
-    from fleet_rlm.daytona.run_environment import _LiveCapabilityPreparer
-    from fleet_rlm.files.workspace_models import WorkspaceEntry, WorkspaceListResult, WorkspaceTextPage
+    from fleet_rlm.config.settings import Settings
+    from fleet_rlm.runtime.daytona.run_environment import _LiveCapabilityPreparer
+    from fleet_rlm.workspace.models import WorkspaceEntry, WorkspaceListResult, WorkspaceTextPage
 
     class FakeWorkspace:
         last_warnings: tuple[dict[str, object], ...] = ()
@@ -405,7 +404,7 @@ async def test_daytona_report_builder_workspace_selection_keeps_workspace_host_o
 
     fake_workspace = FakeWorkspace()
     monkeypatch.setattr(
-        "fleet_rlm.daytona.workspace_fs.DaytonaSessionWorkspaceFS",
+        "fleet_rlm.workspace.storage.AgentStorageSession",
         lambda *_args, **_kwargs: fake_workspace,
     )
     catalog = _catalog()

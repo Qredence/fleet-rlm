@@ -7,8 +7,8 @@ from pathlib import Path
 
 import pytest
 
-from fleet_rlm.config import FleetConfigurationError, Settings
-from fleet_rlm.config_policy import ConfigPolicyService, PolicyConflictError
+from fleet_rlm.config.policy import ConfigPolicyService, PolicyConflictError
+from fleet_rlm.config.settings import FleetConfigurationError, Settings
 
 
 def _service(tmp_path: Path) -> tuple[ConfigPolicyService, Path]:
@@ -176,8 +176,8 @@ def test_autonomous_memory_categories_reject_invalid_entries(tmp_path: Path) -> 
 
 
 def test_policy_inventory_fields_match_toml_schema() -> None:
-    from fleet_rlm.config import _ROLE_KEYS, _TABLE_KEYS
-    from fleet_rlm.config_policy import _FIELDS
+    from fleet_rlm.config.loader import _ROLE_KEYS, _TABLE_KEYS
+    from fleet_rlm.config.policy import _FIELDS
 
     for field in _FIELDS:
         parts = field.path.split(".")
@@ -192,8 +192,8 @@ def test_policy_inventory_fields_match_toml_schema() -> None:
 
 
 def test_policy_inventory_covers_flattened_non_secret_settings(tmp_path: Path) -> None:
-    from fleet_rlm.config import _deep_merge, _flatten_policy, _read_policy_document
-    from fleet_rlm.config_policy import _FIELDS
+    from fleet_rlm.config.loader import _deep_merge, _flatten_policy, _read_policy_document
+    from fleet_rlm.config.policy import _FIELDS
 
     policy = tmp_path / "fleet.toml"
     shutil.copy(Path("config/fleet.toml"), policy)
@@ -205,7 +205,7 @@ def test_policy_inventory_covers_flattened_non_secret_settings(tmp_path: Path) -
     assert missing == [], f"editable Settings fields missing from ConfigPolicyService: {missing}"
     # Environment references resolve into real Settings fields and stay
     # operator-editable only through their ``*_env`` TOML paths.
-    from fleet_rlm.config import config_field_specs
+    from fleet_rlm.config.settings import config_field_specs
 
     editable_paths = {field.path for field in _FIELDS}
     reference_paths = {

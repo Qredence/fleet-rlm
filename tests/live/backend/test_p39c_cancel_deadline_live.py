@@ -34,12 +34,12 @@ from fastapi.testclient import TestClient
 
 from fleet_rlm.api.local_scope import LocalScope
 from fleet_rlm.app import create_app
-from fleet_rlm.config import Settings
+from fleet_rlm.config.settings import Settings
 from fleet_rlm.daytona import recursive_child_runtime
-from fleet_rlm.daytona.http_broker import DaytonaHttpToolBroker
+from fleet_rlm.daytona.broker import DaytonaHttpToolBroker
 from fleet_rlm.daytona.sandbox_lease import SandboxLeaseReceipt
 from fleet_rlm.daytona.session_manager import get_active_lease_registry
-from fleet_rlm.rlm.model_bundle import RLMModelBundle
+from fleet_rlm.rlm.program import RLMModelBundle
 from fleet_rlm.sessions.models import TurnAccess
 from tests.live.backend._database import upgrade_to_head
 from tests.live.backend._p35d_evidence import candidate_identity
@@ -397,7 +397,9 @@ def test_live_cancel_with_in_flight_child_and_queued_sibling(
             assert receipt["admission_released_after"] == "confirmed_cleanup"
             assert receipt["clean"] is True
 
-            _wait_for_admission_baseline(resources, session_id, permits=settings.max_active_daytona_leases)
+            _wait_for_admission_baseline(
+                resources, session_id, permits=settings.max_active_daytona_leases, portal=portal
+            )
             assert get_active_lease_registry().holder(session_id) is None
             absence = portal.call(_all_absent, resources, list(evidence.sandbox_ids))
             assert all(absence.values())
@@ -539,7 +541,9 @@ def test_live_deadline_with_in_flight_child_and_queued_sibling(
             assert receipt["admission_released"] is True
             assert receipt["clean"] is True
 
-            _wait_for_admission_baseline(resources, session_id, permits=settings.max_active_daytona_leases)
+            _wait_for_admission_baseline(
+                resources, session_id, permits=settings.max_active_daytona_leases, portal=portal
+            )
             assert get_active_lease_registry().holder(session_id) is None
             absence = portal.call(_all_absent, resources, list(evidence.sandbox_ids))
             assert all(absence.values())

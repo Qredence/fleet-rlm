@@ -8,7 +8,7 @@ operators can tell *why* Memory context fell back.
 
 ## Where diagnostics appear
 
-- **Logs**: `WARNING` records from `fleet_rlm.daytona.memory_diagnostics`
+- **Logs**: `WARNING` records from `fleet_rlm.workspace.memory`
   with the pattern
   `Workspace Memory degraded: category=… operation=… runtime=… cause_type=… outcome=…`.
 - **MLflow Turn traces** (when tracing is enabled by the selected TOML

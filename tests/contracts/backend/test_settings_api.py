@@ -8,11 +8,11 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 from fleet_rlm.composition.testing import create_testing_app
-from fleet_rlm.config import Settings
+from fleet_rlm.config.settings import Settings
 
 
 def test_settings_policy_is_loopback_only_and_revision_checked(monkeypatch, tmp_path: Path) -> None:
-    import fleet_rlm.config as config
+    import fleet_rlm.config.loader as config
 
     policy = tmp_path / "fleet.toml"
     shutil.copy(Path("config/fleet.toml"), policy)

@@ -38,7 +38,7 @@ def test_dspy_rlm_skill_defines_recursive_not_retrieval_language_model() -> None
     assert "Retrieval Language Model" in resource.content
     assert "dspy.Retrieve" in resource.content
     assert "Turn output is too large" in resource.content
-    assert "active Fleet Signature" in resource.content
+    assert "`FleetRLMSignature`" in resource.content
     assert "every required output field" in resource.content
     assert "`max_iters`" in resource.content
     assert "| Fleet iteration budget | `max_iters` | `max_iters` |" in resource.content

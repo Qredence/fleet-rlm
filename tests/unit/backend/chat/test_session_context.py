@@ -12,13 +12,11 @@ import pytest
 
 @pytest.mark.asyncio
 async def test_prepared_rlm_kwargs_bound_a_large_session_to_recent_previews() -> None:
+    from fleet_rlm.attachments.models import PreparedAttachments
+    from fleet_rlm.chat.preparation import DefaultRunPreparer, RunEnvironment
     from fleet_rlm.chat.run_lifecycle import ClaimedRun, _RunClaimToken
-    from fleet_rlm.chat.run_preparation import DefaultRunPreparer, RunEnvironment
-    from fleet_rlm.files.models import PreparedAttachments
-    from fleet_rlm.rlm.context import RLMExecutionSpec
-    from fleet_rlm.rlm.dspy_contract import RLMOptions
-    from fleet_rlm.rlm.model_bundle import RLMModelBundle
-    from fleet_rlm.rlm.runner import RLMRunner
+    from fleet_rlm.rlm.program import RLMModelBundle, RLMOptions
+    from fleet_rlm.rlm.runtime import RLMExecutionSpec, RLMRunner
     from fleet_rlm.sessions.models import HistoryMessage, SessionHistory, TurnAccess, TurnInput
 
     session_id = uuid4()
@@ -126,7 +124,17 @@ async def test_prepared_rlm_kwargs_bound_a_large_session_to_recent_previews() ->
     _events = [event async for event in stream]
 
     assert factory.kwargs is not None
-    assert set(factory.kwargs) == {"request", "session_context", "skill_cards", "attachments"}
+    # P44.3 production wiring: ``history`` is now a first-class RLM input
+    # alongside the existing common fields. The set assertion still names
+    # every input the Runner forwards; the new ``history`` key carries the
+    # canonical committed Session conversation as a ``dspy.History``.
+    assert set(factory.kwargs) == {
+        "request",
+        "session_context",
+        "skill_cards",
+        "attachments",
+        "history",
+    }
     manifest = factory.kwargs["session_context"]
     assert manifest == {
         "session_id": str(session_id),
@@ -150,9 +158,26 @@ async def test_prepared_rlm_kwargs_bound_a_large_session_to_recent_previews() ->
         },
     }
     assert all(len(item["preview"]) <= 320 for item in manifest["recent"])
-    encoded = json.dumps(factory.kwargs)
+    # The bounded payload surface (``session_context``) still does not
+    # embed the full message bodies. The full bodies now live behind the
+    # ``history`` key as a ``dspy.History`` instance, which is the
+    # P44.1 first-class durable conversation and is expected to contain
+    # them by design.
+    bounded_subset = {key: factory.kwargs[key] for key in ("session_context", "skill_cards", "attachments")}
+    encoded = json.dumps(bounded_subset, default=str)
     assert messages[0].content not in encoded
     assert messages[-1].content not in encoded
+    # The canonical committed Session conversation IS the full bodies.
+    history = factory.kwargs["history"]
+    assert type(history) is dspy.History
+    history_messages = list(history.messages)
+    assert history_messages[0]["request"] == messages[0].content
+    # The last paired record is the final user request and its assistant answer.
+    # The test's 100 messages alternate user/assistant; only user→assistant
+    # pairs enter the canonical conversation, so the last request corresponds
+    # to the second-to-last message and the last answer to the last message.
+    assert history_messages[-1]["request"] == messages[-2].content
+    assert history_messages[-1]["answer"] == messages[-1].content
     assert prepared.execution.session.session_context.message_count == 100
     assert not hasattr(prepared.execution, "history")
 

@@ -11,8 +11,9 @@ from typing import Any
 import dspy
 import pytest
 
-from fleet_rlm.daytona import optimization_evaluator as subject
-from fleet_rlm.daytona.optimization_evaluator import (
+from fleet_rlm.daytona.provisioning import DaytonaSandboxSpec
+from fleet_rlm.optimization import daytona as subject
+from fleet_rlm.optimization.daytona import (
     DisposableOptimizationSandboxFactory,
     OptimizationSandboxPolicy,
     OptimizationSandboxPolicyError,
@@ -23,7 +24,6 @@ from fleet_rlm.daytona.optimization_evaluator import (
     StrictEvaluationProof,
     StrictEvaluationRequest,
 )
-from fleet_rlm.daytona.provisioning import DaytonaSandboxSpec
 from fleet_rlm.optimization.evidence import (
     StrictDaytonaProofError,
     StrictDaytonaProofReceipt,
@@ -31,7 +31,7 @@ from fleet_rlm.optimization.evidence import (
     validate_strict_daytona_proof,
 )
 from fleet_rlm.optimization.types import OptimizationRecord
-from fleet_rlm.rlm.dspy_contract import RLMOptions
+from fleet_rlm.rlm.program import RLMOptions
 
 
 @dataclass

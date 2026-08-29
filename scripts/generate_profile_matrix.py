@@ -6,7 +6,11 @@ import argparse
 import sys
 from pathlib import Path
 
-from fleet_rlm.config import ProfileEnvironmentContract, active_profile_contract, load_profile_environment_contracts
+from fleet_rlm.config.loader import (
+    ProfileEnvironmentContract,
+    active_profile_contract,
+    load_profile_environment_contracts,
+)
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 _OUTPUT = _REPO_ROOT / "docs" / "reference" / "profile-matrix.md"

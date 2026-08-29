@@ -6,8 +6,8 @@ from uuid import UUID, uuid4
 
 import pytest
 
-from fleet_rlm.daytona.workspace_gateway import DaytonaWorkspaceVolumeGateway
-from fleet_rlm.files.volume_paths import UnsafePathError
+from fleet_rlm.runtime.daytona.workspace_gateway import DaytonaWorkspaceVolumeGateway
+from fleet_rlm.workspace.paths import UnsafePathError
 
 
 class _FakeFs:

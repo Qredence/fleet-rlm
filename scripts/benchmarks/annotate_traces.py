@@ -1,6 +1,6 @@
 """Annotate persisted ``fleet_turn`` traces with derived aggregate attributes.
 
-Engineering-observability companion to ``fleet_rlm.observability.turn_tracing``.
+Engineering-observability companion to ``fleet_rlm.observability.tracing``.
 Persisted traces carry rich span structure (DSPy autolog LLM/tool spans) but
 only a small fixed set of tags. This script walks persisted traces and stamps
 derived, non-content ``fleet.*`` trace tags so the MLflow UI and

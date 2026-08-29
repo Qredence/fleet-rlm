@@ -18,8 +18,7 @@ async def test_success_validates_and_publishes_before_atomic_commit() -> None:
         RunLifecycleService,
         _RunClaimToken,
     )
-    from fleet_rlm.rlm.dspy_contract import PredictionResult
-    from fleet_rlm.rlm.outcome import RLMOutcome
+    from fleet_rlm.rlm.result import PredictionResult, RLMOutcome
     from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
 
     data = b"{}"
@@ -64,7 +63,7 @@ async def test_success_validates_and_publishes_before_atomic_commit() -> None:
         async def transition_claim(self, claimed, command):
             from fleet_rlm.chat.run_claim import FailClaim
             from fleet_rlm.chat.run_lifecycle import RunFailure
-            from fleet_rlm.rlm.dspy_contract import empty_rlm_usage
+            from fleet_rlm.rlm.result import empty_rlm_usage
 
             assert isinstance(command, FailClaim)
             failure = RunFailure(
@@ -120,8 +119,7 @@ async def test_authority_revocation_after_artifact_publish_rolls_back_before_com
         RunLifecycleService,
         _RunClaimToken,
     )
-    from fleet_rlm.rlm.dspy_contract import PredictionResult
-    from fleet_rlm.rlm.outcome import RLMOutcome
+    from fleet_rlm.rlm.result import PredictionResult, RLMOutcome
     from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
 
     data = b"artifact"
@@ -233,8 +231,7 @@ async def test_authority_revocation_after_artifact_publish_rolls_back_before_com
 async def test_integrity_failure_does_not_publish_and_finalizes_safely() -> None:
     from fleet_rlm.artifacts.models import ArtifactCandidate
     from fleet_rlm.chat.run_lifecycle import ClaimedRun, FailedRunReceipt, RunLifecycleService, _RunClaimToken
-    from fleet_rlm.rlm.dspy_contract import PredictionResult
-    from fleet_rlm.rlm.outcome import RLMOutcome
+    from fleet_rlm.rlm.result import PredictionResult, RLMOutcome
     from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
 
     access, run_id, session_id = TurnAccess(uuid4(), uuid4()), uuid4(), uuid4()
@@ -270,7 +267,7 @@ async def test_integrity_failure_does_not_publish_and_finalizes_safely() -> None
         async def transition_claim(self, claimed, command):
             from fleet_rlm.chat.run_claim import FailClaim
             from fleet_rlm.chat.run_lifecycle import RunFailure
-            from fleet_rlm.rlm.dspy_contract import empty_rlm_usage
+            from fleet_rlm.rlm.result import empty_rlm_usage
 
             assert isinstance(command, FailClaim)
             failure = RunFailure(
@@ -323,8 +320,7 @@ async def test_daytona_success_writes_snapshot_before_commit_and_retains_it() ->
         RunLifecycleService,
         _RunClaimToken,
     )
-    from fleet_rlm.rlm.dspy_contract import PredictionResult
-    from fleet_rlm.rlm.outcome import RLMOutcome
+    from fleet_rlm.rlm.result import PredictionResult, RLMOutcome
     from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
 
     access, run_id, session_id = TurnAccess(uuid4(), uuid4()), uuid4(), uuid4()
@@ -353,7 +349,7 @@ async def test_daytona_success_writes_snapshot_before_commit_and_retains_it() ->
         async def transition_claim(self, claimed, command):
             from fleet_rlm.chat.run_claim import FailClaim
             from fleet_rlm.chat.run_lifecycle import RunFailure
-            from fleet_rlm.rlm.dspy_contract import empty_rlm_usage
+            from fleet_rlm.rlm.result import empty_rlm_usage
 
             assert isinstance(command, FailClaim)
             failure = RunFailure(
@@ -405,8 +401,7 @@ async def test_commit_failure_removes_snapshot_logs_stage_and_keeps_public_failu
         RunLifecycleService,
         _RunClaimToken,
     )
-    from fleet_rlm.rlm.dspy_contract import PredictionResult
-    from fleet_rlm.rlm.outcome import RLMOutcome
+    from fleet_rlm.rlm.result import PredictionResult, RLMOutcome
     from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
 
     access, run_id, session_id = TurnAccess(uuid4(), uuid4()), uuid4(), uuid4()
@@ -449,7 +444,7 @@ async def test_commit_failure_removes_snapshot_logs_stage_and_keeps_public_failu
         async def transition_claim(self, claimed, command):
             from fleet_rlm.chat.run_claim import FailClaim
             from fleet_rlm.chat.run_lifecycle import RunFailure
-            from fleet_rlm.rlm.dspy_contract import empty_rlm_usage
+            from fleet_rlm.rlm.result import empty_rlm_usage
 
             assert isinstance(command, FailClaim)
             failure = RunFailure(
@@ -544,7 +539,7 @@ async def test_non_success_never_writes_result_snapshot(status: str) -> None:
         RunLifecycleService,
         _RunClaimToken,
     )
-    from fleet_rlm.rlm.outcome import RLMOutcome
+    from fleet_rlm.rlm.result import RLMOutcome
     from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
 
     access, run_id, session_id = TurnAccess(uuid4(), uuid4()), uuid4(), uuid4()
@@ -566,7 +561,7 @@ async def test_non_success_never_writes_result_snapshot(status: str) -> None:
         async def transition_claim(self, claimed, command):
             from fleet_rlm.chat.run_claim import FailClaim
             from fleet_rlm.chat.run_lifecycle import RunFailure
-            from fleet_rlm.rlm.dspy_contract import empty_rlm_usage
+            from fleet_rlm.rlm.result import empty_rlm_usage
 
             assert isinstance(command, FailClaim)
             failure = RunFailure(
@@ -606,7 +601,7 @@ async def test_non_success_removes_run_local_artifact_candidate_bytes(status: st
         RunLifecycleService,
         _RunClaimToken,
     )
-    from fleet_rlm.rlm.outcome import RLMOutcome
+    from fleet_rlm.rlm.result import RLMOutcome
     from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
 
     access, run_id, session_id = TurnAccess(uuid4(), uuid4()), uuid4(), uuid4()
@@ -643,7 +638,7 @@ async def test_non_success_removes_run_local_artifact_candidate_bytes(status: st
         async def transition_claim(self, claimed, command):
             from fleet_rlm.chat.run_claim import FailClaim
             from fleet_rlm.chat.run_lifecycle import RunFailure
-            from fleet_rlm.rlm.dspy_contract import empty_rlm_usage
+            from fleet_rlm.rlm.result import empty_rlm_usage
 
             assert isinstance(command, FailClaim)
             failure = RunFailure(
@@ -685,10 +680,9 @@ async def test_memory_candidate_promotion_happens_after_atomic_commit_and_fails_
 
     from fleet_rlm.chat.post_commit_memory import OwnedPostCommitMemoryPromotion
     from fleet_rlm.chat.run_lifecycle import ClaimedRun, CommittedTurnReceipt, RunLifecycleService, _RunClaimToken
-    from fleet_rlm.files.memory_candidates import MemoryCandidate
-    from fleet_rlm.rlm.dspy_contract import PredictionResult
-    from fleet_rlm.rlm.outcome import RLMOutcome
+    from fleet_rlm.rlm.result import PredictionResult, RLMOutcome
     from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
+    from fleet_rlm.workspace.memory import MemoryCandidate
 
     run_id, session_id = uuid4(), uuid4()
     access = TurnAccess(uuid4(), uuid4())
@@ -746,10 +740,9 @@ async def test_memory_candidate_promotion_never_runs_after_a_commit_failure() ->
 
     from fleet_rlm.chat.post_commit_memory import OwnedPostCommitMemoryPromotion
     from fleet_rlm.chat.run_lifecycle import ClaimedRun, FailedRunReceipt, RunLifecycleService, _RunClaimToken
-    from fleet_rlm.files.memory_candidates import MemoryCandidate
-    from fleet_rlm.rlm.dspy_contract import PredictionResult
-    from fleet_rlm.rlm.outcome import RLMOutcome
+    from fleet_rlm.rlm.result import PredictionResult, RLMOutcome
     from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
+    from fleet_rlm.workspace.memory import MemoryCandidate
 
     run_id, session_id = uuid4(), uuid4()
 
@@ -813,10 +806,9 @@ async def test_memory_candidate_promotion_trace_never_copies_learning(monkeypatc
 
     from fleet_rlm.chat.post_commit_memory import OwnedPostCommitMemoryPromotion
     from fleet_rlm.chat.run_lifecycle import ClaimedRun, CommittedTurnReceipt, RunLifecycleService, _RunClaimToken
-    from fleet_rlm.files.memory_candidates import MemoryCandidate, MemoryCandidatePromotionResult
-    from fleet_rlm.rlm.dspy_contract import PredictionResult
-    from fleet_rlm.rlm.outcome import RLMOutcome
+    from fleet_rlm.rlm.result import PredictionResult, RLMOutcome
     from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
+    from fleet_rlm.workspace.memory import MemoryCandidate, MemoryCandidatePromotionResult
 
     run_id, session_id = uuid4(), uuid4()
 
@@ -889,7 +881,7 @@ async def test_memory_candidate_promotion_is_unreachable_for_failure_resolution(
 
     from fleet_rlm.chat.post_commit_memory import OwnedPostCommitMemoryPromotion
     from fleet_rlm.chat.run_lifecycle import ClaimedRun, RunFailure, RunLifecycleService, _RunClaimToken
-    from fleet_rlm.rlm.dspy_contract import empty_rlm_usage
+    from fleet_rlm.rlm.result import empty_rlm_usage
     from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
 
     run_id, session_id = uuid4(), uuid4()

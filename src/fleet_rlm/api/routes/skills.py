@@ -10,7 +10,7 @@ from fastapi import APIRouter, Query
 from fleet_rlm.api.dependencies import LocalScopeDep, SkillCatalogDep
 from fleet_rlm.api.errors import http_error
 from fleet_rlm.api.schemas import SkillCardResponse
-from fleet_rlm.posthog_client import get_client, get_distinct_id
+from fleet_rlm.observability.posthog import get_client, get_distinct_id
 from fleet_rlm.skills.models import SkillCard
 
 router = APIRouter(tags=["skills"])

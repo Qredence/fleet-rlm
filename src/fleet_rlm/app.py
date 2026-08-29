@@ -10,9 +10,11 @@ from typing import TYPE_CHECKING, Protocol
 
 from fastapi import FastAPI
 
+from fleet_rlm.observability.posthog import init_posthog, shutdown_posthog
+
 from . import __version__
-from .config import Settings, configure_logging, load_runtime_settings
-from .posthog_client import init_posthog, shutdown_posthog
+from .config.loader import configure_logging, load_runtime_settings
+from .config.settings import Settings
 
 if TYPE_CHECKING:
     from fleet_rlm.composition.inventory import RuntimeDatabaseLifecycle, RuntimeInventory
@@ -89,19 +91,61 @@ async def _local_db_lifespan(
         run_state = inventory.run_state_store
         reconcile = getattr(run_state, "reconcile_settling", None)
         if callable(reconcile):
-            from fleet_rlm.composition.common import no_provider_recovery_fence
+            from fleet_rlm.composition.inventory import no_provider_recovery_fence
 
             await reconcile(no_provider_recovery_fence)
         yield
     finally:
         detached = clear_runtime_inventory(app)
+        shutdown_error: BaseException | None = None
+
         cleanup = getattr(detached, "run_cleanup_supervisor", None)
         if cleanup is not None:
-            await cleanup.shutdown(drain_seconds=30)
+            try:
+                await cleanup.shutdown(drain_seconds=30)
+            except BaseException as exc:
+                shutdown_error = exc
+
+        runner = getattr(detached, "runner", None)
+        close_runner = getattr(runner, "aclose", None)
+        if callable(close_runner):
+            try:
+                await close_runner(drain_seconds=30)
+            except BaseException as exc:
+                if shutdown_error is None:
+                    shutdown_error = exc
+
+        runtime_registry = getattr(detached, "session_runtime_registry", None)
+        if runtime_registry is not None:
+            try:
+                await runtime_registry.shutdown(drain_seconds=30)
+            except BaseException as exc:
+                if shutdown_error is None:
+                    shutdown_error = exc
+
+        preparation = getattr(detached, "run_preparation", None)
+        close_preparation = getattr(preparation, "aclose", None)
+        if callable(close_preparation):
+            try:
+                await close_preparation()
+            except BaseException as exc:
+                if shutdown_error is None:
+                    shutdown_error = exc
+
         if detached is not None:
-            await detached.database.aclose()
+            try:
+                await detached.database.aclose()
+            except BaseException as exc:
+                if shutdown_error is None:
+                    shutdown_error = exc
         if engine is not None and (detached is None or detached.database.engine is not engine):
-            await engine.dispose()
+            try:
+                await engine.dispose()
+            except BaseException as exc:
+                if shutdown_error is None:
+                    shutdown_error = exc
+        if shutdown_error is not None:
+            raise shutdown_error
 
 
 def create_app(
@@ -123,7 +167,7 @@ def create_app(
     # The certified-DSPy runtime guard runs before any other startup work so a
     # rejected runtime can never reach provider, database, or Daytona resource
     # construction, nor bind a public listener.
-    from fleet_rlm.rlm.dspy_contract import assert_dspy_version
+    from fleet_rlm.rlm._dspy_compat import assert_dspy_version
 
     assert_dspy_version()
     _reject_retired_environment_variables()
@@ -141,7 +185,7 @@ def create_app(
         Raises:
             RuntimeError: If the configured runtime environment is unsupported.
         """
-        from fleet_rlm.observability.mlflow_runtime import MLflowRuntime
+        from fleet_rlm.observability.mlflow import MLflowRuntime
 
         settings_obj: Settings = app.state.settings
         mlflow_runtime = app.state.mlflow_runtime
@@ -190,7 +234,7 @@ def create_app(
     app.state.settings = resolved
     app.state.composition_ready = False
     app.state.runtime_inventory = None
-    from fleet_rlm.observability.mlflow_runtime import MLflowRuntime
+    from fleet_rlm.observability.mlflow import MLflowRuntime
 
     app.state.mlflow_runtime = MLflowRuntime(resolved)
 

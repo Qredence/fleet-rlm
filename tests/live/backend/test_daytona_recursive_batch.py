@@ -16,13 +16,15 @@ import pytest
 from dotenv import load_dotenv
 from fastapi.testclient import TestClient
 
+from fleet_rlm.api.local_scope import LocalScope
 from fleet_rlm.app import create_app
-from fleet_rlm.config import FleetConfigurationError, Settings, active_profile, require_live_execution
+from fleet_rlm.config.loader import active_profile, require_live_execution
+from fleet_rlm.config.settings import FleetConfigurationError, Settings
 from fleet_rlm.daytona import recursive_child_runtime
 from fleet_rlm.daytona.session_manager import get_active_lease_registry
-from fleet_rlm.rlm.lm_factory import has_llm_credentials
-from fleet_rlm.rlm.recursive_calls import RecursiveRLMExecutor
-from fleet_rlm.rlm.tool_observer import ToolEventView
+from fleet_rlm.rlm.events import ToolEventView
+from fleet_rlm.rlm.program import has_llm_credentials
+from fleet_rlm.rlm.recursion import RecursiveRLMExecutor
 from tests.live.backend._database import upgrade_to_head
 from tests.live.backend._p35d_evidence import candidate_identity, write_receipt
 from tests.live.backend.test_phase1_daytona_stream import _strict_cleanup
@@ -42,6 +44,7 @@ class BatchResult(dspy.Signature):
     """Return a multi-field Root result so completion is necessarily typed."""
 
     request: str = dspy.InputField()
+    history: dspy.History = dspy.InputField()
     session_context: dict = dspy.InputField()
     skill_cards: list[dict] = dspy.InputField()
     attachments: list[dict] = dspy.InputField()
@@ -105,7 +108,7 @@ def _load_live_settings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Sett
     if not _live_enabled():
         pytest.skip("Set FLEET_LIVE=1 for the two-child rlm_query_batched canary")
     load_dotenv(_REPO_ROOT / ".env", override=False)
-    import fleet_rlm.config as configuration
+    import fleet_rlm.config.loader as configuration
 
     copied_policy = tmp_path / "batch-fleet.toml"
     target_profile = os.environ.get("FLEET_LIVE_PROFILE", "daytona-recursive")
@@ -279,8 +282,8 @@ def test_daytona_recursive_batch_two_children_through_fastapi(
                         " Do not call rlm_query, do not call llm_query, and do not nest batching."
                         " After the batch returns, in a later iteration call"
                         " verify_batch(results=results) exactly once and require its ok result. Finally"
-                        ' issue exactly one typed SUBMIT(answer="batch complete", evidence="two-child'
-                        ' rlm_query_batched"). Do not retry and do not use extraction fallback.'
+                        " issue exactly one typed SUBMIT with a brief completion answer and evidence='two-child"
+                        " rlm_query_batched'. Do not retry and do not use extraction fallback."
                     ),
                 },
                 headers={"Idempotency-Key": f"daytona-recursive-batch-{uuid4()}"},
@@ -306,6 +309,10 @@ def test_daytona_recursive_batch_two_children_through_fastapi(
             assert child_evidence.peak_observed == 2
             assert child_evidence.cleanups == 2
             assert child_evidence._active == 0
+            runtime = getattr(resources, "runtime", None)
+            close = getattr(runtime, "close_root_session", None)
+            if callable(close):
+                client.portal.call(lambda: close(LocalScope().workspace_id, session_id))
             assert resources.daytona_admission._semaphore._value == settings.max_active_daytona_leases
             assert get_active_lease_registry().holder(session_id) is None
             structured = [chunk for chunk in chunks if chunk.get("type") == "data-structured-result"]

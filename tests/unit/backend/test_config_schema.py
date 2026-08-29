@@ -15,8 +15,9 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-import fleet_rlm.config as config
-import fleet_rlm.config_policy as config_policy
+import fleet_rlm.config.loader as config_loader
+import fleet_rlm.config.policy as config_policy
+import fleet_rlm.config.settings as config
 
 _EXPECTED_INVENTORY: tuple[tuple[str, str, str, str, tuple[str, ...], str | None], ...] = (
     ("application.name", "Application", "Name", "text", (), "app_name"),
@@ -204,18 +205,18 @@ def test_policy_inventory_matches_the_frozen_operator_surface() -> None:
 
 
 def test_derived_table_keys_cover_exactly_the_supported_toml_surface() -> None:
-    document = config._read_policy_document(Path("config/fleet.toml"))
+    document = config_loader._read_policy_document(Path("config/fleet.toml"))
     for scope_name, scope in [("defaults", document.defaults)] + [
         (name, profile) for name, profile in document.profiles.items()
     ]:
         for section_name, section in scope.items():
-            assert section_name in config._TABLE_KEYS, f"{scope_name}.{section_name}"
+            assert section_name in config_loader._TABLE_KEYS, f"{scope_name}.{section_name}"
             for key, value in section.items():
-                assert key in config._TABLE_KEYS[section_name], f"{scope_name}.{section_name}.{key}"
+                assert key in config_loader._TABLE_KEYS[section_name], f"{scope_name}.{section_name}.{key}"
                 if section_name == "llm":
                     assert isinstance(value, dict)
                     for role_key in value:
-                        assert role_key in config._ROLE_KEYS, f"{scope_name}.llm.{key}.{role_key}"
+                        assert role_key in config_loader._ROLE_KEYS, f"{scope_name}.llm.{key}.{role_key}"
 
 
 def test_environment_reference_specs_reference_real_fields_and_follow_naming() -> None:
@@ -318,8 +319,8 @@ def test_committed_policy_loads_every_profile_identically(monkeypatch: pytest.Mo
             flags=re.MULTILINE,
         )
         policy.write_text(updated, encoding="utf-8")
-        monkeypatch.setattr(config, "_CONFIG_PATH", policy)
-        settings = config.load_runtime_settings()
+        monkeypatch.setattr(config_loader, "_CONFIG_PATH", policy)
+        settings = config_loader.load_runtime_settings()
         assert settings.run_environment == "daytona"
         assert settings.root_model and settings.sub_model
 
@@ -332,7 +333,7 @@ def test_required_policy_key_reports_its_settings_field() -> None:
     profile = document["profiles"][document["config"]["default_profile"]]
 
     with pytest.raises(config.FleetConfigurationError, match="turn_timeout_seconds"):
-        config._flatten_policy(config._deep_merge(document["defaults"], profile))
+        config_loader._flatten_policy(config_loader._deep_merge(document["defaults"], profile))
 
 
 def test_absent_optional_policy_keys_fall_back_to_settings_defaults() -> None:
@@ -342,7 +343,7 @@ def test_absent_optional_policy_keys_fall_back_to_settings_defaults() -> None:
     defaults = document["defaults"]
     defaults["rlm"].pop("recursion_max_calls")
 
-    flat = config._flatten_policy(config._deep_merge(defaults, document["profiles"]["daytona"]))
+    flat = config_loader._flatten_policy(config_loader._deep_merge(defaults, document["profiles"]["daytona"]))
 
     assert "rlm_recursion_max_calls" not in flat.settings
     # ``Settings`` owns the fallback default; TOML absence stays absent.

@@ -11,7 +11,8 @@ database lanes remain explicit.
 | Backend unit | `tests/unit/backend/` | domain, adapters, configuration, routes, runtime modules |
 | Script unit | `tests/unit/scripts/` | supported helper behavior |
 | LiteLLM invariant | `tests/unit/test_litellm_invariant.py` | forbids direct application LiteLLM use |
-| Backend contracts | `tests/contracts/backend/` | API, persistence, packaging, composition, boundary contracts |
+| Backend contracts | `tests/contracts/backend/` | API, persistence, composition, and boundary contracts |
+| Packaging/release | `tests/unit/backend/packaging/` | artifact metadata, clean installs, CLI guards, and VCS-free builds |
 | End to end | `tests/e2e/` | canonical local process and request flows |
 | TUI | `tools/fleet-tui/src/tests/`, `tools/fleet-tui/src/tui/tests/` | transport, projection, store, commands, rendering, terminal lifecycle |
 | Database | tests marked `db` | explicit configured database behavior |
@@ -26,7 +27,10 @@ make check
 
 The default pytest targets mask local live `FLEET_*` credentials so `.env`
 cannot silently select provider composition. They install deterministic private
-composition where required and run with at most two xdist workers by default.
+composition where required, run with at most two xdist workers by default, and
+use xdist `loadfile` scheduling to keep module-scoped fixtures together. The
+packaging/release matrix is intentionally excluded because it creates isolated
+virtual environments and artifacts; run it explicitly with `make test-packaging`.
 
 Package-wide coverage is enforced separately over the same canonical non-live
 corpus:
@@ -46,7 +50,7 @@ substitute for the opt-in live Daytona durability checks below.
 - Ruff lint and format checks;
 - `ty` for `src`;
 - backend/script/LiteLLM/contract/end-to-end tests excluding live,
-  benchmark, and database markers;
+  benchmark, database, and packaging markers;
 - `make api-check` for OpenAPI and generated TUI HTTP types;
 - pi-tui format, lint, type, and Vitest checks;
 - codebase-tree and documentation/harness checks.
@@ -60,12 +64,21 @@ and `stream-check`),
 `tests/unit/backend` + `tests/contracts/backend` only), and the `tui`
 job (pnpm format, lint, typecheck, and Vitest against the maintained client).
 Python 3.13 remains the full gate image; 3.11/3.12 certify declared support
-without duplicating Daytona coverage or E2E.
+without duplicating Daytona coverage or E2E. Packaging/install certification
+runs in the release package gate rather than every unit shard.
 
-`git diff --check` is required separately. Useful focused commands are:
+`git diff --check` is required separately. The packaging lane is intentionally
+separate from the fast gate and runs serially to avoid build-metadata races:
 
 ```bash
-uv run pytest tests/unit/backend tests/unit/scripts tests/contracts/backend tests/e2e -q
+make test-packaging
+```
+
+Useful focused commands are:
+
+```bash
+uv run pytest tests/unit/backend tests/unit/scripts tests/contracts/backend tests/e2e -q \
+  -m "not live_llm and not live_daytona and not benchmark and not db and not packaging"
 uv run ruff check src tests scripts migrations
 uv run ty check src
 make api-check
@@ -78,7 +91,7 @@ production seam: composition inventory tests live in
 `tests/unit/backend/test_live_composition.py`, Turn execution tests
 in `tests/unit/backend/chat/test_turn_coordinator_execution.py`, binding repository tests
 in `tests/unit/backend/test_sandbox_binding_repository.py`, and pure broker
-source tests in `tests/unit/backend/daytona/test_broker_source.py`. Include
+source and transport tests in `tests/unit/backend/daytona/test_broker.py`. Include
 the claim-heartbeat, cleanup, claim-parity, live-preparation, orphan-cleanup,
 broker-binding, and interpreter-observation suites when changing lifecycle or
 provider ownership.

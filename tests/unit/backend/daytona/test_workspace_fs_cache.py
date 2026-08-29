@@ -70,7 +70,7 @@ class _SyncFs:
 
 @pytest.mark.asyncio
 async def test_async_cache_is_mount_aware_and_invalidates_content_and_listings() -> None:
-    from fleet_rlm.daytona.workspace_fs import AsyncDaytonaVolumeFS
+    from fleet_rlm.workspace.storage import AsyncDaytonaVolumeFS
 
     mount = "/custom/fleet"
     path = f"{mount}/artifacts/report.json"
@@ -102,7 +102,7 @@ async def test_async_cache_is_mount_aware_and_invalidates_content_and_listings()
 
 
 def test_sync_cache_is_mount_aware() -> None:
-    from fleet_rlm.daytona.workspace_fs import DaytonaSandboxVolumeFs
+    from fleet_rlm.workspace.storage import DaytonaSandboxVolumeFs
 
     mount = "/custom/fleet"
     path = f"{mount}/artifacts/report.json"
@@ -130,7 +130,7 @@ def test_sync_cache_is_mount_aware() -> None:
 
 @pytest.mark.asyncio
 async def test_async_listing_uses_bounded_depth_one_provider_requests() -> None:
-    from fleet_rlm.daytona.workspace_fs import AsyncDaytonaVolumeFS
+    from fleet_rlm.workspace.storage import AsyncDaytonaVolumeFS
 
     mount = "/custom/fleet"
     root = f"{mount}/files"
@@ -164,7 +164,7 @@ async def test_async_listing_uses_bounded_depth_one_provider_requests() -> None:
 
 @pytest.mark.asyncio
 async def test_shared_cache_state_does_not_store_stale_read_after_cross_adapter_mutation() -> None:
-    from fleet_rlm.daytona.workspace_fs import (
+    from fleet_rlm.workspace.storage import (
         AsyncDaytonaVolumeFS,
         DaytonaSandboxVolumeFs,
         VolumeFSCacheState,
@@ -216,7 +216,7 @@ async def test_shared_cache_state_does_not_store_stale_read_after_cross_adapter_
 
 @pytest.mark.asyncio
 async def test_shared_cache_state_invalidates_across_adapters() -> None:
-    from fleet_rlm.daytona.workspace_fs import (
+    from fleet_rlm.workspace.storage import (
         AsyncDaytonaVolumeFS,
         DaytonaSandboxVolumeFs,
         VolumeFSCacheState,
@@ -246,7 +246,7 @@ async def test_shared_cache_state_invalidates_across_adapters() -> None:
 
 
 def test_lru_cache_bounds_entry_count() -> None:
-    from fleet_rlm.daytona.workspace_fs import _LRUCache
+    from fleet_rlm.workspace.storage import _LRUCache
 
     cache = _LRUCache(max_size_mb=100, max_entries=5)
     for index in range(10):
@@ -258,7 +258,7 @@ def test_lru_cache_bounds_entry_count() -> None:
 
 
 def test_lru_cache_bounds_zero_byte_entries() -> None:
-    from fleet_rlm.daytona.workspace_fs import _LRUCache
+    from fleet_rlm.workspace.storage import _LRUCache
 
     cache = _LRUCache(max_size_mb=100, max_entries=3)
     for index in range(8):
@@ -268,7 +268,7 @@ def test_lru_cache_bounds_zero_byte_entries() -> None:
 
 
 def test_lru_cache_replacement_does_not_evict_other_entries() -> None:
-    from fleet_rlm.daytona.workspace_fs import _LRUCache
+    from fleet_rlm.workspace.storage import _LRUCache
 
     cache = _LRUCache(max_size_mb=100, max_entries=2)
     cache.put("a", b"1")
@@ -280,7 +280,7 @@ def test_lru_cache_replacement_does_not_evict_other_entries() -> None:
 
 
 def test_modified_timestamp_parses_daytona_mod_time_strings() -> None:
-    from fleet_rlm.daytona.workspace_fs import _modified_timestamp
+    from fleet_rlm.workspace.storage import _modified_timestamp
 
     assert _modified_timestamp("2026-08-08 21:26:10 +0000 UTC") == 1786224370.0
     assert abs(_modified_timestamp("2026-07-30 00:05:20.290395882 +0000 UTC") - 1785369920.290395) < 1e-3

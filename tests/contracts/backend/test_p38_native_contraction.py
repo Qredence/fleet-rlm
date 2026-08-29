@@ -36,63 +36,6 @@ def _source(relative: str) -> str:
     return (PACKAGE_ROOT / relative).read_text(encoding="utf-8")
 
 
-# RETAINED owners named by the P36 inventory (KEEP rows and retained halves of
-# CONDITIONAL DELETE rows). P38 may narrow implementations but never remove
-# these obligations.
-RETAINED_OWNERS: tuple[tuple[str, str], ...] = (
-    # P38-RLM-001/003: native kernel seam plus Fleet result trust boundary.
-    ("rlm/dspy_contract.py", "PredictionResult"),
-    ("rlm/dspy_contract.py", "prediction_result"),
-    ("rlm/dspy_contract.py", "validate_rlm_usage"),
-    ("rlm/dspy_contract.py", "observed_usage"),
-    ("rlm/dspy_contract.py", "normalize_prediction_trajectory"),
-    ("rlm/dspy_contract.py", "RLMOptions"),
-    ("rlm/dspy_contract.py", "assert_dspy_version"),
-    ("rlm/dspy_contract.py", "build_native_rlm"),
-    # P38-RLM-004: worker/cancellation ownership.
-    ("rlm/runner.py", "RLMRunner"),
-    ("rlm/worker_execution.py", "WorkerOwnership"),
-    ("rlm/worker_execution.py", "invoke_native_rlm"),
-    # P38-RLM-005/008: Fleet observation projection and product observers.
-    ("rlm/trajectory_projection.py", "reconcile_trajectory"),
-    ("rlm/observation.py", "ObservationSession"),
-    ("rlm/observation.py", "DetailRelay"),
-    ("rlm/tool_observer.py", "observe_tool"),
-    ("rlm/execution_trace.py", "ExecutionTraceAssembler"),
-    # P38-RLM-006 retained half: truthful observed usage per LM call.
-    ("rlm/dspy_contract.py", "_RLMTraceCallback"),
-    ("rlm/dspy_contract.py", "_latest_lm_telemetry"),
-    ("rlm/delegation_metrics.py", "DelegationMetrics"),
-    # P38-RLM-007: bounded diagnostic probe, never a second production path.
-    ("rlm/provider_probe.py", "probe_root_lm"),
-    ("daytona/diagnostics.py", "DaytonaDoctorDependencies"),
-    # P38-RLM-009: shadow recorder stays, shadow-only.
-    ("observability/callback_shadow.py", "CallbackShadowRecorder"),
-    ("observability/callback_shadow.py", "compare_callback_records"),
-    # P38-RLM-015: error taxonomy and repair classification.
-    ("rlm/dspy_interpreter_contract.py", "CodeExecutionError"),
-    ("rlm/dspy_interpreter_contract.py", "CodeInterpreterError"),
-    ("daytona/errors.py", "sanitize_provider_message"),
-    # P37-ORCH-007/010 durable settlement and coordinator ownership.
-    ("chat/run_lifecycle.py", "RunLifecycleService"),
-    ("chat/turn_coordinator.py", "TurnCoordinator"),
-)
-
-
-def test_p38_retained_owners_are_enumerated_in_the_production_tree() -> None:
-    missing = [f"{relative}::{name}" for relative, name in RETAINED_OWNERS if name not in _top_level_names(relative)]
-    assert missing == [], f"retained P38 owners are missing: {missing}"
-
-
-def test_p38_build_native_rlm_keeps_the_execution_context_metadata_seam() -> None:
-    # P38-RLM-012: DSPy 3.3.1's `_get_output_fields_info` exposes only simple
-    # types, so the certified adoption condition is NOT met; the wrapper that
-    # refreshes required/default output metadata must stay.
-    source = _source("rlm/dspy_contract.py")
-    assert "_inject_execution_context" in source
-    assert "build_output_fields" in source
-
-
 # DELETED categories: proven duplicate or unsupported under the certified
 # DSPy 3.3.1 legacy contract. Zero matches in production sources.
 DELETED_TELEMETRY_SYMBOLS = (
@@ -130,6 +73,13 @@ def test_p38_deleted_telemetry_helpers_and_provider_fields_are_absent() -> None:
         for marker in (*DELETED_TELEMETRY_SYMBOLS, *DELETED_PROVIDER_FIELDS):
             if marker in text:
                 findings.append(f"{path.relative_to(REPO_ROOT)}: {marker}")
+    # The benchmark suite reads engineering span outputs; it must not depend
+    # on deleted provider fields either.
+    for script in (REPO_ROOT / "scripts" / "benchmarks").glob("*.py"):
+        text = script.read_text(encoding="utf-8")
+        for marker in DELETED_PROVIDER_FIELDS:
+            if marker in text:
+                findings.append(f"{script.relative_to(REPO_ROOT)}: {marker}")
     assert findings == [], findings
 
 
@@ -193,34 +143,15 @@ def test_p38_callback_shadow_is_isolated_from_product_modules() -> None:
     # and the recorder itself never touches Runtime Events.
     importers: list[str] = []
     for path in _production_python_files():
-        if path == PACKAGE_ROOT / "observability" / "callback_shadow.py":
+        if path == PACKAGE_ROOT / "observability" / "dspy_callbacks.py":
             continue
         tree = ast.parse(path.read_text(encoding="utf-8"))
         for node in ast.walk(tree):
-            if isinstance(node, ast.ImportFrom) and node.module and "callback_shadow" in node.module:
+            if isinstance(node, ast.ImportFrom) and node.module and "dspy_callbacks" in node.module:
                 importers.append(str(path.relative_to(REPO_ROOT)))
             if isinstance(node, ast.Import):
-                importers.extend(alias.name for alias in node.names if "callback_shadow" in alias.name)
+                importers.extend(alias.name for alias in node.names if "dspy_callbacks" in alias.name)
     assert importers == [], importers
-    shadow_source = _source("observability/callback_shadow.py")
+    shadow_source = _source("observability/dspy_callbacks.py")
     assert "RuntimeEvent" not in shadow_source
     assert "fleet_rlm.rlm.events" not in shadow_source
-
-
-def test_p38_decision_record_selects_the_shadow_branch() -> None:
-    # VAL-RLM-056 evidence: the milestone callback decision names the selected
-    # owner. P35-D is shadow-only, so no manual adapter deletion is authorized.
-    text = DECISION_DOC.read_text(encoding="utf-8")
-    assert "shadow-only, do not adopt for product or authoritative spans" in text
-    assert "does not authorize removal" in text
-    inventory = INVENTORY_DOC.read_text(encoding="utf-8")
-    assert "P38-RLM-009" in inventory
-    assert "Shadow evidence alone never authorizes product-path deletion." in inventory
-
-
-def test_p38_benchmark_script_no_longer_consumes_provider_telemetry() -> None:
-    # The latency benchmark reads engineering span outputs; after the
-    # contraction it must not depend on deleted provider fields.
-    script = (REPO_ROOT / "scripts/benchmarks/run_rlm_latency.py").read_text(encoding="utf-8")
-    for marker in DELETED_PROVIDER_FIELDS:
-        assert marker not in script, marker

@@ -6,9 +6,13 @@ import subprocess
 import sys
 from types import SimpleNamespace
 
-from fleet_rlm.files.memory_candidates import MemoryCandidate, promote_memory_candidates
-from fleet_rlm.files.memory_tools import WorkspaceMemoryToolHost
-from fleet_rlm.files.volume_paths import VolumePaths
+from fleet_rlm.workspace.memory import (
+    MemoryCandidate,
+    WorkspaceMemory,
+    WorkspaceMemoryToolHost,
+    promote_memory_candidates,
+)
+from fleet_rlm.workspace.storage import AgentStorageSession, WorkspaceMemoryStorage
 
 
 class _GeneratedWorkspaceProcess:
@@ -24,22 +28,20 @@ class _GeneratedWorkspaceProcess:
 
 
 def _store(tmp_path):
-    from fleet_rlm.daytona.workspace_memory import DaytonaWorkspaceMemoryStore
-
     volume_root = tmp_path / "volume"
     volume_root.mkdir()
-    return (
-        DaytonaWorkspaceMemoryStore(
-            SimpleNamespace(process=_GeneratedWorkspaceProcess()),
-            volume_paths=VolumePaths.from_mount(str(volume_root)),
-            max_upload_bytes=262_144,
-        ),
-        volume_root,
+    session = AgentStorageSession(
+        SimpleNamespace(process=_GeneratedWorkspaceProcess()),
+        volume_root=str(volume_root),
+        root=str(volume_root),
+        max_file_bytes=262_144,
+        allow_volume_root=True,
     )
+    return WorkspaceMemory.from_storage(WorkspaceMemoryStorage(session), max_file_bytes=262_144), volume_root
 
 
 def test_promoted_agent_candidate_becomes_searchable_and_injectable_on_the_next_turn(tmp_path) -> None:
-    from fleet_rlm.daytona.workspace_memory import read_workspace_memory_injection_digest
+    from fleet_rlm.workspace.memory import read_workspace_memory_injection_digest
 
     store, _volume_root = _store(tmp_path)
     candidate = MemoryCandidate(
@@ -70,8 +72,8 @@ def test_promoted_agent_candidate_becomes_searchable_and_injectable_on_the_next_
 
 
 def test_promotion_supersedes_only_an_active_target_and_updates_the_injection_view(tmp_path) -> None:
-    from fleet_rlm.daytona.workspace_memory import read_workspace_memory_injection_digest
-    from fleet_rlm.files.memory_models import parse_workspace_memory_lines
+    from fleet_rlm.workspace.memory import read_workspace_memory_injection_digest
+    from fleet_rlm.workspace.models import parse_workspace_memory_lines
 
     store, volume_root = _store(tmp_path)
     store.append_record(

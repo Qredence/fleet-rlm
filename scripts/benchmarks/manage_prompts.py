@@ -113,7 +113,7 @@ def _signature_text(args: argparse.Namespace) -> str:
             raise PromptRegistryError(f"could not read prompt text: {args.text_file}") from exc
     else:
         try:
-            from fleet_rlm.rlm.signature import FleetRLMSignature
+            from fleet_rlm.rlm.program import FleetRLMSignature
         except Exception as exc:
             raise PromptRegistryError("--text-file is required when the Fleet signature module is unavailable") from exc
         text = str(FleetRLMSignature.instructions)

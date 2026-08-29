@@ -8,14 +8,14 @@ from pathlib import Path
 import pytest
 from dspy.primitives.code_interpreter import CodeExecutionError
 
-from fleet_rlm.config import Settings
+from fleet_rlm.config.settings import Settings
 from fleet_rlm.daytona.interpreter import (
     BackendExecutionResult,
     DaytonaCodeInterpreter,
     InProcessInterpreterBackend,
     sandbox_backend,
 )
-from fleet_rlm.rlm.dspy_interpreter_contract import FinalOutput
+from fleet_rlm.rlm._dspy_compat import FinalOutput
 
 
 def test_large_stdout_is_head_tail_capped_with_marker() -> None:

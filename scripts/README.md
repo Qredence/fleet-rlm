@@ -8,6 +8,7 @@
 | `generate_tui_chunk_validation.py` | Generate or check the TUI runtime chunk-validation tables from `openapi.yaml` |
 | `generate_profile_matrix.py` | Generate or check the provider/profile matrix from `config/fleet.toml` |
 | `check_codebase_tree.py` | Enforce canonical import and route boundaries |
+| `check_dependency_boundaries.py` | Check P50 domain dependency directions and Daytona Memory-policy residue |
 | `check_harness_engineering.py` | Validate repository agent-harness contracts |
 | `check_docs_quality.py` | Validate documentation structure and links |
 | `check_agents_md_freshness.py` | Validate agent-guide reachability |
@@ -16,16 +17,22 @@
 | `live_phase2_recursive_verify.py` | Run the narrow Phase 2 dedicated-child native DSPy canary on `daytona-recursive` |
 | `live_daytona_verify.py` | Run the opt-in Daytona MVP proof and validate its bounded JSON receipt |
 | `live_p35d_certification.py` | Run the serial P35-D credentialed live certification matrix and aggregate ignored evidence receipts |
-| `certification_gate.py` | Seal or verify the fail-closed, same-SHA P35-E certification manifest |
+| `live_p53_certification.py` | Run the serial P53.2 Daytona Session rotation and native-child certification, archiving stale receipts |
+| `p53_certification.py` | Build and verify the fail-closed P53.2 continuity/rotation/child evidence manifest |
+| `certification_gate.py` | Seal or verify the fail-closed, same-SHA P35-E certification manifest, including P53.2 evidence |
 | `release_smoke.py` | Smoke-test installed wheel bytes, bundled assets, CLI entry points, and OpenAPI without provider startup |
 | `live_daytona_tunnel_probe.py` | Run the development-only strict Daytona egress smoke through two Cloudflare HTTPS origins |
 | `benchmark_daytona_lifecycle.py` | Benchmark full Daytona create-through-first-execution lifecycle and select retained versus per-Turn mode |
-| `p13_memory_relevance_cost.py` | Measure live Daytona relevance-aware Workspace Memory preparation cost against the P7 Turn preparation baseline |
 | `benchmarks/run_prime_oolong.py` | Run the pinned PrimeIntellect Oolong environment against a live Fleet API using Attachments |
 | `benchmarks/prime_oolong_sidecar.py` | Isolated JSONL export/scoring bridge for the pinned PrimeIntellect environment |
+| `benchmarks/corpus_chain.py` | Deterministic corpus-chain benchmark fixtures and report validation |
 | `benchmarks/run_native_long_context.py` | Measure native whole-value URL context at 1/5/10 MiB and emit the paging decision receipt |
 | `benchmarks/run_rlm_latency.py` | Compare live Fleet RLM configuration variants and run the MLflow-native five-task quality gate |
 | `benchmarks/run_routing_eval.py` | Run the deterministic or opt-in live delegation-ladder benchmark, including bounded recursive batches |
+| `benchmarks/judges.py` | Shared Fleet evaluation judge definitions and registration |
+| `benchmarks/scorers.py` | MLflow 3 GenAI custom scorers and evaluation metric definitions |
+| `benchmarks/manage_prompts.py` | Manage and version Fleet signature prompts in MLflow Prompt Registry |
+| `benchmarks/annotate_traces.py` | Annotate persisted `fleet_turn` traces with derived aggregate attributes |
 | `daytona_snapshot.py` | Explicitly create or check the immutable Fleet Daytona Snapshot |
 | `codex_feedback_loop.py` | Run the local Codex feedback-loop probes |
 | `deployment_observability.py` | Inspect deployment observability inputs |
@@ -114,3 +121,22 @@ The Databricks-backed quality loop composes three opt-in steps that all require
    SME labeling session, distills judge guidelines with MemAlign, and re-runs
    the aligned baseline under a named run.
 See `docs/how-to-guides/evaluation-optimization.md` for the full workflow.
+
+## P53.2 Daytona Session certification
+
+P53.2 is a separate live proof from the ten-lane P35-D transport matrix. It
+requires a clean candidate, `FLEET_LIVE=1`, the credentialed Daytona provider,
+and serial execution (`-n 0`). The runner archives stale receipts before each
+lane and seals one manifest only after resident continuity, all seven runtime
+rotation triggers, and the seven native-child outcome lanes pass.
+
+```bash
+make p53-live-certification
+make certification-gate
+make certification-verify
+```
+
+`certification-gate` consumes the current P35-D receipt and the P53.2 manifest;
+`certification-verify` rejects stale SHA, lockfile, DSPy, nested receipt, or
+content-digest identity. Do not report certification from a green P35-D matrix
+alone.

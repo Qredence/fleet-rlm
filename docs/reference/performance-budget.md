@@ -1,7 +1,7 @@
 # P7 performance budget decision
 
 Candidate: `9b1067ca` on `dev-0.7`, measured 2026-08-09/10 with
-`fleet-rlm-python313-v5`, DSPy 3.3.0, and Daytona 0.202.0. The receipts below
+`fleet-rlm-python313-v5`, DSPy 3.3.1, and Daytona 0.202.0. The receipts below
 are local ignored evidence; this page records the decision and bounded numbers.
 
 **Decision: KEEP ISOLATED CHILD DESIGN.** Bounded sibling fan-out is now

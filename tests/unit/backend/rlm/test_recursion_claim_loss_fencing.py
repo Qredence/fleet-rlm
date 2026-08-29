@@ -28,50 +28,26 @@ import pytest
 from fleet_rlm.chat.run_authority import RunAuthority
 from fleet_rlm.chat.session_context import SessionContextManifest
 from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
-from fleet_rlm.daytona.recursive_child_runtime import ChildRuntimeLease
-from fleet_rlm.rlm.context import (
+from fleet_rlm.rlm.events import RunCompleted
+from fleet_rlm.rlm.program import RLMModelBundle, RLMOptions
+from fleet_rlm.rlm.recursion import (
+    RecursiveRLMExecutor,
+    RecursiveRLMOptions,
+)
+from fleet_rlm.rlm.runtime import (
     DelegationPolicy,
     ExecutionRuntime,
     RLMExecutionContext,
+    RLMRunner,
     RunIdentity,
     SessionView,
 )
-from fleet_rlm.rlm.dspy_contract import RLMOptions
-from fleet_rlm.rlm.events import RunCompleted
-from fleet_rlm.rlm.model_bundle import RLMModelBundle
-from fleet_rlm.rlm.recursive_calls import RecursiveRLMExecutor, RecursiveRLMOptions
-from fleet_rlm.rlm.runner import RLMRunner
 from fleet_rlm.sessions.models import TurnAccess
-from tests.unit.backend.rlm.fakes import EmptyCapabilities
-
-
-class _Recorder:
-    def __init__(self) -> None:
-        self.call_indexes: list[int] = []
-        self.leases: list[ChildRuntimeLease] = []
-        self.close_calls: dict[int, int] = {}
-
-    def factory(self, call_index: int) -> ChildRuntimeLease:
-        self.call_indexes.append(call_index)
-        interpreter = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())
-
-        def close() -> None:
-            self.close_calls[call_index] = self.close_calls.get(call_index, 0) + 1
-            interpreter.shutdown()
-
-        lease = ChildRuntimeLease(
-            interpreter,
-            f"claim-child-{call_index}",
-            "test-volume",
-            f"recursive/test-workspace/test-run/{call_index}",
-            close,
-        )
-        self.leases.append(lease)
-        return lease
+from tests.unit.backend.rlm.fakes import ChildLeaseRecorder, EmptyCapabilities
 
 
 def _executor(
-    recorder: _Recorder,
+    recorder: ChildLeaseRecorder,
     root_actions: list[dict[str, str]],
     *,
     authority: RunAuthority,
@@ -94,7 +70,7 @@ def test_val_rec_015_claim_loss_before_allocation_performs_no_reservation_or_acq
     the authorization fence with no reservation, no call index, no factory
     acquisition, and no budget mutation."""
     authority = RunAuthority()
-    recorder = _Recorder()
+    recorder = ChildLeaseRecorder()
     executor = _executor(
         recorder,
         [{"reasoning": "submit", "code": "SUBMIT(answer='never-runs')"}],
@@ -118,7 +94,7 @@ def test_val_rec_015_claim_loss_rejects_every_subsequent_recursive_call() -> Non
     reserve or acquire: the first call completed while the claim was held,
     and every later call (single and batched) is rejected at the fence."""
     authority = RunAuthority()
-    recorder = _Recorder()
+    recorder = ChildLeaseRecorder()
     executor = _executor(
         recorder,
         [{"reasoning": "submit", "code": "SUBMIT(answer='held-ok')"}],
@@ -150,7 +126,7 @@ async def test_val_rec_015_claim_loss_during_blocked_child_discards_result_and_f
     produces a failed parent outcome with no successful structured result or
     terminal completion, performs no further allocation, and settles the
     acquired lease exactly once before the claim is released."""
-    import fleet_rlm.rlm.recursive_calls as recursive_calls
+    import fleet_rlm.rlm.recursion as recursive_calls
 
     started = threading.Event()
     release = threading.Event()
@@ -172,7 +148,7 @@ async def test_val_rec_015_claim_loss_during_blocked_child_discards_result_and_f
         adapter=adapter,
     )
     sub = dspy.utils.DummyLM([{"answer": "unused"}], adapter=adapter)
-    recorder = _Recorder()
+    recorder = ChildLeaseRecorder()
     authority = RunAuthority()
 
     async def never_cancelled() -> bool:

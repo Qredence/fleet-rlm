@@ -148,13 +148,16 @@ class TestGuardStaticContract:
     """The certified constant and error shape stay pinned in production code."""
 
     def test_certified_constant_is_exact_final_release(self) -> None:
-        from fleet_rlm.rlm.dspy_contract import CERTIFIED_DSPY_VERSION, UncertifiedDSpyVersionError
+        from fleet_rlm.rlm._dspy_compat import (
+            CERTIFIED_DSPY_VERSION,
+            UncertifiedDSpyVersionError,
+        )
 
         assert CERTIFIED_DSPY_VERSION == "3.3.1"
         assert issubclass(UncertifiedDSpyVersionError, RuntimeError)
 
     def test_guard_uses_literal_comparison_only(self) -> None:
-        source = (REPO_ROOT / "src" / "fleet_rlm" / "rlm" / "dspy_contract.py").read_text(encoding="utf-8")
+        source = (REPO_ROOT / "src" / "fleet_rlm" / "rlm" / "_dspy_compat.py").read_text(encoding="utf-8")
         assert "packaging.version" not in source
         assert "Version(" not in source
 

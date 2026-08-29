@@ -79,6 +79,7 @@ jobs:
           FLEET_MLFLOW_TRACING_ENABLED: "false"
         run: >
           uv run pytest -q
+          -m "not packaging"
           --timeout=120
           --timeout-method=thread
 

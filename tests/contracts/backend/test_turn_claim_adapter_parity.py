@@ -75,7 +75,7 @@ async def _build_harness(adapter_kind: str) -> _Harness:
 async def test_settlement_retains_claim_until_cleanup(adapter_kind: str) -> None:
     from fleet_rlm.chat.run_claim import BeginSettlement, ClaimFailure, CompleteSettlement
     from fleet_rlm.chat.run_lifecycle import RunFailure
-    from fleet_rlm.rlm.dspy_contract import empty_rlm_usage
+    from fleet_rlm.rlm.result import empty_rlm_usage
 
     harness = await _build_harness(adapter_kind)
     try:
@@ -103,7 +103,7 @@ async def test_settlement_retains_claim_until_cleanup(adapter_kind: str) -> None
 async def test_stale_revocation_and_completion_have_equivalent_receipts(adapter_kind: str) -> None:
     from fleet_rlm.chat.run_claim import ClaimFailure, CompleteSettlement, RevokeClaim
     from fleet_rlm.chat.run_lifecycle import RunFailure
-    from fleet_rlm.rlm.dspy_contract import empty_rlm_usage
+    from fleet_rlm.rlm.result import empty_rlm_usage
 
     harness = await _build_harness(adapter_kind)
     try:
@@ -131,7 +131,7 @@ async def test_stale_revocation_and_completion_have_equivalent_receipts(adapter_
 async def test_heartbeat_is_valid_only_while_claim_is_live(adapter_kind: str) -> None:
     from fleet_rlm.chat.run_claim import BeginSettlement, ClaimFailure, CompleteSettlement, HeartbeatClaim
     from fleet_rlm.chat.run_lifecycle import RunFailure, RunStateError
-    from fleet_rlm.rlm.dspy_contract import empty_rlm_usage
+    from fleet_rlm.rlm.result import empty_rlm_usage
 
     harness = await _build_harness(adapter_kind)
     try:
@@ -164,8 +164,11 @@ async def test_committed_run_rejects_late_claim_transitions(adapter_kind: str) -
     )
     from fleet_rlm.chat.run_lifecycle import RunAlreadyCompletedError, RunStateError
     from fleet_rlm.chat.turn_detail_policy import commit_success
-    from fleet_rlm.rlm.dspy_contract import PredictionResult, empty_rlm_usage
-    from fleet_rlm.rlm.outcome import RLMOutcome
+    from fleet_rlm.rlm.result import (
+        PredictionResult,
+        RLMOutcome,
+        empty_rlm_usage,
+    )
 
     assert issubclass(RunAlreadyCompletedError, RunStateError)
     harness = await _build_harness(adapter_kind)

@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from fleet_rlm.config import Settings
+from fleet_rlm.config.settings import Settings
 from fleet_rlm.daytona.errors import DaytonaAdapterError
 from fleet_rlm.daytona.provisioning import (
     BASE_IMAGE,

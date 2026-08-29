@@ -10,7 +10,7 @@ from typing import Any, cast
 
 import pytest
 
-from fleet_rlm.daytona.workspace_agent import (
+from fleet_rlm.daytona.workspace_agent.client import (
     WORKSPACE_AGENT_CODE_RUN_TIMEOUT_S,
     run_workspace_agent,
     run_workspace_agent_async,
@@ -99,7 +99,7 @@ async def test_run_workspace_agent_async_forwards_timeout(tmp_path: Any) -> None
 
 @pytest.mark.asyncio
 async def test_sync_process_facade_forwards_timeout() -> None:
-    from fleet_rlm.daytona.workspace_fs import _SyncProcessFacade
+    from fleet_rlm.workspace.storage import _SyncProcessFacade
 
     process = _RecordingProcess()
     facade = _SyncProcessFacade(process)
@@ -124,7 +124,7 @@ async def test_prepared_run_aclose_waits_for_timed_out_workspace_agent_promotion
     tmp_path: Any,
 ) -> None:
     from fleet_rlm.chat.post_commit_memory import OwnedPostCommitMemoryPromotion
-    from fleet_rlm.chat.run_preparation import PreparedRun, _PreparedRunResources
+    from fleet_rlm.chat.preparation import PreparedRun, _PreparedRunResources
 
     process = _HangingProcess()
     release_count = 0

@@ -1,0 +1,2537 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Fleet RLM model-facing Tool contract",
+  "schema_version": 1,
+  "dspy_version": "3.3.1",
+  "scope": "This is the model-facing inventory for one Fleet RLM invocation. It records tool names, DSPy argument schemas, result success shapes, composition availability, authority, and public event redaction. It is not an HTTP/OpenAPI contract.",
+  "argument_schema_note": "Each argument_schema.properties value is the current dspy.Tool.args value. required follows dspy.Tool.format_as_litellm_function_call(): properties with no schema default are required.",
+  "result_schema_note": "Result schemas describe successful JSON values. Tools may instead raise a closed, sanitized error; schemas permit documented optional failure fields where the host returns them.",
+  "$defs": {
+    "text": {
+      "type": "string"
+    },
+    "text_array": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "history_page": {
+      "type": "object",
+      "properties": {
+        "offset": {
+          "type": "integer"
+        },
+        "next_offset": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "total": {
+          "type": "integer"
+        },
+        "has_more": {
+          "type": "boolean"
+        },
+        "done": {
+          "type": "boolean"
+        },
+        "messages": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "ordinal": {
+                "type": "integer"
+              },
+              "role": {
+                "type": "string"
+              },
+              "content": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "ordinal",
+              "role",
+              "content"
+            ],
+            "additionalProperties": true
+          }
+        },
+        "truncated": {
+          "type": "boolean"
+        },
+        "bytes_returned": {
+          "type": "integer"
+        },
+        "byte_budget": {
+          "type": "integer"
+        },
+        "skipped_ordinal": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "offset",
+        "next_offset",
+        "total",
+        "has_more",
+        "done",
+        "messages",
+        "truncated",
+        "bytes_returned",
+        "byte_budget"
+      ],
+      "additionalProperties": true
+    },
+    "filesystem_entry": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "file",
+            "directory"
+          ]
+        },
+        "byte_size": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "modified_at": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "checksum_sha256": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "kind",
+        "byte_size",
+        "modified_at"
+      ],
+      "additionalProperties": true
+    },
+    "filesystem_list": {
+      "type": "object",
+      "properties": {
+        "ok": {
+          "type": "boolean"
+        },
+        "namespace": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "count": {
+          "type": "integer"
+        },
+        "truncated": {
+          "type": "boolean"
+        },
+        "next_cursor": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "entries": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/filesystem_entry"
+          }
+        },
+        "error": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "ok",
+        "namespace",
+        "path",
+        "count",
+        "truncated",
+        "next_cursor",
+        "entries"
+      ],
+      "additionalProperties": true
+    },
+    "filesystem_stat": {
+      "type": "object",
+      "properties": {
+        "ok": {
+          "type": "boolean"
+        },
+        "namespace": {
+          "type": "string"
+        },
+        "entry": {
+          "$ref": "#/$defs/filesystem_entry"
+        },
+        "error": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "ok",
+        "namespace",
+        "entry"
+      ],
+      "additionalProperties": true
+    },
+    "filesystem_text_page": {
+      "type": "object",
+      "properties": {
+        "ok": {
+          "type": "boolean"
+        },
+        "namespace": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "content": {
+          "type": "string"
+        },
+        "next_cursor": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "byte_size": {
+          "type": "integer"
+        },
+        "eof": {
+          "type": "boolean"
+        },
+        "error": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "ok",
+        "namespace",
+        "path",
+        "content",
+        "next_cursor",
+        "byte_size",
+        "eof"
+      ],
+      "additionalProperties": true
+    },
+    "filesystem_write": {
+      "type": "object",
+      "properties": {
+        "ok": {
+          "type": "boolean"
+        },
+        "namespace": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "byte_size": {
+          "type": "integer"
+        },
+        "warnings": {
+          "type": "array"
+        },
+        "error": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "ok",
+        "namespace",
+        "path",
+        "byte_size"
+      ],
+      "additionalProperties": true
+    },
+    "filesystem_delete": {
+      "type": "object",
+      "properties": {
+        "ok": {
+          "type": "boolean"
+        },
+        "namespace": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "warnings": {
+          "type": "array"
+        },
+        "error": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "ok",
+        "namespace",
+        "path"
+      ],
+      "additionalProperties": true
+    },
+    "memory_entry": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "timestamp": {
+          "type": "string"
+        },
+        "category": {
+          "type": "string"
+        },
+        "learning": {
+          "type": "string"
+        },
+        "source": {
+          "type": "string"
+        },
+        "record_version": {
+          "type": "integer"
+        },
+        "updated_at": {
+          "type": "string"
+        },
+        "supersedes_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "timestamp",
+        "category",
+        "learning"
+      ],
+      "additionalProperties": true
+    },
+    "memory_tail": {
+      "type": "object",
+      "properties": {
+        "ok": {
+          "type": "boolean"
+        },
+        "namespace": {
+          "type": "string"
+        },
+        "content": {
+          "type": "string"
+        },
+        "truncated": {
+          "type": "boolean"
+        },
+        "bytes_returned": {
+          "type": "integer"
+        },
+        "byte_budget": {
+          "type": "integer"
+        },
+        "total_bytes": {
+          "type": "integer"
+        },
+        "skipped_malformed_records": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "ok",
+        "namespace",
+        "content",
+        "truncated",
+        "bytes_returned",
+        "byte_budget",
+        "total_bytes",
+        "skipped_malformed_records"
+      ],
+      "additionalProperties": true
+    },
+    "memory_write": {
+      "type": "object",
+      "properties": {
+        "ok": {
+          "type": "boolean"
+        },
+        "namespace": {
+          "type": "string"
+        },
+        "memory_id": {
+          "type": "string"
+        },
+        "category": {
+          "type": "string"
+        },
+        "entry_bytes": {
+          "type": "integer"
+        },
+        "total_bytes": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "ok",
+        "namespace",
+        "memory_id",
+        "category",
+        "entry_bytes",
+        "total_bytes"
+      ],
+      "additionalProperties": true
+    },
+    "memory_list": {
+      "type": "object",
+      "properties": {
+        "ok": {
+          "type": "boolean"
+        },
+        "namespace": {
+          "type": "string"
+        },
+        "entries": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/memory_entry"
+          }
+        },
+        "count": {
+          "type": "integer"
+        },
+        "truncated": {
+          "type": "boolean"
+        },
+        "next_cursor": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "skipped_malformed_records": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "ok",
+        "namespace",
+        "entries",
+        "count",
+        "truncated",
+        "next_cursor",
+        "skipped_malformed_records"
+      ],
+      "additionalProperties": true
+    },
+    "memory_search": {
+      "type": "object",
+      "properties": {
+        "ok": {
+          "type": "boolean"
+        },
+        "namespace": {
+          "type": "string"
+        },
+        "query": {
+          "type": "string"
+        },
+        "category": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "entries": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "score": {
+                "type": "number"
+              },
+              "rank": {
+                "type": "integer"
+              }
+            },
+            "required": [],
+            "additionalProperties": true
+          }
+        },
+        "count": {
+          "type": "integer"
+        },
+        "truncated": {
+          "type": "boolean"
+        },
+        "skipped_malformed_records": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "ok",
+        "namespace",
+        "query",
+        "category",
+        "entries",
+        "count",
+        "truncated",
+        "skipped_malformed_records"
+      ],
+      "additionalProperties": true
+    },
+    "memory_edit": {
+      "type": "object",
+      "properties": {
+        "ok": {
+          "type": "boolean"
+        },
+        "namespace": {
+          "type": "string"
+        },
+        "memory_id": {
+          "type": "string"
+        },
+        "category": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "source": {
+          "type": "string"
+        },
+        "record_version": {
+          "type": "integer"
+        },
+        "updated_at": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "entry_bytes": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "ok",
+        "namespace",
+        "memory_id",
+        "category",
+        "source",
+        "record_version",
+        "updated_at",
+        "entry_bytes"
+      ],
+      "additionalProperties": true
+    },
+    "memory_forget": {
+      "type": "object",
+      "properties": {
+        "ok": {
+          "type": "boolean"
+        },
+        "namespace": {
+          "type": "string"
+        },
+        "memory_id": {
+          "type": "string"
+        },
+        "removed": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "ok",
+        "namespace",
+        "memory_id",
+        "removed"
+      ],
+      "additionalProperties": true
+    },
+    "memory_candidate": {
+      "type": "object",
+      "properties": {
+        "ok": {
+          "type": "boolean"
+        },
+        "namespace": {
+          "type": "string"
+        },
+        "candidate_id": {
+          "type": "string"
+        },
+        "category": {
+          "type": "string"
+        },
+        "byte_size": {
+          "type": "integer"
+        },
+        "candidate_count": {
+          "type": "integer"
+        },
+        "candidate_bytes": {
+          "type": "integer"
+        },
+        "supersedes": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "ok",
+        "namespace",
+        "candidate_id",
+        "category",
+        "byte_size",
+        "candidate_count",
+        "candidate_bytes",
+        "supersedes"
+      ],
+      "additionalProperties": true
+    },
+    "skill_load": {
+      "type": "object",
+      "properties": {
+        "ok": {
+          "type": "boolean"
+        },
+        "error": {
+          "type": "string"
+        },
+        "skill_id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        },
+        "skill_markdown": {
+          "type": "string"
+        },
+        "allowed_tools": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "resources": {
+          "type": "array"
+        },
+        "installed_paths": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "resource_install": {
+          "type": "object",
+          "properties": {
+            "declared": {
+              "type": "integer"
+            },
+            "installed": {
+              "type": "integer"
+            },
+            "complete": {
+              "type": "boolean"
+            }
+          },
+          "required": [],
+          "additionalProperties": true
+        }
+      },
+      "required": [
+        "ok"
+      ],
+      "additionalProperties": true
+    },
+    "skill_resource": {
+      "type": "object",
+      "properties": {
+        "ok": {
+          "type": "boolean"
+        },
+        "error": {
+          "type": "string"
+        },
+        "skill_id": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "content": {
+          "type": "string"
+        },
+        "encoding": {
+          "type": "string"
+        },
+        "media_type": {
+          "type": "string"
+        },
+        "byte_size": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "ok"
+      ],
+      "additionalProperties": true
+    },
+    "url_fetch": {
+      "type": "object",
+      "properties": {
+        "ok": {
+          "type": "boolean"
+        },
+        "error": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        },
+        "source_id": {
+          "type": "string"
+        },
+        "canonical_url": {
+          "type": "string"
+        },
+        "workspace_path": {
+          "type": "string"
+        },
+        "content": {
+          "type": "string"
+        },
+        "byte_size": {
+          "type": "integer"
+        },
+        "checksum_sha256": {
+          "type": "string"
+        },
+        "cache_hit": {
+          "type": "boolean"
+        },
+        "content_type": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "ok"
+      ],
+      "additionalProperties": true
+    },
+    "attachment_read": {
+      "type": "object",
+      "properties": {
+        "ok": {
+          "type": "boolean"
+        },
+        "error": {
+          "type": "string"
+        },
+        "attachment_id": {
+          "type": "string"
+        },
+        "filename": {
+          "type": "string"
+        },
+        "content_type": {
+          "type": "string"
+        },
+        "content": {
+          "type": "string"
+        },
+        "content_base64": {
+          "type": "string"
+        },
+        "encoding": {
+          "enum": [
+            "utf-8",
+            "base64"
+          ]
+        }
+      },
+      "required": [
+        "ok"
+      ],
+      "additionalProperties": true
+    },
+    "artifact_candidate": {
+      "type": "object",
+      "properties": {
+        "ok": {
+          "type": "boolean"
+        },
+        "error": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        },
+        "artifact_candidate_id": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "title": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "byte_size": {
+          "type": "integer"
+        },
+        "checksum_sha256": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "ok"
+      ],
+      "additionalProperties": true
+    },
+    "curated_input_page": {
+      "type": "object",
+      "properties": {
+        "sha256": {
+          "type": "string"
+        },
+        "json": {
+          "type": "string"
+        },
+        "start": {
+          "type": "integer"
+        },
+        "total_bytes": {
+          "type": "integer"
+        },
+        "complete": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "sha256",
+        "json",
+        "start",
+        "total_bytes",
+        "complete"
+      ],
+      "additionalProperties": true
+    }
+  },
+  "entries": [
+    {
+      "name": "append_workspace_text",
+      "category": "workspace",
+      "source": "src/fleet_rlm/workspace/workspace.py:WorkspaceToolHost",
+      "description": "Append UTF-8 text immediately into this Session's durable Workspace when incremental state must survive the Run; this durability is independent of Turn Commit.",
+      "argument_schema": {
+        "type": "object",
+        "properties": {
+          "content": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "content",
+          "path"
+        ],
+        "additionalProperties": false
+      },
+      "result_schema": {
+        "$ref": "#/$defs/filesystem_write"
+      },
+      "availability_policy": "Available only in the Daytona Session Workspace capability; the deterministic private composition declares Workspace unavailable and omits these Tools.",
+      "authorization_policy": "Host binds one Session-scoped Workspace filesystem; the generic observed-tool Run-authority fence fails closed after revocation.",
+      "event_projection_policy": {
+        "mode": "bounded_allowlist",
+        "input": [
+          "path",
+          "content_chars"
+        ],
+        "output": [
+          "ok",
+          "namespace",
+          "path",
+          "byte_size",
+          "warnings"
+        ],
+        "omits": [
+          "content"
+        ],
+        "source": "src/fleet_rlm/workspace/workspace.py:WorkspaceToolHost.event_views"
+      }
+    },
+    {
+      "name": "create_artifact",
+      "category": "attachment_artifact",
+      "source": "src/fleet_rlm/artifacts/tools.py:ArtifactToolHost",
+      "description": "Stage generated text, markdown, or JSON as a private Artifact Candidate; it is promoted only by a successful Turn Commit.",
+      "argument_schema": {
+        "type": "object",
+        "properties": {
+          "content": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          }
+        },
+        "required": [
+          "content",
+          "kind"
+        ],
+        "additionalProperties": false
+      },
+      "result_schema": {
+        "$ref": "#/$defs/artifact_candidate"
+      },
+      "availability_policy": "Available only in the live Daytona capability composition; deterministic private composition deliberately omits Artifact Candidate tools.",
+      "authorization_policy": "File host owns the current Run, Session, Workspace, and Volume staging scope; generic observed-tool Run authority fails closed after revocation. Promotion is owned by successful Turn Commit.",
+      "event_projection_policy": {
+        "mode": "bounded_allowlist",
+        "input": [
+          "kind",
+          "title",
+          "content_chars"
+        ],
+        "output": [
+          "ok",
+          "error",
+          "kind",
+          "title",
+          "byte_size"
+        ],
+        "omits": [
+          "content",
+          "artifact_candidate_id",
+          "checksum_sha256"
+        ],
+        "source": "src/fleet_rlm/artifacts/tools.py:ArtifactToolHost.event_views"
+      }
+    },
+    {
+      "name": "delete_project_path",
+      "category": "project",
+      "source": "src/fleet_rlm/workspace/projects.py:ProjectToolHost",
+      "description": "Delete one file or one empty directory immediately under projects/<slug>/; non-empty directories are refused, and a supplied expected_sha256 guards against deleting changed content. This durability is independent of Turn Commit.",
+      "argument_schema": {
+        "type": "object",
+        "properties": {
+          "expected_sha256": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "path": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "expected_sha256",
+          "path"
+        ],
+        "additionalProperties": false
+      },
+      "result_schema": {
+        "$ref": "#/$defs/filesystem_delete"
+      },
+      "availability_policy": "Available only in the Daytona Project capability rooted at projects/; the deterministic private composition declares Workspace unavailable and omits these Tools.",
+      "authorization_policy": "Host binds the projects root with validated project-slug paths; the generic observed-tool Run-authority fence fails closed after revocation.",
+      "event_projection_policy": {
+        "mode": "bounded_allowlist",
+        "input": [
+          "path",
+          "checksum_precondition"
+        ],
+        "output": [
+          "ok",
+          "namespace",
+          "path",
+          "warnings"
+        ],
+        "omits": [
+          "expected_sha256"
+        ],
+        "source": "src/fleet_rlm/workspace/projects.py:ProjectToolHost.event_views"
+      }
+    },
+    {
+      "name": "delete_workspace_path",
+      "category": "workspace",
+      "source": "src/fleet_rlm/workspace/workspace.py:WorkspaceToolHost",
+      "description": "Delete one file or one empty directory immediately from this Session's durable Workspace; non-empty directories are refused, and a supplied expected_sha256 guards against deleting changed content. This durability is independent of Turn Commit.",
+      "argument_schema": {
+        "type": "object",
+        "properties": {
+          "expected_sha256": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "path": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "expected_sha256",
+          "path"
+        ],
+        "additionalProperties": false
+      },
+      "result_schema": {
+        "$ref": "#/$defs/filesystem_delete"
+      },
+      "availability_policy": "Available only in the Daytona Session Workspace capability; the deterministic private composition declares Workspace unavailable and omits these Tools.",
+      "authorization_policy": "Host binds one Session-scoped Workspace filesystem; the generic observed-tool Run-authority fence fails closed after revocation.",
+      "event_projection_policy": {
+        "mode": "bounded_allowlist",
+        "input": [
+          "path",
+          "checksum_precondition"
+        ],
+        "output": [
+          "ok",
+          "namespace",
+          "path",
+          "warnings"
+        ],
+        "omits": [
+          "expected_sha256"
+        ],
+        "source": "src/fleet_rlm/workspace/workspace.py:WorkspaceToolHost.event_views"
+      }
+    },
+    {
+      "name": "edit_memory",
+      "category": "workspace_memory",
+      "source": "src/fleet_rlm/workspace/memory.py:WorkspaceMemoryToolHost",
+      "description": "Replace one remembered learning in place by id, preserving its id and timestamp; pass category only to recategorize.",
+      "argument_schema": {
+        "type": "object",
+        "properties": {
+          "category": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "key_learning": {
+            "type": "string"
+          },
+          "memory_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "category",
+          "key_learning",
+          "memory_id"
+        ],
+        "additionalProperties": false
+      },
+      "result_schema": {
+        "$ref": "#/$defs/memory_edit"
+      },
+      "availability_policy": "Available only in the Daytona Workspace Memory capability; it is omitted from the deterministic private composition.",
+      "authorization_policy": "Host binds the current Workspace Memory store; the generic observed-tool Run-authority fence fails closed after revocation.",
+      "event_projection_policy": {
+        "mode": "bounded_allowlist",
+        "input": [
+          "memory_id",
+          "key_learning_bytes",
+          "category"
+        ],
+        "output": [
+          "ok",
+          "namespace",
+          "memory_id",
+          "category",
+          "source",
+          "record_version",
+          "updated_at",
+          "entry_bytes"
+        ],
+        "omits": [
+          "key_learning"
+        ],
+        "source": "src/fleet_rlm/workspace/memory.py:WorkspaceMemoryToolHost.event_views"
+      }
+    },
+    {
+      "name": "edit_project_text",
+      "category": "project",
+      "source": "src/fleet_rlm/workspace/projects.py:ProjectToolHost",
+      "description": "Replace exactly one unique occurrence of old with new in one UTF-8 Project file under projects/<slug>/; the edit fails when old is absent or occurs more than once, and a supplied expected_sha256 guards against editing changed content. Read the file first and keep old short and unique. This durability is independent of Turn Commit.",
+      "argument_schema": {
+        "type": "object",
+        "properties": {
+          "expected_sha256": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "new": {
+            "type": "string"
+          },
+          "old": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "expected_sha256",
+          "new",
+          "old",
+          "path"
+        ],
+        "additionalProperties": false
+      },
+      "result_schema": {
+        "$ref": "#/$defs/filesystem_write"
+      },
+      "availability_policy": "Available only in the Daytona Project capability rooted at projects/; the deterministic private composition declares Workspace unavailable and omits these Tools.",
+      "authorization_policy": "Host binds the projects root with validated project-slug paths; the generic observed-tool Run-authority fence fails closed after revocation.",
+      "event_projection_policy": {
+        "mode": "bounded_allowlist",
+        "input": [
+          "path",
+          "old_chars",
+          "new_chars",
+          "checksum_precondition"
+        ],
+        "output": [
+          "ok",
+          "namespace",
+          "path",
+          "byte_size",
+          "warnings"
+        ],
+        "omits": [
+          "old",
+          "new",
+          "expected_sha256"
+        ],
+        "source": "src/fleet_rlm/workspace/projects.py:ProjectToolHost.event_views"
+      }
+    },
+    {
+      "name": "edit_workspace_text",
+      "category": "workspace",
+      "source": "src/fleet_rlm/workspace/workspace.py:WorkspaceToolHost",
+      "description": "Replace exactly one unique occurrence of old with new in one UTF-8 Session Workspace file; the edit fails when old is absent or occurs more than once, and a supplied expected_sha256 guards against editing changed content. Read the file first and keep old short and unique. This durability is independent of Turn Commit.",
+      "argument_schema": {
+        "type": "object",
+        "properties": {
+          "expected_sha256": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "new": {
+            "type": "string"
+          },
+          "old": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "expected_sha256",
+          "new",
+          "old",
+          "path"
+        ],
+        "additionalProperties": false
+      },
+      "result_schema": {
+        "$ref": "#/$defs/filesystem_write"
+      },
+      "availability_policy": "Available only in the Daytona Session Workspace capability; the deterministic private composition declares Workspace unavailable and omits these Tools.",
+      "authorization_policy": "Host binds one Session-scoped Workspace filesystem; the generic observed-tool Run-authority fence fails closed after revocation.",
+      "event_projection_policy": {
+        "mode": "bounded_allowlist",
+        "input": [
+          "path",
+          "old_chars",
+          "new_chars",
+          "checksum_precondition"
+        ],
+        "output": [
+          "ok",
+          "namespace",
+          "path",
+          "byte_size",
+          "warnings"
+        ],
+        "omits": [
+          "old",
+          "new",
+          "expected_sha256"
+        ],
+        "source": "src/fleet_rlm/workspace/workspace.py:WorkspaceToolHost.event_views"
+      }
+    },
+    {
+      "name": "fetch_url",
+      "category": "url",
+      "source": "src/fleet_rlm/workspace/url.py:UrlToolHost",
+      "description": "Fetch one relevant anonymous public HTTPS text URL. The result is a Python value; do not print the complete content. Repeated calls reuse the Session cache.",
+      "argument_schema": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "url"
+        ],
+        "additionalProperties": false
+      },
+      "result_schema": {
+        "$ref": "#/$defs/url_fetch"
+      },
+      "availability_policy": "Composed in live and deterministic test environments. Live uses public HTTPS retrieval plus a Session cache; deterministic tests use a cache-only fetcher that reports unavailable on a miss.",
+      "authorization_policy": "Host binds one Session ID and source store; the generic observed-tool Run-authority fence fails closed after revocation.",
+      "event_projection_policy": {
+        "mode": "bounded_allowlist",
+        "input": [
+          "source_id"
+        ],
+        "output": [
+          "ok",
+          "error",
+          "source_id",
+          "cache_hit",
+          "content_type",
+          "byte_size",
+          "checksum_sha256"
+        ],
+        "omits": [
+          "url",
+          "canonical_url",
+          "workspace_path",
+          "content"
+        ],
+        "source": "src/fleet_rlm/workspace/url.py:UrlToolHost.event_views"
+      }
+    },
+    {
+      "name": "forget",
+      "category": "workspace_memory",
+      "source": "src/fleet_rlm/workspace/memory.py:WorkspaceMemoryToolHost",
+      "description": "Remove exactly one Workspace Memory entry by id when the user asks to forget it.",
+      "argument_schema": {
+        "type": "object",
+        "properties": {
+          "memory_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "memory_id"
+        ],
+        "additionalProperties": false
+      },
+      "result_schema": {
+        "$ref": "#/$defs/memory_forget"
+      },
+      "availability_policy": "Available only in the Daytona Workspace Memory capability; it is omitted from the deterministic private composition.",
+      "authorization_policy": "Host binds the current Workspace Memory store; the generic observed-tool Run-authority fence fails closed after revocation.",
+      "event_projection_policy": {
+        "mode": "bounded_allowlist",
+        "input": [
+          "memory_id"
+        ],
+        "output": [
+          "ok",
+          "namespace",
+          "memory_id",
+          "removed"
+        ],
+        "omits": [],
+        "source": "src/fleet_rlm/workspace/memory.py:WorkspaceMemoryToolHost.event_views"
+      }
+    },
+    {
+      "name": "list_memories",
+      "category": "workspace_memory",
+      "source": "src/fleet_rlm/workspace/memory.py:WorkspaceMemoryToolHost",
+      "description": "List durable Workspace Memory entries (id, timestamp, category, learning) chronologically with bounded pages; pass the previous page's next_cursor as after to continue.",
+      "argument_schema": {
+        "type": "object",
+        "properties": {
+          "after": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "category": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "limit": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "after",
+          "category",
+          "limit"
+        ],
+        "additionalProperties": false
+      },
+      "result_schema": {
+        "$ref": "#/$defs/memory_list"
+      },
+      "availability_policy": "Available only in the Daytona Workspace Memory capability; it is omitted from the deterministic private composition.",
+      "authorization_policy": "Host binds the current Workspace Memory store; the generic observed-tool Run-authority fence fails closed after revocation.",
+      "event_projection_policy": {
+        "mode": "bounded_allowlist",
+        "input": [
+          "after",
+          "limit",
+          "category"
+        ],
+        "output": [
+          "ok",
+          "namespace",
+          "count",
+          "truncated",
+          "next_cursor",
+          "skipped_malformed_records"
+        ],
+        "omits": [
+          "entries"
+        ],
+        "source": "src/fleet_rlm/workspace/memory.py:WorkspaceMemoryToolHost.event_views"
+      }
+    },
+    {
+      "name": "list_project_files",
+      "category": "project",
+      "source": "src/fleet_rlm/workspace/projects.py:ProjectToolHost",
+      "description": "List immediate entries under projects/<slug>/ (or the projects root) only when existing durable Project deliverables are relevant; do not explore them for a self-contained request.",
+      "argument_schema": {
+        "type": "object",
+        "properties": {
+          "after": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "limit": {
+            "maximum": 100,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "path": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "after",
+          "limit",
+          "path"
+        ],
+        "additionalProperties": false
+      },
+      "result_schema": {
+        "$ref": "#/$defs/filesystem_list"
+      },
+      "availability_policy": "Available only in the Daytona Project capability rooted at projects/; the deterministic private composition declares Workspace unavailable and omits these Tools.",
+      "authorization_policy": "Host binds the projects root with validated project-slug paths; the generic observed-tool Run-authority fence fails closed after revocation.",
+      "event_projection_policy": {
+        "mode": "bounded_allowlist",
+        "input": [
+          "path",
+          "limit",
+          "after"
+        ],
+        "output": [
+          "ok",
+          "error",
+          "path",
+          "count",
+          "truncated",
+          "next_cursor"
+        ],
+        "omits": [
+          "entries"
+        ],
+        "source": "src/fleet_rlm/workspace/projects.py:ProjectToolHost.event_views"
+      }
+    },
+    {
+      "name": "list_workspace_files",
+      "category": "workspace",
+      "source": "src/fleet_rlm/workspace/workspace.py:WorkspaceToolHost",
+      "description": "List immediate entries in this Session's durable Workspace only when existing durable state is relevant; do not explore it for a self-contained request.",
+      "argument_schema": {
+        "type": "object",
+        "properties": {
+          "after": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "limit": {
+            "maximum": 100,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "path": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "after",
+          "limit",
+          "path"
+        ],
+        "additionalProperties": false
+      },
+      "result_schema": {
+        "$ref": "#/$defs/filesystem_list"
+      },
+      "availability_policy": "Available only in the Daytona Session Workspace capability; the deterministic private composition declares Workspace unavailable and omits these Tools.",
+      "authorization_policy": "Host binds one Session-scoped Workspace filesystem; the generic observed-tool Run-authority fence fails closed after revocation.",
+      "event_projection_policy": {
+        "mode": "bounded_allowlist",
+        "input": [
+          "path",
+          "limit",
+          "after"
+        ],
+        "output": [
+          "ok",
+          "error",
+          "path",
+          "count",
+          "truncated",
+          "next_cursor"
+        ],
+        "omits": [
+          "entries"
+        ],
+        "source": "src/fleet_rlm/workspace/workspace.py:WorkspaceToolHost.event_views"
+      }
+    },
+    {
+      "name": "llm_query",
+      "category": "semantic",
+      "source": "dspy/predict/rlm.py:RLM._make_llm_tools (installed dspy==3.3.1)",
+      "description": "query a sub-LLM (~500K char capacity) for semantic analysis",
+      "argument_schema": {
+        "type": "object",
+        "properties": {
+          "prompt": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "prompt"
+        ],
+        "additionalProperties": false
+      },
+      "result_schema": {
+        "$ref": "#/$defs/text"
+      },
+      "availability_policy": "Built into every native dspy.RLM invocation for the current Root or child invocation; DSPy creates a fresh max_llm_calls counter for that invocation.",
+      "authorization_policy": "Native DSPy internal capability only. It is not caller-supplied and uses the host-selected Sub LM for the current RLM invocation.",
+      "event_projection_policy": {
+        "mode": "bounded_allowlist",
+        "input": [
+          "prompt_count",
+          "prompt_chars"
+        ],
+        "output": [],
+        "omits": [
+          "prompt",
+          "sub-LM response text"
+        ],
+        "source": "src/fleet_rlm/daytona/interpreter.py:DaytonaCodeInterpreter._execution_tools"
+      }
+    },
+    {
+      "name": "llm_query_batched",
+      "category": "semantic",
+      "source": "dspy/predict/rlm.py:RLM._make_llm_tools (installed dspy==3.3.1)",
+      "description": "query multiple prompts concurrently (much faster for multiple queries)",
+      "argument_schema": {
+        "type": "object",
+        "properties": {
+          "prompts": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "prompts"
+        ],
+        "additionalProperties": false
+      },
+      "result_schema": {
+        "$ref": "#/$defs/text_array"
+      },
+      "availability_policy": "Built into every native dspy.RLM invocation for the current Root or child invocation; DSPy creates a fresh max_llm_calls counter for that invocation.",
+      "authorization_policy": "Native DSPy internal capability only. It is not caller-supplied and uses the host-selected Sub LM for the current RLM invocation.",
+      "event_projection_policy": {
+        "mode": "bounded_allowlist",
+        "input": [
+          "prompt_count",
+          "prompt_chars"
+        ],
+        "output": [],
+        "omits": [
+          "prompt",
+          "sub-LM response text"
+        ],
+        "source": "src/fleet_rlm/daytona/interpreter.py:DaytonaCodeInterpreter._execution_tools"
+      }
+    },
+    {
+      "name": "load_skill",
+      "category": "skill",
+      "source": "src/fleet_rlm/skills/tools.py:SkillToolHost",
+      "description": "Load an authorized Skill only when its advertised Skill Card is relevant to the current request. Returns a dictionary with ok, skill_markdown, allowed_tools, and resources on success, or error on failure; allowed_tools are model guidance, not authorization; do not load Skills speculatively.",
+      "argument_schema": {
+        "type": "object",
+        "properties": {
+          "expected_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "skill_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "skill_id"
+        ],
+        "additionalProperties": false
+      },
+      "result_schema": {
+        "$ref": "#/$defs/skill_load"
+      },
+      "availability_policy": "Composed when the immutable bundled Skill catalog is available; unavailable catalogs omit both Tools, and explicit selections restrict allowed Skill IDs.",
+      "authorization_policy": "Skill host resolves only catalog Skills permitted for this Turn; resource reads additionally require that Skill to be loaded. allowed_tools is guidance, not authorization.",
+      "event_projection_policy": {
+        "mode": "bounded_allowlist",
+        "input": [
+          "skill_id",
+          "expected_version"
+        ],
+        "output": [
+          "ok",
+          "error",
+          "skill_id",
+          "name",
+          "version"
+        ],
+        "omits": [
+          "skill_markdown",
+          "allowed_tools",
+          "resources",
+          "installed_paths"
+        ],
+        "source": "src/fleet_rlm/skills/tools.py:SkillToolHost.event_views"
+      }
+    },
+    {
+      "name": "propose_memory",
+      "category": "conditional_capability",
+      "source": "src/fleet_rlm/workspace/memory.py:MemoryCandidateToolHost",
+      "description": "Propose one durable cross-session preference, workflow, or project learning for later commit-gated promotion. Use only for stable, non-secret evidence likely to remain useful beyond this Turn; never for temporary task state, raw documents, credentials, or ordinary conversational facts. This does not immediately change Workspace Memory.",
+      "argument_schema": {
+        "type": "object",
+        "properties": {
+          "category": {
+            "type": "string"
+          },
+          "key_learning": {
+            "type": "string"
+          },
+          "supersedes_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "category",
+          "key_learning",
+          "supersedes_id"
+        ],
+        "additionalProperties": false
+      },
+      "result_schema": {
+        "$ref": "#/$defs/memory_candidate"
+      },
+      "availability_policy": "Omitted by default. It is a Root-only live capability only when rlm.autonomous_memory_categories is non-empty; native child RLMs never receive it.",
+      "authorization_policy": "A Run-scoped collector validates the configured category allowlist, limits, and optional supersession target; generic observed-tool Run authority fails closed after revocation.",
+      "event_projection_policy": {
+        "mode": "bounded_allowlist",
+        "input": [
+          "category",
+          "learning_bytes",
+          "supersedes",
+          "supersedes_id"
+        ],
+        "output": [
+          "ok",
+          "namespace",
+          "candidate_id",
+          "category",
+          "byte_size",
+          "candidate_count",
+          "candidate_bytes",
+          "supersedes"
+        ],
+        "omits": [
+          "key_learning"
+        ],
+        "source": "src/fleet_rlm/workspace/memory.py:MemoryCandidateToolHost.event_views"
+      }
+    },
+    {
+      "name": "publish_workspace_artifact",
+      "category": "attachment_artifact",
+      "source": "src/fleet_rlm/artifacts/tools.py:ArtifactToolHost",
+      "description": "Stage an existing durable Session Workspace text file as a private Artifact Candidate; it is promoted only by a successful Turn Commit.",
+      "argument_schema": {
+        "type": "object",
+        "properties": {
+          "expected_sha256": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "kind": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          }
+        },
+        "required": [
+          "kind",
+          "path"
+        ],
+        "additionalProperties": false
+      },
+      "result_schema": {
+        "$ref": "#/$defs/artifact_candidate"
+      },
+      "availability_policy": "Available only in the live Daytona capability composition; deterministic private composition deliberately omits Artifact Candidate tools.",
+      "authorization_policy": "File host owns the current Run, Session, Workspace, and Volume staging scope; generic observed-tool Run authority fails closed after revocation. Promotion is owned by successful Turn Commit.",
+      "event_projection_policy": {
+        "mode": "bounded_allowlist",
+        "input": [
+          "path",
+          "kind",
+          "title",
+          "expected_sha256_present"
+        ],
+        "output": [
+          "ok",
+          "error",
+          "artifact_candidate_id",
+          "kind",
+          "title",
+          "byte_size"
+        ],
+        "omits": [
+          "expected_sha256"
+        ],
+        "source": "src/fleet_rlm/artifacts/tools.py:ArtifactToolHost.event_views"
+      }
+    },
+    {
+      "name": "read_attachment",
+      "category": "attachment_artifact",
+      "source": "src/fleet_rlm/attachments/tools.py:AttachmentToolHost",
+      "description": "Read one immutable authorized Attachment by opaque identity only when its advertised metadata is relevant to the current request.",
+      "argument_schema": {
+        "type": "object",
+        "properties": {
+          "attachment_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "attachment_id"
+        ],
+        "additionalProperties": false
+      },
+      "result_schema": {
+        "$ref": "#/$defs/attachment_read"
+      },
+      "availability_policy": "Composed in live and deterministic environments, even with no attached references; it succeeds only for an attachment prepared for the current Run.",
+      "authorization_policy": "File host rechecks the current Run attachment reference, staged path, byte size, and checksum; generic observed-tool Run authority also fails closed after revocation.",
+      "event_projection_policy": {
+        "mode": "bounded_allowlist",
+        "input": [
+          "attachment_id"
+        ],
+        "output": [
+          "ok",
+          "error",
+          "attachment_id",
+          "filename",
+          "content_type",
+          "encoding"
+        ],
+        "omits": [
+          "content",
+          "content_base64"
+        ],
+        "source": "src/fleet_rlm/attachments/tools.py:AttachmentToolHost.event_views"
+      }
+    },
+    {
+      "name": "read_curated_input",
+      "category": "conditional_capability",
+      "source": "src/fleet_rlm/optimization/daytona.py:StrictDaytonaEvaluationLifecycle",
+      "description": "Read bounded canonical curated evaluation input with the supplied capability handle.",
+      "argument_schema": {
+        "type": "object",
+        "properties": {
+          "json_pointer": {
+            "default": "",
+            "type": "string"
+          },
+          "limit": {
+            "default": 8000,
+            "type": "integer"
+          },
+          "sha256": {
+            "type": "string"
+          },
+          "start": {
+            "default": 0,
+            "type": "integer"
+          },
+          "transaction_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "sha256",
+          "transaction_id"
+        ],
+        "additionalProperties": false
+      },
+      "result_schema": {
+        "$ref": "#/$defs/curated_input_page"
+      },
+      "availability_policy": "Not part of the conversational Turn inventory. It exists only in the strict Daytona optimization evaluator after validated proof/policy, and that evaluator registers no Session, Workspace, Attachment, History, URL, or external Tool.",
+      "authorization_policy": "The one-use strict evaluator capability validates the exact transaction_id and sha256 captured by its host-side CuratedEvaluationStore; unrelated handles fail closed.",
+      "event_projection_policy": {
+        "mode": "none",
+        "input": [],
+        "output": [],
+        "omits": [
+          "transaction_id",
+          "sha256",
+          "json",
+          "curated input"
+        ],
+        "source": "src/fleet_rlm/optimization/daytona.py:StrictDaytonaEvaluationLifecycle.evaluate"
+      }
+    },
+    {
+      "name": "read_project_text",
+      "category": "project",
+      "source": "src/fleet_rlm/workspace/projects.py:ProjectToolHost",
+      "description": "Read one relevant UTF-8 Project deliverable page with max_chars in 1..10000 using a projects/<slug>/<path> target. Continue with next_cursor until eof.",
+      "argument_schema": {
+        "type": "object",
+        "properties": {
+          "cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "max_chars": {
+            "maximum": 10000,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "path": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "cursor",
+          "max_chars",
+          "path"
+        ],
+        "additionalProperties": false
+      },
+      "result_schema": {
+        "$ref": "#/$defs/filesystem_text_page"
+      },
+      "availability_policy": "Available only in the Daytona Project capability rooted at projects/; the deterministic private composition declares Workspace unavailable and omits these Tools.",
+      "authorization_policy": "Host binds the projects root with validated project-slug paths; the generic observed-tool Run-authority fence fails closed after revocation.",
+      "event_projection_policy": {
+        "mode": "bounded_allowlist",
+        "input": [
+          "path",
+          "cursor",
+          "max_chars"
+        ],
+        "output": [
+          "ok",
+          "namespace",
+          "path",
+          "next_cursor",
+          "byte_size",
+          "eof"
+        ],
+        "omits": [
+          "content"
+        ],
+        "source": "src/fleet_rlm/workspace/projects.py:ProjectToolHost.event_views"
+      }
+    },
+    {
+      "name": "read_session_history",
+      "category": "session_history",
+      "source": "src/fleet_rlm/sessions/history_tools.py:SessionHistoryToolHost",
+      "description": "Read a bounded page dictionary of older committed messages only when the current request requires prior-turn evidence. Iterate result[\"messages\"]; each message contains role and content; do not read history for self-contained requests.",
+      "argument_schema": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "maximum": 20,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "offset": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "limit",
+          "offset"
+        ],
+        "additionalProperties": false
+      },
+      "result_schema": {
+        "$ref": "#/$defs/history_page"
+      },
+      "availability_policy": "Always composed for an authorized Turn in every runtime; its immutable binding is the claimed Session History.",
+      "authorization_policy": "Host binds only the claimed Session History; the generic observed-tool Run-authority fence fails closed after revocation.",
+      "event_projection_policy": {
+        "mode": "bounded_allowlist",
+        "input": [
+          "offset",
+          "limit"
+        ],
+        "output": [
+          "offset",
+          "next_offset",
+          "total",
+          "has_more",
+          "done",
+          "truncated",
+          "bytes_returned",
+          "byte_budget",
+          "skipped_ordinal",
+          "message_count"
+        ],
+        "omits": [
+          "messages",
+          "message.content"
+        ],
+        "source": "src/fleet_rlm/sessions/history_tools.py:SessionHistoryToolHost.event_views"
+      }
+    },
+    {
+      "name": "read_skill_resource",
+      "category": "skill",
+      "source": "src/fleet_rlm/skills/tools.py:SkillToolHost",
+      "description": "Read one relevant resource from a previously loaded Skill. Returns a dictionary with ok, content, and resource metadata on success, or error on failure.",
+      "argument_schema": {
+        "type": "object",
+        "properties": {
+          "expected_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "resource_path": {
+            "type": "string"
+          },
+          "skill_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "resource_path",
+          "skill_id"
+        ],
+        "additionalProperties": false
+      },
+      "result_schema": {
+        "$ref": "#/$defs/skill_resource"
+      },
+      "availability_policy": "Composed when the immutable bundled Skill catalog is available; unavailable catalogs omit both Tools, and explicit selections restrict allowed Skill IDs.",
+      "authorization_policy": "Skill host resolves only catalog Skills permitted for this Turn; resource reads additionally require that Skill to be loaded. allowed_tools is guidance, not authorization.",
+      "event_projection_policy": {
+        "mode": "bounded_allowlist",
+        "input": [
+          "skill_id",
+          "resource_path",
+          "expected_version"
+        ],
+        "output": [
+          "ok",
+          "error",
+          "skill_id",
+          "path",
+          "encoding",
+          "media_type",
+          "byte_size"
+        ],
+        "omits": [
+          "content"
+        ],
+        "source": "src/fleet_rlm/skills/tools.py:SkillToolHost.event_views"
+      }
+    },
+    {
+      "name": "read_workspace_memory",
+      "category": "workspace_memory",
+      "source": "src/fleet_rlm/workspace/memory.py:WorkspaceMemoryToolHost",
+      "description": "Read the latest bounded cross-session Workspace Memory learnings when prior workspace context is relevant to the current request.",
+      "argument_schema": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      },
+      "result_schema": {
+        "$ref": "#/$defs/memory_tail"
+      },
+      "availability_policy": "Available only in the Daytona Workspace Memory capability; it is omitted from the deterministic private composition.",
+      "authorization_policy": "Host binds the current Workspace Memory store; the generic observed-tool Run-authority fence fails closed after revocation.",
+      "event_projection_policy": {
+        "mode": "bounded_allowlist",
+        "input": [],
+        "output": [
+          "ok",
+          "namespace",
+          "truncated",
+          "bytes_returned",
+          "byte_budget",
+          "total_bytes",
+          "skipped_malformed_records"
+        ],
+        "omits": [
+          "content"
+        ],
+        "source": "src/fleet_rlm/workspace/memory.py:WorkspaceMemoryToolHost.event_views"
+      }
+    },
+    {
+      "name": "read_workspace_text",
+      "category": "workspace",
+      "source": "src/fleet_rlm/workspace/workspace.py:WorkspaceToolHost",
+      "description": "Read one relevant UTF-8 durable Workspace page with max_chars in 1..10000. Continue with next_cursor until eof.",
+      "argument_schema": {
+        "type": "object",
+        "properties": {
+          "cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "max_chars": {
+            "maximum": 10000,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "path": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "cursor",
+          "max_chars",
+          "path"
+        ],
+        "additionalProperties": false
+      },
+      "result_schema": {
+        "$ref": "#/$defs/filesystem_text_page"
+      },
+      "availability_policy": "Available only in the Daytona Session Workspace capability; the deterministic private composition declares Workspace unavailable and omits these Tools.",
+      "authorization_policy": "Host binds one Session-scoped Workspace filesystem; the generic observed-tool Run-authority fence fails closed after revocation.",
+      "event_projection_policy": {
+        "mode": "bounded_allowlist",
+        "input": [
+          "path",
+          "cursor",
+          "max_chars"
+        ],
+        "output": [
+          "ok",
+          "namespace",
+          "path",
+          "next_cursor",
+          "byte_size",
+          "eof"
+        ],
+        "omits": [
+          "content"
+        ],
+        "source": "src/fleet_rlm/workspace/workspace.py:WorkspaceToolHost.event_views"
+      }
+    },
+    {
+      "name": "remember",
+      "category": "workspace_memory",
+      "source": "src/fleet_rlm/workspace/memory.py:WorkspaceMemoryToolHost",
+      "description": "Record one durable Workspace Memory learning or preference only when the user explicitly requests that it be remembered; returns the new entry's id for later edit or forget.",
+      "argument_schema": {
+        "type": "object",
+        "properties": {
+          "category": {
+            "type": "string"
+          },
+          "key_learning": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "category",
+          "key_learning"
+        ],
+        "additionalProperties": false
+      },
+      "result_schema": {
+        "$ref": "#/$defs/memory_write"
+      },
+      "availability_policy": "Available only in the Daytona Workspace Memory capability; it is omitted from the deterministic private composition.",
+      "authorization_policy": "Host binds the current Workspace Memory store; the generic observed-tool Run-authority fence fails closed after revocation.",
+      "event_projection_policy": {
+        "mode": "bounded_allowlist",
+        "input": [
+          "category",
+          "key_learning_bytes"
+        ],
+        "output": [
+          "ok",
+          "namespace",
+          "memory_id",
+          "category",
+          "entry_bytes",
+          "total_bytes"
+        ],
+        "omits": [
+          "key_learning"
+        ],
+        "source": "src/fleet_rlm/workspace/memory.py:WorkspaceMemoryToolHost.event_views"
+      }
+    },
+    {
+      "name": "rlm_query",
+      "category": "recursive",
+      "source": "src/fleet_rlm/rlm/recursion.py:RecursiveRLMExecutor",
+      "description": "Solve one self-contained bounded semantic subproblem. Pass only selected data, not the complete Turn, history, Attachment, or Workspace. Store the concise answer.",
+      "argument_schema": {
+        "type": "object",
+        "properties": {
+          "prompt": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "prompt"
+        ],
+        "additionalProperties": false
+      },
+      "result_schema": {
+        "$ref": "#/$defs/text"
+      },
+      "availability_policy": "Available only when recursive execution is enabled: Root and native depth-one child RLMs receive it; deeper calls use the Sub-LM fallback.",
+      "authorization_policy": "The executor checks live Run authority before reservation, child acquisition, and completion; revoked authority fails closed.",
+      "event_projection_policy": {
+        "mode": "bounded_allowlist",
+        "input": [
+          "prompt_count",
+          "prompt_chars"
+        ],
+        "output": [
+          "status",
+          "call_index",
+          "recursive_depth",
+          "child_iterations",
+          "termination_mode"
+        ],
+        "omits": [
+          "prompt",
+          "child answer"
+        ],
+        "source": "src/fleet_rlm/rlm/recursion.py:RecursiveRLMExecutor"
+      }
+    },
+    {
+      "name": "rlm_query_batched",
+      "category": "recursive",
+      "source": "src/fleet_rlm/rlm/recursion.py:RecursiveRLMExecutor",
+      "description": "Solve multiple independent bounded subproblems with isolated child RLMs. Inputs and outputs preserve order; use only when every item needs iterative exploration.",
+      "argument_schema": {
+        "type": "object",
+        "properties": {
+          "prompts": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "prompts"
+        ],
+        "additionalProperties": false
+      },
+      "result_schema": {
+        "$ref": "#/$defs/text_array"
+      },
+      "availability_policy": "Available only when recursive execution is enabled and only on the Root; native children receive rlm_query but not the batched tool.",
+      "authorization_policy": "The executor checks live Run authority before reservation, child acquisition, and completion; revoked authority fails closed.",
+      "event_projection_policy": {
+        "mode": "bounded_allowlist",
+        "input": [
+          "prompt_count",
+          "prompt_chars"
+        ],
+        "output": [
+          "status",
+          "answer_count",
+          "peak_child_concurrency"
+        ],
+        "omits": [
+          "prompts",
+          "child answers"
+        ],
+        "source": "src/fleet_rlm/rlm/recursion.py:RecursiveRLMExecutor"
+      }
+    },
+    {
+      "name": "search_memories",
+      "category": "workspace_memory",
+      "source": "src/fleet_rlm/workspace/memory.py:WorkspaceMemoryToolHost",
+      "description": "Search durable Workspace Memory for an older relevant learning by a bounded query, using deterministic lexical ranking; pass category only to constrain recall.",
+      "argument_schema": {
+        "type": "object",
+        "properties": {
+          "category": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "limit": {
+            "type": "integer"
+          },
+          "query": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "category",
+          "limit",
+          "query"
+        ],
+        "additionalProperties": false
+      },
+      "result_schema": {
+        "$ref": "#/$defs/memory_search"
+      },
+      "availability_policy": "Available only in the Daytona Workspace Memory capability; it is omitted from the deterministic private composition.",
+      "authorization_policy": "Host binds the current Workspace Memory store; the generic observed-tool Run-authority fence fails closed after revocation.",
+      "event_projection_policy": {
+        "mode": "bounded_allowlist",
+        "input": [
+          "query_bytes",
+          "limit",
+          "category"
+        ],
+        "output": [
+          "ok",
+          "namespace",
+          "count",
+          "truncated",
+          "skipped_malformed_records",
+          "top_memory_ids"
+        ],
+        "omits": [
+          "query",
+          "entries.learning"
+        ],
+        "source": "src/fleet_rlm/workspace/memory.py:WorkspaceMemoryToolHost.event_views"
+      }
+    },
+    {
+      "name": "stat_project_file",
+      "category": "project",
+      "source": "src/fleet_rlm/workspace/projects.py:ProjectToolHost",
+      "description": "Read bounded metadata for a relevant durable Project deliverable path under projects/<slug>/.",
+      "argument_schema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "additionalProperties": false
+      },
+      "result_schema": {
+        "$ref": "#/$defs/filesystem_stat"
+      },
+      "availability_policy": "Available only in the Daytona Project capability rooted at projects/; the deterministic private composition declares Workspace unavailable and omits these Tools.",
+      "authorization_policy": "Host binds the projects root with validated project-slug paths; the generic observed-tool Run-authority fence fails closed after revocation.",
+      "event_projection_policy": {
+        "mode": "bounded_allowlist",
+        "input": [
+          "path"
+        ],
+        "output": [
+          "ok",
+          "error",
+          "path",
+          "byte_size"
+        ],
+        "omits": [
+          "entry"
+        ],
+        "source": "src/fleet_rlm/workspace/projects.py:ProjectToolHost.event_views"
+      }
+    },
+    {
+      "name": "stat_workspace_file",
+      "category": "workspace",
+      "source": "src/fleet_rlm/workspace/workspace.py:WorkspaceToolHost",
+      "description": "Read bounded metadata for a relevant durable Session Workspace path.",
+      "argument_schema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "additionalProperties": false
+      },
+      "result_schema": {
+        "$ref": "#/$defs/filesystem_stat"
+      },
+      "availability_policy": "Available only in the Daytona Session Workspace capability; the deterministic private composition declares Workspace unavailable and omits these Tools.",
+      "authorization_policy": "Host binds one Session-scoped Workspace filesystem; the generic observed-tool Run-authority fence fails closed after revocation.",
+      "event_projection_policy": {
+        "mode": "bounded_allowlist",
+        "input": [
+          "path"
+        ],
+        "output": [
+          "ok",
+          "error",
+          "path",
+          "byte_size"
+        ],
+        "omits": [
+          "entry"
+        ],
+        "source": "src/fleet_rlm/workspace/workspace.py:WorkspaceToolHost.event_views"
+      }
+    },
+    {
+      "name": "update_workspace_memory",
+      "category": "workspace_memory",
+      "source": "src/fleet_rlm/workspace/memory.py:WorkspaceMemoryToolHost",
+      "description": "Legacy alias of remember: record one durable Workspace Memory learning or preference only when the user explicitly requests that it be remembered.",
+      "argument_schema": {
+        "type": "object",
+        "properties": {
+          "category": {
+            "type": "string"
+          },
+          "key_learning": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "category",
+          "key_learning"
+        ],
+        "additionalProperties": false
+      },
+      "result_schema": {
+        "$ref": "#/$defs/memory_write"
+      },
+      "availability_policy": "Available only in the Daytona Workspace Memory capability; it is omitted from the deterministic private composition.",
+      "authorization_policy": "Host binds the current Workspace Memory store; the generic observed-tool Run-authority fence fails closed after revocation.",
+      "event_projection_policy": {
+        "mode": "bounded_allowlist",
+        "input": [
+          "category",
+          "key_learning_bytes"
+        ],
+        "output": [
+          "ok",
+          "namespace",
+          "memory_id",
+          "category",
+          "entry_bytes",
+          "total_bytes"
+        ],
+        "omits": [
+          "key_learning"
+        ],
+        "source": "src/fleet_rlm/workspace/memory.py:WorkspaceMemoryToolHost.event_views"
+      }
+    },
+    {
+      "name": "write_project_text",
+      "category": "project",
+      "source": "src/fleet_rlm/workspace/projects.py:ProjectToolHost",
+      "description": "Write UTF-8 text immediately as a durable deliverable under projects/<slug>/ when the result must stay browsable across Sessions; choose a short repo/task-derived slug and keep scratch in the Session Workspace. This durability is independent of Turn Commit.",
+      "argument_schema": {
+        "type": "object",
+        "properties": {
+          "content": {
+            "type": "string"
+          },
+          "overwrite": {
+            "type": "boolean"
+          },
+          "path": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "content",
+          "overwrite",
+          "path"
+        ],
+        "additionalProperties": false
+      },
+      "result_schema": {
+        "$ref": "#/$defs/filesystem_write"
+      },
+      "availability_policy": "Available only in the Daytona Project capability rooted at projects/; the deterministic private composition declares Workspace unavailable and omits these Tools.",
+      "authorization_policy": "Host binds the projects root with validated project-slug paths; the generic observed-tool Run-authority fence fails closed after revocation.",
+      "event_projection_policy": {
+        "mode": "bounded_allowlist",
+        "input": [
+          "path",
+          "overwrite",
+          "content_chars"
+        ],
+        "output": [
+          "ok",
+          "namespace",
+          "path",
+          "byte_size",
+          "warnings"
+        ],
+        "omits": [
+          "content"
+        ],
+        "source": "src/fleet_rlm/workspace/projects.py:ProjectToolHost.event_views"
+      }
+    },
+    {
+      "name": "write_workspace_text",
+      "category": "workspace",
+      "source": "src/fleet_rlm/workspace/workspace.py:WorkspaceToolHost",
+      "description": "Write UTF-8 text immediately into this Session's durable Workspace when the result must survive the Run; this durability is independent of Turn Commit.",
+      "argument_schema": {
+        "type": "object",
+        "properties": {
+          "content": {
+            "type": "string"
+          },
+          "overwrite": {
+            "type": "boolean"
+          },
+          "path": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "content",
+          "overwrite",
+          "path"
+        ],
+        "additionalProperties": false
+      },
+      "result_schema": {
+        "$ref": "#/$defs/filesystem_write"
+      },
+      "availability_policy": "Available only in the Daytona Session Workspace capability; the deterministic private composition declares Workspace unavailable and omits these Tools.",
+      "authorization_policy": "Host binds one Session-scoped Workspace filesystem; the generic observed-tool Run-authority fence fails closed after revocation.",
+      "event_projection_policy": {
+        "mode": "bounded_allowlist",
+        "input": [
+          "path",
+          "overwrite",
+          "content_chars"
+        ],
+        "output": [
+          "ok",
+          "namespace",
+          "path",
+          "byte_size",
+          "warnings"
+        ],
+        "omits": [
+          "content"
+        ],
+        "source": "src/fleet_rlm/workspace/workspace.py:WorkspaceToolHost.event_views"
+      }
+    }
+  ]
+}

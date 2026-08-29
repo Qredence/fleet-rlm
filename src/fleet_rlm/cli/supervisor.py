@@ -20,11 +20,11 @@ from pathlib import Path
 from types import FrameType
 from typing import TYPE_CHECKING, cast
 
-from fleet_rlm.config import active_profile, load_runtime_settings
+from fleet_rlm.config.loader import active_profile, load_runtime_settings
 from fleet_rlm.persistence.database import ensure_database_compatible
 
 if TYPE_CHECKING:
-    from fleet_rlm.config import Settings
+    from fleet_rlm.config.settings import Settings
 
 SignalHandler = int | Callable[[int, FrameType | None], object] | None
 

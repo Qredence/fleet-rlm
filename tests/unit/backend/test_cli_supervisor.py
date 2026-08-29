@@ -324,7 +324,7 @@ def test_local_mlflow_server_skips_unmanaged_policies(
 
 
 def test_daytona_startup_cleanup_recovery_leaves_readiness_margin() -> None:
-    from fleet_rlm.composition.daytona import (
+    from fleet_rlm.composition.live import (
         _ORPHAN_CLEANUP_TIMEOUT_SECONDS,
         _STARTUP_CLEANUP_RECOVERY_BUDGET_SECONDS,
     )

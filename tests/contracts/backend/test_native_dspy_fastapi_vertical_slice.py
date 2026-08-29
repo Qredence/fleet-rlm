@@ -48,7 +48,7 @@ async def test_native_runtime_deltas_reach_fastapi_sse_before_done() -> None:
 
     class _Coordinator:
         def open_owned(self, _command: object):
-            from fleet_rlm.chat.turn_coordinator import OpenedTurnStream
+            from fleet_rlm.chat.turn_runtime import OpenedTurnStream
 
             return OpenedTurnStream(opened.run_id, opened)
 

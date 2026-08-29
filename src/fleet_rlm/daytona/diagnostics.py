@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from typing import Any, Literal, Protocol
 from uuid import uuid4
 
-from fleet_rlm.config import Settings
+from fleet_rlm.config.settings import Settings
 from fleet_rlm.daytona.errors import DaytonaAdapterError, classify_provider_error
 from fleet_rlm.daytona.platform import (
     LiveDaytonaPlatform,
@@ -203,7 +203,7 @@ class _ProductionDaytonaDoctorDependencies:
         await self._client.close()
 
     async def check_rlm_readiness(self, settings: Settings) -> None:
-        from fleet_rlm.rlm.provider_probe import probe_configured_root_lm
+        from fleet_rlm.rlm.runtime import probe_configured_root_lm
 
         await probe_configured_root_lm(
             settings,
