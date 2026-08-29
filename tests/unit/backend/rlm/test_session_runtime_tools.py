@@ -60,7 +60,8 @@ def test_stale_cleared_and_expired_bindings_fail_closed() -> None:
         proxy.func(value="expired")
 
     live = True
-    assert lease.remove()
+    removed = lease.remove()
+    assert removed
     with pytest.raises(SessionToolAuthorizationError):
         proxy.func(value="cleared")
     assert registry.tools() == ()
@@ -91,7 +92,8 @@ async def test_retiring_binding_cancels_suspended_async_tool_call() -> None:
     task = asyncio.create_task(lease.tools[0].func(value="stale"))
     await started.wait()
 
-    assert lease.remove()
+    removed = lease.remove()
+    assert removed
     release.set()
     with pytest.raises(asyncio.CancelledError):
         await task
@@ -113,7 +115,8 @@ def test_stale_lease_cannot_remove_a_new_run_binding() -> None:
         authorized_names={"echo"},
     )
 
-    assert old.remove() is False
+    removed = old.remove()
+    assert removed is False
     assert current.tools[0].func(value="value") == "current:value"
 
 
