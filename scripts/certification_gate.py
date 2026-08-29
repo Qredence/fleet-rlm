@@ -893,9 +893,9 @@ def verify_manifest(
 def verify_command(args: argparse.Namespace) -> int:
     """Verify a manifest against the current clean candidate."""
     current_sha, current_lockfile_sha256 = _current_identity()
-    _require_certified_provider_configuration()
     if args.sha is not None and args.sha != current_sha:
         raise CertificationGateError("explicit candidate SHA does not match current candidate")
+    _require_certified_provider_configuration()
     manifest_path = _safe_exact_path(
         args.manifest,
         DEFAULT_OUTPUT,
