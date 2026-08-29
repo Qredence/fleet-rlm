@@ -260,7 +260,10 @@ def _copy_atomic(source: Path, target: Path) -> None:
 
 
 def _command(test: str, timeout: int) -> tuple[str, ...]:
-    return ("uv", "run", "pytest", test, "-q", "-n", "0", f"--timeout={timeout}")
+    # Keep quiet flags out of the command: pyproject addopts already carries
+    # ``-q``.  A second ``-q`` (effective ``-qq``) suppresses the terminal
+    # summary line that _pytest_exactly_one_passed requires.
+    return ("uv", "run", "pytest", test, "-n", "0", f"--timeout={timeout}")
 
 
 def _pytest_exactly_one_passed(output: str) -> bool:
