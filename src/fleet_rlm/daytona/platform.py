@@ -43,7 +43,7 @@ def build_daytona_client(settings: Settings) -> Any:
         api_key = raw.get_secret_value() if hasattr(raw, "get_secret_value") else str(raw)
         api_key = api_key or None
     # Pass the current SDK field explicitly.  Leaving this unset makes Daytona
-    # 0.202.0 evaluate the deprecated ``server_url`` fallback, and would also
+    # 0.207.0 evaluate the deprecated ``server_url`` fallback, and would also
     # allow ambient SDK endpoint discovery to bypass Fleet's configuration.
     config_kwargs: dict[str, Any] = {"api_url": _DAYTONA_CLOUD_API_URL}
     if api_key:

@@ -31,8 +31,13 @@ dependencies = [
     # patches, prereleases, post-releases, and local builds.
     "dspy==3.3.1",
     "packaging>=24,<27",
-    # Sandboxed execution.
-    "daytona==0.202.0",
+    # Sandboxed execution. Bumped to 0.207.0: validated additive-compatible
+    # against our SDK surface (AsyncDaytona, DaytonaConfig,
+    # CreateSandboxFromSnapshotParams, VolumeMount, Image,
+    # SessionExecuteRequest are all unchanged or gain optional fields only).
+    # The new warm-pool service and typed errors are not exploited by our
+    # volume-mounted sandboxes, so this is a maintenance bump, not a feature.
+    "daytona==0.207.0",
     # Persistence and migrations.
     "aiosqlite>=0.20.0",
     "alembic>=1.18.5,<2",
@@ -43,12 +48,11 @@ dependencies = [
     "python-dotenv>=1.2.2",
     "pyyaml>=6.0.3,<7",
     "sqlalchemy[asyncio]>=2.0.51,<3",
-    # Web API surface. Pinned exactly to 0.141.1 (latest PyPI release, Jul 29
-    # 2026) for reproducible installs; bump deliberately when a newer release is
+    # Web API surface. Pinned exactly to the latest PyPI release at pin time
+    # for reproducible installs; bump deliberately when a newer release is
     # validated against the runtime + test suite.
     "fastapi[standard]==0.141.1",
     "uvicorn>=0.47.0,<1",
-    "httpx2>=2.5.0",
     # Pooled HTTP client for the Daytona tool broker poll/fulfill loop:
     # connection reuse through the preview proxy. Transitive via the Daytona
     # SDK; declared direct because daytona.broker imports it.
@@ -73,18 +77,6 @@ fleet = "fleet_rlm.cli.main:fleet_main"
 fleet-rlm = "fleet_rlm.cli.main:fleet_rlm_main"
 
 [project.optional-dependencies]
-# Keep this list mirrored with [dependency-groups].dev for packaged installs
-# and local uv workflows.
-dev = [
-    "pre-commit>=4.6.0",
-    "pytest>=9.1.1",
-    "pytest-asyncio>=1.3.0",
-    "pytest-cov>=7.1,<8",
-    "pytest-timeout>=2.4.0",
-    "pytest-xdist>=3.5.0",
-    "ruff>=0.16.3",
-    "ty>=0.0.71",
-]
 server = [
     "psycopg[binary]>=3.3.4,<4",
     "uvicorn[standard]>=0.47.0,<1",
@@ -105,7 +97,8 @@ build-backend = "setuptools.build_meta"
 entrypoint = "fleet_rlm.main:app"
 
 [dependency-groups]
-# Mirrors the published dev extra for local workspace management via uv.
+# The single dev dependency list (PEP 735). Local workflows install it via
+# `uv sync --dev`; there is deliberately no published `dev` extra.
 dev = [
     "pre-commit>=4.6.0",
     "pytest>=9.1.1",
@@ -118,6 +111,14 @@ dev = [
 ]
 
 [tool.uv]
+# Solve the lock only for platforms Fleet actually targets (macOS dev, Linux
+# CI/containers). Entries must be disjoint per uv's universal resolver. This
+# keeps marker resolution deterministic across contributors and CI images;
+# Windows is intentionally not covered by the lock.
+environments = [
+    "sys_platform == 'darwin'",
+    "sys_platform == 'linux'",
+]
 override-dependencies = [
     # LiteLLM 1.83.x pins older vulnerable releases; keep the resolver on
     # patched floors until upstream relaxes its metadata.
