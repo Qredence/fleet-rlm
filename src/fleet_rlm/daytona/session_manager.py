@@ -134,10 +134,10 @@ _PREWARM_CLAIM_WAIT_SECONDS = 60.0
 async def _claim_session_lease(session_id: UUID, run_id: UUID, *, workspace_id: UUID, deadline: float) -> None:
     """Claim the per-session active lease, waiting out a best-effort pre-warm.
 
-    A real-versus-real claim conflict still raises ``ActiveLeaseConflictError``
-    unchanged; only a conflict whose holder is the reserved pre-warm identity
-    waits, because the pre-warm yields and releases its claim within its
-    bounded acquire.
+    Real-versus-real and overlapping pre-warm conflicts still raise
+    ``ActiveLeaseConflictError`` unchanged. Only a real caller whose conflict
+    holder is the reserved pre-warm identity waits, because the pre-warm yields
+    and releases its claim within its bounded acquire.
     """
     loop = asyncio.get_running_loop()
     claim_wait_deadline = loop.time() + _PREWARM_CLAIM_WAIT_SECONDS
@@ -146,7 +146,7 @@ async def _claim_session_lease(session_id: UUID, run_id: UUID, *, workspace_id: 
             get_active_lease_registry().acquire(session_id, run_id, workspace_id=workspace_id)
             return
         except ActiveLeaseConflictError as exc:
-            if exc.holder_run_id != PREWARM_RUN_ID:
+            if run_id == PREWARM_RUN_ID or exc.holder_run_id != PREWARM_RUN_ID:
                 raise
         remaining = min(deadline, claim_wait_deadline) - loop.time()
         if remaining <= 0:
@@ -174,7 +174,10 @@ class ActiveLeaseRegistry:
         with self._lock:
             key = self._key(session_id, workspace_id)
             existing = self._holders.get(key)
-            if existing is not None and existing != run_id:
+            # Real Run re-entry is idempotent, but the shared pre-warm identity
+            # represents distinct callers. Reject an overlap before either
+            # caller can start competing provider acquisition or persistence.
+            if existing is not None and (existing != run_id or run_id == PREWARM_RUN_ID):
                 raise ActiveLeaseConflictError(session_id, holder_run_id=existing)
             self._holders[key] = run_id
 
@@ -524,16 +527,17 @@ class DaytonaSessionManager:
         subject to the existing idle-stop fencing.
 
         A pre-warm is best-effort and transparent to real Turns: when a real
-        Turn acquires the same Session while the pre-warm is in flight, the
-        per-session active-lease claim conflicts and this pre-warm yields
-        (returns False) — the Turn performs the acquisition itself. Acquire
+        Turn or another pre-warm claims the same Session first, the per-session
+        active-lease claim conflicts and this pre-warm yields (returns False)
+        before provider acquisition. A real Turn performs the acquisition
+        itself; an earlier pre-warm completes the shared warm binding. Acquire
         failures surface to the caller for telemetry; the first Turn retries
         acquisition normally either way. A failed interpreter release stays
         retained for the manager's asynchronous drain retry, together with
         its admission permit, sandbox ownership, and per-session claim.
 
         Returns True when this pre-warm completed a warm binding; False when
-        a concurrent real Turn superseded it.
+        a concurrent real Turn or pre-warm superseded it.
         """
         effective_deadline = deadline if deadline is not None else asyncio.get_running_loop().time() + 120.0
         try:
@@ -547,9 +551,9 @@ class DaytonaSessionManager:
                 deadline=effective_deadline,
             )
         except ActiveLeaseConflictError:
-            # A real Turn holds or is acquiring this Session's lease; the
-            # Turn is the authoritative acquisition, so this best-effort
-            # pre-warm yields without touching provider state.
+            # A real Turn or earlier pre-warm holds or is acquiring this
+            # Session's lease, so this best-effort pre-warm yields without
+            # touching provider state.
             return False
         await self.release(lease)
         return True

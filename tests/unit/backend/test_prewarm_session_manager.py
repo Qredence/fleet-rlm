@@ -77,6 +77,38 @@ async def test_prewarm_persists_binding_and_leaves_sandbox_running() -> None:
 
 
 @pytest.mark.asyncio
+async def test_overlapping_prewarm_yields_before_competing_sandbox_create() -> None:
+    mgr, platform, store, _volumes = _manager()
+    session_id, user_id, workspace_id = uuid4(), uuid4(), uuid4()
+    first_create_started = asyncio.Event()
+    allow_first_create = asyncio.Event()
+    original_create = platform.create
+
+    async def gated_create(**kwargs):
+        first_create_started.set()
+        await asyncio.wait_for(allow_first_create.wait(), timeout=10)
+        return await original_create(**kwargs)
+
+    platform.create = gated_create  # type: ignore[method-assign]
+
+    first = asyncio.create_task(mgr.prewarm_session(session_id, user_id=user_id, workspace_id=workspace_id))
+    await asyncio.wait_for(first_create_started.wait(), timeout=5)
+
+    second = await asyncio.wait_for(
+        mgr.prewarm_session(session_id, user_id=user_id, workspace_id=workspace_id),
+        timeout=5,
+    )
+    assert second is False
+    assert not platform.created, "overlapping pre-warm must yield before creating a competing Sandbox"
+
+    allow_first_create.set()
+    assert await asyncio.wait_for(first, timeout=10) is True
+    assert len(platform.created) == 1
+    assert isinstance(await store.get(session_id), SandboxBinding)
+    assert not mgr.has_pending_ownership
+
+
+@pytest.mark.asyncio
 async def test_prewarm_failure_surfaces_to_caller() -> None:
     mgr, _platform, _store, _volumes = _manager()
 
