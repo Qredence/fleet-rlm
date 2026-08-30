@@ -124,9 +124,10 @@ class ActiveLeaseConflictError(RuntimeError):
 #: Turn whose acquire conflicts with this holder waits briefly for the
 #: pre-warm claim to clear instead of failing: the pre-warm is transparent
 #: by contract, and its acquire (create + layout + binding + release)
-#: settles within seconds.
+#: settles within seconds. A pre-warm whose interpreter release fails
+#: clears its claim immediately (``_clear_prewarm_lease_ownership``), so
+#: this holder never outlives a bounded acquisition or a settled release.
 PREWARM_RUN_ID = UUID("00000000-0000-4000-8000-000000000000")
-_PREWARM_CLAIM_WAIT_SECONDS = 60.0
 
 
 async def _claim_session_lease(session_id: UUID, run_id: UUID, *, workspace_id: UUID, deadline: float) -> None:
@@ -150,6 +151,29 @@ async def _claim_session_lease(session_id: UUID, run_id: UUID, *, workspace_id: 
         # The pre-warm holds this Session's claim; it releases as soon as its
         # acquire completes. Yield and retry rather than failing the Turn.
         await asyncio.sleep(min(0.2, remaining))
+
+
+def _clear_prewarm_lease_ownership(lease: InterpreterLease) -> None:
+    """Clear a failed pre-warm lease's admission/claim/ownership guards.
+
+    The pre-warm never executed, so its lease is only an acquisition
+    guard. Interpreter shutdown stays retryable through ``_release_leases``
+    at drain, but the admission permit, sandbox ownership, and the
+    per-session active-lease claim must clear now: a retained PREWARM claim
+    makes every later real Turn poll ``_claim_session_lease`` until its
+    deadline and fail.
+    """
+    if lease._released:
+        return
+    callback = lease._on_release
+    if callback is None:
+        return
+    # Any completed release already ran the callback; deferring here keeps
+    # the drain retry from invoking it a second time, matching the
+    # unpublished-lease single-callback convention.
+    lease._defer_owner_release = True
+    with contextlib.suppress(BaseException):
+        callback()
 
 
 class ActiveLeaseRegistry:
@@ -522,9 +546,13 @@ class DaytonaSessionManager:
         A pre-warm is best-effort and transparent to real Turns: when a real
         Turn acquires the same Session while the pre-warm is in flight, the
         per-session active-lease claim conflicts and this pre-warm yields
-        (returns False) — the Turn performs the acquisition itself. Failures
-        surface to the caller for telemetry; the first Turn retries
-        acquisition normally either way.
+        (returns False) — the Turn performs the acquisition itself. Acquire
+        failures surface to the caller for telemetry; the first Turn retries
+        acquisition normally either way. A failed interpreter release clears
+        the pre-warm's admission, sandbox ownership, and per-session claim
+        (``_clear_prewarm_lease_ownership``) so real Turns proceed
+        immediately, while the failed lease stays retryable through the
+        drain path.
 
         Returns True when this pre-warm completed a warm binding; False when
         a concurrent real Turn superseded it.
@@ -549,8 +577,24 @@ class DaytonaSessionManager:
             return False
         finally:
             if lease is not None:
-                with contextlib.suppress(BaseException):
+                try:
                     await self.release(lease)
+                except BaseException as exc:
+                    # The pre-warm never executed, so its lease is only an
+                    # acquisition guard. Clear the guards so real Turns
+                    # proceed, and leave the failed interpreter shutdown to
+                    # the drain retry.
+                    _clear_prewarm_lease_ownership(lease)
+                    logger.warning(
+                        "Daytona pre-warm lease release failed",
+                        extra={
+                            "session_id": str(session_id),
+                            "workspace_id": str(workspace_id),
+                            "error_type": type(exc).__name__,
+                        },
+                    )
+                    if isinstance(exc, asyncio.CancelledError):
+                        raise
 
     def _expected_mount(self, *, volume_id: str, workspace_id: UUID) -> ExpectedWorkspaceMount:
         return self._provisioner.expected_mount(

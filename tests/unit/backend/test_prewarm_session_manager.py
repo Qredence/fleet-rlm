@@ -4,7 +4,10 @@ Pre-warm acquires a lease through the normal admission path (creating the
 Sandbox, canonical layout, and persisted binding), then releases the
 interpreter lease immediately. The Sandbox keeps running and the binding
 stays persisted so the first real Turn reuses the bound Sandbox; a
-pre-warm failure surfaces to the caller and holds no lease.
+pre-warm failure surfaces to the caller and holds no lease. A failed
+interpreter release clears the pre-warm's admission, sandbox ownership,
+and per-session claim so real Turns proceed, while the failed lease stays
+drain-retryable.
 """
 
 from __future__ import annotations
@@ -15,9 +18,35 @@ from uuid import uuid4
 import pytest
 
 from fleet_rlm.daytona.errors import ProviderRequestError
-from fleet_rlm.daytona.session_manager import LeaseRequest
+from fleet_rlm.daytona.session_manager import LeaseRequest, get_active_lease_registry
 from fleet_rlm.runtime.bindings import SandboxBinding
 from tests.unit.backend.test_session_manager import _manager
+
+
+class _FailOnceBackend:
+    """Interpreter backend whose first close() fails and later ones settle."""
+
+    def __init__(self) -> None:
+        self.close_calls = 0
+
+    def close(self) -> None:
+        self.close_calls += 1
+        if self.close_calls == 1:
+            raise RuntimeError("interpreter backend close failed")
+
+
+def _attach_failing_backend(platform) -> _FailOnceBackend:
+    """Attach one fail-once interpreter backend to every created sandbox."""
+    backend = _FailOnceBackend()
+    original_create = platform.create
+
+    async def create_with_failing_backend(**kwargs):
+        sandbox = await original_create(**kwargs)
+        sandbox.backend = backend
+        return sandbox
+
+    platform.create = create_with_failing_backend  # type: ignore[method-assign]
+    return backend
 
 
 @pytest.mark.asyncio
@@ -63,6 +92,81 @@ async def test_prewarm_failure_surfaces_to_caller() -> None:
         await mgr.prewarm_session(
             session_id, user_id=user_id, workspace_id=workspace_id, deadline=asyncio.get_running_loop().time() + 10
         )
+    assert not mgr.has_pending_ownership
+
+
+@pytest.mark.asyncio
+async def test_prewarm_release_failure_clears_claim_for_real_turns() -> None:
+    """A failed pre-warm interpreter release must not wedge the Session.
+
+    The pre-warm's finally clears admission, sandbox ownership, and the
+    per-session PREWARM claim when the interpreter shutdown fails, so the
+    first real Turn acquires promptly (no claim to poll out) and reuses the
+    persisted warm binding. The failed lease itself stays retained for the
+    drain retry.
+    """
+    mgr, platform, store, _volumes = _manager()
+    session_id, user_id, workspace_id = uuid4(), uuid4(), uuid4()
+    backend = _attach_failing_backend(platform)
+
+    result = await mgr.prewarm_session(
+        session_id, user_id=user_id, workspace_id=workspace_id, deadline=asyncio.get_running_loop().time() + 10
+    )
+
+    # The warm binding completed and persists despite the failed release.
+    assert result is True
+    binding = await store.get(session_id)
+    assert isinstance(binding, SandboxBinding)
+    assert binding.provider_state == "running"
+    assert backend.close_calls == 1, "pre-warm release must have attempted interpreter shutdown once"
+
+    # A real Turn must acquire without waiting out a PREWARM claim. The
+    # bounded wait_for discriminates the old wedge, which polled the claim
+    # until the acquire deadline and failed with a lease timeout.
+    lease = await asyncio.wait_for(
+        mgr.acquire(
+            LeaseRequest(session_id=session_id, user_id=user_id, workspace_id=workspace_id, run_id=uuid4()),
+            deadline=asyncio.get_running_loop().time() + 10,
+        ),
+        timeout=2.0,
+    )
+    try:
+        assert lease.sandbox_id == binding.sandbox_id
+        assert len(platform.created) == 1, "the real Turn must reuse the warm binding, not create a Sandbox"
+    finally:
+        await mgr.release(lease)
+
+    # The real Turn's release settles the shared fail-once backend; the
+    # pre-warm's failed lease itself remains drain-owned until disposal.
+    assert backend.close_calls == 2
+    assert mgr.has_pending_ownership, "pre-warm lease must remain retryable at drain"
+
+
+@pytest.mark.asyncio
+async def test_prewarm_release_failure_settles_through_drain_retry() -> None:
+    """The failed pre-warm lease stays drain-retryable after the claim clear.
+
+    aclose retries the retained release; the fail-once backend settles on
+    its second close, and the manager ends with no pending ownership.
+    """
+    mgr, platform, _store, _volumes = _manager()
+    session_id, user_id, workspace_id = uuid4(), uuid4(), uuid4()
+    backend = _attach_failing_backend(platform)
+
+    result = await mgr.prewarm_session(
+        session_id, user_id=user_id, workspace_id=workspace_id, deadline=asyncio.get_running_loop().time() + 10
+    )
+
+    assert result is True
+    assert backend.close_calls == 1
+    # The claim clear is immediate: no PREWARM holder remains for real Turns.
+    assert get_active_lease_registry().holder(session_id, workspace_id=workspace_id) is None
+    assert mgr.has_pending_ownership, "failed pre-warm release must stay owned until drain"
+
+    settled = await mgr.aclose(drain_seconds=5.0)
+
+    assert settled is True
+    assert backend.close_calls == 2, "drain must retry the failed interpreter shutdown"
     assert not mgr.has_pending_ownership
 
 
