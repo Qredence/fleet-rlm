@@ -43,6 +43,7 @@ export interface paths {
          *         body (SessionCreateRequest): Session creation data, including the optional title.
          *         identity (LocalScopeDep): Authenticated user and workspace scope.
          *         repo (SessionCatalogDep): Session repository used to create the session.
+         *         prewarm (SessionPrewarmDep): Optional background Sandbox pre-warm trigger.
          *
          *     Returns:
          *         SessionDetailResponse: The newly created session details.

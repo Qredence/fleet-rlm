@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 from collections.abc import Iterable
 from dataclasses import dataclass
@@ -444,23 +445,34 @@ async def _require_directory(fs: Any, path: str, *, create: bool) -> None:
     try:
         await fs.create_folder(path, _DIRECTORY_MODE)
     except Exception as exc:
+        # Tolerate a concurrent writer: a failed mkdir that the follow-up
+        # stat resolves to an existing directory (ours or another writer's)
+        # is success, not an error.
         info = await _file_info(fs, path)
         if info is None:
             raise map_provider_error(exc) from exc
         _assert_directory(info)
         return
-    info = await _file_info(fs, path)
-    if info is None:
-        raise DaytonaAdapterError(
-            message="Workspace Volume directory was not created",
-            cause_type="VolumeLayoutCreateFailed",
-        )
-    _assert_directory(info)
+    # create_folder returning normally is the creation confirmation; a
+    # success-path re-stat costs one extra provider round-trip per directory
+    # on the session cold-start path for no additional safety.
 
 
 async def _ensure_directories(fs: Any, directories: Iterable[str]) -> None:
+    """Ensure every directory exists, creating independent siblings concurrently.
+
+    Directories are grouped into depth levels (path segment count); within a
+    level, siblings share no parent/child relationship in this batch, so they
+    are created with ``asyncio.gather``. Each directory keeps the idempotent
+    verify-then-create contract of :func:`_require_directory`, whose
+    post-failure re-stat tolerates concurrent creation by an unrelated
+    writer.
+    """
+    batches: dict[int, list[str]] = {}
     for directory in directories:
-        await _require_directory(fs, directory, create=True)
+        batches.setdefault(str(directory).strip("/").count("/"), []).append(directory)
+    for depth in sorted(batches):
+        await asyncio.gather(*(_require_directory(fs, d, create=True) for d in batches[depth]))
 
 
 async def ensure_shared_volume_layout(sandbox: Any, paths: VolumePaths) -> None:

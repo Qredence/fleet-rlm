@@ -132,7 +132,8 @@ paths:
         \nParameters:\n    body (SessionCreateRequest): Session creation data, including\
         \ the optional title.\n    identity (LocalScopeDep): Authenticated user and\
         \ workspace scope.\n    repo (SessionCatalogDep): Session repository used\
-        \ to create the session.\n\nReturns:\n    SessionDetailResponse: The newly\
+        \ to create the session.\n    prewarm (SessionPrewarmDep): Optional background\
+        \ Sandbox pre-warm trigger.\n\nReturns:\n    SessionDetailResponse: The newly\
         \ created session details."
       operationId: create_session
       requestBody:

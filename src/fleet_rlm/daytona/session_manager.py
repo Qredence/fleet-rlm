@@ -120,6 +120,42 @@ class ActiveLeaseConflictError(RuntimeError):
         super().__init__(f"active lease conflict for session {session_id}")
 
 
+#: Reserved run identity for best-effort Session pre-warm claims. A real
+#: Turn whose acquire conflicts with this holder waits briefly for the
+#: pre-warm claim to clear instead of failing: the pre-warm is transparent
+#: by contract, and its acquire (create + layout + binding + release)
+#: settles within seconds. A failed release keeps this claim until the
+#: retained interpreter release succeeds, while real Turns bound how long
+#: they wait for that retry.
+PREWARM_RUN_ID = UUID("00000000-0000-4000-8000-000000000000")
+_PREWARM_CLAIM_WAIT_SECONDS = 60.0
+
+
+async def _claim_session_lease(session_id: UUID, run_id: UUID, *, workspace_id: UUID, deadline: float) -> None:
+    """Claim the per-session active lease, waiting out a best-effort pre-warm.
+
+    Real-versus-real and overlapping pre-warm conflicts still raise
+    ``ActiveLeaseConflictError`` unchanged. Only a real caller whose conflict
+    holder is the reserved pre-warm identity waits, because the pre-warm yields
+    and releases its claim within its bounded acquire.
+    """
+    loop = asyncio.get_running_loop()
+    claim_wait_deadline = loop.time() + _PREWARM_CLAIM_WAIT_SECONDS
+    while True:
+        try:
+            get_active_lease_registry().acquire(session_id, run_id, workspace_id=workspace_id)
+            return
+        except ActiveLeaseConflictError as exc:
+            if run_id == PREWARM_RUN_ID or exc.holder_run_id != PREWARM_RUN_ID:
+                raise
+        remaining = min(deadline, claim_wait_deadline) - loop.time()
+        if remaining <= 0:
+            raise DaytonaLeaseAcquisitionTimeoutError("Daytona lease acquisition timed out") from None
+        # The pre-warm holds this Session's claim; it releases as soon as its
+        # acquire completes. Yield and retry rather than failing the Turn.
+        await asyncio.sleep(min(0.2, remaining))
+
+
 class ActiveLeaseRegistry:
     """At most one active Interpreter Lease per Workspace+Session in this process."""
 
@@ -138,7 +174,10 @@ class ActiveLeaseRegistry:
         with self._lock:
             key = self._key(session_id, workspace_id)
             existing = self._holders.get(key)
-            if existing is not None and existing != run_id:
+            # Real Run re-entry is idempotent, but the shared pre-warm identity
+            # represents distinct callers. Reject an overlap before either
+            # caller can start competing provider acquisition or persistence.
+            if existing is not None and (existing != run_id or run_id == PREWARM_RUN_ID):
                 raise ActiveLeaseConflictError(session_id, holder_run_id=existing)
             self._holders[key] = run_id
 
@@ -467,6 +506,58 @@ class DaytonaSessionManager:
         with self._owned_sandbox_lock:
             return sandbox_id in self._owned_sandbox_ids
 
+    async def prewarm_session(
+        self,
+        session_id: UUID,
+        *,
+        user_id: UUID,
+        workspace_id: UUID,
+        deadline: float | None = None,
+    ) -> bool:
+        """Warm the provider Sandbox and canonical layout for one Session.
+
+        Acquires a lease through the normal admission path, lets the
+        acquisition create the Workspace Volume layout and persist the
+        binding, then releases the interpreter lease immediately. The Sandbox
+        keeps running and the binding stays persisted, so the first real
+        Turn reuses the bound Sandbox (``_reuse_bound_sandbox``) instead of
+        paying sandbox creation and layout cold-start on the user-visible
+        Turn path. Release never deletes a Sandbox, so a Session that is
+        archived before its first Turn simply leaves an idle bound Sandbox
+        subject to the existing idle-stop fencing.
+
+        A pre-warm is best-effort and transparent to real Turns: when a real
+        Turn or another pre-warm claims the same Session first, the per-session
+        active-lease claim conflicts and this pre-warm yields (returns False)
+        before provider acquisition. A real Turn performs the acquisition
+        itself; an earlier pre-warm completes the shared warm binding. Acquire
+        failures surface to the caller for telemetry; the first Turn retries
+        acquisition normally either way. A failed interpreter release stays
+        retained for the manager's asynchronous drain retry, together with
+        its admission permit, sandbox ownership, and per-session claim.
+
+        Returns True when this pre-warm completed a warm binding; False when
+        a concurrent real Turn or pre-warm superseded it.
+        """
+        effective_deadline = deadline if deadline is not None else asyncio.get_running_loop().time() + 120.0
+        try:
+            lease = await self.acquire(
+                LeaseRequest(
+                    session_id=session_id,
+                    user_id=user_id,
+                    workspace_id=workspace_id,
+                    run_id=PREWARM_RUN_ID,
+                ),
+                deadline=effective_deadline,
+            )
+        except ActiveLeaseConflictError:
+            # A real Turn or earlier pre-warm holds or is acquiring this
+            # Session's lease, so this best-effort pre-warm yields without
+            # touching provider state.
+            return False
+        await self.release(lease)
+        return True
+
     def _expected_mount(self, *, volume_id: str, workspace_id: UUID) -> ExpectedWorkspaceMount:
         return self._provisioner.expected_mount(
             volume_id=volume_id,
@@ -507,7 +598,7 @@ class DaytonaSessionManager:
         run_id = request.run_id or uuid4()
         session_id = request.session_id
         await self._cancel_idle_stop(session_id, workspace_id=request.workspace_id, deadline=deadline)
-        get_active_lease_registry().acquire(session_id, run_id, workspace_id=request.workspace_id)
+        await _claim_session_lease(session_id, run_id, workspace_id=request.workspace_id, deadline=deadline)
         claim_held = True
         permit: DaytonaAdmissionPermit | None = None
         try:
@@ -1941,6 +2032,7 @@ class DaytonaSessionManager:
 
 
 __all__ = [
+    "PREWARM_RUN_ID",
     "ActiveLeaseConflictError",
     "BindingStoreLike",
     "DaytonaAdmission",
