@@ -25,6 +25,8 @@ The generated source of truth is [`openapi.yaml`](../../openapi.yaml).
 | `GET` | `/api/skills/{skill_id}` | Read one bounded system Skill Card |
 | `PUT` | `/api/runs/{run_id}/cancellation` | Request cancellation of an owned Run |
 | `GET/PATCH` | `/api/settings` | Read or revision-update non-secret `config/fleet.toml` policy from a loopback client |
+| `GET` | `/health` | Liveness probe: process identity, no dependency checks |
+| `GET` | `/health/ready` | Readiness probe: composition installed and the configured database answers |
 
 The API uses one deterministic local User and Workspace scope. It accepts no
 Authorization or caller-supplied identity headers. The settings endpoint is a
@@ -97,3 +99,16 @@ content checksum for precondition chaining.
 
 `POST /api/artifacts` does not exist. Artifacts become public only through Turn
 Commit after host-mediated `create_artifact` produces a private candidate.
+
+## Health probes
+
+`GET /health` answers liveness for any caller while the process serves HTTP,
+even before lifespan composition completes: it returns the application name and
+version and performs no dependency checks. `GET /health/ready` answers
+readiness: before composition installs it returns the closed `service_not_ready`
+JSON 503 on the shared error envelope (serving routes use `turn_unavailable`
+there); once composed it probes the configured database with one bounded
+`SELECT 1` round-trip and reports `database: "ok"`, or
+`database: "not_configured"` when no database URL is set. An unreachable or
+hung database degrades readiness to the same closed 503. Neither probe
+requires an identity header, a loopback client, or an existing Session.

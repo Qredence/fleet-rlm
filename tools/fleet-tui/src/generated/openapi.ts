@@ -355,6 +355,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/health": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Health
+         * @description Liveness: the process is serving HTTP regardless of composition state.
+         */
+        get: operations["get_health"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/health/ready": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Readiness
+         * @description Readiness: composition installed and the configured database answers.
+         */
+        get: operations["get_readiness"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -557,6 +597,37 @@ export interface components {
             errorText?: string | null;
             /** Providerexecuted */
             providerExecuted?: boolean | null;
+        };
+        /**
+         * HealthLivenessResponse
+         * @description Liveness payload — the process is serving HTTP; no dependency checks.
+         */
+        HealthLivenessResponse: {
+            /**
+             * Status
+             * @constant
+             */
+            status: "ok";
+            /** App */
+            app: string;
+            /** Version */
+            version: string;
+        };
+        /**
+         * HealthReadinessResponse
+         * @description Readiness payload — composition installed and the database answers.
+         */
+        HealthReadinessResponse: {
+            /**
+             * Status
+             * @constant
+             */
+            status: "ready";
+            /**
+             * Database
+             * @enum {string}
+             */
+            database: "ok" | "not_configured";
         };
         JsonValue: unknown;
         /** ReasoningUIMessagePart */
@@ -2047,6 +2118,55 @@ export interface operations {
             };
             /** @description Validation Error */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_health: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HealthLivenessResponse"];
+                };
+            };
+        };
+    };
+    get_readiness: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HealthReadinessResponse"];
+                };
+            };
+            /** @description Service is not ready */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };

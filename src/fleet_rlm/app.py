@@ -246,6 +246,7 @@ def create_app(
 
     from fleet_rlm.api.routes.artifacts import router as artifacts_router
     from fleet_rlm.api.routes.attachments import router as attachments_router
+    from fleet_rlm.api.routes.health import router as health_router
     from fleet_rlm.api.routes.runs import router as runs_router
     from fleet_rlm.api.routes.sessions import router as sessions_router
     from fleet_rlm.api.routes.settings import router as settings_router
@@ -263,6 +264,7 @@ def create_app(
     app.include_router(settings_router)
     app.include_router(workspace_files_router)
     app.include_router(volume_router)
+    app.include_router(health_router)
 
     from fleet_rlm.skills.catalog import build_bundled_skill_catalog
 

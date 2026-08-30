@@ -63,6 +63,18 @@ def get_ready_runtime_inventory(request: Request) -> RuntimeInventory:
     return inventory
 
 
+def get_runtime_inventory_if_ready(request: Request) -> RuntimeInventory | None:
+    """Return the composed inventory without failing pre-composition requests.
+
+    Health probes must distinguish "process alive but not composed" from
+    "composition complete", so they read composition readiness directly
+    instead of sharing the closed 503 dependency used by serving routes.
+    """
+    if not getattr(request.app.state, "composition_ready", False):
+        return None
+    return get_runtime_inventory(request.app)
+
+
 def get_turn_runtime(request: Request) -> TurnRuntime:
     runtime = get_ready_runtime_inventory(request).turn_runtime
     if runtime is None:
@@ -174,6 +186,7 @@ SessionCatalogDep = Annotated[SessionCatalog, Depends(get_session_catalog)]
 SessionRuntimeRegistryDep = Annotated[SessionRLMRegistry | None, Depends(get_session_runtime_registry)]
 SessionPrewarmDep = Annotated[Callable[[UUID, UUID, UUID], asyncio.Task[None]] | None, Depends(get_session_prewarm)]
 RunLifecycleDep = Annotated[RunLifecycle, Depends(get_run_lifecycle)]
+RuntimeInventoryIfReadyDep = Annotated[RuntimeInventory | None, Depends(get_runtime_inventory_if_ready)]
 SettingsDep = Annotated[Settings, Depends(get_settings)]
 SkillCatalogDep = Annotated[SkillCatalog, Depends(get_skill_catalog)]
 ConfigPolicyDep = Annotated[ConfigPolicyService, Depends(get_config_policy)]
@@ -187,6 +200,7 @@ __all__ = [
     "ConfigPolicyDep",
     "LocalScopeDep",
     "RunLifecycleDep",
+    "RuntimeInventoryIfReadyDep",
     "SessionCatalogDep",
     "SessionPrewarmDep",
     "SessionRuntimeRegistryDep",
