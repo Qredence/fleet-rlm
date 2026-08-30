@@ -292,12 +292,13 @@ jobs:
           name: Unit and contract tests
           no_output_timeout: 15m
           command: |
-            env FLEET_DAYTONA_API_KEY= FLEET_OPENAI_API_KEY= FLEET_LLM_BASE_URL= FLEET_DATABASE_URL= \
-              uv run --python "<< parameters.python_version >>" pytest \
-              tests/unit/backend tests/contracts/backend -q \
-              -n 2 \
-              --dist=loadfile \
-              -m "not live_llm and not live_daytona and not benchmark and not db and not packaging"
+            mkdir -p test-results
+            circleci run testsuite "pytest-compat"
+      - store_test_results:
+          path: test-results
+      - store_artifacts:
+          path: test-results
+          destination: test-results/compat
 
   tui:
     executor: node
