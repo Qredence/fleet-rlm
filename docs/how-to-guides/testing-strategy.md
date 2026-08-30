@@ -32,18 +32,19 @@ use xdist `loadfile` scheduling to keep module-scoped fixtures together. The
 packaging/release matrix is intentionally excluded because it creates isolated
 virtual environments and artifacts; run it explicitly with `make test-packaging`.
 
-Package-wide coverage is enforced separately over the same canonical non-live
-corpus:
+Package-wide coverage remains available locally over the same canonical
+non-live corpus:
 
 ```bash
 make test-daytona-cov
 ```
 
 This target measures `src/fleet_rlm`, fails below 75%, prints missing lines,
-and writes `.scratch/coverage/daytona.xml`. CircleCI runs it as one aggregate
-job because the existing unit and E2E jobs execute independent test shards that
-cannot enforce a package-wide threshold individually. Coverage is not a
-substitute for the opt-in live Daytona durability checks below.
+and writes `.scratch/coverage/daytona.xml`. CircleCI instead measures coverage
+inside the four `test-unit` shards, persists each shard's `.coverage.*` data,
+and combines it in the downstream `coverage-gate` job, which enforces the same
+75% floor. Coverage is not a substitute for the opt-in live Daytona durability
+checks below.
 
 `make check` includes:
 
@@ -58,16 +59,19 @@ substitute for the opt-in live Daytona durability checks below.
 CircleCI enforces the same non-live surface: the `ci` workflow runs `quality`
 (on the Node-bearing `cimg/python:*-node` executor so `api-check` can run
 openapi-typescript there: release, docs, security, dependency, `api-check`,
-and `stream-check`),
-`lint-typecheck`, `test-unit`, `test-e2e`, `daytona-coverage`, lightweight
-`python-compat-311` / `python-compat-312` / `python-compat-313` jobs
-(lock/install, import check, and `tests/unit/backend` + `tests/contracts/backend`
-only, through the `pytest-compat` testsuite with the same first-flake
-`max-auto-rerun` containment as `pytest-unit`), and the `tui`
-job (pnpm format, lint, typecheck, and Vitest against the maintained client).
-Python 3.13 remains the full gate image; 3.11/3.12 certify declared support
-without duplicating Daytona coverage or E2E. Packaging/install certification
-runs in the release package gate rather than every unit shard.
+and `stream-check`), `lint-typecheck`, the four-way `test-unit` job (unit,
+contract, freeze, and E2E atoms through `pytest-unit`, with per-shard
+coverage), `coverage-gate`, lightweight `python-compat-311` /
+`python-compat-312` / `python-compat-313` jobs (lock/install, import check,
+and `tests/unit/backend` + `tests/contracts/backend` only, through the
+`pytest-compat` testsuite with the same first-flake `max-auto-rerun`
+containment as `pytest-unit`), and the `tui` job (pnpm format, lint,
+typecheck, and Vitest against the maintained client). Python 3.13 remains the
+full gate image; 3.11/3.12 certify declared support without duplicating
+Daytona coverage or the canonical E2E atoms. Packaging/install certification
+runs in the release package gate rather than every unit shard. The opt-in
+`deploy-pypi` bridge is attached to this workflow and runs only on `main`
+after every listed quality, test, compatibility, coverage, and TUI gate.
 
 `git diff --check` is required separately. The packaging lane is intentionally
 separate from the fast gate and runs serially to avoid build-metadata races:
