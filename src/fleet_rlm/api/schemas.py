@@ -383,3 +383,23 @@ class SettingsPolicyPatchRequest(BaseModel):
     path: str | None = Field(default=None, min_length=1, max_length=128, pattern=r"^[a-z][a-z0-9_.]*$")
     value: JsonValue = None
     profile: str | None = Field(default=None, min_length=1, max_length=128, pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+
+
+# ---------------------------------------------------------------------------
+# Health probes (liveness / readiness)
+# ---------------------------------------------------------------------------
+
+
+class HealthLivenessResponse(BaseModel):
+    """Liveness payload — the process is serving HTTP; no dependency checks."""
+
+    status: Literal["ok"]
+    app: str
+    version: str
+
+
+class HealthReadinessResponse(BaseModel):
+    """Readiness payload — composition installed and the database answers."""
+
+    status: Literal["ready"]
+    database: Literal["ok", "not_configured"]
