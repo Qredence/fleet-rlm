@@ -1,7 +1,7 @@
 ---
 name: pytest-unit
 discover: bash -c 'find tests/unit tests/contracts tests/freeze tests/e2e -type f -name "*.py" ! -path "tests/unit/backend/packaging/*" ! -name "__init__.py" ! -name "fakes.py" ! -name "_*.py" -print | sort'
-run: bash -c 'set -f; mkdir -p test-results .scratch/coverage; COVERAGE_FILE=$PWD/.scratch/coverage/.coverage.$CIRCLE_NODE_INDEX .venv/bin/pytest -p no:warnings -m "not live_llm and not live_daytona and not benchmark and not db and not packaging" --cov --cov-config=pyproject.toml --cov-fail-under=0 --cov-report= --junit-xml=<< outputs.junit >> << test.atoms >>'
+run: bash -c 'set -f; mkdir -p test-results .scratch/coverage; COVERAGE_FILE=$PWD/.scratch/coverage/.coverage.$CIRCLE_NODE_INDEX-$$.data .venv/bin/pytest -p no:warnings -m "not live_llm and not live_daytona and not benchmark and not db and not packaging" --cov --cov-config=pyproject.toml --cov-fail-under=0 --cov-report= --junit-xml=<< outputs.junit >> << test.atoms >>'
 outputs:
   junit: test-results/pytest-unit.xml
 options:
