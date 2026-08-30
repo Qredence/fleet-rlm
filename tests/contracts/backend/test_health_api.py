@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+import asyncio
+import time
 from dataclasses import replace
 from pathlib import Path
+from typing import Any, cast
 
+import pytest
 from fastapi.testclient import TestClient
 
 import fleet_rlm
@@ -88,3 +92,31 @@ def test_readiness_is_closed_503_when_the_configured_database_is_unreachable(tmp
 
     assert degraded.status_code == 503
     assert degraded.json() == {"code": "service_not_ready", "message": "Service is not ready"}
+
+
+@pytest.mark.asyncio
+async def test_readiness_probe_is_bounded_against_a_hung_engine(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(RuntimeDatabaseLifecycle, "_PROBE_TIMEOUT_SECONDS", 0.05)
+
+    class HungConnection:
+        async def __aenter__(self) -> HungConnection:
+            return self
+
+        async def __aexit__(self, *exc_info: object) -> None:
+            del exc_info
+
+        async def execute(self, statement: object) -> None:
+            del statement
+            await asyncio.sleep(30)
+
+    class HungEngine:
+        def connect(self) -> HungConnection:
+            return HungConnection()
+
+    lifecycle = RuntimeDatabaseLifecycle(engine=cast(Any, HungEngine()))
+    started = time.monotonic()
+
+    verdict = await lifecycle.readiness()
+
+    assert verdict == "unreachable"
+    assert time.monotonic() - started < 5

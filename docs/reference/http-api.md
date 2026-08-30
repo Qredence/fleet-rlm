@@ -106,8 +106,9 @@ Commit after host-mediated `create_artifact` produces a private candidate.
 even before lifespan composition completes: it returns the application name and
 version and performs no dependency checks. `GET /health/ready` answers
 readiness: before composition installs it returns the closed `service_not_ready`
-JSON 503 used by serving routes; once composed it probes the configured database
-with one `SELECT 1` round-trip and reports `database: "ok"`, or
-`database: "not_configured"` when no database URL is set. An unreachable
-configured database degrades readiness to the same closed 503. Neither probe
+JSON 503 on the shared error envelope (serving routes use `turn_unavailable`
+there); once composed it probes the configured database with one bounded
+`SELECT 1` round-trip and reports `database: "ok"`, or
+`database: "not_configured"` when no database URL is set. An unreachable or
+hung database degrades readiness to the same closed 503. Neither probe
 requires an identity header, a loopback client, or an existing Session.

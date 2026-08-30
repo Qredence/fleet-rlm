@@ -90,6 +90,9 @@ class RuntimeDatabaseLifecycle:
     engine: AsyncEngine | None = None
     session_factory: async_sessionmaker[AsyncSession] | None = None
     dispose_engine: bool = True
+    # Bounded probe window for readiness(); a hung connection or statement
+    # must degrade readiness, never wedge the probe open.
+    _PROBE_TIMEOUT_SECONDS: ClassVar[float] = 5.0
 
     async def aclose(self) -> None:
         if self.dispose_engine and self.engine is not None:
@@ -99,15 +102,18 @@ class RuntimeDatabaseLifecycle:
         """Probe the configured engine for health checks without raising.
 
         A probe failure degrades the verdict to "unreachable" instead of
-        surfacing an error: any transport, driver, or server refusal is one
-        closed verdict, and the caller translates it into its own public
-        contract. Cancellation is BaseException and is never swallowed here.
+        surfacing an error: any transport, driver, or server refusal, or a
+        probe that exceeds its bounded window, is one closed verdict, and
+        the caller translates it into its own public contract. The bound is
+        cancellation-safe: CancelledError is BaseException and is never
+        swallowed here.
         """
         if self.engine is None:
             return "not_configured"
         try:
-            async with self.engine.connect() as connection:
-                await connection.execute(text("SELECT 1"))
+            async with asyncio.timeout(self._PROBE_TIMEOUT_SECONDS):
+                async with self.engine.connect() as connection:
+                    await connection.execute(text("SELECT 1"))
         except Exception:
             return "unreachable"
         return "ok"
