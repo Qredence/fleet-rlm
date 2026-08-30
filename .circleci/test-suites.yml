@@ -11,3 +11,15 @@ options:
   # fail whole workflows on their first flake. A test failing every
   # attempt still fails the job.
   max-auto-rerun: 2
+---
+name: pytest-compat
+discover: bash -c 'find tests/unit/backend tests/contracts/backend -type f -name "*.py" ! -path "tests/unit/backend/packaging/*" ! -name "__init__.py" ! -name "fakes.py" ! -name "_*.py" -print | sort'
+run: bash -c 'set -f; mkdir -p test-results; FLEET_DAYTONA_API_KEY= FLEET_OPENAI_API_KEY= FLEET_LLM_BASE_URL= FLEET_DATABASE_URL= .venv/bin/pytest -q -n 2 --dist=loadfile -p no:warnings -m "not live_llm and not live_daytona and not benchmark and not db and not packaging" --junit-xml=<< outputs.junit >> << test.atoms >>'
+outputs:
+  junit: test-results/pytest-compat.xml
+options:
+  # Same first-flake containment as pytest-unit for the python-compat
+  # matrix: each compat job runs on one node without dynamic splitting,
+  # so a timing flake reruns in place instead of failing the matrix
+  # entry — and with it every main push — on its first occurrence.
+  max-auto-rerun: 2
