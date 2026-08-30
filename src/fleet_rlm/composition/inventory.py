@@ -55,6 +55,15 @@ class RuntimeSessionManager(Protocol):
 
     async def fence_session(self, session_id: UUID, *, deadline: float | None = None) -> None: ...
 
+    async def prewarm_session(
+        self,
+        session_id: UUID,
+        *,
+        user_id: UUID,
+        workspace_id: UUID,
+        deadline: float | None = None,
+    ) -> bool: ...
+
 
 class RuntimeProcessResources(Protocol):
     """Closeable process-scoped resources owned by one runtime composition."""

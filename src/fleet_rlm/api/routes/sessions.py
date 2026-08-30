@@ -8,7 +8,12 @@ from uuid import UUID
 
 from fastapi import APIRouter, Query
 
-from fleet_rlm.api.dependencies import LocalScopeDep, SessionCatalogDep, SessionRuntimeRegistryDep
+from fleet_rlm.api.dependencies import (
+    LocalScopeDep,
+    SessionCatalogDep,
+    SessionPrewarmDep,
+    SessionRuntimeRegistryDep,
+)
 from fleet_rlm.api.errors import http_error
 from fleet_rlm.api.schemas import (
     SessionCreateRequest,
@@ -60,6 +65,7 @@ async def create_session(
     body: SessionCreateRequest,
     identity: LocalScopeDep,
     repo: SessionCatalogDep,
+    prewarm: SessionPrewarmDep,
 ) -> SessionDetailResponse:
     """
     Create a session for the authenticated user in the current workspace.
@@ -68,6 +74,7 @@ async def create_session(
         body (SessionCreateRequest): Session creation data, including the optional title.
         identity (LocalScopeDep): Authenticated user and workspace scope.
         repo (SessionCatalogDep): Session repository used to create the session.
+        prewarm (SessionPrewarmDep): Optional background Sandbox pre-warm trigger.
 
     Returns:
         SessionDetailResponse: The newly created session details.
@@ -78,6 +85,11 @@ async def create_session(
         workspace_id=identity.workspace_id,
         title=title[:255],
     )
+    if prewarm is not None:
+        # Fire-and-forget: the response does not wait for the Sandbox. A warm
+        # binding makes the first Turn skip sandbox creation and layout; a
+        # failed or absent pre-warm leaves the first Turn acquiring normally.
+        prewarm(record.id, identity.user_id, identity.workspace_id)
     ph = get_client()
     if ph is not None:
         ph.capture(

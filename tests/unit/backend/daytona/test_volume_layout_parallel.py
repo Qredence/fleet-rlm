@@ -139,7 +139,7 @@ async def test_layout_tolerates_concurrent_creation_by_another_writer() -> None:
 @pytest.mark.asyncio
 async def test_missing_mount_raises_without_creating() -> None:
     fs = _FakeFs(existing=set())
-    with pytest.raises(Exception, match="[Uu]navailable"):
+    with pytest.raises(Exception, match=r"[Uu]navailable"):
         await ensure_volume_layout(_sandbox(fs), _paths(), session_id=uuid4(), run_id=uuid4())
     assert not _dirs_of(fs, "mkdir"), "no directories may be created when the mount is missing"
 
