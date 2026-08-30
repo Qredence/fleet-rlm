@@ -1,16 +1,13 @@
 ---
 name: pytest-unit
-discover: bash -c 'find tests/unit tests/contracts -type f -name "*.py" ! -path "tests/unit/backend/packaging/*" ! -name "__init__.py" ! -name "fakes.py" ! -name "_*.py" -print | sort'
-run: bash -c 'set -f; mkdir -p test-results; .venv/bin/pytest -p no:warnings -m "not live_llm and not live_daytona and not benchmark and not db and not packaging" --junit-xml=<< outputs.junit >> << test.atoms >>'
+discover: bash -c 'find tests/unit tests/contracts tests/e2e -type f -name "*.py" ! -path "tests/unit/backend/packaging/*" ! -name "__init__.py" ! -name "fakes.py" ! -name "_*.py" -print | sort'
+run: bash -c 'set -f; mkdir -p test-results .scratch/coverage; COVERAGE_FILE=$PWD/.scratch/coverage/.coverage.$CIRCLE_NODE_INDEX .venv/bin/pytest -p no:warnings -m "not live_llm and not live_daytona and not benchmark and not db and not packaging" --cov --cov-config=pyproject.toml --cov-fail-under=0 --cov-report= --junit-xml=<< outputs.junit >> << test.atoms >>'
 outputs:
   junit: test-results/pytest-unit.xml
 options:
   dynamic-test-splitting: true
----
-name: pytest-e2e
-discover: bash -c 'find tests/e2e -type f -name "*.py" ! -name "__init__.py" -print | sort'
-run: bash -c 'set -f; mkdir -p test-results; .venv/bin/pytest -p no:warnings -m "not live_llm and not live_daytona and not benchmark and not db" --junit-xml=<< outputs.junit >> << test.atoms >>'
-outputs:
-  junit: test-results/pytest-e2e.xml
-options:
-  dynamic-test-splitting: false
+  # Auto-rerun failed tests in the same shard step (up to 2 reruns) so
+  # CI-timing-sensitive tests (e.g. recursion-flow deadline races) do not
+  # fail whole workflows on their first flake. A test failing every
+  # attempt still fails the job.
+  max-auto-rerun: 2

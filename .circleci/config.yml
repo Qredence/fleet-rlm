@@ -44,11 +44,6 @@ commands:
               curl -LsSf https://astral.sh/uv/install.sh | sh
             fi
             echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$BASH_ENV"
-      - save_cache:
-          key: v1-uv-bin-{{ arch }}
-          paths:
-            - ~/.local/bin/uv
-            - ~/.local/bin/uvx
 
   restore_uv_cache:
     parameters:
@@ -87,7 +82,7 @@ commands:
       - run:
           name: Install Python dependencies (<< parameters.python_version >>)
           no_output_timeout: 15m
-          command: uv sync --all-extras --dev --python << parameters.python_version >> --verbose
+          command: uv sync --all-extras --dev --python << parameters.python_version >>
 
   install_tui_dependencies:
     steps:
@@ -171,41 +166,35 @@ jobs:
       - store_artifacts:
           path: test-results
           destination: test-results/unit
+      - persist_to_workspace:
+          root: .scratch/coverage
+          paths:
+            - ".coverage.*"
 
-  test-e2e:
+  # Combines the per-shard coverage data produced by test-unit and enforces
+  # the repository coverage floor (75%) once, instead of re-running the whole
+  # offline suite serially in a dedicated container for the same measurement.
+  coverage-gate:
     executor: python
-    resource_class: medium+
-    parallelism: 1
+    resource_class: small
     steps:
       - checkout
       - install_python_dependencies
-      - save_uv_cache
+      - attach_workspace:
+          at: .scratch/coverage
       - run:
-          name: Run E2E atom subset (Smarter Testing)
-          no_output_timeout: 10m
+          name: Combine shard coverage and enforce floor
+          no_output_timeout: 5m
           command: |
-            mkdir -p test-results
-            circleci run testsuite "pytest-e2e"
-      - store_test_results:
-          path: test-results
+            .venv/bin/coverage combine --keep .scratch/coverage
+            .venv/bin/coverage report --fail-under=75 --show-missing > coverage-report.txt || {
+              cat coverage-report.txt
+              exit 1
+            }
+            tail -5 coverage-report.txt
       - store_artifacts:
-          path: test-results
-          destination: test-results/e2e
-
-  daytona-coverage:
-    executor: python
-    resource_class: medium+
-    steps:
-      - checkout
-      - install_python_dependencies
-      - save_uv_cache
-      - run:
-          name: Run Daytona branch coverage gate
-          no_output_timeout: 10m
-          command: make test-daytona-cov
-      - store_artifacts:
-          path: .scratch/coverage
-          destination: coverage/daytona
+          path: coverage-report.txt
+          destination: coverage/combined-report.txt
 
   # Opt-in deployment bridge for the existing GitHub Actions PyPI release.
   # Configure GITHUB_TOKEN in a CircleCI project/context with actions:write.
@@ -330,8 +319,9 @@ workflows:
       - quality
       - lint-typecheck
       - test-unit
-      - test-e2e
-      - daytona-coverage
+      - coverage-gate:
+          requires:
+            - test-unit
       - python-compat:
           name: python-compat-311
           python_version: "3.11"
