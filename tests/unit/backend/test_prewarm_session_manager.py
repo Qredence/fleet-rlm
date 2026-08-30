@@ -5,9 +5,8 @@ Sandbox, canonical layout, and persisted binding), then releases the
 interpreter lease immediately. The Sandbox keeps running and the binding
 stays persisted so the first real Turn reuses the bound Sandbox; a
 pre-warm failure surfaces to the caller and holds no lease. A failed
-interpreter release clears the pre-warm's admission, sandbox ownership,
-and per-session claim so real Turns proceed, while the failed lease stays
-drain-retryable.
+interpreter release surfaces to the caller and stays drain-retryable while
+retaining the pre-warm's admission, sandbox ownership, and per-session claim.
 """
 
 from __future__ import annotations
@@ -18,7 +17,7 @@ from uuid import uuid4
 import pytest
 
 from fleet_rlm.daytona.errors import ProviderRequestError
-from fleet_rlm.daytona.session_manager import LeaseRequest, get_active_lease_registry
+from fleet_rlm.daytona.session_manager import PREWARM_RUN_ID, LeaseRequest, get_active_lease_registry
 from fleet_rlm.runtime.bindings import SandboxBinding
 from tests.unit.backend.test_session_manager import _manager
 
@@ -64,6 +63,7 @@ async def test_prewarm_persists_binding_and_leaves_sandbox_running() -> None:
     assert binding.provider_state == "running"
     # The Sandbox stays running (release never deletes) and is reusable.
     assert not mgr.has_pending_ownership
+    assert get_active_lease_registry().holder(session_id, workspace_id=workspace_id) is None
     # A follow-up acquisition reuses the same bound sandbox instead of creating.
     lease = await mgr.acquire(
         LeaseRequest(session_id=session_id, user_id=user_id, workspace_id=workspace_id),
@@ -96,50 +96,28 @@ async def test_prewarm_failure_surfaces_to_caller() -> None:
 
 
 @pytest.mark.asyncio
-async def test_prewarm_release_failure_clears_claim_for_real_turns() -> None:
-    """A failed pre-warm interpreter release must not wedge the Session.
-
-    The pre-warm's finally clears admission, sandbox ownership, and the
-    per-session PREWARM claim when the interpreter shutdown fails, so the
-    first real Turn acquires promptly (no claim to poll out) and reuses the
-    persisted warm binding. The failed lease itself stays retained for the
-    drain retry.
-    """
+async def test_prewarm_release_failure_is_not_reported_as_success() -> None:
+    """A failed pre-warm release retains ownership and surfaces failure."""
     mgr, platform, store, _volumes = _manager()
     session_id, user_id, workspace_id = uuid4(), uuid4(), uuid4()
     backend = _attach_failing_backend(platform)
 
-    result = await mgr.prewarm_session(
-        session_id, user_id=user_id, workspace_id=workspace_id, deadline=asyncio.get_running_loop().time() + 10
-    )
+    with pytest.raises(RuntimeError, match="interpreter backend close failed"):
+        await mgr.prewarm_session(
+            session_id, user_id=user_id, workspace_id=workspace_id, deadline=asyncio.get_running_loop().time() + 10
+        )
 
-    # The warm binding completed and persists despite the failed release.
-    assert result is True
+    # The warm binding persists, but it is not reported as successfully
+    # released while its interpreter owner remains live.
     binding = await store.get(session_id)
     assert isinstance(binding, SandboxBinding)
     assert binding.provider_state == "running"
     assert backend.close_calls == 1, "pre-warm release must have attempted interpreter shutdown once"
-
-    # A real Turn must acquire without waiting out a PREWARM claim. The
-    # bounded wait_for discriminates the old wedge, which polled the claim
-    # until the acquire deadline and failed with a lease timeout.
-    lease = await asyncio.wait_for(
-        mgr.acquire(
-            LeaseRequest(session_id=session_id, user_id=user_id, workspace_id=workspace_id, run_id=uuid4()),
-            deadline=asyncio.get_running_loop().time() + 10,
-        ),
-        timeout=2.0,
-    )
-    try:
-        assert lease.sandbox_id == binding.sandbox_id
-        assert len(platform.created) == 1, "the real Turn must reuse the warm binding, not create a Sandbox"
-    finally:
-        await mgr.release(lease)
-
-    # The real Turn's release settles the shared fail-once backend; the
-    # pre-warm's failed lease itself remains drain-owned until disposal.
-    assert backend.close_calls == 2
+    assert get_active_lease_registry().holder(session_id, workspace_id=workspace_id) == PREWARM_RUN_ID
     assert mgr.has_pending_ownership, "pre-warm lease must remain retryable at drain"
+
+    assert await mgr.aclose(drain_seconds=5.0) is True
+    assert backend.close_calls == 2
 
 
 @pytest.mark.asyncio
@@ -153,20 +131,22 @@ async def test_prewarm_release_failure_settles_through_drain_retry() -> None:
     session_id, user_id, workspace_id = uuid4(), uuid4(), uuid4()
     backend = _attach_failing_backend(platform)
 
-    result = await mgr.prewarm_session(
-        session_id, user_id=user_id, workspace_id=workspace_id, deadline=asyncio.get_running_loop().time() + 10
-    )
+    with pytest.raises(RuntimeError, match="interpreter backend close failed"):
+        await mgr.prewarm_session(
+            session_id, user_id=user_id, workspace_id=workspace_id, deadline=asyncio.get_running_loop().time() + 10
+        )
 
-    assert result is True
     assert backend.close_calls == 1
-    # The claim clear is immediate: no PREWARM holder remains for real Turns.
-    assert get_active_lease_registry().holder(session_id, workspace_id=workspace_id) is None
+    # The retry owner keeps the admission permit and PREWARM claim until the
+    # interpreter shutdown succeeds.
+    assert get_active_lease_registry().holder(session_id, workspace_id=workspace_id) == PREWARM_RUN_ID
     assert mgr.has_pending_ownership, "failed pre-warm release must stay owned until drain"
 
     settled = await mgr.aclose(drain_seconds=5.0)
 
     assert settled is True
     assert backend.close_calls == 2, "drain must retry the failed interpreter shutdown"
+    assert get_active_lease_registry().holder(session_id, workspace_id=workspace_id) is None
     assert not mgr.has_pending_ownership
 
 
@@ -274,3 +254,60 @@ async def test_real_turn_waits_out_inflight_prewarm_claim() -> None:
             break
         await asyncio.sleep(0.05)
     assert not mgr.has_pending_ownership
+
+
+@pytest.mark.asyncio
+async def test_real_turn_prewarm_claim_wait_is_bounded(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A PREWARM claim cannot consume a real Turn's longer deadline."""
+    from fleet_rlm.daytona import session_manager
+
+    mgr, _platform, _store, _volumes = _manager()
+    session_id, user_id, workspace_id = uuid4(), uuid4(), uuid4()
+    registry = get_active_lease_registry()
+    registry.acquire(session_id, session_manager.PREWARM_RUN_ID, workspace_id=workspace_id)
+    monkeypatch.setattr(session_manager, "_PREWARM_CLAIM_WAIT_SECONDS", 0.05)
+    loop = asyncio.get_running_loop()
+    started = loop.time()
+    try:
+        with pytest.raises(session_manager.DaytonaLeaseAcquisitionTimeoutError):
+            await mgr.acquire(
+                LeaseRequest(
+                    session_id=session_id,
+                    user_id=user_id,
+                    workspace_id=workspace_id,
+                    run_id=uuid4(),
+                ),
+                deadline=started + 10.0,
+            )
+    finally:
+        registry.release(session_id, session_manager.PREWARM_RUN_ID, workspace_id=workspace_id)
+
+    assert 0.04 <= loop.time() - started < 1.0
+
+
+@pytest.mark.asyncio
+async def test_expired_turn_deadline_does_not_wait_for_prewarm_claim() -> None:
+    """An already-expired caller deadline still times out immediately."""
+    from fleet_rlm.daytona import session_manager
+
+    mgr, _platform, _store, _volumes = _manager()
+    session_id, user_id, workspace_id = uuid4(), uuid4(), uuid4()
+    registry = get_active_lease_registry()
+    registry.acquire(session_id, session_manager.PREWARM_RUN_ID, workspace_id=workspace_id)
+    loop = asyncio.get_running_loop()
+    started = loop.time()
+    try:
+        with pytest.raises(session_manager.DaytonaLeaseAcquisitionTimeoutError):
+            await mgr.acquire(
+                LeaseRequest(
+                    session_id=session_id,
+                    user_id=user_id,
+                    workspace_id=workspace_id,
+                    run_id=uuid4(),
+                ),
+                deadline=started - 1.0,
+            )
+    finally:
+        registry.release(session_id, session_manager.PREWARM_RUN_ID, workspace_id=workspace_id)
+
+    assert loop.time() - started < 0.1

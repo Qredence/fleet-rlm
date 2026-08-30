@@ -124,10 +124,11 @@ class ActiveLeaseConflictError(RuntimeError):
 #: Turn whose acquire conflicts with this holder waits briefly for the
 #: pre-warm claim to clear instead of failing: the pre-warm is transparent
 #: by contract, and its acquire (create + layout + binding + release)
-#: settles within seconds. A pre-warm whose interpreter release fails
-#: clears its claim immediately (``_clear_prewarm_lease_ownership``), so
-#: this holder never outlives a bounded acquisition or a settled release.
+#: settles within seconds. A failed release keeps this claim until the
+#: retained interpreter release succeeds, while real Turns bound how long
+#: they wait for that retry.
 PREWARM_RUN_ID = UUID("00000000-0000-4000-8000-000000000000")
+_PREWARM_CLAIM_WAIT_SECONDS = 60.0
 
 
 async def _claim_session_lease(session_id: UUID, run_id: UUID, *, workspace_id: UUID, deadline: float) -> None:
@@ -138,6 +139,8 @@ async def _claim_session_lease(session_id: UUID, run_id: UUID, *, workspace_id: 
     waits, because the pre-warm yields and releases its claim within its
     bounded acquire.
     """
+    loop = asyncio.get_running_loop()
+    claim_wait_deadline = loop.time() + _PREWARM_CLAIM_WAIT_SECONDS
     while True:
         try:
             get_active_lease_registry().acquire(session_id, run_id, workspace_id=workspace_id)
@@ -145,35 +148,12 @@ async def _claim_session_lease(session_id: UUID, run_id: UUID, *, workspace_id: 
         except ActiveLeaseConflictError as exc:
             if exc.holder_run_id != PREWARM_RUN_ID:
                 raise
-        remaining = deadline - asyncio.get_running_loop().time()
+        remaining = min(deadline, claim_wait_deadline) - loop.time()
         if remaining <= 0:
             raise DaytonaLeaseAcquisitionTimeoutError("Daytona lease acquisition timed out") from None
         # The pre-warm holds this Session's claim; it releases as soon as its
         # acquire completes. Yield and retry rather than failing the Turn.
         await asyncio.sleep(min(0.2, remaining))
-
-
-def _clear_prewarm_lease_ownership(lease: InterpreterLease) -> None:
-    """Clear a failed pre-warm lease's admission/claim/ownership guards.
-
-    The pre-warm never executed, so its lease is only an acquisition
-    guard. Interpreter shutdown stays retryable through ``_release_leases``
-    at drain, but the admission permit, sandbox ownership, and the
-    per-session active-lease claim must clear now: a retained PREWARM claim
-    makes every later real Turn poll ``_claim_session_lease`` until its
-    deadline and fail.
-    """
-    if lease._released:
-        return
-    callback = lease._on_release
-    if callback is None:
-        return
-    # Any completed release already ran the callback; deferring here keeps
-    # the drain retry from invoking it a second time, matching the
-    # unpublished-lease single-callback convention.
-    lease._defer_owner_release = True
-    with contextlib.suppress(BaseException):
-        callback()
 
 
 class ActiveLeaseRegistry:
@@ -548,17 +528,14 @@ class DaytonaSessionManager:
         per-session active-lease claim conflicts and this pre-warm yields
         (returns False) — the Turn performs the acquisition itself. Acquire
         failures surface to the caller for telemetry; the first Turn retries
-        acquisition normally either way. A failed interpreter release clears
-        the pre-warm's admission, sandbox ownership, and per-session claim
-        (``_clear_prewarm_lease_ownership``) so real Turns proceed
-        immediately, while the failed lease stays retryable through the
-        drain path.
+        acquisition normally either way. A failed interpreter release stays
+        retained for the manager's asynchronous drain retry, together with
+        its admission permit, sandbox ownership, and per-session claim.
 
         Returns True when this pre-warm completed a warm binding; False when
         a concurrent real Turn superseded it.
         """
         effective_deadline = deadline if deadline is not None else asyncio.get_running_loop().time() + 120.0
-        lease: InterpreterLease | None = None
         try:
             lease = await self.acquire(
                 LeaseRequest(
@@ -569,32 +546,13 @@ class DaytonaSessionManager:
                 ),
                 deadline=effective_deadline,
             )
-            return True
         except ActiveLeaseConflictError:
             # A real Turn holds or is acquiring this Session's lease; the
             # Turn is the authoritative acquisition, so this best-effort
             # pre-warm yields without touching provider state.
             return False
-        finally:
-            if lease is not None:
-                try:
-                    await self.release(lease)
-                except BaseException as exc:
-                    # The pre-warm never executed, so its lease is only an
-                    # acquisition guard. Clear the guards so real Turns
-                    # proceed, and leave the failed interpreter shutdown to
-                    # the drain retry.
-                    _clear_prewarm_lease_ownership(lease)
-                    logger.warning(
-                        "Daytona pre-warm lease release failed",
-                        extra={
-                            "session_id": str(session_id),
-                            "workspace_id": str(workspace_id),
-                            "error_type": type(exc).__name__,
-                        },
-                    )
-                    if isinstance(exc, asyncio.CancelledError):
-                        raise
+        await self.release(lease)
+        return True
 
     def _expected_mount(self, *, volume_id: str, workspace_id: UUID) -> ExpectedWorkspaceMount:
         return self._provisioner.expected_mount(

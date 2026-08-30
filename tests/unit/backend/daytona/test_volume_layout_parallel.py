@@ -118,7 +118,8 @@ async def test_layout_creates_parents_before_children() -> None:
 async def test_layout_tolerates_concurrent_creation_by_another_writer() -> None:
     # mkdir fails because another writer created the directory first; the
     # post-failure stat must observe it and accept.
-    fs = _FakeFs(existing={"/home/daytona/fleet"})
+    artifact_root = "/home/daytona/fleet/artifacts"
+    fs = _FakeFs(existing={"/home/daytona/fleet"}, fail_once={artifact_root: 1})
 
     real_get_info = fs.get_file_info
 
@@ -133,7 +134,9 @@ async def test_layout_tolerates_concurrent_creation_by_another_writer() -> None:
 
     await ensure_volume_layout(_sandbox(fs), _paths(), session_id=uuid4(), run_id=uuid4())
 
-    assert "/home/daytona/fleet/artifacts" in fs._existing
+    assert artifact_root in fs._existing
+    assert _dirs_of(fs, "mkdir").count(artifact_root) == 1
+    assert _dirs_of(fs, "stat").count(artifact_root) == 2
 
 
 @pytest.mark.asyncio
