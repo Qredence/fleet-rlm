@@ -23,14 +23,18 @@ references fail startup.
 ## Runtime prerequisites
 
 The provider environment contract is policy-derived; see the [profile matrix](profile-matrix.md).
-All committed profiles use the OpenAI-compatible Chat Completion API through the
-configured Databricks AI Gateway endpoint and require
+All committed profiles use the OpenAI-compatible Chat Completion API. The
+selected `daytona-recursive` profile routes Root and Sub through the
+Modal-hosted GLM gateway and requires `FLEET_MODAL_API_KEY`,
+`FLEET_MODAL_BASE_URL`, and `FLEET_DAYTONA_API_KEY`; every other committed
+profile reaches the configured Databricks AI Gateway endpoint and requires
 `DATABRICKS_TOKEN`, `FLEET_DATABRICKS_AI_GATEWAY_BASE_URL`, and
 `FLEET_DAYTONA_API_KEY`.
 
 | Profile family | Provider values | Persistence and tracing |
 | --- | --- | --- |
-| `daytona` / `daytona-recursive` | `DATABRICKS_TOKEN`, `FLEET_DATABRICKS_AI_GATEWAY_BASE_URL`, `FLEET_DAYTONA_API_KEY` | Configure `FLEET_DATABASE_URL` at Alembic head for durable deployment; local SQLite is suitable for development. Local MLflow tracing is enabled. |
+| `daytona` | `DATABRICKS_TOKEN`, `FLEET_DATABRICKS_AI_GATEWAY_BASE_URL`, `FLEET_DAYTONA_API_KEY` | Configure `FLEET_DATABASE_URL` at Alembic head for durable deployment; local SQLite is suitable for development. Local MLflow tracing is enabled. |
+| `daytona-recursive` | `FLEET_MODAL_API_KEY`, `FLEET_MODAL_BASE_URL`, `FLEET_DAYTONA_API_KEY` | Configure `FLEET_DATABASE_URL` at Alembic head for durable deployment; local SQLite is suitable for development. Local MLflow tracing is enabled. |
 | `daytona-managed` | `DATABRICKS_TOKEN`, `FLEET_DATABRICKS_AI_GATEWAY_BASE_URL`, `FLEET_DAYTONA_API_KEY` | `FLEET_DATABASE_URL` and every managed MLflow environment name in the matrix are required. |
 | `daytona-bench` / `daytona-bench-40` | `DATABRICKS_TOKEN`, `FLEET_DATABRICKS_AI_GATEWAY_BASE_URL`, `FLEET_DAYTONA_API_KEY` | Use the explicitly configured database for benchmark runs; MLflow tracing is disabled. |
 
@@ -154,7 +158,7 @@ All committed profiles use the OpenAI-compatible Chat Completion format.
 selected `daytona-recursive` interactive profile routes Root and Sub through
 the Modal-hosted `openai/zai-org/GLM-5.3-Flash` endpoint using the
 `FLEET_MODAL_API_KEY` and `FLEET_MODAL_BASE_URL` environment references, with
-no reasoning-effort override, Root capped at 16,000 output tokens, and Sub
+no reasoning-effort override, Root capped at 32,768 output tokens, and Sub
 capped at 4,000 to keep slow sub-LLM completions inside the per-cell execution
 timeout. The `daytona`, `daytona-managed`, and benchmark profiles keep the
 `databricks-deepseek-v4-flash-0731` endpoint behind `DATABRICKS_TOKEN` and

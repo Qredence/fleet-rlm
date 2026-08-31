@@ -89,7 +89,7 @@ keyword-only and are not routed through the native positional call contract.
   `reasoning` and `code`; `completed` is internal loop state, not a Signature
 output field. The selected `daytona-recursive` Root and Sub Models
 (`openai/zai-org/GLM-5.3-Flash` through the Modal-hosted Chat Completions
-gateway) cap Root at 16,000 output tokens and Sub at 4,000 with no
+gateway) cap Root at 32,768 output tokens and Sub at 4,000 with no
 reasoning-effort override. This is separate from `max_output_chars`, which
 bounds REPL output retained in recursive history.
 - **Daytona** (primary durable path): custom interpreter, Session Workspace tools, Artifact candidates promoted on Turn Commit.

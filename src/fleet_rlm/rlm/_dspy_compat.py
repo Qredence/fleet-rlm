@@ -120,6 +120,24 @@ def _retry_correction_feedback(attempt: int, exc: AdapterParseError) -> str:
     )
 
 
+def _correction_field_name(signature: type[Signature]) -> str:
+    """
+    Pick the retry-correction input field name free of caller collisions.
+
+    Parameters:
+        signature (type[Signature]): The base signature used by the failed call.
+
+    Returns:
+        str: The reserved field name, suffixed per collision until it is free.
+    """
+    field = RETRY_CORRECTION_FIELD
+    suffix = 1
+    while field in signature.fields:
+        suffix += 1
+        field = f"{RETRY_CORRECTION_FIELD}_{suffix}"
+    return field
+
+
 def _retry_call_arguments(
     signature: type[Signature],
     inputs: dict[str, Any],
@@ -129,8 +147,14 @@ def _retry_call_arguments(
     """
     Extend one failed action call with a bounded corrective input field.
 
+    The base signature is extended afresh on every retry, so a caller that
+    already defines the reserved correction field keeps its own input value
+    untouched: the adapter appends the next collision-free correction field
+    instead of overwriting caller context.
+
     Parameters:
-        signature (type[Signature]): The signature used by the failed call.
+        signature (type[Signature]): The base signature used by the failed call;
+            never a previously extended retry signature.
         inputs (dict[str, Any]): The inputs used by the failed call; never mutated.
         attempt (int): The retry attempt number, starting at 1.
         exc (AdapterParseError): The parse failure that triggered the retry.
@@ -138,14 +162,13 @@ def _retry_call_arguments(
     Returns:
         tuple[type[Signature], dict[str, Any]]: The retry signature and inputs.
     """
-    retry_signature = signature
-    if RETRY_CORRECTION_FIELD not in signature.input_fields:
-        retry_signature = signature.append(
-            RETRY_CORRECTION_FIELD,
-            dspy.InputField(desc="Bounded corrective feedback for the previous failed attempt; follow it."),
-        )
+    correction_field = _correction_field_name(signature)
+    retry_signature = signature.append(
+        correction_field,
+        dspy.InputField(desc="Bounded corrective feedback for the previous failed attempt; follow it."),
+    )
     retry_inputs = dict(inputs)
-    retry_inputs[RETRY_CORRECTION_FIELD] = _retry_correction_feedback(attempt, exc)
+    retry_inputs[correction_field] = _retry_correction_feedback(attempt, exc)
     return retry_signature, retry_inputs
 
 
@@ -206,6 +229,7 @@ class FleetJSONAdapter(dspy.JSONAdapter):
             list[dict[str, Any]]: Parsed responses keyed by the signature output fields.
         """
         attempt = 0
+        base_signature = signature
         while True:
             try:
                 return super().__call__(lm, lm_kwargs, signature, demos, inputs)
@@ -213,7 +237,7 @@ class FleetJSONAdapter(dspy.JSONAdapter):
                 if attempt >= self._max_parse_retries:
                     raise
                 attempt += 1
-                signature, inputs = _retry_call_arguments(signature, inputs, attempt, exc)
+                signature, inputs = _retry_call_arguments(base_signature, inputs, attempt, exc)
 
     async def acall(
         self,
@@ -237,6 +261,7 @@ class FleetJSONAdapter(dspy.JSONAdapter):
             list[dict[str, Any]]: Parsed responses keyed by the signature output fields.
         """
         attempt = 0
+        base_signature = signature
         while True:
             try:
                 return await super().acall(lm, lm_kwargs, signature, demos, inputs)
@@ -244,7 +269,7 @@ class FleetJSONAdapter(dspy.JSONAdapter):
                 if attempt >= self._max_parse_retries:
                     raise
                 attempt += 1
-                signature, inputs = _retry_call_arguments(signature, inputs, attempt, exc)
+                signature, inputs = _retry_call_arguments(base_signature, inputs, attempt, exc)
 
 
 class _RLMReasoningCallback(BaseCallback):

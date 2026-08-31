@@ -90,9 +90,10 @@ clients cannot provide models, Signatures, or executable capabilities.
   each Root/Sub role supplies a provider base URL, an API-key environment
   reference, and a provider-native model id. The request goes to the provider's
   `/chat/completions` endpoint with `model_type="chat"`; no provider-specific
-  routing header is required. Interactive profiles cap both roles at 16,000
-  tokens; managed and benchmark profiles cap them at 8,000. The exact
-  credential and endpoint names are policy-derived in [the profile
+  routing header is required. The `daytona` profile caps both roles at 16,000
+  tokens, the selected `daytona-recursive` profile caps Root at 32,768 and Sub
+  at 4,000, and managed and benchmark profiles cap both roles at 8,000. The
+  exact credential and endpoint names are policy-derived in [the profile
   matrix](../reference/profile-matrix.md). This LM response limit is distinct
   from `dspy.RLM.max_output_chars`, which bounds REPL output retained in
   recursive history.

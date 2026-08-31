@@ -132,6 +132,53 @@ def test_retry_keeps_original_output_fields() -> None:
     assert not hasattr(prediction, "extra")
 
 
+def test_retry_preserves_caller_owned_correction_field() -> None:
+    class _ReservedSignature(dspy.Signature):
+        """Caller-defined fields that collide with the reserved retry name."""
+
+        request: str = dspy.InputField()
+        fleet_retry_correction: str = dspy.InputField()
+        reasoning: str = dspy.OutputField()
+        code: str = dspy.OutputField()
+
+    lm = _ScriptedLM(["", '{"reasoning": "r", "code": "c"}'])
+
+    with dspy.context(lm=lm, adapter=FleetJSONAdapter()):
+        prediction = dspy.Predict(_ReservedSignature)(
+            request="summarize",
+            fleet_retry_correction="caller guidance",
+        )
+
+    assert prediction.reasoning == "r"
+    assert prediction.code == "c"
+    retry_text = _last_user_text(lm.calls[1])
+    assert "caller guidance" in retry_text
+    assert "Correction (attempt 1)" in retry_text
+    assert "[[ ## fleet_retry_correction_2 ## ]]" in retry_text
+
+
+def test_retry_avoids_caller_owned_output_correction_field() -> None:
+    class _OutputReservedSignature(dspy.Signature):
+        """Caller-defined output field that collides with the retry name."""
+
+        request: str = dspy.InputField()
+        fleet_retry_correction: str = dspy.OutputField()
+        reasoning: str = dspy.OutputField()
+        code: str = dspy.OutputField()
+
+    lm = _ScriptedLM(["", '{"fleet_retry_correction": "ok", "reasoning": "r", "code": "c"}'])
+
+    with dspy.context(lm=lm, adapter=FleetJSONAdapter()):
+        prediction = dspy.Predict(_OutputReservedSignature)(request="summarize")
+
+    assert prediction.fleet_retry_correction == "ok"
+    assert prediction.reasoning == "r"
+    assert prediction.code == "c"
+    retry_text = _last_user_text(lm.calls[1])
+    assert "Correction (attempt 1)" in retry_text
+    assert "[[ ## fleet_retry_correction_2 ## ]]" in retry_text
+
+
 def test_constructor_rejects_invalid_retry_budget() -> None:
     with pytest.raises(ValueError):
         FleetJSONAdapter(max_parse_retries=-1)
