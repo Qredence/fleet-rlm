@@ -39,6 +39,7 @@ def test_committed_policy_declares_two_profiles_with_modal_model_roles() -> None
             "api_key_env": "FLEET_MODAL_API_KEY",
             "base_url_env": "FLEET_MODAL_BASE_URL",
             "max_tokens": 131072,
+            "timeout_seconds": 300,
             "cache": False,
         },
         "sub": {
@@ -46,6 +47,7 @@ def test_committed_policy_declares_two_profiles_with_modal_model_roles() -> None
             "api_key_env": "FLEET_MODAL_API_KEY",
             "base_url_env": "FLEET_MODAL_BASE_URL",
             "max_tokens": 131072,
+            "timeout_seconds": 90,
             "temperature": 0,
             "cache": False,
         },
@@ -136,6 +138,8 @@ def test_selected_recursive_profile_resolves_root_and_sub_with_modal_params(
     # (131,072) tokens and recommends at least 1024.
     assert settings.root_llm_max_tokens == 131072
     assert settings.sub_llm_max_tokens == 131072
+    assert settings.root_llm_timeout_seconds == 300
+    assert settings.sub_llm_timeout_seconds == 90
     assert settings.mlflow_tracing_enabled is True
     assert settings.mlflow_tracking_uri == "http://127.0.0.1:5001"
 

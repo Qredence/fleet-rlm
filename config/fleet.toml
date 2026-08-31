@@ -24,6 +24,7 @@ model = "openai/zai-org/GLM-5.3-Flash"
 api_key_env = "FLEET_MODAL_API_KEY"
 base_url_env = "FLEET_MODAL_BASE_URL"
 max_tokens = 131072
+timeout_seconds = 300
 cache = false
 
 [defaults.llm.sub]
@@ -31,6 +32,7 @@ model = "openai/zai-org/GLM-5.3-Flash"
 api_key_env = "FLEET_MODAL_API_KEY"
 base_url_env = "FLEET_MODAL_BASE_URL"
 max_tokens = 131072
+timeout_seconds = 90
 temperature = 0
 cache = false
 

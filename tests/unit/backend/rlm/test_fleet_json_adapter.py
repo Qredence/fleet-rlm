@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import time
 from types import SimpleNamespace
 from typing import Any
@@ -239,6 +240,22 @@ def test_wrap_up_accepts_direct_submit_and_safe_serialization() -> None:
     )
     assert prediction.code == "SUBMIT(answer=json.dumps(answer))"
 
+    f_string = _ScriptedLM(
+        [
+            json.dumps(
+                {
+                    "reasoning": "format gathered evidence",
+                    "code": 'SUBMIT(answer=f"answer: {answer}")',
+                }
+            )
+        ],
+    )
+    prediction = _run_iteration_action(
+        f_string,
+        FleetJSONAdapter(deadline=time.monotonic() + 0.5, wrap_up_seconds=1),
+    )
+    assert prediction.code == 'SUBMIT(answer=f"answer: {answer}")'
+
     fenced = _ScriptedLM(
         [
             '{"reasoning": "fenced submit", "code": "```python\\nSUBMIT(answer=answer)\\n```"}',
@@ -257,6 +274,7 @@ def test_wrap_up_accepts_direct_submit_and_safe_serialization() -> None:
         "answer = tool()",
         "answer = 1\nSUBMIT(answer=answer)",
         "SUBMIT(answer=tool())",
+        'SUBMIT(answer=f"answer: {tool()}")',
         "SUBMIT(answer=(",
     ),
 )

@@ -35,6 +35,14 @@ def test_policy_read_exposes_toml_values_without_environment_secret_values(tmp_p
     assert model["value"] == "openai/zai-org/GLM-5.3-Flash"
     assert model["editor"] == "text"
 
+    root_timeout = _field(service.read(), "daytona-recursive", "llm.root.timeout_seconds")
+    assert root_timeout["value"] == 300
+    assert root_timeout["editor"] == "number"
+
+    sub_timeout = _field(service.read(), "daytona-recursive", "llm.sub.timeout_seconds")
+    assert sub_timeout["value"] == 90
+    assert sub_timeout["editor"] == "number"
+
     tracking_uri = _field(service.read(), "daytona-recursive", "mlflow.tracking_uri")
     assert tracking_uri["value"] == "http://127.0.0.1:5001"
     assert "secret" not in str(tracking_uri).lower()

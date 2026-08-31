@@ -239,6 +239,12 @@ def _is_safe_submit_value(node: ast.AST) -> bool:
     """Allow only data expressions that cannot launch another action."""
     if isinstance(node, (ast.Constant, ast.Name)):
         return True
+    if isinstance(node, ast.JoinedStr):
+        return all(_is_safe_submit_value(value) for value in node.values)
+    if isinstance(node, ast.FormattedValue):
+        return _is_safe_submit_value(node.value) and (
+            node.format_spec is None or _is_safe_submit_value(node.format_spec)
+        )
     if isinstance(node, ast.Attribute):
         return not node.attr.startswith("_") and _is_safe_submit_value(node.value)
     if isinstance(node, ast.Subscript):

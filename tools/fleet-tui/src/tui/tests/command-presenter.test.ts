@@ -474,6 +474,7 @@ describe("PiCommandPresenter", () => {
     const screen = overlay();
     expect(stripAnsi(screen.render(80).join("\n"))).toContain("2 commands");
     expect(stripAnsi(screen.render(80).join("\n"))).toContain("Ctrl+Shift+F search");
+    expect(stripAnsi(screen.render(80).join("\n"))).not.toContain("PgUp/PgDn scroll");
 
     for (const key of "status") screen.handleInput(key);
     const filtered = stripAnsi(screen.render(80).join("\n"));
