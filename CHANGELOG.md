@@ -36,7 +36,7 @@ All notable changes to this project are documented in this file.
   `daytona-bench` profile lost its only consumer and was removed with it.
   **Outcome:** Benchmark surface is now the Daytona lifecycle and
   native-long-context measurements; the manual-dispatch live workflow runs the
-  canonical MVP + durability canaries with the committed Modal credentials
+  canonical MVP + durability canaries with workflow-provided Modal secrets
   instead of every live test serially.
 - **Removed:** The one-shot P-phase certification receipt lane: the
   `p53-live-certification`, `certification-gate`, and `certification-verify`
