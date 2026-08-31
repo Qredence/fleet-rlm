@@ -360,6 +360,8 @@ export const theme = {
   underline: (text: string) => activeTheme.underline(text),
   strikethrough: (text: string) => activeTheme.strikethrough(text),
   surface: (color: ThemeBackground) => activeTheme.surfaceBackgroundColor(color),
+  /** Focus styling for keyboard-first pickers and settings rows. */
+  selection: () => activeTheme.selectionBackgroundColor(),
   userMessageBackground: () => activeTheme.getUserMessageBackgroundColor(),
   /** Transcript search match styles: resolve against the active theme at call time. */
   searchMatch: () => activeTheme.getSearchMatchStyle(),
@@ -394,7 +396,7 @@ export const markdownTheme: MarkdownTheme = {
 
 export const selectTheme: SelectListTheme = {
   selectedPrefix: (text) => theme.fg("accent", text),
-  selectedText: (text) => theme.fg("accent", text),
+  selectedText: (text) => theme.fg("text", theme.selection()(text)),
   description: (text) => theme.fg("muted", text),
   scrollInfo: (text) => theme.fg("muted", text),
   noMatch: (text) => theme.fg("muted", text),
@@ -406,8 +408,9 @@ export const editorTheme = {
 };
 
 export const settingsListTheme: SettingsListTheme = {
-  label: (text, selected) => (selected ? theme.fg("accent", text) : text),
-  value: (text, selected) => (selected ? theme.fg("accent", text) : theme.fg("muted", text)),
+  label: (text, selected) => (selected ? theme.fg("text", theme.selection()(text)) : text),
+  value: (text, selected) =>
+    selected ? theme.fg("text", theme.selection()(text)) : theme.fg("muted", text),
   description: (text) => theme.fg("dim", text),
   cursor: theme.fg("accent", "› "),
   hint: (text) => theme.fg("dim", text),

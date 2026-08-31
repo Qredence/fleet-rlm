@@ -40,13 +40,17 @@ pnpm --dir tools/fleet-tui start -- --api-url http://127.0.0.1:8000
 
 ## Timeline and interaction
 
-The screen uses pi coding-agent's built-in visual language. It starts with the
-dark palette and switches to the matching light palette when the terminal
-reports that preference. User prompts use a distinct message surface, assistant
-prose remains unboxed, Markdown and code use semantic highlighting, and Tool
-surfaces distinguish pending, successful, and failed execution. Accent,
-success, warning, error, muted, and border colors carry meaning rather than
-decoration.
+The screen uses a dense pi-tui trajectory-console visual language: teal on
+graphite in dark terminals and ink on a cool paper surface in light terminals.
+It switches to
+the matching palette when the terminal reports that preference. The session
+header, compact trajectory markers, and operator dock establish quiet hierarchy
+without boxing the chronological assistant timeline. The dock keeps live
+activity, next-Turn context, editor, then optional metrics in one fixed order;
+short and narrow terminals remove passive copy first. User prompts use a distinct
+message surface, Markdown and code use semantic highlighting, and Tool surfaces
+distinguish pending, successful, and failed execution. Accent, success, warning,
+error, muted, and border colors carry meaning rather than decoration.
 
 Fleet identity and runtime evidence remain unchanged: user/assistant text,
 sanitized reasoning, generated code, interpreter output, Tools, Skills,
@@ -72,16 +76,25 @@ transcript search over the scroll view; Enter/Ctrl+G moves to the next match,
 Shift+Enter/Ctrl+Shift+G to the previous, and Escape closes the search overlay.
 Search matches are styled from the active Fleet theme (underline for matches,
 the adaptive selection background for the current match). Tool, code, and
-output cards
-fold with Ctrl+O. Resize, hydration, and clear may replay the screen and return
+output cards fold with Ctrl+O. `/help` opens a searchable command palette; type
+to filter, use the arrow keys to navigate, and press Enter to insert the
+selected command. Command, Session, theme, profile, Skill, and settings dialogs
+use the same centered pi-tui modal shell: padded adaptive surface, menu title,
+contextual divider, high-contrast focused selection, and key footer. Resize,
+hydration, and clear may replay the screen and return
 to the live bottom.
 
 During a Turn, the activity rail shows phase, safe backend detail, elapsed time,
-SSE-derived started/completed step counts, Tool count, and `Ctrl+C`
+SSE-derived started/completed step counts, Tool count, and `Escape`
 cancellation. The SSE stream opens immediately with transient `preparation`
 status heartbeats while Fleet claims and prepares the Turn; the rail uses those
 transient status phases and safe detail from the first byte. Code and
 interpreter output remain evidence and never infer step completion.
+
+Pinned Skills and Attachments stay visible in a compact `Next Turn` rail above
+the editor, with counts, total Attachment size, and bounded names. The rail is
+cleared when the stream accepts those inputs, or through `/skill clear` and
+`/attach clear`; a pre-stream failure leaves it intact for correction and retry.
 
 The editor remains writable while a Turn runs, but Enter cannot submit a second
 Turn until the active one settles. The footer labels Session token totals and

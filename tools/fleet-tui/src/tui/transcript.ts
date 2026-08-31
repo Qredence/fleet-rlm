@@ -24,7 +24,6 @@ export class TranscriptComponent implements Component {
   private cachedWidth = 0;
   private cachedMessages: readonly Message[] | null = null;
   private cachedSession: State["session"] = null;
-  private cachedSkills: State["pendingSkillSelections"] | null = null;
 
   constructor(
     private readonly store: ConversationStore,
@@ -35,7 +34,6 @@ export class TranscriptComponent implements Component {
     this.cache.clear();
     this.renderCache.clear();
     this.cachedMessages = null;
-    this.cachedSkills = null;
   }
 
   render(width: number): string[] {
@@ -44,8 +42,7 @@ export class TranscriptComponent implements Component {
     if (
       safeWidth === this.cachedWidth &&
       state.messages === this.cachedMessages &&
-      state.session === this.cachedSession &&
-      state.pendingSkillSelections === this.cachedSkills
+      state.session === this.cachedSession
     ) {
       return this.cachedLines;
     }
@@ -53,48 +50,64 @@ export class TranscriptComponent implements Component {
     this.cachedWidth = safeWidth;
     this.cachedMessages = state.messages;
     this.cachedSession = state.session;
-    this.cachedSkills = state.pendingSkillSelections;
     this.cachedLines = lines;
     return lines;
   }
 
   private buildLines(state: State, safeWidth: number): string[] {
     const session = state.session;
-    const lines = [theme.fg("accent", theme.bold("FLEET"))];
+    const lines = [
+      truncateToWidth(
+        `${theme.fg("accent", theme.bold("FLEET"))}${dim("  /  RLM OPERATOR")}`,
+        safeWidth,
+        "",
+      ),
+    ];
     lines.push(
-      dim(
-        truncateToWidth(
-          session
-            ? `${terminalSafeLine(session.title)} · ${session.resumed ? "resumed" : "new"} · ${session.status}`
-            : "session unavailable",
-          safeWidth,
-          "",
-        ),
+      truncateToWidth(
+        session
+          ? `${theme.fg("dim", "SESSION")}  ${theme.fg("text", terminalSafeLine(session.title))}${dim(`  ·  ${session.resumed ? "resumed" : "new"}  ·  ${session.status}`)}`
+          : `${theme.fg("dim", "SESSION")}  ${dim("unavailable")}`,
+        safeWidth,
+        "",
       ),
     );
-    if (state.pendingSkillSelections.length > 0) {
-      lines.push(
-        dim(
-          truncateToWidth(
-            `next Turn Skills · ${state.pendingSkillSelections.map((item) => `${item.displayName}@${item.expectedVersion}`).join(", ")}`,
-            safeWidth,
-            "",
-          ),
-        ),
-      );
-    }
     lines.push("");
     if (state.messages.length === 0) {
-      lines.push(dim("(empty conversation — type a prompt or /help)"));
+      lines.push(
+        truncateToWidth(`${theme.fg("accent", "›")} ${theme.bold("Start a Turn")}`, safeWidth, "…"),
+      );
+      lines.push(
+        truncateToWidth(
+          dim("  Investigate a question, analyze workspace files, or create a report."),
+          safeWidth,
+          "…",
+        ),
+      );
+      lines.push(
+        truncateToWidth(
+          `  ${theme.fg("mdCode", "/skills")} ${dim("expertise")}   ${theme.fg("mdCode", "/attach")} ${dim("files")}   ${theme.fg("mdCode", "/help")} ${dim("commands")}`,
+          safeWidth,
+          "…",
+        ),
+      );
       this.cache.clear();
       this.renderCache.clear();
       return lines;
     }
 
     const retained = new Set<string>();
+    let previousRunId: string | undefined;
+    let trajectoryIndex = 0;
     state.messages.forEach((message, index) => {
       retained.add(message.id);
       if (index > 0) lines.push("");
+      const runId = messageRunId(message);
+      if (runId && runId !== previousRunId) {
+        trajectoryIndex += 1;
+        lines.push(trajectoryDivider(trajectoryIndex, safeWidth));
+        previousRunId = runId;
+      }
       lines.push(...this.renderCached(message, safeWidth));
     });
     for (const id of this.cache.keys()) {
@@ -119,4 +132,14 @@ export class TranscriptComponent implements Component {
 
 function dim(value: string): string {
   return theme.fg("dim", value);
+}
+
+/** Internal execution IDs are intentionally not exposed in the timeline. */
+function messageRunId(message: Message): string | undefined {
+  return "runId" in message ? message.runId : undefined;
+}
+
+function trajectoryDivider(index: number, width: number): string {
+  const label = `${theme.fg("accent", theme.bold("◇ TRAJECTORY"))}${dim(`  turn ${index}`)}`;
+  return truncateToWidth(label, width, "");
 }

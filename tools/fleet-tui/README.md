@@ -37,30 +37,37 @@ documented in [`../../docs/reference/configuration.md`](../../docs/reference/con
 
 ## Operator timeline
 
-pi-tui renders one white-and-gray execution timeline in an alternate-screen
-viewport. Text, reasoning, code, interpreter output, Tools, Skills, errors,
-Results, Artifacts, and usage remain chronological, complete, and expanded
-unless the operator folds them. Live and reloaded Turns share one projection
-and renderer-neutral store.
+pi-tui renders one dense trajectory console in an alternate-screen viewport:
+teal-on-graphite dark styling or ink-on-cool-paper light styling, with color
+reserved for identity, keyboard focus, and semantic state. Compact trajectory
+markers separate independent runtime Turns without exposing internal Run IDs. Text,
+reasoning, code, interpreter output, Tools, Skills, errors, Results, Artifacts,
+and usage remain chronological, complete, and expanded unless the operator
+folds them. Live and reloaded Turns share one projection and renderer-neutral
+store.
 
 The transcript viewport follows the newest output: PgUp/PgDn scroll a page,
 Home/End jump to the top/bottom, the mouse wheel scrolls, drag selects text
 for copy, and new output re-follows the end. Ctrl+Shift+F opens transcript
 search over the scroll view (Enter/Ctrl+G steps to the next match,
 Shift+Enter/Ctrl+Shift+G to the previous, Escape closes); matches are styled
-from the active Fleet theme. Tool, code, and output cards
-fold with Ctrl+O (multi-line tool errors collapse to their summary by
-default); the latest card shows a dim key hint.
+from the active Fleet theme. Tool, code, and output cards fold with Ctrl+O
+(multi-line tool errors collapse to their summary by default); the latest card
+shows a dim key hint. `/help` opens a searchable command palette: type to
+filter, use the arrow keys to navigate, and press Enter to insert a command
+into the editor. All command pickers and settings dialogs share a centered,
+keyboard-first pi-tui modal surface with quiet padding, a menu label, a
+high-contrast selected row, and an explicit key footer.
 
 Assistant, user, reasoning, and Result narrative text is rendered as pi-tui
 Markdown, including lists, links, blockquotes, fenced code, and tables. Tool
-cards share one panel surface (input/output previews bounded to 4k chars,
-long bodies capped with a skip marker). User messages render on an adaptive
-surface that keeps contrast against the actual terminal background. The live
-activity strip borders a pulse indicator and names the current preparation,
-RLM step, Tool, replay, or cancellation action. The footer reports observed
-committed input/output tokens, Turn steps, Tools, and outcome; absent provider
-telemetry displays as `—` rather than an estimated zero.
+cards share one panel surface (input/output previews bounded to 4k chars, long
+bodies capped with a skip marker). User messages and the editor dock render on
+an adaptive surface that keeps contrast against the actual terminal background.
+The live activity strip borders a pulse indicator and names the current
+preparation, RLM step, Tool, replay, or cancellation action. The footer reports
+observed committed input/output tokens, Turn steps, Tools, and outcome; absent
+provider telemetry displays as `—` rather than an estimated zero.
 
 Use `/help` for commands. `/theme [name]` lists and switches the builtin
 (`dark`/`light`) or custom JSON themes with a filter-as-you-type picker (see below).
@@ -97,8 +104,13 @@ backend Turn contract, so the TUI can move files in both directions:
   stream interruption); `/reload` re-fetches committed Turns for the current
   Session; `/trace` prints the full MLflow trace ID.
 
-The editor draft, pinned Skills/Attachments, and the last prompt persist per
-Session to `~/.local/share/fleet/tui/<session-id>.json` (override with
+The persistent operator dock keeps live activity, pinned Skills/Attachments,
+the editor, and responsive token/outcome metrics together. The compact `Next
+Turn` rail includes counts, total Attachment size, and bounded names; it
+disappears only when the stream accepts those inputs or they are cleared. On
+narrow or short terminals passive hints disappear before actionable activity,
+the rail, or the editor. The editor draft, pinned Skills/Attachments, and the last prompt
+persist per Session to `~/.local/share/fleet/tui/<session-id>.json` (override with
 `FLEET_TUI_STATE_DIR`) and are restored on the next start; a failed write never
 blocks the TUI.
 

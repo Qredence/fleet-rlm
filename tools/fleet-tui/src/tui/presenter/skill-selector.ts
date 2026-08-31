@@ -13,7 +13,7 @@ import { MAX_PENDING_SKILLS, type PendingSkillSelection } from "../store.js";
 import { dropLastGrapheme } from "../terminal-text.js";
 import { selectTheme, theme } from "../theme.js";
 
-import { isPrintableInput } from "./overlay.js";
+import { isPrintableInput, overlayHint, overlayRule, overlayTitle } from "./overlay.js";
 
 export class SkillSelector implements Component {
   private index = 0;
@@ -31,14 +31,13 @@ export class SkillSelector implements Component {
     const safeWidth = Math.max(1, width);
     const filtered = this.filteredSkills();
     this.index = Math.min(this.index, Math.max(0, filtered.length - 1));
-    const maxVisible = 10;
+    const maxVisible = 8;
     const start = Math.max(0, Math.min(this.index - maxVisible + 1, filtered.length - maxVisible));
     const visible = filtered.slice(start, start + maxVisible);
     return [
-      theme.fg(
-        "accent",
-        theme.bold("Skills for the next Turn (Space toggle · Enter apply · Escape cancel)"),
-      ),
+      overlayTitle("Skills for the next Turn"),
+      overlayHint("Pin exact Skill versions for the next accepted Turn"),
+      overlayRule(safeWidth),
       `${theme.fg("muted", "Filter:")} ${this.query || theme.fg("dim", "(type to search)")}`,
       "",
       ...(visible.length > 0
@@ -56,6 +55,8 @@ export class SkillSelector implements Component {
       selectTheme.scrollInfo(
         `${this.selected.length}/${MAX_PENDING_SKILLS} selected · ${filtered.length} shown${filtered.length > maxVisible ? ` · rows ${start + 1}-${Math.min(start + maxVisible, filtered.length)}` : ""}`,
       ),
+      overlayRule(safeWidth),
+      `${theme.fg("accent", "SPACE")} ${overlayHint("toggle  ·  Enter apply  ·  Esc cancel")}`,
     ].map((line) => truncateToWidth(line, safeWidth, "…"));
   }
   handleInput(data: string): void {
