@@ -319,10 +319,23 @@ function dim(value: string): string {
   return theme.fg("dim", value);
 }
 
+/**
+ * Selects the singular or plural form of a label based on a count.
+ *
+ * @param count - The quantity determining the label form
+ * @param singular - The singular form of the label
+ * @returns The singular label when `count` is 1; otherwise, the label with an appended `s`
+ */
 function plural(count: number, singular: string): string {
   return count === 1 ? singular : `${singular}s`;
 }
 
+/**
+ * Determines the activity label for the current run state.
+ *
+ * @param state - The application state containing run and message activity
+ * @returns The label describing the run's current activity
+ */
 function activityAction(state: State): string {
   const run = state.run;
   if (run.phase === "submitting") return "Preparing Turn";

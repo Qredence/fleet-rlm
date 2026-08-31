@@ -134,11 +134,22 @@ function dim(value: string): string {
   return theme.fg("dim", value);
 }
 
-/** Internal execution IDs are intentionally not exposed in the timeline. */
+/**
+ * Gets the internal execution identifier associated with a message.
+ *
+ * @returns The message's execution identifier, or `undefined` when none is present.
+ */
 function messageRunId(message: Message): string | undefined {
   return "runId" in message ? message.runId : undefined;
 }
 
+/**
+ * Formats a numbered trajectory divider for the transcript.
+ *
+ * @param index - The trajectory number to display
+ * @param width - The maximum display width
+ * @returns The width-truncated trajectory divider
+ */
 function trajectoryDivider(index: number, width: number): string {
   const label = `${theme.fg("accent", theme.bold("◇ TRAJECTORY"))}${dim(`  turn ${index}`)}`;
   return truncateToWidth(label, width, "");
