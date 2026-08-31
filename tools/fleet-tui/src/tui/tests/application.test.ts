@@ -59,7 +59,7 @@ describe("FleetTuiApplication", () => {
       await vi.waitFor(() => expect(terminal.writes).toContain("\x1b[?996n"));
       terminal.send("\x1b[?997;1n");
       await vi.waitFor(() => expect(getTerminalColorScheme()).toBe("light"));
-      expect(theme.fg("accent", "x")).toContain("38;2;90;128;128");
+      expect(theme.fg("accent", "x")).toContain("38;2;47;118;111");
     } finally {
       await app.stop();
       await finished;
@@ -132,6 +132,28 @@ describe("FleetTuiApplication", () => {
     });
     // The viewport follows the end: early rows are clipped, not painted.
     expect(terminal.writes.join("")).not.toContain("row-0");
+    await app.stop();
+    await finished;
+  });
+
+  it("guides unknown slash commands back to command discovery", async () => {
+    const terminal = new FakeTerminal();
+    const app = createFleetTui({
+      terminal,
+      client: new FleetApiClient({ baseUrl: "http://fleet.test" }),
+      session,
+      resumed: false,
+      initialEvents: [],
+      queryColorScheme: false,
+    });
+
+    const finished = app.start();
+    for (const key of "/unknown") terminal.send(key);
+    terminal.send("\r");
+
+    await vi.waitFor(() =>
+      expect(terminal.writes.join("")).toContain("Type / to browse commands or use /help"),
+    );
     await app.stop();
     await finished;
   });

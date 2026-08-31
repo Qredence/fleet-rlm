@@ -13,7 +13,9 @@ import { MAX_PENDING_SKILLS, type PendingSkillSelection } from "../store.js";
 import { dropLastGrapheme } from "../terminal-text.js";
 import { selectTheme, theme } from "../theme.js";
 
-import { isPrintableInput } from "./overlay.js";
+import { isPrintableInput, overlayHint, overlayRule, overlayTitle } from "./overlay.js";
+
+const SKILL_SELECTOR_PAGE_SIZE = 8;
 
 export class SkillSelector implements Component {
   private index = 0;
@@ -31,14 +33,18 @@ export class SkillSelector implements Component {
     const safeWidth = Math.max(1, width);
     const filtered = this.filteredSkills();
     this.index = Math.min(this.index, Math.max(0, filtered.length - 1));
-    const maxVisible = 10;
-    const start = Math.max(0, Math.min(this.index - maxVisible + 1, filtered.length - maxVisible));
-    const visible = filtered.slice(start, start + maxVisible);
-    return [
-      theme.fg(
-        "accent",
-        theme.bold("Skills for the next Turn (Space toggle · Enter apply · Escape cancel)"),
+    const start = Math.max(
+      0,
+      Math.min(
+        this.index - SKILL_SELECTOR_PAGE_SIZE + 1,
+        filtered.length - SKILL_SELECTOR_PAGE_SIZE,
       ),
+    );
+    const visible = filtered.slice(start, start + SKILL_SELECTOR_PAGE_SIZE);
+    return [
+      overlayTitle("Skills for the next Turn"),
+      overlayHint("Pin exact Skill versions for the next accepted Turn"),
+      overlayRule(safeWidth),
       `${theme.fg("muted", "Filter:")} ${this.query || theme.fg("dim", "(type to search)")}`,
       "",
       ...(visible.length > 0
@@ -54,17 +60,20 @@ export class SkillSelector implements Component {
       }),
       "",
       selectTheme.scrollInfo(
-        `${this.selected.length}/${MAX_PENDING_SKILLS} selected · ${filtered.length} shown${filtered.length > maxVisible ? ` · rows ${start + 1}-${Math.min(start + maxVisible, filtered.length)}` : ""}`,
+        `${this.selected.length}/${MAX_PENDING_SKILLS} selected · ${filtered.length} shown${filtered.length > SKILL_SELECTOR_PAGE_SIZE ? ` · rows ${start + 1}-${Math.min(start + SKILL_SELECTOR_PAGE_SIZE, filtered.length)}` : ""}`,
       ),
+      overlayRule(safeWidth),
+      `${theme.fg("accent", "SPACE")} ${overlayHint("toggle  ·  Enter apply  ·  Esc cancel")}`,
     ].map((line) => truncateToWidth(line, safeWidth, "…"));
   }
   handleInput(data: string): void {
     const filtered = this.filteredSkills();
     if (matchesKey(data, "up")) this.index = Math.max(0, this.index - 1);
     else if (matchesKey(data, "down")) this.index = Math.min(filtered.length - 1, this.index + 1);
-    else if (matchesKey(data, "pageUp")) this.index = Math.max(0, this.index - 10);
+    else if (matchesKey(data, "pageUp"))
+      this.index = Math.max(0, this.index - SKILL_SELECTOR_PAGE_SIZE);
     else if (matchesKey(data, "pageDown"))
-      this.index = Math.min(filtered.length - 1, this.index + 10);
+      this.index = Math.min(filtered.length - 1, this.index + SKILL_SELECTOR_PAGE_SIZE);
     else if (data === " ") {
       const skill = filtered[this.index];
       if (!skill) return;
