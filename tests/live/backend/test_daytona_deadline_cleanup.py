@@ -19,7 +19,7 @@ from fleet_rlm.config.settings import Settings
 from fleet_rlm.daytona.broker import DaytonaHttpToolBroker
 from fleet_rlm.daytona.session_manager import get_active_lease_registry
 from fleet_rlm.rlm.program import RLMModelBundle
-from tests.live.backend._p35d_evidence import candidate_identity, write_receipt
+from tests.live.backend._evidence import candidate_identity, write_receipt
 from tests.live.backend.test_fleet_rlm_daytona_mvp import (
     _live_settings,
     _strict_cleanup,
@@ -28,6 +28,8 @@ from tests.live.backend.test_fleet_rlm_daytona_mvp import (
 pytestmark = [pytest.mark.live_daytona, pytest.mark.timeout(600)]
 
 _TURN_TIMEOUT_SECONDS = 180
+_WRAP_UP_SECONDS = 30
+_OBSERVATION_GRACE_SECONDS = 30
 _TIMEOUT_PROMPT = (
     "Run exactly one Python code cell containing only print('deadline-probe'). Do not call SUBMIT or any tools."
 )
@@ -70,6 +72,7 @@ def _case_settings(tmp_path: Path) -> Settings:
             "rlm_max_iters": 4,
             "rlm_max_llm_calls": 6,
             "turn_timeout_seconds": _TURN_TIMEOUT_SECONDS,
+            "rlm_wrap_up_seconds": _WRAP_UP_SECONDS,
             "run_stale_after_seconds": 600,
             "rlm_autonomous_memory_categories": ("operator preference",),
             "mlflow_tracing_enabled": False,
@@ -143,7 +146,8 @@ def test_daytona_deadline_cleanup_through_fastapi(
             chunks, done = _sse_chunks(response)
             assert done == 1
             assert entered.is_set(), "interpreter never reached host-forced stall"
-            assert _TURN_TIMEOUT_SECONDS <= elapsed < _TURN_TIMEOUT_SECONDS + 120
+            assert settings.rlm_wrap_up_seconds < settings.turn_timeout_seconds
+            assert _TURN_TIMEOUT_SECONDS <= elapsed < _TURN_TIMEOUT_SECONDS + _OBSERVATION_GRACE_SECONDS
             assert chunks[-1].get("type") == "finish"
             assert chunks[-1].get("finishReason") == "error"
             errors = [str(chunk.get("errorText", "")) for chunk in chunks if chunk.get("type") == "error"]

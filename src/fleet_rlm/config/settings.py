@@ -64,6 +64,7 @@ class LLMRoleSettings(BaseModel):
     api_key_env: str
     base_url: str | None = None
     max_tokens: int | None = Field(default=None, ge=1)
+    timeout_seconds: int | None = Field(default=None, gt=0)
     temperature: float | None = None
     reasoning_effort: Literal["none", "low", "medium", "high"] | None = None
     cache: bool = True
@@ -415,6 +416,16 @@ class Settings(BaseModel):
             required_in_policy=True,
         ),
     ] = Field(default=120, gt=0)
+    rlm_wrap_up_seconds: Annotated[
+        int,
+        FleetFieldPolicy(
+            toml_path="rlm.wrap_up_seconds",
+            group="RLM",
+            label="Final-answer reserve (seconds)",
+            editor="number",
+            rank=69,
+        ),
+    ] = Field(default=300, gt=0)
     rlm_recursion_enabled: Annotated[
         bool,
         FleetFieldPolicy(
@@ -565,6 +576,16 @@ class Settings(BaseModel):
             toml_path="llm.root.max_tokens", group="Root LLM", label="Maximum tokens", editor="number", rank=11
         ),
     ] = Field(default=None, ge=1)
+    root_llm_timeout_seconds: Annotated[
+        int | None,
+        FleetFieldPolicy(
+            toml_path="llm.root.timeout_seconds",
+            group="Root LLM",
+            label="Provider timeout seconds",
+            editor="number",
+            rank=70,
+        ),
+    ] = Field(default=300, gt=0)
     root_llm_temperature: Annotated[
         float | None,
         FleetFieldPolicy(
@@ -617,6 +638,16 @@ class Settings(BaseModel):
             toml_path="llm.sub.max_tokens", group="Sub LLM", label="Maximum tokens", editor="number", rank=20
         ),
     ] = Field(default=None, ge=1)
+    sub_llm_timeout_seconds: Annotated[
+        int | None,
+        FleetFieldPolicy(
+            toml_path="llm.sub.timeout_seconds",
+            group="Sub LLM",
+            label="Provider timeout seconds",
+            editor="number",
+            rank=71,
+        ),
+    ] = Field(default=90, gt=0)
     sub_llm_temperature: Annotated[
         float | None,
         FleetFieldPolicy(
@@ -780,6 +811,8 @@ class Settings(BaseModel):
     def _validate_run_liveness(self) -> Settings:
         if self.run_stale_after_seconds < self.run_heartbeat_seconds * 3:
             raise ValueError("FLEET_RUN_STALE_AFTER_SECONDS must be at least three times FLEET_RUN_HEARTBEAT_SECONDS")
+        if self.rlm_wrap_up_seconds >= self.turn_timeout_seconds:
+            raise ValueError("rlm_wrap_up_seconds must be less than turn_timeout_seconds")
         return self
 
     @field_validator("rlm_autonomous_memory_categories")
@@ -858,6 +891,7 @@ class Settings(BaseModel):
             api_key_env=getattr(self, f"{prefix}_api_key_env"),
             base_url=getattr(self, f"{prefix}_base_url"),
             max_tokens=getattr(self, f"{prefix}_max_tokens"),
+            timeout_seconds=getattr(self, f"{prefix}_timeout_seconds"),
             temperature=getattr(self, f"{prefix}_temperature"),
             reasoning_effort=getattr(self, f"{prefix}_reasoning_effort"),
             cache=getattr(self, f"{prefix}_cache"),

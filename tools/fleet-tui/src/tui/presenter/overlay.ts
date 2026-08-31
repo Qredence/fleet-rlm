@@ -1,6 +1,7 @@
 /** Shared overlay scaffold for Fleet TUI presenter surfaces. */
 
 import {
+  Box,
   type Component,
   decodeKittyPrintable,
   matchesKey,
@@ -15,9 +16,24 @@ import { selectTheme, theme } from "../theme.js";
 /** Shared geometry for presenter overlays: readable but inside small terminals. */
 export const OVERLAY_OPTIONS = { width: "80%", maxHeight: "80%", anchor: "center" } as const;
 
+/**
+ * A quiet, keyboard-first modal surface. `Box` owns the adaptive fill and
+ * padding while the child keeps ownership of selection and input behavior.
+ */
+export class ModalSurface extends Box {
+  constructor(private readonly inner: Component) {
+    super(2, 1, (text) => theme.surface("customMessageBg")(text));
+    this.addChild(inner);
+  }
+
+  handleInput(data: string): void {
+    this.inner.handleInput?.(data);
+  }
+}
+
 /** Shared Fleet-styled overlay header line. */
 export function overlayTitle(text: string): string {
-  return theme.fg("accent", theme.bold(text));
+  return `${theme.fg("dim", "MENU")}  ${theme.fg("accent", theme.bold(text))}`;
 }
 
 /** Applies Fleet's dim styling to overlay hint text.
@@ -27,6 +43,11 @@ export function overlayTitle(text: string): string {
  */
 export function overlayHint(text: string): string {
   return theme.fg("dim", text);
+}
+
+/** A light structural rule that separates modal metadata from active content. */
+export function overlayRule(width: number): string {
+  return theme.fg("borderMuted", "─".repeat(Math.max(1, width)));
 }
 
 /**
@@ -52,7 +73,9 @@ export class SelectOverlay implements Component {
       maxVisible?: number;
     },
   ) {
-    this.list = new SelectList(items, options.maxVisible ?? 10, selectTheme);
+    // Leave room for the modal title, filter, and key footer inside pi-tui's
+    // 80%-height overlay budget on a conventional 80×24 terminal.
+    this.list = new SelectList(items, options.maxVisible ?? 8, selectTheme);
     this.list.onSelect = (item) => this.onSelect?.(item);
     this.list.onCancel = () => this.onCancel?.();
     if (options.selectedValue !== undefined) {
@@ -69,6 +92,7 @@ export class SelectOverlay implements Component {
     const safeWidth = Math.max(1, width);
     const lines = [overlayTitle(this.options.title)];
     if (this.options.context) lines.push(overlayHint(this.options.context));
+    lines.push(overlayRule(safeWidth));
     if (this.options.filterable) {
       lines.push(
         `${theme.fg("muted", "Filter:")} ${this.query || theme.fg("dim", "(type to filter)")}`,
@@ -78,7 +102,8 @@ export class SelectOverlay implements Component {
     lines.push(...this.list.render(safeWidth));
     if (this.options.hint) {
       lines.push("");
-      lines.push(overlayHint(this.options.hint));
+      lines.push(overlayRule(safeWidth));
+      lines.push(`${theme.fg("accent", "ESC")} ${overlayHint(`close  ·  ${this.options.hint}`)}`);
     }
     return lines.map((line) => truncateToWidth(line, safeWidth, "…"));
   }
@@ -125,6 +150,7 @@ export class TitledComponent implements Component {
     const safeWidth = Math.max(1, width);
     const lines = [overlayTitle(this.titleText)];
     if (this.contextText) lines.push(overlayHint(this.contextText));
+    lines.push(overlayRule(safeWidth));
     lines.push("");
     lines.push(...this.inner.render(safeWidth));
     return lines.map((line) => truncateToWidth(line, safeWidth, "…"));

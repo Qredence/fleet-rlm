@@ -20,7 +20,9 @@ if ! command -v pnpm >/dev/null 2>&1; then
   fi
   corepack enable
 fi
-pnpm --dir tools/fleet-tui install --frozen-lockfile
+# Run pnpm from inside the workspace so corepack resolves the pinned
+# packageManager version (pnpm --dir resolves from the invocation CWD).
+(cd tools/fleet-tui && pnpm install --frozen-lockfile)
 
 uv run python scripts/check_harness_engineering.py --skip-script-help
 echo "Codex Cloud maintenance complete"

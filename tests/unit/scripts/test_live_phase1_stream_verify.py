@@ -49,7 +49,7 @@ def _test_receipt() -> dict[str, object]:
     }
 
 
-def _settings(*, profile: str = "daytona") -> object:
+def _settings(*, profile: str = "daytona-recursive") -> object:
     """
     Create test settings for a Daytona live-execution profile.
 
@@ -171,7 +171,7 @@ def test_success_receipt_is_enriched_and_sanitized(
     receipt = json.loads(output.read_text(encoding="utf-8"))
     assert receipt["candidate"]["sha"] == "a" * 40
     assert receipt["policy"] == {
-        "profile": "daytona",
+        "profile": "daytona-recursive",
         "environment": "daytona",
         "root_model": verifier._LIVE_ROOT_MODEL,
         "sub_model": verifier._LIVE_SUB_MODEL,

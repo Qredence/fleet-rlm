@@ -64,6 +64,19 @@ class _Program:
         return dspy.Prediction(answer=f"answer-{self.calls}", trajectory=[])
 
 
+class _SubAwareProgram(_Program):
+    """Resident program double that exposes DSPy's mutable ``sub_lm`` seam."""
+
+    def __init__(self, thread_ids: list[int], interpreter: _Interpreter, sub_lm: object) -> None:
+        super().__init__(thread_ids, interpreter)
+        self.sub_lm = sub_lm
+        self.seen_sub_lms: list[object] = []
+
+    async def acall(self, **kwargs: object) -> dspy.Prediction:
+        self.seen_sub_lms.append(self.sub_lm)
+        return await super().acall(**kwargs)
+
+
 class _Factory:
     def __init__(self, thread_ids: list[int], interpreter: _Interpreter) -> None:
         self.thread_ids = thread_ids
@@ -76,7 +89,29 @@ class _Factory:
         return program
 
 
-def _context(session_id, workspace_id, interpreter, request: str, run_id, history: dspy.History) -> RLMExecutionContext:
+class _SubAwareFactory:
+    def __init__(self, thread_ids: list[int], interpreter: _Interpreter) -> None:
+        self.thread_ids = thread_ids
+        self.interpreter = interpreter
+        self.programs: list[_SubAwareProgram] = []
+
+    def create(self, **kwargs: object) -> _SubAwareProgram:
+        models = cast(Any, kwargs["models"])
+        program = _SubAwareProgram(self.thread_ids, self.interpreter, models.sub_lm)
+        self.programs.append(program)
+        return program
+
+
+def _context(
+    session_id,
+    workspace_id,
+    interpreter,
+    request: str,
+    run_id,
+    history: dspy.History,
+    *,
+    models: RLMModelBundle | None = None,
+) -> RLMExecutionContext:
     return RLMExecutionContext(
         identity=RunIdentity(run_id=run_id, session_id=session_id, access=TurnAccess(uuid4(), workspace_id)),
         session=SessionView(
@@ -86,7 +121,7 @@ def _context(session_id, workspace_id, interpreter, request: str, run_id, histor
             history=history,
         ),
         execution=ExecutionRuntime(
-            models=RLMModelBundle(object(), object()),
+            models=models or RLMModelBundle(object(), object()),
             options=RLMOptions(),
             interpreter=interpreter,
             cancellation_requested=lambda: _not_cancelled(),
@@ -144,6 +179,56 @@ async def test_successful_sequential_streams_reuse_program_interpreter_and_threa
     assert thread_ids[0] == thread_ids[1]
     session_key = next(iter(runner._session_tool_registries))
     assert runner._session_tool_registries[session_key].active_run_id is None
+
+
+@pytest.mark.asyncio
+async def test_reused_resident_program_receives_each_turn_sub_lm_copy() -> None:
+    """A resident RLM must never retain the previous Turn's deadline-bound Sub LM."""
+    session_id, workspace_id = uuid4(), uuid4()
+    interpreter = _Interpreter()
+    thread_ids: list[int] = []
+    factory = _SubAwareFactory(thread_ids, interpreter)
+    runner = RLMRunner(factory=factory)
+    first_sub = SimpleNamespace(model="sub", kwargs={})
+    second_sub = SimpleNamespace(model="sub", kwargs={})
+    root = SimpleNamespace(model="root", kwargs={})
+
+    first = runner.stream(
+        _context(
+            session_id,
+            workspace_id,
+            interpreter,
+            "first",
+            uuid4(),
+            dspy.History(messages=[]),
+            models=RLMModelBundle(root, first_sub),
+        )
+    )
+    _ = [event async for event in first]
+    assert first.outcome is not None and first.outcome.succeeded
+    first.mark_committed()
+    await first.aclose()
+
+    second = runner.stream(
+        _context(
+            session_id,
+            workspace_id,
+            interpreter,
+            "second",
+            uuid4(),
+            dspy.History(messages=[]),
+            models=RLMModelBundle(root, second_sub),
+        )
+    )
+    _ = [event async for event in second]
+    assert second.outcome is not None and second.outcome.succeeded
+    second.mark_committed()
+    await second.aclose()
+
+    assert len(factory.programs) == 1
+    program = factory.programs[0]
+    assert program.seen_sub_lms == [first_sub, second_sub]
+    await runner.aclose()
 
 
 @pytest.mark.asyncio

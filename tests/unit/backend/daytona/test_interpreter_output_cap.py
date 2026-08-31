@@ -97,4 +97,4 @@ def test_settings_expose_execution_bounds_and_toml_defaults() -> None:
     toml_path = Path(__file__).resolve().parents[4] / "config" / "fleet.toml"
     data = tomllib.loads(toml_path.read_text(encoding="utf-8"))
     assert data["defaults"]["rlm"]["max_execution_output_chars"] == 4000
-    assert data["defaults"]["rlm"]["execution_timeout_s"] == 120
+    assert data["defaults"]["rlm"]["execution_timeout_s"] == 300

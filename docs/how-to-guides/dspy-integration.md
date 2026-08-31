@@ -90,9 +90,11 @@ clients cannot provide models, Signatures, or executable capabilities.
   each Root/Sub role supplies a provider base URL, an API-key environment
   reference, and a provider-native model id. The request goes to the provider's
   `/chat/completions` endpoint with `model_type="chat"`; no provider-specific
-  routing header is required. Interactive profiles cap both roles at 16,000
-  tokens; managed and benchmark profiles cap them at 8,000. The exact
-  credential and endpoint names are policy-derived in [the profile
+  routing header is required. Both roles run the Modal-hosted GLM-5.3-Flash
+  endpoint and are capped at 131,072 output tokens — the maximum output length
+  Z.AI documents for GLM-5.3-Flash — leaving ample headroom under the served
+  1,048,576-token context for any Fleet prompt. The
+  exact credential and endpoint names are policy-derived in [the profile
   matrix](../reference/profile-matrix.md). This LM response limit is distinct
   from `dspy.RLM.max_output_chars`, which bounds REPL output retained in
   recursive history.
@@ -258,7 +260,7 @@ See [backend architecture](../architecture.md) for ownership and Turn commit ord
 ## Run the Phase 1 Daytona stream canary
 
 Phase 1 closure uses a deliberately narrow, one-Turn live canary. It selects
-the normal `[profiles.daytona]` policy—not `daytona-bench`—and proves one small
+the default `daytona-recursive` policy and proves one small
 text Attachment is materialized through the Volume capsule, native
 `llm_query` and `llm_query_batched` calls occur without `rlm_query`, Root
 reasoning or code reaches SSE before terminal completion, typed `SUBMIT`
@@ -273,8 +275,8 @@ uv run python scripts/live_phase1_stream_verify.py \
 The command is explicitly invoked and policy-gated by
 `runtime.live_enabled`. It loads `.env` with `override=False`, so operator
 exports retain precedence. It requires a clean tracked non-`main` candidate,
-the `daytona` profile, and the `databricks-deepseek-v4-flash-0731` endpoint for
-both Root and Sub. Its bounded receipt excludes Attachment content, prompts,
+the default `daytona-recursive` policy, and the Modal-hosted
+`openai/zai-org/GLM-5.3-Flash` endpoint for both Root and Sub. Its bounded receipt excludes Attachment content, prompts,
 generated code, provider responses, trace IDs, broker addresses, and
 credentials. A passing canary closes Phase 1 only; it does not promote or
 release the candidate.
@@ -285,8 +287,8 @@ After Phase 1 has a committed passing receipt and retrospective, the narrow
 Phase 2 canary selects `[profiles.daytona-recursive]`. It proves one native
 DSPy child RLM receives a dedicated Daytona Sandbox with ordinary network
 policy, a sibling private Volume scope, no Root Python marker, and strict
-cleanup before the Root typed `SUBMIT` completes. It does not use
-`daytona-bench`, Oolong, a custom agent loop, or a grandchild Sandbox.
+cleanup before the Root typed `SUBMIT` completes. It does not use a custom
+agent loop or a grandchild Sandbox.
 
 ```bash
 uv run python scripts/live_phase2_recursive_verify.py \
@@ -294,8 +296,8 @@ uv run python scripts/live_phase2_recursive_verify.py \
 ```
 
 The command requires explicit live authorization, `runtime.live_enabled`, a
-clean tracked non-`main` candidate, the recursive profile, and the
-`databricks-deepseek-v4-flash-0731` endpoint for both model roles. Its receipt
+clean tracked non-`main` candidate, the recursive profile, and the Modal-hosted
+`openai/zai-org/GLM-5.3-Flash` endpoint for both model roles. Its receipt
 contains only candidate/dependency identity, non-secret policy identifiers,
 two bounded durations, and boolean assertions. It excludes prompts, answers,
 code, credentials, URLs, trace IDs, Sandbox IDs, Volume IDs, and broker data.
@@ -324,10 +326,10 @@ Provision the immutable Snapshot named by that profile with the [Daytona
 Snapshot guide](daytona-snapshot.md).
 
 The verifier requires a clean tracked tree on a non-`main` branch, invokes the
-single live pytest scenario once, and performs no automatic retry. It resolves the `databricks-deepseek-v4-flash-0731` Root and Sub roles from
-the selected TOML profile; ambient model variables are ignored, and swapped or
-obsolete model pairs fail the precondition. Its `--help` path requires no
-credentials.
+single live pytest scenario once, and performs no automatic retry. It resolves
+the `openai/zai-org/GLM-5.3-Flash` Root and Sub roles from the selected TOML
+profile; ambient model variables are ignored, and swapped or obsolete model
+pairs fail the precondition. Its `--help` path requires no credentials.
 
 The proof exercises a typed host Signature, state across RLM iterations,
 single and batched recursive calls, a host Tool, a durable workspace write,

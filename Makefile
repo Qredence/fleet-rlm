@@ -10,24 +10,24 @@ PYTEST_ISOLATED := env \
 	FLEET_LLM_BASE_URL= \
 	FLEET_DATABASE_URL= \
 	$(PYTEST)
-PYTEST_XDIST_MAX_WORKERS ?= 2
-# Keep module-scoped fixtures together; this avoids rebuilding expensive test
-# state when xdist splits individual tests from the same module.
+# Four workers keep local gate runs fast on typical dev machines while xdist
+# `loadfile` scheduling keeps module-scoped fixtures together; override with
+# PYTEST_XDIST_MAX_WORKERS when memory is constrained.
+PYTEST_XDIST_MAX_WORKERS ?= 4
 PYTEST_PARALLEL := -n auto --maxprocesses=$(PYTEST_XDIST_MAX_WORKERS) --dist=loadfile
 
 .PHONY: \
 	help \
 	install install-dev install-all \
 	dev format format-check lint typecheck \
-	test test-fast test-unit test-contract test-packaging test-daytona-cov \
-	check quality-gate check-release check-docs check-security check-deps check-codebase-tree check-dependency-boundaries api-check api-sync tui-check \
-	build build-release release release-check \
-	certification-gate certification-verify p53-live-certification \
+	test test-unit test-contract test-packaging test-db test-daytona-cov \
+	check check-release check-docs check-security check-deps check-codebase-tree check-dependency-boundaries \
+	api-check api-sync tui-check stream-check stream-sync \
+	build build-release release \
 	clean cli precommit-install precommit-run precommit \
-	sync sync-dev sync-all metadata-check docs-check security-check dependency-check release-artifacts cli-help \
 	cloud-preflight \
 	daytona-snapshot-create daytona-snapshot-check profile-matrix \
-	benchmark-oolong benchmark-native-long-context
+	benchmark-daytona-lifecycle benchmark-native-long-context
 
 help:
 	@echo "Setup:"
@@ -45,12 +45,13 @@ help:
 	@echo "Testing:"
 	@echo "  make test             - Run default fast non-live tests (packaging is separate)"
 	@echo "  make test-unit        - Run unit tests (non-live/non-benchmark; packaging separate)"
-	@echo "  make test-packaging   - Run serial artifact/install/release tests"
 	@echo "  make test-contract    - Run backend contracts and CLI smoke tests"
+	@echo "  make test-packaging   - Run serial artifact/install/release tests"
+	@echo "  make test-db          - Run explicit configured-database tests (db marker)"
 	@echo "  make test-daytona-cov - Run canonical non-live tests with Daytona branch coverage"
-	@echo "  make p53-live-certification - Run serial credentialed P53 Session certification"
-	@echo "  make benchmark-oolong - Run pinned Prime Oolong smoke (runtime.live_enabled=true; configure credentials)"
+	@echo "  make benchmark-daytona-lifecycle - Measure full Daytona create-through-first-execution lifecycle"
 	@echo "  make benchmark-native-long-context - Measure native whole-value URL context at 1/5/10 MiB"
+	@echo "  (Credentialed live Daytona lanes run via FLEET_LIVE=1; see docs/how-to-guides/testing-strategy.md)"
 	@echo ""
 	@echo "Quality:"
 	@echo "  make check            - Run the primary repo quality gate"
@@ -69,7 +70,6 @@ help:
 	@echo "  make build            - Build Python distributions"
 	@echo "  make build-release    - Build and verify the backend-only distribution"
 	@echo "  make release          - Run clean + check + security + release artifacts"
-	@echo "  make release-check    - Alias for release"
 	@echo ""
 	@echo "Cloud:"
 	@echo "  make cloud-preflight  - Validate the app boots for FastAPI Cloud deploy"
@@ -110,36 +110,29 @@ typecheck:
 test:
 	$(PYTEST_ISOLATED) -q $(PYTEST_PARALLEL) tests/unit/backend tests/unit/scripts tests/contracts/backend tests/freeze tests/unit/test_litellm_invariant.py tests/e2e -m "$(PYTEST_FAST_MARKERS)"
 
-test-fast: test
-
-test-packaging:
-	$(PYTEST_ISOLATED) -q tests/unit/backend/packaging -m "$(PYTEST_PACKAGING_MARKERS)" -n 0
-
 test-unit:
 	$(PYTEST_ISOLATED) -q $(PYTEST_PARALLEL) tests/unit/backend tests/unit/scripts tests/freeze tests/unit/test_litellm_invariant.py -m "$(PYTEST_FAST_MARKERS)"
 
 test-contract:
 	$(PYTEST_ISOLATED) -q tests/contracts/backend tests/e2e -m "$(PYTEST_FAST_MARKERS)" -n 0
 
-test-daytona-cov:
-	mkdir -p .scratch/coverage
-	$(PYTEST_ISOLATED) -q $(PYTEST_PARALLEL) tests/unit/backend tests/unit/scripts tests/contracts/backend tests/freeze tests/unit/test_litellm_invariant.py tests/e2e -m "$(PYTEST_FAST_MARKERS)" --cov --cov-config=pyproject.toml --cov-report=term-missing --cov-report=xml:.scratch/coverage/daytona.xml
+test-packaging:
+	$(PYTEST_ISOLATED) -q tests/unit/backend/packaging -m "$(PYTEST_PACKAGING_MARKERS)" -n 0
 
 test-db:
 	$(PYTEST) -q -m "db" -n 0
 
-OOLONG_LIMIT ?= 12
-OOLONG_OUTPUT ?= .scratch/benchmark-reports/prime-oolong-$(shell date +%Y-%m-%d).json
-OOLONG_API_URL ?= http://127.0.0.1:8000
-OOLONG_PROFILE ?= daytona-bench
-
-benchmark-oolong:
-	uv run python scripts/benchmarks/run_prime_oolong.py --limit $(OOLONG_LIMIT) --api-url $(OOLONG_API_URL) --profile $(OOLONG_PROFILE) --output $(OOLONG_OUTPUT)
+test-daytona-cov:
+	mkdir -p .scratch/coverage
+	$(PYTEST_ISOLATED) -q $(PYTEST_PARALLEL) tests/unit/backend tests/unit/scripts tests/contracts/backend tests/freeze tests/unit/test_litellm_invariant.py tests/e2e -m "$(PYTEST_FAST_MARKERS)" --cov --cov-config=pyproject.toml --cov-report=term-missing --cov-report=xml:.scratch/coverage/daytona.xml
 
 NATIVE_LONG_CONTEXT_OUTPUT ?= .scratch/benchmark-reports/native-long-context-$(shell date +%Y-%m-%d).json
 
 benchmark-native-long-context:
 	uv run python scripts/benchmarks/run_native_long_context.py --output $(NATIVE_LONG_CONTEXT_OUTPUT)
+
+benchmark-daytona-lifecycle:
+	FLEET_LIVE=1 uv run python scripts/benchmark_daytona_lifecycle.py --output .scratch/daytona-lifecycle-benchmark.json
 
 DAYTONA_SNAPSHOT_NAME ?= fleet-rlm-python313-v5
 
@@ -164,8 +157,6 @@ tui-check:
 	cd tools/fleet-tui && pnpm run test
 
 check: lint format-check typecheck test-daytona-cov api-check tui-check check-codebase-tree check-dependency-boundaries check-docs
-
-quality-gate: check
 
 check-release:
 	uv run python scripts/validate_release.py hygiene
@@ -213,18 +204,7 @@ build-release: build
 	uvx twine check --strict dist/*
 	uv run python scripts/validate_release.py artifacts
 
-p53-live-certification:
-	FLEET_LIVE=1 uv run python scripts/live_p53_certification.py
-
-certification-gate:
-	uv run python scripts/certification_gate.py run
-
-certification-verify:
-	uv run python scripts/certification_gate.py verify
-
 release: clean check check-security build-release
-
-release-check: release
 
 clean:
 	@echo "Cleaning caches and local generated artifacts..."
@@ -244,32 +224,6 @@ precommit: precommit-install
 
 cli:
 	uv run fleet-rlm --help
-
-cli-help: cli
-
-sync:
-	$(MAKE) install
-
-sync-dev:
-	$(MAKE) install-dev
-
-sync-all:
-	$(MAKE) install-all
-
-metadata-check:
-	$(MAKE) check-release
-
-docs-check:
-	$(MAKE) check-docs
-
-security-check:
-	$(MAKE) check-security
-
-dependency-check:
-	$(MAKE) check-deps
-
-release-artifacts:
-	$(MAKE) build-release
 
 cloud-preflight:
 	@echo "Checking fastapi CLI is available in the locked env..."

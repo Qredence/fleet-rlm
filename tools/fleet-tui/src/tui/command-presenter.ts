@@ -21,7 +21,12 @@ import type {
   SettingsUpdate,
 } from "./commands/registry.js";
 import { shortId } from "./format.js";
-import { OVERLAY_OPTIONS, SelectOverlay, TitledComponent } from "./presenter/overlay.js";
+import {
+  ModalSurface,
+  OVERLAY_OPTIONS,
+  SelectOverlay,
+  TitledComponent,
+} from "./presenter/overlay.js";
 import {
   applyFieldValue,
   displayValue,
@@ -34,6 +39,7 @@ import type { ConversationStore, PendingSkillSelection } from "./store.js";
 import { settingsListTheme } from "./theme.js";
 
 export { SelectOverlay } from "./presenter/overlay.js";
+export { ModalSurface } from "./presenter/overlay.js";
 export {
   fieldItem,
   MultiChoiceEditor,
@@ -58,20 +64,22 @@ export class PiCommandPresenter implements CommandPresenter {
   showHelp(commands: CommandSpec[]): void {
     const overlay = new SelectOverlay(
       commands.map((command) => ({
-        value: command.usage.split(" ", 1)[0] ?? command.usage,
+        value: command.name,
         label: command.usage,
         description: command.description,
       })),
       {
         title: "Fleet TUI commands",
-        hint: "Enter insert into editor · Esc close",
-        maxVisible: 12,
+        context: `${commands.length} commands · Ctrl+Shift+F search`,
+        hint: "Type to filter · ↑↓ navigate · Enter insert",
+        filterable: true,
+        maxVisible: 8,
       },
     );
-    const handle = this.ui.showOverlay(overlay, OVERLAY_OPTIONS);
+    const handle = this.showModal(overlay);
     const finish = (command?: string) => {
       handle.hide();
-      if (command) this.editor.setText(`${command} `);
+      if (command) this.editor.setText(`/${command} `);
       this.restoreFocus();
     };
     overlay.onSelect = (item) => finish(item.value);
@@ -89,7 +97,7 @@ export class PiCommandPresenter implements CommandPresenter {
       })),
       {
         title: "Switch Fleet Session",
-        hint: "Enter resume · Esc cancel",
+        hint: "Enter resume",
         selectedValue: state.session?.id,
       },
     );
@@ -105,7 +113,7 @@ export class PiCommandPresenter implements CommandPresenter {
         this.restoreFocus();
         resolve(value);
       });
-      const handle = this.ui.showOverlay(selector, OVERLAY_OPTIONS);
+      const handle = this.showModal(selector);
     });
   }
 
@@ -130,7 +138,7 @@ export class PiCommandPresenter implements CommandPresenter {
       {
         title: "Select theme",
         context: `Current: ${current ?? "—"}`,
-        hint: "Type to filter · Enter apply · Esc cancel",
+        hint: "Type to filter · Enter apply",
         filterable: true,
         selectedValue: current,
       },
@@ -174,7 +182,7 @@ export class PiCommandPresenter implements CommandPresenter {
       {
         title: "Select profile for next restart",
         context: contextParts.join(" · ") || undefined,
-        hint: "Enter select · Esc cancel",
+        hint: "Enter select",
         selectedValue: selected,
       },
     );
@@ -192,7 +200,7 @@ export class PiCommandPresenter implements CommandPresenter {
   ): Promise<string | null> {
     return new Promise((resolve) => {
       const overlay = new SelectOverlay(items, options);
-      const handle = this.ui.showOverlay(overlay, OVERLAY_OPTIONS);
+      const handle = this.showModal(overlay);
       const finish = (value: string | null) => {
         handle.hide();
         this.restoreFocus();
@@ -232,7 +240,7 @@ export class PiCommandPresenter implements CommandPresenter {
               { enableSearch: true },
             ),
         }));
-      const handle = this.ui.showOverlay(
+      const handle = this.showModal(
         new TitledComponent(
           new SettingsList(
             scopeItems(),
@@ -245,7 +253,6 @@ export class PiCommandPresenter implements CommandPresenter {
           "Fleet settings",
           "Saved changes apply after a Fleet restart",
         ),
-        OVERLAY_OPTIONS,
       );
     });
   }
@@ -346,15 +353,19 @@ export class PiCommandPresenter implements CommandPresenter {
         },
         { enableSearch: true },
       );
-      const handle = this.ui.showOverlay(
+      const handle = this.showModal(
         new TitledComponent(
           root,
           "Fleet settings",
           "Enter edit · Esc back/close · changes apply after a Fleet restart",
         ),
-        OVERLAY_OPTIONS,
       );
     });
+  }
+
+  /** Mount every presenter flow in the same pi-tui focusable modal surface. */
+  private showModal(component: import("@earendil-works/pi-tui").Component) {
+    return this.ui.showOverlay(new ModalSurface(component), OVERLAY_OPTIONS);
   }
 }
 

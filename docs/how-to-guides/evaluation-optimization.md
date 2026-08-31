@@ -1,7 +1,9 @@
 # Evaluation and Monitoring
 
 The Databricks-backed quality loop runs server-side against the managed
-`fleet_turn` traces already written by the `daytona-managed` profile. It adds
+`fleet_turn` traces written by a Databricks-tracing policy (a local profile
+with `mlflow.tracking_uri = "databricks"` and the UC `mlflow.*_env` references).
+It adds
 no Fleet Turn-path surface: tracing stays fail-soft and bounded by the
 `_sanitize_mlflow_span` security export boundary, and every step is an opt-in script
 behind `FLEET_LIVE=1` with Databricks auth from the environment
@@ -19,9 +21,10 @@ behind `FLEET_LIVE=1` with Databricks auth from the environment
 | Evaluation scorers | `scripts/benchmarks/scorers.py` (via `run_rlm_latency.py evaluate --scorers`) | `fleet.rlm-latency/v1` |
 
 Prerequisites: the `benchmark` extra (`uv sync --extra benchmark`) provides
-`databricks-agents` for UC-managed datasets. Production monitoring requires the managed tracing profile (UC trace
-destination: `config/fleet.toml` `[profiles.daytona-managed.mlflow]`) in an
-eligible region with the OpenTelemetry-on-Databricks preview enabled.
+`databricks-agents` for UC-managed datasets. Production monitoring requires a
+Databricks-tracing policy (UC trace destination via the profile's
+`mlflow.*_env` references) in an eligible region with the
+OpenTelemetry-on-Databricks preview enabled.
 
 **Databricks vs local MLflow (`http://localhost:5001`).** Follow the traces,
 keep quality-of-record in UC, keep fast loops local: R1 monitoring, R4

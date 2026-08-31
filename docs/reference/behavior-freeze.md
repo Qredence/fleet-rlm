@@ -27,21 +27,20 @@ the behaviors below keep passing their lanes.
 | SSE transport | Closed projected chunk vocabulary and ordering; wire terminator per ending | SSE projector and stream route | `tests/freeze/test_public_stream_gate.py`, `make api-check` |
 | pi-tui client | Live/durable projection convergence, timeline/cards/viewport behavior | pi-tui terminal client | `make tui-check`, tuistory interactive lanes |
 | Public failure taxonomy | Closed sanitized HTTP/open-path/terminal categories, messages, phases | Public failure adapters | `tests/freeze/test_failure_taxonomy_golden.py` |
-| Session Workspace and Project products | Explicit tool hosts, tool catalogs, path rules, delete/edit preconditions | Workspace/Project tool hosts | `tests/contracts/backend/test_p40_explicit_hosts` |
+| Session Workspace and Project products | Explicit tool hosts, tool catalogs, path rules, delete/edit preconditions | Workspace/Project tool hosts | `tests/unit/backend/workspace/`, `tests/contracts/backend/test_skills_api.py` |
 | Workspace Memory | Format, caps, digests, process-local append serialization | Workspace Memory host | `tests/unit/backend/workspace/test_memory_*.py`, `tests/unit/backend/daytona/test_workspace_memory*.py`, `tests/live/backend/` |
 | Attachments and Artifacts | Upload/list/read, commit-gated publication, checksum integrity | Attachment/Artifact pipeline | `tests/unit/backend/test_attachment_*.py`, `tests/contracts/backend/` |
 | Daytona provider lifecycle | Admission accounting, leases, cleanup and confirmed absence, Volume safety | Daytona runtime owner | `tests/live/backend/` (serial, `FLEET_LIVE=1`) |
 | FastAPI and OpenAPI surface | Route set, one stream route, generated client types | API surface | `make api-check`, `tests/freeze/test_public_stream_gate.py` |
 | Packaging | Wheel/sdist metadata, entry points, supported Python releases | Release machinery | `make build-release`, `make check-release` |
-| CLI | `fleet cli` supervised loopback composition and bind guard; `fleet doctor daytona` probe; `fleet web`/`fleet-rlm serve-api` | CLI launchers | `tests/freeze/test_p41_cli_doctor_retention.py`, tuistory + live lanes |
+| CLI | `fleet cli` supervised loopback composition and bind guard; `fleet doctor daytona` probe; `fleet web`/`fleet-rlm serve-api` | CLI launchers | `tests/unit/backend/test_cli.py`, `tests/unit/backend/test_cli_supervisor.py`, live lanes |
 
 ## What is not frozen
 
 Private implementation structure stays free to change: internal module and
 helper boundaries, orchestration seams that never cross the public surface,
 test-only instrumentation, and the number or names of source files. The
-guard lane `tests/freeze/test_p41_behavior_over_structure.py` keeps the
-validation suite bound to public surfaces, and the inventory lane
+inventory lane
 `docs/how-to-guides/p36-ownership-deletion-inventory.md` records which
 internal owners changed under this contract.
 
@@ -56,10 +55,9 @@ replacement on the shared Volume — that is durability, not coordination.
 
 ## Drift control and evidence
 
-- Behavior goldens (`tests/fixtures/p35e-golden-baseline.json` pins, the
-  public failure-taxonomy golden, and the canonical stream fixture) are
-  byte-pinned; changed golden bytes require an explicit recorded human
-  decision in the baseline manifest.
+- Behavior goldens (the public failure-taxonomy golden and the canonical
+  stream fixture) are byte-pinned; changed golden bytes require an explicit
+  recorded decision.
 - Deterministic freeze lanes live under `tests/freeze/` and run inside
   `make check`; `make api-check`, `make tui-check`, and `make check-docs`
   gate the generated contracts and these docs.

@@ -88,8 +88,8 @@ describe("renderMessage", () => {
     expect(backgrounds.every(Boolean)).toBe(true);
     expect(new Set(backgrounds).size).toBe(1);
     // Status text uses the semantic success/error colors per state.
-    expect(success).toContain("\x1b[38;2;181;189;104m"); // success #b5bd68
-    expect(failed).toContain("\x1b[38;2;204;102;102m"); // error #cc6666
+    expect(success).toContain("\x1b[38;2;130;181;139m"); // success #82b58b
+    expect(failed).toContain("\x1b[38;2;212;111;124m"); // error #d46f7c
     expect(failed).toContain("failed safely");
   });
 

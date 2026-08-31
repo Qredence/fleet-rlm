@@ -44,7 +44,7 @@ def render() -> str:
         f"The active default is `{active}`.",
         "",
         "Provider environment names are the only values required by the credentialed live verifier. "
-        + "Managed-policy names are additionally required when `daytona-managed` is selected.",
+        + "Managed-policy names are additionally required when the selected profile declares them.",
         "",
         "| Profile | Default | Provider | Root/Sub model | Root/Sub max tokens | Recursion | MLflow | "
         + "Provider environment names | Managed-policy environment names |",
@@ -63,8 +63,7 @@ def render() -> str:
         [
             "",
             "The verifier uses the selected row's provider environment names and never checks a hard-coded provider "
-            + "credential. `FLEET_DATABASE_URL` is replaced by a temporary SQLite URL in the live proof; it is a "
-            + "required selected-policy value only for the managed profile.",
+            + "credential. `FLEET_DATABASE_URL` is replaced by a temporary SQLite URL in the live proof.",
             "",
         ]
     )

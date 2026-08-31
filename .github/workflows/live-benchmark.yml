@@ -1,4 +1,4 @@
-name: Live Backend Tests
+name: Live Daytona Canaries
 permissions:
   contents: read
 
@@ -7,7 +7,7 @@ on:
 
 jobs:
   live-backend:
-    name: Live Backend
+    name: Live Daytona MVP + durability canaries
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -22,10 +22,14 @@ jobs:
         run: uv python install 3.12
       - name: Install dependencies
         run: uv sync --all-extras --dev
-      - name: Run canonical live backend tests
+      - name: Run the canonical live Daytona canaries
         env:
           FLEET_LIVE: "1"
           FLEET_DAYTONA_API_KEY: ${{ secrets.FLEET_DAYTONA_API_KEY }}
-          DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
-          FLEET_DATABRICKS_AI_GATEWAY_BASE_URL: ${{ vars.FLEET_DATABRICKS_AI_GATEWAY_BASE_URL }}
-        run: uv run pytest tests/live/backend -q
+          FLEET_MODAL_API_KEY: ${{ secrets.FLEET_MODAL_API_KEY }}
+          FLEET_MODAL_BASE_URL: ${{ secrets.FLEET_MODAL_BASE_URL }}
+        run: |
+          uv run pytest \
+            tests/live/backend/test_fleet_rlm_daytona_mvp.py \
+            tests/live/backend/test_attachment_artifact_durability.py \
+            -q -n 0 --timeout=900

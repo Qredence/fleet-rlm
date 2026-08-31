@@ -27,8 +27,8 @@ _CANDIDATE_PATHS = (
     "tests/live/backend/test_phase1_daytona_stream.py",
 )
 _REPO_ROOT = Path(__file__).resolve().parents[1]
-_LIVE_ROOT_MODEL = "databricks-deepseek-v4-flash-0731"
-_LIVE_SUB_MODEL = "databricks-deepseek-v4-flash-0731"
+_LIVE_ROOT_MODEL = "openai/zai-org/GLM-5.3-Flash"
+_LIVE_SUB_MODEL = "openai/zai-org/GLM-5.3-Flash"
 _FAILURE_CATEGORIES = frozenset(
     {
         "precondition_failed",
@@ -382,7 +382,7 @@ def _policy(settings: Any) -> dict[str, str]:
         "sub_model": settings.sub_model,
     }
     if policy != {
-        "profile": "daytona",
+        "profile": "daytona-recursive",
         "environment": "daytona",
         "root_model": _LIVE_ROOT_MODEL,
         "sub_model": _LIVE_SUB_MODEL,

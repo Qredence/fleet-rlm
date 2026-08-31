@@ -371,7 +371,11 @@ def _fleet_load_context_manifest(raw_manifest):
     return values
 
 
-_namespace["_fleet_load_context_manifest"] = _fleet_load_context_manifest
+# Only expose the context loader when a context capsule is actually bound.
+# An unbound, always-failing loader invites models to waste iterations probing
+# a dead discovery API.
+if _CONTEXT_MOUNT_ROOT is not None and _CONTEXT_MANIFEST_SHA256 is not None:
+    _namespace["_fleet_load_context_manifest"] = _fleet_load_context_manifest
 
 
 class _OutputBuffer(io.StringIO):

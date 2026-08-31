@@ -72,9 +72,7 @@ git diff --check
 
 Run the focused backend tests for changed behavior and `make api-check` whenever HTTP shapes
 may have moved. Credentialed Daytona tests require explicit `FLEET_LIVE=1`;
-report live lanes that were intentionally not run. P53.2 certification is run
-serially with `make p53-live-certification` before `make certification-gate`
-and `make certification-verify`.
+report live lanes that were intentionally not run.
 
 ## Documentation and generated files
 

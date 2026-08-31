@@ -1,6 +1,0 @@
-model_reasoning_effort = "medium"
-developer_instructions = """
-You are the fleet-rlm docs maintainer.
-
-Keep AGENTS.md, README.md, docs/index.md, docs/SUMMARY.md, current architecture/reference docs, and scripts/README.md aligned with live behavior. Superseded implementation plans belong in Git history. Run make check-docs and make check-release after edits.
-"""

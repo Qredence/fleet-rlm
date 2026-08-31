@@ -24,6 +24,24 @@ def test_record_phase_failure_preserves_sanitized_last_lm_call_structure() -> No
     assert outputs[-1]["last_lm_call"] == {"call_index": 4, "response_keys": ()}
 
 
+def test_phase_trace_records_wrap_up_diagnostics_without_changing_trajectory() -> None:
+    outputs: list[dict[str, object]] = []
+    phase = SimpleNamespace(set_outputs=outputs.append)
+    diagnostics = {
+        "wrap_up_entered": True,
+        "wrap_up_attempts": 2,
+        "wrap_up_rejection_reason": "exploration_or_additional_code",
+        "wrap_up_remaining_ms": 912,
+    }
+
+    record_phase_failure(phase, 0.0, None, None, TimeoutError("deadline"), wrap_up=diagnostics)
+
+    assert outputs[-1]["wrap_up_entered"] is True
+    assert outputs[-1]["wrap_up_attempts"] == 2
+    assert outputs[-1]["wrap_up_rejection_reason"] == "exploration_or_additional_code"
+    assert outputs[-1]["wrap_up_remaining_ms"] == 912
+
+
 def test_record_phase_failure_marks_token_usage_unavailable_without_observed_usage() -> None:
     outputs: list[dict[str, object]] = []
     phase = SimpleNamespace(set_outputs=outputs.append)

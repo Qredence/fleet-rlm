@@ -6,23 +6,47 @@ default_profile = "daytona-recursive"
 name = "fleet-rlm"
 
 [defaults.runtime]
-# Explicit live commands are enabled by default; set this to false to fail
-# closed without constructing provider or Daytona clients.
+environment = "daytona"
 live_enabled = true
 turn_timeout_seconds = 1800
 max_active_daytona_leases = 8
 heartbeat_seconds = 10
 stale_after_seconds = 60
 
-# Each profile supplies a provider base URL, API-key environment reference, and
-# provider-native model id for the OpenAI-compatible Chat Completion request.
+# Root and Sub both run the Modal-hosted GLM-5.3-Flash. Z.AI's chat completion
+# API reference (docs.z.ai/api-reference/llm/chat-completion) documents a
+# maximum output length of 128K tokens for GLM-5.3-Flash (and recommends at
+# least 1024), so both roles use the documented 131,072-token output ceiling;
+# it sits well inside the endpoint's 1,048,576-token context for any Fleet
+# prompt, and Fleet's character-level output caps bound what is retained.
+[defaults.llm.root]
+model = "openai/zai-org/GLM-5.3-Flash"
+api_key_env = "FLEET_MODAL_API_KEY"
+base_url_env = "FLEET_MODAL_BASE_URL"
+max_tokens = 131072
+timeout_seconds = 300
+cache = false
 
+[defaults.llm.sub]
+model = "openai/zai-org/GLM-5.3-Flash"
+api_key_env = "FLEET_MODAL_API_KEY"
+base_url_env = "FLEET_MODAL_BASE_URL"
+max_tokens = 131072
+timeout_seconds = 90
+temperature = 0
+cache = false
+
+# Recursive harness limits: one native child level (depth is a fixed
+# execution invariant, not a policy knob) with four reserved child calls per
+# Turn, a 50,000-character delegated prompt bound, and at most five child
+# workers concurrently.
 [defaults.rlm]
 max_iters = 20
 max_llm_calls = 50
 max_output_chars = 10000
 max_execution_output_chars = 4000
-execution_timeout_s = 120
+execution_timeout_s = 300
+wrap_up_seconds = 300
 recursion_enabled = true
 recursion_max_calls = 4
 recursion_max_prompt_chars = 50000
@@ -30,7 +54,6 @@ recursion_child_max_iters = 8
 recursion_child_max_llm_calls = 12
 recursion_child_max_output_chars = 4000
 recursion_max_parallel_children = 5
-# Root-only Memory Candidate category allowlist; empty disables autonomous proposals.
 autonomous_memory_categories = []
 verbose = true
 
@@ -51,166 +74,22 @@ volume_mount_path = "/home/daytona/fleet"
 level = "INFO"
 
 [defaults.mlflow]
-# MLflow 3.15 keeps trace export off the Turn critical path. The sampler is
-# explicit policy so an ambient MLFLOW_TRACE_SAMPLING_RATIO cannot override it.
 tracing_enabled = true
+tracking_uri = "http://127.0.0.1:5001"
+experiment_name = "fleet-rlm"
 expose_trace_id = true
 async_logging = true
 trace_sampling_ratio = 1.0
 trace_content_max_chars = 10000
 
 [defaults.posthog]
-# PostHog product analytics for project 15008, hosted on the EU ingestion
-# endpoint. The project token is resolved from the named environment variable;
-# analytics stay disabled when it is absent and never block startup.
 enabled = true
 project_token_env = "POSTHOG_PROJECT_TOKEN"
 host = "https://eu.i.posthog.com"
 
-[profiles.daytona.runtime]
-environment = "daytona"
-
-# Databricks Foundation Model endpoint routed through the OpenAI-compatible
-# Chat Completion gateway. The endpoint name is the model id sent to the gateway.
-[profiles.daytona.llm.root]
-model = "databricks-deepseek-v4-flash-0731"
-api_key_env = "DATABRICKS_TOKEN"
-base_url_env = "FLEET_DATABRICKS_AI_GATEWAY_BASE_URL"
-max_tokens = 16000
-# Streaming turns re-enter identical action prompts on retries/repeated steps;
-# a cache hit yields zero streamify deltas and reads as a frozen stream.
-cache = false
-reasoning_effort = "low"
-
-[profiles.daytona.llm.sub]
-model = "databricks-deepseek-v4-flash-0731"
-api_key_env = "DATABRICKS_TOKEN"
-base_url_env = "FLEET_DATABRICKS_AI_GATEWAY_BASE_URL"
-max_tokens = 16000
-temperature = 0
-cache = false
-reasoning_effort = "low"
-
-[profiles.daytona.mlflow]
-tracing_enabled = true
-tracking_uri = "http://127.0.0.1:5001"
-experiment_name = "fleet-rlm"
-
-[profiles.daytona-recursive.runtime]
-environment = "daytona"
-
-[profiles.daytona-recursive.llm.root]
-model = "databricks-deepseek-v4-flash-0731"
-api_key_env = "DATABRICKS_TOKEN"
-base_url_env = "FLEET_DATABRICKS_AI_GATEWAY_BASE_URL"
-max_tokens = 16000
-cache = false
-reasoning_effort = "low"
-
-[profiles.daytona-recursive.llm.sub]
-model = "databricks-deepseek-v4-flash-0731"
-api_key_env = "DATABRICKS_TOKEN"
-base_url_env = "FLEET_DATABRICKS_AI_GATEWAY_BASE_URL"
-max_tokens = 16000
-temperature = 0
-cache = false
-reasoning_effort = "low"
-
-[profiles.daytona-recursive.mlflow]
-tracing_enabled = true
-tracking_uri = "http://127.0.0.1:5001"
-experiment_name = "fleet-rlm"
-
-[profiles.daytona-recursive.rlm]
-recursion_enabled = true
-
-# Managed Lakebase/MLflow policy. Select with
-# [config] default_profile = "daytona-managed" after populating the
-# environment variables named below. The database URL continues to come from
-# defaults.storage.database_url_env = "FLEET_DATABASE_URL".
-[profiles.daytona-managed.runtime]
-environment = "daytona"
-
-[profiles.daytona-managed.llm.root]
-model = "databricks-deepseek-v4-flash-0731"
-api_key_env = "DATABRICKS_TOKEN"
-base_url_env = "FLEET_DATABRICKS_AI_GATEWAY_BASE_URL"
-max_tokens = 8000
-reasoning_effort = "low"
-
-[profiles.daytona-managed.llm.sub]
-model = "databricks-deepseek-v4-flash-0731"
-api_key_env = "DATABRICKS_TOKEN"
-base_url_env = "FLEET_DATABRICKS_AI_GATEWAY_BASE_URL"
-max_tokens = 8000
-temperature = 0
-reasoning_effort = "low"
-
-[profiles.daytona-managed.mlflow]
-tracing_enabled = true
-tracking_uri = "databricks"
-experiment_name_env = "FLEET_MLFLOW_EXPERIMENT_NAME"
-trace_catalog_env = "FLEET_MLFLOW_TRACE_CATALOG"
-trace_schema_env = "FLEET_MLFLOW_TRACE_SCHEMA"
-trace_table_prefix_env = "FLEET_MLFLOW_TRACE_TABLE_PREFIX"
-tracing_sql_warehouse_id_env = "FLEET_MLFLOW_TRACING_SQL_WAREHOUSE_ID"
-
-# Prime Oolong mechanics profile: cache is disabled because multiple questions
-# reuse one context window. MLflow is intentionally omitted.
-[profiles.daytona-bench.runtime]
-environment = "daytona"
-
-[profiles.daytona-bench.llm.root]
-model = "databricks-deepseek-v4-flash-0731"
-api_key_env = "DATABRICKS_TOKEN"
-base_url_env = "FLEET_DATABRICKS_AI_GATEWAY_BASE_URL"
-max_tokens = 8000
-cache = false
-
-[profiles.daytona-bench.llm.sub]
-model = "databricks-deepseek-v4-flash-0731"
-api_key_env = "DATABRICKS_TOKEN"
-base_url_env = "FLEET_DATABRICKS_AI_GATEWAY_BASE_URL"
-max_tokens = 8000
-cache = false
-
-# Benchmarks must stay traceless; override the on-by-default global below.
-[profiles.daytona-bench.mlflow]
-tracing_enabled = false
-
-# Benchmarks must also stay analytics-free.
-[profiles.daytona-bench.posthog]
-enabled = false
-
-[profiles.daytona-bench.rlm]
-# Keep host logs free of model-generated execution output; live SSE remains
-# bounded and is the operator-facing execution surface.
-verbose = false
-
-[profiles.daytona-bench-40.runtime]
-environment = "daytona"
-
-[profiles.daytona-bench-40.llm.root]
-model = "databricks-deepseek-v4-flash-0731"
-api_key_env = "DATABRICKS_TOKEN"
-base_url_env = "FLEET_DATABRICKS_AI_GATEWAY_BASE_URL"
-max_tokens = 8000
-cache = false
-
-[profiles.daytona-bench-40.llm.sub]
-model = "databricks-deepseek-v4-flash-0731"
-api_key_env = "DATABRICKS_TOKEN"
-base_url_env = "FLEET_DATABRICKS_AI_GATEWAY_BASE_URL"
-max_tokens = 8000
-cache = false
-
-# Benchmarks must stay traceless; override the on-by-default global below.
-[profiles.daytona-bench-40.mlflow]
-tracing_enabled = false
-
-# Benchmarks must also stay analytics-free.
-[profiles.daytona-bench-40.posthog]
-enabled = false
-
-[profiles.daytona-bench-40.rlm]
-max_iters = 40
+# The committed policy is [defaults] itself: recursive child RLMs (one native
+# depth), DSPy verbose host logging, local MLflow tracing, and the Root/Sub
+# model pair above. The profile table stays empty because the schema requires
+# at least one profile; everything a profile would override already lives in
+# [defaults].
+[profiles.daytona-recursive]

@@ -21,7 +21,41 @@ describe("TranscriptComponent", () => {
 
     expect(header[0]).toContain("FLEET");
     expect(header[0]).toContain("\x1b[38;");
-    expect(header[1]).toContain("Session · new · active");
+    expect(header[0]).toContain("RLM OPERATOR");
+    expect(stripAnsi(header[1] ?? "")).toContain("SESSION  Session  ·  new  ·  active");
+  });
+
+  it("guides a new Session toward Fleet's first-class inputs and commands", () => {
+    const store = new ConversationStore();
+    store.dispatch({
+      type: "session/init",
+      session: { id: "session-1", title: "Session", status: "active", resumed: false },
+    });
+
+    const emptyState = new TranscriptComponent(store).render(100).join("\n");
+
+    expect(emptyState).toContain("Start a Turn");
+    expect(emptyState).toContain("Investigate a question, analyze workspace files");
+    expect(emptyState).toContain("/skills");
+    expect(emptyState).toContain("/attach");
+    expect(emptyState).toContain("/help");
+  });
+
+  it("separates projected runtime evidence into compact trajectory sections", () => {
+    const store = new ConversationStore();
+    store.dispatch({
+      type: "message/upsert",
+      message: { id: "first", kind: "reasoning", runId: "run-1", step: 1, text: "one", ts: 1 },
+    });
+    store.dispatch({
+      type: "message/upsert",
+      message: { id: "second", kind: "reasoning", runId: "run-2", step: 1, text: "two", ts: 2 },
+    });
+
+    const output = stripAnsi(new TranscriptComponent(store).render(80).join("\n"));
+    expect(output).toContain("◇ TRAJECTORY  turn 1");
+    expect(output).toContain("◇ TRAJECTORY  turn 2");
+    expect(output).not.toContain("run-1");
   });
 
   it("renders a caller-controlled Session title as one terminal-safe line", () => {
@@ -38,7 +72,7 @@ describe("TranscriptComponent", () => {
 
     const header = new TranscriptComponent(store).render(100)[1];
 
-    expect(header).toContain("Unsafe Title · resumed · active");
+    expect(stripAnsi(header ?? "")).toContain("Unsafe Title  ·  resumed  ·  active");
     expect(header).not.toContain("secret");
     expect(header).not.toContain("\n");
     expect(header).not.toContain("\x1b]52");
@@ -171,6 +205,10 @@ describe("TranscriptComponent", () => {
   });
 });
 
+function stripAnsi(value: string): string {
+  return value.replaceAll(new RegExp(`${String.fromCharCode(27)}\\[[\\d;]*m`, "g"), "");
+}
+
 describe("TranscriptComponent render fast path", () => {
   it("returns the previous line array while no message changed", () => {
     const store = new ConversationStore();
@@ -199,7 +237,7 @@ describe("TranscriptComponent render fast path", () => {
     expect(grown.join("\n")).toContain("two");
   });
 
-  it("rebuilds when the Session or pending Skill selections change", () => {
+  it("rebuilds when the Session changes", () => {
     const store = new ConversationStore();
     store.dispatch({
       type: "session/init",
@@ -213,11 +251,5 @@ describe("TranscriptComponent render fast path", () => {
       session: { id: "s", title: "Renamed", status: "active", resumed: false },
     });
     expect(transcript.render(80)).not.toBe(before);
-
-    store.dispatch({
-      type: "skill-selection/pin",
-      selection: { id: "sk", expectedVersion: "1.0.0", displayName: "skill" },
-    });
-    expect(transcript.render(80).join("\n")).toContain("next Turn Skills");
   });
 });

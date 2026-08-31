@@ -14,7 +14,7 @@ from fleet_rlm.config.settings import FleetConfigurationError, Settings
 def _service(tmp_path: Path) -> tuple[ConfigPolicyService, Path]:
     policy = tmp_path / "fleet.toml"
     shutil.copy(Path("config/fleet.toml"), policy)
-    return ConfigPolicyService(policy, active_profile="daytona"), policy
+    return ConfigPolicyService(policy, active_profile="daytona-recursive"), policy
 
 
 def _field(snapshot, scope: str, path: str):
@@ -25,17 +25,25 @@ def _field(snapshot, scope: str, path: str):
 def test_policy_read_exposes_toml_values_without_environment_secret_values(tmp_path: Path) -> None:
     service, _ = _service(tmp_path)
 
-    field = _field(service.read(), "daytona", "llm.root.api_key_env")
+    field = _field(service.read(), "daytona-recursive", "llm.root.api_key_env")
 
-    assert field["value"] == "DATABRICKS_TOKEN"
+    assert field["value"] == "FLEET_MODAL_API_KEY"
     assert field["editor"] == "text"
     assert "secret" not in str(field).lower()
 
-    model = _field(service.read(), "daytona", "llm.root.model")
-    assert model["value"] == "databricks-deepseek-v4-flash-0731"
+    model = _field(service.read(), "daytona-recursive", "llm.root.model")
+    assert model["value"] == "openai/zai-org/GLM-5.3-Flash"
     assert model["editor"] == "text"
 
-    tracking_uri = _field(service.read(), "daytona", "mlflow.tracking_uri")
+    root_timeout = _field(service.read(), "daytona-recursive", "llm.root.timeout_seconds")
+    assert root_timeout["value"] == 300
+    assert root_timeout["editor"] == "number"
+
+    sub_timeout = _field(service.read(), "daytona-recursive", "llm.sub.timeout_seconds")
+    assert sub_timeout["value"] == 90
+    assert sub_timeout["editor"] == "number"
+
+    tracking_uri = _field(service.read(), "daytona-recursive", "mlflow.tracking_uri")
     assert tracking_uri["value"] == "http://127.0.0.1:5001"
     assert "secret" not in str(tracking_uri).lower()
 
@@ -43,7 +51,7 @@ def test_policy_read_exposes_toml_values_without_environment_secret_values(tmp_p
     assert content_limit["value"] == 10_000
     assert content_limit["editor"] == "number"
 
-    url_limit = _field(service.read(), "daytona", "storage.max_url_bytes")
+    url_limit = _field(service.read(), "daytona-recursive", "storage.max_url_bytes")
     assert url_limit["value"] == 10 * 1024 * 1024
     assert url_limit["editor"] == "number"
 
@@ -65,9 +73,9 @@ def test_policy_update_preserves_comments_and_validates_all_profiles(tmp_path: P
 
     assert _field(after, "defaults", "rlm.max_iters")["value"] == 21
     content = policy.read_text(encoding="utf-8")
-    assert "# Prime Oolong mechanics profile" in content
+    assert "# The committed policy is [defaults] itself" in content
     assert "max_iters = 21" in content
-    assert _field(after, "daytona", "rlm.max_iters")["value"] == 21
+    assert _field(after, "daytona-recursive", "rlm.max_iters")["value"] == 21
 
 
 def test_policy_can_add_a_profile_override_for_an_inherited_setting(tmp_path: Path) -> None:
@@ -75,14 +83,14 @@ def test_policy_can_add_a_profile_override_for_an_inherited_setting(tmp_path: Pa
     before = service.read()
 
     service.update(
-        scope="daytona-bench",
+        scope="daytona-recursive",
         path="rlm.max_iters",
         value=12,
         revision=before.revision,
     )
 
-    assert "[profiles.daytona-bench.rlm]" in policy.read_text(encoding="utf-8")
-    assert _field(service.read(), "daytona-bench", "rlm.max_iters")["value"] == 12
+    assert "[profiles.daytona-recursive.rlm]" in policy.read_text(encoding="utf-8")
+    assert _field(service.read(), "daytona-recursive", "rlm.max_iters")["value"] == 12
 
 
 def test_policy_can_disable_live_execution_for_all_profiles(tmp_path: Path) -> None:
@@ -97,7 +105,7 @@ def test_policy_can_disable_live_execution_for_all_profiles(tmp_path: Path) -> N
     )
 
     assert _field(after, "defaults", "runtime.live_enabled")["value"] is False
-    assert _field(after, "daytona", "runtime.live_enabled")["value"] is False
+    assert _field(after, "daytona-recursive", "runtime.live_enabled")["value"] is False
 
 
 def test_policy_rejects_stale_revision_and_invalid_database_environment_reference(tmp_path: Path) -> None:
@@ -122,7 +130,7 @@ def test_policy_never_reports_environment_policy_overrides(monkeypatch: pytest.M
     monkeypatch.setenv("FLEET_ROOT_MODEL", "stale-model")
     service, _ = _service(tmp_path)
 
-    field = _field(service.read(), "daytona", "llm.root.model")
+    field = _field(service.read(), "daytona-recursive", "llm.root.model")
 
     assert field["environment_overridden"] is False
 
@@ -219,24 +227,20 @@ def test_policy_inventory_covers_flattened_non_secret_settings(tmp_path: Path) -
         assert reference_paths[field_name] in editable_paths
 
 
-def test_set_default_profile_persists_and_surfaces_in_snapshot(tmp_path: Path) -> None:
+def test_set_default_profile_surfaces_the_single_committed_profile(tmp_path: Path) -> None:
     service, policy = _service(tmp_path)
     before = service.read()
 
     assert before.default_profile == "daytona-recursive"
-    assert set(before.available_profiles) == {
-        "daytona",
-        "daytona-recursive",
-        "daytona-managed",
-        "daytona-bench",
-        "daytona-bench-40",
-    }
+    assert set(before.available_profiles) == {"daytona-recursive"}
 
-    after = service.set_default_profile("daytona-bench", revision=before.revision)
+    # Re-selecting the only committed profile is accepted and keeps the
+    # persisted default_profile line canonical. The revision is a content
+    # hash, so a same-value write legitimately keeps it unchanged.
+    after = service.set_default_profile("daytona-recursive", revision=before.revision)
 
-    assert after.default_profile == "daytona-bench"
-    assert 'default_profile = "daytona-bench"' in policy.read_text(encoding="utf-8")
-    assert after.revision != before.revision
+    assert after.default_profile == "daytona-recursive"
+    assert 'default_profile = "daytona-recursive"' in policy.read_text(encoding="utf-8")
 
 
 def test_set_default_profile_rejects_unknown_profile_and_stale_revision(tmp_path: Path) -> None:
@@ -246,8 +250,11 @@ def test_set_default_profile_rejects_unknown_profile_and_stale_revision(tmp_path
     with pytest.raises(FleetConfigurationError, match="configured profile does not exist"):
         service.set_default_profile("does-not-exist", revision=before.revision)
 
-    updated = service.set_default_profile("daytona-bench", revision=before.revision)
+    # Any policy update bumps the content revision; a set_default_profile call
+    # carrying the stale pre-update revision must fail closed.
+    service.update(scope="defaults", path="rlm.max_iters", value=21, revision=before.revision)
     with pytest.raises(PolicyConflictError):
-        service.set_default_profile("daytona", revision=before.revision)
+        service.set_default_profile("daytona-recursive", revision=before.revision)
 
-    assert service.read().revision == updated.revision
+    # The current revision is accepted again.
+    assert service.set_default_profile("daytona-recursive", revision=service.read().revision).revision

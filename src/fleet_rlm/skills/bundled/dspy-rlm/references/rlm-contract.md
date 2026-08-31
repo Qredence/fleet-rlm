@@ -87,11 +87,11 @@ keyword-only and are not routed through the native positional call contract.
   token streams and sectioned text are not silently salvaged into RLM actions;
   malformed output is an `adapter_parse_error`. RLM action output contains
   `reasoning` and `code`; `completed` is internal loop state, not a Signature
-  output field. Production Daytona model roles cap each response at 8,000
-  tokens. The configured `databricks-deepseek-v4-flash-0731` Root and Sub Models use the
-  compatible Chat Completions path without a reasoning-effort override. This is
-  separate from `max_output_chars`, which bounds REPL output retained in
-  recursive history.
+output field. The selected `daytona-recursive` Root and Sub Models
+(`openai/zai-org/GLM-5.3-Flash` through the Modal-hosted Chat Completions
+gateway) cap Root at 32,768 output tokens and Sub at 4,000 with no
+reasoning-effort override. This is separate from `max_output_chars`, which
+bounds REPL output retained in recursive history.
 - **Daytona** (primary durable path): custom interpreter, Session Workspace tools, Artifact candidates promoted on Turn Commit.
 - Recursive child calls are bounded by the policy keys `recursion_max_calls`,
   `recursion_max_prompt_chars`, `recursion_child_max_iters`,

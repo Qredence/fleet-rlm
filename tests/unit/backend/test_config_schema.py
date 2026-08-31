@@ -173,6 +173,9 @@ _EXPECTED_INVENTORY: tuple[tuple[str, str, str, str, tuple[str, ...], str | None
     ("posthog.enabled", "PostHog", "Analytics enabled", "boolean", (), "posthog_enabled"),
     ("posthog.project_token_env", "PostHog", "Project token environment variable", "text", (), None),
     ("posthog.host", "PostHog", "Ingestion host", "text", (), "posthog_host"),
+    ("rlm.wrap_up_seconds", "RLM", "Final-answer reserve (seconds)", "number", (), "rlm_wrap_up_seconds"),
+    ("llm.root.timeout_seconds", "Root LLM", "Provider timeout seconds", "number", (), "root_llm_timeout_seconds"),
+    ("llm.sub.timeout_seconds", "Sub LLM", "Provider timeout seconds", "number", (), "sub_llm_timeout_seconds"),
 )
 
 
@@ -294,6 +297,8 @@ def test_committed_policy_loads_every_profile_identically(monkeypatch: pytest.Mo
         "FLEET_DAYTONA_API_KEY",
         "DATABRICKS_TOKEN",
         "FLEET_DATABRICKS_AI_GATEWAY_BASE_URL",
+        "FLEET_MODAL_API_KEY",
+        "FLEET_MODAL_BASE_URL",
         "FLEET_DATABASE_URL",
         "POSTHOG_PROJECT_TOKEN",
     ):
@@ -343,7 +348,7 @@ def test_absent_optional_policy_keys_fall_back_to_settings_defaults() -> None:
     defaults = document["defaults"]
     defaults["rlm"].pop("recursion_max_calls")
 
-    flat = config_loader._flatten_policy(config_loader._deep_merge(defaults, document["profiles"]["daytona"]))
+    flat = config_loader._flatten_policy(config_loader._deep_merge(defaults, document["profiles"]["daytona-recursive"]))
 
     assert "rlm_recursion_max_calls" not in flat.settings
     # ``Settings`` owns the fallback default; TOML absence stays absent.

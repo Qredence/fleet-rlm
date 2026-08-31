@@ -24,6 +24,8 @@ def test_model_bundle_applies_independent_role_policy(monkeypatch: pytest.Monkey
         sub_llm_api_key_env="SUB_KEY",
         root_llm_max_tokens=101,
         sub_llm_max_tokens=202,
+        root_llm_timeout_seconds=303,
+        sub_llm_timeout_seconds=404,
         root_llm_cache=True,
         sub_llm_cache=False,
         root_llm_num_retries=1,
@@ -37,9 +39,11 @@ def test_model_bundle_applies_independent_role_policy(monkeypatch: pytest.Monkey
     assert bundle.root_lm == "root-lm"
     assert bundle.sub_lm == "sub-lm"
     assert build.call_args_list[0].kwargs["max_tokens"] == 101
+    assert build.call_args_list[0].kwargs["timeout_seconds"] == 303
     assert build.call_args_list[0].kwargs["cache"] is True
     assert build.call_args_list[0].kwargs["reasoning_effort"] == "none"
     assert build.call_args_list[1].kwargs["max_tokens"] == 202
+    assert build.call_args_list[1].kwargs["timeout_seconds"] == 404
     assert build.call_args_list[1].kwargs["cache"] is False
     assert build.call_args_list[1].kwargs["temperature"] == 0.3
 
@@ -148,6 +152,15 @@ def test_build_lm_uses_chat_completion_transport(monkeypatch: pytest.MonkeyPatch
     assert lm.call_args.kwargs["model_type"] == "chat"
     assert lm.call_args.kwargs["api_base"] == "https://gateway.example/v1"
     assert "headers" not in lm.call_args.kwargs
+
+
+def test_build_lm_passes_provider_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
+    lm = MagicMock(return_value="bounded-lm")
+    monkeypatch.setattr(factory.dspy, "LM", lm)
+
+    factory.build_lm("openai/model", api_key=None, timeout_seconds=37)
+
+    assert lm.call_args.kwargs["timeout"] == 37
 
 
 def test_mocked_litellm_request_resolves_unqualified_deepseek_model(monkeypatch: pytest.MonkeyPatch) -> None:

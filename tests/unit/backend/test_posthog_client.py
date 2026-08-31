@@ -171,6 +171,8 @@ def test_default_profile_enables_posthog_and_resolves_token(monkeypatch) -> None
     monkeypatch.setenv("FLEET_DAYTONA_API_KEY", "test-daytona-key")
     monkeypatch.setenv("DATABRICKS_TOKEN", "test-databricks-token")
     monkeypatch.setenv("FLEET_DATABRICKS_AI_GATEWAY_BASE_URL", "https://gateway.example.test/v1")
+    monkeypatch.setenv("FLEET_MODAL_API_KEY", "test-modal-key")
+    monkeypatch.setenv("FLEET_MODAL_BASE_URL", "https://modal.example.test/v1")
     monkeypatch.setenv("POSTHOG_PROJECT_TOKEN", "phc-policy-token")
 
     settings = config.load_runtime_settings()
@@ -179,13 +181,3 @@ def test_default_profile_enables_posthog_and_resolves_token(monkeypatch) -> None
     assert settings.posthog_host == "https://eu.i.posthog.com"
     assert settings.posthog_project_token is not None
     assert settings.posthog_project_token.get_secret_value() == "phc-policy-token"
-
-
-def test_benchmark_profiles_disable_posthog() -> None:
-    from fleet_rlm.config.loader import _deep_merge, _flatten_policy, _read_policy_document
-
-    document = _read_policy_document(Path("config/fleet.toml"))
-
-    for profile in ("daytona-bench", "daytona-bench-40"):
-        flattened = _flatten_policy(_deep_merge(document.defaults, document.profiles[profile]))
-        assert flattened.settings["posthog_enabled"] is False

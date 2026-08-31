@@ -289,8 +289,10 @@ class ConfigPolicyService:
         document = _policy_document_from_mapping(root)
         for profile, value in document.profiles.items():
             selected = _require_mapping(value, f"profiles.{profile}")
-            _validate_policy_table(selected, f"profiles.{profile}")
-            flattened = _flatten_policy(_deep_merge(document.defaults, selected))
+            _validate_policy_table(selected, f"profiles.{profile}", allow_partial_llm=True)
+            merged = _deep_merge(document.defaults, selected)
+            _validate_policy_table(merged, f"profiles.{profile}")
+            flattened = _flatten_policy(merged)
             try:
                 Settings.model_validate(dict(flattened.settings))
             except ValueError as exc:

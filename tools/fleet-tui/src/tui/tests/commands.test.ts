@@ -86,6 +86,8 @@ describe("command handlers", () => {
       expect(sys.text).toContain("/help");
       expect(sys.text).toContain("/cancel");
       expect(sys.text).toContain("/exit");
+      expect(sys.text).toContain("Ctrl+Shift+F  search the transcript");
+      expect(sys.text).toContain("Ctrl+O        fold the latest");
     }
   });
 

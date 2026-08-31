@@ -276,6 +276,9 @@ class ExecutionRuntime:
     cancellation_requested: AsyncCancellationProbe
     deadline: float
     environment_release: RetainableEnvironmentRelease | None = None
+    # Directly constructed test/in-process contexts opt into the reserve via
+    # preparation; the public TOML default is applied by the live composition.
+    wrap_up_seconds: float = 0.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -1620,13 +1623,20 @@ class RLMRunner:
                 state_context.execution.interpreter,
                 observations.publish,
                 state_context.execution.options.max_output_chars,
+                deadline=state_context.execution.deadline,
             )
+            # The resident native RLM owns its sub-LM reference for the
+            # duration of ``_make_llm_tools``. Refresh it for every Turn so a
+            # reused Session never retains a prior Turn's deadline-bound copy.
+            if hasattr(lease.state.rlm, "sub_lm"):
+                lease.state.rlm.sub_lm = state_context.execution.models.sub_lm
             self._bind_context_capsule(state_context)
             self._bind_observer(
                 lease.state.rlm,
                 observations.publish,
                 state_context.execution.options.max_output_chars,
                 emit_reasoning=True,
+                deadline=state_context.execution.deadline,
             )
             kwargs = build_rlm_input_kwargs(
                 request=state_context.session.request,
@@ -1723,6 +1733,7 @@ class RLMRunner:
         max_chars: int,
         *,
         emit_reasoning: bool = True,
+        deadline: float | None = None,
     ) -> None:
         """
         Bind an observation callback to a supported RLM target.
@@ -1732,12 +1743,14 @@ class RLMRunner:
             publish (Callable[[RuntimeEventDetail], None]): Callback for publishing runtime event details.
             max_chars (int): Maximum number of characters retained per observed detail.
             emit_reasoning (bool): Whether native RLM reasoning events should be published.
+            deadline (float | None): Absolute Turn deadline used to suppress late native spans.
         """
         if type(target) is dspy.RLM:
             bind_native_rlm_observer(
                 target,
                 publish if emit_reasoning else None,
                 max_chars=max_chars,
+                deadline=deadline,
             )
             return
         bind = getattr(target, "bind_observer", None)
@@ -1810,6 +1823,7 @@ def _root_lm(settings: Settings) -> dspy.LM:
         api_key=api_key,
         base_url=sanitize_base_url(role.base_url),
         max_tokens=role.max_tokens,
+        timeout_seconds=role.timeout_seconds,
         temperature=role.temperature,
         reasoning_effort=role.reasoning_effort,
         cache=False,

@@ -26,14 +26,14 @@ from fleet_rlm.rlm.events import ToolEventView
 from fleet_rlm.rlm.program import has_llm_credentials
 from fleet_rlm.rlm.recursion import RecursiveRLMExecutor
 from tests.live.backend._database import upgrade_to_head
-from tests.live.backend._p35d_evidence import candidate_identity, write_receipt
+from tests.live.backend._evidence import candidate_identity, write_receipt
 from tests.live.backend.test_phase1_daytona_stream import _strict_cleanup
 
 pytestmark = [pytest.mark.live_daytona, pytest.mark.timeout(960)]
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
-_LIVE_ROOT_MODEL = os.environ.get("FLEET_LIVE_ROOT_MODEL", "databricks-deepseek-v4-flash-0731")
-_LIVE_SUB_MODEL = os.environ.get("FLEET_LIVE_SUB_MODEL", "databricks-deepseek-v4-flash-0731")
+_LIVE_ROOT_MODEL = os.environ.get("FLEET_LIVE_ROOT_MODEL", "openai/zai-org/GLM-5.3-Flash")
+_LIVE_SUB_MODEL = os.environ.get("FLEET_LIVE_SUB_MODEL", "openai/zai-org/GLM-5.3-Flash")
 _CONTRACT_ID = "fleet.daytona-recursive-batch"
 _TOKEN_A = "BATCH_TOKEN_ALPHA"
 _TOKEN_B = "BATCH_TOKEN_BETA"
@@ -134,7 +134,7 @@ def _load_live_settings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Sett
         _LIVE_ROOT_MODEL,
         _LIVE_SUB_MODEL,
     ):
-        pytest.fail("Recursive batch canary requires the selected DeepSeek recursive policy")
+        pytest.fail("Recursive batch canary requires the selected GLM recursive policy")
     if policy.rlm_recursion_max_parallel_children < 2:
         pytest.fail("Recursive batch canary requires recursion_max_parallel_children >= 2")
     if policy.daytona_api_key is None or not has_llm_credentials(policy):

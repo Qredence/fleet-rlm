@@ -1,7 +1,7 @@
 # P42 session-state behavior freeze
 
-**Status:** approved behavior contract — deterministic implementation is present; P53
-certification closes when the P35-E gate verifies the current clean candidate.
+**Status:** approved behavior contract — deterministic implementation is present
+and covered by the contract and unit lanes.
 **Supersedes:** only the P41 *Native RLM execution per Turn* behavior, which is
 targeted for supersession by the approved Session-scoped resident contract below. It
 does **not** rewrite the sealed [P41 behavior freeze](behavior-freeze.md), which
@@ -28,12 +28,12 @@ state semantics that P43–P53 are required to prove. The exact evidence baselin
 | --- | --- | --- |
 | Durable conversation | `dspy.History` contains every and only committed user-facing request/answer record for the claimed Session checkpoint. | `tests/unit/backend/sessions/test_history.py`, `tests/unit/backend/rlm/test_turn_history_integration.py` |
 | Session isolation | A History snapshot and resident state are keyed by Workspace plus Session; neither crosses a Session boundary. | `tests/unit/backend/sessions/test_history.py` (two-Session store lanes), `tests/unit/backend/rlm/test_recursion_session_snapshot.py` |
-| Per-Turn reset | DSPy `REPLHistory`, iteration budget, LLM-call budget, current request, current capability binding, attachments, and output metadata are fresh each Turn. | `tests/contracts/backend/test_p45_session_runtime_contract.py`, `tests/unit/backend/rlm/test_session_runtime_reuse.py` |
-| Clean reuse | The same Root RLM, caller-owned interpreter, and Root Sandbox are reused only after a validated, durably committed Turn and only in one sequential lane. | `tests/unit/backend/rlm/test_session_runtime_reuse.py`, `tests/live/backend/test_p45_daytona_session_runtime_live.py` |
+| Per-Turn reset | DSPy `REPLHistory`, iteration budget, LLM-call budget, current request, current capability binding, attachments, and output metadata are fresh each Turn. | `tests/unit/backend/rlm/test_session_runtime.py`, `tests/unit/backend/rlm/test_session_runtime_reuse.py` |
+| Clean reuse | The same Root RLM, caller-owned interpreter, and Root Sandbox are reused only after a validated, durably committed Turn and only in one sequential lane. | `tests/unit/backend/rlm/test_session_runtime_reuse.py` |
 | Taint and recovery | Failure, cancellation, timeout, claim loss, commit failure, authorization failure, or uncertain settlement taints resident state; the next Turn rotates it and rehydrates durable state only. | `tests/unit/backend/chat/test_turn_taint_contract.py`, `tests/unit/backend/rlm/test_session_runtime_reuse.py`, `tests/unit/backend/rlm/test_session_runtime.py` |
-| Eviction | Idle eviction or process/Sandbox replacement may lose arbitrary Python globals but retains committed History and Volume-backed Workspace, Memory, Attachments, and Artifacts. | `tests/unit/backend/chat/test_p52_security_restart.py`, `tests/unit/backend/rlm/test_session_runtime.py` |
+| Eviction | Idle eviction or process/Sandbox replacement may lose arbitrary Python globals but retains committed History and Volume-backed Workspace, Memory, Attachments, and Artifacts. | `tests/unit/backend/rlm/test_session_runtime.py` |
 | Child isolation | Native child RLMs use fresh child RLM/interpreter/Sandbox state and never share mutable Root interpreter globals. | `tests/unit/backend/rlm/test_recursion_namespace_and_typed_parity.py`, `tests/unit/backend/rlm/test_recursion_session_snapshot.py`, live child lanes |
-| Tool authority | A retained Tool object or Python alias resolves authorization for the current Turn and fails closed when no current capability authorizes it. | `tests/unit/backend/chat/test_p52_security_restart.py`, `tests/unit/backend/rlm/test_session_runtime_tools.py` |
+| Tool authority | A retained Tool object or Python alias resolves authorization for the current Turn and fails closed when no current capability authorizes it. | `tests/unit/backend/rlm/test_session_runtime_tools.py` |
 | Program fingerprint rotation | An unchanged program reuses the resident state; a Signature, Skill-instruction, model-configuration, or Tool-schema change rotates it through `program_fingerprint_for_context`, and durable History remains after rotation. | `tests/unit/backend/rlm/test_session_runtime_reuse.py`, `tests/unit/backend/rlm/test_session_runtime.py` |
 
 ### Rotation distinction
