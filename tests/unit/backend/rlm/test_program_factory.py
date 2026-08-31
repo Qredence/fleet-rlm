@@ -165,16 +165,16 @@ def test_provider_retries_recompute_remaining_and_non_retryable_errors_stop(
 ) -> None:
     import time
 
-    import fleet_rlm.rlm.program as factory
+    from fleet_rlm.rlm.program import RLMModelBundle
 
     retry_source = _RetryingLM([LMServerError("temporary")])
-    bound = factory.RLMModelBundle(retry_source, _CopyableLM()).bind_turn_deadline(deadline=110)
+    bound = RLMModelBundle(retry_source, _CopyableLM()).bind_turn_deadline(deadline=110)
     ticks = [100.0, 101.0]
 
     def clock() -> float:
         return ticks.pop(0) if ticks else 102.0
 
-    monkeypatch.setattr(factory.time, "monotonic", clock)
+    monkeypatch.setattr("fleet_rlm.rlm.program.time.monotonic", clock)
     bound.root_lm.forward(prompt="retry")
     monkeypatch.undo()
 
@@ -186,19 +186,19 @@ def test_provider_retries_recompute_remaining_and_non_retryable_errors_stop(
 
     for error in (LMInvalidRequestError("invalid"), LMAuthError("auth")):
         source = _RetryingLM([error])
-        bound = factory.RLMModelBundle(source, _CopyableLM()).bind_turn_deadline(deadline=time.monotonic() + 5)
+        bound = RLMModelBundle(source, _CopyableLM()).bind_turn_deadline(deadline=time.monotonic() + 5)
         with pytest.raises(type(error)):
             bound.root_lm.forward(prompt="do not retry")
         assert len(bound.root_lm.calls) == 1
 
 
 def test_child_copy_strips_turn_wrapper_and_uses_child_deadline(monkeypatch: pytest.MonkeyPatch) -> None:
-    import fleet_rlm.rlm.program as factory
+    from fleet_rlm.rlm.program import RLMModelBundle
 
-    source = factory.RLMModelBundle(_CopyableLM(), _CopyableLM())
+    source = RLMModelBundle(_CopyableLM(), _CopyableLM())
     turn = source.bind_turn_deadline(deadline=101)
     child = turn.fork_for_child(deadline=110)
-    monkeypatch.setattr(factory.time, "monotonic", lambda: 100.0)
+    monkeypatch.setattr("fleet_rlm.rlm.program.time.monotonic", lambda: 100.0)
 
     turn.root_lm.forward(prompt="turn")
     child.root_lm.forward(prompt="child")
