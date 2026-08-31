@@ -382,6 +382,13 @@ describe("adaptive contrast", () => {
     expect(styled.endsWith("row\x1b[49m")).toBe(true);
   });
 
+  it("blends dark selections toward the contrast endpoint in truecolor terminals", () => {
+    const dark = createFleetTheme("dark", "truecolor");
+    setTerminalBackground({ r: 23, g: 29, b: 30 });
+
+    expect(dark.selectionBackgroundColor()("row")).toBe("\x1b[48;2;47;58;61mrow\x1b[49m");
+  });
+
   it("blends a near-midpoint surface until it clears the minimum delta", () => {
     const custom = new FleetTheme({ ...darkPalette, userMessageBg: "#8b8b8b" }, "truecolor");
     setTerminalBackground({ r: 128, g: 128, b: 128 });

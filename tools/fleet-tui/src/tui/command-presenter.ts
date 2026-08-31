@@ -70,7 +70,7 @@ export class PiCommandPresenter implements CommandPresenter {
       })),
       {
         title: "Fleet TUI commands",
-        context: `${commands.length} commands · Ctrl+Shift+F search · Ctrl+O fold · PgUp/PgDn scroll`,
+        context: `${commands.length} commands · Ctrl+Shift+F search · PgUp/PgDn scroll`,
         hint: "Type to filter · ↑↓ navigate · Enter insert",
         filterable: true,
         maxVisible: 8,

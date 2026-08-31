@@ -193,7 +193,7 @@ export class FleetTheme {
       }
       alphas.push(SELECTION_MAX_BLEND_ALPHA);
       for (const alpha of alphas) {
-        const adjusted = rgbToHex(blendColor(top, selectedBg, alpha));
+        const adjusted = rgbToHex(blendColor(selectedBg, top, alpha));
         const adjustedRgb = hexToRgb(adjusted);
         const resultDelta = Math.abs(luminance(adjustedRgb) - terminalLuminance);
         if (resultDelta >= SELECTION_MIN_LUMINANCE_DELTA - 1) {
