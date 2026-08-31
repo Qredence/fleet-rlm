@@ -1,10 +1,11 @@
 # Lakebase Postgres
 
 How to provision a Databricks Lakebase (Postgres Autoscaling) database for Fleet
-RLM and point the TOML-declared `FLEET_DATABASE_URL` at it. The local
-`daytona` profile keeps its supervised MLflow server; use
-`default_profile = "daytona-managed"` in `config/fleet.toml` when the same
-deployment should route traces to managed Databricks MLflow.
+RLM and point the TOML-declared `FLEET_DATABASE_URL` at it. The committed
+`daytona-recursive` profile keeps its supervised local MLflow server; to route
+traces to managed Databricks MLflow instead, declare a local profile with
+`mlflow.tracking_uri = "databricks"` and the `mlflow.*_env` references in
+`config/fleet.toml`.
 
 Lakebase is Databricks' serverless Postgres. A **project** is the top-level
 container; it auto-provisions a `production` branch and a `primary` read-write
@@ -103,9 +104,9 @@ FLEET_MLFLOW_TRACE_TABLE_PREFIX=fleet_rlm
 FLEET_MLFLOW_TRACING_SQL_WAREHOUSE_ID=<warehouse-id>
 ```
 
-`DATABRICKS_HOST` and `DATABRICKS_TOKEN` must authenticate the managed
-Databricks MLflow client; `DATABRICKS_TOKEN` is also the TOML-declared Root/Sub
-AI Gateway credential for the managed profile. Then initialize the schema:
+`DATABRICKS_HOST` and `DATABRICKS_TOKEN` must authenticate the
+Databricks MLflow client when a local policy routes traces to Databricks. Then
+initialize the schema:
 
 ```bash
 uv run python scripts/db_init.py

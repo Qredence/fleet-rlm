@@ -348,7 +348,7 @@ def test_absent_optional_policy_keys_fall_back_to_settings_defaults() -> None:
     defaults = document["defaults"]
     defaults["rlm"].pop("recursion_max_calls")
 
-    flat = config_loader._flatten_policy(config_loader._deep_merge(defaults, document["profiles"]["daytona"]))
+    flat = config_loader._flatten_policy(config_loader._deep_merge(defaults, document["profiles"]["daytona-recursive"]))
 
     assert "rlm_recursion_max_calls" not in flat.settings
     # ``Settings`` owns the fallback default; TOML absence stays absent.

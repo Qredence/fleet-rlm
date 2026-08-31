@@ -89,12 +89,10 @@ serial credentialed lane avoids that model variability with DSPy
 `DummyLM` scripts while still exercising the actual Root/child interpreter
 construction seams:
 
-```text
-FLEET_LIVE=1 uv run pytest \
-  tests/live/backend/test_callback_shadow_root_child.py -q -x
-```
-
-It passed and wrote the sanitized receipt
+The lane
+`FLEET_LIVE=1 uv run pytest tests/live/backend/test_callback_shadow_root_child.py -q -x`
+(has since been retired with the other P-certification receipt lanes) passed
+on the decision candidate and wrote the sanitized receipt
 `.fleet-evidence/receipts/p35d-callback-shadow-root-child.json`. The receipt
 proves DSPy 3.3.1 callbacks attached to the actual Root and child instances,
 Root depth 0 and child depth 1, one `rlm_query` Tool edge, paired start/end

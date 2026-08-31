@@ -2,10 +2,9 @@
 
 Fleet starts from the required, committed [`config/fleet.toml`](../../config/fleet.toml)
 policy file. The active profile is selected by the `[config] default_profile` key
-inside that file (or, when only one profile exists, that single profile). Set
-`default_profile` to one of the named profiles (`daytona`, `daytona-recursive`,
-`daytona-managed`, `daytona-bench`, or `daytona-bench-40`) before starting any
-backend or running `fleet doctor`. Policy is strict, resolved once at process
+inside that file. Set `default_profile` to `daytona-recursive` (the shipped
+and only committed profile) before starting any backend or running
+`fleet doctor`. Policy is strict, resolved once at process
 startup, and takes effect only after restart. The [generated profile matrix](profile-matrix.md)
 shows the provider, token, recursion, and environment contract derived from the
 same TOML file.
@@ -23,20 +22,16 @@ references fail startup.
 ## Runtime prerequisites
 
 The provider environment contract is policy-derived; see the [profile matrix](profile-matrix.md).
-All committed profiles use the OpenAI-compatible Chat Completion API. The
-selected `daytona-recursive` profile routes Root and Sub through the
-Modal-hosted GLM gateway and requires `FLEET_MODAL_API_KEY`,
-`FLEET_MODAL_BASE_URL`, and `FLEET_DAYTONA_API_KEY`; every other committed
-profile reaches the configured Databricks AI Gateway endpoint and requires
-`DATABRICKS_TOKEN`, `FLEET_DATABRICKS_AI_GATEWAY_BASE_URL`, and
-`FLEET_DAYTONA_API_KEY`.
+The committed policy uses the OpenAI-compatible Chat Completion API and routes
+Root and Sub through the Modal-hosted GLM-5.3-Flash gateway, which requires
+`FLEET_MODAL_API_KEY`, `FLEET_MODAL_BASE_URL`, and `FLEET_DAYTONA_API_KEY`.
+The committed policy is intentionally small: the single `daytona-recursive`
+profile is the whole policy (it lives in `[defaults]`; recursive child RLMs,
+DSPy verbose host logging, and local MLflow tracing are all on).
 
-| Profile family | Provider values | Persistence and tracing |
+| Profile | Provider values | Persistence and tracing |
 | --- | --- | --- |
-| `daytona` | `DATABRICKS_TOKEN`, `FLEET_DATABRICKS_AI_GATEWAY_BASE_URL`, `FLEET_DAYTONA_API_KEY` | Configure `FLEET_DATABASE_URL` at Alembic head for durable deployment; local SQLite is suitable for development. Local MLflow tracing is enabled. |
-| `daytona-recursive` | `FLEET_MODAL_API_KEY`, `FLEET_MODAL_BASE_URL`, `FLEET_DAYTONA_API_KEY` | Configure `FLEET_DATABASE_URL` at Alembic head for durable deployment; local SQLite is suitable for development. Local MLflow tracing is enabled. |
-| `daytona-managed` | `DATABRICKS_TOKEN`, `FLEET_DATABRICKS_AI_GATEWAY_BASE_URL`, `FLEET_DAYTONA_API_KEY` | `FLEET_DATABASE_URL` and every managed MLflow environment name in the matrix are required. |
-| `daytona-bench` / `daytona-bench-40` | `DATABRICKS_TOKEN`, `FLEET_DATABRICKS_AI_GATEWAY_BASE_URL`, `FLEET_DAYTONA_API_KEY` | Use the explicitly configured database for benchmark runs; MLflow tracing is disabled. |
+| `daytona-recursive` (default) | `FLEET_MODAL_API_KEY`, `FLEET_MODAL_BASE_URL`, `FLEET_DAYTONA_API_KEY` | Configure `FLEET_DATABASE_URL` at Alembic head for durable deployment; local SQLite is suitable for development. Local MLflow tracing is enabled. |
 
 Profiles are explicit and do not fall back to each other. Daytona startup never
 applies migrations; use `uv run python scripts/db_init.py` or Alembic directly.
@@ -54,21 +49,19 @@ are independent: `storage.max_upload_bytes` bounds uploads and workspace files,
 `storage.max_url_bytes` bounds fetched public URL sources, and
 `storage.max_artifact_bytes` bounds artifact bodies.
 
-`runtime.live_enabled` defaults to `true` for explicitly invoked provider,
-Daytona, and Prime Oolong commands. Set it to `false` in the selected TOML
-policy to fail closed before those commands construct provider or Daytona
-clients. This policy replaces the old `FLEET_LIVE=1` shell switch for the
-Phase 1 verifier and Prime Oolong runner; invoking a live command remains an
-explicit operator action, and the required credentials are still validated.
+`runtime.live_enabled` defaults to `true` for explicitly invoked provider and
+Daytona commands. Set it to `false` in the selected TOML policy to fail closed
+before those commands construct provider or Daytona clients. This policy
+replaces the old `FLEET_LIVE=1` shell switch for the live verifier scripts;
+invoking a live command remains an explicit operator action, and the required
+credentials are still validated.
 
 When MLflow tracing is enabled, `mlflow.async_logging` keeps trace export off
 the Turn path and `mlflow.trace_sampling_ratio` controls the fraction of Turns
 sent to MLflow. The committed default is asynchronous export with a `1.0`
 sampling ratio; both are non-secret TOML policy values. Tracing is enabled by
 default under the committed `[defaults.mlflow]` policy (the `Settings` field
-default is `false`, but the shipped policy enables it). The benchmark profiles
-(`daytona-bench`, `daytona-bench-40`) explicitly keep tracing off to stay
-traceless. Fleet also enables MLflow DSPy inference autologging for the selected
+default is `false`, but the shipped policy enables it). Fleet also enables MLflow DSPy inference autologging for the selected
 experiment, while compile and evaluator traces remain disabled for live Turn
 observability. FastAPI lifespan owns one explicit tracing startup attempt and
 shutdown flush; application construction performs no external MLflow probe, and
@@ -96,8 +89,7 @@ names the environment variable holding the project token, and `posthog.host`
 overrides the ingestion host (the committed default targets the EU instance for
 project 15008). Analytics are enabled by the shipped `[defaults.posthog]` policy
 but stay disabled whenever the named token variable is absent, and they never
-block startup. The benchmark profiles (`daytona-bench`, `daytona-bench-40`)
-explicitly keep analytics off to stay traceless, mirroring the MLflow policy.
+block startup.
 Every analytics event shares one stable per-installation `distinct_id` persisted
 under the storage data root; the deterministic local user id is never used as a
 PostHog identity.
@@ -154,23 +146,24 @@ behavior.
 
 All committed profiles use the OpenAI-compatible Chat Completion format.
 `dspy.LM` sends the request to the provider's `/chat/completions` endpoint with
-`model_type="chat"`; no provider-specific routing header is required. The
-selected `daytona-recursive` interactive profile routes Root and Sub through
-the Modal-hosted `openai/zai-org/GLM-5.3-Flash` endpoint using the
+`model_type="chat"`; no provider-specific routing header is required. Both
+roles run the Modal-hosted `openai/zai-org/GLM-5.3-Flash` endpoint using the
 `FLEET_MODAL_API_KEY` and `FLEET_MODAL_BASE_URL` environment references, with
-no reasoning-effort override, Root capped at 32,768 output tokens, and Sub
-capped at 4,000 to keep slow sub-LLM completions inside the per-cell execution
-timeout. The `daytona`, `daytona-managed`, and benchmark profiles keep the
-`databricks-deepseek-v4-flash-0731` endpoint behind `DATABRICKS_TOKEN` and
-`FLEET_DATABRICKS_AI_GATEWAY_BASE_URL`; managed and benchmark profiles cap both
-roles at 8,000. Interactive profiles disable LM caching, and benchmark profiles
-also keep MLflow tracing off.
+no reasoning-effort override and LM caching disabled. Z.AI's chat completion
+API reference documents a 128K maximum output length for GLM-5.3-Flash (and a
+1024-token floor), so the role ceiling is `max_tokens = 131072`; it sits well
+inside the served endpoint's 1,048,576-token context for any Fleet prompt,
+and Fleet's character-level output caps bound what each role retains,
+independent of this ceiling.
 
-The interactive profiles route traces to the local `fleet-rlm` experiment at
-`http://127.0.0.1:5001`; the supervised `fleet cli` command starts or reuses that
-server. The managed profile uses `tracking_uri = "databricks"` and requires the
-Unity Catalog, table-prefix, SQL-warehouse, and database environment names shown
-in the matrix. Child DSPy trace spans remain structural only even when the
+The committed default routes traces to the local `fleet-rlm` experiment at
+`http://127.0.0.1:5001`; the supervised `fleet cli` command starts or reuses
+that server. Databricks-hosted tracing remains available for local policy:
+declare `mlflow.tracking_uri = "databricks"` together with the
+`experiment_name_env`, `trace_catalog_env`, `trace_schema_env`,
+`trace_table_prefix_env`, and `tracing_sql_warehouse_id_env` references (plus
+`storage.database_url_env`) in a profile, and the loader resolves those names
+the same way. Child DSPy trace spans remain structural only even when the
 selected Root trace policy permits bounded readable previews. A successfully
 prepared Turn with tracing enabled opens two `fleet_turn` root spans
 (preparation and execution), each tagged `fleet.trace_phase` with `preparation`
@@ -208,16 +201,16 @@ Fleet restart.
 
 | Variable | Policy reference | Meaning |
 | --- | --- | --- |
-| `FLEET_DATABASE_URL` | `storage.database_url_env` | Async SQLAlchemy URL; required by the managed profile and durable deployments |
+| `FLEET_DATABASE_URL` | `storage.database_url_env` | Async SQLAlchemy URL; required for durable deployments |
 | `FLEET_DAYTONA_API_KEY` | `daytona.api_key_env` | Daytona provider credential for every profile |
-| `DATABRICKS_TOKEN` | Root/Sub `api_key_env` in the Databricks-backed profiles | Databricks provider API key for the Chat Completion endpoint |
-| `FLEET_DATABRICKS_AI_GATEWAY_BASE_URL` | Root/Sub `base_url_env` in the Databricks-backed profiles | Databricks AI Gateway `/mlflow/v1` base URL (`/chat/completions` is appended) |
-| `FLEET_MODAL_API_KEY` | Root/Sub `api_key_env` in `daytona-recursive` | Modal-hosted GLM provider API key for the Chat Completion endpoint |
-| `FLEET_MODAL_BASE_URL` | Root/Sub `base_url_env` in `daytona-recursive` | Modal vLLM `/v1` base URL (`/chat/completions` is appended) |
+| `FLEET_MODAL_API_KEY` | Root/Sub `api_key_env` in the committed policy | Modal-hosted GLM provider API key for the Chat Completion endpoint |
+| `FLEET_MODAL_BASE_URL` | Root/Sub `base_url_env` in the committed policy | Modal `/v1` base URL (`/chat/completions` is appended) |
 | `FLEET_OPENAI_API_KEY` | A custom Root/Sub `api_key_env` reference | OpenAI-compatible provider credential for custom policy only |
-| `FLEET_MLFLOW_EXPERIMENT_NAME` | `daytona-managed.mlflow.experiment_name_env` | Managed MLflow experiment |
-| `FLEET_MLFLOW_TRACE_CATALOG` / `FLEET_MLFLOW_TRACE_SCHEMA` | `daytona-managed.mlflow.*_env` | Unity Catalog destination |
-| `FLEET_MLFLOW_TRACE_TABLE_PREFIX` / `FLEET_MLFLOW_TRACING_SQL_WAREHOUSE_ID` | `daytona-managed.mlflow.*_env` | Trace table prefix and SQL warehouse |
+| `DATABRICKS_TOKEN` | Databricks MLflow client authentication | Databricks PAT for MLflow tracing and evaluation lanes; not a Chat Completion credential in the committed policy |
+| `FLEET_DATABRICKS_AI_GATEWAY_BASE_URL` | A custom Root/Sub `base_url_env` reference | Databricks AI Gateway base URL for custom policy only |
+| `FLEET_MLFLOW_EXPERIMENT_NAME` | `mlflow.experiment_name_env` when a profile declares it | Databricks MLflow experiment |
+| `FLEET_MLFLOW_TRACE_CATALOG` / `FLEET_MLFLOW_TRACE_SCHEMA` | `mlflow.*_env` when a profile declares them | Unity Catalog destination |
+| `FLEET_MLFLOW_TRACE_TABLE_PREFIX` / `FLEET_MLFLOW_TRACING_SQL_WAREHOUSE_ID` | `mlflow.*_env` when a profile declares them | Trace table prefix and SQL warehouse |
 | `POSTHOG_PROJECT_TOKEN` | `posthog.project_token_env` | PostHog project token for product analytics (enabled by default, disabled when absent) |
 Model ids may use an explicit `provider/model` prefix. For an OpenAI-compatible
 base URL, bare ids are normalized with the `openai/` prefix before constructing

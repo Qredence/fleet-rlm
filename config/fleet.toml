@@ -13,21 +13,31 @@ max_active_daytona_leases = 8
 heartbeat_seconds = 10
 stale_after_seconds = 60
 
-# Shared provider and baseline role limits.
+# Root and Sub both run the Modal-hosted GLM-5.3-Flash. Z.AI's chat completion
+# API reference (docs.z.ai/api-reference/llm/chat-completion) documents a
+# maximum output length of 128K tokens for GLM-5.3-Flash (and recommends at
+# least 1024), so both roles use the documented 131,072-token output ceiling;
+# it sits well inside the endpoint's 1,048,576-token context for any Fleet
+# prompt, and Fleet's character-level output caps bound what is retained.
 [defaults.llm.root]
 model = "openai/zai-org/GLM-5.3-Flash"
 api_key_env = "FLEET_MODAL_API_KEY"
 base_url_env = "FLEET_MODAL_BASE_URL"
-max_tokens = 8000
+max_tokens = 131072
 cache = false
 
 [defaults.llm.sub]
 model = "openai/zai-org/GLM-5.3-Flash"
 api_key_env = "FLEET_MODAL_API_KEY"
 base_url_env = "FLEET_MODAL_BASE_URL"
-max_tokens = 8000
+max_tokens = 131072
+temperature = 0
 cache = false
 
+# Recursive harness limits: one native child level (depth is a fixed
+# execution invariant, not a policy knob) with four reserved child calls per
+# Turn, a 50,000-character delegated prompt bound, and at most five child
+# workers concurrently.
 [defaults.rlm]
 max_iters = 20
 max_llm_calls = 50
@@ -63,6 +73,8 @@ level = "INFO"
 
 [defaults.mlflow]
 tracing_enabled = true
+tracking_uri = "http://127.0.0.1:5001"
+experiment_name = "fleet-rlm"
 expose_trace_id = true
 async_logging = true
 trace_sampling_ratio = 1.0
@@ -73,68 +85,9 @@ enabled = true
 project_token_env = "POSTHOG_PROJECT_TOKEN"
 host = "https://eu.i.posthog.com"
 
-[profiles.daytona.llm.root]
-max_tokens = 16000
-reasoning_effort = "low"
-
-[profiles.daytona.llm.sub]
-max_tokens = 16000
-reasoning_effort = "low"
-
-[profiles.daytona.mlflow]
-tracking_uri = "http://127.0.0.1:5001"
-experiment_name = "fleet-rlm"
-
-[profiles.daytona-recursive.llm.root]
-max_tokens = 32768
-timeout_seconds = 300
-
-[profiles.daytona-recursive.llm.sub]
-max_tokens = 4000
-timeout_seconds = 90
-temperature = 0
-
-[profiles.daytona-recursive.mlflow]
-tracking_uri = "http://127.0.0.1:5001"
-experiment_name = "fleet-rlm"
-
-[profiles.daytona-recursive.rlm]
-recursion_enabled = true
-
-[profiles.daytona-managed.llm.root]
-reasoning_effort = "low"
-cache = true
-
-[profiles.daytona-managed.llm.sub]
-temperature = 0
-reasoning_effort = "low"
-cache = true
-
-[profiles.daytona-managed.mlflow]
-tracing_enabled = true
-tracking_uri = "databricks"
-experiment_name_env = "FLEET_MLFLOW_EXPERIMENT_NAME"
-trace_catalog_env = "FLEET_MLFLOW_TRACE_CATALOG"
-trace_schema_env = "FLEET_MLFLOW_TRACE_SCHEMA"
-trace_table_prefix_env = "FLEET_MLFLOW_TRACE_TABLE_PREFIX"
-tracing_sql_warehouse_id_env = "FLEET_MLFLOW_TRACING_SQL_WAREHOUSE_ID"
-
-# Prime Oolong benchmark profile.
-[profiles.daytona-bench.mlflow]
-tracing_enabled = false
-
-[profiles.daytona-bench.posthog]
-enabled = false
-
-[profiles.daytona-bench.rlm]
-verbose = false
-
-# Same benchmark with a 40-iteration RLM loop.
-[profiles.daytona-bench-40.mlflow]
-tracing_enabled = false
-
-[profiles.daytona-bench-40.posthog]
-enabled = false
-
-[profiles.daytona-bench-40.rlm]
-max_iters = 40
+# The committed policy is [defaults] itself: recursive child RLMs (one native
+# depth), DSPy verbose host logging, local MLflow tracing, and the Root/Sub
+# model pair above. The profile table stays empty because the schema requires
+# at least one profile; everything a profile would override already lives in
+# [defaults].
+[profiles.daytona-recursive]

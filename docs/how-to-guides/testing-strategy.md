@@ -27,7 +27,7 @@ make check
 
 The default pytest targets mask local live `FLEET_*` credentials so `.env`
 cannot silently select provider composition. They install deterministic private
-composition where required, run with at most two xdist workers by default, and
+composition where required, run with at most four xdist workers by default, and
 use xdist `loadfile` scheduling to keep module-scoped fixtures together. The
 packaging/release matrix is intentionally excluded because it creates isolated
 virtual environments and artifacts; run it explicitly with `make test-packaging`.
@@ -123,9 +123,9 @@ Private deterministic tests may create ephemeral schemas explicitly.
 ## Credentialed Daytona gates
 
 Live pytest suites remain separately marked and require explicit live test
-environment setup. The Phase 1 verifier and Prime Oolong runner instead use
-`runtime.live_enabled` from the selected TOML policy (true by default; set it
-to `false` to fail closed) and still require canonical credentials:
+environment setup. The live verifier scripts instead use `runtime.live_enabled`
+from the selected TOML policy (true by default; set it to `false` to fail
+closed) and still require canonical credentials:
 
 ```bash
 FLEET_LIVE=1 uv run python scripts/benchmark_daytona_lifecycle.py \
@@ -155,40 +155,6 @@ identifies the required provider values. The verifier requires the committed
 the exact candidate SHA, verifies provider cleanup and secret isolation, and
 must be paired with same-SHA CI, local release, and human attestations before
 promotion. Historical receipts do not prove a later tip.
-
-### P39c live-evidence receipts and the receipts-archive convention
-
-The P39c recursion certification lanes (`tests/live/backend/test_p39c_*_live.py`)
-write same-SHA receipts plus one shared observed-Sandbox ledger
-(`p39c-observed-sandboxes.json`) under `.fleet-evidence/receipts/`
-(git-ignored, never committed). The canonical default-name receipt is ALWAYS
-written there; when a runner sets `FLEET_LIVE_EVIDENCE_PATH`, that location
-receives an additional env-stem copy, never a replacement. Every lane writes
-the ledger through the single shared helper
-`tests/live/backend/_p39c_evidence.py`, whose read-modify-write merge is
-atomic and refuses to shrink recorded lane coverage (`LedgerCoverageError`).
-
-Multiple workers certifying on one branch can split receipt SHAs, while the
-aggregate zero-leak gate requires every lane receipt at HEAD and the full
-seven-lane ledger. When HEAD moves, ARCHIVE the whole stale `p39c-*` set —
-move, never delete — before re-certifying:
-
-```bash
-archive=.fleet-evidence/receipts-archive/p39c-pre-$(git rev-parse --short HEAD)
-mkdir "$archive" && mv .fleet-evidence/receipts/p39c-*.json "$archive"/
-```
-
-Then re-run the lanes (or re-stamp receipts whose evidence is unchanged) at
-the stable HEAD and run the zero-leak aggregate LAST.
-
-Rebuild rule: the aggregate lane's pre-flight restores any lane key missing
-from the canonical ledger by merging id lists from the NEWEST COMPLETE
-`.fleet-evidence/receipts-archive/p39c-*/p39c-observed-sandboxes.json`
-(complete = its `lanes` mapping covers all seven lane names; newest by
-directory mtime). This restores ledger identity only: archived receipts stay
-in the archive, archived files are never modified, and restored lanes whose
-receipts still carry an old SHA FAIL the aggregate's same-SHA gates until
-they are re-run or re-stamped at HEAD.
 
 ## Security, packaging, and release
 

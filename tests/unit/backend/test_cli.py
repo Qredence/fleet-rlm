@@ -63,8 +63,8 @@ def test_fleet_doctor_reads_profile_from_toml_default_profile(
 
     fleet_main(["doctor", "daytona"])
 
-    # committed config/fleet.toml has default_profile = "daytona"
-    assert "[ok] policy: profile=daytona" in capsys.readouterr().out
+    # committed config/fleet.toml has default_profile = "daytona-recursive"
+    assert "[ok] policy: profile=daytona-recursive" in capsys.readouterr().out
 
 
 def test_fleet_doctor_daytona_returns_nonzero_with_provider_action(

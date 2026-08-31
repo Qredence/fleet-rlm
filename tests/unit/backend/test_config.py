@@ -24,31 +24,13 @@ def test_profile_environment_matrix_follows_selected_toml_policy() -> None:
         "FLEET_MODAL_API_KEY",
         "FLEET_MODAL_BASE_URL",
     )
-    assert contracts["daytona-managed"].provider == "OpenAI Chat Completion"
-    assert contracts["daytona-managed"].managed_policy_environment_names == (
-        "FLEET_DAYTONA_API_KEY",
-        "FLEET_MODAL_API_KEY",
-        "FLEET_MODAL_BASE_URL",
-        "FLEET_DATABASE_URL",
-        "FLEET_MLFLOW_EXPERIMENT_NAME",
-        "FLEET_MLFLOW_TRACE_CATALOG",
-        "FLEET_MLFLOW_TRACE_SCHEMA",
-        "FLEET_MLFLOW_TRACE_TABLE_PREFIX",
-        "FLEET_MLFLOW_TRACING_SQL_WAREHOUSE_ID",
-    )
 
 
-def test_daytona_profile_uses_specialized_bounded_model_roles() -> None:
+def test_committed_policy_declares_two_profiles_with_modal_model_roles() -> None:
     policy_path = Path(__file__).resolve().parents[3] / "config" / "fleet.toml"
     document = tomllib.loads(policy_path.read_text(encoding="utf-8"))
 
-    assert set(document["profiles"]) == {
-        "daytona",
-        "daytona-recursive",
-        "daytona-managed",
-        "daytona-bench",
-        "daytona-bench-40",
-    }
+    assert set(document["profiles"]) == {"daytona-recursive"}
     assert document["defaults"]["daytona"]["snapshot"] == "fleet-rlm-python313-v5"
     assert document["defaults"]["runtime"]["environment"] == "daytona"
     assert document["defaults"]["llm"] == {
@@ -56,20 +38,17 @@ def test_daytona_profile_uses_specialized_bounded_model_roles() -> None:
             "model": "openai/zai-org/GLM-5.3-Flash",
             "api_key_env": "FLEET_MODAL_API_KEY",
             "base_url_env": "FLEET_MODAL_BASE_URL",
-            "max_tokens": 8000,
+            "max_tokens": 131072,
             "cache": False,
         },
         "sub": {
             "model": "openai/zai-org/GLM-5.3-Flash",
             "api_key_env": "FLEET_MODAL_API_KEY",
             "base_url_env": "FLEET_MODAL_BASE_URL",
-            "max_tokens": 8000,
+            "max_tokens": 131072,
+            "temperature": 0,
             "cache": False,
         },
-    }
-    assert document["profiles"]["daytona"]["llm"] == {
-        "root": {"max_tokens": 16000, "reasoning_effort": "low"},
-        "sub": {"max_tokens": 16000, "reasoning_effort": "low"},
     }
     assert document["defaults"]["runtime"]["live_enabled"] is True
 
@@ -81,13 +60,7 @@ _MODAL_ROLE = ("FLEET_MODAL_API_KEY", "FLEET_MODAL_BASE_URL")
 
 @pytest.mark.parametrize(
     ("profile", "expected_model", "expected_role"),
-    (
-        ("daytona", _MODAL_MODEL, _MODAL_ROLE),
-        ("daytona-recursive", _MODAL_MODEL, _MODAL_ROLE),
-        ("daytona-managed", _MODAL_MODEL, _MODAL_ROLE),
-        ("daytona-bench", _MODAL_MODEL, _MODAL_ROLE),
-        ("daytona-bench-40", _MODAL_MODEL, _MODAL_ROLE),
-    ),
+    (("daytona-recursive", _MODAL_MODEL, _MODAL_ROLE),),
 )
 def test_daytona_profiles_use_expected_model_for_both_roles(
     profile: str,
@@ -107,11 +80,11 @@ def test_daytona_profiles_use_expected_model_for_both_roles(
     assert llm["sub"]["base_url_env"] == expected_base_env
 
 
-def test_daytona_profile_routes_tracing_to_supervised_local_mlflow() -> None:
+def test_default_profile_routes_tracing_to_supervised_local_mlflow() -> None:
     policy_path = Path(__file__).resolve().parents[3] / "config" / "fleet.toml"
     document = tomllib.loads(policy_path.read_text(encoding="utf-8"))
 
-    mlflow = _deep_merge(document["defaults"]["mlflow"], document["profiles"]["daytona"]["mlflow"])
+    mlflow = _deep_merge(document["defaults"]["mlflow"], document["profiles"]["daytona-recursive"].get("mlflow", {}))
     assert mlflow["tracing_enabled"] is True
     assert mlflow["tracking_uri"] == "http://127.0.0.1:5001"
     assert mlflow["experiment_name"] == "fleet-rlm"
@@ -123,106 +96,13 @@ def test_default_mlflow_policy_uses_async_full_fidelity_trace_delivery() -> None
 
     assert document["defaults"]["mlflow"] == {
         "tracing_enabled": True,
+        "tracking_uri": "http://127.0.0.1:5001",
+        "experiment_name": "fleet-rlm",
         "expose_trace_id": True,
         "async_logging": True,
         "trace_sampling_ratio": 1.0,
         "trace_content_max_chars": 10000,
     }
-
-
-def test_daytona_managed_profile_declares_lakebase_and_mlflow_environment_references() -> None:
-    policy_path = Path(__file__).resolve().parents[3] / "config" / "fleet.toml"
-    document = tomllib.loads(policy_path.read_text(encoding="utf-8"))
-
-    managed = _deep_merge(document["defaults"], document["profiles"]["daytona-managed"])
-    assert managed["runtime"] == {
-        "environment": "daytona",
-        "live_enabled": True,
-        "turn_timeout_seconds": 1800,
-        "max_active_daytona_leases": 8,
-        "heartbeat_seconds": 10,
-        "stale_after_seconds": 60,
-    }
-    assert managed["mlflow"]["tracing_enabled"] is True
-    assert managed["mlflow"]["tracking_uri"] == "databricks"
-    assert managed["mlflow"]["experiment_name_env"] == "FLEET_MLFLOW_EXPERIMENT_NAME"
-    assert managed["mlflow"]["trace_catalog_env"] == "FLEET_MLFLOW_TRACE_CATALOG"
-    assert managed["mlflow"]["trace_schema_env"] == "FLEET_MLFLOW_TRACE_SCHEMA"
-    assert managed["mlflow"]["trace_table_prefix_env"] == "FLEET_MLFLOW_TRACE_TABLE_PREFIX"
-    assert managed["mlflow"]["tracing_sql_warehouse_id_env"] == "FLEET_MLFLOW_TRACING_SQL_WAREHOUSE_ID"
-    assert document["defaults"]["storage"]["database_url_env"] == "FLEET_DATABASE_URL"
-
-
-def test_daytona_managed_profile_resolves_lakebase_and_managed_mlflow_values(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    import fleet_rlm.config.loader as config
-
-    _select_profile(tmp_path, profile="daytona-managed", monkeypatch=monkeypatch)
-    (tmp_path / ".env").write_text(
-        "FLEET_DATABASE_URL=postgresql://dotenv-user:dotenv-password@lakebase.example/fleet_rlm?sslmode=require\n"
-        "FLEET_MLFLOW_EXPERIMENT_NAME=dotenv-fleet\n"
-        "FLEET_MLFLOW_TRACE_CATALOG=dotenv_catalog\n"
-        "FLEET_MLFLOW_TRACE_SCHEMA=dotenv_schema\n"
-        "FLEET_MLFLOW_TRACE_TABLE_PREFIX=dotenv_prefix\n"
-        "FLEET_MLFLOW_TRACING_SQL_WAREHOUSE_ID=dotenv-warehouse\n",
-        encoding="utf-8",
-    )
-    monkeypatch.chdir(tmp_path)
-    for name in (
-        "FLEET_MLFLOW_EXPERIMENT_NAME",
-        "FLEET_MLFLOW_TRACE_SCHEMA",
-        "FLEET_MLFLOW_TRACE_TABLE_PREFIX",
-        "FLEET_MLFLOW_TRACING_SQL_WAREHOUSE_ID",
-    ):
-        monkeypatch.delenv(name, raising=False)
-    monkeypatch.setenv("FLEET_DAYTONA_API_KEY", "process-daytona-key")
-    monkeypatch.setenv("FLEET_MODAL_API_KEY", "process-modal-token")
-    monkeypatch.setenv("FLEET_MODAL_BASE_URL", "https://modal.example.test/v1")
-    monkeypatch.setenv(
-        "FLEET_DATABASE_URL",
-        "postgresql://process-user:process-password@lakebase.example/fleet_rlm?sslmode=require",
-    )
-    monkeypatch.setenv("FLEET_MLFLOW_TRACE_CATALOG", "process_catalog")
-
-    settings = config.load_runtime_settings()
-
-    assert settings.run_environment == "daytona"
-    assert settings.database_url == (
-        "postgresql://process-user:process-password@lakebase.example/fleet_rlm?sslmode=require"
-    )
-    assert settings.mlflow_tracking_uri == "databricks"
-    assert settings.mlflow_experiment_name == "dotenv-fleet"
-    assert settings.mlflow_trace_catalog == "process_catalog"
-    assert settings.mlflow_trace_schema == "dotenv_schema"
-    assert settings.mlflow_trace_table_prefix == "dotenv_prefix"
-    assert settings.mlflow_tracing_sql_warehouse_id == "dotenv-warehouse"
-
-
-def test_daytona_managed_profile_requires_declared_database_and_mlflow_values(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    import fleet_rlm.config.loader as config
-
-    _select_profile(tmp_path, profile="daytona-managed", monkeypatch=monkeypatch)
-    monkeypatch.chdir(tmp_path)
-    for name in (
-        "FLEET_DATABASE_URL",
-        "FLEET_DAYTONA_API_KEY",
-        "FLEET_MODAL_API_KEY",
-        "FLEET_MODAL_BASE_URL",
-        "FLEET_MLFLOW_EXPERIMENT_NAME",
-        "FLEET_MLFLOW_TRACE_CATALOG",
-        "FLEET_MLFLOW_TRACE_SCHEMA",
-        "FLEET_MLFLOW_TRACE_TABLE_PREFIX",
-        "FLEET_MLFLOW_TRACING_SQL_WAREHOUSE_ID",
-    ):
-        monkeypatch.delenv(name, raising=False)
-
-    with pytest.raises(FleetConfigurationError, match="required environment value"):
-        config.load_runtime_settings()
 
 
 def test_selected_recursive_profile_resolves_root_and_sub_with_modal_params(
@@ -251,9 +131,11 @@ def test_selected_recursive_profile_resolves_root_and_sub_with_modal_params(
     # action observation and read as a frozen stream.
     assert settings.root_llm_cache is False
     assert settings.sub_llm_cache is False
-    assert settings.root_llm_max_tokens == 32768
-    # Bounded Sub-LLM output protects the per-cell execution timeout.
-    assert settings.sub_llm_max_tokens == 4000
+    # Both roles share the documented GLM-5.3-Flash completion ceiling: Z.AI's
+    # chat completion API reference caps the model's output length at 128K
+    # (131,072) tokens and recommends at least 1024.
+    assert settings.root_llm_max_tokens == 131072
+    assert settings.sub_llm_max_tokens == 131072
     assert settings.mlflow_tracing_enabled is True
     assert settings.mlflow_tracking_uri == "http://127.0.0.1:5001"
 
@@ -312,55 +194,14 @@ def test_stale_recursive_depth_policy_key_fails_validation(monkeypatch: pytest.M
         config.load_runtime_settings()
 
 
-def test_committed_daytona_policy_enables_recursive_child_execution() -> None:
+def test_committed_policy_enables_recursive_child_execution() -> None:
     policy_path = Path(__file__).resolve().parents[3] / "config" / "fleet.toml"
     document = tomllib.loads(policy_path.read_text(encoding="utf-8"))
 
     assert document["defaults"]["rlm"]["recursion_enabled"] is True
-    assert document["profiles"]["daytona-recursive"]["rlm"] == {"recursion_enabled": True}
-    llm = _deep_merge(document["defaults"]["llm"], document["profiles"]["daytona-recursive"]["llm"])
-    assert llm == {
-        "root": {
-            "model": "openai/zai-org/GLM-5.3-Flash",
-            "api_key_env": "FLEET_MODAL_API_KEY",
-            "base_url_env": "FLEET_MODAL_BASE_URL",
-            "max_tokens": 32768,
-            "timeout_seconds": 300,
-            "cache": False,
-        },
-        "sub": {
-            "model": "openai/zai-org/GLM-5.3-Flash",
-            "api_key_env": "FLEET_MODAL_API_KEY",
-            "base_url_env": "FLEET_MODAL_BASE_URL",
-            "max_tokens": 4000,
-            "timeout_seconds": 90,
-            "temperature": 0,
-            "cache": False,
-        },
-    }
-
-
-def test_daytona_benchmark_profiles_use_compatible_models_without_cache_or_mlflow() -> None:
-    policy_path = Path(__file__).resolve().parents[3] / "config" / "fleet.toml"
-    document = tomllib.loads(policy_path.read_text(encoding="utf-8"))
-
-    for profile in ("daytona-bench", "daytona-bench-40"):
-        policy = _deep_merge(document["defaults"], document["profiles"][profile])
-        assert policy["runtime"]["environment"] == "daytona"
-        # Bench profiles stay traceless by explicitly declaring mlflow disabled,
-        # overriding the on-by-default [defaults.mlflow] policy.
-        assert policy["mlflow"]["tracing_enabled"] is False
-        for role in ("root", "sub"):
-            llm = policy["llm"][role]
-            assert llm["model"] == _MODAL_MODEL
-            assert llm["api_key_env"] == "FLEET_MODAL_API_KEY"
-            assert llm["base_url_env"] == "FLEET_MODAL_BASE_URL"
-            assert llm["cache"] is False
-            assert llm["max_tokens"] == 8000
-            assert "reasoning_effort" not in llm
-
-    assert document["profiles"]["daytona-bench"]["rlm"] == {"verbose": False}
-    assert document["profiles"]["daytona-bench-40"]["rlm"] == {"max_iters": 40}
+    # The committed default profile is the [defaults] policy itself: the table
+    # stays empty because the schema requires at least one profile.
+    assert document["profiles"]["daytona-recursive"] == {}
 
 
 def _select_profile(tmp_path: Path, *, profile: str, monkeypatch: pytest.MonkeyPatch) -> Path:
@@ -379,34 +220,6 @@ def _select_profile(tmp_path: Path, *, profile: str, monkeypatch: pytest.MonkeyP
     policy.write_text(updated, encoding="utf-8")
     monkeypatch.setattr("fleet_rlm.config.loader._CONFIG_PATH", policy)
     return policy
-
-
-@pytest.mark.parametrize(("profile", "iterations"), [("daytona-bench", 20), ("daytona-bench-40", 40)])
-def test_daytona_benchmark_profiles_resolve_without_mlflow(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-    profile: str,
-    iterations: int,
-) -> None:
-    import fleet_rlm.config.loader as config
-
-    _select_profile(tmp_path, profile=profile, monkeypatch=monkeypatch)
-    monkeypatch.setenv("FLEET_DAYTONA_API_KEY", "test-daytona-key")
-    # All profiles use the same Modal OpenAI-compatible endpoint; benchmark
-    # profiles disable MLflow tracing.
-    monkeypatch.setenv("FLEET_MODAL_API_KEY", "test-modal-token")
-    monkeypatch.setenv("FLEET_MODAL_BASE_URL", "https://modal.example.test/v1")
-
-    settings = config.load_runtime_settings()
-
-    assert settings.run_environment == "daytona"
-    assert settings.root_model == _MODAL_MODEL
-    assert settings.sub_model == settings.root_model
-    assert settings.daytona_snapshot == "fleet-rlm-python313-v5"
-    assert settings.root_llm_cache is False
-    assert settings.sub_llm_cache is False
-    assert settings.rlm_max_iters == iterations
-    assert settings.mlflow_tracing_enabled is False
 
 
 def test_removed_databricks_daytona_profile_is_rejected(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

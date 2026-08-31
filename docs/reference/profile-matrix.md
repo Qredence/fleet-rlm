@@ -3,14 +3,10 @@
 
 This file is generated from `config/fleet.toml`; the TOML policy is the source of truth. The active default is `daytona-recursive`.
 
-Provider environment names are the only values required by the credentialed live verifier. Managed-policy names are additionally required when `daytona-managed` is selected.
+Provider environment names are the only values required by the credentialed live verifier. Managed-policy names are additionally required when the selected profile declares them.
 
 | Profile | Default | Provider | Root/Sub model | Root/Sub max tokens | Recursion | MLflow | Provider environment names | Managed-policy environment names |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `daytona` | no | OpenAI Chat Completion | `openai/zai-org/GLM-5.3-Flash` / `openai/zai-org/GLM-5.3-Flash` | 16000 / 16000 | enabled | http://127.0.0.1:5001 | `FLEET_DAYTONA_API_KEY`, `FLEET_MODAL_API_KEY`, `FLEET_MODAL_BASE_URL` | — |
-| `daytona-recursive` | yes | OpenAI Chat Completion | `openai/zai-org/GLM-5.3-Flash` / `openai/zai-org/GLM-5.3-Flash` | 32768 / 4000 | enabled | http://127.0.0.1:5001 | `FLEET_DAYTONA_API_KEY`, `FLEET_MODAL_API_KEY`, `FLEET_MODAL_BASE_URL` | — |
-| `daytona-managed` | no | OpenAI Chat Completion | `openai/zai-org/GLM-5.3-Flash` / `openai/zai-org/GLM-5.3-Flash` | 8000 / 8000 | enabled | databricks | `FLEET_DAYTONA_API_KEY`, `FLEET_MODAL_API_KEY`, `FLEET_MODAL_BASE_URL` | `FLEET_DATABASE_URL`, `FLEET_MLFLOW_EXPERIMENT_NAME`, `FLEET_MLFLOW_TRACE_CATALOG`, `FLEET_MLFLOW_TRACE_SCHEMA`, `FLEET_MLFLOW_TRACE_TABLE_PREFIX`, `FLEET_MLFLOW_TRACING_SQL_WAREHOUSE_ID` |
-| `daytona-bench` | no | OpenAI Chat Completion | `openai/zai-org/GLM-5.3-Flash` / `openai/zai-org/GLM-5.3-Flash` | 8000 / 8000 | enabled | disabled | `FLEET_DAYTONA_API_KEY`, `FLEET_MODAL_API_KEY`, `FLEET_MODAL_BASE_URL` | — |
-| `daytona-bench-40` | no | OpenAI Chat Completion | `openai/zai-org/GLM-5.3-Flash` / `openai/zai-org/GLM-5.3-Flash` | 8000 / 8000 | enabled | disabled | `FLEET_DAYTONA_API_KEY`, `FLEET_MODAL_API_KEY`, `FLEET_MODAL_BASE_URL` | — |
+| `daytona-recursive` | yes | OpenAI Chat Completion | `openai/zai-org/GLM-5.3-Flash` / `openai/zai-org/GLM-5.3-Flash` | 131072 / 131072 | enabled | http://127.0.0.1:5001 | `FLEET_DAYTONA_API_KEY`, `FLEET_MODAL_API_KEY`, `FLEET_MODAL_BASE_URL` | — |
 
-The verifier uses the selected row's provider environment names and never checks a hard-coded provider credential. `FLEET_DATABASE_URL` is replaced by a temporary SQLite URL in the live proof; it is a required selected-policy value only for the managed profile.
+The verifier uses the selected row's provider environment names and never checks a hard-coded provider credential. `FLEET_DATABASE_URL` is replaced by a temporary SQLite URL in the live proof.

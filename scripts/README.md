@@ -16,14 +16,8 @@
 | `live_phase1_stream_verify.py` | Run the narrow one-Turn Phase 1 native DSPy stream canary on the normal Daytona profile |
 | `live_phase2_recursive_verify.py` | Run the narrow Phase 2 dedicated-child native DSPy canary on `daytona-recursive` |
 | `live_daytona_verify.py` | Run the opt-in Daytona MVP proof and validate its bounded JSON receipt |
-| `live_p35d_certification.py` | Run the serial P35-D credentialed live certification matrix and aggregate ignored evidence receipts |
-| `live_p53_certification.py` | Run the serial P53.2 Daytona Session rotation and native-child certification, archiving stale receipts |
-| `p53_certification.py` | Build and verify the fail-closed P53.2 continuity/rotation/child evidence manifest |
-| `certification_gate.py` | Seal or verify the fail-closed, same-SHA P35-E certification manifest, including P53.2 evidence |
 | `release_smoke.py` | Smoke-test installed wheel bytes, bundled assets, CLI entry points, and OpenAPI without provider startup |
 | `benchmark_daytona_lifecycle.py` | Benchmark full Daytona create-through-first-execution lifecycle and select retained versus per-Turn mode |
-| `benchmarks/run_prime_oolong.py` | Run the pinned PrimeIntellect Oolong environment against a live Fleet API using Attachments |
-| `benchmarks/prime_oolong_sidecar.py` | Isolated JSONL export/scoring bridge for the pinned PrimeIntellect environment |
 | `benchmarks/corpus_chain.py` | Deterministic corpus-chain benchmark fixtures and report validation |
 | `benchmarks/run_native_long_context.py` | Measure native whole-value URL context at 1/5/10 MiB and emit the paging decision receipt |
 | `benchmarks/run_rlm_latency.py` | Compare live Fleet RLM configuration variants and run the MLflow-native five-task quality gate |
@@ -48,8 +42,8 @@ trusted-host CLI workflows.
 ## Phase 1 Daytona stream canary
 
 `live_phase1_stream_verify.py` is the narrow, credentialed closure proof for
-live per-iteration Runtime Events on the normal `[profiles.daytona]` policy. It
-requires `runtime.live_enabled = true`, the selected `daytona` profile, the
+live per-iteration Runtime Events on the default `daytona-recursive` policy. It
+requires `runtime.live_enabled = true`, the selected `daytona-recursive` profile, the
 provider environment names shown in the [profile matrix](../docs/reference/profile-matrix.md),
 and a clean tracked candidate on a non-`main` branch. Existing environment
 values win over `.env` values.
@@ -88,8 +82,8 @@ state in the child, Root continuity, typed child and Root submissions, and
 strict child cleanup. The receipt records only candidate identity, locked
 versions, non-secret policy identifiers, bounded durations, and booleans. It
 never contains prompts, answers, code, credentials, URLs, trace IDs, Sandbox
-or Volume IDs, or broker details. `daytona` remains non-recursive;
-`daytona-bench` remains Oolong-only.
+or Volume IDs, or broker details. The committed policy is the single
+recursive `daytona-recursive` profile.
 
 The live RLM latency gate is opt-in and never edits Fleet policy. Restart Fleet
 with each candidate configuration, then label that active policy explicitly:
@@ -120,22 +114,3 @@ The Databricks-backed quality loop composes three opt-in steps that all require
    SME labeling session, distills judge guidelines with MemAlign, and re-runs
    the aligned baseline under a named run.
 See `docs/how-to-guides/evaluation-optimization.md` for the full workflow.
-
-## P53.2 Daytona Session certification
-
-P53.2 is a separate live proof from the ten-lane P35-D transport matrix. It
-requires a clean candidate, `FLEET_LIVE=1`, the credentialed Daytona provider,
-and serial execution (`-n 0`). The runner archives stale receipts before each
-lane and seals one manifest only after resident continuity, all seven runtime
-rotation triggers, and the seven native-child outcome lanes pass.
-
-```bash
-make p53-live-certification
-make certification-gate
-make certification-verify
-```
-
-`certification-gate` consumes the current P35-D receipt and the P53.2 manifest;
-`certification-verify` rejects stale SHA, lockfile, DSPy, nested receipt, or
-content-digest identity. Do not report certification from a green P35-D matrix
-alone.

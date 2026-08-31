@@ -77,16 +77,16 @@ global generation monotonicity.
   [FastAPI lifespan events](https://fastapi.tiangolo.com/advanced/events/).
 - The certified Fleet dependency is `dspy==3.3.1` in `pyproject.toml`; older
   plan references are not the current runtime evidence baseline.
-- P53.2 and P35-E are certified on the same clean candidate in this order:
+- The historical P53.2/P35-E same-SHA certification machinery was retired with
+  the one-shot P-certification receipts; archived manifests remain ignored
+  local evidence. Release evidence now flows through the standard gates:
 
   ```bash
-  FLEET_LIVE=1 uv run python scripts/live_p35d_certification.py
-  make p53-live-certification
-  uv run python scripts/validate_release.py service-isolation --services <mission-services-manifest>
-  uv run python scripts/certification_gate.py run --services <mission-services-manifest>
-  uv run python scripts/certification_gate.py verify
+  make check
+  make check-release
+  make build-release
+  git diff --check
   ```
 
-  The P53 manifest is an ignored internal v2 receipt and must bind the current
-  SHA, lockfile, certified DSPy/Daytona identity, all seven rotations, and all
-  seven child lanes before the P35-E gate can close.
+  Credentialed Daytona canaries remain opt-in `FLEET_LIVE=1` live lanes (see
+  the testing-strategy guide).

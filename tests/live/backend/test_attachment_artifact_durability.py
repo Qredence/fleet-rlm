@@ -33,7 +33,7 @@ from fleet_rlm.runtime.bindings import InMemorySandboxBindingStore, SandboxBindi
 from fleet_rlm.runtime.cleanup import RunCleanupSupervisor
 from fleet_rlm.runtime.daytona.run_environment import DaytonaRuntimeResources
 from fleet_rlm.workspace.storage import DaytonaSandboxVolumeFs
-from tests.live.backend._p35d_evidence import candidate_identity, write_receipt
+from tests.live.backend._evidence import candidate_identity, write_receipt
 
 
 class _LiveAttachmentBlob:

@@ -19,7 +19,7 @@ from fleet_rlm.daytona.broker import DaytonaHttpToolBroker
 from fleet_rlm.daytona.session_manager import get_active_lease_registry
 from fleet_rlm.rlm.program import RLMModelBundle
 from fleet_rlm.sessions.models import TurnAccess
-from tests.live.backend._p35d_evidence import candidate_identity, write_receipt
+from tests.live.backend._evidence import candidate_identity, write_receipt
 from tests.live.backend.test_fleet_rlm_daytona_mvp import (
     _live_settings,
     _strict_cleanup,

@@ -382,7 +382,7 @@ def _policy(settings: Any) -> dict[str, str]:
         "sub_model": settings.sub_model,
     }
     if policy != {
-        "profile": "daytona",
+        "profile": "daytona-recursive",
         "environment": "daytona",
         "root_model": _LIVE_ROOT_MODEL,
         "sub_model": _LIVE_SUB_MODEL,

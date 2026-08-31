@@ -27,13 +27,9 @@ def test_settings_policy_is_loopback_only_and_revision_checked(monkeypatch, tmp_
         assert body["revision"]
         assert {scope["name"] for scope in body["scopes"]} == {
             "defaults",
-            "daytona",
             "daytona-recursive",
-            "daytona-managed",
-            "daytona-bench",
-            "daytona-bench-40",
         }
-        daytona_fields = next(scope for scope in body["scopes"] if scope["name"] == "daytona")["fields"]
+        daytona_fields = next(scope for scope in body["scopes"] if scope["name"] == "daytona-recursive")["fields"]
         fields_by_path = {field["path"]: field["value"] for field in daytona_fields}
         assert fields_by_path["llm.root.model"] == "openai/zai-org/GLM-5.3-Flash"
         assert fields_by_path["llm.root.api_key_env"] == "FLEET_MODAL_API_KEY"

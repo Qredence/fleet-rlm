@@ -26,7 +26,7 @@ from fleet_rlm.rlm.events import ToolEventView
 from fleet_rlm.rlm.program import has_llm_credentials
 from fleet_rlm.rlm.recursion import RecursiveRLMExecutor
 from tests.live.backend._database import upgrade_to_head
-from tests.live.backend._p35d_evidence import candidate_identity, write_receipt
+from tests.live.backend._evidence import candidate_identity, write_receipt
 from tests.live.backend.test_phase1_daytona_stream import _strict_cleanup
 
 pytestmark = [pytest.mark.live_daytona, pytest.mark.timeout(960)]
