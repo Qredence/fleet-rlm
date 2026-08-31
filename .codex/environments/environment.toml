@@ -27,22 +27,22 @@ command = "uv run fleet-rlm serve-api --port 8000"
 [[actions]]
 name = "Terminal Client: Install"
 icon = "run"
-command = "pnpm --dir tools/fleet-tui install --frozen-lockfile"
+command = "cd tools/fleet-tui && pnpm install --frozen-lockfile"
 
 [[actions]]
 name = "Terminal Client: Run"
 icon = "run"
-command = "pnpm --dir tools/fleet-tui start"
+command = "cd tools/fleet-tui && pnpm start"
 
 [[actions]]
 name = "Terminal Client: Test"
 icon = "test"
-command = "pnpm --dir tools/fleet-tui test"
+command = "cd tools/fleet-tui && pnpm test"
 
 [[actions]]
 name = "Terminal Client: Typecheck"
 icon = "check"
-command = "pnpm --dir tools/fleet-tui typecheck"
+command = "cd tools/fleet-tui && pnpm typecheck"
 
 [[actions]]
 name = "Backend: Format"
