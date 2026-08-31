@@ -11,6 +11,7 @@ import type { FleetSettingsPolicy, FleetSkillCard } from "../../fleet-api-client
 import {
   fieldItem,
   MultiChoiceEditor,
+  ModalSurface,
   parseFieldValue,
   PiCommandPresenter,
   SelectOverlay,
@@ -175,7 +176,9 @@ describe("SkillSelector", () => {
     const selector = new SkillSelector(skills, [], vi.fn());
 
     const initial = selector.render(48);
-    expect(initial.length).toBeLessThanOrEqual(15);
+    // The shared modal adds title/context/rule/footer chrome while staying
+    // within the 80%-of-24-row overlay budget.
+    expect(initial.length).toBeLessThanOrEqual(17);
     expect(initial.every((line) => visibleWidth(line) <= 48)).toBe(true);
     expect(initial.join("\n")).toContain("\x1b[");
 
@@ -192,7 +195,9 @@ describe("SkillSelector", () => {
     selector.handleInput("e\u0301");
     selector.handleInput("\u007f");
 
-    expect(stripAnsi(selector.render(48)[1] ?? "")).toBe("Filter: x");
+    expect(stripAnsi(selector.render(48).find((line) => line.includes("Filter:")) ?? "")).toBe(
+      "Filter: x",
+    );
   });
 
   it("keeps CJK, emoji, and combining marks within a narrow overlay", () => {
@@ -326,9 +331,28 @@ describe("SelectOverlay", () => {
     });
     const output = rendered(overlay);
     expect(output).toContain("Select theme");
+    expect(output).toContain("MENU");
     expect(output).toContain("Current: dark");
     expect(output).toContain("Enter apply · Esc cancel");
     expect(overlay.render(60).every((line) => visibleWidth(line) <= 60)).toBe(true);
+  });
+
+  it("uses a padded adaptive pi-tui Box surface without swallowing picker input", () => {
+    const overlay = new SelectOverlay(items, {
+      title: "Select theme",
+      hint: "Enter apply",
+    });
+    const surface = new ModalSurface(overlay);
+    const onSelect = vi.fn();
+    overlay.onSelect = onSelect;
+
+    const lines = surface.render(44);
+    expect(lines.every((line) => visibleWidth(line) === 44)).toBe(true);
+    expect(lines.every((line) => line.includes("\x1b[48;"))).toBe(true);
+    expect(stripAnsi(lines.join("\n"))).toContain("ESC close");
+
+    surface.handleInput("\r");
+    expect(onSelect).toHaveBeenCalledWith(expect.objectContaining({ value: "dark" }));
   });
 
   it("preselects the configured value", () => {
@@ -369,7 +393,7 @@ describe("SelectOverlay", () => {
   });
 });
 
-describe("PiCommandPresenter interactive settings editor", () => {
+describe("PiCommandPresenter", () => {
   const ENTER = "\r";
   const ESCAPE = "\x1b";
   const DOWN = "\x1b[B";
@@ -433,6 +457,34 @@ describe("PiCommandPresenter interactive settings editor", () => {
       hide,
     };
   }
+
+  it("shows a filterable help palette and inserts the selected command", () => {
+    const { ui, overlay, hide } = fakeUi();
+    const setText = vi.fn();
+    const presenter = new PiCommandPresenter(
+      ui,
+      { setText } as unknown as Editor,
+      new ConversationStore(),
+    );
+
+    presenter.showHelp([
+      { name: "help", usage: "/help", description: "Show help", handler: vi.fn() },
+      { name: "status", usage: "/status", description: "Show status", handler: vi.fn() },
+    ]);
+    const screen = overlay();
+    expect(stripAnsi(screen.render(80).join("\n"))).toContain("2 commands");
+    expect(stripAnsi(screen.render(80).join("\n"))).toContain("Ctrl+Shift+F search");
+
+    for (const key of "status") screen.handleInput(key);
+    const filtered = stripAnsi(screen.render(80).join("\n"));
+    expect(filtered).toContain("Filter: status");
+    expect(filtered).toContain("/status");
+    expect(filtered).not.toContain("/help");
+
+    screen.handleInput(ENTER);
+    expect(setText).toHaveBeenCalledWith("/status ");
+    expect(hide).toHaveBeenCalledTimes(1);
+  });
 
   it("keeps the overlay open across successive saves and uses the freshest revision", async () => {
     const { ui, overlay, hide } = fakeUi();

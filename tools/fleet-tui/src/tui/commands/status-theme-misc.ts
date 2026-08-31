@@ -22,7 +22,7 @@ export const helpCommand: CommandSpec = {
       .join("\n");
     appendSystem(
       ctx.store,
-      `Fleet TUI commands\n\n${lines}\n\nKeybindings:\n  Enter         submit prompt\n  Shift+Enter   insert newline\n  Escape        cancel current Run\n  Ctrl+C        clear editor; press twice while empty to exit\n  Ctrl+D        delete forward, or exit when the editor is empty\n  Arrow Up/Dn   history`,
+      `Fleet TUI commands\n\n${lines}\n\nKeybindings:\n  Enter         submit prompt\n  Shift+Enter   insert newline\n  Escape        cancel current Run\n  Ctrl+O        fold the latest Tool, code, or output card\n  Ctrl+Shift+F  search the transcript\n  PgUp/PgDn     scroll the transcript\n  Home/End      jump to transcript start/end\n  Ctrl+C        clear editor; press twice while empty to exit\n  Ctrl+D        delete forward, or exit when the editor is empty\n  Ctrl+Z        suspend Fleet\n  Arrow Up/Dn   editor history`,
     );
   },
 };

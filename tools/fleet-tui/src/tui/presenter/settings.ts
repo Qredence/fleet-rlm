@@ -13,7 +13,7 @@ import type { SettingsUpdate } from "../commands/registry.js";
 import { dropLastGrapheme } from "../terminal-text.js";
 import { selectTheme, theme } from "../theme.js";
 
-import { isPrintableInput } from "./overlay.js";
+import { isPrintableInput, overlayHint, overlayRule, overlayTitle } from "./overlay.js";
 
 export type SettingsField = FleetSettingsPolicy["scopes"][number]["fields"][number];
 
@@ -164,17 +164,20 @@ export class TextSettingEditor implements Component {
   render(width: number): string[] {
     const safeWidth = Math.max(1, width);
     const lines = [
-      theme.fg("accent", theme.bold(`${this.field.group} · ${this.field.label}`)),
-      theme.fg(
-        "muted",
-        `Current: ${displayValue(this.field.value)}${this.numeric ? " (number)" : ""} · Enter save · Escape back`,
-      ),
+      overlayTitle(`${this.field.group} · ${this.field.label}`),
+      overlayHint(`Current: ${displayValue(this.field.value)}${this.numeric ? " (number)" : ""}`),
+      overlayRule(safeWidth),
       "",
       `${theme.fg("muted", "New value:")} ${this.value || theme.fg("dim", "(type a value)")}`,
     ];
     if (this.error) {
       lines.push(theme.fg("error", this.error));
     }
+    lines.push(
+      "",
+      overlayRule(safeWidth),
+      `${theme.fg("accent", "ENTER")} ${overlayHint("save  ·  Esc back")}`,
+    );
     return lines.map((line) => truncateToWidth(line, safeWidth, "…"));
   }
 
@@ -225,8 +228,9 @@ export class MultiChoiceEditor implements Component {
     const safeWidth = Math.max(1, width);
     const choices = choicesOf(this.field);
     const lines = [
-      theme.fg("accent", theme.bold(`${this.field.group} · ${this.field.label}`)),
-      theme.fg("muted", "Space toggle · Enter confirm · Escape back"),
+      overlayTitle(`${this.field.group} · ${this.field.label}`),
+      overlayHint("Choose the values to write on the next save"),
+      overlayRule(safeWidth),
       "",
       ...(choices.length > 0 ? choices : ["(no choices)"]).map((choice, index) => {
         const checked = this.selected.includes(choice) ? "x" : " ";
@@ -234,6 +238,9 @@ export class MultiChoiceEditor implements Component {
         const selected = index === this.index;
         return `${selected ? selectTheme.selectedPrefix(">") : " "} ${selected ? selectTheme.selectedText(label) : label}`;
       }),
+      "",
+      overlayRule(safeWidth),
+      `${theme.fg("accent", "SPACE")} ${overlayHint("toggle  ·  Enter confirm  ·  Esc back")}`,
     ];
     return lines.map((line) => truncateToWidth(line, safeWidth, "…"));
   }

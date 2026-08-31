@@ -201,7 +201,7 @@ class FleetTuiApplicationImpl implements FleetTuiApplication {
           message: {
             id: `command-error-${Date.now()}`,
             kind: "error",
-            text: `Unknown command: /${parsed.name}`,
+            text: `Unknown command: /${parsed.name}. Type / to browse commands or use /help.`,
             ts: Date.now(),
           },
         });
