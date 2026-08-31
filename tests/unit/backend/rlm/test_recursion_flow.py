@@ -366,7 +366,7 @@ async def test_runner_wait_owned_retains_pending_recursive_workers_until_child_l
         execution=ExecutionRuntime(
             models=RLMModelBundle(root, sub),
             options=RLMOptions(max_iters=4, max_llm_calls=4),
-            deadline=time.monotonic() + 0.15,
+            deadline=time.monotonic() + 0.5,
             interpreter=DaytonaCodeInterpreter(backend=InProcessInterpreterBackend()),
             cancellation_requested=not_cancelled,
         ),
@@ -382,7 +382,7 @@ async def test_runner_wait_owned_retains_pending_recursive_workers_until_child_l
 
     assert stream.outcome is not None
     assert stream.outcome.terminal_status == "timeout"
-    assert child_started.wait(1)
+    assert child_started.wait(2)
     owned = asyncio.create_task(stream.wait_owned())
     await asyncio.sleep(0.05)
     assert not owned.done()

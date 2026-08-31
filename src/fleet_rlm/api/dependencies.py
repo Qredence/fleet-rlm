@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
 import ipaddress
+from collections.abc import Callable
 from typing import Annotated
+from uuid import UUID
 
 from fastapi import Depends, HTTPException, Request
 
@@ -60,6 +63,18 @@ def get_ready_runtime_inventory(request: Request) -> RuntimeInventory:
     return inventory
 
 
+def get_runtime_inventory_if_ready(request: Request) -> RuntimeInventory | None:
+    """Return the composed inventory without failing pre-composition requests.
+
+    Health probes must distinguish "process alive but not composed" from
+    "composition complete", so they read composition readiness directly
+    instead of sharing the closed 503 dependency used by serving routes.
+    """
+    if not getattr(request.app.state, "composition_ready", False):
+        return None
+    return get_runtime_inventory(request.app)
+
+
 def get_turn_runtime(request: Request) -> TurnRuntime:
     runtime = get_ready_runtime_inventory(request).turn_runtime
     if runtime is None:
@@ -91,6 +106,36 @@ def get_session_catalog(request: Request) -> SessionCatalog:
 def get_session_runtime_registry(request: Request) -> SessionRLMRegistry | None:
     """Return the process-local resident runtime registry when composed."""
     return get_ready_runtime_inventory(request).session_runtime_registry
+
+
+def get_session_prewarm(request: Request) -> Callable[[UUID, UUID, UUID], asyncio.Task[None]] | None:
+    """Return a fire-and-forget Session sandbox pre-warm trigger, if composed.
+
+    The returned callable schedules a background acquisition of the
+    provider Sandbox and canonical Volume layout for a newly created
+    Session, so the first Turn reuses a warm binding instead of paying
+    sandbox creation and layout on the user-visible path. Failures inside
+    the background task are suppressed: a pre-warm is an optimization, and
+    the first Turn acquires normally when no warm binding exists.
+    """
+    manager = get_ready_runtime_inventory(request).session_manager
+    if manager is None:
+        return None
+    prewarm = manager.prewarm_session
+
+    def schedule(session_id: UUID, user_id: UUID, workspace_id: UUID) -> asyncio.Task[None]:
+        async def run_prewarm() -> None:
+            try:
+                await prewarm(session_id, user_id=user_id, workspace_id=workspace_id)
+            except asyncio.CancelledError:
+                raise
+            except BaseException:
+                # Suppressed by design: the first Turn retries acquisition.
+                pass
+
+        return asyncio.create_task(run_prewarm(), name=f"fleet-session-prewarm-{session_id}")
+
+    return schedule
 
 
 def get_run_lifecycle(request: Request) -> RunLifecycle:
@@ -139,7 +184,9 @@ ArtifactReaderDep = Annotated[ArtifactReader, Depends(get_artifact_reader)]
 AttachmentLifecycleDep = Annotated[AttachmentLifecycle, Depends(get_attachment_lifecycle)]
 SessionCatalogDep = Annotated[SessionCatalog, Depends(get_session_catalog)]
 SessionRuntimeRegistryDep = Annotated[SessionRLMRegistry | None, Depends(get_session_runtime_registry)]
+SessionPrewarmDep = Annotated[Callable[[UUID, UUID, UUID], asyncio.Task[None]] | None, Depends(get_session_prewarm)]
 RunLifecycleDep = Annotated[RunLifecycle, Depends(get_run_lifecycle)]
+RuntimeInventoryIfReadyDep = Annotated[RuntimeInventory | None, Depends(get_runtime_inventory_if_ready)]
 SettingsDep = Annotated[Settings, Depends(get_settings)]
 SkillCatalogDep = Annotated[SkillCatalog, Depends(get_skill_catalog)]
 ConfigPolicyDep = Annotated[ConfigPolicyService, Depends(get_config_policy)]
@@ -153,7 +200,9 @@ __all__ = [
     "ConfigPolicyDep",
     "LocalScopeDep",
     "RunLifecycleDep",
+    "RuntimeInventoryIfReadyDep",
     "SessionCatalogDep",
+    "SessionPrewarmDep",
     "SessionRuntimeRegistryDep",
     "SettingsDep",
     "SkillCatalogDep",

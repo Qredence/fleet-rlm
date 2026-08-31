@@ -132,7 +132,8 @@ paths:
         \nParameters:\n    body (SessionCreateRequest): Session creation data, including\
         \ the optional title.\n    identity (LocalScopeDep): Authenticated user and\
         \ workspace scope.\n    repo (SessionCatalogDep): Session repository used\
-        \ to create the session.\n\nReturns:\n    SessionDetailResponse: The newly\
+        \ to create the session.\n    prewarm (SessionPrewarmDep): Optional background\
+        \ Sandbox pre-warm trigger.\n\nReturns:\n    SessionDetailResponse: The newly\
         \ created session details."
       operationId: create_session
       requestBody:
@@ -806,6 +807,41 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+  /health:
+    get:
+      tags:
+      - health
+      summary: Get Health
+      description: 'Liveness: the process is serving HTTP regardless of composition
+        state.'
+      operationId: get_health
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthLivenessResponse'
+  /health/ready:
+    get:
+      tags:
+      - health
+      summary: Get Readiness
+      description: 'Readiness: composition installed and the configured database answers.'
+      operationId: get_readiness
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthReadinessResponse'
+        '503':
+          description: Service is not ready
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
 components:
   schemas:
     ArtifactResponse:
@@ -1128,6 +1164,43 @@ components:
       - state
       - input
       title: DynamicToolUIMessagePart
+    HealthLivenessResponse:
+      properties:
+        status:
+          type: string
+          const: ok
+          title: Status
+        app:
+          type: string
+          title: App
+        version:
+          type: string
+          title: Version
+      type: object
+      required:
+      - status
+      - app
+      - version
+      title: HealthLivenessResponse
+      description: Liveness payload — the process is serving HTTP; no dependency checks.
+    HealthReadinessResponse:
+      properties:
+        status:
+          type: string
+          const: ready
+          title: Status
+        database:
+          type: string
+          enum:
+          - ok
+          - not_configured
+          title: Database
+      type: object
+      required:
+      - status
+      - database
+      title: HealthReadinessResponse
+      description: Readiness payload — composition installed and the database answers.
     JsonValue: {}
     ReasoningUIMessagePart:
       properties:

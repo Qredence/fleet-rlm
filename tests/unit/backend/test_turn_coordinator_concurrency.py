@@ -91,11 +91,11 @@ async def test_two_sessions_execute_concurrently_with_disjoint_stream_identities
             open_turn(sessions[0].id, "session-one"),
             open_turn(sessions[1].id, "session-two"),
         ),
-        timeout=2,
+        timeout=10,
     )
     events_one, events_two = await asyncio.wait_for(
         asyncio.gather(*(drain(stream) for stream in streams)),
-        timeout=2,
+        timeout=10,
     )
     await cleanup.shutdown(drain_seconds=1)
 

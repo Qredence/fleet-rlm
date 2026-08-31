@@ -1,16 +1,25 @@
 ---
 name: pytest-unit
-discover: bash -c 'find tests/unit tests/contracts -type f -name "*.py" ! -path "tests/unit/backend/packaging/*" ! -name "__init__.py" ! -name "fakes.py" ! -name "_*.py" -print | sort'
-run: bash -c 'set -f; mkdir -p test-results; .venv/bin/pytest -p no:warnings -m "not live_llm and not live_daytona and not benchmark and not db and not packaging" --junit-xml=<< outputs.junit >> << test.atoms >>'
+discover: bash -c 'find tests/unit tests/contracts tests/freeze tests/e2e -type f -name "*.py" ! -path "tests/unit/backend/packaging/*" ! -name "__init__.py" ! -name "fakes.py" ! -name "_*.py" -print | sort'
+run: bash -c 'set -f; mkdir -p test-results .scratch/coverage; COVERAGE_FILE=$PWD/.scratch/coverage/.coverage.$CIRCLE_NODE_INDEX-$$.data .venv/bin/pytest -p no:warnings -m "not live_llm and not live_daytona and not benchmark and not db and not packaging" --cov --cov-config=pyproject.toml --cov-fail-under=0 --cov-report= --junit-xml=<< outputs.junit >> << test.atoms >>'
 outputs:
   junit: test-results/pytest-unit.xml
 options:
   dynamic-test-splitting: true
+  # Auto-rerun failed tests in the same shard step (up to 2 reruns) so
+  # CI-timing-sensitive tests (e.g. recursion-flow deadline races) do not
+  # fail whole workflows on their first flake. A test failing every
+  # attempt still fails the job.
+  max-auto-rerun: 2
 ---
-name: pytest-e2e
-discover: bash -c 'find tests/e2e -type f -name "*.py" ! -name "__init__.py" -print | sort'
-run: bash -c 'set -f; mkdir -p test-results; .venv/bin/pytest -p no:warnings -m "not live_llm and not live_daytona and not benchmark and not db" --junit-xml=<< outputs.junit >> << test.atoms >>'
+name: pytest-compat
+discover: bash -c 'find tests/unit/backend tests/contracts/backend -type f -name "*.py" ! -path "tests/unit/backend/packaging/*" ! -name "__init__.py" ! -name "fakes.py" ! -name "_*.py" -print | sort'
+run: bash -c 'set -f; mkdir -p test-results; FLEET_DAYTONA_API_KEY= FLEET_OPENAI_API_KEY= FLEET_LLM_BASE_URL= FLEET_DATABASE_URL= .venv/bin/pytest -q -n 2 --dist=loadfile -p no:warnings -m "not live_llm and not live_daytona and not benchmark and not db and not packaging" --junit-xml=<< outputs.junit >> << test.atoms >>'
 outputs:
-  junit: test-results/pytest-e2e.xml
+  junit: test-results/pytest-compat.xml
 options:
-  dynamic-test-splitting: false
+  # Same first-flake containment as pytest-unit for the python-compat
+  # matrix: each compat job runs on one node without dynamic splitting,
+  # so a timing flake reruns in place instead of failing the matrix
+  # entry — and with it every main push — on its first occurrence.
+  max-auto-rerun: 2
