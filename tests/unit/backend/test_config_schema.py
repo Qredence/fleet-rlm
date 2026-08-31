@@ -294,6 +294,8 @@ def test_committed_policy_loads_every_profile_identically(monkeypatch: pytest.Mo
         "FLEET_DAYTONA_API_KEY",
         "DATABRICKS_TOKEN",
         "FLEET_DATABRICKS_AI_GATEWAY_BASE_URL",
+        "FLEET_MODAL_API_KEY",
+        "FLEET_MODAL_BASE_URL",
         "FLEET_DATABASE_URL",
         "POSTHOG_PROJECT_TOKEN",
     ):

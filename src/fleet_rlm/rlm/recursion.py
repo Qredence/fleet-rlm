@@ -25,7 +25,7 @@ from fleet_rlm.chat.session_context import SessionContextManifest
 from fleet_rlm.config.settings import Settings
 from fleet_rlm.observability.diagnostics import trace_failure_category
 from fleet_rlm.observability.tracing import start_turn_span
-from fleet_rlm.rlm._dspy_compat import CodeInterpreter, _RLMTraceCallback
+from fleet_rlm.rlm._dspy_compat import CodeInterpreter, FleetJSONAdapter, _RLMTraceCallback
 from fleet_rlm.rlm.events import Status, ToolEventView, ToolObserver, observe_tool
 from fleet_rlm.rlm.program import (
     RLMModelBundle,
@@ -1326,7 +1326,10 @@ class RecursiveRLMExecutor:
         self._ensure_call_authorized(batch_cancelled)
         with dspy.context(
             lm=child_models.root_lm,
-            adapter=dspy.JSONAdapter(),
+            # Same pinned JSON action protocol plus bounded corrective re-ask
+            # as the Root lane; a child action must not die on one empty
+            # provider response either.
+            adapter=FleetJSONAdapter(),
             callbacks=[
                 _RLMTraceCallback(
                     root_lm=child_models.root_lm,
@@ -1536,7 +1539,7 @@ class RecursiveRLMExecutor:
         predictor = dspy.Predict(RecursiveSubtaskSignature)
         with dspy.context(
             lm=self._models.sub_lm,
-            adapter=dspy.JSONAdapter(),
+            adapter=FleetJSONAdapter(),
             callbacks=[
                 _RLMTraceCallback(
                     root_lm=self._models.root_lm,

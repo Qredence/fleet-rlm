@@ -25,7 +25,7 @@ import dspy
 from fleet_rlm.json_types import JsonValue, validate_json_value
 from fleet_rlm.observability.diagnostics import trace_failure_category
 from fleet_rlm.observability.tracing import turn_phase_span
-from fleet_rlm.rlm._dspy_compat import _RLMTraceCallback
+from fleet_rlm.rlm._dspy_compat import FleetJSONAdapter, _RLMTraceCallback
 from fleet_rlm.rlm.result import (
     ExecutionDetail,
     RLMConfigError,
@@ -1176,8 +1176,10 @@ class ExecutionTraceAssembler:
                 callbacks=[trace_callback],
                 # Keep the pinned DSPy JSON action protocol authoritative. A
                 # provider-native token stream is an adapter failure, not a
-                # second grammar that Fleet should reinterpret.
-                adapter=dspy.JSONAdapter(),
+                # second grammar that Fleet should reinterpret. FleetJSONAdapter
+                # adds only the bounded corrective re-ask, so one empty or
+                # unparseable action response cannot discard the whole Turn.
+                adapter=FleetJSONAdapter(),
                 track_usage=True,
             ),
         ):

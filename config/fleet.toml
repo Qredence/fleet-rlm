@@ -22,7 +22,9 @@ max_iters = 20
 max_llm_calls = 50
 max_output_chars = 10000
 max_execution_output_chars = 4000
-execution_timeout_s = 120
+# Sub-LLM cells can stream for minutes; a shorter read-timeout failed the
+# whole Turn as an infrastructure error before slow completions finished.
+execution_timeout_s = 300
 recursion_enabled = true
 recursion_max_calls = 4
 recursion_max_prompt_chars = 50000
@@ -99,22 +101,30 @@ experiment_name = "fleet-rlm"
 [profiles.daytona-recursive.runtime]
 environment = "daytona"
 
+# Selected interactive recursive profile routed through the Modal-hosted
+# GLM-5.3-Flash vLLM endpoint. The `openai/` prefix keeps DSPy on the explicit
+# OpenAI-compatible custom-base-URL path; the provider prefix is stripped and
+# `zai-org/GLM-5.3-Flash` is the model id sent to the gateway. The endpoint has
+# no reasoning-effort surface, so the override stays unset for both roles.
 [profiles.daytona-recursive.llm.root]
-model = "databricks-deepseek-v4-flash-0731"
-api_key_env = "DATABRICKS_TOKEN"
-base_url_env = "FLEET_DATABRICKS_AI_GATEWAY_BASE_URL"
-max_tokens = 16000
+model = "openai/zai-org/GLM-5.3-Flash"
+api_key_env = "FLEET_MODAL_API_KEY"
+base_url_env = "FLEET_MODAL_BASE_URL"
+# Reasoning-heavy completions can consume the entire budget before any JSON
+# output text is emitted (finish_reason=length, empty completion). Keep
+# headroom; FleetJSONAdapter bounds the remaining truncation risk.
+max_tokens = 32768
 cache = false
-reasoning_effort = "low"
 
 [profiles.daytona-recursive.llm.sub]
-model = "databricks-deepseek-v4-flash-0731"
-api_key_env = "DATABRICKS_TOKEN"
-base_url_env = "FLEET_DATABRICKS_AI_GATEWAY_BASE_URL"
-max_tokens = 16000
+model = "openai/zai-org/GLM-5.3-Flash"
+api_key_env = "FLEET_MODAL_API_KEY"
+base_url_env = "FLEET_MODAL_BASE_URL"
+# Bounded Sub-LLM output keeps repetition-loop degeneration from consuming the
+# per-cell execution timeout observed on the previous Databricks endpoint.
+max_tokens = 4000
 temperature = 0
 cache = false
-reasoning_effort = "low"
 
 [profiles.daytona-recursive.mlflow]
 tracing_enabled = true

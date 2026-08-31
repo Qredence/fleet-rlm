@@ -20,7 +20,10 @@ if TYPE_CHECKING:
 
 import dspy
 from dspy import CodeExecutionError, CodeInterpreter, CodeInterpreterError, FinalOutput
+from dspy.clients.base_lm import BaseLM
+from dspy.signatures.signature import Signature
 from dspy.utils.callback import BaseCallback
+from dspy.utils.exceptions import AdapterParseError
 
 from fleet_rlm.json_types import JsonValue
 from fleet_rlm.rlm.result import _safe_usage_entry, sanitize_public_text, truncate_public_text
@@ -75,6 +78,173 @@ def needs_binding_refresh(
 ) -> bool:
     """Whether interpreter bindings should be refreshed for this action."""
     return desired_generation != installed_generation or not broker_ready
+
+
+# ---------------------------------------------------------------------------
+# Bounded re-ask adapter for the pinned JSON action protocol
+# ---------------------------------------------------------------------------
+
+RETRY_CORRECTION_FIELD = "fleet_retry_correction"
+
+_EMPTY_RESPONSE_MARKER = "The LM returned an empty or null response"
+
+DEFAULT_PARSE_RETRIES = 2
+
+
+def _retry_correction_feedback(attempt: int, exc: AdapterParseError) -> str:
+    """
+    Build bounded corrective feedback for one failed action attempt.
+
+    The raw LM response is never echoed back: provider output is untrusted
+    prompt-facing text, so only the failure category is described.
+
+    Parameters:
+        attempt (int): The retry attempt number, starting at 1.
+        exc (AdapterParseError): The parse failure that triggered the retry.
+
+    Returns:
+        str: Bounded instruction text for the corrected re-ask.
+    """
+    message = str(getattr(exc, "message", "") or "")
+    if _EMPTY_RESPONSE_MARKER in message:
+        return (
+            f"Correction (attempt {attempt}): the previous response produced no parseable output. "
+            "It was empty or null, typically because generation exhausted the output-token budget "
+            "before emitting any text. Respond now with one JSON object containing exactly the "
+            "required output fields. Keep reasoning short and do not repeat earlier analysis."
+        )
+    return (
+        f"Correction (attempt {attempt}): the previous response was not a JSON object containing "
+        "the required output fields. Respond now with one JSON object containing exactly the "
+        "required output fields; no surrounding prose, markdown, or code fences."
+    )
+
+
+def _retry_call_arguments(
+    signature: type[Signature],
+    inputs: dict[str, Any],
+    attempt: int,
+    exc: AdapterParseError,
+) -> tuple[type[Signature], dict[str, Any]]:
+    """
+    Extend one failed action call with a bounded corrective input field.
+
+    Parameters:
+        signature (type[Signature]): The signature used by the failed call.
+        inputs (dict[str, Any]): The inputs used by the failed call; never mutated.
+        attempt (int): The retry attempt number, starting at 1.
+        exc (AdapterParseError): The parse failure that triggered the retry.
+
+    Returns:
+        tuple[type[Signature], dict[str, Any]]: The retry signature and inputs.
+    """
+    retry_signature = signature
+    if RETRY_CORRECTION_FIELD not in signature.input_fields:
+        retry_signature = signature.append(
+            RETRY_CORRECTION_FIELD,
+            dspy.InputField(desc="Bounded corrective feedback for the previous failed attempt; follow it."),
+        )
+    retry_inputs = dict(inputs)
+    retry_inputs[RETRY_CORRECTION_FIELD] = _retry_correction_feedback(attempt, exc)
+    return retry_signature, retry_inputs
+
+
+class FleetJSONAdapter(dspy.JSONAdapter):
+    """The pinned JSON action protocol plus a bounded corrective re-ask.
+
+    DSPy 3.3.1 raises ``AdapterParseError`` for an empty or unparseable action
+    response without retrying: the legacy ``Retry`` module is removed and
+    ``LM.num_retries`` only covers transient provider failures. One provider
+    hiccup -- typically reasoning consuming the entire completion budget
+    before any output token is emitted -- would otherwise discard a whole
+    Turn's trajectory. Following DSPy's own adapter-level fallback precedent
+    (``ChatAdapter.use_json_adapter_fallback``, ``dspy/adapters/chat_adapter.py``),
+    this subclass keeps the stock ``JSONAdapter`` protocol authoritative and
+    only adds a bounded re-ask of the same LM with corrective feedback appended
+    as a signature input. The final ``AdapterParseError`` propagates unchanged
+    once retries are exhausted, so Fleet's failure mapping stays intact.
+
+    Parameters:
+        max_parse_retries: Additional LM attempts after the first failed action
+            response. Defaults to ``DEFAULT_PARSE_RETRIES``.
+    """
+
+    def __init__(self, *, max_parse_retries: int = DEFAULT_PARSE_RETRIES) -> None:
+        """Initialize the adapter with a bounded retry budget.
+
+        Parameters:
+            max_parse_retries (int): Additional attempts after the first failed
+                action response; must be a non-negative integer.
+
+        Raises:
+            ValueError: If ``max_parse_retries`` is not a non-negative integer.
+        """
+        if not isinstance(max_parse_retries, int) or isinstance(max_parse_retries, bool) or max_parse_retries < 0:
+            raise ValueError(f"max_parse_retries must be a non-negative integer, got {max_parse_retries!r}")
+        super().__init__()
+        self._max_parse_retries = max_parse_retries
+
+    def __call__(
+        self,
+        lm: BaseLM,
+        lm_kwargs: dict[str, Any],
+        signature: type[Signature],
+        demos: list[dict[str, Any]],
+        inputs: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        """
+        Execute the stock JSONAdapter pipeline with a bounded corrective re-ask.
+
+        Parameters:
+            lm (BaseLM): The language model instance to use for generation.
+            lm_kwargs (dict[str, Any]): Additional keyword arguments for the LM call.
+            signature (type[Signature]): The DSPy signature for this call.
+            demos (list[dict[str, Any]]): Few-shot examples included in the prompt.
+            inputs (dict[str, Any]): The current input values for this call.
+
+        Returns:
+            list[dict[str, Any]]: Parsed responses keyed by the signature output fields.
+        """
+        attempt = 0
+        while True:
+            try:
+                return super().__call__(lm, lm_kwargs, signature, demos, inputs)
+            except AdapterParseError as exc:
+                if attempt >= self._max_parse_retries:
+                    raise
+                attempt += 1
+                signature, inputs = _retry_call_arguments(signature, inputs, attempt, exc)
+
+    async def acall(
+        self,
+        lm: BaseLM,
+        lm_kwargs: dict[str, Any],
+        signature: type[Signature],
+        demos: list[dict[str, Any]],
+        inputs: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        """
+        Execute the stock JSONAdapter pipeline with a bounded corrective re-ask.
+
+        Parameters:
+            lm (BaseLM): The language model instance to use for generation.
+            lm_kwargs (dict[str, Any]): Additional keyword arguments for the LM call.
+            signature (type[Signature]): The DSPy signature for this call.
+            demos (list[dict[str, Any]]): Few-shot examples included in the prompt.
+            inputs (dict[str, Any]): The current input values for this call.
+
+        Returns:
+            list[dict[str, Any]]: Parsed responses keyed by the signature output fields.
+        """
+        attempt = 0
+        while True:
+            try:
+                return await super().acall(lm, lm_kwargs, signature, demos, inputs)
+            except AdapterParseError as exc:
+                if attempt >= self._max_parse_retries:
+                    raise
+                attempt += 1
+                signature, inputs = _retry_call_arguments(signature, inputs, attempt, exc)
 
 
 class _RLMReasoningCallback(BaseCallback):
@@ -600,6 +770,7 @@ __all__ = [
     "CodeInterpreter",
     "CodeInterpreterError",
     "FinalOutput",
+    "FleetJSONAdapter",
     "ReasoningObserver",
     "UncertifiedDSpyVersionError",
     "assert_dspy_version",

@@ -148,14 +148,19 @@ Root-only, Run-scoped candidate collector and permits best-effort promotion only
 after a successful durable Turn commit; it does not change explicit-user memory
 behavior.
 
-All committed profiles use the OpenAI-compatible Chat Completion format:
-Root and Sub each use the `databricks-deepseek-v4-flash-0731` endpoint, the
-`DATABRICKS_TOKEN` API-key environment reference, and the configured
-`FLEET_DATABRICKS_AI_GATEWAY_BASE_URL`. `dspy.LM` sends the request to the
-provider's `/chat/completions` endpoint with `model_type="chat"`; no
-provider-specific routing header is required. Interactive profiles cap both
-roles at 16,000 output tokens; managed and benchmark profiles cap both roles at
-8,000. Benchmark profiles disable LM caching and keep MLflow tracing off.
+All committed profiles use the OpenAI-compatible Chat Completion format.
+`dspy.LM` sends the request to the provider's `/chat/completions` endpoint with
+`model_type="chat"`; no provider-specific routing header is required. The
+selected `daytona-recursive` interactive profile routes Root and Sub through
+the Modal-hosted `openai/zai-org/GLM-5.3-Flash` endpoint using the
+`FLEET_MODAL_API_KEY` and `FLEET_MODAL_BASE_URL` environment references, with
+no reasoning-effort override, Root capped at 16,000 output tokens, and Sub
+capped at 4,000 to keep slow sub-LLM completions inside the per-cell execution
+timeout. The `daytona`, `daytona-managed`, and benchmark profiles keep the
+`databricks-deepseek-v4-flash-0731` endpoint behind `DATABRICKS_TOKEN` and
+`FLEET_DATABRICKS_AI_GATEWAY_BASE_URL`; managed and benchmark profiles cap both
+roles at 8,000. Interactive profiles disable LM caching, and benchmark profiles
+also keep MLflow tracing off.
 
 The interactive profiles route traces to the local `fleet-rlm` experiment at
 `http://127.0.0.1:5001`; the supervised `fleet cli` command starts or reuses that
@@ -201,8 +206,10 @@ Fleet restart.
 | --- | --- | --- |
 | `FLEET_DATABASE_URL` | `storage.database_url_env` | Async SQLAlchemy URL; required by the managed profile and durable deployments |
 | `FLEET_DAYTONA_API_KEY` | `daytona.api_key_env` | Daytona provider credential for every profile |
-| `DATABRICKS_TOKEN` | Root/Sub `api_key_env` in every committed profile | Provider API key for the Chat Completion endpoint |
-| `FLEET_DATABRICKS_AI_GATEWAY_BASE_URL` | Root/Sub `base_url_env` in every committed profile | Databricks AI Gateway `/mlflow/v1` base URL (`/chat/completions` is appended) |
+| `DATABRICKS_TOKEN` | Root/Sub `api_key_env` in the Databricks-backed profiles | Databricks provider API key for the Chat Completion endpoint |
+| `FLEET_DATABRICKS_AI_GATEWAY_BASE_URL` | Root/Sub `base_url_env` in the Databricks-backed profiles | Databricks AI Gateway `/mlflow/v1` base URL (`/chat/completions` is appended) |
+| `FLEET_MODAL_API_KEY` | Root/Sub `api_key_env` in `daytona-recursive` | Modal-hosted GLM provider API key for the Chat Completion endpoint |
+| `FLEET_MODAL_BASE_URL` | Root/Sub `base_url_env` in `daytona-recursive` | Modal vLLM `/v1` base URL (`/chat/completions` is appended) |
 | `FLEET_OPENAI_API_KEY` | A custom Root/Sub `api_key_env` reference | OpenAI-compatible provider credential for custom policy only |
 | `FLEET_MLFLOW_EXPERIMENT_NAME` | `daytona-managed.mlflow.experiment_name_env` | Managed MLflow experiment |
 | `FLEET_MLFLOW_TRACE_CATALOG` / `FLEET_MLFLOW_TRACE_SCHEMA` | `daytona-managed.mlflow.*_env` | Unity Catalog destination |

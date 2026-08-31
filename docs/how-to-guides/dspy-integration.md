@@ -294,8 +294,8 @@ uv run python scripts/live_phase2_recursive_verify.py \
 ```
 
 The command requires explicit live authorization, `runtime.live_enabled`, a
-clean tracked non-`main` candidate, the recursive profile, and the
-`databricks-deepseek-v4-flash-0731` endpoint for both model roles. Its receipt
+clean tracked non-`main` candidate, the recursive profile, and the Modal-hosted
+`openai/zai-org/GLM-5.3-Flash` endpoint for both model roles. Its receipt
 contains only candidate/dependency identity, non-secret policy identifiers,
 two bounded durations, and boolean assertions. It excludes prompts, answers,
 code, credentials, URLs, trace IDs, Sandbox IDs, Volume IDs, and broker data.
@@ -324,10 +324,10 @@ Provision the immutable Snapshot named by that profile with the [Daytona
 Snapshot guide](daytona-snapshot.md).
 
 The verifier requires a clean tracked tree on a non-`main` branch, invokes the
-single live pytest scenario once, and performs no automatic retry. It resolves the `databricks-deepseek-v4-flash-0731` Root and Sub roles from
-the selected TOML profile; ambient model variables are ignored, and swapped or
-obsolete model pairs fail the precondition. Its `--help` path requires no
-credentials.
+single live pytest scenario once, and performs no automatic retry. It resolves
+the `openai/zai-org/GLM-5.3-Flash` Root and Sub roles from the selected TOML
+profile; ambient model variables are ignored, and swapped or obsolete model
+pairs fail the precondition. Its `--help` path requires no credentials.
 
 The proof exercises a typed host Signature, state across RLM iterations,
 single and batched recursive calls, a host Tool, a durable workspace write,

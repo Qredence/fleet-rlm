@@ -31,8 +31,8 @@ pytestmark = [pytest.mark.live_daytona, pytest.mark.timeout(960)]
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _RECEIPT_SCHEMA = "fleet.phase2-daytona-recursive/v1"
 _EVIDENCE_ENV = "FLEET_PHASE2_RECURSIVE_EVIDENCE_PATH"
-_LIVE_ROOT_MODEL = os.environ.get("FLEET_LIVE_ROOT_MODEL", "databricks-deepseek-v4-flash-0731")
-_LIVE_SUB_MODEL = os.environ.get("FLEET_LIVE_SUB_MODEL", "databricks-deepseek-v4-flash-0731")
+_LIVE_ROOT_MODEL = os.environ.get("FLEET_LIVE_ROOT_MODEL", "openai/zai-org/GLM-5.3-Flash")
+_LIVE_SUB_MODEL = os.environ.get("FLEET_LIVE_SUB_MODEL", "openai/zai-org/GLM-5.3-Flash")
 _CONTRACT_ID = "fleet.phase2-daytona-recursive"
 
 
@@ -149,7 +149,7 @@ def _load_live_settings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Sett
         _LIVE_ROOT_MODEL,
         _LIVE_SUB_MODEL,
     ):
-        pytest.fail("Phase 2 recursive canary requires the selected DeepSeek recursive policy")
+        pytest.fail("Phase 2 recursive canary requires the selected GLM recursive policy")
     if policy.daytona_api_key is None or not has_llm_credentials(policy):
         pytest.fail("Phase 2 recursive canary is missing configured provider credentials")
     database_url = f"sqlite+aiosqlite:///{(tmp_path / 'phase2-recursive.db').resolve()}"
