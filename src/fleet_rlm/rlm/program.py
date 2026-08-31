@@ -9,6 +9,7 @@ context capsule staging, and native `dspy.RLM` construction.
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import os
@@ -22,6 +23,7 @@ from typing import TYPE_CHECKING, Any, Literal, cast
 from uuid import UUID
 
 import dspy
+from dspy.utils.exceptions import LMRateLimitError, LMServerError, LMTimeoutError, LMTransportError
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from fleet_rlm.config.settings import LLMRoleSettings, Settings
@@ -597,6 +599,7 @@ def build_lm(
     api_key: str | None,
     base_url: str | None = None,
     max_tokens: int | None = None,
+    timeout_seconds: int | None = None,
     temperature: float | None = None,
     reasoning_effort: str | None = None,
     cache: bool = True,
@@ -616,6 +619,8 @@ def build_lm(
         kwargs["api_base"] = base_url
     if max_tokens is not None:
         kwargs["max_tokens"] = max_tokens
+    if timeout_seconds is not None:
+        kwargs["timeout"] = timeout_seconds
     if temperature is not None:
         kwargs["temperature"] = temperature
     if reasoning_effort is not None:
@@ -632,6 +637,8 @@ class RLMModelBundle:
     root_lm: Any
     sub_lm: Any
     utility_lm: Any | None = None
+    deadline: float | None = field(default=None, repr=False, compare=False)
+    reserve_seconds: float = field(default=0.0, repr=False, compare=False)
 
     def __post_init__(self) -> None:
         if self.root_lm is None:
@@ -639,51 +646,190 @@ class RLMModelBundle:
         if self.sub_lm is None:
             raise RLMModelBundleError("sub_lm is required")
 
+    def bind_turn_deadline(self, *, deadline: float, reserve_seconds: float = 0.0) -> RLMModelBundle:
+        """Return isolated Root/Sub runtimes bound to one Turn deadline.
+
+        Production ``dspy.LM`` instances are copied per Turn so a deadline
+        wrapper can never accumulate on a process- or Session-scoped model.
+        Lightweight injected test doubles that do not expose ``copy`` remain
+        untouched; they cannot issue provider calls and preserve the existing
+        preparation-only test seam. A DSPy ``BaseLM`` subclass that overrides
+        ``copy`` is also left in place here: Fleet's live test doubles use that
+        hook to switch the Root response script to a child-specific script,
+        rather than to clone a provider runtime. Child forks still invoke that
+        hook explicitly through :meth:`fork_for_child`.
+        """
+        normalized_reserve = max(0.0, float(reserve_seconds))
+        root_lm = (
+            _copy_lm_for_deadline(self.root_lm, deadline=deadline)
+            if _supports_turn_lm_copy(self.root_lm)
+            else self.root_lm
+        )
+        sub_lm = (
+            _copy_lm_for_deadline(
+                self.sub_lm,
+                deadline=deadline,
+                reserve_seconds=normalized_reserve,
+            )
+            if _supports_turn_lm_copy(self.sub_lm)
+            else self.sub_lm
+        )
+        return RLMModelBundle(
+            root_lm=root_lm,
+            sub_lm=sub_lm,
+            utility_lm=self.utility_lm,
+            deadline=deadline,
+            reserve_seconds=normalized_reserve,
+        )
+
     def fork_for_child(self, *, deadline: float) -> RLMModelBundle:
         """Copy Root/Sub DSPy runtimes and bind every child LM call to one deadline."""
+        reserve_seconds = max(0.0, self.reserve_seconds)
         return RLMModelBundle(
-            root_lm=_copy_lm_for_child(self.root_lm, deadline=deadline),
-            sub_lm=_copy_lm_for_child(self.sub_lm, deadline=deadline),
+            root_lm=_copy_lm_for_deadline(
+                self.root_lm,
+                deadline=deadline,
+                error_message="recursive child LM deadline exceeded",
+            ),
+            sub_lm=_copy_lm_for_deadline(
+                self.sub_lm,
+                deadline=deadline,
+                reserve_seconds=reserve_seconds,
+                error_message="recursive child LM deadline exceeded",
+            ),
             utility_lm=self.utility_lm,
+            deadline=deadline,
+            reserve_seconds=reserve_seconds,
         )
 
 
-def _copy_lm_for_child(lm: Any, *, deadline: float) -> Any:
+_RETRYABLE_LM_ERRORS = (LMRateLimitError, LMServerError, LMTimeoutError, LMTransportError)
+
+
+def _supports_turn_lm_copy(lm: Any) -> bool:
+    """Whether ``lm.copy`` is a provider-runtime clone suitable for Turn binding."""
     copy_lm = getattr(lm, "copy", None)
     if not callable(copy_lm):
-        raise RLMModelBundleError("child LM must support DSPy runtime copy()")
+        return False
+    # The credentialed deterministic lanes use DummyLM.copy() as a semantic
+    # child-script dispatcher. Calling that test-only override while preparing
+    # a Turn would replace the Root script before its first action. A real
+    # BaseLM subclass, including provider adapters with a custom copy method,
+    # still receives the required isolated deadline-bound clone.
+    dummy_lm = getattr(getattr(dspy, "utils", None), "DummyLM", None)
+    return not (
+        isinstance(dummy_lm, type)
+        and isinstance(lm, dummy_lm)
+        and getattr(type(lm), "copy", None) is not dspy.BaseLM.copy
+    )
+
+
+def _copy_lm_for_deadline(
+    lm: Any,
+    *,
+    deadline: float,
+    reserve_seconds: float = 0.0,
+    error_message: str = "Turn LM deadline exceeded",
+) -> Any:
+    """Copy one LM and enforce an absolute deadline on every provider attempt."""
+    copy_lm = getattr(lm, "copy", None)
+    if not callable(copy_lm):
+        raise RLMModelBundleError("deadline-bound LM must support DSPy runtime copy()")
+    retry_budget = getattr(lm, "_fleet_retry_budget", getattr(lm, "num_retries", 0))
+    if not isinstance(retry_budget, int) or isinstance(retry_budget, bool) or retry_budget < 0:
+        retry_budget = 0
     copied = copy_lm(num_retries=0)
     if copied is lm:
-        raise RLMModelBundleError("child LM copy() must return an isolated runtime")
+        raise RLMModelBundleError("deadline-bound LM copy() must return an isolated runtime")
+
+    # DSPy's LM.copy() is intentionally shallow. Remove inherited instance
+    # wrappers before capturing the new copy's class methods so child and
+    # subsequent Turn wrappers never chain closures.
+    instance_dict = getattr(copied, "__dict__", None)
+    if isinstance(instance_dict, dict):
+        instance_dict.pop("forward", None)
+        instance_dict.pop("aforward", None)
 
     original_forward = copied.forward
 
     def forward_with_deadline(*args: Any, **kwargs: Any) -> Any:
-        kwargs["timeout"] = _remaining_lm_timeout(deadline, copied, kwargs)
-        return original_forward(*args, **kwargs)
+        attempt = 0
+        while True:
+            call_kwargs = dict(kwargs)
+            call_kwargs["timeout"] = _remaining_lm_timeout(
+                deadline,
+                copied,
+                call_kwargs,
+                reserve_seconds=reserve_seconds,
+                error_message=error_message,
+            )
+            try:
+                return original_forward(*args, **call_kwargs)
+            except _RETRYABLE_LM_ERRORS:
+                if attempt >= retry_budget:
+                    raise
+                attempt += 1
 
     copied.forward = forward_with_deadline
     original_aforward = getattr(copied, "aforward", None)
     if callable(original_aforward):
 
         async def aforward_with_deadline(*args: Any, **kwargs: Any) -> Any:
-            kwargs["timeout"] = _remaining_lm_timeout(deadline, copied, kwargs)
-            return await original_aforward(*args, **kwargs)
+            attempt = 0
+            while True:
+                call_kwargs = dict(kwargs)
+                call_kwargs["timeout"] = _remaining_lm_timeout(
+                    deadline,
+                    copied,
+                    call_kwargs,
+                    reserve_seconds=reserve_seconds,
+                    error_message=error_message,
+                )
+                try:
+                    return await original_aforward(*args, **call_kwargs)
+                except _RETRYABLE_LM_ERRORS:
+                    if attempt >= retry_budget:
+                        raise
+                    attempt += 1
 
         copied.aforward = aforward_with_deadline
+    for name, value in (
+        ("_fleet_retry_budget", retry_budget),
+        ("_fleet_deadline", deadline),
+        ("_fleet_reserve_seconds", reserve_seconds),
+    ):
+        with contextlib.suppress(AttributeError, TypeError):
+            setattr(copied, name, value)
     return copied
 
 
-def _remaining_lm_timeout(deadline: float, lm: Any, call_kwargs: dict[str, Any]) -> float:
+def _copy_lm_for_child(lm: Any, *, deadline: float) -> Any:
+    """Compatibility helper for callers that copy one child LM directly."""
+    return _copy_lm_for_deadline(
+        lm,
+        deadline=deadline,
+        error_message="recursive child LM deadline exceeded",
+    )
+
+
+def _remaining_lm_timeout(
+    deadline: float,
+    lm: Any,
+    call_kwargs: dict[str, Any],
+    *,
+    reserve_seconds: float = 0.0,
+    error_message: str = "Turn LM deadline exceeded",
+) -> float:
     remaining = deadline - time.monotonic()
-    if remaining <= 0:
-        raise TimeoutError("recursive child LM deadline exceeded")
+    available = remaining - max(0.0, reserve_seconds)
+    if available <= 0:
+        raise TimeoutError(error_message)
     configured = call_kwargs.get("timeout")
     if configured is None:
         configured = getattr(lm, "kwargs", {}).get("timeout")
     if isinstance(configured, (int, float)) and not isinstance(configured, bool) and configured > 0:
-        return min(float(configured), remaining)
-    return remaining
+        return min(float(configured), available)
+    return available
 
 
 def build_model_bundle(settings: Settings) -> RLMModelBundle:
@@ -698,6 +844,7 @@ def build_model_bundle(settings: Settings) -> RLMModelBundle:
             api_key=api_key,
             base_url=sanitize_base_url(policy.base_url),
             max_tokens=policy.max_tokens,
+            timeout_seconds=policy.timeout_seconds,
             temperature=policy.temperature,
             reasoning_effort=policy.reasoning_effort,
             cache=policy.cache,

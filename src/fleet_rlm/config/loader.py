@@ -372,7 +372,9 @@ def _profile_contract(
             model, and environment-reference settings.
     """
     selected_table = _require_mapping(selected, f"profiles.{name}")
-    _validate_policy_table(selected_table, f"profiles.{name}")
+    # Profile tables may override only the fields that differ from defaults;
+    # the merged policy below remains strict about the complete Root/Sub roles.
+    _validate_policy_table(selected_table, f"profiles.{name}", allow_partial_llm=True)
     merged = _deep_merge(defaults, selected_table)
     _validate_policy_table(merged, f"profiles.{name}")
 
@@ -525,8 +527,10 @@ def load_runtime_settings() -> Settings:
         else:
             raise FleetConfigurationError("config.default_profile is required when multiple profiles exist")
     selected = _require_mapping(profiles[profile], f"profiles.{profile}")
-    _validate_policy_table(selected, f"profiles.{profile}")
-    flattened = _flatten_policy(_deep_merge(defaults, selected))
+    _validate_policy_table(selected, f"profiles.{profile}", allow_partial_llm=True)
+    merged = _deep_merge(defaults, selected)
+    _validate_policy_table(merged, f"profiles.{profile}")
+    flattened = _flatten_policy(merged)
     _require_managed_profile_environment_values(profile, flattened, dotenv)
 
     values: dict[str, Any] = dict(flattened.settings)

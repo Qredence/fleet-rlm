@@ -27,12 +27,12 @@ def test_policy_read_exposes_toml_values_without_environment_secret_values(tmp_p
 
     field = _field(service.read(), "daytona", "llm.root.api_key_env")
 
-    assert field["value"] == "DATABRICKS_TOKEN"
+    assert field["value"] == "FLEET_MODAL_API_KEY"
     assert field["editor"] == "text"
     assert "secret" not in str(field).lower()
 
     model = _field(service.read(), "daytona", "llm.root.model")
-    assert model["value"] == "databricks-deepseek-v4-flash-0731"
+    assert model["value"] == "openai/zai-org/GLM-5.3-Flash"
     assert model["editor"] == "text"
 
     tracking_uri = _field(service.read(), "daytona", "mlflow.tracking_uri")
@@ -65,7 +65,7 @@ def test_policy_update_preserves_comments_and_validates_all_profiles(tmp_path: P
 
     assert _field(after, "defaults", "rlm.max_iters")["value"] == 21
     content = policy.read_text(encoding="utf-8")
-    assert "# Prime Oolong mechanics profile" in content
+    assert "# Prime Oolong benchmark profile" in content
     assert "max_iters = 21" in content
     assert _field(after, "daytona", "rlm.max_iters")["value"] == 21
 

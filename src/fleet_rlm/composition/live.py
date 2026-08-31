@@ -861,6 +861,7 @@ def build_run_preparation(
         models=models,
         options=rlm_options(settings),
         recursive_options=recursive_rlm_options(settings),
+        wrap_up_seconds=settings.rlm_wrap_up_seconds,
         attachments=attachment_lifecycle,
         environments=_DaytonaEnvironmentProvider(resources, settings, session_runtime_registry),
         capabilities=_LiveCapabilityPreparer(settings, skill_catalog, volume_paths=resources.volume_paths),

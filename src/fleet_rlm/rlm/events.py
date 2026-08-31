@@ -1048,6 +1048,7 @@ def record_phase_failure(
     exc: BaseException,
     *,
     last_lm_call: Mapping[str, object] | None = None,
+    wrap_up: Mapping[str, object] | None = None,
 ) -> None:
     """
     Record failure status, timing, recursive-call statistics, and delegation metrics for a trace phase.
@@ -1059,6 +1060,7 @@ def record_phase_failure(
         metrics (Any): Metrics snapshot used when recursive execution is unavailable.
         exc (BaseException): Exception that caused the phase to fail.
         last_lm_call (Mapping[str, object] | None): Optional details of the most recent language-model call.
+        wrap_up (Mapping[str, object] | None): Bounded final-answer reserve diagnostics from the Root adapter.
     """
     summary = recursive_summary(recursive_executor, metrics)
     outputs: dict[str, object] = {
@@ -1073,6 +1075,8 @@ def record_phase_failure(
     }
     if last_lm_call:
         outputs["last_lm_call"] = dict(last_lm_call)
+    if wrap_up:
+        outputs.update(dict(wrap_up))
     output_diag = getattr(exc, "output_chars", None)
     if isinstance(output_diag, int):
         outputs["output_diagnostic"] = {
@@ -1088,6 +1092,8 @@ def record_phase_success(
     started: float,
     recursive_executor: RecursiveRLMExecutor | None,
     metrics: Any,
+    *,
+    wrap_up: Mapping[str, object] | None = None,
 ) -> Any:
     """
     Record successful completion details and recursive delegation metrics for a trace phase.
@@ -1098,6 +1104,7 @@ def record_phase_success(
         started (float): Monotonic start time used to calculate elapsed duration.
         recursive_executor (RecursiveRLMExecutor | None): Executor providing recursive-call metrics.
         metrics (Any): Execution metrics used when recursive metrics are unavailable.
+        wrap_up (Mapping[str, object] | None): Bounded final-answer reserve diagnostics from the Root adapter.
 
     Returns:
         Any: The original prediction.
@@ -1114,20 +1121,21 @@ def record_phase_success(
 
     prediction_has_tokens = any(normalize_lm_token_usage(entry) for entry in usage["observed_lm_usage"].values())
     token_usage_status = "observed" if prediction_has_tokens else summary.delegation_metrics.token_usage_status
-    phase.set_outputs(
-        {
-            "iterations": usage["iterations"],
-            "observed_lm_usage": usage["observed_lm_usage"],
-            "termination_mode": termination_mode,
-            "elapsed_ms": usage["duration_ms"],
-            "request_status": "completed",
-            "recursive_call_count": summary.call_count,
-            "recursive_prompt_chars": summary.delegated_prompt_chars,
-            "recursive_depth_fallback_count": summary.depth_fallback_count,
-            "delegation_metrics": summary.delegation_metrics.as_dict(),
-            "token_usage_status": token_usage_status,
-        }
-    )
+    outputs: dict[str, object] = {
+        "iterations": usage["iterations"],
+        "observed_lm_usage": usage["observed_lm_usage"],
+        "termination_mode": termination_mode,
+        "elapsed_ms": usage["duration_ms"],
+        "request_status": "completed",
+        "recursive_call_count": summary.call_count,
+        "recursive_prompt_chars": summary.delegated_prompt_chars,
+        "recursive_depth_fallback_count": summary.depth_fallback_count,
+        "delegation_metrics": summary.delegation_metrics.as_dict(),
+        "token_usage_status": token_usage_status,
+    }
+    if wrap_up:
+        outputs.update(dict(wrap_up))
+    phase.set_outputs(outputs)
     return prediction
 
 
@@ -1159,6 +1167,11 @@ class ExecutionTraceAssembler:
             root_lm=context.execution.models.root_lm,
             sub_lm=context.execution.models.sub_lm,
             metrics=context.delegation.metrics,
+            deadline=context.execution.deadline,
+        )
+        adapter = FleetJSONAdapter(
+            deadline=context.execution.deadline,
+            wrap_up_seconds=context.execution.wrap_up_seconds,
         )
         with (
             turn_phase_span(
@@ -1179,7 +1192,7 @@ class ExecutionTraceAssembler:
                 # second grammar that Fleet should reinterpret. FleetJSONAdapter
                 # adds only the bounded corrective re-ask, so one empty or
                 # unparseable action response cannot discard the whole Turn.
-                adapter=FleetJSONAdapter(),
+                adapter=adapter,
                 track_usage=True,
             ),
         ):
@@ -1195,6 +1208,7 @@ class ExecutionTraceAssembler:
                     context.delegation.metrics,
                     exc,
                     last_lm_call=trace_callback.last_call_summary(),
+                    wrap_up=adapter.wrap_up_summary(),
                 )
                 raise
             finally:
@@ -1205,6 +1219,7 @@ class ExecutionTraceAssembler:
                 started,
                 self.recursive_executor,
                 context.delegation.metrics,
+                wrap_up=adapter.wrap_up_summary(),
             )
 
     @staticmethod

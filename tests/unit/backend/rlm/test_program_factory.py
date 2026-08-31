@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from unittest.mock import MagicMock
 
 import pytest
+from dspy.utils.exceptions import LMAuthError, LMInvalidRequestError, LMServerError
 
 
 class _CopyableLM:
@@ -21,6 +23,28 @@ class _CopyableLM:
 
     def forward(self, **kwargs: object) -> object:
         self.calls.append(dict(kwargs))
+        return object()
+
+
+class _RetryingLM:
+    """Small provider double for deadline/retry isolation contracts."""
+
+    def __init__(self, failures: list[BaseException] | None = None) -> None:
+        self.kwargs: dict[str, object] = {"timeout": 10.0}
+        self.num_retries = 2
+        self.failures = list(failures or [])
+        self.calls: list[dict[str, object]] = []
+
+    def copy(self, **kwargs: object) -> _RetryingLM:
+        copied = _RetryingLM(self.failures)
+        copied.num_retries = int(kwargs.get("num_retries", self.num_retries))
+        copied.kwargs = dict(self.kwargs)
+        return copied
+
+    def forward(self, **kwargs: object) -> object:
+        self.calls.append(dict(kwargs))
+        if self.failures:
+            raise self.failures.pop(0)
         return object()
 
 
@@ -88,6 +112,98 @@ def test_model_bundle_child_lm_rejects_calls_after_turn_deadline() -> None:
 
     with pytest.raises(TimeoutError, match="recursive child LM deadline exceeded"):
         child.root_lm.forward(prompt="late")
+
+
+def test_turn_binding_isolated_and_applies_role_specific_reserve() -> None:
+    import time
+
+    from fleet_rlm.rlm.program import RLMModelBundle
+
+    root = _CopyableLM()
+    sub = _CopyableLM()
+    source = RLMModelBundle(root, sub)
+    bound = source.bind_turn_deadline(deadline=time.monotonic() + 5, reserve_seconds=1)
+
+    bound.root_lm.forward(prompt="root")
+    bound.sub_lm.forward(prompt="sub")
+
+    assert bound is not source
+    assert bound.root_lm is not root
+    assert bound.sub_lm is not sub
+    assert root.calls == []
+    assert sub.calls == []
+    assert 0 < bound.root_lm.calls[-1]["timeout"] <= 5  # type: ignore[operator]
+    assert 0 < bound.sub_lm.calls[-1]["timeout"] <= 4  # type: ignore[operator]
+    assert bound.deadline is not None
+    assert bound.reserve_seconds == 1
+
+
+def test_sequential_and_concurrent_turn_bindings_do_not_accumulate_wrappers() -> None:
+    import time
+
+    from fleet_rlm.rlm.program import RLMModelBundle
+
+    source = RLMModelBundle(_CopyableLM(), _CopyableLM())
+    first = source.bind_turn_deadline(deadline=time.monotonic() + 1)
+    second = source.bind_turn_deadline(deadline=time.monotonic() + 5)
+
+    def call(bundle: RLMModelBundle) -> float:
+        bundle.root_lm.forward(prompt="turn")
+        return float(bundle.root_lm.calls[-1]["timeout"])
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        timeouts = list(executor.map(call, (first, second)))
+
+    assert first.root_lm is not second.root_lm
+    assert timeouts[0] <= 1
+    assert timeouts[1] <= 5
+    assert not hasattr(source.root_lm, "_fleet_deadline")
+
+
+def test_provider_retries_recompute_remaining_and_non_retryable_errors_stop() -> None:
+    import time
+
+    import fleet_rlm.rlm.program as factory
+    from fleet_rlm.rlm.program import RLMModelBundle
+
+    retry_source = _RetryingLM([LMServerError("temporary")])
+    bound = RLMModelBundle(retry_source, _CopyableLM()).bind_turn_deadline(deadline=110)
+    ticks = iter((100.0, 101.0, 102.0))
+    original_monotonic = factory.time.monotonic
+    factory.time.monotonic = lambda: next(ticks)
+    try:
+        bound.root_lm.forward(prompt="retry")
+    finally:
+        factory.time.monotonic = original_monotonic
+
+    assert len(bound.root_lm.calls) == 2
+    assert bound.root_lm.calls[0]["timeout"] == 10
+    assert bound.root_lm.calls[1]["timeout"] == 9
+    assert retry_source.calls == []
+    assert bound.root_lm.num_retries == 0
+
+    for error in (LMInvalidRequestError("invalid"), LMAuthError("auth")):
+        source = _RetryingLM([error])
+        bound = RLMModelBundle(source, _CopyableLM()).bind_turn_deadline(deadline=time.monotonic() + 5)
+        with pytest.raises(type(error)):
+            bound.root_lm.forward(prompt="do not retry")
+        assert len(bound.root_lm.calls) == 1
+
+
+def test_child_copy_strips_turn_wrapper_and_uses_child_deadline(monkeypatch: pytest.MonkeyPatch) -> None:
+    import fleet_rlm.rlm.program as factory
+    from fleet_rlm.rlm.program import RLMModelBundle
+
+    source = RLMModelBundle(_CopyableLM(), _CopyableLM())
+    turn = source.bind_turn_deadline(deadline=101)
+    child = turn.fork_for_child(deadline=110)
+    monkeypatch.setattr(factory.time, "monotonic", lambda: 100.0)
+
+    turn.root_lm.forward(prompt="turn")
+    child.root_lm.forward(prompt="child")
+
+    assert turn.root_lm.calls[-1]["timeout"] == 1
+    assert child.root_lm.calls[-1]["timeout"] == 10
 
 
 def test_invalid_options_fail_before_construction() -> None:

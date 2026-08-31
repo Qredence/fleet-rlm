@@ -290,6 +290,7 @@ class DefaultRunPreparer:
         capabilities: CapabilityPreparer,
         recursive_options: RecursiveRLMOptions | None = None,
         session_runtime_registry: SessionRLMRegistry | None = None,
+        wrap_up_seconds: float = 300.0,
     ) -> None:
         self._models = models
         self._options = options
@@ -297,6 +298,7 @@ class DefaultRunPreparer:
         self._environments = environments
         self._capabilities = capabilities
         self._recursive_options = recursive_options or RecursiveRLMOptions()
+        self._wrap_up_seconds = max(0.0, float(wrap_up_seconds))
         self._session_runtime_registry = session_runtime_registry
 
     async def prepare(self, run: ClaimedRun, *, deadline: float) -> PreparedTurn:
@@ -451,6 +453,17 @@ class DefaultRunPreparer:
             cleanups.append(turn_environment_release.release)
         cleanups.extend((capabilities.aclose, remove_staged))
         resources = _PreparedTurnResources(tuple(cleanups))
+        try:
+            turn_models = self._models.bind_turn_deadline(
+                deadline=deadline,
+                reserve_seconds=self._wrap_up_seconds,
+            )
+        except BaseException:
+            # LM copies are part of preparation ownership. If a provider
+            # runtime cannot be copied, release every resource acquired above
+            # before surfacing the preparation failure.
+            await asyncio.shield(resources.aclose())
+            raise
         execution = RLMExecutionContext(
             identity=RunIdentity(
                 run_id=run.run_id,
@@ -489,11 +502,12 @@ class DefaultRunPreparer:
                 ),
             ),
             execution=ExecutionRuntime(
-                models=self._models,
+                models=turn_models,
                 options=self._options,
                 interpreter=environment.interpreter,
                 cancellation_requested=run.cancellation_requested,
                 deadline=deadline,
+                wrap_up_seconds=self._wrap_up_seconds,
                 environment_release=environment_release,
             ),
             capabilities=capabilities,

@@ -385,6 +385,7 @@ class DeterministicTurnPreparation:
         attachments: AttachmentLifecycle,
         skill_catalog: SkillCatalog | None = None,
         options: RLMOptions | None = None,
+        wrap_up_seconds: float = 300.0,
         max_artifact_bytes: int = 10_000_000,
         max_url_bytes: int = 10 * 1024 * 1024,
         session_runtime_registry: SessionRLMRegistry | None = None,
@@ -395,6 +396,7 @@ class DeterministicTurnPreparation:
             models=models,
             options=resolved_options,
             recursive_options=RecursiveRLMOptions(),
+            wrap_up_seconds=wrap_up_seconds,
             attachments=attachments,
             environments=TestingRunEnvironmentProvider(),
             capabilities=TestingCapabilityPreparer(
@@ -451,6 +453,7 @@ def install_testing_composition(
             attachments=storage.attachment_lifecycle,
             skill_catalog=app.state.skill_catalog,
             options=rlm_options(settings),
+            wrap_up_seconds=settings.rlm_wrap_up_seconds,
             max_artifact_bytes=settings.max_artifact_bytes,
             max_url_bytes=settings.max_url_bytes,
             session_runtime_registry=session_runtime_registry,

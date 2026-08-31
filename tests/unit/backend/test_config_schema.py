@@ -173,6 +173,9 @@ _EXPECTED_INVENTORY: tuple[tuple[str, str, str, str, tuple[str, ...], str | None
     ("posthog.enabled", "PostHog", "Analytics enabled", "boolean", (), "posthog_enabled"),
     ("posthog.project_token_env", "PostHog", "Project token environment variable", "text", (), None),
     ("posthog.host", "PostHog", "Ingestion host", "text", (), "posthog_host"),
+    ("rlm.wrap_up_seconds", "RLM", "Final-answer reserve (seconds)", "number", (), "rlm_wrap_up_seconds"),
+    ("llm.root.timeout_seconds", "Root LLM", "Provider timeout seconds", "number", (), "root_llm_timeout_seconds"),
+    ("llm.sub.timeout_seconds", "Sub LLM", "Provider timeout seconds", "number", (), "sub_llm_timeout_seconds"),
 )
 
 

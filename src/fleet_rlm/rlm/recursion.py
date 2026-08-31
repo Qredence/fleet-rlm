@@ -1247,6 +1247,8 @@ class RecursiveRLMExecutor:
         return _RecursiveCall(reservation.call_index, reservation.child_depth, started_at, span)
 
     def _run_depth_fallback(self, prompt: str, call: _RecursiveCall) -> tuple[str, dict[str, object]]:
+        if time.monotonic() >= self._deadline:
+            raise TimeoutError("recursive child deadline exceeded")
         with self._state.lock:
             self._state.depth_fallback_count += 1
         self._metrics.record_depth_fallback()
@@ -1274,6 +1276,8 @@ class RecursiveRLMExecutor:
         batch_cancelled: Event | None = None,
     ) -> tuple[str, dict[str, object]]:
         self._ensure_call_authorized(batch_cancelled)
+        if time.monotonic() >= self._deadline:
+            raise TimeoutError("recursive child deadline exceeded")
         child_models = self._models.fork_for_child(deadline=self._deadline)
         child_executor = RecursiveRLMExecutor(
             models=child_models,
@@ -1329,13 +1333,17 @@ class RecursiveRLMExecutor:
             # Same pinned JSON action protocol plus bounded corrective re-ask
             # as the Root lane; a child action must not die on one empty
             # provider response either.
-            adapter=FleetJSONAdapter(),
+            adapter=FleetJSONAdapter(
+                deadline=self._deadline,
+                wrap_up_seconds=child_models.reserve_seconds,
+            ),
             callbacks=[
                 _RLMTraceCallback(
                     root_lm=child_models.root_lm,
                     sub_lm=child_models.sub_lm,
                     recursive_depth=call.child_depth,
                     metrics=self._metrics,
+                    deadline=self._deadline,
                 )
             ],
             track_usage=True,
@@ -1479,6 +1487,11 @@ class RecursiveRLMExecutor:
     ) -> str:
         """Run one already-reserved child call and always settle its lease."""
         prompt = reservation.prompt
+        # Batched workers can sit queued behind the bounded pool. Do not open
+        # a recursive span or acquire a child lease when that worker only
+        # starts after the absolute Turn deadline.
+        if time.monotonic() >= self._deadline:
+            raise TimeoutError("recursive child deadline exceeded")
         call = self._start_call(reservation)
         self._emit_progress(
             "child_started",
@@ -1539,13 +1552,14 @@ class RecursiveRLMExecutor:
         predictor = dspy.Predict(RecursiveSubtaskSignature)
         with dspy.context(
             lm=self._models.sub_lm,
-            adapter=FleetJSONAdapter(),
+            adapter=FleetJSONAdapter(deadline=self._deadline),
             callbacks=[
                 _RLMTraceCallback(
                     root_lm=self._models.root_lm,
                     sub_lm=self._models.sub_lm,
                     recursive_depth=self._depth + 1,
                     metrics=self._metrics,
+                    deadline=self._deadline,
                 )
             ],
             track_usage=True,
