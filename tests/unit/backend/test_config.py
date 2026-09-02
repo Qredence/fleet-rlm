@@ -22,7 +22,7 @@ def test_profile_environment_matrix_follows_selected_toml_policy() -> None:
     assert contracts["daytona-recursive"].provider_environment_names == (
         "FLEET_DAYTONA_API_KEY",
         "DATABRICKS_TOKEN",
-        "DATABRICKS_HOST",
+        "FLEET_LLM_BASE_URL",
     )
 
 
@@ -37,16 +37,16 @@ def test_committed_policy_declares_databricks_model_roles() -> None:
         "root": {
             "model": "databricks-deepseek-v4-flash-0731",
             "api_key_env": "DATABRICKS_TOKEN",
-            "base_url_env": "DATABRICKS_HOST",
-            "max_tokens": 131072,
+            "base_url_env": "FLEET_LLM_BASE_URL",
+            "max_tokens": 16384,
             "timeout_seconds": 300,
             "cache": False,
         },
         "sub": {
             "model": "databricks-deepseek-v4-flash-0731",
             "api_key_env": "DATABRICKS_TOKEN",
-            "base_url_env": "DATABRICKS_HOST",
-            "max_tokens": 131072,
+            "base_url_env": "FLEET_LLM_BASE_URL",
+            "max_tokens": 16384,
             "timeout_seconds": 90,
             "temperature": 0,
             "cache": False,
@@ -57,7 +57,7 @@ def test_committed_policy_declares_databricks_model_roles() -> None:
 
 # Every committed profile routes Root and Sub through the Databricks endpoint.
 _DATABRICKS_MODEL = "databricks-deepseek-v4-flash-0731"
-_DATABRICKS_ROLE = ("DATABRICKS_TOKEN", "DATABRICKS_HOST")
+_DATABRICKS_ROLE = ("DATABRICKS_TOKEN", "FLEET_LLM_BASE_URL")
 
 
 @pytest.mark.parametrize(
@@ -115,13 +115,13 @@ def test_selected_recursive_profile_resolves_root_and_sub_with_databricks_params
     # Only the selected profile's declared names supply the Root/Sub provider.
     monkeypatch.setenv("FLEET_DAYTONA_API_KEY", "test-daytona-key")
     monkeypatch.setenv("DATABRICKS_TOKEN", "test-databricks-token")
-    monkeypatch.setenv("DATABRICKS_HOST", "https://gateway.example.test")
+    monkeypatch.setenv("FLEET_LLM_BASE_URL", "https://gateway.example.test/ai-gateway/mlflow/v1")
 
     settings = config.load_runtime_settings()
 
     assert settings.root_model == "databricks-deepseek-v4-flash-0731"
     assert settings.sub_model == "databricks-deepseek-v4-flash-0731"
-    # The Modal vLLM endpoint has no reasoning-effort surface; the override
+    # The endpoint has no reasoning-effort policy override; it
     # stays unset instead of being forwarded with a default.
     assert settings.root_llm_reasoning_effort is None
     assert settings.sub_llm_reasoning_effort is None
@@ -130,11 +130,9 @@ def test_selected_recursive_profile_resolves_root_and_sub_with_databricks_params
     # action observation and read as a frozen stream.
     assert settings.root_llm_cache is False
     assert settings.sub_llm_cache is False
-    # Both roles share the documented GLM-5.3-Flash completion ceiling: Z.AI's
-    # chat completion API reference caps the model's output length at 128K
-    # (131,072) tokens and recommends at least 1024.
-    assert settings.root_llm_max_tokens == 131072
-    assert settings.sub_llm_max_tokens == 131072
+    # Both roles preserve the deliberately bounded 16,384-token policy ceiling.
+    assert settings.root_llm_max_tokens == 16384
+    assert settings.sub_llm_max_tokens == 16384
     assert settings.root_llm_timeout_seconds == 300
     assert settings.sub_llm_timeout_seconds == 90
     assert settings.mlflow_tracing_enabled is True
@@ -148,9 +146,7 @@ def test_daytona_ignores_managed_mlflow_environment_values_when_not_selected(
 
     monkeypatch.setenv("FLEET_DAYTONA_API_KEY", "test-daytona-key")
     monkeypatch.setenv("DATABRICKS_TOKEN", "test-databricks-token")
-    monkeypatch.setenv("FLEET_DATABRICKS_AI_GATEWAY_BASE_URL", "https://gateway.example.test/v1")
-    monkeypatch.setenv("FLEET_MODAL_API_KEY", "test-modal-key")
-    monkeypatch.setenv("FLEET_MODAL_BASE_URL", "https://modal.example.test/v1")
+    monkeypatch.setenv("FLEET_LLM_BASE_URL", "https://gateway.example.test/ai-gateway/mlflow/v1")
     monkeypatch.setenv("FLEET_MLFLOW_EXPERIMENT_NAME", "managed-experiment")
     monkeypatch.setenv("FLEET_MLFLOW_TRACE_CATALOG", "managed_catalog")
 

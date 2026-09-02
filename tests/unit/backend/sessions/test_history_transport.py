@@ -11,6 +11,7 @@ import dspy
 import pytest
 from dspy.primitives.code_interpreter import FinalOutput
 
+from fleet_rlm.observability.diagnostics import normalize_turn_failure
 from fleet_rlm.sessions.history_transport import (
     CommittedSessionHistory,
     committed_session_history_payload,
@@ -148,3 +149,22 @@ async def test_native_rlm_acall_sees_complete_history_through_the_transport() ->
     assert actions.calls == 1
     assert prediction.answer == "latest answer"
     assert any("_raw_history" in code for code in interpreter.executed_code)
+
+
+def test_history_materializes_before_nested_provider_404_failure() -> None:
+    """A provider failure must not be attributed to the committed-history transport."""
+    history = CommittedSessionHistory([{"request": "prior", "answer": "settled"}])
+    interpreter = _InProcessInterpreter()
+    interpreter.execute(
+        "\n".join((history.sandbox_setup(), history.sandbox_assignment("history", "_raw_history"))),
+        variables={"_raw_history": history.to_sandbox()},
+    )
+    assert interpreter.namespace["history"].messages == [{"request": "prior", "answer": "settled"}]
+
+    class _ProviderNotFoundError(Exception):
+        status_code = 404
+
+    try:
+        raise RuntimeError("LMUnsupportedModelError: Error code: 404") from _ProviderNotFoundError()
+    except RuntimeError as raised:
+        assert normalize_turn_failure(raised).cause_type == "provider_not_found"

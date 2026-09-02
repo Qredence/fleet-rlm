@@ -16,6 +16,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from threading import Event, Thread, current_thread
 from typing import Any, cast
+from urllib.parse import urlsplit
 from uuid import UUID
 
 from fastapi import FastAPI
@@ -51,6 +52,29 @@ _STARTUP_CLEANUP_RECOVERY_BUDGET_SECONDS = 75.0
 _COMPOSITION_DISPOSAL_RETRY_BUDGET_SECONDS = 60.0
 _COMPOSITION_DISPOSAL_TASKS: set[asyncio.Task[Any]] = set()
 _COMPOSITION_DISPOSAL_MONITORS: set[Thread] = set()
+_DATABRICKS_MLFLOW_CHAT_BASE_PATH = "/ai-gateway/mlflow/v1"
+
+
+def _databricks_chat_base_url_is_valid(role: object) -> bool:
+    """Return whether a Databricks Chat Completions role uses the gateway base."""
+    model = getattr(role, "model", "")
+    is_databricks_role = getattr(role, "api_key_env", None) == "DATABRICKS_TOKEN" or (
+        isinstance(model, str) and model.lower().startswith("databricks-")
+    )
+    if not is_databricks_role:
+        return True
+    base_url = getattr(role, "base_url", None)
+    if not isinstance(base_url, str):
+        return False
+    try:
+        parsed = urlsplit(base_url)
+    except ValueError:
+        return False
+    return (
+        parsed.scheme in {"http", "https"}
+        and bool(parsed.netloc)
+        and parsed.path.rstrip("/") == _DATABRICKS_MLFLOW_CHAT_BASE_PATH
+    )
 
 
 def require_daytona_settings(settings: Settings) -> None:
@@ -62,15 +86,12 @@ def require_daytona_settings(settings: Settings) -> None:
         missing.append("FLEET_DAYTONA_API_KEY")
     if not (settings.daytona_snapshot or "").strip():
         missing.append("FLEET_DAYTONA_SNAPSHOT")
-    from fleet_rlm.rlm.program import has_llm_credentials, sanitize_base_url
+    from fleet_rlm.rlm.program import has_llm_credentials
 
     if not has_llm_credentials(settings):
         missing.append("configured provider API key")
-    if any(
-        role.api_key_env == "DATABRICKS_TOKEN" and not sanitize_base_url(role.base_url)
-        for role in (settings.root_lm, settings.sub_lm)
-    ):
-        missing.append("FLEET_DATABRICKS_AI_GATEWAY_BASE_URL")
+    if any(not _databricks_chat_base_url_is_valid(role) for role in (settings.root_lm, settings.sub_lm)):
+        missing.append("Databricks MLflow gateway base URL")
     if not (settings.database_url or "").strip():
         missing.append("FLEET_DATABASE_URL")
     if missing:

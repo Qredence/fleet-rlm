@@ -50,8 +50,8 @@ _SECRET_NAMES = tuple(
     name for contract in load_profile_environment_contracts() for name in contract.provider_environment_names
 )
 _CLEANUP_RETRY_DELAYS = (0.5, 1.0, 2.0, 4.0)
-_LIVE_ROOT_MODEL = os.environ.get("FLEET_LIVE_ROOT_MODEL", "openai/zai-org/GLM-5.3-Flash")
-_LIVE_SUB_MODEL = os.environ.get("FLEET_LIVE_SUB_MODEL", "openai/zai-org/GLM-5.3-Flash")
+_LIVE_ROOT_MODEL = os.environ.get("FLEET_LIVE_ROOT_MODEL", "databricks-deepseek-v4-flash-0731")
+_LIVE_SUB_MODEL = os.environ.get("FLEET_LIVE_SUB_MODEL", "databricks-deepseek-v4-flash-0731")
 _APPROVED_MODELS = frozenset(
     name
     for base in {
@@ -182,7 +182,7 @@ def _live_settings(tmp_path: Path) -> Settings:
         pytest.fail("Live Daytona MVP proof missing required credentials: " + ", ".join(missing))
     policy = load_runtime_settings()
     if policy.root_model not in _APPROVED_MODELS or policy.sub_model not in _APPROVED_MODELS:
-        pytest.fail("Live Daytona MVP proof requires the openai/zai-org/GLM-5.3-Flash Root and Sub policy")
+        pytest.fail("Live Daytona MVP proof requires the committed Root and Sub policy")
     database_url = f"sqlite+aiosqlite:///{(tmp_path / 'live-mvp.db').resolve()}"
     upgrade_to_head(database_url)
     return policy.model_copy(

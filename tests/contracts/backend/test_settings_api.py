@@ -73,10 +73,13 @@ def test_settings_policy_is_loopback_only_and_revision_checked(monkeypatch, tmp_
         fields_by_path = {field["path"]: field["value"] for field in daytona_fields}
         assert fields_by_path["llm.root.model"] == "databricks-deepseek-v4-flash-0731"
         assert fields_by_path["llm.root.api_key_env"] == "DATABRICKS_TOKEN"
-        assert fields_by_path["llm.root.base_url_env"] == "DATABRICKS_HOST"
+        assert fields_by_path["llm.root.base_url_env"] == "FLEET_LLM_BASE_URL"
         assert fields_by_path["llm.sub.model"] == "databricks-deepseek-v4-flash-0731"
         assert fields_by_path["llm.sub.api_key_env"] == "DATABRICKS_TOKEN"
-        assert fields_by_path["llm.sub.base_url_env"] == "DATABRICKS_HOST"
+        assert fields_by_path["llm.sub.base_url_env"] == "FLEET_LLM_BASE_URL"
+        inherited = next(field for field in daytona_fields if field["path"] == "rlm.max_iters")
+        assert inherited["origin"] == "inherited"
+        assert inherited["can_reset"] is False
 
         updated = client.patch(
             "/api/settings",

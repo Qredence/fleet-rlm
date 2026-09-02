@@ -61,11 +61,14 @@ from fleet_rlm.json_types import JsonScalar as JsonScalar
 
 RunFailedMessage: TypeAlias = Literal[
     "Turn failed",
+    "Provider endpoint not found; check model and base URL",
     "Turn output is invalid",
     "Turn output is too large",
     "Turn could not be prepared",
     "Turn could not be committed",
 ]
+
+PROVIDER_ENDPOINT_NOT_FOUND_MESSAGE = "Provider endpoint not found; check model and base URL"
 
 
 def _freeze_json(value: object) -> JsonValue:
@@ -1530,6 +1533,7 @@ class ObservationSession:
 
 
 __all__ = [
+    "PROVIDER_ENDPOINT_NOT_FOUND_MESSAGE",
     "ArtifactCreated",
     "AttachmentRead",
     "DetailRelay",
