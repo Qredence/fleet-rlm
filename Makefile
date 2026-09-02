@@ -68,7 +68,7 @@ help:
 	@echo "  make check-docs       - Run docs quality and harness engineering checks"
 	@echo "  make check-security   - Run pip-audit + bandit"
 	@echo "  make check-deps       - Check Python dependencies with deptry"
-	@echo "  make check-codebase-tree - Enforce import boundaries defined in ARCHITECTURE.md"
+	@echo "  make check-codebase-tree - Enforce import boundaries documented in ARCHITECTURE.md"
 	@echo "  make check-dependency-boundaries - Enforce provider/domain dependency directions"
 	@echo "  make api-check        - Verify OpenAPI and generated TUI HTTP types"
 	@echo "  make api-sync         - Regenerate OpenAPI and generated TUI HTTP types"
