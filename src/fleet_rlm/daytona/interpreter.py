@@ -908,7 +908,15 @@ class DaytonaCodeInterpreter:
                 if self._http_broker is not None:
                     outputs["ensure_bindings_ms"] = ensure_bindings_ms
                     outputs["execute_ms"] = execute_ms
-                    outputs.update(self._http_broker.last_execution_stats)
+                    broker_metrics = dict(self._http_broker.last_execution_stats)
+                    # Keep the flat keys for existing trace consumers, but put
+                    # the complete broker breakdown under one bounded mapping.
+                    # The generic trace projection caps a mapping at 32 keys;
+                    # placing these metrics together prevents the six
+                    # human-readable fields above from hiding the tail of the
+                    # execution statistics.
+                    outputs["broker_metrics"] = broker_metrics
+                    outputs.update(broker_metrics)
                 phase.set_outputs(outputs)
                 return result
             except RunTerminalError:

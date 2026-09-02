@@ -25,7 +25,9 @@ def test_default_signature_orders_capabilities_before_semantic_calls() -> None:
     assert "Sub LM performs bounded semantic analysis" in instructions
     assert "untrusted context" in instructions
     assert "do not spend an iteration probing optional packages" in instructions
-    assert "do not submit in the initial" in instructions
+    assert "Verify within the same action when possible" in normalized_instructions
+    assert "later iteration only when verification cannot be completed" in normalized_instructions
+    assert "do not submit in the initial" not in instructions
     assert "independent invariant" in instructions
     assert "known reference prefix" in instructions
     assert "Never pass positional arguments" in instructions

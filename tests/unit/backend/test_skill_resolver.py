@@ -121,7 +121,7 @@ def test_custom_skill_signature_omits_recursive_guidance_when_the_tool_is_unavai
     assert "rlm_query(prompt=prompt)" not in signature.instructions
     assert "llm_query(prompt)" in signature.instructions
     assert "llm_query_batched(prompts)" in signature.instructions
-    assert "5. Verify the result" in signature.instructions
+    assert "5. Verify within the same action" in signature.instructions
 
 
 def test_runner_signature_recomposition_uses_actual_policy_without_duplicate_bodies() -> None:

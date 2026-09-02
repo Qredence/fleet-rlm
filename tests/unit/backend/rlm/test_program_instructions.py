@@ -22,7 +22,7 @@ def test_default_fleet_signature_uses_composed_recursive_fragments() -> None:
     assert fragments.recursion == RECURSION_RLM_INSTRUCTIONS
     assert FleetRLMSignature.instructions == fragments.compose()
     assert "rlm_query(prompt=prompt)" in FleetRLMSignature.instructions
-    assert "6. Verify the result" in FleetRLMSignature.instructions
+    assert "6. Verify within the same action" in FleetRLMSignature.instructions
 
 
 def test_nonrecursive_root_signature_omits_only_the_optional_recursion_fragment() -> None:
@@ -30,7 +30,7 @@ def test_nonrecursive_root_signature_omits_only_the_optional_recursion_fragment(
     nonrecursive = root_signature_for_recursion(FleetRLMSignature, recursion_enabled=False).instructions
 
     assert "rlm_query(prompt=prompt)" not in nonrecursive
-    assert "5. Verify the result" in nonrecursive
+    assert "5. Verify within the same action" in nonrecursive
     assert RECURSION_RLM_INSTRUCTIONS in recursive
     assert RECURSION_RLM_INSTRUCTIONS not in nonrecursive
     assert nonrecursive.endswith(DISCOVERY_RLM_INSTRUCTIONS)

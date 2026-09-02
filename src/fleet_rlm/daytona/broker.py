@@ -23,7 +23,7 @@ import uuid
 from collections.abc import Callable, Mapping
 from concurrent.futures import ThreadPoolExecutor
 from contextvars import copy_context
-from threading import Thread
+from threading import Lock, Thread
 from typing import TYPE_CHECKING, Any
 
 import httpx
@@ -252,12 +252,15 @@ from socketserver import ThreadingMixIn
 from urllib.parse import parse_qs, urlparse
 
 _lock = threading.Lock()
+_pending_condition = threading.Condition(_lock)
+_output_condition = threading.Condition(_lock)
 _pending_requests = {}
 _results = {}
 _execution_outputs = {}
 _BROKER_SECRET = __BROKER_SECRET__
 _MAX_REQUEST_BYTES = __MAX_REQUEST_BYTES__
 _MAX_OUTPUT_CHARS = __MAX_OUTPUT_CHARS__
+_MAX_LONG_POLL_WAIT_S = 0.25
 _CONTEXT_MOUNT_ROOT = __CONTEXT_MOUNT_ROOT__
 _CONTEXT_MANIFEST_SHA256 = __CONTEXT_MANIFEST_SHA256__
 _execution_lock = threading.Lock()
@@ -279,6 +282,32 @@ def _send_json(handler, data, status=200):
     handler.send_header("Content-Length", str(len(body)))
     handler.end_headers()
     handler.wfile.write(body)
+
+
+def _bounded_wait_seconds(qs):
+    try:
+        value = float(qs.get("wait", ["0"])[0])
+    except (TypeError, ValueError):
+        return 0.0
+    if not math.isfinite(value):
+        return 0.0
+    return max(0.0, min(_MAX_LONG_POLL_WAIT_S, value))
+
+
+def _pending_available():
+    return any(
+        not req.get("lease_token") and not req.get("completed")
+        for req in _pending_requests.values()
+    )
+
+
+def _output_available(execution_id, offset):
+    state = _execution_outputs.get(execution_id)
+    return (
+        state is None
+        or bool(state["done"])
+        or len(state["stdout"]) > offset
+    )
 
 
 def _decode_value(value):
@@ -389,13 +418,14 @@ class _OutputBuffer(io.StringIO):
         if remaining > 0:
             super().write(value[:remaining])
         if value and self._execution_id:
-            with _lock:
+            with _output_condition:
                 state = _execution_outputs.get(self._execution_id)
                 if state is not None:
                     current = state[self._field]
                     remaining = _MAX_OUTPUT_CHARS - len(current)
                     if remaining > 0:
                         state[self._field] = current + value[:remaining]
+                        _output_condition.notify_all()
         return len(value)
 
 
@@ -431,10 +461,11 @@ def _execute(data):
         return result
     finally:
         if execution_id:
-            with _lock:
+            with _output_condition:
                 state = _execution_outputs.get(execution_id)
                 if state is not None:
                     state["done"] = True
+                    _output_condition.notify_all()
 
 
 class _BrokerHandler(BaseHTTPRequestHandler):
@@ -458,23 +489,40 @@ class _BrokerHandler(BaseHTTPRequestHandler):
             except ValueError:
                 offset = 0
             release = qs.get("release", ["0"])[0] == "1"
-            with _lock:
+            wait_s = _bounded_wait_seconds(qs)
+            waited_ms = 0
+            with _output_condition:
                 state = _execution_outputs.get(execution_id)
                 if state is None:
-                    _send_json(self, {"error": "unknown execution"}, 404)
-                    return
-                stdout = state["stdout"]
-                stderr = state["stderr"]
-                done = bool(state["done"])
-                body = {
-                    "stdout": stdout[offset:],
-                    "stderr": stderr,
-                    "done": done,
-                    "next_offset": len(stdout),
-                }
-                if release and done:
-                    _execution_outputs.pop(execution_id, None)
-            _send_json(self, body)
+                    body = {"error": "unknown execution"}
+                    status = 404
+                else:
+                    if wait_s > 0 and not _output_available(execution_id, offset):
+                        wait_started_ns = time.monotonic_ns()
+                        _output_condition.wait_for(
+                            lambda: _output_available(execution_id, offset),
+                            timeout=wait_s,
+                        )
+                        waited_ms = max(0, int((time.monotonic_ns() - wait_started_ns) / 1_000_000))
+                        state = _execution_outputs.get(execution_id)
+                    if state is None:
+                        body = {"error": "unknown execution"}
+                        status = 404
+                    else:
+                        stdout = state["stdout"]
+                        stderr = state["stderr"]
+                        done = bool(state["done"])
+                        body = {
+                            "stdout": stdout[offset:],
+                            "stderr": stderr,
+                            "done": done,
+                            "next_offset": len(stdout),
+                            "waited_ms": waited_ms,
+                        }
+                        status = 200
+                        if release and done:
+                            _execution_outputs.pop(execution_id, None)
+            _send_json(self, body, status)
             return
         if parsed.path == "/pending":
             secret = self.headers.get("X-Broker-Secret", "")
@@ -487,9 +535,15 @@ class _BrokerHandler(BaseHTTPRequestHandler):
             except ValueError:
                 max_items = 1
             out = []
-            with _lock:
+            wait_s = _bounded_wait_seconds(qs)
+            waited_ms = 0
+            with _pending_condition:
+                if wait_s > 0:
+                    wait_started_ns = time.monotonic_ns()
+                    _pending_condition.wait_for(_pending_available, timeout=wait_s)
+                    waited_ms = max(0, int((time.monotonic_ns() - wait_started_ns) / 1_000_000))
                 for call_id, req in list(_pending_requests.items()):
-                    if req.get("lease_token"):
+                    if req.get("lease_token") or req.get("completed"):
                         continue
                     token = uuid.uuid4().hex
                     req["lease_token"] = token
@@ -502,7 +556,7 @@ class _BrokerHandler(BaseHTTPRequestHandler):
                     })
                     if len(out) >= max_items:
                         break
-            _send_json(self, {"requests": out})
+            _send_json(self, {"requests": out, "waited_ms": waited_ms})
             return
         _send_json(self, {"error": "not found"}, 404)
 
@@ -526,14 +580,16 @@ class _BrokerHandler(BaseHTTPRequestHandler):
         if parsed.path == "/tool_call":
             call_id = str(data.get("id") or uuid.uuid4())
             event = threading.Event()
-            with _lock:
+            with _pending_condition:
                 _pending_requests[call_id] = {
                     "tool_name": data.get("tool_name"),
                     "args": data.get("args") or [],
                     "kwargs": data.get("kwargs") or {},
                     "lease_token": None,
+                    "completed": False,
                     "event": event,
                 }
+                _pending_condition.notify_all()
             if not event.wait(timeout=180.0):
                 with _lock:
                     _pending_requests.pop(call_id, None)
@@ -554,29 +610,38 @@ class _BrokerHandler(BaseHTTPRequestHandler):
         if parsed.path == "/result":
             call_id = str(data.get("id") or "")
             claim = data.get("lease_token")
+            response_body = {"status": "ok"}
+            response_status = 200
+            event = None
             with _lock:
                 req = _pending_requests.get(call_id)
                 if req is None:
-                    _send_json(self, {"error": "unknown call"}, 404)
-                    return
-                if claim != req.get("lease_token"):
-                    _send_json(self, {"error": "stale claim"}, 409)
-                    return
-                if "error" in data:
+                    response_body = {"error": "unknown call"}
+                    response_status = 404
+                elif req.get("completed"):
+                    response_body = {"error": "stale claim"}
+                    response_status = 409
+                elif claim != req.get("lease_token"):
+                    response_body = {"error": "stale claim"}
+                    response_status = 409
+                elif "error" in data:
                     _results[call_id] = {"error": data.get("error")}
+                    req["completed"] = True
+                    event = req.get("event")
                 else:
                     result = data.get("result")
                     try:
                         _validate_json_value(result)
                     except ValueError:
-                        _send_json(self, {"error": "tool result is not JSON-compatible"}, 422)
-                        return
-                    _results[call_id] = result
-                req["lease_token"] = None
-                event = req.get("event")
+                        response_body = {"error": "tool result is not JSON-compatible"}
+                        response_status = 422
+                    else:
+                        _results[call_id] = result
+                        req["completed"] = True
+                        event = req.get("event")
             if event is not None:
                 event.set()
-            _send_json(self, {"status": "ok"})
+            _send_json(self, response_body, response_status)
             return
         _send_json(self, {"error": "not found"}, 404)
 
@@ -644,6 +709,47 @@ _MAX_EXECUTE_REQUEST_BYTES = 2 * 1024 * 1024
 
 _MAX_EXECUTE_OUTPUT_CHARS = 64 * 1024
 
+_MAX_PENDING_POLL_INTERVAL_S = 0.25
+
+_MAX_PENDING_POLL_BACKOFF_EXPONENT = 30
+
+_MAX_CALLBACK_WORKERS = 8
+
+_EXECUTION_STAT_KEYS = (
+    "poll_count",
+    "empty_poll_count",
+    "poll_error_count",
+    "poll_latency_ms",
+    "poll_latency_max_ms",
+    "pending_batch_count",
+    "pending_request_count",
+    "callback_dispatch_count",
+    "callback_dispatch_ms",
+    "callback_dispatch_max_ms",
+    "tool_execution_ms",
+    "tool_execution_max_ms",
+    "result_post_count",
+    "result_post_failures",
+    "result_post_ms",
+    "result_post_max_ms",
+    "pending_wait_requested_ms",
+    "pending_wait_elapsed_ms",
+    "drain_poll_count",
+    "callback_executor_created",
+    "callback_executor_reused",
+    "tool_call_count",
+    "output_poll_count",
+    "output_poll_failures",
+    "output_poll_latency_ms",
+    "output_poll_latency_max_ms",
+    "output_release_count",
+    "output_chars",
+    "output_wait_requested_ms",
+    "output_wait_elapsed_ms",
+    "execution_wall_ms",
+    "run_code_ms",
+)
+
 
 class FleetFinalOutputError(Exception):
     """Raised inside an interpreter when SUBMIT completes successfully."""
@@ -687,7 +793,75 @@ class DaytonaHttpToolBroker:
         self._client: httpx.Client | None = None
         self._poll_count = 0
         self._fulfilled_count = 0
+        self._callback_executor: ThreadPoolExecutor | None = None
+        self._callback_executor_lock = Lock()
+        self._metrics_lock = Lock()
+        self._active_execution_stats: dict[str, int] | None = None
         self.last_execution_stats: dict[str, int] = {}
+
+    @staticmethod
+    def _new_execution_stats() -> dict[str, int]:
+        return {key: 0 for key in _EXECUTION_STAT_KEYS}
+
+    def _begin_execution_stats(self) -> tuple[dict[str, int], bool]:
+        """Start one metrics scope, reusing the outer scope for nested cells."""
+        with self._metrics_lock:
+            if self._active_execution_stats is not None:
+                return self._active_execution_stats, False
+            stats = self._new_execution_stats()
+            self._active_execution_stats = stats
+            return stats, True
+
+    def _finish_execution_stats(self, stats: dict[str, int], *, owner: bool) -> None:
+        if not owner:
+            return
+        with self._metrics_lock:
+            if self._active_execution_stats is stats:
+                self._active_execution_stats = None
+            self.last_execution_stats = dict(stats)
+
+    def _record_metric(self, key: str, value: int = 1) -> None:
+        with self._metrics_lock:
+            stats = self._active_execution_stats
+            if stats is not None:
+                stats[key] = stats.get(key, 0) + int(value)
+
+    def _record_metric_max(self, key: str, value: int) -> None:
+        with self._metrics_lock:
+            stats = self._active_execution_stats
+            if stats is not None:
+                stats[key] = max(stats.get(key, 0), int(value))
+
+    def _record_duration(self, key: str, started_ns: int, *, max_key: str | None = None) -> int:
+        elapsed_ms = max(0, int((time.perf_counter_ns() - started_ns) / 1_000_000))
+        self._record_metric(key, elapsed_ms)
+        if max_key is not None:
+            self._record_metric_max(max_key, elapsed_ms)
+        return elapsed_ms
+
+    def _poll_backoff_delay(self, empty_polls: int) -> float:
+        """Return a bounded exponential delay after consecutive empty polls."""
+        base = float(self._poll_interval_s)
+        if math.isnan(base) or base <= 0:
+            return 0.0
+        if math.isinf(base):
+            return _MAX_PENDING_POLL_INTERVAL_S
+        base = min(base, _MAX_PENDING_POLL_INTERVAL_S)
+        exponent = min(max(empty_polls - 1, 0), _MAX_PENDING_POLL_BACKOFF_EXPONENT)
+        return min(_MAX_PENDING_POLL_INTERVAL_S, math.ldexp(base, exponent))
+
+    def _get_callback_executor(self) -> tuple[ThreadPoolExecutor, bool]:
+        """Return the broker-owned callback pool, creating it lazily once."""
+        with self._callback_executor_lock:
+            if self._stopped:
+                raise DaytonaAdapterError(message="broker already stopped", cause_type="InterpreterLifecycleError")
+            if self._callback_executor is None:
+                self._callback_executor = ThreadPoolExecutor(
+                    max_workers=_MAX_CALLBACK_WORKERS,
+                    thread_name_prefix="fleet-daytona-tool",
+                )
+                return self._callback_executor, True
+            return self._callback_executor, False
 
     def _http(self) -> httpx.Client:
         if self._client is None:
@@ -856,68 +1030,84 @@ class DaytonaHttpToolBroker:
         if execution_id is not None:
             payload["execution_id"] = execution_id
         self._http()
+        stats, stats_owner = self._begin_execution_stats()
+        wall_started_ns = time.perf_counter_ns()
 
-        response_box: list[httpx.Response] = []
-        request_errors: list[BaseException] = []
-
-        def request() -> None:
-            try:
-                response_box.append(self._http().post("/execute", json=payload, timeout=timeout_s))
-            except BaseException as exc:
-                request_errors.append(exc)
-
-        if on_stdout is None:
-            request()
-        else:
-            thread = Thread(target=request, daemon=True)
-            thread.start()
-            offset = 0
-            done = False
-            while thread.is_alive():
-                done, offset = self._poll_output(execution_id, offset, on_stdout)
-                thread.join(timeout=self._poll_interval_s)
-            thread.join()
-            for _ in range(20):
-                done, offset = self._poll_output(execution_id, offset, on_stdout)
-                if done:
-                    break
-                time.sleep(self._poll_interval_s)
-            # Always make a final release attempt after the execution thread
-            # has finished, even if transient polls never observed ``done``.
-            self._poll_output(execution_id, offset, on_stdout, release=True)
-
-        if request_errors:
-            raise DaytonaAdapterError(
-                message="sandbox execution request failed",
-                cause_type="BrokerExecutionError",
-            ) from request_errors[0]
-        if not response_box:
-            raise DaytonaAdapterError(
-                message="sandbox execution produced no response", cause_type="BrokerExecutionError"
-            )
-        response = response_box[0]
-        if response.status_code != 200:
-            raise DaytonaAdapterError(
-                message=f"sandbox execution failed with HTTP {response.status_code}",
-                cause_type="BrokerExecutionError",
-            )
         try:
-            result = response.json()
-        except ValueError as exc:
-            raise DaytonaAdapterError(
-                message="sandbox execution returned an invalid response",
-                cause_type="BrokerExecutionError",
-            ) from exc
-        final = result.get("final")
-        accesses = tuple(str(value) for value in result.get("context_accesses") or ())
-        return BackendExecutionResult(
-            stdout=str(result.get("stdout") or ""),
-            stderr=str(result.get("stderr") or ""),
-            final=dict(final) if isinstance(final, dict) else None,
-            error=str(result.get("error") or "") or None,
-            error_category=str(result.get("error_category") or "") or None,
-            context_accesses=accesses,
-        )
+            response_box: list[httpx.Response] = []
+            request_errors: list[BaseException] = []
+
+            def request() -> None:
+                try:
+                    response_box.append(self._http().post("/execute", json=payload, timeout=timeout_s))
+                except BaseException as exc:
+                    request_errors.append(exc)
+
+            if on_stdout is None:
+                request()
+            else:
+                thread = Thread(target=request, daemon=True)
+                thread.start()
+                offset = 0
+                empty_polls = 0
+                while thread.is_alive():
+                    previous_offset = offset
+                    wait_s = 0.0 if empty_polls == 0 else self._poll_backoff_delay(empty_polls)
+                    done, offset = self._poll_output(execution_id, offset, on_stdout, wait_s=wait_s)
+                    if done:
+                        thread.join()
+                        break
+                    # Fresh output is a signal to keep the next check quick;
+                    # repeated empty checks use a bounded server-side wait to
+                    # reduce per-cell HTTP overhead while a long-running cell
+                    # is quiet.
+                    if offset > previous_offset:
+                        empty_polls = 0
+                    else:
+                        empty_polls += 1
+                thread.join()
+                # The broker's /execute response is emitted only after the
+                # server marks this execution done. One release read is enough
+                # to flush any final stdout and discard the remote buffer; the
+                # old 20-poll drain only repeated already-settled requests.
+                self._poll_output(execution_id, offset, on_stdout, release=True)
+
+            if request_errors:
+                raise DaytonaAdapterError(
+                    message="sandbox execution request failed",
+                    cause_type="BrokerExecutionError",
+                ) from request_errors[0]
+            if not response_box:
+                raise DaytonaAdapterError(
+                    message="sandbox execution produced no response", cause_type="BrokerExecutionError"
+                )
+            response = response_box[0]
+            if response.status_code != 200:
+                raise DaytonaAdapterError(
+                    message=f"sandbox execution failed with HTTP {response.status_code}",
+                    cause_type="BrokerExecutionError",
+                )
+            try:
+                result = response.json()
+            except ValueError as exc:
+                raise DaytonaAdapterError(
+                    message="sandbox execution returned an invalid response",
+                    cause_type="BrokerExecutionError",
+                ) from exc
+            final = result.get("final")
+            accesses = tuple(str(value) for value in result.get("context_accesses") or ())
+            return BackendExecutionResult(
+                stdout=str(result.get("stdout") or ""),
+                stderr=str(result.get("stderr") or ""),
+                final=dict(final) if isinstance(final, dict) else None,
+                error=str(result.get("error") or "") or None,
+                error_category=str(result.get("error_category") or "") or None,
+                context_accesses=accesses,
+            )
+        finally:
+            if stats_owner:
+                self._record_duration("execution_wall_ms", wall_started_ns)
+                self._finish_execution_stats(stats, owner=True)
 
     def _poll_output(
         self,
@@ -926,29 +1116,60 @@ class DaytonaHttpToolBroker:
         on_stdout: Callable[[str], None],
         *,
         release: bool = False,
+        wait_s: float = 0.0,
     ) -> tuple[bool, int]:
         if execution_id is None:
             return False, offset
+        if not math.isfinite(wait_s):
+            wait_s = 0.0
+        wait_s = max(0.0, min(_MAX_PENDING_POLL_INTERVAL_S, wait_s))
+        poll_started_ns = time.perf_counter_ns()
+        self._record_metric("output_poll_count")
+        if release:
+            self._record_metric("output_release_count")
+        self._record_metric("output_wait_requested_ms", max(0, int(wait_s * 1_000)))
+        params = {
+            "execution_id": execution_id,
+            "offset": str(offset),
+            "release": "1" if release else "0",
+        }
+        if wait_s > 0:
+            params["wait"] = f"{wait_s:.3f}"
         try:
             response = self._http().get(
                 "/output",
-                params={
-                    "execution_id": execution_id,
-                    "offset": str(offset),
-                    "release": "1" if release else "0",
-                },
+                params=params,
                 timeout=5,
             )
         except (httpx.HTTPError, TimeoutError, OSError, ValueError):
+            self._record_metric("output_poll_failures")
+            self._record_duration(
+                "output_poll_latency_ms",
+                poll_started_ns,
+                max_key="output_poll_latency_max_ms",
+            )
             return False, offset
+        self._record_duration(
+            "output_poll_latency_ms",
+            poll_started_ns,
+            max_key="output_poll_latency_max_ms",
+        )
         if response.status_code != 200:
+            self._record_metric("output_poll_failures")
             return False, offset
         try:
             result = response.json()
         except ValueError:
+            self._record_metric("output_poll_failures")
             return False, offset
+        try:
+            waited_ms = max(0, int(result.get("waited_ms", 0)))
+        except (TypeError, ValueError):
+            waited_ms = 0
+        self._record_metric("output_wait_elapsed_ms", waited_ms)
         stdout = str(result.get("stdout") or "")
         if stdout:
+            self._record_metric("output_chars", len(stdout))
             on_stdout(stdout)
         try:
             next_offset = max(offset, int(result.get("next_offset", offset)))
@@ -982,59 +1203,104 @@ class DaytonaHttpToolBroker:
             msg = "broker already stopped"
             raise DaytonaAdapterError(message=msg, cause_type="InterpreterLifecycleError")
 
-        bucket: list[str | BackendExecutionResult | BaseException] = []
-
-        def _runner() -> None:
-            try:
-                bucket.append(run_code())
-            except BaseException as exc:
-                bucket.append(exc)
-
-        poll_start = self._poll_count
+        stats, stats_owner = self._begin_execution_stats()
+        wall_started_ns = time.perf_counter_ns()
         fulfilled_start = self._fulfilled_count
-        thread = Thread(target=_runner, daemon=True)
-        thread.start()
-        while thread.is_alive():
-            if self._stopped:
-                break
-            self._poll_once(tool_executor)
-            time.sleep(self._poll_interval_s)
-        thread.join(timeout=1.0)
-        for _ in range(5):
-            if not self._poll_once(tool_executor):
-                break
-            time.sleep(self._poll_interval_s)
-        self.last_execution_stats = {
-            "poll_count": self._poll_count - poll_start,
-            "tool_call_count": self._fulfilled_count - fulfilled_start,
-        }
+        try:
+            bucket: list[str | BackendExecutionResult | BaseException] = []
 
-        if not bucket:
-            msg = "sandbox execution produced no result"
-            raise DaytonaAdapterError(message=msg, cause_type="BrokerExecutionError")
-        outcome = bucket[0]
-        if isinstance(outcome, BaseException):
-            if isinstance(outcome, DaytonaAdapterError):
-                raise outcome
-            raise DaytonaAdapterError(
-                message=sanitize_provider_message(str(outcome)),
-                cause_type=type(outcome).__name__,
-            ) from outcome
-        if isinstance(outcome, BackendExecutionResult):
-            return outcome
-        final = extract_final_payload(str(outcome))
-        return BackendExecutionResult(stdout=str(outcome), final=final)
+            def _runner() -> None:
+                run_started_ns = time.perf_counter_ns()
+                try:
+                    bucket.append(run_code())
+                except BaseException as exc:
+                    bucket.append(exc)
+                finally:
+                    self._record_duration("run_code_ms", run_started_ns)
+
+            thread = Thread(target=_runner, daemon=True)
+            thread.start()
+            empty_polls = 0
+            while thread.is_alive():
+                if self._stopped:
+                    break
+                wait_s = 0.0 if empty_polls == 0 else self._poll_backoff_delay(empty_polls)
+                if self._poll_once(tool_executor, wait_s=wait_s):
+                    # A fulfilled callback is progress. Poll again immediately
+                    # so a sequence of model/tool calls does not pay an extra
+                    # fixed sleep after every useful broker response.
+                    empty_polls = 0
+                    continue
+                empty_polls += 1
+            thread.join(timeout=1.0)
+            for _ in range(5):
+                if self._stopped:
+                    break
+                self._record_metric("drain_poll_count")
+                if not self._poll_once(tool_executor):
+                    break
+
+            if not bucket:
+                msg = "sandbox execution produced no result"
+                raise DaytonaAdapterError(message=msg, cause_type="BrokerExecutionError")
+            outcome = bucket[0]
+            if isinstance(outcome, BaseException):
+                if isinstance(outcome, DaytonaAdapterError):
+                    raise outcome
+                raise DaytonaAdapterError(
+                    message=sanitize_provider_message(str(outcome)),
+                    cause_type=type(outcome).__name__,
+                ) from outcome
+            if isinstance(outcome, BackendExecutionResult):
+                return outcome
+            final = extract_final_payload(str(outcome))
+            return BackendExecutionResult(stdout=str(outcome), final=final)
+        finally:
+            if stats_owner:
+                self._record_metric("tool_call_count", self._fulfilled_count - fulfilled_start)
+                self._record_duration("execution_wall_ms", wall_started_ns)
+                self._finish_execution_stats(stats, owner=True)
 
     def stop(self, *, strict: bool = False) -> bool:
         """
         Stop the broker and release its HTTP client and Daytona session.
 
         Parameters:
-            strict (bool): Whether to re-raise the first cleanup error after all cleanup steps complete.
+            strict (bool): Whether to re-raise the first cleanup error after cleanup reaches a settled state.
         """
         self._stopped = True
         session_id = self._broker_session_id
         self._broker_session_id = None
+        # Strict mode records the first cleanup failure and re-raises it after
+        # the remaining safe disposal steps have run. If callback workers
+        # cannot be joined, later disposal would race their pooled client.
+        first_error: BaseException | None = None
+        settled = True
+
+        # Callback workers may still be posting tool results through the pooled
+        # HTTP client. Drain them before closing that client so no worker can
+        # outlive broker shutdown or race a client disposal. Keep the executor
+        # (and all other cleanup ownership) when shutdown fails so a later
+        # ``stop`` call can retry it.
+        executor = self._callback_executor
+        if executor is not None:
+            try:
+                with self._callback_executor_lock:
+                    executor.shutdown(wait=True)
+                    if self._callback_executor is executor:
+                        self._callback_executor = None
+            except BaseException as exc:
+                settled = False
+                if strict:
+                    first_error = exc
+
+        if not settled:
+            if session_id is not None:
+                self._broker_session_id = session_id
+            if first_error is not None:
+                raise first_error
+            return False
+
         self._broker_url = None
         self._broker_token = None
         # Swap before closing so a concurrent late _http() caller never
@@ -1042,10 +1308,6 @@ class DaytonaHttpToolBroker:
         # client fail into the suppressed httpx error paths.
         client = self._client
         self._client = None
-        # Strict mode still runs every disposal step; the first failure is
-        # recorded and re-raised only after the remaining steps have run.
-        first_error: BaseException | None = None
-        settled = True
         if client is not None:
             try:
                 client.close()
@@ -1131,7 +1393,12 @@ class DaytonaHttpToolBroker:
             cause_type="BrokerHealthError",
         )
 
-    def _poll_once(self, tool_executor: Callable[[str, list[Any], dict[str, Any]], Any]) -> bool:
+    def _poll_once(
+        self,
+        tool_executor: Callable[[str, list[Any], dict[str, Any]], Any],
+        *,
+        wait_s: float = 0.0,
+    ) -> bool:
         """
         Poll for pending broker requests and fulfill them concurrently.
 
@@ -1145,17 +1412,39 @@ class DaytonaHttpToolBroker:
             DaytonaAdapterError: If the broker responds with a non-success, non-server-error status.
         """
         assert self._broker_url is not None
+        if not math.isfinite(wait_s):
+            wait_s = 0.0
+        wait_s = max(0.0, min(_MAX_PENDING_POLL_INTERVAL_S, wait_s))
+        poll_started_ns = time.perf_counter_ns()
         self._poll_count += 1
+        self._record_metric("poll_count")
+        self._record_metric("pending_wait_requested_ms", max(0, int(wait_s * 1_000)))
+        params = {"max": "8"}
+        if wait_s > 0:
+            params["wait"] = f"{wait_s:.3f}"
         try:
-            response = self._http().get("/pending", params={"max": "8"}, timeout=5)
+            response = self._http().get("/pending", params=params, timeout=5)
         except (httpx.HTTPError, TimeoutError, OSError, ValueError):
+            self._record_metric("poll_error_count")
+            self._record_duration(
+                "poll_latency_ms",
+                poll_started_ns,
+                max_key="poll_latency_max_ms",
+            )
             return False
+        self._record_duration(
+            "poll_latency_ms",
+            poll_started_ns,
+            max_key="poll_latency_max_ms",
+        )
         if response.status_code != 200:
             # 5xx from the preview proxy is a transient failure mode the poll
             # loops recover from, exactly like the tolerated transport errors
             # above; only non-recoverable statuses abort the execution.
             if response.status_code >= 500:
+                self._record_metric("poll_error_count")
                 return False
+            self._record_metric("poll_error_count")
             raise DaytonaAdapterError(
                 message=f"broker poll failed with HTTP {response.status_code}",
                 cause_type="BrokerPollError",
@@ -1163,17 +1452,32 @@ class DaytonaHttpToolBroker:
         try:
             payload = response.json()
         except ValueError:
+            self._record_metric("poll_error_count")
             return False
+        try:
+            waited_ms = max(0, int(payload.get("waited_ms", 0)))
+        except (TypeError, ValueError):
+            waited_ms = 0
+        self._record_metric("pending_wait_elapsed_ms", waited_ms)
         requests_out = payload.get("requests") or []
         if not requests_out:
+            self._record_metric("empty_poll_count")
             return False
+        self._record_metric("pending_batch_count")
+        self._record_metric("pending_request_count", len(requests_out))
         self._fulfilled_count += len(requests_out)
         # The broker polls on the interpreter thread, then fulfills host Tools
         # in worker threads. Copy the active Turn/MLflow context separately for
         # each request so Tool spans stay nested without sharing a Context.
         work = [(copy_context(), item) for item in requests_out]
-        with ThreadPoolExecutor(max_workers=min(8, len(requests_out))) as pool:
-            list(pool.map(lambda item: item[0].run(self._fulfill, item[1], tool_executor), work))
+        executor, created = self._get_callback_executor()
+        self._record_metric("callback_executor_created" if created else "callback_executor_reused")
+        self._record_metric("callback_dispatch_count", len(requests_out))
+        dispatch_started_ns = time.perf_counter_ns()
+        try:
+            list(executor.map(lambda item: item[0].run(self._fulfill, item[1], tool_executor), work))
+        finally:
+            self._record_duration("callback_dispatch_ms", dispatch_started_ns, max_key="callback_dispatch_max_ms")
         return True
 
     def _fulfill(
@@ -1194,6 +1498,7 @@ class DaytonaHttpToolBroker:
         name = str(item.get("tool_name") or "")
         args = list(item.get("args") or [])
         kwargs = dict(item.get("kwargs") or {})
+        tool_started_ns = time.perf_counter_ns()
         try:
             result = tool_executor(name, args, kwargs)
             validate_json_value(result, path=f"Tool {name} result")
@@ -1208,15 +1513,24 @@ class DaytonaHttpToolBroker:
                 "lease_token": lease,
                 "error": message,
             }
+        finally:
+            self._record_duration("tool_execution_ms", tool_started_ns, max_key="tool_execution_max_ms")
+
+        post_started_ns = time.perf_counter_ns()
+        self._record_metric("result_post_count")
         try:
-            self._http().post(
+            response = self._http().post(
                 "/result",
                 content=json.dumps(body, allow_nan=False).encode("utf-8"),
                 headers={"Content-Type": "application/json"},
                 timeout=10,
             )
+            if response.status_code >= 400:
+                self._record_metric("result_post_failures")
         except (httpx.HTTPError, TimeoutError, OSError):
-            return
+            self._record_metric("result_post_failures")
+        finally:
+            self._record_duration("result_post_ms", post_started_ns, max_key="result_post_max_ms")
 
     def _preview_headers(self) -> dict[str, str]:
         headers = {"X-Broker-Secret": self._broker_secret}

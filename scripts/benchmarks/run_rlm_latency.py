@@ -16,6 +16,7 @@ import sys
 import tempfile
 import time
 from collections.abc import Iterator, Mapping, Sequence
+from contextlib import suppress
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -69,6 +70,41 @@ EVIDENCE_WORKLOAD_ID = "evidence-conflict-v1"
 WORKLOAD_CHOICES = (EVIDENCE_WORKLOAD_ID, CORPUS_WORKLOAD_ID)
 _TRAJECTORY_ITEM_LIMIT = 64
 _TRAJECTORY_CHAR_LIMIT = 64 * 1024
+_BROKER_METRIC_KEYS = (
+    "poll_count",
+    "empty_poll_count",
+    "poll_error_count",
+    "poll_latency_ms",
+    "poll_latency_max_ms",
+    "pending_batch_count",
+    "pending_request_count",
+    "callback_dispatch_count",
+    "callback_dispatch_ms",
+    "callback_dispatch_max_ms",
+    "tool_execution_ms",
+    "tool_execution_max_ms",
+    "result_post_count",
+    "result_post_failures",
+    "result_post_ms",
+    "result_post_max_ms",
+    "pending_wait_requested_ms",
+    "pending_wait_elapsed_ms",
+    "drain_poll_count",
+    "callback_executor_created",
+    "callback_executor_reused",
+    "tool_call_count",
+    "output_poll_count",
+    "output_poll_failures",
+    "output_poll_latency_ms",
+    "output_poll_latency_max_ms",
+    "output_release_count",
+    "output_chars",
+    "output_wait_requested_ms",
+    "output_wait_elapsed_ms",
+    "execution_wall_ms",
+    "run_code_ms",
+)
+_BROKER_METRIC_KEY_SET = frozenset(_BROKER_METRIC_KEYS)
 
 LATENCY_WORKLOAD = """Analyze the following evidence and decide whether the customer can
 prevent renewal of OF-7781 effective 2025-04-01. Resolve conflicts by authority
@@ -640,6 +676,8 @@ def _execution_trace_diagnostics(mlflow_url: str, trace_id: str) -> dict[str, An
         ]
         adapter_parse_error_count = 0
         last_lm_response_keys: list[str] = []
+        sandbox_execute_span_count = 0
+        broker_metrics = _new_broker_metrics()
         for span in spans:
             outputs = getattr(span, "outputs", None)
             if isinstance(outputs, Mapping):
@@ -655,6 +693,11 @@ def _execution_trace_diagnostics(mlflow_url: str, trace_id: str) -> dict[str, An
                         last_lm_response_keys = [str(key) for key in keys[:32]]
                 if span.name == "Turn.progress.warning" and "omitted" in str(outputs.get("message", "")):
                     detail_overflowed = True
+                if span.name == "sandbox.execute":
+                    sandbox_execute_span_count += 1
+                    _merge_broker_metrics(broker_metrics, _broker_metrics(outputs))
+            elif span.name == "sandbox.execute":
+                sandbox_execute_span_count += 1
         return {
             "root_lm_span_count": len(root_lm_spans),
             "root_lm_wall_time_ms": round(sum(root_lm_wall_times), 3),
@@ -664,6 +707,8 @@ def _execution_trace_diagnostics(mlflow_url: str, trace_id: str) -> dict[str, An
             "last_lm_response_keys": last_lm_response_keys,
             "repair_error_count": repair_error_count,
             "detail_overflowed": detail_overflowed,
+            "sandbox_execute_span_count": sandbox_execute_span_count,
+            "broker_metrics": broker_metrics,
         }
     except Exception as exc:
         return {"status": "unavailable", "error_category": type(exc).__name__}
@@ -734,6 +779,12 @@ def _aggregate(rows: Sequence[Mapping[str, Any]], *, workload_id: str = EVIDENCE
         item = row.get("trace_diagnostics")
         if isinstance(item, Mapping):
             diagnostics.append(item)
+    broker_metrics = _new_broker_metrics()
+    sandbox_execute_span_count = 0
+    for item in diagnostics:
+        with suppress(TypeError, ValueError):
+            sandbox_execute_span_count += int(item.get("sandbox_execute_span_count", 0))
+        _merge_broker_metrics(broker_metrics, item.get("broker_metrics"))
     return {
         "sample_count": len(measured),
         "end_to_end_ms": {
@@ -776,11 +827,38 @@ def _aggregate(rows: Sequence[Mapping[str, Any]], *, workload_id: str = EVIDENCE
         ),
         "repair_error_count": sum(int(item.get("repair_error_count", 0)) for item in diagnostics),
         "detail_overflowed": any(item.get("detail_overflowed") is True for item in diagnostics),
+        "sandbox_execute_span_count": sandbox_execute_span_count,
+        "broker_metrics": broker_metrics,
         "corpus_report_complete": corpus_report_complete if workload_id == CORPUS_WORKLOAD_ID else None,
         "corpus_evidence_complete": corpus_evidence_complete if workload_id == CORPUS_WORKLOAD_ID else None,
         "corpus_quality_complete": corpus_quality_complete if workload_id == CORPUS_WORKLOAD_ID else None,
         "quality_complete": corpus_quality_complete if workload_id == CORPUS_WORKLOAD_ID else False,
     }
+
+
+def _new_broker_metrics() -> dict[str, int]:
+    """Return a zeroed allowlist for broker metrics emitted by ``sandbox.execute``."""
+    return {key: 0 for key in _BROKER_METRIC_KEYS}
+
+
+def _broker_metrics(outputs: Mapping[str, Any]) -> Mapping[str, Any] | None:
+    """Read nested broker metrics, falling back to legacy flat span keys."""
+    nested = outputs.get("broker_metrics")
+    return nested if isinstance(nested, Mapping) else outputs
+
+
+def _merge_broker_metrics(target: dict[str, int], values: object) -> None:
+    """Merge an allowlisted per-cell broker breakdown into aggregate totals."""
+    if not isinstance(values, Mapping):
+        return
+    for raw_key, raw_value in values.items():
+        key = str(raw_key)
+        if key not in _BROKER_METRIC_KEY_SET or not isinstance(raw_value, int) or isinstance(raw_value, bool):
+            continue
+        if key.endswith("_max_ms"):
+            target[key] = max(target[key], raw_value)
+        else:
+            target[key] += raw_value
 
 
 def _usage_totals(value: object) -> dict[str, int]:

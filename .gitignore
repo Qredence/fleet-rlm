@@ -139,6 +139,9 @@ FINDINGS_REPORT.md
 
 # Playground / one-off
 plugins/
+!.amp/
+!.amp/plugins/
+!.amp/plugins/*.ts
 notebooks/dspy-rlm-end-to-end-use-case.ipynb
 src/fleet_rlm/_scaffold/
 src/.tmp/

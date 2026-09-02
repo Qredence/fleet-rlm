@@ -112,8 +112,12 @@ typed Runtime Events projected through SSE or the terminal client.
 The native RLM policy fields map directly to DSPy 3.3.x: `max_iters` bounds
 Root/child action iterations, `max_llm_calls` bounds prompts sent through native
 `llm_query` and `llm_query_batched` tools (each batched prompt counts), and
-`max_output_chars` bounds retained REPL output/history. The default Root values
-are `20`, `50`, and `10000`; the child values are `8`, `12`, and `4000`.
+`max_output_chars` bounds each REPL output when DSPy renders native history for
+the next action; it is not a total-history limit, and reasoning/code text is
+still governed by the native trajectory. The generic `RLMOptions` and DSPy
+constructor fallback values for Root are `20`, `50`, and `10000`; the shipped
+`daytona-recursive` policy deliberately lowers the effective Root values to
+`12`, `32`, and `6000`. Its child values remain `8`, `12`, and `4000`.
 `max_execution_output_chars`, the Turn deadline, and recursive call/concurrency
 limits are separate Fleet controls. There is no configurable recursive depth;
 `RLM_NATIVE_CHILD_DEPTH = 1` is a fixed product invariant.
@@ -169,6 +173,10 @@ or `execution` so both roots stay searchable; a failed preparation leaves only
 the preparation root, and disabled tracing records none. The execution root
 additionally carries the bounded one-way `fleet.preparation_trace_id` tag;
 preparation traces never reference the execution trace.
+
+The shipped Root and Sub LLM roles set `num_retries = 1`. This is a committed
+runtime policy choice, not a change to DSPy's generic constructor defaults;
+custom profiles that omit the field still resolve the typed settings default.
 
 ## Local terminal editing
 

@@ -67,6 +67,29 @@ The broker startup boundary costs 3.746s p95 (3.8% of total Run p95), and the
 first actual brokered interpreter call costs 1.284s p95 (1.3%). Both remain
 small next to model/RLM execution (72.049s p95).
 
+## Broker polling and per-cell instrumentation
+
+The broker optimization keeps the existing isolation boundary but removes
+avoidable per-cell work. Host polling now uses a pooled `httpx.Client`, a
+broker-owned callback executor reused across cells, bounded server-side
+long-polling on `/pending` and streamed `/output`, and a single final output
+release read. The broker records the following on each `sandbox.execute` span:
+
+- `poll_count`, `empty_poll_count`, and `poll_latency_ms` for callback polling;
+- `pending_wait_requested_ms` versus `pending_wait_elapsed_ms` for configured
+  versus observed server-side pending waits;
+- `output_poll_count`, `output_poll_latency_ms`, and the corresponding output
+  wait metrics;
+- `callback_dispatch_ms`, `tool_execution_ms`, and `result_post_ms` for the
+  host callback path; and
+- `execution_wall_ms` and `run_code_ms` for end-to-end cell accounting.
+
+The distinction between requested and observed wait is intentional: it makes
+preview-proxy/network delay visible in poll latency without attributing it to
+the broker's condition wait. The co-located test exercises streaming output,
+callback fulfillment, executor reuse, and the long-poll contract. A new live
+p95 is not claimed until the explicit Daytona latency benchmark is rerun.
+
 The live latency workload did not issue a recursive LLM call in this run
 (`recursive_calls = 0`), so it cannot provide child-model p95. The decision
 therefore uses the stricter product boundary: actual recursive child

@@ -119,7 +119,7 @@ def test_policy_apply_is_atomic_and_can_reset_a_profile_override(tmp_path: Path)
         revision=updated.revision,
     )
     inherited = _field(reset, "daytona-recursive", "rlm.max_llm_calls")
-    assert inherited["value"] == 50
+    assert inherited["value"] == 32
     assert inherited["origin"] == "inherited"
     assert inherited["can_reset"] is False
     rendered = tomllib.loads(policy.read_text(encoding="utf-8"))

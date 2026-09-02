@@ -273,16 +273,86 @@ def test_execution_trace_diagnostics_exposes_wall_time_and_parse_failure(
 
     diagnostics = _execution_trace_diagnostics("http://localhost:5001", "trace-1")
 
-    assert diagnostics == {
-        "root_lm_span_count": 2,
-        "root_lm_wall_time_ms": 320.0,
-        "root_lm_slowest_wall_time_ms": 220.0,
-        "root_lm_max_context_chars": 24,
-        "adapter_parse_error_count": 1,
-        "last_lm_response_keys": [],
-        "repair_error_count": 0,
-        "detail_overflowed": False,
-    }
+    assert diagnostics["root_lm_span_count"] == 2
+    assert diagnostics["root_lm_wall_time_ms"] == 320.0
+    assert diagnostics["root_lm_slowest_wall_time_ms"] == 220.0
+    assert diagnostics["root_lm_max_context_chars"] == 24
+    assert diagnostics["adapter_parse_error_count"] == 1
+    assert diagnostics["last_lm_response_keys"] == []
+    assert diagnostics["repair_error_count"] == 0
+    assert diagnostics["detail_overflowed"] is False
+    assert diagnostics["sandbox_execute_span_count"] == 0
+    assert all(value == 0 for value in diagnostics["broker_metrics"].values())
+
+
+def test_execution_trace_diagnostics_reads_nested_broker_metrics(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    spans = [
+        SimpleNamespace(
+            name="sandbox.execute",
+            inputs={},
+            outputs={
+                "broker_metrics": {
+                    "poll_count": 3,
+                    "output_release_count": 1,
+                    "poll_latency_max_ms": 7,
+                    "run_code_ms": 11,
+                }
+            },
+        )
+    ]
+    fake_mlflow = SimpleNamespace(
+        set_tracking_uri=lambda _url: None,
+        get_trace=lambda _trace_id: SimpleNamespace(data=SimpleNamespace(spans=spans)),
+    )
+    monkeypatch.setitem(sys.modules, "mlflow", fake_mlflow)
+
+    diagnostics = _execution_trace_diagnostics("http://localhost:5001", "trace-1")
+
+    assert diagnostics["sandbox_execute_span_count"] == 1
+    assert diagnostics["broker_metrics"]["poll_count"] == 3
+    assert diagnostics["broker_metrics"]["output_release_count"] == 1
+    assert diagnostics["broker_metrics"]["poll_latency_max_ms"] == 7
+    assert diagnostics["broker_metrics"]["run_code_ms"] == 11
+
+
+def test_aggregate_sums_broker_metrics_and_preserves_maxima() -> None:
+    aggregate = _aggregate(
+        [
+            {
+                "sample_kind": "measured",
+                "duration_ms": 100,
+                "first_event_ms": 10,
+                "trace_diagnostics": {
+                    "sandbox_execute_span_count": 2,
+                    "broker_metrics": {
+                        "poll_count": 3,
+                        "output_release_count": 1,
+                        "poll_latency_max_ms": 7,
+                    },
+                },
+            },
+            {
+                "sample_kind": "measured",
+                "duration_ms": 200,
+                "first_event_ms": 20,
+                "trace_diagnostics": {
+                    "sandbox_execute_span_count": 1,
+                    "broker_metrics": {
+                        "poll_count": 4,
+                        "output_release_count": 1,
+                        "poll_latency_max_ms": 9,
+                    },
+                },
+            },
+        ]
+    )
+
+    assert aggregate["sandbox_execute_span_count"] == 3
+    assert aggregate["broker_metrics"]["poll_count"] == 7
+    assert aggregate["broker_metrics"]["output_release_count"] == 2
+    assert aggregate["broker_metrics"]["poll_latency_max_ms"] == 9
 
 
 def test_usage_totals_keep_only_approved_counters() -> None:
