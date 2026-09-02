@@ -288,7 +288,7 @@ describe("FleetApiClient", () => {
                     path: "llm.root.base_url_env",
                     group: "Root LLM",
                     label: "Provider base URL environment variable",
-                    value: "FLEET_DATABRICKS_AI_GATEWAY_BASE_URL",
+                    value: "FLEET_LLM_BASE_URL",
                     editor: "text",
                     choices: [],
                     environment_overridden: false,
@@ -316,7 +316,7 @@ describe("FleetApiClient", () => {
     );
     expect(fields["llm.root.model"]).toBe("databricks-deepseek-v4-flash-0731");
     expect(fields["llm.root.api_key_env"]).toBe("DATABRICKS_TOKEN");
-    expect(fields["llm.root.base_url_env"]).toBe("FLEET_DATABRICKS_AI_GATEWAY_BASE_URL");
+    expect(fields["llm.root.base_url_env"]).toBe("FLEET_LLM_BASE_URL");
     await client.updateSettings({
       revision: "a".repeat(64),
       scope: "defaults",

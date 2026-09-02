@@ -31,13 +31,26 @@ export type SettingsUpdate = {
   value: string | number | boolean | string[] | null;
 };
 
+export type SettingsBatchUpdate = {
+  revision: string;
+  updates: Array<{
+    scope: string;
+    path: string;
+    value?: string | number | boolean | string[] | null;
+    unset?: boolean;
+  }>;
+  defaultProfile?: string;
+};
+
 /**
  * Saves one settings update and returns the freshest policy for the next edit:
  * the PATCH response on success, or a GET-refreshed snapshot after a revision
  * conflict. Returns `null` when the save failed (the callback surfaces the
  * error itself). Never throws.
  */
-export type SettingsSaveCallback = (update: SettingsUpdate) => Promise<FleetSettingsPolicy | null>;
+export type SettingsSaveCallback = (
+  update: SettingsUpdate | SettingsBatchUpdate,
+) => Promise<FleetSettingsPolicy | null>;
 
 export interface CommandPresenter {
   showHelp(commands: CommandSpec[]): void;

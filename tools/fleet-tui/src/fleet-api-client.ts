@@ -8,6 +8,7 @@ type FleetTurnPage = components["schemas"]["SessionTurnPageResponse"];
 export type FleetSkillCard = components["schemas"]["SkillCardResponse"];
 export type FleetSettingsPolicy = components["schemas"]["SettingsPolicyResponse"];
 export type FleetSettingsPatch = components["schemas"]["SettingsPolicyPatchRequest"];
+export type FleetSettingsUpdate = components["schemas"]["SettingsPolicyUpdate"];
 export type FleetVolumeTree = components["schemas"]["VolumeTreeResponse"];
 export type FleetAttachment = components["schemas"]["AttachmentResponse"];
 export type FleetWorkspaceFileList = components["schemas"]["WorkspaceFileListResponse"];
@@ -106,6 +107,18 @@ export class FleetApiClient {
     return this.requestJson<FleetSettingsPolicy>("/api/settings", {
       method: "PATCH",
       body: JSON.stringify(patch),
+    });
+  }
+
+  async applySettings(
+    revision: string,
+    updates: FleetSettingsUpdate[],
+    defaultProfile?: string,
+  ): Promise<FleetSettingsPolicy> {
+    return this.updateSettings({
+      revision,
+      updates,
+      ...(defaultProfile ? { default_profile: defaultProfile } : {}),
     });
   }
 

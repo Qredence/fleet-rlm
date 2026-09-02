@@ -50,6 +50,56 @@ def test_settings_policy_is_loopback_only_and_revision_checked(monkeypatch, tmp_
         assert updated.status_code == 200
         assert updated.json()["revision"] != body["revision"]
 
+        batch = client.patch(
+            "/api/settings",
+            json={
+                "revision": updated.json()["revision"],
+                "updates": [
+                    {"scope": "defaults", "path": "rlm.max_iters", "value": 22},
+                    {"scope": "daytona-recursive", "path": "rlm.max_llm_calls", "value": 12},
+                ],
+            },
+        )
+        assert batch.status_code == 200
+        profile_scope = next(scope for scope in batch.json()["scopes"] if scope["name"] == "daytona-recursive")
+        override = next(field for field in profile_scope["fields"] if field["path"] == "rlm.max_llm_calls")
+        assert override["origin"] == "override"
+        assert override["can_reset"] is True
+
+        reset = client.patch(
+            "/api/settings",
+            json={
+                "revision": batch.json()["revision"],
+                "updates": [
+                    {"scope": "daytona-recursive", "path": "rlm.max_llm_calls", "unset": True},
+                ],
+            },
+        )
+        assert reset.status_code == 200
+
+        inherited_reset = client.patch(
+            "/api/settings",
+            json={
+                "revision": reset.json()["revision"],
+                "updates": [
+                    {"scope": "daytona-recursive", "path": "rlm.max_llm_calls", "unset": True},
+                ],
+            },
+        )
+        assert inherited_reset.status_code == 422
+
+        duplicate = client.patch(
+            "/api/settings",
+            json={
+                "revision": reset.json()["revision"],
+                "updates": [
+                    {"scope": "defaults", "path": "rlm.max_iters", "value": 23},
+                    {"scope": "defaults", "path": "rlm.max_iters", "value": 24},
+                ],
+            },
+        )
+        assert duplicate.status_code == 422
+
         stale = client.patch(
             "/api/settings",
             json={

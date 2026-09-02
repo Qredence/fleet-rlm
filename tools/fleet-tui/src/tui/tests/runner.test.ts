@@ -450,6 +450,32 @@ describe("RunController", () => {
     expect(store.getState().run.statusPhase).toBeNull();
   });
 
+  it("renders the bounded provider endpoint diagnostic", async () => {
+    globalThis.fetch = vi
+      .fn()
+      .mockResolvedValue(
+        sseResponse(
+          [
+            'data: {"type":"start","messageId":"run-provider-missing","messageMetadata":{}}\n\n',
+            'data: {"type":"error","errorText":"Provider endpoint not found; check model and base URL"}\n\n',
+            'data: {"type":"finish","finishReason":"error"}\n\n',
+            "data: [DONE]\n\n",
+          ].join(""),
+        ),
+      );
+    const { store, controller } = setup();
+
+    controller.start("provider failure");
+    await vi.waitFor(() => expect(store.getState().run.phase).toBe("error"));
+
+    expect(store.getState().messages).toContainEqual(
+      expect.objectContaining({
+        kind: "error",
+        text: "Provider endpoint not found; check model and base URL",
+      }),
+    );
+  });
+
   it("does not create an assistant message when submission is cancelled", async () => {
     const { client, store, controller } = setup();
     client.streamTurn = vi.fn(

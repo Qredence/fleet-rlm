@@ -101,12 +101,16 @@ export function parseFieldValue(field: SettingsField, raw: string): ParsedFieldV
     return { ok: true, value: parsed };
   }
   if (field.editor === "multi_choice" || field.editor === "string_list") {
+    const values = raw
+      .split(",")
+      .map((item) => item.trim())
+      .filter(Boolean);
     return {
       ok: true,
-      value: raw
-        .split(",")
-        .map((item) => item.trim())
-        .filter(Boolean),
+      // The policy service canonicalizes category lists by trimming and
+      // deduplicating them before writing. Keep the draft in that same form so
+      // a successful response is recognized as the requested value.
+      value: field.editor === "string_list" ? [...new Set(values)] : values,
     };
   }
   return { ok: true, value: raw };
@@ -284,6 +288,8 @@ function describeField(field: SettingsField): string {
   } else if (isFixedChoice(field)) {
     parts.push("fixed; only one value is supported");
   }
+  if (field.origin === "inherited") parts.push("inherited from defaults");
+  if (field.origin === "override") parts.push("profile override; can reset to inherited");
   return parts.join(" · ");
 }
 

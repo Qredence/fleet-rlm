@@ -359,6 +359,8 @@ class SettingsFieldResponse(BaseModel):
     editor: Literal["text", "number", "boolean", "single_choice", "multi_choice", "string_list"]
     choices: list[str] = Field(default_factory=list)
     environment_overridden: bool = False
+    origin: Literal["default", "inherited", "override"] = "default"
+    can_reset: bool = False
 
 
 class SettingsScopeResponse(BaseModel):
@@ -375,6 +377,25 @@ class SettingsPolicyResponse(BaseModel):
     scopes: list[SettingsScopeResponse]
 
 
+class SettingsPolicyUpdate(BaseModel):
+    """One set or reset operation in an atomic settings-policy batch."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    scope: str = Field(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+    path: str = Field(min_length=1, max_length=128, pattern=r"^[a-z][a-z0-9_.]*$")
+    value: JsonValue = None
+    unset: bool = False
+
+    @model_validator(mode="after")
+    def validate_operation(self) -> SettingsPolicyUpdate:
+        if self.unset and self.value is not None:
+            raise ValueError("reset settings updates cannot include a value")
+        if not self.unset and self.value is None:
+            raise ValueError("settings updates require a value")
+        return self
+
+
 class SettingsPolicyPatchRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -383,6 +404,26 @@ class SettingsPolicyPatchRequest(BaseModel):
     path: str | None = Field(default=None, min_length=1, max_length=128, pattern=r"^[a-z][a-z0-9_.]*$")
     value: JsonValue = None
     profile: str | None = Field(default=None, min_length=1, max_length=128, pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+    updates: list[SettingsPolicyUpdate] = Field(default_factory=list, max_length=128)
+    default_profile: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=128,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]*$",
+    )
+
+    @model_validator(mode="after")
+    def validate_operation_shape(self) -> SettingsPolicyPatchRequest:
+        legacy_field = self.scope is not None or self.path is not None or self.value is not None
+        if legacy_field and (self.scope is None or self.path is None or self.value is None):
+            raise ValueError("legacy settings updates require scope, path, and value")
+        if self.profile is not None and (legacy_field or self.updates or self.default_profile is not None):
+            raise ValueError("legacy profile selection cannot be combined with settings updates")
+        if (self.updates or self.default_profile is not None) and legacy_field:
+            raise ValueError("batch settings updates cannot be combined with legacy settings fields")
+        if not legacy_field and self.profile is None and not self.updates and self.default_profile is None:
+            raise ValueError("settings update is empty")
+        return self
 
 
 # ---------------------------------------------------------------------------

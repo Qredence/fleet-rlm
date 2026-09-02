@@ -17,6 +17,7 @@ import type { FleetSession, FleetSettingsPolicy, FleetSkillCard } from "../fleet
 import type {
   CommandPresenter,
   CommandSpec,
+  SettingsBatchUpdate,
   SettingsSaveCallback,
   SettingsUpdate,
 } from "./commands/registry.js";
@@ -257,22 +258,36 @@ export class PiCommandPresenter implements CommandPresenter {
     });
   }
 
-  /**
-   * Settings-first flow: the overlay stays open across edits. Each change is
-   * parsed and queued through `save`, which returns the freshest policy (PATCH
-   * response, or a GET refresh after a revision conflict) used for the next
-   * edit's revision. Displayed values always resync from that policy, so a
-   * failed or conflicted save reverts the optimistic SettingsList display.
-   */
+  /** Settings edits stay local until the operator explicitly applies one batch. */
   private editSettingsInteractively(
     settings: FleetSettingsPolicy,
     save: SettingsSaveCallback,
   ): Promise<void> {
     return new Promise((resolve) => {
       let policy = settings;
-      let chain: Promise<void> = Promise.resolve();
+      const draft = new Map<string, SettingsBatchUpdate["updates"][number]>();
       let activeFieldList: SettingsList | null = null;
       let activeScopeName: string | null = null;
+      let applyInFlight = false;
+      let root: SettingsList;
+
+      const draftKey = (scope: string, path: string): string => `${scope}\u0000${path}`;
+      const updateRootStatus = (): void => {
+        let status = "no changes";
+        if (applyInFlight) status = "applying...";
+        else if (draft.size) status = `${draft.size} pending`;
+        root.updateValue("__apply", status);
+        root.updateValue("__discard", draft.size ? `${draft.size} pending` : "no changes");
+      };
+
+      const sameDraftUpdate = (
+        left: SettingsBatchUpdate["updates"][number],
+        right: SettingsBatchUpdate["updates"][number],
+      ): boolean =>
+        left.scope === right.scope &&
+        left.path === right.path &&
+        left.unset === right.unset &&
+        JSON.stringify(left.value) === JSON.stringify(right.value);
 
       const resyncDisplayedValues = (): void => {
         // Field paths are unique per scope list; only the open scope's list
@@ -280,76 +295,161 @@ export class PiCommandPresenter implements CommandPresenter {
         const activeScope = policy.scopes.find((scope) => scope.name === activeScopeName);
         if (!activeFieldList || !activeScope) return;
         for (const field of activeScope.fields) {
-          activeFieldList.updateValue(field.path, displayValue(field.value));
+          const pending = draft.get(draftKey(activeScope.name, field.path));
+          activeFieldList.updateValue(
+            field.path,
+            displayValue(pending?.unset ? field.value : (pending?.value ?? field.value)),
+          );
         }
       };
 
-      const enqueueSave = (scopeName: string, field: SettingsField, raw: string): void => {
-        // Serialized so revision chaining stays consistent; errors are absorbed
-        // so one bad save can neither wedge the queue nor hang dismissal.
-        chain = chain
-          .then(async () => {
-            const parsed = parseFieldValue(field, raw);
-            if (!parsed.ok) {
-              this.notify(`${field.path}: ${parsed.error}`);
-              resyncDisplayedValues();
-              return;
-            }
-            const revision = policy.revision;
-            const refreshed = await save({
-              revision,
-              scope: scopeName,
-              path: field.path,
-              value: parsed.value,
-            });
-            if (refreshed) policy = refreshed;
-            resyncDisplayedValues();
-          })
-          .catch(() => undefined);
+      const stage = (scopeName: string, field: SettingsField, raw: string): void => {
+        const parsed = parseFieldValue(field, raw);
+        if (!parsed.ok) {
+          this.notify(`${field.path}: ${parsed.error}`);
+          resyncDisplayedValues();
+          return;
+        }
+        draft.set(draftKey(scopeName, field.path), {
+          scope: scopeName,
+          path: field.path,
+          value: parsed.value,
+        });
+        updateRootStatus();
+        resyncDisplayedValues();
       };
 
       const onFieldChange = (scopeName: string, id: string, raw: string): void => {
-        // Read field metadata from the freshest policy so refreshed choices
-        // and environment overrides apply to the next edit.
         const scope = policy.scopes.find((candidate) => candidate.name === scopeName);
         const field = scope?.fields.find((candidate) => candidate.path === id);
         if (!field || field.environment_overridden) return;
-        enqueueSave(scopeName, field, raw);
+        stage(scopeName, field, raw);
       };
 
-      const root = new SettingsList(
-        settings.scopes.map((scope) => ({
-          id: scope.name,
-          label: scope.name,
-          description: `${scope.fields.length} setting${scope.fields.length === 1 ? "" : "s"}`,
-          currentValue: "",
-          submenu: (_current, done) => {
-            // Look up the freshest snapshot so reopening a scope reflects
-            // values saved or refreshed through the server.
-            const latest =
-              policy.scopes.find((candidate) => candidate.name === scope.name) ?? scope;
-            const fieldList = new SettingsList(
-              latest.fields.map((field) => fieldItem(field)),
-              10,
-              settingsListTheme,
-              (id, value) => onFieldChange(scope.name, id, value),
-              () => done(undefined),
-              { enableSearch: true },
+      const applyDraft = async (): Promise<void> => {
+        if (applyInFlight) {
+          this.notify("A settings apply is already in progress.");
+          return;
+        }
+        if (!draft.size) {
+          this.notify("No settings changes to apply.");
+          return;
+        }
+        const updates = [...draft.values()];
+        applyInFlight = true;
+        updateRootStatus();
+        try {
+          const refreshed = await save({ revision: policy.revision, updates });
+          if (!refreshed) return;
+          const applied = updates.every((update) => {
+            const field = refreshed.scopes
+              .find((scope) => scope.name === update.scope)
+              ?.fields.find((candidate) => candidate.path === update.path);
+            return update.unset
+              ? field?.origin === "inherited"
+              : JSON.stringify(field?.value) === JSON.stringify(update.value);
+          });
+          policy = refreshed;
+          if (applied) {
+            for (const update of updates) {
+              const key = draftKey(update.scope, update.path);
+              const current = draft.get(key);
+              if (current && sameDraftUpdate(current, update)) draft.delete(key);
+            }
+          } else {
+            this.notify(
+              "Settings changed outside this TUI; review the refreshed policy and reapply the draft.",
             );
-            activeFieldList = fieldList;
-            activeScopeName = scope.name;
-            return fieldList;
+          }
+        } finally {
+          applyInFlight = false;
+          updateRootStatus();
+          resyncDisplayedValues();
+        }
+      };
+
+      const discardDraft = (): void => {
+        draft.clear();
+        updateRootStatus();
+        resyncDisplayedValues();
+        this.notify("Discarded pending settings changes.");
+      };
+
+      root = new SettingsList(
+        [
+          ...settings.scopes.map((scope) => ({
+            id: scope.name,
+            label: scope.name,
+            description: `${scope.fields.length} setting${scope.fields.length === 1 ? "" : "s"}`,
+            currentValue: "",
+            submenu: (_current: string, done: (selectedValue?: string) => void) => {
+              // Look up the freshest snapshot so reopening a scope reflects
+              // values saved or refreshed through the server.
+              const latest =
+                policy.scopes.find((candidate) => candidate.name === scope.name) ?? scope;
+              const fieldList = new SettingsList(
+                latest.fields.flatMap((field) => [
+                  fieldItem({
+                    ...field,
+                    value: draft.get(draftKey(scope.name, field.path))?.value ?? field.value,
+                  }),
+                  ...(field.can_reset
+                    ? [
+                        {
+                          id: `__reset:${field.path}`,
+                          label: `Reset ${field.label}`,
+                          description: "Remove this profile override and inherit the default value",
+                          currentValue: "",
+                          values: ["reset"],
+                        },
+                      ]
+                    : []),
+                ]),
+                10,
+                settingsListTheme,
+                (id, value) => {
+                  if (id.startsWith("__reset:")) {
+                    const path = id.slice("__reset:".length);
+                    draft.set(draftKey(scope.name, path), { scope: scope.name, path, unset: true });
+                    updateRootStatus();
+                    resyncDisplayedValues();
+                    return;
+                  }
+                  onFieldChange(scope.name, id, value);
+                },
+                () => done(undefined),
+                { enableSearch: true },
+              );
+              activeFieldList = fieldList;
+              activeScopeName = scope.name;
+              return fieldList;
+            },
+          })),
+          {
+            id: "__apply",
+            label: "Apply draft",
+            description: "Validate and write all pending changes atomically",
+            currentValue: "no changes",
+            values: ["apply"],
           },
-        })),
+          {
+            id: "__discard",
+            label: "Discard draft",
+            description: "Restore the server policy values in this editor",
+            currentValue: "no changes",
+            values: ["discard"],
+          },
+        ],
         10,
         settingsListTheme,
-        () => undefined,
+        (id) => {
+          if (id === "__apply") void applyDraft();
+          if (id === "__discard") discardDraft();
+        },
         () => {
           handle.hide();
           this.restoreFocus();
-          // Let queued saves settle before the command completes so flashes
-          // and error messages stay in save order.
-          void chain.then(() => resolve());
+          resolve();
         },
         { enableSearch: true },
       );
@@ -357,9 +457,10 @@ export class PiCommandPresenter implements CommandPresenter {
         new TitledComponent(
           root,
           "Fleet settings",
-          "Enter edit · Esc back/close · changes apply after a Fleet restart",
+          "Enter edit · Apply draft to save · Esc back/close · restart Fleet after saving",
         ),
       );
+      updateRootStatus();
     });
   }
 

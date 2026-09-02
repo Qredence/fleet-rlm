@@ -7,7 +7,12 @@ import {
   type PendingSkillSelection,
 } from "../store.js";
 
-import type { CommandContext, CommandSpec, SettingsUpdate } from "./registry.js";
+import type {
+  CommandContext,
+  CommandSpec,
+  SettingsBatchUpdate,
+  SettingsUpdate,
+} from "./registry.js";
 import { appendSystem, errorMessage, notifySuccess } from "./shared.js";
 
 export const skillsCommand: CommandSpec = {
@@ -184,11 +189,22 @@ export const profilesCommand: CommandSpec = {
  */
 async function saveSettingsUpdate(
   ctx: CommandContext,
-  update: SettingsUpdate,
+  update: SettingsUpdate | SettingsBatchUpdate,
 ): Promise<FleetSettingsPolicy | null> {
   try {
-    const saved = await ctx.client.updateSettings(update);
-    notifySuccess(ctx, `Saved ${update.path} to config/fleet.toml. Restart Fleet to apply.`);
+    const saved =
+      "updates" in update
+        ? await ctx.client.applySettings(
+            update.revision,
+            update.updates.map((item) => ({ ...item, unset: item.unset ?? false })),
+            update.defaultProfile,
+          )
+        : await ctx.client.updateSettings(update);
+    const message =
+      "updates" in update
+        ? `Saved ${update.updates.length} settings changes to config/fleet.toml. Restart Fleet to apply.`
+        : `Saved ${update.path} to config/fleet.toml. Restart Fleet to apply.`;
+    notifySuccess(ctx, message);
     return saved;
   } catch (error) {
     if (error instanceof FleetApiError && error.code === "settings_revision_conflict") {
