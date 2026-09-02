@@ -768,7 +768,7 @@ export interface components {
             updates?: components["schemas"]["SettingsPolicyUpdate"][];
             /** Default Profile */
             default_profile?: string | null;
-        };
+        } & (unknown | unknown | unknown | unknown);
         /** SettingsPolicyResponse */
         SettingsPolicyResponse: {
             /** Revision */
@@ -802,7 +802,14 @@ export interface components {
              * @default false
              */
             unset: boolean;
-        };
+        } & ({
+            /** @constant */
+            unset: true;
+        } | {
+            /** @constant */
+            unset?: false;
+            value: unknown;
+        });
         /** SettingsScopeResponse */
         SettingsScopeResponse: {
             /** Name */

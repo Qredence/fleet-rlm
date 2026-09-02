@@ -1420,6 +1420,21 @@ components:
       - editor
       title: SettingsFieldResponse
     SettingsPolicyPatchRequest:
+      oneOf:
+      - required:
+        - revision
+        - profile
+      - required:
+        - revision
+        - scope
+        - path
+        - value
+      - required:
+        - revision
+        - updates
+      - required:
+        - revision
+        - default_profile
       properties:
         revision:
           type: string
@@ -1507,6 +1522,24 @@ components:
       - scopes
       title: SettingsPolicyResponse
     SettingsPolicyUpdate:
+      oneOf:
+      - properties:
+          unset:
+            const: true
+        required:
+        - scope
+        - path
+        - unset
+      - properties:
+          unset:
+            const: false
+          value:
+            not:
+              type: 'null'
+        required:
+        - scope
+        - path
+        - value
       properties:
         scope:
           type: string
