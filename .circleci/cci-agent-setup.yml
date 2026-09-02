@@ -1,0 +1,28 @@
+version: 2.1
+
+jobs:
+  cci-agent-setup:
+    docker:
+      - image: cimg/python:3.13.13-node
+    working_directory: ~/project
+    steps:
+      - checkout
+      - run:
+          name: Install uv
+          command: curl -LsSf https://astral.sh/uv/install.sh | sh
+      - run:
+          name: Provision locked Python dependencies
+          command: |
+            export PATH="$HOME/.local/bin:$PATH"
+            uv sync --all-extras --dev --locked
+      - run:
+          name: Provision locked TUI dependencies
+          command: |
+            corepack enable
+            corepack prepare pnpm@11.15.1 --activate
+            pnpm --dir tools/fleet-tui install --frozen-lockfile
+
+workflows:
+  cci-agent-setup:
+    jobs:
+      - cci-agent-setup

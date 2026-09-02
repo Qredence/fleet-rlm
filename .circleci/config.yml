@@ -36,7 +36,7 @@ commands:
     steps:
       - restore_cache:
           keys:
-            - v1-uv-bin-{{ arch }}
+            - v2-uv-bin-{{ arch }}
       - run:
           name: Install uv (skip if cached)
           command: |
@@ -44,6 +44,14 @@ commands:
               curl -LsSf https://astral.sh/uv/install.sh | sh
             fi
             echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$BASH_ENV"
+
+  save_uv_binary_cache:
+    steps:
+      - save_cache:
+          key: v2-uv-bin-{{ arch }}
+          paths:
+            - ~/.local/bin/uv
+            - ~/.local/bin/uvx
 
   restore_uv_cache:
     parameters:
@@ -109,6 +117,7 @@ jobs:
     steps:
       - checkout
       - install_python_dependencies
+      - save_uv_binary_cache
       - save_uv_cache
       - run:
           name: Release and docs checks

@@ -3,6 +3,8 @@ PYTHON_SOURCES = src tests scripts migrations
 # virtual environments and are covered by the dedicated package gate.
 PYTEST_FAST_MARKERS = not live_llm and not live_daytona and not benchmark and not db and not packaging
 PYTEST_PACKAGING_MARKERS = packaging and not live_llm and not live_daytona and not benchmark and not db
+PYTEST_FAST_PATHS = tests/unit/backend tests/unit/scripts tests/contracts/backend tests/freeze tests/unit/test_litellm_invariant.py tests/e2e
+PYTEST_UNIT_PATHS = tests/unit/backend tests/unit/scripts tests/freeze tests/unit/test_litellm_invariant.py
 PYTEST := uv run --no-sync pytest
 PYTEST_ISOLATED := env \
 	FLEET_DAYTONA_API_KEY= \
@@ -10,18 +12,23 @@ PYTEST_ISOLATED := env \
 	FLEET_LLM_BASE_URL= \
 	FLEET_DATABASE_URL= \
 	$(PYTEST)
-# Four workers keep local gate runs fast on typical dev machines while xdist
-# `loadfile` scheduling keeps module-scoped fixtures together; override with
-# PYTEST_XDIST_MAX_WORKERS when memory is constrained.
-PYTEST_XDIST_MAX_WORKERS ?= 4
+# Two workers keep local gate runs fast on typical dev machines while xdist
+# `loadfile` scheduling keeps module-scoped fixtures together; override only
+# with verified local runner capacity.
+PYTEST_XDIST_MAX_WORKERS ?= 2
 PYTEST_PARALLEL := -n auto --maxprocesses=$(PYTEST_XDIST_MAX_WORKERS) --dist=loadfile
+PYTEST_FAST_ARGS = -q $(PYTEST_PARALLEL) $(PYTEST_FAST_PATHS) -m "$(PYTEST_FAST_MARKERS)"
+PYTEST_UNIT_ARGS = -q $(PYTEST_PARALLEL) $(PYTEST_UNIT_PATHS) -m "$(PYTEST_FAST_MARKERS)"
+
+TUI_DIR := tools/fleet-tui
+TUI_PNPM := cd $(TUI_DIR) && pnpm
 
 .PHONY: \
 	help \
 	install install-dev install-all \
 	dev format format-check lint typecheck \
-	test test-unit test-contract test-packaging test-db test-daytona-cov \
-	check check-release check-docs check-security check-deps check-codebase-tree check-dependency-boundaries \
+	test test-fast test-unit test-contract test-packaging test-db test-daytona-cov \
+	check quality-gate check-release check-docs check-security check-deps check-codebase-tree check-dependency-boundaries \
 	api-check api-sync tui-check stream-check stream-sync \
 	build build-release release \
 	clean cli precommit-install precommit-run precommit \
@@ -44,6 +51,7 @@ help:
 	@echo ""
 	@echo "Testing:"
 	@echo "  make test             - Run default fast non-live tests (packaging is separate)"
+	@echo "  make test-fast        - Alias for the default fast non-live tests"
 	@echo "  make test-unit        - Run unit tests (non-live/non-benchmark; packaging separate)"
 	@echo "  make test-contract    - Run backend contracts and CLI smoke tests"
 	@echo "  make test-packaging   - Run serial artifact/install/release tests"
@@ -55,11 +63,12 @@ help:
 	@echo ""
 	@echo "Quality:"
 	@echo "  make check            - Run the primary repo quality gate"
+	@echo "  make quality-gate     - Alias for the primary repo quality gate"
 	@echo "  make check-release    - Run release metadata/hygiene and AGENTS.md validation"
 	@echo "  make check-docs       - Run docs quality and harness engineering checks"
 	@echo "  make check-security   - Run pip-audit + bandit"
 	@echo "  make check-deps       - Check Python dependencies with deptry"
-	@echo "  make check-codebase-tree - Enforce import boundaries defined in codebase map"
+	@echo "  make check-codebase-tree - Enforce import boundaries defined in ARCHITECTURE.md"
 	@echo "  make check-dependency-boundaries - Enforce provider/domain dependency directions"
 	@echo "  make api-check        - Verify OpenAPI and generated TUI HTTP types"
 	@echo "  make api-sync         - Regenerate OpenAPI and generated TUI HTTP types"
@@ -108,10 +117,12 @@ typecheck:
 	uv run ty check src
 
 test:
-	$(PYTEST_ISOLATED) -q $(PYTEST_PARALLEL) tests/unit/backend tests/unit/scripts tests/contracts/backend tests/freeze tests/unit/test_litellm_invariant.py tests/e2e -m "$(PYTEST_FAST_MARKERS)"
+	$(PYTEST_ISOLATED) $(PYTEST_FAST_ARGS)
+
+test-fast: test
 
 test-unit:
-	$(PYTEST_ISOLATED) -q $(PYTEST_PARALLEL) tests/unit/backend tests/unit/scripts tests/freeze tests/unit/test_litellm_invariant.py -m "$(PYTEST_FAST_MARKERS)"
+	$(PYTEST_ISOLATED) $(PYTEST_UNIT_ARGS)
 
 test-contract:
 	$(PYTEST_ISOLATED) -q tests/contracts/backend tests/e2e -m "$(PYTEST_FAST_MARKERS)" -n 0
@@ -124,7 +135,7 @@ test-db:
 
 test-daytona-cov:
 	mkdir -p .scratch/coverage
-	$(PYTEST_ISOLATED) -q $(PYTEST_PARALLEL) tests/unit/backend tests/unit/scripts tests/contracts/backend tests/freeze tests/unit/test_litellm_invariant.py tests/e2e -m "$(PYTEST_FAST_MARKERS)" --cov --cov-config=pyproject.toml --cov-report=term-missing --cov-report=xml:.scratch/coverage/daytona.xml
+	$(PYTEST_ISOLATED) $(PYTEST_FAST_ARGS) --cov --cov-config=pyproject.toml --cov-report=term-missing --cov-report=xml:.scratch/coverage/daytona.xml
 
 NATIVE_LONG_CONTEXT_OUTPUT ?= .scratch/benchmark-reports/native-long-context-$(shell date +%Y-%m-%d).json
 
@@ -151,12 +162,14 @@ tui-check:
 	# Run pnpm from inside the workspace so corepack resolves the pinned
 	# packageManager version (pnpm --dir resolves from the invocation CWD and
 	# misses it when make runs from the repo root).
-	cd tools/fleet-tui && pnpm run format:check
-	cd tools/fleet-tui && pnpm run lint
-	cd tools/fleet-tui && pnpm run typecheck
-	cd tools/fleet-tui && pnpm run test
+	$(TUI_PNPM) run format:check
+	$(TUI_PNPM) run lint
+	$(TUI_PNPM) run typecheck
+	$(TUI_PNPM) run test
 
 check: lint format-check typecheck test-daytona-cov api-check tui-check check-codebase-tree check-dependency-boundaries check-docs
+
+quality-gate: check
 
 check-release:
 	uv run python scripts/validate_release.py hygiene
