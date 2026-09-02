@@ -104,13 +104,16 @@ class HarnessChecker:
 
     def _check_agent_guide_structure(self) -> None:
         """Keep the nested AGENTS.md surface intentionally closed."""
-        listed = subprocess.run(
-            ("git", "ls-files", "-z", "--cached", "--others", "--exclude-standard"),
-            cwd=self.repo_root,
-            check=False,
-            capture_output=True,
-        )
-        if listed.returncode == 0:
+        try:
+            listed = subprocess.run(
+                ("git", "ls-files", "-z", "--cached", "--others", "--exclude-standard"),
+                cwd=self.repo_root,
+                check=False,
+                capture_output=True,
+            )
+        except FileNotFoundError:
+            listed = None
+        if listed and listed.returncode == 0:
             candidates = [
                 self.repo_root / raw_path
                 for raw_path in listed.stdout.decode().split("\0")
@@ -118,7 +121,6 @@ class HarnessChecker:
             ]
         else:
             candidates = list(self.repo_root.rglob("AGENTS.md"))
-
         for path in candidates:
             relative = path.relative_to(self.repo_root).as_posix()
             if relative not in ALLOWED_AGENT_FILES:
