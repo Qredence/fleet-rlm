@@ -40,6 +40,7 @@ from fleet_rlm.rlm._dspy_compat import (
     bind_native_rlm_observer,
 )
 from fleet_rlm.rlm.events import (
+    PROVIDER_ENDPOINT_NOT_FOUND_MESSAGE,
     AttachmentRead,
     ExecutionTraceAssembler,
     ObservationSession,
@@ -1176,6 +1177,8 @@ def _public_failure_message(exc: BaseException) -> str:
         return str(getattr(exc, "public_message", "Turn failed"))
     if isinstance(exc, AdapterParseError):
         return "The model produced a response that could not be parsed into the expected fields."
+    if normalize_turn_failure(exc).cause_type == "provider_not_found":
+        return PROVIDER_ENDPOINT_NOT_FOUND_MESSAGE
     return "Turn failed"
 
 

@@ -33,6 +33,25 @@ def test_terminal_maps_turn_output_too_large_public_message() -> None:
     assert event.detail.message == "Turn output is too large"
 
 
+def test_terminal_preserves_provider_endpoint_not_found_message_from_durable_failure() -> None:
+    from fleet_rlm.chat.run_lifecycle import FailedRunReceipt
+    from fleet_rlm.chat.turn_runtime import terminal
+    from fleet_rlm.rlm.events import PROVIDER_ENDPOINT_NOT_FOUND_MESSAGE, EventRecorder, RunFailed
+
+    event = terminal(
+        EventRecorder(uuid4(), uuid4()),
+        FailedRunReceipt(
+            run_id=uuid4(),
+            terminal_status="failed",
+            failure_code="execution_failed",
+            public_message=PROVIDER_ENDPOINT_NOT_FOUND_MESSAGE,
+            durable=True,
+        ),
+    )
+    assert isinstance(event.detail, RunFailed)
+    assert event.detail.message == PROVIDER_ENDPOINT_NOT_FOUND_MESSAGE
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("status", "terminal_type"),

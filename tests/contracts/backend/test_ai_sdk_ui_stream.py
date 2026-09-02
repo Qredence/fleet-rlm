@@ -76,13 +76,25 @@ def test_projector_maps_detailed_runtime_events_to_ui_message_chunks() -> None:
 
 def test_projector_maps_failure_and_cancel_to_ai_sdk_terminal_parts() -> None:
     from fleet_rlm.api.sse import AISDKUIProjector
-    from fleet_rlm.rlm.events import EventRecorder, RunCancelled, RunFailed
+    from fleet_rlm.rlm.events import (
+        PROVIDER_ENDPOINT_NOT_FOUND_MESSAGE,
+        EventRecorder,
+        RunCancelled,
+        RunFailed,
+    )
 
     failed = EventRecorder(run_id=uuid4(), session_id=uuid4()).record(RunFailed("execution_failed", "Turn failed"))
     cancelled = EventRecorder(run_id=uuid4(), session_id=uuid4()).record(RunCancelled())
 
     assert AISDKUIProjector().project(failed) == [
         {"type": "error", "errorText": "Turn failed"},
+        {"type": "finish", "finishReason": "error"},
+    ]
+    provider_failed = EventRecorder(run_id=uuid4(), session_id=uuid4()).record(
+        RunFailed("execution_failed", PROVIDER_ENDPOINT_NOT_FOUND_MESSAGE)
+    )
+    assert AISDKUIProjector().project(provider_failed) == [
+        {"type": "error", "errorText": PROVIDER_ENDPOINT_NOT_FOUND_MESSAGE},
         {"type": "finish", "finishReason": "error"},
     ]
     assert AISDKUIProjector().project(cancelled) == [

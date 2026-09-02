@@ -26,8 +26,8 @@ jobs:
         env:
           FLEET_LIVE: "1"
           FLEET_DAYTONA_API_KEY: ${{ secrets.FLEET_DAYTONA_API_KEY }}
-          FLEET_MODAL_API_KEY: ${{ secrets.FLEET_MODAL_API_KEY }}
-          FLEET_MODAL_BASE_URL: ${{ secrets.FLEET_MODAL_BASE_URL }}
+          DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
+          FLEET_LLM_BASE_URL: ${{ secrets.FLEET_LLM_BASE_URL }}
         run: |
           uv run pytest \
             tests/live/backend/test_fleet_rlm_daytona_mvp.py \

@@ -7,6 +7,6 @@ Provider environment names are the only values required by the credentialed live
 
 | Profile | Default | Provider | Root/Sub model | Root/Sub max tokens | Recursion | MLflow | Provider environment names | Managed-policy environment names |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `daytona-recursive` | yes | OpenAI Chat Completion | `databricks-deepseek-v4-flash-0731` / `databricks-deepseek-v4-flash-0731` | 131072 / 131072 | enabled | http://127.0.0.1:5001 | `FLEET_DAYTONA_API_KEY`, `DATABRICKS_TOKEN`, `DATABRICKS_HOST` | — |
+| `daytona-recursive` | yes | OpenAI Chat Completion | `databricks-deepseek-v4-flash-0731` / `databricks-deepseek-v4-flash-0731` | 16384 / 16384 | enabled | http://127.0.0.1:5001 | `FLEET_DAYTONA_API_KEY`, `DATABRICKS_TOKEN`, `FLEET_LLM_BASE_URL` | — |
 
 The verifier uses the selected row's provider environment names and never checks a hard-coded provider credential. `FLEET_DATABASE_URL` is replaced by a temporary SQLite URL in the live proof.

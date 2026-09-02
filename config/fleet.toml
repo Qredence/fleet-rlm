@@ -13,25 +13,22 @@ max_active_daytona_leases = 8
 heartbeat_seconds = 10
 stale_after_seconds = 60
 
-# Root and Sub both run the Modal-hosted GLM-5.3-Flash. Z.AI's chat completion
-# API reference (docs.z.ai/api-reference/llm/chat-completion) documents a
-# maximum output length of 128K tokens for GLM-5.3-Flash (and recommends at
-# least 1024), so both roles use the documented 131,072-token output ceiling;
-# it sits well inside the endpoint's 1,048,576-token context for any Fleet
-# prompt, and Fleet's character-level output caps bound what is retained.
+# Root and Sub use the selected Databricks Unity AI Gateway Chat Completions
+# endpoint. Keep the deliberately bounded 16,384-token role limit; Fleet's
+# character-level output caps independently bound retained output.
 [defaults.llm.root]
 model = "databricks-deepseek-v4-flash-0731"
 api_key_env = "DATABRICKS_TOKEN"
-base_url_env = "DATABRICKS_HOST"
-max_tokens = 131072
+base_url_env = "FLEET_LLM_BASE_URL"
+max_tokens = 16384
 timeout_seconds = 300
 cache = false
 
 [defaults.llm.sub]
 model = "databricks-deepseek-v4-flash-0731"
 api_key_env = "DATABRICKS_TOKEN"
-base_url_env = "DATABRICKS_HOST"
-max_tokens = 131072
+base_url_env = "FLEET_LLM_BASE_URL"
+max_tokens = 16384
 timeout_seconds = 90
 temperature = 0
 cache = false

@@ -170,9 +170,7 @@ def test_default_profile_enables_posthog_and_resolves_token(monkeypatch) -> None
 
     monkeypatch.setenv("FLEET_DAYTONA_API_KEY", "test-daytona-key")
     monkeypatch.setenv("DATABRICKS_TOKEN", "test-databricks-token")
-    monkeypatch.setenv("FLEET_DATABRICKS_AI_GATEWAY_BASE_URL", "https://gateway.example.test/v1")
-    monkeypatch.setenv("FLEET_MODAL_API_KEY", "test-modal-key")
-    monkeypatch.setenv("FLEET_MODAL_BASE_URL", "https://modal.example.test/v1")
+    monkeypatch.setenv("FLEET_LLM_BASE_URL", "https://gateway.example.test/ai-gateway/mlflow/v1")
     monkeypatch.setenv("POSTHOG_PROJECT_TOKEN", "phc-policy-token")
 
     settings = config.load_runtime_settings()

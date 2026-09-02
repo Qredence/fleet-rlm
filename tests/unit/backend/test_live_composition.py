@@ -255,7 +255,7 @@ def test_require_daytona_settings_fails_closed_without_deps(monkeypatch: pytest.
                 llm_api_key=SecretStr("llm-key"),
             )
         )
-    with pytest.raises(CompositionError, match="FLEET_DATABRICKS_AI_GATEWAY_BASE_URL"):
+    with pytest.raises(CompositionError, match="Databricks MLflow gateway base URL"):
         monkeypatch.setenv("DATABRICKS_TOKEN", "databricks-key")
         require_daytona_settings(
             Settings(
@@ -270,6 +270,58 @@ def test_require_daytona_settings_fails_closed_without_deps(monkeypatch: pytest.
                 llm_api_key=SecretStr("llm-key"),
             )
         )
+
+
+def test_require_daytona_settings_accepts_databricks_mlflow_gateway_base(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("DATABRICKS_TOKEN", "databricks-key")
+    settings = Settings(
+        run_environment="daytona",
+        database_url="sqlite+aiosqlite:///:memory:",
+        daytona_api_key=SecretStr("daytona-key"),
+        daytona_snapshot="fleet-test-v1",
+        root_model="databricks-deepseek-v4-flash-0731",
+        sub_model="databricks-deepseek-v4-flash-0731",
+        root_llm_api_key_env="DATABRICKS_TOKEN",
+        sub_llm_api_key_env="DATABRICKS_TOKEN",
+        root_llm_base_url="https://gateway.example.test/ai-gateway/mlflow/v1",
+        sub_llm_base_url="https://gateway.example.test/ai-gateway/mlflow/v1/",
+        llm_api_key=SecretStr("llm-key"),
+    )
+
+    require_daytona_settings(settings)
+
+
+@pytest.mark.parametrize(
+    "base_url",
+    [
+        "https://gateway.example.test",
+        "https://gateway.example.test/ai-gateway/openai/v1",
+        "gateway.example.test/ai-gateway/mlflow/v1",
+        "https://[bad/ai-gateway/mlflow/v1",
+    ],
+)
+def test_require_daytona_settings_rejects_non_mlflow_databricks_chat_base(
+    monkeypatch: pytest.MonkeyPatch, base_url: str
+) -> None:
+    monkeypatch.setenv("DATABRICKS_TOKEN", "databricks-key")
+    settings = Settings(
+        run_environment="daytona",
+        database_url="sqlite+aiosqlite:///:memory:",
+        daytona_api_key=SecretStr("daytona-key"),
+        daytona_snapshot="fleet-test-v1",
+        root_model="databricks-deepseek-v4-flash-0731",
+        sub_model="databricks-deepseek-v4-flash-0731",
+        root_llm_api_key_env="DATABRICKS_TOKEN",
+        sub_llm_api_key_env="DATABRICKS_TOKEN",
+        root_llm_base_url=base_url,
+        sub_llm_base_url="https://gateway.example.test/ai-gateway/mlflow/v1",
+        llm_api_key=SecretStr("llm-key"),
+    )
+
+    with pytest.raises(CompositionError, match="Databricks MLflow gateway base URL") as raised:
+        require_daytona_settings(settings)
+    assert "databricks-key" not in str(raised.value)
+    assert "gateway.example.test" not in str(raised.value)
 
 
 def test_daytona_environment_fails_closed_without_secrets() -> None:

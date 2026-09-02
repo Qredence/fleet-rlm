@@ -38,6 +38,7 @@ from fleet_rlm.chat.run_ownership import (
 )
 from fleet_rlm.observability.tracing import annotate_trace_io, turn_phase_span, turn_trace
 from fleet_rlm.rlm.events import (
+    PROVIDER_ENDPOINT_NOT_FOUND_MESSAGE,
     TERMINAL_DETAIL_TYPES,
     EventRecorder,
     RunCancelled,
@@ -275,6 +276,8 @@ def terminal(
         public_message = "Turn output is too large"
     elif message == "Turn output is invalid":
         public_message = "Turn output is invalid"
+    elif message == PROVIDER_ENDPOINT_NOT_FOUND_MESSAGE:
+        public_message = PROVIDER_ENDPOINT_NOT_FOUND_MESSAGE
     else:
         public_message = "Turn failed"
     return recorder.record(RunFailed(code="execution_failed", message=public_message))
