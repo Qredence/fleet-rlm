@@ -58,10 +58,15 @@ provider's `/v1` root, such as `https://api.openai.com/v1`.
 export FLEET_DATABASE_URL='postgresql+asyncpg://...'
 export FLEET_DAYTONA_API_KEY='...'
 export DATABRICKS_TOKEN='...'
-export FLEET_DATABRICKS_AI_GATEWAY_BASE_URL='https://<workspace-id>.ai-gateway.gcp.databricks.com/mlflow/v1'
+export FLEET_LLM_BASE_URL='https://<workspace-host>/ai-gateway/mlflow/v1'
 
 uv run python scripts/db_init.py
 ```
+
+`FLEET_LLM_BASE_URL` is the committed Fleet chat-inference base; the client
+appends `/chat/completions`. Keep `DATABRICKS_HOST` for Databricks MLflow or
+evaluation tooling. `FLEET_DATABRICKS_AI_GATEWAY_BASE_URL` is reserved for
+explicit custom or benchmark paths and is not read by the shipped profile.
 
 Startup never applies migrations automatically — initialize the database explicitly before serving.
 
@@ -159,7 +164,7 @@ Contributing workflow and architecture rules: [CONTRIBUTING.md](CONTRIBUTING.md)
 
 Key docs:
 
-- [Architecture](docs/architecture.md)
+- [Architecture](ARCHITECTURE.md)
 - [P41 behavior freeze](docs/reference/behavior-freeze.md)
 - [Configuration](docs/reference/configuration.md)
 - [Terminal UI guide](docs/how-to-guides/terminal-tui.md)

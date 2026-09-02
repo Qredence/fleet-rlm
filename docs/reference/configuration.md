@@ -23,15 +23,15 @@ references fail startup.
 
 The provider environment contract is policy-derived; see the [profile matrix](profile-matrix.md).
 The committed policy uses the OpenAI-compatible Chat Completion API and routes
-Root and Sub through the Modal-hosted GLM-5.3-Flash gateway, which requires
-`FLEET_MODAL_API_KEY`, `FLEET_MODAL_BASE_URL`, and `FLEET_DAYTONA_API_KEY`.
+Root and Sub through the Databricks Unity AI Gateway MLflow endpoint, which
+requires `DATABRICKS_TOKEN`, `FLEET_LLM_BASE_URL`, and `FLEET_DAYTONA_API_KEY`.
 The committed policy is intentionally small: the single `daytona-recursive`
 profile is the whole policy (it lives in `[defaults]`; recursive child RLMs,
 DSPy verbose host logging, and local MLflow tracing are all on).
 
 | Profile | Provider values | Persistence and tracing |
 | --- | --- | --- |
-| `daytona-recursive` (default) | `FLEET_MODAL_API_KEY`, `FLEET_MODAL_BASE_URL`, `FLEET_DAYTONA_API_KEY` | Configure `FLEET_DATABASE_URL` at Alembic head for durable deployment; local SQLite is suitable for development. Local MLflow tracing is enabled. |
+| `daytona-recursive` (default) | `DATABRICKS_TOKEN`, `FLEET_LLM_BASE_URL`, `FLEET_DAYTONA_API_KEY` | Configure `FLEET_DATABASE_URL` at Alembic head for durable deployment; local SQLite is suitable for development. Local MLflow tracing is enabled. |
 
 Profiles are explicit and do not fall back to each other. Daytona startup never
 applies migrations; use `uv run python scripts/db_init.py` or Alembic directly.
@@ -146,15 +146,13 @@ behavior.
 
 All committed profiles use the OpenAI-compatible Chat Completion format.
 `dspy.LM` sends the request to the provider's `/chat/completions` endpoint with
-`model_type="chat"`; no provider-specific routing header is required. Both
-roles run the Modal-hosted `openai/zai-org/GLM-5.3-Flash` endpoint using the
-`FLEET_MODAL_API_KEY` and `FLEET_MODAL_BASE_URL` environment references, with
-no reasoning-effort override and LM caching disabled. Z.AI's chat completion
-API reference documents a 128K maximum output length for GLM-5.3-Flash (and a
-1024-token floor), so the role ceiling is `max_tokens = 131072`; it sits well
-inside the served endpoint's 1,048,576-token context for any Fleet prompt,
-and Fleet's character-level output caps bound what each role retains,
-independent of this ceiling.
+`model_type="chat"`; no provider-specific routing header is required. The
+committed Root and Sub roles use `databricks-deepseek-v4-flash-0731` with the
+`DATABRICKS_TOKEN` and `FLEET_LLM_BASE_URL` references, no reasoning-effort
+override, and LM caching disabled. `FLEET_LLM_BASE_URL` must be the
+`/ai-gateway/mlflow/v1` base; the client appends `/chat/completions`. Their
+`max_tokens = 16384` ceiling and Fleet's character-level output caps are
+independent policy bounds.
 
 The committed default routes traces to the local `fleet-rlm` experiment at
 `http://127.0.0.1:5001`; the supervised `fleet cli` command starts or reuses
@@ -183,8 +181,13 @@ Root/Sub model ids, provider API-key environment names, and Chat Completion base
 URL environment names are directly editable there; only the names are shown,
 never secret values.
 
-Edits are revision-checked, atomically written, and validated against every
-profile before saving. They never read or display `.env` values or provider
+Edits remain local drafts until **Apply**. Apply sends one revision-checked
+batch transaction: every mutation is normalized and every merged profile is
+validated before the policy is atomically written once, or none of it is
+written. Profile fields show whether their value is inherited or an explicit
+override; an explicit override can be reset to inherited. Defaults cannot be
+reset. On a revision conflict, the TUI refreshes the server snapshot and keeps
+the draft for an explicit discard or reapply. They never read or display `.env` values or provider
 credentials; database and provider values are represented only by their
 environment-variable names. A saved policy applies only after Fleet is
 restarted; existing runtime composition and active Turns are never changed in
@@ -203,11 +206,11 @@ Fleet restart.
 | --- | --- | --- |
 | `FLEET_DATABASE_URL` | `storage.database_url_env` | Async SQLAlchemy URL; required for durable deployments |
 | `FLEET_DAYTONA_API_KEY` | `daytona.api_key_env` | Daytona provider credential for every profile |
-| `FLEET_MODAL_API_KEY` | Root/Sub `api_key_env` in the committed policy | Modal-hosted GLM provider API key for the Chat Completion endpoint |
-| `FLEET_MODAL_BASE_URL` | Root/Sub `base_url_env` in the committed policy | Modal `/v1` base URL (`/chat/completions` is appended) |
+| `DATABRICKS_TOKEN` | Root/Sub `api_key_env` in the committed policy | Databricks credential for the configured Chat Completion endpoint |
+| `FLEET_LLM_BASE_URL` | Root/Sub `base_url_env` in the committed policy | Databricks Unity AI Gateway MLflow base (`/chat/completions` is appended) |
+| `DATABRICKS_HOST` | MLflow/evaluation tooling | Databricks workspace root; not the Fleet Root/Sub Chat Completions base |
+| `FLEET_DATABRICKS_AI_GATEWAY_BASE_URL` | Custom/benchmark policy or latency benchmark only | Optional Databricks AI Gateway base for explicitly custom paths; not used by the committed Root/Sub policy |
 | `FLEET_OPENAI_API_KEY` | A custom Root/Sub `api_key_env` reference | OpenAI-compatible provider credential for custom policy only |
-| `DATABRICKS_TOKEN` | Databricks MLflow client authentication | Databricks PAT for MLflow tracing and evaluation lanes; not a Chat Completion credential in the committed policy |
-| `FLEET_DATABRICKS_AI_GATEWAY_BASE_URL` | A custom Root/Sub `base_url_env` reference | Databricks AI Gateway base URL for custom policy only |
 | `FLEET_MLFLOW_EXPERIMENT_NAME` | `mlflow.experiment_name_env` when a profile declares it | Databricks MLflow experiment |
 | `FLEET_MLFLOW_TRACE_CATALOG` / `FLEET_MLFLOW_TRACE_SCHEMA` | `mlflow.*_env` when a profile declares them | Unity Catalog destination |
 | `FLEET_MLFLOW_TRACE_TABLE_PREFIX` / `FLEET_MLFLOW_TRACING_SQL_WAREHOUSE_ID` | `mlflow.*_env` when a profile declares them | Trace table prefix and SQL warehouse |

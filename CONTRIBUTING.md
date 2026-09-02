@@ -29,8 +29,8 @@ commit credentials or use a Daytona API key as an API bearer token.
 
 ## Architecture rules
 
-- Read `AGENTS.md`, `src/fleet_rlm/AGENTS.md`, `CONTEXT-MAP.md`, and the relevant
-  context before changing backend ownership.
+- Read `AGENTS.md` and `ARCHITECTURE.md` before changing backend ownership; read
+  `tools/fleet-tui/AGENTS.md` for terminal-client work.
 - Keep routes as HTTP translators and retrieve runtime modules through
   `api/dependencies.py`.
 - Keep Daytona SDK imports inside `src/fleet_rlm/daytona/`.
@@ -77,8 +77,7 @@ report live lanes that were intentionally not run.
 ## Documentation and generated files
 
 - `docs/index.md` is the documentation reachability root.
-- `docs/architecture.md` and `docs/reference/codebase-map.md` describe current
-  ownership.
+- `ARCHITECTURE.md` describes current ownership and dependency direction.
 - `scripts/README.md` inventories supported top-level helpers.
 - Completed plans belong in Git history or the ignored local `.scratch/archive/`,
   not in the active tracked documentation tree.

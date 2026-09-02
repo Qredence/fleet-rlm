@@ -151,7 +151,7 @@ uv run python scripts/live_daytona_verify.py \
 Select the intended provider profile through `[config] default_profile` before
 this gate; the shipped default is `daytona-recursive`. The [profile matrix](../reference/profile-matrix.md)
 identifies the required provider values. The verifier requires the committed
-`openai/zai-org/GLM-5.3-Flash` Root and Sub roles, records a passing receipt at
+configured Root and Sub policy roles, records a passing receipt at
 the exact candidate SHA, verifies provider cleanup and secret isolation, and
 must be paired with same-SHA CI, local release, and human attestations before
 promotion. Historical receipts do not prove a later tip.

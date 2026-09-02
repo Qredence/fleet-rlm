@@ -58,5 +58,5 @@ yet establish Workspace Memory across real provider-backed Sandbox replacement
 and separate Sessions.
 
 See the [configuration reference](docs/reference/configuration.md),
-[architecture](docs/architecture.md), [HTTP API reference](docs/reference/http-api.md),
+[architecture](ARCHITECTURE.md), [HTTP API reference](docs/reference/http-api.md),
 and [terminal guide](docs/how-to-guides/terminal-tui.md) for operational details.

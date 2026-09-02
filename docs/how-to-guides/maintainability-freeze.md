@@ -72,6 +72,5 @@ substitute for that evidence.
 When a guardrail fails, repair the owning P26–P33 seam or update this guide and
 its matching contract check in the same change. Do not hide a failed gate by
 loosening a public assertion, adding a second transformation pipeline, or
-reintroducing a deleted alias. Update [the codebase map](../reference/codebase-map.md)
-and [architecture invariants](../agent-harness/architecture-invariants.md) when
+reintroducing a deleted alias. Update the root [architecture](../../ARCHITECTURE.md) when
 module ownership changes.

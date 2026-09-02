@@ -39,7 +39,7 @@ CLI_CONTRACT_COMMANDS = (("uv", "run", "fleet-rlm", "--help"),)
 CANONICAL_RUN_ENVIRONMENTS = frozenset({"daytona"})
 CANONICAL_ENVIRONMENT_DOCS = (
     Path("PRODUCT.md"),
-    Path("docs/architecture.md"),
+    Path("ARCHITECTURE.md"),
     Path("docs/reference/database.md"),
 )
 CANONICAL_ENVIRONMENT_DECLARATION = re.compile(

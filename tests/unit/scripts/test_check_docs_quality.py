@@ -31,14 +31,14 @@ def test_canonical_environment_sets_report_a_mismatched_document(tmp_path: Path)
         tmp_path,
         "Canonical Run Environment set: `daytona`.",
     )
-    drifted_path = tmp_path / "docs/architecture.md"
+    drifted_path = tmp_path / "ARCHITECTURE.md"
     drifted_path.write_text(
         "Canonical Run Environment set: `daytona`, `local`.\n",
         encoding="utf-8",
     )
 
     assert check_canonical_environment_sets(tmp_path) == [
-        "canonical Run Environment drift in docs/architecture.md: expected ['daytona'], found ['daytona', 'local']"
+        "canonical Run Environment drift in ARCHITECTURE.md: expected ['daytona'], found ['daytona', 'local']"
     ]
 
 

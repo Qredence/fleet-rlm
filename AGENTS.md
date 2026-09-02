@@ -1,149 +1,139 @@
-# Repository Agent Map
+# Fleet RLM — Agent Instructions
 
-`fleet-rlm` is a backend-first adaptive recursive language model workspace with a Daytona DSPy RLM runtime and a credential-free deterministic private-test composition. The prior Web frontend has been removed; the maintained development client is `tools/fleet-tui/`.
+`fleet-rlm` is an RLM-native system built around DSPy, Daytona, FastAPI,
+durable Sessions/Turns, and a maintained terminal client under
+`tools/fleet-tui/`.
 
-## Operating Model
+This file defines repository-wide execution rules. `tools/fleet-tui/AGENTS.md`
+adds rules specific to the terminal client.
 
-- Use closest applicable `AGENTS.md` before editing files; deeper guides override this map.
-- This guide describes the current checkout; code, tests, generated contracts, committed policy, and tracked docs remain authoritative.
-- Keep repo docs, generated contracts, and `.codex/` actions aligned with implementation changes.
-- Prefer smallest validation lane that covers the change, then escalate when contracts move.
-- Do not hand-edit generated/synced artifacts; use the commands listed below.
-- Do not mutate user-level Codex config. Ask before deploy, push, migrations, or deletion.
+## Working model
 
-For the current delivery sequence, base all work on `origin/main`; `main` is a protected branch whose required status checks reject direct pushes, so land changes through pull requests into `main` and never push to `main` or `master` directly. Cloud tasks may use limited internet and explicitly authorized apps/connectors; keep credentials and tokens out of the repository.
+Before changing code:
 
-## Reading Path
+1. Inspect the relevant implementation and its tests.
+2. Search for existing implementations, helpers, and established boundaries before introducing new abstractions.
+3. Read `ARCHITECTURE.md` when the task affects ownership, lifecycle, dependencies, domain boundaries, or cross-component behavior.
 
-1. `docs/agent-harness/README.md` - harness model, reading order, and quality bar.
-2. `docs/agent-harness/feedback-loop.md` - local Codex loop and report expectations.
-3. `docs/agent-harness/architecture-invariants.md` - backend and generated-file rules.
-4. `docs/reference/codebase-map.md` - source layout and ownership map.
-5. `docs/how-to-guides/testing-strategy.md` - validation lanes by change type.
+Treat current code, tests, `config/fleet.toml`, dependency pins, generated-contract
+checks, and executable validation as authoritative; documentation does not override
+executable contracts.
 
-## Deeper Agent Guides
+## Execution
 
-- `src/fleet_rlm/AGENTS.md` - backend, runtime, API, persistence, Daytona, and package rules.
-- `scripts/AGENTS.md` - maintenance, validation, benchmark, and release scripts.
-- `tools/fleet-tui/AGENTS.md` - pi-tui client, SSE projection, state, and tests.
+For clear, reversible tasks, inspect the relevant context and proceed; prefer the
+simplest implementation that fully satisfies the request.
+Keep changes focused and reuse existing modules. Remove obsolete or superseded code
+only when safe, verified, and directly relevant. For architectural work, keep a
+concise task list and validate meaningful stages as you go. Use `uv run` for Python
+commands and do not modify unrelated files merely to make a diff cleaner.
 
-## Durable Detail Locations
+## Git and external effects
 
-- Auth, DB, SSE, runtime, and deploy details live in `src/fleet_rlm/AGENTS.md` or matching docs.
-- Local Codex actions, ports, terminal-client checks, and tool preferences live in `.codex/` and loop docs.
-- Workspace source scanning declares five roots: `src/` and `tests/` are accessible; optional `scripts/` may be reported missing; `tools/` and `docs/` are intentionally disabled to avoid non-code noise.
+Preserve pre-existing staged, unstaged, and untracked changes. Do not reset, clean,
+stash, overwrite, or revert changes you did not make.
+Do not commit, amend, push, open pull requests, deploy, publish, mutate shared
+infrastructure, or perform other externally visible actions unless explicitly requested.
+Never expose credentials, tokens, `.env` values, provider secrets, or raw infrastructure errors.
 
-## Agent skills
+## Hard architecture invariants
 
-### Issue tracker
+- `src/fleet_rlm/` is the canonical Python backend.
+- Keep FastAPI routes as transport adapters; obtain application/runtime dependencies through the established composition/dependency seams.
+- Use `dspy.LM` as Fleet's LLM abstraction. Do not introduce direct LiteLLM application usage.
+- Use the repository-pinned DSPy implementation and current official DSPy documentation as the behavioral contract when DSPy/RLM behavior matters.
+- DSPy owns native RLM history and trajectory semantics. Fleet must not independently duplicate, compact, truncate, reset, or reconstruct native `REPLHistory`.
+- Treat process-scoped LM instances as immutable templates. Turn-specific deadlines, retries, adapters, callbacks, or other mutable execution state must be isolated per Turn.
+- Turn ownership and deadlines bound LM, Tool, interpreter, and recursive work. Do not allow detached work to continue mutating Fleet state after settlement.
+- Recursive delegation depth is distinct from native RLM iteration count.
+- Keep Daytona SDK integration inside `src/fleet_rlm/daytona/`.
+- Keep internal Runtime Events transport-neutral. Public clients consume the backend stream contract rather than defining parallel execution semantics.
+- State transitions, settlement, persistence, and resource cleanup must go through their owning lifecycle/service abstractions.
+- Alembic owns live schema evolution.
+- `config/fleet.toml` owns runtime policy and profile configuration. Do not encode current provider/model choices in application code or repository instructions.
+- Secrets may only come from explicitly configured environment references and must never be exposed through settings APIs, traces, logs, SSE payloads, or public exceptions.
 
-Planning issues use local Markdown under `.scratch/<feature>/`; `.scratch/` is local-only and ignored. See `docs/agents/issue-tracker.md`.
+See `ARCHITECTURE.md` for component ownership and dependency structure.
 
-### Triage labels
+## Generated artifacts
 
-Use the default `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, and `wontfix` roles. See `docs/agents/triage-labels.md`.
+Do not hand-edit generated contracts or generated client types, including:
 
-### Domain docs
+- `openapi.yaml`
+- `tools/fleet-tui/src/generated/openapi.ts`
+- generated TUI stream/chunk validation artifacts
 
-Use the root and backend contexts listed in `CONTEXT-MAP.md`, plus relevant ADRs. See `docs/agents/domain.md`.
-
-## Setup
-
-For ordinary local development:
-
-```bash
-uv sync --all-extras --dev
-```
-
-Codex Cloud workspaces use `zsh .codex/workspace-bootstrap.zsh`; the script installs locked dependencies and enforces the Cloud branch guard.
-
-## Run
-
-```bash
-uv run fleet cli
-uv run fleet doctor daytona
-uv run fleet web
-uv run fleet-rlm serve-api --port 8000
-```
+When their source contract changes, regenerate them using repository commands and include the generated changes.
 
 ## Validation
 
+Use the smallest validation lane that proves the change, then escalate when the affected contract requires it.
+
+### Focused Python changes
+
+Run relevant tests and checks: `uv run pytest <relevant-tests> -q`, `uv run ruff
+check <changed-paths>`, and `uv run ruff format --check <changed-paths>`.
+
+Run `uv run ty check src` when typed application interfaces or implementations change.
+
+### API or generated contracts
+
+After changing public HTTP schemas, routes, settings contracts, stream contracts, or generated client interfaces:
+
 ```bash
-make check
+make api-sync
+make api-check
 ```
 
-The parallel backend test lane defaults to at most two pytest-xdist workers.
-Override it only on a runner with verified capacity using
-`make test PYTEST_XDIST_MAX_WORKERS=<count>`.
+### TUI
 
-## Generated Artifacts
+For changes under `tools/fleet-tui/`:
 
-Do not hand-edit `openapi.yaml` or
-`tools/fleet-tui/src/generated/openapi.ts`.
+```bash
+make tui-check
+```
 
-Use: `make api-sync`, `make api-check`.
+Follow `tools/fleet-tui/AGENTS.md`.
 
-## Drift Checks
+### Architecture or dependency boundaries
 
-Run `make check-docs` when docs, commands, Codex config, generated contracts, or scripts change.
+When moving responsibilities, imports, provider integrations, or package boundaries:
 
-## Learned User Preferences
+```bash
+make check-codebase-tree
+make check-dependency-boundaries
+```
 
-- Always use the `zsh` terminal profile for CLI commands; prefer running Python scripts/commands using `uv run` over raw `python3` or `python`.
-- Secure production deployments strictly on Bring-Your-Own-Key (BYOK) model; never leak server-level secrets (like Gemini API keys or Daytona keys) to authenticated users.
-- Do not edit `.plan.md` or any attached implementation plans while executing a task, prioritizing marked-in-progress to-dos sequentially.
-- Run the full validation gate (`make check`,
-  `make check-security`, `make build-release`, `make check-release`, and
-  `git diff --check`) before commits when the user or phase completion requires it.
-- Do not amend commits already pushed to remote; use narrow follow-up commits for fixes discovered after push.
-- Never expose provider credentials through Fleet-RLM API requests; sanitize client-facing prepare/startup errors—never expose raw `str(exc)`, stack traces, credentials, or Daytona/provider internals to API clients.
-- Do not commit `AGENTS.md` unless changes are intentional team workflow guidance; continual-learning workspace-fact deltas may stay uncommitted.
-- Avoid introducing direct `litellm` usage in application code; reach LLM providers through `dspy.LM` instead.
-- Prefer wire-protocol-named Literal unions (`openai_responses`, `openai_chat_completion`, `anthropic_messages`) over vendor-flavored or `_compatible`-suffixed provider-type enums, and keep LLM profiles flat (profile name, provider type, base endpoint, API key) rather than over-abstracting.
-- Cite ONLY DSPy (installed 3.3.1 source + dspy.ai docs) as the reference contract for LLM/runtime design; do NOT cite the `/daytona` or `daytona-signature` skill as authority for DSPy/RLM decisions. For Daytona sandbox/interpreter and FastAPI API work, use the `/daytona` and `/fastapi` skills for provider/framework best practices.
-- When asked for a plan, make it code-tree-explicit: exact file paths, line ranges, and ADD/REMOVE/EDIT tables; include expected behavior, capability, and code-change impacts; and cite DSPy, Daytona, and/or FastAPI docs when justifying relevance — not generic prose. When grilling or collecting decisions, prefer AskUser/AskQuestion over long inline multi-question dumps when that tool is available.
-- Prefer live per-iteration RLM reasoning on the existing SSE/`RLMReasoning` → TUI path; treat `dspy.RLM(verbose=…)` as host-logger-only and insufficient for operator-visible streaming.
+### Broad or cross-cutting changes
 
-## Learned Workspace Facts
+Run `make check` for changes spanning multiple subsystems, lifecycle semantics, public contracts, configuration resolution, or other repository-wide invariants.
 
-- Local development runs on `:8000`. `fleet cli` supervises Daytona plus pi-tui,
-  and `fleet web` or `fleet-rlm serve-api` remains backend-only. Supervised
-  backend logs live under `.fleet_rlm/logs/`;
-  `fleet doctor daytona` is the opt-in disposable provider/mount probe.
-  `POST /api/sessions/{session_id}/turns`
-  requires `Idempotency-Key` and projects typed `RuntimeEvent` values over SSE;
-  the legacy top-level chat, `/api/v1`, and WebSocket surfaces are removed.
-- `src/fleet_rlm/` is the canonical RLM-native backend. The parallel foundation package was cut over after exit-bar evidence on `71e79271`; there is no compatibility runtime or dual-serve path.
-- The canonical public Run Environment set is `daytona`. Private tests install a credential-free deterministic composition explicitly; it is not a public runtime profile.
-- `create_app()` installs handlers, routers, and the static in-memory bundled Skill catalog (including `dspy-rlm`, which defines `dspy.RLM` as Recursive LM/REPL — never RAG/`dspy.Retrieve`). FastAPI lifespan installs one complete Daytona inventory through `composition/`; private tests inject their own inventory and routes retrieve composed runtime modules.
-- The maintained terminal uses pi-tui only. `fleet-turn-stream.ts` owns strict stream lifecycle, `sse.ts` owns frame/chunk validation, `tui/live-projection.ts` / `tui/durable-projection.ts` own live SSE and durable reload projection (with shared helpers in `tui/projection-helpers.ts`), and `tui/store.ts` owns atomic hydration. The monochrome operator timeline renders in an alternate-screen follow-end viewport (`TuiAltScreen` + `ScrollView`): PgUp/PgDn/Home/End and the mouse wheel scroll, drag selects text for copy, and tool/code/output cards fold with Ctrl+O. Themes are JSON-driven with adaptive contrast (`tui/themes/palette.ts`, `tui/theme.ts`). Live evidence includes DSPy callback reasoning, Tools, and Daytona interpreter code/output; the completed native trajectory reconciles gaps or corrections. `dspy.RLM(verbose=…)` remains host-logger-only.
-- Live Daytona MVP proof (`tests/live/backend/`, `scripts/live_daytona_verify.py`) loads repo `.env` via `python-dotenv` with `override=False`; existing process exports still win.
-- Daytona SDK imports are confined to `fleet_rlm.daytona`. Durable Attachments and Artifacts use Workspace Volume Scope;
-  Session Workspace + `projects/` add `delete/edit` workspace tools (`delete_workspace_path`, `edit_workspace_text`,
-  `delete_project_path`, `edit_project_text`): files + EMPTY dirs only, optional `expected_sha256` (WS-7 ended the
-  no-delete invariant). Workspace Memory is `memory/MEMORIES.md`: fresh v3 ids persist, v1 ids include a canonical-row
-  occurrence, duplicates fail closed; same-record `remember` idempotent; edit/forget one operation; each Turn gets a 4 KiB digest; the read projection never lowers the configured cap.
-  Long operator reports should write Session Workspace then `SUBMIT` a short summary; oversized `SUBMIT` fails with public Turn output budget errors.
-  Volume backends that reject atomic `os.replace` use a non-atomic overwrite fallback (keep new content if only file `fsync` fails).
-  `RunLifecycle.finish()` promotes Artifact Candidates and owns atomic Turn
-  Commit, while `TurnCoordinator` owns stream settlement, terminal ordering,
-  and cleanup.
-- `read_session_history` enforces a fixed 256 KiB UTF-8 aggregate byte budget on
-  returned message bodies (host constant, not a `FLEET_*` setting), using
-  whole-message omission with `truncated` / `bytes_returned` / `byte_budget` /
-  `skipped_ordinal` continuation metadata.
-- Runtime policy is required from `config/fleet.toml`; `[config] default_profile` selects a profile, and only environment variables explicitly referenced by that policy supply secrets or endpoints. Ambient `FLEET_CONFIG_PROFILE` and `FLEET_RUN_ENVIRONMENT` selectors are ignored. The loopback-only settings API edits non-secret TOML policy for the next restart. The local BYOK API uses one deterministic process-local User and Workspace scope and accepts no Authorization or synthetic identity headers.
-- Databricks MLflow tracing is fail-soft engineering observability controlled by the selected TOML profile. When enabled, live Turns open a `fleet_turn` root span, and policy may expose `traceId` on existing SSE metadata, TUI status, and durable assistant UI metadata. Databricks auth stays on `DATABRICKS_HOST`/`DATABRICKS_TOKEN` or databricks-cli; product evidence remains RuntimeEvents → SSE → TUI.
-- Alembic owns the live schema through one fresh canonical baseline. `create_tables` is restricted to explicit SQLite test/offline helpers; run `alembic check` against an upgraded empty database for drift.
-- Repository validation is `make check`; its default test targets mask local
-  live credentials, install private deterministic composition explicitly, and
-  include the maintained TUI. Live promotion uses `tests/live/backend/` with
-  explicit `FLEET_LIVE=1`. `make api-sync` owns root OpenAPI and generated TUI
-  HTTP types; a future graphical client is separate work.
-- Under pinned DSPy 3.3.1, every `dspy.LM` must resolve a provider; profile roles
-  and bare IDs use `normalize_model_id`; native `RLMOptions` map one-to-one to
-  DSPy. `max_iters` bounds iterations, `max_llm_calls` semantic prompts, and
-  `max_output_chars` retained REPL output. Root-only `rlm_query_batched` reserves
-  children; Root depth is 0, children are depth 1, deeper calls use Sub-LM
-  fallback (`max_depth` is not configurable). Caller-owned RLM interpreters are
-  fail-closed and Fleet-owned; `RLM(verbose=...)` is host logging, not UI streaming.
+### Release or security work
+
+When the task affects these concerns or release-ready validation is explicitly requested:
+
+```bash
+make check-security
+make build-release
+make check-release
+git diff --check
+```
+
+### Live validation
+
+Credentialed Daytona, model-provider, database, benchmark, and other live tests are explicit operator actions.
+
+Do not enable or infer live credentials merely to satisfy ordinary validation.
+
+When live validation is requested, use the existing repository live-test or verification entry points and report exactly what was exercised.
+
+## Completion
+
+Before finishing:
+
+1. Review the diff for unintended changes.
+2. Run every validation lane applicable to the touched contract.
+3. Run `git diff --check`.
+4. Report what changed, what was validated, and anything that could not be validated.
+
+Do not claim live, release, security, or integration guarantees from narrower tests alone.
