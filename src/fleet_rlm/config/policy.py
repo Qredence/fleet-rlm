@@ -16,6 +16,7 @@ import os
 import tempfile
 import threading
 import tomllib
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -45,6 +46,7 @@ __all__ = [
     "ConfigPolicyService",
     "PolicyAccessError",
     "PolicyConflictError",
+    "PolicyMutation",
 ]
 
 
@@ -64,6 +66,16 @@ class PolicyField:
     editor: EditorKind
     choices: tuple[str, ...] = ()
     settings_field: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class PolicyMutation:
+    """One validated non-secret policy change in an atomic settings transaction."""
+
+    scope: str
+    path: str
+    value: Any = None
+    unset: bool = False
 
 
 # Derived from the authoritative Settings policy declarations (config/settings.py);
@@ -113,17 +125,41 @@ class ConfigPolicyService:
             return self._snapshot(document, raw)
 
     def update(self, *, scope: str, path: str, value: Any, revision: str) -> PolicySnapshot:
-        field = _FIELD_BY_PATH.get(path)
-        if field is None:
-            raise FleetConfigurationError("unsupported settings field")
-        normalized = self._normalize_value(field, value)
+        return self.apply(updates=(PolicyMutation(scope=scope, path=path, value=value),), revision=revision)
+
+    def apply(
+        self,
+        *,
+        updates: Sequence[PolicyMutation] = (),
+        default_profile: str | None = None,
+        revision: str,
+    ) -> PolicySnapshot:
+        """Validate and atomically persist one batch of non-secret policy changes."""
+        if not updates and default_profile is None:
+            raise FleetConfigurationError("settings update is empty")
+        targets = [(update.scope, update.path) for update in updates]
+        if len(set(targets)) != len(targets):
+            raise FleetConfigurationError("settings update contains duplicate fields")
         with self._lock:
             document, raw = self._read_document()
             if revision != self._revision(raw):
                 raise PolicyConflictError("settings changed; reload before saving")
-            table = self._scope_table(document, scope)
-            parent, key = self._parent_table(table, path)
-            parent[key] = normalized
+            for update in updates:
+                field = _FIELD_BY_PATH.get(update.path)
+                if field is None:
+                    raise FleetConfigurationError("unsupported settings field")
+                table = self._scope_table(document, update.scope)
+                if update.unset:
+                    if update.scope == "defaults":
+                        raise FleetConfigurationError("default settings cannot be reset")
+                    if self._lookup(table, update.path) is _MISSING:
+                        raise FleetConfigurationError("profile setting does not override a default value")
+                    self._unset(table, update.path)
+                    continue
+                parent, key = self._parent_table(table, update.path)
+                parent[key] = self._normalize_value(field, update.value)
+            if default_profile is not None:
+                self._set_default_profile(document, default_profile)
             rendered = tomlkit.dumps(document)
             self._validate(rendered)
             self._atomic_write(rendered)
@@ -131,26 +167,7 @@ class ConfigPolicyService:
             return self._snapshot(updated, updated_raw)
 
     def set_default_profile(self, name: str, *, revision: str) -> PolicySnapshot:
-        if not isinstance(name, str) or not name.strip():
-            raise FleetConfigurationError("profile name must be a non-empty string")
-        target = name.strip()
-        with self._lock:
-            document, raw = self._read_document()
-            if revision != self._revision(raw):
-                raise PolicyConflictError("settings changed; reload before saving")
-            profiles = document.get("profiles")
-            if not isinstance(profiles, dict) or target not in profiles:
-                raise FleetConfigurationError(f"configured profile does not exist: {target}")
-            config = document.get("config")
-            if not isinstance(config, dict):
-                config = tomlkit.table()
-                document["config"] = config
-            config["default_profile"] = target
-            rendered = tomlkit.dumps(document)
-            self._validate(rendered)
-            self._atomic_write(rendered)
-            updated, updated_raw = self._read_document()
-            return self._snapshot(updated, updated_raw)
+        return self.apply(default_profile=name, revision=revision)
 
     def _read_document(self) -> tuple[TOMLDocument, str]:
         if self._path.is_symlink() or not self._path.is_file():
@@ -165,14 +182,14 @@ class ConfigPolicyService:
         scopes: list[dict[str, Any]] = []
         defaults = document.get("defaults")
         if isinstance(defaults, dict):
-            scopes.append(self._scope("defaults", defaults))
+            scopes.append(self._scope("defaults", defaults, origin="default"))
         profiles = document.get("profiles")
         available: list[str] = []
         if isinstance(profiles, dict):
             for name, profile in profiles.items():
                 if isinstance(name, str) and isinstance(profile, dict):
                     available.append(name)
-                    scopes.append(self._scope(name, profile, inherited=defaults))
+                    scopes.append(self._scope(name, profile, inherited=defaults, origin="override"))
         config = document.get("config")
         default_profile = config.get("default_profile") if isinstance(config, dict) else None
         return PolicySnapshot(
@@ -189,12 +206,15 @@ class ConfigPolicyService:
         table: dict[str, Any],
         *,
         inherited: dict[str, Any] | None = None,
+        origin: str,
     ) -> dict[str, Any]:
         values: list[dict[str, Any]] = []
         for field in _FIELDS:
             value = self._lookup(table, field.path)
+            field_origin = origin
             if value is _MISSING and inherited is not None:
                 value = self._lookup(inherited, field.path)
+                field_origin = "inherited"
             if value is _MISSING:
                 continue
             values.append(
@@ -206,6 +226,8 @@ class ConfigPolicyService:
                     "editor": field.editor,
                     "choices": list(field.choices),
                     "environment_overridden": False,
+                    "origin": field_origin,
+                    "can_reset": field_origin == "override",
                 }
             )
         return {"name": name, "fields": values}
@@ -231,6 +253,31 @@ class ConfigPolicyService:
                 child = current[part]
             current = child
         return current, parts[-1]
+
+    @staticmethod
+    def _unset(table: dict[str, Any], path: str) -> None:
+        parts = path.split(".")
+        current = table
+        for part in parts[:-1]:
+            child = current.get(part)
+            if not isinstance(child, dict):
+                return
+            current = child
+        current.pop(parts[-1], None)
+
+    @staticmethod
+    def _set_default_profile(document: TOMLDocument, name: str) -> None:
+        if not isinstance(name, str) or not name.strip():
+            raise FleetConfigurationError("profile name must be a non-empty string")
+        target = name.strip()
+        profiles = document.get("profiles")
+        if not isinstance(profiles, dict) or target not in profiles:
+            raise FleetConfigurationError(f"configured profile does not exist: {target}")
+        config = document.get("config")
+        if not isinstance(config, dict):
+            config = tomlkit.table()
+            document["config"] = config
+        config["default_profile"] = target
 
     @staticmethod
     def _lookup(table: dict[str, Any], path: str) -> Any:

@@ -48,6 +48,8 @@ const settings = {
           editor: "boolean",
           choices: [],
           environment_overridden: false,
+          origin: "default",
+          can_reset: false,
         },
       ],
     },
@@ -309,6 +311,10 @@ describe("parseFieldValue", () => {
       ok: true,
       value: ["a", "b", "c"],
     });
+    expect(parseFieldValue({ ...base, editor: "string_list" }, "Project, Project, docs")).toEqual({
+      ok: true,
+      value: ["Project", "docs"],
+    });
   });
 });
 
@@ -416,6 +422,8 @@ describe("PiCommandPresenter", () => {
               editor: "number" as const,
               choices: [],
               environment_overridden: false,
+              origin: "inherited",
+              can_reset: false,
             },
             {
               path: "rlm.verbose",
@@ -425,6 +433,8 @@ describe("PiCommandPresenter", () => {
               editor: "boolean" as const,
               choices: [],
               environment_overridden: false,
+              origin: "inherited",
+              can_reset: false,
             },
           ],
         },
@@ -487,7 +497,7 @@ describe("PiCommandPresenter", () => {
     expect(hide).toHaveBeenCalledTimes(1);
   });
 
-  it("keeps the overlay open across successive saves and uses the freshest revision", async () => {
+  it("stages successive edits and applies them in one revision-checked batch", async () => {
     const { ui, overlay, hide } = fakeUi();
     const notify = vi.fn();
     const presenter = new PiCommandPresenter(
@@ -497,7 +507,25 @@ describe("PiCommandPresenter", () => {
       notify,
     );
     const settings = editableSettings();
-    const refreshed = { ...settings, revision: "b".repeat(64) };
+    const [originalScope] = settings.scopes;
+    if (!originalScope || originalScope.fields.length < 2) {
+      throw new Error("expected editable settings fields");
+    }
+    const [maxItersField, verboseField] = originalScope.fields;
+    if (!maxItersField || !verboseField) throw new Error("expected editable settings fields");
+    const refreshed = {
+      ...settings,
+      revision: "b".repeat(64),
+      scopes: [
+        {
+          ...originalScope,
+          fields: [
+            { ...maxItersField, value: 8 },
+            { ...verboseField, value: true },
+          ],
+        },
+      ],
+    };
     const save = vi.fn<SettingsSaveCallback>().mockResolvedValue(refreshed);
 
     const result = presenter.chooseSetting({ ...settings }, save);
@@ -511,34 +539,95 @@ describe("PiCommandPresenter", () => {
     screen.handleInput("\u007f");
     screen.handleInput("8");
     screen.handleInput(ENTER);
+    expect(save).not.toHaveBeenCalled();
+
+    // Cycle the boolean field; this also remains local.
+    expect(hide).not.toHaveBeenCalled();
+    screen.handleInput(DOWN);
+    screen.handleInput(ENTER);
+    expect(save).not.toHaveBeenCalled();
+
+    // Return to the root list and apply the complete draft.
+    screen.handleInput(ESCAPE);
+    screen.handleInput(DOWN);
+    screen.handleInput(ENTER);
     await vi.waitFor(() => expect(save).toHaveBeenCalledTimes(1));
     expect(save.mock.calls[0]?.[0]).toEqual({
       revision: "a".repeat(64),
-      scope: "daytona",
-      path: "rlm.max_iters",
-      value: 8,
+      updates: [
+        { scope: "daytona", path: "rlm.max_iters", value: 8 },
+        { scope: "daytona", path: "rlm.verbose", value: true },
+      ],
     });
 
-    // The overlay stayed open and shows the saved value from the refreshed policy
-    expect(hide).not.toHaveBeenCalled();
-    expect(text()).toContain("rlm.max_iters");
+    // Escape closes the root list, which resolves the command.
+    screen.handleInput(ESCAPE);
+    await expect(result).resolves.toBeNull();
+    expect(hide).toHaveBeenCalled();
+  });
 
-    // Cycle the boolean field; the save must use the refreshed revision
+  it("keeps edits staged while a batch apply is in flight", async () => {
+    const { ui, overlay } = fakeUi();
+    const presenter = new PiCommandPresenter(
+      ui,
+      { setText: vi.fn() } as unknown as Editor,
+      new ConversationStore(),
+    );
+    const settings = editableSettings();
+    const [originalScope] = settings.scopes;
+    if (!originalScope) throw new Error("expected editable settings scope");
+    const [maxItersField, verboseField] = originalScope.fields;
+    if (!maxItersField || !verboseField) throw new Error("expected editable settings fields");
+    const refreshed = {
+      ...settings,
+      revision: "b".repeat(64),
+      scopes: [
+        {
+          ...originalScope,
+          fields: [{ ...maxItersField, value: 8 }, verboseField],
+        },
+      ],
+    };
+    let resolveSave: ((policy: FleetSettingsPolicy) => void) | undefined;
+    const pendingSave = new Promise<FleetSettingsPolicy>((resolve) => {
+      resolveSave = resolve;
+    });
+    const save = vi.fn<SettingsSaveCallback>().mockReturnValue(pendingSave);
+
+    const result = presenter.chooseSetting(settings, save);
+    const screen = overlay();
+
+    // Stage max_iters and start its batch apply.
+    screen.handleInput(ENTER);
+    screen.handleInput(ENTER);
+    screen.handleInput("\u007f");
+    screen.handleInput("8");
+    screen.handleInput(ENTER);
+    screen.handleInput(ESCAPE);
+    screen.handleInput(DOWN);
+    screen.handleInput(ENTER);
+    await vi.waitFor(() => expect(save).toHaveBeenCalledTimes(1));
+
+    // Stage verbose while the first request is still pending.
+    screen.handleInput("\x1b[A");
+    screen.handleInput(ENTER);
+    screen.handleInput(DOWN);
+    screen.handleInput(ENTER);
+    screen.handleInput(ESCAPE);
+    resolveSave?.(refreshed);
+    await vi.waitFor(() => expect(screen.render(80).join("\n")).toContain("1 pending"));
+
+    // The second Apply sends only the edit that was made during the first request.
     screen.handleInput(DOWN);
     screen.handleInput(ENTER);
     await vi.waitFor(() => expect(save).toHaveBeenCalledTimes(2));
     expect(save.mock.calls[1]?.[0]).toEqual({
       revision: "b".repeat(64),
-      scope: "daytona",
-      path: "rlm.verbose",
-      value: true,
+      updates: [{ scope: "daytona", path: "rlm.verbose", value: true }],
     });
 
-    // Escape twice: field list -> scope list -> close, which resolves the command
-    screen.handleInput(ESCAPE);
     screen.handleInput(ESCAPE);
     await expect(result).resolves.toBeNull();
-    expect(hide).toHaveBeenCalled();
   });
 
   it("flashes a parse error and does not save when a number field gets NaN input", async () => {
@@ -567,7 +656,7 @@ describe("PiCommandPresenter", () => {
     await expect(result).resolves.toBeNull();
   });
 
-  it("reverts the displayed value and keeps the current policy when a save fails", async () => {
+  it("keeps a draft for retry when its batch save fails", async () => {
     const { ui, overlay } = fakeUi();
     const presenter = new PiCommandPresenter(
       ui,
@@ -581,12 +670,16 @@ describe("PiCommandPresenter", () => {
 
     screen.handleInput(ENTER);
     screen.handleInput(DOWN);
-    screen.handleInput(ENTER); // cycle boolean false -> true, save fails
-    await vi.waitFor(() => expect(save).toHaveBeenCalledTimes(1));
-    await vi.waitFor(() =>
-      expect(stripAnsi(screen.render(80).join("\n"))).toContain("RLM · Verbose logging  false"),
-    );
+    screen.handleInput(ENTER); // cycle boolean false -> true; still local
+    expect(save).not.toHaveBeenCalled();
     screen.handleInput(ESCAPE);
+    screen.handleInput(DOWN);
+    screen.handleInput(ENTER); // apply; save fails
+    await vi.waitFor(() => expect(save).toHaveBeenCalledTimes(1));
+    expect(save.mock.calls[0]?.[0]).toEqual({
+      revision: "a".repeat(64),
+      updates: [{ scope: "daytona", path: "rlm.verbose", value: true }],
+    });
     screen.handleInput(ESCAPE);
     await expect(result).resolves.toBeNull();
   });

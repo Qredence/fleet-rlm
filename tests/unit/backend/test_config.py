@@ -21,12 +21,12 @@ def test_profile_environment_matrix_follows_selected_toml_policy() -> None:
     assert contracts["daytona-recursive"].provider == "OpenAI Chat Completion"
     assert contracts["daytona-recursive"].provider_environment_names == (
         "FLEET_DAYTONA_API_KEY",
-        "FLEET_MODAL_API_KEY",
-        "FLEET_MODAL_BASE_URL",
+        "DATABRICKS_TOKEN",
+        "DATABRICKS_HOST",
     )
 
 
-def test_committed_policy_declares_two_profiles_with_modal_model_roles() -> None:
+def test_committed_policy_declares_databricks_model_roles() -> None:
     policy_path = Path(__file__).resolve().parents[3] / "config" / "fleet.toml"
     document = tomllib.loads(policy_path.read_text(encoding="utf-8"))
 
@@ -35,17 +35,17 @@ def test_committed_policy_declares_two_profiles_with_modal_model_roles() -> None
     assert document["defaults"]["runtime"]["environment"] == "daytona"
     assert document["defaults"]["llm"] == {
         "root": {
-            "model": "openai/zai-org/GLM-5.3-Flash",
-            "api_key_env": "FLEET_MODAL_API_KEY",
-            "base_url_env": "FLEET_MODAL_BASE_URL",
+            "model": "databricks-deepseek-v4-flash-0731",
+            "api_key_env": "DATABRICKS_TOKEN",
+            "base_url_env": "DATABRICKS_HOST",
             "max_tokens": 131072,
             "timeout_seconds": 300,
             "cache": False,
         },
         "sub": {
-            "model": "openai/zai-org/GLM-5.3-Flash",
-            "api_key_env": "FLEET_MODAL_API_KEY",
-            "base_url_env": "FLEET_MODAL_BASE_URL",
+            "model": "databricks-deepseek-v4-flash-0731",
+            "api_key_env": "DATABRICKS_TOKEN",
+            "base_url_env": "DATABRICKS_HOST",
             "max_tokens": 131072,
             "timeout_seconds": 90,
             "temperature": 0,
@@ -55,14 +55,14 @@ def test_committed_policy_declares_two_profiles_with_modal_model_roles() -> None
     assert document["defaults"]["runtime"]["live_enabled"] is True
 
 
-# Every committed profile routes Root and Sub through the Modal gateway.
-_MODAL_MODEL = "openai/zai-org/GLM-5.3-Flash"
-_MODAL_ROLE = ("FLEET_MODAL_API_KEY", "FLEET_MODAL_BASE_URL")
+# Every committed profile routes Root and Sub through the Databricks endpoint.
+_DATABRICKS_MODEL = "databricks-deepseek-v4-flash-0731"
+_DATABRICKS_ROLE = ("DATABRICKS_TOKEN", "DATABRICKS_HOST")
 
 
 @pytest.mark.parametrize(
     ("profile", "expected_model", "expected_role"),
-    (("daytona-recursive", _MODAL_MODEL, _MODAL_ROLE),),
+    (("daytona-recursive", _DATABRICKS_MODEL, _DATABRICKS_ROLE),),
 )
 def test_daytona_profiles_use_expected_model_for_both_roles(
     profile: str,
@@ -107,23 +107,20 @@ def test_default_mlflow_policy_uses_async_full_fidelity_trace_delivery() -> None
     }
 
 
-def test_selected_recursive_profile_resolves_root_and_sub_with_modal_params(
+def test_selected_recursive_profile_resolves_root_and_sub_with_databricks_params(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     import fleet_rlm.config.loader as config
 
-    # Ambient Databricks values stay set; only the selected profile's declared
-    # Modal names supply the Root/Sub provider for this load.
+    # Only the selected profile's declared names supply the Root/Sub provider.
     monkeypatch.setenv("FLEET_DAYTONA_API_KEY", "test-daytona-key")
     monkeypatch.setenv("DATABRICKS_TOKEN", "test-databricks-token")
-    monkeypatch.setenv("FLEET_DATABRICKS_AI_GATEWAY_BASE_URL", "https://gateway.example.test/v1")
-    monkeypatch.setenv("FLEET_MODAL_API_KEY", "test-modal-key")
-    monkeypatch.setenv("FLEET_MODAL_BASE_URL", "https://modal.example.test/v1")
+    monkeypatch.setenv("DATABRICKS_HOST", "https://gateway.example.test")
 
     settings = config.load_runtime_settings()
 
-    assert settings.root_model == "openai/zai-org/GLM-5.3-Flash"
-    assert settings.sub_model == "openai/zai-org/GLM-5.3-Flash"
+    assert settings.root_model == "databricks-deepseek-v4-flash-0731"
+    assert settings.sub_model == "databricks-deepseek-v4-flash-0731"
     # The Modal vLLM endpoint has no reasoning-effort surface; the override
     # stays unset instead of being forwarded with a default.
     assert settings.root_llm_reasoning_effort is None

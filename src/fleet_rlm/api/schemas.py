@@ -359,6 +359,8 @@ class SettingsFieldResponse(BaseModel):
     editor: Literal["text", "number", "boolean", "single_choice", "multi_choice", "string_list"]
     choices: list[str] = Field(default_factory=list)
     environment_overridden: bool = False
+    origin: Literal["default", "inherited", "override"] = "default"
+    can_reset: bool = False
 
 
 class SettingsScopeResponse(BaseModel):
@@ -375,14 +377,137 @@ class SettingsPolicyResponse(BaseModel):
     scopes: list[SettingsScopeResponse]
 
 
+class SettingsPolicyUpdate(BaseModel):
+    """One set or reset operation in an atomic settings-policy batch."""
+
+    model_config = ConfigDict(
+        extra="forbid",
+        json_schema_extra={
+            "oneOf": [
+                {
+                    "title": "SetSettingsPolicyValue",
+                    "required": ["value"],
+                    "properties": {
+                        "value": {"not": {"type": "null"}},
+                        "unset": {"const": False},
+                    },
+                },
+                {
+                    "title": "ResetSettingsPolicyValue",
+                    "required": ["unset"],
+                    "properties": {"unset": {"const": True}},
+                    "not": {"required": ["value"]},
+                },
+            ]
+        },
+    )
+
+    scope: str = Field(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+    path: str = Field(min_length=1, max_length=128, pattern=r"^[a-z][a-z0-9_.]*$")
+    value: JsonValue = None
+    unset: bool = False
+
+    @model_validator(mode="after")
+    def validate_operation(self) -> SettingsPolicyUpdate:
+        if self.unset and "value" in self.model_fields_set:
+            raise ValueError("reset settings updates cannot include a value")
+        if not self.unset and ("value" not in self.model_fields_set or self.value is None):
+            raise ValueError("settings updates require a value")
+        return self
+
+
 class SettingsPolicyPatchRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(
+        extra="forbid",
+        json_schema_extra={
+            "oneOf": [
+                {
+                    "title": "UpdateSettingsPolicyField",
+                    "required": ["revision", "scope", "path", "value"],
+                    "properties": {
+                        "scope": {"not": {"type": "null"}},
+                        "path": {"not": {"type": "null"}},
+                        "value": {"not": {"type": "null"}},
+                    },
+                    "not": {
+                        "anyOf": [
+                            {"required": ["profile"]},
+                            {"required": ["updates"]},
+                            {"required": ["default_profile"]},
+                        ]
+                    },
+                },
+                {
+                    "title": "SelectSettingsPolicyProfile",
+                    "required": ["revision", "profile"],
+                    "properties": {"profile": {"not": {"type": "null"}}},
+                    "not": {
+                        "anyOf": [
+                            {"required": ["scope"]},
+                            {"required": ["path"]},
+                            {"required": ["value"]},
+                            {"required": ["updates"]},
+                            {"required": ["default_profile"]},
+                        ]
+                    },
+                },
+                {
+                    "title": "BatchUpdateSettingsPolicy",
+                    "required": ["revision"],
+                    "properties": {"default_profile": {"not": {"type": "null"}}},
+                    "anyOf": [
+                        {
+                            "required": ["updates"],
+                            "properties": {"updates": {"minItems": 1}},
+                        },
+                        {"required": ["default_profile"]},
+                    ],
+                    "not": {
+                        "anyOf": [
+                            {"required": ["scope"]},
+                            {"required": ["path"]},
+                            {"required": ["value"]},
+                            {"required": ["profile"]},
+                        ]
+                    },
+                },
+            ]
+        },
+    )
 
     revision: str = Field(min_length=64, max_length=64, pattern=r"^[0-9a-f]{64}$")
     scope: str | None = Field(default=None, min_length=1, max_length=128, pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
     path: str | None = Field(default=None, min_length=1, max_length=128, pattern=r"^[a-z][a-z0-9_.]*$")
     value: JsonValue = None
     profile: str | None = Field(default=None, min_length=1, max_length=128, pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+    updates: list[SettingsPolicyUpdate] = Field(default_factory=list, max_length=128)
+    default_profile: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=128,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]*$",
+    )
+
+    @model_validator(mode="after")
+    def validate_operation_shape(self) -> SettingsPolicyPatchRequest:
+        supplied = self.model_fields_set
+        legacy_fields = supplied.intersection({"scope", "path", "value"})
+        batch_fields = supplied.intersection({"updates", "default_profile"})
+        if "profile" in supplied and (legacy_fields or batch_fields):
+            raise ValueError("legacy profile selection cannot be combined with settings updates")
+        if batch_fields and legacy_fields:
+            raise ValueError("batch settings updates cannot be combined with legacy settings fields")
+        if legacy_fields and (
+            legacy_fields != {"scope", "path", "value"} or self.scope is None or self.path is None or self.value is None
+        ):
+            raise ValueError("legacy settings updates require scope, path, and value")
+        if "profile" in supplied and self.profile is None:
+            raise ValueError("legacy profile selection requires a profile")
+        if "default_profile" in supplied and self.default_profile is None:
+            raise ValueError("default profile updates require a profile")
+        if not legacy_fields and "profile" not in supplied and not self.updates and self.default_profile is None:
+            raise ValueError("settings update is empty")
+        return self
 
 
 # ---------------------------------------------------------------------------

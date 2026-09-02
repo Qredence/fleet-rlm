@@ -253,10 +253,11 @@ export interface paths {
         head?: never;
         /**
          * Patch Settings Policy
-         * @description Update the settings policy's default profile or a specified field.
+         * @description Update the settings policy's default profile or one atomic batch of fields.
          *
          *     Parameters:
-         *         body (SettingsPolicyPatchRequest): The requested profile or field update, including the expected revision.
+         *         body (SettingsPolicyPatchRequest): The requested profile, legacy field, or
+         *             batch update, including the expected revision.
          *
          *     Returns:
          *         SettingsPolicyResponse: The updated settings policy.
@@ -740,6 +741,17 @@ export interface components {
              * @default false
              */
             environment_overridden: boolean;
+            /**
+             * Origin
+             * @default default
+             * @enum {string}
+             */
+            origin: "default" | "inherited" | "override";
+            /**
+             * Can Reset
+             * @default false
+             */
+            can_reset: boolean;
         };
         /** SettingsPolicyPatchRequest */
         SettingsPolicyPatchRequest: {
@@ -752,7 +764,21 @@ export interface components {
             value?: components["schemas"]["JsonValue"];
             /** Profile */
             profile?: string | null;
-        };
+            /** Updates */
+            updates?: components["schemas"]["SettingsPolicyUpdate"][];
+            /** Default Profile */
+            default_profile?: string | null;
+        } & ({
+            scope: unknown;
+            path: unknown;
+            value: unknown;
+        } | {
+            profile: unknown;
+        } | ({
+            default_profile?: unknown;
+        } | {
+            updates: unknown;
+        } | unknown));
         /** SettingsPolicyResponse */
         SettingsPolicyResponse: {
             /** Revision */
@@ -771,6 +797,29 @@ export interface components {
             /** Scopes */
             scopes: components["schemas"]["SettingsScopeResponse"][];
         };
+        /**
+         * SettingsPolicyUpdate
+         * @description One set or reset operation in an atomic settings-policy batch.
+         */
+        SettingsPolicyUpdate: {
+            /** Scope */
+            scope: string;
+            /** Path */
+            path: string;
+            value?: components["schemas"]["JsonValue"];
+            /**
+             * Unset
+             * @default false
+             */
+            unset: boolean;
+        } & ({
+            value: unknown;
+            /** @constant */
+            unset?: false;
+        } | {
+            /** @constant */
+            unset: true;
+        });
         /** SettingsScopeResponse */
         SettingsScopeResponse: {
             /** Name */

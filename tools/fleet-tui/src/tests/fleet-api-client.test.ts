@@ -288,7 +288,7 @@ describe("FleetApiClient", () => {
                     path: "llm.root.base_url_env",
                     group: "Root LLM",
                     label: "Provider base URL environment variable",
-                    value: "FLEET_DATABRICKS_AI_GATEWAY_BASE_URL",
+                    value: "FLEET_LLM_BASE_URL",
                     editor: "text",
                     choices: [],
                     environment_overridden: false,
@@ -316,7 +316,7 @@ describe("FleetApiClient", () => {
     );
     expect(fields["llm.root.model"]).toBe("databricks-deepseek-v4-flash-0731");
     expect(fields["llm.root.api_key_env"]).toBe("DATABRICKS_TOKEN");
-    expect(fields["llm.root.base_url_env"]).toBe("FLEET_DATABRICKS_AI_GATEWAY_BASE_URL");
+    expect(fields["llm.root.base_url_env"]).toBe("FLEET_LLM_BASE_URL");
     await client.updateSettings({
       revision: "a".repeat(64),
       scope: "defaults",
@@ -340,6 +340,38 @@ describe("FleetApiClient", () => {
           path: "rlm.max_iters",
           value: 21,
         }),
+      }),
+    );
+  });
+
+  it("distinguishes an empty default profile from an omitted one in settings batches", async () => {
+    const fetchMock = vi.fn().mockImplementation(() =>
+      Promise.resolve(
+        new Response(JSON.stringify({ revision: "b".repeat(64), scopes: [] }), {
+          headers: { "content-type": "application/json" },
+        }),
+      ),
+    );
+    globalThis.fetch = fetchMock;
+    const client = new FleetApiClient({ baseUrl: "http://fleet.test" });
+
+    await client.applySettings("a".repeat(64), [], "");
+    await client.applySettings("b".repeat(64), []);
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      "http://fleet.test/api/settings",
+      expect.objectContaining({
+        method: "PATCH",
+        body: JSON.stringify({ revision: "a".repeat(64), updates: [], default_profile: "" }),
+      }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "http://fleet.test/api/settings",
+      expect.objectContaining({
+        method: "PATCH",
+        body: JSON.stringify({ revision: "b".repeat(64), updates: [] }),
       }),
     );
   });

@@ -28,8 +28,8 @@ RECEIPT_SCHEMA = "fleet.daytona-mvp-proof/v1"
 EVIDENCE_ENV = "FLEET_LIVE_EVIDENCE_PATH"
 _LIVE_TEST = "tests/live/backend/test_fleet_rlm_daytona_mvp.py::test_complete_daytona_mvp_through_fastapi"
 _REPO_ROOT = Path(__file__).resolve().parents[1]
-_LIVE_ROOT_MODEL = os.environ.get("FLEET_LIVE_ROOT_MODEL", "openai/zai-org/GLM-5.3-Flash")
-_LIVE_SUB_MODEL = os.environ.get("FLEET_LIVE_SUB_MODEL", "openai/zai-org/GLM-5.3-Flash")
+_LIVE_ROOT_MODEL = os.environ.get("FLEET_LIVE_ROOT_MODEL", "databricks-deepseek-v4-flash-0731")
+_LIVE_SUB_MODEL = os.environ.get("FLEET_LIVE_SUB_MODEL", "databricks-deepseek-v4-flash-0731")
 _APPROVED_ROOT_MODELS = frozenset(
     name
     for base in {_LIVE_ROOT_MODEL, _LIVE_ROOT_MODEL.removesuffix("-0731"), _LIVE_ROOT_MODEL + "-0731"}

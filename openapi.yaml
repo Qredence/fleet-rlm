@@ -523,11 +523,12 @@ paths:
       tags:
       - settings
       summary: Patch Settings Policy
-      description: "Update the settings policy's default profile or a specified field.\n\
-        \nParameters:\n    body (SettingsPolicyPatchRequest): The requested profile\
-        \ or field update, including the expected revision.\n\nReturns:\n    SettingsPolicyResponse:\
-        \ The updated settings policy.\n\nRaises:\n    HTTPException: If the revision\
-        \ conflicts, the update is invalid, or the policy is unavailable."
+      description: "Update the settings policy's default profile or one atomic batch\
+        \ of fields.\n\nParameters:\n    body (SettingsPolicyPatchRequest): The requested\
+        \ profile, legacy field, or\n        batch update, including the expected\
+        \ revision.\n\nReturns:\n    SettingsPolicyResponse: The updated settings\
+        \ policy.\n\nRaises:\n    HTTPException: If the revision conflicts, the update\
+        \ is invalid, or the policy is unavailable."
       operationId: update_settings_policy
       requestBody:
         content:
@@ -1398,6 +1399,18 @@ components:
           type: boolean
           title: Environment Overridden
           default: false
+        origin:
+          type: string
+          enum:
+          - default
+          - inherited
+          - override
+          title: Origin
+          default: default
+        can_reset:
+          type: boolean
+          title: Can Reset
+          default: false
       type: object
       required:
       - path
@@ -1407,6 +1420,76 @@ components:
       - editor
       title: SettingsFieldResponse
     SettingsPolicyPatchRequest:
+      oneOf:
+      - not:
+          anyOf:
+          - required:
+            - profile
+          - required:
+            - updates
+          - required:
+            - default_profile
+        properties:
+          scope:
+            not:
+              type: 'null'
+          path:
+            not:
+              type: 'null'
+          value:
+            not:
+              type: 'null'
+        required:
+        - revision
+        - scope
+        - path
+        - value
+        title: UpdateSettingsPolicyField
+      - not:
+          anyOf:
+          - required:
+            - scope
+          - required:
+            - path
+          - required:
+            - value
+          - required:
+            - updates
+          - required:
+            - default_profile
+        properties:
+          profile:
+            not:
+              type: 'null'
+        required:
+        - revision
+        - profile
+        title: SelectSettingsPolicyProfile
+      - anyOf:
+        - properties:
+            updates:
+              minItems: 1
+          required:
+          - updates
+        - required:
+          - default_profile
+        not:
+          anyOf:
+          - required:
+            - scope
+          - required:
+            - path
+          - required:
+            - value
+          - required:
+            - profile
+        properties:
+          default_profile:
+            not:
+              type: 'null'
+        required:
+        - revision
+        title: BatchUpdateSettingsPolicy
       properties:
         revision:
           type: string
@@ -1440,6 +1523,20 @@ components:
             pattern: ^[A-Za-z0-9][A-Za-z0-9._-]*$
           - type: 'null'
           title: Profile
+        updates:
+          items:
+            $ref: '#/components/schemas/SettingsPolicyUpdate'
+          type: array
+          maxItems: 128
+          title: Updates
+        default_profile:
+          anyOf:
+          - type: string
+            maxLength: 128
+            minLength: 1
+            pattern: ^[A-Za-z0-9][A-Za-z0-9._-]*$
+          - type: 'null'
+          title: Default Profile
       additionalProperties: false
       type: object
       required:
@@ -1479,6 +1576,52 @@ components:
       - revision
       - scopes
       title: SettingsPolicyResponse
+    SettingsPolicyUpdate:
+      oneOf:
+      - properties:
+          value:
+            not:
+              type: 'null'
+          unset:
+            const: false
+        required:
+        - value
+        title: SetSettingsPolicyValue
+      - not:
+          required:
+          - value
+        properties:
+          unset:
+            const: true
+        required:
+        - unset
+        title: ResetSettingsPolicyValue
+      properties:
+        scope:
+          type: string
+          maxLength: 128
+          minLength: 1
+          pattern: ^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$
+          title: Scope
+        path:
+          type: string
+          maxLength: 128
+          minLength: 1
+          pattern: ^[a-z][a-z0-9_.]*$
+          title: Path
+        value:
+          $ref: '#/components/schemas/JsonValue'
+        unset:
+          type: boolean
+          title: Unset
+          default: false
+      additionalProperties: false
+      type: object
+      required:
+      - scope
+      - path
+      title: SettingsPolicyUpdate
+      description: One set or reset operation in an atomic settings-policy batch.
     SettingsScopeResponse:
       properties:
         name:

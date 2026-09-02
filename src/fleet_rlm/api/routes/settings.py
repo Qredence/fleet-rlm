@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends
 from fleet_rlm.api.dependencies import ConfigPolicyDep, require_loopback_client
 from fleet_rlm.api.errors import http_error
 from fleet_rlm.api.schemas import SettingsPolicyPatchRequest, SettingsPolicyResponse
-from fleet_rlm.config.policy import PolicyAccessError, PolicyConflictError
+from fleet_rlm.config.policy import PolicyAccessError, PolicyConflictError, PolicyMutation
 from fleet_rlm.config.settings import FleetConfigurationError
 from fleet_rlm.observability.posthog import get_client, get_distinct_id
 
@@ -45,10 +45,11 @@ def get_settings_policy(policy: ConfigPolicyDep) -> SettingsPolicyResponse:
 )
 def patch_settings_policy(body: SettingsPolicyPatchRequest, policy: ConfigPolicyDep) -> SettingsPolicyResponse:
     """
-    Update the settings policy's default profile or a specified field.
+    Update the settings policy's default profile or one atomic batch of fields.
 
     Parameters:
-        body (SettingsPolicyPatchRequest): The requested profile or field update, including the expected revision.
+        body (SettingsPolicyPatchRequest): The requested profile, legacy field, or
+            batch update, including the expected revision.
 
     Returns:
         SettingsPolicyResponse: The updated settings policy.
@@ -59,23 +60,40 @@ def patch_settings_policy(body: SettingsPolicyPatchRequest, policy: ConfigPolicy
     try:
         if body.profile is not None:
             result = _response(policy.set_default_profile(body.profile, revision=body.revision))
-            ph = get_client()
-            if ph is not None:
-                ph.capture(
-                    distinct_id=get_distinct_id(),
-                    event="settings_policy_updated",
-                    properties={"update_kind": "profile"},
+            update_kind = "profile"
+            properties = {"update_kind": update_kind}
+        elif body.updates or body.default_profile is not None:
+            result = _response(
+                policy.apply(
+                    updates=tuple(
+                        PolicyMutation(
+                            scope=update.scope,
+                            path=update.path,
+                            value=update.value,
+                            unset=update.unset,
+                        )
+                        for update in body.updates
+                    ),
+                    default_profile=body.default_profile,
+                    revision=body.revision,
                 )
-            return result
-        if body.scope is None or body.path is None or body.value is None:
-            raise http_error(422, "settings_policy_invalid", "Settings value is invalid")
-        result = _response(policy.update(scope=body.scope, path=body.path, value=body.value, revision=body.revision))
+            )
+            update_kind = "batch"
+            properties = {"update_kind": update_kind, "update_count": len(body.updates)}
+        else:
+            if body.scope is None or body.path is None or body.value is None:
+                raise http_error(422, "settings_policy_invalid", "Settings value is invalid")
+            result = _response(
+                policy.update(scope=body.scope, path=body.path, value=body.value, revision=body.revision)
+            )
+            update_kind = "field"
+            properties = {"update_kind": update_kind, "scope": body.scope, "path": body.path}
         ph = get_client()
         if ph is not None:
             ph.capture(
                 distinct_id=get_distinct_id(),
                 event="settings_policy_updated",
-                properties={"update_kind": "field", "scope": body.scope, "path": body.path},
+                properties=properties,
             )
         return result
     except PolicyConflictError as exc:

@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import shutil
+import tomllib
 from pathlib import Path
 
 import pytest
 
-from fleet_rlm.config.policy import ConfigPolicyService, PolicyConflictError
+from fleet_rlm.config.policy import ConfigPolicyService, PolicyConflictError, PolicyMutation
 from fleet_rlm.config.settings import FleetConfigurationError, Settings
 
 
@@ -27,12 +28,12 @@ def test_policy_read_exposes_toml_values_without_environment_secret_values(tmp_p
 
     field = _field(service.read(), "daytona-recursive", "llm.root.api_key_env")
 
-    assert field["value"] == "FLEET_MODAL_API_KEY"
+    assert field["value"] == "DATABRICKS_TOKEN"
     assert field["editor"] == "text"
     assert "secret" not in str(field).lower()
 
     model = _field(service.read(), "daytona-recursive", "llm.root.model")
-    assert model["value"] == "openai/zai-org/GLM-5.3-Flash"
+    assert model["value"] == "databricks-deepseek-v4-flash-0731"
     assert model["editor"] == "text"
 
     root_timeout = _field(service.read(), "daytona-recursive", "llm.root.timeout_seconds")
@@ -90,7 +91,63 @@ def test_policy_can_add_a_profile_override_for_an_inherited_setting(tmp_path: Pa
     )
 
     assert "[profiles.daytona-recursive.rlm]" in policy.read_text(encoding="utf-8")
-    assert _field(service.read(), "daytona-recursive", "rlm.max_iters")["value"] == 12
+    override = _field(service.read(), "daytona-recursive", "rlm.max_iters")
+    assert override["value"] == 12
+    assert override["origin"] == "override"
+    assert override["can_reset"] is True
+
+
+def test_policy_apply_is_atomic_and_can_reset_a_profile_override(tmp_path: Path) -> None:
+    service, policy = _service(tmp_path)
+    before = service.read()
+
+    updated = service.apply(
+        updates=(
+            PolicyMutation(scope="defaults", path="rlm.max_iters", value=21),
+            PolicyMutation(scope="daytona-recursive", path="rlm.max_llm_calls", value=12),
+        ),
+        revision=before.revision,
+    )
+
+    assert _field(updated, "defaults", "rlm.max_iters")["value"] == 21
+    override = _field(updated, "daytona-recursive", "rlm.max_llm_calls")
+    assert override["value"] == 12
+    assert override["origin"] == "override"
+
+    reset = service.apply(
+        updates=(PolicyMutation(scope="daytona-recursive", path="rlm.max_llm_calls", unset=True),),
+        revision=updated.revision,
+    )
+    inherited = _field(reset, "daytona-recursive", "rlm.max_llm_calls")
+    assert inherited["value"] == 50
+    assert inherited["origin"] == "inherited"
+    assert inherited["can_reset"] is False
+    rendered = tomllib.loads(policy.read_text(encoding="utf-8"))
+    assert "max_llm_calls" not in rendered["profiles"]["daytona-recursive"].get("rlm", {})
+
+
+def test_policy_apply_rejects_duplicate_or_invalid_batches_without_writing(tmp_path: Path) -> None:
+    service, policy = _service(tmp_path)
+    before = service.read()
+    original = policy.read_text(encoding="utf-8")
+
+    with pytest.raises(FleetConfigurationError, match="duplicate"):
+        service.apply(
+            updates=(
+                PolicyMutation(scope="defaults", path="rlm.max_iters", value=21),
+                PolicyMutation(scope="defaults", path="rlm.max_iters", value=22),
+            ),
+            revision=before.revision,
+        )
+    with pytest.raises(FleetConfigurationError):
+        service.apply(
+            updates=(
+                PolicyMutation(scope="defaults", path="rlm.max_iters", value=21),
+                PolicyMutation(scope="defaults", path="storage.max_upload_bytes", value="invalid"),
+            ),
+            revision=before.revision,
+        )
+    assert policy.read_text(encoding="utf-8") == original
 
 
 def test_policy_can_disable_live_execution_for_all_profiles(tmp_path: Path) -> None:
