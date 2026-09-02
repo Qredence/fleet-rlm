@@ -768,7 +768,17 @@ export interface components {
             updates?: components["schemas"]["SettingsPolicyUpdate"][];
             /** Default Profile */
             default_profile?: string | null;
-        } & (unknown | unknown | unknown | unknown);
+        } & ({
+            scope: unknown;
+            path: unknown;
+            value: unknown;
+        } | {
+            profile: unknown;
+        } | ({
+            default_profile?: unknown;
+        } | {
+            updates: unknown;
+        } | unknown));
         /** SettingsPolicyResponse */
         SettingsPolicyResponse: {
             /** Revision */
@@ -803,12 +813,12 @@ export interface components {
              */
             unset: boolean;
         } & ({
-            /** @constant */
-            unset: true;
-        } | {
+            value: unknown;
             /** @constant */
             unset?: false;
-            value: unknown;
+        } | {
+            /** @constant */
+            unset: true;
         });
         /** SettingsScopeResponse */
         SettingsScopeResponse: {

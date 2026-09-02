@@ -1421,20 +1421,75 @@ components:
       title: SettingsFieldResponse
     SettingsPolicyPatchRequest:
       oneOf:
-      - required:
-        - revision
-        - profile
-      - required:
+      - not:
+          anyOf:
+          - required:
+            - profile
+          - required:
+            - updates
+          - required:
+            - default_profile
+        properties:
+          scope:
+            not:
+              type: 'null'
+          path:
+            not:
+              type: 'null'
+          value:
+            not:
+              type: 'null'
+        required:
         - revision
         - scope
         - path
         - value
-      - required:
+        title: UpdateSettingsPolicyField
+      - not:
+          anyOf:
+          - required:
+            - scope
+          - required:
+            - path
+          - required:
+            - value
+          - required:
+            - updates
+          - required:
+            - default_profile
+        properties:
+          profile:
+            not:
+              type: 'null'
+        required:
         - revision
-        - updates
-      - required:
+        - profile
+        title: SelectSettingsPolicyProfile
+      - anyOf:
+        - properties:
+            updates:
+              minItems: 1
+          required:
+          - updates
+        - required:
+          - default_profile
+        not:
+          anyOf:
+          - required:
+            - scope
+          - required:
+            - path
+          - required:
+            - value
+          - required:
+            - profile
+        properties:
+          default_profile:
+            not:
+              type: 'null'
+        required:
         - revision
-        - default_profile
+        title: BatchUpdateSettingsPolicy
       properties:
         revision:
           type: string
@@ -1524,22 +1579,23 @@ components:
     SettingsPolicyUpdate:
       oneOf:
       - properties:
-          unset:
-            const: true
-        required:
-        - scope
-        - path
-        - unset
-      - properties:
-          unset:
-            const: false
           value:
             not:
               type: 'null'
+          unset:
+            const: false
         required:
-        - scope
-        - path
         - value
+        title: SetSettingsPolicyValue
+      - not:
+          required:
+          - value
+        properties:
+          unset:
+            const: true
+        required:
+        - unset
+        title: ResetSettingsPolicyValue
       properties:
         scope:
           type: string

@@ -344,6 +344,38 @@ describe("FleetApiClient", () => {
     );
   });
 
+  it("distinguishes an empty default profile from an omitted one in settings batches", async () => {
+    const fetchMock = vi.fn().mockImplementation(() =>
+      Promise.resolve(
+        new Response(JSON.stringify({ revision: "b".repeat(64), scopes: [] }), {
+          headers: { "content-type": "application/json" },
+        }),
+      ),
+    );
+    globalThis.fetch = fetchMock;
+    const client = new FleetApiClient({ baseUrl: "http://fleet.test" });
+
+    await client.applySettings("a".repeat(64), [], "");
+    await client.applySettings("b".repeat(64), []);
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      "http://fleet.test/api/settings",
+      expect.objectContaining({
+        method: "PATCH",
+        body: JSON.stringify({ revision: "a".repeat(64), updates: [], default_profile: "" }),
+      }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "http://fleet.test/api/settings",
+      expect.objectContaining({
+        method: "PATCH",
+        body: JSON.stringify({ revision: "b".repeat(64), updates: [] }),
+      }),
+    );
+  });
+
   it("switches the active Fleet profile through the settings policy", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(

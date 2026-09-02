@@ -198,8 +198,13 @@ async function saveSettingsUpdate(
             update.revision,
             update.updates.map((item) =>
               item.unset
-                ? { ...item, unset: true as const }
-                : { ...item, unset: false as const, value: item.value },
+                ? { scope: item.scope, path: item.path, unset: true as const }
+                : {
+                    scope: item.scope,
+                    path: item.path,
+                    value: item.value,
+                    unset: false as const,
+                  },
             ),
             update.defaultProfile,
           )

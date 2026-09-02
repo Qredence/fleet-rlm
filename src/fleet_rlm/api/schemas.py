@@ -384,10 +384,19 @@ class SettingsPolicyUpdate(BaseModel):
         extra="forbid",
         json_schema_extra={
             "oneOf": [
-                {"required": ["scope", "path", "unset"], "properties": {"unset": {"const": True}}},
                 {
-                    "required": ["scope", "path", "value"],
-                    "properties": {"unset": {"const": False}, "value": {"not": {"type": "null"}}},
+                    "title": "SetSettingsPolicyValue",
+                    "required": ["value"],
+                    "properties": {
+                        "value": {"not": {"type": "null"}},
+                        "unset": {"const": False},
+                    },
+                },
+                {
+                    "title": "ResetSettingsPolicyValue",
+                    "required": ["unset"],
+                    "properties": {"unset": {"const": True}},
+                    "not": {"required": ["value"]},
                 },
             ]
         },
@@ -400,9 +409,9 @@ class SettingsPolicyUpdate(BaseModel):
 
     @model_validator(mode="after")
     def validate_operation(self) -> SettingsPolicyUpdate:
-        if self.unset and self.value is not None:
+        if self.unset and "value" in self.model_fields_set:
             raise ValueError("reset settings updates cannot include a value")
-        if not self.unset and self.value is None:
+        if not self.unset and ("value" not in self.model_fields_set or self.value is None):
             raise ValueError("settings updates require a value")
         return self
 
@@ -412,10 +421,56 @@ class SettingsPolicyPatchRequest(BaseModel):
         extra="forbid",
         json_schema_extra={
             "oneOf": [
-                {"required": ["revision", "profile"]},
-                {"required": ["revision", "scope", "path", "value"]},
-                {"required": ["revision", "updates"]},
-                {"required": ["revision", "default_profile"]},
+                {
+                    "title": "UpdateSettingsPolicyField",
+                    "required": ["revision", "scope", "path", "value"],
+                    "properties": {
+                        "scope": {"not": {"type": "null"}},
+                        "path": {"not": {"type": "null"}},
+                        "value": {"not": {"type": "null"}},
+                    },
+                    "not": {
+                        "anyOf": [
+                            {"required": ["profile"]},
+                            {"required": ["updates"]},
+                            {"required": ["default_profile"]},
+                        ]
+                    },
+                },
+                {
+                    "title": "SelectSettingsPolicyProfile",
+                    "required": ["revision", "profile"],
+                    "properties": {"profile": {"not": {"type": "null"}}},
+                    "not": {
+                        "anyOf": [
+                            {"required": ["scope"]},
+                            {"required": ["path"]},
+                            {"required": ["value"]},
+                            {"required": ["updates"]},
+                            {"required": ["default_profile"]},
+                        ]
+                    },
+                },
+                {
+                    "title": "BatchUpdateSettingsPolicy",
+                    "required": ["revision"],
+                    "properties": {"default_profile": {"not": {"type": "null"}}},
+                    "anyOf": [
+                        {
+                            "required": ["updates"],
+                            "properties": {"updates": {"minItems": 1}},
+                        },
+                        {"required": ["default_profile"]},
+                    ],
+                    "not": {
+                        "anyOf": [
+                            {"required": ["scope"]},
+                            {"required": ["path"]},
+                            {"required": ["value"]},
+                            {"required": ["profile"]},
+                        ]
+                    },
+                },
             ]
         },
     )
@@ -435,14 +490,22 @@ class SettingsPolicyPatchRequest(BaseModel):
 
     @model_validator(mode="after")
     def validate_operation_shape(self) -> SettingsPolicyPatchRequest:
-        legacy_field = self.scope is not None or self.path is not None or self.value is not None
-        if legacy_field and (self.scope is None or self.path is None or self.value is None):
-            raise ValueError("legacy settings updates require scope, path, and value")
-        if self.profile is not None and (legacy_field or self.updates or self.default_profile is not None):
+        supplied = self.model_fields_set
+        legacy_fields = supplied.intersection({"scope", "path", "value"})
+        batch_fields = supplied.intersection({"updates", "default_profile"})
+        if "profile" in supplied and (legacy_fields or batch_fields):
             raise ValueError("legacy profile selection cannot be combined with settings updates")
-        if (self.updates or self.default_profile is not None) and legacy_field:
+        if batch_fields and legacy_fields:
             raise ValueError("batch settings updates cannot be combined with legacy settings fields")
-        if not legacy_field and self.profile is None and not self.updates and self.default_profile is None:
+        if legacy_fields and (
+            legacy_fields != {"scope", "path", "value"} or self.scope is None or self.path is None or self.value is None
+        ):
+            raise ValueError("legacy settings updates require scope, path, and value")
+        if "profile" in supplied and self.profile is None:
+            raise ValueError("legacy profile selection requires a profile")
+        if "default_profile" in supplied and self.default_profile is None:
+            raise ValueError("default profile updates require a profile")
+        if not legacy_fields and "profile" not in supplied and not self.updates and self.default_profile is None:
             raise ValueError("settings update is empty")
         return self
 

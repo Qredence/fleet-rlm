@@ -5,10 +5,50 @@ from __future__ import annotations
 import shutil
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
+from pydantic import ValidationError
 
+from fleet_rlm.api.schemas import SettingsPolicyPatchRequest, SettingsPolicyUpdate
 from fleet_rlm.composition.testing import create_testing_app
 from fleet_rlm.config.settings import Settings
+
+
+def test_settings_policy_openapi_exposes_closed_operation_alternatives() -> None:
+    schemas = create_testing_app().openapi()["components"]["schemas"]
+
+    update_variants = schemas["SettingsPolicyUpdate"]["oneOf"]
+    assert [variant["title"] for variant in update_variants] == [
+        "SetSettingsPolicyValue",
+        "ResetSettingsPolicyValue",
+    ]
+    assert update_variants[0]["required"] == ["value"]
+    assert update_variants[0]["properties"]["value"] == {"not": {"type": "null"}}
+    assert update_variants[1]["not"] == {"required": ["value"]}
+
+    patch_variants = schemas["SettingsPolicyPatchRequest"]["oneOf"]
+    assert [variant["title"] for variant in patch_variants] == [
+        "UpdateSettingsPolicyField",
+        "SelectSettingsPolicyProfile",
+        "BatchUpdateSettingsPolicy",
+    ]
+    assert all("revision" in variant["required"] for variant in patch_variants)
+    assert patch_variants[0]["properties"]["value"] == {"not": {"type": "null"}}
+
+
+def test_settings_policy_models_reject_mixed_or_incomplete_operations() -> None:
+    revision = "a" * 64
+
+    with pytest.raises(ValidationError, match="cannot include a value"):
+        SettingsPolicyUpdate(scope="defaults", path="rlm.max_iters", unset=True, value=None)
+    with pytest.raises(ValidationError, match="require a value"):
+        SettingsPolicyUpdate(scope="defaults", path="rlm.max_iters")
+    with pytest.raises(ValidationError, match="cannot be combined"):
+        SettingsPolicyPatchRequest(
+            revision=revision,
+            updates=[{"scope": "defaults", "path": "rlm.max_iters", "value": 21}],
+            value=None,
+        )
 
 
 def test_settings_policy_is_loopback_only_and_revision_checked(monkeypatch, tmp_path: Path) -> None:
