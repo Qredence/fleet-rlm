@@ -380,7 +380,18 @@ class SettingsPolicyResponse(BaseModel):
 class SettingsPolicyUpdate(BaseModel):
     """One set or reset operation in an atomic settings-policy batch."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(
+        extra="forbid",
+        json_schema_extra={
+            "oneOf": [
+                {"required": ["scope", "path", "unset"], "properties": {"unset": {"const": True}}},
+                {
+                    "required": ["scope", "path", "value"],
+                    "properties": {"unset": {"const": False}, "value": {"not": {"type": "null"}}},
+                },
+            ]
+        },
+    )
 
     scope: str = Field(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
     path: str = Field(min_length=1, max_length=128, pattern=r"^[a-z][a-z0-9_.]*$")
@@ -397,7 +408,17 @@ class SettingsPolicyUpdate(BaseModel):
 
 
 class SettingsPolicyPatchRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(
+        extra="forbid",
+        json_schema_extra={
+            "oneOf": [
+                {"required": ["revision", "profile"]},
+                {"required": ["revision", "scope", "path", "value"]},
+                {"required": ["revision", "updates"]},
+                {"required": ["revision", "default_profile"]},
+            ]
+        },
+    )
 
     revision: str = Field(min_length=64, max_length=64, pattern=r"^[0-9a-f]{64}$")
     scope: str | None = Field(default=None, min_length=1, max_length=128, pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")

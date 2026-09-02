@@ -118,7 +118,7 @@ export class FleetApiClient {
     return this.updateSettings({
       revision,
       updates,
-      ...(defaultProfile ? { default_profile: defaultProfile } : {}),
+      ...(defaultProfile !== undefined ? { default_profile: defaultProfile } : {}),
     });
   }
 
