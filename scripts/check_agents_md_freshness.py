@@ -33,6 +33,8 @@ class AgentsMdValidator:
     repo_root: Path
     errors: list[ValidationError] = field(default_factory=list)
 
+    ALLOWED_AGENT_PATHS: ClassVar[frozenset[str]] = frozenset({"AGENTS.md", "tools/fleet-tui/AGENTS.md"})
+
     # Patterns for extracting references
     LINK_PATTERN = re.compile(r"\[([^\]]+)\]\(([^)]+)\)")
     CODE_BLOCK_PATTERN = re.compile(r"```[^\n]*\n(.*?)```", re.DOTALL)
@@ -73,12 +75,34 @@ class AgentsMdValidator:
             )
             return self.errors
 
+        self._validate_structure(agents_files)
+
         for agents_file in agents_files:
             self._validate_file(agents_file)
 
         self._validate_cross_references(agents_files)
 
         return self.errors
+
+    def _validate_structure(self, agents_files: list[Path]) -> None:
+        """Require the root guide and the one intentionally specialized guide."""
+        actual = {path.relative_to(self.repo_root).as_posix() for path in agents_files}
+        for required in sorted(self.ALLOWED_AGENT_PATHS - actual):
+            self.errors.append(
+                ValidationError(
+                    file=required,
+                    issue="missing_required_guide",
+                    detail="required repository agent guide is missing",
+                )
+            )
+        for unexpected in sorted(actual - self.ALLOWED_AGENT_PATHS):
+            self.errors.append(
+                ValidationError(
+                    file=unexpected,
+                    issue="unexpected_nested_guide",
+                    detail="only AGENTS.md and tools/fleet-tui/AGENTS.md are allowed",
+                )
+            )
 
     def _find_agents_files(self) -> list[Path]:
         """Find all AGENTS.md files in the repository, excluding third-party dirs."""
@@ -170,7 +194,7 @@ class AgentsMdValidator:
         """Check that referenced paths (in backticks or as directories) exist."""
         rel_path = agents_file.relative_to(self.repo_root)
 
-        # Determine if this is a subdirectory AGENTS.md (e.g., src/fleet_rlm/AGENTS.md)
+        # Resolve paths relative to the guide's directory when needed.
         # Path references there are relative to the package root, not repo root
         package_root = None
         if agents_file.parent != self.repo_root:
@@ -335,7 +359,7 @@ class AgentsMdValidator:
 
     def _validate_cross_references(self, agents_files: list[Path]) -> None:
         """Validate cross-references between AGENTS.md files."""
-        # Check that root AGENTS.md references sub-AGENTS.md files correctly
+        # Check that the root guide references the one specialized guide.
         root_agents = self.repo_root / "AGENTS.md"
         if not root_agents.exists():
             return
@@ -343,9 +367,7 @@ class AgentsMdValidator:
         content = root_agents.read_text(encoding="utf-8", errors="ignore")
 
         # Every discovered sub-guide must be reachable from the root map.
-        expected_refs = [
-            str(agents_file.relative_to(self.repo_root)) for agents_file in agents_files if agents_file != root_agents
-        ]
+        expected_refs = ["tools/fleet-tui/AGENTS.md"]
 
         for ref in expected_refs:
             if ref not in content:

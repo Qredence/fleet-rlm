@@ -26,7 +26,7 @@ src/fleet_rlm/
 └── snapshot_contract.py # immutable Daytona Snapshot name policy
 ```
 
-See [codebase map](codebase-map.md) for dependency boundaries.
+See the root [architecture](../../ARCHITECTURE.md) for dependency boundaries.
 
 The maintained TypeScript client is separate under `tools/fleet-tui/`; its
 generated HTTP types are owned by `make api-sync`.

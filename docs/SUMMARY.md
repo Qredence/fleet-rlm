@@ -1,7 +1,7 @@
 # Table of contents
 
 * [Documentation Home](index.md)
-* [Architecture](architecture.md)
+* [Architecture](../ARCHITECTURE.md)
 * [Testing Strategy](how-to-guides/testing-strategy.md)
 * [DSPy RLM and Daytona Integration](how-to-guides/dspy-integration.md)
 * [Daytona Snapshot](how-to-guides/daytona-snapshot.md)
@@ -22,14 +22,7 @@
   * [CLI](reference/cli.md)
   * [Database](reference/database.md)
   * [Source Layout](reference/source-layout.md)
-  * [Codebase Map](reference/codebase-map.md)
   * [Performance Budget Decision](reference/performance-budget.md)
 * [Lakebase Postgres](how-to-guides/lakebase-postgres.md)
-* [Agent Harness](agent-harness/README.md)
-  * [Feedback Loop](agent-harness/feedback-loop.md)
-  * [Architecture Invariants](agent-harness/architecture-invariants.md)
-  * [Drift Control](agent-harness/drift-control.md)
-  * [Quality Standard](agent-harness/quality-score.md)
-* [Agent Domain Docs](agents/domain.md)
 * [Local Issue Tracker](agents/issue-tracker.md)
 * [Triage Labels](agents/triage-labels.md)

@@ -12,14 +12,13 @@ import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 
-ROOT_AGENTS_LINE_BUDGET = 150
-REQUIRED_HARNESS_DOCS = (
-    "docs/agent-harness/README.md",
-    "docs/agent-harness/feedback-loop.md",
-    "docs/agent-harness/architecture-invariants.md",
-    "docs/agent-harness/quality-score.md",
-    "docs/agent-harness/drift-control.md",
+ROOT_AGENTS_LINE_BUDGET = 140
+REQUIRED_GUIDANCE_FILES = (
+    "AGENTS.md",
+    "ARCHITECTURE.md",
+    "tools/fleet-tui/AGENTS.md",
 )
+ALLOWED_AGENT_FILES = frozenset({"AGENTS.md", "tools/fleet-tui/AGENTS.md"})
 DOC_INDEXES = ("docs/index.md", "docs/SUMMARY.md")
 GENERATED_ARTIFACTS = ("openapi.yaml",)
 GENERATED_COMMANDS = ("make api-sync", "make api-check")
@@ -75,7 +74,8 @@ class HarnessChecker:
     def run(self) -> list[HarnessError]:
         """Run all checks and return collected errors."""
         self._check_root_agents_budget()
-        self._check_required_docs()
+        self._check_required_guidance_files()
+        self._check_agent_guide_structure()
         self._check_docs_index_links()
         self._check_codex_config()
         self._check_generated_artifact_controls()
@@ -97,21 +97,43 @@ class HarnessChecker:
                 f"root guide has {line_count} lines; budget is {ROOT_AGENTS_LINE_BUDGET}",
             )
 
-    def _check_required_docs(self) -> None:
-        for rel_path in REQUIRED_HARNESS_DOCS:
+    def _check_required_guidance_files(self) -> None:
+        for rel_path in REQUIRED_GUIDANCE_FILES:
             if not (self.repo_root / rel_path).is_file():
-                self._error(rel_path, "required harness doc is missing")
+                self._error(rel_path, "required repository guidance file is missing")
+
+    def _check_agent_guide_structure(self) -> None:
+        """Keep the nested AGENTS.md surface intentionally closed."""
+        listed = subprocess.run(
+            ("git", "ls-files", "-z", "--cached", "--others", "--exclude-standard"),
+            cwd=self.repo_root,
+            check=False,
+            capture_output=True,
+        )
+        if listed.returncode == 0:
+            candidates = [
+                self.repo_root / raw_path
+                for raw_path in listed.stdout.decode().split("\0")
+                if raw_path and Path(raw_path).name == "AGENTS.md" and (self.repo_root / raw_path).is_file()
+            ]
+        else:
+            candidates = list(self.repo_root.rglob("AGENTS.md"))
+
+        for path in candidates:
+            relative = path.relative_to(self.repo_root).as_posix()
+            if relative not in ALLOWED_AGENT_FILES:
+                self._error(relative, "unexpected nested AGENTS.md; only the TUI guide is allowed")
 
     def _check_docs_index_links(self) -> None:
-        required_link = "agent-harness/README.md"
+        required_link = "../ARCHITECTURE.md"
         for rel_path in DOC_INDEXES:
             path = self.repo_root / rel_path
             if not path.is_file():
                 self._error(rel_path, "docs index is missing")
                 continue
             content = path.read_text(encoding="utf-8")
-            if required_link not in content and "docs/agent-harness/README.md" not in content:
-                self._error(rel_path, "does not link docs/agent-harness/README.md")
+            if required_link not in content:
+                self._error(rel_path, "does not link ../ARCHITECTURE.md")
 
     def _check_codex_config(self) -> None:
         codex_dir = self.repo_root / ".codex"
@@ -134,15 +156,15 @@ class HarnessChecker:
     def _check_generated_artifact_controls(self) -> None:
         docs = "\n".join(
             (self.repo_root / rel_path).read_text(encoding="utf-8")
-            for rel_path in REQUIRED_HARNESS_DOCS
+            for rel_path in ("AGENTS.md", "ARCHITECTURE.md", "tools/fleet-tui/AGENTS.md")
             if (self.repo_root / rel_path).is_file()
         )
         for artifact in GENERATED_ARTIFACTS:
             if artifact not in docs:
-                self._error("docs/agent-harness", f"generated artifact not documented: {artifact}")
+                self._error("ARCHITECTURE.md", f"generated artifact not documented: {artifact}")
         for command in GENERATED_COMMANDS:
             if command not in docs:
-                self._error("docs/agent-harness", f"generated artifact command not documented: {command}")
+                self._error("ARCHITECTURE.md", f"generated artifact command not documented: {command}")
 
     def _check_script_inventory(self) -> None:
         inventory_path = self.repo_root / "scripts" / "README.md"
@@ -160,6 +182,8 @@ class HarnessChecker:
     def _control_surface_files(self) -> list[Path]:
         relative_files = (
             "AGENTS.md",
+            "ARCHITECTURE.md",
+            "tools/fleet-tui/AGENTS.md",
             "CONTRIBUTING.md",
             "Makefile",
             "PRODUCT.md",

@@ -90,10 +90,8 @@ clients cannot provide models, Signatures, or executable capabilities.
   each Root/Sub role supplies a provider base URL, an API-key environment
   reference, and a provider-native model id. The request goes to the provider's
   `/chat/completions` endpoint with `model_type="chat"`; no provider-specific
-  routing header is required. Both roles run the Modal-hosted GLM-5.3-Flash
-  endpoint and are capped at 131,072 output tokens — the maximum output length
-  Z.AI documents for GLM-5.3-Flash — leaving ample headroom under the served
-  1,048,576-token context for any Fleet prompt. The
+  routing header is required. Both roles use the committed Databricks endpoint
+  and are capped at 16,384 output tokens. The
   exact credential and endpoint names are policy-derived in [the profile
   matrix](../reference/profile-matrix.md). This LM response limit is distinct
   from `dspy.RLM.max_output_chars`, which bounds REPL output retained in
@@ -255,7 +253,7 @@ annotations and continue to own only their declared output fields. Custom DSPy
 Modules are outside the supported Turn composition contract; use the native RLM
 with host-mediated Tools and typed inputs.
 
-See [backend architecture](../architecture.md) for ownership and Turn commit ordering.
+See the root [architecture](../../ARCHITECTURE.md) for ownership and Turn commit ordering.
 
 ## Run the Phase 1 Daytona stream canary
 
@@ -275,8 +273,8 @@ uv run python scripts/live_phase1_stream_verify.py \
 The command is explicitly invoked and policy-gated by
 `runtime.live_enabled`. It loads `.env` with `override=False`, so operator
 exports retain precedence. It requires a clean tracked non-`main` candidate,
-the default `daytona-recursive` policy, and the Modal-hosted
-`openai/zai-org/GLM-5.3-Flash` endpoint for both Root and Sub. Its bounded receipt excludes Attachment content, prompts,
+the default `daytona-recursive` policy, and its configured Root and Sub model
+roles. Its bounded receipt excludes Attachment content, prompts,
 generated code, provider responses, trace IDs, broker addresses, and
 credentials. A passing canary closes Phase 1 only; it does not promote or
 release the candidate.
@@ -296,8 +294,8 @@ uv run python scripts/live_phase2_recursive_verify.py \
 ```
 
 The command requires explicit live authorization, `runtime.live_enabled`, a
-clean tracked non-`main` candidate, the recursive profile, and the Modal-hosted
-`openai/zai-org/GLM-5.3-Flash` endpoint for both model roles. Its receipt
+clean tracked non-`main` candidate, the recursive profile, and its configured
+model roles. Its receipt
 contains only candidate/dependency identity, non-secret policy identifiers,
 two bounded durations, and boolean assertions. It excludes prompts, answers,
 code, credentials, URLs, trace IDs, Sandbox IDs, Volume IDs, and broker data.
@@ -327,8 +325,8 @@ Snapshot guide](daytona-snapshot.md).
 
 The verifier requires a clean tracked tree on a non-`main` branch, invokes the
 single live pytest scenario once, and performs no automatic retry. It resolves
-the `openai/zai-org/GLM-5.3-Flash` Root and Sub roles from the selected TOML
-profile; ambient model variables are ignored, and swapped or obsolete model
+the configured Root and Sub roles from the selected TOML profile; ambient model
+variables are ignored, and swapped or obsolete model
 pairs fail the precondition. Its `--help` path requires no credentials.
 
 The proof exercises a typed host Signature, state across RLM iterations,

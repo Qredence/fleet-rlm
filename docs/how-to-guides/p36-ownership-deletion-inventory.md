@@ -2,7 +2,7 @@
 
 > **Historical record (P36, completed).** Rows name symbols deleted in P36; the
 > document is retained as migration evidence, not as living architecture
-> guidance. Current ownership rules live in `docs/reference/codebase-map.md`.
+> guidance. Current ownership rules live in the root [ARCHITECTURE.md](../../ARCHITECTURE.md).
 
 Status: **sealed gate artifact for P37-P40**.
 
