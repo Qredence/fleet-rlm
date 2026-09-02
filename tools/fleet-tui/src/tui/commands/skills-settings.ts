@@ -196,7 +196,11 @@ async function saveSettingsUpdate(
       "updates" in update
         ? await ctx.client.applySettings(
             update.revision,
-            update.updates.map((item) => ({ ...item, unset: item.unset ?? false })),
+            update.updates.map((item) =>
+              item.unset
+                ? { ...item, unset: true as const }
+                : { ...item, unset: false as const, value: item.value },
+            ),
             update.defaultProfile,
           )
         : await ctx.client.updateSettings(update);
