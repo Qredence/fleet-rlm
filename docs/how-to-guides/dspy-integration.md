@@ -127,7 +127,9 @@ The generic `RLMOptions`/DSPy constructor fallback for Root is `20` iterations,
 budget; the child policy remains `8`, `12`, and `4,000`. Fleet's
 `max_execution_output_chars`, Turn deadline, recursive call budget, and child
 concurrency are separate controls. The shipped Root and Sub provider roles use
-`num_retries = 1`; omitted custom-role values retain the typed settings default.
+`num_retries = 1`; omitted custom-role values inherit the shipped default, while
+the typed settings default of `3` applies only when the policy omits the field
+from both defaults and the selected profile.
 `rlm.verbose` controls host logging only;
 operator-visible reasoning, code, output, and recursive status use Fleet's
 Runtime Events and trajectory reconciliation.

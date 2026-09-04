@@ -196,6 +196,7 @@ def test_stop_retains_failed_cleanup_ownership_for_retry() -> None:
 
 def test_broker_server_and_wrapper_sources_are_provider_independent() -> None:
     assert "http.server" in BROKER_SERVER_CODE
+    assert 'protocol_version = "HTTP/1.1"' in BROKER_SERVER_CODE
     assert "__BROKER_SECRET__" in BROKER_SERVER_CODE
     assert "{broker_port}" in TOOL_WRAPPER_TEMPLATE
     assert "daytona" not in (BROKER_SERVER_CODE + TOOL_WRAPPER_TEMPLATE).lower()

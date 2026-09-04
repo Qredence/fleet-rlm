@@ -469,6 +469,9 @@ def _execute(data):
 
 
 class _BrokerHandler(BaseHTTPRequestHandler):
+    # Keep the pooled host client connection reusable across poll requests.
+    protocol_version = "HTTP/1.1"
+
     def log_message(self, format, *args):
         pass
 

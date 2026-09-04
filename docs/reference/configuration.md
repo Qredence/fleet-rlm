@@ -176,7 +176,9 @@ preparation traces never reference the execution trace.
 
 The shipped Root and Sub LLM roles set `num_retries = 1`. This is a committed
 runtime policy choice, not a change to DSPy's generic constructor defaults;
-custom profiles that omit the field still resolve the typed settings default.
+custom profiles that omit the field inherit the shipped default of `1`. The
+typed settings default of `3` applies only when both the defaults and selected
+profile omit the field.
 
 ## Local terminal editing
 
