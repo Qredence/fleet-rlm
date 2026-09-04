@@ -19,6 +19,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import PurePosixPath
+from threading import Lock
 from typing import TYPE_CHECKING, Any, Literal, cast
 from uuid import UUID
 
@@ -707,6 +708,34 @@ class RLMModelBundle:
 _RETRYABLE_LM_ERRORS = (LMRateLimitError, LMServerError, LMTimeoutError, LMTransportError)
 
 
+class ProviderAttemptCounter:
+    """Thread-safe count of provider attempts behind one deadline-bound LM.
+
+    DSPy callbacks report logical LM calls. This counter deliberately lives one
+    layer lower, around each actual provider invocation, so retry attempts can
+    be measured without being misreported as independent logical calls.
+    """
+
+    def __init__(self) -> None:
+        self._lock = Lock()
+        self._count = 0
+
+    def increment(self) -> None:
+        with self._lock:
+            self._count += 1
+
+    def snapshot(self) -> int:
+        with self._lock:
+            return self._count
+
+
+def provider_attempt_count(lm: Any) -> int | None:
+    """Return a measured provider-attempt count, or ``None`` when uninstrumented."""
+    counter = getattr(lm, "_fleet_provider_attempt_counter", None)
+    snapshot = getattr(counter, "snapshot", None)
+    return int(snapshot()) if callable(snapshot) else None
+
+
 def _supports_turn_lm_copy(lm: Any) -> bool:
     """Whether ``lm.copy`` is a provider-runtime clone suitable for Turn binding."""
     copy_lm = getattr(lm, "copy", None)
@@ -752,6 +781,7 @@ def _copy_lm_for_deadline(
         instance_dict.pop("aforward", None)
 
     original_forward = copied.forward
+    attempt_counter = ProviderAttemptCounter()
 
     def forward_with_deadline(*args: Any, **kwargs: Any) -> Any:
         attempt = 0
@@ -765,6 +795,7 @@ def _copy_lm_for_deadline(
                 error_message=error_message,
             )
             try:
+                attempt_counter.increment()
                 return original_forward(*args, **call_kwargs)
             except _RETRYABLE_LM_ERRORS:
                 if attempt >= retry_budget:
@@ -787,6 +818,7 @@ def _copy_lm_for_deadline(
                     error_message=error_message,
                 )
                 try:
+                    attempt_counter.increment()
                     return await original_aforward(*args, **call_kwargs)
                 except _RETRYABLE_LM_ERRORS:
                     if attempt >= retry_budget:
@@ -798,6 +830,7 @@ def _copy_lm_for_deadline(
         ("_fleet_retry_budget", retry_budget),
         ("_fleet_deadline", deadline),
         ("_fleet_reserve_seconds", reserve_seconds),
+        ("_fleet_provider_attempt_counter", attempt_counter),
     ):
         with contextlib.suppress(AttributeError, TypeError):
             setattr(copied, name, value)
@@ -1028,6 +1061,7 @@ __all__ = [
     "FleetInputModel",
     "FleetRLMSignature",
     "LMTier",
+    "ProviderAttemptCounter",
     "RLMFactory",
     "RLMInstructionFragments",
     "RLMModelBundle",
@@ -1049,6 +1083,7 @@ __all__ = [
     "fleet_rlm_instruction_fragments",
     "has_llm_credentials",
     "normalize_model_id",
+    "provider_attempt_count",
     "resolve_role_api_key",
     "root_signature_for_recursion",
     "sanitize_base_url",

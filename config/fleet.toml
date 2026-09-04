@@ -7,6 +7,7 @@ name = "fleet-rlm"
 
 [defaults.runtime]
 environment = "daytona"
+implementation = "legacy" # legacy | v2; v2 is enabled only by its owning migration
 live_enabled = true
 turn_timeout_seconds = 1800
 max_active_daytona_leases = 8
@@ -41,6 +42,7 @@ cache = false
 # and at most five child workers concurrently. The root budget leaves room
 # for deliberate verification without allowing an unproductive long tail.
 [defaults.rlm]
+recursion_policy = "legacy" # legacy | capsule; capsule is enabled only by its owning migration
 max_iters = 12
 max_llm_calls = 32
 max_output_chars = 6000
@@ -66,6 +68,7 @@ database_url_env = "FLEET_DATABASE_URL"
 
 [defaults.daytona]
 api_key_env = "FLEET_DAYTONA_API_KEY"
+interpreter = "broker" # broker | native; native is enabled only by its owning migration
 snapshot = "fleet-rlm-python313-v5"
 volume_name = "fleet-volume"
 volume_mount_path = "/home/daytona/fleet"

@@ -23,6 +23,11 @@ FastAPI/SSE contract backed by DSPy, Daytona, and SQLAlchemy/Alembic.
 15. [P42 Session-state behavior freeze](reference/p42-session-state-behavior-freeze.md)
 16. [P42 module-subtraction ledger](reference/p42-module-subtraction-ledger.md)
 17. [Session-scoped RLM state ADR](decisions/ADR-session-scoped-rlm-state.md)
+18. [Execution-state vocabulary ADR](architecture/001-execution-state.md)
+19. [Persistence-boundary ADR](architecture/002-persistence-boundary.md)
+20. [DSPy tool-ownership ADR](architecture/003-dspy-tool-ownership.md)
+21. [Daytona-environment ADR](architecture/004-daytona-environments.md)
+22. [Runtime-migration ADR](architecture/005-runtime-migration.md)
 
 ## Reference
 
@@ -30,6 +35,7 @@ FastAPI/SSE contract backed by DSPy, Daytona, and SQLAlchemy/Alembic.
 - [Reference index](reference/index.md)
 - [Source layout](reference/source-layout.md)
 - [Database](reference/database.md)
+- [Runtime benchmark baseline](reference/runtime-benchmark.md)
 
 ## Source of truth
 

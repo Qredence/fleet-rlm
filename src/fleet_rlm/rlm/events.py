@@ -1175,6 +1175,7 @@ class ExecutionTraceAssembler:
         adapter = FleetJSONAdapter(
             deadline=context.execution.deadline,
             wrap_up_seconds=context.execution.wrap_up_seconds,
+            metrics=context.delegation.metrics,
         )
         with (
             turn_phase_span(

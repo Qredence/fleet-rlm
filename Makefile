@@ -34,7 +34,7 @@ TUI_PNPM := cd $(TUI_DIR) && pnpm
 	clean cli precommit-install precommit-run precommit \
 	cloud-preflight \
 	daytona-snapshot-create daytona-snapshot-check profile-matrix \
-	benchmark-daytona-lifecycle benchmark-native-long-context
+	benchmark-daytona-lifecycle benchmark-native-long-context benchmark-runtime-baseline
 
 help:
 	@echo "Setup:"
@@ -59,6 +59,7 @@ help:
 	@echo "  make test-daytona-cov - Run canonical non-live tests with Daytona branch coverage"
 	@echo "  make benchmark-daytona-lifecycle - Measure full Daytona create-through-first-execution lifecycle"
 	@echo "  make benchmark-native-long-context - Measure native whole-value URL context at 1/5/10 MiB"
+	@echo "  make benchmark-runtime-baseline - Validate and persist a content-free Phase-0 baseline receipt"
 	@echo "  (Credentialed live Daytona lanes run via FLEET_LIVE=1; see docs/how-to-guides/testing-strategy.md)"
 	@echo ""
 	@echo "Quality:"
@@ -145,6 +146,12 @@ benchmark-native-long-context:
 benchmark-daytona-lifecycle:
 	FLEET_LIVE=1 uv run python scripts/benchmark_daytona_lifecycle.py --output .scratch/daytona-lifecycle-benchmark.json
 
+RUNTIME_BENCHMARK_RESULTS ?= .scratch/runtime-benchmark-results.json
+RUNTIME_BENCHMARK_OUTPUT ?= .scratch/runtime-benchmark-baseline.json
+
+benchmark-runtime-baseline:
+	uv run python scripts/benchmarks/capture_runtime_baseline.py --results $(RUNTIME_BENCHMARK_RESULTS) --output $(RUNTIME_BENCHMARK_OUTPUT)
+
 DAYTONA_SNAPSHOT_NAME ?= fleet-rlm-python313-v5
 
 daytona-snapshot-create:
@@ -190,6 +197,7 @@ check-deps:
 
 check-codebase-tree:
 	uv run python scripts/check_codebase_tree.py
+	uv run python scripts/check_architecture_vocabulary.py
 
 check-dependency-boundaries:
 	uv run python scripts/check_dependency_boundaries.py

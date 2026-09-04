@@ -25,9 +25,16 @@ User / Workspace
 
 A User is the deterministic local actor namespace. A Workspace owns Sessions,
 Skills, Attachments, Artifacts, and workspace-scoped state. A Session owns
-ordered Turns and committed history. A Turn is one user message; a Run is its
-execution attempt. A successful Turn is not complete until durable settlement
-and Turn Commit succeed.
+ordered Turns and committed history. A Turn is the durable conversational
+result for one user message; a Run is one execution attempt for that Turn. A
+RunClaim is the durable authority to execute and settle a Run. A successful
+Turn is not complete until durable settlement and Turn Commit succeed.
+
+A SessionSandbox is a reusable root Daytona Sandbox scoped to one Workspace
+and Session. An InterpreterContext is its ephemeral Python namespace and
+caller-owned interpreter bindings. A ChildEnvironment is the fresh isolated
+Sandbox/interpreter scope for one recursive child. These resource terms are not
+synonyms for Session, Turn, Run, or RunClaim; see the execution-state ADR.
 
 ## Component ownership
 
@@ -106,12 +113,15 @@ Fleet state after settlement.
 `src/fleet_rlm/sessions/`, `workspace/`, `attachments/`, `artifacts/`, and
 `persistence/` own provider-neutral domain policy and durable adapters.
 
-Session History and Checkpoints are durable semantic state. Attachments and
-Artifact bytes live in Workspace Volume Scope. Artifact Candidates remain
-private until byte validation, promotion, and Turn Commit. Session Workspace
-files and Workspace Memory are immediate private state and are intentionally
-separate from committed conversation history. Memory writes are explicit,
-bounded, and host-mediated.
+Session History and Checkpoints are durable semantic state in the Database.
+Attachments and Artifact bytes live in Workspace Volume Scope. Artifact
+Candidates remain private until byte validation, promotion, and Turn Commit.
+Session Workspace files and Workspace Memory are immediate private state and
+are intentionally separate from committed conversation history. Memory writes
+are explicit, bounded, and host-mediated. InterpreterContext namespaces,
+`REPLHistory`, brokers, and in-memory registries are ephemeral: a
+SessionSandbox may be deleted and recreated without losing committed Session
+correctness.
 
 Alembic owns live schema evolution. Explicit SQLite test/local helpers may
 create tables, but production startup does not use `create_all`. In-memory and
@@ -120,7 +130,10 @@ retaining their respective lock or transaction boundaries.
 
 ### Configuration
 
-`config/fleet.toml` is the canonical runtime policy. `[defaults]` is deep-merged
+`config/fleet.toml` is the canonical runtime policy. Phase-0 runtime migration
+selectors are deliberately bounded to `runtime.implementation`,
+`daytona.interpreter`, and `rlm.recursion_policy`; they support controlled
+legacy/v2 comparison rather than per-component compatibility flags. `[defaults]` is deep-merged
 with the selected `[profiles.<name>]` table. The loader validates the complete
 policy at startup, and only environment names explicitly referenced by the
 selected policy may supply secrets or endpoints. Ambient selectors and

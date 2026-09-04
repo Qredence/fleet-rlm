@@ -388,6 +388,7 @@ class FleetJSONAdapter(dspy.JSONAdapter):
         max_parse_retries: int = DEFAULT_PARSE_RETRIES,
         deadline: float | None = None,
         wrap_up_seconds: float = 0.0,
+        metrics: DelegationMetrics | None = None,
     ) -> None:
         """Initialize the adapter with a bounded retry budget.
 
@@ -412,6 +413,7 @@ class FleetJSONAdapter(dspy.JSONAdapter):
         self._wrap_up_attempts = 0
         self._wrap_up_rejection_reason: str | None = None
         self._wrap_up_remaining_ms: int | None = None
+        self._metrics = metrics
 
     def _remaining(self) -> float | None:
         if self._deadline is None:
@@ -437,6 +439,10 @@ class FleetJSONAdapter(dspy.JSONAdapter):
             "wrap_up_rejection_reason": self._wrap_up_rejection_reason,
             "wrap_up_remaining_ms": self._wrap_up_remaining_ms,
         }
+
+    def _record_parse_repair(self) -> None:
+        if self._metrics is not None:
+            self._metrics.record_parse_repair()
 
     def _next_wrap_up_attempt(self) -> None:
         """Consume one of the two total final-answer provider attempts."""
@@ -580,6 +586,7 @@ class FleetJSONAdapter(dspy.JSONAdapter):
                         continue
                 raise
             except AdapterParseError as exc:
+                self._record_parse_repair()
                 if wrap_up:
                     if self._wrap_up_attempts >= 2:
                         raise TimeoutError("wrap-up action was not parseable before the Turn deadline") from exc
@@ -721,6 +728,7 @@ class FleetJSONAdapter(dspy.JSONAdapter):
                         continue
                 raise
             except AdapterParseError as exc:
+                self._record_parse_repair()
                 if wrap_up:
                     if self._wrap_up_attempts >= 2:
                         raise TimeoutError("wrap-up action was not parseable before the Turn deadline") from exc
@@ -914,7 +922,7 @@ class _RLMTraceCallback(BaseCallback):
         self._metrics = metrics
         self._deadline = deadline
         self._call_index = 0
-        self._spans: dict[str, tuple[Any, Any, int | None, int, float]] = {}
+        self._spans: dict[str, tuple[Any, Any, int | None, int, float, int | None]] = {}
         self._last_call: dict[str, JsonValue] | None = None
 
     def on_lm_start(self, call_id: str, instance: Any, inputs: dict[str, Any]) -> None:
@@ -953,7 +961,13 @@ class _RLMTraceCallback(BaseCallback):
             )
         except Exception:
             pass
-        self._spans[call_id] = (instance, span, history_length, call_index, time.perf_counter())
+        try:
+            from fleet_rlm.rlm.program import provider_attempt_count
+
+            attempts_before = provider_attempt_count(instance)
+        except Exception:
+            attempts_before = None
+        self._spans[call_id] = (instance, span, history_length, call_index, time.perf_counter(), attempts_before)
 
     def on_lm_end(
         self,
@@ -964,7 +978,7 @@ class _RLMTraceCallback(BaseCallback):
         state = self._spans.pop(call_id, None)
         if state is None:
             return
-        instance, span, history_length, call_index, started_at = state
+        instance, span, history_length, call_index, started_at, attempts_before = state
         role = self._roles.get(id(instance), "unknown")
         try:
             usage = _latest_lm_telemetry(instance, history_length, outputs)
@@ -1003,11 +1017,21 @@ class _RLMTraceCallback(BaseCallback):
             last_call.update(failure_outputs)
         self._last_call = last_call
         if self._metrics is not None:
+            try:
+                from fleet_rlm.rlm.program import provider_attempt_count
+
+                attempts_after = provider_attempt_count(instance)
+            except Exception:
+                attempts_after = None
+            provider_attempts = (
+                None if attempts_before is None or attempts_after is None else max(0, attempts_after - attempts_before)
+            )
             self._metrics.record_lm_call(
                 role,
                 self._recursive_depth,
                 duration_ms=(time.perf_counter() - started_at) * 1000,
                 usage=usage,
+                provider_attempts=provider_attempts,
             )
         if span is None:
             return

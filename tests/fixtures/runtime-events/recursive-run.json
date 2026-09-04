@@ -1,0 +1,1 @@
+{"schema":"fleet.runtime-events/v1","scenario":"recursive","events":["run.started","status","step.started","rlm.code","tool.started","tool.completed","step.finished","usage","structured.result","text.completed","run.completed"]}

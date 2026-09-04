@@ -293,6 +293,8 @@ class DelegationMetricsSnapshot:
     # Entries exist only for calls where usage was actually observed; a call
     # whose provider reported no usage must never emit an all-zero entry.
     lm_token_totals: tuple[tuple[str, int, int, int, int], ...] = ()
+    provider_attempt_counts: tuple[tuple[str, int, int], ...] = ()
+    parse_repairs: int = 0
     token_usage_status: TokenUsageStatus = "unavailable"
 
     def as_dict(self) -> dict[str, object]:
@@ -332,6 +334,11 @@ class DelegationMetricsSnapshot:
                 }
                 for role, depth, input_tokens, output_tokens, tokens in self.lm_token_totals
             ],
+            "provider_attempt_counts": [
+                {"role": role, "recursive_depth": depth, "count": count}
+                for role, depth, count in self.provider_attempt_counts
+            ],
+            "parse_repairs": self.parse_repairs,
             "token_usage_status": self.token_usage_status,
         }
 
@@ -347,6 +354,8 @@ class DelegationMetrics:
         self._lm_output_tokens: dict[tuple[str, int], int] = {}
         self._lm_tokens: dict[tuple[str, int], int] = {}
         self._lm_usage_observed: set[tuple[str, int]] = set()
+        self._provider_attempts: dict[tuple[str, int], int] = {}
+        self._parse_repairs = 0
         self._recursive_child_calls = 0
         self._recursive_batch_calls = 0
         self._recursive_children_started = 0
@@ -362,6 +371,7 @@ class DelegationMetrics:
         *,
         duration_ms: float = 0.0,
         usage: Mapping[str, Any] | None = None,
+        provider_attempts: int | None = None,
     ) -> None:
         """
         Record a language-model request and its aggregate metrics.
@@ -387,11 +397,18 @@ class DelegationMetrics:
         with self._lock:
             self._lm_calls[key] = self._lm_calls.get(key, 0) + 1
             self._lm_latency_ms[key] = self._lm_latency_ms.get(key, 0.0) + max(0.0, float(duration_ms))
+            if provider_attempts is not None:
+                self._provider_attempts[key] = self._provider_attempts.get(key, 0) + max(0, int(provider_attempts))
             if usage_observed:
                 self._lm_usage_observed.add(key)
                 self._lm_input_tokens[key] = self._lm_input_tokens.get(key, 0) + input_tokens
                 self._lm_output_tokens[key] = self._lm_output_tokens.get(key, 0) + output_tokens
                 self._lm_tokens[key] = self._lm_tokens.get(key, 0) + tokens
+
+    def record_parse_repair(self) -> None:
+        """Record one adapter-level parse correction, separate from provider retries."""
+        with self._lock:
+            self._parse_repairs += 1
 
     def record_recursive_call(self) -> None:
         """Record one recursive child call."""
@@ -428,6 +445,9 @@ class DelegationMetrics:
             calls = tuple(sorted((role, depth, count) for (role, depth), count in self._lm_calls.items()))
             latency = tuple(sorted((role, depth, total) for (role, depth), total in self._lm_latency_ms.items()))
             token_keys = self._lm_input_tokens.keys() | self._lm_output_tokens.keys() | self._lm_tokens.keys()
+            provider_attempts = tuple(
+                sorted((role, depth, count) for (role, depth), count in self._provider_attempts.items())
+            )
             tokens = tuple(
                 sorted(
                     (
@@ -454,6 +474,8 @@ class DelegationMetrics:
                 lm_call_counts=calls,
                 lm_latency_ms=latency,
                 lm_token_totals=tokens,
+                provider_attempt_counts=provider_attempts,
+                parse_repairs=self._parse_repairs,
                 token_usage_status="observed" if self._lm_usage_observed else "unavailable",
             )
 
@@ -1336,6 +1358,7 @@ class RecursiveRLMExecutor:
             adapter=FleetJSONAdapter(
                 deadline=self._deadline,
                 wrap_up_seconds=child_models.reserve_seconds,
+                metrics=self._metrics,
             ),
             callbacks=[
                 _RLMTraceCallback(
@@ -1552,7 +1575,7 @@ class RecursiveRLMExecutor:
         predictor = dspy.Predict(RecursiveSubtaskSignature)
         with dspy.context(
             lm=self._models.sub_lm,
-            adapter=FleetJSONAdapter(deadline=self._deadline),
+            adapter=FleetJSONAdapter(deadline=self._deadline, metrics=self._metrics),
             callbacks=[
                 _RLMTraceCallback(
                     root_lm=self._models.root_lm,

@@ -1,0 +1,1 @@
+{"schema":"fleet.runtime-events/v1","scenario":"cancelled","events":["run.started","status","step.started","rlm.code","run.cancelled"]}

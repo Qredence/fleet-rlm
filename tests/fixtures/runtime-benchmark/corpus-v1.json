@@ -1,0 +1,14 @@
+{
+  "schema": "fleet.runtime-benchmark-corpus/v1",
+  "scenarios": [
+    {"id": "exact-calculation", "kind": "success", "score": "exact"},
+    {"id": "long-document-evidence", "kind": "success", "score": "evidence"},
+    {"id": "repository-analysis", "kind": "success", "score": "evidence"},
+    {"id": "tabular-analysis", "kind": "success", "score": "exact"},
+    {"id": "multi-source-comparison", "kind": "success", "score": "evidence"},
+    {"id": "artifact-creation", "kind": "success", "score": "artifact"},
+    {"id": "cancel-during-code", "kind": "cancelled", "score": "terminal"},
+    {"id": "timeout-recursive-child", "kind": "timed_out", "score": "terminal"},
+    {"id": "child-cleanup-failure", "kind": "cleanup_failed", "score": "terminal"}
+  ]
+}

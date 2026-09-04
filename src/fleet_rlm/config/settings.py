@@ -256,6 +256,17 @@ class Settings(BaseModel):
         default="/home/daytona/fleet",
         description="Absolute Sandbox mount path for the workspace Volume",
     )
+    daytona_interpreter: Annotated[
+        Literal["broker", "native"],
+        FleetFieldPolicy(
+            toml_path="daytona.interpreter",
+            group="Daytona",
+            label="Interpreter",
+            editor="single_choice",
+            choices=("broker", "native"),
+            rank=73,
+        ),
+    ] = Field(default="broker", description="Bounded Daytona interpreter migration selector")
     run_environment: Annotated[
         Literal["daytona"],
         FleetFieldPolicy(
@@ -277,6 +288,17 @@ class Settings(BaseModel):
         default=True,
         description="Allow explicitly invoked credentialed provider and benchmark commands",
     )
+    runtime_implementation: Annotated[
+        Literal["legacy", "v2"],
+        FleetFieldPolicy(
+            toml_path="runtime.implementation",
+            group="Runtime",
+            label="Implementation",
+            editor="single_choice",
+            choices=("legacy", "v2"),
+            rank=72,
+        ),
+    ] = Field(default="legacy", description="Bounded runtime migration selector")
     data_root: Annotated[
         str,
         FleetFieldPolicy(
@@ -436,6 +458,17 @@ class Settings(BaseModel):
             rank=30,
         ),
     ] = False
+    rlm_recursion_policy: Annotated[
+        Literal["legacy", "capsule"],
+        FleetFieldPolicy(
+            toml_path="rlm.recursion_policy",
+            group="RLM",
+            label="Recursion policy",
+            editor="single_choice",
+            choices=("legacy", "capsule"),
+            rank=74,
+        ),
+    ] = Field(default="legacy", description="Bounded recursive-runtime migration selector")
     rlm_recursion_max_calls: Annotated[
         int,
         FleetFieldPolicy(

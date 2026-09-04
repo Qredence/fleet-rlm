@@ -8,6 +8,7 @@
 | `generate_tui_chunk_validation.py` | Generate or check the TUI runtime chunk-validation tables from `openapi.yaml` |
 | `generate_profile_matrix.py` | Generate or check the provider/profile matrix from `config/fleet.toml` |
 | `check_codebase_tree.py` | Enforce canonical import and route boundaries |
+| `check_architecture_vocabulary.py` | Enforce Phase-0 canonical execution terms and DSPy native-tool ownership |
 | `check_dependency_boundaries.py` | Check P50 domain dependency directions and Daytona Memory-policy residue |
 | `check_harness_engineering.py` | Validate repository guidance and harness contracts |
 | `check_docs_quality.py` | Validate documentation structure and links |
@@ -22,6 +23,7 @@
 | `benchmarks/run_native_long_context.py` | Measure native whole-value URL context at 1/5/10 MiB and emit the paging decision receipt |
 | `benchmarks/run_rlm_latency.py` | Compare live Fleet RLM configuration variants and run the MLflow-native five-task quality gate |
 | `benchmarks/run_routing_eval.py` | Run the deterministic or opt-in live delegation-ladder benchmark, including bounded recursive batches |
+| `benchmarks/capture_runtime_baseline.py` | Validate per-scenario aggregates and persist a content-free Phase-0 runtime receipt |
 | `benchmarks/judges.py` | Shared Fleet evaluation judge definitions and registration |
 | `benchmarks/scorers.py` | MLflow 3 GenAI custom scorers and evaluation metric definitions |
 | `benchmarks/manage_prompts.py` | Manage and version Fleet signature prompts in MLflow Prompt Registry |

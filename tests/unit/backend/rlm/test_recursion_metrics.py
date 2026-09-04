@@ -6,6 +6,7 @@ from fleet_rlm.rlm._dspy_compat import (
     _latest_lm_telemetry,
     _RLMTraceCallback,
 )
+from fleet_rlm.rlm.program import ProviderAttemptCounter
 from fleet_rlm.rlm.recursion import (
     DelegationMetrics,
     normalize_lm_token_usage,
@@ -30,6 +31,35 @@ def test_dspy_callback_records_role_and_recursive_depth_without_content() -> Non
     assert snapshot.sub_lm_calls_depth_0 == 0
     assert "private prompt" not in repr(snapshot)
     assert "private answer" not in repr(snapshot)
+
+
+def test_callback_records_measured_provider_attempts_separately_from_logical_calls() -> None:
+    metrics = DelegationMetrics()
+    counter = ProviderAttemptCounter()
+    root = SimpleNamespace(model="root-model", history=[], _fleet_provider_attempt_counter=counter)
+    callback = _RLMTraceCallback(root_lm=root, sub_lm=SimpleNamespace(), metrics=metrics)
+
+    callback.on_lm_start("root-call", root, {})
+    counter.increment()
+    counter.increment()
+    callback.on_lm_end("root-call", {"content": "answer"})
+
+    snapshot = metrics.snapshot()
+    assert snapshot.root_lm_calls_depth_0 == 1
+    assert snapshot.provider_attempt_counts == (("root", 0, 2),)
+
+
+def test_metrics_keep_provider_attempts_and_adapter_repairs_separate_from_logical_calls() -> None:
+    metrics = DelegationMetrics()
+    metrics.record_lm_call("root", 0, provider_attempts=2)
+    metrics.record_lm_call("root", 0, provider_attempts=1)
+    metrics.record_parse_repair()
+
+    snapshot = metrics.snapshot()
+    assert snapshot.root_lm_calls_depth_0 == 2
+    assert snapshot.provider_attempt_counts == (("root", 0, 3),)
+    assert snapshot.parse_repairs == 1
+    assert snapshot.as_dict()["provider_attempt_counts"] == [{"role": "root", "recursive_depth": 0, "count": 3}]
 
 
 def test_metrics_track_recursive_batch_lifecycle_and_peak_width() -> None:
