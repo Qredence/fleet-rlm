@@ -27,6 +27,12 @@ class _RecordingTool:
 
 
 def test_co_located_worker_preserves_state_and_services_callbacks(tmp_path: Path) -> None:
+    """
+    Verify that a co-located broker preserves interpreter state and services callbacks across executions.
+    
+    Parameters:
+    	tmp_path (Path): Temporary directory used to store the generated broker server.
+    """
     from fleet_rlm.daytona.broker import (
         _MAX_EXECUTE_OUTPUT_CHARS,
         _MAX_EXECUTE_REQUEST_BYTES,
@@ -763,6 +769,14 @@ def test_execute_with_callbacks_reuses_executor_and_reports_breakdown(monkeypatc
         return "ok"
 
     def _handler(request: httpx.Request) -> httpx.Response:
+        """Handle pending-request polling and result-submission requests.
+        
+        Parameters:
+        	request (httpx.Request): The incoming HTTP request.
+        
+        Returns:
+        	httpx.Response: A response containing the next pending batch for ``/pending`` or an empty JSON object for ``/result``.
+        """
         if request.url.path == "/pending":
             batch = (
                 pending_batches[execution_index - 1].pop(0)
@@ -832,6 +846,7 @@ def test_execute_with_callbacks_polls_immediately_after_work_and_backs_off_empty
     pending_waits: list[str] = []
 
     def _handler(request: httpx.Request) -> httpx.Response:
+        """Handle pending-request polling and result submissions in the test transport."""
         nonlocal empty_poll_count
         if request.url.path == "/pending":
             pending_waits.append(request.url.params.get("wait", "0"))

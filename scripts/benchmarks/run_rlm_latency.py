@@ -642,17 +642,17 @@ def _attach_trace_identity(row: dict[str, Any], execution_trace_id: str | None) 
 
 def _execution_trace_diagnostics(mlflow_url: str, trace_id: str) -> dict[str, Any]:
     """
-    Collect bounded execution-trace diagnostics for benchmark comparisons.
-
+    Collect bounded diagnostics from an MLflow execution trace for benchmark comparisons.
+    
     Parameters:
         mlflow_url (str): MLflow tracking server URL.
         trace_id (str): Identifier of the execution trace to inspect.
-
+    
     Returns:
-        dict[str, Any]: Diagnostic metrics for root language-model spans, context size,
-            adapter and repair errors, response keys, and detail truncation. Returns a
-            status of ``"unavailable"`` and the exception category when diagnostics
-            cannot be collected.
+        dict[str, Any]: Aggregated trace diagnostics, including language-model timing,
+            context size, parsing and repair errors, response keys, detail overflow,
+            sandbox execution counts, and broker metrics. Returns an unavailable status
+            and error category when the trace cannot be inspected.
     """
     try:
         import mlflow
@@ -735,17 +735,17 @@ def _tag_trace(mlflow_url: str, trace_id: str, *, workload_id: str, variant: str
 
 def _aggregate(rows: Sequence[Mapping[str, Any]], *, workload_id: str = EVIDENCE_WORKLOAD_ID) -> dict[str, Any]:
     """
-    Aggregate measured benchmark rows into latency, error, usage, execution, trace,
-    diagnostic, and corpus-quality metrics.
-
+    Aggregate measured benchmark rows into latency, error, usage, execution, trace, diagnostic, broker, and corpus-quality metrics.
+    
     Parameters:
         rows (Sequence[Mapping[str, Any]]): Benchmark sample records to aggregate.
         workload_id (str): Workload identifier used to determine whether corpus-quality metrics apply.
-
+    
     Returns:
-        dict[str, Any]: Aggregate metrics. Warmups and failed samples are excluded from
-            success-based metrics, and quality is marked incomplete unless all corpus
-            checks pass for the corpus workload.
+        dict[str, Any]: Aggregate metrics. Warmups and failed samples are excluded from success-based metrics.
+            Includes sandbox execution counts and broker counters from trace diagnostics. Corpus-quality
+            metrics are complete only when every measured sample passes all applicable corpus checks for
+            the corpus workload.
     """
     measured = [row for row in rows if row.get("sample_kind") == "measured"]
     successes = [row for row in measured if not row.get("error_category")]
