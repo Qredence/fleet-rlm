@@ -572,6 +572,10 @@ class _BrokerHandler(BaseHTTPRequestHandler):
         try:
             data = _read_json(self)
         except (ValueError, json.JSONDecodeError):
+            # _read_json rejects oversized bodies before consuming them. Close
+            # this HTTP/1.1 connection so the unread bytes cannot be parsed as
+            # a second request on the pooled connection.
+            self.close_connection = True
             _send_json(self, {"error": "invalid request"}, 400)
             return
         if parsed.path == "/execute":
@@ -1116,6 +1120,7 @@ class DaytonaHttpToolBroker:
                 while thread.is_alive():
                     previous_offset = offset
                     wait_s = 0.0 if empty_polls == 0 else self._poll_backoff_delay(empty_polls)
+                    poll_started_ns = time.perf_counter_ns()
                     done, offset = self._poll_output(execution_id, offset, on_stdout, wait_s=wait_s)
                     if done:
                         thread.join()
@@ -1128,6 +1133,7 @@ class DaytonaHttpToolBroker:
                         empty_polls = 0
                     else:
                         empty_polls += 1
+                        self._sleep_remaining_poll_delay(wait_s, poll_started_ns)
                 thread.join()
                 # The broker's /execute response is emitted only after the
                 # server marks this execution done. One release read is enough
@@ -1253,6 +1259,12 @@ class DaytonaHttpToolBroker:
             next_offset = offset + len(stdout)
         return bool(result.get("done")), next_offset
 
+    @staticmethod
+    def _sleep_remaining_poll_delay(wait_s: float, started_ns: int) -> None:
+        remaining_s = wait_s - (time.perf_counter_ns() - started_ns) / 1_000_000_000
+        if remaining_s > 0:
+            time.sleep(remaining_s)
+
     def execute_with_callbacks(
         self,
         *,
@@ -1301,6 +1313,7 @@ class DaytonaHttpToolBroker:
                 if self._stopped:
                     break
                 wait_s = 0.0 if empty_polls == 0 else self._poll_backoff_delay(empty_polls)
+                poll_started_ns = time.perf_counter_ns()
                 if self._poll_once(tool_executor, wait_s=wait_s):
                     # A fulfilled callback is progress. Poll again immediately
                     # so a sequence of model/tool calls does not pay an extra
@@ -1308,6 +1321,7 @@ class DaytonaHttpToolBroker:
                     empty_polls = 0
                     continue
                 empty_polls += 1
+                self._sleep_remaining_poll_delay(wait_s, poll_started_ns)
             thread.join(timeout=1.0)
             for _ in range(5):
                 if self._stopped:

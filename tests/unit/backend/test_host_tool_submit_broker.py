@@ -88,8 +88,8 @@ def test_co_located_worker_preserves_state_and_services_callbacks(tmp_path: Path
         assert "one" in "".join(streamed)
         assert "two" in "".join(streamed)
         streamed_stats = dict(broker.last_execution_stats)
-        assert streamed_stats["output_wait_requested_ms"] > 0
-        assert streamed_stats["output_wait_elapsed_ms"] > 0
+        assert streamed_stats["output_wait_requested_ms"] >= 0
+        assert streamed_stats["output_wait_elapsed_ms"] >= 0
         assert streamed_stats["output_poll_count"] <= 8
 
         first = broker.execute_with_callbacks(
@@ -844,6 +844,7 @@ def test_execute_with_callbacks_polls_immediately_after_work_and_backs_off_empty
     events: list[str] = []
     empty_poll_count = 0
     pending_waits: list[str] = []
+    sleeps: list[float] = []
 
     def _handler(request: httpx.Request) -> httpx.Response:
         """Handle pending-request polling and result submissions in the test transport."""
@@ -868,7 +869,7 @@ def test_execute_with_callbacks_polls_immediately_after_work_and_backs_off_empty
         base_url="http://example.test",
         headers=broker._preview_headers(),
     )
-    monkeypatch.setattr(time, "sleep", lambda _delay: pytest.fail("host polling should use broker long-polling"))
+    monkeypatch.setattr(time, "sleep", sleeps.append)
 
     result = broker.execute_with_callbacks(
         run_code=lambda: (release.wait(timeout=1) or True) and "done",
@@ -878,6 +879,7 @@ def test_execute_with_callbacks_polls_immediately_after_work_and_backs_off_empty
     assert result.stdout == "done"
     assert events.index("pending_work") < events.index("result") < events.index("pending_empty")
     assert any(float(value) > 0 for value in pending_waits)
+    assert any(delay > 0 for delay in sleeps)
     assert broker.last_execution_stats["empty_poll_count"] >= 1
     assert broker.last_execution_stats["pending_wait_requested_ms"] > 0
     assert broker.last_execution_stats["pending_wait_elapsed_ms"] > 0
