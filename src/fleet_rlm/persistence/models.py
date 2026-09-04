@@ -10,6 +10,7 @@ from sqlalchemy import (
     CheckConstraint,
     DateTime,
     ForeignKey,
+    ForeignKeyConstraint,
     Index,
     Integer,
     String,
@@ -50,7 +51,11 @@ class WorkspaceRow(Base):
 
 class SessionRow(Base):
     __tablename__ = "fleet_sessions"
-    __table_args__ = (Index("ix_fleet_sessions_workspace_updated", "workspace_id", "updated_at"),)
+    __table_args__ = (
+        CheckConstraint("status IN ('active', 'archived')", name="ck_fleet_sessions_status"),
+        UniqueConstraint("id", "workspace_id", name="uq_fleet_sessions_id_workspace"),
+        Index("ix_fleet_sessions_workspace_updated", "workspace_id", "updated_at"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=_uuid)
     user_id: Mapped[uuid.UUID] = mapped_column(
@@ -73,6 +78,12 @@ class TurnRow(Base):
     __table_args__ = (
         UniqueConstraint("session_id", "sequence", name="uq_fleet_turns_session_sequence"),
         UniqueConstraint("run_id", "role", name="uq_fleet_turns_run_role"),
+        ForeignKeyConstraint(
+            ["run_id"],
+            ["fleet_runs.id"],
+            name="fk_fleet_turns_run_id",
+            ondelete="CASCADE",
+        ),
         CheckConstraint(
             "(role = 'user' AND user_input_json IS NOT NULL AND committed_turn_json IS NULL) OR "
             "(role = 'assistant' AND user_input_json IS NULL AND committed_turn_json IS NOT NULL)",
@@ -154,6 +165,25 @@ class RunRow(Base):
 
 class SandboxBindingRow(Base):
     __tablename__ = "fleet_sandbox_bindings"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["workspace_id"],
+            ["fleet_workspaces.id"],
+            name="fk_fleet_sandbox_bindings_workspace_id",
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["session_id", "workspace_id"],
+            ["fleet_sessions.id", "fleet_sessions.workspace_id"],
+            name="fk_fleet_sandbox_bindings_session_workspace",
+            ondelete="CASCADE",
+        ),
+        CheckConstraint(
+            "provider_state IN ('missing', 'running', 'stopped', 'paused', 'archived', "
+            "'fencing', 'quarantined', 'unrecoverable')",
+            name="ck_fleet_sandbox_bindings_provider_state",
+        ),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=_uuid)
     session_id: Mapped[uuid.UUID] = mapped_column(

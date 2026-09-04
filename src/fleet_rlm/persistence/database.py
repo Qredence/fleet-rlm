@@ -7,10 +7,11 @@ explicit helper for private SQLite tests only.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 from alembic.config import Config
 from alembic.script import ScriptDirectory
-from sqlalchemy import inspect, text
+from sqlalchemy import event, inspect, text
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import (
@@ -92,6 +93,30 @@ _POSTGRES_POOL_RECYCLE_SECONDS = 1800
 # startup (readiness checks, the supervisor preflight, and the daytona
 # composition all build engines through this helper) indefinitely.
 _POSTGRES_CONNECT_TIMEOUT_SECONDS = 30.0
+_SQLITE_BUSY_TIMEOUT_MS = 5_000
+
+
+def _sqlite_is_file_backed(normalized_url: str) -> bool:
+    """Return whether a SQLite URL targets a local file rather than memory."""
+    database = make_url(normalized_url).database
+    return database not in (None, "", ":memory:")
+
+
+def _configure_sqlite_connection(dbapi_connection: Any, _connection_record: object, *, wal: bool) -> None:
+    """Apply required SQLite integrity and bounded local-development policy."""
+    cursor = dbapi_connection.cursor()  # type: ignore[union-attr]
+    try:
+        cursor.execute("PRAGMA foreign_keys = ON")
+        cursor.execute(f"PRAGMA busy_timeout = {_SQLITE_BUSY_TIMEOUT_MS}")
+        if wal:
+            cursor.execute("PRAGMA journal_mode = WAL")
+    finally:
+        cursor.close()
+
+
+def _defer_sqlite_foreign_keys(connection: Any) -> None:
+    """Check SQLite foreign keys atomically when each unit of work commits."""
+    connection.exec_driver_sql("PRAGMA defer_foreign_keys = ON")
 
 
 def _pool_kwargs_for_url(normalized_url: str) -> dict[str, object]:
@@ -115,9 +140,21 @@ def _pool_kwargs_for_url(normalized_url: str) -> dict[str, object]:
 
 
 def create_async_engine_from_url(url: str, *, echo: bool = False) -> AsyncEngine:
-    """Build an async engine. Does not open connections until first use."""
+    """Build an async engine with database-specific correctness policy."""
     normalized = normalize_database_url(url)
-    return create_async_engine(normalized, echo=echo, **_pool_kwargs_for_url(normalized))
+    engine = create_async_engine(normalized, echo=echo, **_pool_kwargs_for_url(normalized))
+    if is_sqlite_url(normalized):
+        event.listen(
+            engine.sync_engine,
+            "connect",
+            lambda connection, record: _configure_sqlite_connection(
+                connection,
+                record,
+                wal=_sqlite_is_file_backed(normalized),
+            ),
+        )
+        event.listen(engine.sync_engine, "begin", _defer_sqlite_foreign_keys)
+    return engine
 
 
 def create_session_factory(engine: AsyncEngine) -> async_sessionmaker[AsyncSession]:
@@ -176,10 +213,21 @@ async def ensure_database_compatible(database_url: str, *, repo_root: Path | Non
         raise DatabaseConnectionError("Fleet database compatibility could not be verified") from exc
 
 
+async def assert_sqlite_foreign_keys(engine: AsyncEngine) -> None:
+    """Fail fast if a SQLite connection was created without FK enforcement."""
+    if not is_sqlite_url(str(engine.url)):
+        return
+    async with engine.connect() as conn:
+        enabled = await conn.scalar(text("PRAGMA foreign_keys"))
+    if enabled != 1:
+        raise DatabaseConnectionError("SQLite foreign-key enforcement is disabled")
+
+
 async def create_tables(engine: AsyncEngine) -> None:
     """Create an ephemeral/offline schema; never call this from live startup."""
     # Import models so metadata is populated.
     from fleet_rlm.persistence import models as _models  # noqa: F401
 
+    await assert_sqlite_foreign_keys(engine)
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)

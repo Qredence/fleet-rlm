@@ -833,15 +833,36 @@ async def test_sql_cancelled_settlement_persists_bounded_tombstone_rows() -> Non
 
 
 @pytest.mark.asyncio
-async def test_sql_racing_begins_fence_one_claimant() -> None:
-    """P52.7(c): two racing begin claims on one Session commit exactly one winner."""
-    from fleet_rlm.chat.run_lifecycle import ClaimedRun, RunClaim, RunInProgressError
+@pytest.mark.parametrize(
+    ("first_key", "second_key", "first_input", "second_input", "expected_error"),
+    (
+        ("worker-a", "worker-b", "same input", "same input", "in-progress"),
+        ("shared", "shared", "same input", "same input", "in-progress"),
+        ("shared", "shared", "first input", "second input", "mismatch"),
+    ),
+    ids=("separate-keys", "identical-claims", "same-key-different-input"),
+)
+async def test_sql_racing_begins_return_domain_conflicts(
+    tmp_path,
+    first_key: str,
+    second_key: str,
+    first_input: str,
+    second_input: str,
+    expected_error: str,
+) -> None:
+    """SQLite claim races retain the in-memory adapter's typed outcomes."""
+    from fleet_rlm.chat.run_lifecycle import (
+        ClaimedRun,
+        RunClaim,
+        RunIdempotencyMismatchError,
+        RunInProgressError,
+    )
     from fleet_rlm.persistence.database import create_async_engine_from_url, create_session_factory, create_tables
     from fleet_rlm.persistence.models import SessionRow, UserRow, WorkspaceRow
     from fleet_rlm.persistence.repositories.turns import SqlAlchemyRunStateStore
     from fleet_rlm.sessions.models import TurnAccess, TurnInput
 
-    engine = create_async_engine_from_url("sqlite+aiosqlite:///:memory:")
+    engine = create_async_engine_from_url(f"sqlite+aiosqlite:///{tmp_path / 'claim-race.sqlite3'}")
     try:
         await create_tables(engine)
         factory = create_session_factory(engine)
@@ -861,22 +882,184 @@ async def test_sql_racing_begins_fence_one_claimant() -> None:
             )
         store = SqlAlchemyRunStateStore(factory, stale_after_seconds=30)
 
-        async def begin(run_id, key: str):
-            return await store.begin(RunClaim(access, session_id, TurnInput(f"turn-{key}"), key, run_id))
+        async def begin(run_id, key: str, input_text: str):
+            return await store.begin(RunClaim(access, session_id, TurnInput(input_text), key, run_id))
 
         results = await asyncio.gather(
-            begin(uuid4(), "worker-a"),
-            begin(uuid4(), "worker-b"),
+            begin(uuid4(), first_key, first_input),
+            begin(uuid4(), second_key, second_input),
             return_exceptions=True,
         )
         winners = [r for r in results if isinstance(r, ClaimedRun)]
         losers = [r for r in results if isinstance(r, BaseException)]
         assert len(winners) == 1
         assert len(losers) == 1
-        # The loser fails closed: either a clean in-progress refusal or, under
-        # SQLite lock contention, the lifecycle-unavailable fencing error.
-        from fleet_rlm.chat.run_lifecycle import RunLifecycleUnavailableError
+        # The loser is resolved from the durable winner, never exposed as
+        # generic lifecycle unavailability.
+        expected_type = RunInProgressError if expected_error == "in-progress" else RunIdempotencyMismatchError
+        assert isinstance(losers[0], expected_type)
+    finally:
+        await engine.dispose()
 
-        assert isinstance(losers[0], (RunInProgressError, RunLifecycleUnavailableError))
+
+@pytest.mark.asyncio
+async def test_sql_claim_racing_completion_resolves_from_durable_state(tmp_path) -> None:
+    """A begin() racing an in-flight commit replays or refuses; it never fails closed."""
+    from sqlalchemy import select
+
+    from fleet_rlm.chat.run_lifecycle import (
+        ClaimedRun,
+        CommittedRunReplay,
+        CommittedTurnReceipt,
+        RunClaim,
+        RunInProgressError,
+    )
+    from fleet_rlm.persistence.database import create_async_engine_from_url, create_session_factory, create_tables
+    from fleet_rlm.persistence.models import RunRow, SessionRow, UserRow, WorkspaceRow
+    from fleet_rlm.persistence.repositories.turns import SqlAlchemyRunStateStore
+    from fleet_rlm.sessions.committed_turn import CommittedTurn, TextPart, UsagePart
+    from fleet_rlm.sessions.models import TurnAccess, TurnInput
+
+    engine = create_async_engine_from_url(f"sqlite+aiosqlite:///{tmp_path / 'claim-vs-commit.sqlite3'}")
+    try:
+        await create_tables(engine)
+        factory = create_session_factory(engine)
+        access, session_id = TurnAccess(uuid4(), uuid4()), uuid4()
+        async with factory() as db, db.begin():
+            db.add_all(
+                (
+                    UserRow(id=access.user_id),
+                    WorkspaceRow(id=access.workspace_id),
+                    SessionRow(
+                        id=session_id,
+                        user_id=access.user_id,
+                        workspace_id=access.workspace_id,
+                        title="claim vs commit",
+                    ),
+                )
+            )
+        store = SqlAlchemyRunStateStore(factory, stale_after_seconds=30)
+        request = RunClaim(access, session_id, TurnInput("hello"), "key", uuid4())
+        winner = await store.begin(request)
+        assert isinstance(winner, ClaimedRun)
+        committed = CommittedTurn(
+            1,
+            (UsagePart({"iterations": 0, "observed_lm_usage": {}, "duration_ms": 0}), TextPart("world")),
+        )
+
+        results = await asyncio.gather(
+            store.begin(request),
+            store.commit(winner, committed, ()),
+            return_exceptions=True,
+        )
+        begin_outcome, commit_outcome = results
+        assert isinstance(commit_outcome, CommittedTurnReceipt)
+        # The racing begin resolves from durable state: replay once the commit
+        # landed, or a typed in-progress refusal while the claim was live.
+        if isinstance(begin_outcome, CommittedRunReplay):
+            assert begin_outcome.committed_turn.text == "world"
+            assert begin_outcome.run_id == winner.run_id
+        else:
+            assert isinstance(begin_outcome, RunInProgressError)
+
+        # Exactly one Run owns the idempotency key afterwards, and it is the
+        # completed winner with released claim state.
+        async with factory() as db:
+            rows = (await db.scalars(select(RunRow).where(RunRow.session_id == session_id))).all()
+        assert len(rows) == 1
+        assert (rows[0].id, rows[0].status, rows[0].claim_owner, rows[0].commit_checkpoint_version) == (
+            winner.run_id,
+            "completed",
+            None,
+            1,
+        )
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_sql_claim_racing_cancellation_keeps_in_progress_fence(tmp_path) -> None:
+    """Cancellation marking stays advisory; a racing begin is refused, then a fresh claim wins."""
+    from sqlalchemy import select
+
+    from fleet_rlm.chat.run_claim import BeginSettlement, ClaimFailure, CompleteSettlement
+    from fleet_rlm.chat.run_lifecycle import ClaimedRun, RunClaim, RunFailure, RunInProgressError, RunStateError
+    from fleet_rlm.persistence.database import create_async_engine_from_url, create_session_factory, create_tables
+    from fleet_rlm.persistence.models import RunRow, SessionRow, UserRow, WorkspaceRow
+    from fleet_rlm.persistence.repositories.turns import SqlAlchemyRunStateStore
+    from fleet_rlm.rlm.result import empty_rlm_usage
+    from fleet_rlm.sessions.models import TurnAccess, TurnInput
+
+    engine = create_async_engine_from_url(f"sqlite+aiosqlite:///{tmp_path / 'claim-vs-cancel.sqlite3'}")
+    try:
+        await create_tables(engine)
+        factory = create_session_factory(engine)
+        access, session_id = TurnAccess(uuid4(), uuid4()), uuid4()
+        async with factory() as db, db.begin():
+            db.add_all(
+                (
+                    UserRow(id=access.user_id),
+                    WorkspaceRow(id=access.workspace_id),
+                    SessionRow(
+                        id=session_id,
+                        user_id=access.user_id,
+                        workspace_id=access.workspace_id,
+                        title="claim vs cancel",
+                    ),
+                )
+            )
+        store = SqlAlchemyRunStateStore(factory, stale_after_seconds=30)
+        request = RunClaim(access, session_id, TurnInput("hello"), "key", uuid4())
+        winner = await store.begin(request)
+        assert isinstance(winner, ClaimedRun)
+
+        results = await asyncio.gather(
+            store.begin(request),
+            store.request_cancel(access, winner.run_id),
+            return_exceptions=True,
+        )
+        begin_outcome, cancel_outcome = results
+        # Cancellation marking is advisory and succeeds for the live claim.
+        assert cancel_outcome == "requested"
+        # The racing begin sees the same-key running Run: a typed in-progress
+        # refusal, never a new claim or generic unavailability.
+        assert isinstance(begin_outcome, RunInProgressError)
+
+        async with factory() as db:
+            run = await db.get(RunRow, winner.run_id)
+            assert run is not None
+            assert (run.status, run.cancel_requested_at is not None) == ("running", True)
+
+        # Complete the cancellation durably, then prove terminal cancelled rows
+        # leave the live idempotency index: a fresh same-key claim wins.
+        failure = RunFailure("cancelled", "cancelled", "Turn cancelled", empty_rlm_usage())
+        settling = await store.transition_claim(
+            winner,
+            BeginSettlement(
+                ClaimFailure(failure.terminal_status, failure.failure_code, failure.public_message), failure.usage
+            ),
+        )
+        assert settling is not None
+        terminal = await store.transition_claim(winner, CompleteSettlement())
+        assert terminal is not None
+
+        with pytest.raises(RunStateError):
+            await store.transition_claim(
+                winner,
+                BeginSettlement(
+                    ClaimFailure(failure.terminal_status, failure.failure_code, failure.public_message), failure.usage
+                ),
+            )
+
+        retried = await store.begin(RunClaim(access, session_id, TurnInput("hello"), "key", uuid4()))
+        assert isinstance(retried, ClaimedRun)
+        assert retried.run_id != winner.run_id
+
+        async with factory() as db:
+            runs = (await db.scalars(select(RunRow).where(RunRow.session_id == session_id))).all()
+        assert {run.status for run in runs} == {"cancelled", "running"}
+        cancelled_rows = [run for run in runs if run.status == "cancelled"]
+        assert cancelled_rows[0].claim_owner is None
+        assert cancelled_rows[0].finished_at is not None
     finally:
         await engine.dispose()

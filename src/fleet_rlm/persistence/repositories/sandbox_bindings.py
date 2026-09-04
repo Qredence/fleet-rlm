@@ -60,9 +60,14 @@ class SqlAlchemySandboxBindingStore:
         try:
             return await self._write_binding(binding)
         except IntegrityError:
-            # Two racing first writes both observed no row; the unique
-            # session_id constraint rejected the loser. Retry once so the
-            # loser lands as an update of the winner's committed row.
+            # A second writer can win the unique session_id insert race. Only
+            # retry after an authoritative reread proves that row now exists;
+            # FK/check violations must remain integrity failures.
+            existing = await self.get(binding.session_id)
+            if existing is None:
+                raise
+            if existing.workspace_id != binding.workspace_id:
+                raise ValueError("sandbox binding workspace scope mismatch") from None
             return await self._write_binding(binding)
 
     async def _write_binding(self, binding: SandboxBinding) -> SandboxBinding:

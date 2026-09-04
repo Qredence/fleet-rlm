@@ -30,3 +30,24 @@ The canonical tables are `fleet_users`, `fleet_workspaces`, `fleet_sessions`,
 Production startup assumes migrations have already run. Explicit SQLite
 test/offline helpers may call `create_tables`; all other environments must use
 Alembic.
+
+## SQLite local-development policy
+
+SQLite is supported for deterministic tests and single-machine local
+development, not production concurrency. Every Fleet SQLite connection enables
+foreign-key enforcement and uses a bounded 5-second busy timeout. File-backed
+local databases also use WAL mode. Tests assert `PRAGMA foreign_keys = 1` and
+run `PRAGMA foreign_key_check` over valid lineage fixtures.
+
+Production deployments require PostgreSQL. Repository interfaces retain the
+same lifecycle contract across both engines; PostgreSQL concurrency and
+outbox-worker competition are exercised only by the explicit credentialed
+`db` test lane.
+
+The database enforces Turn-to-Run lineage and SandboxBinding workspace lineage.
+The binding constraint pairs `(session_id, workspace_id)` with the Session's
+same pair, so a binding cannot name an unrelated Workspace. Artifact and Memory
+outbox rows retain independently validated Run, Session, User, and Workspace
+foreign keys; broader composite lineage is intentionally deferred until a
+separate migration can preflight existing production data and prove its
+cross-database upgrade path.

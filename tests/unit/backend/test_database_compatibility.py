@@ -41,7 +41,7 @@ async def test_database_compatibility_rejects_database_without_alembic_revision(
 @pytest.mark.asyncio
 async def test_database_compatibility_accepts_exact_alembic_head(tmp_path: Path) -> None:
     database_url = f"sqlite+aiosqlite:///{tmp_path / 'head.sqlite3'}"
-    await _set_revision(database_url, "019fa2e4b7c1")
+    await _set_revision(database_url, "019fb7e2c4d1")
 
     await check_database_compatibility(database_url)
 
@@ -86,7 +86,7 @@ def test_existing_baseline_database_upgrades_to_settling_head(
         columns = {column["name"] for column in inspect(connection).get_columns("fleet_runs")}
         revision = connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
     assert {"terminal_intent", "recovery_metadata_json"} <= columns
-    assert revision == "019fa2e4b7c1"
+    assert revision == "019fb7e2c4d1"
 
 
 def test_existing_baseline_database_upgrades_to_memory_intents_head(
@@ -125,4 +125,33 @@ def test_existing_baseline_database_upgrades_to_memory_intents_head(
         "claim_heartbeat_at",
         "completion_reason",
     } <= intent_columns
-    assert revision == "019fa2e4b7c1"
+    assert revision == "019fb7e2c4d1"
+
+
+def test_relational_integrity_migration_round_trips_constraints(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = Path(__file__).resolve().parents[3]
+    database_url = f"sqlite:///{tmp_path / 'integrity.sqlite3'}"
+    monkeypatch.setenv("FLEET_DATABASE_URL", database_url)
+    config = Config(str(root / "alembic.ini"))
+    config.set_main_option("script_location", str(root / "migrations"))
+
+    sync_engine = create_engine(database_url)
+    try:
+        command.upgrade(config, "head")
+        with sync_engine.connect() as connection:
+            inspector = inspect(connection)
+            turn_fks = inspector.get_foreign_keys("fleet_turns")
+            binding_fks = inspector.get_foreign_keys("fleet_sandbox_bindings")
+            session_checks = inspector.get_check_constraints("fleet_sessions")
+        assert any(foreign_key["referred_table"] == "fleet_runs" for foreign_key in turn_fks)
+        assert any(foreign_key["referred_table"] == "fleet_workspaces" for foreign_key in binding_fks)
+        assert any(check["name"] == "ck_fleet_sessions_status" for check in session_checks)
+
+        command.downgrade(config, "019fa2e4b7c1")
+        with sync_engine.connect() as connection:
+            turn_fks = inspect(connection).get_foreign_keys("fleet_turns")
+        assert not any(foreign_key["referred_table"] == "fleet_runs" for foreign_key in turn_fks)
+    finally:
+        sync_engine.dispose()

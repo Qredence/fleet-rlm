@@ -10,7 +10,7 @@ from typing import Literal
 from uuid import UUID, uuid4
 
 from sqlalchemy import select
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from fleet_rlm.artifacts.models import ArtifactRef
@@ -33,6 +33,7 @@ from fleet_rlm.chat.run_lifecycle import (
     RunClaim,
     RunFailure,
     RunFailureCode,
+    RunLifecycleError,
     RunLifecycleUnavailableError,
     RunNotFoundError,
     RunStart,
@@ -427,6 +428,8 @@ class SqlAlchemyRunStateStore:
     _RECOVERY_BATCH_SIZE = 100
     _CANCELLATION_PROBE_ATTEMPTS = 2
     _CANCELLATION_PROBE_RETRY_DELAY_SECONDS = 0.05
+    _CLAIM_CONFLICT_REREAD_ATTEMPTS = 3
+    _CLAIM_CONFLICT_REREAD_DELAY_SECONDS = 0.01
 
     def __init__(
         self,
@@ -470,7 +473,24 @@ class SqlAlchemyRunStateStore:
                         RunRow.status.in_(("running", "settling")),
                     )
                 )
-                _reject_active_run(active is not None)
+                if active is not None:
+                    # SQLite does not honor FOR UPDATE. A competing Run can
+                    # commit between the first key lookup and this active-run
+                    # fence, so recheck the exact key before generic refusal.
+                    prior = await db.scalar(
+                        select(RunRow)
+                        .where(
+                            RunRow.session_id == request.session_id,
+                            RunRow.idempotency_key == request.idempotency_key,
+                            RunRow.status.in_(("running", "settling", "completed")),
+                        )
+                        .order_by(RunRow.created_at.desc())
+                        .limit(1)
+                    )
+                    if _prior_run_needs_replay(prior, request):
+                        assert prior is not None
+                        return await self._replay(db, prior)
+                    _reject_active_run(True)
 
                 claim = _new_run_claim(session.checkpoint_version)
                 db.add(
@@ -486,6 +506,8 @@ class SqlAlchemyRunStateStore:
                     )
                 )
                 history = await self._history(db, request.session_id)
+        except IntegrityError as exc:
+            return await self._resolve_claim_conflict(request, exc)
         except (OSError, SQLAlchemyError) as exc:
             raise RunLifecycleUnavailableError("Turn lifecycle is unavailable") from exc
 
@@ -512,6 +534,62 @@ class SqlAlchemyRunStateStore:
             cancelled,
             claim,
         )
+
+    async def _resolve_claim_conflict(self, request: RunClaim, original: IntegrityError) -> RunStart:
+        """Re-read a fresh transaction after an expected unique-index claim race."""
+        try:
+            for attempt in range(self._CLAIM_CONFLICT_REREAD_ATTEMPTS):
+                async with self._sessions() as db:
+                    session = await db.scalar(
+                        select(SessionRow).where(
+                            SessionRow.id == request.session_id,
+                            SessionRow.user_id == request.access.user_id,
+                            SessionRow.workspace_id == request.access.workspace_id,
+                        )
+                    )
+                    if session is None or session.status != "active":
+                        raise RunNotFoundError("Turn not found")
+                    prior = await db.scalar(
+                        select(RunRow)
+                        .where(
+                            RunRow.session_id == request.session_id,
+                            RunRow.idempotency_key == request.idempotency_key,
+                            RunRow.status.in_(("running", "settling", "completed")),
+                        )
+                        .order_by(RunRow.created_at.desc())
+                        .limit(1)
+                    )
+                    if _prior_run_needs_replay(prior, request):
+                        assert prior is not None
+                        return await self._replay(db, prior)
+                    active = await db.scalar(
+                        select(RunRow.id).where(
+                            RunRow.session_id == request.session_id,
+                            RunRow.status.in_(("running", "settling")),
+                        )
+                    )
+                    if active is not None:
+                        prior = await db.scalar(
+                            select(RunRow)
+                            .where(
+                                RunRow.session_id == request.session_id,
+                                RunRow.idempotency_key == request.idempotency_key,
+                                RunRow.status.in_(("running", "settling", "completed")),
+                            )
+                            .order_by(RunRow.created_at.desc())
+                            .limit(1)
+                        )
+                        if _prior_run_needs_replay(prior, request):
+                            assert prior is not None
+                            return await self._replay(db, prior)
+                        _reject_active_run(True)
+                if attempt + 1 < self._CLAIM_CONFLICT_REREAD_ATTEMPTS:
+                    await asyncio.sleep(self._CLAIM_CONFLICT_REREAD_DELAY_SECONDS)
+        except RunLifecycleError:
+            raise
+        except (OSError, SQLAlchemyError) as exc:
+            raise RunLifecycleUnavailableError("Turn lifecycle is unavailable") from exc
+        raise RunLifecycleUnavailableError("Turn lifecycle claim conflict could not be resolved") from original
 
     async def commit(
         self,

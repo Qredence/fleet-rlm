@@ -117,3 +117,26 @@ async def test_sql_sandbox_binding_store_retries_lost_insert_race() -> None:
         assert loaded.sandbox_id == "sb-race"
     finally:
         await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_sql_sandbox_binding_store_does_not_retry_parent_integrity_errors() -> None:
+    engine = create_async_engine_from_url("sqlite+aiosqlite:///:memory:")
+    try:
+        await create_tables(engine)
+        store = SqlAlchemySandboxBindingStore(create_session_factory(engine))
+        workspace_id = uuid4()
+        binding = SandboxBinding(
+            session_id=uuid4(),
+            sandbox_id="sb-orphan",
+            workspace_id=workspace_id,
+            volume_id="vol-1",
+            volume_subpath=f"workspaces/{workspace_id}",
+            mount_path="",
+            provider_state="running",
+        )
+
+        with pytest.raises(IntegrityError):
+            await store.upsert(binding)
+    finally:
+        await engine.dispose()
