@@ -45,7 +45,10 @@ Signature output. The default `answer` output is a string: call
 when the formatted value fits the Turn output character budget. Passing a
 mapping or list directly produces Python `repr` text.
 For nontrivial deterministic work, keep the initial computation and later
-independent verification in separate iterations.
+independent verification in the same action when practical. Use a later
+iteration only when the verification genuinely cannot be completed alongside
+the computation; never spend a later iteration merely restating an already
+verified result.
 
 ## Constructor knobs (DSPy defaults)
 
@@ -54,6 +57,12 @@ independent verification in separate iterations.
 | `max_iters` | 20 | Max REPL iterations |
 | `max_llm_calls` | 50 | Max sub-LM calls (`llm_query` / batched) |
 | `max_output_chars` | 10000 | Truncates **REPL step output** fed back into the loop (not a silent truncate of SUBMIT) |
+
+These are the generic DSPy constructor and `RLMOptions` fallback values, not
+the effective policy for every Fleet profile. The shipped `daytona-recursive`
+profile currently uses Root values `12`, `32`, and `6000`; its child RLM values
+are `8`, `12`, and `4000`. Treat `config/fleet.toml` as authoritative when a
+different profile is selected.
 
 Fleet uses DSPy 3.3.x's `max_iters` spelling end-to-end: `RLMOptions.max_iters`,
 `Settings.rlm_max_iters`, and the TOML policy key `rlm.max_iters` are passed
@@ -88,8 +97,8 @@ keyword-only and are not routed through the native positional call contract.
   malformed output is an `adapter_parse_error`. RLM action output contains
   `reasoning` and `code`; `completed` is internal loop state, not a Signature
 output field. The selected `daytona-recursive` Root and Sub Models
-through the policy-configured Databricks Chat Completions gateway) cap Root and
-Sub at 16,384 output tokens with no
+(through the policy-configured Databricks Chat Completions gateway) cap Root
+and Sub at 16,384 output tokens with no
 reasoning-effort override. This is separate from `max_output_chars`, which
 bounds REPL output retained in recursive history.
 - **Daytona** (primary durable path): custom interpreter, Session Workspace tools, Artifact candidates promoted on Turn Commit.

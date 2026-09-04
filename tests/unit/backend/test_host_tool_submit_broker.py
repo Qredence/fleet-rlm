@@ -8,6 +8,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from threading import Event
 from typing import Any
 
 import httpx
@@ -26,6 +27,12 @@ class _RecordingTool:
 
 
 def test_co_located_worker_preserves_state_and_services_callbacks(tmp_path: Path) -> None:
+    """
+    Verify that a co-located broker preserves interpreter state and services callbacks across executions.
+
+    Parameters:
+        tmp_path (Path): Temporary directory used to store the generated broker server.
+    """
     from fleet_rlm.daytona.broker import (
         _MAX_EXECUTE_OUTPUT_CHARS,
         _MAX_EXECUTE_REQUEST_BYTES,
@@ -80,6 +87,10 @@ def test_co_located_worker_preserves_state_and_services_callbacks(tmp_path: Path
         assert output.stdout == "one\ntwo\n"
         assert "one" in "".join(streamed)
         assert "two" in "".join(streamed)
+        streamed_stats = dict(broker.last_execution_stats)
+        assert streamed_stats["output_wait_requested_ms"] >= 0
+        assert streamed_stats["output_wait_elapsed_ms"] >= 0
+        assert streamed_stats["output_poll_count"] <= 8
 
         first = broker.execute_with_callbacks(
             run_code=lambda: broker.execute_code("value = 41"),
@@ -727,6 +738,165 @@ def test_execute_with_callbacks_records_per_execution_stats(monkeypatch: pytest.
     assert stats["poll_count"] >= 1
 
 
+def test_execute_with_callbacks_reuses_executor_and_reports_breakdown(monkeypatch: pytest.MonkeyPatch) -> None:
+    from fleet_rlm.daytona.broker import DaytonaHttpToolBroker
+
+    class _Sandbox:
+        pass
+
+    broker = DaytonaHttpToolBroker(sandbox=_Sandbox(), poll_interval_s=0.001)
+    broker._broker_url = "http://example.test"
+    broker._broker_token = "tok"
+    broker._broker_secret = "secret"
+    pending_batches: list[list[dict[str, object]]] = [
+        [{"id": "c1", "lease_token": "t1", "tool_name": "echo", "args": [], "kwargs": {}}],
+        [{"id": "c2", "lease_token": "t2", "tool_name": "echo", "args": [], "kwargs": {}}],
+    ]
+
+    monkeypatch.setattr(time, "sleep", lambda _delay: None)
+
+    execution_index = 0
+    completion_events = [Event(), Event()]
+
+    def _run_code() -> str:
+        nonlocal execution_index
+        execution_index += 1
+        assert completion_events[execution_index - 1].wait(timeout=1)
+        return "hello"
+
+    def _tool_executor(_name: str, _args: list[Any], _kwargs: dict[str, Any]) -> str:
+        completion_events[execution_index - 1].set()
+        return "ok"
+
+    def _handler(request: httpx.Request) -> httpx.Response:
+        """Handle pending-request polling and result-submission requests.
+
+        Parameters:
+            request (httpx.Request): The incoming HTTP request.
+
+        Returns:
+            httpx.Response: A response containing the next pending batch for
+                ``/pending`` or an empty JSON object for ``/result``.
+        """
+        if request.url.path == "/pending":
+            batch = (
+                pending_batches[execution_index - 1].pop(0)
+                if execution_index and pending_batches[execution_index - 1]
+                else []
+            )
+            return httpx.Response(200, json={"requests": [batch] if batch else []})
+        assert request.url.path == "/result"
+        return httpx.Response(200, json={})
+
+    broker._client = httpx.Client(
+        transport=httpx.MockTransport(_handler),
+        base_url="http://example.test",
+        headers=broker._preview_headers(),
+    )
+
+    snapshots: list[dict[str, int]] = []
+    for _ in range(2):
+        assert (
+            broker.execute_with_callbacks(
+                run_code=_run_code,
+                tool_executor=_tool_executor,
+            ).stdout
+            == "hello"
+        )
+        snapshots.append(dict(broker.last_execution_stats))
+
+    first, second = snapshots
+    assert first["callback_executor_created"] == 1
+    assert first["callback_executor_reused"] == 0
+    assert second["callback_executor_created"] == 0
+    assert second["callback_executor_reused"] == 1
+    assert first["pending_batch_count"] == 1
+    assert second["pending_request_count"] == 1
+    for key in (
+        "poll_latency_ms",
+        "callback_dispatch_ms",
+        "tool_execution_ms",
+        "result_post_ms",
+        "execution_wall_ms",
+    ):
+        assert key in second
+        assert second[key] >= 0
+
+    executor = broker._callback_executor
+    assert executor is not None
+    broker.stop()
+    assert executor._shutdown is True
+
+
+def test_execute_with_callbacks_polls_immediately_after_work_and_backs_off_empty(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from fleet_rlm.daytona.broker import DaytonaHttpToolBroker
+
+    class _Sandbox:
+        pass
+
+    broker = DaytonaHttpToolBroker(sandbox=_Sandbox(), poll_interval_s=0.01)
+    broker._broker_url = "http://example.test"
+    broker._broker_token = "tok"
+    broker._broker_secret = "secret"
+    pending = [{"id": "c1", "lease_token": "t1", "tool_name": "echo", "args": [], "kwargs": {}}]
+    release = Event()
+    events: list[str] = []
+    empty_poll_count = 0
+    pending_waits: list[str] = []
+    sleeps: list[float] = []
+
+    def _handler(request: httpx.Request) -> httpx.Response:
+        """Handle pending-request polling and result submissions in the test transport."""
+        nonlocal empty_poll_count
+        if request.url.path == "/pending":
+            pending_waits.append(request.url.params.get("wait", "0"))
+            if pending:
+                events.append("pending_work")
+                return httpx.Response(200, json={"requests": [pending.pop()]})
+            events.append("pending_empty")
+            empty_poll_count += 1
+            if empty_poll_count >= 2:
+                release.set()
+            wait_value = request.url.params.get("wait", "0")
+            waited_ms = max(1, int(float(wait_value) * 1_000)) if float(wait_value) > 0 else 0
+            return httpx.Response(200, json={"requests": [], "waited_ms": waited_ms})
+        events.append("result")
+        return httpx.Response(200, json={})
+
+    broker._client = httpx.Client(
+        transport=httpx.MockTransport(_handler),
+        base_url="http://example.test",
+        headers=broker._preview_headers(),
+    )
+    monkeypatch.setattr(time, "sleep", sleeps.append)
+
+    result = broker.execute_with_callbacks(
+        run_code=lambda: (release.wait(timeout=1) or True) and "done",
+        tool_executor=lambda _name, _args, _kwargs: "ok",
+    )
+
+    assert result.stdout == "done"
+    assert events.index("pending_work") < events.index("result") < events.index("pending_empty")
+    assert any(float(value) > 0 for value in pending_waits)
+    assert any(delay > 0 for delay in sleeps)
+    assert broker.last_execution_stats["empty_poll_count"] >= 1
+    assert broker.last_execution_stats["pending_wait_requested_ms"] > 0
+    assert broker.last_execution_stats["pending_wait_elapsed_ms"] > 0
+
+
+def test_poll_backoff_stays_finite_and_capped_for_large_empty_poll_counts() -> None:
+    from fleet_rlm.daytona.broker import DaytonaHttpToolBroker
+
+    broker = DaytonaHttpToolBroker(sandbox=object(), poll_interval_s=1.0)
+
+    assert broker._poll_backoff_delay(10**100) == pytest.approx(0.25)
+    infinite_interval = DaytonaHttpToolBroker(sandbox=object(), poll_interval_s=float("inf"))
+    assert infinite_interval._poll_backoff_delay(1) == pytest.approx(0.25)
+    assert DaytonaHttpToolBroker(sandbox=object(), poll_interval_s=float("nan"))._poll_backoff_delay(1) == 0.0
+
+
 def test_execute_code_attempts_final_output_release_after_poll_failures(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -767,7 +937,7 @@ def test_execute_code_attempts_final_output_release_after_poll_failures(
 
     broker.execute_code("print('ok')", on_stdout=lambda _value: None)
 
-    assert release_flags
+    assert release_flags.count("0") <= 1
     assert release_flags[-1] == "1"
 
 

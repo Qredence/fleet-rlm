@@ -116,13 +116,21 @@ Fleet's `RLMOptions` mirrors the pinned DSPy 3.3.x constructor fields:
   recursion-depth setting.
 - `max_llm_calls` bounds prompts sent through DSPy's native
   `llm_query()`/`llm_query_batched()` tools; batched prompts count individually.
-- `max_output_chars` bounds retained REPL output/history, not the provider's
-  response-token limit.
+- `max_output_chars` bounds each REPL output when DSPy renders native history
+  for the next action, not the provider's response-token limit or the total
+  history size. DSPy remains the owner of `REPLHistory`; Fleet does not compact
+  or reconstruct it.
 
-The default Root policy is `20` iterations, `50` semantic prompts, and `10,000`
-retained output characters. The child policy is `8`, `12`, and `4,000`. Fleet's
+The generic `RLMOptions`/DSPy constructor fallback for Root is `20` iterations,
+`50` semantic prompts, and `10,000` output characters. The shipped
+`daytona-recursive` policy uses `12`, `32`, and `6,000` for the effective Root
+budget; the child policy remains `8`, `12`, and `4,000`. Fleet's
 `max_execution_output_chars`, Turn deadline, recursive call budget, and child
-concurrency are separate controls. `rlm.verbose` controls host logging only;
+concurrency are separate controls. The shipped Root and Sub provider roles use
+`num_retries = 1`; omitted custom-role values inherit the shipped default, while
+the typed settings default of `3` applies only when the policy omits the field
+from both defaults and the selected profile.
+`rlm.verbose` controls host logging only;
 operator-visible reasoning, code, output, and recursive status use Fleet's
 Runtime Events and trajectory reconciliation.
 
@@ -239,6 +247,27 @@ and judgment. Use native batching for independent semantic judgments. Reserve
 the child lane for sub-problems that need iterative, code-executing, file-touching
 lifecycles in isolation, and use recursive batching only when every independent
 subproblem individually justifies a child RLM.
+
+## Daytona broker polling and cell overhead
+
+The host-side Daytona broker uses a pooled `httpx.Client`, one broker-owned
+callback executor per runtime, and bounded long-polling on `/pending` and
+streamed `/output`. A useful cell-level trace breakdown is emitted on the
+`sandbox.execute` span: `poll_latency_ms`, `pending_wait_requested_ms`,
+`pending_wait_elapsed_ms`, `output_poll_latency_ms`,
+`output_wait_requested_ms`, `output_wait_elapsed_ms`,
+`callback_dispatch_ms`, `tool_execution_ms`, `result_post_ms`, and
+`execution_wall_ms`. Requested wait and observed server-side condition wait are
+reported separately so a preview-proxy delay is not mistaken for broker idle
+time. The output path exits as soon as the broker marks a cell complete and
+performs one final release read instead of a fixed post-completion drain.
+
+These measurements are local instrumentation and do not imply a live Daytona
+SLO. Run the co-located broker tests for deterministic protocol coverage, then
+run the explicit credentialed lifecycle/latency benchmarks before changing
+snapshot or warm-pool policy. The current architecture already pre-warms and
+reuses the resident Root Sandbox; recursive children remain isolated until
+live measurements show their lifecycle exceeds the documented decision gate.
 
 ## Typed startup inputs
 

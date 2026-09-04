@@ -22,6 +22,7 @@ api_key_env = "DATABRICKS_TOKEN"
 base_url_env = "FLEET_LLM_BASE_URL"
 max_tokens = 16384
 timeout_seconds = 300
+num_retries = 1
 cache = false
 
 [defaults.llm.sub]
@@ -31,16 +32,18 @@ base_url_env = "FLEET_LLM_BASE_URL"
 max_tokens = 16384
 timeout_seconds = 90
 temperature = 0
+num_retries = 1
 cache = false
 
 # Recursive harness limits: one native child level (depth is a fixed
-# execution invariant, not a policy knob) with four reserved child calls per
-# Turn, a 50,000-character delegated prompt bound, and at most five child
-# workers concurrently.
+# execution invariant, not a policy knob), a bounded root budget, four
+# reserved child calls per Turn, a 50,000-character delegated prompt bound,
+# and at most five child workers concurrently. The root budget leaves room
+# for deliberate verification without allowing an unproductive long tail.
 [defaults.rlm]
-max_iters = 20
-max_llm_calls = 50
-max_output_chars = 10000
+max_iters = 12
+max_llm_calls = 32
+max_output_chars = 6000
 max_execution_output_chars = 4000
 execution_timeout_s = 300
 wrap_up_seconds = 300

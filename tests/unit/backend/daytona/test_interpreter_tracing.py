@@ -11,6 +11,7 @@ from typing import Any
 import pytest
 from dspy.primitives.code_interpreter import CodeExecutionError
 
+from fleet_rlm.daytona.broker import _EXECUTION_STAT_KEYS
 from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
 
 
@@ -188,6 +189,38 @@ def test_sandbox_execute_span_reports_broker_rtt_breakdown(
     assert outputs["path"] == "http_broker"
     assert outputs["poll_count"] == 12
     assert outputs["tool_call_count"] == 2
+    assert outputs["broker_metrics"] == {
+        "poll_count": 12,
+        "tool_call_count": 2,
+    }
     assert outputs["ensure_bindings_ms"] >= 0
     assert outputs["execute_ms"] >= 0
     assert outputs["phase_status"] == "completed"
+
+
+def test_sandbox_execute_span_preserves_complete_broker_metric_breakdown(
+    monkeypatch: pytest.MonkeyPatch, fleet_trace_active: None
+) -> None:
+    del fleet_trace_active
+    calls = _install_fake_mlflow(monkeypatch)
+    metrics = {key: index + 1 for index, key in enumerate(_EXECUTION_STAT_KEYS)}
+
+    class _FakeBroker:
+        last_execution_stats = metrics
+
+        def execute_with_callbacks(self, *, run_code: Any, tool_executor: Any) -> Any:
+            """Execute the provided code callback.
+
+            Parameters:
+                run_code (Any): Callable that performs the code execution.
+            """
+            del tool_executor
+            return run_code()
+
+    interpreter = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())
+    interpreter._http_broker = _FakeBroker()
+
+    assert interpreter.execute("_out = 'complete metrics'") == "complete metrics"
+
+    outputs = calls.span_outputs[0]
+    assert outputs["broker_metrics"] == metrics

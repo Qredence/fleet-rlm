@@ -213,12 +213,13 @@ class RLMInstructionFragments:
 def fleet_rlm_instruction_fragments(*, recursion_enabled: bool) -> RLMInstructionFragments:
     """Build instruction fragments for the selected recursion policy."""
     step = 6 if recursion_enabled else 5
-    verification = f"""{step}. Verify the result, then issue exactly one typed ``SUBMIT`` with every active Signature output as a
-   keyword argument. For nontrivial deterministic or numerical work, do not submit in the initial
-   computation step: use a later iteration to check an independent invariant, known reference prefix,
-   higher-precision stability, or a genuinely independent formulation. Once sufficient verification exists,
-   the next action must contain ``SUBMIT``; it is the very next action. Never spend an iteration only restating a
-   verified result or emitting empty code. Do not reproduce a large code block. Never pass positional arguments.
+    verification = f"""{step}. Verify within the same action when possible, then issue exactly one typed ``SUBMIT`` with every active
+   Signature output as a keyword argument. For nontrivial deterministic or numerical work, include an independent invariant,
+   known reference prefix, higher-precision stability check, or genuinely independent formulation in
+   that action when practical. Use a later iteration only when verification cannot be completed in the same
+   action. Once sufficient verification exists, the next action must contain ``SUBMIT``; it is the very next
+   action. Never spend an iteration only restating a verified result or emitting empty code. Do not reproduce a large
+   code block. Never pass positional arguments.
    A declared ``str`` output must receive a string. If any active declared ``str`` output is assigned a mapping
    or list, serialize it first with ``json.dumps(..., ensure_ascii=False)`` and submit that string. For example,
    if ``answer`` is a mapping or list, serialize it with ``json.dumps(answer, ensure_ascii=False)``. Use

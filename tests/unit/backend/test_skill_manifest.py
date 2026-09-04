@@ -46,7 +46,9 @@ def _document(
 def test_every_current_bundled_skill_parses_into_one_validated_manifest() -> None:
     root = Path("src/fleet_rlm/skills/bundled")
     manifests = tuple(
-        parse_bundled_skill_manifest(directory) for directory in sorted(root.iterdir()) if directory.is_dir()
+        parse_bundled_skill_manifest(directory)
+        for directory in sorted(root.iterdir())
+        if directory.is_dir() and (directory / "SKILL.md").is_file()
     )
 
     assert [manifest.name for manifest in manifests] == [

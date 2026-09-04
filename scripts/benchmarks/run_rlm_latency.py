@@ -16,6 +16,7 @@ import sys
 import tempfile
 import time
 from collections.abc import Iterator, Mapping, Sequence
+from contextlib import suppress
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -38,6 +39,7 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
+from fleet_rlm.daytona.broker import _EXECUTION_STAT_KEYS
 from scripts.benchmarks import judges as _judges
 from scripts.benchmarks.corpus_chain import (
     CORPUS_SEEDS,
@@ -69,6 +71,8 @@ EVIDENCE_WORKLOAD_ID = "evidence-conflict-v1"
 WORKLOAD_CHOICES = (EVIDENCE_WORKLOAD_ID, CORPUS_WORKLOAD_ID)
 _TRAJECTORY_ITEM_LIMIT = 64
 _TRAJECTORY_CHAR_LIMIT = 64 * 1024
+_BROKER_METRIC_KEYS = _EXECUTION_STAT_KEYS
+_BROKER_METRIC_KEY_SET = frozenset(_BROKER_METRIC_KEYS)
 
 LATENCY_WORKLOAD = """Analyze the following evidence and decide whether the customer can
 prevent renewal of OF-7781 effective 2025-04-01. Resolve conflicts by authority
@@ -606,17 +610,17 @@ def _attach_trace_identity(row: dict[str, Any], execution_trace_id: str | None) 
 
 def _execution_trace_diagnostics(mlflow_url: str, trace_id: str) -> dict[str, Any]:
     """
-    Collect bounded execution-trace diagnostics for benchmark comparisons.
+    Collect bounded diagnostics from an MLflow execution trace for benchmark comparisons.
 
     Parameters:
         mlflow_url (str): MLflow tracking server URL.
         trace_id (str): Identifier of the execution trace to inspect.
 
     Returns:
-        dict[str, Any]: Diagnostic metrics for root language-model spans, context size,
-            adapter and repair errors, response keys, and detail truncation. Returns a
-            status of ``"unavailable"`` and the exception category when diagnostics
-            cannot be collected.
+        dict[str, Any]: Aggregated trace diagnostics, including language-model timing,
+            context size, parsing and repair errors, response keys, detail overflow,
+            sandbox execution counts, and broker metrics. Returns an unavailable status
+            and error category when the trace cannot be inspected.
     """
     try:
         import mlflow
@@ -640,6 +644,8 @@ def _execution_trace_diagnostics(mlflow_url: str, trace_id: str) -> dict[str, An
         ]
         adapter_parse_error_count = 0
         last_lm_response_keys: list[str] = []
+        sandbox_execute_span_count = 0
+        broker_metrics = _new_broker_metrics()
         for span in spans:
             outputs = getattr(span, "outputs", None)
             if isinstance(outputs, Mapping):
@@ -655,6 +661,11 @@ def _execution_trace_diagnostics(mlflow_url: str, trace_id: str) -> dict[str, An
                         last_lm_response_keys = [str(key) for key in keys[:32]]
                 if span.name == "Turn.progress.warning" and "omitted" in str(outputs.get("message", "")):
                     detail_overflowed = True
+                if span.name == "sandbox.execute":
+                    sandbox_execute_span_count += 1
+                    _merge_broker_metrics(broker_metrics, _broker_metrics(outputs))
+            elif span.name == "sandbox.execute":
+                sandbox_execute_span_count += 1
         return {
             "root_lm_span_count": len(root_lm_spans),
             "root_lm_wall_time_ms": round(sum(root_lm_wall_times), 3),
@@ -664,6 +675,8 @@ def _execution_trace_diagnostics(mlflow_url: str, trace_id: str) -> dict[str, An
             "last_lm_response_keys": last_lm_response_keys,
             "repair_error_count": repair_error_count,
             "detail_overflowed": detail_overflowed,
+            "sandbox_execute_span_count": sandbox_execute_span_count,
+            "broker_metrics": broker_metrics,
         }
     except Exception as exc:
         return {"status": "unavailable", "error_category": type(exc).__name__}
@@ -690,17 +703,18 @@ def _tag_trace(mlflow_url: str, trace_id: str, *, workload_id: str, variant: str
 
 def _aggregate(rows: Sequence[Mapping[str, Any]], *, workload_id: str = EVIDENCE_WORKLOAD_ID) -> dict[str, Any]:
     """
-    Aggregate measured benchmark rows into latency, error, usage, execution, trace,
-    diagnostic, and corpus-quality metrics.
+    Aggregate measured benchmark rows into latency, error, usage, execution,
+    trace, diagnostics, broker, and corpus-quality metrics.
 
     Parameters:
         rows (Sequence[Mapping[str, Any]]): Benchmark sample records to aggregate.
         workload_id (str): Workload identifier used to determine whether corpus-quality metrics apply.
 
     Returns:
-        dict[str, Any]: Aggregate metrics. Warmups and failed samples are excluded from
-            success-based metrics, and quality is marked incomplete unless all corpus
-            checks pass for the corpus workload.
+        dict[str, Any]: Aggregate metrics. Warmups and failed samples are excluded from success-based metrics.
+            Includes sandbox execution counts and broker counters from trace diagnostics. Corpus-quality
+            metrics are complete only when every measured sample passes all applicable corpus checks for
+            the corpus workload.
     """
     measured = [row for row in rows if row.get("sample_kind") == "measured"]
     successes = [row for row in measured if not row.get("error_category")]
@@ -734,6 +748,12 @@ def _aggregate(rows: Sequence[Mapping[str, Any]], *, workload_id: str = EVIDENCE
         item = row.get("trace_diagnostics")
         if isinstance(item, Mapping):
             diagnostics.append(item)
+    broker_metrics = _new_broker_metrics()
+    sandbox_execute_span_count = 0
+    for item in diagnostics:
+        with suppress(TypeError, ValueError):
+            sandbox_execute_span_count += int(item.get("sandbox_execute_span_count", 0))
+        _merge_broker_metrics(broker_metrics, item.get("broker_metrics"))
     return {
         "sample_count": len(measured),
         "end_to_end_ms": {
@@ -776,11 +796,38 @@ def _aggregate(rows: Sequence[Mapping[str, Any]], *, workload_id: str = EVIDENCE
         ),
         "repair_error_count": sum(int(item.get("repair_error_count", 0)) for item in diagnostics),
         "detail_overflowed": any(item.get("detail_overflowed") is True for item in diagnostics),
+        "sandbox_execute_span_count": sandbox_execute_span_count,
+        "broker_metrics": broker_metrics,
         "corpus_report_complete": corpus_report_complete if workload_id == CORPUS_WORKLOAD_ID else None,
         "corpus_evidence_complete": corpus_evidence_complete if workload_id == CORPUS_WORKLOAD_ID else None,
         "corpus_quality_complete": corpus_quality_complete if workload_id == CORPUS_WORKLOAD_ID else None,
         "quality_complete": corpus_quality_complete if workload_id == CORPUS_WORKLOAD_ID else False,
     }
+
+
+def _new_broker_metrics() -> dict[str, int]:
+    """Return a zeroed allowlist for broker metrics emitted by ``sandbox.execute``."""
+    return {key: 0 for key in _BROKER_METRIC_KEYS}
+
+
+def _broker_metrics(outputs: Mapping[str, Any]) -> Mapping[str, Any] | None:
+    """Read nested broker metrics, falling back to legacy flat span keys."""
+    nested = outputs.get("broker_metrics")
+    return nested if isinstance(nested, Mapping) else outputs
+
+
+def _merge_broker_metrics(target: dict[str, int], values: object) -> None:
+    """Merge an allowlisted per-cell broker breakdown into aggregate totals."""
+    if not isinstance(values, Mapping):
+        return
+    for raw_key, raw_value in values.items():
+        key = str(raw_key)
+        if key not in _BROKER_METRIC_KEY_SET or not isinstance(raw_value, int) or isinstance(raw_value, bool):
+            continue
+        if key.endswith("_max_ms"):
+            target[key] = max(target[key], raw_value)
+        else:
+            target[key] += raw_value
 
 
 def _usage_totals(value: object) -> dict[str, int]:

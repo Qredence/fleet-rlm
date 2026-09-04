@@ -797,20 +797,20 @@ class DaytonaCodeInterpreter:
 
     def _execute_once(self, code: str, variables: dict[str, Any] | None = None) -> Any:
         """
-        Execute Python code in the configured interpreter and process its result.
+        Execute one code step in the configured interpreter.
 
         Parameters:
             code (str): Python code to execute.
-            variables (dict[str, Any] | None): Variables made available to the execution.
+            variables (dict[str, Any] | None): Variables to make available during execution.
 
         Returns:
-            Any: A final submission result, ordinary output, or a bounded execution result.
+            Any: The submitted final value or bounded ordinary execution output.
 
         Raises:
-            CodeExecutionError: If generated code can be repaired and should be reinjected by DSPy.
-            CodeInterpreterError: If the interpreter cannot safely continue.
-            DaytonaAdapterError: If the interpreter is shut down, misconfigured, or the execution provider fails.
-            RunTerminalError: If execution repeats without making progress.
+            CodeExecutionError: If execution produces a recoverable error.
+            CodeInterpreterError: If execution cannot safely continue.
+            DaytonaAdapterError: If the interpreter is unavailable, misconfigured, shut down, or the provider fails.
+            RunTerminalError: If repeated execution makes no progress.
         """
         if self._shutdown:
             msg = "interpreter already shut down"
@@ -908,7 +908,15 @@ class DaytonaCodeInterpreter:
                 if self._http_broker is not None:
                     outputs["ensure_bindings_ms"] = ensure_bindings_ms
                     outputs["execute_ms"] = execute_ms
-                    outputs.update(self._http_broker.last_execution_stats)
+                    broker_metrics = dict(self._http_broker.last_execution_stats)
+                    # Keep the flat keys for existing trace consumers, but put
+                    # the complete broker breakdown under one bounded mapping.
+                    # The generic trace projection caps a mapping at 32 keys;
+                    # placing these metrics together prevents the six
+                    # human-readable fields above from hiding the tail of the
+                    # execution statistics.
+                    outputs["broker_metrics"] = broker_metrics
+                    outputs.update(broker_metrics)
                 phase.set_outputs(outputs)
                 return result
             except RunTerminalError:

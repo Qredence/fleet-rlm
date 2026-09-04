@@ -40,6 +40,7 @@ def test_committed_policy_declares_databricks_model_roles() -> None:
             "base_url_env": "FLEET_LLM_BASE_URL",
             "max_tokens": 16384,
             "timeout_seconds": 300,
+            "num_retries": 1,
             "cache": False,
         },
         "sub": {
@@ -49,10 +50,24 @@ def test_committed_policy_declares_databricks_model_roles() -> None:
             "max_tokens": 16384,
             "timeout_seconds": 90,
             "temperature": 0,
+            "num_retries": 1,
             "cache": False,
         },
     }
     assert document["defaults"]["runtime"]["live_enabled"] is True
+
+
+def test_committed_policy_uses_bounded_root_rlm_budget_and_single_provider_retry() -> None:
+    policy_path = Path(__file__).resolve().parents[3] / "config" / "fleet.toml"
+    document = tomllib.loads(policy_path.read_text(encoding="utf-8"))
+
+    assert {key: document["defaults"]["rlm"][key] for key in ("max_iters", "max_llm_calls", "max_output_chars")} == {
+        "max_iters": 12,
+        "max_llm_calls": 32,
+        "max_output_chars": 6_000,
+    }
+    assert document["defaults"]["llm"]["root"]["num_retries"] == 1
+    assert document["defaults"]["llm"]["sub"]["num_retries"] == 1
 
 
 # Every committed profile routes Root and Sub through the Databricks endpoint.
