@@ -798,14 +798,14 @@ class DaytonaCodeInterpreter:
     def _execute_once(self, code: str, variables: dict[str, Any] | None = None) -> Any:
         """
         Execute one code step in the configured interpreter.
-        
+
         Parameters:
             code (str): Python code to execute.
             variables (dict[str, Any] | None): Variables to make available during execution.
-        
+
         Returns:
             Any: The submitted final value or bounded ordinary execution output.
-        
+
         Raises:
             CodeExecutionError: If execution produces a recoverable error.
             CodeInterpreterError: If execution cannot safely continue.

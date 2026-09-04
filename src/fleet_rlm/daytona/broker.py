@@ -780,15 +780,15 @@ class DaytonaHttpToolBroker:
     ) -> None:
         """
         Initialize a Daytona HTTP tool broker.
-        
+
         Parameters:
-        	broker_port (int): Port used by the sandbox-hosted broker.
-        	context_mount_root (str | None): Root directory for bound context data.
-        	context_manifest_sha256 (str | None): SHA-256 digest of the bound context manifest.
-        
+            broker_port (int): Port used by the sandbox-hosted broker.
+            context_mount_root (str | None): Root directory for bound context data.
+            context_manifest_sha256 (str | None): SHA-256 digest of the bound context manifest.
+
         Raises:
-        	ValueError: If the broker port is outside the range 1–65535 or only one
-        		context-binding value is provided.
+            ValueError: If the broker port is outside the range 1-65535 or only one
+                context-binding value is provided.
         """
         self._sandbox = sandbox
         if not isinstance(broker_port, int) or isinstance(broker_port, bool) or not 0 < broker_port <= 65_535:
@@ -845,10 +845,10 @@ class DaytonaHttpToolBroker:
 
     def _record_metric(self, key: str, value: int = 1) -> None:
         """Record a metric value for the active execution, if one exists.
-        
+
         Parameters:
-        	key (str): The metric name.
-        	value (int): The amount to add to the metric.
+            key (str): The metric name.
+            value (int): The amount to add to the metric.
         """
         with self._metrics_lock:
             stats = self._active_execution_stats
@@ -865,12 +865,12 @@ class DaytonaHttpToolBroker:
     def _record_duration(self, key: str, started_ns: int, *, max_key: str | None = None) -> int:
         """
         Record the elapsed time since a start timestamp and return it in milliseconds.
-        
+
         Parameters:
             key (str): Metric key for the elapsed duration.
             started_ns (int): Start timestamp from `time.perf_counter_ns()`.
             max_key (str | None): Optional metric key used to record the maximum duration.
-        
+
         Returns:
             int: Elapsed duration in milliseconds.
         """
@@ -894,11 +894,11 @@ class DaytonaHttpToolBroker:
     def _get_callback_executor(self) -> tuple[ThreadPoolExecutor, bool]:
         """
         Obtain the broker-owned callback executor, creating it on first use.
-        
+
         Returns:
             tuple[ThreadPoolExecutor, bool]: The callback executor and whether it was
             created by this call.
-        
+
         Raises:
             DaytonaAdapterError: If the broker has already stopped.
         """
@@ -1062,18 +1062,19 @@ class DaytonaHttpToolBroker:
     ) -> BackendExecutionResult:
         """
         Execute code in the sandbox and optionally forward stdout as it is produced.
-        
+
         Parameters:
-        	code (str): Code to execute.
-        	variables (Mapping[str, Any] | None): Variables to make available during execution.
-        	timeout_s (float): Maximum time to wait for the execution request.
-        	on_stdout (Callable[[str], None] | None): Callback invoked with streamed stdout chunks.
-        
+            code (str): Code to execute.
+            variables (Mapping[str, Any] | None): Variables to make available during execution.
+            timeout_s (float): Maximum time to wait for the execution request.
+            on_stdout (Callable[[str], None] | None): Callback invoked with streamed stdout chunks.
+
         Returns:
-        	BackendExecutionResult: Execution output, final result, errors, and accessed context paths.
-        
+            BackendExecutionResult: Execution output, final result, errors, and accessed context paths.
+
         Raises:
-        	DaytonaAdapterError: If the broker is stopped or the execution request, response, or variables are invalid.
+            DaytonaAdapterError: If the broker is stopped or the execution
+                request, response, or variables are invalid.
         """
         from fleet_rlm.daytona.interpreter import BackendExecutionResult
 
@@ -1189,14 +1190,14 @@ class DaytonaHttpToolBroker:
     ) -> tuple[bool, int]:
         """
         Polls the broker for newly available execution output and forwards it to the callback.
-        
+
         Parameters:
             execution_id (str | None): Identifier of the execution whose output is being polled.
             offset (int): Current output position from which to read.
             on_stdout (Callable[[str], None]): Callback invoked with newly available standard output.
             release (bool): Whether completed output may be released after polling.
             wait_s (float): Maximum duration to wait for additional output.
-        
+
         Returns:
             tuple[bool, int]: Whether execution output is complete and the next output position.
         """
@@ -1354,10 +1355,10 @@ class DaytonaHttpToolBroker:
     def stop(self, *, strict: bool = False) -> bool:
         """
         Stop the broker and release its callback workers, HTTP client, and Daytona session.
-        
+
         Parameters:
             strict (bool): Whether to raise the first cleanup error encountered.
-        
+
         Returns:
             bool: True if cleanup is settled, or False if a resource remains for a later cleanup attempt.
         """
@@ -1494,16 +1495,17 @@ class DaytonaHttpToolBroker:
     ) -> bool:
         """
         Poll for pending broker requests and fulfill them concurrently.
-        
+
         Parameters:
-        	tool_executor (Callable[[str, list[Any], dict[str, Any]], Any]): Callback used to execute each requested tool.
-        	wait_s (float): Maximum time to wait for pending requests before returning an empty result.
-        
+            tool_executor (Callable[[str, list[Any], dict[str, Any]], Any]): Callback used to
+                execute each requested tool.
+            wait_s (float): Maximum time to wait for pending requests before returning an empty result.
+
         Returns:
-        	bool: `True` if requests were found and fulfilled, `False` otherwise.
-        
+            bool: `True` if requests were found and fulfilled, `False` otherwise.
+
         Raises:
-        	DaytonaAdapterError: If the broker returns a non-success, non-server-error status.
+            DaytonaAdapterError: If the broker returns a non-success, non-server-error status.
         """
         assert self._broker_url is not None
         if not math.isfinite(wait_s):
@@ -1628,9 +1630,9 @@ class DaytonaHttpToolBroker:
 
     def _preview_headers(self) -> dict[str, str]:
         """Build authentication headers for requests to the sandbox broker.
-        
+
         Returns:
-        	dict[str, str]: Headers containing the broker secret and, when available, the Daytona preview token.
+            dict[str, str]: Headers containing the broker secret and, when available, the Daytona preview token.
         """
         headers = {"X-Broker-Secret": self._broker_secret}
         if self._broker_token:

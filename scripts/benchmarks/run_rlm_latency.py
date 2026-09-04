@@ -611,11 +611,11 @@ def _attach_trace_identity(row: dict[str, Any], execution_trace_id: str | None) 
 def _execution_trace_diagnostics(mlflow_url: str, trace_id: str) -> dict[str, Any]:
     """
     Collect bounded diagnostics from an MLflow execution trace for benchmark comparisons.
-    
+
     Parameters:
         mlflow_url (str): MLflow tracking server URL.
         trace_id (str): Identifier of the execution trace to inspect.
-    
+
     Returns:
         dict[str, Any]: Aggregated trace diagnostics, including language-model timing,
             context size, parsing and repair errors, response keys, detail overflow,
@@ -703,12 +703,13 @@ def _tag_trace(mlflow_url: str, trace_id: str, *, workload_id: str, variant: str
 
 def _aggregate(rows: Sequence[Mapping[str, Any]], *, workload_id: str = EVIDENCE_WORKLOAD_ID) -> dict[str, Any]:
     """
-    Aggregate measured benchmark rows into latency, error, usage, execution, trace, diagnostic, broker, and corpus-quality metrics.
-    
+    Aggregate measured benchmark rows into latency, error, usage, execution,
+    trace, diagnostics, broker, and corpus-quality metrics.
+
     Parameters:
         rows (Sequence[Mapping[str, Any]]): Benchmark sample records to aggregate.
         workload_id (str): Workload identifier used to determine whether corpus-quality metrics apply.
-    
+
     Returns:
         dict[str, Any]: Aggregate metrics. Warmups and failed samples are excluded from success-based metrics.
             Includes sandbox execution counts and broker counters from trace diagnostics. Corpus-quality

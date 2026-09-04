@@ -210,9 +210,9 @@ def test_sandbox_execute_span_preserves_complete_broker_metric_breakdown(
 
         def execute_with_callbacks(self, *, run_code: Any, tool_executor: Any) -> Any:
             """Execute the provided code callback.
-            
+
             Parameters:
-            	run_code (Any): Callable that performs the code execution.
+                run_code (Any): Callable that performs the code execution.
             """
             del tool_executor
             return run_code()
