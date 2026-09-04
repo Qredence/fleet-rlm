@@ -1038,12 +1038,12 @@ class DaytonaHttpToolBroker:
 
         try:
             response_box: list[httpx.Response] = []
-            request_errors: list[BaseException] = []
+            request_errors: list[Exception] = []
 
             def request() -> None:
                 try:
                     response_box.append(self._http().post("/execute", json=payload, timeout=timeout_s))
-                except BaseException as exc:
+                except Exception as exc:
                     request_errors.append(exc)
 
             if on_stdout is None:
@@ -1216,7 +1216,7 @@ class DaytonaHttpToolBroker:
                 run_started_ns = time.perf_counter_ns()
                 try:
                     bucket.append(run_code())
-                except BaseException as exc:
+                except Exception as exc:
                     bucket.append(exc)
                 finally:
                     self._record_duration("run_code_ms", run_started_ns)
@@ -1292,7 +1292,7 @@ class DaytonaHttpToolBroker:
                     executor.shutdown(wait=True)
                     if self._callback_executor is executor:
                         self._callback_executor = None
-            except BaseException as exc:
+            except Exception as exc:
                 settled = False
                 if strict:
                     first_error = exc
