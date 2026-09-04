@@ -88,6 +88,18 @@ All notable changes to this project are documented in this file.
   live-evidence helper was renamed `_p35d_evidence.py` -> `_evidence.py`
   and the four kept live canaries import it under the new name.
 
+## [0.7.6] - 2026-09-04
+
+### Changed
+
+- **Change:** Reduced DSPy RLM and Daytona broker overhead with pooled HTTP,
+  bounded long-polling, tighter root budgets, and bounded broker execution
+  metrics.
+  **Outcome:** Host-tool and output polling avoid fixed per-request delays while
+  retaining trace and benchmark receipts for performance diagnostics.
+- **Change:** Hardened bundled Skill discovery to ignore directories without a
+  `SKILL.md` manifest and expanded focused performance validation coverage.
+
 ## [0.7.5] - 2026-08-29
 
 ### Changed
