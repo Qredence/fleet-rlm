@@ -26,8 +26,14 @@ checks also pass. Runtime-v2 comparison tests cover receipt integrity, both
 invocation modes, attempt accounting, semantic scorer evidence, and repair-policy
 ablations. Source-root guards inspect the actual backend tree. SUBMIT syntax
 validation is separately tested and is not a runtime safety sandbox.
-The 15-Turn receipt is `.scratch/runtime-v2-scripted-baseline.json`; it is explicitly
-scripted lifecycle evidence, not a sealed live legacy semantic baseline.
+The clean 15-Turn scripted receipts are
+`.scratch/runtime-v2-scripted-baseline-semantic-ff24757b.json` (digest
+`d0c3b8fed7d9c61cbada149f40539cd6197263fe77cd68d3612d5bb1c5ad70ad`) and
+`.scratch/runtime-v2-scripted-candidate-semantic-ff24757b.json` (digest
+`cf39453a3071b572a60e1a3e5f32b619a0901231f734b9196eab3c22d17f77aa`); both
+passed lifecycle comparison with `semantic-keywords/v1`, `source_dirty: false`,
+and `live_semantic_gate: not_exercised`. They are explicitly scripted lifecycle
+evidence, not a sealed live legacy semantic baseline.
 
 ## Sequence
 
@@ -199,7 +205,8 @@ Objective: stabilize Phase 0/1 before introducing runtime alternatives.
 - [x] Add repeated samples and p50/p95 distributions for the scripted lane.
 - [x] Record dataset/scorer digests and all relevant snapshot/profile identities.
 - [x] Generate Runtime Event fixtures from deterministic scripted Runs.
-- [ ] Seal one actual legacy 0.7.6 baseline receipt.
+- [x] Regenerate clean scripted baseline/candidate receipts with semantic scorer IDs.
+- [ ] Seal one actual live legacy 0.7.6 semantic baseline receipt (operator-authorized).
 - [x] Add a comparison command producing pass/fail migration gates.
 
 ### PR 1.1D — Finish database lineage
@@ -347,8 +354,8 @@ receipts/logs stay ignored; fixtures, replay code, tests, and this summary are t
 ## Next implementation steps
 
 1. Complete: run the post-fix `make check` and review the resulting diff.
-2. Regenerate clean scripted baseline/candidate receipts with semantic scorer IDs
-   after this change is committed; these remain lifecycle evidence only.
+2. Complete: regenerate clean scripted baseline/candidate receipts with semantic
+   scorer IDs; these remain lifecycle evidence only.
 3. When explicitly authorized, capture the live legacy semantic baseline and
    Postgres contention evidence. Scripted receipts do not satisfy either live gate.
 4. Execute Phase 3 gates, starting with the credential-free parity lane and then
