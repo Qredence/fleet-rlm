@@ -377,6 +377,7 @@ async def test_sql_store_level_cross_session_history_isolation(tmp_path) -> None
                     SessionRow(id=session_b, user_id=access.user_id, workspace_id=access.workspace_id, title="B"),
                 )
             )
+            await db.flush([row for row in db.new if isinstance(row, (UserRow, WorkspaceRow))])
         store = SqlAlchemyRunStateStore(factory)
 
         async def commit(session_id: object, request: str, answer: str, key: str) -> None:

@@ -130,6 +130,7 @@ async def _seed_store():
                 SessionRow(id=session_id, user_id=access.user_id, workspace_id=access.workspace_id),
             )
         )
+        await db.flush([row for row in db.new if isinstance(row, (UserRow, WorkspaceRow))])
     store = SqlAlchemyRunStateStore(factory)
     run = await store.begin(RunClaim(access, session_id, TurnInput("hello"), "key", uuid4()))
     return engine, factory, store, run

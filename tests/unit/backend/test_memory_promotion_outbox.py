@@ -35,6 +35,7 @@ async def _seed_with_intents(database_url: str, *, intents: tuple = (), commit: 
                 SessionRow(id=session_id, user_id=access.user_id, workspace_id=access.workspace_id),
             )
         )
+        await db.flush([row for row in db.new if isinstance(row, (UserRow, WorkspaceRow))])
     store = SqlAlchemyRunStateStore(factory)
     run = await store.begin(RunClaim(access, session_id, TurnInput("hello"), "key", uuid4()))
     if commit:

@@ -10,6 +10,7 @@ from sqlalchemy import (
     CheckConstraint,
     DateTime,
     ForeignKey,
+    ForeignKeyConstraint,
     Index,
     Integer,
     String,
@@ -71,6 +72,12 @@ class SessionRow(Base):
 class TurnRow(Base):
     __tablename__ = "fleet_turns"
     __table_args__ = (
+        ForeignKeyConstraint(
+            ["run_id", "session_id"],
+            ["fleet_runs.id", "fleet_runs.session_id"],
+            name="fk_fleet_turns_run_session",
+            ondelete="CASCADE",
+        ),
         UniqueConstraint("session_id", "sequence", name="uq_fleet_turns_session_sequence"),
         UniqueConstraint("run_id", "role", name="uq_fleet_turns_run_role"),
         CheckConstraint(
@@ -96,6 +103,7 @@ class TurnRow(Base):
 class RunRow(Base):
     __tablename__ = "fleet_runs"
     __table_args__ = (
+        Index("uq_fleet_runs_id_session", "id", "session_id", unique=True),
         CheckConstraint(
             "status IN ('running', 'settling', 'completed', 'failed', 'cancelled', 'timeout')",
             name="ck_fleet_runs_status",

@@ -10,7 +10,7 @@ from typing import Literal
 from uuid import UUID, uuid4
 
 from sqlalchemy import select
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from fleet_rlm.artifacts.models import ArtifactRef
@@ -421,6 +421,23 @@ class InMemoryRunStateStore:
         )
 
 
+def _expected_claim_conflict(error: IntegrityError) -> bool:
+    """Recognize only claim uniqueness conflicts, never FK/check failures."""
+    original = error.orig
+    if getattr(original, "sqlite_errorname", None) == "SQLITE_CONSTRAINT_UNIQUE":
+        return str(original) in {
+            "UNIQUE constraint failed: fleet_runs.session_id",
+            "UNIQUE constraint failed: fleet_runs.session_id, fleet_runs.idempotency_key",
+        }
+    if getattr(original, "sqlstate", getattr(original, "pgcode", None)) != "23505":
+        return False
+    diagnostic = getattr(original, "diag", None)
+    constraint = getattr(diagnostic, "constraint_name", None)
+    if constraint is None:
+        constraint = getattr(getattr(original, "__cause__", None), "constraint_name", None)
+    return constraint in {"uq_fleet_runs_one_running", "uq_fleet_runs_live_idempotency"}
+
+
 class SqlAlchemyRunStateStore:
     """Transaction-backed authoritative Turn lifecycle state."""
 
@@ -486,6 +503,10 @@ class SqlAlchemyRunStateStore:
                     )
                 )
                 history = await self._history(db, request.session_id)
+        except IntegrityError as exc:
+            if not _expected_claim_conflict(exc):
+                raise RunLifecycleUnavailableError("Turn lifecycle is unavailable") from exc
+            return await self._reconcile_claim_conflict(request)
         except (OSError, SQLAlchemyError) as exc:
             raise RunLifecycleUnavailableError("Turn lifecycle is unavailable") from exc
 
@@ -512,6 +533,44 @@ class SqlAlchemyRunStateStore:
             cancelled,
             claim,
         )
+
+    async def _reconcile_claim_conflict(self, request: RunClaim) -> RunStart:
+        """Read the winning claim once after rollback, retaining Session authority."""
+        try:
+            async with self._sessions() as db, db.begin():
+                session = await db.scalar(
+                    select(SessionRow).where(
+                        SessionRow.id == request.session_id,
+                        SessionRow.user_id == request.access.user_id,
+                        SessionRow.workspace_id == request.access.workspace_id,
+                        SessionRow.status == "active",
+                    )
+                )
+                if session is None:
+                    raise RunNotFoundError("Turn not found")
+                prior = await db.scalar(
+                    select(RunRow)
+                    .where(
+                        RunRow.session_id == request.session_id,
+                        RunRow.idempotency_key == request.idempotency_key,
+                        RunRow.status.in_(("running", "settling", "completed")),
+                    )
+                    .order_by(RunRow.created_at.desc())
+                    .limit(1)
+                )
+                if _prior_run_needs_replay(prior, request):
+                    assert prior is not None
+                    return await self._replay(db, prior)
+                active = await db.scalar(
+                    select(RunRow.id).where(
+                        RunRow.session_id == request.session_id,
+                        RunRow.status.in_(("running", "settling")),
+                    )
+                )
+                _reject_active_run(active is not None)
+        except (OSError, SQLAlchemyError) as exc:
+            raise RunLifecycleUnavailableError("Turn lifecycle is unavailable") from exc
+        raise RunLifecycleUnavailableError("Turn lifecycle is unavailable")
 
     async def commit(
         self,

@@ -10,7 +10,7 @@ from pathlib import Path
 
 from alembic.config import Config
 from alembic.script import ScriptDirectory
-from sqlalchemy import inspect, text
+from sqlalchemy import event, inspect, text
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import (
@@ -117,7 +117,16 @@ def _pool_kwargs_for_url(normalized_url: str) -> dict[str, object]:
 def create_async_engine_from_url(url: str, *, echo: bool = False) -> AsyncEngine:
     """Build an async engine. Does not open connections until first use."""
     normalized = normalize_database_url(url)
-    return create_async_engine(normalized, echo=echo, **_pool_kwargs_for_url(normalized))
+    engine = create_async_engine(normalized, echo=echo, **_pool_kwargs_for_url(normalized))
+    if engine.dialect.name == "sqlite":
+
+        @event.listens_for(engine.sync_engine, "connect")
+        def _enable_foreign_keys(connection, _record) -> None:
+            cursor = connection.cursor()
+            cursor.execute("PRAGMA foreign_keys=ON")
+            cursor.close()
+
+    return engine
 
 
 def create_session_factory(engine: AsyncEngine) -> async_sessionmaker[AsyncSession]:

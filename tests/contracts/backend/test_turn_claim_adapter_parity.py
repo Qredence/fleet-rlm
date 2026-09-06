@@ -54,6 +54,7 @@ async def _build_harness(adapter_kind: str) -> _Harness:
                 SessionRow(id=session_id, user_id=access.user_id, workspace_id=access.workspace_id, title="parity"),
             )
         )
+        await db.flush([row for row in db.new if isinstance(row, (UserRow, WorkspaceRow))])
     store = SqlAlchemyRunStateStore(factory)
     turn = await store.begin(RunClaim(access, session_id, TurnInput("claim parity"), "parity", run_id))
     assert isinstance(turn, ClaimedRun)

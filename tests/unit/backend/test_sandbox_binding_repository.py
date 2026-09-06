@@ -26,6 +26,7 @@ async def test_sql_sandbox_binding_store_round_trips_and_updates_scope() -> None
                     SessionRow(id=session_id, user_id=user_id, workspace_id=workspace_id, title="bindings"),
                 )
             )
+            await db.flush([row for row in db.new if isinstance(row, (UserRow, WorkspaceRow))])
 
         store = SqlAlchemySandboxBindingStore(factory)
         first = await store.upsert(
@@ -83,6 +84,7 @@ async def test_sql_sandbox_binding_store_retries_lost_insert_race() -> None:
                     SessionRow(id=session_id, user_id=user_id, workspace_id=workspace_id, title="bindings"),
                 )
             )
+            await db.flush([row for row in db.new if isinstance(row, (UserRow, WorkspaceRow))])
 
         store = SqlAlchemySandboxBindingStore(factory)
         binding = SandboxBinding(
