@@ -17,6 +17,7 @@
 * [Session-scoped RLM state ADR](decisions/ADR-session-scoped-rlm-state.md)
 * [Turn interpreter context target (ADR 004)](decisions/004-turn-interpreter-context.md)
 * [Runtime variant (ADR 005)](decisions/005-runtime-variant.md)
+* [Native runtime and MLflow evidence (ADR 006)](decisions/006-native-turn-scoped-runtime-and-evaluation.md)
 * [Reference](reference/index.md)
   * [Configuration](reference/configuration.md)
   * [Runtime Profile Matrix](reference/profile-matrix.md)
