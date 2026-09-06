@@ -10,7 +10,7 @@ The maintained Fleet client is a pi-tui TypeScript terminal application. It cons
 
 - Node and pnpm versions are defined by the workspace.
 - Use pnpm from `tools/fleet-tui/`.
-- Run the complete TUI validation lane with `make tui-check`.
+- Run the complete TUI validation lane for code changes with `make tui-check`.
 
 Do not hand-edit generated files under `src/generated/`.
 
@@ -63,6 +63,8 @@ Treat profile changes as restart-target policy unless the backend contract expli
 ## Validation
 
 For focused TypeScript changes, run the relevant workspace checks/tests.
+For changes limited to documentation or agent instructions, use the root
+documentation validation lane; no terminal launch or live backend is required.
 
 Before completing substantial TUI work, run:
 

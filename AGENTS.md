@@ -1,11 +1,8 @@
 # Fleet RLM — Agent Instructions
 
-`fleet-rlm` is an RLM-native system built around DSPy, Daytona, FastAPI,
-durable Sessions/Turns, and a maintained terminal client under
-`tools/fleet-tui/`.
+`fleet-rlm` is an RLM-native system built around DSPy, Daytona, FastAPI, durable Sessions/Turns, and a maintained terminal client under `tools/fleet-tui/`.
 
-This file defines repository-wide execution rules. `tools/fleet-tui/AGENTS.md`
-adds rules specific to the terminal client.
+This file defines repository-wide execution rules. `tools/fleet-tui/AGENTS.md` adds rules specific to the terminal client.
 
 ## Working model
 
@@ -15,25 +12,29 @@ Before changing code:
 2. Search for existing implementations, helpers, and established boundaries before introducing new abstractions.
 3. Read `ARCHITECTURE.md` when the task affects ownership, lifecycle, dependencies, domain boundaries, or cross-component behavior.
 
-Treat current code, tests, `config/fleet.toml`, dependency pins, generated-contract
-checks, and executable validation as authoritative; documentation does not override
-executable contracts.
+Treat current code, tests, `config/fleet.toml`, dependency pins, generated-contract checks, and executable validation as authoritative; documentation does not override executable contracts.
 
 ## Execution
 
-For clear, reversible tasks, inspect the relevant context and proceed; prefer the
-simplest implementation that fully satisfies the request.
-Keep changes focused and reuse existing modules. Remove obsolete or superseded code
-only when safe, verified, and directly relevant. For architectural work, keep a
-concise task list and validate meaningful stages as you go. Use `uv run` for Python
-commands and do not modify unrelated files merely to make a diff cleaner.
+- Treat action requests as instructions to implement and validate through completion or a concrete blocker. Resolve routine, reversible choices from repository evidence and user intent.
+- For simple/local tasks, act directly; avoid long plans, routine tool narration, speculative exploration, and questions that repository evidence can answer.
+- Ask only when missing information materially changes the outcome or additional authority is needed. Prepare authorized, reviewable work before asking; do not ask again for authority already granted.
+- Keep changes focused, reuse existing modules, and prefer the simplest complete implementation. Remove obsolete code only when safe, verified, and directly relevant. Do not clean up unrelated files.
+- For architectural work, keep a concise task list and validate meaningful stages. Use `uv run` for Python commands.
+- Treat follow-ups as steering unless the user cancels or replaces the task. Answer status questions briefly, then continue.
+- Delegate only when explicitly requested or required by applicable instructions; assign bounded responsibilities and preserve others' edits.
+
+## Instructions and communication
+
+- Explicit user instructions take precedence over skill guidelines, subject to system and developer instructions. Apply skills to the actual task; guidance edits do not themselves require API credentials or live calls.
+- Distinguish the coding agent's authentication/model from Fleet's runtime provider configuration. Do not change either merely because the other is discussed.
+- If a skill blocks progress, cite its exact file and instruction, explain why it applies, and state the input needed. Do not infer extra approval requirements.
+- Use concise, plain language. Lead with results and evidence; state limits. Prefer short paragraphs and useful lists; avoid repeated summaries, stock phrases, and unnecessary formatting.
 
 ## Git and external effects
 
-Preserve pre-existing staged, unstaged, and untracked changes. Do not reset, clean,
-stash, overwrite, or revert changes you did not make.
-Do not commit, amend, push, open pull requests, deploy, publish, mutate shared
-infrastructure, or perform other externally visible actions unless explicitly requested.
+Preserve pre-existing staged, unstaged, and untracked changes. Do not reset, clean, stash, overwrite, or revert changes you did not make.
+Do not commit, amend, push, open pull requests, deploy, publish, mutate shared infrastructure, or perform other externally visible actions unless explicitly requested.
 Never expose credentials, tokens, `.env` values, provider secrets, or raw infrastructure errors.
 
 ## Hard architecture invariants
@@ -68,11 +69,12 @@ When their source contract changes, regenerate them using repository commands an
 ## Validation
 
 Use the smallest validation lane that proves the change, then escalate when the affected contract requires it.
+Repeat or broaden passing checks only for new changes, failures, or unresolved concerns. Add tests for meaningful behavior or regression risks, not to restate implementation.
+For documentation or agent-instruction-only changes, run `make check-docs` and `git diff --check`. Code lanes below apply when their code or executable contracts change.
 
 ### Focused Python changes
 
-Run relevant tests and checks: `uv run pytest <relevant-tests> -q`, `uv run ruff
-check <changed-paths>`, and `uv run ruff format --check <changed-paths>`.
+Run relevant tests and checks: `uv run pytest <relevant-tests> -q`, `uv run ruff check <changed-paths>`, and `uv run ruff format --check <changed-paths>`.
 
 Run `uv run ty check src` when typed application interfaces or implementations change.
 
@@ -87,11 +89,9 @@ make api-check
 
 ### TUI
 
-For changes under `tools/fleet-tui/`:
+For code changes under `tools/fleet-tui/`:
 
-```bash
-make tui-check
-```
+Run `make tui-check`.
 
 Follow `tools/fleet-tui/AGENTS.md`.
 
