@@ -408,7 +408,7 @@ class AsyncToolBridge(Protocol):
 
     def run(self, awaitable: Any) -> Any:
         """Await one host operation on the bridge's persistent event loop."""
-        ...
+        pass
 
 
 class ToolResultSerializationError(TypeError):
