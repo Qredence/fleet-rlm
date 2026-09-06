@@ -464,3 +464,74 @@ async def test_distilled_trace_rejects_late_exploration_and_submits_existing_evi
         "wrap_up_rejection_reason": "exploration_or_additional_code",
         "wrap_up_remaining_ms": 500,
     }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "texts, reserve, expected_error",
+    [
+        (['{"reasoning":"r","code":"SUBMIT(answer=1)"}'], False, None),
+        (["", '{"reasoning":"r","code":"SUBMIT(answer=1)"}'], False, None),
+        (["", ""], False, AdapterParseError),
+        (
+            ['{"reasoning":"r","code":"print(1)"}', '{"reasoning":"r","code":"SUBMIT(answer=1)"}'],
+            True,
+            None,
+        ),
+        (["", ""], True, TimeoutError),
+    ],
+)
+async def test_sync_async_repair_policy_parity(
+    monkeypatch: pytest.MonkeyPatch,
+    texts: list[str],
+    reserve: bool,
+    expected_error: type[Exception] | None,
+) -> None:
+    monkeypatch.setattr("fleet_rlm.rlm._dspy_compat.time.monotonic", lambda: 100.0)
+    sync_lm = _ScriptedLM(texts)
+    async_lm = _ScriptedLM(texts)
+    options = {"deadline": 105.0, "wrap_up_seconds": 10.0} if reserve else {}
+    sync_adapter = FleetJSONAdapter(**options)
+    async_adapter = FleetJSONAdapter(**options)
+    inputs = {"iteration": "1/5"}
+    if expected_error is not None:
+        with pytest.raises(expected_error) as sync_error:
+            sync_adapter(sync_lm, {}, _IterationActionSignature, [], inputs)
+        with pytest.raises(expected_error) as async_error:
+            await async_adapter.acall(async_lm, {}, _IterationActionSignature, [], inputs)
+        assert str(sync_error.value) == str(async_error.value)
+    else:
+        expected = sync_adapter(sync_lm, {}, _IterationActionSignature, [], inputs)
+        actual = await async_adapter.acall(async_lm, {}, _IterationActionSignature, [], inputs)
+        assert actual == expected
+    assert async_lm.calls == sync_lm.calls
+    assert async_adapter.wrap_up_summary() == sync_adapter.wrap_up_summary()
+
+
+@pytest.mark.asyncio
+async def test_async_cancellation_closes_repair_machine_without_retry(monkeypatch: pytest.MonkeyPatch) -> None:
+    import asyncio
+
+    adapter = FleetJSONAdapter()
+    original = adapter._repair_steps
+    machines = []
+
+    def capture(*args, **kwargs):
+        machine = original(*args, **kwargs)
+        machines.append(machine)
+        return machine
+
+    calls = 0
+
+    async def cancel(*_args, **_kwargs):
+        nonlocal calls
+        calls += 1
+        raise asyncio.CancelledError
+
+    monkeypatch.setattr(adapter, "_repair_steps", capture)
+    monkeypatch.setattr(dspy.JSONAdapter, "acall", cancel)
+    with pytest.raises(asyncio.CancelledError):
+        await adapter.acall(_ScriptedLM([""]), {}, _IterationActionSignature, [], {"iteration": "1/5"})
+    assert calls == 1
+    assert len(machines) == 1
+    assert machines[0].gi_frame is None

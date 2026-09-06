@@ -11,7 +11,7 @@ import contextlib
 import json
 import logging
 import time
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Generator, Mapping, Sequence
 from copy import deepcopy
 from typing import TYPE_CHECKING, Any, TypeAlias, cast
 
@@ -391,18 +391,71 @@ class FleetJSONAdapter(dspy.JSONAdapter):
         demos: list[dict[str, Any]],
         inputs: dict[str, Any],
     ) -> list[dict[str, Any]]:
-        """
-        Execute the stock JSONAdapter pipeline with a bounded corrective re-ask.
+        """Drive the shared repair policy through the stock DSPy adapter."""
+        machine = self._repair_steps(lm, lm_kwargs, signature, inputs)
+        try:
+            request = next(machine)
+            while True:
+                call_kwargs, request_signature, request_inputs = request
+                try:
+                    response = super().__call__(lm, call_kwargs, request_signature, demos, request_inputs)
+                except (AdapterParseError, LMTimeoutError, TimeoutError) as exc:
+                    try:
+                        request = machine.throw(exc)
+                    except StopIteration as done:
+                        return done.value
+                else:
+                    try:
+                        request = machine.send(response)
+                    except StopIteration as done:
+                        return done.value
+        finally:
+            machine.close()
 
-        Parameters:
-            lm (BaseLM): The language model instance to use for generation.
-            lm_kwargs (dict[str, Any]): Additional keyword arguments for the LM call.
-            signature (type[Signature]): The DSPy signature for this call.
-            demos (list[dict[str, Any]]): Few-shot examples included in the prompt.
-            inputs (dict[str, Any]): The current input values for this call.
+    async def acall(
+        self,
+        lm: BaseLM,
+        lm_kwargs: dict[str, Any],
+        signature: type[Signature],
+        demos: list[dict[str, Any]],
+        inputs: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        """Drive the shared repair policy through the stock DSPy adapter."""
+        machine = self._repair_steps(lm, lm_kwargs, signature, inputs)
+        try:
+            request = next(machine)
+            while True:
+                call_kwargs, request_signature, request_inputs = request
+                try:
+                    response = await super().acall(lm, call_kwargs, request_signature, demos, request_inputs)
+                except (AdapterParseError, LMTimeoutError, TimeoutError) as exc:
+                    try:
+                        request = machine.throw(exc)
+                    except StopIteration as done:
+                        return done.value
+                else:
+                    try:
+                        request = machine.send(response)
+                    except StopIteration as done:
+                        return done.value
+        finally:
+            machine.close()
 
-        Returns:
-            list[dict[str, Any]]: Parsed responses keyed by the signature output fields.
+    def _repair_steps(
+        self,
+        lm: BaseLM,
+        lm_kwargs: dict[str, Any],
+        signature: type[Signature],
+        inputs: dict[str, Any],
+    ) -> Generator[
+        tuple[dict[str, Any], type[Signature], dict[str, Any]],
+        list[dict[str, Any]],
+        list[dict[str, Any]],
+    ]:
+        """Yield requests and consume responses/errors without owning provider I/O.
+
+        Both drivers close the machine on failure or cancellation. All repair,
+        reserve-transition, and finalization grammar decisions live here.
         """
         attempt = 0
         base_signature = signature
@@ -434,7 +487,7 @@ class FleetJSONAdapter(dspy.JSONAdapter):
                 action=action,
             )
             try:
-                response = super().__call__(lm, call_kwargs, request_signature, demos, request_inputs)
+                response = yield call_kwargs, request_signature, request_inputs
             except (LMTimeoutError, TimeoutError):
                 if not wrap_up and action and self._wrap_up_seconds > 0:
                     boundary_remaining = self._remaining()
@@ -504,141 +557,6 @@ class FleetJSONAdapter(dspy.JSONAdapter):
                         # wrap-up grammar. Execute it as the initial
                         # final-answer attempt instead of spending reserve
                         # time on an unnecessary re-ask.
-                        return response
-                    request_signature, request_inputs, directive_field = self._with_wrap_up_directive(
-                        request_signature,
-                        request_inputs,
-                        after_response,
-                        field_name=directive_field,
-                    )
-                if wrap_up and action and not is_submit_only_code(_action_code(response)):
-                    self._wrap_up_rejection_reason = "exploration_or_additional_code"
-                    if self._wrap_up_attempts >= 2:
-                        raise TimeoutError("wrap-up action did not submit before the Turn deadline")
-                    request_signature, request_inputs = self._with_wrap_up_correction(
-                        request_signature,
-                        request_inputs,
-                        reason="exploration or additional code",
-                    )
-                    continue
-                return response
-            return response
-
-    async def acall(
-        self,
-        lm: BaseLM,
-        lm_kwargs: dict[str, Any],
-        signature: type[Signature],
-        demos: list[dict[str, Any]],
-        inputs: dict[str, Any],
-    ) -> list[dict[str, Any]]:
-        """
-        Execute the stock JSONAdapter pipeline with a bounded corrective re-ask.
-
-        Parameters:
-            lm (BaseLM): The language model instance to use for generation.
-            lm_kwargs (dict[str, Any]): Additional keyword arguments for the LM call.
-            signature (type[Signature]): The DSPy signature for this call.
-            demos (list[dict[str, Any]]): Few-shot examples included in the prompt.
-            inputs (dict[str, Any]): The current input values for this call.
-
-        Returns:
-            list[dict[str, Any]]: Parsed responses keyed by the signature output fields.
-        """
-        attempt = 0
-        base_signature = signature
-        base_inputs = dict(inputs)
-        wrap_up = False
-        request_signature = signature
-        request_inputs = dict(inputs)
-        directive_field: str | None = None
-        while True:
-            remaining = self._remaining()
-            action = _iteration_is_action(base_inputs)
-            if action and self._wrap_up_required(base_inputs, remaining):
-                wrap_up = True
-                assert remaining is not None
-                self._enter_wrap_up(remaining)
-            if wrap_up and remaining is not None:
-                request_signature, request_inputs, directive_field = self._with_wrap_up_directive(
-                    request_signature,
-                    request_inputs,
-                    remaining,
-                    field_name=directive_field,
-                )
-                self._next_wrap_up_attempt()
-            call_kwargs = self._call_kwargs(
-                lm,
-                lm_kwargs,
-                remaining=remaining,
-                wrap_up=wrap_up,
-                action=action,
-            )
-            try:
-                response = await super().acall(lm, call_kwargs, request_signature, demos, request_inputs)
-            except (LMTimeoutError, TimeoutError):
-                if not wrap_up and action and self._wrap_up_seconds > 0:
-                    boundary_remaining = self._remaining()
-                    if boundary_remaining is not None and boundary_remaining <= self._wrap_up_seconds:
-                        wrap_up = True
-                        self._enter_wrap_up(boundary_remaining)
-                        request_signature, request_inputs, directive_field = self._with_wrap_up_directive(
-                            request_signature,
-                            request_inputs,
-                            boundary_remaining,
-                            field_name=directive_field,
-                        )
-                        continue
-                raise
-            except AdapterParseError as exc:
-                if wrap_up:
-                    if self._wrap_up_attempts >= 2:
-                        raise TimeoutError("wrap-up action was not parseable before the Turn deadline") from exc
-                    self._wrap_up_rejection_reason = "unparseable_json"
-                    request_signature, request_inputs = self._with_wrap_up_correction(
-                        request_signature,
-                        request_inputs,
-                        reason="unparseable JSON",
-                    )
-                    continue
-                if action and self._wrap_up_seconds > 0:
-                    # Keep parse corrections that cross the reserve boundary
-                    # inside the same two-attempt wrap-up budget as action
-                    # corrections.
-                    boundary_remaining = self._remaining()
-                    if boundary_remaining is not None and boundary_remaining <= self._wrap_up_seconds:
-                        wrap_up = True
-                        self._enter_wrap_up(boundary_remaining, rejection_reason="unparseable_json")
-                        self._next_wrap_up_attempt()
-                        request_signature, request_inputs, directive_field = self._with_wrap_up_directive(
-                            request_signature,
-                            request_inputs,
-                            boundary_remaining,
-                            field_name=directive_field,
-                        )
-                        request_signature, request_inputs = self._with_wrap_up_correction(
-                            request_signature,
-                            request_inputs,
-                            reason="unparseable JSON",
-                        )
-                        continue
-                if attempt >= self._max_parse_retries:
-                    raise
-                attempt += 1
-                request_signature, request_inputs = _retry_call_arguments(
-                    base_signature,
-                    base_inputs,
-                    attempt,
-                    exc,
-                )
-                continue
-            if remaining is not None:
-                after_response = self._remaining()
-                if not wrap_up and action and after_response is not None and after_response <= self._wrap_up_seconds:
-                    wrap_up = True
-                    self._enter_wrap_up(after_response)
-                    self._next_wrap_up_attempt()
-                    if is_submit_only_code(_action_code(response)):
                         return response
                     request_signature, request_inputs, directive_field = self._with_wrap_up_directive(
                         request_signature,
