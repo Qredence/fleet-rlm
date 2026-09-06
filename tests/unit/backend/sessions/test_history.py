@@ -381,6 +381,15 @@ async def test_sql_store_level_cross_session_history_isolation(tmp_path) -> None
         store = SqlAlchemyRunStateStore(factory)
 
         async def commit(session_id: object, request: str, answer: str, key: str) -> None:
+            """
+            Commit a successful answer for a session.
+            
+            Parameters:
+                session_id (object): Identifier of the session receiving the committed turn.
+                request (str): User request associated with the turn.
+                answer (str): Final answer text for the turn.
+                key (str): Key used to claim the turn.
+            """
             claimed = await store.begin(RunClaim(access, session_id, TurnInput(request), key, uuid4()))
             assert isinstance(claimed, ClaimedRun)
             await store.commit(

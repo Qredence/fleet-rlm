@@ -16,6 +16,11 @@ depends_on = None
 
 
 def upgrade() -> None:
+    """Enforce matching run and session references for all turns.
+    
+    Raises:
+        RuntimeError: If any turn lacks a run with the same ID and session ID.
+    """
     connection = op.get_bind()
     if connection.dialect.name == "postgresql":
         connection.execute(sa.text("LOCK TABLE fleet_runs, fleet_turns IN SHARE ROW EXCLUSIVE MODE"))
@@ -42,6 +47,9 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    """
+    Remove the composite turn-to-run foreign key and its supporting unique index.
+    """
     with op.batch_alter_table("fleet_turns") as batch:
         batch.drop_constraint("fk_fleet_turns_run_session", type_="foreignkey")
     op.drop_index("uq_fleet_runs_id_session", table_name="fleet_runs")

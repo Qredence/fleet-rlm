@@ -10,6 +10,16 @@ from sqlalchemy.exc import IntegrityError
 
 
 def _database(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """
+    Configure a temporary SQLite database and apply the baseline migration.
+    
+    Parameters:
+    	tmp_path (Path): Temporary directory in which to create the database.
+    	monkeypatch (pytest.MonkeyPatch): Fixture used to set the database URL environment variable.
+    
+    Returns:
+    	tuple: The Alembic configuration and SQLAlchemy engine for the database.
+    """
     url = f"sqlite:///{tmp_path / 'lineage.db'}"
     monkeypatch.setenv("FLEET_DATABASE_URL", url)
     config = Config("alembic.ini")
@@ -18,6 +28,9 @@ def _database(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 
 
 def _seed(connection) -> None:
+    """
+    Populate the database with a user, workspace, two active sessions, and a running session-associated run.
+    """
     connection.execute(text("INSERT INTO fleet_users (id) VALUES ('u')"))
     connection.execute(text("INSERT INTO fleet_workspaces (id, name) VALUES ('w', 'test')"))
     for session in ("s1", "s2"):
@@ -39,6 +52,14 @@ def _seed(connection) -> None:
 
 
 def _turn(connection, session: str, run: str = "r") -> None:
+    """
+    Insert a user turn associated with a session and run.
+    
+    Parameters:
+    	connection: Database connection used to execute the insert.
+    	session: Identifier of the session associated with the turn.
+    	run: Identifier of the run associated with the turn.
+    """
     connection.execute(
         text(
             "INSERT INTO fleet_turns (id,session_id,run_id,sequence,role,user_input_json) "
@@ -66,6 +87,7 @@ def test_upgrade_rejects_dirty_lineage_before_ddl(tmp_path, monkeypatch, session
 
 
 def test_upgrade_enforces_immediate_lineage_and_downgrade_preserves_rows(tmp_path, monkeypatch):
+    """Verify lineage enforcement after upgrade and row preservation after downgrade."""
     config, engine = _database(tmp_path, monkeypatch)
     try:
         with engine.begin() as connection:

@@ -23,6 +23,12 @@ class BudgetDimension(StrEnum):
 
 class TurnBudgetExhausted(RuntimeError):  # noqa: N818 - domain exhaustion category
     def __init__(self, dimension: BudgetDimension) -> None:
+        """
+        Initialize an exception identifying the exhausted turn-budget dimension.
+        
+        Parameters:
+        	dimension (BudgetDimension): The budget dimension that has been exhausted.
+        """
         self.dimension = dimension
         super().__init__(f"Turn budget exhausted: {dimension.value}")
 
@@ -41,6 +47,14 @@ class BudgetLimits:
     finalization_seconds: float = 0.0
 
     def __post_init__(self) -> None:
+        """
+        Validate budget limits and finalization configuration.
+        
+        Raises:
+            ValueError: If a count limit is not a nonnegative integer, finalization
+                seconds is not finite and nonnegative, or finalization attempts exceed
+                the provider-attempt limit.
+        """
         for value in (
             self.provider_attempts,
             self.tool_calls,
@@ -75,6 +89,16 @@ class TurnBudget:
     """
 
     def __init__(self, *, deadline: float | None, limits: BudgetLimits | None = None) -> None:
+        """
+        Initialize a turn budget with an optional deadline and resource limits.
+        
+        Parameters:
+            deadline (float | None): Finite absolute deadline, or None for no deadline.
+            limits (BudgetLimits | None): Resource and finalization limits for the turn.
+        
+        Raises:
+            ValueError: If deadline is not a finite number or None.
+        """
         if deadline is not None and (
             not isinstance(deadline, (int, float)) or isinstance(deadline, bool) or not math.isfinite(deadline)
         ):
@@ -99,7 +123,21 @@ class TurnBudget:
         *,
         finalization: bool = False,
     ) -> float:
-        """Debit atomically and return remaining time for the admitted operation."""
+        """
+        Atomically admit an operation against a budget dimension and report its remaining time.
+        
+        Parameters:
+            dimension (BudgetDimension): Resource dimension to charge.
+            count (int): Amount to charge.
+            finalization (bool): Whether the provider-attempt reservation uses finalization capacity.
+        
+        Returns:
+            float: Time remaining for the admitted operation.
+        
+        Raises:
+            ValueError: If the dimension is not reservable or count is not a nonnegative integer.
+            TurnBudgetExhausted: If the reservation exceeds a budget limit or available deadline.
+        """
         if dimension not in self._used:
             raise ValueError("dimension is not a reservable counter")
         if type(count) is not int or count < 0:
@@ -123,6 +161,18 @@ class TurnBudget:
             return remaining
 
     def _remaining(self, *, finalization: bool) -> float:
+        """
+        Calculate the time available for an operation.
+        
+        Parameters:
+            finalization (bool): Whether the operation is a finalization attempt.
+        
+        Returns:
+            float: Available time in seconds.
+        
+        Raises:
+            TurnBudgetExhausted: If the budget is settled or the available time is exhausted.
+        """
         if self._settled:
             raise TurnBudgetExhausted(BudgetDimension.SETTLED)
         remaining = math.inf if self.deadline is None else self.deadline - time.monotonic()
@@ -133,11 +183,29 @@ class TurnBudget:
         return remaining
 
     def remaining(self, *, finalization: bool = False) -> float:
+        """
+        Determine the time available for an operation.
+        
+        Parameters:
+            finalization (bool): Whether the operation is a finalization attempt.
+        
+        Returns:
+            float: Available seconds for the operation.
+        """
         with self._lock:
             return self._remaining(finalization=finalization)
 
     def reclassify_finalization(self, count: int = 1) -> None:
-        """Consume finalization capacity for an already-admitted response."""
+        """
+        Consume finalization capacity for an already-admitted response.
+        
+        Parameters:
+        	count (int): Number of finalization attempts to consume.
+        
+        Raises:
+        	ValueError: If count is not a nonnegative integer.
+        	TurnBudgetExhausted: If the deadline or finalization-attempt limit is exhausted.
+        """
         if type(count) is not int or count < 0:
             raise ValueError("reclassification count must be a nonnegative integer")
         with self._lock:
@@ -148,7 +216,13 @@ class TurnBudget:
             self._finalization_attempts += count
 
     def exploration_exhausted(self) -> bool:
-        """Whether an explicit provider reserve has fenced further exploration."""
+        """
+        Determine whether provider exploration has exhausted its available capacity.
+        
+        Returns:
+            bool: `True` if the provider-attempt limit or exploration capacity before the
+                finalization reserve has been reached, `False` otherwise.
+        """
         with self._lock:
             limit = self.limits.provider_attempts
             finalization_reserve = self.limits.finalization_attempts or 0
@@ -158,6 +232,12 @@ class TurnBudget:
             )
 
     def snapshot(self) -> dict[str, int]:
+        """
+        Return the current usage counts for each tracked budget dimension.
+        
+        Returns:
+        	dict[str, int]: A mapping from budget dimension names to their consumed counts.
+        """
         with self._lock:
             return {dimension.value: count for dimension, count in self._used.items()}
 
@@ -185,6 +265,19 @@ class AdapterBudget:
         turn: TurnBudget | None = None,
     ) -> None:
         # Existing preparation-only seams use +inf for an unbounded invocation.
+        """
+        Initialize invocation-local budget and finalization policies.
+        
+        Parameters:
+            deadline (float | None): Absolute deadline for the invocation; positive infinity means unbounded.
+            reserve_seconds (float): Time reserved for finalization.
+            max_parse_retries (int): Maximum number of parse-repair retries.
+            max_finalization_attempts (int): Maximum number of finalization attempts.
+            turn (TurnBudget | None): Shared turn budget, or a new budget when omitted.
+        
+        Raises:
+            ValueError: If a numeric limit is invalid, negative, non-finite where prohibited, or not an integer where required.
+        """
         if deadline == math.inf:
             deadline = None
         if deadline is not None and (
@@ -213,6 +306,15 @@ class AdapterBudget:
         self._lock = Lock()
 
     def remaining(self) -> float | None:
+        """
+        Determine the time remaining for the current invocation.
+        
+        Returns:
+            float | None: Available time in seconds, or `None` when the deadline is unbounded.
+        
+        Raises:
+            TimeoutError: If the turn or invocation deadline has expired.
+        """
         try:
             remaining = self.turn.remaining(finalization=True)
         except TurnBudgetExhausted as exc:
@@ -226,28 +328,61 @@ class AdapterBudget:
         return remaining if math.isfinite(remaining) else None
 
     def can_repair(self, retries: int) -> bool:
+        """Determine whether another parse-repair attempt is allowed.
+        
+        Parameters:
+        	retries (int): Number of parse-repair attempts already used.
+        
+        Returns:
+        	bool: `true` if another repair attempt is allowed, `false` otherwise.
+        """
         return retries < self.max_parse_retries
 
     @property
     def finalization_used(self) -> int:
+        """Report the number of finalization attempts used by this invocation.
+        
+        Returns:
+        	int: The number of finalization attempts consumed.
+        """
         with self._lock:
             return self._finalization_used
 
     def can_finalize(self) -> bool:
+        """Determine whether another finalization attempt is available.
+        
+        Returns:
+        	bool: `true` if the finalization limit has not been reached, `false` otherwise.
+        """
         return self.finalization_used < self.max_finalization_attempts
 
     def _check_finalization(self) -> None:
+        """Raise ``TimeoutError`` when the local finalization-attempt limit is exhausted."""
         if self._finalization_used >= self.max_finalization_attempts:
             raise TimeoutError("wrap-up action did not submit before the Turn deadline")
 
     def reclassify_late_response(self) -> None:
-        """Count a late admitted response as finalization, without double debit."""
+        """Reclassify a previously admitted response as a finalization attempt without charging another provider attempt."""
         with self._lock:
             self._check_finalization()
             self.turn.reclassify_finalization()
             self._finalization_used += 1
 
     def reserve_provider(self, *, action: bool, wrap_up: bool, can_finalize: bool) -> float:
+        """
+        Reserve a provider attempt for an action or finalization call.
+        
+        Parameters:
+            action (bool): Whether the call performs an action.
+            wrap_up (bool): Whether the call is a wrap-up finalization call.
+            can_finalize (bool): Whether the call may use finalization capacity.
+        
+        Returns:
+            float: The time available for the admitted provider call.
+        
+        Raises:
+            TimeoutError: If the available time is exhausted.
+        """
         with self._lock:
             if wrap_up:
                 self._check_finalization()
@@ -276,4 +411,9 @@ class ProviderAdmission:
     can_finalize: bool
 
     def reserve(self) -> float:
+        """Reserve admission for the provider call.
+        
+        Returns:
+        	float: The remaining time available for the call.
+        """
         return self.budget.reserve_provider(action=self.action, wrap_up=self.wrap_up, can_finalize=self.can_finalize)

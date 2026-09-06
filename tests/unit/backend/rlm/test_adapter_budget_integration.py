@@ -18,6 +18,15 @@ GOOD = '{"reasoning":"done","code":"SUBMIT(answer=1)"}'
 
 
 async def invoke(adapter, lm, asynchronous):
+    """
+    Execute a standard scripted request through the adapter.
+    
+    Parameters:
+    	asynchronous (bool): Whether to use the adapter's asynchronous call interface.
+    
+    Returns:
+    	The adapter's response.
+    """
     args = (lm, {}, _IterationActionSignature, [], {"iteration": "1/3"})
     return await adapter.acall(*args) if asynchronous else adapter(*args)
 
@@ -48,10 +57,22 @@ async def test_schema_fallback_cannot_bypass_global_admission(asynchronous: bool
     class StructuredLM(_ScriptedLM):
         @property
         def supported_params(self):
+            """
+            Identify the parameters supported by the adapter.
+            
+            Returns:
+            	set[str]: The supported parameter names.
+            """
             return {"response_format"}
 
         @property
         def supports_response_schema(self):
+            """
+            Indicate that response schemas are supported.
+            
+            Returns:
+                bool: `True` because response schemas are supported.
+            """
             return True
 
     source = StructuredLM(["", GOOD])
@@ -165,6 +186,16 @@ async def test_real_lm_template_is_copied_without_mutating_retries_or_history(mo
     seen = []
 
     def forward(instance, **kwargs):
+        """
+        Record a model invocation and return a successful completion response.
+        
+        Parameters:
+        	instance: Request object containing the model name.
+        	**kwargs: Additional invocation arguments.
+        
+        Returns:
+        	A completion response containing the configured content, token usage, and model name.
+        """
         seen.append((instance, kwargs))
         return SimpleNamespace(
             choices=[SimpleNamespace(message=SimpleNamespace(content=GOOD, tool_calls=None))],
@@ -173,6 +204,12 @@ async def test_real_lm_template_is_copied_without_mutating_retries_or_history(mo
         )
 
     async def aforward(instance, **kwargs):
+        """
+        Execute the adapter operation for an instance.
+        
+        Returns:
+            The operation result.
+        """
         return forward(instance, **kwargs)
 
     monkeypatch.setattr(dspy.LM, "forward", forward)
@@ -196,10 +233,22 @@ async def test_schema_fallback_consumes_finalization_ceiling(asynchronous) -> No
     class StructuredLM(_ScriptedLM):
         @property
         def supported_params(self):
+            """
+            Identify the parameters supported by the adapter.
+            
+            Returns:
+            	set[str]: The supported parameter names.
+            """
             return {"response_format"}
 
         @property
         def supports_response_schema(self):
+            """
+            Indicate that response schemas are supported.
+            
+            Returns:
+                bool: `True` because response schemas are supported.
+            """
             return True
 
     source = StructuredLM(["", "", GOOD])
@@ -274,6 +323,12 @@ def test_concurrent_finalization_admissions_do_not_overdraw():
     scope = AdapterBudget(deadline=time.monotonic() + 10)
 
     def attempt(_):
+        """
+        Attempts to reserve provider and finalization capacity for the current scope.
+        
+        Returns:
+            `true` if capacity is reserved successfully, `false` if the reservation times out.
+        """
         try:
             scope.reserve_provider(action=True, wrap_up=True, can_finalize=True)
             return True

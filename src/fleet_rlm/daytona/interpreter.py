@@ -511,6 +511,17 @@ class DaytonaCodeInterpreter:
         execution_output_cap: int = DEFAULT_EXECUTION_OUTPUT_CHARS,
         max_code_chars: int = DEFAULT_INTERMEDIATE_CODE_CHARS,
     ) -> None:
+        """Initialize the interpreter with its backend, tools, output configuration, callbacks, and execution limits.
+        
+        Parameters:
+            backend (InterpreterBackend | None): Backend used to execute code.
+            tools (Mapping[str, Callable[..., Any]] | None): Host tools available to executed code.
+            output_fields (list[dict[str, Any]] | None): Metadata describing fields accepted in submitted final output.
+            callbacks (list[BaseCallback] | None): Optional callbacks for execution lifecycle events.
+            broker_port (int): Port used by the HTTP tool broker.
+            execution_output_cap (int): Maximum captured output size per execution.
+            max_code_chars (int): Maximum permitted size of submitted code.
+        """
         self._backend = backend
         # DSPy 3.3.1's callback contract is opt-in and engineering-only.
         # Fleet Runtime Events and manual spans remain the product/trace
@@ -572,12 +583,24 @@ class DaytonaCodeInterpreter:
         return copy_output_fields(self._output_fields)
 
     def bind_output_contract(self, contract: FleetOutputContract) -> None:
+        """
+        Bind an output contract and update the interpreter's output field metadata.
+        
+        Parameters:
+        	contract (FleetOutputContract): Contract defining the interpreter's output fields.
+        """
         self._ensure_binding_mutation_allowed()
         self._fleet_output_contract = contract
         self.output_fields = [{"name": field.name} for field in contract.fields]
 
     @output_fields.setter
     def output_fields(self, value: list[dict[str, Any]] | None) -> None:
+        """
+        Configure the output field metadata used for final-output submission.
+        
+        Parameters:
+        	value (list[dict[str, Any]] | None): Output field definitions, or `None` to clear them.
+        """
         self._ensure_binding_mutation_allowed()
         copied = copy_output_fields(value)
         if copied is not None and self._fleet_output_contract is not None:
@@ -690,7 +713,13 @@ class DaytonaCodeInterpreter:
         self._started = True
 
     def bind_observer(self, observer: ObservationObserver | None, *, max_chars: int = 10_000) -> None:
-        """Bind one run-local observer without changing interpreter execution semantics."""
+        """
+        Bind a run-local observer and configure the maximum size of observation details.
+        
+        Parameters:
+            observer: Observer that receives observation events, or ``None`` to disable observation.
+            max_chars: Maximum number of characters retained for each observation detail.
+        """
         self._ensure_binding_mutation_allowed()
         normalized_max_chars = max(1, int(max_chars))
         if self._observer is not observer or self._observation_max_chars != normalized_max_chars:
@@ -702,13 +731,26 @@ class DaytonaCodeInterpreter:
         self._no_progress_repair_used = False
 
     def bind_turn_budget(self, budget: TurnBudget | None) -> None:
-        """Bind the current Turn's shared admission ledger before execution."""
+        """
+        Bind or clear the shared budget ledger for the current turn.
+        
+        Parameters:
+        	budget (TurnBudget | None): The turn budget to use, or None to clear the binding.
+        """
         self._ensure_binding_mutation_allowed()
         self._turn_budget = budget
         self._output_budget_exhausted = False
 
     def bind_context_capsule(self, capsule: Any) -> None:
-        """Bind one host-created context capsule before DSPy starts the RLM."""
+        """
+        Bind and validate the host-created context capsule used for execution.
+        
+        Parameters:
+        	capsule (Any): Context capsule containing the sandbox manifest and trusted mount root.
+        
+        Raises:
+        	DaytonaAdapterError: If the capsule is invalid or conflicts with an existing context binding.
+        """
         from fleet_rlm.rlm.program import AttachmentContextCapsule
 
         if not isinstance(capsule, AttachmentContextCapsule):
@@ -737,6 +779,15 @@ class DaytonaCodeInterpreter:
         self._context_binding = binding
 
     def _observe(self, detail: StepStarted | RLMCode | RLMOutput | StepFinished) -> None:
+        """
+        Process an observation detail and forward it to the configured observer.
+        
+        Parameters:
+        	detail: Observation event to process.
+        
+        Raises:
+        	TurnBudgetExhausted: If the output detail exceeds the remaining execution-output budget.
+        """
         if isinstance(detail, RLMOutput) and detail.output and self._turn_budget is not None:
             if self._output_budget_exhausted:
                 return
@@ -826,20 +877,21 @@ class DaytonaCodeInterpreter:
 
     def _execute_once(self, code: str, variables: dict[str, Any] | None = None) -> Any:
         """
-        Execute one code step in the configured interpreter.
-
+        Execute one code step in the configured interpreter and process its result.
+        
         Parameters:
             code (str): Python code to execute.
             variables (dict[str, Any] | None): Variables to make available during execution.
-
+        
         Returns:
-            Any: The submitted final value or bounded ordinary execution output.
-
+            Any: The submitted final value or bounded execution output.
+        
         Raises:
             CodeExecutionError: If execution produces a recoverable error.
             CodeInterpreterError: If execution cannot safely continue.
             DaytonaAdapterError: If the interpreter is unavailable, misconfigured, shut down, or the provider fails.
             RunTerminalError: If repeated execution makes no progress.
+            TurnBudgetExhausted: If the turn budget cannot cover the execution output.
         """
         if self._shutdown:
             msg = "interpreter already shut down"

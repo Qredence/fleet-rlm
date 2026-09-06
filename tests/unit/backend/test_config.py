@@ -258,6 +258,12 @@ def test_removed_databricks_daytona_profile_is_rejected(monkeypatch: pytest.Monk
 
 
 def _policy(path: Path) -> None:
+    """
+    Write a minimal runtime policy to the specified path for isolated tests.
+    
+    Parameters:
+    	path (Path): Destination file for the temporary TOML policy.
+    """
     path.write_text(
         """
 [config]

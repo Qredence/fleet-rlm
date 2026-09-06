@@ -141,6 +141,7 @@ async def test_deadline_proxy_async_retry_preserves_attempt_timeout():
             return copied
 
         async def aforward(self, **kwargs):
+            """Execute the forward operation asynchronously and return its result."""
             return self.forward(**kwargs)
 
     source = AsyncLM([LMServerError("retry")])
@@ -166,11 +167,22 @@ async def test_deadline_proxy_preserves_dspy_sync_async_usage_and_callbacks():
             self.starts = []
 
         def on_lm_start(self, call_id, instance, inputs):
+            """
+            Record the model associated with a language-model invocation.
+            
+            Parameters:
+                instance: The language-model instance whose model name is recorded.
+            """
             del call_id, inputs
             self.starts.append(instance.model)
 
     class ScriptLM(dspy.BaseLM):
         def forward(self, prompt=None, messages=None, **kwargs):
+            """Generate a fixed successful language-model response.
+            
+            Returns:
+                A response containing ``"ok"`` and fixed token usage statistics.
+            """
             del prompt, messages, kwargs
             return SimpleNamespace(
                 model=self.model,
@@ -179,6 +191,16 @@ async def test_deadline_proxy_preserves_dspy_sync_async_usage_and_callbacks():
             )
 
         async def aforward(self, prompt=None, messages=None, **kwargs):
+            """
+            Process a prompt or message sequence.
+            
+            Parameters:
+                prompt: Optional prompt to process.
+                messages: Optional sequence of messages to process.
+            
+            Returns:
+                The model response.
+            """
             return self.forward(prompt, messages, **kwargs)
 
     callback = Callback()
@@ -250,6 +272,12 @@ def test_provider_retries_recompute_remaining_and_non_retryable_errors_stop(
     ticks = [100.0, 100.0, 101.0, 101.0]
 
     def clock() -> float:
+        """
+        Return the next scripted clock value.
+        
+        Returns:
+        	float: The next value from `ticks`, or `102.0` when no scripted values remain.
+        """
         return ticks.pop(0) if ticks else 102.0
 
     monkeypatch.setattr("fleet_rlm.rlm.program.time.monotonic", clock)

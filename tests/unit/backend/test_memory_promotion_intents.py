@@ -108,6 +108,12 @@ def test_builder_fails_closed_on_bounds_and_policy() -> None:
 
 
 async def _seed_store():
+    """
+    Prepare an isolated in-memory persistence store with seeded user, workspace, session, and run records.
+    
+    Returns:
+        tuple: The database engine, session factory, run state store, and newly started run.
+    """
     from fleet_rlm.chat.run_lifecycle import RunClaim
     from fleet_rlm.persistence.database import (
         create_async_engine_from_url,

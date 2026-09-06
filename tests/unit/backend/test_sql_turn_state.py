@@ -269,6 +269,11 @@ async def test_sql_terminal_replay_and_transition_require_session_scope() -> Non
 
 @pytest.mark.asyncio
 async def test_sql_state_replaces_a_stale_claim_after_recovery() -> None:
+    """
+    Verifies that a stale claim is recovered as failed and a replacement claim can be created.
+    
+    The recovered run retains the `stale_claim` failure code and has its claim ownership and heartbeat cleared.
+    """
     from fleet_rlm.chat.run_lifecycle import ClaimedRun, RunClaim
     from fleet_rlm.persistence.database import create_async_engine_from_url, create_session_factory, create_tables
     from fleet_rlm.persistence.models import RunRow, SessionRow, UserRow, WorkspaceRow
@@ -752,6 +757,7 @@ async def test_concurrent_recovery_workers_fence_a_run_once() -> None:
 
 @pytest.mark.asyncio
 async def test_sql_cancelled_settlement_persists_bounded_tombstone_rows() -> None:
+    """Verify that cancelled turn settlement creates bounded tombstone rows and remains outside live idempotency replay."""
     from sqlalchemy import select
 
     from fleet_rlm.chat.run_lifecycle import ClaimedRun, RunClaim, RunFailure, RunLifecycleService
@@ -874,6 +880,16 @@ async def test_sql_racing_begins_fence_one_claimant() -> None:
         store = SqlAlchemyRunStateStore(factory, stale_after_seconds=30)
 
         async def begin(run_id, key: str):
+            """
+            Begin a turn for the configured session.
+            
+            Parameters:
+                run_id: Identifier of the run to claim.
+                key (str): Key identifying the turn request.
+            
+            Returns:
+                The result of the turn-claim operation.
+            """
             return await store.begin(RunClaim(access, session_id, TurnInput(f"turn-{key}"), key, run_id))
 
         results = await asyncio.gather(

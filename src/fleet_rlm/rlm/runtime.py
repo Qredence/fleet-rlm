@@ -496,10 +496,11 @@ class RunToolGuards:
         return self.progress.completed(tool_name, arguments, result)
 
     def failed(self, tool_name: str, arguments: Mapping[str, Any]) -> None:
+        """Record that a tool operation failed without resolving its workspace obligation."""
         self.integrity.failed(tool_name, arguments)
 
     def reserve_tool(self) -> None:
-        """Admit one host Tool call against the Turn-wide ledger."""
+        """Reserve capacity for one tool call in the turn budget."""
         if self.budget is not None:
             self.budget.reserve(BudgetDimension.TOOL_CALLS)
 
@@ -1457,7 +1458,20 @@ class RLMRunner:
         RecursiveRLMExecutor | None,
         SessionRuntimeLease,
     ]:
-        """Acquire the Session lane, bind current Tools, and start one worker."""
+        """
+        Acquire and prepare the session runtime, bind turn-specific tools and context, and start the RLM worker.
+        
+        Parameters:
+            context (RLMExecutionContext): Execution identity, session data, capabilities, and runtime configuration.
+            ownership (WorkerOwnership): Ownership state for the worker and its blocking resources.
+            observations (ObservationSession): Session used to publish worker and capability events.
+        
+        Returns:
+            tuple: The execution specification, tool guards, worker handle, optional recursive executor, and session runtime lease.
+        
+        Raises:
+            RLMConfigError: If recursive execution is enabled without a child runtime or the session tool registry is unavailable.
+        """
         spec = context.capabilities.spec
         guards = RunToolGuards(
             required_targets=workspace_obligations(context.session.request),

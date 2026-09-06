@@ -407,7 +407,15 @@ class AsyncToolBridge(Protocol):
     """Composition-owned bridge for awaiting async host Tools from DSPy sync code."""
 
     def run(self, awaitable: Any) -> Any:
-        """Await one host operation on the bridge's persistent event loop."""
+        """
+        Run a host operation through the asynchronous bridge.
+        
+        Parameters:
+            awaitable (Any): The awaitable host operation to execute.
+        
+        Returns:
+            Any: The operation's result.
+        """
         pass
 
 
@@ -510,6 +518,23 @@ def _validate_tool_arguments(
     event_view: ToolEventView,
     trace: _ToolTrace,
 ) -> dict[str, Any]:
+    """
+    Validate tool arguments and report validation failures.
+    
+    Parameters:
+        validator (dspy.Tool): Tool used to validate the arguments.
+        arguments (Mapping[str, Any]): Arguments supplied to the tool.
+        source (dspy.Tool): Original tool being invoked.
+        observer (ToolObserver): Callback for tool lifecycle events.
+        event_view (ToolEventView): View used to create failure details.
+        trace (_ToolTrace): Trace for the current tool call.
+    
+    Returns:
+        dict[str, Any]: Validated tool arguments.
+    
+    Raises:
+        Exception: Re-raises the validation exception.
+    """
     try:
         return validator(**arguments)
     except Exception:
@@ -519,13 +544,18 @@ def _validate_tool_arguments(
 
 
 def _resolve_awaitable_result(result: Any, *, async_bridge: AsyncToolBridge | None = None) -> Any:
-    """Resolve an async host Tool through the composition-owned async bridge.
-
-    Native DSPy invokes interpreter Tools synchronously.  Outside an event loop
-    the credential-free direct path can own a short-lived loop; while DSPy is
-    running on a loop, the host operation must be submitted to the persistent
-    composition loop.  Creating a private loop/thread per Tool would break
-    loop-affine host resources and leak work past the Turn ownership boundary.
+    """
+    Resolve an awaitable tool result using the available asynchronous execution context.
+    
+    Parameters:
+        result (Any): The synchronous value or awaitable result to resolve.
+        async_bridge (AsyncToolBridge | None): Bridge used when resolution occurs inside a running event loop.
+    
+    Returns:
+        Any: The resolved value, or the original value when it is not awaitable.
+    
+    Raises:
+        RuntimeError: If an awaitable is resolved inside a running event loop without an async bridge.
     """
     if not inspect.isawaitable(result):
         return result
@@ -557,6 +587,27 @@ def _execute_observed_tool(
     guards: RunToolGuards | None,
     async_bridge: AsyncToolBridge | None,
 ) -> Any:
+    """
+    Execute a validated tool call and report its result or failure.
+    
+    Parameters:
+    	source (dspy.Tool): Tool to execute.
+    	validated (Mapping[str, Any]): Arguments validated for invocation.
+    	arguments (Mapping[str, Any]): Original tool arguments used for failure reporting.
+    	observer (ToolObserver): Callback for reporting tool failures.
+    	event_view (ToolEventView): View used to create failure event details.
+    	trace (_ToolTrace): Trace for the tool invocation.
+    	after_result (ToolAfterResult | None): Optional callback invoked with a successful result.
+    	guards (RunToolGuards | None): Optional guards governing tool execution.
+    	async_bridge (AsyncToolBridge | None): Optional bridge for resolving asynchronous results.
+    
+    Returns:
+    	Any: The tool's JSON-serializable result.
+    
+    Raises:
+    	ToolResultSerializationError: If the result cannot be serialized as JSON.
+    	Exception: Propagates exceptions raised during execution or result handling.
+    """
     try:
         if guards is not None:
             guards.reserve_tool()
@@ -615,6 +666,15 @@ def _run_observed_tool(
     args: tuple[Any, ...],
     kwargs: Mapping[str, Any],
 ) -> Any:
+    """
+    Execute an observed tool call and report its lifecycle events.
+    
+    Parameters:
+        async_bridge: Optional bridge used to resolve asynchronous tool results.
+    
+    Returns:
+        The tool's result.
+    """
     trace = _ToolTrace(source, str(uuid4()))
     _reject_unauthorized(source, observer, event_view, trace, is_authorized)
     arguments = _bind_tool_arguments(signature, args, kwargs, source, observer, event_view, trace)
@@ -667,7 +727,18 @@ def observe_tool(
     guards: RunToolGuards | None = None,
     async_bridge: AsyncToolBridge | None = None,
 ) -> dspy.Tool:
-    """Return a fresh Tool whose extracted ``func`` preserves DSPy validation."""
+    """Create a DSPy tool that observes calls to the source tool.
+    
+    Parameters:
+        tool (dspy.Tool): Source tool whose calls are observed.
+        async_bridge (AsyncToolBridge | None): Bridge used to resolve awaitable results when an event loop is already running.
+    
+    Returns:
+        dspy.Tool: A wrapped tool that preserves the source tool's metadata and validation contract.
+    
+    Raises:
+        TypeError: If `tool` is not a `dspy.Tool`.
+    """
     if not isinstance(tool, dspy.Tool):
         raise TypeError("observe_tool requires a dspy.Tool")
     source = tool
@@ -676,6 +747,9 @@ def observe_tool(
 
     @wraps(source.func)
     def wrapped(*args: Any, **kwargs: Any) -> Any:
+        """
+        Execute the wrapped tool with lifecycle observation and return its result.
+        """
         return _run_observed_tool(
             source,
             signature,

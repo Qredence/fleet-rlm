@@ -296,6 +296,15 @@ def test_wrap_up_rejects_non_submit_actions_after_one_correction(bad_code: str) 
 def _advance_after_provider(
     monkeypatch: pytest.MonkeyPatch, lm: _ScriptedLM, *, start: float, after: list[float]
 ) -> None:
+    """
+    Advance the mocked clock after each scripted language-model call.
+    
+    Parameters:
+        monkeypatch (pytest.MonkeyPatch): Fixture used to apply temporary patches.
+        lm (_ScriptedLM): Scripted language model whose forward method is wrapped.
+        start (float): Initial monotonic clock value.
+        after (list[float]): Successive clock values applied after provider calls.
+    """
     now = [start]
     remaining = iter(after)
     original = lm.forward
@@ -311,6 +320,7 @@ def _advance_after_provider(
 
 
 def test_late_normal_response_is_reclassified_before_action_execution(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify that a late provider response is reclassified for wrap-up before action execution."""
     lm = _ScriptedLM(
         [
             '{"reasoning": "keep exploring", "code": "answer = tool()"}',
@@ -458,6 +468,12 @@ async def test_distilled_trace_rejects_late_exploration_and_submits_existing_evi
     original = adapter.acall
 
     async def advance_after_action(*args, **kwargs):
+        """
+        Run the wrapped action and advance the mocked clock after it completes.
+        
+        Returns:
+            The result produced by the wrapped action.
+        """
         result = await original(*args, **kwargs)
         now[0] = 9.5
         return result
@@ -539,6 +555,15 @@ async def test_async_cancellation_closes_repair_machine_without_retry(monkeypatc
     machines = []
 
     def capture(*args, **kwargs):
+        """Create and record a machine produced by the original factory.
+        
+        Parameters:
+        	*args: Positional arguments forwarded to the original factory.
+        	**kwargs: Keyword arguments forwarded to the original factory.
+        
+        Returns:
+        	The created machine.
+        """
         machine = original(*args, **kwargs)
         machines.append(machine)
         return machine
@@ -546,6 +571,7 @@ async def test_async_cancellation_closes_repair_machine_without_retry(monkeypatc
     calls = 0
 
     async def cancel(*_args, **_kwargs):
+        """Raise asyncio.CancelledError and record the cancellation attempt."""
         nonlocal calls
         calls += 1
         raise asyncio.CancelledError

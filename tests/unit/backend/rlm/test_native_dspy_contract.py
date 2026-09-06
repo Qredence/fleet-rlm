@@ -355,6 +355,7 @@ async def test_native_rlm_callback_observes_completed_action_without_altering_pr
             return None
 
         def execute(self, code: str, variables: dict[str, Any] | None = None) -> Any:
+            """Execute code with optional variables and return a wrapped result."""
             del code, variables
             from fleet_rlm.rlm.compat_3_3_1 import wrap_final_output
 
@@ -1266,19 +1267,31 @@ async def test_caller_owned_interpreter_tool_injection_output_metadata_and_traje
 
     class ItemPayload(dspy.SandboxSerializable):
         def __init__(self, key: str, value: int) -> None:
+            """Initialize an instance with a key and associated value."""
             self.key = key
             self.value = value
 
         def sandbox_setup(self) -> str:
+            """Provide the sandbox initialization code used by the test interpreter."""
             return "import json as _test_json"
 
         def to_sandbox(self) -> bytes:
+            """
+            Serialize the key-value pair for sandbox transfer.
+            
+            Returns:
+                bytes: UTF-8 encoded JSON representation of the key-value pair.
+            """
             return json.dumps({"key": self.key, "value": self.value}).encode()
 
         def sandbox_assignment(self, var_name: str, data_expr: str) -> str:
+            """
+            Generate a sandbox assignment statement that deserializes a JSON expression.
+            """
             return f"{var_name} = _test_json.loads({data_expr})"
 
         def rlm_preview(self, max_chars: int = 100) -> str:
+            """Return a concise representation containing the payload key."""
             del max_chars
             return f"ItemPayload(key={self.key})"
 
@@ -1289,7 +1302,11 @@ async def test_caller_owned_interpreter_tool_injection_output_metadata_and_traje
         summary: str = dspy.OutputField(default="default-summary")
 
     def lookup_tool(text: str) -> str:
-        """Echo lookup value."""
+        """Formats a lookup value with a found prefix.
+        
+        Returns:
+            The lookup value prefixed with ``"found:"``.
+        """
         return f"found:{text}"
 
     interpreter = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())

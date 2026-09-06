@@ -229,7 +229,15 @@ async def _run_cycle(
 
 
 async def run_benchmark(settings: Any) -> dict[str, object]:
-    """Run warmups and measured cycles, returning only bounded evidence."""
+    """
+    Run warmup and measured lifecycle cycles and produce a bounded benchmark receipt.
+    
+    Parameters:
+    	settings (Any): Benchmark configuration, including the runtime variant and Daytona settings.
+    
+    Returns:
+    	dict[str, object]: Receipt containing cycle results, timing summaries, threshold decision, and any benchmark failure information.
+    """
     client = build_daytona_client(settings)
     spec = sandbox_spec_from_settings(settings)
     platform = LiveDaytonaPlatform(client, spec)

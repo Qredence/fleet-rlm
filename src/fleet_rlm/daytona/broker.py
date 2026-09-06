@@ -1733,11 +1733,13 @@ class SyncBridgeDispatcher:
         return self._service_loop
 
     def run(self, awaitable: Any) -> Any:
-        """Await one host operation on this persistent composition loop.
-
-        DSPy invokes host Tools synchronously from a worker loop. This public
-        structural seam lets the provider-neutral RLM observer use the same
-        composition-owned loop without creating a loop or thread per call.
+        """Run an awaitable on the composition-owned event loop.
+        
+        Args:
+            awaitable: The host operation to execute.
+        
+        Returns:
+            The awaitable's result.
         """
         return _SyncBridgeLoop(caller_loop=None, dispatcher=self).run(awaitable)
 
@@ -1788,7 +1790,15 @@ class _SyncBridgeLoop:
         return self._caller_loop
 
     def run(self, awaitable: Any) -> Any:
-        """Post one awaitable on the service loop and block until it settles."""
+        """
+        Execute an awaitable on the service event loop and wait for its result.
+        
+        Parameters:
+        	awaitable (Any): The awaitable to execute.
+        
+        Returns:
+        	Any: The awaitable's result.
+        """
         if self._closed:
             if inspect.iscoroutine(awaitable):
                 awaitable.close()

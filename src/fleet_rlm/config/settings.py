@@ -152,7 +152,15 @@ class Settings(BaseModel):
 
     @classmethod
     def _reject_unknown_fields(cls, data: Mapping[Any, Any]) -> None:
-        """Fail on unsupported keys, naming keys only to protect secret values."""
+        """
+        Reject unsupported configuration field names.
+        
+        Parameters:
+            data (Mapping[Any, Any]): Configuration data whose keys are checked.
+        
+        Raises:
+            FleetConfigurationError: If the data contains fields not defined by the settings model.
+        """
         unknown = sorted(key for key in data if key not in cls.model_fields)
         if unknown:
             raise FleetConfigurationError(f"unsupported Settings field(s): {', '.join(map(str, unknown))}")

@@ -207,6 +207,15 @@ def _append_input_field(
 
 
 def _budget_directive(remaining: float, *, attempts_exhausted: bool = False) -> str:
+    """Create a directive requiring immediate submission when exploration must end.
+    
+    Parameters:
+        remaining (float): Estimated seconds remaining in the time budget.
+        attempts_exhausted (bool): Whether the exploration attempt limit has been reached.
+    
+    Returns:
+        str: A directive containing the budget reason, remaining time, and required SUBMIT action.
+    """
     seconds = max(0, int(remaining))
     reason = "Exploration attempt budget exhausted" if attempts_exhausted else "Time budget nearly exhausted"
     return (
@@ -260,14 +269,19 @@ class FleetJSONAdapter(dspy.JSONAdapter):
         wrap_up_seconds: float = 0.0,
         budget: TurnBudget | None = None,
     ) -> None:
-        """Initialize the adapter with a bounded retry budget.
-
+        """
+        Initialize the adapter with deadline, wrap-up, and parse-retry budgets.
+        
         Parameters:
-            max_parse_retries (int): Additional attempts after the first failed
-                action response; must be a non-negative integer.
-
+            max_parse_retries (int): Number of additional attempts allowed after the
+                initial parse failure.
+            deadline (float | None): Absolute deadline for adapter processing.
+            wrap_up_seconds (float): Time reserved for final-answer submission.
+            budget (TurnBudget | None): Optional turn budget used to control adapter
+                limits.
+        
         Raises:
-            ValueError: If ``max_parse_retries`` is not a non-negative integer.
+            ValueError: If a budget value is invalid.
         """
         super().__init__()
         self._budget = AdapterBudget(
@@ -283,18 +297,35 @@ class FleetJSONAdapter(dspy.JSONAdapter):
 
     @property
     def _wrap_up_seconds(self) -> float:
+        """Return the time reserved for the final wrap-up phase."""
         return self._budget.reserve_seconds
 
     @property
     def _wrap_up_attempts(self) -> int:
+        """Return the number of finalization attempts used by the adapter."""
         return self._budget.finalization_used
 
     def _remaining(self) -> float | None:
+        """Return the remaining budget time in seconds, or `None` when no deadline is set."""
         return self._budget.remaining()
 
     def _lm_for_request(self, lm: BaseLM, *, action: bool, wrap_up: bool) -> BaseLM:
         # Local import avoids coupling the DSPy compatibility module's import
         # initialization to program construction, which consumes this module.
+        """
+        Prepare the language model for an adapter request with deadline and budget tracking.
+        
+        Parameters:
+            lm (BaseLM): Language model to wrap.
+            action (bool): Whether the request is for a native action.
+            wrap_up (bool): Whether the request is part of the wrap-up phase.
+        
+        Returns:
+            BaseLM: A deadline-aware language model proxy.
+        
+        Raises:
+            ValueError: If the request attempts to switch turn budgets after budget state has been established.
+        """
         from fleet_rlm.rlm.program import DeadlineLMProxy
 
         if isinstance(lm, DeadlineLMProxy) and lm.budget is not None and lm.budget is not self._budget.turn:
@@ -325,6 +356,14 @@ class FleetJSONAdapter(dspy.JSONAdapter):
         self._budget.reclassify_late_response()
 
     def _wrap_up_required(self, inputs: Mapping[str, Any], remaining: float | None) -> bool:
+        """Determine whether the current action iteration must enter wrap-up mode.
+        
+        Parameters:
+        	remaining (float | None): The time remaining for the current turn, in seconds.
+        
+        Returns:
+        	`True` if wrap-up is enabled and the action iteration is at or below its time reserve or has exhausted exploration, `False` otherwise.
+        """
         return bool(
             remaining is not None
             and self._wrap_up_seconds > 0
@@ -340,6 +379,18 @@ class FleetJSONAdapter(dspy.JSONAdapter):
         *,
         field_name: str | None = None,
     ) -> tuple[type[Signature], dict[str, Any], str]:
+        """
+        Prepare inputs with a mandatory final-answer budget directive.
+        
+        Parameters:
+        	signature (type[Signature]): The input signature to update.
+        	inputs (Mapping[str, Any]): Current input values.
+        	remaining (float): Time remaining for finalization.
+        	field_name (str | None): Existing input field to receive the directive, if available.
+        
+        Returns:
+        	tuple[type[Signature], dict[str, Any], str]: The updated signature, input values, and field name containing the directive.
+        """
         directive = _budget_directive(remaining, attempts_exhausted=self._budget.turn.exploration_exhausted())
         if field_name is not None and field_name in signature.fields:
             updated = dict(inputs)
@@ -378,7 +429,19 @@ class FleetJSONAdapter(dspy.JSONAdapter):
         demos: list[dict[str, Any]],
         inputs: dict[str, Any],
     ) -> list[dict[str, Any]]:
-        """Drive the shared repair policy through the stock DSPy adapter."""
+        """
+        Drive the DSPy adapter through the bounded repair and finalization policy.
+        
+        Parameters:
+            lm (BaseLM): Language model used to generate the response.
+            lm_kwargs (dict[str, Any]): Keyword arguments for the language model.
+            signature (type[Signature]): DSPy signature describing the request.
+            demos (list[dict[str, Any]]): Demonstration examples passed to the adapter.
+            inputs (dict[str, Any]): Input values for the request.
+        
+        Returns:
+            list[dict[str, Any]]: Parsed adapter output records.
+        """
         machine = self._repair_steps(lm, lm_kwargs, signature, inputs)
         try:
             request = next(machine)
@@ -439,10 +502,15 @@ class FleetJSONAdapter(dspy.JSONAdapter):
         list[dict[str, Any]],
         list[dict[str, Any]],
     ]:
-        """Yield requests and consume responses/errors without owning provider I/O.
-
-        Both drivers close the machine on failure or cancellation. All repair,
-        reserve-transition, and finalization grammar decisions live here.
+        """Drive request repair and wrap-up processing for an LM interaction.
+        
+        Yields:
+            tuple[BaseLM, dict[str, Any], type[Signature], dict[str, Any]]:
+                The LM, call arguments, signature, and inputs for the next request.
+        
+        Returns:
+            list[dict[str, Any]]:
+                The parsed response accepted as the final result.
         """
         lm = self._lm_for_request(lm, action=False, wrap_up=False)
         attempt = 0
@@ -687,6 +755,13 @@ class _RLMTraceCallback(BaseCallback):
         self._last_call: dict[str, JsonValue] | None = None
 
     def on_lm_start(self, call_id: str, instance: Any, inputs: dict[str, Any]) -> None:
+        """Record the start of an LM call for tracing and usage correlation.
+        
+        Parameters:
+        	call_id (str): Identifier for the LM call.
+        	instance (Any): LM instance associated with the call.
+        	inputs (dict[str, Any]): Input fields supplied to the LM.
+        """
         if self._deadline is not None and time.monotonic() >= self._deadline:
             return
         role = self._roles.get(id(getattr(instance, "_fleet_trace_identity", instance)))
@@ -730,6 +805,14 @@ class _RLMTraceCallback(BaseCallback):
         outputs: dict[str, Any] | None,
         exception: BaseException | None = None,
     ) -> None:
+        """
+        Finalize tracking for a language-model call, recording its outcome, timing, usage, and response details.
+        
+        Parameters:
+        	call_id (str): Identifier of the tracked call.
+        	outputs (dict[str, Any] | None): Model outputs, if the call produced any.
+        	exception (BaseException | None): Exception that caused the call to fail, if applicable.
+        """
         state = self._spans.pop(call_id, None)
         if state is None:
             return

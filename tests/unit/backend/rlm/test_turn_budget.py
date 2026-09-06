@@ -85,6 +85,12 @@ def test_failed_batch_does_not_partially_debit() -> None:
 def test_model_children_and_copies_share_budget_without_mutating_templates() -> None:
     class CountingLM(dspy.BaseLM):
         def forward(self, *_args, **_kwargs):
+            """
+            Provide a successful forward result.
+            
+            Returns:
+            	str: The string `"ok"`.
+            """
             return "ok"
 
     lm = CountingLM("test/counting")
@@ -109,9 +115,19 @@ def test_model_children_and_copies_share_budget_without_mutating_templates() -> 
 async def test_each_retry_is_charged_and_stops_before_an_unadmitted_attempt(asynchronous: bool) -> None:
     class FailingLM(dspy.BaseLM):
         def forward(self, *_args, **_kwargs):
+            """Simulate a temporary language model server failure.
+            
+            Raises:
+                LMServerError: Always raised with a temporary failure message.
+            """
             raise LMServerError("temporary")
 
         async def aforward(self, *_args, **_kwargs):
+            """Run the model's forward operation.
+            
+            Returns:
+                The result of the forward operation.
+            """
             return self.forward()
 
     lm = FailingLM("test/retrying", num_retries=5)

@@ -1216,6 +1216,18 @@ class RecursiveRLMExecutor:
         return tuple(self._make_reservation(prompt, index) for prompt, index in zip(prompts, indexes, strict=True))
 
     def _reserve_call_indexes(self, prompts: tuple[str, ...]) -> tuple[int, ...]:
+        """
+        Reserve call indexes for a batch of recursive prompts.
+        
+        Parameters:
+            prompts (tuple[str, ...]): Prompts whose recursive call capacity should be reserved.
+        
+        Returns:
+            tuple[int, ...]: Consecutive 1-based indexes assigned to the prompts.
+        
+        Raises:
+            RuntimeError: If reserving the prompts would exceed the configured recursive call limit.
+        """
         if not prompts:
             return ()
         with self._state.lock:
@@ -1284,6 +1296,18 @@ class RecursiveRLMExecutor:
         lease: ChildRuntimeLease,
         batch_cancelled: Event | None = None,
     ) -> tuple[str, dict[str, object]]:
+        """
+        Execute a recursive child using the native RLM runtime.
+        
+        Parameters:
+            prompt (str): The prompt to send to the child.
+            call (_RecursiveCall): Reserved call metadata, including the child depth.
+            lease (ChildRuntimeLease): Runtime lease used for child execution.
+            batch_cancelled (Event | None): Optional event indicating that the enclosing batch was cancelled.
+        
+        Returns:
+            tuple[str, dict[str, object]]: The child's bounded display text and completion metadata.
+        """
         self._ensure_call_authorized(batch_cancelled)
         if time.monotonic() >= self._deadline:
             raise TimeoutError("recursive child deadline exceeded")

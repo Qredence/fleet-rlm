@@ -8,6 +8,15 @@ from scripts.benchmarks.runtime_v2 import compare, run, seal, semantic_keywords_
 
 
 def _clean_receipt(receipt):
+    """
+    Create a resealed copy of a receipt marked as clean.
+    
+    Parameters:
+    	receipt (dict): Receipt to copy and reseal.
+    
+    Returns:
+    	dict: A copy with its receipt digest removed and source marked clean.
+    """
     clean = deepcopy(receipt)
     clean.pop("receipt_digest", None)
     clean["source_dirty"] = False

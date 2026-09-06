@@ -22,6 +22,15 @@ class FleetOutputContract:
 
     @classmethod
     def from_signature(cls, signature: Any) -> FleetOutputContract:
+        """
+        Build an output contract from a signature's output fields.
+        
+        Parameters:
+            signature (Any): Signature containing output field definitions.
+        
+        Returns:
+            FleetOutputContract: Contract containing field requirements and JSON-encoded defaults.
+        """
         fields = []
         for name, field in signature.output_fields.items():
             default_json = None
@@ -34,7 +43,17 @@ class FleetOutputContract:
         return cls(tuple(fields))
 
     def merge(self, native_fields: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        """Keep native types while supplying Fleet's required/default metadata."""
+        """Merge Fleet-required and default metadata into native output fields while preserving their other metadata.
+        
+        Parameters:
+        	native_fields (list[dict[str, Any]]): Native interpreter output field metadata whose names and order must match the Fleet contract.
+        
+        Returns:
+        	list[dict[str, Any]]: Output field metadata with Fleet-required and default values applied.
+        
+        Raises:
+        	ValueError: If the native fields do not match the Fleet contract in name or order.
+        """
         if [field.get("name") for field in native_fields] != [field.name for field in self.fields]:
             raise ValueError("interpreter output fields do not match the bound Fleet output contract")
         result = []
@@ -48,7 +67,7 @@ class FleetOutputContract:
 
 
 def bind_output_contract(interpreter: Any, signature: Any) -> None:
-    """Bind through the caller-owned adapter; lightweight non-Fleet doubles opt out."""
+    """Bind the signature's output contract through a compatible interpreter adapter."""
     if signature is None or not hasattr(signature, "output_fields"):
         return
     bind = getattr(interpreter, "bind_output_contract", None)

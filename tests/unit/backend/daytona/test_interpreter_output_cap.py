@@ -72,6 +72,12 @@ def test_turn_output_budget_is_shared_and_fail_closed() -> None:
 def test_error_feedback_includes_capped_stderr() -> None:
     class _StderrBackend:
         def run(self, code: str, variables: dict[str, object] | None = None) -> BackendExecutionResult:
+            """
+            Simulate a failed backend execution with an undefined-name error.
+            
+            Returns:
+            	BackendExecutionResult: An execution result with a fixed `NameError` message and 5,000-character stderr output.
+            """
             del code, variables
             return BackendExecutionResult(
                 stdout="", error="NameError: name 'missing' is not defined", stderr="s" * 5000

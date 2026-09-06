@@ -35,11 +35,13 @@ def _qualified_ast_name(node: ast.AST) -> str | None:
 
 
 def _strip_action_code_fences(code: str) -> str:
-    """Mirror DSPy's public action fence handling for wrap-up validation.
-
-    Native RLM actions are commonly emitted in a Python markdown fence and
-    DSPy strips that fence before execution. Validation must inspect the same
-    executable text, while still rejecting an explicit non-Python fence.
+    """
+    Remove surrounding Python markdown fences from action code.
+    
+    Non-Python or malformed fences are preserved unchanged.
+    
+    Returns:
+        str: The executable action text with Python fences removed.
     """
     text = code.strip()
     if "```" not in text:
@@ -65,7 +67,15 @@ def _strip_action_code_fences(code: str) -> str:
 
 
 def _is_safe_submit_value(node: ast.AST) -> bool:
-    """Allow only data expressions that cannot launch another action."""
+    """
+    Determine whether an AST node is an allowed expression for a SUBMIT keyword value.
+    
+    Parameters:
+    	node (ast.AST): The expression node to validate.
+    
+    Returns:
+    	bool: True if the node uses an allowed data expression, false otherwise.
+    """
     if isinstance(node, (ast.Constant, ast.Name)):
         return True
     if isinstance(node, ast.JoinedStr):
@@ -113,7 +123,19 @@ def _is_safe_submit_value(node: ast.AST) -> bool:
 
 
 def is_submit_only_code(code: object) -> bool:
-    """Check wrap-up syntax, not runtime safety of names or overloaded operators."""
+    """
+    Determine whether code contains a syntactically valid, submit-only action.
+    
+    Parameters:
+        code (object): Source code to validate.
+    
+    Returns:
+        bool: `true` if the code consists of one direct `SUBMIT` call with
+            permitted keyword-value expressions, `false` otherwise.
+    
+    This validates syntax only; it does not resolve names or evaluate operator
+    behavior.
+    """
     if not isinstance(code, str):
         return False
     try:

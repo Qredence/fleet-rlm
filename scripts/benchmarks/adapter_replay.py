@@ -34,6 +34,13 @@ class ReplayLM(dspy.BaseLM):
     forward_contract = "legacy"
 
     def __init__(self, case: dict[str, Any], clock: list[float]) -> None:
+        """
+        Initialize the scripted language model with a replay case and shared clock.
+        
+        Parameters:
+            case (dict[str, Any]): Dataset case containing the scripted responses and behavior.
+            clock (list[float]): Mutable clock value used to track simulated time.
+        """
         super().__init__("test/adapter-replay", cache=False, num_retries=0)
         self.case = case
         self.clock = clock
@@ -41,13 +48,31 @@ class ReplayLM(dspy.BaseLM):
 
     @property
     def supported_params(self) -> set[str]:
+        """
+        Return the provider parameters supported for the current replay case.
+        """
         return {"response_format"} if self.case.get("structured") else set()
 
     @property
     def supports_response_schema(self) -> bool:
+        """Indicate whether the scripted case supports structured responses.
+        
+        Returns:
+        	bool: `True` if the case is structured, `False` otherwise.
+        """
         return bool(self.case.get("structured"))
 
     def forward(self, prompt=None, messages=None, **kwargs):
+        """
+        Replay the next scripted language-model response and record the request.
+        
+        Raises:
+            LMTimeoutError: If the scripted response indicates a provider timeout.
+            LMServerError: If the scripted response indicates a retryable server error.
+        
+        Returns:
+            A response object containing the scripted content, usage data, and model name.
+        """
         self.calls.append({"prompt": prompt, "messages": messages, "kwargs": kwargs})
         responses = self.case["responses"]
         text = responses[min(len(self.calls) - 1, len(responses) - 1)]
@@ -64,10 +89,26 @@ class ReplayLM(dspy.BaseLM):
         )
 
     async def aforward(self, **kwargs):
+        """Produce the scripted response for a model call.
+        
+        Returns:
+            The scripted response.
+        """
         return self.forward(**kwargs)
 
 
 def replay(case: dict[str, Any], *, variant: str, asynchronous: bool) -> dict[str, Any]:
+    """
+    Replay one benchmark case through the selected JSON adapter configuration.
+    
+    Parameters:
+    	case (dict[str, Any]): Dataset case containing scripted responses and expected outcomes.
+    	variant (str): Adapter variant to exercise.
+    	asynchronous (bool): Whether to invoke the adapter asynchronously.
+    
+    Returns:
+    	dict[str, Any]: Recorded outcome, timing, provider-attempt counts, and scorer results.
+    """
     clock = [109.5 if case.get("reserve") else 100.0]
     turn = TurnBudget(deadline=110.0, limits=BudgetLimits(provider_attempts=10))
     source = ReplayLM(case, clock)
@@ -112,7 +153,19 @@ def replay(case: dict[str, Any], *, variant: str, asynchronous: bool) -> dict[st
 
 
 def run_adapter_comparison(*, repetitions: int = 5) -> dict[str, Any]:
-    """Use runtime-v2 sealing and distributions for an explicitly narrower lane."""
+    """
+    Run the scripted adapter comparison across configured variants and execution modes.
+    
+    Parameters:
+        repetitions (int): Number of times to execute each dataset case; must be at least 2.
+    
+    Returns:
+        dict[str, Any]: Sealed benchmark results containing samples, per-variant summaries,
+            validation gates, metadata, and the overall pass status.
+    
+    Raises:
+        ValueError: If repetitions is less than 2.
+    """
     from scripts.benchmarks.runtime_v2 import digest, percentile, seal
 
     assert_dspy_version()

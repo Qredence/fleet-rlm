@@ -337,7 +337,16 @@ class InMemoryRunStateStore:
         *,
         deadline: float | None = None,
     ) -> ReconciliationSummary:
-        """Recover prior-process claims with the same bounded policy as SQL."""
+        """
+        Recover running or settling claims from a prior process.
+        
+        Parameters:
+        	fence (Callable[[UUID], Awaitable[None]] | None): Optional callback used to verify provider state before recovery.
+        	deadline (float | None): Optional monotonic-time deadline for bounded recovery.
+        
+        Returns:
+        	ReconciliationSummary: Counts recovery candidates, successful recoveries, fence failures, skipped runs, and deadline exhaustion.
+        """
         async with self._lock:
             pending = [
                 (run.run_id, run.session_id, run.status, run.claim)
@@ -422,7 +431,15 @@ class InMemoryRunStateStore:
 
 
 def _expected_claim_conflict(error: IntegrityError) -> bool:
-    """Recognize only claim uniqueness conflicts, never FK/check failures."""
+    """
+    Determines whether a database integrity error represents a supported claim uniqueness conflict.
+    
+    Parameters:
+    	error (IntegrityError): The database integrity error to classify.
+    
+    Returns:
+    	bool: `true` if the error represents a supported claim uniqueness conflict, `false` otherwise.
+    """
     original = error.orig
     if getattr(original, "sqlite_errorname", None) == "SQLITE_CONSTRAINT_UNIQUE":
         return str(original) in {
@@ -460,6 +477,20 @@ class SqlAlchemyRunStateStore:
         self._stale_after = stale_after_seconds
 
     async def begin(self, request: RunClaim) -> RunStart:
+        """
+        Start a run for an active session, reusing an eligible prior run when applicable.
+        
+        Parameters:
+        	request (RunClaim): Claim request containing the session, access credentials, proposed run identity, idempotency key, and input.
+        
+        Returns:
+        	RunStart: A claimed run with session history and a cancellation-status callback.
+        
+        Raises:
+        	RunNotFoundError: If the session is missing or inactive.
+        	RunLifecycleUnavailableError: If the lifecycle store is unavailable or claim reconciliation fails.
+        	DatabaseConnectionError: If cancellation status cannot be probed after the configured retries.
+        """
         try:
             async with self._sessions() as db, db.begin():
                 session = await db.scalar(
@@ -540,7 +571,19 @@ class SqlAlchemyRunStateStore:
         )
 
     async def _reconcile_claim_conflict(self, request: RunClaim) -> RunStart:
-        """Read the winning claim once after rollback, retaining Session authority."""
+        """
+        Reconciles a claim conflict by reloading the authoritative session and winning run.
+        
+        Parameters:
+        	request (RunClaim): Claim request used to identify the session and idempotent run.
+        
+        Returns:
+        	RunStart: Replay of the previously completed run.
+        
+        Raises:
+        	RunNotFoundError: If the session is missing, inactive, or inaccessible.
+        	RunLifecycleUnavailableError: If the winning claim cannot be found or the database is unavailable.
+        """
         try:
             async with self._sessions() as db, db.begin():
                 session = await db.scalar(
@@ -584,6 +627,20 @@ class SqlAlchemyRunStateStore:
         artifacts: tuple[PromotedArtifact, ...],
         memory_intents: tuple[MemoryPromotionIntent, ...] = (),
     ) -> CommittedTurnReceipt:
+        """Persist the committed result and artifacts for a claimed turn.
+        
+        Parameters:
+        	run (ClaimedRun): The active turn claim authorizing the commit.
+        	committed (CommittedTurn): The completed turn data.
+        	artifacts (tuple[PromotedArtifact, ...]): Artifacts to associate with the turn.
+        	memory_intents (tuple[MemoryPromotionIntent, ...]): Memory promotion intents associated with the turn.
+        
+        Returns:
+        	CommittedTurnReceipt: The receipt for the committed turn.
+        
+        Raises:
+        	RunStateError: If the claim authority has been revoked.
+        """
         if run.authority.revoked:
             raise RunStateError("Turn claim is invalid")
         async with self._sessions() as db, db.begin():

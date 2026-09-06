@@ -10,6 +10,7 @@ from fleet_rlm.rlm.result import RLMConfigError
 
 
 def _tool(name):
+    """Create a test tool with the specified name."""
     return dspy.Tool(lambda: "ok", name=name)
 
 
