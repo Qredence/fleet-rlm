@@ -1,10 +1,10 @@
 # Refined runtime roadmap
 
 Status: implementation in progress on branch `feat/runtime-roadmap` (0.7.6).
-Implementation commits are recorded below. Pre-existing agent-instruction edits
-remain uncommitted and outside these implementation commits. ADR 004/005 were
-created here because this checkout lacked them.
-No phase is closed. Phase 2 budget integration and adapter contraction remain open;
+Implementation commits are recorded below, including the existing agent-instruction
+changes requested by the operator. ADR 004/005 were created here because this
+checkout lacked them. PR 2E is complete in the deterministic protocol lane.
+No phase is closed. Phase 2 global budget integration remains open;
 live semantic baseline and Postgres evidence remain pending operator authorization.
 
 Implemented so far: explicit legacy selector and rejection tests; architecture
@@ -12,20 +12,19 @@ target ADRs; composite database lineage with preflight and reversible migration;
 immediate SQLite FK enforcement and corrected fixtures; narrowly allowlisted claim
 race reconciliation; scripted benchmark execution, digests and comparison; native
 FleetProgramSpec/tool catalog; deadline LM proxy replacing instance method assignment;
-TurnBudget atomic reservation primitive and provider-proxy accounting;
+TurnBudget atomic reservations and provider-proxy accounting, including adapter
+corrections, DSPy schema fallback, and provider retries;
 FleetOutputContract replacing private `_inject_execution_context` monkey-patching;
 DSPy compatibility implementation and consumers migrated to `compat_3_3_1.py`;
 and comprehensive tests for caller-owned interpreter, tool injection, output metadata,
 SandboxSerializable, async invocation, and trajectory shape.
-Latest implementation validation: `make check` passed (78.45% backend coverage;
-538 TUI tests), with output in `.scratch/roadmap-compat-check.log`.
-The earlier factory/native-contract/SUBMIT suite passed all 85 tests.
-The adapter suite now passes 29 tests, including five sync/async parity cases
-and cancellation cleanup. The RLM/tracer/version-guard suite passed 546 tests
-before the final single-home guard was added and covered by `make check`.
-Follow-up: corrected three vacuous source-root guards, added source-file existence
-assertions, and extracted SUBMIT syntax validation into `rlm/submit_validation.py`
-with 14 direct test cases. This validator is not a runtime safety sandbox.
+Latest implementation validation: `make check` passed (78.58% backend coverage;
+538 TUI tests), with output in `.scratch/contract-adapter-final-check.log`.
+The adapter-budget integration suite has 29 cases; the adapter behavior suite has
+29 cases. Runtime-v2 comparison tests cover receipt integrity, both invocation
+modes, attempt accounting, and repair-policy ablations. Source-root guards inspect
+the actual backend tree. SUBMIT syntax validation is separately tested and is not
+a runtime safety sandbox.
 The 15-Turn receipt is `.scratch/runtime-v2-scripted-baseline.json`; it is explicitly
 scripted lifecycle evidence, not a sealed live legacy semantic baseline.
 
@@ -133,7 +132,8 @@ accounting until usage is reliably available before further calls for hard admis
 - [ ] Add concurrency-safe child reservations and complete budget-path tests.
 
 Integration evidence: production reservations currently cover provider attempts only.
-Tool/child/output-byte admission, configured limits, finalization capability, and
+PR 2E now supplies call-local finalization capability and tests root-only reserved
+provider attempts. Tool/child/output-byte admission, configured global limits, and
 settlement wiring still need implementation and end-to-end budget-path tests.
 
 ### PR 2C — Replace LM monkey-patching
@@ -159,14 +159,53 @@ and a regression test verifies that the implementation has one home.
 
 ### PR 2E — Contract FleetJSONAdapter
 
-- [ ] Compare stock JSONAdapter against Fleet's adapter using benchmark v2.
-- [ ] Keep only measured repair behavior.
-- [ ] Move deadlines and attempt limits to TurnBudget/LM proxy.
+Complete for deterministic protocol behavior; not a live semantic or provider-cost
+claim. Implementation: `8752eb2a`.
+
+- [x] Compare stock JSONAdapter against Fleet's adapter using benchmark v2.
+- [x] Keep only measured repair behavior: retain two bounded parse corrections,
+  reserve-boundary transition, and SUBMIT-only finalization correction. Removing
+  or reducing parse repairs loses expected outcomes in the replay fixtures.
+- [x] Move deadlines and attempt limits to the budget layer/LM proxy. AdapterBudget
+  uses the shared TurnBudget; DeadlineLMProxy enforces each provider admission.
 - [x] Extract SUBMIT validation into a small validator.
 - [x] Use one state machine for sync and async. Requests, error transitions,
   wrap-up metadata, and cancellation cleanup are regression-tested.
-- [ ] Debit all corrective calls from the global budget.
-- [ ] Keep finalization reserve independently testable.
+- [x] Debit all corrective calls from the global provider ledger, including native
+  schema fallback and transport retries; reject mismatched Turn budgets.
+- [x] Keep finalization reserve independently testable. Finalization slots count
+  physical admissions, not just adapter requests; children cannot spend Root's
+  reserved attempts. Late responses are reclassified without double debit.
+
+#### Comparison evidence
+
+```bash
+uv run python -m scripts.benchmarks.runtime_v2 compare-adapters \
+  --repetitions 5 --output .scratch/runtime-v2-adapter-comparison-sealed.json
+```
+
+The local receipt was generated from clean commit `8752eb2a`: 14 fixtures ×
+4 adapter settings × 2 invocation modes × 5 repetitions = 560 replays.
+Use a new output filename when rerunning; sealed files are never overwritten.
+
+| Adapter setting | Expected outcomes | Provider admissions | Local p50 / p95 |
+| --- | --- | --- | --- |
+| Stock JSONAdapter | 40/140 | 160 | 0.292 / 0.724 ms |
+| Fleet, no parse repairs | 100/140 | 220 | 0.539 / 1.360 ms |
+| Fleet, one parse repair | 130/140 | 270 | 0.757 / 1.373 ms |
+| Fleet, two parse repairs | 140/140 | 290 | 0.920 / 1.516 ms |
+
+All gates pass: Fleet expected outcomes/attempt ceilings, provider accounting,
+sync/async parity, and no extra calls for valid output. Fixtures cover empty,
+invalid, and missing-field responses; exhausted repair; non-SUBMIT finalization;
+late responses and provider timeout; transport retry; and DSPy schema fallback.
+These are scripted protocol outcomes, not answer-quality scores. Recorded latency
+is local replay overhead, not production inference latency. No provider, Daytona,
+Postgres, or MLflow server was contacted.
+
+Receipt digest: `0a13fe7e6dde8bc1ad89304b3d39bde0908fc7b1b24dfc3647f71203480229cf`.
+The receipt includes dataset, scorer, and implementation digests. Raw local
+receipts/logs stay ignored; fixtures, replay code, tests, and this summary are tracked.
 
 ### Exit criteria
 
@@ -182,13 +221,14 @@ and a regression test verifies that the implementation has one home.
    finalization reserve and tests exercising root, child, and corrective calls.
 2. Close PR 2C retry accounting with end-to-end admission evidence; do not treat
    primitive-only tests as completion evidence.
-3. Complete PR 2E adapter comparison and budget integration, preserving existing
-   repair behavior until measurements justify policy changes.
-4. Define Phase 3 feasibility experiments and exit gates before snapshot work.
-5. When explicitly authorized, capture the live legacy baseline and Postgres
+3. Define Phase 3 feasibility experiments and exit gates before snapshot work.
+4. When explicitly authorized, capture the live legacy baseline and Postgres
    contention evidence. Scripted receipts do not satisfy either live gate.
 
 ## Implementation commits
+
+- `35067612` — Commit the existing repository/TUI agent-instruction changes.
+- `8752eb2a` — Complete PR 2E budget/proxy contraction and adapter comparison.
 
 - `9c2526dc` — Extract finalization syntax validation.
 - `577f0c84` — Share sync/async repair policy and test parity/cancellation.
