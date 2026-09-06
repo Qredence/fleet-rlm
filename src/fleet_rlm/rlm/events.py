@@ -8,16 +8,14 @@ and execution trace assembly for one native DSPy RLM execution.
 from __future__ import annotations
 
 import asyncio
-import contextvars
 import inspect
 import time
 from collections.abc import AsyncIterator, Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from functools import wraps
-from threading import Thread
 from types import MappingProxyType
-from typing import TYPE_CHECKING, Any, Literal, TypeAlias, cast
+from typing import TYPE_CHECKING, Any, Literal, Protocol, TypeAlias, cast
 from uuid import UUID, uuid4
 
 import dspy
@@ -405,6 +403,14 @@ class EventRecorder:
 ToolObserver: TypeAlias = Callable[[ObservationDetail | Status | WarningEvent], None]
 
 
+class AsyncToolBridge(Protocol):
+    """Composition-owned bridge for awaiting async host Tools from DSPy sync code."""
+
+    def run(self, awaitable: Any) -> Any:
+        """Await one host operation on the bridge's persistent event loop."""
+        ...
+
+
 class ToolResultSerializationError(TypeError):
     """Closed failure for a host Tool result outside Fleet's JSON contract."""
 
@@ -512,13 +518,14 @@ def _validate_tool_arguments(
         raise
 
 
-def _resolve_awaitable_result(result: Any) -> Any:
-    """Resolve sync and async host Tools through the synchronous DSPy seam.
+def _resolve_awaitable_result(result: Any, *, async_bridge: AsyncToolBridge | None = None) -> Any:
+    """Resolve an async host Tool through the composition-owned async bridge.
 
-    Native DSPy invokes interpreter Tools synchronously, while Fleet's
-    composition also exposes async host implementations.  If the caller is
-    already on an event loop, a private thread avoids nesting or blocking that
-    loop; otherwise ``asyncio.run`` keeps the deterministic path small.
+    Native DSPy invokes interpreter Tools synchronously.  Outside an event loop
+    the credential-free direct path can own a short-lived loop; while DSPy is
+    running on a loop, the host operation must be submitted to the persistent
+    composition loop.  Creating a private loop/thread per Tool would break
+    loop-affine host resources and leak work past the Turn ownership boundary.
     """
     if not inspect.isawaitable(result):
         return result
@@ -530,27 +537,12 @@ def _resolve_awaitable_result(result: Any) -> Any:
         asyncio.get_running_loop()
     except RuntimeError:
         return asyncio.run(await_result())
-
-    context = contextvars.copy_context()
-    values: list[Any] = []
-    errors: list[BaseException] = []
-
-    def run() -> None:
-        # Ferry every worker-thread failure back to the caller, including
-        # asyncio.CancelledError (a BaseException), rather than losing it.
-        try:
-            values.append(context.run(asyncio.run, await_result()))
-        except BaseException as exc:
-            errors.append(exc)
-
-    worker = Thread(target=run, name="fleet-rlm-async-tool", daemon=True)
-    worker.start()
-    worker.join()
-    if errors:
-        raise errors[0]
-    if not values:
-        raise RuntimeError("async Tool produced no result")
-    return values[0]
+    if async_bridge is None:
+        close = getattr(result, "close", None)
+        if callable(close):
+            close()
+        raise RuntimeError("async Tool requires a persistent async bridge")
+    return async_bridge.run(await_result())
 
 
 def _execute_observed_tool(
@@ -562,9 +554,12 @@ def _execute_observed_tool(
     trace: _ToolTrace,
     after_result: ToolAfterResult | None,
     guards: RunToolGuards | None,
+    async_bridge: AsyncToolBridge | None,
 ) -> Any:
     try:
-        result = _resolve_awaitable_result(source.func(**validated))
+        if guards is not None:
+            guards.reserve_tool()
+        result = _resolve_awaitable_result(source.func(**validated), async_bridge=async_bridge)
         try:
             validate_json_value(result, path=f"Tool {source.name} result")
         except (TypeError, ValueError):
@@ -615,6 +610,7 @@ def _run_observed_tool(
     after_result: ToolAfterResult | None,
     is_authorized: Callable[[], bool] | None,
     guards: RunToolGuards | None,
+    async_bridge: AsyncToolBridge | None,
     args: tuple[Any, ...],
     kwargs: Mapping[str, Any],
 ) -> Any:
@@ -634,6 +630,7 @@ def _run_observed_tool(
         trace,
         after_result,
         guards,
+        async_bridge,
     )
     _check_tool_progress(source, result, arguments, observer, event_view, trace, guards)
     projected_output = event_view.output(result)
@@ -667,6 +664,7 @@ def observe_tool(
     after_result: ToolAfterResult | None = None,
     is_authorized: Callable[[], bool] | None = None,
     guards: RunToolGuards | None = None,
+    async_bridge: AsyncToolBridge | None = None,
 ) -> dspy.Tool:
     """Return a fresh Tool whose extracted ``func`` preserves DSPy validation."""
     if not isinstance(tool, dspy.Tool):
@@ -686,6 +684,7 @@ def observe_tool(
             after_result,
             is_authorized,
             guards,
+            async_bridge,
             args,
             kwargs,
         )
@@ -1536,6 +1535,7 @@ class ObservationSession:
 __all__ = [
     "PROVIDER_ENDPOINT_NOT_FOUND_MESSAGE",
     "ArtifactCreated",
+    "AsyncToolBridge",
     "AttachmentRead",
     "DetailRelay",
     "EventRecorder",

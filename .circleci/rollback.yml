@@ -51,8 +51,8 @@ jobs:
       - run:
           name: Perform rollback
           command: |
-            # TODO: add rollback logic using ${TARGET_VERSION}
-            echo "Rolling back fleet-rlm to ${TARGET_VERSION}"
+            echo "Automatic PyPI rollback is not supported for fleet-rlm; target version ${TARGET_VERSION} requires an explicit operator procedure." >&2
+            exit 1
       - run:
           name: Update deployment status to failed
           command: circleci run release update deploy-pypi-rollback --status=FAILED

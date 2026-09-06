@@ -1210,6 +1210,7 @@ class TurnRuntime:
 
                 try:
                     await _close_stream_owned(state.stream, remember)
+                    self._settle_turn_budget(prepared)
                     try:
                         await shield_cleanup(prepared.aclose())
                     except BaseException as exc:
@@ -1329,6 +1330,7 @@ class TurnRuntime:
             if finalization_task is not None:
                 with contextlib.suppress(BaseException):
                     await shield_cleanup(finalization_task)
+            self._settle_turn_budget(prepared)
             try:
                 await prepared.aclose()
             except BaseException as exc:
@@ -1350,6 +1352,15 @@ class TurnRuntime:
         finally:
             await stop_heartbeat(heartbeat)
         return cleanup_error
+
+    @staticmethod
+    def _settle_turn_budget(prepared: PreparedTurn) -> None:
+        """Close shared admission before prepared resources are released."""
+        execution_context = getattr(prepared, "execution", None)
+        execution_runtime = getattr(execution_context, "execution", None)
+        budget = getattr(getattr(execution_runtime, "models", None), "budget", None)
+        if budget is not None:
+            budget.settle()
 
     def _execution_deadline(self, prepared: PreparedTurn) -> float:
         execution_runtime = getattr(prepared.execution, "execution", None)

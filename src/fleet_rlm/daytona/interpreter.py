@@ -57,6 +57,7 @@ from fleet_rlm.daytona.interpreter_output import (
     _PublicStdoutProjector,
 )
 from fleet_rlm.observability.tracing import trace_preview_limit, turn_phase_span
+from fleet_rlm.rlm.budget import BudgetDimension, TurnBudget, TurnBudgetExhausted
 from fleet_rlm.rlm.compat_3_3_1 import (
     PUBLIC_FINAL_OUTPUT_LABEL,
     CodeExecutionError,
@@ -535,6 +536,8 @@ class DaytonaCodeInterpreter:
         self._http_broker: DaytonaHttpToolBroker | None = None
         self._observer: ObservationObserver | None = None
         self._observation_max_chars = 10_000
+        self._turn_budget: TurnBudget | None = None
+        self._output_budget_exhausted = False
         self._execution_output_cap = max(1, int(execution_output_cap))
         self._max_code_chars = max(1, int(max_code_chars))
         self._observation_step = 0
@@ -698,6 +701,12 @@ class DaytonaCodeInterpreter:
         self._last_execution = None
         self._no_progress_repair_used = False
 
+    def bind_turn_budget(self, budget: TurnBudget | None) -> None:
+        """Bind the current Turn's shared admission ledger before execution."""
+        self._ensure_binding_mutation_allowed()
+        self._turn_budget = budget
+        self._output_budget_exhausted = False
+
     def bind_context_capsule(self, capsule: Any) -> None:
         """Bind one host-created context capsule before DSPy starts the RLM."""
         from fleet_rlm.rlm.program import AttachmentContextCapsule
@@ -728,6 +737,17 @@ class DaytonaCodeInterpreter:
         self._context_binding = binding
 
     def _observe(self, detail: StepStarted | RLMCode | RLMOutput | StepFinished) -> None:
+        if isinstance(detail, RLMOutput) and detail.output and self._turn_budget is not None:
+            if self._output_budget_exhausted:
+                return
+            try:
+                self._turn_budget.reserve(
+                    BudgetDimension.EXECUTION_OUTPUT_BYTES,
+                    len(detail.output.encode("utf-8")),
+                )
+            except TurnBudgetExhausted:
+                self._output_budget_exhausted = True
+                raise
         if self._observer is None:
             return
         try:
@@ -928,6 +948,16 @@ class DaytonaCodeInterpreter:
                     outputs.update(broker_metrics)
                 phase.set_outputs(outputs)
                 return result
+            except TurnBudgetExhausted:
+                # The output reservation is the terminal boundary for this
+                # execution. The first failed reservation suppresses any
+                # additional error-frame bytes, then the domain exhaustion is
+                # propagated unchanged to the Turn runner.
+                stdout_projector.finish()
+                _close_output_stream(
+                    "Execution failed", step=step, stream_id=output_stream_id, state=output_state, observe=self._observe
+                )
+                raise
             except RunTerminalError:
                 stdout_projector.finish()
                 _close_output_stream(

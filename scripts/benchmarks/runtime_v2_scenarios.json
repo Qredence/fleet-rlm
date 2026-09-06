@@ -1,8 +1,8 @@
 {
   "schema": "fleet.scripted-runtime-scenarios/v1",
   "scenarios": [
-    {"id": "plain-answer/v1", "text": "hello", "expected_answer": "hello"},
-    {"id": "unicode-answer/v1", "text": "Résumé: 東京", "expected_answer": "Résumé: 東京"},
-    {"id": "multiline-answer/v1", "text": "first\nsecond", "expected_answer": "first\nsecond"}
+    {"id": "plain-answer/v1", "text": "hello", "expected_answer": "hello", "semantic_keywords": ["hello"]},
+    {"id": "unicode-answer/v1", "text": "Résumé: 東京", "expected_answer": "Résumé: 東京", "semantic_keywords": ["résumé", "東京"]},
+    {"id": "multiline-answer/v1", "text": "first\nsecond", "expected_answer": "first\nsecond", "semantic_keywords": ["first", "second"]}
   ]
 }

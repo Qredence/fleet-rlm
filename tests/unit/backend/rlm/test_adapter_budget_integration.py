@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import time
 
 import dspy
@@ -99,6 +100,21 @@ async def test_reserved_attempts_are_root_only_and_independent_of_time(asynchron
     assert (await invoke(adapter, models.root_lm, asynchronous))[0]["code"] == "SUBMIT(answer=1)"
     assert adapter.wrap_up_summary()["wrap_up_entered"]
     assert turn.snapshot()["provider_attempts"] == 2
+
+
+def test_late_response_reclassification_consumes_global_finalization_capacity() -> None:
+    turn = TurnBudget(
+        deadline=time.monotonic() + 30,
+        limits=BudgetLimits(finalization_attempts=2),
+    )
+    adapter = AdapterBudget(turn=turn, max_finalization_attempts=10)
+    turn.reserve(BudgetDimension.PROVIDER_ATTEMPTS)
+    adapter.reclassify_late_response()
+    adapter.reclassify_late_response()
+    with pytest.raises(TurnBudgetExhausted):
+        adapter.reclassify_late_response()
+    assert turn.snapshot()["provider_attempts"] == 1
+    assert adapter.finalization_used == 2
 
 
 def test_finalization_time_and_attempt_reserves_are_independently_enforced(monkeypatch) -> None:
@@ -211,11 +227,15 @@ async def test_adapter_rejects_mismatched_turn_ledger() -> None:
     "kwargs",
     [
         {"deadline": "invalid"},
-        {"deadline": float("nan")},
+        {"deadline": math.nan},
+        {"deadline": -math.inf},
         {"deadline": False},
         {"reserve_seconds": "invalid"},
-        {"reserve_seconds": float("inf")},
+        {"reserve_seconds": math.nan},
+        {"reserve_seconds": math.inf},
         {"max_parse_retries": True},
+        {"max_parse_retries": -1},
+        {"max_finalization_attempts": True},
         {"max_finalization_attempts": -1},
     ],
 )
@@ -240,6 +260,12 @@ async def test_copy_of_call_view_retains_admission_and_trace_identity() -> None:
     assert callback._last_call["role"] == "root"
     assert scope.finalization_used == 1
     assert models.budget.snapshot()["provider_attempts"] == 1
+
+
+def test_positive_infinite_adapter_deadline_is_the_unbounded_compatibility_case() -> None:
+    budget = AdapterBudget(deadline=math.inf)
+    assert budget.deadline is None
+    assert budget.remaining() is None
 
 
 def test_concurrent_finalization_admissions_do_not_overdraw():

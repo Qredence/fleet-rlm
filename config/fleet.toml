@@ -44,10 +44,14 @@ cache = false
 [defaults.rlm]
 max_iters = 12
 max_llm_calls = 32
+max_provider_attempts = 2048
+max_tool_calls = 256
 max_output_chars = 6000
 max_execution_output_chars = 4000
+max_execution_output_bytes = 2000000
 execution_timeout_s = 300
 wrap_up_seconds = 300
+finalization_attempts = 2
 recursion_enabled = true
 recursion_max_calls = 4
 recursion_max_prompt_chars = 50000

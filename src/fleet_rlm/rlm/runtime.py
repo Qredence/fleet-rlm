@@ -35,12 +35,14 @@ from fleet_rlm.attachments.models import PreparedAttachment
 from fleet_rlm.chat.run_authority import RunAuthority
 from fleet_rlm.config.settings import Settings
 from fleet_rlm.observability.diagnostics import normalize_turn_failure
+from fleet_rlm.rlm.budget import BudgetDimension, TurnBudget
 from fleet_rlm.rlm.compat_3_3_1 import (
     CodeInterpreter,
     bind_native_rlm_observer,
 )
 from fleet_rlm.rlm.events import (
     PROVIDER_ENDPOINT_NOT_FOUND_MESSAGE,
+    AsyncToolBridge,
     AttachmentRead,
     ExecutionTraceAssembler,
     ObservationSession,
@@ -278,6 +280,9 @@ class ExecutionRuntime:
     cancellation_requested: AsyncCancellationProbe
     deadline: float
     environment_release: RetainableEnvironmentRelease | None = None
+    # Composition-owned bridge for async host Tools called synchronously by
+    # DSPy's worker-side interpreter.
+    async_bridge: AsyncToolBridge | None = None
     # Directly constructed test/in-process contexts opt into the reserve via
     # preparation; the public TOML default is applied by the live composition.
     wrap_up_seconds: float = 0.0
@@ -480,6 +485,7 @@ class RunToolGuards:
     integrity: RunIntegrityLedger = field(default_factory=RunIntegrityLedger)
     progress: ToolProgressGuard = field(default_factory=ToolProgressGuard)
     required_targets: frozenset[str] | None = None
+    budget: TurnBudget | None = None
 
     def __post_init__(self) -> None:
         if self.required_targets is not None:
@@ -491,6 +497,11 @@ class RunToolGuards:
 
     def failed(self, tool_name: str, arguments: Mapping[str, Any]) -> None:
         self.integrity.failed(tool_name, arguments)
+
+    def reserve_tool(self) -> None:
+        """Admit one host Tool call against the Turn-wide ledger."""
+        if self.budget is not None:
+            self.budget.reserve(BudgetDimension.TOOL_CALLS)
 
 
 # ---------------------------------------------------------------------------
@@ -1448,7 +1459,10 @@ class RLMRunner:
     ]:
         """Acquire the Session lane, bind current Tools, and start one worker."""
         spec = context.capabilities.spec
-        guards = RunToolGuards(required_targets=workspace_obligations(context.session.request))
+        guards = RunToolGuards(
+            required_targets=workspace_obligations(context.session.request),
+            budget=getattr(context.execution.models, "budget", None),
+        )
         recursive_executor = None
         if context.delegation.recursive_options.enabled:
             if context.delegation.child_runtime_factory is None:
@@ -1492,6 +1506,7 @@ class RLMRunner:
                 after_result=(relay_capability_details if str(tool.name) == "load_skill" else None),
                 is_authorized=lambda: not context.identity.authority.revoked,
                 guards=guards,
+                async_bridge=getattr(context.execution, "async_bridge", None),
             )
             for tool in spec.tools
         )
@@ -1623,6 +1638,9 @@ class RLMRunner:
             observer_cleanup = clear_observers
             lease.bind_turn_cleanup(binding, observer_cleanup)
             binding_attached = True
+            bind_budget = getattr(state_context.execution.interpreter, "bind_turn_budget", None)
+            if callable(bind_budget):
+                bind_budget(getattr(state_context.execution.models, "budget", None))
             self._bind_observer(
                 state_context.execution.interpreter,
                 observations.publish,

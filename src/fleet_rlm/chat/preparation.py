@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import math
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
 from typing import Any, Protocol
@@ -26,6 +27,8 @@ from fleet_rlm.chat.session_context import build_session_context_manifest
 from fleet_rlm.observability.tracing import turn_phase_span
 from fleet_rlm.persistence.database import DatabaseConnectionError
 from fleet_rlm.result_snapshot import ResultSnapshotSink
+from fleet_rlm.rlm.budget import BudgetLimits, TurnBudget
+from fleet_rlm.rlm.events import AsyncToolBridge
 from fleet_rlm.rlm.program import AttachmentContextCapsule, AttachmentContextEntry, RLMModelBundle, RLMOptions
 from fleet_rlm.rlm.recursion import ChildRuntimeFactory, RecursiveRLMOptions
 from fleet_rlm.rlm.result import empty_rlm_usage
@@ -250,6 +253,9 @@ class RunEnvironment:
     # Synchronous provider fence used when the resident RLM becomes tainted.
     # This is an internal lifecycle hook; it does not cross the HTTP/SSE seam.
     mark_tainted: Callable[[], None] | None = None
+    # Composition-owned loop bridge for async host Tools invoked through
+    # DSPy's synchronous interpreter seam.
+    async_bridge: AsyncToolBridge | None = None
 
 
 class RunEnvironmentProvider(Protocol):
@@ -291,6 +297,7 @@ class DefaultRunPreparer:
         recursive_options: RecursiveRLMOptions | None = None,
         session_runtime_registry: SessionRLMRegistry | None = None,
         wrap_up_seconds: float = 300.0,
+        budget_limits: BudgetLimits | None = None,
     ) -> None:
         self._models = models
         self._options = options
@@ -299,6 +306,7 @@ class DefaultRunPreparer:
         self._capabilities = capabilities
         self._recursive_options = recursive_options or RecursiveRLMOptions()
         self._wrap_up_seconds = max(0.0, float(wrap_up_seconds))
+        self._budget_limits = budget_limits or BudgetLimits()
         self._session_runtime_registry = session_runtime_registry
 
     async def prepare(self, run: ClaimedRun, *, deadline: float) -> PreparedTurn:
@@ -454,9 +462,14 @@ class DefaultRunPreparer:
         cleanups.extend((capabilities.aclose, remove_staged))
         resources = _PreparedTurnResources(tuple(cleanups))
         try:
+            turn_budget = TurnBudget(
+                deadline=deadline if math.isfinite(deadline) else None,
+                limits=self._budget_limits,
+            )
             turn_models = self._models.bind_turn_deadline(
                 deadline=deadline,
                 reserve_seconds=self._wrap_up_seconds,
+                budget=turn_budget,
             )
         except BaseException:
             # LM copies are part of preparation ownership. If a provider
@@ -509,6 +522,7 @@ class DefaultRunPreparer:
                 deadline=deadline,
                 wrap_up_seconds=self._wrap_up_seconds,
                 environment_release=environment_release,
+                async_bridge=environment.async_bridge,
             ),
             capabilities=capabilities,
             delegation=DelegationPolicy(

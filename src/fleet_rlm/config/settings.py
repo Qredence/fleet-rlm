@@ -394,6 +394,28 @@ class Settings(BaseModel):
             required_in_policy=True,
         ),
     ] = Field(default=50, gt=0)
+    rlm_max_provider_attempts: Annotated[
+        int,
+        FleetFieldPolicy(
+            toml_path="rlm.max_provider_attempts",
+            group="RLM",
+            label="Maximum provider attempts",
+            editor="number",
+            rank=73,
+            required_in_policy=True,
+        ),
+    ] = Field(default=2048, gt=0)
+    rlm_max_tool_calls: Annotated[
+        int,
+        FleetFieldPolicy(
+            toml_path="rlm.max_tool_calls",
+            group="RLM",
+            label="Maximum Tool calls",
+            editor="number",
+            rank=74,
+            required_in_policy=True,
+        ),
+    ] = Field(default=256, gt=0)
     rlm_max_output_chars: Annotated[
         int,
         FleetFieldPolicy(
@@ -416,6 +438,17 @@ class Settings(BaseModel):
             required_in_policy=True,
         ),
     ] = Field(default=4_000, gt=0)
+    rlm_max_execution_output_bytes: Annotated[
+        int,
+        FleetFieldPolicy(
+            toml_path="rlm.max_execution_output_bytes",
+            group="RLM",
+            label="Maximum execution output bytes",
+            editor="number",
+            rank=75,
+            required_in_policy=True,
+        ),
+    ] = Field(default=2_000_000, gt=0)
     rlm_execution_timeout_s: Annotated[
         int,
         FleetFieldPolicy(
@@ -437,6 +470,17 @@ class Settings(BaseModel):
             rank=69,
         ),
     ] = Field(default=300, gt=0)
+    rlm_finalization_attempts: Annotated[
+        int,
+        FleetFieldPolicy(
+            toml_path="rlm.finalization_attempts",
+            group="RLM",
+            label="Finalization attempts",
+            editor="number",
+            rank=76,
+            required_in_policy=True,
+        ),
+    ] = Field(default=2, ge=0)
     rlm_recursion_enabled: Annotated[
         bool,
         FleetFieldPolicy(

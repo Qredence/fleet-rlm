@@ -1732,6 +1732,15 @@ class SyncBridgeDispatcher:
         """Return the registered composition loop, if any."""
         return self._service_loop
 
+    def run(self, awaitable: Any) -> Any:
+        """Await one host operation on this persistent composition loop.
+
+        DSPy invokes host Tools synchronously from a worker loop. This public
+        structural seam lets the provider-neutral RLM observer use the same
+        composition-owned loop without creating a loop or thread per call.
+        """
+        return _SyncBridgeLoop(caller_loop=None, dispatcher=self).run(awaitable)
+
 
 class _SyncBridgeLoop:
     """Service-loop routing and close state for one synchronous Daytona bridge.
@@ -1789,6 +1798,14 @@ class _SyncBridgeLoop:
             if inspect.iscoroutine(awaitable):
                 awaitable.close()
             raise self._bridge_error("synchronous Daytona bridge service loop is unavailable")
+        try:
+            current_loop = asyncio.get_running_loop()
+        except RuntimeError:
+            current_loop = None
+        if current_loop is loop:
+            if inspect.iscoroutine(awaitable):
+                awaitable.close()
+            raise self._bridge_error("synchronous Daytona bridge called from its owning event loop")
         try:
             future = asyncio.run_coroutine_threadsafe(awaitable, loop)
         except RuntimeError as exc:

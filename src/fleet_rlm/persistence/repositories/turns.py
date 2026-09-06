@@ -431,8 +431,13 @@ def _expected_claim_conflict(error: IntegrityError) -> bool:
         }
     if getattr(original, "sqlstate", getattr(original, "pgcode", None)) != "23505":
         return False
-    diagnostic = getattr(original, "diag", None)
-    constraint = getattr(diagnostic, "constraint_name", None)
+    # asyncpg exposes the constraint name directly on the driver exception;
+    # SQLAlchemy/other adapters may retain it under ``diag`` or ``__cause__``.
+    # Check the real asyncpg shape first, then keep the compatibility fallbacks.
+    constraint = getattr(original, "constraint_name", None)
+    if constraint is None:
+        diagnostic = getattr(original, "diag", None)
+        constraint = getattr(diagnostic, "constraint_name", None)
     if constraint is None:
         constraint = getattr(getattr(original, "__cause__", None), "constraint_name", None)
     return constraint in {"uq_fleet_runs_one_running", "uq_fleet_runs_live_idempotency"}

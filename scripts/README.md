@@ -128,7 +128,10 @@ uv run python -m scripts.benchmarks.runtime_v2 compare-adapters \
 The command executes stock JSONAdapter and Fleet adapters with zero, one, and
 two parse repairs over versioned response fixtures, in both sync and async modes.
 It records outcomes, physical provider admissions, latency distributions, source
-and fixture digests, and fail-closed contract gates. Output creation is exclusive;
-choose a new filename for each receipt. The comparison does not call a provider,
-Daytona, Postgres, or an MLflow server. Its scores measure deterministic protocol
-behavior, not semantic answer quality or production latency/cost.
+and fixture digests, and fail-closed contract gates. The scripted Turn lane also
+runs the deterministic `semantic-keywords/v1` content-presence scorer; this is not
+an LLM quality judgment, and `live_semantic_gate` remains `not_exercised`. Output
+creation is exclusive; choose a new filename for each receipt. The comparison does
+not call a provider, Daytona, Postgres, or an MLflow server. Its scores measure
+deterministic lifecycle/protocol behavior, not live semantic quality or production
+latency/cost.

@@ -42,6 +42,19 @@ def test_finalization_capacity_is_not_available_to_exploration() -> None:
     assert budget.snapshot()["provider_attempts"] == 5
 
 
+def test_finalization_reservation_is_enforced_independently() -> None:
+    budget = TurnBudget(
+        deadline=time.monotonic() + 60,
+        limits=BudgetLimits(finalization_attempts=2),
+    )
+    budget.reserve(BudgetDimension.PROVIDER_ATTEMPTS, finalization=True)
+    budget.reserve(BudgetDimension.PROVIDER_ATTEMPTS, finalization=True)
+    with pytest.raises(TurnBudgetExhausted) as error:
+        budget.reserve(BudgetDimension.PROVIDER_ATTEMPTS, finalization=True)
+    assert error.value.dimension == BudgetDimension.PROVIDER_ATTEMPTS
+    assert budget.snapshot()["provider_attempts"] == 2
+
+
 def test_deadline_reserve_and_settlement(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("fleet_rlm.rlm.budget.time.monotonic", lambda: 98.0)
     budget = TurnBudget(deadline=100, limits=BudgetLimits(finalization_seconds=3))

@@ -25,6 +25,7 @@ from fleet_rlm.chat.session_context import SessionContextManifest
 from fleet_rlm.config.settings import Settings
 from fleet_rlm.observability.diagnostics import trace_failure_category
 from fleet_rlm.observability.tracing import start_turn_span
+from fleet_rlm.rlm.budget import BudgetDimension
 from fleet_rlm.rlm.compat_3_3_1 import CodeInterpreter, FleetJSONAdapter, _RLMTraceCallback
 from fleet_rlm.rlm.events import Status, ToolEventView, ToolObserver, observe_tool
 from fleet_rlm.rlm.output_contract import bind_output_contract
@@ -1220,6 +1221,13 @@ class RecursiveRLMExecutor:
         with self._state.lock:
             if self._state.reserved_call_count + len(prompts) > self._options.max_calls:
                 raise RuntimeError("recursive call budget exhausted")
+            turn_budget = self._models.budget
+            if turn_budget is not None:
+                # A recursive request is both a Tool invocation and a child
+                # admission. Reserve the Tool counter first so an attempted
+                # request that fails the child ceiling is still accounted for.
+                turn_budget.reserve(BudgetDimension.TOOL_CALLS, len(prompts))
+                turn_budget.reserve(BudgetDimension.RECURSIVE_CHILDREN, len(prompts))
             start = self._state.reserved_call_count + 1
             self._state.reserved_call_count += len(prompts)
             self._state.delegated_prompt_chars += sum(len(prompt) for prompt in prompts)
@@ -1280,6 +1288,9 @@ class RecursiveRLMExecutor:
         if time.monotonic() >= self._deadline:
             raise TimeoutError("recursive child deadline exceeded")
         child_models = self._models.fork_for_child(deadline=self._deadline)
+        bind_budget = getattr(lease.interpreter, "bind_turn_budget", None)
+        if callable(bind_budget):
+            bind_budget(child_models.budget)
         child_executor = RecursiveRLMExecutor(
             models=child_models,
             options=self._options,

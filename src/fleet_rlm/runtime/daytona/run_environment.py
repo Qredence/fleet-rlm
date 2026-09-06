@@ -1382,6 +1382,7 @@ class _DaytonaEnvironmentProvider:
                 release_is_resident=False,
                 history_transport=build_committed_session_history_for_claim(run),
                 mark_tainted=lambda key=key: self._mark_provider_root_tainted(key),
+                async_bridge=getattr(self.resources, "dispatcher", None),
             )
         except BaseException:
             # The preparation gate proves that no earlier same-Session Turn

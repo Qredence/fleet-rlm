@@ -1196,7 +1196,9 @@ async def test_sync_and_async_tools_have_equivalent_results_and_lifecycle() -> N
     async_wrapped = observe_tool(dspy.Tool(async_tool), async_events.append, ToolEventView.metadata_only())
 
     sync_result = sync_wrapped.func(value=4, note=None)
-    async_result = async_wrapped.func(value=4, note=None)
+    # DSPy Tools are synchronous at the interpreter boundary; direct callers
+    # outside the worker loop use the short-lived credential-free path.
+    async_result = await asyncio.to_thread(async_wrapped.func, value=4, note=None)
 
     assert sync_result == async_result == {"value": 4, "note": None}
     assert [type(event).__name__ for event in sync_events] == [

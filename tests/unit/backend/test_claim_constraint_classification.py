@@ -1,8 +1,8 @@
 """Only expected unique claim constraints may enter race reconciliation."""
 
 import sqlite3
-from types import SimpleNamespace
 
+import asyncpg
 import pytest
 from sqlalchemy.exc import IntegrityError
 
@@ -40,10 +40,7 @@ def test_sqlite_constraint_allowlist(message, code, expected):
     ],
 )
 def test_postgres_constraint_allowlist(constraint, code, expected):
-    class DriverError(Exception):
-        pass
-
-    original = DriverError()
+    original = asyncpg.exceptions.UniqueViolationError() if code == "23505" else Exception()
     original.sqlstate = code
-    original.diag = SimpleNamespace(constraint_name=constraint)
+    original.constraint_name = constraint
     assert _expected_claim_conflict(IntegrityError(None, None, original)) is expected

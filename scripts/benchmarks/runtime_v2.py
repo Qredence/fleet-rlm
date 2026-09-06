@@ -15,6 +15,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import unicodedata
 from pathlib import Path
 from typing import Any
 
@@ -25,6 +26,7 @@ if str(_REPO_ROOT) not in sys.path:
 SCHEMA = "fleet.runtime-benchmark/v2"
 DATASET = Path(__file__).with_name("runtime_v2_scenarios.json")
 SCORERS = ("stream-terminal/v1", "echo-answer/v1", "durable-turn-pair/v1")
+SEMANTIC_SCORERS = ("semantic-keywords/v1",)
 
 
 def digest(value: Any) -> str:
@@ -35,6 +37,24 @@ def percentile(values: list[float], percent: int) -> float:
     return sorted(values)[max(0, math.ceil(len(values) * percent / 100) - 1)]
 
 
+def _semantic_text(value: object) -> str:
+    """Normalize bounded answer text for the deterministic semantic proxy."""
+    return " ".join(unicodedata.normalize("NFKC", str(value)).casefold().split())
+
+
+def semantic_keywords_score(answer: str, keywords: object) -> bool:
+    """Require every expected concept marker without making a provider call.
+
+    This is intentionally a deterministic content-presence scorer, not an LLM
+    quality judgment. The live semantic gate remains separate and explicitly
+    unexercised by the scripted benchmark.
+    """
+    if not isinstance(keywords, list) or not keywords or not all(isinstance(item, str) for item in keywords):
+        return False
+    normalized_answer = _semantic_text(answer)
+    return all((keyword := _semantic_text(item)) and keyword in normalized_answer for item in keywords)
+
+
 def seal(receipt: dict[str, Any]) -> dict[str, Any]:
     return {**receipt, "receipt_digest": digest(receipt)}
 
@@ -43,6 +63,14 @@ def validate(receipt: dict[str, Any]) -> None:
     body = {key: value for key, value in receipt.items() if key != "receipt_digest"}
     if receipt.get("schema") != SCHEMA or receipt.get("receipt_digest") != digest(body):
         raise ValueError("invalid benchmark schema or receipt digest")
+    if type(receipt.get("runtime_variant")) is not str or not receipt["runtime_variant"]:
+        raise ValueError("benchmark runtime variant is missing")
+    if type(receipt.get("source_dirty")) is not bool:
+        raise ValueError("benchmark source_dirty provenance is invalid")
+    if type(receipt.get("source_revision")) is not str or not receipt["source_revision"]:
+        raise ValueError("benchmark source revision is missing")
+    if receipt.get("semantic_scorer_ids") != list(SEMANTIC_SCORERS):
+        raise ValueError("benchmark semantic scorer IDs are incomplete")
     if not receipt.get("samples") or receipt.get("repetitions", 0) < 2:
         raise ValueError("benchmark requires repeated samples")
     expected = {
@@ -56,13 +84,22 @@ def validate(receipt: dict[str, Any]) -> None:
             raise ValueError("benchmark duration must be finite and nonnegative")
         if set(sample["scores"]) != set(SCORERS) or any(type(value) is not bool for value in sample["scores"].values()):
             raise ValueError("benchmark scorer results are incomplete")
+        semantic_scores = sample.get("semantic_scores")
+        if (
+            not isinstance(semantic_scores, dict)
+            or set(semantic_scores) != set(SEMANTIC_SCORERS)
+            or any(type(value) is not bool for value in semantic_scores.values())
+        ):
+            raise ValueError("benchmark semantic scorer results are incomplete")
         if sample["event_types"] != receipt["event_fixtures"][sample["scenario"]]:
             raise ValueError("benchmark event fixtures disagree with executed samples")
     durations = [sample["seconds"] for sample in receipt["samples"]]
     summary = {"p50": percentile(durations, 50), "p95": percentile(durations, 95)}
     if receipt["latency_seconds"] != summary:
         raise ValueError("benchmark latency summary disagrees with samples")
-    passed = all(all(sample["scores"].values()) for sample in receipt["samples"])
+    passed = all(
+        all(sample["scores"].values()) and all(sample["semantic_scores"].values()) for sample in receipt["samples"]
+    )
     if receipt["passed"] is not passed:
         raise ValueError("benchmark verdict disagrees with scores")
 
@@ -109,6 +146,9 @@ def run(*, repetitions: int = 5) -> dict[str, Any]:
                         "durable-turn-pair/v1": [item["role"] for item in durable.json()["items"]]
                         == ["user", "assistant"],
                     }
+                    semantic_scores = {
+                        "semantic-keywords/v1": semantic_keywords_score(answer, scenario.get("semantic_keywords")),
+                    }
                     fixtures.setdefault(scenario["id"], types)
                     samples.append(
                         {
@@ -116,6 +156,7 @@ def run(*, repetitions: int = 5) -> dict[str, Any]:
                             "repetition": repetition,
                             "seconds": elapsed,
                             "scores": scores,
+                            "semantic_scores": semantic_scores,
                             "event_types": types,
                         }
                     )
@@ -129,14 +170,18 @@ def run(*, repetitions: int = 5) -> dict[str, Any]:
             "source_revision": subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip(),
             "source_dirty": bool(subprocess.check_output(["git", "status", "--porcelain"], text=True).strip()),
             "dataset_digest": digest(dataset),
-            "scorer_digest": digest({"ids": SCORERS, "implementation": Path(__file__).read_text()}),
+            "scorer_digest": digest(
+                {"ids": SCORERS, "semantic_ids": SEMANTIC_SCORERS, "implementation": Path(__file__).read_text()}
+            ),
             "scorer_ids": list(SCORERS),
-            "semantic_scorer_ids": [],
+            "semantic_scorer_ids": list(SEMANTIC_SCORERS),
             "identities": {"profile": "private-testing", "snapshots": [], "provider": "scripted"},
             "samples": samples,
             "event_fixtures": fixtures,
             "latency_seconds": {"p50": percentile(durations, 50), "p95": percentile(durations, 95)},
-            "passed": all(all(sample["scores"].values()) for sample in samples),
+            "passed": all(
+                all(sample["scores"].values()) and all(sample["semantic_scores"].values()) for sample in samples
+            ),
             "live_semantic_gate": "not_exercised",
         }
     )
@@ -149,10 +194,19 @@ def compare(baseline: dict[str, Any], candidate: dict[str, Any], *, max_p95_rati
         raise ValueError("p95 ratio must be finite and positive")
     compatible = all(
         baseline[key] == candidate[key]
-        for key in ("dataset_digest", "scorer_digest", "execution_mode", "repetitions", "identities")
+        for key in (
+            "dataset_digest",
+            "scorer_digest",
+            "execution_mode",
+            "repetitions",
+            "identities",
+            "runtime_variant",
+            "semantic_scorer_ids",
+        )
     )
     gates = {
         "comparable": compatible,
+        "source_clean": not baseline["source_dirty"] and not candidate["source_dirty"],
         "baseline_passed": baseline["passed"],
         "candidate_passed": candidate["passed"],
         "event_parity": baseline["event_fixtures"] == candidate["event_fixtures"],

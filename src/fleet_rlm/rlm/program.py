@@ -664,7 +664,20 @@ class RLMModelBundle:
         rather than to clone a provider runtime. Child forks still invoke that
         hook explicitly through :meth:`fork_for_child`.
         """
-        normalized_reserve = max(0.0, float(reserve_seconds))
+        if (
+            not isinstance(deadline, (int, float))
+            or isinstance(deadline, bool)
+            or (not math.isfinite(deadline) and deadline != math.inf)
+        ):
+            raise ValueError("deadline must be finite or positive infinity")
+        if (
+            not isinstance(reserve_seconds, (int, float))
+            or isinstance(reserve_seconds, bool)
+            or not math.isfinite(reserve_seconds)
+            or reserve_seconds < 0
+        ):
+            raise ValueError("reserve_seconds must be finite and nonnegative")
+        normalized_reserve = float(reserve_seconds)
         # Preparation-only test seams intentionally use an unbounded deadline.
         # Production Turns supply a finite absolute deadline.
         turn_budget = budget
@@ -939,8 +952,21 @@ def _remaining_lm_timeout(
     reserve_seconds: float = 0.0,
     error_message: str = "Turn LM deadline exceeded",
 ) -> float:
+    if deadline is not None and (
+        not isinstance(deadline, (int, float))
+        or isinstance(deadline, bool)
+        or (not math.isfinite(deadline) and deadline != math.inf)
+    ):
+        raise ValueError("deadline must be finite, positive infinity, or None")
+    if (
+        not isinstance(reserve_seconds, (int, float))
+        or isinstance(reserve_seconds, bool)
+        or not math.isfinite(reserve_seconds)
+        or reserve_seconds < 0
+    ):
+        raise ValueError("reserve_seconds must be finite and nonnegative")
     remaining = math.inf if deadline is None else deadline - time.monotonic()
-    available = remaining - max(0.0, reserve_seconds)
+    available = remaining - float(reserve_seconds)
     if available <= 0:
         raise TimeoutError(error_message)
     configured = call_kwargs.get("timeout")

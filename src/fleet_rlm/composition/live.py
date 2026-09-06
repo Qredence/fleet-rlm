@@ -38,6 +38,7 @@ from fleet_rlm.daytona.session_manager import DEFAULT_IDLE_STOP_SECONDS
 from fleet_rlm.persistence.database import ensure_database_compatible
 from fleet_rlm.persistence.repositories.outbox import SqlAlchemyMemoryPromotionOutbox
 from fleet_rlm.persistence.repositories.turns import ReconciliationSummary
+from fleet_rlm.rlm.budget import BudgetLimits
 from fleet_rlm.rlm.program import RLMModelBundle, rlm_options
 from fleet_rlm.rlm.recursion import recursive_rlm_options
 from fleet_rlm.rlm.session_runtime import SessionRLMRegistry
@@ -883,6 +884,14 @@ def build_run_preparation(
         options=rlm_options(settings),
         recursive_options=recursive_rlm_options(settings),
         wrap_up_seconds=settings.rlm_wrap_up_seconds,
+        budget_limits=BudgetLimits(
+            provider_attempts=settings.rlm_max_provider_attempts,
+            tool_calls=settings.rlm_max_tool_calls,
+            recursive_children=(settings.rlm_recursion_max_calls if settings.rlm_recursion_enabled else 0),
+            execution_output_bytes=settings.rlm_max_execution_output_bytes,
+            finalization_attempts=settings.rlm_finalization_attempts,
+            finalization_seconds=settings.rlm_wrap_up_seconds,
+        ),
         attachments=attachment_lifecycle,
         environments=_DaytonaEnvironmentProvider(resources, settings, session_runtime_registry),
         capabilities=_LiveCapabilityPreparer(settings, skill_catalog, volume_paths=resources.volume_paths),

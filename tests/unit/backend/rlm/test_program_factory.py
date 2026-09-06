@@ -270,6 +270,17 @@ def test_provider_retries_recompute_remaining_and_non_retryable_errors_stop(
         assert len(bound.root_lm.calls) == 1
 
 
+def test_turn_binding_rejects_nonfinite_deadline_that_would_disable_budget() -> None:
+    import math
+
+    from fleet_rlm.rlm.program import RLMModelBundle
+
+    with pytest.raises(ValueError, match="deadline"):
+        RLMModelBundle(_CopyableLM(), _CopyableLM()).bind_turn_deadline(deadline=math.nan)
+    with pytest.raises(ValueError, match="deadline"):
+        RLMModelBundle(_CopyableLM(), _CopyableLM()).bind_turn_deadline(deadline=-math.inf)
+
+
 def test_child_copy_cannot_extend_turn_budget_deadline(monkeypatch: pytest.MonkeyPatch) -> None:
     from fleet_rlm.rlm.program import RLMModelBundle
 

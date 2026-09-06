@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 import tomllib
 from pathlib import Path
 
@@ -15,6 +16,7 @@ from fleet_rlm.daytona.interpreter import (
     InProcessInterpreterBackend,
     sandbox_backend,
 )
+from fleet_rlm.rlm.budget import BudgetDimension, BudgetLimits, TurnBudget, TurnBudgetExhausted
 from fleet_rlm.rlm.compat_3_3_1 import FinalOutput
 
 
@@ -47,6 +49,24 @@ def test_final_output_is_never_capped() -> None:
 
     assert isinstance(result, FinalOutput)
     assert result.output["answer"] == "x" * 5000
+
+
+def test_turn_output_budget_is_shared_and_fail_closed() -> None:
+    interpreter = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend(), execution_output_cap=400)
+    observed: list[object] = []
+    budget = TurnBudget(
+        deadline=time.monotonic() + 60,
+        limits=BudgetLimits(execution_output_bytes=3),
+    )
+    interpreter.bind_observer(observed.append)
+    interpreter.bind_turn_budget(budget)
+
+    with pytest.raises(TurnBudgetExhausted) as caught:
+        interpreter.execute("_out = 'abcd'")
+
+    assert caught.value.dimension == BudgetDimension.EXECUTION_OUTPUT_BYTES
+    assert budget.snapshot()[BudgetDimension.EXECUTION_OUTPUT_BYTES.value] == 0
+    assert not any(getattr(item, "output", "") == "Execution failed" for item in observed)
 
 
 def test_error_feedback_includes_capped_stderr() -> None:

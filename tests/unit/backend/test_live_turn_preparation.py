@@ -170,6 +170,12 @@ async def test_live_preparation_stages_attachment_and_cleans_it(
     ).prepare(turn, deadline=float("inf"))
 
     assert prepared.execution.session.attachments[0].attachment_id == attachment_id
+    budget = prepared.execution.execution.models.budget
+    assert budget is not None
+    assert budget.limits.provider_attempts == settings.rlm_max_provider_attempts
+    assert budget.limits.tool_calls == settings.rlm_max_tool_calls
+    assert budget.limits.execution_output_bytes == settings.rlm_max_execution_output_bytes
+    assert budget.limits.finalization_attempts == settings.rlm_finalization_attempts
     assert data in volume.values()
     expected_tools = {
         "create_artifact",

@@ -35,7 +35,9 @@ class BudgetLimits:
     tool_calls: int | None = None
     recursive_children: int | None = None
     execution_output_bytes: int | None = None
-    finalization_attempts: int = 0
+    # ``None`` leaves finalization admission to the invocation-local
+    # ``AdapterBudget``. A value, including zero, is an explicit global ceiling.
+    finalization_attempts: int | None = None
     finalization_seconds: float = 0.0
 
     def __post_init__(self) -> None:
@@ -48,9 +50,18 @@ class BudgetLimits:
         ):
             if value is not None and (type(value) is not int or value < 0):
                 raise ValueError("budget counts must be nonnegative integers")
-        if not math.isfinite(self.finalization_seconds) or self.finalization_seconds < 0:
+        if (
+            not isinstance(self.finalization_seconds, (int, float))
+            or isinstance(self.finalization_seconds, bool)
+            or not math.isfinite(self.finalization_seconds)
+            or self.finalization_seconds < 0
+        ):
             raise ValueError("finalization_seconds must be finite and nonnegative")
-        if self.provider_attempts is not None and self.finalization_attempts > self.provider_attempts:
+        if (
+            self.provider_attempts is not None
+            and self.finalization_attempts is not None
+            and self.finalization_attempts > self.provider_attempts
+        ):
             raise ValueError("finalization reserve exceeds provider attempt limit")
 
 
@@ -64,8 +75,10 @@ class TurnBudget:
     """
 
     def __init__(self, *, deadline: float | None, limits: BudgetLimits | None = None) -> None:
-        if deadline is not None and not math.isfinite(deadline):
-            raise ValueError("deadline must be finite")
+        if deadline is not None and (
+            not isinstance(deadline, (int, float)) or isinstance(deadline, bool) or not math.isfinite(deadline)
+        ):
+            raise ValueError("deadline must be a finite number or None")
         self.deadline = deadline
         self.limits = limits or BudgetLimits()
         self._lock = Lock()
@@ -77,6 +90,7 @@ class TurnBudget:
             BudgetDimension.EXECUTION_OUTPUT_BYTES: 0,
         }
         self._exploration_attempts = 0
+        self._finalization_attempts = 0
 
     def reserve(
         self,
@@ -95,10 +109,14 @@ class TurnBudget:
             limit = getattr(self.limits, dimension.value)
             if limit is not None and self._used[dimension] + count > limit:
                 raise TurnBudgetExhausted(dimension)
-            if dimension == BudgetDimension.PROVIDER_ATTEMPTS and not finalization:
-                if limit is not None and (
-                    self._exploration_attempts + count > limit - self.limits.finalization_attempts
-                ):
+            if dimension == BudgetDimension.PROVIDER_ATTEMPTS and finalization:
+                finalization_limit = self.limits.finalization_attempts
+                if finalization_limit is not None and self._finalization_attempts + count > finalization_limit:
+                    raise TurnBudgetExhausted(dimension)
+                self._finalization_attempts += count
+            elif dimension == BudgetDimension.PROVIDER_ATTEMPTS:
+                finalization_reserve = self.limits.finalization_attempts or 0
+                if limit is not None and (self._exploration_attempts + count > limit - finalization_reserve):
                     raise TurnBudgetExhausted(dimension)
                 self._exploration_attempts += count
             self._used[dimension] += count
@@ -118,13 +136,25 @@ class TurnBudget:
         with self._lock:
             return self._remaining(finalization=finalization)
 
+    def reclassify_finalization(self, count: int = 1) -> None:
+        """Consume finalization capacity for an already-admitted response."""
+        if type(count) is not int or count < 0:
+            raise ValueError("reclassification count must be a nonnegative integer")
+        with self._lock:
+            self._remaining(finalization=True)
+            limit = self.limits.finalization_attempts
+            if limit is not None and self._finalization_attempts + count > limit:
+                raise TurnBudgetExhausted(BudgetDimension.PROVIDER_ATTEMPTS)
+            self._finalization_attempts += count
+
     def exploration_exhausted(self) -> bool:
         """Whether an explicit provider reserve has fenced further exploration."""
         with self._lock:
             limit = self.limits.provider_attempts
+            finalization_reserve = self.limits.finalization_attempts or 0
             return limit is not None and (
                 self._used[BudgetDimension.PROVIDER_ATTEMPTS] >= limit
-                or self._exploration_attempts >= limit - self.limits.finalization_attempts
+                or self._exploration_attempts >= limit - finalization_reserve
             )
 
     def snapshot(self) -> dict[str, int]:
@@ -171,6 +201,9 @@ class AdapterBudget:
         for value in (max_parse_retries, max_finalization_attempts):
             if type(value) is not int or value < 0:
                 raise ValueError("repair attempt limits must be nonnegative integers")
+        # Without an explicitly supplied Turn ledger, finalization remains
+        # governed by this invocation-local adapter cap. A shared production
+        # ledger may opt into a global finalization ceiling via its limits.
         self.turn = turn or TurnBudget(deadline=deadline)
         self.deadline = deadline
         self.reserve_seconds = reserve_seconds
@@ -211,6 +244,7 @@ class AdapterBudget:
         """Count a late admitted response as finalization, without double debit."""
         with self._lock:
             self._check_finalization()
+            self.turn.reclassify_finalization()
             self._finalization_used += 1
 
     def reserve_provider(self, *, action: bool, wrap_up: bool, can_finalize: bool) -> float:

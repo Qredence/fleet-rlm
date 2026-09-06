@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from collections.abc import Mapping
 from typing import Any
 
 import dspy
 import pytest
 
+from fleet_rlm.rlm.budget import BudgetDimension, BudgetLimits, TurnBudget, TurnBudgetExhausted
 from fleet_rlm.rlm.events import (
     ToolCompleted,
     ToolEventView,
@@ -19,6 +21,29 @@ from fleet_rlm.rlm.events import (
 )
 from fleet_rlm.rlm.result import RunNoProgressError
 from fleet_rlm.rlm.runtime import RunToolGuards
+
+
+def test_observe_tool_admits_calls_against_the_turn_budget() -> None:
+    calls: list[str] = []
+    observed: list[Any] = []
+    budget = TurnBudget(
+        deadline=time.monotonic() + 60,
+        limits=BudgetLimits(tool_calls=1),
+    )
+    wrapped = observe_tool(
+        dspy.Tool(lambda query: calls.append(query) or query, name="lookup"),
+        observed.append,
+        ToolEventView.metadata_only(),
+        guards=RunToolGuards(budget=budget),
+    )
+
+    assert wrapped.func("first") == "first"
+    with pytest.raises(TurnBudgetExhausted):
+        wrapped.func("second")
+
+    assert calls == ["first"]
+    assert budget.snapshot()[BudgetDimension.TOOL_CALLS.value] == 1
+    assert sum(isinstance(item, ToolFailed) for item in observed) == 1
 
 
 def test_observe_tool_creates_bounded_mlflow_tool_span(monkeypatch: pytest.MonkeyPatch) -> None:

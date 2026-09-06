@@ -285,10 +285,14 @@ temperature = 0.2
 [defaults.rlm]
 max_iters = 3
 max_llm_calls = 4
+max_provider_attempts = 32
+max_tool_calls = 16
 max_output_chars = 500
 max_execution_output_chars = 250
+max_execution_output_bytes = 10000
 execution_timeout_s = 90
 wrap_up_seconds = 30
+finalization_attempts = 2
 verbose = true
 [defaults.storage]
 data_root = ".fleet-test"
@@ -482,6 +486,23 @@ def test_runtime_settings_reject_unknown_toml_key(monkeypatch: pytest.MonkeyPatc
     monkeypatch.setattr(config, "_CONFIG_PATH", policy)
 
     with pytest.raises(FleetConfigurationError, match="unknown configuration key"):
+        config.load_runtime_settings()
+
+
+def test_runtime_settings_reject_unknown_llm_role(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    import fleet_rlm.config.loader as config
+
+    policy = tmp_path / "fleet.toml"
+    _policy(policy)
+    policy.write_text(
+        policy.read_text(encoding="utf-8")
+        + '\n[defaults.llm.utility]\nmodel = "openai/utility"\napi_key_env = "UTILITY_KEY"\n',
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(config, "_CONFIG_PATH", policy)
+
+    with pytest.raises(FleetConfigurationError, match=r"unknown LLM role.*utility"):
         config.load_runtime_settings()
 
 
