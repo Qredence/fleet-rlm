@@ -574,6 +574,7 @@ def _resolve_awaitable_result(result: Any, *, async_bridge: AsyncToolBridge | No
         if callable(cancel):
             cancel()
         raise RuntimeError("async Tool requires a persistent async bridge")
+    return result
 
 
 def _execute_observed_tool(
