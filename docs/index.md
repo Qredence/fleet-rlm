@@ -25,6 +25,7 @@ FastAPI/SSE contract backed by DSPy, Daytona, and SQLAlchemy/Alembic.
 17. [Session-scoped RLM state ADR](decisions/ADR-session-scoped-rlm-state.md)
 18. [Turn interpreter context target (ADR 004)](decisions/004-turn-interpreter-context.md)
 19. [Runtime variant (ADR 005)](decisions/005-runtime-variant.md)
+20. [Native runtime and MLflow evidence (ADR 006)](decisions/006-native-turn-scoped-runtime-and-evaluation.md)
 
 ## Reference
 
