@@ -16,7 +16,7 @@ from typing import Any, Literal, cast
 
 import dspy
 
-from fleet_rlm.rlm._dspy_compat import _RLMTraceCallback
+from fleet_rlm.rlm.compat_3_3_1 import _RLMTraceCallback
 from fleet_rlm.rlm.events import ObservationDetail, ToolCompleted, ToolFailed, ToolStarted
 from fleet_rlm.rlm.program import RLMModelBundle, RLMOptions, build_native_rlm, root_signature_for_recursion
 from fleet_rlm.rlm.recursion import (

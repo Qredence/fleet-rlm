@@ -1,4 +1,4 @@
-"""DSPy 3.3.x compatibility, version guard, callbacks, and interpreter contracts.
+"""DSPy 3.3.1 compatibility, version guard, callbacks, and interpreter contracts.
 
 This module isolates version-specific and private/public DSPy 3.3.1 contracts.
 Other modules in ``fleet_rlm.rlm`` depend on this compatibility layer rather

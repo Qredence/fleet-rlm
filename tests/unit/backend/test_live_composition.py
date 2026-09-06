@@ -81,7 +81,7 @@ async def test_daytona_build_cancellation_disposes_partial_engine(monkeypatch: p
     import fleet_rlm.composition.live as composition
     import fleet_rlm.daytona.provisioning as provisioning
     import fleet_rlm.persistence.database as database
-    import fleet_rlm.rlm._dspy_compat as dspy_contract
+    import fleet_rlm.rlm.compat_3_3_1 as dspy_contract
     import fleet_rlm.runtime.daytona.run_environment as run_environment
 
     class Engine:

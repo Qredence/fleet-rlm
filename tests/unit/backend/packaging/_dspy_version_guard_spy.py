@@ -48,7 +48,7 @@ def _install_ordered_spies(order: list[str], counts: dict[str, int]) -> None:
     import fleet_rlm.composition.testing as composition_common
     import fleet_rlm.daytona.platform as daytona_platform
     import fleet_rlm.persistence.database as persistence_database
-    import fleet_rlm.rlm._dspy_compat as dspy_compat
+    import fleet_rlm.rlm.compat_3_3_1 as dspy_compat
     import fleet_rlm.rlm.program as program
 
     real_guard = dspy_compat.assert_dspy_version
@@ -221,7 +221,7 @@ def main(argv: list[str]) -> int:
 
     dspy.__version__ = reported_version
 
-    import fleet_rlm.rlm._dspy_compat as dspy_compat
+    import fleet_rlm.rlm.compat_3_3_1 as dspy_compat
 
     rejection_error_type = getattr(
         dspy_compat,

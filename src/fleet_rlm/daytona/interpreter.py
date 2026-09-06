@@ -57,7 +57,7 @@ from fleet_rlm.daytona.interpreter_output import (
     _PublicStdoutProjector,
 )
 from fleet_rlm.observability.tracing import trace_preview_limit, turn_phase_span
-from fleet_rlm.rlm._dspy_compat import (
+from fleet_rlm.rlm.compat_3_3_1 import (
     PUBLIC_FINAL_OUTPUT_LABEL,
     CodeExecutionError,
     CodeInterpreterError,
@@ -76,6 +76,7 @@ from fleet_rlm.rlm.events import (
     ToolObserver,
     observe_tool,
 )
+from fleet_rlm.rlm.output_contract import FleetOutputContract
 from fleet_rlm.rlm.result import (
     RunNoProgressError,
     RunTerminalError,
@@ -524,6 +525,7 @@ class DaytonaCodeInterpreter:
         self._execution_started = False
         self._tools: _BindingTools = _BindingTools(self, tools)
         self._bound_tools: dict[str, Callable[..., Any]] = {}
+        self._fleet_output_contract: FleetOutputContract | None = None
         self._output_fields: list[dict[str, Any]] | None = None
         self._output_fields_digest: str | None = None
         self.output_fields = output_fields
@@ -566,10 +568,17 @@ class DaytonaCodeInterpreter:
         """Return the current typed-output metadata copy."""
         return copy_output_fields(self._output_fields)
 
+    def bind_output_contract(self, contract: FleetOutputContract) -> None:
+        self._ensure_binding_mutation_allowed()
+        self._fleet_output_contract = contract
+        self.output_fields = [{"name": field.name} for field in contract.fields]
+
     @output_fields.setter
     def output_fields(self, value: list[dict[str, Any]] | None) -> None:
         self._ensure_binding_mutation_allowed()
         copied = copy_output_fields(value)
+        if copied is not None and self._fleet_output_contract is not None:
+            copied = self._fleet_output_contract.merge(copied)
         digest = _output_fields_digest(copied)
         self._output_fields = copied
         if digest != getattr(self, "_output_fields_digest", None):

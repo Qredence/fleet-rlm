@@ -11,7 +11,7 @@ import dspy
 import pytest
 
 from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
-from fleet_rlm.rlm._dspy_compat import bind_native_rlm_observer
+from fleet_rlm.rlm.compat_3_3_1 import bind_native_rlm_observer
 from fleet_rlm.rlm.events import (
     RLMCode,
     RLMOutput,

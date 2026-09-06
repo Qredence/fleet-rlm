@@ -35,7 +35,7 @@ from fleet_rlm.attachments.models import PreparedAttachment
 from fleet_rlm.chat.run_authority import RunAuthority
 from fleet_rlm.config.settings import Settings
 from fleet_rlm.observability.diagnostics import normalize_turn_failure
-from fleet_rlm.rlm._dspy_compat import (
+from fleet_rlm.rlm.compat_3_3_1 import (
     CodeInterpreter,
     bind_native_rlm_observer,
 )
@@ -57,6 +57,7 @@ from fleet_rlm.rlm.events import (
     observe_tool,
     reconcile_trajectory,
 )
+from fleet_rlm.rlm.output_contract import bind_output_contract
 from fleet_rlm.rlm.program import (
     AttachmentContextCapsule,
     FleetRLMSignature,
@@ -1634,6 +1635,10 @@ class RLMRunner:
             if hasattr(lease.state.rlm, "sub_lm"):
                 lease.state.rlm.sub_lm = state_context.execution.models.sub_lm
             self._bind_context_capsule(state_context)
+            bind_output_contract(
+                state_context.execution.interpreter,
+                getattr(lease.state.rlm, "signature", None),
+            )
             self._bind_observer(
                 lease.state.rlm,
                 observations.publish,

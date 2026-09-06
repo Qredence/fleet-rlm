@@ -13,7 +13,7 @@ from dspy.utils.exceptions import AdapterParseError, LMTimeoutError
 
 from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
 from fleet_rlm.observability.diagnostics import normalize_turn_failure
-from fleet_rlm.rlm._dspy_compat import FleetJSONAdapter
+from fleet_rlm.rlm.compat_3_3_1 import FleetJSONAdapter
 from fleet_rlm.rlm.program import RLMOptions, build_native_rlm
 
 
@@ -487,7 +487,7 @@ async def test_sync_async_repair_policy_parity(
     reserve: bool,
     expected_error: type[Exception] | None,
 ) -> None:
-    monkeypatch.setattr("fleet_rlm.rlm._dspy_compat.time.monotonic", lambda: 100.0)
+    monkeypatch.setattr("fleet_rlm.rlm.compat_3_3_1.time.monotonic", lambda: 100.0)
     sync_lm = _ScriptedLM(texts)
     async_lm = _ScriptedLM(texts)
     options = {"deadline": 105.0, "wrap_up_seconds": 10.0} if reserve else {}

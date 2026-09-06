@@ -40,7 +40,7 @@ class _OneAction:
 
 @pytest.mark.asyncio
 async def test_daytona_provider_contract_is_zero_arg_metadata_only() -> None:
-    from fleet_rlm.rlm._dspy_compat import DAYTONA_EXECUTION_INSTRUCTIONS
+    from fleet_rlm.rlm.compat_3_3_1 import DAYTONA_EXECUTION_INSTRUCTIONS
 
     rlm = _rlm()
     provider = rlm._interpreter_factory
@@ -54,7 +54,7 @@ async def test_daytona_provider_contract_is_zero_arg_metadata_only() -> None:
 
 
 def test_daytona_action_prompt_contains_each_runtime_fact_once() -> None:
-    from fleet_rlm.rlm._dspy_compat import DAYTONA_EXECUTION_INSTRUCTIONS
+    from fleet_rlm.rlm.compat_3_3_1 import DAYTONA_EXECUTION_INSTRUCTIONS
 
     prompt = str(_rlm().generate_action.signature.instructions)
     facts = (

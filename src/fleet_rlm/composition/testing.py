@@ -34,7 +34,7 @@ from fleet_rlm.composition.inventory import (
     install_runtime_inventory,
 )
 from fleet_rlm.config.settings import Settings
-from fleet_rlm.rlm._dspy_compat import assert_dspy_version
+from fleet_rlm.rlm.compat_3_3_1 import assert_dspy_version
 from fleet_rlm.rlm.program import FleetRLMSignature, RLMModelBundle, RLMOptions, rlm_options
 from fleet_rlm.rlm.recursion import RecursiveRLMOptions
 from fleet_rlm.rlm.runtime import RLMFactoryLike

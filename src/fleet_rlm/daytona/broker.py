@@ -135,6 +135,13 @@ def _typed_submit_source(output_fields: list[dict[str, Any]]) -> str:
                 raise ValueError(f"typed output default for {name} is not JSON-compatible")
             default_values[name] = default_json
         signature_parts.append(parameter)
+        if not required:
+            validation_parts.extend(
+                (
+                    f"if {name} is _FLEET_MISSING:",
+                    f"    {name} = _fleet_default({name!r})",
+                )
+            )
         if type_hint in {"str", "builtins.str"}:
             message = (
                 f"SUBMIT field {name} must be a string; serialize mappings/lists with "
@@ -144,13 +151,6 @@ def _typed_submit_source(output_fields: list[dict[str, Any]]) -> str:
                 (
                     f"if not isinstance({name}, str):",
                     f"    raise TypeError({message!r})",
-                )
-            )
-        if not required:
-            validation_parts.extend(
-                (
-                    f"if {name} is _FLEET_MISSING:",
-                    f"    {name} = _fleet_default({name!r})",
                 )
             )
         result_parts.append(f'"{name}": {name}')

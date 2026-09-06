@@ -25,7 +25,7 @@ import dspy
 from fleet_rlm.json_types import JsonValue, validate_json_value
 from fleet_rlm.observability.diagnostics import trace_failure_category
 from fleet_rlm.observability.tracing import turn_phase_span
-from fleet_rlm.rlm._dspy_compat import FleetJSONAdapter, _RLMTraceCallback
+from fleet_rlm.rlm.compat_3_3_1 import FleetJSONAdapter, _RLMTraceCallback
 from fleet_rlm.rlm.result import (
     ExecutionDetail,
     RLMConfigError,

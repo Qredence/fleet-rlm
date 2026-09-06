@@ -4,7 +4,7 @@ from __future__ import annotations
 
 
 def test_wrap_and_is_final_output_round_trip() -> None:
-    from fleet_rlm.rlm._dspy_compat import (
+    from fleet_rlm.rlm.compat_3_3_1 import (
         FinalOutput,
         is_final_output,
         wrap_final_output,
@@ -20,7 +20,7 @@ def test_wrap_and_is_final_output_round_trip() -> None:
 def test_interpreter_types_use_dspy_public_namespace() -> None:
     import dspy
 
-    from fleet_rlm.rlm._dspy_compat import (
+    from fleet_rlm.rlm.compat_3_3_1 import (
         CodeInterpreter,
         FinalOutput,
     )
@@ -30,7 +30,7 @@ def test_interpreter_types_use_dspy_public_namespace() -> None:
 
 
 def test_copy_output_fields_defensive_copy() -> None:
-    from fleet_rlm.rlm._dspy_compat import copy_output_fields
+    from fleet_rlm.rlm.compat_3_3_1 import copy_output_fields
 
     fields = [{"name": "answer", "type": "str"}]
     copied = copy_output_fields(fields)
@@ -40,7 +40,7 @@ def test_copy_output_fields_defensive_copy() -> None:
 
 
 def test_copy_output_fields_does_not_share_nested_metadata() -> None:
-    from fleet_rlm.rlm._dspy_compat import copy_output_fields
+    from fleet_rlm.rlm.compat_3_3_1 import copy_output_fields
 
     fields = [{"name": "answer", "metadata": {"description": "final answer"}}]
     copied = copy_output_fields(fields)
@@ -51,7 +51,7 @@ def test_copy_output_fields_does_not_share_nested_metadata() -> None:
 
 
 def test_needs_binding_refresh_uses_fleet_generation_state() -> None:
-    from fleet_rlm.rlm._dspy_compat import needs_binding_refresh
+    from fleet_rlm.rlm.compat_3_3_1 import needs_binding_refresh
 
     assert needs_binding_refresh(desired_generation=1, installed_generation=0, broker_ready=False) is True
     assert needs_binding_refresh(desired_generation=1, installed_generation=0, broker_ready=True) is True
@@ -60,6 +60,6 @@ def test_needs_binding_refresh_uses_fleet_generation_state() -> None:
 
 
 def test_public_final_output_label_is_stable() -> None:
-    from fleet_rlm.rlm._dspy_compat import PUBLIC_FINAL_OUTPUT_LABEL
+    from fleet_rlm.rlm.compat_3_3_1 import PUBLIC_FINAL_OUTPUT_LABEL
 
     assert PUBLIC_FINAL_OUTPUT_LABEL == "FINAL submitted"

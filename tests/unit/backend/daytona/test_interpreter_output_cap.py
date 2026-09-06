@@ -15,7 +15,7 @@ from fleet_rlm.daytona.interpreter import (
     InProcessInterpreterBackend,
     sandbox_backend,
 )
-from fleet_rlm.rlm._dspy_compat import FinalOutput
+from fleet_rlm.rlm.compat_3_3_1 import FinalOutput
 
 
 def test_large_stdout_is_head_tail_capped_with_marker() -> None:

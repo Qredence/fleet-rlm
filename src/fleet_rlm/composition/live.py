@@ -463,7 +463,7 @@ async def build_daytona_composition(
     dispatcher: SyncBridgeDispatcher | None = None,
 ) -> RuntimeInventory:
     """Construct the Daytona runtime inventory; clean up partial init on failure."""
-    from fleet_rlm.rlm._dspy_compat import assert_dspy_version
+    from fleet_rlm.rlm.compat_3_3_1 import assert_dspy_version
 
     assert_dspy_version()
     require_daytona_settings(settings)

@@ -14,7 +14,7 @@ from typing import Any
 import httpx
 import pytest
 
-from fleet_rlm.rlm._dspy_compat import FinalOutput
+from fleet_rlm.rlm.compat_3_3_1 import FinalOutput
 
 
 class _RecordingTool:

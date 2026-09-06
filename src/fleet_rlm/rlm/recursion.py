@@ -25,8 +25,9 @@ from fleet_rlm.chat.session_context import SessionContextManifest
 from fleet_rlm.config.settings import Settings
 from fleet_rlm.observability.diagnostics import trace_failure_category
 from fleet_rlm.observability.tracing import start_turn_span
-from fleet_rlm.rlm._dspy_compat import CodeInterpreter, FleetJSONAdapter, _RLMTraceCallback
+from fleet_rlm.rlm.compat_3_3_1 import CodeInterpreter, FleetJSONAdapter, _RLMTraceCallback
 from fleet_rlm.rlm.events import Status, ToolEventView, ToolObserver, observe_tool
+from fleet_rlm.rlm.output_contract import bind_output_contract
 from fleet_rlm.rlm.program import (
     RLMModelBundle,
     RLMOptions,
@@ -1328,6 +1329,7 @@ class RecursiveRLMExecutor:
             verbose=False,
         )
         self._ensure_call_authorized(batch_cancelled)
+        bind_output_contract(lease.interpreter, getattr(child, "signature", None))
         with dspy.context(
             lm=child_models.root_lm,
             # Same pinned JSON action protocol plus bounded corrective re-ask
