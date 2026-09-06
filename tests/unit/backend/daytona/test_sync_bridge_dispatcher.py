@@ -104,7 +104,7 @@ def test_dispatcher_runs_async_host_operation_from_worker_loop() -> None:
 
             asyncio.run(body())
 
-        thread = threading.Thread(target=worker, name="fleet-test-rlm-worker")
+        thread = threading.Thread(target=worker, name="fleet-test-rlm-worker", daemon=True)
         thread.start()
         thread.join(timeout=_DEADLOCK_BOUND_S)
         assert not thread.is_alive(), "async host bridge deadlocked"

@@ -213,7 +213,7 @@ def run(*, repetitions: int = 5) -> dict[str, Any]:
                         }
                     )
     durations = [sample["seconds"] for sample in samples]
-    return seal(
+    receipt = seal(
         {
             "schema": SCHEMA,
             "runtime_variant": settings.runtime_variant,
@@ -237,6 +237,8 @@ def run(*, repetitions: int = 5) -> dict[str, Any]:
             "live_semantic_gate": "not_exercised",
         }
     )
+    validate(receipt)
+    return receipt
 
 
 def compare(baseline: dict[str, Any], candidate: dict[str, Any], *, max_p95_ratio: float = 2.0) -> dict[str, Any]:

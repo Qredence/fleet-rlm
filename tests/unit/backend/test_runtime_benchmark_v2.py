@@ -4,7 +4,14 @@ from copy import deepcopy
 
 import pytest
 
-from scripts.benchmarks.runtime_v2 import compare, run, seal, semantic_keywords_score, validate
+from scripts.benchmarks import runtime_v2
+from scripts.benchmarks.runtime_v2 import (
+    compare,
+    run,
+    seal,
+    semantic_keywords_score,
+    validate,
+)
 
 
 def _clean_receipt(receipt):
@@ -87,3 +94,18 @@ def test_benchmark_rejects_missing_semantic_scorer_evidence():
     receipt["semantic_scorer_ids"] = []
     with pytest.raises(ValueError, match="semantic scorer IDs"):
         validate(seal(receipt))
+
+
+def test_run_rejects_sealed_inconsistent_event_fixtures(monkeypatch):
+    original_seal = runtime_v2.seal
+
+    def seal_with_inconsistent_fixture(receipt):
+        corrupted = deepcopy(receipt)
+        scenario = next(iter(corrupted["event_fixtures"]))
+        corrupted["event_fixtures"][scenario].append("unexpected")
+        return original_seal(corrupted)
+
+    monkeypatch.setattr(runtime_v2, "seal", seal_with_inconsistent_fixture)
+
+    with pytest.raises(ValueError, match="event fixtures"):
+        runtime_v2.run(repetitions=2)
