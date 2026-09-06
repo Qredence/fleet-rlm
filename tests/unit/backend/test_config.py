@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 from pydantic import SecretStr, ValidationError
 
-from fleet_rlm.config.loader import _deep_merge, active_profile_contract, load_profile_environment_contracts
+from fleet_rlm.config.loader import _deep_merge, active_profile_contract, load_profile_environment_contracts, load_runtime_settings
 from fleet_rlm.config.settings import FleetConfigurationError, Settings
 
 
@@ -503,7 +503,7 @@ def test_runtime_settings_reject_unknown_llm_role(monkeypatch: pytest.MonkeyPatc
     monkeypatch.setattr(config, "_CONFIG_PATH", policy)
 
     with pytest.raises(FleetConfigurationError, match=r"unknown LLM role.*utility"):
-        config.load_runtime_settings()
+        load_runtime_settings()
 
 
 def test_redacted_policy_summary_never_includes_secret_values() -> None:
