@@ -538,11 +538,12 @@ def _resolve_awaitable_result(result: Any, *, async_bridge: AsyncToolBridge | No
     except RuntimeError:
         return asyncio.run(await_result())
     if async_bridge is None:
-        close = getattr(result, "close", None)
-        if callable(close):
-            close()
+        if inspect.iscoroutine(result):
+            result.close()
+        cancel = getattr(result, "cancel", None)
+        if callable(cancel):
+            cancel()
         raise RuntimeError("async Tool requires a persistent async bridge")
-    return async_bridge.run(await_result())
 
 
 def _execute_observed_tool(
