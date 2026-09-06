@@ -8,6 +8,9 @@ from dataclasses import dataclass
 from enum import StrEnum
 from threading import Lock
 
+DEFAULT_PARSE_RETRIES = 2
+DEFAULT_FINALIZATION_ATTEMPTS = 2
+
 
 class BudgetDimension(StrEnum):
     DEADLINE = "deadline"
@@ -60,8 +63,8 @@ class TurnBudget:
     attempt does not reach the network; token counts are deliberately absent.
     """
 
-    def __init__(self, *, deadline: float, limits: BudgetLimits | None = None) -> None:
-        if not math.isfinite(deadline):
+    def __init__(self, *, deadline: float | None, limits: BudgetLimits | None = None) -> None:
+        if deadline is not None and not math.isfinite(deadline):
             raise ValueError("deadline must be finite")
         self.deadline = deadline
         self.limits = limits or BudgetLimits()
@@ -104,7 +107,7 @@ class TurnBudget:
     def _remaining(self, *, finalization: bool) -> float:
         if self._settled:
             raise TurnBudgetExhausted(BudgetDimension.SETTLED)
-        remaining = self.deadline - time.monotonic()
+        remaining = math.inf if self.deadline is None else self.deadline - time.monotonic()
         if not finalization:
             remaining -= self.limits.finalization_seconds
         if remaining <= 0:
@@ -115,6 +118,15 @@ class TurnBudget:
         with self._lock:
             return self._remaining(finalization=finalization)
 
+    def exploration_exhausted(self) -> bool:
+        """Whether an explicit provider reserve has fenced further exploration."""
+        with self._lock:
+            limit = self.limits.provider_attempts
+            return limit is not None and (
+                self._used[BudgetDimension.PROVIDER_ATTEMPTS] >= limit
+                or self._exploration_attempts >= limit - self.limits.finalization_attempts
+            )
+
     def snapshot(self) -> dict[str, int]:
         with self._lock:
             return {dimension.value: count for dimension, count in self._used.items()}
@@ -123,3 +135,111 @@ class TurnBudget:
         """Close admission. Owning lifecycle must separately cancel in-flight work."""
         with self._lock:
             self._settled = True
+
+
+class AdapterBudget:
+    """Invocation-local repair policy over one shared Turn admission ledger.
+
+    Finalization slots count physical provider admissions, including transport
+    retries and DSPy schema fallback. A late exploration response can consume a
+    finalization slot without charging its provider attempt a second time.
+    """
+
+    def __init__(
+        self,
+        *,
+        deadline: float | None = None,
+        reserve_seconds: float = 0.0,
+        max_parse_retries: int = DEFAULT_PARSE_RETRIES,
+        max_finalization_attempts: int = DEFAULT_FINALIZATION_ATTEMPTS,
+        turn: TurnBudget | None = None,
+    ) -> None:
+        # Existing preparation-only seams use +inf for an unbounded invocation.
+        if deadline == math.inf:
+            deadline = None
+        if deadline is not None and (
+            not isinstance(deadline, (int, float)) or isinstance(deadline, bool) or not math.isfinite(deadline)
+        ):
+            raise ValueError("deadline must be finite or None")
+        if (
+            not isinstance(reserve_seconds, (int, float))
+            or isinstance(reserve_seconds, bool)
+            or not math.isfinite(reserve_seconds)
+            or reserve_seconds < 0
+        ):
+            raise ValueError("reserve_seconds must be finite and nonnegative")
+        for value in (max_parse_retries, max_finalization_attempts):
+            if type(value) is not int or value < 0:
+                raise ValueError("repair attempt limits must be nonnegative integers")
+        self.turn = turn or TurnBudget(deadline=deadline)
+        self.deadline = deadline
+        self.reserve_seconds = reserve_seconds
+        self.max_parse_retries = max_parse_retries
+        self.max_finalization_attempts = max_finalization_attempts
+        self._finalization_used = 0
+        self._lock = Lock()
+
+    def remaining(self) -> float | None:
+        try:
+            remaining = self.turn.remaining(finalization=True)
+        except TurnBudgetExhausted as exc:
+            if exc.dimension != BudgetDimension.DEADLINE:
+                raise
+            raise TimeoutError("Turn deadline exceeded") from exc
+        if self.deadline is not None:
+            remaining = min(remaining, self.deadline - time.monotonic())
+        if remaining <= 0:
+            raise TimeoutError("Turn deadline exceeded")
+        return remaining if math.isfinite(remaining) else None
+
+    def can_repair(self, retries: int) -> bool:
+        return retries < self.max_parse_retries
+
+    @property
+    def finalization_used(self) -> int:
+        with self._lock:
+            return self._finalization_used
+
+    def can_finalize(self) -> bool:
+        return self.finalization_used < self.max_finalization_attempts
+
+    def _check_finalization(self) -> None:
+        if self._finalization_used >= self.max_finalization_attempts:
+            raise TimeoutError("wrap-up action did not submit before the Turn deadline")
+
+    def reclassify_late_response(self) -> None:
+        """Count a late admitted response as finalization, without double debit."""
+        with self._lock:
+            self._check_finalization()
+            self._finalization_used += 1
+
+    def reserve_provider(self, *, action: bool, wrap_up: bool, can_finalize: bool) -> float:
+        with self._lock:
+            if wrap_up:
+                self._check_finalization()
+            remaining = self.remaining()
+            available = math.inf if remaining is None else remaining
+            if action and not wrap_up:
+                available -= self.reserve_seconds
+            if available <= 0:
+                raise TimeoutError("Turn final-answer reserve exhausted")
+            remaining_turn = self.turn.reserve(
+                BudgetDimension.PROVIDER_ATTEMPTS,
+                finalization=can_finalize and (wrap_up or not action),
+            )
+            if wrap_up:
+                self._finalization_used += 1
+            return min(available, remaining_turn)
+
+
+@dataclass(frozen=True, slots=True)
+class ProviderAdmission:
+    """An explicit call-local capability, never provider kwargs or global mode."""
+
+    budget: AdapterBudget
+    action: bool
+    wrap_up: bool
+    can_finalize: bool
+
+    def reserve(self) -> float:
+        return self.budget.reserve_provider(action=self.action, wrap_up=self.wrap_up, can_finalize=self.can_finalize)

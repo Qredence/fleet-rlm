@@ -115,3 +115,20 @@ The Databricks-backed quality loop composes three opt-in steps that all require
    SME labeling session, distills judge guidelines with MemAlign, and re-runs
    the aligned baseline under a named run.
 See `docs/how-to-guides/evaluation-optimization.md` for the full workflow.
+
+## Runtime v2 adapter protocol comparison
+
+Run the credential-free DSPy 3.3.1 protocol replay from the repository root:
+
+```bash
+uv run python -m scripts.benchmarks.runtime_v2 compare-adapters \
+  --repetitions 5 --output .scratch/runtime-v2-adapter-comparison.json
+```
+
+The command executes stock JSONAdapter and Fleet adapters with zero, one, and
+two parse repairs over versioned response fixtures, in both sync and async modes.
+It records outcomes, physical provider admissions, latency distributions, source
+and fixture digests, and fail-closed contract gates. Output creation is exclusive;
+choose a new filename for each receipt. The comparison does not call a provider,
+Daytona, Postgres, or an MLflow server. Its scores measure deterministic protocol
+behavior, not semantic answer quality or production latency/cost.

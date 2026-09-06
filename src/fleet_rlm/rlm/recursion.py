@@ -1338,6 +1338,7 @@ class RecursiveRLMExecutor:
             adapter=FleetJSONAdapter(
                 deadline=self._deadline,
                 wrap_up_seconds=child_models.reserve_seconds,
+                budget=child_models.budget,
             ),
             callbacks=[
                 _RLMTraceCallback(
@@ -1554,7 +1555,7 @@ class RecursiveRLMExecutor:
         predictor = dspy.Predict(RecursiveSubtaskSignature)
         with dspy.context(
             lm=self._models.sub_lm,
-            adapter=FleetJSONAdapter(deadline=self._deadline),
+            adapter=FleetJSONAdapter(deadline=self._deadline, budget=self._models.budget),
             callbacks=[
                 _RLMTraceCallback(
                     root_lm=self._models.root_lm,

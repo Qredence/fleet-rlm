@@ -29,7 +29,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from fleet_rlm.config.settings import LLMRoleSettings, Settings
 from fleet_rlm.paths import DEFAULT_VOLUME_MOUNT_PATH, validate_mount_path
-from fleet_rlm.rlm.budget import BudgetDimension, TurnBudget
+from fleet_rlm.rlm.budget import AdapterBudget, BudgetDimension, ProviderAdmission, TurnBudget
 from fleet_rlm.rlm.compat_3_3_1 import (
     daytona_provider_contract,
 )
@@ -681,6 +681,7 @@ class RLMModelBundle:
                 deadline=deadline,
                 reserve_seconds=normalized_reserve,
                 budget=turn_budget,
+                can_finalize=False,
             )
             if _supports_turn_lm_copy(self.sub_lm)
             else self.sub_lm
@@ -703,6 +704,7 @@ class RLMModelBundle:
                 deadline=deadline,
                 error_message="recursive child LM deadline exceeded",
                 budget=self.budget,
+                can_finalize=False,
             ),
             sub_lm=_copy_lm_for_deadline(
                 self.sub_lm,
@@ -710,6 +712,7 @@ class RLMModelBundle:
                 reserve_seconds=reserve_seconds,
                 error_message="recursive child LM deadline exceeded",
                 budget=self.budget,
+                can_finalize=False,
             ),
             utility_lm=self.utility_lm,
             deadline=deadline,
@@ -742,15 +745,19 @@ def _supports_turn_lm_copy(lm: Any) -> bool:
 class DeadlineLMProxy(dspy.BaseLM):
     """Turn-owned DSPy LM proxy with one retry owner and no instance method edits."""
 
+    _fleet_trace_identity: Any
+
     def __init__(
         self,
         wrapped: Any,
         *,
-        deadline: float,
+        deadline: float | None,
         reserve_seconds: float,
         retries: int,
         error_message: str,
         budget: TurnBudget | None = None,
+        admission: ProviderAdmission | None = None,
+        can_finalize: bool = True,
     ) -> None:
         super().__init__(
             model=getattr(wrapped, "model", "test/deadline"),
@@ -767,6 +774,8 @@ class DeadlineLMProxy(dspy.BaseLM):
         self._fleet_retry_budget = retries
         self._deadline_error_message = error_message
         self.budget = budget
+        self.admission = admission
+        self.can_finalize = can_finalize
 
     def __getattr__(self, name: str) -> Any:
         wrapped = self.__dict__.get("wrapped")
@@ -792,14 +801,53 @@ class DeadlineLMProxy(dspy.BaseLM):
 
     def copy(self, **kwargs: Any) -> Any:
         kwargs["num_retries"] = 0
-        return type(self)(
+        copied = type(self)(
             self.wrapped.copy(**kwargs),
             deadline=self._fleet_deadline,
             reserve_seconds=self._fleet_reserve_seconds,
             retries=self._fleet_retry_budget,
             error_message=self._deadline_error_message,
             budget=self.budget,
+            admission=self.admission,
+            can_finalize=self.can_finalize,
         )
+        if "_fleet_trace_identity" in vars(self):
+            copied._fleet_trace_identity = self._fleet_trace_identity
+        return copied
+
+    @classmethod
+    def for_adapter(cls, lm: Any, budget: AdapterBudget, *, action: bool, wrap_up: bool) -> DeadlineLMProxy:
+        """Make a call-local view while preserving the immutable provider template."""
+        if isinstance(lm, cls):
+            if lm.budget is not None and lm.budget is not budget.turn:
+                raise RLMModelBundleError("adapter and LM must share the Turn budget")
+            wrapped = lm.wrapped
+            deadline = lm._fleet_deadline
+            reserve = lm._fleet_reserve_seconds
+            retries = lm._fleet_retry_budget
+            can_finalize = lm.can_finalize
+        else:
+            # Real provider LMs must disable their internal retry owner on a copy.
+            # Non-provider BaseLM scripts have no transport retry implementation.
+            wrapped = lm.copy(num_retries=0) if isinstance(lm, dspy.LM) else lm
+            deadline = budget.deadline
+            reserve = 0.0
+            retries = getattr(lm, "num_retries", 0)
+            can_finalize = True
+        if type(retries) is not int or retries < 0:
+            retries = 0
+        view = cls(
+            wrapped,
+            deadline=deadline,
+            reserve_seconds=reserve,
+            retries=retries,
+            error_message="Turn LM deadline exceeded",
+            budget=budget.turn,
+            admission=ProviderAdmission(budget, action, wrap_up, can_finalize),
+            can_finalize=can_finalize,
+        )
+        view._fleet_trace_identity = getattr(lm, "_fleet_trace_identity", lm)
+        return view
 
     def dump_state(self) -> dict[str, Any]:
         """Persist the provider template, never a transient Turn deadline."""
@@ -807,15 +855,19 @@ class DeadlineLMProxy(dspy.BaseLM):
 
     def _attempt_kwargs(self, kwargs: dict[str, Any]) -> dict[str, Any]:
         bounded = dict(kwargs)
-        bounded["timeout"] = _remaining_lm_timeout(
+        available = _remaining_lm_timeout(
             self._fleet_deadline,
             self,
             bounded,
             reserve_seconds=self._fleet_reserve_seconds,
             error_message=self._deadline_error_message,
         )
-        if self.budget is not None:
-            bounded["timeout"] = min(bounded["timeout"], self.budget.reserve(BudgetDimension.PROVIDER_ATTEMPTS))
+        if self.admission is not None:
+            available = min(available, self.admission.reserve())
+        elif self.budget is not None:
+            available = min(available, self.budget.reserve(BudgetDimension.PROVIDER_ATTEMPTS))
+        if math.isfinite(available):
+            bounded["timeout"] = available
         return bounded
 
     def forward(self, *args: Any, **kwargs: Any) -> Any:
@@ -846,6 +898,7 @@ def _copy_lm_for_deadline(
     reserve_seconds: float = 0.0,
     error_message: str = "Turn LM deadline exceeded",
     budget: TurnBudget | None = None,
+    can_finalize: bool = True,
 ) -> Any:
     """Copy one LM and enforce an absolute deadline on every provider attempt."""
     copy_lm = getattr(lm, "copy", None)
@@ -865,6 +918,7 @@ def _copy_lm_for_deadline(
         retries=retry_budget,
         error_message=error_message,
         budget=budget if budget is not None else getattr(lm, "budget", None),
+        can_finalize=can_finalize,
     )
 
 
@@ -878,14 +932,14 @@ def _copy_lm_for_child(lm: Any, *, deadline: float) -> Any:
 
 
 def _remaining_lm_timeout(
-    deadline: float,
+    deadline: float | None,
     lm: Any,
     call_kwargs: dict[str, Any],
     *,
     reserve_seconds: float = 0.0,
     error_message: str = "Turn LM deadline exceeded",
 ) -> float:
-    remaining = deadline - time.monotonic()
+    remaining = math.inf if deadline is None else deadline - time.monotonic()
     available = remaining - max(0.0, reserve_seconds)
     if available <= 0:
         raise TimeoutError(error_message)

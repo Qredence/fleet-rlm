@@ -26,6 +26,7 @@ from dspy.utils.callback import BaseCallback
 from dspy.utils.exceptions import AdapterParseError, LMTimeoutError
 
 from fleet_rlm.json_types import JsonValue
+from fleet_rlm.rlm.budget import DEFAULT_PARSE_RETRIES, AdapterBudget, TurnBudget
 from fleet_rlm.rlm.result import _safe_usage_entry, sanitize_public_text, truncate_public_text
 from fleet_rlm.rlm.submit_validation import is_submit_only_code
 
@@ -90,8 +91,6 @@ BUDGET_DIRECTIVE_FIELD = "fleet_budget_directive"
 WRAP_UP_CORRECTION_FIELD = "fleet_wrap_up_correction"
 
 _EMPTY_RESPONSE_MARKER = "The LM returned an empty or null response"
-
-DEFAULT_PARSE_RETRIES = 2
 
 
 def _retry_correction_feedback(attempt: int, exc: AdapterParseError) -> str:
@@ -207,10 +206,11 @@ def _append_input_field(
     return extended, extended_inputs, field
 
 
-def _budget_directive(remaining: float) -> str:
+def _budget_directive(remaining: float, *, attempts_exhausted: bool = False) -> str:
     seconds = max(0, int(remaining))
+    reason = "Exploration attempt budget exhausted" if attempts_exhausted else "Time budget nearly exhausted"
     return (
-        f"Time budget nearly exhausted ({seconds}s remaining). Submit your best-supported answer now "
+        f"{reason} ({seconds}s remaining). Submit your best-supported answer now "
         "using evidence already gathered. Do not explore, call tools, or execute additional code. "
         "Return exactly one SUBMIT(...) action."
     )
@@ -258,6 +258,7 @@ class FleetJSONAdapter(dspy.JSONAdapter):
         max_parse_retries: int = DEFAULT_PARSE_RETRIES,
         deadline: float | None = None,
         wrap_up_seconds: float = 0.0,
+        budget: TurnBudget | None = None,
     ) -> None:
         """Initialize the adapter with a bounded retry budget.
 
@@ -268,28 +269,39 @@ class FleetJSONAdapter(dspy.JSONAdapter):
         Raises:
             ValueError: If ``max_parse_retries`` is not a non-negative integer.
         """
-        if not isinstance(max_parse_retries, int) or isinstance(max_parse_retries, bool) or max_parse_retries < 0:
-            raise ValueError(f"max_parse_retries must be a non-negative integer, got {max_parse_retries!r}")
-        if deadline is not None and not isinstance(deadline, (int, float)):
-            raise ValueError(f"deadline must be numeric or None, got {deadline!r}")
-        if not isinstance(wrap_up_seconds, (int, float)) or isinstance(wrap_up_seconds, bool) or wrap_up_seconds < 0:
-            raise ValueError(f"wrap_up_seconds must be a non-negative number, got {wrap_up_seconds!r}")
         super().__init__()
-        self._max_parse_retries = max_parse_retries
-        self._deadline = float(deadline) if deadline is not None else None
-        self._wrap_up_seconds = float(wrap_up_seconds)
+        self._budget = AdapterBudget(
+            deadline=deadline,
+            reserve_seconds=wrap_up_seconds,
+            max_parse_retries=max_parse_retries,
+            turn=budget,
+        )
+        self._explicit_budget = budget is not None
         self._wrap_up_entered = False
-        self._wrap_up_attempts = 0
         self._wrap_up_rejection_reason: str | None = None
         self._wrap_up_remaining_ms: int | None = None
 
+    @property
+    def _wrap_up_seconds(self) -> float:
+        return self._budget.reserve_seconds
+
+    @property
+    def _wrap_up_attempts(self) -> int:
+        return self._budget.finalization_used
+
     def _remaining(self) -> float | None:
-        if self._deadline is None:
-            return None
-        remaining = self._deadline - time.monotonic()
-        if remaining <= 0:
-            raise TimeoutError("Turn deadline exceeded")
-        return remaining
+        return self._budget.remaining()
+
+    def _lm_for_request(self, lm: BaseLM, *, action: bool, wrap_up: bool) -> BaseLM:
+        # Local import avoids coupling the DSPy compatibility module's import
+        # initialization to program construction, which consumes this module.
+        from fleet_rlm.rlm.program import DeadlineLMProxy
+
+        if isinstance(lm, DeadlineLMProxy) and lm.budget is not None and lm.budget is not self._budget.turn:
+            if self._explicit_budget or any(self._budget.turn.snapshot().values()):
+                raise ValueError("adapter cannot switch Turn budgets")
+            self._budget.turn = lm.budget
+        return DeadlineLMProxy.for_adapter(lm, self._budget, action=action, wrap_up=wrap_up)
 
     def _enter_wrap_up(self, remaining: float, *, rejection_reason: str | None = None) -> None:
         """Record the first reserve transition and any bounded rejection reason."""
@@ -309,41 +321,16 @@ class FleetJSONAdapter(dspy.JSONAdapter):
         }
 
     def _next_wrap_up_attempt(self) -> None:
-        """Consume one of the two total final-answer provider attempts."""
-        if self._wrap_up_attempts >= 2:
-            raise TimeoutError("wrap-up action did not submit before the Turn deadline")
-        self._wrap_up_attempts += 1
+        """Reclassify an already-charged late response as finalization."""
+        self._budget.reclassify_late_response()
 
     def _wrap_up_required(self, inputs: Mapping[str, Any], remaining: float | None) -> bool:
         return bool(
             remaining is not None
             and self._wrap_up_seconds > 0
             and _iteration_is_action(inputs)
-            and remaining <= self._wrap_up_seconds
+            and (remaining <= self._wrap_up_seconds or self._budget.turn.exploration_exhausted())
         )
-
-    def _call_kwargs(
-        self,
-        lm: BaseLM,
-        lm_kwargs: Mapping[str, Any],
-        *,
-        remaining: float | None,
-        wrap_up: bool,
-        action: bool,
-    ) -> dict[str, Any]:
-        values = dict(lm_kwargs)
-        if remaining is None:
-            return values
-        available = remaining if wrap_up or not action else remaining - self._wrap_up_seconds
-        if available <= 0:
-            raise TimeoutError("Turn final-answer reserve exhausted")
-        configured = values.get("timeout")
-        if configured is None:
-            configured = getattr(lm, "kwargs", {}).get("timeout")
-        if isinstance(configured, (int, float)) and not isinstance(configured, bool) and configured > 0:
-            available = min(float(configured), available)
-        values["timeout"] = available
-        return values
 
     def _with_wrap_up_directive(
         self,
@@ -353,7 +340,7 @@ class FleetJSONAdapter(dspy.JSONAdapter):
         *,
         field_name: str | None = None,
     ) -> tuple[type[Signature], dict[str, Any], str]:
-        directive = _budget_directive(remaining)
+        directive = _budget_directive(remaining, attempts_exhausted=self._budget.turn.exploration_exhausted())
         if field_name is not None and field_name in signature.fields:
             updated = dict(inputs)
             updated[field_name] = directive
@@ -396,9 +383,9 @@ class FleetJSONAdapter(dspy.JSONAdapter):
         try:
             request = next(machine)
             while True:
-                call_kwargs, request_signature, request_inputs = request
+                call_lm, call_kwargs, request_signature, request_inputs = request
                 try:
-                    response = super().__call__(lm, call_kwargs, request_signature, demos, request_inputs)
+                    response = super().__call__(call_lm, call_kwargs, request_signature, demos, request_inputs)
                 except (AdapterParseError, LMTimeoutError, TimeoutError) as exc:
                     try:
                         request = machine.throw(exc)
@@ -425,9 +412,9 @@ class FleetJSONAdapter(dspy.JSONAdapter):
         try:
             request = next(machine)
             while True:
-                call_kwargs, request_signature, request_inputs = request
+                call_lm, call_kwargs, request_signature, request_inputs = request
                 try:
-                    response = await super().acall(lm, call_kwargs, request_signature, demos, request_inputs)
+                    response = await super().acall(call_lm, call_kwargs, request_signature, demos, request_inputs)
                 except (AdapterParseError, LMTimeoutError, TimeoutError) as exc:
                     try:
                         request = machine.throw(exc)
@@ -448,7 +435,7 @@ class FleetJSONAdapter(dspy.JSONAdapter):
         signature: type[Signature],
         inputs: dict[str, Any],
     ) -> Generator[
-        tuple[dict[str, Any], type[Signature], dict[str, Any]],
+        tuple[BaseLM, dict[str, Any], type[Signature], dict[str, Any]],
         list[dict[str, Any]],
         list[dict[str, Any]],
     ]:
@@ -457,6 +444,7 @@ class FleetJSONAdapter(dspy.JSONAdapter):
         Both drivers close the machine on failure or cancellation. All repair,
         reserve-transition, and finalization grammar decisions live here.
         """
+        lm = self._lm_for_request(lm, action=False, wrap_up=False)
         attempt = 0
         base_signature = signature
         base_inputs = dict(inputs)
@@ -478,16 +466,9 @@ class FleetJSONAdapter(dspy.JSONAdapter):
                     remaining,
                     field_name=directive_field,
                 )
-                self._next_wrap_up_attempt()
-            call_kwargs = self._call_kwargs(
-                lm,
-                lm_kwargs,
-                remaining=remaining,
-                wrap_up=wrap_up,
-                action=action,
-            )
+            call_lm = self._lm_for_request(lm, action=action, wrap_up=wrap_up)
             try:
-                response = yield call_kwargs, request_signature, request_inputs
+                response = yield call_lm, dict(lm_kwargs), request_signature, request_inputs
             except (LMTimeoutError, TimeoutError):
                 if not wrap_up and action and self._wrap_up_seconds > 0:
                     boundary_remaining = self._remaining()
@@ -504,7 +485,7 @@ class FleetJSONAdapter(dspy.JSONAdapter):
                 raise
             except AdapterParseError as exc:
                 if wrap_up:
-                    if self._wrap_up_attempts >= 2:
+                    if not self._budget.can_finalize():
                         raise TimeoutError("wrap-up action was not parseable before the Turn deadline") from exc
                     self._wrap_up_rejection_reason = "unparseable_json"
                     request_signature, request_inputs = self._with_wrap_up_correction(
@@ -536,7 +517,7 @@ class FleetJSONAdapter(dspy.JSONAdapter):
                             reason="unparseable JSON",
                         )
                         continue
-                if attempt >= self._max_parse_retries:
+                if not self._budget.can_repair(attempt):
                     raise
                 attempt += 1
                 request_signature, request_inputs = _retry_call_arguments(
@@ -566,7 +547,7 @@ class FleetJSONAdapter(dspy.JSONAdapter):
                     )
                 if wrap_up and action and not is_submit_only_code(_action_code(response)):
                     self._wrap_up_rejection_reason = "exploration_or_additional_code"
-                    if self._wrap_up_attempts >= 2:
+                    if not self._budget.can_finalize():
                         raise TimeoutError("wrap-up action did not submit before the Turn deadline")
                     request_signature, request_inputs = self._with_wrap_up_correction(
                         request_signature,
@@ -708,7 +689,7 @@ class _RLMTraceCallback(BaseCallback):
     def on_lm_start(self, call_id: str, instance: Any, inputs: dict[str, Any]) -> None:
         if self._deadline is not None and time.monotonic() >= self._deadline:
             return
-        role = self._roles.get(id(instance))
+        role = self._roles.get(id(getattr(instance, "_fleet_trace_identity", instance)))
         if role is None:
             return
         model = "unknown"
@@ -753,7 +734,7 @@ class _RLMTraceCallback(BaseCallback):
         if state is None:
             return
         instance, span, history_length, call_index, started_at = state
-        role = self._roles.get(id(instance), "unknown")
+        role = self._roles.get(id(getattr(instance, "_fleet_trace_identity", instance)), "unknown")
         try:
             usage = _latest_lm_telemetry(instance, history_length, outputs)
         except Exception:

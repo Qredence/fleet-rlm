@@ -12,10 +12,15 @@ import hashlib
 import json
 import math
 import subprocess
+import sys
 import tempfile
 import time
 from pathlib import Path
 from typing import Any
+
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
 
 SCHEMA = "fleet.runtime-benchmark/v2"
 DATASET = Path(__file__).with_name("runtime_v2_scenarios.json")
@@ -162,13 +167,21 @@ def main() -> int:
     execute = commands.add_parser("run", help="Execute real Turns using private deterministic adapters")
     execute.add_argument("--repetitions", type=int, default=5)
     execute.add_argument("--output", type=Path, required=True)
+    adapters = commands.add_parser("compare-adapters", help="Replay stock/Fleet DSPy adapter protocol fixtures offline")
+    adapters.add_argument("--repetitions", type=int, default=5)
+    adapters.add_argument("--output", type=Path, required=True)
     comparison = commands.add_parser("compare", help="Fail closed on incompatible receipts or regressions")
     comparison.add_argument("baseline", type=Path)
     comparison.add_argument("candidate", type=Path)
     comparison.add_argument("--max-p95-ratio", type=float, default=2.0)
     args = parser.parse_args()
-    if args.command == "run":
-        receipt = run(repetitions=args.repetitions)
+    if args.command in {"run", "compare-adapters"}:
+        if args.command == "compare-adapters":
+            from scripts.benchmarks.adapter_replay import run_adapter_comparison
+
+            receipt = run_adapter_comparison(repetitions=args.repetitions)
+        else:
+            receipt = run(repetitions=args.repetitions)
         # Exclusive creation prevents accidental replacement of sealed evidence.
         with args.output.open("x") as stream:
             json.dump(receipt, stream, indent=2, sort_keys=True)
