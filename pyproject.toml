@@ -37,7 +37,7 @@ dependencies = [
     # SessionExecuteRequest are all unchanged or gain optional fields only).
     # The new warm-pool service and typed errors are not exploited by our
     # volume-mounted sandboxes, so this is a maintenance bump, not a feature.
-    "daytona==0.207.0",
+    "daytona==0.207.1",
     # Persistence and migrations.
     "aiosqlite>=0.20.0",
     "alembic>=1.18.5,<2",
