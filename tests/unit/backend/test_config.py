@@ -10,7 +10,12 @@ from pathlib import Path
 import pytest
 from pydantic import SecretStr, ValidationError
 
-from fleet_rlm.config.loader import _deep_merge, active_profile_contract, load_profile_environment_contracts
+from fleet_rlm.config.loader import (
+    _deep_merge,
+    active_profile_contract,
+    load_profile_environment_contracts,
+    load_runtime_settings,
+)
 from fleet_rlm.config.settings import FleetConfigurationError, Settings
 
 
@@ -24,6 +29,18 @@ def test_profile_environment_matrix_follows_selected_toml_policy() -> None:
         "DATABRICKS_TOKEN",
         "FLEET_LLM_BASE_URL",
     )
+
+
+def test_runtime_variant_default_is_explicit_and_stable() -> None:
+    document = tomllib.loads(Path("config/fleet.toml").read_text(encoding="utf-8"))
+    assert document["defaults"]["runtime"]["variant"] == "legacy"
+    assert Settings().runtime_variant == "legacy"
+
+
+@pytest.mark.parametrize("variant", ["native", "capsule", "", "unknown"])
+def test_unimplemented_runtime_variants_are_rejected(variant: str) -> None:
+    with pytest.raises(ValidationError):
+        Settings(runtime_variant=variant)
 
 
 def test_committed_policy_declares_databricks_model_roles() -> None:
@@ -246,6 +263,12 @@ def test_removed_databricks_daytona_profile_is_rejected(monkeypatch: pytest.Monk
 
 
 def _policy(path: Path) -> None:
+    """
+    Write a minimal runtime policy to the specified path for isolated tests.
+
+    Parameters:
+        path (Path): Destination file for the temporary TOML policy.
+    """
     path.write_text(
         """
 [config]
@@ -273,10 +296,14 @@ temperature = 0.2
 [defaults.rlm]
 max_iters = 3
 max_llm_calls = 4
+max_provider_attempts = 32
+max_tool_calls = 16
 max_output_chars = 500
 max_execution_output_chars = 250
+max_execution_output_bytes = 10000
 execution_timeout_s = 90
 wrap_up_seconds = 30
+finalization_attempts = 2
 verbose = true
 [defaults.storage]
 data_root = ".fleet-test"
@@ -471,6 +498,23 @@ def test_runtime_settings_reject_unknown_toml_key(monkeypatch: pytest.MonkeyPatc
 
     with pytest.raises(FleetConfigurationError, match="unknown configuration key"):
         config.load_runtime_settings()
+
+
+def test_runtime_settings_reject_unknown_llm_role(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    import fleet_rlm.config.loader as config
+
+    policy = tmp_path / "fleet.toml"
+    _policy(policy)
+    policy.write_text(
+        policy.read_text(encoding="utf-8")
+        + '\n[defaults.llm.utility]\nmodel = "openai/utility"\napi_key_env = "UTILITY_KEY"\n',
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(config, "_CONFIG_PATH", policy)
+
+    with pytest.raises(FleetConfigurationError, match=r"unknown LLM role.*utility"):
+        load_runtime_settings()
 
 
 def test_redacted_policy_summary_never_includes_secret_values() -> None:

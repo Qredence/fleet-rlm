@@ -114,6 +114,106 @@ def test_model_bundle_child_lm_rejects_calls_after_turn_deadline() -> None:
         child.root_lm.forward(prompt="late")
 
 
+def test_deadline_proxy_copy_preserves_deadline_without_method_assignment() -> None:
+    import time
+
+    from fleet_rlm.rlm.program import RLMModelBundle
+
+    bound = RLMModelBundle(_CopyableLM(), _CopyableLM()).fork_for_child(deadline=time.monotonic() - 1)
+    copied = bound.root_lm.copy()
+    assert "forward" not in vars(copied)
+    assert "aforward" not in vars(copied)
+    assert copied.wrapped is not bound.root_lm.wrapped
+    with pytest.raises(TimeoutError, match="deadline exceeded"):
+        copied.forward(prompt="late")
+
+
+@pytest.mark.asyncio
+async def test_deadline_proxy_async_retry_preserves_attempt_timeout():
+    import time
+
+    from fleet_rlm.rlm.program import RLMModelBundle
+
+    class AsyncLM(_RetryingLM):
+        def copy(self, **kwargs):
+            copied = AsyncLM(self.failures)
+            copied.num_retries = kwargs["num_retries"]
+            return copied
+
+        async def aforward(self, **kwargs):
+            """Execute the forward operation asynchronously and return its result."""
+            return self.forward(**kwargs)
+
+    source = AsyncLM([LMServerError("retry")])
+    bound = RLMModelBundle(source, source).bind_turn_deadline(deadline=time.monotonic() + 5)
+    await bound.root_lm.aforward(prompt="test")
+    assert len(bound.root_lm.calls) == 2
+    assert source.calls == []
+    assert all(0 < call["timeout"] <= 5 for call in bound.root_lm.calls)
+
+
+@pytest.mark.asyncio
+async def test_deadline_proxy_preserves_dspy_sync_async_usage_and_callbacks():
+    import time
+    from types import SimpleNamespace
+
+    import dspy
+    from dspy.utils.callback import BaseCallback
+
+    from fleet_rlm.rlm.program import RLMModelBundle
+
+    class Callback(BaseCallback):
+        def __init__(self):
+            self.starts = []
+
+        def on_lm_start(self, call_id, instance, inputs):
+            """
+            Record the model associated with a language-model invocation.
+
+            Parameters:
+                instance: The language-model instance whose model name is recorded.
+            """
+            del call_id, inputs
+            self.starts.append(instance.model)
+
+    class ScriptLM(dspy.BaseLM):
+        def forward(self, prompt=None, messages=None, **kwargs):
+            """Generate a fixed successful language-model response.
+
+            Returns:
+                A response containing ``"ok"`` and fixed token usage statistics.
+            """
+            del prompt, messages, kwargs
+            return SimpleNamespace(
+                model=self.model,
+                choices=[SimpleNamespace(message=SimpleNamespace(content="ok"))],
+                usage={"prompt_tokens": 2, "completion_tokens": 1, "total_tokens": 3},
+            )
+
+        async def aforward(self, prompt=None, messages=None, **kwargs):
+            """
+            Process a prompt or message sequence.
+
+            Parameters:
+                prompt: Optional prompt to process.
+                messages: Optional sequence of messages to process.
+
+            Returns:
+                The model response.
+            """
+            return self.forward(prompt, messages, **kwargs)
+
+    callback = Callback()
+    source = ScriptLM("test/script", callbacks=[callback])
+    proxy = RLMModelBundle(source, source).bind_turn_deadline(deadline=time.monotonic() + 10).root_lm
+    assert proxy("sync") == ["ok"]
+    assert await proxy.acall("async") == ["ok"]
+    assert len(proxy.history) == 2
+    assert proxy.history[-1]["usage"]["total_tokens"] == 3
+    assert source.history == []
+    assert callback.starts == ["test/script", "test/script"]
+
+
 def test_turn_binding_isolated_and_applies_role_specific_reserve() -> None:
     import time
 
@@ -169,9 +269,15 @@ def test_provider_retries_recompute_remaining_and_non_retryable_errors_stop(
 
     retry_source = _RetryingLM([LMServerError("temporary")])
     bound = RLMModelBundle(retry_source, _CopyableLM()).bind_turn_deadline(deadline=110)
-    ticks = [100.0, 101.0]
+    ticks = [100.0, 100.0, 101.0, 101.0]
 
     def clock() -> float:
+        """
+        Return the next scripted clock value.
+
+        Returns:
+                float: The next value from `ticks`, or `102.0` when no scripted values remain.
+        """
         return ticks.pop(0) if ticks else 102.0
 
     monkeypatch.setattr("fleet_rlm.rlm.program.time.monotonic", clock)
@@ -192,7 +298,18 @@ def test_provider_retries_recompute_remaining_and_non_retryable_errors_stop(
         assert len(bound.root_lm.calls) == 1
 
 
-def test_child_copy_strips_turn_wrapper_and_uses_child_deadline(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_turn_binding_rejects_nonfinite_deadline_that_would_disable_budget() -> None:
+    import math
+
+    from fleet_rlm.rlm.program import RLMModelBundle
+
+    with pytest.raises(ValueError, match="deadline"):
+        RLMModelBundle(_CopyableLM(), _CopyableLM()).bind_turn_deadline(deadline=math.nan)
+    with pytest.raises(ValueError, match="deadline"):
+        RLMModelBundle(_CopyableLM(), _CopyableLM()).bind_turn_deadline(deadline=-math.inf)
+
+
+def test_child_copy_cannot_extend_turn_budget_deadline(monkeypatch: pytest.MonkeyPatch) -> None:
     from fleet_rlm.rlm.program import RLMModelBundle
 
     source = RLMModelBundle(_CopyableLM(), _CopyableLM())
@@ -204,7 +321,10 @@ def test_child_copy_strips_turn_wrapper_and_uses_child_deadline(monkeypatch: pyt
     child.root_lm.forward(prompt="child")
 
     assert turn.root_lm.calls[-1]["timeout"] == 1
-    assert child.root_lm.calls[-1]["timeout"] == 10
+    assert child.root_lm.calls[-1]["timeout"] == 1
+    shorter_child = turn.fork_for_child(deadline=100.5)
+    shorter_child.root_lm.forward(prompt="short child")
+    assert shorter_child.root_lm.calls[-1]["timeout"] == 0.5
 
 
 def test_invalid_options_fail_before_construction() -> None:
@@ -282,7 +402,8 @@ def test_dspy_contract_is_only_native_dspy_rlm_call_site_in_rlm_package() -> Non
     import ast
     from pathlib import Path
 
-    rlm_dir = Path(__file__).resolve().parents[3] / "src" / "fleet_rlm" / "rlm"
+    rlm_dir = Path(__file__).resolve().parents[4] / "src" / "fleet_rlm" / "rlm"
+    assert (rlm_dir / "program.py").is_file()
     offenders: list[str] = []
     for path in sorted(rlm_dir.glob("*.py")):
         if path.name in ("dspy_contract.py", "program.py"):
@@ -300,12 +421,13 @@ def test_dspy_contract_is_only_native_dspy_rlm_call_site_in_rlm_package() -> Non
 
 
 def test_dspy_primitives_imports_are_confined_to_interpreter_contract() -> None:
-    """Static guard: only dspy_interpreter_contract.py may import dspy.primitives."""
+    """Static guard: only dspy_interpreter_contract.py and compat modules may import dspy.primitives."""
     import ast
     from pathlib import Path
 
-    src_root = Path(__file__).resolve().parents[3] / "src" / "fleet_rlm"
-    allowed = {"rlm/dspy_interpreter_contract.py", "rlm/_dspy_compat.py"}
+    src_root = Path(__file__).resolve().parents[4] / "src" / "fleet_rlm"
+    allowed = {"rlm/compat_3_3_1.py"}
+    assert (src_root / "rlm" / "program.py").is_file()
     offenders: list[str] = []
     for path in sorted(src_root.rglob("*.py")):
         rel = path.relative_to(src_root).as_posix()
@@ -326,3 +448,50 @@ def test_dspy_primitives_imports_are_confined_to_interpreter_contract() -> None:
                 offenders.append(rel)
                 break
     assert offenders == [], f"dspy.primitives imported outside interpreter contract: {offenders}"
+
+
+def test_private_dspy_imports_are_confined_to_compat_layer() -> None:
+    """Static guard: only compat modules may import private DSPy internal packages."""
+    import ast
+    from pathlib import Path
+
+    src_root = Path(__file__).resolve().parents[4] / "src" / "fleet_rlm"
+    allowed = {"rlm/compat_3_3_1.py"}
+    assert (src_root / "rlm" / "program.py").is_file()
+    offenders: list[str] = []
+    for path in sorted(src_root.rglob("*.py")):
+        rel = path.relative_to(src_root).as_posix()
+        if rel in allowed:
+            continue
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom):
+                if node.module and (
+                    node.module.startswith("dspy.primitives")
+                    or node.module.startswith("dspy.predict")
+                    or node.module.startswith("dspy.adapters")
+                    or node.module.startswith("dspy.clients")
+                    or node.module.startswith("dspy.signatures")
+                ):
+                    offenders.append(f"{rel}: {node.module}")
+            elif isinstance(node, ast.Import):
+                for alias in node.names:
+                    if (
+                        alias.name.startswith("dspy.primitives")
+                        or alias.name.startswith("dspy.predict")
+                        or alias.name.startswith("dspy.adapters")
+                        or alias.name.startswith("dspy.clients")
+                        or alias.name.startswith("dspy.signatures")
+                    ):
+                        offenders.append(f"{rel}: {alias.name}")
+    assert offenders == [], f"Private DSPy imports found outside compat layer: {offenders}"
+
+
+def test_compatibility_implementation_has_one_versioned_home() -> None:
+    from pathlib import Path
+
+    from fleet_rlm.rlm.compat_3_3_1 import FleetJSONAdapter
+
+    root = Path(__file__).resolve().parents[4] / "src" / "fleet_rlm" / "rlm"
+    assert not (root / "_dspy_compat.py").exists()
+    assert FleetJSONAdapter.__module__ == "fleet_rlm.rlm.compat_3_3_1"

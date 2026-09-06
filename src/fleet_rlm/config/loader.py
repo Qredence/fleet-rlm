@@ -199,11 +199,9 @@ def _validate_policy_table(value: object, location: str, *, allow_partial_llm: b
                 )
             continue
         llm = _require_mapping(child, f"{location}.llm")
-        extras = set(llm).difference(_TABLE_KEYS["llm"])
-        if extras:
-            raise FleetConfigurationError(
-                f"unknown configuration key(s) at {location}.llm: {', '.join(sorted(extras))}"
-            )
+        unknown_roles = set(llm).difference(_TABLE_KEYS["llm"])
+        if unknown_roles:
+            raise FleetConfigurationError(f"unknown LLM role(s) at {location}.llm: {', '.join(sorted(unknown_roles))}")
         for role, role_value in llm.items():
             role_table = _require_mapping(role_value, f"{location}.llm.{role}")
             role_extras = set(role_table).difference(_ROLE_KEYS)

@@ -58,7 +58,16 @@ class _ServingLoop:
 
 
 def _call_from_worker_thread(view: SimpleNamespace, path: str) -> bytes:
-    """Run one bridged SDK call on a DST-y worker thread, like DSPy _execute_code."""
+    """
+    Execute a bridged filesystem call from a worker thread.
+
+    Parameters:
+        view (SimpleNamespace): Namespace exposing the bridged filesystem.
+        path (str): Path to pass to the filesystem operation.
+
+    Returns:
+        bytes: Data returned for the requested path.
+    """
     holder: dict[str, object] = {}
 
     def run() -> None:
@@ -74,6 +83,37 @@ def _call_from_worker_thread(view: SimpleNamespace, path: str) -> bytes:
     value = holder.get("value")
     assert isinstance(value, bytes)
     return value
+
+
+def test_dispatcher_runs_async_host_operation_from_worker_loop() -> None:
+    """The RLM async-Tool seam uses the persistent composition loop."""
+    dispatcher = SyncBridgeDispatcher()
+    with _ServingLoop("fleet-test-host-tool-loop") as server:
+        dispatcher.set_loop(server.loop)
+        result_holder: dict[str, object] = {}
+
+        def worker() -> None:
+            """
+            Run a bridged host operation from a worker event loop and store its result.
+            """
+
+            async def host_operation() -> tuple[str, str]:
+                return (threading.current_thread().name, asyncio.get_running_loop().__class__.__name__)
+
+            async def body() -> None:
+                result_holder["value"] = dispatcher.run(host_operation())
+
+            asyncio.run(body())
+
+        thread = threading.Thread(target=worker, name="fleet-test-rlm-worker", daemon=True)
+        thread.start()
+        thread.join(timeout=_DEADLOCK_BOUND_S)
+        assert not thread.is_alive(), "async host bridge deadlocked"
+        value = result_holder["value"]
+        assert isinstance(value, tuple)
+        assert value[0] == "fleet-test-host-tool-loop"
+        assert str(value[1]).endswith("EventLoop")
+        dispatcher.clear_loop(server.loop)
 
 
 def test_compositions_cannot_overwrite_each_others_bridge_authority() -> None:

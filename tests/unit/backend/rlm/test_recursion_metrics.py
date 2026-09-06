@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from fleet_rlm.rlm._dspy_compat import (
+from fleet_rlm.rlm.compat_3_3_1 import (
     _latest_lm_telemetry,
     _RLMTraceCallback,
 )

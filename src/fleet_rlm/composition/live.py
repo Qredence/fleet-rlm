@@ -38,6 +38,7 @@ from fleet_rlm.daytona.session_manager import DEFAULT_IDLE_STOP_SECONDS
 from fleet_rlm.persistence.database import ensure_database_compatible
 from fleet_rlm.persistence.repositories.outbox import SqlAlchemyMemoryPromotionOutbox
 from fleet_rlm.persistence.repositories.turns import ReconciliationSummary
+from fleet_rlm.rlm.budget import BudgetLimits
 from fleet_rlm.rlm.program import RLMModelBundle, rlm_options
 from fleet_rlm.rlm.recursion import recursive_rlm_options
 from fleet_rlm.rlm.session_runtime import SessionRLMRegistry
@@ -462,8 +463,18 @@ async def build_daytona_composition(
     skill_catalog: SkillCatalog,
     dispatcher: SyncBridgeDispatcher | None = None,
 ) -> RuntimeInventory:
-    """Construct the Daytona runtime inventory; clean up partial init on failure."""
-    from fleet_rlm.rlm._dspy_compat import assert_dspy_version
+    """
+    Construct the Daytona runtime inventory and recover cleanly from initialization failures.
+
+    Parameters:
+        settings (Settings): Configuration used to create and validate the runtime.
+        skill_catalog (SkillCatalog): Catalog of skills available to the runtime.
+        dispatcher (SyncBridgeDispatcher | None): Optional dispatcher for synchronous bridge operations.
+
+    Returns:
+        RuntimeInventory: The initialized Daytona runtime services and background tasks.
+    """
+    from fleet_rlm.rlm.compat_3_3_1 import assert_dspy_version
 
     assert_dspy_version()
     require_daytona_settings(settings)
@@ -872,7 +883,21 @@ def build_run_preparation(
     models: RLMModelBundle,
     session_runtime_registry: SessionRLMRegistry | None = None,
 ) -> DefaultRunPreparer:
-    """Compose Daytona Run preparation without mutating resource ownership."""
+    """
+    Create a Daytona run preparer configured with models, runtime limits,
+    attachments, environments, and live capabilities.
+
+    Parameters:
+        resources (DaytonaRuntimeResources): Daytona resources used to provide run environments and volume paths.
+        attachment_lifecycle (Any): Attachment lifecycle used during run preparation.
+        skill_catalog (SkillCatalog): Skills available to live capabilities.
+        settings (Settings): Runtime and budget configuration.
+        models (RLMModelBundle): Models used for run execution.
+        session_runtime_registry (SessionRLMRegistry | None): Optional registry for session-scoped runtime state.
+
+    Returns:
+        DefaultRunPreparer: The configured run preparer.
+    """
     from fleet_rlm.runtime.daytona.run_environment import (
         _DaytonaEnvironmentProvider,
         _LiveCapabilityPreparer,
@@ -883,6 +908,14 @@ def build_run_preparation(
         options=rlm_options(settings),
         recursive_options=recursive_rlm_options(settings),
         wrap_up_seconds=settings.rlm_wrap_up_seconds,
+        budget_limits=BudgetLimits(
+            provider_attempts=settings.rlm_max_provider_attempts,
+            tool_calls=settings.rlm_max_tool_calls,
+            recursive_children=(settings.rlm_recursion_max_calls if settings.rlm_recursion_enabled else 0),
+            execution_output_bytes=settings.rlm_max_execution_output_bytes,
+            finalization_attempts=settings.rlm_finalization_attempts,
+            finalization_seconds=settings.rlm_wrap_up_seconds,
+        ),
         attachments=attachment_lifecycle,
         environments=_DaytonaEnvironmentProvider(resources, settings, session_runtime_registry),
         capabilities=_LiveCapabilityPreparer(settings, skill_catalog, volume_paths=resources.volume_paths),

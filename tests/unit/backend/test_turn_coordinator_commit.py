@@ -315,6 +315,7 @@ async def test_open_commits_typed_result_through_temporary_sql(tmp_path) -> None
                     ),
                 )
             )
+            await db.flush([row for row in db.new if isinstance(row, (UserRow, WorkspaceRow))])
 
         class Prepared:
             execution = SimpleNamespace(run_id=run_id, session_id=session_id)

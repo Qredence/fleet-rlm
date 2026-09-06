@@ -1197,6 +1197,16 @@ class TurnRuntime:
             await shield_cleanup(inline_cleanup())
 
     async def _close_execution(self, prepared: PreparedTurn, state: _ExecutionState) -> None:
+        """
+        Clean up execution resources that remain owned by the current turn.
+
+        Parameters:
+            prepared: Prepared turn whose execution budget and resources are cleaned up.
+            state: Execution state containing the stream, heartbeat, and cleanup ownership status.
+
+        Raises:
+            BaseException: The first error encountered during owned-resource cleanup.
+        """
         with turn_phase_span("Turn.cleanup", inputs={"cleanup_owned": not state.cleanup_handed_off}):
             await self._cancel_pending_event(state)
             await self._stop_claim_waiter(state)
@@ -1210,6 +1220,7 @@ class TurnRuntime:
 
                 try:
                     await _close_stream_owned(state.stream, remember)
+                    self._settle_turn_budget(prepared)
                     try:
                         await shield_cleanup(prepared.aclose())
                     except BaseException as exc:
@@ -1286,6 +1297,22 @@ class TurnRuntime:
         claim_loss_usage: RLMUsage | None,
         late_claim_loss_window: bool,
     ) -> BaseException | None:
+        """
+        Complete cleanup for an execution whose ownership was transferred.
+
+        Parameters:
+            run (ClaimedRun): The claimed run being cleaned up.
+            prepared (PreparedTurn): The prepared turn and its associated resources.
+            stream (RunEventStream | None): The provider event stream, if opened.
+            heartbeat (ClaimHeartbeat | None): The claim heartbeat, if active.
+            finalization_task (asyncio.Task[RunSettlement] | None): Pending settlement task, if any.
+            claim_lost (bool): Whether claim loss has already been detected.
+            claim_loss_usage (RLMUsage | None): Usage to record when revoking a lost claim.
+            late_claim_loss_window (bool): Whether to check for claim loss after resource cleanup.
+
+        Returns:
+            BaseException | None: The first cleanup error, or `None` if cleanup succeeds.
+        """
         cleanup_error: BaseException | None = None
         committed = False
         claim_cleanup_attempted = False
@@ -1329,6 +1356,7 @@ class TurnRuntime:
             if finalization_task is not None:
                 with contextlib.suppress(BaseException):
                     await shield_cleanup(finalization_task)
+            self._settle_turn_budget(prepared)
             try:
                 await prepared.aclose()
             except BaseException as exc:
@@ -1351,7 +1379,27 @@ class TurnRuntime:
             await stop_heartbeat(heartbeat)
         return cleanup_error
 
+    @staticmethod
+    def _settle_turn_budget(prepared: PreparedTurn) -> None:
+        """
+        Settle the prepared turn's execution budget before releasing its resources.
+        """
+        execution_context = getattr(prepared, "execution", None)
+        execution_runtime = getattr(execution_context, "execution", None)
+        budget = getattr(getattr(execution_runtime, "models", None), "budget", None)
+        if budget is not None:
+            budget.settle()
+
     def _execution_deadline(self, prepared: PreparedTurn) -> float:
+        """
+        Determine the deadline for executing a prepared turn.
+
+        Parameters:
+            prepared (PreparedTurn): The prepared turn whose execution deadline is used.
+
+        Returns:
+            float: The execution deadline as a monotonic clock value.
+        """
         execution_runtime = getattr(prepared.execution, "execution", None)
         if execution_runtime is not None:
             return float(execution_runtime.deadline)

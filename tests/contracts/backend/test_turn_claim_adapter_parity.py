@@ -19,6 +19,15 @@ class _Harness:
 
 
 async def _build_harness(adapter_kind: str) -> _Harness:
+    """
+    Create a run-state test harness for the specified storage adapter.
+
+    Parameters:
+        adapter_kind (str): Storage adapter to use: ``"memory"`` or ``"sql"``.
+
+    Returns:
+        _Harness: Harness containing the initialized store, claimed turn, state reader, and cleanup callback.
+    """
     from fleet_rlm.chat.run_lifecycle import ClaimedRun, RunClaim
     from fleet_rlm.persistence.repositories import InMemoryRunStateStore, SqlAlchemyRunStateStore
     from fleet_rlm.sessions.models import TurnAccess, TurnInput
@@ -54,6 +63,7 @@ async def _build_harness(adapter_kind: str) -> _Harness:
                 SessionRow(id=session_id, user_id=access.user_id, workspace_id=access.workspace_id, title="parity"),
             )
         )
+        await db.flush([row for row in db.new if isinstance(row, (UserRow, WorkspaceRow))])
     store = SqlAlchemyRunStateStore(factory)
     turn = await store.begin(RunClaim(access, session_id, TurnInput("claim parity"), "parity", run_id))
     assert isinstance(turn, ClaimedRun)

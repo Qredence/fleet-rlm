@@ -135,6 +135,13 @@ def _typed_submit_source(output_fields: list[dict[str, Any]]) -> str:
                 raise ValueError(f"typed output default for {name} is not JSON-compatible")
             default_values[name] = default_json
         signature_parts.append(parameter)
+        if not required:
+            validation_parts.extend(
+                (
+                    f"if {name} is _FLEET_MISSING:",
+                    f"    {name} = _fleet_default({name!r})",
+                )
+            )
         if type_hint in {"str", "builtins.str"}:
             message = (
                 f"SUBMIT field {name} must be a string; serialize mappings/lists with "
@@ -144,13 +151,6 @@ def _typed_submit_source(output_fields: list[dict[str, Any]]) -> str:
                 (
                     f"if not isinstance({name}, str):",
                     f"    raise TypeError({message!r})",
-                )
-            )
-        if not required:
-            validation_parts.extend(
-                (
-                    f"if {name} is _FLEET_MISSING:",
-                    f"    {name} = _fleet_default({name!r})",
                 )
             )
         result_parts.append(f'"{name}": {name}')
@@ -1732,6 +1732,17 @@ class SyncBridgeDispatcher:
         """Return the registered composition loop, if any."""
         return self._service_loop
 
+    def run(self, awaitable: Any) -> Any:
+        """Run an awaitable on the composition-owned event loop.
+
+        Args:
+            awaitable: The host operation to execute.
+
+        Returns:
+            The awaitable's result.
+        """
+        return _SyncBridgeLoop(caller_loop=None, dispatcher=self).run(awaitable)
+
 
 class _SyncBridgeLoop:
     """Service-loop routing and close state for one synchronous Daytona bridge.
@@ -1779,7 +1790,15 @@ class _SyncBridgeLoop:
         return self._caller_loop
 
     def run(self, awaitable: Any) -> Any:
-        """Post one awaitable on the service loop and block until it settles."""
+        """
+        Execute an awaitable on the service event loop and wait for its result.
+
+        Parameters:
+                awaitable (Any): The awaitable to execute.
+
+        Returns:
+                Any: The awaitable's result.
+        """
         if self._closed:
             if inspect.iscoroutine(awaitable):
                 awaitable.close()
@@ -1789,6 +1808,14 @@ class _SyncBridgeLoop:
             if inspect.iscoroutine(awaitable):
                 awaitable.close()
             raise self._bridge_error("synchronous Daytona bridge service loop is unavailable")
+        try:
+            current_loop = asyncio.get_running_loop()
+        except RuntimeError:
+            current_loop = None
+        if current_loop is loop:
+            if inspect.iscoroutine(awaitable):
+                awaitable.close()
+            raise self._bridge_error("synchronous Daytona bridge called from its owning event loop")
         try:
             future = asyncio.run_coroutine_threadsafe(awaitable, loop)
         except RuntimeError as exc:

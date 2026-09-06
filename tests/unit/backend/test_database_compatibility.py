@@ -41,7 +41,7 @@ async def test_database_compatibility_rejects_database_without_alembic_revision(
 @pytest.mark.asyncio
 async def test_database_compatibility_accepts_exact_alembic_head(tmp_path: Path) -> None:
     database_url = f"sqlite+aiosqlite:///{tmp_path / 'head.sqlite3'}"
-    await _set_revision(database_url, "019fa2e4b7c1")
+    await _set_revision(database_url, "019fdb010001")
 
     await check_database_compatibility(database_url)
 
@@ -86,7 +86,7 @@ def test_existing_baseline_database_upgrades_to_settling_head(
         columns = {column["name"] for column in inspect(connection).get_columns("fleet_runs")}
         revision = connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
     assert {"terminal_intent", "recovery_metadata_json"} <= columns
-    assert revision == "019fa2e4b7c1"
+    assert revision == "019fdb010001"
 
 
 def test_existing_baseline_database_upgrades_to_memory_intents_head(
@@ -125,4 +125,4 @@ def test_existing_baseline_database_upgrades_to_memory_intents_head(
         "claim_heartbeat_at",
         "completion_reason",
     } <= intent_columns
-    assert revision == "019fa2e4b7c1"
+    assert revision == "019fdb010001"

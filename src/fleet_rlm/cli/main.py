@@ -68,12 +68,19 @@ def _single_command_parser(*, program: str, command: str) -> argparse.ArgumentPa
 
 
 def _run(parser: argparse.ArgumentParser, argv: Sequence[str] | None = None) -> None:
+    """
+    Parse command-line arguments and run the requested diagnostic or serving command.
+
+    Parameters:
+        parser (argparse.ArgumentParser): Parser configured for the CLI.
+        argv (Sequence[str] | None): Arguments to parse, or None to use the process command line.
+    """
     args = parser.parse_args(argv)
     # Certified-runtime guard: fail closed with a bounded public error before
     # any provider, database, or Daytona resource is constructed and before any
     # listener binds. Argument parsing (and --help) stay reachable on any
     # runtime; every serving/diagnostic command is guarded.
-    from fleet_rlm.rlm._dspy_compat import UncertifiedDSpyVersionError, assert_dspy_version
+    from fleet_rlm.rlm.compat_3_3_1 import UncertifiedDSpyVersionError, assert_dspy_version
 
     try:
         assert_dspy_version()

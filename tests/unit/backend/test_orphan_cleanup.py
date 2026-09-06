@@ -173,6 +173,9 @@ async def test_artifact_repository_enumerates_workspace_keep_sets() -> None:
                     ),
                 )
             )
+            await db.flush([row for row in db.new if isinstance(row, (UserRow, WorkspaceRow))])
+            await db.flush([row for row in db.new if isinstance(row, SessionRow)])
+            await db.flush([row for row in db.new if isinstance(row, RunRow)])
 
         catalog = SqlAlchemyArtifactCatalog(factory)
         assert await catalog.list_storage_refs(workspace_id=workspace_id) == frozenset({storage_ref})

@@ -2,6 +2,7 @@
 
 | Script | Purpose |
 | --- | --- |
+| `benchmarks/runtime_v2.py` | Execute repeated scripted Turns and compare sealed lifecycle migration receipts; no live semantic or Daytona guarantee |
 | `db_init.py` | Upgrade a fresh `FLEET_DATABASE_URL` database to Alembic head |
 | `openapi_tools.py` | Generate or check backend-only `openapi.yaml` |
 | `generate_stream_fixture.py` | Generate or check the deterministic TUI turn-stream golden fixture |
@@ -114,3 +115,23 @@ The Databricks-backed quality loop composes three opt-in steps that all require
    SME labeling session, distills judge guidelines with MemAlign, and re-runs
    the aligned baseline under a named run.
 See `docs/how-to-guides/evaluation-optimization.md` for the full workflow.
+
+## Runtime v2 adapter protocol comparison
+
+Run the credential-free DSPy 3.3.1 protocol replay from the repository root:
+
+```bash
+uv run python -m scripts.benchmarks.runtime_v2 compare-adapters \
+  --repetitions 5 --output .scratch/runtime-v2-adapter-comparison.json
+```
+
+The command executes stock JSONAdapter and Fleet adapters with zero, one, and
+two parse repairs over versioned response fixtures, in both sync and async modes.
+It records outcomes, physical provider admissions, latency distributions, source
+and fixture digests, and fail-closed contract gates. The scripted Turn lane also
+runs the deterministic `semantic-keywords/v1` content-presence scorer; this is not
+an LLM quality judgment, and `live_semantic_gate` remains `not_exercised`. Output
+creation is exclusive; choose a new filename for each receipt. The comparison does
+not call a provider, Daytona, Postgres, or an MLflow server. Its scores measure
+deterministic lifecycle/protocol behavior, not live semantic quality or production
+latency/cost.

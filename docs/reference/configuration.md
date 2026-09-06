@@ -38,6 +38,12 @@ applies migrations; use `uv run python scripts/db_init.py` or Alembic directly.
 
 ## Policy settings
 
+`runtime.variant` selects the execution architecture. Its default and only
+implemented value is `legacy`; `native` and `capsule` are rejected at startup
+and are absent from the settings editor. Existing policies that omit it keep
+the legacy behavior. `runtime.environment = "daytona"` selects the provider
+environment independently. See [ADR 005](../decisions/005-runtime-variant.md).
+
 `config/fleet.toml` deep-merges `[defaults]` into the selected
 `[profiles.<name>]`. It centralizes application identity; runtime timeouts,
 leases, liveness, and the credentialed-command live switch; Root/Sub model ids,
@@ -118,8 +124,12 @@ still governed by the native trajectory. The generic `RLMOptions` and DSPy
 constructor fallback values for Root are `20`, `50`, and `10000`; the shipped
 `daytona-recursive` policy deliberately lowers the effective Root values to
 `12`, `32`, and `6000`. Its child values remain `8`, `12`, and `4000`.
-`max_execution_output_chars`, the Turn deadline, and recursive call/concurrency
-limits are separate Fleet controls. There is no configurable recursive depth;
+`max_execution_output_chars`, `max_execution_output_bytes`, the Turn deadline,
+provider-attempt, Tool-call, finalization, and recursive call/concurrency limits
+are separate Fleet controls. `max_provider_attempts` counts physical provider
+admissions, including retries and adapter repairs; `max_tool_calls` and
+`max_execution_output_bytes` are Turn-wide ceilings. There is no configurable
+recursive depth;
 `RLM_NATIVE_CHILD_DEPTH = 1` is a fixed product invariant.
 
 The `[rlm]` recursion settings include `recursion_enabled` and bound the native

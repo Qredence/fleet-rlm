@@ -65,7 +65,7 @@ jobs:
       - run:
           name: Plan release
           command: |
-            circleci run release plan \
+            circleci run release plan deploy-pypi \
               --environment-name=${ENVIRONMENT_NAME} \
               --component-name=${COMPONENT_NAME} \
               --target-version=${TARGET_VERSION}
@@ -79,7 +79,7 @@ jobs:
           no_output_timeout: 45m
       - run:
           name: Update deployment status to failed
-          command: circleci run release update --status=FAILED
+          command: circleci run release update deploy-pypi --status=FAILED
           when: on_fail
   cancel-deploy-pypi:
     docker:

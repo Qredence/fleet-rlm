@@ -13,7 +13,7 @@ from dspy.utils.exceptions import AdapterParseError, LMTimeoutError
 
 from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
 from fleet_rlm.observability.diagnostics import normalize_turn_failure
-from fleet_rlm.rlm._dspy_compat import FleetJSONAdapter
+from fleet_rlm.rlm.compat_3_3_1 import FleetJSONAdapter
 from fleet_rlm.rlm.program import RLMOptions, build_native_rlm
 
 
@@ -293,7 +293,34 @@ def test_wrap_up_rejects_non_submit_actions_after_one_correction(bad_code: str) 
     assert len(lm.calls) == 2
 
 
+def _advance_after_provider(
+    monkeypatch: pytest.MonkeyPatch, lm: _ScriptedLM, *, start: float, after: list[float]
+) -> None:
+    """
+    Advance the mocked clock after each scripted language-model call.
+
+    Parameters:
+        monkeypatch (pytest.MonkeyPatch): Fixture used to apply temporary patches.
+        lm (_ScriptedLM): Scripted language model whose forward method is wrapped.
+        start (float): Initial monotonic clock value.
+        after (list[float]): Successive clock values applied after provider calls.
+    """
+    now = [start]
+    remaining = iter(after)
+    original = lm.forward
+
+    def forward(*args, **kwargs):
+        try:
+            return original(*args, **kwargs)
+        finally:
+            now[0] = next(remaining)
+
+    monkeypatch.setattr("fleet_rlm.rlm.budget.time.monotonic", lambda: now[0])
+    monkeypatch.setattr(lm, "forward", forward)
+
+
 def test_late_normal_response_is_reclassified_before_action_execution(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify that a late provider response is reclassified for wrap-up before action execution."""
     lm = _ScriptedLM(
         [
             '{"reasoning": "keep exploring", "code": "answer = tool()"}',
@@ -301,8 +328,7 @@ def test_late_normal_response_is_reclassified_before_action_execution(monkeypatc
         ]
     )
     adapter = FleetJSONAdapter(deadline=10, wrap_up_seconds=1)
-    remaining = iter((2.0, 0.5, 0.4, 0.3))
-    monkeypatch.setattr(adapter, "_remaining", lambda: next(remaining))
+    _advance_after_provider(monkeypatch, lm, start=8.0, after=[9.5, 9.7])
 
     prediction = _run_iteration_action(lm, adapter)
 
@@ -317,8 +343,7 @@ def test_late_normal_response_is_reclassified_before_action_execution(monkeypatc
 def test_late_normal_submit_is_accepted_as_the_wrap_up_attempt(monkeypatch: pytest.MonkeyPatch) -> None:
     lm = _ScriptedLM(['{"reasoning": "submit evidence", "code": "SUBMIT(answer=answer)"}'])
     adapter = FleetJSONAdapter(deadline=10, wrap_up_seconds=1)
-    remaining = iter((2.0, 0.5))
-    monkeypatch.setattr(adapter, "_remaining", lambda: next(remaining))
+    _advance_after_provider(monkeypatch, lm, start=8.0, after=[9.5])
 
     prediction = _run_iteration_action(lm, adapter)
 
@@ -337,8 +362,7 @@ def test_normal_provider_timeout_at_reserve_transitions_to_wrap_up(monkeypatch: 
 
     lm = _TimeoutOnceLM(['{"reasoning": "submit evidence", "code": "SUBMIT(answer=answer)"}'])
     adapter = FleetJSONAdapter(deadline=10, wrap_up_seconds=1)
-    remaining = iter((2.0, 0.5, 0.4, 0.3))
-    monkeypatch.setattr(adapter, "_remaining", lambda: next(remaining))
+    _advance_after_provider(monkeypatch, lm, start=8.0, after=[9.5, 9.7])
 
     prediction = _run_iteration_action(lm, adapter)
 
@@ -439,8 +463,22 @@ async def test_distilled_trace_rejects_late_exploration_and_submits_existing_evi
         ]
     )
     adapter = FleetJSONAdapter(deadline=10, wrap_up_seconds=1)
-    remaining = iter((10.0, 10.0, 0.5, 0.4, 0.3, 0.2))
-    monkeypatch.setattr(adapter, "_remaining", lambda: next(remaining))
+    now = [0.0]
+    monkeypatch.setattr("fleet_rlm.rlm.budget.time.monotonic", lambda: now[0])
+    original = adapter.acall
+
+    async def advance_after_action(*args, **kwargs):
+        """
+        Run the wrapped action and advance the mocked clock after it completes.
+
+        Returns:
+            The result produced by the wrapped action.
+        """
+        result = await original(*args, **kwargs)
+        now[0] = 9.5
+        return result
+
+    monkeypatch.setattr(adapter, "acall", advance_after_action)
     backend = InProcessInterpreterBackend()
     interpreter = DaytonaCodeInterpreter(backend=backend)
     rlm = build_native_rlm(signature="request -> answer: str", options=RLMOptions(max_iters=3), verbose=False)
@@ -464,3 +502,84 @@ async def test_distilled_trace_rejects_late_exploration_and_submits_existing_evi
         "wrap_up_rejection_reason": "exploration_or_additional_code",
         "wrap_up_remaining_ms": 500,
     }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "texts, reserve, expected_error",
+    [
+        (['{"reasoning":"r","code":"SUBMIT(answer=1)"}'], False, None),
+        (["", '{"reasoning":"r","code":"SUBMIT(answer=1)"}'], False, None),
+        (["", ""], False, AdapterParseError),
+        (
+            ['{"reasoning":"r","code":"print(1)"}', '{"reasoning":"r","code":"SUBMIT(answer=1)"}'],
+            True,
+            None,
+        ),
+        (["", ""], True, TimeoutError),
+    ],
+)
+async def test_sync_async_repair_policy_parity(
+    monkeypatch: pytest.MonkeyPatch,
+    texts: list[str],
+    reserve: bool,
+    expected_error: type[Exception] | None,
+) -> None:
+    monkeypatch.setattr("fleet_rlm.rlm.compat_3_3_1.time.monotonic", lambda: 100.0)
+    sync_lm = _ScriptedLM(texts)
+    async_lm = _ScriptedLM(texts)
+    options = {"deadline": 105.0, "wrap_up_seconds": 10.0} if reserve else {}
+    sync_adapter = FleetJSONAdapter(**options)
+    async_adapter = FleetJSONAdapter(**options)
+    inputs = {"iteration": "1/5"}
+    if expected_error is not None:
+        with pytest.raises(expected_error) as sync_error:
+            sync_adapter(sync_lm, {}, _IterationActionSignature, [], inputs)
+        with pytest.raises(expected_error) as async_error:
+            await async_adapter.acall(async_lm, {}, _IterationActionSignature, [], inputs)
+        assert str(sync_error.value) == str(async_error.value)
+    else:
+        expected = sync_adapter(sync_lm, {}, _IterationActionSignature, [], inputs)
+        actual = await async_adapter.acall(async_lm, {}, _IterationActionSignature, [], inputs)
+        assert actual == expected
+    assert async_lm.calls == sync_lm.calls
+    assert async_adapter.wrap_up_summary() == sync_adapter.wrap_up_summary()
+
+
+@pytest.mark.asyncio
+async def test_async_cancellation_closes_repair_machine_without_retry(monkeypatch: pytest.MonkeyPatch) -> None:
+    import asyncio
+
+    adapter = FleetJSONAdapter()
+    original = adapter._repair_steps
+    machines = []
+
+    def capture(*args, **kwargs):
+        """Create and record a machine produced by the original factory.
+
+        Parameters:
+                *args: Positional arguments forwarded to the original factory.
+                **kwargs: Keyword arguments forwarded to the original factory.
+
+        Returns:
+                The created machine.
+        """
+        machine = original(*args, **kwargs)
+        machines.append(machine)
+        return machine
+
+    calls = 0
+
+    async def cancel(*_args, **_kwargs):
+        """Raise asyncio.CancelledError and record the cancellation attempt."""
+        nonlocal calls
+        calls += 1
+        raise asyncio.CancelledError
+
+    monkeypatch.setattr(adapter, "_repair_steps", capture)
+    monkeypatch.setattr(dspy.JSONAdapter, "acall", cancel)
+    with pytest.raises(asyncio.CancelledError):
+        await adapter.acall(_ScriptedLM([""]), {}, _IterationActionSignature, [], {"iteration": "1/5"})
+    assert calls == 1
+    assert len(machines) == 1
+    assert machines[0].gi_frame is None

@@ -1247,7 +1247,21 @@ class _DaytonaEnvironmentProvider:
             self._maybe_release_environment_owner()
 
     async def _acquire(self, run: ClaimedRun, *, deadline: float) -> RunEnvironment:
-        """Perform one tracked environment acquisition."""
+        """
+        Acquire the execution environment for a claimed run.
+
+        Parameters:
+            run (ClaimedRun): The run whose workspace and session environment should be acquired.
+            deadline (float): The absolute time by which preparation must complete.
+
+        Returns:
+            RunEnvironment: The prepared environment and its associated resource-release callbacks.
+
+        Raises:
+            RunPreparationTimeoutError: If preparation exceeds the deadline.
+            RunPreparationUnavailableError: If the execution environment cannot be admitted.
+            RuntimeError: If the acquired sandbox is unavailable.
+        """
         key = (run.access.workspace_id, run.session_id)
         preparation_gate = self._preparation_gate(key)
         gate_held = False
@@ -1382,6 +1396,7 @@ class _DaytonaEnvironmentProvider:
                 release_is_resident=False,
                 history_transport=build_committed_session_history_for_claim(run),
                 mark_tainted=lambda key=key: self._mark_provider_root_tainted(key),
+                async_bridge=getattr(self.resources, "dispatcher", None),
             )
         except BaseException:
             # The preparation gate proves that no earlier same-Session Turn

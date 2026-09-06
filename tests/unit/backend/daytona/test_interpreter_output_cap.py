@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 import tomllib
 from pathlib import Path
 
@@ -15,7 +16,8 @@ from fleet_rlm.daytona.interpreter import (
     InProcessInterpreterBackend,
     sandbox_backend,
 )
-from fleet_rlm.rlm._dspy_compat import FinalOutput
+from fleet_rlm.rlm.budget import BudgetDimension, BudgetLimits, TurnBudget, TurnBudgetExhausted
+from fleet_rlm.rlm.compat_3_3_1 import FinalOutput
 
 
 def test_large_stdout_is_head_tail_capped_with_marker() -> None:
@@ -49,9 +51,34 @@ def test_final_output_is_never_capped() -> None:
     assert result.output["answer"] == "x" * 5000
 
 
+def test_turn_output_budget_is_shared_and_fail_closed() -> None:
+    interpreter = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend(), execution_output_cap=400)
+    observed: list[object] = []
+    budget = TurnBudget(
+        deadline=time.monotonic() + 60,
+        limits=BudgetLimits(execution_output_bytes=3),
+    )
+    interpreter.bind_observer(observed.append)
+    interpreter.bind_turn_budget(budget)
+
+    with pytest.raises(TurnBudgetExhausted) as caught:
+        interpreter.execute("_out = 'abcd'")
+
+    assert caught.value.dimension == BudgetDimension.EXECUTION_OUTPUT_BYTES
+    assert budget.snapshot()[BudgetDimension.EXECUTION_OUTPUT_BYTES.value] == 0
+    assert not any(getattr(item, "output", "") == "Execution failed" for item in observed)
+
+
 def test_error_feedback_includes_capped_stderr() -> None:
     class _StderrBackend:
         def run(self, code: str, variables: dict[str, object] | None = None) -> BackendExecutionResult:
+            """
+            Simulate a failed backend execution with an undefined-name error.
+
+            Returns:
+                BackendExecutionResult: An execution result with a fixed `NameError`
+                    message and 5,000-character stderr output.
+            """
             del code, variables
             return BackendExecutionResult(
                 stdout="", error="NameError: name 'missing' is not defined", stderr="s" * 5000

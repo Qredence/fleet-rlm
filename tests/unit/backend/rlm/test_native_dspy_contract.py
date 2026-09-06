@@ -15,6 +15,7 @@ from pydantic import Field, PlainSerializer
 
 from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
 from fleet_rlm.rlm.events import ToolEventView, observe_tool
+from fleet_rlm.rlm.output_contract import bind_output_contract
 from fleet_rlm.rlm.program import RLMModelBundle, RLMOptions, build_native_rlm
 from fleet_rlm.rlm.result import prediction_result
 
@@ -323,7 +324,7 @@ async def test_native_json_action_contract_parses_first_and_followup_iterations(
 
 @pytest.mark.asyncio
 async def test_native_rlm_callback_observes_completed_action_without_altering_prediction() -> None:
-    from fleet_rlm.rlm._dspy_compat import bind_native_rlm_observer
+    from fleet_rlm.rlm.compat_3_3_1 import bind_native_rlm_observer
     from fleet_rlm.rlm.events import RLMReasoning
     from fleet_rlm.rlm.program import (
         RLMOptions,
@@ -354,8 +355,9 @@ async def test_native_rlm_callback_observes_completed_action_without_altering_pr
             return None
 
         def execute(self, code: str, variables: dict[str, Any] | None = None) -> Any:
+            """Execute code with optional variables and return a wrapped result."""
             del code, variables
-            from fleet_rlm.rlm._dspy_compat import wrap_final_output
+            from fleet_rlm.rlm.compat_3_3_1 import wrap_final_output
 
             return wrap_final_output({"answer": "ok"})
 
@@ -385,7 +387,7 @@ async def test_native_rlm_callback_observes_completed_action_without_altering_pr
 def test_composition_version_guard_accepts_exact_final_3_3_1_only(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from fleet_rlm.rlm._dspy_compat import (
+    from fleet_rlm.rlm.compat_3_3_1 import (
         CERTIFIED_DSPY_VERSION,
         UncertifiedDSpyVersionError,
         assert_dspy_version,
@@ -419,7 +421,7 @@ def test_composition_version_guard_accepts_exact_final_3_3_1_only(
 def test_composition_version_guard_error_is_bounded_and_typed(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from fleet_rlm.rlm._dspy_compat import (
+    from fleet_rlm.rlm.compat_3_3_1 import (
         UncertifiedDSpyVersionError,
         assert_dspy_version,
     )
@@ -500,7 +502,7 @@ def test_lm_trace_callback_records_role_and_failure_category(monkeypatch: pytest
     from types import SimpleNamespace
 
     from fleet_rlm.observability import tracing as turn_tracing
-    from fleet_rlm.rlm._dspy_compat import _RLMTraceCallback
+    from fleet_rlm.rlm.compat_3_3_1 import _RLMTraceCallback
 
     calls = SimpleNamespace(outputs=[])
 
@@ -587,7 +589,7 @@ def test_lm_trace_callback_records_classified_failure_detail(monkeypatch: pytest
 
     from fleet_rlm.daytona.errors import ProviderRequestError
     from fleet_rlm.observability import tracing as turn_tracing
-    from fleet_rlm.rlm._dspy_compat import _RLMTraceCallback
+    from fleet_rlm.rlm.compat_3_3_1 import _RLMTraceCallback
 
     captured = SimpleNamespace(outputs=[])
 
@@ -663,7 +665,7 @@ def test_lm_trace_callback_records_classified_failure_detail(monkeypatch: pytest
 def test_lm_trace_callback_keeps_structural_last_call_summary() -> None:
     from types import SimpleNamespace
 
-    from fleet_rlm.rlm._dspy_compat import _RLMTraceCallback
+    from fleet_rlm.rlm.compat_3_3_1 import _RLMTraceCallback
 
     root = SimpleNamespace(model="root-model", history=[])
     callback = _RLMTraceCallback(root_lm=root, sub_lm=SimpleNamespace(model="sub-model"))
@@ -683,7 +685,7 @@ def test_lm_trace_callback_keeps_structural_last_call_summary() -> None:
 
 def test_lm_trace_profiles_include_bounded_readable_payloads(monkeypatch: pytest.MonkeyPatch) -> None:
     from fleet_rlm.observability import tracing
-    from fleet_rlm.rlm._dspy_compat import (
+    from fleet_rlm.rlm.compat_3_3_1 import (
         _lm_input_profile,
         _lm_output_profile,
     )
@@ -708,7 +710,7 @@ def test_lm_trace_callback_records_call_specific_usage_and_standard_attribute(mo
     from types import SimpleNamespace
 
     from fleet_rlm.observability import tracing as turn_tracing
-    from fleet_rlm.rlm._dspy_compat import _RLMTraceCallback
+    from fleet_rlm.rlm.compat_3_3_1 import _RLMTraceCallback
 
     calls = SimpleNamespace(outputs=[], attributes=[])
 
@@ -816,7 +818,7 @@ def test_reasoning_callback_spans_the_complete_root_action(monkeypatch: pytest.M
     from types import SimpleNamespace
 
     from fleet_rlm.observability import tracing as turn_tracing
-    from fleet_rlm.rlm._dspy_compat import _RLMReasoningCallback
+    from fleet_rlm.rlm.compat_3_3_1 import _RLMReasoningCallback
 
     outputs: list[dict[str, object]] = []
 
@@ -893,7 +895,7 @@ def test_malformed_provider_usage_degrades_without_losing_measured_fields(provid
 
 
 def test_lm_output_profile_reads_mapping_of_parsed_fields() -> None:
-    from fleet_rlm.rlm._dspy_compat import _lm_output_profile
+    from fleet_rlm.rlm.compat_3_3_1 import _lm_output_profile
 
     # Success path: adapter-parsed outputs arrive as a Mapping of signature fields.
     outputs = {"reasoning": "step", "code": "print(1)"}
@@ -904,7 +906,7 @@ def test_lm_output_profile_reads_mapping_of_parsed_fields() -> None:
 
 
 def test_lm_output_profile_degrades_unknown_shapes_without_raw_probing() -> None:
-    from fleet_rlm.rlm._dspy_compat import _lm_output_profile
+    from fleet_rlm.rlm.compat_3_3_1 import _lm_output_profile
 
     # P38-RLM-006/011: raw LiteLLM ModelResponse shapes are never delivered by
     # the certified DSPy 3.3.1 legacy contract and are no longer probed.
@@ -928,7 +930,7 @@ def test_latest_lm_telemetry_reads_only_the_certified_legacy_history_entry() -> 
     """
     from types import SimpleNamespace
 
-    from fleet_rlm.rlm._dspy_compat import _latest_lm_telemetry
+    from fleet_rlm.rlm.compat_3_3_1 import _latest_lm_telemetry
 
     outputs = ["parsed"]
     lm = SimpleNamespace(
@@ -961,7 +963,7 @@ def test_lm_trace_callback_emits_token_usage_output_and_mlflow_attribute(monkeyp
     from types import SimpleNamespace
 
     from fleet_rlm.observability import tracing as turn_tracing
-    from fleet_rlm.rlm._dspy_compat import _RLMTraceCallback
+    from fleet_rlm.rlm.compat_3_3_1 import _RLMTraceCallback
     from fleet_rlm.rlm.recursion import DelegationMetrics
 
     captured = SimpleNamespace(outputs=[], attributes={})
@@ -1079,6 +1081,7 @@ async def test_native_submit_honors_required_defaults_and_nullable_outputs() -> 
         note: str | None = dspy.OutputField()
 
     interpreter = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())
+    bind_output_contract(interpreter, Report)
     rlm = build_native_rlm(
         signature=Report,
         options=RLMOptions(max_iters=1),
@@ -1194,7 +1197,9 @@ async def test_sync_and_async_tools_have_equivalent_results_and_lifecycle() -> N
     async_wrapped = observe_tool(dspy.Tool(async_tool), async_events.append, ToolEventView.metadata_only())
 
     sync_result = sync_wrapped.func(value=4, note=None)
-    async_result = async_wrapped.func(value=4, note=None)
+    # DSPy Tools are synchronous at the interpreter boundary; direct callers
+    # outside the worker loop use the short-lived credential-free path.
+    async_result = await asyncio.to_thread(async_wrapped.func, value=4, note=None)
 
     assert sync_result == async_result == {"value": 4, "note": None}
     assert [type(event).__name__ for event in sync_events] == [
@@ -1254,3 +1259,85 @@ def test_native_contract_does_not_construct_or_shutdown_caller_owned_interpreter
 
     assert inspect.signature(rlm._interpreter_factory).parameters == {}
     assert sentinel.shutdown_calls == 0
+
+
+@pytest.mark.asyncio
+async def test_caller_owned_interpreter_tool_injection_output_metadata_and_trajectory() -> None:
+    import json
+
+    class ItemPayload(dspy.SandboxSerializable):
+        def __init__(self, key: str, value: int) -> None:
+            """Initialize an instance with a key and associated value."""
+            self.key = key
+            self.value = value
+
+        def sandbox_setup(self) -> str:
+            """Provide the sandbox initialization code used by the test interpreter."""
+            return "import json as _test_json"
+
+        def to_sandbox(self) -> bytes:
+            """
+            Serialize the key-value pair for sandbox transfer.
+
+            Returns:
+                bytes: UTF-8 encoded JSON representation of the key-value pair.
+            """
+            return json.dumps({"key": self.key, "value": self.value}).encode()
+
+        def sandbox_assignment(self, var_name: str, data_expr: str) -> str:
+            """
+            Generate a sandbox assignment statement that deserializes a JSON expression.
+            """
+            return f"{var_name} = _test_json.loads({data_expr})"
+
+        def rlm_preview(self, max_chars: int = 100) -> str:
+            """Return a concise representation containing the payload key."""
+            del max_chars
+            return f"ItemPayload(key={self.key})"
+
+    class TaskSignature(dspy.Signature):
+        request: str = dspy.InputField()
+        payload: ItemPayload = dspy.InputField()
+        answer: str = dspy.OutputField()
+        summary: str = dspy.OutputField(default="default-summary")
+
+    def lookup_tool(text: str) -> str:
+        """Formats a lookup value with a found prefix.
+
+        Returns:
+            The lookup value prefixed with ``"found:"``.
+        """
+        return f"found:{text}"
+
+    interpreter = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())
+    bind_output_contract(interpreter, TaskSignature)
+
+    rlm = build_native_rlm(
+        signature=TaskSignature,
+        tools=[lookup_tool],
+        options=RLMOptions(max_iters=2),
+        verbose=False,
+    )
+
+    action1 = 'val = lookup_tool(text=payload["key"])\nprint(val)'
+    action2 = "SUBMIT(answer=val)"
+    rlm.generate_action = _Actions(action1, action2)
+    rlm.extract = _NeverExtract()
+
+    try:
+        prediction = await rlm.acall(
+            interpreter,
+            request="fetch",
+            payload=ItemPayload("test-key", 42),
+        )
+    finally:
+        interpreter.shutdown()
+
+    assert "lookup_tool" in interpreter.tools
+    assert "llm_query" in interpreter.tools
+    assert prediction.answer == "found:test-key"
+    assert prediction.summary == "default-summary"
+    assert len(prediction.trajectory) >= 2
+    assert prediction.trajectory[0]["code"] == action1
+    assert "found:test-key" in prediction.trajectory[0]["output"]
+    assert prediction.trajectory[1]["code"] == action2

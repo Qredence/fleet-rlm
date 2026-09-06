@@ -35,12 +35,14 @@ from fleet_rlm.attachments.models import PreparedAttachment
 from fleet_rlm.chat.run_authority import RunAuthority
 from fleet_rlm.config.settings import Settings
 from fleet_rlm.observability.diagnostics import normalize_turn_failure
-from fleet_rlm.rlm._dspy_compat import (
+from fleet_rlm.rlm.budget import BudgetDimension, TurnBudget
+from fleet_rlm.rlm.compat_3_3_1 import (
     CodeInterpreter,
     bind_native_rlm_observer,
 )
 from fleet_rlm.rlm.events import (
     PROVIDER_ENDPOINT_NOT_FOUND_MESSAGE,
+    AsyncToolBridge,
     AttachmentRead,
     ExecutionTraceAssembler,
     ObservationSession,
@@ -57,6 +59,7 @@ from fleet_rlm.rlm.events import (
     observe_tool,
     reconcile_trajectory,
 )
+from fleet_rlm.rlm.output_contract import bind_output_contract
 from fleet_rlm.rlm.program import (
     AttachmentContextCapsule,
     FleetRLMSignature,
@@ -277,6 +280,9 @@ class ExecutionRuntime:
     cancellation_requested: AsyncCancellationProbe
     deadline: float
     environment_release: RetainableEnvironmentRelease | None = None
+    # Composition-owned bridge for async host Tools called synchronously by
+    # DSPy's worker-side interpreter.
+    async_bridge: AsyncToolBridge | None = None
     # Directly constructed test/in-process contexts opt into the reserve via
     # preparation; the public TOML default is applied by the live composition.
     wrap_up_seconds: float = 0.0
@@ -479,6 +485,7 @@ class RunToolGuards:
     integrity: RunIntegrityLedger = field(default_factory=RunIntegrityLedger)
     progress: ToolProgressGuard = field(default_factory=ToolProgressGuard)
     required_targets: frozenset[str] | None = None
+    budget: TurnBudget | None = None
 
     def __post_init__(self) -> None:
         if self.required_targets is not None:
@@ -489,7 +496,13 @@ class RunToolGuards:
         return self.progress.completed(tool_name, arguments, result)
 
     def failed(self, tool_name: str, arguments: Mapping[str, Any]) -> None:
+        """Record that a tool operation failed without resolving its workspace obligation."""
         self.integrity.failed(tool_name, arguments)
+
+    def reserve_tool(self) -> None:
+        """Reserve capacity for one tool call in the turn budget."""
+        if self.budget is not None:
+            self.budget.reserve(BudgetDimension.TOOL_CALLS)
 
 
 # ---------------------------------------------------------------------------
@@ -1445,9 +1458,27 @@ class RLMRunner:
         RecursiveRLMExecutor | None,
         SessionRuntimeLease,
     ]:
-        """Acquire the Session lane, bind current Tools, and start one worker."""
+        """
+        Acquire and prepare the session runtime, bind turn-specific tools and context, and start the RLM worker.
+
+        Parameters:
+            context (RLMExecutionContext): Execution identity, session data, capabilities, and runtime configuration.
+            ownership (WorkerOwnership): Ownership state for the worker and its blocking resources.
+            observations (ObservationSession): Session used to publish worker and capability events.
+
+        Returns:
+            tuple: The execution specification, tool guards, worker handle, optional
+            recursive executor, and session runtime lease.
+
+        Raises:
+            RLMConfigError: If recursive execution is enabled without a child runtime or
+            the session tool registry is unavailable.
+        """
         spec = context.capabilities.spec
-        guards = RunToolGuards(required_targets=workspace_obligations(context.session.request))
+        guards = RunToolGuards(
+            required_targets=workspace_obligations(context.session.request),
+            budget=getattr(context.execution.models, "budget", None),
+        )
         recursive_executor = None
         if context.delegation.recursive_options.enabled:
             if context.delegation.child_runtime_factory is None:
@@ -1491,6 +1522,7 @@ class RLMRunner:
                 after_result=(relay_capability_details if str(tool.name) == "load_skill" else None),
                 is_authorized=lambda: not context.identity.authority.revoked,
                 guards=guards,
+                async_bridge=getattr(context.execution, "async_bridge", None),
             )
             for tool in spec.tools
         )
@@ -1622,6 +1654,9 @@ class RLMRunner:
             observer_cleanup = clear_observers
             lease.bind_turn_cleanup(binding, observer_cleanup)
             binding_attached = True
+            bind_budget = getattr(state_context.execution.interpreter, "bind_turn_budget", None)
+            if callable(bind_budget):
+                bind_budget(getattr(state_context.execution.models, "budget", None))
             self._bind_observer(
                 state_context.execution.interpreter,
                 observations.publish,
@@ -1634,6 +1669,10 @@ class RLMRunner:
             if hasattr(lease.state.rlm, "sub_lm"):
                 lease.state.rlm.sub_lm = state_context.execution.models.sub_lm
             self._bind_context_capsule(state_context)
+            bind_output_contract(
+                state_context.execution.interpreter,
+                getattr(lease.state.rlm, "signature", None),
+            )
             self._bind_observer(
                 lease.state.rlm,
                 observations.publish,

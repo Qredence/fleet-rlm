@@ -1,0 +1,140 @@
+{
+  "schema": "fleet.adapter-replay-cases/v1",
+  "cases": [
+    {
+      "id": "valid/v1",
+      "responses": [
+        "{\"reasoning\":\"done\",\"code\":\"SUBMIT(answer=1)\"}"
+      ],
+      "expected": "submit",
+      "fleet_attempts": 1
+    },
+    {
+      "id": "empty-repair/v1",
+      "responses": [
+        "",
+        "{\"reasoning\":\"done\",\"code\":\"SUBMIT(answer=1)\"}"
+      ],
+      "expected": "submit",
+      "fleet_attempts": 2
+    },
+    {
+      "id": "invalid-json-repair/v1",
+      "responses": [
+        "not json",
+        "{\"reasoning\":\"done\",\"code\":\"SUBMIT(answer=1)\"}"
+      ],
+      "expected": "submit",
+      "fleet_attempts": 2
+    },
+    {
+      "id": "missing-field-repair/v1",
+      "responses": [
+        "{\"reasoning\":\"missing code\"}",
+        "{\"reasoning\":\"done\",\"code\":\"SUBMIT(answer=1)\"}"
+      ],
+      "expected": "submit",
+      "fleet_attempts": 2
+    },
+    {
+      "id": "second-repair/v1",
+      "responses": [
+        "",
+        "",
+        "{\"reasoning\":\"done\",\"code\":\"SUBMIT(answer=1)\"}"
+      ],
+      "expected": "submit",
+      "fleet_attempts": 3
+    },
+    {
+      "id": "parse-ceiling/v1",
+      "responses": [
+        "",
+        "",
+        ""
+      ],
+      "expected": "AdapterParseError",
+      "fleet_attempts": 3
+    },
+    {
+      "id": "reserve-exploration/v1",
+      "responses": [
+        "{\"reasoning\":\"explore\",\"code\":\"lookup()\"}",
+        "{\"reasoning\":\"done\",\"code\":\"SUBMIT(answer=1)\"}"
+      ],
+      "reserve": true,
+      "expected": "submit",
+      "fleet_attempts": 2
+    },
+    {
+      "id": "reserve-parse-repair/v1",
+      "responses": [
+        "",
+        "{\"reasoning\":\"done\",\"code\":\"SUBMIT(answer=1)\"}"
+      ],
+      "reserve": true,
+      "expected": "submit",
+      "fleet_attempts": 2
+    },
+    {
+      "id": "reserve-ceiling/v1",
+      "responses": [
+        "{\"reasoning\":\"explore\",\"code\":\"lookup()\"}",
+        "{\"reasoning\":\"explore\",\"code\":\"lookup()\"}"
+      ],
+      "reserve": true,
+      "expected": "TimeoutError",
+      "fleet_attempts": 2
+    },
+    {
+      "id": "late-exploration/v1",
+      "responses": [
+        "{\"reasoning\":\"explore\",\"code\":\"lookup()\"}",
+        "{\"reasoning\":\"done\",\"code\":\"SUBMIT(answer=1)\"}"
+      ],
+      "late": true,
+      "expected": "submit",
+      "fleet_attempts": 2
+    },
+    {
+      "id": "provider-retry/v1",
+      "responses": [
+        "retryable-server-error",
+        "{\"reasoning\":\"done\",\"code\":\"SUBMIT(answer=1)\"}"
+      ],
+      "provider_retries": 1,
+      "expected": "submit",
+      "fleet_attempts": 2
+    },
+    {
+      "id": "schema-fallback/v1",
+      "responses": [
+        "",
+        "{\"reasoning\":\"done\",\"code\":\"SUBMIT(answer=1)\"}"
+      ],
+      "structured": true,
+      "expected": "submit",
+      "fleet_attempts": 2
+    },
+    {
+      "id": "timeout-at-reserve/v1",
+      "responses": [
+        "provider-timeout",
+        "{\"reasoning\":\"done\",\"code\":\"SUBMIT(answer=1)\"}"
+      ],
+      "late": true,
+      "expected": "submit",
+      "fleet_attempts": 2
+    },
+    {
+      "id": "late-parse-repair/v1",
+      "responses": [
+        "",
+        "{\"reasoning\":\"done\",\"code\":\"SUBMIT(answer=1)\"}"
+      ],
+      "late": true,
+      "expected": "submit",
+      "fleet_attempts": 2
+    }
+  ]
+}

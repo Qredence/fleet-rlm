@@ -191,6 +191,13 @@ remain transport-neutral until the API SSE adapter projects them.
 
 ## DSPy RLM contract
 
+The migration target uses a fresh InterpreterContext per Turn and distinguishes
+Volume-less SemanticChild from restricted-data WorkspaceChild. See
+[ADR 004](docs/decisions/004-turn-interpreter-context.md). These are target
+contracts; the selected `legacy` runtime retains its existing Session reuse
+until the native cutover gates pass. [ADR 005](docs/decisions/005-runtime-variant.md)
+defines the single execution-architecture selector.
+
 Fleet uses the repository-pinned DSPy implementation as the behavioral source
 of truth. A native RLM invocation receives the declared request, committed
 history, bounded Session context, authorized Skill metadata, and bounded

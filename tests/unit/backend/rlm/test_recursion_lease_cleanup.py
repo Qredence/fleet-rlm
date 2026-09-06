@@ -42,7 +42,7 @@ from fleet_rlm.chat.run_authority import RunAuthority
 from fleet_rlm.chat.session_context import SessionContextManifest
 from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
 from fleet_rlm.daytona.recursive_child_runtime import ChildRuntimeLease
-from fleet_rlm.rlm._dspy_compat import wrap_final_output
+from fleet_rlm.rlm.compat_3_3_1 import wrap_final_output
 from fleet_rlm.rlm.events import RunCompleted, Status
 from fleet_rlm.rlm.program import (
     RLMModelBundle,

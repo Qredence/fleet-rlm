@@ -15,6 +15,8 @@
 * [P42 Session-state behavior freeze](reference/p42-session-state-behavior-freeze.md)
 * [P42 module-subtraction ledger](reference/p42-module-subtraction-ledger.md)
 * [Session-scoped RLM state ADR](decisions/ADR-session-scoped-rlm-state.md)
+* [Turn interpreter context target (ADR 004)](decisions/004-turn-interpreter-context.md)
+* [Runtime variant (ADR 005)](decisions/005-runtime-variant.md)
 * [Reference](reference/index.md)
   * [Configuration](reference/configuration.md)
   * [Runtime Profile Matrix](reference/profile-matrix.md)
