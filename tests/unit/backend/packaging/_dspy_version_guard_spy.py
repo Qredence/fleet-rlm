@@ -44,10 +44,10 @@ class _UnsettledGuardRejectionError(Exception):
 def _install_ordered_spies(order: list[str], counts: dict[str, int]) -> None:
     """
     Install spies that record DSPy guard and resource-construction order.
-    
+
     Parameters:
-    	order (list[str]): Mutable sequence receiving guard and resource labels in call order.
-    	counts (dict[str, int]): Mutable mapping updated with the number of calls for each label.
+        order (list[str]): Mutable sequence receiving guard and resource labels in call order.
+        counts (dict[str, int]): Mutable mapping updated with the number of calls for each label.
     """
     import fleet_rlm.app as app_module
     import fleet_rlm.cli as cli_module
@@ -220,12 +220,13 @@ def _report(payload: dict[str, Any]) -> None:
 def main(argv: list[str]) -> int:
     """
     Run the selected DSPy version-guard test mode and report its outcome.
-    
+
     Parameters:
-    	argv (list[str]): Command-line arguments containing the harness name, mode, and reported DSPy version.
-    
+        argv (list[str]): Command-line arguments containing the harness name, mode, and reported DSPy version.
+
     Returns:
-    	int: The process exit code recorded by the selected mode, or a harness status code for invalid arguments, guard rejection, or unexpected errors.
+        int: The process exit code recorded by the selected mode, or a harness status
+        code for invalid arguments, guard rejection, or unexpected errors.
     """
     if len(argv) != 3 or argv[1] not in _MODES:
         sys.stderr.write("usage: _dspy_version_guard_spy.py <" + "|".join(sorted(_MODES)) + "> <reported-version>\n")

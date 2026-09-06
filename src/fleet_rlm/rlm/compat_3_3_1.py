@@ -208,11 +208,11 @@ def _append_input_field(
 
 def _budget_directive(remaining: float, *, attempts_exhausted: bool = False) -> str:
     """Create a directive requiring immediate submission when exploration must end.
-    
+
     Parameters:
         remaining (float): Estimated seconds remaining in the time budget.
         attempts_exhausted (bool): Whether the exploration attempt limit has been reached.
-    
+
     Returns:
         str: A directive containing the budget reason, remaining time, and required SUBMIT action.
     """
@@ -271,7 +271,7 @@ class FleetJSONAdapter(dspy.JSONAdapter):
     ) -> None:
         """
         Initialize the adapter with deadline, wrap-up, and parse-retry budgets.
-        
+
         Parameters:
             max_parse_retries (int): Number of additional attempts allowed after the
                 initial parse failure.
@@ -279,7 +279,7 @@ class FleetJSONAdapter(dspy.JSONAdapter):
             wrap_up_seconds (float): Time reserved for final-answer submission.
             budget (TurnBudget | None): Optional turn budget used to control adapter
                 limits.
-        
+
         Raises:
             ValueError: If a budget value is invalid.
         """
@@ -314,15 +314,15 @@ class FleetJSONAdapter(dspy.JSONAdapter):
         # initialization to program construction, which consumes this module.
         """
         Prepare the language model for an adapter request with deadline and budget tracking.
-        
+
         Parameters:
             lm (BaseLM): Language model to wrap.
             action (bool): Whether the request is for a native action.
             wrap_up (bool): Whether the request is part of the wrap-up phase.
-        
+
         Returns:
             BaseLM: A deadline-aware language model proxy.
-        
+
         Raises:
             ValueError: If the request attempts to switch turn budgets after budget state has been established.
         """
@@ -357,12 +357,13 @@ class FleetJSONAdapter(dspy.JSONAdapter):
 
     def _wrap_up_required(self, inputs: Mapping[str, Any], remaining: float | None) -> bool:
         """Determine whether the current action iteration must enter wrap-up mode.
-        
+
         Parameters:
-        	remaining (float | None): The time remaining for the current turn, in seconds.
-        
+                remaining (float | None): The time remaining for the current turn, in seconds.
+
         Returns:
-        	`True` if wrap-up is enabled and the action iteration is at or below its time reserve or has exhausted exploration, `False` otherwise.
+                `True` if wrap-up is enabled and the action iteration is at or below its
+                time reserve or has exhausted exploration, `False` otherwise.
         """
         return bool(
             remaining is not None
@@ -381,15 +382,16 @@ class FleetJSONAdapter(dspy.JSONAdapter):
     ) -> tuple[type[Signature], dict[str, Any], str]:
         """
         Prepare inputs with a mandatory final-answer budget directive.
-        
+
         Parameters:
-        	signature (type[Signature]): The input signature to update.
-        	inputs (Mapping[str, Any]): Current input values.
-        	remaining (float): Time remaining for finalization.
-        	field_name (str | None): Existing input field to receive the directive, if available.
-        
+                signature (type[Signature]): The input signature to update.
+                inputs (Mapping[str, Any]): Current input values.
+                remaining (float): Time remaining for finalization.
+                field_name (str | None): Existing input field to receive the directive, if available.
+
         Returns:
-        	tuple[type[Signature], dict[str, Any], str]: The updated signature, input values, and field name containing the directive.
+                tuple[type[Signature], dict[str, Any], str]: The updated signature, input
+                values, and field name containing the directive.
         """
         directive = _budget_directive(remaining, attempts_exhausted=self._budget.turn.exploration_exhausted())
         if field_name is not None and field_name in signature.fields:
@@ -431,14 +433,14 @@ class FleetJSONAdapter(dspy.JSONAdapter):
     ) -> list[dict[str, Any]]:
         """
         Drive the DSPy adapter through the bounded repair and finalization policy.
-        
+
         Parameters:
             lm (BaseLM): Language model used to generate the response.
             lm_kwargs (dict[str, Any]): Keyword arguments for the language model.
             signature (type[Signature]): DSPy signature describing the request.
             demos (list[dict[str, Any]]): Demonstration examples passed to the adapter.
             inputs (dict[str, Any]): Input values for the request.
-        
+
         Returns:
             list[dict[str, Any]]: Parsed adapter output records.
         """
@@ -503,11 +505,11 @@ class FleetJSONAdapter(dspy.JSONAdapter):
         list[dict[str, Any]],
     ]:
         """Drive request repair and wrap-up processing for an LM interaction.
-        
+
         Yields:
             tuple[BaseLM, dict[str, Any], type[Signature], dict[str, Any]]:
                 The LM, call arguments, signature, and inputs for the next request.
-        
+
         Returns:
             list[dict[str, Any]]:
                 The parsed response accepted as the final result.
@@ -756,11 +758,11 @@ class _RLMTraceCallback(BaseCallback):
 
     def on_lm_start(self, call_id: str, instance: Any, inputs: dict[str, Any]) -> None:
         """Record the start of an LM call for tracing and usage correlation.
-        
+
         Parameters:
-        	call_id (str): Identifier for the LM call.
-        	instance (Any): LM instance associated with the call.
-        	inputs (dict[str, Any]): Input fields supplied to the LM.
+                call_id (str): Identifier for the LM call.
+                instance (Any): LM instance associated with the call.
+                inputs (dict[str, Any]): Input fields supplied to the LM.
         """
         if self._deadline is not None and time.monotonic() >= self._deadline:
             return
@@ -807,11 +809,11 @@ class _RLMTraceCallback(BaseCallback):
     ) -> None:
         """
         Finalize tracking for a language-model call, recording its outcome, timing, usage, and response details.
-        
+
         Parameters:
-        	call_id (str): Identifier of the tracked call.
-        	outputs (dict[str, Any] | None): Model outputs, if the call produced any.
-        	exception (BaseException | None): Exception that caused the call to fail, if applicable.
+                call_id (str): Identifier of the tracked call.
+                outputs (dict[str, Any] | None): Model outputs, if the call produced any.
+                exception (BaseException | None): Exception that caused the call to fail, if applicable.
         """
         state = self._spans.pop(call_id, None)
         if state is None:

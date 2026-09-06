@@ -12,13 +12,13 @@ from sqlalchemy.exc import IntegrityError
 def _database(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     """
     Configure a temporary SQLite database and apply the baseline migration.
-    
+
     Parameters:
-    	tmp_path (Path): Temporary directory in which to create the database.
-    	monkeypatch (pytest.MonkeyPatch): Fixture used to set the database URL environment variable.
-    
+        tmp_path (Path): Temporary directory in which to create the database.
+        monkeypatch (pytest.MonkeyPatch): Fixture used to set the database URL environment variable.
+
     Returns:
-    	tuple: The Alembic configuration and SQLAlchemy engine for the database.
+        tuple: The Alembic configuration and SQLAlchemy engine for the database.
     """
     url = f"sqlite:///{tmp_path / 'lineage.db'}"
     monkeypatch.setenv("FLEET_DATABASE_URL", url)
@@ -54,11 +54,11 @@ def _seed(connection) -> None:
 def _turn(connection, session: str, run: str = "r") -> None:
     """
     Insert a user turn associated with a session and run.
-    
+
     Parameters:
-    	connection: Database connection used to execute the insert.
-    	session: Identifier of the session associated with the turn.
-    	run: Identifier of the run associated with the turn.
+        connection: Database connection used to execute the insert.
+        session: Identifier of the session associated with the turn.
+        run: Identifier of the run associated with the turn.
     """
     connection.execute(
         text(

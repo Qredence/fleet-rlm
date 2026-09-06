@@ -1734,10 +1734,10 @@ class SyncBridgeDispatcher:
 
     def run(self, awaitable: Any) -> Any:
         """Run an awaitable on the composition-owned event loop.
-        
+
         Args:
             awaitable: The host operation to execute.
-        
+
         Returns:
             The awaitable's result.
         """
@@ -1792,12 +1792,12 @@ class _SyncBridgeLoop:
     def run(self, awaitable: Any) -> Any:
         """
         Execute an awaitable on the service event loop and wait for its result.
-        
+
         Parameters:
-        	awaitable (Any): The awaitable to execute.
-        
+                awaitable (Any): The awaitable to execute.
+
         Returns:
-        	Any: The awaitable's result.
+                Any: The awaitable's result.
         """
         if self._closed:
             if inspect.iscoroutine(awaitable):

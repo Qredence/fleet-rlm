@@ -1249,14 +1249,14 @@ class _DaytonaEnvironmentProvider:
     async def _acquire(self, run: ClaimedRun, *, deadline: float) -> RunEnvironment:
         """
         Acquire the execution environment for a claimed run.
-        
+
         Parameters:
             run (ClaimedRun): The run whose workspace and session environment should be acquired.
             deadline (float): The absolute time by which preparation must complete.
-        
+
         Returns:
             RunEnvironment: The prepared environment and its associated resource-release callbacks.
-        
+
         Raises:
             RunPreparationTimeoutError: If preparation exceeds the deadline.
             RunPreparationUnavailableError: If the execution environment cannot be admitted.

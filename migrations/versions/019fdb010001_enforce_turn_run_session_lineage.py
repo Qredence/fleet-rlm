@@ -17,7 +17,7 @@ depends_on = None
 
 def upgrade() -> None:
     """Enforce matching run and session references for all turns.
-    
+
     Raises:
         RuntimeError: If any turn lacks a run with the same ID and session ID.
     """

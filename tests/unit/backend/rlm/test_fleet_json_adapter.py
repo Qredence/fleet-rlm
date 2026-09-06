@@ -298,7 +298,7 @@ def _advance_after_provider(
 ) -> None:
     """
     Advance the mocked clock after each scripted language-model call.
-    
+
     Parameters:
         monkeypatch (pytest.MonkeyPatch): Fixture used to apply temporary patches.
         lm (_ScriptedLM): Scripted language model whose forward method is wrapped.
@@ -470,7 +470,7 @@ async def test_distilled_trace_rejects_late_exploration_and_submits_existing_evi
     async def advance_after_action(*args, **kwargs):
         """
         Run the wrapped action and advance the mocked clock after it completes.
-        
+
         Returns:
             The result produced by the wrapped action.
         """
@@ -556,13 +556,13 @@ async def test_async_cancellation_closes_repair_machine_without_retry(monkeypatc
 
     def capture(*args, **kwargs):
         """Create and record a machine produced by the original factory.
-        
+
         Parameters:
-        	*args: Positional arguments forwarded to the original factory.
-        	**kwargs: Keyword arguments forwarded to the original factory.
-        
+                *args: Positional arguments forwarded to the original factory.
+                **kwargs: Keyword arguments forwarded to the original factory.
+
         Returns:
-        	The created machine.
+                The created machine.
         """
         machine = original(*args, **kwargs)
         machines.append(machine)

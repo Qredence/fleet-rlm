@@ -654,15 +654,15 @@ class RLMModelBundle:
         self, *, deadline: float, reserve_seconds: float = 0.0, budget: TurnBudget | None = None
     ) -> RLMModelBundle:
         """Bind the root and submodel runtimes to a turn deadline.
-        
+
         Parameters:
             deadline (float): Absolute deadline in seconds, or positive infinity for no deadline.
             reserve_seconds (float): Time reserved for finalization by the submodel.
             budget (TurnBudget | None): Optional shared turn budget.
-        
+
         Returns:
             RLMModelBundle: A model bundle with deadline-bound runtimes and budget settings.
-        
+
         Raises:
             ValueError: If the deadline or reserve duration is invalid.
         """
@@ -712,12 +712,12 @@ class RLMModelBundle:
 
     def fork_for_child(self, *, deadline: float) -> RLMModelBundle:
         """Create isolated root and submodel runtimes for a recursive child bound to a shared deadline.
-        
+
         Parameters:
-        	deadline (float): The absolute deadline for all child model calls.
-        
+                deadline (float): The absolute deadline for all child model calls.
+
         Returns:
-        	RLMModelBundle: A model bundle whose root and submodel calls enforce the specified deadline.
+                RLMModelBundle: A model bundle whose root and submodel calls enforce the specified deadline.
         """
         reserve_seconds = max(0.0, self.reserve_seconds)
         return RLMModelBundle(
@@ -783,16 +783,16 @@ class DeadlineLMProxy(dspy.BaseLM):
     ) -> None:
         """
         Initialize a deadline-enforcing language-model proxy.
-        
+
         Parameters:
-        	wrapped (Any): Language-model instance to wrap.
-        	deadline (float | None): Absolute deadline for provider calls.
-        	reserve_seconds (float): Time reserved from the deadline for finalization.
-        	retries (int): Number of retry attempts for retryable provider errors.
-        	error_message (str): Message used when the deadline cannot be met.
-        	budget (TurnBudget | None): Optional turn budget shared by provider calls.
-        	admission (ProviderAdmission | None): Optional provider admission controller.
-        	can_finalize (bool): Whether the proxy may reserve time for finalization.
+                wrapped (Any): Language-model instance to wrap.
+                deadline (float | None): Absolute deadline for provider calls.
+                reserve_seconds (float): Time reserved from the deadline for finalization.
+                retries (int): Number of retry attempts for retryable provider errors.
+                error_message (str): Message used when the deadline cannot be met.
+                budget (TurnBudget | None): Optional turn budget shared by provider calls.
+                admission (ProviderAdmission | None): Optional provider admission controller.
+                can_finalize (bool): Whether the proxy may reserve time for finalization.
         """
         super().__init__(
             model=getattr(wrapped, "model", "test/deadline"),
@@ -822,9 +822,9 @@ class DeadlineLMProxy(dspy.BaseLM):
     @property
     def supports_function_calling(self) -> bool:
         """Determine whether the wrapped language model supports function calling.
-        
+
         Returns:
-        	bool: `True` if the wrapped model supports function calling, `False` otherwise.
+                bool: `True` if the wrapped model supports function calling, `False` otherwise.
         """
         return bool(getattr(self.wrapped, "supports_function_calling", False))
 
@@ -832,18 +832,18 @@ class DeadlineLMProxy(dspy.BaseLM):
     def supports_response_schema(self) -> bool:
         """
         Determine whether the wrapped language model supports response schemas.
-        
+
         Returns:
-        	bool: `True` if response schemas are supported, `False` otherwise.
+                bool: `True` if response schemas are supported, `False` otherwise.
         """
         return bool(getattr(self.wrapped, "supports_response_schema", False))
 
     @property
     def supports_reasoning(self) -> bool:
         """Indicate whether the wrapped language model supports reasoning.
-        
+
         Returns:
-        	bool: `True` if the wrapped model supports reasoning, `False` otherwise.
+                bool: `True` if the wrapped model supports reasoning, `False` otherwise.
         """
         return bool(getattr(self.wrapped, "supports_reasoning", False))
 
@@ -855,10 +855,10 @@ class DeadlineLMProxy(dspy.BaseLM):
     def copy(self, **kwargs: Any) -> Any:
         """
         Create a copy of the wrapped language model with the current deadline configuration.
-        
+
         Parameters:
             **kwargs: Options forwarded to the wrapped language model copy.
-        
+
         Returns:
             A copied deadline-enforcing language model proxy.
         """
@@ -918,10 +918,10 @@ class DeadlineLMProxy(dspy.BaseLM):
     def _attempt_kwargs(self, kwargs: dict[str, Any]) -> dict[str, Any]:
         """
         Add a bounded timeout to language-model call parameters based on the remaining turn budget.
-        
+
         Parameters:
             kwargs (dict[str, Any]): Call parameters to copy and constrain.
-        
+
         Returns:
             dict[str, Any]: A copy of the call parameters with a calculated timeout when finite.
         """
@@ -944,10 +944,10 @@ class DeadlineLMProxy(dspy.BaseLM):
     def forward(self, *args: Any, **kwargs: Any) -> Any:
         """
         Forward a language-model request through the wrapped model with bounded retries.
-        
+
         Returns:
             Any: The wrapped model's response.
-        
+
         Raises:
             Exception: The final retryable provider error when all retry attempts fail.
         """
@@ -963,11 +963,11 @@ class DeadlineLMProxy(dspy.BaseLM):
     async def aforward(self, *args: Any, **kwargs: Any) -> Any:
         """
         Forward a language-model request through the wrapped model with bounded retry handling.
-        
+
         Retries failures classified as retryable and propagates the final failure when the retry budget is exhausted.
-        
+
         Returns:
-        	Any: The wrapped model's response.
+                Any: The wrapped model's response.
         """
         for attempt in range(self._fleet_retry_budget + 1):
             bounded = self._attempt_kwargs(kwargs)
@@ -990,7 +990,7 @@ def _copy_lm_for_deadline(
 ) -> Any:
     """
     Create an isolated language-model runtime that enforces an absolute deadline for provider attempts.
-    
+
     Parameters:
         lm (Any): Language-model runtime to copy.
         deadline (float): Absolute deadline for provider attempts.
@@ -998,10 +998,10 @@ def _copy_lm_for_deadline(
         error_message (str): Message used when the deadline is exceeded.
         budget (TurnBudget | None): Optional turn budget for provider admission and accounting.
         can_finalize (bool): Whether the runtime may finalize its turn budget.
-    
+
     Returns:
         Any: A deadline-enforcing language-model proxy.
-    
+
     Raises:
         RLMModelBundleError: If the model cannot be copied or its copy is not isolated.
     """
@@ -1045,20 +1045,20 @@ def _remaining_lm_timeout(
 ) -> float:
     """
     Calculate the timeout available for an LM call.
-    
+
     Parameters:
-    	deadline (float | None): Absolute monotonic deadline, or `None` for no deadline.
-    	lm (Any): LM whose configured timeout may provide a fallback.
-    	call_kwargs (dict[str, Any]): Call arguments that may contain a timeout.
-    	reserve_seconds (float): Time to preserve after the call.
-    	error_message (str): Message for the timeout error.
-    
+        deadline (float | None): Absolute monotonic deadline, or `None` for no deadline.
+        lm (Any): LM whose configured timeout may provide a fallback.
+        call_kwargs (dict[str, Any]): Call arguments that may contain a timeout.
+        reserve_seconds (float): Time to preserve after the call.
+        error_message (str): Message for the timeout error.
+
     Returns:
-    	float: The smaller of the configured timeout and remaining available time.
-    
+        float: The smaller of the configured timeout and remaining available time.
+
     Raises:
-    	ValueError: If the deadline or reserve is invalid.
-    	TimeoutError: If the available time is exhausted.
+        ValueError: If the deadline or reserve is invalid.
+        TimeoutError: If the available time is exhausted.
     """
     if deadline is not None and (
         not isinstance(deadline, (int, float))
@@ -1191,7 +1191,7 @@ class FleetToolCatalog:
     def __post_init__(self) -> None:
         """
         Validate and normalize the catalog's tool entries.
-        
+
         Raises:
             RLMConfigError: If an entry has an invalid authority kind, an invalid or
                 conflicting name, or a duplicate name.
@@ -1217,10 +1217,10 @@ class FleetToolCatalog:
     def from_tools(cls, tools: Sequence[dspy.Tool] | None) -> FleetToolCatalog:
         """
         Create a tool catalog from DSPy tools.
-        
+
         Parameters:
             tools: The tools to include in the catalog. Values are converted to DSPy tools when necessary.
-        
+
         Returns:
             A catalog containing the supplied tools, classified by execution authority.
         """
@@ -1286,16 +1286,16 @@ def build_native_rlm(
 ) -> Any:
     """
     Build a configured RLM with the supplied signature, execution limits, tools, and language model.
-    
+
     Parameters:
-    	signature: The RLM signature to execute.
-    	options: Execution limits for iterations, language-model calls, and output size.
-    	tools: Tools available to the RLM.
-    	sub_lm: Optional language model for delegated calls.
-    	verbose: Whether to enable verbose execution output.
-    
+        signature: The RLM signature to execute.
+        options: Execution limits for iterations, language-model calls, and output size.
+        tools: Tools available to the RLM.
+        sub_lm: Optional language model for delegated calls.
+        verbose: Whether to enable verbose execution output.
+
     Returns:
-    	A configured RLM instance.
+        A configured RLM instance.
     """
     catalog = FleetToolCatalog.from_tools(tools)
     rlm = dspy.RLM(
@@ -1316,10 +1316,10 @@ def build_native_rlm(
 def build_program(spec: RLMProgramSpec) -> Any:
     """
     Build a native DSPy RLM from the supplied program specification.
-    
+
     Parameters:
         spec (RLMProgramSpec): Program signature, execution options, tools, submodel, and related configuration.
-    
+
     Returns:
         Any: The configured native DSPy RLM instance.
     """
@@ -1360,16 +1360,16 @@ class RLMFactory:
     ) -> Any:
         """
         Create a configured native RLM program.
-        
+
         Parameters:
-        	models (Any): Model bundle providing the optional submodel.
-        	options (RLMOptions): Execution limits and configuration for the program.
-        	tools (Sequence[dspy.Tool] | None): Tools available to the program.
-        	signature (type[dspy.Signature] | str | None): Signature defining the program interface.
-        	verbose (bool | None): Whether to enable verbose execution output.
-        
+                models (Any): Model bundle providing the optional submodel.
+                options (RLMOptions): Execution limits and configuration for the program.
+                tools (Sequence[dspy.Tool] | None): Tools available to the program.
+                signature (type[dspy.Signature] | str | None): Signature defining the program interface.
+                verbose (bool | None): Whether to enable verbose execution output.
+
         Returns:
-        	Any: The constructed RLM program.
+                Any: The constructed RLM program.
         """
         return build_program(
             FleetProgramSpec(

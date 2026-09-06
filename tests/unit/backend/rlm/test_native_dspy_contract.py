@@ -1278,7 +1278,7 @@ async def test_caller_owned_interpreter_tool_injection_output_metadata_and_traje
         def to_sandbox(self) -> bytes:
             """
             Serialize the key-value pair for sandbox transfer.
-            
+
             Returns:
                 bytes: UTF-8 encoded JSON representation of the key-value pair.
             """
@@ -1303,7 +1303,7 @@ async def test_caller_owned_interpreter_tool_injection_output_metadata_and_traje
 
     def lookup_tool(text: str) -> str:
         """Formats a lookup value with a found prefix.
-        
+
         Returns:
             The lookup value prefixed with ``"found:"``.
         """

@@ -465,12 +465,12 @@ async def build_daytona_composition(
 ) -> RuntimeInventory:
     """
     Construct the Daytona runtime inventory and recover cleanly from initialization failures.
-    
+
     Parameters:
         settings (Settings): Configuration used to create and validate the runtime.
         skill_catalog (SkillCatalog): Catalog of skills available to the runtime.
         dispatcher (SyncBridgeDispatcher | None): Optional dispatcher for synchronous bridge operations.
-    
+
     Returns:
         RuntimeInventory: The initialized Daytona runtime services and background tasks.
     """
@@ -884,8 +884,9 @@ def build_run_preparation(
     session_runtime_registry: SessionRLMRegistry | None = None,
 ) -> DefaultRunPreparer:
     """
-    Create a Daytona run preparer configured with models, runtime limits, attachments, environments, and live capabilities.
-    
+    Create a Daytona run preparer configured with models, runtime limits,
+    attachments, environments, and live capabilities.
+
     Parameters:
         resources (DaytonaRuntimeResources): Daytona resources used to provide run environments and volume paths.
         attachment_lifecycle (Any): Attachment lifecycle used during run preparation.
@@ -893,7 +894,7 @@ def build_run_preparation(
         settings (Settings): Runtime and budget configuration.
         models (RLMModelBundle): Models used for run execution.
         session_runtime_registry (SessionRLMRegistry | None): Optional registry for session-scoped runtime state.
-    
+
     Returns:
         DefaultRunPreparer: The configured run preparer.
     """

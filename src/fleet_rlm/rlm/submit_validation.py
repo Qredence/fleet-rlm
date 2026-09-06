@@ -37,9 +37,9 @@ def _qualified_ast_name(node: ast.AST) -> str | None:
 def _strip_action_code_fences(code: str) -> str:
     """
     Remove surrounding Python markdown fences from action code.
-    
+
     Non-Python or malformed fences are preserved unchanged.
-    
+
     Returns:
         str: The executable action text with Python fences removed.
     """
@@ -69,12 +69,12 @@ def _strip_action_code_fences(code: str) -> str:
 def _is_safe_submit_value(node: ast.AST) -> bool:
     """
     Determine whether an AST node is an allowed expression for a SUBMIT keyword value.
-    
+
     Parameters:
-    	node (ast.AST): The expression node to validate.
-    
+        node (ast.AST): The expression node to validate.
+
     Returns:
-    	bool: True if the node uses an allowed data expression, false otherwise.
+        bool: True if the node uses an allowed data expression, false otherwise.
     """
     if isinstance(node, (ast.Constant, ast.Name)):
         return True
@@ -125,14 +125,14 @@ def _is_safe_submit_value(node: ast.AST) -> bool:
 def is_submit_only_code(code: object) -> bool:
     """
     Determine whether code contains a syntactically valid, submit-only action.
-    
+
     Parameters:
         code (object): Source code to validate.
-    
+
     Returns:
         bool: `true` if the code consists of one direct `SUBMIT` call with
             permitted keyword-value expressions, `false` otherwise.
-    
+
     This validates syntax only; it does not resolve names or evaluate operator
     behavior.
     """

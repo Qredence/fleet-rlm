@@ -87,9 +87,9 @@ def test_model_children_and_copies_share_budget_without_mutating_templates() -> 
         def forward(self, *_args, **_kwargs):
             """
             Provide a successful forward result.
-            
+
             Returns:
-            	str: The string `"ok"`.
+                str: The string `"ok"`.
             """
             return "ok"
 
@@ -116,7 +116,7 @@ async def test_each_retry_is_charged_and_stops_before_an_unadmitted_attempt(asyn
     class FailingLM(dspy.BaseLM):
         def forward(self, *_args, **_kwargs):
             """Simulate a temporary language model server failure.
-            
+
             Raises:
                 LMServerError: Always raised with a temporary failure message.
             """
@@ -124,7 +124,7 @@ async def test_each_retry_is_charged_and_stops_before_an_unadmitted_attempt(asyn
 
         async def aforward(self, *_args, **_kwargs):
             """Run the model's forward operation.
-            
+
             Returns:
                 The result of the forward operation.
             """

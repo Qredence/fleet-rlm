@@ -116,11 +116,11 @@ def _pool_kwargs_for_url(normalized_url: str) -> dict[str, object]:
 
 def create_async_engine_from_url(url: str, *, echo: bool = False) -> AsyncEngine:
     """Create a lazy asynchronous database engine from a database URL.
-    
+
     Parameters:
         url (str): Database URL to normalize and use for engine creation.
         echo (bool): Whether to enable SQL statement logging.
-    
+
     Returns:
         AsyncEngine: An asynchronous engine that enables foreign-key enforcement for SQLite connections.
     """
@@ -140,12 +140,12 @@ def create_async_engine_from_url(url: str, *, echo: bool = False) -> AsyncEngine
 
 def create_session_factory(engine: AsyncEngine) -> async_sessionmaker[AsyncSession]:
     """Create an asynchronous session factory with non-expiring sessions.
-    
+
     Parameters:
-    	engine (AsyncEngine): The engine used to create database sessions.
-    
+        engine (AsyncEngine): The engine used to create database sessions.
+
     Returns:
-    	async_sessionmaker[AsyncSession]: A configured asynchronous session factory.
+        async_sessionmaker[AsyncSession]: A configured asynchronous session factory.
     """
     return async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
 

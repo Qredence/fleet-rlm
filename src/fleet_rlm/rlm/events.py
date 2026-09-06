@@ -409,10 +409,10 @@ class AsyncToolBridge(Protocol):
     def run(self, awaitable: Any) -> Any:
         """
         Run a host operation through the asynchronous bridge.
-        
+
         Parameters:
             awaitable (Any): The awaitable host operation to execute.
-        
+
         Returns:
             Any: The operation's result.
         """
@@ -520,7 +520,7 @@ def _validate_tool_arguments(
 ) -> dict[str, Any]:
     """
     Validate tool arguments and report validation failures.
-    
+
     Parameters:
         validator (dspy.Tool): Tool used to validate the arguments.
         arguments (Mapping[str, Any]): Arguments supplied to the tool.
@@ -528,10 +528,10 @@ def _validate_tool_arguments(
         observer (ToolObserver): Callback for tool lifecycle events.
         event_view (ToolEventView): View used to create failure details.
         trace (_ToolTrace): Trace for the current tool call.
-    
+
     Returns:
         dict[str, Any]: Validated tool arguments.
-    
+
     Raises:
         Exception: Re-raises the validation exception.
     """
@@ -546,14 +546,14 @@ def _validate_tool_arguments(
 def _resolve_awaitable_result(result: Any, *, async_bridge: AsyncToolBridge | None = None) -> Any:
     """
     Resolve an awaitable tool result using the available asynchronous execution context.
-    
+
     Parameters:
         result (Any): The synchronous value or awaitable result to resolve.
         async_bridge (AsyncToolBridge | None): Bridge used when resolution occurs inside a running event loop.
-    
+
     Returns:
         Any: The resolved value, or the original value when it is not awaitable.
-    
+
     Raises:
         RuntimeError: If an awaitable is resolved inside a running event loop without an async bridge.
     """
@@ -590,24 +590,24 @@ def _execute_observed_tool(
 ) -> Any:
     """
     Execute a validated tool call and report its result or failure.
-    
+
     Parameters:
-    	source (dspy.Tool): Tool to execute.
-    	validated (Mapping[str, Any]): Arguments validated for invocation.
-    	arguments (Mapping[str, Any]): Original tool arguments used for failure reporting.
-    	observer (ToolObserver): Callback for reporting tool failures.
-    	event_view (ToolEventView): View used to create failure event details.
-    	trace (_ToolTrace): Trace for the tool invocation.
-    	after_result (ToolAfterResult | None): Optional callback invoked with a successful result.
-    	guards (RunToolGuards | None): Optional guards governing tool execution.
-    	async_bridge (AsyncToolBridge | None): Optional bridge for resolving asynchronous results.
-    
+        source (dspy.Tool): Tool to execute.
+        validated (Mapping[str, Any]): Arguments validated for invocation.
+        arguments (Mapping[str, Any]): Original tool arguments used for failure reporting.
+        observer (ToolObserver): Callback for reporting tool failures.
+        event_view (ToolEventView): View used to create failure event details.
+        trace (_ToolTrace): Trace for the tool invocation.
+        after_result (ToolAfterResult | None): Optional callback invoked with a successful result.
+        guards (RunToolGuards | None): Optional guards governing tool execution.
+        async_bridge (AsyncToolBridge | None): Optional bridge for resolving asynchronous results.
+
     Returns:
-    	Any: The tool's JSON-serializable result.
-    
+        Any: The tool's JSON-serializable result.
+
     Raises:
-    	ToolResultSerializationError: If the result cannot be serialized as JSON.
-    	Exception: Propagates exceptions raised during execution or result handling.
+        ToolResultSerializationError: If the result cannot be serialized as JSON.
+        Exception: Propagates exceptions raised during execution or result handling.
     """
     try:
         if guards is not None:
@@ -669,10 +669,10 @@ def _run_observed_tool(
 ) -> Any:
     """
     Execute an observed tool call and report its lifecycle events.
-    
+
     Parameters:
         async_bridge: Optional bridge used to resolve asynchronous tool results.
-    
+
     Returns:
         The tool's result.
     """
@@ -729,14 +729,15 @@ def observe_tool(
     async_bridge: AsyncToolBridge | None = None,
 ) -> dspy.Tool:
     """Create a DSPy tool that observes calls to the source tool.
-    
+
     Parameters:
         tool (dspy.Tool): Source tool whose calls are observed.
-        async_bridge (AsyncToolBridge | None): Bridge used to resolve awaitable results when an event loop is already running.
-    
+        async_bridge (AsyncToolBridge | None): Bridge used to resolve awaitable results
+            when an event loop is already running.
+
     Returns:
         dspy.Tool: A wrapped tool that preserves the source tool's metadata and validation contract.
-    
+
     Raises:
         TypeError: If `tool` is not a `dspy.Tool`.
     """

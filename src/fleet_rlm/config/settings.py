@@ -154,10 +154,10 @@ class Settings(BaseModel):
     def _reject_unknown_fields(cls, data: Mapping[Any, Any]) -> None:
         """
         Reject unsupported configuration field names.
-        
+
         Parameters:
             data (Mapping[Any, Any]): Configuration data whose keys are checked.
-        
+
         Raises:
             FleetConfigurationError: If the data contains fields not defined by the settings model.
         """

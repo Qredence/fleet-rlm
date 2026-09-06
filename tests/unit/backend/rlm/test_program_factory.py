@@ -169,7 +169,7 @@ async def test_deadline_proxy_preserves_dspy_sync_async_usage_and_callbacks():
         def on_lm_start(self, call_id, instance, inputs):
             """
             Record the model associated with a language-model invocation.
-            
+
             Parameters:
                 instance: The language-model instance whose model name is recorded.
             """
@@ -179,7 +179,7 @@ async def test_deadline_proxy_preserves_dspy_sync_async_usage_and_callbacks():
     class ScriptLM(dspy.BaseLM):
         def forward(self, prompt=None, messages=None, **kwargs):
             """Generate a fixed successful language-model response.
-            
+
             Returns:
                 A response containing ``"ok"`` and fixed token usage statistics.
             """
@@ -193,11 +193,11 @@ async def test_deadline_proxy_preserves_dspy_sync_async_usage_and_callbacks():
         async def aforward(self, prompt=None, messages=None, **kwargs):
             """
             Process a prompt or message sequence.
-            
+
             Parameters:
                 prompt: Optional prompt to process.
                 messages: Optional sequence of messages to process.
-            
+
             Returns:
                 The model response.
             """
@@ -274,9 +274,9 @@ def test_provider_retries_recompute_remaining_and_non_retryable_errors_stop(
     def clock() -> float:
         """
         Return the next scripted clock value.
-        
+
         Returns:
-        	float: The next value from `ticks`, or `102.0` when no scripted values remain.
+                float: The next value from `ticks`, or `102.0` when no scripted values remain.
         """
         return ticks.pop(0) if ticks else 102.0
 

@@ -1199,11 +1199,11 @@ class TurnRuntime:
     async def _close_execution(self, prepared: PreparedTurn, state: _ExecutionState) -> None:
         """
         Clean up execution resources that remain owned by the current turn.
-        
+
         Parameters:
             prepared: Prepared turn whose execution budget and resources are cleaned up.
             state: Execution state containing the stream, heartbeat, and cleanup ownership status.
-        
+
         Raises:
             BaseException: The first error encountered during owned-resource cleanup.
         """
@@ -1299,7 +1299,7 @@ class TurnRuntime:
     ) -> BaseException | None:
         """
         Complete cleanup for an execution whose ownership was transferred.
-        
+
         Parameters:
             run (ClaimedRun): The claimed run being cleaned up.
             prepared (PreparedTurn): The prepared turn and its associated resources.
@@ -1309,7 +1309,7 @@ class TurnRuntime:
             claim_lost (bool): Whether claim loss has already been detected.
             claim_loss_usage (RLMUsage | None): Usage to record when revoking a lost claim.
             late_claim_loss_window (bool): Whether to check for claim loss after resource cleanup.
-        
+
         Returns:
             BaseException | None: The first cleanup error, or `None` if cleanup succeeds.
         """
@@ -1393,10 +1393,10 @@ class TurnRuntime:
     def _execution_deadline(self, prepared: PreparedTurn) -> float:
         """
         Determine the deadline for executing a prepared turn.
-        
+
         Parameters:
             prepared (PreparedTurn): The prepared turn whose execution deadline is used.
-        
+
         Returns:
             float: The execution deadline as a monotonic clock value.
         """

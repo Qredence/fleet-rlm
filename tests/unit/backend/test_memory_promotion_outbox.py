@@ -14,13 +14,13 @@ from sqlalchemy import select
 async def _seed_with_intents(database_url: str, *, intents: tuple = (), commit: bool = True):
     """
     Create a database-backed run with optional memory promotion intents.
-    
+
     Parameters:
-    	intents (tuple): Memory promotion intents to attach to the committed turn.
-    	commit (bool): Whether to commit a turn for the run.
-    
+        intents (tuple): Memory promotion intents to attach to the committed turn.
+        commit (bool): Whether to commit a turn for the run.
+
     Returns:
-    	tuple: The database engine, session factory, run state store, created run, and turn access context.
+        tuple: The database engine, session factory, run state store, created run, and turn access context.
     """
     from fleet_rlm.chat.run_lifecycle import RunClaim
     from fleet_rlm.persistence.database import (

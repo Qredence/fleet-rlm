@@ -110,7 +110,7 @@ def test_builder_fails_closed_on_bounds_and_policy() -> None:
 async def _seed_store():
     """
     Prepare an isolated in-memory persistence store with seeded user, workspace, session, and run records.
-    
+
     Returns:
         tuple: The database engine, session factory, run state store, and newly started run.
     """

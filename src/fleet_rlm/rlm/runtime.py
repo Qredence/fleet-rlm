@@ -1460,17 +1460,19 @@ class RLMRunner:
     ]:
         """
         Acquire and prepare the session runtime, bind turn-specific tools and context, and start the RLM worker.
-        
+
         Parameters:
             context (RLMExecutionContext): Execution identity, session data, capabilities, and runtime configuration.
             ownership (WorkerOwnership): Ownership state for the worker and its blocking resources.
             observations (ObservationSession): Session used to publish worker and capability events.
-        
+
         Returns:
-            tuple: The execution specification, tool guards, worker handle, optional recursive executor, and session runtime lease.
-        
+            tuple: The execution specification, tool guards, worker handle, optional
+            recursive executor, and session runtime lease.
+
         Raises:
-            RLMConfigError: If recursive execution is enabled without a child runtime or the session tool registry is unavailable.
+            RLMConfigError: If recursive execution is enabled without a child runtime or
+            the session tool registry is unavailable.
         """
         spec = context.capabilities.spec
         guards = RunToolGuards(

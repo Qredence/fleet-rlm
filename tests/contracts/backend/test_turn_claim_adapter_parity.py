@@ -21,10 +21,10 @@ class _Harness:
 async def _build_harness(adapter_kind: str) -> _Harness:
     """
     Create a run-state test harness for the specified storage adapter.
-    
+
     Parameters:
         adapter_kind (str): Storage adapter to use: ``"memory"`` or ``"sql"``.
-    
+
     Returns:
         _Harness: Harness containing the initialized store, claimed turn, state reader, and cleanup callback.
     """

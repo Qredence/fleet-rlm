@@ -10,7 +10,12 @@ from pathlib import Path
 import pytest
 from pydantic import SecretStr, ValidationError
 
-from fleet_rlm.config.loader import _deep_merge, active_profile_contract, load_profile_environment_contracts, load_runtime_settings
+from fleet_rlm.config.loader import (
+    _deep_merge,
+    active_profile_contract,
+    load_profile_environment_contracts,
+    load_runtime_settings,
+)
 from fleet_rlm.config.settings import FleetConfigurationError, Settings
 
 
@@ -260,9 +265,9 @@ def test_removed_databricks_daytona_profile_is_rejected(monkeypatch: pytest.Monk
 def _policy(path: Path) -> None:
     """
     Write a minimal runtime policy to the specified path for isolated tests.
-    
+
     Parameters:
-    	path (Path): Destination file for the temporary TOML policy.
+        path (Path): Destination file for the temporary TOML policy.
     """
     path.write_text(
         """

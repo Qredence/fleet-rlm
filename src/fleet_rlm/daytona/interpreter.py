@@ -512,7 +512,7 @@ class DaytonaCodeInterpreter:
         max_code_chars: int = DEFAULT_INTERMEDIATE_CODE_CHARS,
     ) -> None:
         """Initialize the interpreter with its backend, tools, output configuration, callbacks, and execution limits.
-        
+
         Parameters:
             backend (InterpreterBackend | None): Backend used to execute code.
             tools (Mapping[str, Callable[..., Any]] | None): Host tools available to executed code.
@@ -585,9 +585,9 @@ class DaytonaCodeInterpreter:
     def bind_output_contract(self, contract: FleetOutputContract) -> None:
         """
         Bind an output contract and update the interpreter's output field metadata.
-        
+
         Parameters:
-        	contract (FleetOutputContract): Contract defining the interpreter's output fields.
+                contract (FleetOutputContract): Contract defining the interpreter's output fields.
         """
         self._ensure_binding_mutation_allowed()
         self._fleet_output_contract = contract
@@ -597,9 +597,9 @@ class DaytonaCodeInterpreter:
     def output_fields(self, value: list[dict[str, Any]] | None) -> None:
         """
         Configure the output field metadata used for final-output submission.
-        
+
         Parameters:
-        	value (list[dict[str, Any]] | None): Output field definitions, or `None` to clear them.
+                value (list[dict[str, Any]] | None): Output field definitions, or `None` to clear them.
         """
         self._ensure_binding_mutation_allowed()
         copied = copy_output_fields(value)
@@ -715,7 +715,7 @@ class DaytonaCodeInterpreter:
     def bind_observer(self, observer: ObservationObserver | None, *, max_chars: int = 10_000) -> None:
         """
         Bind a run-local observer and configure the maximum size of observation details.
-        
+
         Parameters:
             observer: Observer that receives observation events, or ``None`` to disable observation.
             max_chars: Maximum number of characters retained for each observation detail.
@@ -733,9 +733,9 @@ class DaytonaCodeInterpreter:
     def bind_turn_budget(self, budget: TurnBudget | None) -> None:
         """
         Bind or clear the shared budget ledger for the current turn.
-        
+
         Parameters:
-        	budget (TurnBudget | None): The turn budget to use, or None to clear the binding.
+                budget (TurnBudget | None): The turn budget to use, or None to clear the binding.
         """
         self._ensure_binding_mutation_allowed()
         self._turn_budget = budget
@@ -744,12 +744,12 @@ class DaytonaCodeInterpreter:
     def bind_context_capsule(self, capsule: Any) -> None:
         """
         Bind and validate the host-created context capsule used for execution.
-        
+
         Parameters:
-        	capsule (Any): Context capsule containing the sandbox manifest and trusted mount root.
-        
+                capsule (Any): Context capsule containing the sandbox manifest and trusted mount root.
+
         Raises:
-        	DaytonaAdapterError: If the capsule is invalid or conflicts with an existing context binding.
+                DaytonaAdapterError: If the capsule is invalid or conflicts with an existing context binding.
         """
         from fleet_rlm.rlm.program import AttachmentContextCapsule
 
@@ -781,12 +781,12 @@ class DaytonaCodeInterpreter:
     def _observe(self, detail: StepStarted | RLMCode | RLMOutput | StepFinished) -> None:
         """
         Process an observation detail and forward it to the configured observer.
-        
+
         Parameters:
-        	detail: Observation event to process.
-        
+                detail: Observation event to process.
+
         Raises:
-        	TurnBudgetExhausted: If the output detail exceeds the remaining execution-output budget.
+                TurnBudgetExhausted: If the output detail exceeds the remaining execution-output budget.
         """
         if isinstance(detail, RLMOutput) and detail.output and self._turn_budget is not None:
             if self._output_budget_exhausted:
@@ -878,14 +878,14 @@ class DaytonaCodeInterpreter:
     def _execute_once(self, code: str, variables: dict[str, Any] | None = None) -> Any:
         """
         Execute one code step in the configured interpreter and process its result.
-        
+
         Parameters:
             code (str): Python code to execute.
             variables (dict[str, Any] | None): Variables to make available during execution.
-        
+
         Returns:
             Any: The submitted final value or bounded execution output.
-        
+
         Raises:
             CodeExecutionError: If execution produces a recoverable error.
             CodeInterpreterError: If execution cannot safely continue.

@@ -32,12 +32,12 @@ SEMANTIC_SCORERS = ("semantic-keywords/v1",)
 def digest(value: Any) -> str:
     """
     Create a deterministic SHA-256 digest for a JSON-serializable value.
-    
+
     Parameters:
-    	value (Any): The value to serialize and hash.
-    
+        value (Any): The value to serialize and hash.
+
     Returns:
-    	str: The hexadecimal SHA-256 digest.
+        str: The hexadecimal SHA-256 digest.
     """
     return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 
@@ -45,13 +45,13 @@ def digest(value: Any) -> str:
 def percentile(values: list[float], percent: int) -> float:
     """
     Compute a nearest-rank percentile from a collection of values.
-    
+
     Parameters:
-    	values (list[float]): Values from which to calculate the percentile.
-    	percent (int): Percentile to calculate, expressed as a percentage.
-    
+        values (list[float]): Values from which to calculate the percentile.
+        percent (int): Percentile to calculate, expressed as a percentage.
+
     Returns:
-    	float: The value at the requested nearest-rank percentile.
+        float: The value at the requested nearest-rank percentile.
     """
     return sorted(values)[max(0, math.ceil(len(values) * percent / 100) - 1)]
 
@@ -64,10 +64,10 @@ def _semantic_text(value: object) -> str:
 def semantic_keywords_score(answer: str, keywords: object) -> bool:
     """
     Determine whether an answer contains every expected keyword.
-    
+
     Parameters:
         keywords (object): A nonempty list of string keywords to find in the answer.
-    
+
     Returns:
         bool: `true` if every keyword occurs in the answer, `false` otherwise.
     """
@@ -80,12 +80,12 @@ def semantic_keywords_score(answer: str, keywords: object) -> bool:
 def seal(receipt: dict[str, Any]) -> dict[str, Any]:
     """
     Add a SHA-256 digest of the receipt contents.
-    
+
     Parameters:
-    	receipt (dict[str, Any]): Receipt data to seal.
-    
+        receipt (dict[str, Any]): Receipt data to seal.
+
     Returns:
-    	dict[str, Any]: A copy of the receipt containing its digest.
+        dict[str, Any]: A copy of the receipt containing its digest.
     """
     return {**receipt, "receipt_digest": digest(receipt)}
 
@@ -93,12 +93,12 @@ def seal(receipt: dict[str, Any]) -> dict[str, Any]:
 def validate(receipt: dict[str, Any]) -> None:
     """
     Validate the schema, provenance, sample coverage, scores, latency summary, and verdict of a benchmark receipt.
-    
+
     Parameters:
-    	receipt (dict[str, Any]): Benchmark receipt to validate.
-    
+        receipt (dict[str, Any]): Benchmark receipt to validate.
+
     Raises:
-    	ValueError: If the receipt is malformed or internally inconsistent.
+        ValueError: If the receipt is malformed or internally inconsistent.
     """
     body = {key: value for key, value in receipt.items() if key != "receipt_digest"}
     if receipt.get("schema") != SCHEMA or receipt.get("receipt_digest") != digest(body):
@@ -147,13 +147,14 @@ def validate(receipt: dict[str, Any]) -> None:
 def run(*, repetitions: int = 5) -> dict[str, Any]:
     """
     Run the scripted lifecycle benchmark repeatedly and return a sealed receipt of its results.
-    
+
     Parameters:
         repetitions (int): Number of times to execute each dataset scenario. Must be at least 2.
-    
+
     Returns:
-        dict[str, Any]: Sealed benchmark receipt containing samples, scores, latency summaries, provenance, and pass status.
-    
+        dict[str, Any]: Sealed benchmark receipt containing samples, scores, latency
+            summaries, provenance, and pass status.
+
     Raises:
         ValueError: If repetitions is less than 2.
     """
@@ -244,15 +245,15 @@ def run(*, repetitions: int = 5) -> dict[str, Any]:
 def compare(baseline: dict[str, Any], candidate: dict[str, Any], *, max_p95_ratio: float = 2.0) -> dict[str, Any]:
     """
     Compare baseline and candidate benchmark receipts against compatibility, integrity, parity, and latency gates.
-    
+
     Parameters:
         baseline (dict[str, Any]): Validated baseline benchmark receipt.
         candidate (dict[str, Any]): Validated candidate benchmark receipt.
         max_p95_ratio (float): Maximum permitted ratio of candidate to baseline p95 latency.
-    
+
     Returns:
         dict[str, Any]: Gate results and an overall pass status for the scripted lifecycle scope.
-    
+
     Raises:
         ValueError: If either receipt is invalid or the latency ratio is not finite and positive.
     """
@@ -286,7 +287,7 @@ def compare(baseline: dict[str, Any], candidate: dict[str, Any], *, max_p95_rati
 def main() -> int:
     """
     Run the benchmark or compare sealed benchmark receipts from the command line.
-    
+
     Returns:
         int: Exit status code: 0 when the operation passes, otherwise 1.
     """

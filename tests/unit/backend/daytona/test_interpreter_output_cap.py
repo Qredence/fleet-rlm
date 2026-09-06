@@ -74,9 +74,10 @@ def test_error_feedback_includes_capped_stderr() -> None:
         def run(self, code: str, variables: dict[str, object] | None = None) -> BackendExecutionResult:
             """
             Simulate a failed backend execution with an undefined-name error.
-            
+
             Returns:
-            	BackendExecutionResult: An execution result with a fixed `NameError` message and 5,000-character stderr output.
+                BackendExecutionResult: An execution result with a fixed `NameError`
+                    message and 5,000-character stderr output.
             """
             del code, variables
             return BackendExecutionResult(

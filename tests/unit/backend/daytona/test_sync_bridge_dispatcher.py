@@ -60,11 +60,11 @@ class _ServingLoop:
 def _call_from_worker_thread(view: SimpleNamespace, path: str) -> bytes:
     """
     Execute a bridged filesystem call from a worker thread.
-    
+
     Parameters:
         view (SimpleNamespace): Namespace exposing the bridged filesystem.
         path (str): Path to pass to the filesystem operation.
-    
+
     Returns:
         bytes: Data returned for the requested path.
     """
@@ -96,6 +96,7 @@ def test_dispatcher_runs_async_host_operation_from_worker_loop() -> None:
             """
             Run a bridged host operation from a worker event loop and store its result.
             """
+
             async def host_operation() -> tuple[str, str]:
                 return (threading.current_thread().name, asyncio.get_running_loop().__class__.__name__)
 
