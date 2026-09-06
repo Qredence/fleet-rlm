@@ -23,6 +23,8 @@ FastAPI/SSE contract backed by DSPy, Daytona, and SQLAlchemy/Alembic.
 15. [P42 Session-state behavior freeze](reference/p42-session-state-behavior-freeze.md)
 16. [P42 module-subtraction ledger](reference/p42-module-subtraction-ledger.md)
 17. [Session-scoped RLM state ADR](decisions/ADR-session-scoped-rlm-state.md)
+18. [Turn interpreter context target (ADR 004)](decisions/004-turn-interpreter-context.md)
+19. [Runtime variant (ADR 005)](decisions/005-runtime-variant.md)
 
 ## Reference
 

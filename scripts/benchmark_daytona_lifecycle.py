@@ -268,6 +268,7 @@ async def run_benchmark(settings: Any) -> dict[str, object]:
         decision = benchmark_decision(p95_seconds=p95, deleted=deleted, measured=len(measured))
         return {
             "schema": RECEIPT_SCHEMA,
+            "runtime_variant": settings.runtime_variant,
             "started_at": started_at,
             "finished_at": datetime.now(UTC).isoformat(),
             "versions": _versions(),

@@ -14,6 +14,10 @@ records this change.
 
 ## Decision
 
+Migration note: [ADR 004](004-turn-interpreter-context.md) supersedes cross-Turn
+interpreter globals as the target architecture. The behavior below describes the
+selectable legacy implementation until the gated production cutover.
+
 Fleet distinguishes these four state classes:
 
 | State | Scope | Required behavior |

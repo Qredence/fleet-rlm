@@ -38,6 +38,12 @@ applies migrations; use `uv run python scripts/db_init.py` or Alembic directly.
 
 ## Policy settings
 
+`runtime.variant` selects the execution architecture. Its default and only
+implemented value is `legacy`; `native` and `capsule` are rejected at startup
+and are absent from the settings editor. Existing policies that omit it keep
+the legacy behavior. `runtime.environment = "daytona"` selects the provider
+environment independently. See [ADR 005](../decisions/005-runtime-variant.md).
+
 `config/fleet.toml` deep-merges `[defaults]` into the selected
 `[profiles.<name>]`. It centralizes application identity; runtime timeouts,
 leases, liveness, and the credentialed-command live switch; Root/Sub model ids,

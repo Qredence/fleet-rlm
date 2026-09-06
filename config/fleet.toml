@@ -6,6 +6,7 @@ default_profile = "daytona-recursive"
 name = "fleet-rlm"
 
 [defaults.runtime]
+variant = "legacy"
 environment = "daytona"
 live_enabled = true
 turn_timeout_seconds = 1800

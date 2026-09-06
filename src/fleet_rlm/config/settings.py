@@ -157,6 +157,17 @@ class Settings(BaseModel):
         if unknown:
             raise FleetConfigurationError(f"unsupported Settings field(s): {', '.join(map(str, unknown))}")
 
+    runtime_variant: Annotated[
+        Literal["legacy"],
+        FleetFieldPolicy(
+            toml_path="runtime.variant",
+            group="Runtime",
+            label="Runtime variant",
+            editor="single_choice",
+            choices=("legacy",),
+            rank=72,
+        ),
+    ] = Field(default="legacy", description="Implemented execution architecture; independent of provider environment")
     app_name: Annotated[
         str,
         FleetFieldPolicy(

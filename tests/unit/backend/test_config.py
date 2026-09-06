@@ -26,6 +26,18 @@ def test_profile_environment_matrix_follows_selected_toml_policy() -> None:
     )
 
 
+def test_runtime_variant_default_is_explicit_and_stable() -> None:
+    document = tomllib.loads(Path("config/fleet.toml").read_text(encoding="utf-8"))
+    assert document["defaults"]["runtime"]["variant"] == "legacy"
+    assert Settings().runtime_variant == "legacy"
+
+
+@pytest.mark.parametrize("variant", ["native", "capsule", "", "unknown"])
+def test_unimplemented_runtime_variants_are_rejected(variant: str) -> None:
+    with pytest.raises(ValidationError):
+        Settings(runtime_variant=variant)
+
+
 def test_committed_policy_declares_databricks_model_roles() -> None:
     policy_path = Path(__file__).resolve().parents[3] / "config" / "fleet.toml"
     document = tomllib.loads(policy_path.read_text(encoding="utf-8"))

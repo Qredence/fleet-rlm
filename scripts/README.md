@@ -2,6 +2,7 @@
 
 | Script | Purpose |
 | --- | --- |
+| `benchmarks/runtime_v2.py` | Execute repeated scripted Turns and compare sealed lifecycle migration receipts; no live semantic or Daytona guarantee |
 | `db_init.py` | Upgrade a fresh `FLEET_DATABASE_URL` database to Alembic head |
 | `openapi_tools.py` | Generate or check backend-only `openapi.yaml` |
 | `generate_stream_fixture.py` | Generate or check the deterministic TUI turn-stream golden fixture |

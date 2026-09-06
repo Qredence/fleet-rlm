@@ -176,6 +176,7 @@ _EXPECTED_INVENTORY: tuple[tuple[str, str, str, str, tuple[str, ...], str | None
     ("rlm.wrap_up_seconds", "RLM", "Final-answer reserve (seconds)", "number", (), "rlm_wrap_up_seconds"),
     ("llm.root.timeout_seconds", "Root LLM", "Provider timeout seconds", "number", (), "root_llm_timeout_seconds"),
     ("llm.sub.timeout_seconds", "Sub LLM", "Provider timeout seconds", "number", (), "sub_llm_timeout_seconds"),
+    ("runtime.variant", "Runtime", "Runtime variant", "single_choice", ("legacy",), "runtime_variant"),
 )
 
 
