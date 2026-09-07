@@ -17,9 +17,9 @@ from fleet_rlm.config.settings import Settings
 @pytest.fixture(autouse=True)
 def _reset_trace_content_bound(monkeypatch: pytest.MonkeyPatch) -> None:
     """Reset the shared readable content bound for a test."""
+    tracing.set_tracing_active_for_tests(False)
     monkeypatch.setattr(tracing, "_TRACE_CONTENT_MAX_CHARS", 10_000)
     monkeypatch.setattr(tracing, "_TRACE_CONTENT_ENABLED", True)
-    tracing.set_tracing_active_for_tests(False)
 
 
 def _install_fake_mlflow(
@@ -617,6 +617,16 @@ def test_configure_tracing_setup_failure_is_soft(monkeypatch: pytest.MonkeyPatch
     assert tracing.configure_tracing(_enabled_settings()) is False
 
 
+def test_set_tracing_active_for_tests_resets_content_policy(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(tracing, "_TRACE_CONTENT_ENABLED", True)
+    monkeypatch.setattr(tracing, "_TRACE_CONTENT_MAX_CHARS", 256)
+
+    tracing.set_tracing_active_for_tests(False)
+
+    assert tracing._TRACE_CONTENT_ENABLED is False
+    assert tracing._TRACE_CONTENT_MAX_CHARS == 10_000
+
+
 def test_configure_tracing_is_idempotent_until_explicit_reset(monkeypatch: pytest.MonkeyPatch) -> None:
     calls = _install_fake_mlflow(monkeypatch)
     monkeypatch.delenv("MLFLOW_TRACKING_URI", raising=False)
@@ -667,7 +677,9 @@ def test_tracing_cleanup_restores_policy_environment_after_autolog_failure(
 
     assert tracing.configure_tracing(settings) is False
     assert tracing.is_tracing_active() is False
-    assert autolog_calls[-1] == {"disable": True, "silent": True}
+    assert len(autolog_calls) == 1
+    assert "disable" not in autolog_calls[0]
+    assert tracing._DSPY_AUTOLOG_ENABLED is False
     assert {name: os.environ.get(name) for name in owned_environment} == before
 
 

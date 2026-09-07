@@ -99,7 +99,8 @@ def is_tracing_active() -> bool:
 
 def set_tracing_active_for_tests(active: bool) -> None:
     """Test-only override for Turn-span gate without a real tracking backend."""
-    global _DSPY_AUTOLOG_ENABLED, _TRACE_CONFIG_CONTEXT, _TRACKING_URI_APPLIED, _TRACKING_URI_BEFORE, _TRACING_ACTIVE
+    global _DSPY_AUTOLOG_ENABLED, _TRACE_CONFIG_CONTEXT, _TRACKING_URI_APPLIED, _TRACKING_URI_BEFORE
+    global _TRACE_CONTENT_ENABLED, _TRACE_CONTENT_MAX_CHARS, _TRACING_ACTIVE
     _TRACING_ACTIVE = active
     if not active:
         # Test doubles are installed and removed per test. Do not let a prior
@@ -109,6 +110,8 @@ def set_tracing_active_for_tests(active: bool) -> None:
         _TRACE_CONFIG_CONTEXT = None
         _TRACKING_URI_BEFORE = _UNKNOWN_TRACKING_URI
         _TRACKING_URI_APPLIED = None
+        _TRACE_CONTENT_ENABLED = False
+        _TRACE_CONTENT_MAX_CHARS = 10_000
         _TRACE_ENVIRONMENT_SNAPSHOT.clear()
         _TRACE_ENVIRONMENT_APPLIED.clear()
 
@@ -721,7 +724,6 @@ def configure_tracing(settings: Settings) -> bool:
         # above is the export boundary that bounds readable trace content and
         # protects credentials, paths, and system-prompt dumps. Keep
         # compile and evaluator traces out of the live Turn experiment.
-        _DSPY_AUTOLOG_ENABLED = True
         mlflow.dspy.autolog(
             log_traces=True,
             log_traces_from_eval=False,
@@ -730,6 +732,7 @@ def configure_tracing(settings: Settings) -> bool:
             log_evals=False,
             silent=True,
         )
+        _DSPY_AUTOLOG_ENABLED = True
         logger.info(
             "MLflow DSPy autolog enabled (inference=true backend=%s async=%s sampling=%s content_enabled=%s "
             "content_max_chars=%s)",

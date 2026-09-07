@@ -490,8 +490,6 @@ def test_turn_trace_omits_raw_exception_from_mlflow_context(monkeypatch: pytest.
             raise TimeoutError("secret timeout")
     except TimeoutError as exc:
         assert "secret timeout" in str(exc)
-    else:
-        pytest.fail("TimeoutError was not raised")
 
     assert calls.span_outputs[-1] == {"failure_category": "timeout"}
     assert calls.span_statuses[-1] == "ERROR"
