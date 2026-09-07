@@ -689,9 +689,11 @@ def test_start_turn_span_preserves_input_key_names_as_structural_attributes(
 def test_turn_phase_span_records_failures_without_suppressing_them(monkeypatch: pytest.MonkeyPatch) -> None:
     calls = _install_fake_mlflow(monkeypatch)
 
-    with pytest.raises(RuntimeError, match="expected"):
-        with turn_phase_span("Turn.settlement", inputs={"terminal_status": "failed"}):
-            raise RuntimeError("expected")
+    with (
+        pytest.raises(RuntimeError, match="expected"),
+        turn_phase_span("Turn.settlement", inputs={"terminal_status": "failed"}),
+    ):
+        raise RuntimeError("expected")
 
     assert calls.span_outputs[-1] == {
         "failure_category": "unknown",
@@ -715,10 +717,12 @@ def test_turn_phase_span_merges_handle_outputs_with_phase_status(monkeypatch: py
 def test_turn_phase_span_handle_outputs_survive_body_failure(monkeypatch: pytest.MonkeyPatch) -> None:
     calls = _install_fake_mlflow(monkeypatch)
 
-    with pytest.raises(RuntimeError, match="boom"):
-        with turn_phase_span("sandbox.execute", inputs={"iteration": 2}) as phase:
-            phase.set_outputs({"stdout_chars": 3})
-            raise RuntimeError("boom")
+    with (
+        pytest.raises(RuntimeError, match="boom"),
+        turn_phase_span("sandbox.execute", inputs={"iteration": 2}) as phase,
+    ):
+        phase.set_outputs({"stdout_chars": 3})
+        raise RuntimeError("boom")
 
     assert calls.span_outputs[-1] == {
         "stdout_chars": 3,
