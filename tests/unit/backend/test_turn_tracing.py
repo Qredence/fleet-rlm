@@ -715,12 +715,10 @@ def test_turn_phase_span_merges_handle_outputs_with_phase_status(monkeypatch: py
 def test_turn_phase_span_handle_outputs_survive_body_failure(monkeypatch: pytest.MonkeyPatch) -> None:
     calls = _install_fake_mlflow(monkeypatch)
 
-    with (
-        pytest.raises(RuntimeError, match="boom"),
-        turn_phase_span("sandbox.execute", inputs={"iteration": 2}) as phase,
-    ):
-        phase.set_outputs({"stdout_chars": 3})
-        raise RuntimeError("boom")
+    with pytest.raises(RuntimeError, match="boom"):
+        with turn_phase_span("sandbox.execute", inputs={"iteration": 2}) as phase:
+            phase.set_outputs({"stdout_chars": 3})
+            raise RuntimeError("boom")
 
     assert calls.span_outputs[-1] == {
         "stdout_chars": 3,
