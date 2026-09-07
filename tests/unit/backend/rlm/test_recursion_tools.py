@@ -5,6 +5,7 @@ import threading
 import time
 import urllib.request
 from collections.abc import Callable
+from concurrent.futures import CancelledError as FutureCancelledError
 from concurrent.futures import Future
 
 import dspy
@@ -22,6 +23,7 @@ from fleet_rlm.rlm.recursion import (
     RecursiveBatchError,
     RecursiveRLMExecutor,
     RecursiveRLMOptions,
+    SubproblemCapsule,
 )
 
 
@@ -80,6 +82,154 @@ def _executor(
         observer=observer,
         is_authorized=is_authorized,
     )
+
+
+def test_subproblem_capsule_is_selected_bounded_input_not_session_copy() -> None:
+    capsule = SubproblemCapsule(
+        task="compare selected findings",
+        fragments=("finding-a", "finding-b"),
+        authorized_references=("artifact://one",),
+        expected_result_shape="verdict with citations",
+        evidence_requirements=("cite each finding",),
+        allocation_chars=512,
+    )
+    payload = json.loads(capsule.render())
+    assert payload["task"] == "compare selected findings"
+    assert payload["selected_fragments"] == ["finding-a", "finding-b"]
+    assert "history" not in payload and "workspace" not in payload
+    with pytest.raises(ValueError, match="serialized bytes"):
+        SubproblemCapsule(task="x", fragments=("x" * 100,), allocation_chars=10)
+
+
+def test_subproblem_capsule_is_strict_deterministic_and_path_scoped() -> None:
+    digest = "A" * 64
+    first = SubproblemCapsule.model_validate(
+        {
+            "task": " inspect selected file ",
+            "fragments": ["row-1"],
+            "authorized_references": ["artifact://report/1"],
+            "expected_result_shape": "verdict",
+            "evidence_requirements": ["cite row-1"],
+            "allocation_chars": 1_024,
+            "selected_file_checksums": [["reports/findings.json", digest]],
+        }
+    )
+    second = SubproblemCapsule(
+        task="inspect selected file",
+        fragments=("row-1",),
+        authorized_references=("artifact://report/1",),
+        expected_result_shape="verdict",
+        evidence_requirements=("cite row-1",),
+        allocation_chars=1_024,
+        selected_file_checksums=(("reports/findings.json", digest.lower()),),
+    )
+    assert first.render() == second.render()
+    assert first.serialized_bytes == len(first.render().encode("utf-8"))
+    assert json.loads(first.render())["selected_file_checksums"] == [
+        {"path": "reports/findings.json", "sha256": digest.lower()}
+    ]
+    with pytest.raises(ValueError, match="extra"):
+        SubproblemCapsule.model_validate({"task": "x", "undeclared": "must reject"})
+    with pytest.raises(ValueError, match=r"outside|escapes"):
+        SubproblemCapsule(task="x", authorized_references=("../secret",))
+    for reference in ("artifact://../secret", "artifact://report/%2e%2e/secret", "https://example.test/x"):
+        with pytest.raises(ValueError, match=r"outside|escapes"):
+            SubproblemCapsule(task="x", authorized_references=(reference,))
+    with pytest.raises(ValueError, match=r"outside|escapes"):
+        SubproblemCapsule(task="x", selected_file_checksums=(("/etc/passwd", digest),))
+    with pytest.raises(ValueError, match="non-empty"):
+        SubproblemCapsule(task="  ")
+
+
+def test_execute_capsule_outcome_classifies_ordinary_child_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    executor = _executor([{"reasoning": "unused", "code": "SUBMIT(answer='unused')"}])
+    capsule = SubproblemCapsule(
+        task="selected analysis",
+        authorized_references=("artifact://selected",),
+        allocation_chars=1_024,
+    )
+
+    def fail(_capsule: SubproblemCapsule) -> object:
+        raise ValueError("provider details stay inside the typed outcome")
+
+    monkeypatch.setattr(executor, "execute_capsule", fail)
+    outcome = executor.execute_capsule_outcome(capsule)
+    assert outcome.status == "failed"
+    assert outcome.error_category == "child_failed"
+    assert outcome.answer == ""
+    assert outcome.source_references == ("artifact://selected",)
+    assert outcome.selected_input_bytes == capsule.serialized_bytes
+
+
+def test_execute_capsule_outcome_classifies_ownership_cancellation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    executor = _executor([{"reasoning": "unused", "code": "SUBMIT(answer='unused')"}])
+    capsule = SubproblemCapsule(task="selected analysis", allocation_chars=1_024)
+
+    def cancel(_capsule: SubproblemCapsule) -> object:
+        raise FutureCancelledError()
+
+    monkeypatch.setattr(executor, "execute_capsule", cancel)
+    outcome = executor.execute_capsule_outcome(capsule)
+    assert outcome.status == "cancelled"
+    assert outcome.error_category == "cancelled"
+    assert outcome.selected_input_bytes == capsule.serialized_bytes
+
+
+def test_capsule_batch_returns_ordered_typed_outcomes_and_preserves_atomic_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    executor = _executor([{"reasoning": "unused", "code": "SUBMIT(answer='unused')"}])
+    capsules = [
+        {"task": "first", "authorized_references": ["artifact://first"]},
+        {"task": "second", "authorized_references": ["artifact://second"]},
+    ]
+
+    def answer(reservation, _batch_cancelled, *, child_profile):
+        assert child_profile == "semantic-child"
+        return f"answer-{reservation.call_index}"
+
+    monkeypatch.setattr(executor, "_run_reserved_call", answer)
+    result = executor._call_capsules_batched(capsules)
+    assert [item["answer"] for item in result] == ["answer-1", "answer-2"]
+    assert [item["status"] for item in result] == ["completed", "completed"]
+    assert [outcome.status for outcome in executor.last_capsule_outcomes] == ["completed", "completed"]
+    assert [item["source_references"] for item in result] == [
+        ["artifact://first"],
+        ["artifact://second"],
+    ]
+
+    def fail_second(reservation, _batch_cancelled, *, child_profile):
+        del child_profile
+        if reservation.call_index == 2:
+            raise ValueError("second child failed")
+        return "first-answer"
+
+    monkeypatch.setattr(executor, "_run_reserved_call", fail_second)
+    # The shared monotonic ledger charges the first batch, so a fresh executor
+    # proves the second batch's all-or-nothing failure policy independently.
+    failing = _executor([{"reasoning": "unused", "code": "SUBMIT(answer='unused')"}])
+    monkeypatch.setattr(failing, "_run_reserved_call", fail_second)
+    with pytest.raises(RecursiveBatchError):
+        failing._call_capsules_batched(capsules)
+    assert [outcome.status for outcome in failing.last_capsule_outcomes] == ["completed", "failed"]
+
+
+def test_capsule_tool_returns_structured_evidence() -> None:
+    executor = _executor([{"reasoning": "submit", "code": "SUBMIT(answer='capsule-ok')"}])
+    result = executor.capsule_tool(
+        task="classify selected row",
+        fragments=["row-a"],
+        authorized_references=["artifact://row-a"],
+        evidence_requirements=["cite source"],
+    )
+    assert result["status"] == "complete"
+    assert result["answer"] == "capsule-ok"
+    assert result["source_references"] == ["artifact://row-a"]
+    assert result["usage"]["child_calls"] == 1
 
 
 def test_native_child_depth_is_a_fixed_invariant_not_an_options_surface() -> None:

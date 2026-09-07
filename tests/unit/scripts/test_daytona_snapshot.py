@@ -125,4 +125,4 @@ async def test_create_builds_with_expected_resources() -> None:
     await daytona_snapshot.create_snapshot(SimpleNamespace(snapshot=SimpleNamespace(get=get, create=create)), spec)
     params = captured["params"]
     assert params.name == spec.snapshot
-    assert (params.resources.cpu, params.resources.memory, params.resources.disk) == (2, 4, 8)
+    assert (params.resources.cpu, params.resources.memory, params.resources.disk) == (4, 8, 8)

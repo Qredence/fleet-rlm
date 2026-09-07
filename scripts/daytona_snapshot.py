@@ -9,14 +9,26 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
+import sys
 from collections.abc import Sequence
 from typing import Any
 
 from daytona import CreateSnapshotParams, Resources
 
 from fleet_rlm.daytona.errors import is_sandbox_not_found, sanitize_provider_message
-from fleet_rlm.daytona.platform import build_daytona_client
-from fleet_rlm.daytona.provisioning import DaytonaSandboxSpec, build_snapshot_image
+from fleet_rlm.daytona.lifecycle import confirm_absence
+from fleet_rlm.daytona.platform import LiveDaytonaPlatform, build_daytona_client
+from fleet_rlm.daytona.provisioning import (
+    DEFAULT_CHILD_SNAPSHOT_NAME,
+    DEFAULT_SNAPSHOT_NAME,
+    SEMANTIC_CHILD_RESOURCES,
+    SESSION_RESOURCES,
+    DaytonaEnvironmentProfile,
+    DaytonaSandboxSpec,
+    build_snapshot_image,
+    environment_manifest,
+)
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -28,14 +40,51 @@ def _parser() -> argparse.ArgumentParser:
     """
     parser = argparse.ArgumentParser(description="Manage the immutable Fleet Daytona Snapshot.")
     subcommands = parser.add_subparsers(dest="command", required=True)
-    for command in ("create", "check"):
+    for command in ("plan", "create", "check", "verify-runtime"):
         sub = subcommands.add_parser(command)
-        sub.add_argument("--name", required=True, help="Immutable snapshot name, for example fleet-rlm-python313-v5")
+        sub.add_argument(
+            "--profile",
+            choices=tuple(profile.value for profile in DaytonaEnvironmentProfile),
+            default=DaytonaEnvironmentProfile.SESSION.value,
+            help="Immutable environment profile to reconcile",
+        )
+        sub.add_argument(
+            "--name",
+            required=True,
+            help=(f"Immutable snapshot name, for example {DEFAULT_SNAPSHOT_NAME} or {DEFAULT_CHILD_SNAPSHOT_NAME}"),
+        )
     return parser
 
 
-def _spec(name: str) -> DaytonaSandboxSpec:
-    return DaytonaSandboxSpec(snapshot=name)
+def _spec(name: str, profile: str = DaytonaEnvironmentProfile.SESSION.value) -> DaytonaSandboxSpec:
+    selected = DaytonaEnvironmentProfile(profile)
+    resources = SEMANTIC_CHILD_RESOURCES if selected is DaytonaEnvironmentProfile.SEMANTIC_CHILD else SESSION_RESOURCES
+    return DaytonaSandboxSpec(
+        snapshot=name,
+        cpu=resources[0],
+        memory_gib=resources[1],
+        disk_gib=resources[2],
+        profile=selected,
+    )
+
+
+def plan_snapshot(spec: DaytonaSandboxSpec) -> None:
+    """Print a non-secret immutable image plan without contacting Daytona."""
+    manifest = environment_manifest(spec)
+    print(
+        json.dumps(
+            {
+                "profile": spec.profile.value,
+                "snapshot": spec.snapshot,
+                "resources": {"cpu": spec.cpu, "memory_gib": spec.memory_gib, "disk_gib": spec.disk_gib},
+                "manifest_sha256": manifest.digest,
+                "dependency_sha256": manifest.dependency_sha256,
+                "volume_allowed": manifest.volume_allowed,
+                "warm_pool_eligible": manifest.warm_pool_eligible,
+            },
+            sort_keys=True,
+        )
+    )
 
 
 def _validate_snapshot(snapshot: Any, spec: DaytonaSandboxSpec) -> None:
@@ -98,8 +147,64 @@ async def check_snapshot(client: Any, spec: DaytonaSandboxSpec) -> None:
     print(f"Snapshot {spec.snapshot} is active and matches the Fleet resource contract.")
 
 
+async def verify_runtime(client: Any, spec: DaytonaSandboxSpec) -> None:
+    """Run a disposable no-Volume runtime probe for one immutable profile."""
+    platform = LiveDaytonaPlatform(client, spec)
+    sandbox: Any | None = None
+    try:
+        sandbox = await platform.create(
+            profile=spec.profile,
+            with_volume=False,
+            labels={"fleet.runtime": "snapshot-verification", "fleet.profile": spec.profile.value},
+            ephemeral=True,
+        )
+        context = await sandbox.code_interpreter.create_context()
+        try:
+            manifest = environment_manifest(spec)
+            expected = json.dumps(manifest.as_dict(), sort_keys=True, separators=(",", ":"))
+            code = (
+                "import getpass, hashlib, json, pathlib, shutil, sys\n"
+                "manifest_path = pathlib.Path('/opt/fleet/runtime-manifest.json')\n"
+                "manifest = json.loads(manifest_path.read_text())\n"
+                f"expected = json.loads({expected!r})\n"
+                "assert manifest == expected\n"
+                "assert hashlib.sha256("
+                "json.dumps(manifest, sort_keys=True, separators=(',', ':')).encode()"
+                ").hexdigest() "
+                "== "
+                f"{manifest.digest!r}\n"
+                "assert sys.version_info[:3] == (3, 13, 13)\n"
+                "assert getpass.getuser() == 'daytona'\n"
+                "assert pathlib.Path.cwd() == pathlib.Path('/home/daytona')\n"
+                "assert shutil.which('git')\n"
+                "print('fleet-snapshot-runtime-ok')"
+            )
+            result = await sandbox.code_interpreter.run_code(code, context=context)
+            stdout = getattr(result, "stdout", result)
+            if getattr(result, "error", None) or str(stdout or "").strip() != "fleet-snapshot-runtime-ok":
+                raise RuntimeError("snapshot runtime probe failed")
+        finally:
+            await sandbox.code_interpreter.delete_context(context)
+    finally:
+        if sandbox is not None:
+            await platform.delete(sandbox)
+            sandbox_id = str(getattr(sandbox, "id", ""))
+            confirmation = await confirm_absence(
+                probe=platform.get,
+                sandbox_id=sandbox_id,
+                timeout_s=120.0,
+                poll_interval_s=1.0,
+            )
+            if not confirmation.absent:
+                raise RuntimeError("snapshot verification sandbox was not deleted")
+    print(f"Snapshot {spec.snapshot} runtime probe passed and disposable sandbox was deleted.")
+
+
 async def _run(args: argparse.Namespace) -> int:
-    spec = _spec(args.name)
+    spec = _spec(args.name, args.profile)
+    if args.command == "plan":
+        plan_snapshot(spec)
+        return 0
     from fleet_rlm.config.loader import load_runtime_settings
 
     # Snapshot operations still use the selected policy profile for credentials
@@ -111,8 +216,10 @@ async def _run(args: argparse.Namespace) -> int:
     try:
         if args.command == "create":
             await create_snapshot(client, spec)
-        else:
+        elif args.command == "check":
             await check_snapshot(client, spec)
+        else:
+            await verify_runtime(client, spec)
     finally:
         await client.close()
     return 0
@@ -120,7 +227,15 @@ async def _run(args: argparse.Namespace) -> int:
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = _parser().parse_args(argv)
-    return asyncio.run(_run(args))
+    try:
+        return asyncio.run(_run(args))
+    except SystemExit:
+        raise
+    except BaseException:
+        # Snapshot/provider failures are operator-visible only as a stable
+        # category.  Do not print SDK traces, build commands, or credentials.
+        print("Daytona snapshot operation failed safely.", file=sys.stderr)
+        return 1
 
 
 if __name__ == "__main__":  # pragma: no cover - CLI entrypoint

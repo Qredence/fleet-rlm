@@ -33,7 +33,9 @@ TUI_PNPM := cd $(TUI_DIR) && pnpm
 	build build-release release \
 	clean cli precommit-install precommit-run precommit \
 	cloud-preflight \
-	daytona-snapshot-create daytona-snapshot-check profile-matrix \
+	daytona-snapshot-create daytona-snapshot-check daytona-snapshot-plan daytona-snapshot-verify-runtime \
+	daytona-child-snapshot-create daytona-child-snapshot-check daytona-child-snapshot-plan daytona-child-snapshot-verify-runtime \
+	profile-matrix \
 	benchmark-daytona-lifecycle benchmark-native-long-context
 
 help:
@@ -84,8 +86,14 @@ help:
 	@echo "  make cloud-preflight  - Validate the app boots for FastAPI Cloud deploy"
 	@echo ""
 	@echo "Utility:"
-	@echo "  make daytona-snapshot-create - Create or validate the immutable Daytona Snapshot"
-	@echo "  make daytona-snapshot-check  - Check the immutable Daytona Snapshot contract"
+	@echo "  make daytona-snapshot-create - Create or validate the immutable Session Snapshot"
+	@echo "  make daytona-snapshot-check  - Check the immutable Session Snapshot contract"
+	@echo "  make daytona-snapshot-plan    - Print the non-secret Session Snapshot plan"
+	@echo "  make daytona-snapshot-verify-runtime - Verify the native Session runtime"
+	@echo "  make daytona-child-snapshot-create - Create or validate the lean SemanticChild Snapshot"
+	@echo "  make daytona-child-snapshot-check  - Check the lean SemanticChild Snapshot contract"
+	@echo "  make daytona-child-snapshot-plan   - Print the non-secret SemanticChild plan"
+	@echo "  make daytona-child-snapshot-verify-runtime - Verify the native SemanticChild runtime"
 	@echo "  make profile-matrix          - Regenerate the TOML-derived provider/profile matrix"
 	@echo "  make clean            - Remove caches and local generated artifacts"
 	@echo "  make precommit-install - Install pre-commit and pre-push git hooks"
@@ -145,13 +153,33 @@ benchmark-native-long-context:
 benchmark-daytona-lifecycle:
 	FLEET_LIVE=1 uv run python scripts/benchmark_daytona_lifecycle.py --output .scratch/daytona-lifecycle-benchmark.json
 
-DAYTONA_SNAPSHOT_NAME ?= fleet-rlm-python313-v5
+DAYTONA_SNAPSHOT_NAME ?= fleet-rlm-python313-v7
+DAYTONA_SNAPSHOT_PROFILE ?= session
+DAYTONA_CHILD_SNAPSHOT_NAME ?= fleet-rlm-python313-child-v2
 
 daytona-snapshot-create:
-	uv run python scripts/daytona_snapshot.py create --name $(DAYTONA_SNAPSHOT_NAME)
+	uv run python scripts/daytona_snapshot.py create --profile $(DAYTONA_SNAPSHOT_PROFILE) --name $(DAYTONA_SNAPSHOT_NAME)
 
 daytona-snapshot-check:
-	uv run python scripts/daytona_snapshot.py check --name $(DAYTONA_SNAPSHOT_NAME)
+	uv run python scripts/daytona_snapshot.py check --profile $(DAYTONA_SNAPSHOT_PROFILE) --name $(DAYTONA_SNAPSHOT_NAME)
+
+daytona-snapshot-plan:
+	uv run python scripts/daytona_snapshot.py plan --profile $(DAYTONA_SNAPSHOT_PROFILE) --name $(DAYTONA_SNAPSHOT_NAME)
+
+daytona-snapshot-verify-runtime:
+	uv run python scripts/daytona_snapshot.py verify-runtime --profile $(DAYTONA_SNAPSHOT_PROFILE) --name $(DAYTONA_SNAPSHOT_NAME)
+
+daytona-child-snapshot-create:
+	uv run python scripts/daytona_snapshot.py create --profile semantic-child --name $(DAYTONA_CHILD_SNAPSHOT_NAME)
+
+daytona-child-snapshot-check:
+	uv run python scripts/daytona_snapshot.py check --profile semantic-child --name $(DAYTONA_CHILD_SNAPSHOT_NAME)
+
+daytona-child-snapshot-plan:
+	uv run python scripts/daytona_snapshot.py plan --profile semantic-child --name $(DAYTONA_CHILD_SNAPSHOT_NAME)
+
+daytona-child-snapshot-verify-runtime:
+	uv run python scripts/daytona_snapshot.py verify-runtime --profile semantic-child --name $(DAYTONA_CHILD_SNAPSHOT_NAME)
 
 profile-matrix:
 	uv run python scripts/generate_profile_matrix.py generate

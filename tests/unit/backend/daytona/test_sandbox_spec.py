@@ -10,8 +10,10 @@ from fleet_rlm.daytona.provisioning import (
     BASE_IMAGE,
     DEFAULT_SNAPSHOT_NAME,
     PYTHON_VERSION,
+    DaytonaEnvironmentProfile,
     DaytonaSandboxSpec,
     build_snapshot_image,
+    environment_manifest,
     sandbox_spec_from_settings,
     snapshot_dependency_import_names,
     snapshot_dependency_sha256,
@@ -54,9 +56,9 @@ def test_spec_builds_non_root_pinned_image_with_toolchain_and_declared_dependenc
 def test_default_snapshot_envelope_stays_fixed() -> None:
     spec = DaytonaSandboxSpec(DEFAULT_SNAPSHOT_NAME)
 
-    assert spec.snapshot == "fleet-rlm-python313-v5"
+    assert spec.snapshot == "fleet-rlm-python313-v7"
     assert spec.python_version == PYTHON_VERSION == "3.13.13"
-    assert (spec.cpu, spec.memory_gib, spec.disk_gib) == (2, 4, 8)
+    assert (spec.cpu, spec.memory_gib, spec.disk_gib) == (4, 8, 8)
 
 
 def test_dependency_import_names_map_distribution_to_module() -> None:
@@ -72,7 +74,7 @@ def test_settings_require_snapshot_only_when_converted_to_daytona_spec() -> None
     with pytest.raises(ValueError, match="FLEET_DAYTONA_SNAPSHOT"):
         sandbox_spec_from_settings(Settings())
     assert sandbox_spec_from_settings(Settings(daytona_snapshot="fleet-test-v1")).snapshot == "fleet-test-v1"
-    with pytest.raises(ValueError, match="FLEET_DAYTONA_SNAPSHOT"):
+    with pytest.raises(ValueError, match="immutable"):
         Settings(daytona_snapshot="latest")
 
 
@@ -81,3 +83,19 @@ def test_snapshot_provenance_is_exact() -> None:
     verify_sandbox_spec(SimpleNamespace(snapshot=spec.snapshot), spec)
     with pytest.raises(DaytonaAdapterError, match="snapshot"):
         verify_sandbox_spec(SimpleNamespace(snapshot="fleet-rlm-python313-v2"), spec)
+
+
+def test_environment_profiles_keep_capacity_and_data_access_separate() -> None:
+    spec = DaytonaSandboxSpec("fleet-rlm-python313-v1")
+    session = environment_manifest(spec, DaytonaEnvironmentProfile.SESSION)
+    semantic = environment_manifest(spec, DaytonaEnvironmentProfile.SEMANTIC_CHILD)
+    workspace = environment_manifest(spec, DaytonaEnvironmentProfile.WORKSPACE_CHILD)
+
+    assert session.image_kind == workspace.image_kind == "session-analysis"
+    assert session.volume_allowed and workspace.volume_allowed
+    assert not session.warm_pool_eligible and not workspace.warm_pool_eligible
+    assert session.resources == workspace.resources == (4, 8, 8)
+    assert semantic.image_kind == "lean-child"
+    assert semantic.dependencies == ()
+    assert not semantic.volume_allowed and semantic.warm_pool_eligible
+    assert semantic.resources == (2, 4, 4)

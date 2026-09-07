@@ -128,7 +128,7 @@ _EXPECTED_INVENTORY: tuple[tuple[str, str, str, str, tuple[str, ...], str | None
     ("storage.max_artifact_bytes", "Storage", "Maximum artifact bytes", "number", (), "max_artifact_bytes"),
     ("storage.database_url_env", "Storage", "Database URL environment variable", "text", (), None),
     ("daytona.api_key_env", "Daytona", "API key environment variable", "text", (), None),
-    ("daytona.snapshot", "Daytona", "Snapshot", "text", (), "daytona_snapshot"),
+    ("daytona.snapshot_env", "Daytona", "Session snapshot environment variable", "text", (), None),
     ("daytona.org_id", "Daytona", "Organization ID", "text", (), "daytona_org_id"),
     ("daytona.volume_name", "Daytona", "Volume name", "text", (), "volume_name"),
     ("daytona.volume_mount_path", "Daytona", "Volume mount path", "text", (), "volume_mount_path"),
@@ -176,7 +176,14 @@ _EXPECTED_INVENTORY: tuple[tuple[str, str, str, str, tuple[str, ...], str | None
     ("rlm.wrap_up_seconds", "RLM", "Final-answer reserve (seconds)", "number", (), "rlm_wrap_up_seconds"),
     ("llm.root.timeout_seconds", "Root LLM", "Provider timeout seconds", "number", (), "root_llm_timeout_seconds"),
     ("llm.sub.timeout_seconds", "Sub LLM", "Provider timeout seconds", "number", (), "sub_llm_timeout_seconds"),
-    ("runtime.variant", "Runtime", "Runtime variant", "single_choice", ("legacy",), "runtime_variant"),
+    (
+        "runtime.variant",
+        "Runtime",
+        "Runtime variant",
+        "single_choice",
+        ("legacy",),
+        "runtime_variant",
+    ),
     ("rlm.max_provider_attempts", "RLM", "Maximum provider attempts", "number", (), "rlm_max_provider_attempts"),
     ("rlm.max_tool_calls", "RLM", "Maximum Tool calls", "number", (), "rlm_max_tool_calls"),
     (
@@ -188,6 +195,33 @@ _EXPECTED_INVENTORY: tuple[tuple[str, str, str, str, tuple[str, ...], str | None
         "rlm_max_execution_output_bytes",
     ),
     ("rlm.finalization_attempts", "RLM", "Finalization attempts", "number", (), "rlm_finalization_attempts"),
+    (
+        "mlflow.trace_content_enabled",
+        "MLflow",
+        "Capture sanitized trace content",
+        "boolean",
+        (),
+        "mlflow_trace_content_enabled",
+    ),
+    (
+        "mlflow.trace_export_queue_size",
+        "MLflow",
+        "Trace export queue size",
+        "number",
+        (),
+        "mlflow_trace_export_queue_size",
+    ),
+    ("mlflow.trace_export_workers", "MLflow", "Trace export workers", "number", (), "mlflow_trace_export_workers"),
+    (
+        "mlflow.trace_export_retry_seconds",
+        "MLflow",
+        "Trace export retry limit",
+        "number",
+        (),
+        "mlflow_trace_export_retry_seconds",
+    ),
+    ("mlflow.trace_shutdown_seconds", "MLflow", "Trace shutdown wait", "number", (), "mlflow_trace_shutdown_seconds"),
+    ("daytona.child_snapshot_env", "Daytona", "SemanticChild snapshot environment variable", "text", (), None),
 )
 
 

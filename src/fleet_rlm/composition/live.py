@@ -920,4 +920,5 @@ def build_run_preparation(
         environments=_DaytonaEnvironmentProvider(resources, settings, session_runtime_registry),
         capabilities=_LiveCapabilityPreparer(settings, skill_catalog, volume_paths=resources.volume_paths),
         session_runtime_registry=session_runtime_registry,
+        runtime_variant=settings.runtime_variant,
     )

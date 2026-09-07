@@ -39,7 +39,11 @@ from uuid import UUID
 from fleet_rlm.daytona.broker import SyncBridgeDispatcher
 from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, sandbox_backend
 from fleet_rlm.daytona.lifecycle import AbsenceOutcome, confirm_absence
-from fleet_rlm.daytona.provisioning import SandboxPlatform, recursive_child_volume_subpath
+from fleet_rlm.daytona.provisioning import (
+    DaytonaEnvironmentProfile,
+    SandboxPlatform,
+    recursive_child_volume_subpath,
+)
 from fleet_rlm.daytona.sandbox_lease import SandboxLease, SandboxLeasePolicy, schedule_owned_close
 from fleet_rlm.daytona.session_manager import (
     DaytonaAdmission,
@@ -345,7 +349,7 @@ def close_child_runtime_sync(
     platform: SandboxPlatform,
     sandbox: Any,
     sandbox_id: str,
-    mount_path: str,
+    mount_path: str | None,
     interpreter: Any,
     permit: DaytonaAdmissionPermit,
     retain_pending_cleanup: Callable[[Future[Any]], None] | None = None,
@@ -549,7 +553,7 @@ async def cleanup_child_runtime_async(
     platform: SandboxPlatform,
     sandbox: Any,
     sandbox_id: str,
-    mount_path: str,
+    mount_path: str | None,
     permit: DaytonaAdmissionPermit,
     confirm: Callable[..., Awaitable[AbsenceOutcome]] | None = None,
     confirm_timeout_s: float = CHILD_DELETE_CONFIRM_TIMEOUT_S,
@@ -573,6 +577,11 @@ async def cleanup_child_runtime_async(
         ChildRuntimeCleanupError: If cleanup fails or provider-side absence is not confirmed.
     """
     purge_fn = purge if purge is not None else purge_regular_files
+
+    async def purge_scope(target: Any, root: str | None) -> None:
+        if root:
+            await purge_fn(target, root)
+
     confirm_fn = confirm if confirm is not None else confirm_absence
     lease = SandboxLease(
         kind="recursive_child",
@@ -580,7 +589,7 @@ async def cleanup_child_runtime_async(
         sandbox_id=sandbox_id,
         platform=platform,
         permit=permit,
-        purge=lambda sandbox: purge_fn(sandbox, mount_path),
+        purge=lambda sandbox: purge_scope(sandbox, mount_path),
         policy=SandboxLeasePolicy(
             kind="recursive_child",
             interpreter_shutdown=False,
@@ -640,8 +649,9 @@ async def acquire_child_runtime(
     dispatcher: Any = None,
     platform: SandboxPlatform,
     admission: DaytonaAdmission,
-    volume_id: str,
-    mount_path: str,
+    volume_id: str | None,
+    mount_path: str | None,
+    profile: DaytonaEnvironmentProfile = DaytonaEnvironmentProfile.WORKSPACE_CHILD,
     workspace_id: UUID,
     run_id: UUID,
     call_index: int,
@@ -661,8 +671,9 @@ async def acquire_child_runtime(
     Acquire an ephemeral runtime for executing a recursive child operation.
 
     Parameters:
-        volume_id (str): Identifier of the volume mounted in the child sandbox.
-        mount_path (str): Path where the volume is mounted.
+        volume_id (str | None): Identifier of the volume mounted in the child sandbox.
+        mount_path (str | None): Path where the volume is mounted.
+        profile (DaytonaEnvironmentProfile): Immutable child image/access profile.
         workspace_id (UUID): Workspace containing the recursive child.
         run_id (UUID): Run containing the recursive child.
         call_index (int): Index identifying the recursive child call.
@@ -680,18 +691,30 @@ async def acquire_child_runtime(
     sandbox_id_resolver = sandbox_id_for if sandbox_id_for_fn is None else sandbox_id_for_fn
     authorization_check = require_authorized if require_authorized_fn is None else require_authorized_fn
     authorization_check(is_authorized)
+    if not isinstance(profile, DaytonaEnvironmentProfile):
+        profile = DaytonaEnvironmentProfile(str(profile))
+    semantic = profile is DaytonaEnvironmentProfile.SEMANTIC_CHILD
+    if not semantic and (not volume_id or not mount_path):
+        raise ValueError("WorkspaceChild requires a Volume binding")
+    # Validate the selected profile before taking a scarce child permit. A
+    # malformed WorkspaceChild request must not strand admission capacity.
     permit = await admission.acquire(deadline=deadline)
     sandbox: Any | None = None
     sandbox_id: str | None = None
-    subpath = recursive_child_volume_subpath(workspace_id, run_id, call_index)
+    subpath = "" if semantic else recursive_child_volume_subpath(workspace_id, run_id, call_index)
     try:
         authorization_check(is_authorized)
         async with asyncio.timeout_at(deadline):
+            labels = {"fleet.runtime": "recursive-child"}
+            if semantic:
+                labels["fleet.profile"] = profile.value
             sandbox = await platform.create(
-                volume_id=volume_id,
-                mount_path=mount_path,
-                volume_subpath=subpath,
-                labels={"fleet.runtime": "recursive-child"},
+                profile=profile,
+                volume_id=None if semantic else volume_id,
+                mount_path=None if semantic else mount_path,
+                volume_subpath=None if semantic else subpath,
+                labels=labels,
+                with_volume=not semantic,
                 ephemeral=True,
             )
         sandbox_id = sandbox_id_resolver(sandbox)
@@ -714,13 +737,13 @@ async def acquire_child_runtime(
                 platform=platform,
                 sandbox=sandbox,
                 sandbox_id=child_sandbox_id,
-                mount_path=mount_path,
+                mount_path=mount_path or "",
                 interpreter=interpreter,
                 permit=permit,
                 retain_pending_cleanup=retain_pending_cleanup,
             )
 
-        return ChildRuntimeLease(interpreter, child_sandbox_id, volume_id, subpath, close)
+        return ChildRuntimeLease(interpreter, child_sandbox_id, volume_id or "", subpath, close)
     except BaseException:
         try:
             cleanup = OwnedEffect.start(cleanup_after_failed_acquire(platform, sandbox, sandbox_id, permit))
@@ -763,14 +786,15 @@ def build_child_runtime_factory(
     dispatcher: SyncBridgeDispatcher | None = None,
     platform: SandboxPlatform,
     admission: DaytonaAdmission,
-    volume_id: str,
-    mount_path: str,
+    volume_id: str | None,
+    mount_path: str | None,
     workspace_id: UUID,
     run_id: UUID,
     deadline: float,
     execution_timeout_s: int,
     execution_output_cap: int,
     is_authorized: Callable[[], bool] | None = None,
+    profile: DaytonaEnvironmentProfile = DaytonaEnvironmentProfile.WORKSPACE_CHILD,
 ) -> ChildRuntimeFactory:
     """
     Build a factory for acquiring disposable child-runtime leases for recursive calls.
@@ -779,8 +803,10 @@ def build_child_runtime_factory(
     late acquisitions for cleanup.
 
     Parameters:
-        volume_id (str): Identifier of the volume mounted in child runtimes.
-        mount_path (str): Mount path used by child runtimes.
+        volume_id (str | None): Identifier of the volume mounted in child runtimes.
+        mount_path (str | None): Mount path used by child runtimes.
+        profile (DaytonaEnvironmentProfile): Default child profile; selected-input
+            callers may override it when acquiring a SemanticChild.
         workspace_id (UUID): Identifier of the workspace owning the runtimes.
         run_id (UUID): Identifier of the root turn run.
         deadline (float): Monotonic acquisition deadline.
@@ -796,7 +822,11 @@ def build_child_runtime_factory(
 
     late_owner = LateCleanupOwner(wait_timeout_s=_CHILD_CLEANUP_RESULT_TIMEOUT_S)
 
-    def create(call_index: int) -> ChildRuntimeLease:
+    def create(
+        call_index: int,
+        *,
+        selected_profile: DaytonaEnvironmentProfile | str | None = None,
+    ) -> ChildRuntimeLease:
         """
         Acquire a disposable child runtime lease for a recursive call.
 
@@ -806,6 +836,9 @@ def build_child_runtime_factory(
         Returns:
             ChildRuntimeLease: Lease for the acquired child runtime.
         """
+        chosen_profile = selected_profile if selected_profile is not None else profile
+        if not isinstance(chosen_profile, DaytonaEnvironmentProfile):
+            chosen_profile = DaytonaEnvironmentProfile(str(chosen_profile))
         acquisition_coroutine = _acquire_child_runtime(
             loop=loop,
             dispatcher=dispatcher,
@@ -813,6 +846,7 @@ def build_child_runtime_factory(
             admission=admission,
             volume_id=volume_id,
             mount_path=mount_path,
+            profile=chosen_profile,
             workspace_id=workspace_id,
             run_id=run_id,
             call_index=call_index,
@@ -847,7 +881,12 @@ def build_child_runtime_factory(
     class Factory:
         """Callable child-runtime factory with late-acquisition ownership."""
 
-        def __call__(self, call_index: int) -> ChildRuntimeLease:
+        def __call__(
+            self,
+            call_index: int,
+            *,
+            profile: DaytonaEnvironmentProfile | str | None = None,
+        ) -> ChildRuntimeLease:
             """
             Create a disposable child-runtime lease for a recursive call.
 
@@ -857,7 +896,7 @@ def build_child_runtime_factory(
             Returns:
                 ChildRuntimeLease: Lease for the acquired child runtime.
             """
-            return create(call_index)
+            return create(call_index, selected_profile=profile)
 
         def wait_owned(self) -> None:
             """Wait for all retained cleanup operations to finish."""

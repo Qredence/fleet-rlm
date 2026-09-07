@@ -18,6 +18,8 @@
 * [Turn interpreter context target (ADR 004)](decisions/004-turn-interpreter-context.md)
 * [Runtime variant (ADR 005)](decisions/005-runtime-variant.md)
 * [Native runtime and MLflow evidence (ADR 006)](decisions/006-native-turn-scoped-runtime-and-evaluation.md)
+* [ADR 006 implementation status](decisions/006-implementation-status.md)
+* [ADR 006 consolidated implementation plan](../fleet-rlm-implementation-plan-2026-09-06-v2.md)
 * [Reference](reference/index.md)
   * [Configuration](reference/configuration.md)
   * [Runtime Profile Matrix](reference/profile-matrix.md)

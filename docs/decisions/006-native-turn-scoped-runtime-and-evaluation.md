@@ -1,10 +1,15 @@
 # ADR 006: Native Turn-scoped runtime, recursive delegation, and MLflow evidence
 
-Status: proposed; acceptance records the target architecture, not completed implementation or permission to enable it.
+Status: proposed; native feasibility mechanics are available, while policy selection, cutover, and live evidence gates remain open.
 
 Date: 2026-09-06.
 
 Source baseline: `main` at `bcb85cc7b29d625e4c399cbf0a56459d0617302e`.
+
+Implementation tracking: [ADR 006 implementation status](006-implementation-status.md)
+is the evidence ledger for the current checkout. It separates completed
+implementation work from certification that still requires an authorized live
+lane.
 
 Related decisions: [ADR 004](004-turn-interpreter-context.md) establishes fresh
 Turn interpreter contexts and child data authority;
@@ -50,10 +55,10 @@ and MLflow as an evidence system rather than an execution controller.
   unrelated MLflow upgrade is not part of this decision.
 - Keep model choices, budgets, environment profiles, and endpoints in resolved
   `config/fleet.toml` policy. Secrets come only from configured references.
-- Preserve one `runtime.variant`. Expose `native-turn-scoped` only when its whole
-  implementation exists. Any later capsule migration stage uses this same
-  selector and has a removal gate; do not create orthogonal runtime/interpreter/
-  recursion switches.
+- Preserve one `runtime.variant`. Keep `legacy` as the only selectable value
+  until native containment and durable-continuity evidence pass. Native
+  feasibility remains an explicit injected verification seam; do not create
+  orthogonal runtime/interpreter/recursion switches.
 
 ### 2. Durable state and execution ownership
 
@@ -275,10 +280,14 @@ history, Run claims, sandbox cleanup, capacity policy or the TUI state machine.
 
 ## Phased adoption and required evidence
 
-These are acceptance milestones, not declarations that work has run. Detailed
-implementation tasks may evolve without changing the decision; changing an
-ownership boundary or removing a gate requires a reviewed amendment. Preserve
-existing implementations and distinguish existing, pending and certified status.
+These are acceptance milestones, not a blanket declaration that the target
+architecture is enabled. Checked items below are evidence-backed implementation
+surfaces in the current checkout; unchecked items remain certification gates.
+Detailed tasks may evolve without changing the decision; changing an ownership
+boundary or removing a gate requires a reviewed amendment. Preserve existing
+implementations and distinguish existing, pending and certified status. See the
+[implementation status ledger](006-implementation-status.md) for receipts and
+the next authorized lanes.
 
 ### Phase 0 - Architecture, vocabulary, and baseline contracts
 
@@ -418,14 +427,21 @@ what is removed and which behavior-level tests preserve its obligations.
 
 ## Acceptance and scope
 
-- [ ] Exact dependency targets are certified; existing DSPy/MLflow components are reused.
+Implementation/evidence recorded through Phase 6:
+
+- [x] Daytona 0.210.0 and DSPy 3.3.1 are pinned/resolved, with the existing MLflow policy retained.
+- [x] Additive lineage/status constraints, settlement/publication behavior, and generated Runtime Event/TUI contracts remain covered by the local checks.
+- [x] Native built-ins stay native; capsule children receive bounded selected input and cannot become final publication authority.
+- [x] Scripted lifecycle, adapter replay, and credentialed live operator lanes are explicitly distinguished.
+- [x] Session and SemanticChild snapshot definitions are immutable, `.env`-resolved, and have retained no-Volume runtime-probe receipts.
+
+Open acceptance gates:
+
+- [ ] Exact SDK/backend behavior, deployed Alembic heads, and PostgreSQL contention are certified on the supported live topology.
 - [ ] Session continuity survives process, context and sandbox replacement using authorized durable state.
 - [ ] Output bounds and remote containment are proven; uncertain mutation prevents reuse/publication.
-- [ ] SQL claims, publication, recovery and generated Runtime Event/TUI contracts remain intact.
-- [ ] Native built-ins remain native; children receive bounded selected data and cannot become final authority.
 - [ ] Optional warm capacity has eligibility, quota, clean-instance and cost evidence.
-- [ ] Trace parentage, privacy, non-duplicated usage and bounded export pass concurrency/failure tests.
-- [ ] Live semantic/operational gates are distinct from scripted and non-promotable smoke evidence.
+- [ ] Trace parentage, privacy, non-duplicated usage and bounded export pass the required concurrency/failure and outage tests.
 - [ ] Safe program loading, immutable promotion and rollback are demonstrated.
 - [ ] Replaced resident/broker/migration machinery is deleted after its bounded rollback window.
 

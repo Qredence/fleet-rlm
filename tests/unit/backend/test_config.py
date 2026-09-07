@@ -37,7 +37,7 @@ def test_runtime_variant_default_is_explicit_and_stable() -> None:
     assert Settings().runtime_variant == "legacy"
 
 
-@pytest.mark.parametrize("variant", ["native", "capsule", "", "unknown"])
+@pytest.mark.parametrize("variant", ["native", "native-turn-scoped", "capsule", "", "unknown"])
 def test_unimplemented_runtime_variants_are_rejected(variant: str) -> None:
     with pytest.raises(ValidationError):
         Settings(runtime_variant=variant)
@@ -48,7 +48,8 @@ def test_committed_policy_declares_databricks_model_roles() -> None:
     document = tomllib.loads(policy_path.read_text(encoding="utf-8"))
 
     assert set(document["profiles"]) == {"daytona-recursive"}
-    assert document["defaults"]["daytona"]["snapshot"] == "fleet-rlm-python313-v5"
+    assert document["defaults"]["daytona"]["snapshot_env"] == "FLEET_DAYTONA_SNAPSHOT"
+    assert document["defaults"]["daytona"]["child_snapshot_env"] == "FLEET_DAYTONA_CHILD_SNAPSHOT"
     assert document["defaults"]["runtime"]["environment"] == "daytona"
     assert document["defaults"]["llm"] == {
         "root": {
@@ -124,7 +125,7 @@ def test_default_profile_routes_tracing_to_supervised_local_mlflow() -> None:
     assert mlflow["experiment_name"] == "fleet-rlm"
 
 
-def test_default_mlflow_policy_uses_async_full_fidelity_trace_delivery() -> None:
+def test_default_mlflow_policy_uses_bounded_operational_trace_delivery() -> None:
     policy_path = Path(__file__).resolve().parents[3] / "config" / "fleet.toml"
     document = tomllib.loads(policy_path.read_text(encoding="utf-8"))
 
@@ -136,6 +137,11 @@ def test_default_mlflow_policy_uses_async_full_fidelity_trace_delivery() -> None
         "async_logging": True,
         "trace_sampling_ratio": 1.0,
         "trace_content_max_chars": 10000,
+        "trace_content_enabled": False,
+        "trace_export_queue_size": 128,
+        "trace_export_workers": 2,
+        "trace_export_retry_seconds": 10,
+        "trace_shutdown_seconds": 5.0,
     }
 
 
@@ -313,13 +319,19 @@ max_artifact_bytes = 20
 [defaults.daytona]
 volume_name = "fleet-volume"
 volume_mount_path = "/fleet"
+snapshot_env = "FLEET_DAYTONA_SNAPSHOT"
+child_snapshot_env = "FLEET_DAYTONA_CHILD_SNAPSHOT"
 [defaults.logging]
 level = "DEBUG"
 [profiles.daytona.runtime]
 environment = "daytona"
-[profiles.daytona.daytona]
-snapshot = "fleet-test-v1"
-""".strip(),
+        """.strip(),
+        encoding="utf-8",
+    )
+    # Snapshot identities are deliberately dotenv-only; provide the isolated
+    # policy with deterministic non-secret values for tests that load settings.
+    path.with_name(".env").write_text(
+        "FLEET_DAYTONA_SNAPSHOT=fleet-test-v1\nFLEET_DAYTONA_CHILD_SNAPSHOT=fleet-child-v1\n",
         encoding="utf-8",
     )
 

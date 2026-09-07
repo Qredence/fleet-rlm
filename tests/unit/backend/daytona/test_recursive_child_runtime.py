@@ -12,6 +12,7 @@ import pytest
 
 from fleet_rlm.daytona import recursive_child_runtime
 from fleet_rlm.daytona.provisioning import (
+    DaytonaEnvironmentProfile,
     recursive_child_volume_subpath,
     require_recursive_child_volume_subpath,
 )
@@ -232,10 +233,12 @@ async def test_child_runtime_uses_sibling_volume_scope_and_strictly_cleans_only_
     assert lease.volume_subpath == recursive_child_volume_subpath(workspace_id, run_id, 1)
     assert platform.create_calls == [
         {
+            "profile": DaytonaEnvironmentProfile.WORKSPACE_CHILD,
             "volume_id": "shared-volume",
             "mount_path": "/home/daytona/fleet",
             "volume_subpath": lease.volume_subpath,
             "labels": {"fleet.runtime": "recursive-child"},
+            "with_volume": True,
             "ephemeral": True,
         }
     ]
@@ -507,6 +510,31 @@ async def test_revocation_before_admission_performs_no_allocation() -> None:
     assert platform.create_calls == []
     permit = await admission.acquire(deadline=asyncio.get_running_loop().time() + 1)
     permit.release()
+
+
+@pytest.mark.asyncio
+async def test_invalid_workspace_child_binding_does_not_consume_admission_permit() -> None:
+    platform = _Platform(_Sandbox("child-sandbox", _Fs(set())))
+    admission = DaytonaAdmission(max_active_leases=1)
+    factory = recursive_child_runtime.build_child_runtime_factory(
+        loop=asyncio.get_running_loop(),
+        platform=platform,
+        admission=admission,
+        volume_id=None,
+        mount_path=None,
+        workspace_id=uuid4(),
+        run_id=uuid4(),
+        deadline=asyncio.get_running_loop().time() + 30,
+        execution_timeout_s=30,
+        execution_output_cap=1000,
+    )
+
+    with pytest.raises(ValueError, match="WorkspaceChild requires"):
+        await asyncio.to_thread(factory, 1)
+
+    permit = await admission.acquire(deadline=asyncio.get_running_loop().time() + 1)
+    permit.release()
+    assert platform.create_calls == []
 
 
 @pytest.mark.asyncio

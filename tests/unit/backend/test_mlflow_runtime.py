@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+from threading import Event
 from types import SimpleNamespace
 
 import pytest
@@ -19,6 +21,33 @@ def _settings(**overrides: object) -> Settings:
     }
     values.update(overrides)
     return Settings(**values)
+
+
+@pytest.mark.asyncio
+async def test_stalled_flush_is_bounded_retained_and_reobserved():
+    entered, release = Event(), Event()
+    calls = []
+
+    def flush():
+        calls.append("flush")
+        entered.set()
+        release.wait(5)
+
+    runtime = MLflowRuntime(_settings(mlflow_trace_shutdown_seconds=0.02), _configure=lambda _: True, _flush=flush)
+    await runtime.start()
+    try:
+        await asyncio.wait_for(runtime.close(), timeout=1)
+        assert entered.is_set()
+        assert runtime.flush_pending
+        assert runtime.state is MLflowRuntimeState.CLOSED
+        await runtime.start()
+        assert runtime.state is MLflowRuntimeState.UNAVAILABLE
+        assert runtime.flush_pending
+    finally:
+        release.set()
+    await asyncio.wait_for(runtime.close(), timeout=1)
+    assert not runtime.flush_pending
+    assert calls == ["flush"]
 
 
 @pytest.mark.asyncio

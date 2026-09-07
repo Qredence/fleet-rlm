@@ -7,7 +7,11 @@ from typing import Any, Literal
 
 from fleet_rlm.config.settings import Settings
 from fleet_rlm.daytona.errors import DaytonaAdapterError, is_sandbox_not_found, map_provider_error
-from fleet_rlm.daytona.provisioning import DaytonaSandboxSpec, require_volume_mount_subpath
+from fleet_rlm.daytona.provisioning import (
+    DaytonaEnvironmentProfile,
+    DaytonaSandboxSpec,
+    require_volume_mount_subpath,
+)
 
 _VOLUME_READY_RETRY_DELAYS = (0.25, 0.5, 1.0, 2.0, 4.0, 8.0)
 _VOLUME_FAILED_STATES = frozenset({"deleting", "deleted", "error"})
@@ -43,7 +47,7 @@ def build_daytona_client(settings: Settings) -> Any:
         api_key = raw.get_secret_value() if hasattr(raw, "get_secret_value") else str(raw)
         api_key = api_key or None
     # Pass the current SDK field explicitly.  Leaving this unset makes Daytona
-    # 0.207.0 evaluate the deprecated ``server_url`` fallback, and would also
+    # evaluate the deprecated ``server_url`` fallback, and would also
     # allow ambient SDK endpoint discovery to bypass Fleet's configuration.
     config_kwargs: dict[str, Any] = {"api_url": _DAYTONA_CLOUD_API_URL}
     if api_key:
@@ -91,7 +95,18 @@ class LiveDaytonaVolumeClient:
         self._client = client
 
     async def get(self, name: str, *, create: bool = False) -> Any:
-        volume = await self._client.volume.get(name, create=create)
+        from daytona.common.errors import DaytonaConflictError
+
+        try:
+            volume = await self._client.volume.get(name, create=create)
+        except DaytonaConflictError as exc:
+            if not create:
+                raise map_provider_error(exc) from exc
+            # The SDK creates only after typed absence. A concurrent creator
+            # may win that race; reconcile by lookup, never repeat creation.
+            volume = await self._get_existing(name)
+        except Exception as exc:
+            raise map_provider_error(exc) from exc
         if not create:
             return volume
 
@@ -102,13 +117,19 @@ class LiveDaytonaVolumeClient:
             raise DaytonaAdapterError(message="Daytona Volume did not become ready", cause_type="VolumeLifecycleError")
         for delay in _VOLUME_READY_RETRY_DELAYS:
             await asyncio.sleep(delay)
-            volume = await self._client.volume.get(name, create=False)
+            volume = await self._get_existing(name)
             state = _volume_state(volume)
             if state is None or state == "ready":
                 return volume
             if state in _VOLUME_FAILED_STATES:
                 break
         raise DaytonaAdapterError(message="Daytona Volume did not become ready", cause_type="VolumeLifecycleError")
+
+    async def _get_existing(self, name: str) -> Any:
+        try:
+            return await self._client.volume.get(name, create=False)
+        except Exception as exc:
+            raise map_provider_error(exc) from exc
 
 
 def _volume_state(volume: Any) -> str | None:
@@ -121,9 +142,23 @@ def _volume_state(volume: Any) -> str | None:
 class LiveDaytonaPlatform:
     """SandboxPlatform over a Daytona SDK client."""
 
-    def __init__(self, client: Any, sandbox_spec: DaytonaSandboxSpec) -> None:
+    def __init__(
+        self,
+        client: Any,
+        sandbox_spec: DaytonaSandboxSpec,
+        environment_specs: dict[DaytonaEnvironmentProfile, DaytonaSandboxSpec] | None = None,
+    ) -> None:
         self._client = client
         self._sandbox_spec = sandbox_spec
+        self._sandbox_specs = dict(environment_specs or {})
+        self._sandbox_specs.setdefault(sandbox_spec.profile, sandbox_spec)
+
+    def spec_for_profile(self, profile: DaytonaEnvironmentProfile) -> DaytonaSandboxSpec:
+        """Return the immutable snapshot/resource contract for ``profile``."""
+        try:
+            return self._sandbox_specs[profile]
+        except KeyError as exc:
+            raise ValueError(f"Daytona environment profile is unavailable: {profile.value}") from exc
 
     async def get(self, sandbox_id: str) -> Any | None:
         """Return sandbox or ``None`` only for explicit not-found.
@@ -140,6 +175,7 @@ class LiveDaytonaPlatform:
     async def create(
         self,
         *,
+        profile: DaytonaEnvironmentProfile = DaytonaEnvironmentProfile.SESSION,
         volume_id: str | None = None,
         mount_path: str | None = None,
         volume_subpath: str | None = None,
@@ -156,6 +192,7 @@ class LiveDaytonaPlatform:
         Create a Daytona sandbox from the configured snapshot.
 
         Parameters:
+            profile (DaytonaEnvironmentProfile): Immutable profile/image contract.
             volume_id (str | None): Volume identifier required when `with_volume` is true.
             mount_path (str | None): Sandbox mount path required when `with_volume` is true.
             volume_subpath (str | None): Scoped subpath within the volume.
@@ -176,6 +213,12 @@ class LiveDaytonaPlatform:
         """
         from daytona import CreateSandboxFromSnapshotParams, VolumeMount
 
+        spec = self.spec_for_profile(profile)
+        if profile is DaytonaEnvironmentProfile.SEMANTIC_CHILD:
+            if volume_id or mount_path or volume_subpath:
+                raise ValueError("SemanticChild sandboxes cannot mount a Workspace Volume")
+            with_volume = False
+
         volumes = None
         if with_volume:
             if not volume_id or not mount_path:
@@ -189,11 +232,14 @@ class LiveDaytonaPlatform:
                     subpath=scoped,
                 )
             ]
+        effective_labels = dict(labels or {})
+        if profile is not DaytonaEnvironmentProfile.SESSION:
+            effective_labels.setdefault("fleet.profile", profile.value)
         params = CreateSandboxFromSnapshotParams(
-            snapshot=self._sandbox_spec.snapshot,
+            snapshot=spec.snapshot,
             language="python",
             os_user="daytona",
-            labels=labels or {},
+            labels=effective_labels,
             volumes=volumes,
             ephemeral=ephemeral,
             network_block_all=network_block_all,
@@ -202,7 +248,10 @@ class LiveDaytonaPlatform:
             auto_stop_interval=auto_stop_interval,
             auto_delete_interval=auto_delete_interval,
         )
-        return await self._client.create(params)
+        try:
+            return await self._client.create(params)
+        except Exception as exc:
+            raise map_provider_error(exc) from exc
 
     async def delete(self, sandbox_id: Any) -> None:
         """Delete through Daytona's async client, treating absence as success."""
@@ -225,8 +274,13 @@ class LiveDaytonaPlatform:
         Parameters:
                 sandbox_id (str): The identifier of the sandbox to start.
         """
-        sandbox = await self._client.get(sandbox_id)
-        await self._client.start(sandbox)
+        try:
+            sandbox = await self._client.get(sandbox_id)
+            await self._client.start(sandbox)
+        except Exception as exc:
+            if is_sandbox_not_found(exc):
+                return
+            raise map_provider_error(exc) from exc
 
     async def stop(self, sandbox_id: str, *, timeout: float = 60, force: bool = False) -> None:
         """
@@ -244,11 +298,16 @@ class LiveDaytonaPlatform:
         except Exception as exc:
             if is_sandbox_not_found(exc):
                 return
-            raise
+            raise map_provider_error(exc) from exc
         try:
             await self._client.stop(sandbox, timeout=timeout)
-        except Exception:
+        except Exception as exc:
             if force:
-                await self._client.delete(sandbox)
+                try:
+                    await self._client.delete(sandbox)
+                except Exception as delete_exc:
+                    if is_sandbox_not_found(delete_exc):
+                        return
+                    raise map_provider_error(delete_exc) from delete_exc
             else:
-                raise
+                raise map_provider_error(exc) from exc

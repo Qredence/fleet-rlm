@@ -37,14 +37,17 @@ from fleet_rlm.chat.preparation import (
 from fleet_rlm.chat.run_lifecycle import ClaimedRun
 from fleet_rlm.config.settings import Settings
 from fleet_rlm.daytona._lease import RootSessionLease
-from fleet_rlm.daytona.broker import SyncBridgeDispatcher, sync_sandbox
+from fleet_rlm.daytona.broker import DaytonaHttpToolBroker, SyncBridgeDispatcher, sync_sandbox
 from fleet_rlm.daytona.errors import is_sandbox_not_found
+from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter
+from fleet_rlm.daytona.native_interpreter import NativeInterpreterBackend
 from fleet_rlm.daytona.platform import (
     LiveDaytonaPlatform,
     LiveDaytonaVolumeClient,
     build_daytona_client,
 )
 from fleet_rlm.daytona.provisioning import (
+    DaytonaEnvironmentProfile,
     DaytonaSandboxSpec,
     sandbox_spec_from_settings,
     volume_config_from_settings,
@@ -1378,6 +1381,59 @@ class _DaytonaEnvironmentProvider:
                 is_authorized=lambda: not run.authority.revoked,
             )
 
+            async def native_interpreter_factory(*, deadline: float) -> tuple[Any, Callable[[], Awaitable[Any]]]:
+                """Create one isolated Daytona interpreter context for feasibility verification.
+
+                This is deliberately not a policy-selectable production path.
+                A native context has no certified remote subprocess stop
+                contract, so cleanup taints and closes the exact root owner
+                before the preparation gate can be released.
+                """
+                remaining = deadline - asyncio.get_running_loop().time()
+                if remaining <= 0:
+                    raise TimeoutError("native interpreter context acquisition timed out")
+                context = await sandbox.code_interpreter.create_context(
+                    cwd="/home/daytona",
+                    request_timeout=remaining,
+                )
+                sync_view = sync_sandbox(sandbox, main_loop, getattr(self.resources, "dispatcher", None))
+                gateway = DaytonaHttpToolBroker(sandbox=sync_view)
+                try:
+                    backend = NativeInterpreterBackend(
+                        service=sync_view.code_interpreter,
+                        context=context,
+                        gateway=gateway,
+                        deadline=deadline,
+                        max_output_bytes=self.settings.rlm_max_execution_output_chars,
+                        # The synchronous adapter can only fence reuse. The
+                        # async owner below performs the actual root close and
+                        # confirms the provider lifecycle boundary.
+                        contain=lambda key=key: self._mark_provider_root_tainted(key),
+                        is_authorized=lambda: not run.authority.revoked,
+                        cleanup_timeout_seconds=max(1.0, min(30.0, remaining)),
+                    )
+                    interpreter = DaytonaCodeInterpreter(
+                        backend=backend,
+                        execution_output_cap=self.settings.rlm_max_execution_output_chars,
+                    )
+                except BaseException:
+                    with contextlib.suppress(BaseException):
+                        await sandbox.code_interpreter.delete_context(context, request_timeout=remaining)
+                    raise
+
+                async def close_native_interpreter() -> None:
+                    try:
+                        await asyncio.to_thread(interpreter.shutdown, strict_broker_cleanup=True)
+                    finally:
+                        # Context deletion and gateway shutdown cannot certify
+                        # remote subprocess termination. Keep one owner: mark
+                        # this exact root generation unavailable and let its
+                        # existing Session lease close/quarantine it.
+                        self._mark_provider_root_tainted(key)
+                        await root_owner.close()
+
+                return interpreter, close_native_interpreter
+
             return RunEnvironment(
                 interpreter=lease.interpreter,
                 attachment_sink=sink,
@@ -1397,6 +1453,7 @@ class _DaytonaEnvironmentProvider:
                 history_transport=build_committed_session_history_for_claim(run),
                 mark_tainted=lambda key=key: self._mark_provider_root_tainted(key),
                 async_bridge=getattr(self.resources, "dispatcher", None),
+                native_interpreter_factory=native_interpreter_factory,
             )
         except BaseException:
             # The preparation gate proves that no earlier same-Session Turn
@@ -1658,9 +1715,25 @@ class DaytonaRuntimeResources:
     ) -> None:
         self.settings = resolve_settings(settings)
         self.sandbox_spec = sandbox_spec or sandbox_spec_from_settings(self.settings)
+        self.environment_specs: dict[DaytonaEnvironmentProfile, DaytonaSandboxSpec] = {
+            DaytonaEnvironmentProfile.SESSION: self.sandbox_spec,
+        }
+        if getattr(self.settings, "daytona_child_snapshot", None):
+            self.environment_specs[DaytonaEnvironmentProfile.SEMANTIC_CHILD] = sandbox_spec_from_settings(
+                self.settings,
+                DaytonaEnvironmentProfile.SEMANTIC_CHILD,
+            )
+        # WorkspaceChild deliberately reuses the Session image and resource
+        # identity, but remains an explicit profile at child-acquisition time.
+        self.environment_specs[DaytonaEnvironmentProfile.WORKSPACE_CHILD] = DaytonaSandboxSpec(
+            snapshot=self.sandbox_spec.snapshot,
+            python_version=self.sandbox_spec.python_version,
+            base_image=self.sandbox_spec.base_image,
+            profile=DaytonaEnvironmentProfile.WORKSPACE_CHILD,
+        )
         self.client = build_daytona_client(self.settings)
         self.dispatcher = dispatcher
-        self.platform = LiveDaytonaPlatform(self.client, self.sandbox_spec)
+        self.platform = LiveDaytonaPlatform(self.client, self.sandbox_spec, self.environment_specs)
         self.volume_client = LiveDaytonaVolumeClient(self.client)
         self.volume_config = volume_config_from_settings(self.settings)
         self.volume_paths = volume_paths_from_settings(self.settings)

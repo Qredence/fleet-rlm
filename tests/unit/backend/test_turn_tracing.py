@@ -470,6 +470,7 @@ def test_turn_trace_respects_expose_flag(monkeypatch: pytest.MonkeyPatch) -> Non
 
 
 def test_annotate_trace_io_updates_trace_request_response(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("fleet_rlm.observability.tracing._TRACE_CONTENT_ENABLED", True)
     calls = _install_fake_mlflow(monkeypatch)
 
     annotate_trace_io(
@@ -500,6 +501,7 @@ def test_annotate_trace_io_keeps_bounded_trace_previews(
     from fleet_rlm.observability import tracing
 
     monkeypatch.setattr(tracing, "_TRACE_CONTENT_MAX_CHARS", 256)
+    monkeypatch.setattr(tracing, "_TRACE_CONTENT_ENABLED", True)
     calls = _install_fake_mlflow(monkeypatch)
 
     annotate_trace_io(

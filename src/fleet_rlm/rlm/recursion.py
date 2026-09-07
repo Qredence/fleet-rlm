@@ -10,16 +10,21 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import contextvars
+import inspect
+import json
 import time
 from collections.abc import Callable, Mapping, Sequence
 from concurrent.futures import FIRST_EXCEPTION, Future, ThreadPoolExecutor, wait
+from concurrent.futures import CancelledError as FutureCancelledError
 from contextvars import Context, copy_context
 from dataclasses import dataclass, field
+from pathlib import PurePosixPath
 from threading import Event, Lock, RLock, Thread
 from typing import Any, Literal, NoReturn, Protocol, Self, TypeAlias
+from urllib.parse import unquote, urlsplit
 
 import dspy
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from fleet_rlm.chat.session_context import SessionContextManifest
 from fleet_rlm.config.settings import Settings
@@ -69,7 +74,7 @@ class ChildRuntimeLease(Protocol):
         ...
 
 
-ChildRuntimeFactory = Callable[[int], ChildRuntimeLease]
+ChildRuntimeFactory = Callable[..., ChildRuntimeLease]
 
 
 # ---------------------------------------------------------------------------
@@ -507,18 +512,18 @@ class RecursiveCallReservation:
 class RecursiveBatchError(RuntimeError):
     """Bounded all-or-nothing failure for one recursive batch."""
 
-    def __init__(self) -> None:
-        super().__init__("recursive child batch failed")
+    def __init__(self, message: str = "recursive child batch failed") -> None:
+        super().__init__(message)
 
 
 def run_reserved_batch(
     reservations: Sequence[RecursiveCallReservation],
     *,
-    execute: Callable[[RecursiveCallReservation, Event], str],
+    execute: Callable[[RecursiveCallReservation, Event], Any],
     deadline_monotonic: float,
     max_parallel: int,
-    on_retain_running: Callable[[set[Future[str]]], None],
-) -> list[str]:
+    on_retain_running: Callable[[set[Future[Any]]], None],
+) -> list[Any]:
     """Run reserved child work with bounded fan-out and input-order results.
 
     Preserves atomic submit failure retention, first-failure cancellation of
@@ -529,10 +534,10 @@ def run_reserved_batch(
     if not reservations:
         raise ValueError("reserved batch must not be empty")
     workers = min(max_parallel, len(reservations))
-    answers: list[str] = []
+    answers: list[Any] = []
     batch_cancelled = Event()
     pool = ThreadPoolExecutor(max_workers=workers, thread_name_prefix="fleet-rlm-child")
-    futures: list[Future[str]] = []
+    futures: list[Future[Any]] = []
     try:
         try:
             for reservation in reservations:
@@ -544,7 +549,7 @@ def run_reserved_batch(
                 def _run(
                     reserved: RecursiveCallReservation = reservation,
                     context: Context = ctx,
-                ) -> str:
+                ) -> Any:
                     return context.run(execute, reserved, batch_cancelled)
 
                 futures.append(pool.submit(_run))
@@ -579,7 +584,7 @@ def run_reserved_batch(
     return answers
 
 
-def _future_failures(futures: set[Future[str]]) -> list[BaseException]:
+def _future_failures(futures: set[Future[Any]]) -> list[BaseException]:
     failures: list[BaseException] = []
     for future in futures:
         if future.cancelled():
@@ -601,6 +606,180 @@ def _future_failures(futures: set[Future[str]]) -> list[BaseException]:
 # bounded Sub fallback. This is a product invariant owned here, not an
 # operator-facing policy knob.
 RLM_NATIVE_CHILD_DEPTH = 1
+_MAX_CAPSULE_BYTES = 50_000
+_MAX_CAPSULE_FRAGMENTS = 16
+_MAX_CAPSULE_REFERENCES = 32
+
+
+class SubproblemCapsule(BaseModel):
+    """Strict selected child input; never a copied Session or Workspace view.
+
+    The model is intentionally closed and frozen.  ``model_validate`` accepts
+    JSON arrays for tuple-shaped fields, while unknown keys and unsafe local
+    paths fail before a child reservation is admitted.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+    task: str = Field(min_length=1, max_length=_MAX_CAPSULE_BYTES)
+    fragments: tuple[str, ...] = Field(default=(), max_length=_MAX_CAPSULE_FRAGMENTS)
+    authorized_references: tuple[str, ...] = Field(default=(), max_length=_MAX_CAPSULE_REFERENCES)
+    expected_result_shape: str = Field(default="concise answer", min_length=1, max_length=2_000)
+    evidence_requirements: tuple[str, ...] = Field(default=(), max_length=16)
+    allocation_chars: int = Field(default=4_000, gt=0, le=_MAX_CAPSULE_BYTES)
+    # A selected-file digest is evidence metadata, not an instruction.  It is
+    # included only when a caller actually selected a local file.
+    selected_file_checksums: tuple[tuple[str, str], ...] = Field(default=(), max_length=_MAX_CAPSULE_REFERENCES)
+
+    @field_validator("fragments", "authorized_references", "evidence_requirements", mode="before")
+    @classmethod
+    def _normalize_text_collection(cls, value: object) -> tuple[str, ...]:
+        if value is None:
+            return ()
+        if isinstance(value, str) or not isinstance(value, (tuple, list)):
+            raise ValueError("capsule collections must be arrays of text")
+        return tuple(value)
+
+    @field_validator("selected_file_checksums", mode="before")
+    @classmethod
+    def _normalize_checksums(cls, value: object) -> tuple[tuple[str, str], ...]:
+        if value is None:
+            return ()
+        if not isinstance(value, (tuple, list)):
+            raise ValueError("capsule checksums must be an array")
+        normalized: list[tuple[str, str]] = []
+        for item in value:
+            if not isinstance(item, (tuple, list)) or len(item) != 2:
+                raise ValueError("capsule checksum entries must contain path and digest")
+            normalized.append((item[0], item[1]))
+        return tuple(normalized)
+
+    @model_validator(mode="after")
+    def _validate_selected_input(self) -> SubproblemCapsule:
+        values = (*self.fragments, *self.authorized_references, *self.evidence_requirements)
+        if not self.task.strip() or not self.expected_result_shape.strip():
+            raise ValueError("capsule fields must contain non-empty text")
+        if any(not isinstance(value, str) or not value.strip() for value in values):
+            raise ValueError("capsule fields must contain non-empty text")
+        for reference in self.authorized_references:
+            _validate_capsule_reference(reference)
+        for path, digest in self.selected_file_checksums:
+            _validate_capsule_path(path)
+            if not isinstance(digest, str) or len(digest) != 64:
+                raise ValueError("capsule file checksum must be a SHA-256 hex digest")
+            try:
+                int(digest, 16)
+            except ValueError:
+                raise ValueError("capsule file checksum must be a SHA-256 hex digest") from None
+        if len(self.render().encode("utf-8")) > min(self.allocation_chars, _MAX_CAPSULE_BYTES):
+            raise ValueError("capsule serialized bytes exceed its allocation")
+        return self
+
+    @classmethod
+    def from_mapping(cls, value: Mapping[str, object]) -> SubproblemCapsule:
+        """Parse one strict mapping without silently dropping unknown fields."""
+        if not isinstance(value, Mapping):
+            raise ValueError("capsule must be a JSON object")
+        return cls.model_validate(value)
+
+    @property
+    def serialized_bytes(self) -> int:
+        """Return the deterministic UTF-8 size admitted by this capsule."""
+        return len(self.render().encode("utf-8"))
+
+    def render(self) -> str:
+        """Serialize selected untrusted inputs deterministically."""
+        payload = {
+            "task": self.task.strip(),
+            "selected_fragments": list(self.fragments),
+            "authorized_references": list(self.authorized_references),
+            "expected_result_shape": self.expected_result_shape.strip(),
+            "evidence_requirements": list(self.evidence_requirements),
+            "selected_file_checksums": [
+                {"path": path, "sha256": digest.lower()} for path, digest in self.selected_file_checksums
+            ],
+        }
+        return json.dumps(payload, ensure_ascii=True, sort_keys=True, separators=(",", ":"))
+
+
+def _validate_capsule_path(value: object) -> None:
+    if not isinstance(value, str) or not value.strip() or "\x00" in value:
+        raise ValueError("capsule reference path is invalid")
+    path = PurePosixPath(value)
+    if path.is_absolute() or ".." in path.parts:
+        raise ValueError("capsule reference path escapes its authorized scope")
+
+
+def _validate_capsule_reference(value: object) -> None:
+    if not isinstance(value, str) or not value.strip() or "\x00" in value:
+        raise ValueError("capsule reference is invalid")
+    parsed = urlsplit(value)
+    if parsed.scheme:
+        if (
+            parsed.scheme.lower() != "artifact"
+            or not parsed.netloc
+            or parsed.username is not None
+            or parsed.password is not None
+            or parsed.port is not None
+            or parsed.query
+            or parsed.fragment
+        ):
+            raise ValueError("capsule reference is outside its authorized scope")
+        authority = unquote(parsed.netloc)
+        path = unquote(parsed.path)
+        if authority in {".", ".."} or "/" in authority or "\\" in authority:
+            raise ValueError("capsule reference is outside its authorized scope")
+        if path:
+            _validate_capsule_path(path.lstrip("/"))
+        return
+    _validate_capsule_path(value)
+
+
+@dataclass(frozen=True, slots=True)
+class CapsuleResult:
+    """Bounded child evidence returned to the Root, which remains publisher."""
+
+    status: Literal["complete"]
+    answer: str
+    source_references: tuple[str, ...]
+    uncertainty: str
+    usage: Mapping[str, int]
+    outcome_status: Literal["completed", "failed", "timeout", "cancelled"] = "completed"
+    verified_observations: tuple[str, ...] = ()
+    error_category: str | None = None
+
+
+CapsuleStatus: TypeAlias = Literal["completed", "failed", "timeout", "cancelled"]
+
+
+@dataclass(frozen=True, slots=True)
+class ChildOutcome:
+    """Bounded per-child evidence; private trajectories never cross this DTO."""
+
+    status: CapsuleStatus
+    answer: str = ""
+    source_references: tuple[str, ...] = ()
+    verified_observations: tuple[str, ...] = ()
+    uncertainty: str = ""
+    usage: Mapping[str, int] = field(default_factory=dict)
+    error_category: str | None = None
+    selected_input_bytes: int = 0
+    result_bytes: int = 0
+
+    def as_dict(self) -> dict[str, object]:
+        """Return the public JSON-shaped representation of this outcome."""
+        return {
+            "status": self.status,
+            "answer": self.answer,
+            "source_references": list(self.source_references),
+            "verified_observations": list(self.verified_observations),
+            "uncertainty": self.uncertainty,
+            "usage": dict(self.usage),
+            "error_category": self.error_category,
+            "selected_input_bytes": self.selected_input_bytes,
+            "result_bytes": self.result_bytes,
+        }
+
 
 # Wait bound for detached child workers retained after batch settlement. A
 # provider, LM call, or interpreter that never returns becomes a cleanup
@@ -616,6 +795,137 @@ _PENDING_BATCH_WAIT_TIMEOUT_S = 60.0
 _CHILD_FENCE_SETTLE_GRACE_S = 5.0
 
 
+class ChildAsyncScheduler:
+    """Application-owned async workers for native child invocations.
+
+    DSPy's ``RLM.acall`` is asynchronous, while the interpreter contract is
+    synchronous.  A child therefore needs a thread whose event loop can await
+    the RLM without blocking Fleet's serving loop.  The old implementation
+    created and destroyed one event loop for every child.  This scheduler
+    creates a bounded set of long-lived loops once and routes child futures to
+    them; callers retain the returned ``concurrent.futures.Future`` as the
+    ownership/cancellation token.
+    """
+
+    def __init__(self, max_workers: int = 1) -> None:
+        if not isinstance(max_workers, int) or isinstance(max_workers, bool) or max_workers <= 0:
+            raise ValueError("child scheduler worker count must be a positive integer")
+        self._lock = Lock()
+        self._closed = False
+        self._next = 0
+        self._loops: list[asyncio.AbstractEventLoop | None] = [None] * max_workers
+        self._threads: list[Thread] = []
+        self._ready: list[Event] = []
+        self._tasks: dict[Future[Any], tuple[asyncio.AbstractEventLoop, asyncio.Task[Any]]] = {}
+        self._cancel_requested: set[Future[Any]] = set()
+        for index in range(max_workers):
+            ready = Event()
+            thread = Thread(
+                target=self._run_loop,
+                args=(index, ready),
+                name=f"fleet-rlm-child-scheduler-{index}",
+                daemon=True,
+            )
+            self._threads.append(thread)
+            self._ready.append(ready)
+            thread.start()
+        for ready in self._ready:
+            if not ready.wait(5.0):
+                self.shutdown()
+                raise RuntimeError("child scheduler failed to start")
+
+    def _run_loop(self, index: int, ready: Event) -> None:
+        loop = asyncio.new_event_loop()
+        with self._lock:
+            self._loops[index] = loop
+        asyncio.set_event_loop(loop)
+        ready.set()
+        try:
+            loop.run_forever()
+            pending = asyncio.all_tasks(loop)
+            for task in pending:
+                task.cancel()
+            if pending:
+                loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
+        finally:
+            asyncio.set_event_loop(None)
+            loop.close()
+
+    def submit(self, awaitable: Any) -> Future[Any]:
+        """Submit one awaitable to a scheduler loop and return its ownership token."""
+        with self._lock:
+            if self._closed:
+                if inspect.iscoroutine(awaitable):
+                    awaitable.close()
+                raise RuntimeError("child scheduler is closed")
+            loops = tuple(loop for loop in self._loops if loop is not None and not loop.is_closed())
+            if not loops:
+                if inspect.iscoroutine(awaitable):
+                    awaitable.close()
+                raise RuntimeError("child scheduler has no running loop")
+            loop = loops[self._next % len(loops)]
+            self._next += 1
+        future_box: list[Future[Any]] = []
+
+        async def run_owned() -> Any:
+            task = asyncio.current_task()
+            if task is None:  # pragma: no cover - asyncio always supplies a current task
+                raise RuntimeError("child scheduler task was not created")
+            # The outer Future is assigned immediately after submission.  Yield
+            # once so cancellation can race safely with task registration.
+            while not future_box:
+                await asyncio.sleep(0)
+            outer = future_box[0]
+            with self._lock:
+                self._tasks[outer] = (loop, task)
+                requested = outer in self._cancel_requested
+                if requested:
+                    self._cancel_requested.discard(outer)
+            if requested:
+                if inspect.iscoroutine(awaitable):
+                    awaitable.close()
+                task.cancel()
+                raise asyncio.CancelledError
+            try:
+                return await awaitable
+            finally:
+                with self._lock:
+                    self._tasks.pop(outer, None)
+                    self._cancel_requested.discard(outer)
+
+        future = asyncio.run_coroutine_threadsafe(run_owned(), loop)
+        future_box.append(future)
+        return future
+
+    def cancel(self, future: Future[Any]) -> bool:
+        """Request cooperative cancellation without cancelling the ownership token."""
+        with self._lock:
+            owned = self._tasks.get(future)
+            if owned is None:
+                if future.done():
+                    return False
+                self._cancel_requested.add(future)
+                return True
+            loop, task = owned
+        if not task.done() and not loop.is_closed():
+            loop.call_soon_threadsafe(task.cancel)
+            return True
+        return False
+
+    def shutdown(self, *, timeout: float = 5.0) -> None:
+        """Stop scheduler loops after their owned futures have been settled."""
+        with self._lock:
+            if self._closed:
+                return
+            self._closed = True
+            loops = tuple(loop for loop in self._loops if loop is not None and not loop.is_closed())
+        for loop in loops:
+            loop.call_soon_threadsafe(loop.stop)
+        deadline = time.monotonic() + max(0.0, timeout)
+        for thread in self._threads:
+            thread.join(timeout=max(0.0, deadline - time.monotonic()))
+
+
 def _invoke_async_child(
     child_acall: Callable[..., Any],
     interpreter: Any,
@@ -625,15 +935,16 @@ def _invoke_async_child(
     deadline: float,
     retain_pending: Callable[[Future[Any]], None],
     extra_inputs: Mapping[str, Any] | None = None,
+    scheduler: ChildAsyncScheduler | None = None,
 ) -> Any:
     """Await a native child under the one absolute Turn deadline.
 
     ``RLM`` executes the synchronous recursive Tool either on the parent
     worker's running event loop or from a plain synchronous caller.  Either
-    way, the child invocation runs on a dedicated private loop thread so the
-    synchronous Tool never blocks the parent loop, and the join is fenced by
-    the remaining Turn deadline (p39b): a child that never completes cannot
-    hold the Tool past the deadline.
+    way, the child invocation is submitted to the application-owned bounded
+    scheduler so the synchronous Tool never blocks the parent loop, and the
+    join is fenced by the remaining Turn deadline (p39b): a child that never
+    completes cannot hold the Tool past the deadline.
 
     When the fence fires, the child task receives one cooperative
     cancellation and is given a bounded grace window to unwind.  A child that
@@ -654,31 +965,9 @@ def _invoke_async_child(
     if remaining <= 0:
         raise TimeoutError("recursive child deadline exceeded")
 
-    context = contextvars.copy_context()
-    future: Future[Any] = Future()
-    loop_box: list[asyncio.AbstractEventLoop] = []
-    task_box: list[asyncio.Task[Any]] = []
-
-    def runner() -> Any:
-        loop = asyncio.new_event_loop()
-        loop_box.append(loop)
-        asyncio.set_event_loop(loop)
-        try:
-            task = loop.create_task(invoke())
-            task_box.append(task)
-            return loop.run_until_complete(task)
-        finally:
-            with contextlib.suppress(Exception):
-                loop.close()
-
-    def target() -> None:
-        try:
-            future.set_result(context.run(runner))
-        except BaseException as exc:
-            future.set_exception(exc)
-
-    thread = Thread(target=target, name="fleet-rlm-child", daemon=True)
-    thread.start()
+    if scheduler is None:
+        raise RuntimeError("recursive child scheduler is unavailable")
+    future = scheduler.submit(invoke())
     try:
         return future.result(timeout=remaining)
     except TimeoutError:
@@ -690,13 +979,9 @@ def _invoke_async_child(
             if child_error is not None:
                 raise child_error from None
 
-    # The deadline fired while the child was still running: request one
-    # cooperative cancellation on the child's private loop.
-    loop = loop_box[0] if loop_box else None
-    task = task_box[0] if task_box else None
-    if task is not None and not task.done() and loop is not None and not loop.is_closed():
-        with contextlib.suppress(RuntimeError):
-            loop.call_soon_threadsafe(task.cancel)
+    # The deadline fired while the child was still running.  Cancellation of
+    # the scheduler future propagates to the Task on its long-lived loop.
+    scheduler.cancel(future)
     try:
         future.result(timeout=_CHILD_FENCE_SETTLE_GRACE_S)
     except TimeoutError:
@@ -723,7 +1008,9 @@ class RecursiveRLMOptions:
     child_max_iters: int = 8
     child_max_llm_calls: int = 12
     child_max_output_chars: int = 4_000
-    max_parallel_children: int = 2
+    # A single worker is the safe default for a one-call reservation. Policy
+    # can raise this explicitly, but never above the global child-call limit.
+    max_parallel_children: int = 1
 
     def __post_init__(self) -> None:
         for name, value in (
@@ -738,6 +1025,8 @@ class RecursiveRLMOptions:
                 raise RLMConfigError(f"{name} must be a positive integer, got {value!r}")
         if self.max_parallel_children > 8:
             raise RLMConfigError("max_parallel_children must not exceed 8")
+        if self.max_parallel_children > self.max_calls:
+            raise RLMConfigError("max_parallel_children must not exceed max_calls")
 
 
 def recursive_rlm_options(settings: Settings) -> RecursiveRLMOptions:
@@ -807,7 +1096,7 @@ class _RecursiveState:
     depth_fallback_count: int = 0
     termination_modes: list[str] = field(default_factory=list)
     fatal_cleanup_error: BaseException | None = None
-    pending_batch_futures: list[Future[str]] = field(default_factory=list, repr=False)
+    pending_batch_futures: list[Future[Any]] = field(default_factory=list, repr=False)
     metrics: DelegationMetrics = field(default_factory=DelegationMetrics, repr=False)
 
 
@@ -957,6 +1246,7 @@ class RecursiveRLMExecutor:
         observer: ToolObserver | None = None,
         is_authorized: Callable[[], bool] | None = None,
         snapshot: RecursiveSessionSnapshot | None = None,
+        scheduler: ChildAsyncScheduler | None = None,
     ) -> None:
         """
         Configure a bounded recursive RLM executor.
@@ -972,6 +1262,7 @@ class RecursiveRLMExecutor:
             is_authorized (Callable[[], bool] | None): Optional authorization check for recursive execution.
             snapshot (RecursiveSessionSnapshot | None): Immutable Session material delegated to
                 every native child (P47.4). When absent, children receive only the delegated prompt.
+            scheduler (ChildAsyncScheduler | None): Application-owned scheduler for async child RLM calls.
         """
         self._models = models
         self._options = options
@@ -985,7 +1276,10 @@ class RecursiveRLMExecutor:
         self._observer = observer
         self._is_authorized = is_authorized
         self._snapshot = snapshot
+        self._owns_scheduler = scheduler is None
+        self._scheduler = scheduler or ChildAsyncScheduler(max_workers=options.max_parallel_children)
         self._last_completion: dict[str, object] | None = None
+        self._last_capsule_outcomes: tuple[ChildOutcome, ...] = ()
         raw_tool = dspy.Tool(
             self._call,
             name="rlm_query",
@@ -1023,6 +1317,43 @@ class RecursiveRLMExecutor:
             )
         else:
             self._batched_tool = raw_batch_tool
+        raw_capsule_tool = dspy.Tool(
+            self._call_capsule,
+            name="rlm_query_capsule",
+            desc=(
+                "Solve one selected-input subproblem. Provide task, selected fragments, authorized references, "
+                "expected result shape, evidence requirements and a bounded allocation. Do not pass Session history."
+            ),
+        )
+        if observer is not None or is_authorized is not None:
+            self._capsule_tool = observe_tool(
+                raw_capsule_tool,
+                observer or (lambda _detail: None),
+                ToolEventView(input_projection=self._capsule_input, output_projection=self._recursive_output),
+                is_authorized=is_authorized,
+            )
+        else:
+            self._capsule_tool = raw_capsule_tool
+        raw_capsule_batch_tool = dspy.Tool(
+            self._call_capsules_batched,
+            name="rlm_query_capsules_batched",
+            desc=(
+                "Solve multiple independent selected-input capsules with isolated child RLMs. "
+                "Inputs and outputs preserve order; the initial contract is all-or-nothing."
+            ),
+        )
+        if observer is not None or is_authorized is not None:
+            self._capsule_batch_tool = observe_tool(
+                raw_capsule_batch_tool,
+                observer or (lambda _detail: None),
+                ToolEventView(
+                    input_projection=self._capsule_batch_input,
+                    output_projection=self._recursive_batch_output,
+                ),
+                is_authorized=is_authorized,
+            )
+        else:
+            self._capsule_batch_tool = raw_capsule_batch_tool
 
     @property
     def tool(self) -> dspy.Tool:
@@ -1033,6 +1364,21 @@ class RecursiveRLMExecutor:
     def batched_tool(self) -> dspy.Tool:
         """Return the Root-only batched recursive Tool."""
         return self._batched_tool
+
+    @property
+    def capsule_tool(self) -> dspy.Tool:
+        """Return the strict selected-input recursive tool for Root programs."""
+        return self._capsule_tool
+
+    @property
+    def capsule_batch_tool(self) -> dspy.Tool:
+        """Return the ordered strict selected-input batch Tool."""
+        return self._capsule_batch_tool
+
+    @property
+    def last_capsule_outcomes(self) -> tuple[ChildOutcome, ...]:
+        """Return bounded outcomes from the most recent capsule batch."""
+        return self._last_capsule_outcomes
 
     @property
     def metrics(self) -> DelegationMetrics:
@@ -1051,6 +1397,219 @@ class RecursiveRLMExecutor:
                 depth_fallback_count=self._state.depth_fallback_count,
                 termination_modes=tuple(self._state.termination_modes),
             )
+
+    def execute_capsule(self, capsule: SubproblemCapsule) -> CapsuleResult:
+        """Run selected child input and return bounded evidence to the Root.
+
+        The compatibility ``rlm_query`` API can still use a prepared Session
+        snapshot. A capsule must not: construct a narrow view that shares the
+        run-scoped reservation/budget/cleanup owners but has no snapshot to
+        inject into the child signature.
+        """
+        if not isinstance(capsule, SubproblemCapsule):
+            raise TypeError("capsule must be a SubproblemCapsule")
+        rendered = capsule.render()
+        if capsule.serialized_bytes > self._options.max_prompt_chars:
+            raise ValueError("capsule exceeds recursive prompt bound")
+        before = self._metrics.snapshot()
+        capsule_executor = RecursiveRLMExecutor(
+            models=self._models,
+            options=self._options,
+            child_runtime_factory=self._child_runtime_factory,
+            deadline=self._deadline,
+            depth=self._depth,
+            state=self._state,
+            metrics=self._metrics,
+            observer=self._observer,
+            is_authorized=self._is_authorized,
+            snapshot=None,
+            scheduler=self._scheduler,
+        )
+        answer = capsule_executor._call_with_profile(rendered, child_profile="semantic-child")
+        if len(answer.encode("utf-8")) > self._options.child_max_output_chars:
+            raise RLMConfigError("capsule result exceeds child result bound")
+        after = self._metrics.snapshot()
+        return CapsuleResult(
+            status="complete",
+            answer=answer,
+            source_references=capsule.authorized_references,
+            uncertainty="child evidence is untrusted until Root verification",
+            usage={
+                "child_calls": max(0, after.recursive_children_completed - before.recursive_children_completed),
+                "llm_calls": max(
+                    0,
+                    (after.child_root_lm_calls_depth_1 + after.child_sub_lm_calls_depth_1)
+                    - (before.child_root_lm_calls_depth_1 + before.child_sub_lm_calls_depth_1),
+                ),
+            },
+            outcome_status="completed",
+        )
+
+    def execute_capsule_outcome(self, capsule: SubproblemCapsule) -> ChildOutcome:
+        """Execute one capsule and classify ordinary child failures safely.
+
+        Authorization, cancellation, and cleanup failures deliberately remain
+        fatal to the parent.  Provider/semantic failures that settled inside
+        their owned child boundary become typed evidence instead of leaking a
+        provider exception or an unbounded traceback into the Root response.
+        """
+        if not isinstance(capsule, SubproblemCapsule):
+            raise TypeError("capsule must be a SubproblemCapsule")
+        try:
+            result = self.execute_capsule(capsule)
+        except asyncio.CancelledError:
+            raise
+        except FutureCancelledError:
+            # A cancellation of the ownership Future is a typed child outcome;
+            # asyncio task cancellation remains fatal above (P6B.08).
+            return ChildOutcome(
+                status="cancelled",
+                source_references=capsule.authorized_references,
+                uncertainty="child execution was cancelled before completion",
+                error_category="cancelled",
+                selected_input_bytes=capsule.serialized_bytes,
+            )
+        except (ChildRuntimeAuthorizationError, ChildRuntimeCleanupError):
+            raise
+        except TimeoutError:
+            return ChildOutcome(
+                status="timeout",
+                source_references=capsule.authorized_references,
+                uncertainty="child did not settle before the shared deadline",
+                error_category="timeout",
+                selected_input_bytes=capsule.serialized_bytes,
+            )
+        except Exception as exc:
+            return ChildOutcome(
+                status="failed",
+                source_references=capsule.authorized_references,
+                uncertainty="child evidence is unavailable",
+                error_category=_recursive_failure_category(exc),
+                selected_input_bytes=capsule.serialized_bytes,
+            )
+        return ChildOutcome(
+            status="completed",
+            answer=result.answer,
+            source_references=result.source_references,
+            verified_observations=result.verified_observations,
+            uncertainty=result.uncertainty,
+            usage=result.usage,
+            error_category=result.error_category,
+            selected_input_bytes=capsule.serialized_bytes,
+            result_bytes=len(result.answer.encode("utf-8")),
+        )
+
+    def _call_capsule(
+        self,
+        task: str,
+        fragments: list[str] | None = None,
+        authorized_references: list[str] | None = None,
+        expected_result_shape: str = "concise answer",
+        evidence_requirements: list[str] | None = None,
+        allocation_chars: int = 4_000,
+        selected_file_checksums: list[list[str]] | None = None,
+    ) -> dict[str, object]:
+        """Tool-shaped adapter that rejects undeclared child input fields."""
+        capsule = SubproblemCapsule(
+            task=task,
+            fragments=tuple(fragments or ()),
+            authorized_references=tuple(authorized_references or ()),
+            expected_result_shape=expected_result_shape,
+            evidence_requirements=tuple(evidence_requirements or ()),
+            allocation_chars=allocation_chars,
+            selected_file_checksums=tuple(tuple(item) for item in (selected_file_checksums or ())),
+        )
+        outcome = self.execute_capsule_outcome(capsule)
+        payload = outcome.as_dict()
+        payload["status"] = "complete" if outcome.status == "completed" else outcome.status
+        return payload
+
+    def _call_capsules_batched(self, capsules: list[Mapping[str, object]]) -> list[dict[str, object]]:
+        """Run selected-input capsules in order with atomic admission.
+
+        The scheduler replacement intentionally keeps the legacy all-or-nothing
+        result policy: every capsule is admitted up front, and no sibling
+        evidence is returned when one ordinary child fails.  The typed outcome
+        records remain available through :attr:`last_capsule_outcomes` for a
+        later explicitly read-only partial-result policy.
+        """
+        if not isinstance(capsules, list):
+            raise ValueError("rlm_query_capsules_batched capsules must be a list")
+        if not capsules:
+            raise ValueError("rlm_query_capsules_batched capsules must not be empty")
+        normalized = tuple(SubproblemCapsule.from_mapping(item) for item in capsules)
+        if time.monotonic() >= self._deadline:
+            raise TimeoutError("recursive call deadline exceeded")
+        self._ensure_authorized()
+        self._ensure_no_pending_batch_workers()
+        self._metrics.record_recursive_batch()
+        reservations = self._begin_batch(tuple(capsule.render() for capsule in normalized))
+        errors: dict[int, BaseException] = {}
+
+        def execute(
+            reservation: RecursiveCallReservation,
+            batch_cancelled: Event,
+        ) -> ChildOutcome:
+            capsule = normalized[reservation.call_index - reservations[0].call_index]
+            try:
+                answer = self._run_reserved_call(
+                    reservation,
+                    batch_cancelled,
+                    child_profile="semantic-child",
+                )
+            except asyncio.CancelledError:
+                raise
+            except (ChildRuntimeAuthorizationError, ChildRuntimeCleanupError):
+                raise
+            except TimeoutError as exc:
+                errors[reservation.call_index] = exc
+                return ChildOutcome(
+                    status="timeout",
+                    source_references=capsule.authorized_references,
+                    uncertainty="child did not settle before the shared deadline",
+                    error_category="timeout",
+                    selected_input_bytes=capsule.serialized_bytes,
+                )
+            except Exception as exc:
+                errors[reservation.call_index] = exc
+                return ChildOutcome(
+                    status="failed",
+                    source_references=capsule.authorized_references,
+                    uncertainty="child evidence is unavailable",
+                    error_category=_recursive_failure_category(exc),
+                    selected_input_bytes=capsule.serialized_bytes,
+                )
+            return ChildOutcome(
+                status="completed",
+                answer=answer,
+                source_references=capsule.authorized_references,
+                uncertainty="child evidence is untrusted until Root verification",
+                usage={"child_calls": 1},
+                selected_input_bytes=capsule.serialized_bytes,
+                result_bytes=len(answer.encode("utf-8")),
+            )
+
+        outcomes = run_reserved_batch(
+            reservations,
+            execute=execute,
+            deadline_monotonic=self._deadline,
+            max_parallel=self._options.max_parallel_children,
+            on_retain_running=self._retain_pending_batch_futures,
+        )
+        self._last_capsule_outcomes = tuple(outcomes)
+        self.raise_if_cleanup_failed()
+        failed_index, failed = next(
+            ((index, outcome) for index, outcome in enumerate(outcomes) if outcome.status != "completed"),
+            (None, None),
+        )
+        if failed is not None:
+            assert failed_index is not None
+            cause = errors.get(reservations[failed_index].call_index)
+            error = RecursiveBatchError("recursive capsule batch did not complete")
+            if cause is not None:
+                raise error from cause
+            raise error
+        return [outcome.as_dict() for outcome in outcomes]
 
     def raise_if_cleanup_failed(self) -> None:
         """Raise a runtime error when recursive child cleanup has failed."""
@@ -1074,36 +1633,40 @@ class RecursiveRLMExecutor:
         the sibling does.  Run cleanup calls this blocking seam off the event
         loop before releasing the parent Run resources.
         """
-        wait_deadline = time.monotonic() + _PENDING_BATCH_WAIT_TIMEOUT_S
-        while True:
-            with self._state.lock:
-                pending = tuple(future for future in self._state.pending_batch_futures if not future.done())
-            if not pending:
-                break
-            remaining = max(0.0, wait_deadline - time.monotonic())
-            _, still_pending = wait(pending, timeout=remaining)
-            if not still_pending:
-                continue
-            with self._state.lock:
-                if self._state.fatal_cleanup_error is None:
-                    self._state.fatal_cleanup_error = TimeoutError("recursive child worker quarantine timed out")
-            raise ChildRuntimeCleanupError("recursive child cleanup failed") from self._state.fatal_cleanup_error
+        try:
+            wait_deadline = time.monotonic() + _PENDING_BATCH_WAIT_TIMEOUT_S
+            while True:
+                with self._state.lock:
+                    pending = tuple(future for future in self._state.pending_batch_futures if not future.done())
+                if not pending:
+                    break
+                remaining = max(0.0, wait_deadline - time.monotonic())
+                _, still_pending = wait(pending, timeout=remaining)
+                if not still_pending:
+                    continue
+                with self._state.lock:
+                    if self._state.fatal_cleanup_error is None:
+                        self._state.fatal_cleanup_error = TimeoutError("recursive child worker quarantine timed out")
+                raise ChildRuntimeCleanupError("recursive child cleanup failed") from self._state.fatal_cleanup_error
 
-        # A Daytona factory adopts timed-out provider acquisitions so a late
-        # Sandbox/permit cannot be orphaned.  Keep that ownership under the
-        # same cleanup boundary when the optional hook is available.
-        factory_wait_owned = getattr(self._child_runtime_factory, "wait_owned", None)
-        if callable(factory_wait_owned):
-            factory_wait_owned()
+            # A Daytona factory adopts timed-out provider acquisitions so a late
+            # Sandbox/permit cannot be orphaned.  Keep that ownership under the
+            # same cleanup boundary when the optional hook is available.
+            factory_wait_owned = getattr(self._child_runtime_factory, "wait_owned", None)
+            if callable(factory_wait_owned):
+                factory_wait_owned()
+        finally:
+            if self._owns_scheduler:
+                self._scheduler.shutdown()
 
-    def _retain_pending_batch_futures(self, futures: set[Future[str]]) -> None:
+    def _retain_pending_batch_futures(self, futures: set[Future[Any]]) -> None:
         pending = [future for future in futures if not future.done()]
         if not pending:
             return
         with self._state.lock:
             self._state.pending_batch_futures.extend(pending)
 
-        def settled(future: Future[str]) -> None:
+        def settled(future: Future[Any]) -> None:
             if not future.cancelled():
                 with contextlib.suppress(BaseException):
                     future.exception()
@@ -1128,6 +1691,33 @@ class RecursiveRLMExecutor:
         return {
             "prompt_count": len(prompts),
             "prompt_chars": sum(len(item) for item in prompts if isinstance(item, str)),
+        }
+
+    @staticmethod
+    def _capsule_batch_input(arguments: Mapping[str, Any]) -> dict[str, int]:
+        capsules = arguments.get("capsules")
+        if not isinstance(capsules, list):
+            return {"capsule_count": 0, "selected_input_bytes": 0}
+        selected_bytes = 0
+        for value in capsules:
+            if isinstance(value, Mapping):
+                try:
+                    selected_bytes += SubproblemCapsule.from_mapping(value).serialized_bytes
+                except ValueError:
+                    continue
+        return {"capsule_count": len(capsules), "selected_input_bytes": selected_bytes}
+
+    @staticmethod
+    def _capsule_input(arguments: Mapping[str, Any]) -> dict[str, int]:
+        """Project capsule metadata without exporting selected content."""
+        return {
+            "fragment_count": len(arguments.get("fragments", ()))
+            if isinstance(arguments.get("fragments", ()), list)
+            else 0,
+            "reference_count": len(arguments.get("authorized_references", ()))
+            if isinstance(arguments.get("authorized_references", ()), list)
+            else 0,
+            "task_chars": len(arguments.get("task", "")) if isinstance(arguments.get("task"), str) else 0,
         }
 
     def _recursive_batch_output(self, result: Any) -> dict[str, object]:
@@ -1283,11 +1873,20 @@ class RecursiveRLMExecutor:
         )
         return answer, completion_outputs
 
-    def _acquire_child_lease(self, call_index: int) -> ChildRuntimeLease:
+    def _acquire_child_lease(self, call_index: int, *, profile: str) -> ChildRuntimeLease:
         if self._child_runtime_factory is None:
             raise RuntimeError("recursive child runtime is unavailable")
         self._ensure_authorized()
-        return self._child_runtime_factory(call_index)
+        factory = self._child_runtime_factory
+        try:
+            signature = inspect.signature(factory)
+        except (TypeError, ValueError):
+            return factory(call_index)
+        parameters = signature.parameters.values()
+        accepts_profile = "profile" in signature.parameters or any(
+            parameter.kind is inspect.Parameter.VAR_KEYWORD for parameter in parameters
+        )
+        return factory(call_index, profile=profile) if accepts_profile else factory(call_index)
 
     def _run_native_child(
         self,
@@ -1329,6 +1928,7 @@ class RecursiveRLMExecutor:
                 and (self._is_authorized is None or self._is_authorized())
             ),
             snapshot=self._snapshot,
+            scheduler=self._scheduler,
         )
         child_signature: type[dspy.Signature] = RecursiveSubtaskSignature
         child_inputs: dict[str, Any] = {}
@@ -1399,6 +1999,7 @@ class RecursiveRLMExecutor:
                     deadline=self._deadline,
                     retain_pending=lambda pending: self._retain_pending_batch_futures({pending}),
                     extra_inputs=child_inputs,
+                    scheduler=self._scheduler,
                 )
             else:
                 prediction = child(lease.interpreter, prompt=prompt)
@@ -1496,6 +2097,16 @@ class RecursiveRLMExecutor:
             raise cleanup_error
 
     def _call(self, prompt: str) -> str:
+        """Execute the public prompt-only recursive Tool.
+
+        ``child_profile`` is intentionally not part of this callable's
+        signature: DSPy reflects Tool signatures into the sandbox namespace,
+        and exposing an internal profile selector would let model code bypass
+        the capsule admission contract.
+        """
+        return self._call_with_profile(prompt, child_profile="workspace-child")
+
+    def _call_with_profile(self, prompt: str, *, child_profile: str) -> str:
         """
         Execute a bounded recursive query for the given prompt.
 
@@ -1516,12 +2127,14 @@ class RecursiveRLMExecutor:
         self._ensure_authorized()
         self._ensure_no_pending_batch_workers()
         reservation = self._begin_call(prompt)
-        return self._run_reserved_call(reservation)
+        return self._run_reserved_call(reservation, child_profile=child_profile)
 
     def _run_reserved_call(
         self,
         reservation: RecursiveCallReservation,
         batch_cancelled: Event | None = None,
+        *,
+        child_profile: str = "workspace-child",
     ) -> str:
         """Run one already-reserved child call and always settle its lease."""
         prompt = reservation.prompt
@@ -1550,7 +2163,7 @@ class RecursiveRLMExecutor:
                 answer, completion_outputs = self._run_depth_fallback(prompt, call)
             else:
                 cleanup_status = "not_acquired"
-                lease = self._acquire_child_lease(call.call_index)
+                lease = self._acquire_child_lease(call.call_index, profile=child_profile)
                 cleanup_status = "acquired"
                 self._metrics.child_started()
                 child_started = True
@@ -1640,6 +2253,10 @@ class RecursiveRLMExecutor:
 
 __all__ = [
     "RLM_NATIVE_CHILD_DEPTH",
+    "CapsuleResult",
+    "CapsuleStatus",
+    "ChildAsyncScheduler",
+    "ChildOutcome",
     "ChildRuntimeAuthorizationError",
     "ChildRuntimeCleanupError",
     "ChildRuntimeFactory",
@@ -1654,6 +2271,7 @@ __all__ = [
     "RecursiveSessionSnapshot",
     "RecursiveSessionSubtaskSignature",
     "RecursiveSubtaskSignature",
+    "SubproblemCapsule",
     "TokenUsageStatus",
     "build_recursive_session_snapshot",
     "normalize_lm_token_usage",
