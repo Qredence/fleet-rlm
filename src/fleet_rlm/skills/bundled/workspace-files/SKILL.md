@@ -7,7 +7,7 @@ metadata:
   affordances:
     - workspace.files
     - artifacts.publish
-allowed-tools: list_project_files stat_project_file read_project_text write_project_text delete_project_path edit_project_text list_workspace_files stat_workspace_file read_workspace_text write_workspace_text append_workspace_text delete_workspace_path edit_workspace_text publish_workspace_artifact read_attachment create_artifact
+allowed-tools: list_project_files stat_project_file read_project_text write_project_text delete_project_path edit_project_text list_workspace_files stat_workspace_file read_workspace_text read_workspace_text_batch write_workspace_text append_workspace_text delete_workspace_path edit_workspace_text publish_workspace_artifact read_attachment create_artifact
 
 resources:
   - path: references/filesystem-contract.md
@@ -59,6 +59,12 @@ Session Workspace paths are canonical POSIX-relative paths rooted at `.`. Sessio
 ```python
 listing = list_workspace_files(path=".", limit=100)
 page = read_workspace_text(path="notes/analysis.md", max_chars=10000)
+pages = read_workspace_text_batch(
+    requests=[
+        {"path": "notes/analysis.md", "max_chars": 5000},
+        {"path": "notes/summary.md", "max_chars": 5000},
+    ]
+)
 saved = write_workspace_text(path="notes/analysis.md", content=updated_text, overwrite=True)
 assert page["ok"] is True
 ```
@@ -68,6 +74,10 @@ UTF-8 page with `content`, `byte_size`, `next_cursor`, and `eof`. Continue with
 the opaque `next_cursor` until `eof` for large documents; never invent or edit a
 cursor. `list_workspace_files` is immediate-child and can continue with its
 `next_cursor`. Keep only the requested page in memory.
+
+For several independently selected files, use `read_workspace_text_batch` rather than a serial loop of
+`read_workspace_text` calls. A batch accepts 1–32 `{path, cursor?, max_chars?}` requests with a 32,000-character
+aggregate request bound and returns ordered per-item results. List or stat first; do not use it to crawl a Workspace.
 
 For exact write-size confirmation, compare metadata with
 `len(content.encode("utf-8"))` rather than character count.
