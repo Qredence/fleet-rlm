@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from threading import Event
+from threading import Event, get_ident
 from types import SimpleNamespace
 
 import pytest
@@ -51,6 +51,42 @@ async def test_stalled_flush_is_bounded_retained_and_reobserved():
 
 
 @pytest.mark.asyncio
+async def test_timed_out_flush_resets_when_background_export_finishes() -> None:
+    entered, release, reset_done = Event(), Event(), Event()
+    owner_threads: list[int] = []
+
+    def configure(_settings: Settings) -> bool:
+        owner_threads.append(get_ident())
+        return True
+
+    def flush() -> None:
+        entered.set()
+        release.wait(5)
+
+    def reset() -> None:
+        owner_threads.append(get_ident())
+        reset_done.set()
+
+    runtime = MLflowRuntime(
+        _settings(mlflow_trace_shutdown_seconds=0.02),
+        _configure=configure,
+        _flush=flush,
+        _reset=reset,
+    )
+    await runtime.start()
+    await runtime.close()
+    assert entered.is_set()
+    assert runtime.flush_pending
+
+    release.set()
+    await asyncio.wait_for(asyncio.to_thread(reset_done.wait, 1), timeout=2)
+
+    assert runtime.flush_pending is False
+    assert len(set(owner_threads)) == 1
+    assert runtime._reset_required is False
+
+
+@pytest.mark.asyncio
 async def test_runtime_tracks_inactive_starting_active_and_explicit_flush() -> None:
     calls: list[str] = []
     runtime = MLflowRuntime(_settings())
@@ -75,6 +111,34 @@ async def test_runtime_tracks_inactive_starting_active_and_explicit_flush() -> N
     assert calls == ["configure", "flush"]
     assert runtime.state is MLflowRuntimeState.CLOSED
     assert runtime.active is False
+
+
+@pytest.mark.asyncio
+async def test_runtime_resets_tracing_on_the_same_owner_after_flush() -> None:
+    calls: list[str] = []
+    owner_threads: list[int] = []
+    runtime = MLflowRuntime(_settings())
+
+    def configure(_settings: Settings) -> bool:
+        owner_threads.append(get_ident())
+        calls.append("configure")
+        return True
+
+    def reset() -> None:
+        owner_threads.append(get_ident())
+        calls.append("reset")
+
+    runtime._configure = configure
+    runtime._flush = lambda: calls.append("flush")
+    runtime._reset = reset
+
+    await runtime.start()
+    await runtime.close()
+
+    assert calls == ["configure", "flush", "reset"]
+    assert len(set(owner_threads)) == 1
+    assert runtime.state is MLflowRuntimeState.CLOSED
+    assert runtime.flush_pending is False
 
 
 @pytest.mark.asyncio

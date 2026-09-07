@@ -27,7 +27,7 @@ from dspy.utils.exceptions import AdapterParseError, LMTimeoutError
 
 from fleet_rlm.json_types import JsonValue
 from fleet_rlm.rlm.budget import DEFAULT_PARSE_RETRIES, AdapterBudget, TurnBudget
-from fleet_rlm.rlm.result import _safe_usage_entry, sanitize_public_text, truncate_public_text
+from fleet_rlm.rlm.result import _safe_usage_entry, truncate_public_text
 from fleet_rlm.rlm.submit_validation import is_submit_only_code
 
 logger = logging.getLogger(__name__)
@@ -902,9 +902,10 @@ def _trace_preview(value: object, *, max_chars: int = 900) -> str:
         str: Sanitized text representation of the value, limited to the configured length.
     """
     from fleet_rlm.observability.tracing import trace_preview_limit
+    from fleet_rlm.rlm.result import sanitize_trace_text
 
     limit = trace_preview_limit(max_chars)
-    return sanitize_public_text(str(value or ""), max_len=limit)
+    return sanitize_trace_text(str(value or ""), max_len=limit)
 
 
 def _trace_payload_text(value: object) -> str:

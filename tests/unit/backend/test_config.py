@@ -137,7 +137,7 @@ def test_default_mlflow_policy_uses_bounded_operational_trace_delivery() -> None
         "async_logging": True,
         "trace_sampling_ratio": 1.0,
         "trace_content_max_chars": 10000,
-        "trace_content_enabled": False,
+        "trace_content_enabled": True,
         "trace_export_queue_size": 128,
         "trace_export_workers": 2,
         "trace_export_retry_seconds": 10,

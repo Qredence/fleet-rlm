@@ -252,8 +252,10 @@ Tracing is fail-soft for execution, while sensitive export fails closed. Test
 actual exported inputs/outputs, exceptions, attributes, previews and artifacts
 for secret/path sentinels and redaction failure. When safe export cannot be
 established, suppress unsafe content/export rather than allowing raw fallback.
-Never export credentials or hidden provider reasoning. Approved restricted
-quality data is separate from content-free public engineering receipts.
+Never export credentials, tokens, connection strings, URLs, or private paths.
+Authorized MLflow traces may include bounded reasoning and system-prompt
+content under the explicit trace-content policy; public engineering receipts
+and Runtime Events remain separate from that content.
 
 Bound asynchronous export queues, retries and shutdown flush. Test outage,
 expired credentials, saturation and slow export without stalling heartbeat,

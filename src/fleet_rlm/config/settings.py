@@ -819,7 +819,7 @@ class Settings(BaseModel):
             editor="boolean",
             rank=110,
         ),
-    ] = Field(default=False, description="Permit bounded sanitized content in restricted engineering traces")
+    ] = Field(default=True, description="Permit bounded sanitized content in authorized engineering traces")
     mlflow_trace_export_queue_size: Annotated[
         int,
         FleetFieldPolicy(

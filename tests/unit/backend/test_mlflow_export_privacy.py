@@ -26,8 +26,19 @@ def export_span(monkeypatch):
     provider.add_span_processor(SimpleSpanProcessor(exporter))
     otel = provider.get_tracer("fleet-privacy-test").start_span("operation /private/sentinel")
     span = LiveSpan(otel, trace_id="tr-0123456789abcdef0123456789abcdef")
-    span.set_inputs({"api_key": "sentinel", "question": "permitted question"})
-    span.set_outputs({"answer": "permitted answer", "reasoning_content": "sentinel"})
+    span.set_inputs(
+        {
+            "api_key": "sentinel",
+            "question": "permitted question",
+            "system_prompt": "BEGIN SYSTEM\nUse the tool safely.",
+        }
+    )
+    span.set_outputs(
+        {
+            "answer": "permitted answer",
+            "reasoning_content": "I inspected the request before selecting a tool.",
+        }
+    )
     for index in range(80):
         span.set_attribute(f"field_{index}", "/private/sentinel")
     otel.record_exception(RuntimeError("token=sentinel"))
@@ -56,12 +67,43 @@ def test_exported_payload_excludes_exceptions_attachments_and_excess_attributes(
     assert "permitted answer" in json.dumps(payload)
 
 
+def test_exported_payload_keeps_bounded_reasoning_and_system_prompt_content(export_span):
+    _, finish = export_span
+    payload = finish()
+    serialized = json.dumps(payload)
+
+    assert "permitted question" in serialized
+    assert "permitted answer" in serialized
+    assert "Use the tool safely." in serialized
+    assert "I inspected the request before selecting a tool." in serialized
+
+
+def test_exported_payload_redacts_cloud_credentials_and_non_http_uris(export_span):
+    span, finish = export_span
+    span.set_inputs(
+        {
+            "trace": (
+                "AWS_ACCESS_KEY_ID=AKIA1234567890ABCDEF "
+                "AWS_SECRET_ACCESS_KEY=cloud-secret "
+                "ws://user:uri-secret@example.invalid/socket "
+                "s3://private-bucket/object file:///private/sentinel"
+            )
+        }
+    )
+
+    serialized = json.dumps(finish())
+    for secret in ("AKIA1234567890ABCDEF", "cloud-secret", "uri-secret", "private-bucket"):
+        assert secret not in serialized
+
+
 def test_operational_only_policy_suppresses_content(export_span, monkeypatch):
     _, finish = export_span
     monkeypatch.setattr(tracing, "_TRACE_CONTENT_ENABLED", False)
     payload = finish()
     assert "permitted question" not in json.dumps(payload)
     assert "permitted answer" not in json.dumps(payload)
+    assert "Use the tool safely." not in json.dumps(payload)
+    assert "I inspected the request before selecting a tool." not in json.dumps(payload)
     assert "tr-0123456789abcdef0123456789abcdef" in json.dumps(payload)
 
 
