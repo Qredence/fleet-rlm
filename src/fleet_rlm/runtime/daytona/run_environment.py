@@ -1379,6 +1379,7 @@ class _DaytonaEnvironmentProvider:
                 execution_timeout_s=self.settings.rlm_execution_timeout_s,
                 execution_output_cap=self.settings.rlm_max_execution_output_chars,
                 is_authorized=lambda: not run.authority.revoked,
+                semantic_child_available=bool(getattr(self.settings, "daytona_child_snapshot", None)),
             )
 
             async def native_interpreter_factory(*, deadline: float) -> tuple[Any, Callable[[], Awaitable[Any]]]:

@@ -850,6 +850,16 @@ class Settings(BaseModel):
             rank=113,
         ),
     ] = Field(default=10, ge=1, le=120)
+    mlflow_http_request_timeout_seconds: Annotated[
+        int,
+        FleetFieldPolicy(
+            toml_path="mlflow.http_request_timeout_seconds",
+            group="MLflow",
+            label="MLflow HTTP request timeout",
+            editor="number",
+            rank=115,
+        ),
+    ] = Field(default=10, ge=1, le=600)
     mlflow_trace_shutdown_seconds: Annotated[
         float,
         FleetFieldPolicy(
@@ -1099,7 +1109,7 @@ _ENVIRONMENT_REFERENCE_SPECS: tuple[EnvironmentReferenceSpec, ...] = (
         toml_path="daytona.child_snapshot_env",
         group="Daytona",
         label="SemanticChild snapshot environment variable",
-        rank=115,
+        rank=116,
         resolves_to="daytona_child_snapshot",
     ),
     EnvironmentReferenceSpec(

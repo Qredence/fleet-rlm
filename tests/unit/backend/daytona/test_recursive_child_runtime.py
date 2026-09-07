@@ -254,6 +254,85 @@ async def test_child_runtime_uses_sibling_volume_scope_and_strictly_cleans_only_
 
 
 @pytest.mark.asyncio
+async def test_semantic_child_lease_omits_workspace_volume_metadata_and_cleanup_scope(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    child_fs = _Fs({"/home/daytona/fleet/workspace-file.txt"})
+    child = _Sandbox("semantic-child", child_fs)
+    platform = _Platform(child)
+
+    class Interpreter:
+        def __init__(self, **_kwargs: object) -> None:
+            return None
+
+        def shutdown(self, *, strict_broker_cleanup: bool = False) -> None:
+            assert strict_broker_cleanup is True
+
+    monkeypatch.setattr(recursive_child_runtime, "DaytonaCodeInterpreter", Interpreter)
+    monkeypatch.setattr(recursive_child_runtime, "sandbox_backend", lambda sandbox, **_kwargs: sandbox)
+    factory = recursive_child_runtime.build_child_runtime_factory(
+        loop=asyncio.get_running_loop(),
+        platform=platform,
+        admission=DaytonaAdmission(max_active_leases=1),
+        volume_id="shared-volume",
+        mount_path="/home/daytona/fleet",
+        workspace_id=uuid4(),
+        run_id=uuid4(),
+        deadline=asyncio.get_running_loop().time() + 30,
+        execution_timeout_s=30,
+        execution_output_cap=1000,
+    )
+
+    lease = await asyncio.to_thread(factory, 1, profile=DaytonaEnvironmentProfile.SEMANTIC_CHILD)
+
+    assert lease.volume_id == ""
+    assert lease.volume_subpath == ""
+    assert platform.create_calls == [
+        {
+            "profile": DaytonaEnvironmentProfile.SEMANTIC_CHILD,
+            "volume_id": None,
+            "mount_path": None,
+            "volume_subpath": None,
+            "labels": {"fleet.runtime": "recursive-child", "fleet.profile": "semantic-child"},
+            "with_volume": False,
+            "ephemeral": True,
+        }
+    ]
+
+    await asyncio.to_thread(lease.close)
+
+    assert child_fs.files == {"/home/daytona/fleet/workspace-file.txt"}
+    assert child_fs.deleted == []
+    assert platform.deleted == ["semantic-child"]
+
+
+@pytest.mark.asyncio
+async def test_semantic_child_requires_a_configured_snapshot_before_provider_acquisition() -> None:
+    platform = _Platform(_Sandbox("semantic-child", _Fs(set())))
+    admission = DaytonaAdmission(max_active_leases=1)
+    factory = recursive_child_runtime.build_child_runtime_factory(
+        loop=asyncio.get_running_loop(),
+        platform=platform,
+        admission=admission,
+        volume_id="shared-volume",
+        mount_path="/home/daytona/fleet",
+        workspace_id=uuid4(),
+        run_id=uuid4(),
+        deadline=asyncio.get_running_loop().time() + 30,
+        execution_timeout_s=30,
+        execution_output_cap=1000,
+        semantic_child_available=False,
+    )
+
+    with pytest.raises(ValueError, match="FLEET_DAYTONA_CHILD_SNAPSHOT"):
+        await asyncio.to_thread(factory, 1, profile=DaytonaEnvironmentProfile.SEMANTIC_CHILD)
+
+    assert platform.create_calls == []
+    permit = await admission.acquire(deadline=asyncio.get_running_loop().time() + 1)
+    permit.release()
+
+
+@pytest.mark.asyncio
 async def test_child_cleanup_timeout_retains_provider_future_until_it_settles(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

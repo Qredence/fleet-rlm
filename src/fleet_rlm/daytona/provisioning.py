@@ -84,6 +84,19 @@ class DaytonaEnvironmentManifest:
             "warm_pool_eligible": self.warm_pool_eligible,
         }
 
+    def image_identity(self) -> dict[str, object]:
+        """Return the immutable image payload independent of its execution profile."""
+        identity = self.as_dict()
+        identity.pop("profile")
+        return identity
+
+    @property
+    def compatible_profiles(self) -> tuple[DaytonaEnvironmentProfile, ...]:
+        """Return profiles that may execute against this immutable image."""
+        if self.profile is DaytonaEnvironmentProfile.SEMANTIC_CHILD:
+            return (DaytonaEnvironmentProfile.SEMANTIC_CHILD,)
+        return (DaytonaEnvironmentProfile.SESSION, DaytonaEnvironmentProfile.WORKSPACE_CHILD)
+
     @property
     def resources(self) -> tuple[int, int, int]:
         """Return the immutable CPU/memory/disk contract for this profile."""
@@ -95,8 +108,8 @@ class DaytonaEnvironmentManifest:
 
     @property
     def digest(self) -> str:
-        """Return the deterministic digest of the manifest payload."""
-        encoded = json.dumps(self.as_dict(), sort_keys=True, separators=(",", ":")).encode("utf-8")
+        """Return the deterministic digest of the profile-independent image identity."""
+        encoded = json.dumps(self.image_identity(), sort_keys=True, separators=(",", ":")).encode("utf-8")
         return hashlib.sha256(encoded).hexdigest()
 
 
@@ -346,7 +359,15 @@ def build_snapshot_image(spec: DaytonaSandboxSpec) -> Any:
     """
     from daytona import Image
 
-    manifest = environment_manifest(spec)
+    # Session and WorkspaceChild share one immutable analysis image. Bake its
+    # canonical Session manifest regardless of the execution profile selected
+    # by the caller; profile-specific mounts and labels remain runtime policy.
+    manifest_profile = (
+        DaytonaEnvironmentProfile.SEMANTIC_CHILD
+        if spec.profile is DaytonaEnvironmentProfile.SEMANTIC_CHILD
+        else DaytonaEnvironmentProfile.SESSION
+    )
+    manifest = environment_manifest(spec, manifest_profile)
     image = (
         Image.base(spec.base_image)
         .run_commands(

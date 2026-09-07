@@ -45,6 +45,8 @@ async def test_stalled_flush_is_bounded_retained_and_reobserved():
         assert runtime.flush_pending
     finally:
         release.set()
+    assert runtime._flush_future is not None
+    await asyncio.wait_for(asyncio.wrap_future(runtime._flush_future), timeout=1)
     await asyncio.wait_for(runtime.close(), timeout=1)
     assert not runtime.flush_pending
     assert calls == ["flush"]

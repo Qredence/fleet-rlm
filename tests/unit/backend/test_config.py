@@ -141,6 +141,7 @@ def test_default_mlflow_policy_uses_bounded_operational_trace_delivery() -> None
         "trace_export_queue_size": 128,
         "trace_export_workers": 2,
         "trace_export_retry_seconds": 10,
+        "http_request_timeout_seconds": 10,
         "trace_shutdown_seconds": 5.0,
     }
 

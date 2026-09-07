@@ -8,11 +8,12 @@ from uuid import uuid4
 import dspy
 import pytest
 
+import fleet_rlm.rlm.runtime as runtime_module
 from fleet_rlm.chat.run_authority import RunAuthority
 from fleet_rlm.chat.session_context import SessionContextManifest
 from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
 from fleet_rlm.daytona.recursive_child_runtime import ChildRuntimeLease
-from fleet_rlm.rlm.events import Status, ToolCompleted, ToolStarted
+from fleet_rlm.rlm.events import ObservationSession, Status, ToolCompleted, ToolStarted
 from fleet_rlm.rlm.program import RLMFactory, RLMModelBundle, RLMOptions
 from fleet_rlm.rlm.recursion import RecursiveRLMOptions
 from fleet_rlm.rlm.runtime import (
@@ -22,6 +23,7 @@ from fleet_rlm.rlm.runtime import (
     RLMRunner,
     RunIdentity,
     SessionView,
+    WorkerOwnership,
 )
 from fleet_rlm.sessions.models import TurnAccess
 from tests.unit.backend.rlm.fakes import EmptyCapabilities
@@ -120,6 +122,64 @@ def _child_lease(call_index: int) -> ChildRuntimeLease:
         f"recursive/test-workspace/test-run/{call_index}",
         interpreter.shutdown,
     )
+
+
+@pytest.mark.asyncio
+async def test_worker_startup_failure_releases_the_runner_owned_child_scheduler(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = dspy.utils.DummyLM([], adapter=dspy.JSONAdapter())
+    sub = dspy.utils.DummyLM([], adapter=dspy.JSONAdapter())
+
+    async def not_cancelled() -> bool:
+        return False
+
+    context = RLMExecutionContext(
+        identity=RunIdentity(run_id=uuid4(), session_id=uuid4(), access=TurnAccess(uuid4(), uuid4())),
+        session=SessionView(
+            request="fail during worker startup",
+            session_context=SessionContextManifest(uuid4(), 0, 0, ()),
+            attachments=(),
+            preparation_notices=(),
+        ),
+        execution=ExecutionRuntime(
+            models=RLMModelBundle(root, sub),
+            options=RLMOptions(max_iters=1, max_llm_calls=1),
+            deadline=time.monotonic() + 30,
+            interpreter=DaytonaCodeInterpreter(backend=InProcessInterpreterBackend()),
+            cancellation_requested=not_cancelled,
+        ),
+        delegation=DelegationPolicy(
+            recursive_options=RecursiveRLMOptions(enabled=True, max_calls=1),
+            child_runtime_factory=lambda call_index: _child_lease(call_index),
+        ),
+        capabilities=EmptyCapabilities(),
+    )
+    created = []
+    real_executor = runtime_module.RecursiveRLMExecutor
+
+    def track_executor(**kwargs):
+        executor = real_executor(**kwargs)
+        created.append(executor)
+        return executor
+
+    def fail_signature(*_args, **_kwargs):
+        raise RuntimeError("worker startup failed")
+
+    monkeypatch.setattr(runtime_module, "RecursiveRLMExecutor", track_executor)
+    monkeypatch.setattr(runtime_module, "root_signature_for_recursion", fail_signature)
+    ownership = WorkerOwnership()
+    observations = ObservationSession(context.identity.run_id, context.identity.session_id)
+
+    try:
+        with pytest.raises(RuntimeError, match="worker startup failed"):
+            await RLMRunner()._start_worker(context, ownership, observations)
+        assert created
+        assert any(thread.is_alive() for thread in created[0]._scheduler._threads)
+    finally:
+        await ownership.wait_owned()
+
+    assert all(not thread.is_alive() for thread in created[0]._scheduler._threads)
 
 
 @pytest.mark.asyncio

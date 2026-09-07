@@ -202,6 +202,15 @@ def test_unavailable_local_tracking_uri_does_not_activate_turn_spans(
     assert tracing.is_tracing_active() is False
 
 
+def test_missing_export_distribution_is_handled_fail_soft(monkeypatch: pytest.MonkeyPatch) -> None:
+    def missing(_distribution: str) -> str:
+        raise tracing.PackageNotFoundError
+
+    monkeypatch.setattr(tracing, "package_version", missing)
+
+    assert tracing._mlflow_export_versions_are_certified() is False
+
+
 def test_configure_tracing_enabled_sets_uri_experiment_and_autolog(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -292,12 +301,14 @@ def test_trace_export_policy_overrides_ambient_queue_settings(monkeypatch):
         mlflow_trace_export_queue_size=17,
         mlflow_trace_export_workers=1,
         mlflow_trace_export_retry_seconds=3,
+        mlflow_http_request_timeout_seconds=19,
     )
     assert tracing.configure_tracing(settings)
     assert os.environ["MLFLOW_ENABLE_ASYNC_TRACE_LOGGING"] == "true"
     assert os.environ["MLFLOW_ASYNC_TRACE_LOGGING_MAX_QUEUE_SIZE"] == "17"
     assert os.environ["MLFLOW_ASYNC_TRACE_LOGGING_MAX_WORKERS"] == "1"
     assert os.environ["MLFLOW_ASYNC_TRACE_LOGGING_RETRY_TIMEOUT"] == "3"
+    assert os.environ["MLFLOW_HTTP_REQUEST_TIMEOUT"] == "19"
     assert tracing.trace_content_preview("private content") == "[content suppressed]"
 
 

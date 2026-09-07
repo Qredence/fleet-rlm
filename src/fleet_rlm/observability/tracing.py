@@ -51,6 +51,19 @@ _TRACE_CONTENT_ENABLED = False
 _TRACING_ACTIVE = False
 
 
+def _mlflow_export_versions_are_certified() -> bool:
+    """Return whether all installed export distributions match the certified pair."""
+    try:
+        versions = (package_version("mlflow"), package_version("opentelemetry-sdk"))
+    except PackageNotFoundError:
+        logger.warning("MLflow export compatibility dependencies are unavailable; continuing without traces")
+        return False
+    if versions != ("3.15.2", "1.44.0"):
+        logger.warning("MLflow export compatibility is uncertified; continuing without traces")
+        return False
+    return True
+
+
 def is_tracing_active() -> bool:
     """Return whether configure_tracing successfully activated Turn spans."""
     return _TRACING_ACTIVE
@@ -416,10 +429,7 @@ def configure_tracing(settings: Settings) -> bool:
         # The export fence uses private fields because public setters cannot
         # delete events/attachments. Certify a new lock resolution before
         # enabling export with it; execution continues without tracing.
-        if getattr(mlflow, "__file__", None) and (
-            package_version("mlflow") != "3.15.2" or package_version("opentelemetry-sdk") != "1.44.0"
-        ):
-            logger.warning("MLflow export compatibility is uncertified; continuing without traces")
+        if getattr(mlflow, "__file__", None) and not _mlflow_export_versions_are_certified():
             return False
 
         # A local MLflow server is optional engineering observability. Probe
@@ -446,7 +456,7 @@ def configure_tracing(settings: Settings) -> bool:
         os.environ["MLFLOW_ASYNC_TRACE_LOGGING_MAX_QUEUE_SIZE"] = str(settings.mlflow_trace_export_queue_size)
         os.environ["MLFLOW_ASYNC_TRACE_LOGGING_MAX_WORKERS"] = str(settings.mlflow_trace_export_workers)
         os.environ["MLFLOW_ASYNC_TRACE_LOGGING_RETRY_TIMEOUT"] = str(settings.mlflow_trace_export_retry_seconds)
-        os.environ["MLFLOW_HTTP_REQUEST_TIMEOUT"] = str(settings.mlflow_trace_export_retry_seconds)
+        os.environ["MLFLOW_HTTP_REQUEST_TIMEOUT"] = str(settings.mlflow_http_request_timeout_seconds)
 
         # Preflight: catch trace-location mismatch before set_experiment.
         # FleetConfigurationError propagates — all other failures are soft.

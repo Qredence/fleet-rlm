@@ -737,13 +737,14 @@ async def acquire_child_runtime(
                 platform=platform,
                 sandbox=sandbox,
                 sandbox_id=child_sandbox_id,
-                mount_path=mount_path or "",
+                mount_path="" if semantic else mount_path or "",
                 interpreter=interpreter,
                 permit=permit,
                 retain_pending_cleanup=retain_pending_cleanup,
             )
 
-        return ChildRuntimeLease(interpreter, child_sandbox_id, volume_id or "", subpath, close)
+        lease_volume_id = "" if semantic else volume_id or ""
+        return ChildRuntimeLease(interpreter, child_sandbox_id, lease_volume_id, subpath, close)
     except BaseException:
         try:
             cleanup = OwnedEffect.start(cleanup_after_failed_acquire(platform, sandbox, sandbox_id, permit))
@@ -795,6 +796,7 @@ def build_child_runtime_factory(
     execution_output_cap: int,
     is_authorized: Callable[[], bool] | None = None,
     profile: DaytonaEnvironmentProfile = DaytonaEnvironmentProfile.WORKSPACE_CHILD,
+    semantic_child_available: bool = True,
 ) -> ChildRuntimeFactory:
     """
     Build a factory for acquiring disposable child-runtime leases for recursive calls.
@@ -807,6 +809,8 @@ def build_child_runtime_factory(
         mount_path (str | None): Mount path used by child runtimes.
         profile (DaytonaEnvironmentProfile): Default child profile; selected-input
             callers may override it when acquiring a SemanticChild.
+        semantic_child_available (bool): Whether the configured runtime includes
+            a SemanticChild snapshot contract.
         workspace_id (UUID): Identifier of the workspace owning the runtimes.
         run_id (UUID): Identifier of the root turn run.
         deadline (float): Monotonic acquisition deadline.
@@ -839,6 +843,8 @@ def build_child_runtime_factory(
         chosen_profile = selected_profile if selected_profile is not None else profile
         if not isinstance(chosen_profile, DaytonaEnvironmentProfile):
             chosen_profile = DaytonaEnvironmentProfile(str(chosen_profile))
+        if chosen_profile is DaytonaEnvironmentProfile.SEMANTIC_CHILD and not semantic_child_available:
+            raise ValueError("SemanticChild requires FLEET_DAYTONA_CHILD_SNAPSHOT")
         acquisition_coroutine = _acquire_child_runtime(
             loop=loop,
             dispatcher=dispatcher,

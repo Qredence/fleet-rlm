@@ -87,6 +87,10 @@ def test_snapshot_provenance_is_exact() -> None:
 
 def test_environment_profiles_keep_capacity_and_data_access_separate() -> None:
     spec = DaytonaSandboxSpec("fleet-rlm-python313-v1")
+    workspace_spec = DaytonaSandboxSpec(
+        "fleet-rlm-python313-v1",
+        profile=DaytonaEnvironmentProfile.WORKSPACE_CHILD,
+    )
     session = environment_manifest(spec, DaytonaEnvironmentProfile.SESSION)
     semantic = environment_manifest(spec, DaytonaEnvironmentProfile.SEMANTIC_CHILD)
     workspace = environment_manifest(spec, DaytonaEnvironmentProfile.WORKSPACE_CHILD)
@@ -95,7 +99,21 @@ def test_environment_profiles_keep_capacity_and_data_access_separate() -> None:
     assert session.volume_allowed and workspace.volume_allowed
     assert not session.warm_pool_eligible and not workspace.warm_pool_eligible
     assert session.resources == workspace.resources == (4, 8, 8)
+    assert session.profile is DaytonaEnvironmentProfile.SESSION
+    assert workspace.profile is DaytonaEnvironmentProfile.WORKSPACE_CHILD
+    assert session.image_identity() == workspace.image_identity()
+    assert session.digest == workspace.digest
+    assert (
+        session.compatible_profiles
+        == workspace.compatible_profiles
+        == (
+            DaytonaEnvironmentProfile.SESSION,
+            DaytonaEnvironmentProfile.WORKSPACE_CHILD,
+        )
+    )
     assert semantic.image_kind == "lean-child"
     assert semantic.dependencies == ()
     assert not semantic.volume_allowed and semantic.warm_pool_eligible
     assert semantic.resources == (2, 4, 4)
+    assert semantic.digest != session.digest
+    assert build_snapshot_image(spec).dockerfile() == build_snapshot_image(workspace_spec).dockerfile()

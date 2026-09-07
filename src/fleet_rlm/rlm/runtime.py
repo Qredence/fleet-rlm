@@ -1472,10 +1472,8 @@ class RLMRunner:
         observations = ObservationSession(context.identity.run_id, context.identity.session_id)
         async for event in self._initial_events(context, observations):
             yield event
-        spec, guards, worker, recursive_executor, lease = await self._start_worker(context, ownership, observations)
+        spec, guards, worker, _recursive_executor, lease = await self._start_worker(context, ownership, observations)
         runtime_lease.append(lease)
-        if recursive_executor is not None:
-            ownership.add_blocking_waiter(recursive_executor.wait_owned)
         async for event in self._worker_events(context, observations, worker):
             yield event
         prediction.append(worker.result())
@@ -1584,6 +1582,10 @@ class RLMRunner:
                     workspace_memory_digest=context.session.workspace_memory_digest,
                 ),
             )
+            # Register the executor's owned scheduler before any remaining
+            # worker startup step can fail. Externally supplied schedulers are
+            # preserved by RecursiveRLMExecutor.wait_owned().
+            ownership.add_blocking_waiter(recursive_executor.wait_owned)
         spec = replace(
             spec,
             signature=root_signature_for_recursion(

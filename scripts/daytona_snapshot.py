@@ -161,15 +161,19 @@ async def verify_runtime(client: Any, spec: DaytonaSandboxSpec) -> None:
         context = await sandbox.code_interpreter.create_context()
         try:
             manifest = environment_manifest(spec)
-            expected = json.dumps(manifest.as_dict(), sort_keys=True, separators=(",", ":"))
+            expected = json.dumps(manifest.image_identity(), sort_keys=True, separators=(",", ":"))
+            compatible_profiles = tuple(profile.value for profile in manifest.compatible_profiles)
             code = (
                 "import getpass, hashlib, json, pathlib, shutil, sys\n"
                 "manifest_path = pathlib.Path('/opt/fleet/runtime-manifest.json')\n"
                 "manifest = json.loads(manifest_path.read_text())\n"
                 f"expected = json.loads({expected!r})\n"
-                "assert manifest == expected\n"
+                f"assert manifest.get('profile') in {compatible_profiles!r}\n"
+                "image_identity = dict(manifest)\n"
+                "image_identity.pop('profile', None)\n"
+                "assert image_identity == expected\n"
                 "assert hashlib.sha256("
-                "json.dumps(manifest, sort_keys=True, separators=(',', ':')).encode()"
+                "json.dumps(image_identity, sort_keys=True, separators=(',', ':')).encode()"
                 ").hexdigest() "
                 "== "
                 f"{manifest.digest!r}\n"
