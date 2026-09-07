@@ -95,7 +95,7 @@ class MLflowRuntime:
                 def run_flush() -> None:
                     try:
                         flush()
-                    except BaseException:
+                    except Exception:
                         # Retain only a safe outcome, never SDK exception text.
                         future.set_exception(RuntimeError("MLflow trace flush failed"))
                     else:
