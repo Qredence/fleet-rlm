@@ -67,27 +67,30 @@ the Turn path and `mlflow.trace_sampling_ratio` controls the fraction of Turns
 sent to MLflow. The committed default is asynchronous export with a `1.0`
 sampling ratio; both are non-secret TOML policy values. Tracing is enabled by
 default under the committed `[defaults.mlflow]` policy (the `Settings` field
-default is `false`, but the shipped policy enables it). Fleet also enables MLflow DSPy inference autologging for the selected
+default is `true`, matching the shipped policy). Fleet also enables MLflow DSPy inference autologging for the selected
 experiment, while compile and evaluator traces remain disabled for live Turn
-observability. FastAPI lifespan owns one explicit tracing startup attempt and
-shutdown flush; application construction performs no external MLflow probe, and
-an unavailable setup marks that lifespan inactive instead of poisoning later
-lifespans.
+observability. FastAPI lifespan owns one explicit tracing startup attempt,
+shutdown flush, and process-global autolog teardown; application construction
+performs no external MLflow probe, and an unavailable setup marks that lifespan
+inactive instead of poisoning later lifespans.
 
-MLflow trace payloads retain bounded, readable prompts, reasoning, generated
-code, tool payloads, and responses. `mlflow.trace_content_max_chars` bounds
-each readable field and defaults to `10000` characters. The trace export
-boundary still protects credentials, connection strings, private paths, and
-system-prompt dumps. Content is readable by default — there is no hashing
-"safe" content mode. Custom DSPy signature fields and MLflow autolog fields
-that do not match the sanitizer's protection patterns are exported readable up
-to the content bound, so treat the trace destination as a sensitive consumer of
-the same bounded payloads the TUI displays.
+MLflow trace payloads are bounded and readable by default: prompts, generated
+code, tool payloads, responses, reasoning, and system-prompt fields are
+available in the authorized engineering trace destination. Set
+`mlflow.trace_content_enabled = false` to use the operational-only mode, which
+suppresses content while retaining safe routing and structural metadata. In
+either mode, `mlflow.trace_content_max_chars` bounds each readable field and
+defaults to `10000` characters; the export boundary redacts credentials,
+connection strings, bearer values, URLs, private paths, and control-plane
+noise. Custom DSPy signature fields and MLflow autolog fields use the same
+sanitizer. Public Runtime Events and SSE payloads do not inherit MLflow trace
+content visibility.
 
 > Migration note: the `mlflow.trace_content_mode` setting is removed. Existing
 > `fleet.toml` files that still set `trace_content_mode = "safe"` will fail
 > validation with an unknown-key error; delete the key. Trace content is now
-> always readable (bounded by `mlflow.trace_content_max_chars`).
+> bounded and sanitized by default; set `mlflow.trace_content_enabled = false`
+> explicitly for operational-only traces.
 
 PostHog product analytics are policy-controlled by the optional `[posthog]`
 section. `posthog.enabled` switches analytics on or off, `posthog.project_token_env`
@@ -104,13 +107,11 @@ Profile role tables avoid an inheritance framework. Only defaults that duplicate
 `Settings` behavior are omitted; explicit profiles keep operator-visible role
 values rather than gaining `extends`, mixins, or cross-profile aliases.
 
-Each typed public Runtime Event is also projected as a bounded
-`Turn.progress.<event-kind>` child span. This includes RLM reasoning summaries,
-generated code, interpreter output, tool inputs and outputs, status/progress
-events, structured results, streamed text, and the committed final answer.
-The projection is centralized at `EventRecorder`, so live, reconciled, and
-committed events remain aligned. It does not export hidden provider
-chain-of-thought or arbitrary callback payloads.
+The trace topology intentionally keeps the `fleet_turn` root, explicit Fleet
+phase/tool/LM spans, and DSPy inference autolog spans. Typed Runtime Events are
+projected through SSE and the terminal client, but are not emitted as
+`Turn.progress.<event-kind>` spans; this avoids duplicating the product event
+stream and keeps trace timelines focused on timed execution operations.
 
 `rlm.verbose` controls native DSPy host logs only. It does not control the
 typed Runtime Events projected through SSE or the terminal client.

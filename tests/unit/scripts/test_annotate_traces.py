@@ -44,8 +44,14 @@ class _FakeTrace:
         state: str = "OK",
         execution_duration: int | None = 42,
         spans: list[_FakeSpan] | None = None,
+        request_metadata: dict[str, Any] | None = None,
     ) -> None:
-        self.info = SimpleNamespace(trace_id=trace_id, state=state, execution_duration=execution_duration)
+        self.info = SimpleNamespace(
+            trace_id=trace_id,
+            state=state,
+            execution_duration=execution_duration,
+            request_metadata=request_metadata or {},
+        )
         self.data = SimpleNamespace(spans=list(spans or []))
 
 
@@ -103,11 +109,12 @@ def test_derive_attributes_extracts_llm_tool_latency_and_tokens() -> None:
             "LLM",
             start_ns=0,
             end_ns=1_000_000,
-            attributes={
-                "model_name": "databricks:/databricks-qwen35-122b-a10b",
-                "provider": "databricks",
-                "usage": {"prompt_tokens": 12, "completion_tokens": 3, "total_tokens": 15},
-            },
+            attributes={"mlflow.llm.model": "databricks:/databricks-qwen35-122b-a10b"},
+        ),
+        _FakeSpan(
+            "LM.module",
+            "CHAIN",
+            attributes={"mlflow.chat.tokenUsage": {"input_tokens": 12, "output_tokens": 3, "total_tokens": 15}},
         ),
         _FakeSpan("remember", "TOOL", attributes={}),
     ]
@@ -118,12 +125,80 @@ def test_derive_attributes_extracts_llm_tool_latency_and_tokens() -> None:
     assert attributes["fleet.turn_status"] == "error"
     assert attributes["fleet.latency_ms"] == "5"
     assert attributes["fleet.models"] == "databricks:/databricks-qwen35-122b-a10b"
-    assert attributes["fleet.providers"] == "databricks"
     assert attributes["fleet.tools"] == "remember"
     assert attributes["fleet.prompt_tokens"] == "12"
     assert attributes["fleet.completion_tokens"] == "3"
     assert attributes["fleet.total_tokens"] == "15"
-    assert attributes["fleet.span_types"] == "chain:1,llm:1,tool:1"
+    assert attributes["fleet.span_types"] == "chain:2,llm:1,tool:1"
+
+
+def test_derive_attributes_reads_provider_and_trace_level_token_usage() -> None:
+    spans = [
+        _FakeSpan(
+            "LM.model",
+            "LLM",
+            attributes={
+                "mlflow.llm.model": "databricks:/databricks-qwen35-122b-a10b",
+                "mlflow.llm.provider": "databricks",
+            },
+        )
+    ]
+    trace = _FakeTrace(
+        "trace-3",
+        state="OK",
+        spans=spans,
+        request_metadata={"mlflow.trace.tokenUsage": '{"input_tokens": 40, "output_tokens": 10, "total_tokens": 50}'},
+    )
+
+    attributes = derive_attributes(trace)
+
+    assert attributes["fleet.providers"] == "databricks"
+    assert attributes["fleet.prompt_tokens"] == "40"
+    assert attributes["fleet.completion_tokens"] == "10"
+    assert attributes["fleet.total_tokens"] == "50"
+
+
+def test_derive_attributes_prefers_trace_aggregate_and_legacy_model_provider() -> None:
+    trace = _FakeTrace(
+        "trace-aggregate",
+        spans=[
+            _FakeSpan(
+                "module",
+                "CHAIN",
+                attributes={"mlflow.chat.tokenUsage": {"input_tokens": 12, "output_tokens": 3, "total_tokens": 15}},
+            ),
+            _FakeSpan(
+                "LM.model",
+                "LLM",
+                attributes={
+                    "mlflow.chat.tokenUsage": {"input_tokens": 12, "output_tokens": 3, "total_tokens": 15},
+                    "model_name": "legacy-model",
+                    "provider": "legacy-provider",
+                },
+            ),
+        ],
+    )
+    trace.info.token_usage = {"input_tokens": 12, "output_tokens": 3, "total_tokens": 15}
+
+    attributes = derive_attributes(trace)
+
+    assert attributes["fleet.models"] == "legacy-model"
+    assert attributes["fleet.providers"] == "legacy-provider"
+    assert attributes["fleet.prompt_tokens"] == "12"
+    assert attributes["fleet.completion_tokens"] == "3"
+    assert attributes["fleet.total_tokens"] == "15"
+
+
+def test_derive_attributes_ignores_malformed_trace_level_token_usage() -> None:
+    trace = _FakeTrace(
+        "trace-4",
+        state="OK",
+        execution_duration=None,
+        spans=[],
+        request_metadata={"mlflow.trace.tokenUsage": "not-json"},
+    )
+    attributes = derive_attributes(trace)
+    assert attributes == {"fleet.turn_status": "ok"}
 
 
 def test_derive_attributes_uses_execution_duration_and_skips_empty() -> None:
@@ -137,7 +212,7 @@ def test_annotate_stamps_bounded_tags_and_reports_aggregates(monkeypatch: pytest
     traces = [
         _FakeTrace(
             "trace-a",
-            spans=[_FakeSpan("LM.a", "LLM", attributes={"model_name": "model-a"})],
+            spans=[_FakeSpan("LM.a", "LLM", attributes={"mlflow.llm.model": "model-a"})],
         ),
         _FakeTrace("trace-b", spans=[]),
         _FakeTrace("", spans=[]),

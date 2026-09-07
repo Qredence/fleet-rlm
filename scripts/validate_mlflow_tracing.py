@@ -18,6 +18,7 @@ from dotenv import load_dotenv
 
 from fleet_rlm.config.loader import load_runtime_settings
 from fleet_rlm.config.settings import Settings
+from fleet_rlm.observability.tracing import configure_tracing, flush_tracing, is_tracing_active, reset_tracing
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -65,7 +66,8 @@ def _tables(profile: str | None, schema: str) -> set[str]:
     return {str(item["full_name"]) for item in json.loads(result.stdout)}
 
 
-def _trace_summary(trace: Any) -> tuple[str, list[Any]]:
+def _trace_summary(trace: Any, *, require_content_previews: bool = False) -> tuple[str, list[Any]]:
+    """Validate trace identity and health without requiring disabled content fields."""
     info = trace.info
     spans = list(trace.data.spans)
     state = str(getattr(info, "state", ""))
@@ -78,10 +80,11 @@ def _trace_summary(trace: Any) -> tuple[str, list[Any]]:
     root_spans = [span for span in spans if getattr(span, "parent_span_id", None) is None]
     if not root_spans:
         raise RuntimeError("trace contains no root span")
-    if not getattr(info, "request_preview", None):
-        raise RuntimeError("trace is missing request preview")
-    if not getattr(info, "response_preview", None):
-        raise RuntimeError("trace is missing response preview")
+    if require_content_previews:
+        if not getattr(info, "request_preview", None):
+            raise RuntimeError("trace is missing request preview")
+        if not getattr(info, "response_preview", None):
+            raise RuntimeError("trace is missing response preview")
     error_spans = [
         str(getattr(span, "name", "unknown"))
         for span in spans
@@ -121,63 +124,64 @@ def main() -> int:
             profile = None
         elif profile:
             os.environ["DATABRICKS_CONFIG_PROFILE"] = profile
-        os.environ["MLFLOW_TRACING_SQL_WAREHOUSE_ID"] = settings.mlflow_tracing_sql_warehouse_id
 
-    import mlflow
+    if not configure_tracing(settings) or not is_tracing_active():
+        raise RuntimeError("Fleet MLflow tracing setup did not activate")
 
-    mlflow.set_tracking_uri(settings.mlflow_tracking_uri)
-    if managed:
-        from mlflow.entities.trace_location import UnityCatalog
+    tracing_active = True
+    try:
+        import mlflow
 
-        assert settings.mlflow_trace_catalog is not None
-        assert settings.mlflow_trace_schema is not None
-        assert settings.mlflow_trace_table_prefix is not None
-        experiment = mlflow.set_experiment(
-            experiment_name=settings.mlflow_experiment_name,
-            trace_location=UnityCatalog(
-                catalog_name=settings.mlflow_trace_catalog,
-                schema_name=settings.mlflow_trace_schema,
-                table_prefix=settings.mlflow_trace_table_prefix,
-            ),
-        )
-    else:
-        experiment = mlflow.set_experiment(experiment_name=settings.mlflow_experiment_name)
+        # configure_tracing is the single owner of the tracking URI,
+        # experiment destination, sanitizer, and DSPy autolog setup. Resolve
+        # the resulting experiment instead of duplicating that configuration
+        # in this standalone verifier.
+        experiment = mlflow.get_experiment_by_name(settings.mlflow_experiment_name)
+        if experiment is None:
+            raise RuntimeError("Fleet MLflow experiment was not available after setup")
 
-    @mlflow.trace(name="fleet_mlflow_smoke")
-    def smoke(input_text: str) -> dict[str, str]:
-        return {"echo": input_text}
+        @mlflow.trace(name="fleet_mlflow_smoke")
+        def smoke(input_text: str) -> dict[str, str]:
+            return {"echo": input_text}
 
-    smoke("fleet MLflow tracing smoke test")
-    trace_id = mlflow.get_last_active_trace_id()
-    if not trace_id:
-        raise RuntimeError("MLflow did not return a trace id")
-    trace = mlflow.get_trace(trace_id, flush=True)
-    if trace is None:
-        raise RuntimeError(f"MLflow trace was not available after flushing: {trace_id}")
-    verified_trace_id, spans = _trace_summary(trace)
-
-    trace_location = settings.mlflow_tracking_uri
-    if managed:
-        expected_tables = {
-            f"{settings.mlflow_trace_catalog}.{settings.mlflow_trace_schema}.{settings.mlflow_trace_table_prefix}_{suffix}"
-            for suffix in ("otel_spans", "otel_annotations", "otel_logs", "otel_metrics")
-        }
-        actual_tables = _tables(profile, f"{settings.mlflow_trace_catalog}.{settings.mlflow_trace_schema}")
-        missing_tables = expected_tables.difference(actual_tables)
-        if missing_tables:
-            raise RuntimeError(f"missing Unity Catalog trace table(s): {', '.join(sorted(missing_tables))}")
-        trace_location = (
-            f"{settings.mlflow_trace_catalog}.{settings.mlflow_trace_schema}.{settings.mlflow_trace_table_prefix}"
+        smoke("fleet MLflow tracing smoke test")
+        trace_id = mlflow.get_last_active_trace_id()
+        if not trace_id:
+            raise RuntimeError("MLflow did not return a trace id")
+        trace = mlflow.get_trace(trace_id, flush=True)
+        if trace is None:
+            raise RuntimeError(f"MLflow trace was not available after flushing: {trace_id}")
+        verified_trace_id, spans = _trace_summary(
+            trace,
+            require_content_previews=bool(getattr(settings, "mlflow_trace_content_enabled", False)),
         )
 
-    print(f"experiment_id={experiment.experiment_id}")
-    print(f"trace_id={verified_trace_id}")
-    print(f"span_count={len(spans)}")
-    print(f"execution_duration_ms={trace.info.execution_duration}")
-    print(f"tracking_uri={settings.mlflow_tracking_uri}")
-    print(f"trace_location={trace_location}")
-    print("status=PASS")
-    return 0
+        trace_location = settings.mlflow_tracking_uri
+        if managed:
+            expected_tables = {
+                f"{settings.mlflow_trace_catalog}.{settings.mlflow_trace_schema}.{settings.mlflow_trace_table_prefix}_{suffix}"
+                for suffix in ("otel_spans", "otel_annotations", "otel_logs", "otel_metrics")
+            }
+            actual_tables = _tables(profile, f"{settings.mlflow_trace_catalog}.{settings.mlflow_trace_schema}")
+            missing_tables = expected_tables.difference(actual_tables)
+            if missing_tables:
+                raise RuntimeError(f"missing Unity Catalog trace table(s): {', '.join(sorted(missing_tables))}")
+            trace_location = (
+                f"{settings.mlflow_trace_catalog}.{settings.mlflow_trace_schema}.{settings.mlflow_trace_table_prefix}"
+            )
+
+        print(f"experiment_id={experiment.experiment_id}")
+        print(f"trace_id={verified_trace_id}")
+        print(f"span_count={len(spans)}")
+        print(f"execution_duration_ms={trace.info.execution_duration}")
+        print(f"tracking_uri={settings.mlflow_tracking_uri}")
+        print(f"trace_location={trace_location}")
+        print("status=PASS")
+        return 0
+    finally:
+        if tracing_active:
+            flush_tracing()
+            reset_tracing()
 
 
 if __name__ == "__main__":

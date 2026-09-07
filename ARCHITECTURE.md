@@ -137,8 +137,10 @@ composition or in-flight Turns.
 tracing, PostHog analytics, and DSPy callback projection. Observability is
 fail-soft: unavailable tracing or analytics cannot change execution outcomes,
 settlement, or public success/failure semantics. Trace and event payloads are
-bounded and sanitized; hidden provider reasoning and credentials are not
-public data.
+bounded and sanitized; credentials, tokens, connection strings, URLs, and
+private paths are never exported. Authorized MLflow traces may include bounded
+reasoning and system-prompt content under the MLflow content policy, while
+public Runtime Events and SSE payloads keep their separate content boundary.
 
 ### TUI
 

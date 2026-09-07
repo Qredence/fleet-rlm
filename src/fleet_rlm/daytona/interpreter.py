@@ -81,8 +81,8 @@ from fleet_rlm.rlm.output_contract import FleetOutputContract
 from fleet_rlm.rlm.result import (
     RunNoProgressError,
     RunTerminalError,
-    sanitize_public_text,
     sanitize_repair_text,
+    sanitize_trace_text,
     truncate_head_tail,
     truncate_public_text,
 )
@@ -927,7 +927,7 @@ class DaytonaCodeInterpreter:
                 "iteration": step,
                 "code_chars": len(code or ""),
                 "variable_count": len(variables or {}),
-                "code_preview": sanitize_public_text(
+                "code_preview": sanitize_trace_text(
                     truncate_head_tail(code or "", max_chars=trace_chars),
                     max_len=trace_chars,
                 ),
@@ -986,7 +986,7 @@ class DaytonaCodeInterpreter:
                     "path": "http_broker" if self._http_broker is not None else type(self._backend).__name__,
                     "result_kind": _result_kind(result),
                     "stdout_chars": len(str(result)),
-                    "output_preview": sanitize_public_text(str(result), max_len=trace_chars),
+                    "output_preview": sanitize_trace_text(str(result), max_len=trace_chars),
                 }
                 if self._http_broker is not None:
                     outputs["ensure_bindings_ms"] = ensure_bindings_ms
