@@ -455,8 +455,13 @@ def test_turn_trace_closes_root_when_failure_annotation_raises(monkeypatch: pyte
     monkeypatch.setitem(sys.modules, "mlflow.entities", SimpleNamespace(SpanType=SimpleNamespace(CHAIN="CHAIN")))
 
     expected = ValueError("original turn failure")
-    with pytest.raises(ValueError) as raised, turn_trace(uuid4(), uuid4(), enabled=True):
-        raise expected
+
+    def _run() -> None:
+        with turn_trace(uuid4(), uuid4(), enabled=True):
+            raise expected
+
+    with pytest.raises(ValueError) as raised:
+        _run()
 
     assert raised.value is expected
     assert exits == [(None, None, None)]
