@@ -682,13 +682,18 @@ class WorkspaceToolHost:
             requests = arguments.get("requests")
             if not isinstance(requests, list):
                 return {}
-            requested_chars = sum(
-                value
-                for request in requests
-                if isinstance(request, Mapping)
-                and isinstance((value := request.get("max_chars", MAX_STORAGE_READ_CHARS)), int)
-                and not isinstance(value, bool)
-            )
+            bounded = requests[:MAX_WORKSPACE_TEXT_BATCH_ITEMS]
+            requested_chars = 0
+            for request in bounded:
+                if not isinstance(request, Mapping):
+                    continue
+                value = request.get("max_chars", MAX_STORAGE_READ_CHARS)
+                if isinstance(value, bool) or not isinstance(value, int):
+                    continue
+                requested_chars += min(value, MAX_STORAGE_READ_CHARS)
+                if requested_chars >= MAX_WORKSPACE_TEXT_BATCH_CHARS:
+                    requested_chars = MAX_WORKSPACE_TEXT_BATCH_CHARS
+                    break
             return {"request_count": len(requests), "requested_chars": requested_chars}
 
         return MappingProxyType(
