@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import hashlib
+import time
 from dataclasses import replace
 
 import dspy
 import pytest
 
+from fleet_rlm.rlm.budget import BudgetDimension, BudgetLimits, TurnBudget, TurnBudgetExhausted
 from fleet_rlm.rlm.events import ToolFailed, WarningEvent, observe_tool
 from fleet_rlm.rlm.runtime import RunToolGuards
 from fleet_rlm.workspace.models import WorkspaceEntry, WorkspaceListResult, WorkspaceTextPage
@@ -126,6 +128,7 @@ def test_exposes_exact_typed_tool_contracts() -> None:
         "list_workspace_files",
         "stat_workspace_file",
         "read_workspace_text",
+        "read_workspace_text_batch",
         "write_workspace_text",
         "append_workspace_text",
         "delete_workspace_path",
@@ -160,6 +163,9 @@ def test_exposes_exact_typed_tool_contracts() -> None:
     assert "1..10000" in tools["read_workspace_text"].desc
     assert "next_cursor" in tools["read_workspace_text"].desc
     assert "relevant" in tools["read_workspace_text"].desc
+    assert tools["read_workspace_text_batch"].args == {
+        "requests": {"type": "array", "minItems": 1, "maxItems": 32, "items": {"type": "object"}}
+    }
     assert tools["write_workspace_text"].args == {
         "path": {"type": "string"},
         "content": {"type": "string"},
@@ -195,6 +201,58 @@ def test_round_trips_text_with_bounded_json_results() -> None:
     assert read["content"] == "durable decision"
 
 
+def test_batch_reads_selected_pages_in_order_and_keeps_item_failures_local() -> None:
+    workspace, tools = _tools()
+    workspace.files.update({"notes/a.md": "alpha", "notes/b.md": "bravo"})
+
+    result = tools["read_workspace_text_batch"](
+        requests=[
+            {"path": "notes/b.md", "max_chars": 3},
+            {"path": "missing.md", "max_chars": 10},
+            {"path": "notes/a.md", "max_chars": 10},
+        ]
+    )
+
+    assert result["count"] == 3
+    assert result["failed_count"] == 1
+    assert [item["path"] for item in result["results"]] == ["notes/b.md", "missing.md", "notes/a.md"]
+    assert result["results"][0]["content"] == "bra"
+    assert result["results"][1] == {
+        "ok": False,
+        "namespace": "session_workspace",
+        "path": "missing.md",
+        "error": "not_found",
+    }
+    assert result["results"][2]["content"] == "alpha"
+
+
+@pytest.mark.parametrize(
+    "requests",
+    [
+        [],
+        [{"path": "notes/a.md", "max_chars": 10_001}],
+        [{"path": "../private.md", "max_chars": 1}],
+        [{"path": "notes/a.md", "max_chars": 10_000}] * 4,
+    ],
+)
+def test_batch_rejects_invalid_requests_before_reading(requests: object) -> None:
+    workspace, tools = _tools()
+    workspace.files["notes/a.md"] = "alpha"
+    reads: list[str] = []
+    original = workspace.read_text_page
+
+    def tracked(path: str, **kwargs: object) -> WorkspaceTextPage:
+        reads.append(path)
+        return original(path, **kwargs)  # type: ignore[arg-type]
+
+    workspace.read_text_page = tracked  # type: ignore[method-assign]
+    from fleet_rlm.workspace.workspace import WorkspaceToolError
+
+    with pytest.raises((ValueError, WorkspaceToolError)):
+        tools["read_workspace_text_batch"](requests=requests)  # type: ignore[call-arg]
+    assert reads == []
+
+
 def test_workspace_event_views_expose_metadata_without_file_bodies_or_entries() -> None:
     from fleet_rlm.workspace.workspace import WorkspaceToolHost
 
@@ -217,6 +275,9 @@ def test_workspace_event_views_expose_metadata_without_file_bodies_or_entries() 
     observe_tool(tools["read_workspace_text"], observed.append, views["read_workspace_text"])(
         path="notes/private.md",
         max_chars=64,
+    )
+    observe_tool(tools["read_workspace_text_batch"], observed.append, views["read_workspace_text_batch"])(
+        requests=[{"path": "notes/private.md", "max_chars": 20}]
     )
 
     assert observed[0].input == {
@@ -245,6 +306,8 @@ def test_workspace_event_views_expose_metadata_without_file_bodies_or_entries() 
         "byte_size": 22,
         "eof": True,
     }
+    assert observed[6].input == {"request_count": 1, "requested_chars": 20}
+    assert observed[7].output == {"ok": True, "namespace": "session_workspace", "count": 1, "failed_count": 0}
     assert "private workspace body" not in str(observed)
     assert "entries" not in str(observed)
 
@@ -281,6 +344,28 @@ def test_repeated_workspace_reads_are_idempotent_but_still_observed() -> None:
     assert read(path="date.txt", max_chars=32)["content"] == "2026-07-21"
     assert sum(isinstance(item, WarningEvent) for item in observed) == 1
     assert not any(isinstance(item, ToolFailed) for item in observed)
+
+
+def test_batch_read_uses_one_turn_budget_reservation() -> None:
+    from fleet_rlm.workspace.workspace import WorkspaceToolHost
+
+    workspace, tools = _tools()
+    workspace.files.update({f"notes/{index}.md": str(index) for index in range(32)})
+    budget = TurnBudget(deadline=time.monotonic() + 60, limits=BudgetLimits(tool_calls=1))
+    observed: list[object] = []
+    read = observe_tool(
+        tools["read_workspace_text_batch"],
+        observed.append,
+        WorkspaceToolHost(workspace).event_views()["read_workspace_text_batch"],
+        guards=RunToolGuards(budget=budget),
+    )
+
+    result = read(requests=[{"path": f"notes/{index}.md", "max_chars": 10} for index in range(32)])
+
+    assert result["count"] == 32
+    assert budget.snapshot()[BudgetDimension.TOOL_CALLS.value] == 1
+    with pytest.raises(TurnBudgetExhausted):
+        read(requests=[{"path": "notes/0.md", "max_chars": 10}])
 
 
 def test_raises_stable_safe_errors_without_exception_details() -> None:

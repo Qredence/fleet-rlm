@@ -1002,7 +1002,7 @@ class DaytonaCodeInterpreter:
                     outputs.update(broker_metrics)
                 phase.set_outputs(outputs)
                 return result
-            except TurnBudgetExhausted:
+            except TurnBudgetExhausted as exc:
                 # The output reservation is the terminal boundary for this
                 # execution. The first failed reservation suppresses any
                 # additional error-frame bytes, then the domain exhaustion is
@@ -1011,11 +1011,21 @@ class DaytonaCodeInterpreter:
                 _close_output_stream(
                     "Execution failed", step=step, stream_id=output_stream_id, state=output_state, observe=self._observe
                 )
+                phase.finish(
+                    phase_status="failed",
+                    outputs={"failure_category": f"budget_{exc.dimension.value}"},
+                    attributes={"failure_category": f"budget_{exc.dimension.value}"},
+                )
                 raise
             except RunTerminalError:
                 stdout_projector.finish()
                 _close_output_stream(
                     "Execution failed", step=step, stream_id=output_stream_id, state=output_state, observe=self._observe
+                )
+                phase.finish(
+                    phase_status="failed",
+                    outputs={"failure_category": "terminal_error"},
+                    attributes={"failure_category": "terminal_error"},
                 )
                 raise
             except CodeInterpreterError as exc:
@@ -1076,12 +1086,23 @@ class DaytonaCodeInterpreter:
                 _close_output_stream(
                     "Execution failed", step=step, stream_id=output_stream_id, state=output_state, observe=self._observe
                 )
+                phase.finish(
+                    phase_status="failed",
+                    outputs={"failure_category": "adapter_error"},
+                    attributes={"failure_category": "adapter_error"},
+                )
                 raise
             except Exception as exc:
                 mapped = map_provider_error(exc)
                 stdout_projector.finish()
                 _close_output_stream(
                     "Execution failed", step=step, stream_id=output_stream_id, state=output_state, observe=self._observe
+                )
+                category = "timeout" if isinstance(exc, TimeoutError) else "execution_error"
+                phase.finish(
+                    phase_status="failed",
+                    outputs={"failure_category": category},
+                    attributes={"failure_category": category},
                 )
                 raise mapped from exc
             finally:

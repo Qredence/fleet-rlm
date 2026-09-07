@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 from types import ModuleType, SimpleNamespace
@@ -13,6 +14,7 @@ from dspy.primitives.code_interpreter import CodeExecutionError
 
 from fleet_rlm.daytona.broker import _EXECUTION_STAT_KEYS
 from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
+from fleet_rlm.rlm.budget import BudgetLimits, TurnBudget, TurnBudgetExhausted
 
 
 @pytest.fixture
@@ -155,6 +157,24 @@ def test_sandbox_execute_span_marks_failed_phase_without_suppressing(
         interpreter.execute("_out = 'never'")
 
     assert calls.start_span_names == ["sandbox.execute"]
+    assert calls.span_outputs[0]["phase_status"] == "failed"
+    assert calls.span_outputs[0]["failure_category"] == "execution_error"
+
+
+def test_sandbox_execute_span_classifies_budget_exhaustion(
+    monkeypatch: pytest.MonkeyPatch, fleet_trace_active: None
+) -> None:
+    del fleet_trace_active
+    calls = _install_fake_mlflow(monkeypatch)
+    interpreter = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())
+    interpreter.bind_turn_budget(
+        TurnBudget(deadline=time.monotonic() + 60, limits=BudgetLimits(execution_output_bytes=1))
+    )
+
+    with pytest.raises(TurnBudgetExhausted):
+        interpreter.execute("_out = 'too large'")
+
+    assert calls.span_outputs[0]["failure_category"] == "budget_execution_output_bytes"
     assert calls.span_outputs[0]["phase_status"] == "failed"
 
 

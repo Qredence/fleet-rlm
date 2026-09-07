@@ -62,3 +62,15 @@ def test_fragment_composition_preserves_established_instruction_text() -> None:
     assert RECURSION_RLM_INSTRUCTIONS in enabled
     assert RECURSION_RLM_INSTRUCTIONS not in disabled
     assert DISCOVERY_RLM_INSTRUCTIONS in disabled
+
+
+def test_batch_read_instruction_requires_the_registered_tool() -> None:
+    absent = root_signature_for_recursion(FleetRLMSignature, recursion_enabled=False).instructions
+    present = root_signature_for_recursion(
+        FleetRLMSignature,
+        recursion_enabled=False,
+        tool_names=frozenset({"read_workspace_text_batch"}),
+    ).instructions
+
+    assert "read_workspace_text_batch" not in absent
+    assert "read_workspace_text_batch" in present

@@ -175,6 +175,10 @@ TOOL_RLM_INSTRUCTIONS = """1. Use the Python standard library for deterministic 
 4. Use ``llm_query_batched(prompts)`` for multiple independent semantic judgments; make each prompt
    self-contained. Prefer the cheapest sufficient mechanism."""
 
+WORKSPACE_BATCH_RLM_INSTRUCTIONS = """When several independently selected Session Workspace files are relevant, use
+``read_workspace_text_batch`` rather than serial ``read_workspace_text`` calls. List or stat first, select only
+relevant paths, keep each page bounded, and never crawl an entire Workspace."""
+
 RECURSION_RLM_INSTRUCTIONS = """Use ``rlm_query(prompt=prompt)`` only when one selected, self-contained subproblem needs its own iterative
    Python exploration. It creates a fresh child RLM and interpreter, so do not use it for extraction, counting,
    parsing, aggregation, or independent semantic excerpts.
@@ -299,9 +303,12 @@ def root_signature_for_recursion(
     *,
     recursion_enabled: bool,
     skill_instructions: tuple[str, ...] = (),
+    tool_names: frozenset[str] = frozenset(),
 ) -> type[dspy.Signature]:
     """Compose Fleet operating policy for one output Signature."""
     instructions = compose_rlm_instructions(recursion_enabled=recursion_enabled)
+    if "read_workspace_text_batch" in tool_names:
+        instructions += "\n\n" + WORKSPACE_BATCH_RLM_INSTRUCTIONS
     if skill_instructions:
         instructions += "\n\n" + "\n\n".join(skill_instructions)
     return signature.with_instructions(instructions)
@@ -1330,12 +1337,17 @@ def build_program(spec: RLMProgramSpec) -> Any:
     if (
         isinstance(sig, type)
         and issubclass(sig, dspy.Signature)
-        and (spec.recursion_enabled or spec.skill_instructions)
+        and (
+            spec.recursion_enabled
+            or spec.skill_instructions
+            or any(str(tool.name) == "read_workspace_text_batch" for tool in spec.tools or ())
+        )
     ):
         sig = root_signature_for_recursion(
             sig,
             recursion_enabled=spec.recursion_enabled,
             skill_instructions=spec.skill_instructions,
+            tool_names=frozenset(str(tool.name) for tool in spec.tools or ()),
         )
     return build_native_rlm(
         signature=sig,
