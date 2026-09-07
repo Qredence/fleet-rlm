@@ -689,11 +689,9 @@ def test_start_turn_span_preserves_input_key_names_as_structural_attributes(
 def test_turn_phase_span_records_failures_without_suppressing_them(monkeypatch: pytest.MonkeyPatch) -> None:
     calls = _install_fake_mlflow(monkeypatch)
 
-    with (
-        pytest.raises(RuntimeError, match="expected"),
-        turn_phase_span("Turn.settlement", inputs={"terminal_status": "failed"}),
-    ):
-        raise RuntimeError("expected")
+    with pytest.raises(RuntimeError, match="expected"):
+        with turn_phase_span("Turn.settlement", inputs={"terminal_status": "failed"}):
+            raise RuntimeError("expected")
 
     assert calls.span_outputs[-1] == {
         "failure_category": "unknown",
