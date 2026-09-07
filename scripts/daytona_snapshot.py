@@ -231,7 +231,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         return asyncio.run(_run(args))
     except SystemExit:
         raise
-    except BaseException:
+    except Exception:
         # Snapshot/provider failures are operator-visible only as a stable
         # category.  Do not print SDK traces, build commands, or credentials.
         print("Daytona snapshot operation failed safely.", file=sys.stderr)
