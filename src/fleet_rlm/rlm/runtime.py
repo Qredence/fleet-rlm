@@ -612,7 +612,7 @@ class TurnScopedRuntimeLease:
             return
         if not self._settled:
             self.mark_tainted()
-        errors: list[BaseException] = []
+        errors: list[Exception] = []
         observer_cleanup = self._observer_cleanup
         self._observer_cleanup = None
         if observer_cleanup is not None:
@@ -620,7 +620,7 @@ class TurnScopedRuntimeLease:
                 result = observer_cleanup()
                 if inspect.isawaitable(result):
                     await result
-            except BaseException as exc:
+            except Exception as exc:
                 errors.append(exc)
         binding = self._binding
         self._binding = None
@@ -628,11 +628,11 @@ class TurnScopedRuntimeLease:
         if callable(remove):
             try:
                 remove()
-            except BaseException as exc:
+            except Exception as exc:
                 errors.append(exc)
         try:
             await asyncio.to_thread(self.worker_executor.shutdown, wait=True, cancel_futures=True)
-        except BaseException as exc:
+        except Exception as exc:
             errors.append(exc)
         self._released = True
         if errors:
