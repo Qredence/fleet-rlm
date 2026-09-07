@@ -151,7 +151,7 @@ async def test_worker_startup_failure_releases_the_runner_owned_child_scheduler(
         ),
         delegation=DelegationPolicy(
             recursive_options=RecursiveRLMOptions(enabled=True, max_calls=1),
-            child_runtime_factory=lambda call_index: _child_lease(call_index),
+            child_runtime_factory=_child_lease,
         ),
         capabilities=EmptyCapabilities(),
     )
