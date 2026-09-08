@@ -5,7 +5,7 @@ import json
 
 import mlflow.tracing
 import pytest
-from mlflow.entities import Span
+from mlflow.entities import Link, Span
 from mlflow.entities.span import LiveSpan
 from opentelemetry import trace
 from opentelemetry.sdk.resources import Resource
@@ -94,6 +94,27 @@ def test_exported_payload_redacts_cloud_credentials_and_non_http_uris(export_spa
     serialized = json.dumps(finish())
     for secret in ("AKIA1234567890ABCDEF", "cloud-secret", "uri-secret", "private-bucket"):
         assert secret not in serialized
+
+
+def test_exported_payload_keeps_only_the_validated_fleet_preparation_link(export_span):
+    span, finish = export_span
+    span.add_link(
+        Link(
+            trace_id="tr-0123456789abcdef0123456789abcdef",
+            span_id="0123456789abcdef",
+            attributes={"fleet.relationship": "preparation", "secret": "sentinel"},
+        )
+    )
+    payload = finish()
+    serialized = json.dumps(payload)
+    assert "sentinel" not in serialized
+    assert payload["links"] == [
+        {
+            "trace_id": "tr-0123456789abcdef0123456789abcdef",
+            "span_id": "0123456789abcdef",
+            "attributes": {"fleet.relationship": "preparation"},
+        }
+    ]
 
 
 def test_operational_only_policy_suppresses_content(export_span, monkeypatch):

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import gzip
+import hashlib
 import json
 import os
 import statistics
@@ -571,6 +572,7 @@ def _execution_trace_id(mlflow_url: str, experiment_id: str, run_id: str) -> str
     import mlflow
 
     mlflow.set_tracking_uri(mlflow_url)
+    _flush_trace_exports_once(mlflow)
     for _attempt in range(20):
         traces = mlflow.search_traces(
             locations=[experiment_id],
@@ -582,6 +584,13 @@ def _execution_trace_id(mlflow_url: str, experiment_id: str, run_id: str) -> str
                 return str(trace.info.trace_id)
         time.sleep(0.25)
     return None
+
+
+def _flush_trace_exports_once(mlflow: Any) -> None:
+    """Flush one post-run export batch before checking the tracking store."""
+    flush = getattr(mlflow, "flush_trace_async_logging", None)
+    if callable(flush):
+        flush(terminate=False)
 
 
 def _attach_trace_identity(row: dict[str, Any], execution_trace_id: str | None) -> dict[str, Any]:
@@ -626,6 +635,7 @@ def _execution_trace_diagnostics(mlflow_url: str, trace_id: str) -> dict[str, An
         import mlflow
 
         mlflow.set_tracking_uri(mlflow_url)
+        _flush_trace_exports_once(mlflow)
         trace = mlflow.get_trace(trace_id)
         spans = list(trace.data.spans)
         repair_error_count = 0
@@ -1054,6 +1064,8 @@ def prepare_evaluation(args: argparse.Namespace) -> dict[str, Any]:
 
     if not args.judge_model:
         raise BenchmarkError("prepare-evaluation requires --judge-model with an MLflow-supported model URI")
+    if getattr(args, "judge_ab", False):
+        raise BenchmarkError("--judge-ab is only valid with the evaluate command")
     mlflow.set_tracking_uri(args.mlflow_url)
     mlflow.set_experiment(experiment_id=args.experiment_id)
     dataset_name = _evaluation_dataset_name(args.mlflow_url)
@@ -1090,10 +1102,17 @@ def run_evaluation(args: argparse.Namespace) -> dict[str, Any]:
     _configure_judge_environment(args.judge_model)
     import mlflow
     from mlflow.genai import datasets
-    from mlflow.genai.scorers import get_scorer
 
     mlflow.set_tracking_uri(args.mlflow_url)
-    mlflow.set_experiment(experiment_id=args.experiment_id)
+    judge_ab = bool(getattr(args, "judge_ab", False))
+    evaluation_experiment_id = args.experiment_id
+    if judge_ab:
+        evaluation_experiment_id = str(getattr(args, "evaluation_experiment_id", "")).strip()
+        if not evaluation_experiment_id or evaluation_experiment_id == args.experiment_id:
+            raise BenchmarkError(
+                "--judge-ab requires a separate --evaluation-experiment-id from the dataset experiment"
+            )
+    mlflow.set_experiment(experiment_id=evaluation_experiment_id)
     dataset_name = _evaluation_dataset_name(args.mlflow_url)
     dataset = datasets.get_dataset(name=dataset_name)
     frame = dataset.to_df().head(3) if args.dry_run else dataset.to_df()
@@ -1112,15 +1131,33 @@ def run_evaluation(args: argparse.Namespace) -> dict[str, Any]:
             return str(run_turn(client, query, nonce=f"quality-{uuid4()}")["answer"])
 
     run_name = args.run_name or f"quality-{datetime.now(UTC).strftime('%Y%m%dT%H%M%SZ')}"
-    scorers: list[Any] = [
-        get_scorer(name="correctness", experiment_id=args.experiment_id),
-        get_scorer(name="evidence_coverage", experiment_id=args.experiment_id),
-    ]
+    if judge_ab:
+        baseline = _judges.build_judges(
+            args.judge_model,
+            inference_params=JUDGE_INFERENCE_PARAMS,
+            generate_rationale_first=False,
+            name_suffix="_baseline",
+        )
+        rationale_first = _judges.build_judges(
+            args.judge_model,
+            inference_params=JUDGE_INFERENCE_PARAMS,
+            generate_rationale_first=True,
+            name_suffix="_rationale_first",
+        )
+        scorers = [*baseline, *rationale_first]
+    else:
+        from mlflow.genai.scorers import get_scorer
+
+        scorers = [
+            get_scorer(name="correctness", experiment_id=args.experiment_id),
+            get_scorer(name="evidence_coverage", experiment_id=args.experiment_id),
+        ]
     if args.scorers:
         from scripts.benchmarks.scorers import build_scorers
 
         requested = [name.strip() for name in args.scorers.split(",") if name.strip()]
         scorers.extend(build_scorers(requested, judge_model=args.judge_model, guidelines=args.guidelines or None))
+    started = time.perf_counter()
     with mlflow.start_run(run_name=run_name) as run:
         result = mlflow.genai.evaluate(
             data=frame,
@@ -1128,19 +1165,143 @@ def run_evaluation(args: argparse.Namespace) -> dict[str, Any]:
             scorers=scorers,
         )
         run_id = run.info.run_id
+    evaluation_duration_ms = round((time.perf_counter() - started) * 1000, 3)
     metrics = {str(key): value for key, value in result.metrics.items()}
     receipt = {
+        "schema": RECEIPT_SCHEMA,
         "dataset_name": dataset_name,
         "dataset_id": getattr(dataset, "dataset_id", None),
+        "dataset_experiment_id": args.experiment_id,
+        "dataset_snapshot": _dataset_snapshot(frame),
+        "evaluation_experiment_id": evaluation_experiment_id,
         "run_id": run_id,
         "run_name": run_name,
         "dry_run": args.dry_run,
         "records": len(frame),
         "scorers": [getattr(scorer, "name", None) for scorer in scorers],
+        "evaluation_duration_ms": evaluation_duration_ms,
+        "available_token_cost_measurements": _available_token_cost_measurements(metrics),
         "metrics": metrics,
     }
-    receipt["quality_complete"] = quality_gate(receipt)
+    if judge_ab:
+        judge_ab_receipt = _judge_ab_receipt(result, baseline, rationale_first)
+        judge_ab_receipt.update(
+            {
+                "model": args.judge_model,
+                "instructions": {
+                    "correctness": CORRECTNESS_INSTRUCTIONS,
+                    "evidence_coverage": EVIDENCE_COVERAGE_INSTRUCTIONS,
+                },
+                "inference_params": dict(JUDGE_INFERENCE_PARAMS),
+                "rationale_settings": {"baseline": False, "rationale_first": True},
+            }
+        )
+        receipt["judge_ab"] = judge_ab_receipt
+        receipt["quality_complete"] = None
+    else:
+        receipt["quality_complete"] = quality_gate(receipt)
     return receipt
+
+
+def _dataset_snapshot(frame: Any) -> dict[str, Any]:
+    """Hash the exact bounded dataframe passed to an evaluation run."""
+    serialized = frame.to_json(orient="records", date_format="iso", default_handler=str)
+    return {
+        "sha256": hashlib.sha256(serialized.encode("utf-8")).hexdigest(),
+        "records": len(frame),
+    }
+
+
+def _score_value(value: object) -> bool | str | None:
+    """Project one scorer value into a bounded receipt-safe representation."""
+    if isinstance(value, bool):
+        return value
+    if type(value).__module__ == "numpy" and type(value).__name__ in {"bool", "bool_"}:
+        return bool(value)
+    if value is None:
+        return None
+    try:
+        if value != value:  # NaN-like values
+            return None
+    except Exception:
+        return None
+    return str(value)[:128]
+
+
+def _available_token_cost_measurements(metrics: Mapping[str, Any]) -> dict[str, Any]:
+    """Keep only token/cost metrics when MLflow exposes them in an evaluation result."""
+    return {
+        str(key): value
+        for key, value in metrics.items()
+        if any(term in str(key).lower() for term in ("token", "cost"))
+        and isinstance(value, (int, float))
+        and not isinstance(value, bool)
+    }
+
+
+def _judge_ab_receipt(result: Any, baseline: Sequence[Any], rationale_first: Sequence[Any]) -> dict[str, Any]:
+    """Summarize a same-input baseline/rationale-first evaluation."""
+    frame = getattr(result, "result_df", None)
+    scores: dict[str, dict[str, float | None]] = {}
+    for variant, scorers in (("baseline", baseline), ("rationale_first", rationale_first)):
+        variant_scores: dict[str, float | None] = {}
+        for scorer in scorers:
+            name = str(getattr(scorer, "name", ""))
+            values = []
+            if frame is not None and f"{name}/value" in frame:
+                values = [
+                    projected
+                    for value in frame[f"{name}/value"].tolist()
+                    if isinstance((projected := _score_value(value)), bool)
+                ]
+            variant_scores[name.removesuffix(f"_{variant}")] = sum(values) / len(values) if values else None
+        scores[variant] = variant_scores
+
+    agreement: dict[str, dict[str, float | int | None]] = {}
+    disagreements: list[dict[str, Any]] = []
+    if frame is not None:
+        for base_scorer, rationale_scorer in zip(baseline, rationale_first, strict=True):
+            base_name = str(getattr(base_scorer, "name", ""))
+            rationale_name = str(getattr(rationale_scorer, "name", ""))
+            total = 0
+            matching = 0
+            for index, row in frame.iterrows():
+                base_value = _score_value(row.get(f"{base_name}/value"))
+                rationale_value = _score_value(row.get(f"{rationale_name}/value"))
+                if base_value is None or rationale_value is None:
+                    continue
+                total += 1
+                if base_value == rationale_value:
+                    matching += 1
+                elif len(disagreements) < 64:
+                    disagreements.append(
+                        {
+                            "row_index": int(index) if isinstance(index, int) else str(index),
+                            "judge": base_name.removesuffix("_baseline"),
+                            "baseline": base_value,
+                            "rationale_first": rationale_value,
+                        }
+                    )
+            judge_name = base_name.removesuffix("_baseline")
+            agreement[judge_name] = {
+                "matching": matching,
+                "compared": total,
+                "rate": matching / total if total else None,
+            }
+    policies = {
+        "baseline": [_judges.normalized_judge_policy(scorer) for scorer in baseline],
+        "rationale_first": [_judges.normalized_judge_policy(scorer) for scorer in rationale_first],
+    }
+    return {
+        "scores": scores,
+        "agreement": agreement,
+        "disagreements": disagreements,
+        "accuracy": None,
+        "accuracy_basis": (
+            "No independent reference labels were supplied; expectations are evaluation inputs, not labels."
+        ),
+        "policies": policies,
+    }
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -1186,6 +1347,16 @@ def build_parser() -> argparse.ArgumentParser:
         default="",
         help="MLflow run name for evaluate (default: quality-<UTC timestamp>); reuse a name to build baselines",
     )
+    parser.add_argument(
+        "--judge-ab",
+        action="store_true",
+        help="Evaluate baseline and rationale-first judges in memory; never registers either variant",
+    )
+    parser.add_argument(
+        "--evaluation-experiment-id",
+        default="",
+        help="Separate MLflow experiment for --judge-ab evaluation runs",
+    )
     parser.add_argument("--baseline", type=Path)
     parser.add_argument("--candidate", type=Path)
     parser.add_argument("--quality", type=Path)
@@ -1206,6 +1377,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     _load_repository_env()
     args = build_parser().parse_args(argv)
     try:
+        if args.judge_ab and args.command != "evaluate":
+            raise BenchmarkError("--judge-ab is only valid with the evaluate command")
         if args.command == "benchmark":
             if args.warmups < 0 or args.runs < 1:
                 raise BenchmarkError("warmups must be nonnegative and runs must be positive")

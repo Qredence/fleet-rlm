@@ -102,6 +102,14 @@ MLflow-supported endpoint (e.g. `gateway:/databricks-inkling` via a local
 MLflow AI Gateway server); the Fleet DSPy model aliases are not automatically
 valid MLflow judge endpoints.
 
+The evaluation command uses the MLflow 3.16 GenAI API. The normal path keeps
+the registered `correctness` and `evidence_coverage` judges. Use
+`--judge-ab --evaluation-experiment-id <separate-id>` for the opt-in
+rationale-first comparison; it evaluates both scorer variants in memory,
+writes a bounded comparison receipt, and never mutates the canonical registry.
+Promotion is a separate reviewed call to `ensure_registered` with
+`generate_rationale_first=True`.
+
 ## Phase 3 MLflow receipt attachment
 
 After the opt-in native feasibility lane writes its bounded JSON receipt, an

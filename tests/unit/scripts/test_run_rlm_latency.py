@@ -6,6 +6,7 @@ import json as json_module
 import sys
 from types import SimpleNamespace
 
+import pandas as pd
 import pytest
 
 from scripts.benchmarks.run_rlm_latency import (
@@ -20,6 +21,7 @@ from scripts.benchmarks.run_rlm_latency import (
     _aggregate,
     _attach_trace_identity,
     _execution_trace_diagnostics,
+    _judge_ab_receipt,
     _termination_mode_from_chunk,
     _upload_corpus,
     _usage_totals,
@@ -103,6 +105,40 @@ def test_nearest_rank_percentiles_are_deterministic() -> None:
     assert percentile(values, 95) == 19
     with pytest.raises(ValueError):
         percentile([], 50)
+
+
+def test_judge_ab_receipt_compares_same_input_variant_scores() -> None:
+    baseline = [
+        SimpleNamespace(name="correctness_baseline"),
+        SimpleNamespace(name="evidence_coverage_baseline"),
+    ]
+    rationale_first = [
+        SimpleNamespace(name="correctness_rationale_first"),
+        SimpleNamespace(name="evidence_coverage_rationale_first"),
+    ]
+    result = SimpleNamespace(
+        result_df=pd.DataFrame(
+            {
+                "correctness_baseline/value": [True, False],
+                "correctness_rationale_first/value": [True, True],
+                "evidence_coverage_baseline/value": [True, True],
+                "evidence_coverage_rationale_first/value": [True, True],
+            }
+        )
+    )
+
+    receipt = _judge_ab_receipt(result, baseline, rationale_first)
+
+    assert receipt["scores"] == {
+        "baseline": {"correctness": 0.5, "evidence_coverage": 1.0},
+        "rationale_first": {"correctness": 1.0, "evidence_coverage": 1.0},
+    }
+    assert receipt["agreement"]["correctness"] == {"matching": 1, "compared": 2, "rate": 0.5}
+    assert receipt["agreement"]["evidence_coverage"] == {"matching": 2, "compared": 2, "rate": 1.0}
+    assert receipt["disagreements"] == [
+        {"row_index": 1, "judge": "correctness", "baseline": False, "rationale_first": True}
+    ]
+    assert receipt["accuracy"] is None
 
 
 def test_run_turn_propagates_attachment_ids_and_captures_bounded_trajectory() -> None:

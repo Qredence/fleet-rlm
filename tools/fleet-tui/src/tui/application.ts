@@ -30,6 +30,7 @@ export type FleetTuiOptions = {
   session: FleetSession;
   resumed: boolean;
   initialEvents: StoreEvent[];
+  latestTraceId?: string | null;
   terminal?: Terminal;
   queryColorScheme?: boolean;
   /** Optional local draft persistence; omitted disables it (tests stay hermetic). */
@@ -85,6 +86,7 @@ class FleetTuiApplicationImpl implements FleetTuiApplication {
         resumed: options.resumed,
       },
       events: options.initialEvents,
+      latestTraceId: options.latestTraceId,
     });
     this.screen = new FleetScreen(this.store, this.editor, this.terminal, this.ui);
     this.ui.setLayoutRoot(this.screen);

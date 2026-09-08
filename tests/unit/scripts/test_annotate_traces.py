@@ -114,7 +114,15 @@ def test_derive_attributes_extracts_llm_tool_latency_and_tokens() -> None:
         _FakeSpan(
             "LM.module",
             "CHAIN",
-            attributes={"mlflow.chat.tokenUsage": {"input_tokens": 12, "output_tokens": 3, "total_tokens": 15}},
+            attributes={
+                "mlflow.chat.tokenUsage": {
+                    "input_tokens": 12,
+                    "output_tokens": 3,
+                    "total_tokens": 15,
+                    "cache_read_input_tokens": 4,
+                    "cache_creation_input_tokens": 2,
+                }
+            },
         ),
         _FakeSpan("remember", "TOOL", attributes={}),
     ]
@@ -129,6 +137,8 @@ def test_derive_attributes_extracts_llm_tool_latency_and_tokens() -> None:
     assert attributes["fleet.prompt_tokens"] == "12"
     assert attributes["fleet.completion_tokens"] == "3"
     assert attributes["fleet.total_tokens"] == "15"
+    assert attributes["fleet.cache_read_tokens"] == "4"
+    assert attributes["fleet.cache_creation_tokens"] == "2"
     assert attributes["fleet.span_types"] == "chain:2,llm:1,tool:1"
 
 

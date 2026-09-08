@@ -74,6 +74,11 @@ shutdown flush, and process-global autolog teardown; application construction
 performs no external MLflow probe, and an unavailable setup marks that lifespan
 inactive instead of poisoning later lifespans.
 
+The lock pins MLflow `3.16.0` with `opentelemetry-sdk==1.44.0`. Feedback
+assessments use the same application-owned MLflow lifecycle as tracing; they
+are session-bound, execution-only, and are never allowed to reset or flush the
+global exporter while a request is in flight.
+
 MLflow trace payloads are bounded and readable by default: prompts, generated
 code, tool payloads, responses, reasoning, and system-prompt fields are
 available in the authorized engineering trace destination. Set

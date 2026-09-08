@@ -25,6 +25,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/sessions/{session_id}/traces/feedback": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Submit Trace Feedback
+         * @description Record human feedback for an execution trace owned by this Session.
+         */
+        post: operations["submit_trace_feedback"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/sessions": {
         parameters: {
             query?: never;
@@ -891,6 +911,36 @@ export interface components {
              */
             type: "text";
         };
+        /**
+         * TraceFeedbackRequest
+         * @description One human thumbs assessment for an execution trace.
+         */
+        TraceFeedbackRequest: {
+            /** Trace Id */
+            trace_id: string;
+            /** Value */
+            value: boolean;
+            /** Comment */
+            comment?: string | null;
+        };
+        /**
+         * TraceFeedbackResponse
+         * @description Closed public result for a recorded MLflow assessment.
+         */
+        TraceFeedbackResponse: {
+            /** Trace Id */
+            trace_id: string;
+            /**
+             * Name
+             * @default user_feedback
+             * @constant
+             */
+            name: "user_feedback";
+            /** Value */
+            value: boolean;
+            /** Assessment Id */
+            assessment_id?: string | null;
+        };
         /** UIMessageResponse */
         UIMessageResponse: {
             /** Id */
@@ -1476,6 +1526,41 @@ export interface operations {
             };
             /** @description Turn unavailable while composition installs dependencies */
             503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    submit_trace_feedback: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TraceFeedbackRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TraceFeedbackResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };

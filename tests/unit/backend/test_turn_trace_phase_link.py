@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import importlib
 import sys
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from types import ModuleType, SimpleNamespace
 from typing import Any, cast
@@ -25,9 +25,11 @@ class _FakeSpan:
     def __init__(self, request_id: str) -> None:
         """Initialize a fake span with the specified request ID and empty recording collections."""
         self.request_id = request_id
+        self.span_id = f"{len(request_id):016x}"
         self.inputs: list[dict[str, object]] = []
         self.outputs: list[dict[str, object]] = []
         self.statuses: list[str] = []
+        self.links: list[Any] = []
 
     def set_inputs(self, payload: dict[str, object]) -> None:
         """Records an input payload for the span.
@@ -57,6 +59,12 @@ class _FakeSpan:
         """Record a status value for the span."""
         self.statuses.append(status)
 
+    def add_link(self, link: Any) -> None:
+        """Record a cross-trace link added by the Fleet wrapper."""
+        if getattr(self, "fail_links", False):
+            raise RuntimeError("link unsupported")
+        self.links.append(link)
+
 
 def _install_fake_mlflow(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
     """
@@ -65,13 +73,14 @@ def _install_fake_mlflow(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
     Returns:
         SimpleNamespace: Recorded spans, trace updates, and active span state.
     """
-    calls = SimpleNamespace(spans=[], update_kwargs=[], stack=[])
+    calls = SimpleNamespace(spans=[], update_kwargs=[], stack=[], fail_links=False)
 
     @contextmanager
     def start_span(*, name: str = "span", span_type: Any = None, **_kwargs: Any) -> Iterator[Any]:
         """Create and yield a fake tracing span for the duration of a context."""
         del span_type
         span = _FakeSpan(f"tr-span-{len(calls.spans) + 1}")
+        span.fail_links = calls.fail_links
         calls.spans.append((name, span))
         calls.stack.append(span)
         try:
@@ -99,6 +108,14 @@ def _install_fake_mlflow(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
 
     entities = ModuleType("mlflow.entities")
     entities.SpanType = SimpleNamespace(CHAIN="CHAIN")  # type: ignore[attr-defined]
+
+    class Link:
+        def __init__(self, *, trace_id: str, span_id: str, attributes: Mapping[str, object]) -> None:
+            self.trace_id = trace_id
+            self.span_id = span_id
+            self.attributes = dict(attributes)
+
+    entities.Link = Link  # type: ignore[attr-defined]
 
     monkeypatch.setitem(sys.modules, "mlflow", mlflow)
     monkeypatch.setitem(sys.modules, "mlflow.entities", entities)
@@ -273,6 +290,7 @@ async def test_execution_trace_links_preparation_trace_id_one_way(
     from fleet_rlm.rlm.events import RunCompleted, RunStarted
 
     calls = _install_fake_mlflow(monkeypatch)
+    monkeypatch.setattr(tracing, "_TRACKING_URI_APPLIED", "http://127.0.0.1:5001")
     events = await _run_success_turn(
         prepared_factory=_real_prepared_run,
         tracing_enabled=True,
@@ -286,6 +304,11 @@ async def test_execution_trace_links_preparation_trace_id_one_way(
     assert len(roots) == 2
     preparation_id, execution_id = roots[0].request_id, roots[1].request_id
     assert execution_id != preparation_id
+    assert roots[0].links == []
+    assert len(roots[1].links) == 1
+    assert roots[1].links[0].trace_id == preparation_id
+    assert roots[1].links[0].span_id == roots[0].span_id
+    assert roots[1].links[0].attributes == {"fleet.relationship": "preparation"}
 
     # Both roots are phase-tagged so MLflow search can identify each.
     assert preparation_update["tags"]["fleet.trace_phase"] == "preparation"
@@ -377,6 +400,44 @@ def test_preparation_link_tag_only_records_on_execution_phase(
     assert update["tags"]["fleet.trace_phase"] == "preparation"
     assert "fleet.preparation_trace_id" not in update["tags"]
     assert "fleet.preparation_trace_id" not in update["metadata"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("_tracing_active")
+async def test_preparation_link_is_disabled_for_unity_catalog_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = _install_fake_mlflow(monkeypatch)
+    monkeypatch.setattr(tracing, "_TRACKING_URI_APPLIED", "databricks")
+    await _run_success_turn(
+        prepared_factory=_real_prepared_run,
+        tracing_enabled=True,
+        expose_trace_id=True,
+    )
+    roots = [span for name, span in calls.spans if name == "fleet_turn"]
+    assert len(roots) == 2
+    assert roots[1].links == []
+    execution_update = _trace_root_updates(calls)[1]
+    assert execution_update["tags"]["fleet.preparation_trace_id"] == roots[0].request_id
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("_tracing_active")
+async def test_preparation_link_failure_does_not_fail_execution(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = _install_fake_mlflow(monkeypatch)
+    calls.fail_links = True
+    monkeypatch.setattr(tracing, "_TRACKING_URI_APPLIED", "http://127.0.0.1:5001")
+    events = await _run_success_turn(
+        prepared_factory=_real_prepared_run,
+        tracing_enabled=True,
+        expose_trace_id=True,
+    )
+    assert events
+    roots = [span for name, span in calls.spans if name == "fleet_turn"]
+    assert len(roots) == 2
+    assert all(not span.links for span in roots)
 
 
 @pytest.mark.asyncio

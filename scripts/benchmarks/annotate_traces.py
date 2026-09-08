@@ -7,10 +7,12 @@ derived, non-content ``fleet.*`` trace tags so the MLflow UI and
 ``search_traces`` ``filter_string`` queries can select by model, provider,
 tool, latency, and token usage.
 
-Span attribute contract (MLflow 3.15.x): LLM spans expose
+Span attribute contract (MLflow 3.16.x): LLM spans expose
 ``mlflow.llm.model`` and ``mlflow.llm.provider``; the enclosing LM/module
 span exposes ``mlflow.chat.tokenUsage`` as
-``{"input_tokens": int, "output_tokens": int, "total_tokens": int}``; and
+``{"input_tokens": int, "output_tokens": int, "total_tokens": int}``, with
+optional ``cache_read_input_tokens`` and ``cache_creation_input_tokens``;
+and
 traces carry an aggregated ``mlflow.trace.tokenUsage`` JSON summary under
 ``info.request_metadata``. All are read here; values are never span content.
 The legacy ``model`` key written by the DSPy callback is accepted as a
@@ -149,6 +151,35 @@ def _token_count(value: Any) -> int:
     return max(0, count)
 
 
+def _token_usage_mapping(value: Any) -> Mapping[str, Any] | None:
+    """Decode one MLflow token-usage attribute without treating content as usage."""
+    if isinstance(value, Mapping):
+        return value
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+        except json.JSONDecodeError:
+            return None
+        return parsed if isinstance(parsed, Mapping) else None
+    return None
+
+
+def _usage_field(usage: Mapping[str, Any], *keys: str) -> int:
+    """Read one bounded token field, including provider detail aliases."""
+    for key in keys:
+        value = usage.get(key)
+        if value is not None:
+            return _token_count(value)
+    for details_key in ("input_token_details", "prompt_tokens_details", "input_tokens_details"):
+        details = usage.get(details_key)
+        if isinstance(details, Mapping):
+            for key in keys:
+                value = details.get(key)
+                if value is not None:
+                    return _token_count(value)
+    return 0
+
+
 def derive_attributes(trace: Any) -> dict[str, str]:
     """
     Derive bounded aggregate attributes from one persisted trace.
@@ -172,13 +203,15 @@ def derive_attributes(trace: Any) -> dict[str, str]:
     prompt_tokens = 0
     completion_tokens = 0
     total_tokens = 0
+    cache_read_tokens = 0
+    cache_creation_tokens = 0
 
     for span in spans:
         span_type = str(getattr(span, "span_type", "") or "").upper()
         name = str(getattr(span, "name", "") or "")
         span_type_counts[span_type or "UNKNOWN"] += 1
         if span_type == "LLM":
-            # MLflow 3.15 span attribute contract: the DSPy autolog callback
+            # MLflow 3.16 span attribute contract: the DSPy autolog callback
             # writes mlflow.llm.model/mlflow.llm.provider on LLM spans. The
             # legacy non-namespaced ``model`` key is a fallback.
             model = (
@@ -194,13 +227,24 @@ def derive_attributes(trace: Any) -> dict[str, str]:
         # Token usage is written by the DSPy callback on the enclosing
         # LM/module span, whose span type may be CHAIN or LLM; read it from
         # every span that carries the attribute.
-        usage = _span_attribute(span, "mlflow.chat.tokenUsage")
-        if isinstance(usage, Mapping):
-            prompt_tokens += _token_count(usage.get("input_tokens", usage.get("prompt_tokens")))
-            completion_tokens += _token_count(usage.get("output_tokens", usage.get("completion_tokens")))
-            total_tokens += _token_count(usage.get("total_tokens"))
-        elif usage is not None:
-            total_tokens += _token_count(usage)
+        usage = _token_usage_mapping(_span_attribute(span, "mlflow.chat.tokenUsage"))
+        if usage is not None:
+            prompt_tokens += _usage_field(usage, "input_tokens", "prompt_tokens")
+            completion_tokens += _usage_field(usage, "output_tokens", "completion_tokens")
+            total_tokens += _usage_field(usage, "total_tokens")
+            cache_read_tokens += _usage_field(
+                usage,
+                "cache_read_input_tokens",
+                "cache_read_tokens",
+                "cached_tokens",
+                "cache_read",
+            )
+            cache_creation_tokens += _usage_field(
+                usage,
+                "cache_creation_input_tokens",
+                "cache_creation_tokens",
+                "cache_creation",
+            )
         if span_type == "TOOL" and name:
             tools.append(name)
 
@@ -210,6 +254,19 @@ def derive_attributes(trace: Any) -> dict[str, str]:
         prompt_tokens = _token_count(trace_usage.get("input_tokens", trace_usage.get("prompt_tokens")))
         completion_tokens = _token_count(trace_usage.get("output_tokens", trace_usage.get("completion_tokens")))
         total_tokens = _token_count(trace_usage.get("total_tokens"))
+        cache_read_tokens = _usage_field(
+            trace_usage,
+            "cache_read_input_tokens",
+            "cache_read_tokens",
+            "cached_tokens",
+            "cache_read",
+        )
+        cache_creation_tokens = _usage_field(
+            trace_usage,
+            "cache_creation_input_tokens",
+            "cache_creation_tokens",
+            "cache_creation",
+        )
 
     execution_duration = getattr(info, "execution_duration", None)
     latency_ms = int(execution_duration) if execution_duration is not None else None
@@ -237,6 +294,10 @@ def derive_attributes(trace: Any) -> dict[str, str]:
         attributes[f"{DEFAULT_TAG_PREFIX}prompt_tokens"] = str(prompt_tokens)
     if completion_tokens:
         attributes[f"{DEFAULT_TAG_PREFIX}completion_tokens"] = str(completion_tokens)
+    if cache_read_tokens:
+        attributes[f"{DEFAULT_TAG_PREFIX}cache_read_tokens"] = str(cache_read_tokens)
+    if cache_creation_tokens:
+        attributes[f"{DEFAULT_TAG_PREFIX}cache_creation_tokens"] = str(cache_creation_tokens)
     if span_type_counts:
         attributes[f"{DEFAULT_TAG_PREFIX}span_types"] = _bounded_tag(
             ",".join(f"{span_type.lower()}:{count}" for span_type, count in sorted(span_type_counts.items()))
@@ -260,6 +321,9 @@ def annotate(args: argparse.Namespace) -> dict[str, Any]:
     from mlflow.tracking.client import MlflowClient
 
     mlflow.set_tracking_uri(args.mlflow_url)
+    flush = getattr(mlflow, "flush_trace_async_logging", None)
+    if callable(flush):
+        flush(terminate=False)
     filter_string = f"tag.{args.tag} = 'true'" if args.tag else None
     traces = mlflow.search_traces(
         locations=[experiment_id],

@@ -117,6 +117,34 @@ async def test_runtime_tracks_inactive_starting_active_and_explicit_flush() -> N
 
 
 @pytest.mark.asyncio
+async def test_runtime_runs_synchronous_sdk_operations_on_owner_before_shutdown() -> None:
+    calls: list[str] = []
+    owner_threads: list[int] = []
+    runtime = MLflowRuntime(_settings())
+
+    def configure(_settings: Settings) -> bool:
+        owner_threads.append(get_ident())
+        return True
+
+    def operation(value: str) -> str:
+        owner_threads.append(get_ident())
+        calls.append(value)
+        return "accepted"
+
+    runtime._configure = configure
+    runtime._flush = lambda: calls.append("flush")
+    await runtime.start()
+
+    assert await runtime.run_operation(operation, "feedback") == "accepted"
+    await runtime.close()
+
+    assert calls == ["feedback", "flush"]
+    assert len(set(owner_threads)) == 1
+    with pytest.raises(RuntimeError, match="not active"):
+        await runtime.run_operation(operation, "after-close")
+
+
+@pytest.mark.asyncio
 async def test_runtime_resets_tracing_on_the_same_owner_after_flush() -> None:
     calls: list[str] = []
     owner_threads: list[int] = []

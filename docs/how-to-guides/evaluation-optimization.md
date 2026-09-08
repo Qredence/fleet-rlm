@@ -47,7 +47,7 @@ detached ephemeral lane and consume exported records in the 3.13 lane:
 
 ```bash
 uv run --no-project --python 3.12 \
-  --with 'mlflow[genai]>=3.15' --with 'databricks-agents>=1.11' \
+  --with 'mlflow[genai]==3.16.0' --with 'databricks-agents>=1.11' \
   --with 'databricks-connect==18.0.0' --with httpx --with python-dotenv \
   python scripts/benchmarks/rlm_eval_dataset.py <ingest-static|ingest-traces|show|export|history|tag> ...
 ```
@@ -59,18 +59,18 @@ evaluation on any interpreter.
 
 ```bash
 FLEET_LIVE=1 uv run --no-project --python 3.12 \
-  --with 'mlflow[genai]>=3.15' --with 'databricks-agents>=1.11' \
+  --with 'mlflow[genai]==3.16.0' --with 'databricks-agents>=1.11' \
   --with 'databricks-connect==18.0.0' --with httpx --with python-dotenv \
   python scripts/benchmarks/rlm_eval_dataset.py ingest-static \
   --experiment-id <id> --output .scratch/evals/dataset-static.json
 FLEET_LIVE=1 uv run --no-project --python 3.12 \
-  --with 'mlflow[genai]>=3.15' --with 'databricks-agents>=1.11' \
+  --with 'mlflow[genai]==3.16.0' --with 'databricks-agents>=1.11' \
   --with 'databricks-connect==18.0.0' --with httpx --with python-dotenv \
   python scripts/benchmarks/rlm_eval_dataset.py ingest-traces \
   --experiment-id <id> --expectations-json .scratch/evals/expectations.json \
   --output .scratch/evals/dataset-traces.json
 FLEET_LIVE=1 uv run --no-project --python 3.12 \
-  --with 'mlflow[genai]>=3.15' --with 'databricks-agents>=1.11' \
+  --with 'mlflow[genai]==3.16.0' --with 'databricks-agents>=1.11' \
   --with 'databricks-connect==18.0.0' --with httpx --with python-dotenv \
   python scripts/benchmarks/rlm_eval_dataset.py show \
   --experiment-id <id> --output .scratch/evals/dataset-show.json
@@ -204,6 +204,54 @@ FLEET_LIVE=1 uv run python scripts/benchmarks/run_rlm_latency.py evaluate \
 
 `--scorers` is additive; omitting it keeps the current two-judge default, and
 the receipt lists the applied `scorers` by name.
+
+### Rationale-first judge experiment
+
+MLflow 3.16 can ask a judge to generate a rationale before its final
+assessment. Fleet keeps that setting opt-in and isolates the comparison from
+the canonical `correctness` and `evidence_coverage` registrations. Run both
+variants against the same frozen dataset frame in a separate evaluation
+experiment:
+
+```bash
+FLEET_LIVE=1 uv run python scripts/benchmarks/run_rlm_latency.py evaluate \
+  --experiment-id <dataset-experiment-id> \
+  --evaluation-experiment-id <isolated-evaluation-experiment-id> \
+  --mlflow-url http://127.0.0.1:5001 \
+  --judge-model <mlflow-supported-judge-uri> \
+  --judge-ab \
+  --output .scratch/evals/judge-ab.json
+```
+
+The command constructs baseline and rationale-first scorers in memory, so it
+does not call canonical judge registration or change shared scorer versions.
+Its bounded receipt records the dataset snapshot, model and normalized judge
+policies, instructions, inference parameters, rationale setting, scorer
+values, latency, and any token/cost measurements MLflow exposes. It reports
+per-judge agreement and bounded disagreements for the same inputs. Accuracy is
+left unset unless independent reference labels are supplied; evaluation
+expectations are not independent labels. User satisfaction feedback from the
+TUI is a separate `user_feedback` assessment and must not be merged into
+correctness or evidence-coverage labels.
+
+Keep `generate_rationale_first=False` for the normal registered judges. After
+an explicit promotion decision, register a new version with
+`ensure_registered(..., generate_rationale_first=True)` and review the
+normalized policy diff, including the rationale setting, before changing any
+active monitoring or evaluation configuration. The A/B command itself never
+promotes a scorer.
+
+### Trace V4 navigation
+
+For a compact operational view in MLflow, include the existing Fleet fields
+`fleet.session_id`, `fleet.trace_phase`, `fleet.run_id`, `fleet.turn_status`,
+`fleet.latency_ms`, `fleet.models`, `fleet.providers`, `fleet.tools`,
+`fleet.total_tokens`, `fleet.cache_read_tokens`, and
+`fleet.cache_creation_tokens`. Keep Trace ID, status, latency, and error state
+in the primary columns, then use the session and phase fields to follow a
+Turn. Local supervised traces expose a one-way preparation-to-execution Span
+Link; Unity Catalog traces retain tag-based correlation through
+`fleet.preparation_trace_id`.
 
 ## Failure and budget guardrails
 

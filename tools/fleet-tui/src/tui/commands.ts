@@ -34,6 +34,7 @@ import {
   cancelCommand,
   clearCommand,
   exitCommand,
+  feedbackCommand,
   helpCommand,
   redoCommand,
   statusCommand,
@@ -79,6 +80,7 @@ for (const spec of [
   redoCommand,
   reloadCommand,
   traceCommand,
+  feedbackCommand,
   themeCommand,
   exitCommand,
 ]) {
