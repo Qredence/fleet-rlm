@@ -1,5 +1,9 @@
 # Maintainability freeze
 
+This page records the P34 baseline. Ownership rows and certification instructions
+below describe that phase; use [ARCHITECTURE.md](../../ARCHITECTURE.md) for
+current owners and [testing strategy](testing-strategy.md) for current commands.
+
 P34 is the certification gate for the P26–P33 maintainability hardening. It
 freezes implementation ownership and verifies that the structural changes did
 not change Fleet's public behavior, persistence model, Workspace Memory format,

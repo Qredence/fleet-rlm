@@ -2,7 +2,7 @@
 
 **Recursive language-model backend with live streaming, durable sessions, and sandboxed execution.**
 
-Fleet RLM runs [DSPy](https://github.com/stanfordnlp/dspy) `dspy.RLM` behind a compact FastAPI + SSE API. Each turn executes in an isolated [Daytona](https://www.daytona.io/) sandbox with workspace-scoped volumes, host-mediated tools, and a terminal client that streams reasoning, code, and output as it happens.
+Fleet RLM runs [DSPy](https://github.com/stanfordnlp/dspy) `dspy.RLM` behind a compact FastAPI + SSE API. Turns execute in [Daytona](https://www.daytona.io/) sandboxes with workspace-scoped volumes, host-mediated tools, and a terminal client that streams reasoning, code, and output. The selected runtime reuses a healthy Session sandbox across sequential successful Turns; recursive children receive isolated disposable sandboxes.
 
 [![CircleCI](https://dl.circleci.com/status-badge/img/gh/Qredence/fleet-rlm/tree/main.svg?style=svg)](https://dl.circleci.com/status-badge/redirect/gh/Qredence/fleet-rlm/tree/main)
 [![PyPI](https://img.shields.io/pypi/v/fleet-rlm?style=flat-square&logo=pypi&logoColor=white)](https://pypi.org/project/fleet-rlm/)
@@ -16,7 +16,7 @@ Fleet RLM runs [DSPy](https://github.com/stanfordnlp/dspy) `dspy.RLM` behind a c
 
 ## Why Fleet RLM
 
-- **RLM-native** — One fresh `dspy.RLM` per turn with Python REPL execution, native sub-LM queries, and optional recursive child RLMs.
+- **RLM-native** — Native `dspy.RLM` execution with fresh invocation history and Turn bindings, native sub-LM queries, and optional recursive child RLMs.
 - **Operator-visible streaming** — Reasoning, tool calls, interpreter code, and stdout flow over SSE to the maintained [pi-tui terminal](tools/fleet-tui/).
 - **Durable by default** — Sessions, turns, attachments, artifacts, and workspace memory survive across runs.
 - **Sandboxed execution** — Daytona interpreters run in isolated sandboxes with bounded workspace volumes and host-mediated memory tools.
@@ -24,7 +24,8 @@ Fleet RLM runs [DSPy](https://github.com/stanfordnlp/dspy) `dspy.RLM` behind a c
 
 ## Current state
 
-- **Certified dependency baseline** — The runtime is pinned to published releases only: `dspy==3.3.1` (plus `gepa==0.1.4` under the `optimize` extra). The lockfile is registry-only with no VCS pins, and an exact-version guard (`CERTIFIED_DSPY_VERSION`) fails startup on any drift. `uv run python scripts/certification_gate.py` re-verifies the certified baseline and the sealed P53.2 live Session evidence.
+- **Dependency baseline** — `pyproject.toml` pins DSPy 3.3.1, Daytona 0.210.0, and MLflow 3.16.0; the optional `optimize` extra pins GEPA 0.1.4. The exact-version guard (`CERTIFIED_DSPY_VERSION`) rejects DSPy drift. Dependency checks and historical receipts do not certify a new source revision.
+- **Runtime migration** — `runtime.variant = "legacy"` is the only selectable architecture. ADR 006's native interpreter and capsule mechanics are experimental; remote process containment and production cutover remain gated. See the [implementation status](docs/decisions/006-implementation-status.md).
 - **Turn orchestration** — `TurnCoordinator` is the sole owner of the claim → cleanup path with atomic turn commit; the stream vocabulary is the closed v1 Runtime Event set (freeze suites in `tests/freeze/`).
 - **Recursive RLM** — Native DSPy 3.3.1 child RLMs run under one contracted runtime owner (`src/fleet_rlm/daytona/recursive_child_runtime.py`) with a child deadline fence and zero-leak certification lanes in `tests/live/backend/`.
 - **Tools** — Explicit Session Workspace (7 tools) and Project (6 tools) hosts; cross-sandbox Workspace Memory append coordination is unsupported by design.
@@ -135,7 +136,8 @@ Backend logs for supervised runs: `.fleet_rlm/logs/`.
 | `/api/attachments` | Durable attachment upload and lookup |
 | `/api/artifacts/{artifact_id}` | Committed artifact metadata and content |
 | `GET /api/volume/tree` | Bounded read-only workspace volume tree (Daytona) |
-| `/api/workspace/files` | Session workspace file management |
+| `/api/files` | Independent Workspace `files/` namespace management |
+| `POST /api/sessions/{session_id}/traces/feedback` | Record feedback for a Session-owned execution trace |
 | `/api/settings` | Loopback-only non-secret runtime policy inspection and editing |
 | `/api/skills` | Bundled skill card discovery |
 | `PUT /api/runs/{run_id}/cancellation` | Durable run cancellation |

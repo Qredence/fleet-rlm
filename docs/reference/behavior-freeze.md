@@ -1,5 +1,10 @@
 # P41 behavior freeze
 
+Historical baseline: the per-Turn Root row below was superseded by the
+[Session-state contract](p42-session-state-behavior-freeze.md). Current
+ownership is in [ARCHITECTURE.md](../../ARCHITECTURE.md); ADR 006 tracks the
+next gated migration. Preserve the recorded baseline when comparing behavior.
+
 Status: **sealed** — integrated P41 delivery. The freeze is certified at one
 Git SHA per delivery; the same-SHA receipts that seal it live in the private
 evidence root (`.fleet-evidence/`), never in tracked docs.

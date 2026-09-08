@@ -6,6 +6,16 @@ The starting checkout was `0603e15a1d7ad5a10c8ed30e3fb9f2773569551d`.
 
 ## Current work
 
+This ledger retains dated implementation and validation results. Counts, SHAs,
+local environment observations, and receipt paths below describe those runs;
+they are not a fresh certification of every later checkout. Read current policy
+from `config/fleet.toml` and rerun the relevant lane for a new candidate.
+
+The Phase 6 corpus at `scripts/benchmarks/phase6_cases.json` is currently checked
+as a fixture only. The maintained quality dataset and ingestion path still use
+the five `QUALITY_RECORDS`; corpus integration and per-case experimental
+classification must be completed before claiming a Phase 6 quality campaign.
+
 ### MLflow 3.16 continuation
 
 Baseline: `063bea648`. Full completion remains the target. The 2026-09-08
@@ -15,7 +25,7 @@ local-gate and live-receipt continuation is recorded below; execution order:
 - [ ] Certify the remaining MLflow 3.16 fault-injection and configured-backend lanes.
 - [ ] Require confirmed whole-sandbox deletion for native execution until stop/start containment is certified; then prove settlement and durable continuity.
 - [ ] Complete remaining profile/mount certification, optional capacity and filesystem parity. The wheel/sdist artifact matrix is complete; provider profile and warm-pool gates remain open.
-- [ ] Complete read-only partial recursion and matched quality/cost evidence.
+- [ ] Certify the implemented read-only partial recursion and complete matched quality/cost evidence.
 - [ ] Complete shared evaluation, real GEPA, immutable promotion and rollback.
 - [ ] Remove legacy machinery only after the corresponding certification gates pass.
 

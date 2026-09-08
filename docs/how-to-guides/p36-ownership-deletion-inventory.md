@@ -1,5 +1,10 @@
 # P36 ownership and deletion contract
 
+Historical migration inventory: the source paths, phase dispositions, and
+evidence requirements below belong to P36–P41. They are not new deletion
+authorization. Use [ARCHITECTURE.md](../../ARCHITECTURE.md) for current ownership
+and [ADR 006 status](../decisions/006-implementation-status.md) for active work.
+
 > **Historical record (P36, completed).** Rows name symbols deleted in P36; the
 > document is retained as migration evidence, not as living architecture
 > guidance. Current ownership rules live in the root [ARCHITECTURE.md](../../ARCHITECTURE.md).

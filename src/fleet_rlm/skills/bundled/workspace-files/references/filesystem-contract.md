@@ -11,6 +11,7 @@ Before a Run begins, Fleet creates the shared roots and the current Session and 
 ├── artifacts/
 ├── attachments/
 ├── files/
+├── memory/MEMORIES.md
 ├── projects/<slug>/
 └── sessions/<session_uuid>/
     ├── workspace/
@@ -32,9 +33,13 @@ Session and Run directory names are UUID-shaped. The containers exist at acquisi
 | `sessions/<session_uuid>/runs/<run_uuid>/artifacts/` | Private Artifact Candidate bytes. Writing here directly does not publish or register an Artifact. |
 | `artifacts/<artifact_uuid>/` | Durable promoted bytes. They represent a public Artifact only after successful Turn Commit; raw paths remain private. |
 
-The host-owned bundled Skill catalog is not copied into the Volume. `memory/`,
-Session `exports/` and `staging/`, and Run `staging/` are not provisioned
-namespaces; Fleet has no production writer or reader for them.
+The catalog remains host-owned. Loading an authorized Skill may install its
+manifested resources under `skills/<name>/` in the Session Workspace;
+`read_skill_resource` remains the fallback when installation is unavailable.
+Workspace Memory lives at `memory/MEMORIES.md` and uses the dedicated bounded
+memory tools. Session `exports/` and `staging/`, and Run `staging/`, are not
+general-purpose tool namespaces. The tree shows logical locations; a document
+exists only after its owning operation creates or migrates it.
 
 `create_artifact` writes a private candidate under the current Run. On successful finalization, Fleet validates the candidate, promotes its bytes to the durable Artifact area, and commits its public identity with the Turn. Failure, cancellation, timeout, or commit failure does not publish that identity, even if private bytes were written before the metadata commit completed.
 
@@ -59,9 +64,14 @@ tools (`edit_project_text`, `delete_project_path`) mirror these semantics
 under `projects/<slug>/`; `attachments/` and `artifacts/` remain closed to
 workspace-path deletes and edits.
 
-The Session Workspace is a separate namespace from the Python sandbox filesystem. Use only the bound workspace tools for workspace files; Python file I/O cannot read, verify, or replace them.
+Session Workspace tools resolve authorized logical paths. Use those tools for
+workspace reads, verification, and writes; do not infer host or mounted paths
+from a tool-relative path. Sandbox-local file I/O alone does not prove that a
+durable Workspace operation succeeded.
 
-REPL variables are per-Run and are not durable. Authorized clients can retrieve
+REPL variables are not durable. The selected legacy runtime may retain them
+across sequential clean Turns, but rotation or replacement can lose them.
+Authorized clients can retrieve
 committed Artifact bytes through the Artifact content API, but host storage
 locations and raw sandbox paths must not appear in client-facing answers.
 `publish_workspace_artifact` reads an existing Workspace document into a private

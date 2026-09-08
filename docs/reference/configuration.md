@@ -39,7 +39,7 @@ applies migrations; use `uv run python scripts/db_init.py` or Alembic directly.
 ## Policy settings
 
 `runtime.variant` selects the execution architecture. Its default and only
-implemented value is `legacy`; `native` and `capsule` are rejected at startup
+selectable value is `legacy`; `native` and `capsule` are rejected at startup
 and are absent from the settings editor. Existing policies that omit it keep
 the legacy behavior. `runtime.environment = "daytona"` selects the provider
 environment independently. See [ADR 005](../decisions/005-runtime-variant.md).
@@ -143,7 +143,7 @@ The `[rlm]` recursion settings include `recursion_enabled` and bound the native
 `recursion_max_prompt_chars`, `recursion_child_max_iters`,
 `recursion_child_max_llm_calls`, and `recursion_child_max_output_chars`.
 `recursion_max_parallel_children` bounds the number of independent child RLMs
-that Fleet may run concurrently; the committed default is `5` and it is not a
+that Fleet may run concurrently; the committed default is `4` and it is not a
 model-facing concurrency control.
 The native recursive-child boundary is a fixed product invariant (`RLM_NATIVE_CHILD_DEPTH = 1`),
 not an editable policy value. Existing policies that still set

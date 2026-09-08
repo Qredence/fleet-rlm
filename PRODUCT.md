@@ -7,11 +7,17 @@ workspace; this repository does not maintain a graphical Web frontend.
 
 Canonical Run Environment set: `daytona`.
 
+The selectable architecture is `legacy`: it runs native DSPy RLM and may reuse
+a healthy resident Session interpreter across sequential successful Turns.
+ADR 006's native Daytona adapter and fresh-context cutover remain experimental;
+see the [status ledger](docs/decisions/006-implementation-status.md).
+
 ## What operators can do
 
 - Create Sessions and submit idempotent Turns over the local HTTP/SSE API.
 - Attach files, select bundled Skills, and observe bounded Run evidence in the
-  terminal timeline.
+  terminal timeline, then record optional MLflow feedback for a completed
+  execution trace.
 - In the Daytona environment, inspect the bounded, read-only logical Workspace
   Volume tree from the API or terminal client.
 - Use a Daytona profile for Sandbox-backed execution with Workspace Volume
@@ -36,9 +42,10 @@ It may append only when the user explicitly asks to remember something. Memory
 is distinct from Session History, survives failed or cancelled Runs and Sandbox
 replacement, and is not a Turn-commit record.
 
-Turns are durable only after `RunLifecycle.finish()` successfully commits their
-validated result. A failed Turn does not advance Session history or publish an
-Artifact. Workspace Memory appends become durable independently of Turn Commit
+Successful answers become committed history only after `RunLifecycle.finish()`
+validates and commits the result. Failed attempts do not publish an answer or
+Artifact; settled cancellations retain a bounded tombstone for reload.
+Workspace Memory appends become durable independently of Turn Commit
 and survive failed or cancelled Runs and Sandbox replacement. Runtime evidence
 is delivered as typed Runtime Events projected over SSE; it is separate from
 engineering-only MLflow tracing.

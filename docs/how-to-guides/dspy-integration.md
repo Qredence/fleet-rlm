@@ -11,6 +11,11 @@ iterative Python, while the Sub Model answers `llm_query()` and ordered
 bounded child `dspy.RLM` runtimes. Both model roles are host-configured; API
 clients cannot provide models, Signatures, or executable capabilities.
 
+This guide describes the selectable `legacy` runtime. Native DSPy execution
+does not imply use of ADR 006's experimental native Daytona interpreter.
+Fresh per-Run contexts and capsule-only child inputs remain gated migration
+work; see the [implementation status](../decisions/006-implementation-status.md).
+
 ## Execution contract
 
 - One resident Session runtime owns one caller-provided Code-Interpreter
@@ -81,10 +86,10 @@ clients cannot provide models, Signatures, or executable capabilities.
   metadata only, never the
   learning body, provider path, or raw error; there is no dedicated memory
   event.
-- Fleet scopes the stock `dspy.JSONAdapter()` to each Turn alongside the Root
-  Model. Provider-native token streams and sectioned text are not reinterpreted
-  as RLM actions: malformed responses remain bounded `adapter_parse_error`
-  failures, which keeps the pinned DSPy protocol authoritative without changing
+- Fleet scopes `FleetJSONAdapter` to each Turn alongside the Root Model. It
+  extends DSPy's JSON adapter with deadline/budget accounting and bounded
+  corrective re-asks. It retains the pinned DSPy action grammar; exhausted
+  repairs produce bounded `adapter_parse_error` failures without changing
   process-global DSPy settings.
 - The committed profiles use the OpenAI-compatible Chat Completion format:
   each Root/Sub role supplies a provider base URL, an API-key environment
@@ -215,7 +220,7 @@ expose the bounded recursive Tool and instruction. The selected
 `daytona-recursive` profile enables one native child level with four reserved
 child calls per Turn, a 50,000-character delegated prompt bound, eight child
 iterations, twelve child LM calls, 4,000 child output characters, and at most
-five child workers concurrently. A child request beyond
+four child workers concurrently. A child request beyond
 `RLM_NATIVE_CHILD_DEPTH = 1` uses one bounded plain Sub Model query instead of
 creating a grandchild Sandbox.
 
@@ -235,10 +240,10 @@ and termination mode.
 Fleet exposes two bounded ways for the RLM to delegate work to a smaller model.
 
 The default lane is DSPy's native sub-LM: `llm_query(prompt)` for one bounded
-semantic judgment or `llm_query_batched(prompts)` for independent judgments in
-one round trip (`rlm/program.py` guidance). These run inside the Root
+semantic judgment or `llm_query_batched(prompts)` for concurrent independent
+judgments (`rlm/program.py` guidance). Each prompt is a separate LM query. These run inside the Root
 interpreter namespace as plain LM completions against `RLMModelBundle.sub_lm`,
-so they cost one provider call and inherit the Root trust domain. That
+so each prompt consumes a semantic-call admission and inherits the Root trust domain. That
 inheritance is acceptable for prompt-only judgments because the Root's own
 generated code already executes in the same Sandbox.
 
@@ -247,7 +252,9 @@ Root-only `rlm_query_batched` under the committed recursive policy. Each
 native depth-1 delegation provisions its own ephemeral Sandbox running a full
 native RLM, mounted at the sibling Volume scope
 `recursive/<workspace>/<run>/<call-index>` with no ordinary Fleet capabilities,
-credentials, history, or broker state; strict child cleanup gates Root success.
+credentials, mutable Root state, or Root broker state. Legacy children receive
+an immutable committed Session History snapshot and bounded metadata; strict
+child cleanup gates Root success.
 A depth-2 delegation uses the bounded Sub-LM fallback instead. Child Root/Sub
 DSPy runtimes are copied per sibling to isolate mutable model histories and
 callback bookkeeping.

@@ -1,6 +1,6 @@
 # ADR: Session-scoped RLM state
 
-**Status:** accepted — implemented. P53 certification closes when the P35-E gate verifies the current clean candidate, including the separate P53.2 live Session manifest (`make p53-live-certification`, `make certification-gate`, then `make certification-verify`; ignored `.fleet-evidence/` evidence).
+**Status:** implemented by the selectable `legacy` runtime. The former P53/P35-E certification commands are retired; use the current [testing strategy](../how-to-guides/testing-strategy.md) and [ADR 006 status ledger](006-implementation-status.md) for validation and migration evidence.
 **Decision date:** 2026-08-11
 
 Fleet will make committed Session conversation the durable authority and will pass

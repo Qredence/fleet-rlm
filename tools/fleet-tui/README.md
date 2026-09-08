@@ -103,6 +103,9 @@ backend Turn contract, so the TUI can move files in both directions:
 - `/redo` resubmits the last prompt with a fresh idempotency key (e.g. after a
   stream interruption); `/reload` re-fetches committed Turns for the current
   Session; `/trace` prints the full MLflow trace ID.
+- `/feedback <up|down> [comment]` records a human assessment for the latest
+  completed execution trace in this Session. It requires available MLflow
+  tracing and does not change the Turn result or provide a correctness label.
 
 The persistent operator dock keeps live activity, pinned Skills/Attachments,
 the editor, and responsive token/outcome metrics together. The compact `Next

@@ -28,5 +28,12 @@ src/fleet_rlm/
 
 See the root [architecture](../../ARCHITECTURE.md) for dependency boundaries.
 
+Start lifecycle investigations in `chat/turn_runtime.py` and
+`chat/run_lifecycle.py`; native invocation and observation live in `rlm/runtime.py`
+and `rlm/events.py`. `rlm/session_runtime.py` owns resident reuse, while
+`rlm/program.py` and `rlm/compat_3_3_1.py` own program construction and pinned
+DSPy adaptation. SDK calls remain inside `daytona/`, even when runtime assembly
+is exposed through `runtime/daytona/`.
+
 The maintained TypeScript client is separate under `tools/fleet-tui/`; its
 generated HTTP types are owned by `make api-sync`.

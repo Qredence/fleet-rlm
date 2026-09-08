@@ -23,6 +23,12 @@ Bundled Skills contain model-facing product workflows only. Repository maintenan
 
 ## Catalog conventions
 
+These Markdown bodies and manifested resources are shipped runtime inputs.
+Documentation corrections must preserve the manifest, tool schemas, and
+version-selection contract; behavior or compatibility changes require a
+deliberate version update and corresponding catalog tests. Run the existing
+Skill manifest/catalog/tool and Turn-selection suites after editing them.
+
 - Every Skill Card advertises bounded `affordances` — the capability families
   the Skill expects (for example `workspace.files`, `artifacts.publish`,
   `fetch_url`, `llm_query`, `llm_query_batched`). Affordances are guidance only;

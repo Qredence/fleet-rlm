@@ -2,6 +2,11 @@
 
 Status: proposed; native feasibility mechanics are available, while policy selection, cutover, and live evidence gates remain open.
 
+Read implementation and dated results in the [status ledger](006-implementation-status.md).
+Normative statements below describe the target architecture, not proof that
+each phase is complete. The selectable `legacy` runtime remains the current
+product contract until the cutover gates pass.
+
 Date: 2026-09-06.
 
 Source baseline: `main` at `bcb85cc7b29d625e4c399cbf0a56459d0617302e`.

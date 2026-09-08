@@ -11,12 +11,13 @@ Sandbox, interpreter, LM runtimes, admission permit, and cleanup.
 
 ## Current bounded fan-out policy
 
-`recursion_max_parallel_children = 5` is the shipped policy concurrency cap.
+`recursion_max_parallel_children = 4` is the shipped policy concurrency cap;
+`config/fleet.toml` owns the current value.
 The Root selects `rlm_query_batched`; Fleet atomically reserves the shared
 recursive call budget, preserves input ordering, and settles the batch
 all-or-nothing. The P7 lifecycle measurements below were collected with the
 then-current two-worker benchmark setting, so they remain a per-child cost
-basis rather than a five-sibling latency claim. The routing benchmark records
+basis rather than a current four-sibling latency claim. The routing benchmark records
 observed peak sibling concurrency and latency for batch workloads.
 
 ## Measurements

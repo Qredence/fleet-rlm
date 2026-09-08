@@ -1,10 +1,14 @@
 # Daytona snapshots
 
 Fleet uses immutable Daytona Snapshots. The current operator policy resolves
-the Session image from the `FLEET_DAYTONA_SNAPSHOT` key in the local `.env` and
+the Session image from the `FLEET_DAYTONA_SNAPSHOT` environment reference and
 the lean, Volume-less SemanticChild image from
 `FLEET_DAYTONA_CHILD_SNAPSHOT`. Snapshot values are not embedded in Python or
 passed as credentials on a command line.
+
+The settings loader accepts referenced values from the process or repository
+`.env`, with process values taking precedence. This guide does not assert which
+snapshot an operator currently has selected.
 
 The Session image is the `fleet-rlm-python313-v7` contract: Python 3.13.13,
 the pinned `python:3.13.13-slim-bookworm` base, the `daytona` non-root user,
@@ -20,7 +24,7 @@ never mutated.
 
 The prior `fleet-rlm-python313-v6` and `fleet-rlm-python313-child-v1` snapshots
 remain immutable rollback targets. The larger `v7`/`child-v2` contracts are the
-active `.env` values only after their provider checks and disposable probes pass.
+selected deployment values only after their provider checks and disposable probes pass.
 
 ## Plan, create, and check
 
@@ -75,6 +79,11 @@ The profile contract is deliberately explicit:
 | `session` | Workspace-scoped mount | Root Turn execution |
 | `semantic-child` | None | Selected-input iterative child; generic warm capacity may be eligible |
 | `workspace-child` | Scoped `workspaces/<workspace_id>` mount | Child work that truly needs durable Workspace files |
+
+These are environment-manifest roles, not selectable `runtime.variant` values.
+The legacy prompt-based recursive lane still uses its private sibling Volume
+scope. Volume-less capsule children belong to the gated ADR 006 migration;
+snapshot creation alone does not certify their containment, mounts, or warm pools.
 
 Create and verify a new immutable name before changing `.env`. A Session
 replacement retains the authorized Workspace Volume identity and subpath; it

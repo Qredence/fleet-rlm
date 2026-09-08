@@ -2,6 +2,11 @@
 
 Status: **shadow-only, do not adopt for product or authoritative spans**.
 
+This is the retained P35-D decision and its dated evidence. For current tracing
+ownership and MLflow certification status, see [ARCHITECTURE.md](../../ARCHITECTURE.md)
+and the [ADR 006 ledger](../decisions/006-implementation-status.md). The retired
+live command below is historical evidence, not an executable current runbook.
+
 ## Decision
 
 Fleet keeps the existing manual adapter instrumentation as the authoritative

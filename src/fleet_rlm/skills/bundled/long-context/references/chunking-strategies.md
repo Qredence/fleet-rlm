@@ -1,6 +1,9 @@
 # Deterministic chunking helpers
 
-Prefer direct variable inspection for a small number of searches. Create chunk files only when structure-aware partitioning or repeated ranking materially reduces the evidence set.
+Prefer direct variable inspection and in-memory chunks. Persistent chunk files
+are a corrective path only when whole-value processing is inadequate; ordinary
+sources do not require paging state or indexes. Ranking can prioritize inspection
+but cannot establish that unseen chunks contain no relevant evidence.
 
 ## Split one explicit input
 
