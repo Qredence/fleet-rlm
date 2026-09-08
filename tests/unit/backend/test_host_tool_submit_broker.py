@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import socket
 import subprocess
@@ -742,6 +743,30 @@ def test_silent_native_execution_observes_authority_without_output(monkeypatch: 
             worker.join(timeout=1)
     assert broker.last_execution_stats == settled
     assert broker.stop(strict=True) is True
+
+
+@pytest.mark.parametrize("failure_type", [asyncio.CancelledError, KeyboardInterrupt, SystemExit])
+def test_worker_control_flow_reaches_owner_without_becoming_tool_failure(
+    monkeypatch: pytest.MonkeyPatch, failure_type: type[BaseException]
+) -> None:
+    from fleet_rlm.daytona.broker import DaytonaHttpToolBroker
+
+    broker = DaytonaHttpToolBroker(sandbox=object())
+    monkeypatch.setattr(broker, "ensure_started", lambda: None)
+    monkeypatch.setattr(broker, "_poll_once", lambda *_args, **_kwargs: False)
+    failure = failure_type("worker interrupted")
+
+    def run():
+        raise failure
+
+    with pytest.raises(failure_type) as caught:
+        broker.execute_with_callbacks(run_code=run, tool_executor=lambda *_: None)
+    assert caught.value is failure
+    assert broker.last_execution_stats["drain_poll_count"] == 0
+    assert all(not worker.is_alive() for worker in broker._execution_threads)
+    result = broker.execute_with_callbacks(run_code=lambda: "next invocation", tool_executor=lambda *_: None)
+    assert result.stdout == "next invocation"
+    assert broker.stop(strict=True)
 
 
 def test_execute_with_callbacks_records_per_execution_stats(monkeypatch: pytest.MonkeyPatch) -> None:
