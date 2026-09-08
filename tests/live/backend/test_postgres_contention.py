@@ -11,7 +11,7 @@ from uuid import uuid4
 
 import pytest
 import pytest_asyncio
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, text
 
 from fleet_rlm.chat.run_lifecycle import (
     ClaimedRun,
@@ -36,7 +36,7 @@ pytestmark = [pytest.mark.db, pytest.mark.asyncio]
 
 
 @pytest_asyncio.fixture
-async def postgres_claim_store():
+async def postgres_claim_store(record_testsuite_property):
     if os.environ.get("FLEET_LIVE", "").strip() not in {"1", "true", "yes"}:
         pytest.skip("Set FLEET_LIVE=1 to authorize live PostgreSQL tests")
     url = os.environ.get("FLEET_DATABASE_URL", "")
@@ -48,6 +48,11 @@ async def postgres_claim_store():
     access = TurnAccess(uuid4(), uuid4())
     session_id = None
     try:
+        async with engine.connect() as connection:
+            version = await connection.scalar(text("SHOW server_version_num"))
+            heads = (await connection.execute(text("SELECT version_num FROM alembic_version"))).scalars().all()
+        record_testsuite_property("fleet.postgres.server_version_num", str(version))
+        record_testsuite_property("fleet.postgres.alembic_heads", ",".join(sorted(heads)))
         record = await SqlAlchemySessionCatalog(factory).create(
             user_id=access.user_id, workspace_id=access.workspace_id, title="claim-contention"
         )

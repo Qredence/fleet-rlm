@@ -1137,3 +1137,67 @@ async def test_acquire_replaces_unrecoverable_provider_state() -> None:
     second = await _acquire(mgr, req)
     assert second.sandbox_id != first.sandbox_id
     assert len(plat.created) == 2
+
+
+@pytest.mark.asyncio
+async def test_native_retirement_deletes_reused_root_and_preserves_volume_scope() -> None:
+    mgr, platform, store, _volumes = _manager()
+    request = _request()
+    first = await _acquire(mgr, request)
+    await mgr.release(first)
+    native = await _acquire(mgr, request)
+    assert native.sandbox_id == first.sandbox_id
+    assert not native.created_sandbox
+    native.requires_sandbox_deletion = True
+    await mgr.release(native)
+    assert native.sandbox_id in platform.deleted
+    assert await platform.get(native.sandbox_id) is None
+    assert not mgr.has_pending_ownership
+    assert (await store.get(request.session_id)).provider_state == "quarantined"
+    replacement = await _acquire(mgr, request)
+    try:
+        assert replacement.sandbox_id != native.sandbox_id
+        assert replacement.volume_id == native.volume_id
+        assert replacement.volume_subpath == native.volume_subpath
+        assert (await store.get(request.session_id)).sandbox_id == replacement.sandbox_id
+    finally:
+        await mgr.release(replacement)
+
+
+@pytest.mark.asyncio
+async def test_native_retirement_does_not_overwrite_a_newer_binding() -> None:
+    from dataclasses import replace
+
+    mgr, platform, store, _volumes = _manager()
+    request = _request()
+    native = await _acquire(mgr, request)
+    native.requires_sandbox_deletion = True
+    replacement = replace(await store.get(request.session_id), sandbox_id="replacement")
+    await store.upsert(replacement)
+    await mgr.release(native)
+    assert platform.deleted == [native.sandbox_id]
+    assert await store.get(request.session_id) == replacement
+
+
+@pytest.mark.asyncio
+async def test_native_retirement_failure_keeps_admission_until_deletion_retry() -> None:
+    mgr, platform, store, _volumes = _manager()
+    request = _request()
+    native = await _acquire(mgr, request)
+    native.requires_sandbox_deletion = True
+    delete = platform.delete
+
+    async def unavailable(_sandbox_id):
+        raise RuntimeError("controlled deletion failure")
+
+    platform.delete = unavailable
+    with pytest.raises(RuntimeError, match="deletion was not confirmed"):
+        await mgr.release_and_quarantine(native, request, deadline=asyncio.get_running_loop().time() + 0.02)
+    assert mgr.has_pending_ownership
+    assert (await store.get(request.session_id)).provider_state == "fencing"
+    with pytest.raises(ActiveLeaseConflictError):
+        await _acquire(mgr, request)
+    platform.delete = delete
+    await mgr.release(native)
+    assert await platform.get(native.sandbox_id) is None
+    assert not mgr.has_pending_ownership

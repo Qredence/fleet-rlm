@@ -37,12 +37,17 @@ class DatasetSplit:
     selection: tuple[OptimizationRecord, ...]
     sealed_test: tuple[OptimizationRecord, ...]
     seed: int
+    grouping: str = "record"
 
     @property
     def public_manifest(self) -> dict[str, Any]:
         """Return a manifest that does not disclose sealed-test payloads."""
         return {
             "seed": self.seed,
+            "grouping": self.grouping,
+            "dataset_sha256": _ids_digest(
+                sorted(record.content_sha256 for record in (*self.train, *self.selection, *self.sealed_test))
+            ),
             "train_ids": [record.record_id for record in self.train],
             "selection_ids": [record.record_id for record in self.selection],
             "sealed_test": {

@@ -2,11 +2,63 @@
 
 Revision: **2026-09-06, v2**; status refreshed **2026-09-08**. This document supersedes the A-G organization in the preceding plan and restores the original numbered phases, with MLflow work integrated throughout.
 
-Reviewed source baseline: `main` at `bcb85cc7b29d625e4c399cbf0a56459d0617302e` (2026-09-06 18:46:13 UTC). This revision retains that audited baseline; it is not a claim that all of current main was re-audited or that pending tests were executed.
+Reviewed source baseline: `main` at `bcb85cc7b29d625e4c399cbf0a56459d0617302e` (2026-09-06 18:46:13 UTC). The current continuation checkout is `063bea648614edc1bd3f09792dd6b212429a1f29` on `fix/adr006-runtime-continuation`; it is dirty by design while the implementation is under review. The original baseline remains the source-audit anchor; the continuation receipt and ADR ledger below are authoritative for the refreshed progress.
 
-Required targets: **DSPy 3.3.1** and **Daytona Python SDK 0.210.0**. Keep the repository's current MLflow 3 dependency policy and certify the exact version resolved by `uv.lock`; do not introduce an unrelated MLflow upgrade without a demonstrated need.
+Required targets: **DSPy 3.3.1**, **Daytona Python SDK 0.210.0**, and **MLflow 3.16.0**. All three are pinned and resolved in the current checkout. Certify SDK and tracking-backend capabilities separately; no further dependency upgrade is required for this continuation.
 
 Status vocabulary: **existing** means observed in source, **implemented** means the code and local evidence are present, **pending** means work or certification remains, and **certified** requires retained evidence on the supported live topology. An existing class, test, or script does not by itself close a live validation gate. Detailed checkboxes below now distinguish implemented mechanics from open certification work; the [ADR 006 implementation status ledger](docs/decisions/006-implementation-status.md) is the concise current-state receipt.
+
+### 2026-09-08 continuation receipt
+
+The local gate isolation fixes and live evidence lanes were continued against
+the MLflow 3.16.0, DSPy 3.3.1, and Daytona 0.210.0 lock. The local environment
+no longer sets `MLFLOW_TRACKING_URI`; the explicit local MLflow server was used
+for the current receipt, and no managed Databricks backend is implied until an
+operator re-enables that lane.
+
+- The exclusive PostgreSQL campaign passed all six contention scenarios,
+  including disjoint outbox ownership, and retained target/version identity plus
+  projected Session/history, reconciliation/recovery, replay, and outbox plans:
+  `.fleet-evidence/receipts/adr006/postgres-contention-fleet_rlm_cert_5049b32b8ba0.json`.
+- The local MLflow receipt records backend version 3.16.0, DSPy autolog with
+  `DeadlineLMProxy`, async root/child traces, privacy projection, feedback
+  rationale, linkage, concurrent Sessions, repeated lifespans, and fail-soft
+  unreachable-backend behavior:
+  `.fleet-evidence/receipts/adr006/mlflow-local-certification-20260908T1858.json`.
+  Token aggregation and the requested exporter fault-injection cases remain
+  explicitly unknown or unexercised.
+- The renewed Phase 3 receipt remains a sealed native-production no-go because
+  a detached process survived context deletion:
+  `.fleet-evidence/receipts/adr006/phase3-native-20260908T184525.json`. The
+  durable Volume continuity lane separately proves artifact readability and
+  checksum preservation across replacement at
+  `.fleet-evidence/receipts/adr006/durable-continuity-20260908T1900.json`.
+- The live MVP attempt is retained as a failed semantic-quality sample at
+  `.fleet-evidence/receipts/adr006/mvp-20260908T1905.json`: the first Turn did
+  not prove accumulator continuity after a native follow-up. It leaves the
+  matched legacy/capsule campaign open and does not authorize a retry with
+  changed thresholds or a native-runtime promotion.
+- A final local MLflow operator rerun exercised the corrected certification
+  harness against the explicit local tracking server. The fetched five-span
+  trace had `OK` status, matching `fleet.session_id`, `fleet.run_id`, and
+  `fleet.trace_phase=execution` tags, a root `fleet_turn` span with two
+  `certification_child` spans parented to it, matching span trace IDs, and a
+  `DeadlineLMProxy` span. This check was written to temporary operator
+  storage rather than a retained campaign artifact; token aggregation,
+  exporter fault-injection, and managed-backend evidence remain open.
+- The live Daytona lifecycle benchmark completed three warmups and twenty
+  measured cycles with 20/20 confirmed deletions. Create-through-first-
+  execution p95 was 31.212 seconds and shutdown/deletion p95 was 0.228
+  seconds. Under the ten-second per-Turn threshold the measured decision is
+  `retained_session`, not `per_turn`; this is standalone lifecycle evidence,
+  not a matched native-versus-broker or semantic-quality campaign.
+- The PostgreSQL verifier was not rerun in this process because the required
+  exported exclusive `FLEET_DATABASE_URL` was absent. No new database evidence
+  is claimed; the retained disposable receipt above remains authoritative.
+
+These receipts close the corrected PostgreSQL campaign and local certification
+mechanics only. Native runtime selection, paid capacity, GEPA production
+execution, managed-backend certification, and rollout remain blocked.
 
 ## 1. Objective and ownership
 
@@ -45,7 +97,7 @@ Keep the native DSPy built-ins `llm_query`, `llm_query_batched`, `print`, and `S
 | Quality tooling | Dataset, scorers, judges, alignment, annotations, prompt registry, monitoring scripts | Reuse and certify; these are not greenfield features |
 | GEPA development evidence | `optimization/gepa_runner.py`, `mlflow_observability.py`, `evidence.py` | Preserve the explicit non-promotable smoke distinction |
 
-The baseline still pins Daytona 0.207.0 and selects the legacy execution path. Resident RLM/fingerprint machinery and full Session-context copying to children remain. The current-main ORM still needs the missing Sandbox Binding lineage and Session status checks reconciled. The previous tracked roadmap reports live semantic-baseline and PostgreSQL-contention evidence as pending; do not infer their completion from scripted results.
+The historical reviewed baseline pinned Daytona 0.207.0. The continuation checkout pins 0.210.0 and still selects the legacy execution path. Resident RLM/fingerprint machinery and full Session-context copying to children remain. Migration `019fe0010001` now implements Sandbox Binding lineage and Session status checks; deployed reconciliation remains a certification gate. The corrected exclusive PostgreSQL campaign is now retained separately; the remaining database gate is deployed-head reconciliation and representative deployed workload evidence, not the disposable contention campaign itself.
 
 The reviewed MLflow code already starts DSPy autologging, sanitizes and bounds trace values, supports local and configured Databricks destinations, and links preparation/execution traces. The revised work is to certify correctness, reduce overlap, tighten privacy/error behavior, and connect this existing tooling to the migration and recursive value gates.
 
@@ -54,14 +106,14 @@ The reviewed MLflow code already starts DSPy autologging, sanitizes and bounds t
 | Phase | Scope | Starting status | MLflow deliverable |
 | --- | --- | --- | --- |
 | **Phase 0 - Architecture, vocabulary, and baseline contracts** | Retain ADRs, ownership, evidence definitions | Implemented; receipts linked | Identifier and evidence vocabulary |
-| **Phase 1 - Database correctness and concurrency** | Remaining actual-main integrity and deployed-migration reconciliation | Additive SQLite implementation; deployed/PostgreSQL certification pending | Database/settlement timing with no SQL or secret payload leakage |
-| **Phase 1.1 - Foundation closeout, Daytona 0.210.0, and MLflow certification** | SDK adoption, comparison axes, real baseline, tracing/privacy/lifecycle | SDK/MLflow mechanics implemented; live certification pending | Certified tracing and separate benchmark experiments |
+| **Phase 1 - Database correctness and concurrency** | Remaining actual-main integrity and deployed-migration reconciliation | Exclusive disposable PostgreSQL campaign complete; deployed-head reconciliation pending | Database/settlement timing with no SQL or secret payload leakage |
+| **Phase 1.1 - Foundation closeout, Daytona 0.210.0, and MLflow certification** | SDK adoption, comparison axes, real baseline, tracing/privacy/lifecycle | Local MLflow 3.16 core receipt retained; exporter fault-injection, managed backend, and semantic baseline pending | Certified tracing and separate benchmark experiments |
 | **Phase 2 - DSPy execution-core certification and simplification** | Reuse existing spec, budget, proxy, output contract, adapter | Existing owners preserved; end-to-end certification pending | Correct LM/tool/repair usage attribution |
 | **Phase 3 - Daytona native-interpreter feasibility** | Prove interpreter, tool bridge, bounded output, remote cleanup | Adapter/replay mechanics implemented; native containment pending | Comparable native-versus-broker evidence |
 | **Phase 4 - Daytona environment definitions and warm capacity** | Images, dependencies, profiles, manifests, prewarm and warm-pool management | Profiles/manifests/snapshot operator lane implemented; mounts/pools pending | Image lineage and cold/warm capacity measurements |
 | **Phase 5 - Native Turn-scoped production cutover and subtraction** | Fresh Run resources, consolidated ownership, durable cleanup, SDK I/O parity | Feasibility mechanics are explicit-only; selection/cutover/subtraction pending | Correlated lifecycle, settlement and cleanup traces |
 | **Phase 6 - Recursive RLM v2** | Capsules, child profiles, scheduler, typed results, recursive value proof | Capsule/scheduler/outcome mechanics implemented; quality/value proof pending | Parent/child lineage and quality-per-cost ablations |
-| **Phase 7 - Evaluation, MLflow/GEPA optimization, rollout, and final deletion** | Shared scorers, datasets, feedback, program registry linkage, promotion | Existing scripts; integrate | Reproducible quality gates and approved release evidence |
+| **Phase 7 - Evaluation, MLflow/GEPA optimization, rollout, and final deletion** | Shared scorers, datasets, feedback, program registry linkage, promotion | Existing evaluation owners plus bounded local MLflow certification harness; evaluation/GEPA/promotion pending | Reproducible quality gates and approved release evidence |
 
 Execution order: start the independent SDK upgrade in Phase 1.1A immediately. Phase 1 schema closeout, baseline tooling, and MLflow certification can proceed in parallel where diffs do not overlap. Phase 3 offline prototypes need the SDK and DSPy boundary, not completion of every operator-run live test. Phase 4 production definitions follow native feasibility, using a minimal disposable compatibility image for the spike if needed. Production cutover in Phase 5 requires the relevant live gates. Phase 4 owns warm-capacity implementation and canaries; routine paid child-capacity activation is gated by actual Phase 6 demand and quality evidence.
 
@@ -71,8 +123,8 @@ The old A-G plan is fully incorporated: A -> Phases 1/1.1/2; B -> 3; C and F1 ->
 
 - [ ] Complete every local implementation task through Recursive RLM v2 (Phase 6). Foundational surfaces exist, but their presence does not close the unchecked tasks below.
 - [x] The Session and SemanticChild immutable snapshots are resolved from `.env`, checked against the Daytona contract, and have retained disposable runtime-probe receipts.
-- [x] The final local repository gate passed (`make check`, including generated contracts, boundaries, docs, and 538 TUI tests).
-- [ ] Deployed PostgreSQL/Alembic, native remote-containment, mounted-profile, warm-capacity, and matched semantic-quality gates remain open.
+- [x] The final local repository gate passed (`make check`, including generated contracts, boundaries, docs, and 543 TUI tests; 78.37% backend coverage against the 75% threshold).
+- [ ] Deployed Alembic-head reconciliation, native remote-containment, mounted-profile, warm-capacity, matched native-versus-broker lifecycle, and matched semantic-quality gates remain open. The exclusive disposable PostgreSQL contention and query-plan receipt is complete; the standalone Daytona lifecycle benchmark measured 31.212-second p95 create-through-first-execution and therefore retains Session Sandboxes.
 - [ ] Native cutover, safe program promotion/rollback, and resident/broker subtraction remain blocked on those gates.
 
 See [ADR 006 implementation status](docs/decisions/006-implementation-status.md) for the detailed checked/open ledger and retained evidence paths.
@@ -109,7 +161,7 @@ See [ADR 006 implementation status](docs/decisions/006-implementation-status.md)
 
 **Files:** `persistence/models.py`, `persistence/database.py`, `persistence/repositories/turns.py`, `sandbox_bindings.py`, `outbox.py`, migrations and database tests.
 
-- [ ] **P1A.01** Inventory Alembic heads in current main and deployed databases, including any deployment of the earlier database-correctness branch. Repository ancestry is recorded, but deployed database heads have not been retained in a durable receipt; select an additive/merge migration strategy only after that reconciliation. Never rewrite applied history.
+- [ ] **P1A.01** Inventory Alembic heads in the current continuation/main target and deployed databases, including any deployment of the earlier database-correctness branch. The disposable certification target retained head `019fe0010001`, but deployed database heads have not been retained in a durable receipt; select an additive/merge migration strategy only after that reconciliation. Never rewrite applied history.
 
   Repository inventory is complete: one linear head `019fe0010001`, following
   `019fdb010001`, `019fa2e4b7c1`, `019f8c1d2e3f`, `019f7950a1b2` and baseline
@@ -121,7 +173,7 @@ See [ADR 006 implementation status](docs/decisions/006-implementation-status.md)
 - [x] **P1A.05** Test upgrades from the actual preceding revision with valid data, orphaned bindings, cross-Workspace bindings, and invalid statuses. Reject dirty data without silently deleting or repairing it.
 - [x] **P1A.06** Keep immediate SQLite FK checks and assert enforcement across connections; WAL/busy-timeout tuning remains optional local policy.
 - [x] **P1A.07** Re-run expected-versus-unexpected claim-constraint tests. Preserve narrowly allowlisted conflict reconciliation and sanitized unknown failures.
-- [ ] **P1A.08** Retain a real Postgres contention run for duplicate idempotency, conflicting input, active-Run exclusion, cancellation versus commit, stale recovery, and concurrent outbox ownership. A skipped lane is not evidence of passing. The scenarios require a rerun with a durable receipt after the database-entry barrier and post-commit due-time corrections.
+- [x] **P1A.08** Retain a real Postgres contention run for duplicate idempotency, conflicting input, active-Run exclusion, cancellation versus commit, stale recovery, and concurrent outbox ownership. The exclusive disposable campaign passed all six scenarios and sealed target/version, ownership, and cleanup evidence.
 
   `tests/live/backend/test_postgres_contention.py` provides all six opt-in race
   scenarios: duplicate/conflicting/active claims, cancellation settlement versus
@@ -129,30 +181,36 @@ See [ADR 006 implementation status](docs/decisions/006-implementation-status.md)
   ownership. It checks schema compatibility without applying migrations and
   cleans up only uniquely owned fixture rows. The global outbox case additionally
   requires an empty, exclusive test database (`FLEET_TEST_DATABASE_EXCLUSIVE=1`).
-  Six local SQLite executions and six live PostgreSQL executions of the same
-  assertions pass against the configured compatible target. The global outbox
-  case used the explicit exclusive-target guard and the repaired fixture advances
-  its due timestamp after claim commit.
+  The historical receipt
+  `.fleet-evidence/receipts/adr006/postgres-contention-d60d6864a-20260908T090941Z.json`
+  proves five PostgreSQL scenarios. The corrected complete receipt
+  `.fleet-evidence/receipts/adr006/postgres-contention-fleet_rlm_cert_5049b32b8ba0.json`
+  proves all six scenarios, the exclusive outbox lane, Alembic head
+  `019fe0010001`, server version `170011`, and projected query plans. The
+  disposable database was removed after sealing.
   This exposed and fixed SQLite commit/settlement racing on an unlocked state
   read: final-state transactions now acquire the SQLite writer lock before that
   read, retaining PostgreSQL's existing row locks.
 
 - [x] **P1B.01** Keep Fleet persistence and the MLflow backend logically separate. Local SQLite files must be separate, and production deployments should use separate database/schema ownership and credentials. Fleet Alembic migrations must never manage MLflow tables.
-- [ ] **P1B.02** Measure query count and query plans for Session listing, ordered history, claim reconciliation, recovery scans, and outbox claims. Remove redundant indexes or queries only after a demonstrated overlap and SQLite/PostgreSQL plan tests; do not normalize every JSON payload or introduce a generic repository framework.
+- [x] **P1B.02** Measure query count and query plans for Session listing, ordered history, claim reconciliation, recovery scans, and outbox claims. The exclusive receipt retains representative PostgreSQL plans for each requested operation; no unproven index or query rewrite was added.
 
   Local query-count and SQLite EXPLAIN coverage now exercises all five paths.
   The fixture records 2 statements for Session listing, 1 for history, 3 for
   claim-conflict replay, 1 for recovery selection and 3 for a two-intent outbox
   claim. Replay previously issued 4 statements; its unused artifact read is
   removed while commit receipts retain artifact loading. PostgreSQL plans and
-  representative deployed workloads remain pending; no indexes were removed.
+  the plans use bounded synthetic fixture workloads; representative deployed
+  workload measurements remain pending and no indexes were removed.
 
 - [x] **P1B.03** Keep database transactions short and resource/API calls outside them. Preserve current atomic result/Turn/artifact metadata commit and independent immediate workspace-file semantics. Local recovery regressions verify that the connection is returned before provider fencing on success and failure; existing claim/commit/outbox contracts remain intact.
 - [x] **P1B.04** Add bounded timing and failure-category observations for claim, commit, recovery, and outbox work. Facade observations finish after transaction scope exits and publish only operation, duration and closed outcome categories through logs and existing active trace spans. Tests cover private-value sentinels, cancellation, database errors and unavailable observation sinks.
 
-Continuation validation: 37 focused persistence tests and `make check` passed
-(78.56% backend coverage, 538 TUI tests). Phase 1 remains open for deployed
-revision reconciliation and representative PostgreSQL query plans.
+The earlier persistence validation remains historical local evidence. The
+current final gate is recorded above (`make check`, 78.37% backend coverage and
+543 TUI tests). Phase 1 remains open for deployed revision reconciliation and
+representative deployed workload measurements; the exclusive disposable
+PostgreSQL plan receipt is retained separately.
 
 **Exit:** missing lineage is database-enforced, deployed migration history is respected, concurrency tests retain evidence, and observability does not participate in settlement.
 
@@ -171,7 +229,7 @@ revision reconciliation and representative PostgreSQL query plans.
 - [x] **P1.1A.07** Re-test API-key organization routing. The installed 0.210.0 behavior still uses one narrow, tested compatibility function because the public path does not preserve scope on its own.
 - [x] **P1.1A.08** Normalize create/start/stop/delete and Volume errors consistently. Preserve readiness verification and cleanup confirmation until SDK behavior replaces them demonstrably.
 - [ ] **P1.1A.09** Exercise SDK snapshot build-context upload behavior without adding a second retry loop around the SDK's S3 uploader. Keep this distinct from `sandbox.fs.upload_file` and ordinary artifact I/O.
-- [ ] **P1.1A.10** Keep the current snapshot for this PR. A host SDK upgrade alone does not change the installed sandbox packages or require a new image.
+- [x] **P1.1A.10** Keep the current snapshot for this PR. A host SDK upgrade alone does not change the installed sandbox packages or require a new image. This historical sequencing constraint is satisfied; subsequent Phase 4 image work has its own receipts.
 - [x] **P1.1A.11** Record MI355X support as reviewed but out of scope. Do not introduce GPU configuration for CPU-only workloads.
 - [ ] **P1.1A.12** Record a compatibility receipt covering unit tests and, separately when run, live Volume, sandbox, broker, upload, lifecycle, and public-event smoke tests.
 
@@ -194,11 +252,11 @@ revision reconciliation and representative PostgreSQL query plans.
 
 ### 1.1C. Certify the existing MLflow integration
 
-**Files:** `observability/mlflow.py`, `observability/tracing.py`, `observability/dspy_callbacks.py`, config resolution, `scripts/validate_mlflow_tracing.py`, existing MLflow tests.
+**Files:** `observability/mlflow.py`, `observability/tracing.py`, `observability/dspy_callbacks.py`, config resolution, `scripts/validate_mlflow_tracing.py`, `scripts/benchmarks/certify_mlflow.py`, `tests/unit/scripts/test_certify_mlflow.py`, existing MLflow tests.
 
 The existing implementation already handles lifecycle startup/shutdown, DSPy autologging and linked preparation/execution traces. Extend this owner rather than introducing a second instrumentation service.
 
-- [ ] **P1.1C.01** Certify the exact lock-resolved MLflow version against DSPy 3.3.1, DeadlineLMProxy, async RLM invocation, recursive host callbacks, and the configured local/Databricks backend. Record SDK and tracking-backend capability provenance separately.
+- [ ] **P1.1C.01** Certify the exact lock-resolved MLflow version against DSPy 3.3.1, DeadlineLMProxy, async RLM invocation, recursive host callbacks, and each explicitly selected backend. The local 3.16 receipt is retained in `.fleet-evidence/receipts/adr006/mlflow-local-certification-20260908T1858.json`; the corrected harness now fails closed without a current trace-handle identity and validates fetched trace IDs, Fleet tags, root/child ancestry, and span trace IDs, all of which passed in the final local operator rerun. Token aggregation, exporter fault-injection/settlement cases, and the configured managed-backend lane remain open. The local environment no longer selects a managed `MLFLOW_TRACKING_URI`.
 - [x] **P1.1C.02** Keep tracking destination, experiments, content policy, sampling, and queue settings under resolved Fleet configuration. Configure once before serving; preserve local development and explicitly configured Databricks/Unity Catalog lanes without silently switching destinations.
 - [x] **P1.1C.03** Make runtime autolog behavior explicit: inference traces enabled when permitted; compilation/evaluation logging and their traces disabled for serving. Configure evaluation/optimization jobs separately, not by changing global autolog options during active Turns.
 - [x] **P1.1C.04** Preserve current preparation/execution trace linkage and existing optional public trace ID. Add Fleet Run/Session correlation as necessary; do not force a topology rewrite merely to make a single root span.
@@ -290,16 +348,16 @@ The previously inspected exact Daytona 0.210.0 implementation invokes output han
 - [x] **P3C.02** Enforce byte bounds before output accumulates indefinitely. Replay tests cover output overflow, bounded event delivery and slow-consumer behavior; remote SDK accumulation/containment remains a live gate.
 - [x] **P3C.03** Apply an absolute host deadline and a bounded provider execution timeout. Include connection establishment, tool waits, execution, and cleanup; never use an unbounded timeout accidentally.
 - [ ] **P3C.04** Test cancellation during context creation, execution, native sub-LM calls, host callbacks, and finalization. Context, host-callback, and finalizer ownership fences are implemented, but a native sub-LM cancellation proof remains open.
-- [ ] **P3C.05** Probe long-running and detached subprocesses after cancellation and context deletion. When process termination is uncertain, stop/delete and quarantine the Session sandbox before reuse. The feasibility test now performs that deletion instead of asserting it, but the corrected lane needs a retained live receipt.
+- [ ] **P3C.05** Probe long-running and detached subprocesses after cancellation and context deletion. Durable binding-state fencing before native deletion, followed by quarantine after confirmed deletion, is now implemented and covered by unit regressions. The retained receipt `.fleet-evidence/receipts/adr006/phase3-native-20260908T184525.json` confirms whole-sandbox deletion/quarantine after a detached process survived context deletion; the live v2 remote-containment/fencing proof remains open and native production remains blocked.
 - [x] **P3C.06** Preserve no-success/no-publication behavior after authority loss. Test no delayed mutation after a subsequent Run begins.
 - [x] **P3C.07** Use separate sandboxes for tenant/Session security isolation. Test same-Session overlapping Runs are rejected; different Sessions can execute concurrently without shared bindings. Session runtime tests serialize same-key execution and retain distinct interpreters for different keys; the live lane confirmed distinct sandboxes and concurrent execution for different Sessions.
 - [x] **P3C.08** Compare broker/native protocol outputs and event causality. For parallel events, compare allowed partial order rather than demanding identical scheduling order.
 - [x] **P3C.09** Record a go/no-go receipt: correctness, output bounds, timeout/cancellation, cleanup, latency, and complexity. Record any retained compatibility code and why it remains necessary. Receipt `fleet.phase3-daytona-native-feasibility/v1` records the bounded assertions, timings, containment decision and retained broker rationale.
 
-- [ ] **P3M.01** Measure acquisition, context creation, bootstrap, first action, subsequent action, host-tool round trip, cancellation containment, and cleanup separately. Compare native versus broker under the same task/model/image settings. Current code records the timings, but a matched task/model/image receipt remains required.
+- [ ] **P3M.01** Measure acquisition, context creation, bootstrap, first action, subsequent action, host-tool round trip, cancellation containment, and cleanup separately. Compare native versus broker under the same task/model/image settings. A standalone live Daytona lifecycle benchmark completed 3 warmups and 20 measured cycles, confirmed 20/20 deletions, and measured 31.212-second p95 create-through-first-execution; it informs the `retained_session` decision under the ten-second rule but does not satisfy the matched task/model/image receipt required here.
 - [x] **P3M.02** Use existing Fleet lifecycle spans for timings and DSPy spans for LM/tool work. Represent an SDK operation once, even if lower-level transport instrumentation is also enabled. Existing `sandbox.execute` tracing tests retain one Fleet phase span while DSPy/native work remains nested.
 - [ ] **P3M.03** Propagate context explicitly across the existing sync/async bridge and child scheduling boundary; verify parent IDs under concurrent Sessions. Keep instrumentation credentials on the host. Parent-ID assertion under concurrent Sessions remains required.
-- [ ] **P3M.04** Attach a go/no-go receipt and capability results to the campaign MLflow run. A missing/failed trace cannot stand in for a passing output-bound, process-containment or cleanup test. The attachment schema is now sealed and idempotent; attach a newly generated corrected receipt before closing this gate.
+- [ ] **P3M.04** Attach a go/no-go receipt and capability results to the campaign MLflow run. The attachment schema now accepts versioned v1 historical no-go and v2 whole-sandbox outcomes with no-replace writes; the v1 live no-go remains local evidence until a campaign run and a certified v2 containment receipt exist.
 
 Phase 3 feasibility receipt (2026-09-08): the opt-in live lane passed against
 the configured Daytona 0.210.0 / DSPy 3.3.1 runtime. It proves explicit native
@@ -309,11 +367,13 @@ separate-session isolation/concurrency and disposable cleanup. A detached
 subprocess marker survived context deletion, so `go_no_go.native_production`
 is deliberately `false`; the exact native root is quarantined and the broker
 remains the compatibility path until remote process containment is certified.
-The renewed timing and capability receipt is retained at
-`.fleet-evidence/receipts/adr006/phase3-native-d60d6864a-20260908T090634Z.json`.
-It reconfirms the containment failure and the required quarantine/cleanup
-behavior; it does not close containment, matched-timing, trace-parentage, or
-MLflow-attachment gates and does not authorize native production cutover.
+The corrected receipt is retained at
+`.fleet-evidence/receipts/adr006/phase3-native-20260908T184525.json`; the
+earlier receipt `.fleet-evidence/receipts/adr006/phase3-native-d60d6864a-20260908T090634Z.json`
+remains preserved as historical evidence. The corrected receipt reconfirms the
+containment failure and required quarantine/cleanup behavior; it does not close
+containment, matched-timing, trace-parentage, or MLflow-attachment gates and
+does not authorize native production cutover.
 
 **Exit:** native execution meets the actual output, host-tool, deadline, remote-containment and public-contract requirements. The current receipt records a remote-containment failure, so native remains feasibility-only and the proven broker path is retained; no essential guarantees or rollback machinery are deleted.
 
@@ -346,7 +406,7 @@ Two images are sufficient initially: Session analysis and lean child analysis. T
 - [ ] **P4B.04** Extend `fleet doctor daytona` with actual snapshot, region, runtime-manifest, interpreter, mount, and optional capacity readiness. Report unavailable features without pretending they were exercised.
 - [ ] **P4B.05** Implement and test warm-pool plan/check/reconcile behavior in this phase, with an explicitly authorized canary where available. Keep routine paid capacity disabled until eligibility, containment and actual Phase 6 demand/value are certified. Image correctness must not depend on warm capacity.
 - [x] **P4B.06** Document the official Daytona Skill as implementation assistance and optional MCP as developer/operator tooling. Runtime/provisioning source of truth remains committed definitions plus SDK/API calls, not an interactive MCP transcript.
-- [ ] **P4B.07** Test packaging so installed Fleet distributions contain every dependency manifest and required helper asset.
+- [x] **P4B.07** Test packaging so installed Fleet distributions contain every dependency manifest and required helper asset. The wheel/sdist artifact matrix covers required manifests, helper assets, isolated profile loading, and forbidden payloads.
 
 ### 4C. Session prewarm and recursive-child warm pools
 
@@ -457,7 +517,14 @@ Preserve ordering and existing failure policy while replacing scheduling mechani
 - [x] **P6B.05** Propagate parent cancellation, deadline, and authorization loss to queued and running children; prevent new acquisitions after revocation.
 - [x] **P6B.06** Await child cleanup or establish a durable fenced cleanup obligation before parent success. A successful child answer cannot excuse an uncontained mutating worker.
 - [x] **P6B.07** Add typed per-child outcomes: completed, failed, timeout, cancelled, with bounded answer, evidence references, usage, and error category.
-- [ ] **P6B.08** Permit partial sibling evidence only for explicitly read-only analysis after its safety cleanup succeeds. Authorization/isolation/cleanup failures remain fatal. Do not swallow CancelledError as an ordinary partial result.
+- [x] **P6B.08** `rlm_query_capsules_readonly_batched` is a separate Root-only
+  Tool that returns ordered bounded child outcomes for read-only analysis after
+  ordinary sibling failure. The original capsule batch remains all-or-nothing.
+  Both paths share reservation, authorization, cancellation and cleanup logic;
+  those failures remain fatal and `asyncio.CancelledError` is never converted
+  into a partial outcome. Local tests cover an ordinary failure, authorization
+  loss and the unchanged atomic batch contract. Provider and quality evidence
+  for broader recursive use remains a separate open gate.
 
 ### 6C. Prove the recursive advantage
 
@@ -678,19 +745,19 @@ make check
 git diff --check
 ```
 
-`api-sync`/`api-check` apply to public/generated-contract changes; `tui-check` to TUI changes; full `make check` to cross-cutting work. Use the existing explicit live entry points for credentialed lanes. The plan itself was prepared through source inspection, not by running these checks.
+`api-sync`/`api-check` apply to public/generated-contract changes; `tui-check` to TUI changes; full `make check` to cross-cutting work. Use the existing explicit live entry points for credentialed lanes. The current executed results are recorded in the 2026-09-08 continuation receipt and the ADR 006 status ledger.
 
 Evidence should record: source revision and dirty state, exact installed dependencies, selected non-secret policy, runtime variant, profile/image identities, scenario/scorer identity, repetitions, successes/failures, measured usage and lifecycle distributions, exercised/skipped/blocked gates, and sanitized failure categories. Sensitive prompts, raw reasoning, provider responses, credentials, and private storage references do not belong in public receipts.
 
 Additional MLflow-focused validation should extend the already present suites, including:
 
 ```bash
-uv run pytest tests/unit/backend/test_mlflow_runtime.py   tests/unit/backend/test_mlflow_tracing_config.py   tests/unit/backend/test_turn_tracing.py   tests/unit/backend/test_turn_trace_phase_link.py   tests/unit/backend/test_validate_mlflow_tracing.py   tests/contracts/backend/test_mlflow_lifespan.py   tests/unit/optimization/test_mlflow_observability.py -q
+uv run pytest tests/unit/backend/test_mlflow_runtime.py   tests/unit/backend/test_mlflow_tracing_config.py   tests/unit/backend/test_turn_tracing.py   tests/unit/backend/test_turn_trace_phase_link.py   tests/unit/backend/test_validate_mlflow_tracing.py   tests/contracts/backend/test_mlflow_lifespan.py   tests/unit/optimization/test_mlflow_observability.py   tests/unit/scripts/test_certify_mlflow.py -q
 
 uv run pytest tests/unit/optimization   tests/unit/scripts/test_align_judges.py   tests/unit/scripts/test_enable_monitoring.py   tests/unit/scripts/test_rlm_eval_dataset.py   tests/unit/scripts/test_annotate_traces.py   tests/unit/scripts/test_manage_prompts.py   tests/unit/scripts/test_scorers.py -q
 ```
 
-Verify paths against the implementation checkout before execution. Add meaningful trace parentage, redaction-failure, duplicate-usage, late-cleanup and exporter-outage scenarios to those suites. Do not create a disconnected observability harness. The command examples are validation instructions, not results from this documentation revision.
+Verify paths against the implementation checkout before execution. Add meaningful trace parentage, redaction-failure, duplicate-usage, late-cleanup and exporter-outage scenarios to those suites. Do not create a disconnected observability harness. The command examples remain validation instructions; completed results are linked from the continuation receipt and status ledger, while unexercised cases remain explicitly open.
 
 ## 8. Final acceptance checklist
 
@@ -727,6 +794,7 @@ required certification or rollout gates.
 
 Repository observations above are pinned to the reviewed commit, not inferred from an old phase-completion statement.
 
+- Continuation working baseline: `063bea648614edc1bd3f09792dd6b212429a1f29` on `fix/adr006-runtime-continuation`; the checkout is intentionally dirty while this continuation is reviewed.
 - Current main identity: https://github.com/Qredence/fleet-rlm/commit/bcb85cc7b29d625e4c399cbf0a56459d0617302e
 - Current status/roadmap: [ADR 006 implementation-status ledger](docs/decisions/006-implementation-status.md); the prior scratch roadmap is historical input only.
 - Dependencies: https://github.com/Qredence/fleet-rlm/blob/bcb85cc7b29d625e4c399cbf0a56459d0617302e/pyproject.toml

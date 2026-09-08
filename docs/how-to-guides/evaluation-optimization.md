@@ -270,3 +270,20 @@ uv run pytest tests/unit/optimization tests/unit/scripts/test_align_judges.py \
   tests/unit/scripts/test_manage_prompts.py \
   tests/unit/scripts/test_scorers.py -q
 ```
+
+### Isolate related optimization examples
+
+Curated export provenance may include opaque `session_id` and `project_id`
+identifiers. The existing splitter keeps connected Session/project groups in one
+partition, including transitive relationships. It targets 60/20/20 proportions,
+but group isolation and at least five examples per partition take precedence.
+Exports that cannot meet those constraints are rejected; they are never split
+across a shared Session/project to fill a quota. Exports without those identities
+retain the existing record-based seeded partitioning.
+
+Split manifests record the grouping policy and a digest of all validated record
+content, so changing expectations changes the dataset identity even when record
+IDs remain stable. Group identity values and sealed-test content remain absent
+from the public manifest. These mechanics prevent declared-group leakage; they
+do not certify semantic independence of examples whose provenance omits a shared
+source.

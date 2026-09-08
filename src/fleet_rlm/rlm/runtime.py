@@ -1617,12 +1617,17 @@ class RLMRunner:
         if recursive_executor is None:
             recursive_tools = ()
         elif context.execution.runtime_variant == "native-turn-scoped":
-            recursive_tools = (recursive_executor.capsule_tool, recursive_executor.capsule_batch_tool)
+            recursive_tools = (
+                recursive_executor.capsule_tool,
+                recursive_executor.capsule_batch_tool,
+                recursive_executor.readonly_partial_capsule_batch_tool,
+            )
         else:
             recursive_tools = (
                 recursive_executor.tool,
                 recursive_executor.batched_tool,
                 recursive_executor.capsule_tool,
+                recursive_executor.readonly_partial_capsule_batch_tool,
             )
         all_tools = (*observed_tools, *recursive_tools)
         if context.execution.runtime_variant == "native-turn-scoped":
@@ -1794,6 +1799,7 @@ class RLMRunner:
                 workspace=spec.workspace,
                 workspace_memory_digest=state_context.session.workspace_memory_digest,
                 history=state_context.session.history,
+                signature=spec.signature,
             )
             trace = ExecutionTraceAssembler(recursive_executor)
             worker = start_rlm_worker(
@@ -1890,6 +1896,7 @@ class RLMRunner:
                 workspace=spec.workspace,
                 workspace_memory_digest=context.session.workspace_memory_digest,
                 history=context.session.history,
+                signature=spec.signature,
             )
             trace = ExecutionTraceAssembler(recursive_executor)
             worker = start_rlm_worker(

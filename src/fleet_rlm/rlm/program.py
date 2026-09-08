@@ -16,7 +16,7 @@ import math
 import os
 import re
 import time
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import PurePosixPath
@@ -166,8 +166,12 @@ TOOL_RLM_INSTRUCTIONS = """1. Use the Python standard library for deterministic 
    full request in code). Never repeat an identical interpreter action: use its output, choose a different action, or
    call ``SUBMIT`` when sufficient. Store large values in variables or Session Workspace. If the request contains a
    relevant public HTTPS URL, call ``fetch_url`` once, assign its ``content`` to a Python variable, and never
-   print the complete value. Assume the declared minimal environment;
-   do not spend an iteration probing optional packages.
+   print the complete value. Validate the result is a mapping with ``.get('content')``; ``content`` may be raw
+   text and metadata such as ``start`` may be absent, so handle both with a guarded ``json.loads`` fallback
+   instead of assuming keys. Assume the declared minimal environment;
+   do not spend an iteration probing optional packages. For high-precision numerical work, use the smallest
+   sufficient precision (target index plus a small guard band), reuse computed variables across iterations,
+   and never recompute a cached prefix.
 2. Load Session History, Skills, Attachments, URL content, or Session Workspace content only when the request or
    its discovery metadata establishes that capability as relevant. Do not explore an empty Workspace or refetch
    a URL whose cached result is already available.
@@ -500,8 +504,9 @@ def build_rlm_input_kwargs(
     workspace: WorkspaceCapabilityMetadata = UNAVAILABLE_WORKSPACE_CAPABILITY,
     workspace_memory_digest: str = "",
     history: dspy.History | CommittedSessionHistory | None = None,
+    signature: type[dspy.Signature] | None = None,
 ) -> dict[str, Any]:
-    """Kwargs for ``rlm.aforward`` / ``forward`` matching FleetRLMSignature."""
+    """Kwargs for ``rlm.aforward`` / ``forward`` matching the selected signature."""
     if not isinstance(request, str) or not request.strip() or len(request) > _MAX_REQUEST_CHARS:
         raise RLMConfigError("Turn input metadata is invalid")
     if (
@@ -556,6 +561,10 @@ def build_rlm_input_kwargs(
     }
     if history is not None:
         kwargs["history"] = history
+    if signature is not None:
+        input_fields = getattr(signature, "input_fields", None)
+        if isinstance(input_fields, Mapping):
+            kwargs = {name: value for name, value in kwargs.items() if name in input_fields}
     return kwargs
 
 
