@@ -291,6 +291,20 @@ def test_require_daytona_settings_accepts_databricks_mlflow_gateway_base(monkeyp
     require_daytona_settings(settings)
 
 
+def test_require_daytona_settings_requires_semantic_snapshot_when_recursion_is_enabled() -> None:
+    with pytest.raises(CompositionError, match="FLEET_DAYTONA_CHILD_SNAPSHOT"):
+        require_daytona_settings(
+            Settings(
+                run_environment="daytona",
+                database_url="sqlite+aiosqlite:///:memory:",
+                daytona_api_key=SecretStr("daytona-key"),
+                daytona_snapshot="fleet-test-v1",
+                llm_api_key=SecretStr("llm-key"),
+                rlm_recursion_enabled=True,
+            )
+        )
+
+
 @pytest.mark.parametrize(
     "base_url",
     [

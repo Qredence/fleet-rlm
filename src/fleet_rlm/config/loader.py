@@ -481,16 +481,26 @@ def _resolve_environment_value(
     """Resolve one TOML-declared value, optionally requiring repository ``.env``."""
     if name is None:
         return None
-    value = dotenv.get(name) if dotenv_only else os.environ.get(name)
-    if value is None:
-        value = dotenv.get(name)
-    value = (value or "").strip()
-    return value or None
+    if not dotenv_only:
+        value = os.environ.get(name)
+        if value is None:
+            value = dotenv.get(name)
+        value = (value or "").strip()
+        return value or None
+
+    dotenv_value = (dotenv.get(name) or "").strip() or None
+    process_value = (os.environ.get(name) or "").strip() or None
+    if dotenv_value is not None and process_value is not None and dotenv_value != process_value:
+        raise FleetConfigurationError(f"environment value {name!r} differs between .env and the process environment")
+    # Snapshot identities are safe to resolve from an explicitly declared
+    # process variable when the repository .env is absent (for example in a
+    # deployment image), while a disagreement fails closed above.
+    return dotenv_value or process_value
 
 
-# Snapshot identities are non-secret operator policy and intentionally come
-# from the repository .env file. Ambient shell values must not silently keep a
-# stale image selected during promotion or rollback.
+# Snapshot identities are non-secret operator policy. Prefer the repository
+# .env, allow an explicitly TOML-declared process variable when .env is absent,
+# and reject disagreement so promotion or rollback cannot select a stale image.
 _DOTENV_ONLY_FIELDS: frozenset[str] = frozenset({"daytona_snapshot", "daytona_child_snapshot"})
 
 

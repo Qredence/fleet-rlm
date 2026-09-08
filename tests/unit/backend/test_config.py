@@ -415,6 +415,23 @@ def test_runtime_settings_ignores_stale_environment_policy_overrides(
     assert settings.rlm_max_iters == 3
 
 
+def test_snapshot_resolution_falls_back_to_process_environment_and_rejects_drift(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import fleet_rlm.config.loader as config
+
+    monkeypatch.setenv("SNAPSHOT_NAME", "fleet-process-v1")
+    assert config._resolve_environment_value("SNAPSHOT_NAME", {}, dotenv_only=True) == "fleet-process-v1"
+
+    monkeypatch.setenv("SNAPSHOT_NAME", "fleet-dotenv-v2")
+    with pytest.raises(FleetConfigurationError, match="SNAPSHOT_NAME"):
+        config._resolve_environment_value(
+            "SNAPSHOT_NAME",
+            {"SNAPSHOT_NAME": "fleet-dotenv-v1"},
+            dotenv_only=True,
+        )
+
+
 def test_runtime_settings_resolves_only_toml_declared_environment_values(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

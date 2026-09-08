@@ -737,14 +737,21 @@ async def acquire_child_runtime(
                 platform=platform,
                 sandbox=sandbox,
                 sandbox_id=child_sandbox_id,
-                mount_path="" if semantic else mount_path or "",
+                # Semantic children are volume-less even when this factory
+                # was created with the parent Session's volume binding.
+                mount_path=None if semantic else (mount_path or ""),
                 interpreter=interpreter,
                 permit=permit,
                 retain_pending_cleanup=retain_pending_cleanup,
             )
 
-        lease_volume_id = "" if semantic else volume_id or ""
-        return ChildRuntimeLease(interpreter, child_sandbox_id, lease_volume_id, subpath, close)
+        return ChildRuntimeLease(
+            interpreter,
+            child_sandbox_id,
+            "" if semantic else (volume_id or ""),
+            subpath,
+            close,
+        )
     except BaseException:
         try:
             cleanup = OwnedEffect.start(cleanup_after_failed_acquire(platform, sandbox, sandbox_id, permit))
@@ -921,7 +928,7 @@ def _close_child_runtime_sync(
     platform: SandboxPlatform,
     sandbox: Any,
     sandbox_id: str,
-    mount_path: str,
+    mount_path: str | None,
     interpreter: Any,
     permit: Any,
     retain_pending_cleanup: Callable[[Future[Any]], None] | None = None,

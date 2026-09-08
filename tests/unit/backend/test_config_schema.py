@@ -220,7 +220,14 @@ _EXPECTED_INVENTORY: tuple[tuple[str, str, str, str, tuple[str, ...], str | None
         (),
         "mlflow_trace_export_retry_seconds",
     ),
-    ("mlflow.trace_shutdown_seconds", "MLflow", "Trace shutdown wait", "number", (), "mlflow_trace_shutdown_seconds"),
+    (
+        "mlflow.trace_shutdown_seconds",
+        "MLflow",
+        "Trace shutdown wait",
+        "number",
+        (),
+        "mlflow_trace_shutdown_seconds",
+    ),
     (
         "mlflow.http_request_timeout_seconds",
         "MLflow",

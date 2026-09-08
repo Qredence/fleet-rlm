@@ -1277,7 +1277,6 @@ class RecursiveRLMExecutor:
         self._is_authorized = is_authorized
         self._snapshot = snapshot
         self._owns_scheduler = scheduler is None
-        self._scheduler = scheduler or ChildAsyncScheduler(max_workers=options.max_parallel_children)
         self._last_completion: dict[str, object] | None = None
         self._last_capsule_outcomes: tuple[ChildOutcome, ...] = ()
         raw_tool = dspy.Tool(
@@ -1354,6 +1353,10 @@ class RecursiveRLMExecutor:
             )
         else:
             self._capsule_batch_tool = raw_capsule_batch_tool
+        # Delay creation until all Tool bindings have succeeded. If startup
+        # fails while assembling the executor, no owned scheduler thread is
+        # left behind; externally supplied schedulers remain untouched.
+        self._scheduler = scheduler or ChildAsyncScheduler(max_workers=options.max_parallel_children)
 
     @property
     def tool(self) -> dspy.Tool:

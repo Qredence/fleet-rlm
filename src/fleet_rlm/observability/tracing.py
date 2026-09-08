@@ -11,6 +11,7 @@ Fleet TOML policy (resolved through ``Settings``):
     mlflow.tracking_uri     - tracking target
     mlflow.expose_trace_id  - surface trace ids on Turn SSE metadata
     mlflow.trace_content_max_chars - per-field bound for readable content
+    mlflow.http_request_timeout_seconds - bounded MLflow HTTP request timeout
 
 Databricks auth remains outside FLEET secrets (SDK/CLI conventions):
     DATABRICKS_HOST  - Workspace URL (e.g. https://...gcp.databricks.com)
@@ -40,6 +41,20 @@ if TYPE_CHECKING:
 from fleet_rlm.config.settings import FleetConfigurationError
 
 logger = logging.getLogger(__name__)
+
+
+def _mlflow_export_versions_are_certified() -> bool:
+    """Return whether all installed export distributions match the certified pair."""
+    try:
+        versions = (package_version("mlflow"), package_version("opentelemetry-sdk"))
+    except PackageNotFoundError:
+        logger.warning("MLflow export compatibility dependencies are unavailable; continuing without traces")
+        return False
+    if versions != ("3.15.2", "1.44.0"):
+        logger.warning("MLflow export compatibility is uncertified; continuing without traces")
+        return False
+    return True
+
 
 _DEFAULT_TRACKING_URI = "databricks"
 _TRACE_DESTINATION_TAG = "mlflow.experiment.databricksTraceDestinationPath"

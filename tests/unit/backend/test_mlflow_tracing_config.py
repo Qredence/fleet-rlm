@@ -211,6 +211,23 @@ def test_missing_export_distribution_is_handled_fail_soft(monkeypatch: pytest.Mo
     assert tracing._mlflow_export_versions_are_certified() is False
 
 
+def test_missing_certified_mlflow_distribution_disables_tracing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _install_fake_mlflow(monkeypatch)
+    fake_mlflow = sys.modules["mlflow"]
+    fake_mlflow.__file__ = str(Path(__file__).resolve())  # type: ignore[attr-defined]
+
+    def missing_distribution(name: str) -> str:
+        from importlib.metadata import PackageNotFoundError
+
+        raise PackageNotFoundError(name)
+
+    monkeypatch.setattr(tracing, "package_version", missing_distribution)
+    assert tracing.configure_tracing(_enabled_settings()) is False
+    assert tracing.is_tracing_active() is False
+
+
 def test_configure_tracing_enabled_sets_uri_experiment_and_autolog(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -301,14 +318,14 @@ def test_trace_export_policy_overrides_ambient_queue_settings(monkeypatch):
         mlflow_trace_export_queue_size=17,
         mlflow_trace_export_workers=1,
         mlflow_trace_export_retry_seconds=3,
-        mlflow_http_request_timeout_seconds=19,
+        mlflow_http_request_timeout_seconds=7,
     )
     assert tracing.configure_tracing(settings)
     assert os.environ["MLFLOW_ENABLE_ASYNC_TRACE_LOGGING"] == "true"
     assert os.environ["MLFLOW_ASYNC_TRACE_LOGGING_MAX_QUEUE_SIZE"] == "17"
     assert os.environ["MLFLOW_ASYNC_TRACE_LOGGING_MAX_WORKERS"] == "1"
     assert os.environ["MLFLOW_ASYNC_TRACE_LOGGING_RETRY_TIMEOUT"] == "3"
-    assert os.environ["MLFLOW_HTTP_REQUEST_TIMEOUT"] == "19"
+    assert os.environ["MLFLOW_HTTP_REQUEST_TIMEOUT"] == "7"
     assert tracing.trace_content_preview("private content") == "[content suppressed]"
 
 

@@ -368,6 +368,7 @@ def build_snapshot_image(spec: DaytonaSandboxSpec) -> Any:
         else DaytonaEnvironmentProfile.SESSION
     )
     manifest = environment_manifest(spec, manifest_profile)
+    image_profile = manifest.profile
     image = (
         Image.base(spec.base_image)
         .run_commands(
@@ -377,11 +378,11 @@ def build_snapshot_image(spec: DaytonaSandboxSpec) -> Any:
             "useradd --uid 1000 --gid daytona --create-home --home-dir /home/daytona --shell /bin/bash daytona",
             "chown -R daytona:daytona /home/daytona",
         )
-        .pip_install(list(snapshot_execution_dependencies(spec.profile)))
+        .pip_install(list(snapshot_execution_dependencies(image_profile)))
         .env(
             {
                 "PYTHONUNBUFFERED": "1",
-                "FLEET_SNAPSHOT_DEPENDENCIES_SHA256": snapshot_dependency_sha256(spec.profile),
+                "FLEET_SNAPSHOT_DEPENDENCIES_SHA256": snapshot_dependency_sha256(image_profile),
             }
         )
         .workdir("/home/daytona")
@@ -389,7 +390,7 @@ def build_snapshot_image(spec: DaytonaSandboxSpec) -> Any:
     # v5 is retained as a rollback image whose existing provider definition
     # predates the runtime manifest. New immutable images carry the manifest
     # and its digest so runtime probes can validate the actual profile.
-    if not (spec.snapshot == "fleet-rlm-python313-v5" and spec.profile is DaytonaEnvironmentProfile.SESSION):
+    if not (spec.snapshot == "fleet-rlm-python313-v5" and image_profile is DaytonaEnvironmentProfile.SESSION):
         encoded = json.dumps(manifest.as_dict(), sort_keys=True, separators=(",", ":"))
         image = image.run_commands(
             "mkdir -p /opt/fleet && "
