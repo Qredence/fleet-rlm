@@ -1,4 +1,4 @@
-"""Unit contracts for opt-in Databricks MLflow setup."""
+"""Unit contracts for Fleet's bounded MLflow setup."""
 
 from __future__ import annotations
 
@@ -17,9 +17,9 @@ from fleet_rlm.config.settings import Settings
 @pytest.fixture(autouse=True)
 def _reset_trace_content_bound(monkeypatch: pytest.MonkeyPatch) -> None:
     """Reset the shared readable content bound for a test."""
+    tracing.set_tracing_active_for_tests(False)
     monkeypatch.setattr(tracing, "_TRACE_CONTENT_MAX_CHARS", 10_000)
     monkeypatch.setattr(tracing, "_TRACE_CONTENT_ENABLED", True)
-    tracing.set_tracing_active_for_tests(False)
 
 
 def _install_fake_mlflow(
@@ -65,9 +65,11 @@ def _install_fake_mlflow(
         processor_args=[],
         flush_args=[],
     )
+    current_tracking_uri = {"value": "initial"}
 
     def _set_uri(uri: str) -> None:
         calls.tracking_uri_args.append(uri)
+        current_tracking_uri["value"] = uri
 
     def _set_exp(*args: Any, **kwargs: Any) -> None:
         calls.experiment_args.append(args)
@@ -89,6 +91,7 @@ def _install_fake_mlflow(
 
     mlflow = ModuleType("mlflow")
     mlflow.set_tracking_uri = calls.set_tracking_uri  # type: ignore[attr-defined]
+    mlflow.get_tracking_uri = lambda: current_tracking_uri["value"]  # type: ignore[attr-defined]
     mlflow.set_experiment = calls.set_experiment  # type: ignore[attr-defined]
     dspy_mod = ModuleType("mlflow.dspy")
     dspy_mod.autolog = calls.autolog  # type: ignore[attr-defined]
@@ -268,6 +271,7 @@ def test_configure_tracing_applies_sampling_policy(monkeypatch: pytest.MonkeyPat
     )
 
     assert os.environ["MLFLOW_TRACE_SAMPLING_RATIO"] == "0.25"
+    assert os.environ["MLFLOW_ENABLE_ASYNC_TRACE_LOGGING"] == "false"
     assert calls.async_logging_args == [False]
 
 
@@ -308,6 +312,98 @@ def test_mlflow_315_span_processor_bounds_and_protects_secrets() -> None:
     assert span.attributes["api_key"] == "[redacted]"
 
 
+def test_trace_sanitizer_preserves_authorized_content_and_input_key_names(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(tracing, "_TRACE_CONTENT_ENABLED", True)
+
+    sanitized = tracing._sanitize_mlflow_value(
+        {
+            "system_prompt": "BEGIN SYSTEM\nUse the workspace tools.",
+            "reasoning_content": "I will inspect the selected trace first.",
+            "input_keys": ["messages", "prompt", "kwargs"],
+            "prompt": "Explain the captured execution.",
+        }
+    )
+
+    assert sanitized == {
+        "system_prompt": "BEGIN SYSTEM\nUse the workspace tools.",
+        "reasoning_content": "I will inspect the selected trace first.",
+        "input_keys": ["messages", "prompt", "kwargs"],
+        "prompt": "Explain the captured execution.",
+    }
+
+
+def test_trace_sanitizer_keeps_structural_keys_in_operational_only_mode(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(tracing, "_TRACE_CONTENT_ENABLED", False)
+
+    sanitized = tracing._sanitize_mlflow_value(
+        {
+            "system_prompt": "private system instructions",
+            "prompt": "private user request",
+            "input_keys": ["messages", "prompt", "kwargs"],
+        }
+    )
+
+    assert sanitized == {
+        "system_prompt": "[content suppressed]",
+        "prompt": "[content suppressed]",
+        "input_keys": ["messages", "prompt", "kwargs"],
+    }
+
+
+def test_trace_text_redacts_structured_secrets_urls_and_paths_without_hiding_prompts() -> None:
+    from fleet_rlm.rlm.result import sanitize_trace_text
+
+    sanitized = sanitize_trace_text(
+        '{"api_key": "sentinel", "authorization": "Bearer sentinel", "credentials": "sentinel", '
+        '"provider_token": "ghp_123456789012345678901234567890123456", '
+        '"question": "BEGIN SYSTEM use the tool", '
+        '"url": "https://example.invalid/private", "path": "/Users/example/private.txt"}'
+    )
+
+    assert "sentinel" not in sanitized
+    assert "BEGIN SYSTEM use the tool" in sanitized
+    assert "[redacted-url]" in sanitized
+    assert "[path]" in sanitized
+
+
+def test_trace_text_redacts_cloud_credentials_and_all_uri_schemes() -> None:
+    from fleet_rlm.rlm.result import sanitize_trace_text, sanitize_trace_value
+
+    text = (
+        "AWS_ACCESS_KEY_ID=AKIA1234567890ABCDEF "
+        "AWS_SECRET_ACCESS_KEY=cloud-secret "
+        "secret_access_key: another-secret "
+        "ws://user:uri-secret@example.invalid/socket "
+        "s3://private-bucket/object file:///private/sentinel"
+    )
+    sanitized = sanitize_trace_text(text)
+
+    for secret in ("AKIA1234567890ABCDEF", "cloud-secret", "another-secret", "uri-secret"):
+        assert secret not in sanitized
+    assert sanitized.count("[redacted-url]") == 3
+    assert sanitize_trace_value({"aws_secret_access_key": "nested-secret"}) == {"aws_secret_access_key": "[redacted]"}
+
+
+def test_trace_value_redacts_camel_case_and_private_credential_keys() -> None:
+    from fleet_rlm.rlm.result import sanitize_trace_value
+
+    sanitized = sanitize_trace_value(
+        {
+            "apiKey": "sentinel-api-key",
+            "private_key": "sentinel-private-key",
+            "credentials": {"accessToken": "sentinel-access-token"},
+            "question": "readable question",
+        }
+    )
+
+    assert sanitized == {
+        "apiKey": "[redacted]",
+        "private_key": "[redacted]",
+        "credentials": "[redacted]",
+        "question": "readable question",
+    }
+
+
 def test_trace_export_policy_overrides_ambient_queue_settings(monkeypatch):
     _install_fake_mlflow(monkeypatch)
     monkeypatch.setenv("MLFLOW_ASYNC_TRACE_LOGGING_MAX_QUEUE_SIZE", "999999")
@@ -315,6 +411,7 @@ def test_trace_export_policy_overrides_ambient_queue_settings(monkeypatch):
         mlflow_tracing_enabled=True,
         mlflow_experiment_name="test",
         mlflow_tracking_uri="http://localhost:5001",
+        mlflow_trace_content_enabled=False,
         mlflow_trace_export_queue_size=17,
         mlflow_trace_export_workers=1,
         mlflow_trace_export_retry_seconds=3,
@@ -520,14 +617,70 @@ def test_configure_tracing_setup_failure_is_soft(monkeypatch: pytest.MonkeyPatch
     assert tracing.configure_tracing(_enabled_settings()) is False
 
 
-def test_configure_tracing_allows_a_fresh_explicit_attempt(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_set_tracing_active_for_tests_resets_content_policy(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(tracing, "_TRACE_CONTENT_ENABLED", True)
+    monkeypatch.setattr(tracing, "_TRACE_CONTENT_MAX_CHARS", 256)
+
+    tracing.set_tracing_active_for_tests(False)
+
+    assert tracing._TRACE_CONTENT_ENABLED is False
+    assert tracing._TRACE_CONTENT_MAX_CHARS == 10_000
+
+
+def test_configure_tracing_is_idempotent_until_explicit_reset(monkeypatch: pytest.MonkeyPatch) -> None:
     calls = _install_fake_mlflow(monkeypatch)
     monkeypatch.delenv("MLFLOW_TRACKING_URI", raising=False)
     settings = _enabled_settings()
     assert tracing.configure_tracing(settings) is True
     assert tracing.configure_tracing(settings) is True
-    assert calls.tracking_uri_args == ["databricks", "databricks"]
+    assert calls.tracking_uri_args == ["databricks"]
+    assert calls.autolog_calls == 1
+
+    tracing.reset_tracing()
+
+    assert calls.tracking_uri_args == ["databricks", "initial"]
     assert calls.autolog_calls == 2
+    assert calls.autolog_kwargs[-1] == {"disable": True, "silent": True}
+    assert tracing.is_tracing_active() is False
+
+
+def test_tracing_cleanup_restores_policy_environment_after_autolog_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    autolog_calls: list[dict[str, object]] = []
+
+    def autolog(**kwargs: object) -> None:
+        autolog_calls.append(kwargs)
+        if not kwargs.get("disable"):
+            raise RuntimeError("provider detail must not be logged")
+
+    _install_fake_mlflow(monkeypatch, autolog=autolog)
+    monkeypatch.delenv("DATABRICKS_HOST", raising=False)
+    monkeypatch.delenv("DATABRICKS_TOKEN", raising=False)
+    settings = _enabled_settings()
+    settings._dotenv_values = {
+        "DATABRICKS_HOST": "https://workspace.example",
+        "DATABRICKS_TOKEN": "dotenv-token",
+    }
+    owned_environment = (
+        "DATABRICKS_HOST",
+        "DATABRICKS_TOKEN",
+        "MLFLOW_TRACE_SAMPLING_RATIO",
+        "MLFLOW_ENABLE_ASYNC_TRACE_LOGGING",
+        "MLFLOW_ASYNC_TRACE_LOGGING_MAX_QUEUE_SIZE",
+        "MLFLOW_ASYNC_TRACE_LOGGING_MAX_WORKERS",
+        "MLFLOW_ASYNC_TRACE_LOGGING_RETRY_TIMEOUT",
+        "MLFLOW_HTTP_REQUEST_TIMEOUT",
+        "MLFLOW_TRACING_SQL_WAREHOUSE_ID",
+    )
+    before = {name: os.environ.get(name) for name in owned_environment}
+
+    assert tracing.configure_tracing(settings) is False
+    assert tracing.is_tracing_active() is False
+    assert len(autolog_calls) == 1
+    assert "disable" not in autolog_calls[0]
+    assert tracing._DSPY_AUTOLOG_ENABLED is False
+    assert {name: os.environ.get(name) for name in owned_environment} == before
 
 
 def test_flush_tracing_terminates_async_exporter(monkeypatch: pytest.MonkeyPatch) -> None:

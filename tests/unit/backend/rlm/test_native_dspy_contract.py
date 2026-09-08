@@ -706,6 +706,15 @@ def test_lm_trace_profiles_include_bounded_readable_payloads(monkeypatch: pytest
     assert "readable answer" in outputs["response_preview"]
 
 
+def test_lm_trace_previews_keep_system_prompt_text_and_redact_urls() -> None:
+    from fleet_rlm.rlm.compat_3_3_1 import _trace_preview
+
+    preview = _trace_preview("BEGIN SYSTEM use https://example.invalid/private for context")
+
+    assert "BEGIN SYSTEM" in preview
+    assert "[redacted-url]" in preview
+
+
 def test_lm_trace_callback_records_call_specific_usage_and_standard_attribute(monkeypatch: pytest.MonkeyPatch) -> None:
     from types import SimpleNamespace
 
@@ -802,16 +811,23 @@ def test_lm_trace_callback_records_call_specific_usage_and_standard_attribute(mo
     assert "child-answer-sentinel" not in str(calls.outputs[-1])
     assert "child-reasoning-sentinel" not in str(calls.outputs[-1])
     assert "child-code-sentinel" not in str(calls.outputs[-1])
-    assert calls.attributes == [
-        {
-            "mlflow.chat.tokenUsage": {
-                "input_tokens": 7,
-                "output_tokens": 3,
-                "total_tokens": 10,
-                "cache_read_tokens": 4,
-            }
+    assert calls.attributes[0] == {
+        "role": "root",
+        "model": "root-model",
+        "call_index": 1,
+        "input_keys": ["prompt"],
+        "prompt_chars": len("child-prompt-sentinel"),
+        "history_length_before": 1,
+        "recursive_depth": 1,
+    }
+    assert calls.attributes[1] == {
+        "mlflow.chat.tokenUsage": {
+            "input_tokens": 7,
+            "output_tokens": 3,
+            "total_tokens": 10,
+            "cache_read_tokens": 4,
         }
-    ]
+    }
 
 
 def test_reasoning_callback_spans_the_complete_root_action(monkeypatch: pytest.MonkeyPatch) -> None:

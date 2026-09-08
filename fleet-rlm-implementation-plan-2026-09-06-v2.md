@@ -115,7 +115,7 @@ See [ADR 006 implementation status](docs/decisions/006-implementation-status.md)
 - [x] **P1A.04** Add a Session status CHECK and validate existing rows first. Define any binding-state CHECK around Fleet's normalized closed state model, not an assumed exhaustive list of provider wire values.
 - [x] **P1A.05** Test upgrades from the actual preceding revision with valid data, orphaned bindings, cross-Workspace bindings, and invalid statuses. Reject dirty data without silently deleting or repairing it.
 - [x] **P1A.06** Keep immediate SQLite FK checks and assert enforcement across connections; WAL/busy-timeout tuning remains optional local policy.
-- [ ] **P1A.07** Re-run expected-versus-unexpected claim-constraint tests. Preserve narrowly allowlisted conflict reconciliation and sanitized unknown failures.
+- [x] **P1A.07** Re-run expected-versus-unexpected claim-constraint tests. Preserve narrowly allowlisted conflict reconciliation and sanitized unknown failures.
 - [ ] **P1A.08** Retain a real Postgres contention run for duplicate idempotency, conflicting input, active-Run exclusion, cancellation versus commit, stale recovery, and concurrent outbox ownership. A skipped lane is not evidence of passing.
 
 - [x] **P1B.01** Keep Fleet persistence and the MLflow backend logically separate. Local SQLite files must be separate, and production deployments should use separate database/schema ownership and credentials. Fleet Alembic migrations must never manage MLflow tables.

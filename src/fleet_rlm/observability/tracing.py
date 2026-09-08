@@ -10,6 +10,7 @@ Fleet TOML policy (resolved through ``Settings``):
     mlflow.experiment_name  - experiment passed to set_experiment
     mlflow.tracking_uri     - tracking target
     mlflow.expose_trace_id  - surface trace ids on Turn SSE metadata
+    mlflow.trace_content_enabled - bounded sanitized content gate; enabled by default
     mlflow.trace_content_max_chars - per-field bound for readable content
     mlflow.http_request_timeout_seconds - bounded MLflow HTTP request timeout
 
@@ -43,19 +44,6 @@ from fleet_rlm.config.settings import FleetConfigurationError
 logger = logging.getLogger(__name__)
 
 
-def _mlflow_export_versions_are_certified() -> bool:
-    """Return whether all installed export distributions match the certified pair."""
-    try:
-        versions = (package_version("mlflow"), package_version("opentelemetry-sdk"))
-    except PackageNotFoundError:
-        logger.warning("MLflow export compatibility dependencies are unavailable; continuing without traces")
-        return False
-    if versions != ("3.15.2", "1.44.0"):
-        logger.warning("MLflow export compatibility is uncertified; continuing without traces")
-        return False
-    return True
-
-
 _DEFAULT_TRACKING_URI = "databricks"
 _TRACE_DESTINATION_TAG = "mlflow.experiment.databricksTraceDestinationPath"
 _TRACE_CONTENT_MAX_CHARS = 10_000
@@ -64,6 +52,31 @@ _TRACE_CONTENT_ENABLED = False
 # tracking backend is absent; Turn spans must not enter MLflow's HTTP retry loop
 # and starve claim heartbeats.
 _TRACING_ACTIVE = False
+
+# MLflow and DSPy keep process-global configuration. Keep the small amount of
+# state Fleet changes so an application lifespan can restore it on shutdown.
+# Databricks credentials are only bridged when absent from the process
+# environment, so they are never copied into this snapshot.
+_TRACE_ENVIRONMENT_KEYS = frozenset(
+    {
+        "DATABRICKS_HOST",
+        "DATABRICKS_TOKEN",
+        "MLFLOW_TRACE_SAMPLING_RATIO",
+        "MLFLOW_ENABLE_ASYNC_TRACE_LOGGING",
+        "MLFLOW_ASYNC_TRACE_LOGGING_MAX_QUEUE_SIZE",
+        "MLFLOW_ASYNC_TRACE_LOGGING_MAX_WORKERS",
+        "MLFLOW_ASYNC_TRACE_LOGGING_RETRY_TIMEOUT",
+        "MLFLOW_HTTP_REQUEST_TIMEOUT",
+        "MLFLOW_TRACING_SQL_WAREHOUSE_ID",
+    }
+)
+_TRACE_ENVIRONMENT_SNAPSHOT: dict[str, str | None] = {}
+_TRACE_ENVIRONMENT_APPLIED: dict[str, str] = {}
+_UNKNOWN_TRACKING_URI = object()
+_TRACKING_URI_BEFORE: object = _UNKNOWN_TRACKING_URI
+_TRACKING_URI_APPLIED: str | None = None
+_TRACE_CONFIG_CONTEXT: Any | None = None
+_DSPY_AUTOLOG_ENABLED = False
 
 
 def _mlflow_export_versions_are_certified() -> bool:
@@ -86,11 +99,26 @@ def is_tracing_active() -> bool:
 
 def set_tracing_active_for_tests(active: bool) -> None:
     """Test-only override for Turn-span gate without a real tracking backend."""
-    global _TRACING_ACTIVE
+    global _DSPY_AUTOLOG_ENABLED, _TRACE_CONFIG_CONTEXT, _TRACKING_URI_APPLIED, _TRACKING_URI_BEFORE
+    global _TRACE_CONTENT_ENABLED, _TRACE_CONTENT_MAX_CHARS, _TRACING_ACTIVE
     _TRACING_ACTIVE = active
+    if not active:
+        # Test doubles are installed and removed per test. Do not let a prior
+        # fake configuration make a later test look like a live process
+        # lifespan, and do not import or mutate the real MLflow module here.
+        _DSPY_AUTOLOG_ENABLED = False
+        _TRACE_CONFIG_CONTEXT = None
+        _TRACKING_URI_BEFORE = _UNKNOWN_TRACKING_URI
+        _TRACKING_URI_APPLIED = None
+        _TRACE_CONTENT_ENABLED = False
+        _TRACE_CONTENT_MAX_CHARS = 10_000
+        _TRACE_ENVIRONMENT_SNAPSHOT.clear()
+        _TRACE_ENVIRONMENT_APPLIED.clear()
 
 
-_CREDENTIAL_KEYS = frozenset({"api_key", "authorization", "credential", "password", "secret", "token"})
+_CREDENTIAL_KEYS = frozenset(
+    {"api_key", "authorization", "credential", "credentials", "password", "private_key", "secret", "token"}
+)
 _OPERATIONAL_TEXT_KEYS = frozenset(
     {
         "cache",
@@ -100,17 +128,31 @@ _OPERATIONAL_TEXT_KEYS = frozenset(
         "artifact_kind",
         "attachment_id",
         "affordances",
+        "action_status",
+        "call_index",
+        "cleanup_owned",
+        "code_chars",
         "engine",
         "failure_category",
         "kind",
+        "history_length_before",
+        "input_keys",
+        "iteration",
+        "max_iters",
+        "max_llm_calls",
         "model",
         "model_type",
         "mlflow_span_type",
         "name",
+        "path",
         "phase_status",
         "provider",
         "provider_type",
+        "prompt_chars",
         "role",
+        "result_kind",
+        "recovered",
+        "recursive_depth",
         "phase",
         "schema_id",
         "schema_version",
@@ -149,6 +191,148 @@ def trace_content_max_chars() -> int:
     return _TRACE_CONTENT_MAX_CHARS
 
 
+def _apply_trace_environment(name: str, value: str) -> None:
+    """Set one Fleet-owned environment value while retaining a safe restore point."""
+    if name not in _TRACE_ENVIRONMENT_KEYS:
+        raise ValueError(f"unsupported MLflow environment key: {name}")
+    if name not in _TRACE_ENVIRONMENT_SNAPSHOT:
+        _TRACE_ENVIRONMENT_SNAPSHOT[name] = os.environ.get(name)
+    os.environ[name] = value
+    _TRACE_ENVIRONMENT_APPLIED[name] = value
+
+
+def _restore_trace_environment() -> None:
+    """Restore Fleet-owned environment values unless another owner changed them."""
+    for name, original in list(_TRACE_ENVIRONMENT_SNAPSHOT.items()):
+        applied = _TRACE_ENVIRONMENT_APPLIED.get(name)
+        if applied is not None and os.environ.get(name) == applied:
+            if original is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = original
+    _TRACE_ENVIRONMENT_SNAPSHOT.clear()
+    _TRACE_ENVIRONMENT_APPLIED.clear()
+
+
+def _remember_tracking_uri(mlflow: Any) -> None:
+    """Remember MLflow's current tracking URI before Fleet changes it."""
+    global _TRACKING_URI_BEFORE
+    if _TRACKING_URI_BEFORE is not _UNKNOWN_TRACKING_URI:
+        return
+    getter = getattr(mlflow, "get_tracking_uri", None)
+    if not callable(getter):
+        return
+    try:
+        _TRACKING_URI_BEFORE = getter()
+    except Exception:
+        # A missing or unavailable getter should not make optional tracing
+        # affect application startup.
+        _TRACKING_URI_BEFORE = _UNKNOWN_TRACKING_URI
+
+
+def _restore_tracking_uri(mlflow: Any) -> bool:
+    """Restore MLflow's URI only when Fleet still owns the current value."""
+    global _TRACKING_URI_APPLIED, _TRACKING_URI_BEFORE
+    applied = _TRACKING_URI_APPLIED
+    before = _TRACKING_URI_BEFORE
+    restored = True
+    try:
+        setter = getattr(mlflow, "set_tracking_uri", None)
+        getter = getattr(mlflow, "get_tracking_uri", None)
+        if (
+            applied is not None
+            and before is not _UNKNOWN_TRACKING_URI
+            and callable(setter)
+            and callable(getter)
+            and getter() == applied
+        ):
+            setter(before)
+    except Exception:
+        logger.debug("MLflow tracking URI restore skipped")
+        restored = False
+    finally:
+        if restored:
+            _TRACKING_URI_APPLIED = None
+            _TRACKING_URI_BEFORE = _UNKNOWN_TRACKING_URI
+    return restored
+
+
+def _restore_trace_processors() -> bool:
+    """Restore the MLflow span-processor configuration replaced by Fleet."""
+    global _TRACE_CONFIG_CONTEXT
+    context = _TRACE_CONFIG_CONTEXT
+    if context is None:
+        return True
+    restore = getattr(context, "__exit__", None)
+    if not callable(restore):
+        _TRACE_CONFIG_CONTEXT = None
+        return True
+    try:
+        restore(None, None, None)
+    except Exception:
+        logger.debug("MLflow span-processor restore skipped")
+        return False
+    _TRACE_CONFIG_CONTEXT = None
+    return True
+
+
+def reset_tracing() -> bool:
+    """Disable Fleet's DSPy autologging and restore process-global MLflow state."""
+    global _DSPY_AUTOLOG_ENABLED, _TRACE_CONTENT_ENABLED, _TRACE_CONTENT_MAX_CHARS
+    global _TRACKING_URI_APPLIED, _TRACKING_URI_BEFORE, _TRACING_ACTIVE
+
+    cleanup_ok = True
+    mlflow: Any | None = None
+    if _DSPY_AUTOLOG_ENABLED:
+        try:
+            import mlflow as mlflow_module
+
+            mlflow = mlflow_module
+            dspy_module = getattr(mlflow_module, "dspy", None)
+            autolog = getattr(dspy_module, "autolog", None)
+            if callable(autolog):
+                # MLflow's DSPy integration removes only its callback. Running
+                # this on the same owner thread as configure_tracing keeps
+                # DSPy's configure-owner invariant intact.
+                autolog(disable=True, silent=True)
+        except Exception:
+            # Cleanup must never make FastAPI shutdown fail, and the exception
+            # may include provider or credential material.
+            logger.warning("MLflow DSPy autolog cleanup failed; continuing shutdown")
+            cleanup_ok = False
+
+    if mlflow is None and _TRACKING_URI_APPLIED is not None:
+        try:
+            import mlflow as mlflow_module
+
+            mlflow = mlflow_module
+        except Exception:
+            mlflow = None
+
+    cleanup_ok = _restore_trace_processors() and cleanup_ok
+    if mlflow is not None:
+        cleanup_ok = _restore_tracking_uri(mlflow) and cleanup_ok
+    else:
+        # There is no SDK object to restore, but the bookkeeping must still be
+        # cleared so a later explicit setup starts from a clean boundary.
+        _TRACKING_URI_BEFORE = _UNKNOWN_TRACKING_URI
+        _TRACKING_URI_APPLIED = None
+    _restore_trace_environment()
+    _TRACING_ACTIVE = False
+    _TRACE_CONTENT_ENABLED = False
+    _TRACE_CONTENT_MAX_CHARS = 10_000
+    if cleanup_ok:
+        _DSPY_AUTOLOG_ENABLED = False
+    return cleanup_ok
+
+
+def _abort_tracing_setup(message: str) -> bool:
+    """Log a safe setup outcome, undo partial state, and return ``False``."""
+    logger.warning(message)
+    reset_tracing()
+    return False
+
+
 def _normalize_trace_key(key: str | None) -> str:
     """Normalize dotted, hyphenated, and camel-case span keys for policy checks."""
     raw = (key or "").strip()
@@ -158,11 +342,11 @@ def _normalize_trace_key(key: str | None) -> str:
 
 def trace_content_preview(value: object) -> str:
     """Return a readable, bounded preview for MLflow trace-level metadata."""
-    from fleet_rlm.rlm.result import sanitize_public_text
+    from fleet_rlm.rlm.result import sanitize_trace_text
 
     if not _TRACE_CONTENT_ENABLED:
         return "[content suppressed]"
-    return sanitize_public_text(str(value or ""), max_len=_TRACE_CONTENT_MAX_CHARS)
+    return sanitize_trace_text(str(value or ""), max_len=_TRACE_CONTENT_MAX_CHARS)
 
 
 def _sanitize_mlflow_value(
@@ -175,8 +359,11 @@ def _sanitize_mlflow_value(
     if depth >= 8:
         return "[redacted depth]"
     normalized_key = _normalize_trace_key(key)
-    if normalized_key in {"reasoning", "reasoning_content", "chain_of_thought", "thinking", "system_prompt"}:
-        return "[redacted]"
+    if (
+        normalized_key in {"reasoning", "reasoning_content", "chain_of_thought", "thinking", "system_prompt"}
+        and not _TRACE_CONTENT_ENABLED
+    ):
+        return "[content suppressed]"
     if normalized_key in _CREDENTIAL_KEYS or normalized_key.endswith(
         tuple(f"_{credential_key}" for credential_key in _CREDENTIAL_KEYS)
     ):
@@ -191,21 +378,23 @@ def _sanitize_mlflow_value(
             for item_key, item in list(value.items())[:50]
         }
     if isinstance(value, (list, tuple)):
+        child_key = key if normalized_key in _OPERATIONAL_TEXT_KEYS else None
         return [
             _sanitize_mlflow_value(
                 item,
+                key=child_key,
                 depth=depth + 1,
             )
             for item in list(value)[:50]
         ]
     if isinstance(value, str):
-        from fleet_rlm.rlm.result import sanitize_public_text
+        from fleet_rlm.rlm.result import sanitize_trace_text
 
         if normalized_key in _OPERATIONAL_TEXT_KEYS:
-            return sanitize_public_text(value, max_len=256)
+            return sanitize_trace_text(value, max_len=256)
         if not _TRACE_CONTENT_ENABLED:
             return "[content suppressed]"
-        return sanitize_public_text(value, max_len=_TRACE_CONTENT_MAX_CHARS)
+        return sanitize_trace_text(value, max_len=_TRACE_CONTENT_MAX_CHARS)
     if value is None or isinstance(value, (bool, int, float)):
         return value
     return type(value).__name__
@@ -395,12 +584,23 @@ def _validate_experiment_trace_location(settings: Settings) -> None:
 def configure_tracing(settings: Settings) -> bool:
     """Configure fail-soft MLflow tracing and return whether tracing is active.
 
-    This is one explicit configuration attempt, not process-wide state. Tracing
-    remains inactive when disabled by policy, required settings are missing, or
-    setup fails. `FleetConfigurationError` still reports an intentional Unity
-    Catalog trace-location conflict; other failures are logged and suppressed.
+    Tracing remains inactive when disabled by policy, required settings are
+    missing, or setup fails. A successful configuration is idempotent until
+    :func:`reset_tracing` runs, because MLflow and DSPy both retain process-wide
+    configuration. `FleetConfigurationError` still reports an intentional
+    Unity Catalog trace-location conflict; other failures are logged and
+    suppressed.
     """
+    global _DSPY_AUTOLOG_ENABLED, _TRACE_CONFIG_CONTEXT, _TRACKING_URI_APPLIED
     global _TRACING_ACTIVE, _TRACE_CONTENT_ENABLED
+    if _TRACING_ACTIVE:
+        return True
+    if (
+        _DSPY_AUTOLOG_ENABLED or _TRACE_CONFIG_CONTEXT is not None or _TRACE_ENVIRONMENT_SNAPSHOT
+    ) and not reset_tracing():
+        logger.warning("MLflow tracing cleanup is incomplete; refusing to reconfigure")
+        return False
+
     _TRACING_ACTIVE = False
     _TRACE_CONTENT_ENABLED = settings.mlflow_trace_content_enabled
     _set_trace_content_max_chars(getattr(settings, "mlflow_trace_content_max_chars", _TRACE_CONTENT_MAX_CHARS))
@@ -409,7 +609,7 @@ def configure_tracing(settings: Settings) -> bool:
         logger.debug("MLflow tracing is disabled by Fleet policy")
         return False
 
-    tracking_uri = settings.mlflow_tracking_uri or _DEFAULT_TRACKING_URI
+    tracking_uri = (settings.mlflow_tracking_uri or _DEFAULT_TRACKING_URI).strip()
     required_settings = {"mlflow.experiment_name": settings.mlflow_experiment_name}
     if tracking_uri == _DEFAULT_TRACKING_URI:
         required_settings.update(
@@ -432,20 +632,49 @@ def configure_tracing(settings: Settings) -> bool:
         # The Databricks SDK authenticates from the process environment.
         # Preserve explicit exports and bridge the two external auth variables
         # only when they are present in the already-loaded dotenv values.
+        dotenv_values = getattr(settings, "_dotenv_values", {})
         for name in ("DATABRICKS_HOST", "DATABRICKS_TOKEN"):
             if not os.environ.get(name):
-                value = settings._dotenv_values.get(name)
+                value = dotenv_values.get(name)
                 if value:
-                    os.environ[name] = value
+                    _apply_trace_environment(name, value)
+
+        # Set policy-owned SDK controls before importing MLflow. In particular,
+        # the sampling provider reads its ratio during initialization.
+        _apply_trace_environment("MLFLOW_TRACE_SAMPLING_RATIO", str(settings.mlflow_trace_sampling_ratio))
+        _apply_trace_environment(
+            "MLFLOW_ENABLE_ASYNC_TRACE_LOGGING",
+            str(bool(settings.mlflow_async_logging)).lower(),
+        )
+        _apply_trace_environment(
+            "MLFLOW_ASYNC_TRACE_LOGGING_MAX_QUEUE_SIZE",
+            str(settings.mlflow_trace_export_queue_size),
+        )
+        _apply_trace_environment(
+            "MLFLOW_ASYNC_TRACE_LOGGING_MAX_WORKERS",
+            str(settings.mlflow_trace_export_workers),
+        )
+        _apply_trace_environment(
+            "MLFLOW_ASYNC_TRACE_LOGGING_RETRY_TIMEOUT",
+            str(settings.mlflow_trace_export_retry_seconds),
+        )
+        _apply_trace_environment("MLFLOW_HTTP_REQUEST_TIMEOUT", str(settings.mlflow_http_request_timeout_seconds))
+        if tracking_uri == _DEFAULT_TRACKING_URI:
+            _apply_trace_environment(
+                "MLFLOW_TRACING_SQL_WAREHOUSE_ID",
+                cast(str, settings.mlflow_tracing_sql_warehouse_id),
+            )
 
         import mlflow
         import mlflow.dspy
+
+        _remember_tracking_uri(mlflow)
 
         # The export fence uses private fields because public setters cannot
         # delete events/attachments. Certify a new lock resolution before
         # enabling export with it; execution continues without tracing.
         if getattr(mlflow, "__file__", None) and not _mlflow_export_versions_are_certified():
-            return False
+            return _abort_tracing_setup("MLflow export compatibility is uncertified; continuing without traces")
 
         # A local MLflow server is optional engineering observability. Probe
         # before set_tracking_uri so a dead HTTP endpoint never becomes the
@@ -456,22 +685,10 @@ def configure_tracing(settings: Settings) -> bool:
             and getattr(mlflow, "__file__", None)
             and not _local_tracking_server_available(tracking_uri)
         ):
-            logger.warning("MLflow tracking server is unavailable; continuing without traces")
-            return False
+            return _abort_tracing_setup("MLflow tracking server is unavailable; continuing without traces")
 
         mlflow.set_tracking_uri(tracking_uri)
-
-        # MLflow 3.15's sampler is process-global. Set it from the selected
-        # Fleet policy so an ambient environment variable cannot change the
-        # effective trace volume.
-        os.environ["MLFLOW_TRACE_SAMPLING_RATIO"] = str(settings.mlflow_trace_sampling_ratio)
-        # Trace-export controls are separate from regular metric/parameter
-        # async logging. Resolve them once, before activating autologging.
-        os.environ["MLFLOW_ENABLE_ASYNC_TRACE_LOGGING"] = "true"
-        os.environ["MLFLOW_ASYNC_TRACE_LOGGING_MAX_QUEUE_SIZE"] = str(settings.mlflow_trace_export_queue_size)
-        os.environ["MLFLOW_ASYNC_TRACE_LOGGING_MAX_WORKERS"] = str(settings.mlflow_trace_export_workers)
-        os.environ["MLFLOW_ASYNC_TRACE_LOGGING_RETRY_TIMEOUT"] = str(settings.mlflow_trace_export_retry_seconds)
-        os.environ["MLFLOW_HTTP_REQUEST_TIMEOUT"] = str(settings.mlflow_http_request_timeout_seconds)
+        _TRACKING_URI_APPLIED = tracking_uri
 
         # Preflight: catch trace-location mismatch before set_experiment.
         # FleetConfigurationError propagates — all other failures are soft.
@@ -481,7 +698,6 @@ def configure_tracing(settings: Settings) -> bool:
         if tracking_uri == _DEFAULT_TRACKING_URI:
             from mlflow.entities.trace_location import UnityCatalog
 
-            os.environ["MLFLOW_TRACING_SQL_WAREHOUSE_ID"] = cast(str, settings.mlflow_tracing_sql_warehouse_id)
             mlflow.set_experiment(
                 experiment_name=settings.mlflow_experiment_name,
                 trace_location=UnityCatalog(
@@ -501,9 +717,8 @@ def configure_tracing(settings: Settings) -> bool:
         tracing_api = getattr(mlflow, "tracing", None)
         configure_processors = getattr(tracing_api, "configure", None)
         if not callable(configure_processors):
-            logger.warning("MLflow export processor unavailable; continuing without traces")
-            return False
-        configure_processors(span_processors=[_sanitize_mlflow_span])
+            return _abort_tracing_setup("MLflow export processor unavailable; continuing without traces")
+        _TRACE_CONFIG_CONTEXT = configure_processors(span_processors=[_sanitize_mlflow_span])
 
         # Enable MLflow's DSPy inference callback. The 3.15 span processor
         # above is the export boundary that bounds readable trace content and
@@ -517,21 +732,24 @@ def configure_tracing(settings: Settings) -> bool:
             log_evals=False,
             silent=True,
         )
+        _DSPY_AUTOLOG_ENABLED = True
         logger.info(
-            "MLflow DSPy autolog enabled (inference=true tracking_uri=%s experiment=%s async=%s sampling=%s "
+            "MLflow DSPy autolog enabled (inference=true backend=%s async=%s sampling=%s content_enabled=%s "
             "content_max_chars=%s)",
-            tracking_uri,
-            settings.mlflow_experiment_name,
+            "managed" if tracking_uri == _DEFAULT_TRACKING_URI else "http",
             settings.mlflow_async_logging,
             settings.mlflow_trace_sampling_ratio,
+            _TRACE_CONTENT_ENABLED,
             _TRACE_CONTENT_MAX_CHARS,
         )
         _TRACING_ACTIVE = True
         return True
     except FleetConfigurationError:
+        reset_tracing()
         raise  # Configuration errors propagate clearly
     except Exception:
-        logger.warning("MLflow tracing setup failed; continuing without traces", exc_info=True)
+        reset_tracing()
+        logger.warning("MLflow tracing setup failed; continuing without traces")
         return False
 
 
@@ -549,7 +767,7 @@ def flush_tracing(*, terminate: bool = True) -> None:
         if callable(flush):
             flush(terminate=terminate)
     except Exception:
-        logger.warning("MLflow async trace flush failed; continuing shutdown", exc_info=True)
+        logger.warning("MLflow async trace flush failed; continuing shutdown")
 
 
 # ---------------------------------------------------------------------------
@@ -581,23 +799,9 @@ def _trace_value(value: object) -> object:
     Returns:
         object: A bounded sanitized value, the original primitive value, or the value's type name.
     """
-    if isinstance(value, str):
-        from fleet_rlm.rlm.result import sanitize_public_text
+    from fleet_rlm.rlm.result import sanitize_trace_value
 
-        return sanitize_public_text(value, max_len=trace_preview_limit())
-    if isinstance(value, Mapping):
-        from fleet_rlm.rlm.result import sanitize_public_value
-
-        normalized = {str(key): _trace_value(item) for key, item in list(value.items())[:32]}
-        return sanitize_public_value(normalized, max_len=trace_preview_limit())
-    if isinstance(value, (list, tuple)):
-        from fleet_rlm.rlm.result import sanitize_public_value
-
-        normalized = [_trace_value(item) for item in value[:32]]
-        return sanitize_public_value(normalized, max_len=trace_preview_limit())
-    if value is None or isinstance(value, (bool, int, float)):
-        return value
-    return type(value).__name__
+    return sanitize_trace_value(value, max_len=trace_preview_limit())
 
 
 def _trace_content_preview(value: object) -> str:
@@ -614,6 +818,20 @@ def _trace_mapping(values: Mapping[str, object]) -> dict[str, object]:
     if isinstance(sanitized, dict):
         return cast(dict[str, object], sanitized)
     return {}
+
+
+def _trace_attributes(values: Mapping[str, object]) -> dict[str, object]:
+    """Project only allowlisted, low-cardinality values into span attributes."""
+    attributes: dict[str, object] = {}
+    for key, value in values.items():
+        if _normalize_trace_key(str(key)) not in _OPERATIONAL_TEXT_KEYS:
+            continue
+        sanitized = _sanitize_mlflow_value(value, key=str(key))
+        if isinstance(sanitized, (str, bool, int, float)) or (
+            isinstance(sanitized, list) and all(isinstance(item, (str, bool, int, float)) for item in sanitized)
+        ):
+            attributes[str(key)] = sanitized
+    return attributes
 
 
 # Runtime Events must NOT be echoed into MLflow as spans. A single Turn emits
@@ -662,7 +880,7 @@ def _set_current_trace_state(state: str) -> None:
         if callable(trace_update):
             trace_update(state=state)
     except Exception:
-        logger.debug("MLflow trace state update failed; continuing", exc_info=True)
+        logger.debug("MLflow trace state update failed; continuing")
 
 
 def annotate_trace_io(
@@ -713,9 +931,9 @@ def annotate_trace_io(
             try:
                 span.set_status("ERROR")
             except Exception:
-                logger.debug("annotate_trace_io status update failed; continuing", exc_info=True)
+                logger.debug("annotate_trace_io status update failed; continuing")
     except Exception:
-        logger.debug("annotate_trace_io failed; continuing without root span I/O", exc_info=True)
+        logger.debug("annotate_trace_io failed; continuing without root span I/O")
 
 
 def annotate_turn_attributes(attributes: Mapping[str, object]) -> None:
@@ -738,7 +956,7 @@ def annotate_turn_attributes(attributes: Mapping[str, object]) -> None:
         if callable(setter):
             setter(_trace_mapping(attributes))
     except Exception:
-        logger.debug("annotate_turn_attributes failed; continuing", exc_info=True)
+        logger.debug("annotate_turn_attributes failed; continuing")
 
 
 def current_turn_trace_id() -> str | None:
@@ -764,7 +982,7 @@ class TraceSpanHandle:
         try:
             self.outputs.update(dict(outputs))
         except Exception:
-            logger.debug("trace span output accumulation failed; continuing", exc_info=True)
+            logger.debug("trace span output accumulation failed; continuing")
 
     def finish(
         self,
@@ -784,25 +1002,25 @@ class TraceSpanHandle:
         try:
             self._span.set_outputs({**_trace_mapping(self.outputs), "phase_status": phase_status})
         except Exception:
-            logger.debug("trace span output annotation failed; continuing", exc_info=True)
+            logger.debug("trace span output annotation failed; continuing")
         if attributes:
             try:
                 setter = getattr(self._span, "set_attributes", None)
                 if callable(setter):
                     setter(_trace_mapping(attributes))
             except Exception:
-                logger.debug("trace span attribute annotation failed; continuing", exc_info=True)
+                logger.debug("trace span attribute annotation failed; continuing")
         if phase_status != "completed":
             try:
                 self._span.set_status("ERROR")
             except Exception:
-                logger.debug("trace span status annotation failed; continuing", exc_info=True)
+                logger.debug("trace span status annotation failed; continuing")
         try:
             # Do not pass provider exceptions to MLflow: their messages can
             # contain prompts, generated code, or gateway response bodies.
             self._span_context.__exit__(None, None, None)
         except BaseException:
-            logger.debug("trace span close failed; continuing", exc_info=True)
+            logger.debug("trace span close failed; continuing")
 
 
 def start_turn_span(
@@ -833,7 +1051,7 @@ def start_turn_span(
         )
         span = span_context.__enter__()
     except Exception:
-        logger.debug("MLflow lifecycle span setup failed; continuing", exc_info=True)
+        logger.debug("MLflow lifecycle span setup failed; continuing")
         return handle
 
     handle._span_context = span_context
@@ -841,7 +1059,14 @@ def start_turn_span(
     try:
         span.set_inputs(_trace_mapping(inputs))
     except Exception:
-        logger.debug("trace span input annotation failed; continuing", exc_info=True)
+        logger.debug("trace span input annotation failed; continuing")
+    try:
+        setter = getattr(span, "set_attributes", None)
+        attributes = _trace_attributes(inputs)
+        if callable(setter) and attributes:
+            setter(attributes)
+    except Exception:
+        logger.debug("trace span attribute annotation failed; continuing")
     return handle
 
 
@@ -860,8 +1085,16 @@ def turn_phase_span(name: str, *, inputs: Mapping[str, object]) -> Iterator[Trac
     handle = start_turn_span(name, inputs=inputs)
     try:
         yield handle
-    except BaseException:
-        handle.finish(phase_status="failed")
+    except BaseException as exc:
+        # Categorize failures without passing the exception object or message
+        # into MLflow. Provider and interpreter exceptions frequently carry
+        # prompts, generated code, URLs, or gateway response bodies.
+        from fleet_rlm.observability.diagnostics import trace_failure_category
+
+        handle.finish(
+            phase_status="failed",
+            outputs={"failure_category": trace_failure_category(exc)},
+        )
         raise
     else:
         handle.finish(phase_status="completed")
@@ -912,7 +1145,7 @@ def turn_trace(
             import mlflow
             from mlflow.entities import SpanType
         except Exception:
-            logger.warning("MLflow import failed for turn span; continuing without traces", exc_info=True)
+            logger.warning("MLflow import failed for turn span; continuing without traces")
             yield TraceHandle(trace_id=None)
             return
 
@@ -924,7 +1157,7 @@ def turn_trace(
             )
             span = span_context.__enter__()
         except Exception:
-            logger.warning("MLflow turn span setup failed; continuing without traces", exc_info=True)
+            logger.warning("MLflow turn span setup failed; continuing without traces")
             yield TraceHandle(trace_id=None)
             return
 
@@ -957,7 +1190,7 @@ def turn_trace(
                 metadata=metadata,
             )
         except Exception:
-            logger.warning("MLflow update_current_trace failed; continuing", exc_info=True)
+            logger.warning("MLflow update_current_trace failed; continuing")
         trace_id: str | None = None
         try:
             # The root span is the only authoritative identity for this Turn.
@@ -974,24 +1207,42 @@ def turn_trace(
                 if expose_trace_id:
                     _current_trace_id.set(trace_id)
         except Exception:
-            logger.warning("MLflow active trace ID lookup failed; continuing", exc_info=True)
+            logger.warning("MLflow active trace ID lookup failed; continuing")
 
         try:
             yield TraceHandle(trace_id=trace_id if expose_trace_id else None)
         except BaseException as exc:
+            from fleet_rlm.observability.diagnostics import trace_failure_category
+
             _current_trace_failed.set(True)
             _set_current_trace_state("ERROR")
             try:
-                span_context.__exit__(type(exc), exc, exc.__traceback__)
+                # Never pass the live exception into MLflow. Even though the
+                # exporter sanitizer strips recorded exception events, doing
+                # so at the ownership boundary avoids depending on an SDK
+                # implementation detail and leaves a useful, safe diagnosis.
+                try:
+                    span.set_outputs({"failure_category": _trace_value(trace_failure_category(exc))})
+                except BaseException:
+                    logger.warning("MLflow turn span failure output annotation failed; continuing")
+                try:
+                    span.set_status("ERROR")
+                except BaseException:
+                    logger.warning("MLflow turn span failure status annotation failed; continuing")
             except BaseException:
-                logger.warning("MLflow turn span teardown failed; continuing", exc_info=True)
+                logger.warning("MLflow turn span failure annotation failed; continuing")
+            finally:
+                try:
+                    span_context.__exit__(None, None, None)
+                except BaseException:
+                    logger.warning("MLflow turn span teardown failed; continuing")
             raise
         else:
             _set_current_trace_state("ERROR" if _current_trace_failed.get() else "OK")
             try:
                 span_context.__exit__(None, None, None)
             except BaseException:
-                logger.warning("MLflow turn span teardown failed; continuing", exc_info=True)
+                logger.warning("MLflow turn span teardown failed; continuing")
     finally:
         if active_token is not None:
             _fleet_trace_active.reset(active_token)

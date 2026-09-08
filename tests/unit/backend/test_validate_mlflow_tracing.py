@@ -90,12 +90,11 @@ def test_main_emits_and_retrieves_local_trace(
         mlflow_trace_table_prefix=None,
         mlflow_tracing_sql_warehouse_id=None,
     )
-    calls = SimpleNamespace(tracking_uri=None, experiment_name=None)
+    calls = SimpleNamespace(configure=0, flush=0, reset=0)
     mlflow = ModuleType("mlflow")
-    mlflow.set_tracking_uri = lambda uri: setattr(calls, "tracking_uri", uri)  # type: ignore[attr-defined]
 
-    def set_experiment(*, experiment_name: str) -> SimpleNamespace:
-        calls.experiment_name = experiment_name
+    def get_experiment_by_name(experiment_name: str) -> SimpleNamespace:
+        assert experiment_name == "fleet-rlm"
         return SimpleNamespace(experiment_id="1")
 
     def trace(*, name: str):
@@ -106,7 +105,7 @@ def test_main_emits_and_retrieves_local_trace(
 
         return decorate
 
-    mlflow.set_experiment = set_experiment  # type: ignore[attr-defined]
+    mlflow.get_experiment_by_name = get_experiment_by_name  # type: ignore[attr-defined]
     mlflow.trace = trace  # type: ignore[attr-defined]
     mlflow.get_last_active_trace_id = lambda: "trace-1"  # type: ignore[attr-defined]
 
@@ -136,11 +135,16 @@ def test_main_emits_and_retrieves_local_trace(
     monkeypatch.setitem(sys.modules, "mlflow", mlflow)
     monkeypatch.setattr(verifier, "_load_repository_env", lambda: None)
     monkeypatch.setattr(verifier, "load_runtime_settings", lambda: settings)
+    monkeypatch.setattr(verifier, "configure_tracing", lambda _settings: setattr(calls, "configure", 1) or True)
+    monkeypatch.setattr(verifier, "is_tracing_active", lambda: True)
+    monkeypatch.setattr(verifier, "flush_tracing", lambda: setattr(calls, "flush", 1))
+    monkeypatch.setattr(verifier, "reset_tracing", lambda: setattr(calls, "reset", 1))
     monkeypatch.setattr(sys, "argv", ["validate_mlflow_tracing.py"])
 
     assert verifier.main() == 0
-    assert calls.tracking_uri == "http://127.0.0.1:5001"
-    assert calls.experiment_name == "fleet-rlm"
+    assert calls.configure == 1
+    assert calls.flush == 1
+    assert calls.reset == 1
     output = capsys.readouterr().out
     assert "trace_id=trace-1" in output
     assert "tracking_uri=http://127.0.0.1:5001" in output

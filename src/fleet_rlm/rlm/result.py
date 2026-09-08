@@ -104,11 +104,34 @@ class PredictionOutputTooLargeError(PredictionOutputError):
 # Secrets / credentials
 _SECRETISH = re.compile(
     r"(?i)("
-    r"api[_-]?key|authorization|bearer\s+\S+|sk-[a-z0-9_-]+|"
-    r"password|secret|token|credential|private[_-]?key"
+    r"api[_-]?key|access[_-]?key|authorization|bearer\s+\S+|sk-[a-z0-9_-]+|"
+    r"password|secret|token|credential(?:s)?|private[_-]?key"
     r")[=:\s]+\S+"
 )
+_SECRET_FIELD_NAME = (
+    r"(?:[a-z0-9]+[_-])*?(?:api[_-]?key|access[_-]?key|authorization|password|secret|"
+    r"token|credential(?:s)?|private[_-]?key)"
+)
+_QUOTED_SECRET_ASSIGNMENT = re.compile(
+    r"(?i)(?P<prefix>[\"']?" + _SECRET_FIELD_NAME + r"[\"']?\s*[:=]\s*)"
+    r"(?P<quote>[\"'])"
+    r"(?P<value>(?:\\.|(?!(?P=quote))[\s\S])*?)"
+    r"(?P=quote)"
+)
+_UNQUOTED_SECRET_ASSIGNMENT = re.compile(
+    r"(?i)(?P<prefix>[\"']?" + _SECRET_FIELD_NAME + r"[\"']?\s*[:=]\s*)"
+    r"(?P<value>[^\"'\s,}\]]+)"
+)
 _TOKENISH = re.compile(r"(?i)\b(?:bearer\s+[a-z0-9._~+/=-]+|sk-[a-z0-9_-]{6,})")
+_PROVIDER_TOKENISH = re.compile(
+    r"(?i)\b(?:"
+    r"sk-(?:ant-)?[a-z0-9_-]{6,}|"
+    r"AIza[a-z0-9_-]{20,}|"
+    r"AKIA[0-9A-Z]{16}|"
+    r"gh[pousr]_[a-z0-9]{20,}|"
+    r"xox[baprs]-[a-z0-9-]{10,}"
+    r")\b"
+)
 _SENSITIVE_KEYS = frozenset(
     {
         "api_key",
@@ -126,9 +149,20 @@ _SENSITIVE_KEYS = frozenset(
 
 def _is_sensitive_key(key: object) -> bool:
     """Recognize exact fields plus common namespaced credential fields."""
-    normalized = str(key).strip().lower().replace("-", "_")
+    normalized = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", str(key).strip())
+    normalized = re.sub(r"[^a-zA-Z0-9]+", "_", normalized).strip("_").lower()
     return normalized in _SENSITIVE_KEYS or normalized.endswith(
-        ("_api_key", "_authorization", "_credential", "_password", "_private_key", "_secret", "_token")
+        (
+            "_access_key",
+            "_access_key_id",
+            "_api_key",
+            "_authorization",
+            "_credential",
+            "_password",
+            "_private_key",
+            "_secret",
+            "_token",
+        )
     )
 
 
@@ -154,7 +188,7 @@ _STACKISH = re.compile(r"(?i)(traceback \(most recent call last\)|File \"[^\"]+\
 _PROMPTISH = re.compile(r"(?i)(system prompt|you are a helpful|<<<instructions>>>|BEGIN SYSTEM)")
 _ANSI_ESCAPE = re.compile(r"\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07]*(?:\x07|\x1b\\)|.)")
 _PRIVATE_MARKER = re.compile(r"__FLEET_[A-Z0-9_]+__")
-_URLISH = re.compile(r"(?i)\bhttps?://[^\s\"'<>]+")
+_URLISH = re.compile(r"(?i)\b[a-z][a-z0-9+.-]*://[^\s\"'<>]+")
 _UNSAFE_CONTROL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]")
 
 # Declared model outputs are never rewritten. These patterns therefore live apart
@@ -162,7 +196,7 @@ _UNSAFE_CONTROL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]")
 # shapes. Bare credential names and security terminology are deliberately safe.
 _DECLARED_SECRET_ASSIGNMENT = re.compile(
     r"(?i)(?<![a-z0-9])(?:[a-z0-9]+[_-])*"
-    r"(?:api[_-]?key|authorization|password|secret|token|credential|private[_-]?key)\b"
+    r"(?:api[_-]?key|access[_-]?key|authorization|password|secret|token|credential|private[_-]?key)\b"
     r"\s*(?:=|:)\s*(?P<value>\"[^\"\r\n]+\"|'[^'\r\n]+'|[^\s,;}\]]+)"
 )
 _DECLARED_BEARER = re.compile(r"(?i)\bbearer\s+(?P<value>[a-z0-9._~+/=-]+)")
@@ -170,6 +204,7 @@ _DECLARED_PROVIDER_TOKEN = re.compile(
     r"(?i)\b(?:"
     r"sk-(?:ant-)?[a-z0-9_-]{6,}|"
     r"AIza[a-z0-9_-]{20,}|"
+    r"AKIA[0-9A-Z]{16}|"
     r"gh[pousr]_[a-z0-9]{20,}|"
     r"xox[baprs]-[a-z0-9-]{10,}"
     r")\b"
@@ -214,16 +249,53 @@ _DECLARED_SAFE_PLACEHOLDERS = frozenset(
 )
 
 
-def sanitize_public_text(text: str, *, max_len: int = 10_000) -> str:
-    """Bound and redact model-authored text intended for public detail or answers."""
+def _sanitize_text(
+    text: str,
+    *,
+    max_len: int,
+    redact_prompt_markers: bool,
+    redact_urls: bool,
+    strip_control: bool,
+) -> str:
+    """Apply the shared secret/path redaction policy with caller-specific content rules."""
     cleaned = _TOKENISH.sub("[redacted]", text)
+    cleaned = _PROVIDER_TOKENISH.sub("[redacted]", cleaned)
     cleaned = _SECRETISH.sub("[redacted]", cleaned)
+    cleaned = _QUOTED_SECRET_ASSIGNMENT.sub(r"\g<prefix>\g<quote>[redacted]\g<quote>", cleaned)
+    cleaned = _UNQUOTED_SECRET_ASSIGNMENT.sub(r"\g<prefix>[redacted]", cleaned)
     cleaned = _DSNISH.sub("[redacted-dsn]", cleaned)
     cleaned = _PATHISH.sub("[path]", cleaned)
-    cleaned = _PROMPTISH.sub("[redacted-prompt]", cleaned)
+    if redact_urls:
+        cleaned = _URLISH.sub("[redacted-url]", cleaned)
+    if redact_prompt_markers:
+        cleaned = _PROMPTISH.sub("[redacted-prompt]", cleaned)
+    if strip_control:
+        cleaned = _UNSAFE_CONTROL.sub(" ", cleaned)
     if len(cleaned) > max_len:
         cleaned = cleaned[: max_len - 3] + "..."
     return cleaned
+
+
+def sanitize_public_text(text: str, *, max_len: int = 10_000) -> str:
+    """Bound and redact model-authored text intended for public detail or answers."""
+    return _sanitize_text(
+        text,
+        max_len=max_len,
+        redact_prompt_markers=True,
+        redact_urls=False,
+        strip_control=False,
+    )
+
+
+def sanitize_trace_text(text: str, *, max_len: int = 10_000) -> str:
+    """Bound trace content while preserving authorized prompts and reasoning."""
+    return _sanitize_text(
+        text,
+        max_len=max_len,
+        redact_prompt_markers=False,
+        redact_urls=True,
+        strip_control=True,
+    )
 
 
 def sanitize_repair_text(text: str, *, max_len: int = 512) -> str:
@@ -288,6 +360,26 @@ def sanitize_public_value(value: Any, *, max_len: int = 2_000, depth: int = 0) -
     if isinstance(value, (list, tuple)):
         return [sanitize_public_value(item, max_len=max_len, depth=depth + 1) for item in list(value)[:50]]
     return sanitize_public_text(str(value), max_len=max_len)
+
+
+def sanitize_trace_value(value: Any, *, max_len: int = 2_000, depth: int = 0) -> Any:
+    """Recursively bound trace values while preserving non-secret content."""
+    if depth >= 8:
+        return "[truncated]"
+    if value is None or isinstance(value, (bool, int, float)):
+        return value
+    if isinstance(value, str):
+        return sanitize_trace_text(value, max_len=max_len)
+    if isinstance(value, Mapping):
+        return {
+            str(key)[:128]: "[redacted]"
+            if _is_sensitive_key(key)
+            else sanitize_trace_value(item, max_len=max_len, depth=depth + 1)
+            for key, item in list(value.items())[:50]
+        }
+    if isinstance(value, (list, tuple)):
+        return [sanitize_trace_value(item, max_len=max_len, depth=depth + 1) for item in list(value)[:50]]
+    return sanitize_trace_text(str(value), max_len=max_len)
 
 
 def _is_safe_placeholder(value: str) -> bool:
@@ -771,6 +863,8 @@ __all__ = [
     "sanitize_public_text",
     "sanitize_public_value",
     "sanitize_repair_text",
+    "sanitize_trace_text",
+    "sanitize_trace_value",
     "truncate_head_tail",
     "truncate_public_text",
     "validate_declared_public_value",

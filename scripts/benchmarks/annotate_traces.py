@@ -7,6 +7,15 @@ derived, non-content ``fleet.*`` trace tags so the MLflow UI and
 ``search_traces`` ``filter_string`` queries can select by model, provider,
 tool, latency, and token usage.
 
+Span attribute contract (MLflow 3.15.x): LLM spans expose
+``mlflow.llm.model`` and ``mlflow.llm.provider``; the enclosing LM/module
+span exposes ``mlflow.chat.tokenUsage`` as
+``{"input_tokens": int, "output_tokens": int, "total_tokens": int}``; and
+traces carry an aggregated ``mlflow.trace.tokenUsage`` JSON summary under
+``info.request_metadata``. All are read here; values are never span content.
+The legacy ``model`` key written by the DSPy callback is accepted as a
+fallback.
+
 It never mutates the live Turn path and never exports prompt, response, or
 other content-bearing span payloads: only bounded aggregates become tags.
 All commands require ``FLEET_LIVE=1`` and write a bounded JSON receipt.
@@ -105,6 +114,27 @@ def _bounded_tag(value: object) -> str:
     return text
 
 
+def _trace_token_usage(info: Any) -> Mapping[str, Any] | None:
+    """Read MLflow's authoritative aggregate across supported trace versions."""
+    token_usage = getattr(info, "token_usage", None)
+    if isinstance(token_usage, Mapping):
+        return token_usage
+    request_metadata = getattr(info, "request_metadata", None)
+    if not isinstance(request_metadata, Mapping):
+        return None
+    trace_usage = request_metadata.get("mlflow.trace.tokenUsage")
+    if isinstance(trace_usage, Mapping):
+        return trace_usage
+    if isinstance(trace_usage, str):
+        try:
+            parsed = json.loads(trace_usage)
+        except json.JSONDecodeError:
+            return None
+        if isinstance(parsed, Mapping):
+            return parsed
+    return None
+
+
 def _join_distinct(values: Sequence[str]) -> str:
     """Join distinct non-empty values deterministically."""
     return ",".join(sorted({value for value in values if value}))
@@ -148,21 +178,38 @@ def derive_attributes(trace: Any) -> dict[str, str]:
         name = str(getattr(span, "name", "") or "")
         span_type_counts[span_type or "UNKNOWN"] += 1
         if span_type == "LLM":
-            model = _span_attribute(span, "model_name") or _span_attribute(span, "model")
+            # MLflow 3.15 span attribute contract: the DSPy autolog callback
+            # writes mlflow.llm.model/mlflow.llm.provider on LLM spans. The
+            # legacy non-namespaced ``model`` key is a fallback.
+            model = (
+                _span_attribute(span, "mlflow.llm.model")
+                or _span_attribute(span, "model_name")
+                or _span_attribute(span, "model")
+            )
             if model:
                 models.append(str(model))
-            provider = _span_attribute(span, "provider")
+            provider = _span_attribute(span, "mlflow.llm.provider") or _span_attribute(span, "provider")
             if provider:
                 providers.append(str(provider))
-            usage = _span_attribute(span, "usage") or _span_attribute(span, "token_usage")
-            if isinstance(usage, Mapping):
-                prompt_tokens += _token_count(usage.get("prompt_tokens"))
-                completion_tokens += _token_count(usage.get("completion_tokens"))
-                total_tokens += _token_count(usage.get("total_tokens"))
-            elif usage is not None:
-                total_tokens += _token_count(usage)
+        # Token usage is written by the DSPy callback on the enclosing
+        # LM/module span, whose span type may be CHAIN or LLM; read it from
+        # every span that carries the attribute.
+        usage = _span_attribute(span, "mlflow.chat.tokenUsage")
+        if isinstance(usage, Mapping):
+            prompt_tokens += _token_count(usage.get("input_tokens", usage.get("prompt_tokens")))
+            completion_tokens += _token_count(usage.get("output_tokens", usage.get("completion_tokens")))
+            total_tokens += _token_count(usage.get("total_tokens"))
+        elif usage is not None:
+            total_tokens += _token_count(usage)
         if span_type == "TOOL" and name:
             tools.append(name)
+
+    # MLflow's trace aggregate is ancestor-aware, unlike a raw sum of span
+    # attributes that can contain the same LLM call on enclosing module spans.
+    if trace_usage := _trace_token_usage(info):
+        prompt_tokens = _token_count(trace_usage.get("input_tokens", trace_usage.get("prompt_tokens")))
+        completion_tokens = _token_count(trace_usage.get("output_tokens", trace_usage.get("completion_tokens")))
+        total_tokens = _token_count(trace_usage.get("total_tokens"))
 
     execution_duration = getattr(info, "execution_duration", None)
     latency_ms = int(execution_duration) if execution_duration is not None else None
