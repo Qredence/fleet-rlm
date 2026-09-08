@@ -209,8 +209,8 @@ or authorize paid capacity.
 
 ### Certification still open
 
-- [ ] Deployed Alembic-head reconciliation and representative PostgreSQL query-plan evidence.
-- [ ] Live SDK/API-key, Volume, remote process containment, and stop/start or replacement continuity. The Phase 3 feasibility test and sealed attachment path require a corrected rerun and durable receipt; remote process containment remains the native-production blocker.
+- [ ] PostgreSQL certification: the configured target reported Alembic head `019fe0010001` on 2026-09-08 and five tenant-owned contention scenarios passed. The sanitized receipt is `.fleet-evidence/receipts/adr006/postgres-contention-d60d6864a-20260908T090941Z.json`; the exclusive-database outbox scenario and representative query plans remain unrun.
+- [ ] Live SDK/API-key, Volume, remote process containment, and stop/start or replacement continuity. The 2026-09-08 Phase 3 receipt is `.fleet-evidence/receipts/adr006/phase3-native-d60d6864a-20260908T090634Z.json`: all disposable sandboxes were removed, but a detached subprocess survived context deletion. It is a provider-level native-production no-go, so `legacy` and the broker remain required; MLflow campaign attachment remains open.
 - [ ] Native interpreter startup and capability checks on every production profile, including mounted WorkspaceChild behavior.
 - [ ] Warm-pool eligibility, quota, clean-instance, lifecycle, demand, and cost evidence; paid capacity remains disabled.
 - [ ] Complete MLflow backend/export-outage/concurrency certification and matched semantic/recursive quality-per-cost ablations.

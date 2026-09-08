@@ -309,10 +309,11 @@ separate-session isolation/concurrency and disposable cleanup. A detached
 subprocess marker survived context deletion, so `go_no_go.native_production`
 is deliberately `false`; the exact native root is quarantined and the broker
 remains the compatibility path until remote process containment is certified.
-The timing and capability receipt is retained at
-`.scratch/fleet-rlm-recursive-runtime/evidence/daytona-phase3-native-live-20260908.json`
-and attached to the campaign MLflow run above. This closes the Phase 3
-feasibility/evidence gates without authorizing native production cutover.
+The renewed timing and capability receipt is retained at
+`.fleet-evidence/receipts/adr006/phase3-native-d60d6864a-20260908T090634Z.json`.
+It reconfirms the containment failure and the required quarantine/cleanup
+behavior; it does not close containment, matched-timing, trace-parentage, or
+MLflow-attachment gates and does not authorize native production cutover.
 
 **Exit:** native execution meets the actual output, host-tool, deadline, remote-containment and public-contract requirements. The current receipt records a remote-containment failure, so native remains feasibility-only and the proven broker path is retained; no essential guarantees or rollback machinery are deleted.
 
