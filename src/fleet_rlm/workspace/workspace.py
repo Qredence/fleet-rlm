@@ -40,6 +40,8 @@ PUBLIC_WORKSPACE_NAMESPACE = "files"
 MAX_PUBLIC_LIST_LIMIT = MAX_STORAGE_LIST_LIMIT
 MAX_PUBLIC_READ_CHARS = MAX_STORAGE_READ_CHARS
 SESSION_WORKSPACE_NAMESPACE = "session_workspace"
+MAX_WORKSPACE_TEXT_BATCH_ITEMS = 32
+MAX_WORKSPACE_TEXT_BATCH_CHARS = 32_000
 
 # The old public DTO names are aliases, not second value models.  They make
 # staged route migrations possible while keeping Workspace models canonical.
@@ -367,6 +369,25 @@ class WorkspaceToolHost:
         def _raise(exc: BaseException) -> NoReturn:
             translate_fs_tool_errors(exc, WorkspaceToolError, domain="Session Workspace")
 
+        def _read_workspace_page(path: str, cursor: str | None, max_chars: int) -> dict[str, object]:
+            if max_chars < 1 or max_chars > MAX_STORAGE_READ_CHARS:
+                raise WorkspaceToolError("invalid_path", "Session Workspace read bound is invalid")
+            try:
+                page = self._workspace.read_text_page(
+                    path, cursor=cursor, max_chars=max_chars, max_bytes=self._max_file_bytes
+                )
+            except Exception as exc:
+                return _raise(exc)
+            return {
+                "ok": True,
+                "namespace": SESSION_WORKSPACE_NAMESPACE,
+                "path": path,
+                "content": page.content,
+                "next_cursor": page.next_cursor,
+                "byte_size": page.byte_size,
+                "eof": page.eof,
+            }
+
         def list_workspace_files(path: str = ".", limit: int = 100, after: str | None = None) -> dict[str, object]:
             """List immediate entries in this Session's durable workspace."""
             try:
@@ -403,25 +424,56 @@ class WorkspaceToolHost:
             max_chars: int = MAX_STORAGE_READ_CHARS,
         ) -> dict[str, object]:
             """Read one UTF-8 workspace page without returning more than max_chars."""
-            if max_chars < 1 or max_chars > MAX_STORAGE_READ_CHARS:
-                raise WorkspaceToolError("invalid_path", "Session Workspace read bound is invalid")
-            try:
-                page = self._workspace.read_text_page(
-                    path,
-                    cursor=cursor,
-                    max_chars=max_chars,
-                    max_bytes=self._max_file_bytes,
-                )
-            except Exception as exc:
-                return _raise(exc)
+            return _read_workspace_page(path, cursor, max_chars)
+
+        def read_workspace_text_batch(requests: list[dict[str, object]]) -> dict[str, object]:
+            """Read selected Session Workspace pages in one bounded host call."""
+            if not isinstance(requests, list) or not requests or len(requests) > MAX_WORKSPACE_TEXT_BATCH_ITEMS:
+                raise WorkspaceToolError("invalid_path", "Session Workspace read batch is invalid")
+            normalized: list[tuple[str, str | None, int]] = []
+            requested_chars = 0
+            for request in requests:
+                if not isinstance(request, dict) or set(request) - {"path", "cursor", "max_chars"}:
+                    raise WorkspaceToolError("invalid_path", "Session Workspace read batch is invalid")
+                path, cursor = request.get("path"), request.get("cursor")
+                max_chars = request.get("max_chars", MAX_STORAGE_READ_CHARS)
+                if (
+                    not isinstance(path, str)
+                    or (cursor is not None and not isinstance(cursor, str))
+                    or not isinstance(max_chars, int)
+                    or isinstance(max_chars, bool)
+                    or max_chars < 1
+                    or max_chars > MAX_STORAGE_READ_CHARS
+                ):
+                    raise WorkspaceToolError("invalid_path", "Session Workspace read batch is invalid")
+                try:
+                    normalize_workspace_path(path)
+                except Exception as exc:
+                    _raise(exc)
+                requested_chars += max_chars
+                if requested_chars > MAX_WORKSPACE_TEXT_BATCH_CHARS:
+                    raise WorkspaceToolError("invalid_path", "Session Workspace read batch exceeds its character bound")
+                normalized.append((path, cursor, max_chars))
+
+            results: list[dict[str, object]] = []
+            for path, cursor, max_chars in normalized:
+                try:
+                    results.append(_read_workspace_page(path, cursor, max_chars))
+                except WorkspaceToolError as exc:
+                    results.append(
+                        {
+                            "ok": False,
+                            "namespace": SESSION_WORKSPACE_NAMESPACE,
+                            "path": path,
+                            "error": exc.code,
+                        }
+                    )
             return {
                 "ok": True,
                 "namespace": SESSION_WORKSPACE_NAMESPACE,
-                "path": path,
-                "content": page.content,
-                "next_cursor": page.next_cursor,
-                "byte_size": page.byte_size,
-                "eof": page.eof,
+                "count": len(results),
+                "failed_count": sum(item["ok"] is False for item in results),
+                "results": results,
             }
 
         def write_workspace_text(path: str, content: str, overwrite: bool = False) -> dict[str, object]:
@@ -526,6 +578,23 @@ class WorkspaceToolHost:
                 },
             ),
             dspy.Tool(
+                read_workspace_text_batch,
+                name="read_workspace_text_batch",
+                desc=(
+                    "Read up to 32 selected UTF-8 durable Workspace pages in one host call. Use this for multiple "
+                    "independent relevant files; each page has max_chars in 1..10000 and the batch total is at "
+                    "most 32000."
+                ),
+                args={
+                    "requests": {
+                        "type": "array",
+                        "minItems": 1,
+                        "maxItems": MAX_WORKSPACE_TEXT_BATCH_ITEMS,
+                        "items": {"type": "object"},
+                    }
+                },
+            ),
+            dspy.Tool(
                 write_workspace_text,
                 name="write_workspace_text",
                 desc=(
@@ -609,6 +678,24 @@ class WorkspaceToolHost:
                 "checksum_precondition": bool(arguments.get("expected_sha256")),
             }
 
+        def batch_read_input(arguments: Mapping[str, Any]) -> JsonValue:
+            requests = arguments.get("requests")
+            if not isinstance(requests, list):
+                return {}
+            bounded = requests[:MAX_WORKSPACE_TEXT_BATCH_ITEMS]
+            requested_chars = 0
+            for request in bounded:
+                if not isinstance(request, Mapping):
+                    continue
+                value = request.get("max_chars", MAX_STORAGE_READ_CHARS)
+                if isinstance(value, bool) or not isinstance(value, int):
+                    continue
+                requested_chars += min(value, MAX_STORAGE_READ_CHARS)
+                if requested_chars >= MAX_WORKSPACE_TEXT_BATCH_CHARS:
+                    requested_chars = MAX_WORKSPACE_TEXT_BATCH_CHARS
+                    break
+            return {"request_count": len(requests), "requested_chars": requested_chars}
+
         return MappingProxyType(
             {
                 "list_workspace_files": ToolEventView(
@@ -634,6 +721,13 @@ class WorkspaceToolHost:
                     ),
                     output_projection=lambda result: event_output_fields(
                         result, ("ok", "namespace", "path", "next_cursor", "byte_size", "eof")
+                    ),
+                    allow_repeated_identical=True,
+                ),
+                "read_workspace_text_batch": ToolEventView(
+                    input_projection=batch_read_input,
+                    output_projection=lambda result: event_output_fields(
+                        result, ("ok", "namespace", "count", "failed_count")
                     ),
                     allow_repeated_identical=True,
                 ),
@@ -668,6 +762,8 @@ class WorkspaceToolHost:
 __all__ = [
     "DAYTONA_WORKSPACE_CAPABILITY" if False else "MAX_PUBLIC_LIST_LIMIT",
     "MAX_PUBLIC_READ_CHARS",
+    "MAX_WORKSPACE_TEXT_BATCH_CHARS",
+    "MAX_WORKSPACE_TEXT_BATCH_ITEMS",
     "PUBLIC_WORKSPACE_NAMESPACE",
     "SESSION_WORKSPACE_NAMESPACE",
     "FilesystemToolError",

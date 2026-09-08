@@ -1592,6 +1592,7 @@ class RLMRunner:
                 spec.signature,
                 recursion_enabled=context.delegation.recursive_options.enabled,
                 skill_instructions=spec.skill_instructions,
+                tool_names=frozenset(str(tool.name) for tool in spec.tools),
             ),
         )
 

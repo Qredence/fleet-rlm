@@ -252,6 +252,68 @@
       ],
       "additionalProperties": true
     },
+    "filesystem_text_batch": {
+      "type": "object",
+      "properties": {
+        "ok": {
+          "type": "boolean"
+        },
+        "namespace": {
+          "type": "string"
+        },
+        "count": {
+          "type": "integer"
+        },
+        "failed_count": {
+          "type": "integer"
+        },
+        "results": {
+          "type": "array",
+          "items": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/filesystem_text_page"
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "ok": {
+                    "type": "boolean"
+                  },
+                  "namespace": {
+                    "type": "string"
+                  },
+                  "path": {
+                    "type": "string"
+                  },
+                  "error": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "ok",
+                  "namespace",
+                  "path",
+                  "error"
+                ],
+                "additionalProperties": true
+              }
+            ]
+          }
+        },
+        "error": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "ok",
+        "namespace",
+        "count",
+        "failed_count",
+        "results"
+      ],
+      "additionalProperties": true
+    },
     "filesystem_write": {
       "type": "object",
       "properties": {
@@ -2119,6 +2181,51 @@
         ],
         "omits": [
           "content"
+        ],
+        "source": "src/fleet_rlm/workspace/workspace.py:WorkspaceToolHost.event_views"
+      }
+    },
+    {
+      "name": "read_workspace_text_batch",
+      "category": "workspace",
+      "source": "src/fleet_rlm/workspace/workspace.py:WorkspaceToolHost",
+      "description": "Read up to 32 selected UTF-8 durable Workspace pages in one host call. Use this for multiple independent relevant files; each page has max_chars in 1..10000 and the batch total is at most 32000.",
+      "argument_schema": {
+        "type": "object",
+        "properties": {
+          "requests": {
+            "items": {
+              "type": "object"
+            },
+            "maxItems": 32,
+            "minItems": 1,
+            "type": "array"
+          }
+        },
+        "required": [
+          "requests"
+        ],
+        "additionalProperties": false
+      },
+      "result_schema": {
+        "$ref": "#/$defs/filesystem_text_batch"
+      },
+      "availability_policy": "Available only in the Daytona Session Workspace capability; the deterministic private composition declares Workspace unavailable and omits these Tools.",
+      "authorization_policy": "Host binds one Session-scoped Workspace filesystem; the generic observed-tool Run-authority fence fails closed after revocation.",
+      "event_projection_policy": {
+        "mode": "bounded_allowlist",
+        "input": [
+          "request_count",
+          "requested_chars"
+        ],
+        "output": [
+          "ok",
+          "namespace",
+          "count",
+          "failed_count"
+        ],
+        "omits": [
+          "results"
         ],
         "source": "src/fleet_rlm/workspace/workspace.py:WorkspaceToolHost.event_views"
       }

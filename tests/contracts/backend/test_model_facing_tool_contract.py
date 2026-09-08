@@ -33,6 +33,7 @@ _EXPECTED_CATEGORIES = {
         "list_workspace_files",
         "stat_workspace_file",
         "read_workspace_text",
+        "read_workspace_text_batch",
         "write_workspace_text",
         "append_workspace_text",
         "delete_workspace_path",

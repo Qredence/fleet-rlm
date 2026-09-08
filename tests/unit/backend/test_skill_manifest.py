@@ -67,7 +67,7 @@ def test_every_current_bundled_skill_parses_into_one_validated_manifest() -> Non
         "scripts/rank_chunks.py",
         "references/chunking-strategies.md",
     ]
-    assert by_name["workspace-files"].version == "1.1.0"
+    assert by_name["workspace-files"].version == "1.2.0"
     assert by_name["report-builder"].resources == ()
     assert all(manifest.compatibility.strip() for manifest in manifests)
     assert all(manifest.instructions.startswith("# ") for manifest in manifests)
@@ -197,7 +197,7 @@ def test_runtime_catalog_remains_the_source_of_current_selection_truth() -> None
     # QRE-122 is expand-only: parse/parity does not mutate exact pinned
     # selection semantics. The known sketch-level drift remains visible.
     catalog = build_bundled_skill_catalog()
-    assert catalog.require(stable_skill_id("workspace-files")).card.version == "1.1.0"
+    assert catalog.require(stable_skill_id("workspace-files")).card.version == "1.2.0"
 
 
 def test_human_catalog_documentation_matches_current_runtime_cards() -> None:
