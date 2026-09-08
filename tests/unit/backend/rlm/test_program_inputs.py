@@ -96,6 +96,21 @@ def test_default_input_payload_contains_only_bounded_metadata() -> None:
     }
 
 
+def test_custom_signature_drops_optional_history_input() -> None:
+    class CustomSignature(dspy.Signature):
+        request: str = dspy.InputField()
+        answer: str = dspy.OutputField()
+
+    payload = build_rlm_input_kwargs(
+        request="custom signature",
+        history=dspy.History(messages=[]),
+        session_context=SessionContextManifest(SESSION_ID, 0, 0, ()),
+        signature=CustomSignature,
+    )
+
+    assert set(payload) == {"request"}
+
+
 def test_manifest_skill_affordances_reach_the_model_unchanged() -> None:
     from fleet_rlm.skills.catalog import build_bundled_skill_catalog
 

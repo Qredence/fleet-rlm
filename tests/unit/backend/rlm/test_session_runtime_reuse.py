@@ -55,8 +55,12 @@ class _Program:
     async def acall(self, **kwargs: object) -> dspy.Prediction:
         self.calls += 1
         history = kwargs.get("history")
-        assert type(history) is dspy.History
-        self.histories.append(history)
+        # Custom signatures may intentionally omit Fleet's optional history
+        # input.  Keep recording it when declared while allowing the fake to
+        # exercise signature-driven input filtering.
+        if history is not None:
+            assert type(history) is dspy.History
+            self.histories.append(history)
         if self.calls == 1:
             self.interpreter.namespace["persisted_marker"] = "clean-turn"
         else:
@@ -336,8 +340,12 @@ class _TurnProgram:
     async def acall(self, **kwargs: object) -> dspy.Prediction:
         self.calls += 1
         history = kwargs.get("history")
-        assert type(history) is dspy.History
-        self.histories.append(history)
+        # A custom signature may intentionally omit Fleet's optional history
+        # input.  Record it when declared while allowing input filtering to be
+        # exercised by this resident-program double.
+        if history is not None:
+            assert type(history) is dspy.History
+            self.histories.append(history)
         if self._effect is not None:
             self._effect(self)
         return dspy.Prediction(answer=f"answer-{self.calls}", trajectory=[])

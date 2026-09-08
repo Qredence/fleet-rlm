@@ -19,6 +19,7 @@ from fleet_rlm.daytona.recursive_child_runtime import ChildRuntimeLease
 from fleet_rlm.rlm.events import Status, ToolCompleted, ToolFailed, ToolStarted
 from fleet_rlm.rlm.program import RLMModelBundle
 from fleet_rlm.rlm.recursion import (
+    ChildRuntimeAuthorizationError,
     ChildRuntimeCleanupError,
     RecursiveBatchError,
     RecursiveRLMExecutor,
@@ -216,6 +217,50 @@ def test_capsule_batch_returns_ordered_typed_outcomes_and_preserves_atomic_failu
     with pytest.raises(RecursiveBatchError):
         failing._call_capsules_batched(capsules)
     assert [outcome.status for outcome in failing.last_capsule_outcomes] == ["completed", "failed"]
+
+
+def test_readonly_capsule_batch_returns_completed_siblings_after_ordinary_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    executor = _executor([{"reasoning": "unused", "code": "SUBMIT(answer='unused')"}])
+    capsules = [
+        {"task": "first", "authorized_references": ["artifact://first"]},
+        {"task": "second", "authorized_references": ["artifact://second"]},
+    ]
+
+    def fail_second(reservation, _batch_cancelled, *, child_profile):
+        del child_profile
+        if reservation.call_index == 2:
+            raise ValueError("provider details must remain internal")
+        return "first-answer"
+
+    monkeypatch.setattr(executor, "_run_reserved_call", fail_second)
+
+    result = executor.readonly_partial_capsule_batch_tool(capsules=capsules)
+
+    assert [item["status"] for item in result] == ["completed", "failed"]
+    assert result[0]["answer"] == "first-answer"
+    assert result[1]["answer"] == ""
+    assert result[1]["error_category"] == "child_failed"
+    assert all("provider details" not in str(item) for item in result)
+    assert [outcome.status for outcome in executor.last_capsule_outcomes] == ["completed", "failed"]
+
+
+def test_readonly_capsule_batch_keeps_authority_and_cleanup_failures_fatal(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    executor = _executor([{"reasoning": "unused", "code": "SUBMIT(answer='unused')"}])
+    capsules = [{"task": "only", "authorized_references": ["artifact://only"]}]
+
+    monkeypatch.setattr(
+        executor,
+        "_run_reserved_call",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(ChildRuntimeAuthorizationError("authority revoked")),
+    )
+
+    with pytest.raises(RecursiveBatchError) as raised:
+        executor.readonly_partial_capsule_batch_tool(capsules=capsules)
+    assert isinstance(raised.value.__cause__, ChildRuntimeAuthorizationError)
 
 
 def test_capsule_tool_returns_structured_evidence() -> None:

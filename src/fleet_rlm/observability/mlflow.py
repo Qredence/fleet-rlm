@@ -44,6 +44,7 @@ class MLflowRuntime:
     _state: MLflowRuntimeState = MLflowRuntimeState.INACTIVE
     _flush_future: Future[None] | None = field(default=None, init=False, repr=False)
     _owner_executor: ThreadPoolExecutor | None = field(default=None, init=False, repr=False)
+    _close_task: asyncio.Task[None] | None = field(default=None, init=False, repr=False)
     _operation_lock: asyncio.Lock = field(default_factory=asyncio.Lock, init=False, repr=False)
     _reset_required: bool = field(default=False, init=False, repr=False)
     _reset_scheduled: bool = field(default=False, init=False, repr=False)
@@ -112,10 +113,9 @@ class MLflowRuntime:
     ) -> _OperationResult:
         """Run one synchronous MLflow operation under this lifespan's owner.
 
-        The operation lock is shared with :meth:`close`, so teardown cannot
-        flush or reset Fleet-owned MLflow state while an assessment or other
-        synchronous SDK call is still in flight. The owner executor also keeps
-        the blocking SDK work off the FastAPI event loop.
+        The owner executor orders teardown after accepted SDK operations, even
+        when their caller is cancelled. Close never waits unboundedly for this
+        admission lock. Blocking SDK work stays off the FastAPI event loop.
         """
         async with self._operation_lock:
             if self._state != MLflowRuntimeState.ACTIVE:
@@ -183,12 +183,13 @@ class MLflowRuntime:
         self._reset_required = active
 
     async def close(self) -> None:
-        """Flush tracing only after a successful startup, then release the lifespan."""
-        async with self._operation_lock:
-            await self._close_locked()
+        """Bound the entire drain, including in-flight assessment operations."""
+        if self._close_task is None or self._close_task.done():
+            self._close_task = asyncio.create_task(self._close_owned(), name="fleet-mlflow-close")
+        await asyncio.shield(self._close_task)
 
-    async def _close_locked(self) -> None:
-        """Close the runtime while no synchronous SDK operation can be active."""
+    async def _close_owned(self) -> None:
+        """Queue flush after accepted SDK work without waiting for admission."""
         try:
             if self._state == MLflowRuntimeState.ACTIVE and self._flush_future is None:
                 if self._flush is None:
@@ -197,11 +198,15 @@ class MLflowRuntime:
                     flush = flush_tracing
                 else:
                     flush = self._flush
+                if self._owner_executor is None:
+                    self._owner_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="fleet-mlflow-owner")
+                operations_drained = self._owner_executor.submit(lambda: None)
                 future: Future[None] = Future()
                 self._flush_future = future
 
                 def run_flush() -> None:
                     try:
+                        operations_drained.result()
                         flush()
                     except Exception:
                         # Retain only a safe outcome, never SDK exception text.
@@ -209,9 +214,15 @@ class MLflowRuntime:
                     else:
                         future.set_result(None)
 
-                # The default asyncio executor is joined at loop shutdown and
-                # would defeat the wait bound for a stalled exporter.
+                # The single owner queues flush after any running feedback,
+                # including work whose asyncio caller has been cancelled.
+                # Keep the future alive on timeout; only its completion may
+                # reset process-global SDK state and release the executor.
+                # A stuck exporter must not join the default/non-daemon
+                # executor at interpreter exit. Only the drain barrier runs
+                # on the configuration/assessment owner.
                 Thread(target=run_flush, name="fleet-mlflow-flush", daemon=True).start()
+            self._state = MLflowRuntimeState.CLOSED
             if self._flush_future is not None:
                 waiter = asyncio.wrap_future(self._flush_future)
                 waiter.add_done_callback(lambda done: None if done.cancelled() else done.exception())

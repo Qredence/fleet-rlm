@@ -10,6 +10,7 @@ import pytest
 
 from scripts.benchmarks.attach_phase3_receipt import (
     NATIVE_RECEIPT_SCHEMA,
+    NATIVE_RECEIPT_SCHEMA_V2,
     Phase3AttachmentError,
     attach,
     load_receipt,
@@ -55,6 +56,37 @@ def _payload() -> dict[str, Any]:
     }
 
 
+def _payload_v2() -> dict[str, Any]:
+    payload = _payload()
+    payload["schema"] = NATIVE_RECEIPT_SCHEMA_V2
+    payload["containment"] = {
+        "strategy": "sandbox_delete",
+        "detached_process_probe": "blocked_after_fence",
+        "context_deleted": True,
+        "sandbox_fenced": True,
+        "sandbox_absent_confirmed": True,
+        "replacement_generation": True,
+        "volume_scope_preserved": True,
+        "quarantined_when_uncertain": True,
+        "all_disposable_sandboxes_absent": True,
+    }
+    payload["continuity"] = {
+        "same_process_fresh_context": True,
+        "process_restart": True,
+        "sandbox_stop_start": True,
+        "full_replacement": True,
+        "durable_file_readable": True,
+        "python_only_state_absent": True,
+        "checksum_preserved": True,
+    }
+    payload["go_no_go"] = {
+        "native_production": False,
+        "retained_broker_compatibility": True,
+        "reason": "whole_sandbox_fencing_certified",
+    }
+    return payload
+
+
 def test_load_receipt_projects_only_bounded_capability_fields(tmp_path) -> None:
     source = tmp_path / "native.json"
     payload = _payload()
@@ -74,6 +106,27 @@ def test_load_receipt_rejects_native_go_without_containment(tmp_path) -> None:
     source.write_text(json.dumps(payload), encoding="utf-8")
 
     with pytest.raises(Phase3AttachmentError, match="detached-process containment"):
+        load_receipt(source)
+
+
+def test_load_receipt_accepts_complete_v2_fencing_and_continuity(tmp_path) -> None:
+    source = tmp_path / "native-v2.json"
+    source.write_text(json.dumps(_payload_v2()), encoding="utf-8")
+
+    result = load_receipt(source)
+
+    assert result["schema"] == NATIVE_RECEIPT_SCHEMA_V2
+    assert result["containment"]["strategy"] == "sandbox_delete"
+    assert all(result["continuity"].values())
+
+
+def test_load_receipt_rejects_incomplete_v2_continuity(tmp_path) -> None:
+    source = tmp_path / "native-v2.json"
+    payload = _payload_v2()
+    payload["continuity"]["process_restart"] = False
+    source.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(Phase3AttachmentError, match="complete fencing and continuity"):
         load_receipt(source)
 
 

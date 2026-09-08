@@ -74,3 +74,10 @@ def test_batch_read_instruction_requires_the_registered_tool() -> None:
 
     assert "read_workspace_text_batch" not in absent
     assert "read_workspace_text_batch" in present
+
+
+def test_tool_instructions_require_defensive_fetch_and_bounded_precision() -> None:
+    assert ".get('content')" in TOOL_RLM_INSTRUCTIONS
+    assert "guarded ``json.loads`` fallback" in TOOL_RLM_INSTRUCTIONS
+    assert "smallest" in TOOL_RLM_INSTRUCTIONS and "guard band" in TOOL_RLM_INSTRUCTIONS
+    assert "never recompute a cached prefix" in TOOL_RLM_INSTRUCTIONS

@@ -128,13 +128,15 @@ async def test_build_lm_async_call_processes_an_aggregated_completion(
         "_get_litellm",
         lambda: SimpleNamespace(completion=completion, acompletion=acompletion),
     )
-    monkeypatch.setattr(dspy_lm.dspy.settings, "send_stream", None)
 
     lm = factory.build_lm("openai/model", api_key=None, cache=False)
 
-    result = await lm.acall(prompt="Reply with exactly OK.")
+    process_send_stream = getattr(dspy_lm.dspy.settings, "send_stream", None)
+    with dspy_lm.dspy.context(send_stream=None):
+        result = await lm.acall(prompt="Reply with exactly OK.")
 
     assert result == ["OK"]
+    assert getattr(dspy_lm.dspy.settings, "send_stream", None) is process_send_stream
 
 
 def test_build_lm_uses_chat_completion_transport(monkeypatch: pytest.MonkeyPatch) -> None:

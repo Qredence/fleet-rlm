@@ -30,6 +30,7 @@ if str(_REPO_ROOT) not in sys.path:
 
 RECEIPT_SCHEMA = "fleet.phase3-mlflow-attachment/v1"
 NATIVE_RECEIPT_SCHEMA = "fleet.phase3-daytona-native-feasibility/v1"
+NATIVE_RECEIPT_SCHEMA_V2 = "fleet.phase3-daytona-native-feasibility/v2"
 DEFAULT_MLFLOW_URL = "databricks"
 DEFAULT_ARTIFACT_PATH = "phase3/daytona-native"
 _LIVE_VALUES = frozenset({"1", "true", "yes"})
@@ -55,6 +56,28 @@ _REQUIRED_ASSERTIONS = frozenset(
 )
 _REQUIRED_CONTAINMENT = frozenset(
     {"detached_process_contained", "quarantined_when_uncertain", "all_disposable_sandboxes_absent"}
+)
+_REQUIRED_V2_CONTAINMENT = frozenset(
+    {
+        "context_deleted",
+        "sandbox_fenced",
+        "sandbox_absent_confirmed",
+        "replacement_generation",
+        "volume_scope_preserved",
+        "quarantined_when_uncertain",
+        "all_disposable_sandboxes_absent",
+    }
+)
+_REQUIRED_V2_CONTINUITY = frozenset(
+    {
+        "same_process_fresh_context",
+        "process_restart",
+        "sandbox_stop_start",
+        "full_replacement",
+        "durable_file_readable",
+        "python_only_state_absent",
+        "checksum_preserved",
+    }
 )
 _ALLOWED_TIMING_NAMES = frozenset(
     {
@@ -152,8 +175,12 @@ def load_receipt(path: Path) -> dict[str, Any]:
         payload = json.loads(raw)
     except json.JSONDecodeError as exc:
         raise Phase3AttachmentError("Phase 3 receipt is not valid JSON") from exc
-    if not isinstance(payload, Mapping) or payload.get("schema") != NATIVE_RECEIPT_SCHEMA:
+    if not isinstance(payload, Mapping) or payload.get("schema") not in {
+        NATIVE_RECEIPT_SCHEMA,
+        NATIVE_RECEIPT_SCHEMA_V2,
+    }:
         raise Phase3AttachmentError("receipt schema is not the Phase 3 native feasibility schema")
+    schema = str(payload["schema"])
 
     versions = payload.get("versions")
     transport = payload.get("transport")
@@ -184,34 +211,98 @@ def load_receipt(path: Path) -> dict[str, Any]:
     }
     if projected_transport["host_callback"] != "daytona_preview_http_poll":
         raise Phase3AttachmentError("receipt host callback transport is not the approved Daytona transport")
-    if projected_go_no_go["reason"] != "detached_process_containment_uncertified":
+    allowed_reasons = (
+        {"detached_process_containment_uncertified"}
+        if schema == NATIVE_RECEIPT_SCHEMA
+        else {"whole_sandbox_fencing_certified"}
+    )
+    if projected_go_no_go["reason"] not in allowed_reasons:
         raise Phase3AttachmentError("receipt go/no-go reason is not an approved bounded reason")
     if not isinstance(payload.get("passed"), bool):
         raise Phase3AttachmentError("receipt field passed must be boolean")
+    projected_containment = (
+        _exact_bool_map(containment, field="containment", required=_REQUIRED_CONTAINMENT)
+        if schema == NATIVE_RECEIPT_SCHEMA
+        else {}
+    )
     projected = {
-        "schema": NATIVE_RECEIPT_SCHEMA,
+        "schema": schema,
         "versions": projected_versions,
         "transport": projected_transport,
         "timings_ms": _timing_map(payload.get("timings_ms")),
         "assertions": _exact_bool_map(assertions, field="assertions", required=_REQUIRED_ASSERTIONS),
-        "containment": _exact_bool_map(containment, field="containment", required=_REQUIRED_CONTAINMENT),
+        "containment": projected_containment,
         "go_no_go": projected_go_no_go,
         "passed": payload["passed"],
     }
-    if projected_go_no_go["native_production"] and not projected["containment"].get(
-        "detached_process_contained", False
-    ):
-        raise Phase3AttachmentError("native_production cannot be true without detached-process containment")
     if not projected["passed"] or not all(projected["assertions"].values()):
         raise Phase3AttachmentError("only a complete passing Phase 3 feasibility receipt may be attached")
     if not projected_go_no_go["retained_broker_compatibility"]:
         raise Phase3AttachmentError("Phase 3 receipt must retain the broker compatibility path")
     if (
+        schema == NATIVE_RECEIPT_SCHEMA
+        and projected_go_no_go["native_production"]
+        and not projected["containment"].get("detached_process_contained", False)
+    ):
+        raise Phase3AttachmentError("native_production cannot be true without detached-process containment")
+    if schema == NATIVE_RECEIPT_SCHEMA and (
         not projected["containment"]["detached_process_contained"]
         and not projected["containment"]["quarantined_when_uncertain"]
     ):
         raise Phase3AttachmentError("an uncontained detached process requires confirmed quarantine")
+    if schema == NATIVE_RECEIPT_SCHEMA_V2:
+        v2_containment = payload.get("containment")
+        continuity = payload.get("continuity")
+        if not isinstance(v2_containment, Mapping) or not isinstance(continuity, Mapping):
+            raise Phase3AttachmentError("v2 receipt requires containment and continuity evidence")
+        strategy = _bounded_text(v2_containment.get("strategy"), field="containment.strategy")
+        probe = _bounded_text(v2_containment.get("detached_process_probe"), field="containment.detached_process_probe")
+        if strategy != "sandbox_delete" or probe not in {"contained", "blocked_after_fence"}:
+            raise Phase3AttachmentError("v2 receipt does not identify confirmed sandbox fencing")
+        if not all(
+            _required_bool(v2_containment.get(name), field=f"containment.{name}") for name in _REQUIRED_V2_CONTAINMENT
+        ):
+            raise Phase3AttachmentError("v2 containment evidence is incomplete")
+        projected["containment"] = {
+            "strategy": strategy,
+            "detached_process_probe": probe,
+            **{
+                name: _required_bool(v2_containment.get(name), field=f"containment.{name}")
+                for name in sorted(_REQUIRED_V2_CONTAINMENT)
+            },
+        }
+        projected["continuity"] = {
+            name: _required_bool(continuity.get(name), field=f"continuity.{name}")
+            for name in sorted(_REQUIRED_V2_CONTINUITY)
+        }
+        fenced_values = (
+            value
+            for key, value in projected["containment"].items()
+            if key not in {"strategy", "detached_process_probe"}
+        )
+        if not all(projected["continuity"].values()) or not all(value is True for value in fenced_values):
+            raise Phase3AttachmentError("v2 receipt requires complete fencing and continuity proof")
+        if projected_go_no_go["native_production"]:
+            raise Phase3AttachmentError("v2 capability receipts cannot promote native production")
     return projected
+
+
+def _write_once(path: Path, payload: Mapping[str, object]) -> None:
+    """Write one operator receipt without replacing a sealed result."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    except FileExistsError as exc:
+        raise Phase3AttachmentError("attachment receipt already exists") from exc
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            json.dump(payload, handle, indent=2, sort_keys=True)
+            handle.write("\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+    except BaseException:
+        path.unlink(missing_ok=True)
+        raise
 
 
 def _artifact_path(value: str) -> str:
@@ -259,7 +350,7 @@ def attach(args: argparse.Namespace) -> dict[str, Any]:
         raise Phase3AttachmentError("MLflow run already has a different sealed Phase 3 receipt")
     timestamp_ms = int(digest[:12], 16) % 1_000_000_000_000
     tags = {
-        "fleet.phase3.receipt_schema": NATIVE_RECEIPT_SCHEMA,
+        "fleet.phase3.receipt_schema": str(receipt["schema"]),
         "fleet.phase3.receipt_sha256": digest,
         "fleet.phase3.passed": str(receipt["passed"]).lower(),
         "fleet.phase3.native_production": str(receipt["go_no_go"]["native_production"]).lower(),
@@ -271,6 +362,14 @@ def attach(args: argparse.Namespace) -> dict[str, Any]:
             receipt["containment"].get("all_disposable_sandboxes_absent", False)
         ).lower(),
     }
+    if receipt["schema"] == NATIVE_RECEIPT_SCHEMA_V2:
+        tags.update(
+            {
+                "fleet.phase3.containment_strategy": str(receipt["containment"]["strategy"]),
+                "fleet.phase3.sandbox_fence_confirmed": str(receipt["containment"]["sandbox_fenced"]).lower(),
+                "fleet.phase3.continuity_verified": str(all(receipt["continuity"].values())).lower(),
+            }
+        )
     with TemporaryDirectory(prefix="fleet-phase3-mlflow-") as directory:
         artifact = Path(directory) / "daytona-native-feasibility.json"
         artifact.write_bytes(canonical)
@@ -327,8 +426,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             **receipt,
         }
         exit_code = 0
-    args.output.parent.mkdir(parents=True, exist_ok=True)
-    args.output.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    _write_once(args.output, result)
     print(json.dumps(result, indent=2, sort_keys=True))
     return exit_code
 

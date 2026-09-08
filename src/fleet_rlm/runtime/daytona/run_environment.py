@@ -1595,6 +1595,10 @@ class _DaytonaEnvironmentProvider:
                 if remaining <= 0:
                     raise TimeoutError("native interpreter context acquisition timed out")
                 nonlocal native_context_pending, sandbox_lookup_failed
+                # A reused Session root is just as capable of retaining native
+                # subprocesses as a newly created root. Retire this exact lease
+                # before admission is released, including acquisition failures.
+                lease.requires_sandbox_deletion = True
                 context_task = asyncio.create_task(
                     sandbox.code_interpreter.create_context(
                         cwd="/home/daytona",

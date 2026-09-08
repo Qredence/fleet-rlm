@@ -6,22 +6,55 @@ The starting checkout was `0603e15a1d7ad5a10c8ed30e3fb9f2773569551d`.
 
 ## Current work
 
+### MLflow 3.16 continuation
+
+Baseline: `063bea648`. Full completion remains the target. The 2026-09-08
+local-gate and live-receipt continuation is recorded below; execution order:
+
+- [x] Reconcile Phase 1 evidence and complete the exclusive PostgreSQL campaign.
+- [ ] Certify the remaining MLflow 3.16 fault-injection and configured-backend lanes.
+- [ ] Require confirmed whole-sandbox deletion for native execution until stop/start containment is certified; then prove settlement and durable continuity.
+- [ ] Complete remaining profile/mount certification, optional capacity and filesystem parity. The wheel/sdist artifact matrix is complete; provider profile and warm-pool gates remain open.
+- [ ] Complete read-only partial recursion and matched quality/cost evidence.
+- [ ] Complete shared evaluation, real GEPA, immutable promotion and rollback.
+- [ ] Remove legacy machinery only after the corresponding certification gates pass.
+
+The exclusive PostgreSQL campaign used a newly provisioned disposable database
+and is retained at
+`.fleet-evidence/receipts/adr006/postgres-contention-fleet_rlm_cert_5049b32b8ba0.json`.
+It proves all six contention scenarios, disjoint outbox ownership, Alembic head
+`019fe0010001`, server version `170011`, and representative Session/history,
+reconciliation/recovery, replay, and outbox plans. The database was removed after
+the receipt was sealed. The MLflow certification lane currently targets the
+explicit local 3.16 server; the `MLFLOW_TRACKING_URI` Databricks override was
+removed from the local environment, so no configured managed-backend claim is
+made. Keep native production, paid capacity and program promotion disabled while
+their independent gates are open. Existing feedback API/TUI support is retained;
+feedback does not by itself establish a verified expected answer.
+
 ### Ordered continuation
 
-The Phase 1 contention lane now includes all six planned scenarios, with an
-additional exclusive-database gate for global outbox selection. Six shared
-scenario assertions pass against local SQLite and the configured compatible
-PostgreSQL target. The cancellation/commit scenario reproduced an SQLite integrity
-failure twice: `FOR UPDATE` does not serialize SQLite state reads. Acquiring a
-writer lock within the existing final-state transaction before reading fixes
-that race without replacing PostgreSQL row locking or weakening state checks.
-The focused claim/parity/query lane passes 20 tests. Deployed reconciliation
-and representative PostgreSQL query-plan evidence still block Phase 1
-certification; later phases are
-not marked complete by these local results. On 2026-09-08, the configured
-PostgreSQL target observations are implementation history, not retained gate
-evidence: the contention lane requires a corrected rerun with a durable
-receipt after the database-entry barrier and post-commit due-time fixes.
+The corrected Phase 1 contention lane passed all six scenarios, including
+disjoint outbox ownership, on the exclusive disposable PostgreSQL target. The
+sealed receipt records target/version identity, exercised scenarios, projected
+plans, and cleanup. The SQLite writer-lock correction remains covered by the
+focused local lane; it does not replace PostgreSQL row locking or weaken state
+checks.
+
+The local MLflow 3.16 receipt is
+`.fleet-evidence/receipts/adr006/mlflow-local-certification-20260908T1858.json`.
+It proves the local backend, DSPy autolog plus `DeadlineLMProxy`, async root and
+child traces, sanitization, feedback rationale, trace linkage, concurrent
+Sessions, repeated lifespans, and fail-soft unreachable-backend handling. Token
+usage and the injected outage/credential/saturation/slow-flush cases remain
+explicitly unknown or unexercised, so the receipt is not promotion evidence.
+
+The live Daytona MVP sample
+`.fleet-evidence/receipts/adr006/mvp-20260908T1905.json` is retained as a
+failed semantic-quality receipt. Its first Turn could not prove accumulator
+continuity after the model's native follow-up, so it does not establish durable
+continuity or a legacy quality baseline. The failure remains visible for the
+matched-campaign gate; no retry or threshold adjustment is treated as a pass.
 
 Phase 2 implementation audit (2026-09-08): the complete
 `tests/unit/backend/rlm` suite collected 551 tests and passed. It exercises the
@@ -34,10 +67,11 @@ for these executable implementation contracts; provider-backed semantic
 quality and matched native-versus-broker performance remain later evidence
 gates.
 
-Continue the consolidated plan in Phase 1, then 1.1, 2, 3, 4, 5 and 6 order.
-The earlier Phase 2/3/6 fixes remain retained, but do not establish completion
-of the preceding phases. Finish the remaining local Phase 1 work before taking
-on additional later-phase implementation; retain live gates as explicitly open.
+The consolidated plan remains ordered by Phase 1, 1.1, 2, 3, 4, 5 and 6. The
+earlier Phase 2/3/6 fixes remain retained, but do not establish completion of
+the preceding phases. The 2026-09-08 continuation now closes the corrected
+exclusive PostgreSQL campaign and retains a bounded local MLflow receipt; all
+remaining provider, semantic-quality and rollout gates stay explicitly open.
 
 - P1A.01 repository inventory: one head, `019fe0010001`, with linear ancestry
   through `019fdb010001`, `019fa2e4b7c1`, `019f8c1d2e3f`, `019f7950a1b2`
@@ -47,18 +81,21 @@ on additional later-phase implementation; retain live gates as explicitly open.
   constraint classification and claim adapter parity lane passed 32 tests.
   This is local evidence only; P1A.01 deployed reconciliation remains open.
 - P1B.02 now has query counts and SQLite EXPLAIN coverage for Session listing,
-  history, claim-conflict replay, recovery and outbox claims. Removed the
-  unused artifact lookup in replay (four statements reduced to three).
-  PostgreSQL plans and representative deployment measurements remain open.
+  history, claim-conflict replay, recovery and outbox claims. The exclusive
+  disposable PostgreSQL receipt also retains bounded plans for all five paths;
+  its workloads are synthetic fixtures, so representative deployed workload
+  measurements remain open. Removed the unused artifact lookup in replay (four
+  statements reduced to three).
 - P1B.03 recovery tests verify no checked-out connection at the provider fence
   on either success or failure. P1B.04 now records bounded operation timings
   and outcomes after facade transaction scope exits, with fail-soft logging
   and optional existing trace spans. Arguments, results and exception text
   are excluded; privacy, cancellation and broken-sink regressions pass.
-- Validation: 37 focused persistence tests and `make check` passed, with
-  78.54% backend coverage, 538 TUI tests and generated/boundary/docs checks.
-  Phase 1 remains open for deployed database evidence; later phases are not
-  promoted by this local result. Progress is checked in the consolidated plan.
+- Earlier validation covered 37 focused persistence tests and a passing local
+  repository gate. The current gate result is recorded above with 78.37%
+  backend coverage and 543 TUI tests. Phase 1 remains open for deployed
+  database evidence; later phases are not promoted by either local or
+  disposable-target results. Progress is checked in the consolidated plan.
 
 ### Phase 1–6 continuation (2026-09-08)
 
@@ -111,10 +148,11 @@ implementation and evidence requirements are satisfied.
 - Phase 1: additive migration `019fe0010001` adds Sandbox Binding Workspace and
   composite Session/Workspace lineage, and the Session status CHECK. Dirty-data
   preflight runs before DDL. SQLite upgrade, enforcement, downgrade and row
-  preservation tests exist. Deployed heads and representative PostgreSQL query
-  plans remain unverified.
+  preservation tests exist. The exclusive disposable PostgreSQL receipt now
+  retains six contention scenarios and five bounded query-plan paths; deployed
+  heads and representative deployed workloads remain unverified.
 - Phase 1.1: Daytona and its six generated clients are pinned/resolved to 0.210.0.
-  DSPy remains 3.3.1; MLflow's dependency policy and resolution are unchanged.
+  DSPy remains 3.3.1; MLflow and its skinny/tracing distributions are now pinned/resolved to 3.16.0.
   The organization header compatibility code remains necessary in the installed
   SDK's API-key path. Typed file/process/daemon absence no longer implies sandbox
   absence, including after Fleet error normalization. Volume creation conflicts
@@ -127,9 +165,11 @@ implementation and evidence requirements are satisfied.
   sequential Turns without reusing trace IDs. Trace content is opt-in in resolved policy;
   previews follow that policy. Serving disables compilation/evaluation autolog.
   Queue, worker, retry and shutdown waits have explicit policy limits, and
-  timed-out flush work remains observable through its lifecycle owner. Live SDK
-  certification, a legacy live baseline, complete trace/backend privacy and
-  concurrency/export-outage certification remain pending.
+  timed-out flush work remains observable through its lifecycle owner. The
+  local MLflow 3.16 receipt now covers core tracing, linkage, sanitization,
+  feedback rationale, concurrent Sessions and repeated lifespans; token
+  aggregation, exporter fault-injection/settlement cases, managed-backend
+  certification and a passing legacy semantic baseline remain pending.
 - Phase 2: existing factory, tool catalog, output contract, budget and LM proxy
   remain the owners. No execution-core replacement has been made in this work.
 - Phase 3: replay tests exercise the installed 0.210.0 interpreter with a mocked
@@ -184,11 +224,14 @@ implementation and evidence requirements are satisfied.
   canonical `rlm_query_capsules_batched` path use selected input only, the
   SemanticChild profile, shared reservations, depth-one recursion and the
   application-owned bounded async scheduler. Typed per-child outcomes classify
-  completed/failed/timeout/cancelled work; the initial batch contract remains
-  ordered and all-or-nothing, while authorization/cancellation/cleanup failures
-  stay fatal. Legacy prompt tools remain available only for compatibility and
-  still carry their historical Session snapshot; native root composition exposes
-  capsule tools instead.
+  completed/failed/timeout/cancelled work. `rlm_query_capsules_batched` remains
+  ordered and all-or-nothing. The separately named
+  `rlm_query_capsules_readonly_batched` returns only bounded typed sibling
+  outcomes for Root verification after ordinary child failure; it shares the
+  same admission, authorization, cancellation and cleanup boundary, so those
+  failures remain fatal. Legacy prompt tools remain available only for
+  compatibility and still carry their historical Session snapshot; native root
+  composition exposes capsule tools instead.
 
 ## Todo ledger
 
@@ -204,16 +247,16 @@ or authorize paid capacity.
 - [x] Phase 3 native-interpreter adapter/replay mechanics cover fresh contexts, native built-ins, typed submission, bounded output, authority checks, and retained cleanup behavior.
 - [x] Phase 4 Session/SemanticChild/WorkspaceChild manifests, profile contracts, operator plan/check/create/verify commands, and immutable snapshot receipts are retained.
 - [x] Phase 5 fresh per-Run native RLM/context/binding/worker mechanics are available through an explicit feasibility seam; the single selectable runtime remains `legacy`.
-- [x] Phase 6 bounded capsules, selected-input/path validation, depth-one scheduling, shared reservations, ordered all-or-nothing batches, and typed child outcomes are implemented.
-- [x] Repository-wide local validation passed: `make check` (exit 0), 78.53% backend coverage against a 75% threshold, generated-contract checks, 538 TUI tests, and documentation/boundary checks.
+- [x] Phase 6 bounded capsules, selected-input/path validation, depth-one scheduling, shared reservations, ordered all-or-nothing batches, explicit read-only partial sibling outcomes, and typed child outcomes are implemented.
+- [x] Repository-wide local validation passed: `make check` (exit 0), 78.37% backend coverage against a 75% threshold, generated-contract checks, 543 TUI tests, and documentation/boundary checks.
 
 ### Certification still open
 
-- [ ] PostgreSQL certification: the configured target reported Alembic head `019fe0010001` on 2026-09-08 and five tenant-owned contention scenarios passed. The sanitized receipt is `.fleet-evidence/receipts/adr006/postgres-contention-d60d6864a-20260908T090941Z.json`; the exclusive-database outbox scenario and representative query plans remain unrun.
-- [ ] Live SDK/API-key, Volume, remote process containment, and stop/start or replacement continuity. The 2026-09-08 Phase 3 receipt is `.fleet-evidence/receipts/adr006/phase3-native-d60d6864a-20260908T090634Z.json`: all disposable sandboxes were removed, but a detached subprocess survived context deletion. It is a provider-level native-production no-go, so `legacy` and the broker remain required; MLflow campaign attachment remains open.
+- [x] PostgreSQL certification: the corrected exclusive campaign passed six contention scenarios and retained projected plans in `.fleet-evidence/receipts/adr006/postgres-contention-fleet_rlm_cert_5049b32b8ba0.json` (Alembic `019fe0010001`, PostgreSQL `170011`). The disposable target was removed after sealing.
+- [ ] Live SDK/API-key, Volume, remote process containment, and stop/start or replacement continuity. The corrected Phase 3 receipt `.fleet-evidence/receipts/adr006/phase3-native-20260908T184525.json` still records a detached subprocess surviving context deletion; it is a provider-level native-production no-go, so `legacy` and the broker remain required. The durable Volume continuity receipt `.fleet-evidence/receipts/adr006/durable-continuity-20260908T1900.json` proves artifact readability/checksum across replacement, but does not prove native process containment.
 - [ ] Native interpreter startup and capability checks on every production profile, including mounted WorkspaceChild behavior.
 - [ ] Warm-pool eligibility, quota, clean-instance, lifecycle, demand, and cost evidence; paid capacity remains disabled.
-- [ ] Complete MLflow backend/export-outage/concurrency certification and matched semantic/recursive quality-per-cost ablations.
+- [ ] Complete MLflow exporter fault-injection, token-aggregation, configured-backend certification, and matched semantic/recursive quality-per-cost ablations. The local 3.16 receipt `.fleet-evidence/receipts/adr006/mlflow-local-certification-20260908T1858.json` is retained with unexercised cases visible; the failed MVP sample `.fleet-evidence/receipts/adr006/mvp-20260908T1905.json` keeps the quality gate open.
 - [ ] Safe program loading, immutable promotion/rollback, native cutover, and subtraction of resident/broker migration machinery.
 
 ## Evidence and next tasks
@@ -231,6 +274,8 @@ Executable evidence lives in:
 - `tests/unit/backend/test_host_tool_submit_broker.py`
 - `tests/live/backend/test_phase3_daytona_native.py`
 - `scripts/benchmarks/attach_phase3_receipt.py`
+- `scripts/benchmarks/certify_mlflow.py`
+- `scripts/benchmarks/certify_postgres.py`
 - `tests/unit/backend/test_mlflow_export_privacy.py`
 - `tests/unit/backend/test_mlflow_runtime.py`
 - `tests/unit/backend/test_runtime_benchmark_v2.py`
@@ -238,20 +283,22 @@ Executable evidence lives in:
 SDK replay is adapter evidence, not live Daytona evidence. Scripted benchmark
 keyword checks remain lifecycle smoke, not semantic-quality certification.
 Production cutover, broker retirement and paid capacity cannot be certified by
-these tests. Earlier Phase 3 evidence is not retained under the corrected
-sealed-receipt contract, so it does not prove native interpreter containment,
-model quality, PostgreSQL readiness or warm-pool behavior.
+these tests. The corrected Phase 3 receipt is retained, but its detached-process
+probe remains a native-production no-go; the failed MVP semantic sample and the
+local MLflow receipt likewise leave model-quality and exporter gates open.
 
-The final local validation passed `make check` (exit 0, 78.53% backend
+The final local validation passed `make check` (exit 0, 78.37% backend
 coverage; the 75% threshold was met), including generated API and stream
-checks, 538 TUI tests, boundary checks and documentation checks. These
-receipts do not certify the pending architecture or any live lane.
+checks, 543 TUI tests, boundary checks and documentation checks. The retained
+live receipts are scoped evidence for their individual lanes; they do not
+certify the pending architecture or authorize native selection.
 
 Remaining sequence:
 
-1. Reconcile deployed Alembic heads and retain representative PostgreSQL
-   query-plan evidence; the six-scenario contention/recovery lane is complete
-   against the configured compatible target.
+1. Retain deployed Alembic-head inventories for supported targets; the
+   exclusive disposable PostgreSQL campaign and representative query plans are
+   complete in the sealed receipt, while any additional deployment remains an
+   operator-owned target.
 2. Resolve the retained native no-go by certifying remote detached-process
    containment, then exercise fresh-context durable continuity and stop/start or
    replacement behavior before selecting native in policy. Until then, keep the

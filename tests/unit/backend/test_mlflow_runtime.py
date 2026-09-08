@@ -368,3 +368,76 @@ def test_mlflow_runtime_close_failure_still_shuts_down_posthog(monkeypatch: pyte
     # Verify shutdown_posthog was called despite mlflow_runtime.close() raising
     assert posthog_calls == ["init", "shutdown"]
     assert flush_calls == ["flush"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("cancel_caller", [False, True])
+async def test_stalled_feedback_cannot_delay_shutdown_or_race_teardown(cancel_caller) -> None:
+    entered, release, reset_done = Event(), Event(), Event()
+    calls = []
+
+    def operation():
+        calls.append("operation-start")
+        entered.set()
+        release.wait(5)
+        calls.append("operation-end")
+
+    def reset():
+        calls.append("reset")
+        reset_done.set()
+
+    runtime = MLflowRuntime(
+        _settings(mlflow_trace_shutdown_seconds=0.02),
+        _configure=lambda _: True,
+        _flush=lambda: calls.append("flush"),
+        _reset=reset,
+    )
+    await runtime.start()
+    operation_task = asyncio.create_task(runtime.run_operation(operation))
+    try:
+        assert await asyncio.to_thread(entered.wait, 1)
+        if cancel_caller:
+            operation_task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await operation_task
+        await asyncio.wait_for(runtime.close(), timeout=0.5)
+        assert runtime.state is MLflowRuntimeState.CLOSED
+        assert runtime.flush_pending
+        assert calls == ["operation-start"]
+    finally:
+        release.set()
+        await asyncio.gather(operation_task, return_exceptions=True)
+    assert await asyncio.to_thread(reset_done.wait, 1)
+    assert calls == ["operation-start", "operation-end", "flush", "reset"]
+    await runtime.close()
+
+
+@pytest.mark.asyncio
+async def test_concurrent_close_has_one_flush_and_reset() -> None:
+    entered, release = Event(), Event()
+    calls = []
+
+    def flush():
+        calls.append("flush")
+        entered.set()
+        release.wait(5)
+
+    runtime = MLflowRuntime(
+        _settings(mlflow_trace_shutdown_seconds=1),
+        _configure=lambda _: True,
+        _flush=flush,
+        _reset=lambda: calls.append("reset"),
+    )
+    await runtime.start()
+    first = asyncio.create_task(runtime.close())
+    second = asyncio.create_task(runtime.close())
+    try:
+        assert await asyncio.to_thread(entered.wait, 1)
+        first.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await first
+        assert runtime.flush_pending
+    finally:
+        release.set()
+        await second
+    assert calls == ["flush", "reset"]

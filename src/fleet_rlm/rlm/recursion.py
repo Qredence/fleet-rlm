@@ -1353,6 +1353,27 @@ class RecursiveRLMExecutor:
             )
         else:
             self._capsule_batch_tool = raw_capsule_batch_tool
+        raw_readonly_partial_capsule_batch_tool = dspy.Tool(
+            self._call_capsules_readonly_batched,
+            name="rlm_query_capsules_readonly_batched",
+            desc=(
+                "Read bounded evidence from multiple independent selected-input capsules. "
+                "Completed siblings are returned when an ordinary child fails; verify every result "
+                "and do not publish it."
+            ),
+        )
+        if observer is not None or is_authorized is not None:
+            self._readonly_partial_capsule_batch_tool = observe_tool(
+                raw_readonly_partial_capsule_batch_tool,
+                observer or (lambda _detail: None),
+                ToolEventView(
+                    input_projection=self._capsule_batch_input,
+                    output_projection=self._recursive_batch_output,
+                ),
+                is_authorized=is_authorized,
+            )
+        else:
+            self._readonly_partial_capsule_batch_tool = raw_readonly_partial_capsule_batch_tool
         # Delay creation until all Tool bindings have succeeded. If startup
         # fails while assembling the executor, no owned scheduler thread is
         # left behind; externally supplied schedulers remain untouched.
@@ -1377,6 +1398,11 @@ class RecursiveRLMExecutor:
     def capsule_batch_tool(self) -> dspy.Tool:
         """Return the ordered strict selected-input batch Tool."""
         return self._capsule_batch_tool
+
+    @property
+    def readonly_partial_capsule_batch_tool(self) -> dspy.Tool:
+        """Return the explicit read-only partial-result capsule batch Tool."""
+        return self._readonly_partial_capsule_batch_tool
 
     @property
     def last_capsule_outcomes(self) -> tuple[ChildOutcome, ...]:
@@ -1536,6 +1562,25 @@ class RecursiveRLMExecutor:
         records remain available through :attr:`last_capsule_outcomes` for a
         later explicitly read-only partial-result policy.
         """
+        return self._run_capsule_batch(capsules, allow_partial_results=False)
+
+    def _call_capsules_readonly_batched(self, capsules: list[Mapping[str, object]]) -> list[dict[str, object]]:
+        """Return read-only sibling outcomes after ordinary child failures.
+
+        This is deliberately a separate Tool from ``rlm_query_capsules_batched``.
+        It never changes batch admission, isolation, cancellation, authority, or
+        cleanup behavior.  Only children that settled normally contribute an
+        answer; failed siblings remain bounded metadata for Root verification.
+        """
+        return self._run_capsule_batch(capsules, allow_partial_results=True)
+
+    def _run_capsule_batch(
+        self,
+        capsules: list[Mapping[str, object]],
+        *,
+        allow_partial_results: bool,
+    ) -> list[dict[str, object]]:
+        """Run one capsule batch under either the atomic or read-only policy."""
         if not isinstance(capsules, list):
             raise ValueError("rlm_query_capsules_batched capsules must be a list")
         if not capsules:
@@ -1601,6 +1646,8 @@ class RecursiveRLMExecutor:
         )
         self._last_capsule_outcomes = tuple(outcomes)
         self.raise_if_cleanup_failed()
+        if allow_partial_results:
+            return [outcome.as_dict() for outcome in outcomes]
         failed_index, failed = next(
             ((index, outcome) for index, outcome in enumerate(outcomes) if outcome.status != "completed"),
             (None, None),

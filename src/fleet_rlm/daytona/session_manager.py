@@ -217,6 +217,10 @@ class InterpreterLease:
     volume_subpath: str | None = None
     created_sandbox: bool = False
     sandbox: Any | None = field(default=None, repr=False)
+    user_id: str | None = None
+    # Native context deletion does not contain detached subprocesses. This
+    # obligation belongs to the exact acquired sandbox, including reused roots.
+    requires_sandbox_deletion: bool = False
     _released: bool = field(default=False, init=False, repr=False)
     _state: LeaseState = field(default=LeaseState.OPEN, init=False, repr=False)
     _on_release: Callable[[], None] | None = field(default=None, init=False, repr=False)
@@ -894,6 +898,32 @@ class DaytonaSessionManager:
         self, lease: InterpreterLease, request: LeaseRequest, *, deadline: float | None = None
     ) -> None:
         """Confirm the old Sandbox is stopped before its ownership is released."""
+        if lease.requires_sandbox_deletion:
+            await self._persist_native_binding_state(
+                lease,
+                request,
+                provider_state="fencing",
+                deadline=deadline,
+            )
+            timeout_s = 30.0
+            if deadline is not None:
+                timeout_s = max(0.1, min(timeout_s, deadline - asyncio.get_running_loop().time()))
+            retirement = self._sandbox_retirement_lease(
+                lease.sandbox_id, confirm_timeout_s=timeout_s, provider_request_timeout_s=timeout_s
+            )
+            receipt = await retirement.aclose()
+            if not receipt.clean:
+                raise RuntimeError("native sandbox deletion was not confirmed")
+            # Do not upsert a stale binding here: recovery may already have
+            # installed a replacement. The exact retired ID now resolves absent;
+            # normal acquisition preserves Volume scope and creates a new root.
+            await self._persist_native_binding_state(
+                lease,
+                request,
+                provider_state="quarantined",
+                deadline=deadline,
+            )
+            return
         await self._fence_binding(
             SandboxBinding(
                 session_id=request.session_id,
@@ -939,6 +969,31 @@ class DaytonaSessionManager:
                     extra={"sandbox_id": lease.sandbox_id, "error": receipt.first_error},
                 )
                 raise RuntimeError("sandbox retirement was not confirmed")
+
+    async def _persist_native_binding_state(
+        self,
+        lease: InterpreterLease,
+        request: LeaseRequest,
+        *,
+        provider_state: str,
+        deadline: float | None = None,
+    ) -> None:
+        """Advance the native binding only while it still names this lease."""
+        binding = await self._get_binding_for_workspace(
+            request.session_id,
+            request.workspace_id,
+            deadline=deadline,
+        )
+        if binding is None or binding.sandbox_id != lease.sandbox_id:
+            # Recovery or another owner may already have installed a newer
+            # binding. Never let retirement of the old native root overwrite it.
+            return
+        await _provider_call(
+            self._bindings.upsert(replace(binding, provider_state=provider_state, last_verified_at=datetime.now(UTC))),
+            deadline=deadline,
+            operation=f"Native Sandbox {provider_state} persistence",
+            owner=self._provider_tasks,
+        )
 
     async def _get_binding_for_workspace(
         self,
@@ -1425,6 +1480,7 @@ class DaytonaSessionManager:
             interpreter=interpreter,
             sandbox=sandbox,
             session_id=str(session_id),
+            user_id=str(request.user_id),
             run_id=str(run_id),
             workspace_id=str(request.workspace_id),
             created_sandbox=created_sandbox,
@@ -1458,6 +1514,19 @@ class DaytonaSessionManager:
         unpublished = self._unpublished_leases.get(id(lease))
         if unpublished is not None:
             await self._finish_unpublished_lease(unpublished)
+            return
+        if lease.requires_sandbox_deletion and not lease._provider_retired:
+            if lease.session_id is None or lease.workspace_id is None or lease.run_id is None or lease.user_id is None:
+                raise RuntimeError("native sandbox retirement requires complete lease ownership")
+            await self.release_and_quarantine(
+                lease,
+                LeaseRequest(
+                    session_id=UUID(lease.session_id),
+                    workspace_id=UUID(lease.workspace_id),
+                    user_id=UUID(lease.user_id),
+                    run_id=UUID(lease.run_id),
+                ),
+            )
             return
         await self._release_interpreter(lease)
 

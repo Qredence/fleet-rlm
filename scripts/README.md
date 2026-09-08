@@ -33,6 +33,7 @@
 | `deployment_observability.py` | Inspect deployment observability inputs |
 | `circleci_trigger_release.py` | Trigger and await the GitHub Actions PyPI release from CircleCI |
 | `validate_mlflow_tracing.py` | Emit and validate a local or Managed Databricks trace using the selected Fleet TOML policy |
+| `benchmarks/certify_mlflow.py` | Run the bounded MLflow 3.16 certification lane with explicit local/configured backend selection and a write-once receipt |
 | `benchmarks/rlm_eval_dataset.py` | Manage the UC-backed v2 evaluation dataset (static records + tagged production traces with expectations) |
 | `benchmarks/enable_monitoring.py` | Start, inspect, and stop server-side production monitoring scorers over UC-ingested traces |
 | `benchmarks/align_judges.py` | Align Fleet judges with SME feedback via labeling sessions and MemAlign, then re-evaluate the baseline |
@@ -162,3 +163,24 @@ creation is exclusive; choose a new filename for each receipt. The comparison do
 not call a provider, Daytona, Postgres, or an MLflow server. Its scores measure
 deterministic lifecycle/protocol behavior, not live semantic quality or production
 latency/cost.
+
+### PostgreSQL contention and query-plan receipts
+
+`benchmarks/certify_postgres.py` runs the existing six-scenario contention lane
+and writes a bounded, content-free receipt without printing driver errors. It
+requires exported `FLEET_LIVE=1`, `FLEET_DATABASE_URL`, and an explicitly designated
+exclusive test database (`FLEET_TEST_DATABASE_EXCLUSIVE=1`). It never loads dotenv,
+applies migrations, or overwrites a receipt.
+
+```bash
+uv run python scripts/benchmarks/certify_postgres.py \
+  --receipt .fleet-evidence/receipts/adr006/postgres-contention-new.json \
+  --query-plans --query-plan-samples 64 --timeout 600
+```
+
+The optional query-plan lane captures the actual Session-list, history, replay,
+recovery and outbox SELECTs through repository calls. Receipts retain statement
+digests, planner topology, costs and fixture scale; SQL parameters, predicates,
+private names and exception text are excluded. The fixture is synthetic and does
+not establish representative deployment performance. Skipped, incomplete or
+failed campaigns cannot produce a passing certification result.

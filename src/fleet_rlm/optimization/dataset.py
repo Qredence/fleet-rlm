@@ -6,6 +6,7 @@ import hashlib
 import json
 import random
 import re
+from bisect import bisect_left, bisect_right
 from collections.abc import Mapping, Sequence
 from typing import Any
 
@@ -75,6 +76,11 @@ def validate_records(records: Sequence[Mapping[str, Any]]) -> list[OptimizationR
         redaction_version = provenance.get("redaction_version")
         if not isinstance(redaction_version, str) or not redaction_version:
             raise OptimizationDatasetError(f"record {record_id}: provenance.redaction_version is required")
+        for field in ("session_id", "project_id"):
+            if field in provenance and (
+                not isinstance(provenance[field], str) or not _RECORD_ID_PATTERN.fullmatch(provenance[field])
+            ):
+                raise OptimizationDatasetError(f"provenance.{field} must be an opaque safe identifier")
         content = {
             "record_id": record_id,
             "task": {"query": query},
@@ -98,10 +104,17 @@ def validate_records(records: Sequence[Mapping[str, Any]]) -> list[OptimizationR
 
 
 def split_records(records: Sequence[OptimizationRecord], *, seed: int) -> DatasetSplit:
-    """Create an ID-stable 60/20/20 train, selection, sealed-test split."""
+    """Create stable 60/20/20 targets without separating related examples.
+
+    Session/project provenance defines connected groups. Group sizes may make
+    exact proportions impossible; isolation and five examples per split take
+    precedence. Ungrouped exports retain their historical seeded split.
+    """
     if len(records) < MINIMUM_RECORDS:
         raise OptimizationDatasetError(f"at least {MINIMUM_RECORDS} valid records are required")
     canonical = sorted(records, key=lambda record: record.record_id)
+    if any(record.provenance.get(key) for record in canonical for key in ("session_id", "project_id")):
+        return _split_related_records(canonical, seed=seed)
     shuffled = list(canonical)
     random.Random(seed).shuffle(shuffled)
     total = len(shuffled)
@@ -115,6 +128,59 @@ def split_records(records: Sequence[OptimizationRecord], *, seed: int) -> Datase
         selection=tuple(shuffled[train_count : train_count + selection_count]),
         sealed_test=tuple(shuffled[train_count + selection_count :]),
         seed=seed,
+    )
+
+
+def _split_related_records(records: Sequence[OptimizationRecord], *, seed: int) -> DatasetSplit:
+    """Partition connected Session/project groups, retaining deterministic cuts."""
+    parents = list(range(len(records)))
+
+    def root(index: int) -> int:
+        while parents[index] != index:
+            parents[index] = parents[parents[index]]
+            index = parents[index]
+        return index
+
+    identities: dict[tuple[str, str], int] = {}
+    for index, record in enumerate(records):
+        for field in ("session_id", "project_id"):
+            identity = record.provenance.get(field)
+            if identity:
+                previous = identities.setdefault((field, identity), index)
+                parents[root(index)] = root(previous)
+    groups: dict[int, list[OptimizationRecord]] = {}
+    for index, record in enumerate(records):
+        groups.setdefault(root(index), []).append(record)
+    shuffled = sorted(groups.values(), key=lambda group: group[0].record_id)
+    random.Random(seed).shuffle(shuffled)
+    counts = [0]
+    for group in shuffled:
+        counts.append(counts[-1] + len(group))
+    total = counts[-1]
+    cuts: list[tuple[int, int, int]] = []
+    for first in range(1, len(shuffled) - 1):
+        if counts[first] < 5:
+            continue
+        low = bisect_left(counts, counts[first] + 5)
+        high = bisect_right(counts, total - 5) - 1
+        if low > high:
+            continue
+        target = bisect_left(counts, total * 4 / 5)
+        for second in {max(low, min(high, target)), max(low, min(high, target - 1))}:
+            error = abs(counts[first] * 5 - total * 3) + abs(counts[second] * 5 - total * 4)
+            cuts.append((error, first, second))
+    if not cuts:
+        raise OptimizationDatasetError(
+            "related examples cannot form three isolated partitions of at least five records"
+        )
+    _, first, second = min(cuts)
+    ordered = [record for group in shuffled for record in group]
+    return DatasetSplit(
+        train=tuple(ordered[: counts[first]]),
+        selection=tuple(ordered[counts[first] : counts[second]]),
+        sealed_test=tuple(ordered[counts[second] :]),
+        seed=seed,
+        grouping="session-project",
     )
 
 

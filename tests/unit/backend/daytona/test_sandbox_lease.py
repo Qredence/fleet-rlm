@@ -12,7 +12,6 @@ from fleet_rlm.daytona.sandbox_lease import (
     SandboxLease,
     SandboxLeasePolicy,
     SandboxLeaseReceipt,
-    wait_lease_ownership,
 )
 from fleet_rlm.daytona.session_manager import DaytonaAdmission, DaytonaAdmissionPermit
 
@@ -422,6 +421,71 @@ async def test_retained_provider_timeout_keeps_admission_until_late_delete_settl
     assert lease.has_pending_ownership is True
 
     release_delete.set()
-    assert await wait_lease_ownership(timeout=2) is True
+    assert await lease.wait_ownership(timeout=2) is True
     assert permit._released is True
     assert platform.deletes == ["sb-late", "sb-late"]
+
+
+@pytest.mark.asyncio
+async def test_retained_lease_wait_does_not_depend_on_unrelated_cleanup_owner() -> None:
+    """A lease can settle its own provider continuation while another remains fenced."""
+
+    class _LateDeletePlatform(_ScriptedPlatform):
+        def __init__(self, release: asyncio.Event) -> None:
+            super().__init__([None])
+            self.release = release
+
+        async def delete(self, sandbox_id: str) -> None:
+            self.deletes.append(sandbox_id)
+            if len(self.deletes) == 1:
+                await self.release.wait()
+
+    first_release = asyncio.Event()
+    second_release = asyncio.Event()
+    _, first_permit = await _permit()
+    first = SandboxLease(
+        kind="retained_session",
+        sandbox=None,
+        sandbox_id="sb-first",
+        platform=_LateDeletePlatform(first_release),
+        permit=first_permit,
+        policy=SandboxLeasePolicy(
+            kind="retained_session",
+            provider_request_timeout_s=0.01,
+            confirm_timeout_s=0.2,
+            confirm_poll_interval_s=0.01,
+        ),
+    )
+
+    # A separate admission object models an unrelated worker in the same
+    # pytest process; the local wait below must not inspect its registry entry.
+    _, second_permit = await _permit()
+    second = SandboxLease(
+        kind="retained_session",
+        sandbox=None,
+        sandbox_id="sb-second",
+        platform=_LateDeletePlatform(second_release),
+        permit=second_permit,
+        policy=SandboxLeasePolicy(
+            kind="retained_session",
+            provider_request_timeout_s=0.01,
+            confirm_timeout_s=0.2,
+            confirm_poll_interval_s=0.01,
+        ),
+    )
+
+    first_receipt = await asyncio.wait_for(first.aclose(), timeout=2)
+    second_receipt = await asyncio.wait_for(second.aclose(), timeout=2)
+    assert first_receipt.provider.error is not None
+    assert second_receipt.provider.error is not None
+    assert first_permit._released is False
+    assert second_permit._released is False
+
+    first_release.set()
+    assert await first.wait_ownership(timeout=2) is True
+    assert first_permit._released is True
+    assert second_permit._released is False
+
+    second_release.set()
+    assert await second.wait_ownership(timeout=2) is True
+    assert second_permit._released is True
