@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import socket
 import subprocess
 import sys
 import time
 from pathlib import Path
-from threading import Event
+from threading import Event, Thread
 from typing import Any
 
 import httpx
@@ -283,6 +284,161 @@ def test_http_broker_wrapper_source_and_fulfill_sanitize() -> None:
     assert posted
     assert "sk-secret" not in str(posted[0].get("error", ""))
     assert "/tmp/x" not in str(posted[0].get("error", ""))
+
+
+def test_http_broker_deduplicates_only_explicit_retryable_request() -> None:
+    from fleet_rlm.daytona.broker import DaytonaHttpToolBroker
+
+    class _Sandbox:
+        pass
+
+    broker = DaytonaHttpToolBroker(sandbox=_Sandbox())
+    broker._broker_url = "http://example.test"
+    broker._broker_secret = "secret"
+    broker._retryable_tool_names = frozenset({"read_value"})
+    posted: list[dict[str, object]] = []
+
+    def _handler(request: httpx.Request) -> httpx.Response:
+        posted.append(json.loads(request.content.decode("utf-8")))
+        return httpx.Response(200, json={})
+
+    broker._client = httpx.Client(
+        transport=httpx.MockTransport(_handler),
+        base_url="http://example.test",
+        headers=broker._preview_headers(),
+    )
+    stats, owner = broker._begin_execution_stats()
+    calls = 0
+
+    def read_value(_name: str, _args: list[object], _kwargs: dict[str, object]) -> dict[str, object]:
+        nonlocal calls
+        calls += 1
+        return {"ok": True, "value": "stable"}
+
+    try:
+        item = {
+            "id": "c1",
+            "lease_token": "t1",
+            "tool_name": "read_value",
+            "args": ["notes.txt"],
+            "kwargs": {},
+        }
+        item["request_key"] = hashlib.sha256(
+            json.dumps(
+                {"tool_name": "read_value", "args": item["args"], "kwargs": item["kwargs"]},
+                ensure_ascii=False,
+                allow_nan=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        ).hexdigest()
+        broker._fulfill(item, read_value)
+        broker._fulfill({**item, "id": "c2", "lease_token": "t2"}, read_value)
+    finally:
+        broker._finish_execution_stats(stats, owner=owner)
+
+    assert calls == 1
+    assert [payload["result"] for payload in posted] == [
+        {"ok": True, "value": "stable"},
+        {"ok": True, "value": "stable"},
+    ]
+    assert broker.last_execution_stats["dedupe_execution_count"] == 1
+    assert broker.last_execution_stats["dedupe_hit_count"] == 1
+
+
+def test_http_broker_concurrent_retryable_duplicates_wait_for_one_execution() -> None:
+    """A retryable read is executed once while a concurrent retry waits."""
+
+    from fleet_rlm.daytona.broker import DaytonaHttpToolBroker
+
+    broker = DaytonaHttpToolBroker(sandbox=object())
+    broker._broker_url = "http://example.test"
+    broker._broker_secret = "secret"
+    broker._retryable_tool_names = frozenset({"read_value"})
+    posted: list[dict[str, object]] = []
+
+    def _handler(request: httpx.Request) -> httpx.Response:
+        posted.append(json.loads(request.content.decode("utf-8")))
+        return httpx.Response(200, json={})
+
+    broker._client = httpx.Client(
+        transport=httpx.MockTransport(_handler),
+        base_url="http://example.test",
+        headers=broker._preview_headers(),
+    )
+    stats, owner = broker._begin_execution_stats()
+    entered = Event()
+    duplicate_claimed = Event()
+    release = Event()
+    calls = 0
+
+    def read_value(_name: str, _args: list[object], _kwargs: dict[str, object]) -> dict[str, object]:
+        nonlocal calls
+        calls += 1
+        entered.set()
+        assert release.wait(2)
+        return {"ok": True}
+
+    canonical = json.dumps(
+        {"tool_name": "read_value", "args": ["same"], "kwargs": {}},
+        ensure_ascii=False,
+        allow_nan=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    key = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+    first = {"id": "c1", "lease_token": "t1", "tool_name": "read_value", "args": ["same"], "kwargs": {}}
+    first["request_key"] = key
+    second = {**first, "id": "c2", "lease_token": "t2"}
+
+    claim = broker._claim_dedupe
+
+    def claim_with_probe(value: str):
+        result = claim(value)
+        if not result[2]:
+            duplicate_claimed.set()
+        return result
+
+    broker._claim_dedupe = claim_with_probe  # type: ignore[method-assign]
+    threads = [Thread(target=broker._fulfill, args=(item, read_value), daemon=True) for item in (first, second)]
+    try:
+        threads[0].start()
+        assert entered.wait(1)
+        threads[1].start()
+        assert duplicate_claimed.wait(1)
+        release.set()
+        for thread in threads:
+            thread.join(timeout=2)
+            assert not thread.is_alive()
+    finally:
+        release.set()
+        for thread in threads:
+            thread.join(timeout=2)
+        broker._finish_execution_stats(stats, owner=owner)
+        broker._client.close()
+
+    assert calls == 1
+    assert [payload["result"] for payload in posted] == [{"ok": True}, {"ok": True}]
+    assert broker.last_execution_stats["dedupe_execution_count"] == 1
+    assert broker.last_execution_stats["dedupe_wait_count"] == 1
+    assert broker.last_execution_stats["dedupe_hit_count"] == 1
+
+
+def test_http_broker_rejects_forged_retry_key_for_read_only_request() -> None:
+    from fleet_rlm.daytona.broker import DaytonaHttpToolBroker
+
+    item = {"tool_name": "read_value", "args": ["notes.txt"], "kwargs": {}, "request_key": "a" * 64}
+    assert DaytonaHttpToolBroker._request_key(item, tool_name="read_value") is None
+
+
+def test_http_broker_does_not_emit_retry_key_for_writes() -> None:
+    from fleet_rlm.daytona.broker import DaytonaHttpToolBroker
+
+    broker = DaytonaHttpToolBroker(sandbox=object())
+    source = broker._tool_wrapper_source("write_value", lambda path, content: (path, content), retryable=False)
+
+    assert '"request_key": request_key' in source
+    assert "if False:" in source
 
 
 def test_http_broker_uses_isolated_port_for_server_and_wrappers() -> None:

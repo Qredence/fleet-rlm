@@ -6,7 +6,14 @@ explicit helper for private SQLite tests only.
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
+import logging
+import time
+from collections.abc import Awaitable, Callable
+from functools import wraps
 from pathlib import Path
+from typing import Literal, ParamSpec, TypeVar
 
 from alembic.config import Config
 from alembic.script import ScriptDirectory
@@ -21,6 +28,68 @@ from sqlalchemy.ext.asyncio import (
 )
 
 from fleet_rlm.persistence.models import Base
+
+logger = logging.getLogger(__name__)
+P = ParamSpec("P")
+R = TypeVar("R")
+
+
+def _is_database_failure(exc: BaseException) -> bool:
+    """Classify SQLAlchemy failures preserved by lifecycle-level wrappers."""
+    current: BaseException | None = exc
+    while current is not None:
+        if isinstance(current, SQLAlchemyError):
+            return True
+        current = current.__cause__ if isinstance(current.__cause__, BaseException) else None
+    return False
+
+
+def observe_database_operation(
+    operation: Literal["claim", "commit", "recovery", "outbox"],
+) -> Callable[[Callable[P, Awaitable[R]]], Callable[P, Awaitable[R]]]:
+    """Observe repository completion without capturing arguments, results or exceptions.
+
+    Wrap the transaction-owning facade so observations finish after its database
+    context closes. Logs cover recovery outside a Turn trace; active Turn traces
+    receive the same bounded metadata through the existing span owner.
+    """
+
+    def decorate(function: Callable[P, Awaitable[R]]) -> Callable[P, Awaitable[R]]:
+        @wraps(function)
+        async def observed(*args: P.args, **kwargs: P.kwargs) -> R:
+            started = time.perf_counter()
+            outcome = "completed"
+            handle = None
+            with contextlib.suppress(Exception):
+                from fleet_rlm.observability.tracing import start_turn_span
+
+                handle = start_turn_span(f"database.{operation}", inputs={"operation": operation})
+            try:
+                return await function(*args, **kwargs)
+            except BaseException as exc:
+                if isinstance(exc, asyncio.CancelledError):
+                    outcome = "cancelled"
+                elif isinstance(exc, TimeoutError):
+                    outcome = "timeout"
+                elif _is_database_failure(exc):
+                    outcome = "database_error"
+                else:
+                    outcome = "failed"
+                raise
+            finally:
+                duration_ms = max(0, int((time.perf_counter() - started) * 1000))
+                with contextlib.suppress(Exception):
+                    logger.info("database operation=%s outcome=%s duration_ms=%d", operation, outcome, duration_ms)
+                with contextlib.suppress(Exception):
+                    if handle is not None:
+                        handle.finish(
+                            phase_status="completed" if outcome == "completed" else "failed",
+                            outputs={"outcome": outcome, "duration_ms": duration_ms},
+                        )
+
+        return observed
+
+    return decorate
 
 
 class DatabaseNotConfiguredError(RuntimeError):

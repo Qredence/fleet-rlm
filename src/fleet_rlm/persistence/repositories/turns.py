@@ -39,7 +39,7 @@ from fleet_rlm.chat.run_lifecycle import (
     RunStateError,
     _RunClaimToken,
 )
-from fleet_rlm.persistence.database import DatabaseConnectionError
+from fleet_rlm.persistence.database import DatabaseConnectionError, observe_database_operation
 from fleet_rlm.persistence.models import RunRow, SessionRow
 from fleet_rlm.persistence.repositories.run_claim_decisions import (
     _new_run_claim,
@@ -299,6 +299,7 @@ class InMemoryRunStateStore:
                 )
             return tuple(records)
 
+    @observe_database_operation("claim")
     async def transition_claim(self, run: ClaimedRun, command: ClaimCommand) -> FailedRunReceipt | None:
         async with self._lock:
             state = self._runs.get(run.run_id)
@@ -310,6 +311,7 @@ class InMemoryRunStateStore:
                 state, run, command, persist_cancel_tombstone=self._persist_cancel_tombstone
             )
 
+    @observe_database_operation("claim")
     async def request_cancel(self, access: TurnAccess, run_id: UUID) -> CancelResult:
         async with self._lock:
             run = self._runs.get(run_id)
@@ -478,6 +480,7 @@ class SqlAlchemyRunStateStore:
         self._sessions = session_factory
         self._stale_after = stale_after_seconds
 
+    @observe_database_operation("claim")
     async def begin(self, request: RunClaim) -> RunStart:
         """
         Start a run for an active session, reusing an eligible prior run when applicable.
@@ -623,6 +626,7 @@ class SqlAlchemyRunStateStore:
             raise RunLifecycleUnavailableError("Turn lifecycle is unavailable") from exc
         raise RunLifecycleUnavailableError("Turn lifecycle is unavailable")
 
+    @observe_database_operation("commit")
     async def commit(
         self,
         run: ClaimedRun,
@@ -660,6 +664,7 @@ class SqlAlchemyRunStateStore:
     async def _replay(self, db: AsyncSession, run: RunRow) -> CommittedRunReplay:
         return await _committed_replay(db, run)
 
+    @observe_database_operation("recovery")
     async def reconcile_settling(
         self,
         fence: Callable[[UUID], Awaitable[None]] | None = None,

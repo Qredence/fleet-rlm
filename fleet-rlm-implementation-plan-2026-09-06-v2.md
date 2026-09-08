@@ -1,6 +1,6 @@
 # Fleet RLM - Consolidated implementation plan
 
-Revision: **2026-09-06, v2**; status refreshed **2026-09-07**. This document supersedes the A-G organization in the preceding plan and restores the original numbered phases, with MLflow work integrated throughout.
+Revision: **2026-09-06, v2**; status refreshed **2026-09-08**. This document supersedes the A-G organization in the preceding plan and restores the original numbered phases, with MLflow work integrated throughout.
 
 Reviewed source baseline: `main` at `bcb85cc7b29d625e4c399cbf0a56459d0617302e` (2026-09-06 18:46:13 UTC). This revision retains that audited baseline; it is not a claim that all of current main was re-audited or that pending tests were executed.
 
@@ -69,7 +69,7 @@ The old A-G plan is fully incorporated: A -> Phases 1/1.1/2; B -> 3; C and F1 ->
 
 ### Current todo state
 
-- [x] Implementation surfaces through Recursive RLM v2 (Phase 6) are present and covered by local tests.
+- [ ] Complete every local implementation task through Recursive RLM v2 (Phase 6). Foundational surfaces exist, but their presence does not close the unchecked tasks below.
 - [x] The Session and SemanticChild immutable snapshots are resolved from `.env`, checked against the Daytona contract, and have retained disposable runtime-probe receipts.
 - [x] The final local repository gate passed (`make check`, including generated contracts, boundaries, docs, and 538 TUI tests).
 - [ ] Deployed PostgreSQL/Alembic, native remote-containment, mounted-profile, warm-capacity, and matched semantic-quality gates remain open.
@@ -109,19 +109,50 @@ See [ADR 006 implementation status](docs/decisions/006-implementation-status.md)
 
 **Files:** `persistence/models.py`, `persistence/database.py`, `persistence/repositories/turns.py`, `sandbox_bindings.py`, `outbox.py`, migrations and database tests.
 
-- [ ] **P1A.01** Inventory Alembic heads in current main and deployed databases, including any deployment of the earlier database-correctness branch. Select an additive/merge migration strategy where needed; never rewrite applied history.
+- [ ] **P1A.01** Inventory Alembic heads in current main and deployed databases, including any deployment of the earlier database-correctness branch. Repository ancestry is recorded, but deployed database heads have not been retained in a durable receipt; select an additive/merge migration strategy only after that reconciliation. Never rewrite applied history.
+
+  Repository inventory is complete: one linear head `019fe0010001`, following
+  `019fdb010001`, `019fa2e4b7c1`, `019f8c1d2e3f`, `019f7950a1b2` and baseline
+  `019f5b3c96bd`. Deployed heads remain unverified; no merge migration is
+  justified by the repository graph alone.
 - [x] **P1A.02** Keep the existing `fk_fleet_turns_run_session` migration and dirty-data preflight unchanged unless a reproduced issue requires a fix.
 - [x] **P1A.03** Add the missing Sandbox Binding-to-Workspace and Binding-to-Session/Workspace lineage constraints in a new additive migration. Add the matching unique parent key only as necessary.
 - [x] **P1A.04** Add a Session status CHECK and validate existing rows first. Define any binding-state CHECK around Fleet's normalized closed state model, not an assumed exhaustive list of provider wire values.
 - [x] **P1A.05** Test upgrades from the actual preceding revision with valid data, orphaned bindings, cross-Workspace bindings, and invalid statuses. Reject dirty data without silently deleting or repairing it.
 - [x] **P1A.06** Keep immediate SQLite FK checks and assert enforcement across connections; WAL/busy-timeout tuning remains optional local policy.
 - [x] **P1A.07** Re-run expected-versus-unexpected claim-constraint tests. Preserve narrowly allowlisted conflict reconciliation and sanitized unknown failures.
-- [ ] **P1A.08** Retain a real Postgres contention run for duplicate idempotency, conflicting input, active-Run exclusion, cancellation versus commit, stale recovery, and concurrent outbox ownership. A skipped lane is not evidence of passing.
+- [ ] **P1A.08** Retain a real Postgres contention run for duplicate idempotency, conflicting input, active-Run exclusion, cancellation versus commit, stale recovery, and concurrent outbox ownership. A skipped lane is not evidence of passing. The scenarios require a rerun with a durable receipt after the database-entry barrier and post-commit due-time corrections.
+
+  `tests/live/backend/test_postgres_contention.py` provides all six opt-in race
+  scenarios: duplicate/conflicting/active claims, cancellation settlement versus
+  commit, recovery ownership and stale commit rejection, and disjoint outbox
+  ownership. It checks schema compatibility without applying migrations and
+  cleans up only uniquely owned fixture rows. The global outbox case additionally
+  requires an empty, exclusive test database (`FLEET_TEST_DATABASE_EXCLUSIVE=1`).
+  Six local SQLite executions and six live PostgreSQL executions of the same
+  assertions pass against the configured compatible target. The global outbox
+  case used the explicit exclusive-target guard and the repaired fixture advances
+  its due timestamp after claim commit.
+  This exposed and fixed SQLite commit/settlement racing on an unlocked state
+  read: final-state transactions now acquire the SQLite writer lock before that
+  read, retaining PostgreSQL's existing row locks.
 
 - [x] **P1B.01** Keep Fleet persistence and the MLflow backend logically separate. Local SQLite files must be separate, and production deployments should use separate database/schema ownership and credentials. Fleet Alembic migrations must never manage MLflow tables.
 - [ ] **P1B.02** Measure query count and query plans for Session listing, ordered history, claim reconciliation, recovery scans, and outbox claims. Remove redundant indexes or queries only after a demonstrated overlap and SQLite/PostgreSQL plan tests; do not normalize every JSON payload or introduce a generic repository framework.
-- [ ] **P1B.03** Keep database transactions short and resource/API calls outside them. Preserve current atomic result/Turn/artifact metadata commit and independent immediate workspace-file semantics.
-- [ ] **P1B.04** Add bounded timing and failure-category observations for claim, commit, recovery, and outbox work. Do not record raw SQL parameters, database URLs, private storage references, or credentials. Fleet state remains authoritative even when no trace is exported.
+
+  Local query-count and SQLite EXPLAIN coverage now exercises all five paths.
+  The fixture records 2 statements for Session listing, 1 for history, 3 for
+  claim-conflict replay, 1 for recovery selection and 3 for a two-intent outbox
+  claim. Replay previously issued 4 statements; its unused artifact read is
+  removed while commit receipts retain artifact loading. PostgreSQL plans and
+  representative deployed workloads remain pending; no indexes were removed.
+
+- [x] **P1B.03** Keep database transactions short and resource/API calls outside them. Preserve current atomic result/Turn/artifact metadata commit and independent immediate workspace-file semantics. Local recovery regressions verify that the connection is returned before provider fencing on success and failure; existing claim/commit/outbox contracts remain intact.
+- [x] **P1B.04** Add bounded timing and failure-category observations for claim, commit, recovery, and outbox work. Facade observations finish after transaction scope exits and publish only operation, duration and closed outcome categories through logs and existing active trace spans. Tests cover private-value sentinels, cancellation, database errors and unavailable observation sinks.
+
+Continuation validation: 37 focused persistence tests and `make check` passed
+(78.56% backend coverage, 538 TUI tests). Phase 1 remains open for deployed
+revision reconciliation and representative PostgreSQL query plans.
 
 **Exit:** missing lineage is database-enforced, deployed migration history is respected, concurrency tests retain evidence, and observability does not participate in settlement.
 
@@ -188,21 +219,30 @@ The existing implementation already handles lifecycle startup/shutdown, DSPy aut
 
 **Files:** `rlm/program.py`, `budget.py`, `compat_3_3_1.py`, `output_contract.py`, `submit_validation.py`, existing construction, adapter, budget and callback tests.
 
-- [ ] **P2A.01** Trace budget ownership through root actions, extraction, native sub-LM calls, schema fallback, parse repairs, provider retries, recursive children, host tools, and output admission. Confirm exactly one intended debit per admission path.
-- [ ] **P2A.02** Preserve the current distinction between admitted attempts and observed network requests: cache hits can consume admission without an outbound call. Do not call token estimates an exact hard limit.
-- [ ] **P2A.03** Verify root finalization reserve is not usable by children, post-settlement admissions fail, and closing admission does not substitute for cancelling already running work.
-- [ ] **P2A.04** Test provider-template immutability, proxy copying, callback/usage accounting, schema capabilities, and sync/async parity. Add only missing regressions; do not implement a second LM proxy.
+- [x] **P2A.01** Trace budget ownership through root actions, extraction, native sub-LM calls, schema fallback, parse repairs, provider retries, recursive children, host tools, and output admission. Confirm exactly one intended debit per admission path.
+- [x] **P2A.02** Preserve the current distinction between admitted attempts and observed network requests: cache hits can consume admission without an outbound call. Do not call token estimates an exact hard limit.
+- [x] **P2A.03** Verify root finalization reserve is not usable by children, post-settlement admissions fail, and closing admission does not substitute for cancelling already running work.
+- [x] **P2A.04** Test provider-template immutability, proxy copying, callback/usage accounting, schema capabilities, and sync/async parity. Add only missing regressions; do not implement a second LM proxy.
 
-- [ ] **P2B.01** Keep FleetProgramSpec/FleetToolCatalog/RLMFactory as one construction seam. Validate custom-tool names against the built-ins at final construction, and preserve the bound native callbacks required by the remote interpreter.
-- [ ] **P2B.02** Compare stock JSONAdapter and the Fleet adapter on fixed real failure cases. Remove only measured redundant correction paths; retain necessary typed-SUBMIT validation and extraction behavior. Do not add an outer agent loop that duplicates native RLM iteration.
-- [ ] **P2B.03** Keep unavoidable DSPy 3.3.1 private integration in compat_3_3_1.py. Remove obsolete private mutation and legacy aliases only after all callers migrate and contract tests pass.
-- [ ] **P2B.04** Keep native REPLHistory within one invocation and committed Session history as distinct data. Do not independently reconstruct or compact DSPy native history.
-- [ ] **P2B.05** Remove hardcoded model selection from application helpers when the selected runtime policy already owns it, without mixing model changes into interpreter migration comparisons.
+- [x] **P2B.01** Keep FleetProgramSpec/FleetToolCatalog/RLMFactory as one construction seam. Validate custom-tool names against the built-ins at final construction, and preserve the bound native callbacks required by the remote interpreter.
+- [x] **P2B.02** Compare stock JSONAdapter and the Fleet adapter on fixed real failure cases. Remove only measured redundant correction paths; retain necessary typed-SUBMIT validation and extraction behavior. Do not add an outer agent loop that duplicates native RLM iteration.
+- [x] **P2B.03** Keep unavoidable DSPy 3.3.1 private integration in compat_3_3_1.py. Remove obsolete private mutation and legacy aliases only after all callers migrate and contract tests pass.
+- [x] **P2B.04** Keep native REPLHistory within one invocation and committed Session history as distinct data. Do not independently reconstruct or compact DSPy native history.
+- [x] **P2B.05** Remove hardcoded model selection from application helpers when the selected runtime policy already owns it, without mixing model changes into interpreter migration comparisons.
 
-- [ ] **P2M.01** Test DSPy autolog plus Fleet callbacks plus DeadlineLMProxy for duplicate LM/tool spans and duplicate usage accumulation. Prefer native autolog spans; add Fleet-owned spans or attributes only for work not already represented.
-- [ ] **P2M.02** Attach an explicit model role and execution identity to root, sub-LM, child-root, child-sub-LM, repair, finalization, and optimization-reflection work where applicable. Do not attribute all nested calls to the root.
-- [ ] **P2M.03** Reconcile tracing observations with the authoritative TurnBudget/result metrics: admissions, physical attempts when observable, cache hits, known tokens, and unknown usage remain different quantities.
-- [ ] **P2M.04** Keep Runtime Event projection independent from MLflow. Do not emit one span per SSE/progress token or re-read traces to drive the UI. Add tracing-on/off output and event-contract parity tests.
+- [x] **P2M.01** Test DSPy autolog plus Fleet callbacks plus DeadlineLMProxy for duplicate LM/tool spans and duplicate usage accumulation. Prefer native autolog spans; add Fleet-owned spans or attributes only for work not already represented.
+- [x] **P2M.02** Attach an explicit model role and execution identity to root, sub-LM, child-root, child-sub-LM, repair, finalization, and optimization-reflection work where applicable. Do not attribute all nested calls to the root.
+- [x] **P2M.03** Reconcile tracing observations with the authoritative TurnBudget/result metrics: admissions, physical attempts when observable, cache hits, known tokens, and unknown usage remain different quantities.
+- [x] **P2M.04** Keep Runtime Event projection independent from MLflow. Do not emit one span per SSE/progress token or re-read traces to drive the UI. Add tracing-on/off output and event-contract parity tests.
+
+Phase 2 implementation evidence (2026-09-08): all 551 tests collected under
+`tests/unit/backend/rlm` passed. They cover budget admission and finalization
+ownership, adapter repair parity, immutable LM templates and proxy copies,
+final tool namespace validation, native history boundaries, model-role
+attribution, usage reconciliation, and Runtime Event/tracing independence.
+`make check` and `uv run ty check src` also pass. Provider-backed semantic
+quality and matched native-vs-broker performance remain later-phase evidence
+gates and are not implied by these execution-core tests.
 
 **Exit:** one program/adapter/budget boundary is certified, native built-ins remain native, call attribution is accurate, and no new observability or execution owner duplicates existing code.
 
@@ -217,18 +257,28 @@ The existing implementation already handles lifecycle startup/shutdown, DSPy aut
 - [x] **P3A.01** Implement DSPy's existing CodeInterpreter contract against `sandbox.code_interpreter`, not a second generic interpreter interface.
 - [x] **P3A.02** Acquire the sandbox asynchronously, create an explicit context, and pass the Fleet adapter as a caller-owned interpreter to a fresh RLM invocation. Fleet owns closure; do not force async acquisition into a synchronous factory.
 - [x] **P3A.03** Reuse `FleetOutputContract`, existing serializable attachment/history transport, result validators, and public Runtime Event projection.
-- [ ] **P3A.04** Verify the actual native interpreter's Python executable, version, installed-package path, user, and working directory on the current snapshot. An image having Python 3.13 installed does not prove the provider interpreter selected it. If that snapshot cannot run the native interpreter, use a minimal disposable compatibility image for this proof; defer the final production image/profile split to Phase 4.
+- [ ] **P3A.04** Verify the actual native interpreter's Python executable, version, installed-package path, user, and working directory on the current snapshot. The probe now checks the selected executable and resolved DSPy package path; rerun and retain the resulting live receipt before closing this gate.
 - [x] **P3A.05** Replay tests prove variables/imports/functions survive iterations within one explicit context and are absent in another. Live provider containment remains a separate gate; Daytona's shared default context is not used.
 - [x] **P3A.06** Replay tests prove native `llm_query`, batched queries, a Fleet host tool, and typed `SUBMIT` work. DSPy's functions remain native and their bound callbacks are transported rather than recreated.
 - [x] **P3A.07** Keep private/native type detection, if still unavoidable under 3.3.1, in the existing compatibility module. No new per-version framework.
 
+DSPy contract verification (2026-09-08): the pinned `dspy==3.3.1` RLM,
+CodeInterpreter and SandboxSerializable sources were checked against the
+installed signatures and lifecycle behavior. Fleet now routes the positional
+interpreter only for the concrete native `dspy.RLM`, keeps caller-owned
+shutdown with Fleet, and resolves asynchronous host Tools through the
+composition-owned bridge when DSPy executes a synchronous interpreter action
+inside `RLM.aforward`. The opt-in Daytona feasibility lane then exercised the
+same path against the configured 0.210.0 preview endpoint and retained its
+bounded receipt under `fleet.phase3-daytona-native-feasibility/v1`.
+
 ### 3B. Host-tool transport, not a second execution server
 
-- [ ] **P3B.01** Reuse the composition-owned bridge. Prove the nested path: root code waits for host callback, callback schedules a child, child completes, root resumes, cancellation still works.
-- [ ] **P3B.02** Choose transport consistent with Fleet's deployed topology. Do not assume a sandbox can directly reach a local Fleet host; retain a small polling/proxy bridge if necessary.
+- [x] **P3B.01** Reuse the composition-owned bridge. Prove the nested path: root code waits for host callback, callback schedules a child, child completes, root resumes, cancellation still works. The native replay and 2026-09-08 live lane cover the root -> preview/poll callback -> child -> root-resume path plus authority-loss cancellation.
+- [x] **P3B.02** Choose transport consistent with Fleet's deployed topology. Do not assume a sandbox can directly reach a local Fleet host; retain a small polling/proxy bridge if necessary. The live receipt records the Daytona preview HTTP polling route and `loopback_host_assumption=false`; the composition bridge remains the transport seam.
 - [x] **P3B.03** Restrict the gateway to invocation ID, Run-scoped authorization, bound tool name, arguments, and bounded results. Keep provider credentials and database credentials out of sandboxes.
 - [x] **P3B.04** Validate authority and schema on every call and before publishing results. Prevent replay across Runs and reject late calls after revocation.
-- [ ] **P3B.05** Deduplicate retryable tool requests where safe. Do not describe arbitrary external writes as exactly-once merely because a request ID exists.
+- [ ] **P3B.05** Deduplicate retryable tool requests where safe. Do not describe arbitrary external writes as exactly-once merely because a request ID exists. Default registration now opts out; explicit retry policy is limited to the broker's read-only catalog and excludes `fetch_url`. Complete identity/metadata-backed retry admission and its regression proof before closing this gate.
 - [x] **P3B.06** Preserve native built-in tool identity while supporting host transport. Reserved-name validation applies to Fleet custom tools, not to the bound native callbacks required by the interpreter.
 - [x] **P3B.07** Ensure ordinary stdout cannot be confused with a final-output control message. Validate schema and keep final output distinct from durable settlement authority.
 
@@ -239,19 +289,32 @@ The previously inspected exact Daytona 0.210.0 implementation invokes output han
 - [x] **P3C.01** Use synchronous, fast output callbacks that feed a bounded event bridge. Do not pass un-awaited async callbacks to this SDK version.
 - [x] **P3C.02** Enforce byte bounds before output accumulates indefinitely. Replay tests cover output overflow, bounded event delivery and slow-consumer behavior; remote SDK accumulation/containment remains a live gate.
 - [x] **P3C.03** Apply an absolute host deadline and a bounded provider execution timeout. Include connection establishment, tool waits, execution, and cleanup; never use an unbounded timeout accidentally.
-- [ ] **P3C.04** Test cancellation during context creation, execution, native sub-LM calls, host callbacks, and finalization. Track late-created contexts/sandboxes and do not blindly create replacements.
-- [ ] **P3C.05** Probe long-running and detached subprocesses after cancellation and context deletion. When process termination is uncertain, stop/delete and quarantine the Session sandbox before reuse.
+- [ ] **P3C.04** Test cancellation during context creation, execution, native sub-LM calls, host callbacks, and finalization. Context, host-callback, and finalizer ownership fences are implemented, but a native sub-LM cancellation proof remains open.
+- [ ] **P3C.05** Probe long-running and detached subprocesses after cancellation and context deletion. When process termination is uncertain, stop/delete and quarantine the Session sandbox before reuse. The feasibility test now performs that deletion instead of asserting it, but the corrected lane needs a retained live receipt.
 - [x] **P3C.06** Preserve no-success/no-publication behavior after authority loss. Test no delayed mutation after a subsequent Run begins.
-- [ ] **P3C.07** Use separate sandboxes for tenant/Session security isolation. Test same-Session overlapping Runs are rejected; different Sessions can execute concurrently without shared bindings.
+- [x] **P3C.07** Use separate sandboxes for tenant/Session security isolation. Test same-Session overlapping Runs are rejected; different Sessions can execute concurrently without shared bindings. Session runtime tests serialize same-key execution and retain distinct interpreters for different keys; the live lane confirmed distinct sandboxes and concurrent execution for different Sessions.
 - [x] **P3C.08** Compare broker/native protocol outputs and event causality. For parallel events, compare allowed partial order rather than demanding identical scheduling order.
-- [ ] **P3C.09** Record a go/no-go receipt: correctness, output bounds, timeout/cancellation, cleanup, latency, and complexity. Record any retained compatibility code and why it remains necessary.
+- [x] **P3C.09** Record a go/no-go receipt: correctness, output bounds, timeout/cancellation, cleanup, latency, and complexity. Record any retained compatibility code and why it remains necessary. Receipt `fleet.phase3-daytona-native-feasibility/v1` records the bounded assertions, timings, containment decision and retained broker rationale.
 
-- [ ] **P3M.01** Measure acquisition, context creation, bootstrap, first action, subsequent action, host-tool round trip, cancellation containment, and cleanup separately. Compare native versus broker under the same task/model/image settings.
-- [ ] **P3M.02** Use existing Fleet lifecycle spans for timings and DSPy spans for LM/tool work. Represent an SDK operation once, even if lower-level transport instrumentation is also enabled.
-- [ ] **P3M.03** Propagate context explicitly across the existing sync/async bridge and child scheduling boundary; verify parent IDs under concurrent Sessions. Keep instrumentation credentials on the host.
-- [ ] **P3M.04** Attach a go/no-go receipt and capability results to the campaign MLflow run. A missing/failed trace cannot stand in for a passing output-bound, process-containment or cleanup test.
+- [ ] **P3M.01** Measure acquisition, context creation, bootstrap, first action, subsequent action, host-tool round trip, cancellation containment, and cleanup separately. Compare native versus broker under the same task/model/image settings. Current code records the timings, but a matched task/model/image receipt remains required.
+- [x] **P3M.02** Use existing Fleet lifecycle spans for timings and DSPy spans for LM/tool work. Represent an SDK operation once, even if lower-level transport instrumentation is also enabled. Existing `sandbox.execute` tracing tests retain one Fleet phase span while DSPy/native work remains nested.
+- [ ] **P3M.03** Propagate context explicitly across the existing sync/async bridge and child scheduling boundary; verify parent IDs under concurrent Sessions. Keep instrumentation credentials on the host. Parent-ID assertion under concurrent Sessions remains required.
+- [ ] **P3M.04** Attach a go/no-go receipt and capability results to the campaign MLflow run. A missing/failed trace cannot stand in for a passing output-bound, process-containment or cleanup test. The attachment schema is now sealed and idempotent; attach a newly generated corrected receipt before closing this gate.
 
-**Exit:** native execution meets the actual output, host-tool, deadline, remote-containment and public-contract requirements. Otherwise keep the proven broker path or one justified narrow Toolbox adapter, rather than deleting essential guarantees.
+Phase 3 feasibility receipt (2026-09-08): the opt-in live lane passed against
+the configured Daytona 0.210.0 / DSPy 3.3.1 runtime. It proves explicit native
+contexts, preview/polling host transport, nested root-child-resume composition,
+typed-submit parity with the retained broker, authority-loss cancellation,
+separate-session isolation/concurrency and disposable cleanup. A detached
+subprocess marker survived context deletion, so `go_no_go.native_production`
+is deliberately `false`; the exact native root is quarantined and the broker
+remains the compatibility path until remote process containment is certified.
+The timing and capability receipt is retained at
+`.scratch/fleet-rlm-recursive-runtime/evidence/daytona-phase3-native-live-20260908.json`
+and attached to the campaign MLflow run above. This closes the Phase 3
+feasibility/evidence gates without authorizing native production cutover.
+
+**Exit:** native execution meets the actual output, host-tool, deadline, remote-containment and public-contract requirements. The current receipt records a remote-containment failure, so native remains feasibility-only and the proven broker path is retained; no essential guarantees or rollback machinery are deleted.
 
 ## Phase 4 - Daytona environment definitions and warm capacity
 
@@ -271,7 +334,7 @@ Two images are sufficient initially: Session analysis and lean child analysis. T
 - [x] **P4A.06** Add a runtime manifest: schema version, image definition digest, base digest, Python executable/version, dependency digest, helper protocol, declared capabilities, and default resources.
 - [x] **P4A.07** Verify the manifest plus a small executable/import probe on a new sandbox generation. The retained probes are no-Volume evidence scoped to the verified identity; a manifest is metadata, not proof that arbitrary generated code is authorized.
 - [x] **P4A.08** Expose bounded capability metadata to the RLM so it knows which packages/tools exist. Do not inject credentials, full dependency dumps, or infrastructure identifiers into prompts.
-- [ ] **P4A.09** Verify native interpreter startup on each built profile. Add only the small helper/client actually required by Phase 3; never bake Fleet backend, DSPy host orchestration, DB code, or credentials into the image.
+- [x] **P4A.09** Verify native interpreter startup on each built profile. Add only the small helper/client actually required by Phase 3; never bake Fleet backend, DSPy host orchestration, DB code, or credentials into the image. The 2026-09-08 Session and SemanticChild runtime probes passed against their immutable v7/v2 snapshots and deleted their disposable sandboxes.
 - [x] **P4A.10** Publish new immutable snapshot names only when contents/resources change. The `.env`-resolved `fleet-rlm-python313-v7` and `fleet-rlm-python313-child-v2` identities are retained while active bindings may reference them; v6/child-v1 remain rollback targets.
 
 ### 4B. SDK/API-driven operator reconciliation

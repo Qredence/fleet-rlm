@@ -164,7 +164,7 @@ async def verify_runtime(client: Any, spec: DaytonaSandboxSpec) -> None:
             expected = json.dumps(manifest.image_identity(), sort_keys=True, separators=(",", ":"))
             compatible_profiles = tuple(profile.value for profile in manifest.compatible_profiles)
             code = (
-                "import getpass, hashlib, json, pathlib, shutil, sys\n"
+                "import getpass, hashlib, importlib.util, json, pathlib, shutil, sys, sysconfig\n"
                 "manifest_path = pathlib.Path('/opt/fleet/runtime-manifest.json')\n"
                 "manifest = json.loads(manifest_path.read_text())\n"
                 f"expected = json.loads({expected!r})\n"
@@ -178,6 +178,11 @@ async def verify_runtime(client: Any, spec: DaytonaSandboxSpec) -> None:
                 "== "
                 f"{manifest.digest!r}\n"
                 "assert sys.version_info[:3] == (3, 13, 13)\n"
+                "assert pathlib.Path(sys.executable).is_file()\n"
+                "dspy_spec = importlib.util.find_spec('dspy')\n"
+                "assert dspy_spec is not None and dspy_spec.origin\n"
+                "assert pathlib.Path(dspy_spec.origin).resolve().is_relative_to("
+                "pathlib.Path(sysconfig.get_paths()['purelib']).resolve())\n"
                 "assert getpass.getuser() == 'daytona'\n"
                 "assert pathlib.Path.cwd() == pathlib.Path('/home/daytona')\n"
                 "assert shutil.which('git')\n"

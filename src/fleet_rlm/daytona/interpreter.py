@@ -1213,18 +1213,24 @@ class DaytonaCodeInterpreter:
                 broker_ready=True,
             ):
                 return
-            bind_tools(
-                {
-                    name: (
-                        lambda *_args, _name=name, **kwargs: self._invoke_tool_with_args(
-                            _name,
-                            _args,
-                            kwargs,
-                        )
-                    )
-                    for name in tools
-                }
-            )
+
+            def host_binding(name: str, source: Callable[..., Any]) -> Callable[..., Any]:
+                """Bind one host Tool without exposing the closure name to Daytona."""
+
+                def invoke(*args: Any, **kwargs: Any) -> Any:
+                    return self._invoke_tool_with_args(name, args, kwargs)
+
+                invoke.__name__ = name
+                # The Daytona broker derives its remote wrapper from the
+                # callable signature. Preserve the source Tool's signature,
+                # but never leak the old ``_name`` closure default as a user
+                # argument (which would turn ``tool('value')`` into a lookup
+                # for a tool literally named ``value``).
+                with contextlib.suppress(TypeError, ValueError):
+                    object.__setattr__(invoke, "__signature__", inspect.signature(source))
+                return invoke
+
+            bind_tools({name: host_binding(name, source) for name, source in tools.items()})
             ensure_submit(self.output_fields)
             self._installed_binding_generation = self._binding_generation
             return

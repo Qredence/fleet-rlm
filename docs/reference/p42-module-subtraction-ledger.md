@@ -76,7 +76,7 @@ is an ADD-only destination; its provenance is listed in the relevant row.
 | --- | --- | --- |
 | P44 | `sessions/history.py`; existing History Tool, checkpoint, Signature and context seams | L-01–L-06 |
 | P45 | `rlm/session_runtime.py`; compatible runtime acquisition and current-Turn binding | L-07–L-09 |
-| P46 | `rlm/program.py`, `runtime.py`, `result.py`, `events.py`, `_dspy_compat.py`, and `optimization/routing.py` | L-10–L-17 |
+| P46 | `rlm/program.py`, `runtime.py`, `result.py`, `events.py`, `compat_3_3_1.py`, and `optimization/routing.py` | L-10–L-17 |
 | P47 | `rlm/recursion.py` and the disposable Daytona child boundary | L-18–L-19 |
 | P48 | `daytona/runtime.py`, `interpreter.py`, `platform.py`, `provisioning.py`, `broker.py`, `_lease.py`, `_cleanup.py`, and `daytona/workspace_agent/` | L-20–L-26 |
 | P49 | `chat/preparation.py`, `chat/turn_runtime.py`, `chat/models.py`, and `chat/committed_events.py` | L-27–L-31 |
@@ -112,8 +112,8 @@ no separate X1 certification claim.
 
 | ID | Current path and responsibility | Callers; real production adapters | Invariants | Target module; disposition; planned replacement |
 | --- | --- | --- | --- | --- |
-| L-10 | `rlm/{program,result,_dspy_compat}.py` — exact DSPy version gate, RLM option mapping, Prediction normalization/result trust, trajectory and usage types. | Callers: app, CLI, composition, chat lifecycle/preparation, runner, persistence codecs, and diagnostics. Adapter: pinned native `dspy.RLM`/`dspy.Prediction`. | Fleet owns validation and sanitation but never a second RLM iteration loop or alternate Prediction constructor; `max_iters`, `max_llm_calls`, and output limits retain certified meaning. | `rlm/{program,result,_dspy_compat}.py`; **MERGE**. **P46 implemented; proof: native-kernel contract lanes.** |
-| L-11 | `rlm/_dspy_compat.py` — narrow interpreter injection, output-field refresh, FinalOutput wrapping. | Callers: `daytona/{interpreter,interpreter_output}.py`, `rlm/{program,recursion,runtime}.py`. Adapter: private/public DSPy interpreter seam. | Caller-owned interpreter is never shut down by DSPy; stale Tools/output metadata are refreshed; no `_tools_registered` access is introduced. | `rlm/_dspy_compat.py`; **MOVE/DEEPEN**. **P46 implemented; proof: DSPy compatibility contract lanes.** |
+| L-10 | `rlm/{program,result,compat_3_3_1}.py` — exact DSPy version gate, RLM option mapping, Prediction normalization/result trust, trajectory and usage types. | Callers: app, CLI, composition, chat lifecycle/preparation, runner, persistence codecs, and diagnostics. Adapter: pinned native `dspy.RLM`/`dspy.Prediction`. | Fleet owns validation and sanitation but never a second RLM iteration loop or alternate Prediction constructor; `max_iters`, `max_llm_calls`, and output limits retain certified meaning. | `rlm/{program,result,compat_3_3_1}.py`; **MERGE**. **P46 implemented; proof: native-kernel contract lanes.** |
+| L-11 | `rlm/compat_3_3_1.py` — narrow interpreter injection, output-field refresh, FinalOutput wrapping. | Callers: `daytona/{interpreter,interpreter_output}.py`, `rlm/{program,recursion,runtime}.py`. Adapter: private/public DSPy interpreter seam. | Caller-owned interpreter is never shut down by DSPy; stale Tools/output metadata are refreshed; no `_tools_registered` access is introduced. | `rlm/compat_3_3_1.py`; **MOVE/DEEPEN**. **P46 implemented; proof: DSPy compatibility contract lanes.** |
 | L-12 | `rlm/program.py` — constructs Root/Sub DSPy LMs, model roles, bundles, and Root RLM. | Callers: `composition/{live,testing}.py`, `rlm/{runtime,recursion}.py`, `optimization/{daytona,routing}.py`. Adapter: `dspy.LM` and native `dspy.RLM` construction. | Configuration does no provider I/O; exact role model policy, normalized IDs, secret redaction, and Root/Sub separation remain. | `rlm/program.py`; **MERGE**. **P46 implemented; proof: model-bundle and native-constructor lanes.** |
 | L-13 | `rlm/program.py` — Signature schema, instructions, DTOs, and one-time input validation/serialization. | Callers: `chat/preparation.py`, `rlm/{runtime,recursion}.py`, `optimization/gepa_runner.py`. Adapter: DSPy Signature/input adaptation. | Named fields and bounded input contract stay stable; P44 `history` is canonical conversation; no Pydantic→dict→Pydantic loop survives without a semantic boundary. | `rlm/program.py`; **MERGE**. **P46 implemented; proof: Signature/input contract lanes.** |
 | L-14 | `rlm/result.py` and narrow package error/sanitation seams — typed RLM outcome/failures and public-safe result/error text. | Callers: chat lifecycle/TurnRuntime, runner, interpreter, observation. Adapter: none independent; provider errors enter through Daytona/DSPy. | Invalid, oversized, secret-bearing, or malformed output never commits; public errors remain closed and bounded. | `rlm/result.py` plus `daytona/errors.py`; **MERGE**. **P46 implemented; proof: result and failure-taxonomy lanes.** |
@@ -188,7 +188,7 @@ and every current supporting module required to make those target owners real:
   persistence checkpoint repositories, `chat/session_context.py`,
   `rlm/program.py`, and `skills/signatures.py` (L-01–L-06).
 - Resident Root and native RLM contraction: current
-  `rlm/{program,result,_dspy_compat,runtime,session_runtime,events,recursion}.py`
+  `rlm/{program,result,compat_3_3_1,runtime,session_runtime,events,recursion}.py`
   (L-07–L-18), with evaluation-only routing mapped to `optimization/routing.py`
   (L-17).
 - Child and Root Daytona lifecycle: current acquisition, admission,

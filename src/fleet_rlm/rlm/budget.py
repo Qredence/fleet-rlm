@@ -362,13 +362,16 @@ class AdapterBudget:
         if self._finalization_used >= self.max_finalization_attempts:
             raise TimeoutError("wrap-up action did not submit before the Turn deadline")
 
-    def reclassify_late_response(self) -> None:
+    def reclassify_late_response(self, *, can_finalize: bool = True) -> None:
         """Reclassify a previously admitted response as a finalization attempt
-        without charging another provider attempt.
+        without charging another provider attempt. Child invocations consume
+        their local wrap-up allowance without consuming root-only capacity.
         """
         with self._lock:
             self._check_finalization()
-            self.turn.reclassify_finalization()
+            self.remaining()
+            if can_finalize:
+                self.turn.reclassify_finalization()
             self._finalization_used += 1
 
     def reserve_provider(self, *, action: bool, wrap_up: bool, can_finalize: bool) -> float:

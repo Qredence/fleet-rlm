@@ -15,6 +15,7 @@ from uuid import UUID
 from sqlalchemy import CursorResult, and_, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from fleet_rlm.persistence.database import observe_database_operation
 from fleet_rlm.persistence.models import MemoryPromotionIntentRow
 from fleet_rlm.workspace.models import (
     OUTCOME_DEADLINE_EXCEEDED as REASON_DEADLINE_EXCEEDED,
@@ -94,6 +95,7 @@ class SqlAlchemyMemoryPromotionOutbox:
         delay = min(self.backoff_base_seconds * (2 ** max(0, attempts - 1)), self.backoff_cap_seconds)
         return now + timedelta(seconds=delay)
 
+    @observe_database_operation("outbox")
     async def reclaim_stale(self, *, now: datetime) -> int:
         """DB-only startup step: completing rows whose claim went stale requeue."""
         stale_before = now - timedelta(seconds=self.stale_claim_after_seconds)
@@ -111,6 +113,7 @@ class SqlAlchemyMemoryPromotionOutbox:
             )
             return int(result.rowcount or 0) if isinstance(result, CursorResult) else 0
 
+    @observe_database_operation("outbox")
     async def claim_due(
         self,
         *,
@@ -189,6 +192,7 @@ class SqlAlchemyMemoryPromotionOutbox:
                 )
             return tuple(claimed)
 
+    @observe_database_operation("outbox")
     async def complete(
         self,
         intent_ids: tuple[UUID, ...],

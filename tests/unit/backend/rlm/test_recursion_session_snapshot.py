@@ -84,15 +84,16 @@ def _snapshot(**overrides: Any) -> RecursiveSessionSnapshot:
 
 
 def _native_child_recorder(captured: list[dict[str, Any]]) -> Any:
-    """A spoofed native child whose ``acall`` records every invocation."""
+    """A real native RLM whose async call records every invocation."""
 
-    class RLM:
-        async def acall(self, _interpreter: Any, prompt: str, **kwargs: Any) -> dspy.Prediction:
-            captured.append({"prompt": prompt, **kwargs})
-            return dspy.Prediction(answer="child-ok", trajectory=[])
+    child = dspy.RLM("prompt -> answer")
 
-    RLM.__module__ = "dspy.predict.rlm"
-    return RLM()
+    async def acall(_interpreter: Any, prompt: str, **kwargs: Any) -> dspy.Prediction:
+        captured.append({"prompt": prompt, **kwargs})
+        return dspy.Prediction(answer="child-ok", trajectory=[])
+
+    child.acall = acall
+    return child
 
 
 def _install_child(monkeypatch: pytest.MonkeyPatch, child: Any) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
