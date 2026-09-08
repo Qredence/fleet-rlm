@@ -149,7 +149,21 @@ a fail-closed interpreter factory so an invocation without a caller-owned
 interpreter becomes a bounded `RLMConfigError` rather than silently creating a
 DSPy interpreter; production execution passes the acquired interpreter to
 `rlm.acall(...)`. Exact-version and FinalOutput adaptation lives in
-`rlm._dspy_compat`.
+`rlm.compat_3_3_1`.
+
+The pinned contract was checked against the official DSPy 3.3.1 sources on
+2026-09-08: [`dspy/predict/rlm.py`](https://raw.githubusercontent.com/stanfordnlp/dspy/3.3.1/dspy/predict/rlm.py),
+[`dspy/primitives/code_interpreter.py`](https://raw.githubusercontent.com/stanfordnlp/dspy/3.3.1/dspy/primitives/code_interpreter.py),
+and [`dspy/primitives/sandbox_serializable.py`](https://raw.githubusercontent.com/stanfordnlp/dspy/3.3.1/dspy/primitives/sandbox_serializable.py).
+Those sources define the zero-argument factory versus positional
+caller-owned-interpreter split, invocation-scoped tool injection, native
+`REPLHistory`, `FinalOutput`, and the `SandboxSerializable` transport hooks
+used by this integration. DSPy invokes interpreter actions synchronously even
+from `RLM.aforward`, so async Fleet host Tools are resolved through the
+composition-owned bridge instead of leaking a coroutine into the adapter. The
+rolling [DSPy RLM API](https://dspy.ai/api/modules/RLM/)
+is useful for orientation, but the exact pinned source and installed
+`dspy==3.3.1` remain the compatibility authority.
 
 At execution time, Fleet passes its existing interpreter positionally:
 `await rlm.acall(interpreter, **named_inputs)`. Fleet or the child lease owns

@@ -63,6 +63,18 @@ def assert_dspy_version() -> None:
         )
 
 
+def is_native_rlm(value: object) -> bool:
+    """Return whether ``value`` is the exact pinned DSPy RLM implementation.
+
+    DSPy 3.3.1 exposes the caller-owned interpreter contract on the native
+    ``dspy.RLM`` class. Structural test doubles are deliberately not treated
+    as native execution: only an object whose concrete type is the installed
+    class is routed through the positional interpreter seam. Keep this
+    version-sensitive identity decision in the compatibility seam.
+    """
+    return type(value) is dspy.RLM
+
+
 def copy_output_fields(
     output_fields: list[dict[str, Any]] | None,
 ) -> list[dict[str, Any]] | None:
@@ -351,9 +363,11 @@ class FleetJSONAdapter(dspy.JSONAdapter):
             "wrap_up_remaining_ms": self._wrap_up_remaining_ms,
         }
 
-    def _next_wrap_up_attempt(self) -> None:
+    def _next_wrap_up_attempt(self, lm: BaseLM) -> None:
         """Reclassify an already-charged late response as finalization."""
-        self._budget.reclassify_late_response()
+        from fleet_rlm.rlm.program import DeadlineLMProxy
+
+        self._budget.reclassify_late_response(can_finalize=isinstance(lm, DeadlineLMProxy) and lm.can_finalize)
 
     def _wrap_up_required(self, inputs: Mapping[str, Any], remaining: float | None) -> bool:
         """Determine whether the current action iteration must enter wrap-up mode.
@@ -574,7 +588,7 @@ class FleetJSONAdapter(dspy.JSONAdapter):
                     if boundary_remaining is not None and boundary_remaining <= self._wrap_up_seconds:
                         wrap_up = True
                         self._enter_wrap_up(boundary_remaining, rejection_reason="unparseable_json")
-                        self._next_wrap_up_attempt()
+                        self._next_wrap_up_attempt(call_lm)
                         request_signature, request_inputs, directive_field = self._with_wrap_up_directive(
                             request_signature,
                             request_inputs,
@@ -602,7 +616,7 @@ class FleetJSONAdapter(dspy.JSONAdapter):
                 if not wrap_up and action and after_response is not None and after_response <= self._wrap_up_seconds:
                     wrap_up = True
                     self._enter_wrap_up(after_response)
-                    self._next_wrap_up_attempt()
+                    self._next_wrap_up_attempt(call_lm)
                     if is_submit_only_code(_action_code(response)):
                         # The late normal response already satisfies the
                         # wrap-up grammar. Execute it as the initial
@@ -1146,7 +1160,7 @@ def bind_native_rlm_observer(
     """
     from fleet_rlm.rlm.result import RLMConfigError
 
-    if type(rlm) is not dspy.RLM:
+    if not is_native_rlm(rlm):
         raise RLMConfigError("reasoning observation requires native dspy.RLM")
     predictor = getattr(rlm, "generate_action", None)
     if not isinstance(predictor, dspy.Predict):
@@ -1202,6 +1216,7 @@ __all__ = [
     "copy_output_fields",
     "daytona_provider_contract",
     "is_final_output",
+    "is_native_rlm",
     "needs_binding_refresh",
     "wrap_final_output",
 ]

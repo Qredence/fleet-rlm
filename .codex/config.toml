@@ -1,7 +1,7 @@
 approval_policy = "on-request"
 sandbox_mode = "workspace-write"
 web_search = "live"
-model_verbosity = "low"
+model_verbosity = "medium"
 [features]
 hooks = true
 multi_agent = true
@@ -63,6 +63,7 @@ nickname_candidates = ["Daytona", "Sandbox"]
 description = "AGENTS.md, current architecture/reference docs, README, and workflow documentation consistency."
 config_file = "agents/docs-maintainer.toml"
 nickname_candidates = ["Docs", "Maintainer"]
+
 
 [sandbox_workspace_write]
 network_access = true

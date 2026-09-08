@@ -138,6 +138,47 @@ def test_late_response_reclassification_consumes_global_finalization_capacity() 
     assert adapter.finalization_used == 2
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("asynchronous", [False, True])
+@pytest.mark.parametrize("first_response, attempts", [(GOOD, 1), ("", 2)])
+async def test_late_child_response_preserves_root_finalization_reserve(
+    monkeypatch, asynchronous, first_response, attempts
+) -> None:
+    clock = [100.0]
+    monkeypatch.setattr("fleet_rlm.rlm.budget.time.monotonic", lambda: clock[0])
+
+    class LateLM(_ScriptedLM):
+        def forward(self, **kwargs):
+            clock[0] = 126.0
+            return super().forward(**kwargs)
+
+    source = LateLM([first_response, GOOD])
+    turn = TurnBudget(deadline=130.0, limits=BudgetLimits(provider_attempts=3, finalization_attempts=1))
+    root = RLMModelBundle(source, source).bind_turn_deadline(deadline=130.0, budget=turn)
+    child = root.fork_for_child(deadline=130.0)
+    adapter = FleetJSONAdapter(deadline=130.0, wrap_up_seconds=5, budget=turn)
+    result = await invoke(adapter, child.root_lm, asynchronous)
+    assert result[0]["code"] == "SUBMIT(answer=1)"
+    assert adapter.wrap_up_summary()["wrap_up_attempts"] == attempts
+    assert turn.snapshot()["provider_attempts"] == attempts
+    turn.reserve(BudgetDimension.PROVIDER_ATTEMPTS, finalization=True)
+    assert turn.snapshot()["provider_attempts"] == attempts + 1
+
+
+def test_late_child_response_cannot_bypass_settlement_or_local_wrap_up_limit() -> None:
+    turn = TurnBudget(deadline=None, limits=BudgetLimits(finalization_attempts=0))
+    child = AdapterBudget(turn=turn, max_finalization_attempts=1)
+    child.reclassify_late_response(can_finalize=False)
+    with pytest.raises(TimeoutError, match="wrap-up"):
+        child.reclassify_late_response(can_finalize=False)
+    other = AdapterBudget(turn=turn)
+    turn.settle()
+    with pytest.raises(TurnBudgetExhausted) as failure:
+        other.reclassify_late_response(can_finalize=False)
+    assert failure.value.dimension == BudgetDimension.SETTLED
+    assert other.finalization_used == 0
+
+
 def test_finalization_time_and_attempt_reserves_are_independently_enforced(monkeypatch) -> None:
     monkeypatch.setattr("fleet_rlm.rlm.budget.time.monotonic", lambda: 99.0)
     turn = TurnBudget(deadline=100.0, limits=BudgetLimits(provider_attempts=3, finalization_attempts=2))

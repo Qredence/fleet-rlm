@@ -40,6 +40,7 @@ from fleet_rlm.rlm.budget import BudgetDimension, TurnBudget
 from fleet_rlm.rlm.compat_3_3_1 import (
     CodeInterpreter,
     bind_native_rlm_observer,
+    is_native_rlm,
 )
 from fleet_rlm.rlm.events import (
     PROVIDER_ENDPOINT_NOT_FOUND_MESSAGE,
@@ -694,7 +695,7 @@ async def invoke_native_rlm(
         RLMConfigError: If an exact native `dspy.RLM` instance is invoked without a caller-owned interpreter.
     """
     native_call_args: tuple[Any, ...] = ()
-    if type(rlm) is dspy.RLM:
+    if is_native_rlm(rlm):
         if context.execution.interpreter is None:
             raise RLMConfigError("native RLM execution requires a caller-owned interpreter")
         native_call_args = (context.execution.interpreter,)
@@ -1985,7 +1986,7 @@ class RLMRunner:
             emit_reasoning (bool): Whether native RLM reasoning events should be published.
             deadline (float | None): Absolute Turn deadline used to suppress late native spans.
         """
-        if type(target) is dspy.RLM:
+        if is_native_rlm(target):
             bind_native_rlm_observer(
                 target,
                 publish if emit_reasoning else None,
@@ -2000,7 +2001,7 @@ class RLMRunner:
     @staticmethod
     def _clear_observer(target: Any) -> None:
         """Remove Fleet's run-local observer without touching other callbacks."""
-        if type(target) is dspy.RLM:
+        if is_native_rlm(target):
             bind_native_rlm_observer(target, None)
             return
         bind = getattr(target, "bind_observer", None)

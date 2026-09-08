@@ -6,6 +6,60 @@ The starting checkout was `0603e15a1d7ad5a10c8ed30e3fb9f2773569551d`.
 
 ## Current work
 
+### Ordered continuation
+
+The Phase 1 contention lane now includes all six planned scenarios, with an
+additional exclusive-database gate for global outbox selection. Six shared
+scenario assertions pass against local SQLite and the configured compatible
+PostgreSQL target. The cancellation/commit scenario reproduced an SQLite integrity
+failure twice: `FOR UPDATE` does not serialize SQLite state reads. Acquiring a
+writer lock within the existing final-state transaction before reading fixes
+that race without replacing PostgreSQL row locking or weakening state checks.
+The focused claim/parity/query lane passes 20 tests. Deployed reconciliation
+and representative PostgreSQL query-plan evidence still block Phase 1
+certification; later phases are
+not marked complete by these local results. On 2026-09-08, the configured
+PostgreSQL target observations are implementation history, not retained gate
+evidence: the contention lane requires a corrected rerun with a durable
+receipt after the database-entry barrier and post-commit due-time fixes.
+
+Phase 2 implementation audit (2026-09-08): the complete
+`tests/unit/backend/rlm` suite collected 551 tests and passed. It exercises the
+single program/adapter construction seam, shared budget admission and
+root-only finalization capacity, sync/async adapter repair, immutable LM
+templates and proxy copies, native history separation, tool namespace and
+callback contracts, model-role attribution, usage reconciliation, and
+Runtime Event/tracing independence. The Phase 2 checklist is marked complete
+for these executable implementation contracts; provider-backed semantic
+quality and matched native-versus-broker performance remain later evidence
+gates.
+
+Continue the consolidated plan in Phase 1, then 1.1, 2, 3, 4, 5 and 6 order.
+The earlier Phase 2/3/6 fixes remain retained, but do not establish completion
+of the preceding phases. Finish the remaining local Phase 1 work before taking
+on additional later-phase implementation; retain live gates as explicitly open.
+
+- P1A.01 repository inventory: one head, `019fe0010001`, with linear ancestry
+  through `019fdb010001`, `019fa2e4b7c1`, `019f8c1d2e3f`, `019f7950a1b2`
+  and baseline `019f5b3c96bd`. No repository merge revision is indicated.
+  Deployed database heads have not been inspected.
+- The focused binding/Turn lineage migration, database compatibility, claim
+  constraint classification and claim adapter parity lane passed 32 tests.
+  This is local evidence only; P1A.01 deployed reconciliation remains open.
+- P1B.02 now has query counts and SQLite EXPLAIN coverage for Session listing,
+  history, claim-conflict replay, recovery and outbox claims. Removed the
+  unused artifact lookup in replay (four statements reduced to three).
+  PostgreSQL plans and representative deployment measurements remain open.
+- P1B.03 recovery tests verify no checked-out connection at the provider fence
+  on either success or failure. P1B.04 now records bounded operation timings
+  and outcomes after facade transaction scope exits, with fail-soft logging
+  and optional existing trace spans. Arguments, results and exception text
+  are excluded; privacy, cancellation and broken-sink regressions pass.
+- Validation: 37 focused persistence tests and `make check` passed, with
+  78.54% backend coverage, 538 TUI tests and generated/boundary/docs checks.
+  Phase 1 remains open for deployed database evidence; later phases are not
+  promoted by this local result. Progress is checked in the consolidated plan.
+
 ### Phase 1–6 continuation (2026-09-08)
 
 The continuation starts at `a1957d2ac`. Existing mechanics through Phase 6
@@ -34,6 +88,22 @@ implementation and evidence requirements are satisfied.
   type/lint/format, dependency boundaries and documentation checks. No live
   certification lane was run.
 
+### Root reserve continuation after `4f81687f`
+
+- Phase 2 late-response reclassification now respects the call-local LM's
+  finalization capability. Child responses use their local wrap-up allowance
+  without debiting the root-only finalization reserve or charging another
+  provider admission.
+- Regression tests reproduced the reserve loss before the fix in sync and
+  async adapter calls. Coverage includes late valid submission, late parse
+  failure followed by repair, local attempt limits and settlement rejection.
+- This closes the demonstrated accounting defect; broader Phase 2 accounting
+  certification and Phase 1–6 implementation remain open.
+- Validation: 40 adapter integration tests passed. `make check` passed on
+  rerun (78.45% backend coverage, 538 TUI tests). The first full run failed
+  the existing 50 ms recursive batch startup/deadline assertion; that test
+  passed in isolation and on the full rerun without changes. No live lane ran.
+
 ### Previously retained implementation
 
 - Phase 0: ADR vocabulary and the three evidence lanes already exist. The runtime
@@ -41,7 +111,8 @@ implementation and evidence requirements are satisfied.
 - Phase 1: additive migration `019fe0010001` adds Sandbox Binding Workspace and
   composite Session/Workspace lineage, and the Session status CHECK. Dirty-data
   preflight runs before DDL. SQLite upgrade, enforcement, downgrade and row
-  preservation tests exist. Deployed heads and PostgreSQL contention are unverified.
+  preservation tests exist. Deployed heads and representative PostgreSQL query
+  plans remain unverified.
 - Phase 1.1: Daytona and its six generated clients are pinned/resolved to 0.210.0.
   DSPy remains 3.3.1; MLflow's dependency policy and resolution are unchanged.
   The organization header compatibility code remains necessary in the installed
@@ -68,6 +139,10 @@ implementation and evidence requirements are satisfied.
   explicit context through the existing sync SDK view, interpreter/output owner
   and callback gateway. Replay covers iteration state, fresh-context isolation,
   typed SUBMIT, host tools, output overflow, authority and retained cleanup.
+  The pinned DSPy 3.3.1 RLM/CodeInterpreter/SandboxSerializable sources were
+  rechecked on 2026-09-08; native type routing is centralized in
+  `rlm/compat_3_3_1.py`, and async host Tools use the composition bridge when
+  DSPy runs synchronous interpreter actions from `RLM.aforward`.
   The host callback loop checks authority even for silent executions. Late SDK
   workers cannot publish execution statistics, and broker cleanup retains them
   until they exit. HTTP polling retains its existing bounded timeout, so this
@@ -75,8 +150,15 @@ implementation and evidence requirements are satisfied.
   Caller-provided containment is mandatory. The public runtime policy exposes
   only `legacy`; native construction is an explicit feasibility seam that
   taints and closes its exact root owner before a preparation gate can release.
-  Real gateway/native topology, silent execution timeout, nested callbacks and
-  live subprocess containment still need certification.
+  The opt-in 2026-09-08 live feasibility lane now certifies the real
+  preview/polling gateway topology, nested root -> host callback -> child ->
+  root-resume path, typed native/broker output parity, authority-loss
+  cancellation, separate-session concurrency and disposable cleanup. Its
+  detached-subprocess probe is intentionally negative: a marker survived
+  context deletion, so native production remains a no-go and the exact root is
+  quarantined while the broker stays retained. Native context creation
+  cancellation/timeout is covered by the provider root-lease tests, including
+  late context deletion before gate release.
 - Phase 4: a reproducible, non-secret `DaytonaEnvironmentManifest` now describes
   the three logical profiles. Session and Workspace children share the analysis
   image and Volume eligibility; semantic children have the lean image contract
@@ -123,12 +205,12 @@ or authorize paid capacity.
 - [x] Phase 4 Session/SemanticChild/WorkspaceChild manifests, profile contracts, operator plan/check/create/verify commands, and immutable snapshot receipts are retained.
 - [x] Phase 5 fresh per-Run native RLM/context/binding/worker mechanics are available through an explicit feasibility seam; the single selectable runtime remains `legacy`.
 - [x] Phase 6 bounded capsules, selected-input/path validation, depth-one scheduling, shared reservations, ordered all-or-nothing batches, and typed child outcomes are implemented.
-- [x] Repository-wide local validation passed: `make check` (exit 0), 78.33% backend coverage against a 75% threshold, generated-contract checks, 538 TUI tests, and documentation/boundary checks.
+- [x] Repository-wide local validation passed: `make check` (exit 0), 78.53% backend coverage against a 75% threshold, generated-contract checks, 538 TUI tests, and documentation/boundary checks.
 
 ### Certification still open
 
-- [ ] Deployed Alembic-head reconciliation and PostgreSQL contention/recovery evidence.
-- [ ] Live SDK/API-key, Volume, native gateway topology, remote process containment, and stop/start or replacement continuity.
+- [ ] Deployed Alembic-head reconciliation and representative PostgreSQL query-plan evidence.
+- [ ] Live SDK/API-key, Volume, remote process containment, and stop/start or replacement continuity. The Phase 3 feasibility test and sealed attachment path require a corrected rerun and durable receipt; remote process containment remains the native-production blocker.
 - [ ] Native interpreter startup and capability checks on every production profile, including mounted WorkspaceChild behavior.
 - [ ] Warm-pool eligibility, quota, clean-instance, lifecycle, demand, and cost evidence; paid capacity remains disabled.
 - [ ] Complete MLflow backend/export-outage/concurrency certification and matched semantic/recursive quality-per-cost ablations.
@@ -145,6 +227,10 @@ Executable evidence lives in:
 - `tests/unit/backend/daytona/test_native_sdk_contract.py`
 - `tests/unit/backend/daytona/test_sdk_resource_errors.py`
 - `tests/unit/backend/daytona/test_native_interpreter.py`
+- `tests/unit/backend/daytona/test_run_environment_root_lease.py`
+- `tests/unit/backend/test_host_tool_submit_broker.py`
+- `tests/live/backend/test_phase3_daytona_native.py`
+- `scripts/benchmarks/attach_phase3_receipt.py`
 - `tests/unit/backend/test_mlflow_export_privacy.py`
 - `tests/unit/backend/test_mlflow_runtime.py`
 - `tests/unit/backend/test_runtime_benchmark_v2.py`
@@ -152,22 +238,24 @@ Executable evidence lives in:
 SDK replay is adapter evidence, not live Daytona evidence. Scripted benchmark
 keyword checks remain lifecycle smoke, not semantic-quality certification.
 Production cutover, broker retirement and paid capacity cannot be certified by
-these tests. Live snapshot creation/check/runtime-probe receipts above do not
-prove native interpreter containment, model quality, PostgreSQL readiness or
-warm-pool behavior.
+these tests. Earlier Phase 3 evidence is not retained under the corrected
+sealed-receipt contract, so it does not prove native interpreter containment,
+model quality, PostgreSQL readiness or warm-pool behavior.
 
-The final local validation passed `make check` (exit 0, 78.33% backend
+The final local validation passed `make check` (exit 0, 78.53% backend
 coverage; the 75% threshold was met), including generated API and stream
 checks, 538 TUI tests, boundary checks and documentation checks. These
 receipts do not certify the pending architecture or any live lane.
 
 Remaining sequence:
 
-1. Reconcile deployed Alembic heads and run the supported PostgreSQL contention/
-   recovery lane; retain the separate live SDK/backend receipts.
-2. Exercise the caller-owned native vertical slice with bounded output and the
-   existing remote-compatible host callback route; certify fresh-context durable
-   continuity and cleanup before selecting it in policy.
+1. Reconcile deployed Alembic heads and retain representative PostgreSQL
+   query-plan evidence; the six-scenario contention/recovery lane is complete
+   against the configured compatible target.
+2. Resolve the retained native no-go by certifying remote detached-process
+   containment, then exercise fresh-context durable continuity and stop/start or
+   replacement behavior before selecting native in policy. Until then, keep the
+   proven broker route and its rollback machinery.
 3. Reconcile every profile's cold/mount/capability behavior and warm capacity; do
    not infer paid warm capacity from image creation alone.
 4. Complete MLflow backend/export-outage/concurrency certification and run matched

@@ -22,6 +22,7 @@
 | `benchmarks/corpus_chain.py` | Deterministic corpus-chain benchmark fixtures and report validation |
 | `benchmarks/run_native_long_context.py` | Measure native whole-value URL context at 1/5/10 MiB and emit the paging decision receipt |
 | `benchmarks/run_rlm_latency.py` | Compare live Fleet RLM configuration variants and run the MLflow-native five-task quality gate |
+| `benchmarks/attach_phase3_receipt.py` | Attach a validated, bounded Daytona native-feasibility receipt and capability metrics to an existing MLflow campaign run |
 | `benchmarks/run_routing_eval.py` | Run the deterministic or opt-in live delegation-ladder benchmark, including bounded recursive batches |
 | `benchmarks/judges.py` | Shared Fleet evaluation judge definitions and registration |
 | `benchmarks/scorers.py` | MLflow 3 GenAI custom scorers and evaluation metric definitions |
@@ -100,6 +101,24 @@ FLEET_LIVE=1 uv run python scripts/benchmarks/run_rlm_latency.py benchmark \
 MLflow-supported endpoint (e.g. `gateway:/databricks-inkling` via a local
 MLflow AI Gateway server); the Fleet DSPy model aliases are not automatically
 valid MLflow judge endpoints.
+
+## Phase 3 MLflow receipt attachment
+
+After the opt-in native feasibility lane writes its bounded JSON receipt, an
+operator can attach that exact capability result to an existing campaign run:
+
+```bash
+FLEET_LIVE=1 uv run python scripts/benchmarks/attach_phase3_receipt.py \
+  --run-id <campaign-run-id> \
+  --receipt .scratch/fleet-rlm-recursive-runtime/evidence/daytona-phase3-native-live.json \
+  --output .scratch/benchmark-reports/phase3-mlflow-attachment.json
+```
+
+The command validates the receipt schema and safety fields, uploads one
+canonical `daytona-native-feasibility.json` artifact, and writes only bounded
+`fleet.phase3.*` tags/metrics. It never starts a Turn or changes runtime or
+capacity policy; a missing or failed MLflow operation is recorded as a failed
+attachment receipt rather than presented as native success.
 
 ## Evaluation loop
 

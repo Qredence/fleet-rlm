@@ -274,6 +274,23 @@ def test_build_native_rlm_fails_closed_without_a_caller_owned_interpreter() -> N
         rlm(request="missing interpreter")
 
 
+def test_native_rlm_identity_is_kept_in_the_pinned_compatibility_seam() -> None:
+    from fleet_rlm.rlm.compat_3_3_1 import is_native_rlm
+
+    native = dspy.RLM("request -> answer")
+
+    class StructuralDouble:
+        def acall(self, **_kwargs: Any) -> None:
+            return None
+
+    class NativeSubclass(dspy.RLM):
+        pass
+
+    assert is_native_rlm(native)
+    assert not is_native_rlm(StructuralDouble())
+    assert not is_native_rlm(NativeSubclass("request -> answer"))
+
+
 @pytest.mark.asyncio
 async def test_native_json_action_contract_parses_first_and_followup_iterations() -> None:
     from dspy.primitives.repl_types import REPLHistory

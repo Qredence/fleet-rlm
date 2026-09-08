@@ -1,15 +1,18 @@
 """Native adapter replay: context state, host tools, typed output and cleanup fences."""
 
+import asyncio
 import contextlib
+import inspect
 import io
 import json
+import threading
 import time
 from types import SimpleNamespace
 
 import dspy
 import pytest
 
-from fleet_rlm.daytona.broker import remote_submit_setup_code
+from fleet_rlm.daytona.broker import SyncBridgeDispatcher, remote_submit_setup_code, sync_sandbox
 from fleet_rlm.daytona.errors import DaytonaAdapterError
 from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter
 from fleet_rlm.daytona.native_interpreter import NativeInterpreterBackend
@@ -141,6 +144,83 @@ async def test_stock_dspy_rlm_uses_native_semantic_callback_in_caller_owned_cont
     assert len(service.contexts) == 1
     assert not service.deleted and not contained
     interpreter.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_native_host_callback_can_schedule_child_through_composition_bridge():
+    """The native context may synchronously wait on an async child callback.
+
+    The child operation runs on the composition service loop, not the loop
+    currently executing the native interpreter action. This is the nested
+    root-code -> host-callback -> child -> root-resume shape that previously
+    deadlocked when bridges captured the parked caller loop.
+    """
+
+    class ChildProcess:
+        async def code_run(self, code: str) -> SimpleNamespace:
+            await asyncio.sleep(0)
+            return SimpleNamespace(result=f"child:{code}")
+
+    class ServingLoop:
+        def __init__(self) -> None:
+            self.loop = asyncio.new_event_loop()
+            self.ready = threading.Event()
+            self.thread = threading.Thread(target=self._serve, daemon=True)
+
+        def _serve(self) -> None:
+            asyncio.set_event_loop(self.loop)
+            self.ready.set()
+            self.loop.run_forever()
+
+        def start(self) -> None:
+            self.thread.start()
+            assert self.ready.wait(timeout=2)
+
+        def close(self) -> None:
+            self.loop.call_soon_threadsafe(self.loop.stop)
+            self.thread.join(timeout=2)
+            self.loop.close()
+
+    service_loop = ServingLoop()
+    service_loop.start()
+    dispatcher = SyncBridgeDispatcher()
+    dispatcher.set_loop(service_loop.loop)
+    child_bridge = sync_sandbox(
+        SimpleNamespace(process=ChildProcess()),
+        asyncio.get_running_loop(),
+        dispatcher,
+    )
+
+    def schedule_child_sync(label: str) -> str:
+        # A real host Tool may itself be async. Resolve it through the same
+        # composition-owned bridge used by Daytona SDK views.
+        child = child_bridge.process.code_run(label)
+        return str(child.result)
+
+    backend, service, gateway, contained = await _backend()
+    interpreter = DaytonaCodeInterpreter(
+        backend=backend,
+        tools={"schedule_child": schedule_child_sync},
+        output_fields=[{"name": "answer", "type": "str", "required": True}],
+    )
+    try:
+        interpreter._ensure_bindings()
+        assert tuple(inspect.signature(gateway.tools["schedule_child"]).parameters) == ("label",)
+        # DSPy calls a synchronous interpreter from its worker thread; keep
+        # the event-loop thread free to represent that production boundary.
+        result = await asyncio.to_thread(
+            interpreter.execute,
+            "value = schedule_child('probe')\nSUBMIT(answer=value)",
+        )
+        assert is_final_output(result)
+        assert result.output == {"answer": "child:probe"}
+        assert service.contexts["0"]
+        assert not service.deleted
+    finally:
+        interpreter.shutdown()
+        dispatcher.clear_loop(service_loop.loop)
+        service_loop.close()
+    assert gateway.stopped and contained == [True]
 
 
 @pytest.mark.asyncio

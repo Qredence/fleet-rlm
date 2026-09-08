@@ -31,7 +31,7 @@ from fleet_rlm.config.settings import Settings
 from fleet_rlm.observability.diagnostics import trace_failure_category
 from fleet_rlm.observability.tracing import start_turn_span
 from fleet_rlm.rlm.budget import BudgetDimension
-from fleet_rlm.rlm.compat_3_3_1 import CodeInterpreter, FleetJSONAdapter, _RLMTraceCallback
+from fleet_rlm.rlm.compat_3_3_1 import CodeInterpreter, FleetJSONAdapter, _RLMTraceCallback, is_native_rlm
 from fleet_rlm.rlm.events import Status, ToolEventView, ToolObserver, observe_tool
 from fleet_rlm.rlm.output_contract import bind_output_contract
 from fleet_rlm.rlm.program import (
@@ -1998,7 +1998,7 @@ class RecursiveRLMExecutor:
                     child_acall,
                     lease.interpreter,
                     prompt,
-                    native=(type(child).__module__ == "dspy.predict.rlm" and type(child).__name__ == "RLM"),
+                    native=is_native_rlm(child),
                     deadline=self._deadline,
                     retain_pending=lambda pending: self._retain_pending_batch_futures({pending}),
                     extra_inputs=child_inputs,
