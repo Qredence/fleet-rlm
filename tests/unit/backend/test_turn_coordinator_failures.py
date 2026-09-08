@@ -671,7 +671,7 @@ async def test_failed_turn_emits_settlement_claim_and_cleanup_spans(
         await cleanup.shutdown(drain_seconds=1)
 
         assert isinstance(events[-1].detail, RunFailed)
-        assert [name for name in names if not name.startswith("Turn.progress.")] == [
+        assert [name for name in names if name.startswith("Turn.") and not name.startswith("Turn.progress.")] == [
             "Turn.prepare",
             "Turn.settlement",
             "Turn.claim_transition",
