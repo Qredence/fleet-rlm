@@ -1,6 +1,6 @@
 # dspy.RLM contract (Fleet / DSPy 3.3.x)
 
-Authority: supported DSPy 3.3.x and [dspy.ai RLM](https://dspy.ai/api/modules/RLM/). The current lock resolves 3.3.1. Do not treat Daytona provider docs as DSPy module authority.
+Authority: the exact pinned [DSPy 3.3.1 RLM source](https://raw.githubusercontent.com/stanfordnlp/dspy/3.3.1/dspy/predict/rlm.py) and installed implementation. The rolling [RLM API](https://dspy.ai/api/modules/RLM/) is orientation; do not treat Daytona provider docs as DSPy module authority.
 
 ## Name
 
@@ -16,7 +16,7 @@ Authority: supported DSPy 3.3.x and [dspy.ai RLM](https://dspy.ai/api/modules/RL
 2. Code runs in a sandboxed interpreter. Variables may persist across sequential
    clean Turns while the compatible Session runtime remains resident.
 3. Built-ins include `llm_query(prompt)`, `llm_query_batched(prompts)`, and `SUBMIT(...)`.
-4. Fleet adds `rlm_query(prompt=prompt)` for one bounded child-RLM subproblem.
+4. Fleet adds `rlm_query(prompt=prompt)` and Root-only `rlm_query_batched(prompts=...)` for bounded iterative child-RLM subproblems when recursion is enabled.
 5. Host Tools (Fleet) are additional callables registered for the Turn.
 6. `SUBMIT(...)` ends the RLM loop with typed Signature outputs.
 7. If the loop ends without SUBMIT, DSPy may extract outputs from the trajectory.
@@ -92,11 +92,11 @@ keyword-only and are not routed through the native positional call contract.
 - Normal primary Turns use one compatible native `dspy.RLM` per resident Session runtime; a changed
   program, taint, eviction, or failure creates a replacement. Greetings also use this native path. The default for RLM Turns is
   `FleetRLMSignature` (`answer: str`), but a selected Skill may supply additional required output fields.
-- Fleet scopes the stock `dspy.JSONAdapter()` to each Turn. Provider-native
-  token streams and sectioned text are not silently salvaged into RLM actions;
-  malformed output is an `adapter_parse_error`. RLM action output contains
+- Fleet scopes `FleetJSONAdapter`, a DSPy JSON adapter with bounded corrective
+  re-asks and shared deadline/budget accounting, to each Turn. It preserves the
+  pinned action grammar; exhausted repair is an `adapter_parse_error`. RLM action output contains
   `reasoning` and `code`; `completed` is internal loop state, not a Signature
-output field. The selected `daytona-recursive` Root and Sub Models
+  output field. The selected `daytona-recursive` Root and Sub Models
 (through the policy-configured Databricks Chat Completions gateway) cap Root
 and Sub at 16,384 output tokens with no
 reasoning-effort override. This is separate from `max_output_chars`, which

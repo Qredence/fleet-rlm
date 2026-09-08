@@ -23,7 +23,8 @@ pnpm --dir tools/fleet-tui install --frozen-lockfile
 ```
 
 Use local `.env` files or an authorized secret manager for credentials. Runtime
-configuration uses only `FLEET_*`; see
+configuration reads only environment names referenced by the selected TOML policy,
+including provider-specific names such as `DATABRICKS_TOKEN`; see
 [`docs/reference/configuration.md`](docs/reference/configuration.md). Never
 commit credentials or use a Daytona API key as an API bearer token.
 
@@ -50,29 +51,29 @@ Start with the smallest relevant lane:
 ```bash
 uv run pytest tests/unit/backend/path_to_test.py -q
 uv run ruff check path/to/changed.py
+uv run ruff format --check path/to/changed.py
 uv run ty check src
 ```
 
 For terminal changes:
 
 ```bash
-pnpm --dir tools/fleet-tui run format:check
-pnpm --dir tools/fleet-tui run lint
-pnpm --dir tools/fleet-tui run typecheck
-pnpm --dir tools/fleet-tui run test
+make tui-check
 ```
 
-Before requesting review, run:
+For documentation and agent-instruction changes, run:
 
 ```bash
-make check
-make check-release
+make check-docs
 git diff --check
 ```
 
-Run the focused backend tests for changed behavior and `make api-check` whenever HTTP shapes
-may have moved. Credentialed Daytona tests require explicit `FLEET_LIVE=1`;
-report live lanes that were intentionally not run.
+Run `make check` for broad code, lifecycle, configuration, or public-contract
+changes. Release work additionally requires `make check-release`,
+`make check-security`, and `make build-release`. Follow the validation matrix
+in [AGENTS.md](AGENTS.md); report the checks actually run. Credentialed Daytona
+tests require explicit `FLEET_LIVE=1`; live scripts have their own documented
+admission gates and remain explicit operator actions.
 
 ## Documentation and generated files
 

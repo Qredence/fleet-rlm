@@ -38,6 +38,9 @@ Preserve:
 - one terminal outcome;
 - `[DONE]` last.
 
+Cancellation uses `abort` followed by `[DONE]`, without `finish` or post-terminal
+usage. Preparation heartbeats may precede `start`; they are transient.
+
 Do not infer RLM recursion, depth, settlement, or execution state from model text or presentation details when the backend exposes typed evidence.
 
 Live and durable projections should converge on equivalent user-visible state for equivalent committed information.

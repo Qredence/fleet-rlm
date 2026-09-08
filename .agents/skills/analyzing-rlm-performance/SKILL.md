@@ -60,7 +60,8 @@ Prefer policy/configuration changes over hardcoded behavior:
   redundant restatement. Same-action verification is preferred when practical;
   a genuinely independent later check remains allowed when needed.
 - Bound `max_llm_calls` so recursive delegation cannot consume the entire Run
-  budget. Preserve atomic admission and the configured recursive child depth.
+  budget. Preserve atomic admission and the fixed depth-one child boundary;
+  recursive depth is not configurable.
 - Keep `max_output_chars` and execution-output limits bounded, but do not add a
   second Fleet history compaction policy. Output projection/truncation is a
   public-observability concern, not native DSPy history management.

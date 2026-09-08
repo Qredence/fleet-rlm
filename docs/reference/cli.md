@@ -21,14 +21,15 @@ launcher starts the backend in its own process group, waits up to 90 seconds for
 Daytona readiness, and runs pi-tui in the foreground. Node 22.19+, pnpm, the
 installed TUI workspace, and an unused port are required.
 
-For the interactive `daytona` and `daytona-recursive` profiles, `fleet cli`
+For the shipped `daytona-recursive` policy, `fleet cli`
 starts the installed MLflow server on
 `127.0.0.1:5001` with one worker, SQLite metadata under
 `.fleet_rlm/mlflow/mlflow.db`, and artifacts under
 `.fleet_rlm/mlflow/artifacts`. It reuses an already-running server only when
 `GET /version` matches the installed MLflow version, and it never stops a
-reused process. Benchmark profiles disable tracing, while standalone backend
-commands require the configured tracking server to be started separately.
+reused process. Custom policies may disable tracing or select another tracking
+destination. Standalone backend commands require the configured tracking server
+to be started separately.
 
 ### Upgrade the local MLflow store to 3.16
 

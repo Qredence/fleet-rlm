@@ -35,8 +35,9 @@ or implementing `dspy.RLM`; ordinary RLM Turns do not need it.
 5. For long writeups when Session Workspace is available, follow report-builder
    / workspace-files: write the full report durably, then issue exactly one
    typed `SUBMIT` with every active Signature output.
-6. For nontrivial deterministic work, verify in a later iteration using an
-   independent invariant, known reference, higher-precision stability, or a
-   genuinely independent formulation before submitting.
+6. For nontrivial deterministic work, verify using an independent invariant,
+   known reference, higher-precision stability, or independent formulation.
+   Compute and verify in one action when practical, inspect its output, then
+   submit in a later action; do not repeat an already verified computation.
 
-Authority: supported DSPy 3.3.x and https://dspy.ai/api/modules/RLM/ — not Daytona docs as DSPy authority. The current lock resolves 3.3.1.
+Authority: the exact pinned DSPy 3.3.1 source and installed implementation; the rolling https://dspy.ai/api/modules/RLM/ page is orientation. Do not use Daytona docs as DSPy authority.

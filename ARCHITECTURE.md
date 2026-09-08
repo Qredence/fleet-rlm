@@ -10,6 +10,20 @@ Session state. The maintained operator client is the pi-tui application under
 
 Canonical Run Environment set: `daytona`.
 
+## Current runtime and migration target
+
+`runtime.variant = "legacy"` is the only selectable architecture. It uses native
+DSPy RLM with Fleet's broker-backed interpreter and a compatible resident
+Session runtime. Sequential successful Turns may reuse the Root RLM,
+interpreter, and Sandbox; invocation history, authority, budgets, and bindings
+remain Turn-local. Failures and taint force rotation before reuse.
+
+The native Daytona interpreter adapter, fresh per-Run contexts, and selected-input
+capsules in ADR 006 are separate feasibility mechanics. Their presence in source
+does not enable native production. Context deletion has not established remote
+detached-process containment. The [ADR 006 status ledger](docs/decisions/006-implementation-status.md)
+owns dated evidence and remaining gates; this page describes current ownership.
+
 ## System model
 
 ```text
@@ -80,10 +94,10 @@ bounded Sub-LM fallback. Child batches preserve input order, reserve shared
 budgets atomically, and settle all-or-nothing. Children return evidence for
 Root verification and synthesis, not final authority.
 
-DSPy owns native `REPLHistory` and trajectory semantics. Fleet passes a fresh
-Turn-local history and bindings while preserving the native history contract;
-it does not independently compact, truncate, reset, or reconstruct that
-history. Process-scoped LM instances are immutable templates. Deadlines,
+DSPy creates invocation-local `REPLHistory` and owns trajectory semantics.
+Fleet supplies committed `dspy.History` and Turn-local bindings without
+independently compacting, truncating, resetting, or reconstructing native
+`REPLHistory`. Process-scoped LM instances are immutable templates. Deadlines,
 callbacks, adapters, retries, tools, and other mutable execution state are
 bound per Turn or child invocation.
 
@@ -112,6 +126,12 @@ private until byte validation, promotion, and Turn Commit. Session Workspace
 files and Workspace Memory are immediate private state and are intentionally
 separate from committed conversation history. Memory writes are explicit,
 bounded, and host-mediated.
+
+The independent Workspace `files/` namespace is exposed through `/api/files`;
+Session Workspace scratch and `projects/<slug>/` deliverables have distinct
+host-tool namespaces. Explicit memory appends persist immediately. The optional
+`propose_memory` capability is absent under the shipped empty category allowlist;
+when enabled, its candidates enter a durable post-commit promotion outbox.
 
 Alembic owns live schema evolution. Explicit SQLite test/local helpers may
 create tables, but production startup does not use `create_all`. In-memory and
@@ -186,8 +206,9 @@ remain transport-neutral until the API SSE adapter projects them.
   child-scoped and cannot leak across concurrent Runs.
 - Public Runtime Events and durable projections are closed contracts; transport
   adapters do not become a second source of execution truth.
-- Provider credentials, private paths, raw provider failures, and hidden model
-  reasoning never enter public HTTP, SSE, TUI, trace, or error surfaces.
+- Provider credentials, private paths, and raw provider failures never enter
+  public or trace surfaces. Only approved bounded Root reasoning/code/output
+  projections reach SSE/TUI; engineering trace content has a separate policy.
 - Bytes are validated before metadata is published, and Alembic remains the
   live schema authority.
 
@@ -230,6 +251,11 @@ make api-check
 
 Generated files are reviewed as public contract changes and are never edited
 by hand.
+
+`make stream-sync` / `make stream-check` own the deterministic TUI stream
+fixture. `make profile-matrix` regenerates the policy-derived profile reference;
+`make check-docs` verifies it. Bundled Skill Markdown is loaded into model context
+and must retain valid manifests, resource paths, and catalog contracts.
 
 ## Validation architecture
 

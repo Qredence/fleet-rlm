@@ -9,6 +9,7 @@ The generated source of truth is [`openapi.yaml`](../../openapi.yaml).
 | `GET` | `/api/sessions` | List owned Sessions |
 | `GET/PATCH` | `/api/sessions/{session_id}` | Read, rename, or archive an owned Session |
 | `GET` | `/api/sessions/{session_id}/turns` | Read committed Turn history |
+| `POST` | `/api/sessions/{session_id}/traces/feedback` | Record feedback on an execution trace owned by the Session |
 | `POST` | `/api/attachments` | Upload one durable Attachment |
 | `GET` | `/api/attachments/{attachment_id}` | Read owned Attachment metadata |
 | `GET` | `/api/artifacts/{artifact_id}` | Read committed Artifact metadata |
@@ -70,8 +71,8 @@ After opening, one of three closings applies:
   followed by `[DONE]`. Transport/status 200 therefore no longer implies a
   successful Turn; the Run id lives in the `start` chunk metadata, not in
   response headers.
-- Run cancellation ends the live stream with one terminal `abort` chunk and
-  nothing after it (no `finish`, `data-usage`, or checkpoint metadata). Once
+- Run cancellation ends the live stream with one terminal `abort` chunk followed
+  by the `[DONE]` sentinel (no `finish`, `data-usage`, or checkpoint metadata). Once
   settlement completes, the cancelled attempt persists a bounded tombstone in
   committed history so `GET /api/sessions/{id}/turns` shows the attempt: the
   original user input plus one assistant message carrying only a
@@ -99,6 +100,18 @@ content checksum for precondition chaining.
 
 `POST /api/artifacts` does not exist. Artifacts become public only through Turn
 Commit after host-mediated `create_artifact` produces a private candidate.
+
+## Trace feedback
+
+The Session feedback endpoint accepts `trace_id`, a strict boolean `value`
+(`true` for positive feedback), and an optional `comment` of at most 2,000
+characters. It verifies Session ownership and the trace's
+execution phase, then records the `user_feedback` MLflow assessment through the
+application-owned tracing lifecycle. Missing or mismatched traces return the
+closed `feedback_trace_not_found` error; unavailable tracing returns
+`trace_feedback_unavailable`. Feedback does not change Turn settlement and is
+not a correctness or evidence-coverage label. The TUI exposes the same operation
+as `/feedback <up|down> [comment]` after a Run settles.
 
 ## Health probes
 

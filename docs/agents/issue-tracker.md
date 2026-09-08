@@ -3,6 +3,10 @@
 Issues, PRDs, and Wayfinder maps for this repository live as local Markdown under `.scratch/`.
 The directory is intentionally gitignored: it is a coordination surface for agents sharing this checkout, not a second canonical roadmap.
 
+The tracked `.scratch/refined-runtime-roadmap.md` is a historical exception.
+The maintained ADR 006 plan and status ledger linked from `docs/index.md` own
+active architecture progress; scratch tickets must not override them.
+
 ## Conventions
 
 - One effort per directory: `.scratch/<effort>/`.

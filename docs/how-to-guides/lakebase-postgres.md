@@ -19,8 +19,11 @@ Project (fleet-rlm)
         └── Role (fleet_app)
 ```
 
-Fleet RLM connects over asyncpg with `sslmode=require`. Alembic owns the schema
-(`migrations/`); `scripts/db_init.py` upgrades a fresh database to head.
+Fleet RLM accepts a PostgreSQL URL with `sslmode=require` and normalizes it to
+asyncpg's `ssl` connection option. Alembic uses the synchronous psycopg driver
+and owns Fleet's schema (`migrations/`); `scripts/db_init.py` applies the chain
+to head. Obtain actual endpoint and database names from the Lakebase Connect
+dialog rather than assuming the example names below.
 
 ## Prerequisites
 
@@ -49,6 +52,10 @@ databricks postgres get-endpoint \
 Native login lets a durable Postgres role authenticate with a password instead
 of a short-lived OAuth token.
 
+New projects disable password connections by default. Enable them explicitly
+when choosing this authentication method; see the official
+[role and password-connection guidance](https://docs.databricks.com/aws/en/oltp/projects/manage-roles).
+
 ```bash
 databricks postgres update-project projects/fleet-rlm spec.enable_pg_native_login \
   --json '{"spec": {"enable_pg_native_login": true}}' --profile <PROFILE>
@@ -62,6 +69,7 @@ create the durable role. `fleet_app` should own all `fleet_*` tables and
 
 ```sql
 CREATE ROLE fleet_app WITH LOGIN PASSWORD '<strong-password>';
+CREATE DATABASE fleet_rlm OWNER fleet_app;
 ```
 
 Grant ownership/membership as your deployment requires. **Never commit the
@@ -69,8 +77,11 @@ password.**
 
 ## 4. Alternative: short-lived OAuth token
 
-For quick sessions you can skip the native role and use an OAuth token for a
-Databricks identity. Tokens expire after ~1 hour and must be refreshed.
+For quick sessions you can use an OAuth role for a Databricks identity. Tokens
+expire after one hour and require rotation for a long-running application.
+Fleet's static database URL does not implement a credential-refresh callback;
+pool pre-ping and recycling do not refresh tokens. See the official
+[connection guide](https://docs.databricks.com/aws/en/oltp/projects/connect-overview).
 
 ```bash
 databricks postgres generate-database-credential \
@@ -83,16 +94,19 @@ databricks postgres generate-database-credential \
 
 Native role (durable — preferred):
 
-```bash
+```dotenv
 FLEET_DATABASE_URL=postgresql://fleet_app:<password>@<lakebase-host>:5432/fleet_rlm?sslmode=require
 ```
 
 OAuth identity (short-lived):
 
-```bash
+```dotenv
 FLEET_DATABASE_URL=postgresql://<user-email>:<token>@<lakebase-host>:5432/fleet_rlm?sslmode=require
 ```
 
+Place the chosen value in an untracked `.env` or configured secret store;
+percent-encode reserved characters in usernames and passwords. The database
+must already exist: Fleet's migrations create tables, not a PostgreSQL database.
 `<lakebase-host>` is the endpoint host from step 1. For the managed profile,
 also populate the TOML-declared MLflow values in `.env`:
 
@@ -116,13 +130,15 @@ uv run alembic check
 ## Notes and troubleshooting
 
 - **Always `sslmode=require`** — Lakebase rejects non-TLS connections.
-- **Scale-to-zero**: endpoints suspend when idle and wake in ~100 ms; the
-  runtime enables pool pre-ping and connection recycle to tolerate this.
+- **Scale-to-zero**: cold connection latency varies by deployment. Fleet uses
+  pool pre-ping, 1,800-second connection recycling, and a 30-second connection
+  timeout; these are client controls, not a provider latency guarantee.
 - **Idle/lifetime**: connections idle ~24h are closed; long queries can also
   hit token expiry (OAuth path). Prefer the durable `fleet_app` role for
   servers.
-- **`permission denied for schema`**: the role must own the schema. Create the
-  schema as `fleet_app` (or grant membership) rather than as your user.
+- **`permission denied for schema`**: verify the migration role's schema
+  privileges and ownership. Runtime DML and migration DDL have different
+  requirements; grant only the permissions needed for each role.
 - Token refresh and off-platform connection detail: Databricks Lakebase docs
   on connectivity.
 

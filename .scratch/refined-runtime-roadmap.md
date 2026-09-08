@@ -1,6 +1,10 @@
 # Refined runtime roadmap
 
-Status: implementation in progress on branch `feat/runtime-roadmap` (0.7.6).
+Status: historical roadmap for `feat/runtime-roadmap` (0.7.6), superseded by
+the [consolidated implementation plan](../fleet-rlm-implementation-plan-2026-09-06-v2.md)
+and [ADR 006 status ledger](../docs/decisions/006-implementation-status.md).
+The progress, branch names, pending gates, and validation results below are
+the original snapshot and do not describe the current checkout.
 Implementation commits are recorded below, including the existing agent-instruction
 changes requested by the operator. ADR 004/005 were created here because this
 checkout lacked them. PR 2E and the production Phase 2 budget wiring are complete

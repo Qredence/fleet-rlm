@@ -11,11 +11,11 @@ This project is developed and maintained by the Qredence team.
 
 This project is based on academic research by:
 
-- **Alex L. Zhang** (MIT CSAIL)
-- **Omar Khattab** (Stanford)
-- **Tim Kraska** (MIT)
+- **Alex L. Zhang**
+- **Tim Kraska**
+- **Omar Khattab**
 
-> Reference: [Recursive Language Models](https://arxiv.org/abs/2501.123) (Zhang, Kraska, Khattab, 2025)
+> Reference: [Recursive Language Models](https://arxiv.org/abs/2512.24601) (Zhang, Kraska, Khattab, 2025)
 
 ## Contributing
 

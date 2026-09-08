@@ -54,7 +54,7 @@ checks below.
   benchmark, database, and packaging markers;
 - `make api-check` for OpenAPI and generated TUI HTTP types;
 - pi-tui format, lint, type, and Vitest checks;
-- codebase-tree and documentation/harness checks.
+- codebase-tree, dependency-boundary, and documentation/harness checks.
 
 CircleCI enforces the same non-live surface: the `ci` workflow runs `quality`
 (on the Node-bearing `cimg/python:*-node` executor so `api-check` can run
@@ -107,6 +107,19 @@ terminal. It covers strict stream state, live/durable ordering, atomic hydration
 commands and Skill selection, cancellation, complete static rendering,
 alternate-screen follow-end scroll (`viewport-scroll.test.ts`), large-history
 render cost (`transcript.bench.ts`), and cleanup.
+
+## Documentation and bundled Skills
+
+For authored guides and agent instructions, run `make check-docs` and
+`git diff --check`. The documentation gate checks the generated profile matrix,
+internal documentation links and reachability, CLI/OpenAPI sanity, the root
+agent-guide line budget, and script inventory/help. It does not verify every
+prose claim, external URL, or historical receipt.
+
+Bundled Skill Markdown is loaded by the runtime. After correcting its bodies
+or manifested references, also run the existing Skill catalog, manifest, tools,
+resolver, API, and Turn-selection contracts. Do not turn a documentation refresh
+into an implicit live-provider or certification campaign.
 
 ## Database gate
 

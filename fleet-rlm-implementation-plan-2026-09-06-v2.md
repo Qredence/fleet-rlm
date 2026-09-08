@@ -2,7 +2,7 @@
 
 Revision: **2026-09-06, v2**; status refreshed **2026-09-08**. This document supersedes the A-G organization in the preceding plan and restores the original numbered phases, with MLflow work integrated throughout.
 
-Reviewed source baseline: `main` at `bcb85cc7b29d625e4c399cbf0a56459d0617302e` (2026-09-06 18:46:13 UTC). The current continuation checkout is `063bea648614edc1bd3f09792dd6b212429a1f29` on `fix/adr006-runtime-continuation`; it is dirty by design while the implementation is under review. The original baseline remains the source-audit anchor; the continuation receipt and ADR ledger below are authoritative for the refreshed progress.
+Reviewed source baseline: `main` at `bcb85cc7b29d625e4c399cbf0a56459d0617302e` (2026-09-06 18:46:13 UTC). The recorded continuation began at `063bea648614edc1bd3f09792dd6b212429a1f29` on `fix/adr006-runtime-continuation`. These are historical audit anchors, not a statement about the reader's current HEAD or working-tree state. The continuation receipts and ADR ledger track progress at their recorded revisions.
 
 Required targets: **DSPy 3.3.1**, **Daytona Python SDK 0.210.0**, and **MLflow 3.16.0**. All three are pinned and resolved in the current checkout. Certify SDK and tracking-backend capabilities separately; no further dependency upgrade is required for this continuation.
 

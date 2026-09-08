@@ -105,8 +105,9 @@ any history that the backend committed after an interruption.
 
 On resume, the store atomically replaces its state with persisted Turn text and
 Fleet trajectory parts. Live and durable data use the same projection rules.
-Transient status, delivery, cancellation reason, and latest Run outcome remain
-operator state and are not inserted into durable transcript messages.
+Transient preparation and delivery status remain operator state. A settled
+cancellation reloads the backend's bounded cancellation tombstone rather than
+the interrupted reasoning, code, or Tool evidence.
 
 ## Commands and Skills
 
@@ -150,6 +151,7 @@ the optional sanitized rationale, subject to the configured trace-content
 policy. Each submission is a separate MLflow assessment. Feedback writes are
 not automatically retried because an ambiguous response may follow a
 successful write and a retry could create a duplicate assessment.
+It records operator satisfaction, not verified correctness or evidence coverage.
 
 `/clear` resets only the current local presentation. It does not delete or
 rewrite durable Session History; resuming the Session restores committed Turns.

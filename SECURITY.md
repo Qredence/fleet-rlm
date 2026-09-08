@@ -4,8 +4,18 @@
 
 | Version | Supported          |
 | ------- | ------------------ |
-| 0.4.x   | :white_check_mark: |
-| < 0.4   | :x:                |
+| 0.7.x   | Current maintenance line |
+| < 0.7   | Upgrade to the current line |
+
+The source version is defined in `pyproject.toml`. This table identifies the
+maintenance line, not a claim that a particular checkout has passed a security
+audit. See [CONTRIBUTING.md](CONTRIBUTING.md) for the validation lanes.
+
+Fleet's API has deterministic local scope and no caller authentication. Use
+the default loopback binding unless deployment access controls are configured.
+The settings API remains loopback-only. Report sanitized reproduction steps;
+never include credentials, `.env` values, private trace content, or raw provider
+errors in a public report.
 
 ## Reporting a Vulnerability
 

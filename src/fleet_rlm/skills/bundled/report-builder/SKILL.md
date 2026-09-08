@@ -48,7 +48,8 @@ Create the requested report from verified source data.
    `create_artifact` only for newly generated content. Require `ok: true`; the
    result is a private Artifact Candidate, not proof of public publication
    until Turn Commit succeeds.
-7. For a report longer than 10,000 characters, write it once, then call
+7. When exact paged readback is impractical for a report longer than 10,000
+   characters, use metadata confirmation instead: write it once, then call
    `stat_project_file` (or `stat_workspace_file` for Session scratch) on the
    same path. Treat this as metadata confirmation only when both the write
    receipt's `byte_size` and `stat_result["entry"]["byte_size"]` equal

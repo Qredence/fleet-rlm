@@ -57,6 +57,14 @@ evaluation on any interpreter.
 
 ## 1. Dataset: expectation-bearing records (`fleet-rlm-quality-v2`)
 
+The maintained static dataset is the five `QUALITY_RECORDS` in
+`scripts/benchmarks/run_rlm_latency.py`. The separate
+`scripts/benchmarks/phase6_cases.json` corpus currently has fixture validation
+only: neither `prepare-evaluation` nor static dataset ingestion loads it.
+Its presence does not establish a runnable Phase 6 campaign. Corpus integration,
+per-case recursion classifications, and matched quality/cost evidence remain
+distinct work in the [ADR 006 ledger](../decisions/006-implementation-status.md).
+
 ```bash
 FLEET_LIVE=1 uv run --no-project --python 3.12 \
   --with 'mlflow[genai]==3.16.0' --with 'databricks-agents>=1.11' \
@@ -191,6 +199,11 @@ the `correctness` / `evidence_coverage` judges:
   is available).
 - `guidelines` (built-in) and `retrieval_groundedness` (built-in) — LLM-based,
   require the `--judge-model` URI.
+
+`tool_evidence_used` matches complete evidence identifiers in tool output text;
+it rejects missing, empty, or malformed requirements. It does not use trace
+attributes as evidence and does not establish answer correctness or semantic
+support merely because an identifier is present.
 
 Wire them into the quality gate without changing default behavior:
 

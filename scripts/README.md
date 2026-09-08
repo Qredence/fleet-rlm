@@ -3,7 +3,7 @@
 | Script | Purpose |
 | --- | --- |
 | `benchmarks/runtime_v2.py` | Execute repeated scripted Turns and compare sealed lifecycle migration receipts; no live semantic or Daytona guarantee |
-| `db_init.py` | Upgrade a fresh `FLEET_DATABASE_URL` database to Alembic head |
+| `db_init.py` | Apply the Alembic chain to `FLEET_DATABASE_URL`; keep it aligned with the runtime policy target |
 | `openapi_tools.py` | Generate or check backend-only `openapi.yaml` |
 | `generate_stream_fixture.py` | Generate or check the deterministic TUI turn-stream golden fixture |
 | `generate_tui_chunk_validation.py` | Generate or check the TUI runtime chunk-validation tables from `openapi.yaml` |
@@ -34,6 +34,7 @@
 | `circleci_trigger_release.py` | Trigger and await the GitHub Actions PyPI release from CircleCI |
 | `validate_mlflow_tracing.py` | Emit and validate a local or Managed Databricks trace using the selected Fleet TOML policy |
 | `benchmarks/certify_mlflow.py` | Run the bounded MLflow 3.16 certification lane with explicit local/configured backend selection and a write-once receipt |
+| `benchmarks/certify_postgres.py` | Certify contention and optional query plans against an explicitly designated exclusive test database |
 | `benchmarks/rlm_eval_dataset.py` | Manage the UC-backed v2 evaluation dataset (static records + tagged production traces with expectations) |
 | `benchmarks/enable_monitoring.py` | Start, inspect, and stop server-side production monitoring scorers over UC-ingested traces |
 | `benchmarks/align_judges.py` | Align Fleet judges with SME feedback via labeling sessions and MemAlign, then re-evaluate the baseline |
@@ -41,6 +42,12 @@
 Legacy WebSocket and compatibility runtime scripts were retired with the
 backend hard cutover. The evaluation entries above are the maintained
 trusted-host CLI workflows.
+
+Run commands from the repository root. `--help` is an inspection path, not
+authorization to run a credentialed operation. Live scripts differ in admission:
+some require `FLEET_LIVE=1`, while the maintained Daytona verifiers use
+`runtime.live_enabled`. Follow the individual command's documented prerequisites.
+Receipts prove only their recorded candidate, topology, workload, and outcome.
 
 ## Phase 1 Daytona stream canary
 
