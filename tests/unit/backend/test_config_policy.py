@@ -79,14 +79,14 @@ def test_policy_update_preserves_comments_and_validates_all_profiles(tmp_path: P
     assert _field(after, "daytona-recursive", "rlm.max_iters")["value"] == 21
 
 
-def test_variant_editor_only_exposes_implemented_runtime(tmp_path: Path) -> None:
+def test_variant_editor_exposes_only_the_certified_runtime(tmp_path: Path) -> None:
     service, policy = _service(tmp_path)
     snapshot = service.read()
     field = _field(snapshot, "defaults", "runtime.variant")
     assert field["choices"] == ["legacy"]
     before = policy.read_bytes()
     with pytest.raises(FleetConfigurationError):
-        service.update(scope="defaults", path="runtime.variant", value="native", revision=snapshot.revision)
+        service.update(scope="defaults", path="runtime.variant", value="native-turn-scoped", revision=snapshot.revision)
     assert policy.read_bytes() == before
 
 

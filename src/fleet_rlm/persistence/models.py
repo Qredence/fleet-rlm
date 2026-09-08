@@ -51,7 +51,11 @@ class WorkspaceRow(Base):
 
 class SessionRow(Base):
     __tablename__ = "fleet_sessions"
-    __table_args__ = (Index("ix_fleet_sessions_workspace_updated", "workspace_id", "updated_at"),)
+    __table_args__ = (
+        Index("ix_fleet_sessions_workspace_updated", "workspace_id", "updated_at"),
+        Index("uq_fleet_sessions_id_workspace", "id", "workspace_id", unique=True),
+        CheckConstraint("status IN ('active', 'archived')", name="ck_fleet_sessions_status"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=_uuid)
     user_id: Mapped[uuid.UUID] = mapped_column(
@@ -162,6 +166,14 @@ class RunRow(Base):
 
 class SandboxBindingRow(Base):
     __tablename__ = "fleet_sandbox_bindings"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["session_id", "workspace_id"],
+            ["fleet_sessions.id", "fleet_sessions.workspace_id"],
+            name="fk_fleet_bindings_session_workspace",
+            ondelete="CASCADE",
+        ),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=_uuid)
     session_id: Mapped[uuid.UUID] = mapped_column(
@@ -171,7 +183,11 @@ class SandboxBindingRow(Base):
         unique=True,
     )
     sandbox_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    workspace_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), nullable=False)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("fleet_workspaces.id", name="fk_fleet_bindings_workspace", ondelete="CASCADE"),
+        nullable=False,
+    )
     volume_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     volume_subpath: Mapped[str] = mapped_column(String(512), nullable=False)
     mount_path: Mapped[str] = mapped_column(String(512), nullable=False, default="/home/daytona/fleet")

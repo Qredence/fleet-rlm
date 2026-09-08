@@ -175,7 +175,9 @@ class Settings(BaseModel):
             choices=("legacy",),
             rank=72,
         ),
-    ] = Field(default="legacy", description="Implemented execution architecture; independent of provider environment")
+    ] = Field(
+        default="legacy", description="Supported execution architecture; native feasibility is not policy-selectable"
+    )
     app_name: Annotated[
         str,
         FleetFieldPolicy(
@@ -195,7 +197,17 @@ class Settings(BaseModel):
     ] = Field(default=None)
     daytona_snapshot: Annotated[
         str | None,
-        FleetFieldPolicy(toml_path="daytona.snapshot", group="Daytona", label="Snapshot", editor="text", rank=45),
+        FleetFieldPolicy(
+            toml_path=None,
+            doc="Session snapshot resolved at runtime from daytona.snapshot_env",
+        ),
+    ] = Field(default=None)
+    daytona_child_snapshot: Annotated[
+        str | None,
+        FleetFieldPolicy(
+            toml_path=None,
+            doc="Lean SemanticChild snapshot resolved at runtime from daytona.child_snapshot_env",
+        ),
     ] = Field(default=None)
     daytona_org_id: Annotated[
         str | None,
@@ -798,6 +810,66 @@ class Settings(BaseModel):
         le=1.0,
         description="Fraction of Turn traces to sample for MLflow",
     )
+    mlflow_trace_content_enabled: Annotated[
+        bool,
+        FleetFieldPolicy(
+            toml_path="mlflow.trace_content_enabled",
+            group="MLflow",
+            label="Capture sanitized trace content",
+            editor="boolean",
+            rank=110,
+        ),
+    ] = Field(default=False, description="Permit bounded sanitized content in restricted engineering traces")
+    mlflow_trace_export_queue_size: Annotated[
+        int,
+        FleetFieldPolicy(
+            toml_path="mlflow.trace_export_queue_size",
+            group="MLflow",
+            label="Trace export queue size",
+            editor="number",
+            rank=111,
+        ),
+    ] = Field(default=128, ge=1, le=10000)
+    mlflow_trace_export_workers: Annotated[
+        int,
+        FleetFieldPolicy(
+            toml_path="mlflow.trace_export_workers",
+            group="MLflow",
+            label="Trace export workers",
+            editor="number",
+            rank=112,
+        ),
+    ] = Field(default=2, ge=1, le=16)
+    mlflow_trace_export_retry_seconds: Annotated[
+        int,
+        FleetFieldPolicy(
+            toml_path="mlflow.trace_export_retry_seconds",
+            group="MLflow",
+            label="Trace export retry limit",
+            editor="number",
+            rank=113,
+        ),
+    ] = Field(default=10, ge=1, le=120)
+    mlflow_http_request_timeout_seconds: Annotated[
+        int,
+        FleetFieldPolicy(
+            toml_path="mlflow.http_request_timeout_seconds",
+            group="MLflow",
+            label="MLflow HTTP request timeout",
+            editor="number",
+            rank=115,
+        ),
+    ] = Field(default=10, ge=1, le=600)
+    mlflow_trace_shutdown_seconds: Annotated[
+        float,
+        FleetFieldPolicy(
+            toml_path="mlflow.trace_shutdown_seconds",
+            group="MLflow",
+            label="Trace shutdown wait",
+            editor="number",
+            rank=114,
+        ),
+    ] = Field(default=5.0, gt=0, le=60)
     mlflow_trace_content_max_chars: Annotated[
         int,
         FleetFieldPolicy(
@@ -876,6 +948,8 @@ class Settings(BaseModel):
             raise ValueError("FLEET_RUN_STALE_AFTER_SECONDS must be at least three times FLEET_RUN_HEARTBEAT_SECONDS")
         if self.rlm_wrap_up_seconds >= self.turn_timeout_seconds:
             raise ValueError("rlm_wrap_up_seconds must be less than turn_timeout_seconds")
+        if self.rlm_recursion_max_parallel_children > self.rlm_recursion_max_calls:
+            raise ValueError("rlm_recursion_max_parallel_children must not exceed rlm_recursion_max_calls")
         return self
 
     @field_validator("rlm_autonomous_memory_categories")
@@ -913,7 +987,7 @@ class Settings(BaseModel):
             raise ValueError("posthog_host must be an absolute http(s) URL")
         return text.rstrip("/")
 
-    @field_validator("daytona_snapshot", mode="before")
+    @field_validator("daytona_snapshot", "daytona_child_snapshot", mode="before")
     @classmethod
     def _sanitize_daytona_snapshot(cls, value: object) -> str | None:
         """
@@ -936,7 +1010,7 @@ class Settings(BaseModel):
         try:
             return validate_snapshot_name(text)
         except ValueError as exc:
-            raise ValueError("FLEET_DAYTONA_SNAPSHOT must be immutable and end in -v<positive integer>") from exc
+            raise ValueError("Daytona snapshots must be immutable and end in -v<positive integer>") from exc
 
     def llm_role(self, role: Literal["root", "sub"]) -> LLMRoleSettings:
         """
@@ -1023,6 +1097,20 @@ _ENVIRONMENT_REFERENCE_SPECS: tuple[EnvironmentReferenceSpec, ...] = (
         label="API key environment variable",
         rank=44,
         resolves_to="daytona_api_key",
+    ),
+    EnvironmentReferenceSpec(
+        toml_path="daytona.snapshot_env",
+        group="Daytona",
+        label="Session snapshot environment variable",
+        rank=45,
+        resolves_to="daytona_snapshot",
+    ),
+    EnvironmentReferenceSpec(
+        toml_path="daytona.child_snapshot_env",
+        group="Daytona",
+        label="SemanticChild snapshot environment variable",
+        rank=116,
+        resolves_to="daytona_child_snapshot",
     ),
     EnvironmentReferenceSpec(
         toml_path="mlflow.experiment_name_env",

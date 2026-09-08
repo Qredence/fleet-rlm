@@ -46,6 +46,8 @@ class ProfileEnvironmentContract:
     root_max_tokens: int | None
     sub_max_tokens: int | None
     daytona_api_key_env: str
+    daytona_snapshot_env: str | None
+    daytona_child_snapshot_env: str | None
     database_url_env: str | None
     mlflow_tracing_enabled: bool
     mlflow_tracking_uri: str | None
@@ -73,6 +75,11 @@ class ProfileEnvironmentContract:
             self.database_url_env,
             *self.mlflow_environment_names,
         )
+
+    @property
+    def daytona_snapshot_environment_names(self) -> tuple[str, ...]:
+        """Return non-secret Daytona snapshot variable names for operator tooling."""
+        return _unique_environment_names(self.daytona_snapshot_env, self.daytona_child_snapshot_env)
 
 
 @dataclass(frozen=True, slots=True)
@@ -403,6 +410,12 @@ def _profile_contract(
     daytona_api_key_env = _validate_environment_reference(
         daytona.get("api_key_env"), f"profiles.{name}.daytona.api_key_env"
     )
+    daytona_snapshot_env = _validate_optional_environment_reference(
+        daytona.get("snapshot_env"), f"profiles.{name}.daytona.snapshot_env"
+    )
+    daytona_child_snapshot_env = _validate_optional_environment_reference(
+        daytona.get("child_snapshot_env"), f"profiles.{name}.daytona.child_snapshot_env"
+    )
     database_url_env = _validate_optional_environment_reference(
         storage.get("database_url_env"), f"profiles.{name}.storage.database_url_env"
     )
@@ -432,6 +445,8 @@ def _profile_contract(
         root_max_tokens=root.get("max_tokens"),
         sub_max_tokens=sub.get("max_tokens"),
         daytona_api_key_env=daytona_api_key_env,
+        daytona_snapshot_env=daytona_snapshot_env,
+        daytona_child_snapshot_env=daytona_child_snapshot_env,
         database_url_env=database_url_env,
         mlflow_tracing_enabled=bool(mlflow.get("tracing_enabled", False)),
         mlflow_tracking_uri=mlflow.get("tracking_uri"),
@@ -457,15 +472,36 @@ def active_profile_contract(path: Path | None = None) -> ProfileEnvironmentContr
     return _profile_contract(default_profile, document.defaults, document.profiles[default_profile])
 
 
-def _resolve_environment_value(name: str | None, dotenv: Mapping[str, str | None]) -> str | None:
-    """Resolve one TOML-declared external value; exports win over ``.env``."""
+def _resolve_environment_value(
+    name: str | None,
+    dotenv: Mapping[str, str | None],
+    *,
+    dotenv_only: bool = False,
+) -> str | None:
+    """Resolve one TOML-declared value, optionally requiring repository ``.env``."""
     if name is None:
         return None
-    value = os.environ.get(name)
-    if value is None:
-        value = dotenv.get(name)
-    value = (value or "").strip()
-    return value or None
+    if not dotenv_only:
+        value = os.environ.get(name)
+        if value is None:
+            value = dotenv.get(name)
+        value = (value or "").strip()
+        return value or None
+
+    dotenv_value = (dotenv.get(name) or "").strip() or None
+    process_value = (os.environ.get(name) or "").strip() or None
+    if dotenv_value is not None and process_value is not None and dotenv_value != process_value:
+        raise FleetConfigurationError(f"environment value {name!r} differs between .env and the process environment")
+    # Snapshot identities are safe to resolve from an explicitly declared
+    # process variable when the repository .env is absent (for example in a
+    # deployment image), while a disagreement fails closed above.
+    return dotenv_value or process_value
+
+
+# Snapshot identities are non-secret operator policy. Prefer the repository
+# .env, allow an explicitly TOML-declared process variable when .env is absent,
+# and reject disagreement so promotion or rollback cannot select a stale image.
+_DOTENV_ONLY_FIELDS: frozenset[str] = frozenset({"daytona_snapshot", "daytona_child_snapshot"})
 
 
 def _require_managed_profile_environment_values(
@@ -495,7 +531,11 @@ def _require_managed_profile_environment_values(
             environment_name: Any = flattened.settings.get(field_name)
         else:
             environment_name = flattened.environment_references.get(field_name)
-        if not isinstance(environment_name, str) or not _resolve_environment_value(environment_name, dotenv):
+        if not isinstance(environment_name, str) or not _resolve_environment_value(
+            environment_name,
+            dotenv,
+            dotenv_only=field_name in _DOTENV_ONLY_FIELDS,
+        ):
             missing.add(environment_name if isinstance(environment_name, str) else label)
     if missing:
         raise FleetConfigurationError(
@@ -533,7 +573,11 @@ def load_runtime_settings() -> Settings:
 
     values: dict[str, Any] = dict(flattened.settings)
     for field_name, environment_name in flattened.environment_references.items():
-        resolved = _resolve_environment_value(environment_name, dotenv)
+        resolved = _resolve_environment_value(
+            environment_name,
+            dotenv,
+            dotenv_only=field_name in _DOTENV_ONLY_FIELDS,
+        )
         if field_name in _SECRET_RESOLVED_FIELDS:
             values[field_name] = SecretStr(resolved) if resolved is not None else None
         else:

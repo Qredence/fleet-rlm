@@ -699,6 +699,51 @@ def test_http_broker_copies_context_independently_into_parallel_fulfillment() ->
     assert active_trace.get() == "fleet-turn"
 
 
+def test_silent_native_execution_observes_authority_without_output(monkeypatch: pytest.MonkeyPatch) -> None:
+    from fleet_rlm.daytona.broker import DaytonaHttpToolBroker
+
+    broker = DaytonaHttpToolBroker(sandbox=object())
+    monkeypatch.setattr(broker, "ensure_started", lambda: None)
+    entered, release, finished = Event(), Event(), Event()
+    polls = []
+
+    def run():
+        entered.set()
+        try:
+            assert release.wait(2)
+            return "late result"
+        finally:
+            finished.set()
+
+    def fence():
+        if entered.is_set():
+            raise TimeoutError("turn expired")
+
+    def poll(*_args, **_kwargs):
+        assert entered.wait(1)
+        polls.append(True)
+        return False
+
+    monkeypatch.setattr(broker, "_poll_once", poll)
+    try:
+        with pytest.raises(TimeoutError, match="turn expired"):
+            broker.execute_with_callbacks(run_code=run, tool_executor=lambda *_: None, check_authority=fence)
+        assert not release.is_set()
+        assert broker.stop() is False
+        workers = tuple(broker._execution_threads)
+        assert workers
+        # A transport worker is not proof of remote containment. Its late
+        # completion must not publish results or change settled statistics.
+        settled = broker.last_execution_stats
+    finally:
+        release.set()
+        assert finished.wait(1)
+        for worker in broker._execution_threads:
+            worker.join(timeout=1)
+    assert broker.last_execution_stats == settled
+    assert broker.stop(strict=True) is True
+
+
 def test_execute_with_callbacks_records_per_execution_stats(monkeypatch: pytest.MonkeyPatch) -> None:
     from fleet_rlm.daytona.broker import DaytonaHttpToolBroker
 

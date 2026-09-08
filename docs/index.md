@@ -26,6 +26,8 @@ FastAPI/SSE contract backed by DSPy, Daytona, and SQLAlchemy/Alembic.
 18. [Turn interpreter context target (ADR 004)](decisions/004-turn-interpreter-context.md)
 19. [Runtime variant (ADR 005)](decisions/005-runtime-variant.md)
 20. [Native runtime and MLflow evidence (ADR 006)](decisions/006-native-turn-scoped-runtime-and-evaluation.md)
+21. [ADR 006 implementation status](decisions/006-implementation-status.md)
+22. [ADR 006 consolidated implementation plan](../fleet-rlm-implementation-plan-2026-09-06-v2.md)
 
 ## Reference
 
@@ -43,5 +45,7 @@ FastAPI/SSE contract backed by DSPy, Daytona, and SQLAlchemy/Alembic.
 - schema: `migrations/`
 - validation: `Makefile`, `tests/`, and TUI tests
 
-No tracked implementation plan is currently active; internal mission plans
-and ExecPlan guides are kept under the ignored local `.scratch/` tree.
+The maintained [ADR 006 implementation plan](../fleet-rlm-implementation-plan-2026-09-06-v2.md)
+and its [execution/status ledger](decisions/006-implementation-status.md) track
+implementation through Recursive RLM v2 separately from live certification and
+rollout authorization. Older scratch roadmaps remain historical references.

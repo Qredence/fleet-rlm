@@ -87,6 +87,8 @@ def require_daytona_settings(settings: Settings) -> None:
         missing.append("FLEET_DAYTONA_API_KEY")
     if not (settings.daytona_snapshot or "").strip():
         missing.append("FLEET_DAYTONA_SNAPSHOT")
+    if settings.rlm_recursion_enabled and not (settings.daytona_child_snapshot or "").strip():
+        missing.append("FLEET_DAYTONA_CHILD_SNAPSHOT")
     from fleet_rlm.rlm.program import has_llm_credentials
 
     if not has_llm_credentials(settings):
@@ -920,4 +922,5 @@ def build_run_preparation(
         environments=_DaytonaEnvironmentProvider(resources, settings, session_runtime_registry),
         capabilities=_LiveCapabilityPreparer(settings, skill_catalog, volume_paths=resources.volume_paths),
         session_runtime_registry=session_runtime_registry,
+        runtime_variant=settings.runtime_variant,
     )

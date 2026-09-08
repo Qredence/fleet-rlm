@@ -178,6 +178,9 @@ TOOL_RLM_INSTRUCTIONS = """1. Use the Python standard library for deterministic 
 RECURSION_RLM_INSTRUCTIONS = """Use ``rlm_query(prompt=prompt)`` only when one selected, self-contained subproblem needs its own iterative
    Python exploration. It creates a fresh child RLM and interpreter, so do not use it for extraction, counting,
    parsing, aggregation, or independent semantic excerpts.
+Prefer ``rlm_query_capsule`` for the canonical path: pass only the selected task,
+   fragments, authorized references, evidence requirements, and bounded allocation. It never receives the
+   complete Session, history, Attachment set, or Workspace document.
 Use ``rlm_query_batched(prompts=prompts)`` only for multiple independent selected subproblems where
    each item individually justifies an iterative child RLM. Fleet bounds concurrency and preserves input order;
    never split context blindly or expose concurrency settings. Keep large inputs in Python variables, select only
@@ -1229,7 +1232,7 @@ class FleetToolCatalog:
             tool = value if isinstance(value, dspy.Tool) else dspy.Tool(value)
             kind = (
                 FleetToolKind.RECURSIVE
-                if tool.name in {"rlm_query", "rlm_query_batched"}
+                if tool.name in {"rlm_query", "rlm_query_batched", "rlm_query_capsule", "rlm_query_capsules_batched"}
                 else FleetToolKind.HOST_AUTHORIZED
             )
             entries.append(FleetToolEntry(tool, kind))

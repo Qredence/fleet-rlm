@@ -37,7 +37,7 @@ dependencies = [
     # SessionExecuteRequest are all unchanged or gain optional fields only).
     # The new warm-pool service and typed errors are not exploited by our
     # volume-mounted sandboxes, so this is a maintenance bump, not a feature.
-    "daytona==0.207.0",
+    "daytona==0.210.0",
     # Persistence and migrations.
     "aiosqlite>=0.20.0",
     "alembic>=1.18.5,<2",
@@ -61,7 +61,8 @@ dependencies = [
     # responses without inheriting ambient proxy configuration.
     "urllib3>=2.7,<3",
     # MLflow 3 tracing: DSPy autolog + Databricks tracking backend.
-    "mlflow>=3.15,<4",
+    "mlflow==3.15.2",
+    "opentelemetry-sdk==1.44.0",
     "tomlkit>=0.13,<1",
     "posthog>=7.39.1,<8",
 ]

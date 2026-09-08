@@ -96,6 +96,27 @@ def test_benchmark_rejects_missing_semantic_scorer_evidence():
         validate(seal(receipt))
 
 
+@pytest.mark.parametrize(
+    "axis,key,value",
+    [
+        ("runtime", "runtime_variant", "native-turn-scoped"),
+        ("daytona-sdk", "daytona_sdk", "0.207.0"),
+        ("snapshot", "snapshots", ["analysis-v2"]),
+    ],
+)
+def test_comparison_allows_only_the_explicit_axis(axis, key, value):
+    baseline = _clean_receipt(run(repetitions=2))
+    candidate = deepcopy(baseline)
+    candidate.pop("receipt_digest")
+    target = candidate if axis == "runtime" else candidate["identities"]
+    target[key] = value
+    assert not compare(baseline, seal(candidate))["passed"]
+    assert compare(baseline, seal(candidate), axis=axis)["passed"]
+    candidate["identities"]["provider"] = "different-provider"
+    assert not compare(baseline, seal(candidate), axis=axis)["passed"]
+    assert not compare(baseline, baseline, axis=axis)["passed"]
+
+
 def test_run_rejects_sealed_inconsistent_event_fixtures(monkeypatch):
     original_seal = runtime_v2.seal
 

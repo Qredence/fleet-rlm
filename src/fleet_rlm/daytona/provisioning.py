@@ -4,8 +4,11 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
+import shlex
 from collections.abc import Iterable
 from dataclasses import dataclass
+from enum import StrEnum
 from importlib.resources import files
 from typing import Any, Protocol
 from uuid import UUID
@@ -22,13 +25,121 @@ from fleet_rlm.runtime.bindings import (
 )
 from fleet_rlm.snapshot_contract import validate_snapshot_name
 
-DEFAULT_SNAPSHOT_NAME = "fleet-rlm-python313-v5"
+DEFAULT_SNAPSHOT_NAME = "fleet-rlm-python313-v7"
+DEFAULT_CHILD_SNAPSHOT_NAME = "fleet-rlm-python313-child-v2"
 DEFAULT_VOLUME_NAME = "rlm-volume-dspy"
 PYTHON_VERSION = "3.13.13"
 BASE_IMAGE = "python:3.13.13-slim-bookworm@sha256:f576b530293e74140ea91d262232648d5c4f45640a95ec447757701bfcacf034"
+SESSION_RESOURCES: tuple[int, int, int] = (4, 8, 8)
+SEMANTIC_CHILD_RESOURCES: tuple[int, int, int] = (2, 4, 4)
 _DIRECTORY_MODE = "700"
 _ZERO_UUID = UUID(int=0)
 _SNAPSHOT_REQUIREMENTS = "snapshot-requirements.txt"
+
+
+class DaytonaEnvironmentProfile(StrEnum):
+    """The three logical execution environments; capacity is not implied."""
+
+    SESSION = "session"
+    SEMANTIC_CHILD = "semantic-child"
+    WORKSPACE_CHILD = "workspace-child"
+
+
+@dataclass(frozen=True, slots=True)
+class DaytonaEnvironmentManifest:
+    """Auditable immutable environment identity, safe to retain in evidence."""
+
+    profile: DaytonaEnvironmentProfile
+    image_kind: str
+    snapshot: str
+    base_image: str
+    python_version: str
+    dependency_sha256: str
+    dependencies: tuple[str, ...]
+    user: str = "daytona"
+    workdir: str = "/home/daytona"
+    volume_allowed: bool = False
+    warm_pool_eligible: bool = False
+    schema_version: str = "fleet.daytona-runtime-manifest/v1"
+    helper_protocol: str = "daytona-native-context/v1"
+
+    def as_dict(self) -> dict[str, object]:
+        """Return the non-secret manifest payload baked into new images."""
+        return {
+            "schema_version": self.schema_version,
+            "profile": self.profile.value,
+            "image_kind": self.image_kind,
+            "snapshot": self.snapshot,
+            "base_image": self.base_image,
+            "python_version": self.python_version,
+            "python_executable": "/usr/local/bin/python",
+            "dependency_sha256": self.dependency_sha256,
+            "dependencies": list(self.dependencies),
+            "helper_protocol": self.helper_protocol,
+            "capabilities": ["python", "git", "ca-certificates"],
+            "resources": {"cpu": self.resources[0], "memory_gib": self.resources[1], "disk_gib": self.resources[2]},
+            "user": self.user,
+            "workdir": self.workdir,
+            "volume_allowed": self.volume_allowed,
+            "warm_pool_eligible": self.warm_pool_eligible,
+        }
+
+    def image_identity(self) -> dict[str, object]:
+        """Return the immutable image payload independent of its execution profile."""
+        identity = self.as_dict()
+        identity.pop("profile")
+        return identity
+
+    @property
+    def compatible_profiles(self) -> tuple[DaytonaEnvironmentProfile, ...]:
+        """Return profiles that may execute against this immutable image."""
+        if self.profile is DaytonaEnvironmentProfile.SEMANTIC_CHILD:
+            return (DaytonaEnvironmentProfile.SEMANTIC_CHILD,)
+        return (DaytonaEnvironmentProfile.SESSION, DaytonaEnvironmentProfile.WORKSPACE_CHILD)
+
+    @property
+    def resources(self) -> tuple[int, int, int]:
+        """Return the immutable CPU/memory/disk contract for this profile."""
+        return (
+            SESSION_RESOURCES
+            if self.profile is not DaytonaEnvironmentProfile.SEMANTIC_CHILD
+            else SEMANTIC_CHILD_RESOURCES
+        )
+
+    @property
+    def digest(self) -> str:
+        """Return the deterministic digest of the profile-independent image identity."""
+        encoded = json.dumps(self.image_identity(), sort_keys=True, separators=(",", ":")).encode("utf-8")
+        return hashlib.sha256(encoded).hexdigest()
+
+
+def environment_manifest(
+    spec: DaytonaSandboxSpec,
+    profile: DaytonaEnvironmentProfile | None = None,
+) -> DaytonaEnvironmentManifest:
+    """Return the selected profile's reproducible, non-secret contract.
+
+    Session and Workspace children share the full analysis image. Semantic
+    children use a lean image and are the only profile eligible for a generic
+    clean warm pool; actual pool creation remains an operator action.
+    """
+    profile = spec.profile if profile is None else profile
+    if not isinstance(profile, DaytonaEnvironmentProfile):
+        raise TypeError("profile must be a DaytonaEnvironmentProfile")
+    semantic = profile is DaytonaEnvironmentProfile.SEMANTIC_CHILD
+    dependencies = () if semantic else snapshot_execution_dependencies()
+    digest_source = "".join(f"{item}\n" for item in dependencies).encode("utf-8")
+    return DaytonaEnvironmentManifest(
+        profile=profile,
+        image_kind="lean-child" if semantic else "session-analysis",
+        snapshot=spec.snapshot,
+        base_image=spec.base_image,
+        python_version=spec.python_version,
+        dependency_sha256=hashlib.sha256(digest_source).hexdigest(),
+        dependencies=dependencies,
+        volume_allowed=not semantic,
+        warm_pool_eligible=semantic,
+    )
 
 
 class VolumeClient(Protocol):
@@ -41,6 +152,7 @@ class SandboxPlatform(Protocol):
     async def create(
         self,
         *,
+        profile: DaytonaEnvironmentProfile = DaytonaEnvironmentProfile.SESSION,
         volume_id: str | None = None,
         mount_path: str | None = None,
         volume_subpath: str | None = None,
@@ -57,6 +169,7 @@ class SandboxPlatform(Protocol):
         Create a sandbox with optional volume, network, labeling, and lifecycle configuration.
 
         Parameters:
+            profile (DaytonaEnvironmentProfile): Immutable image/profile contract to use.
             volume_id (str | None): Identifier of the volume to mount.
             mount_path (str | None): Path at which to mount the volume.
             volume_subpath (str | None): Subpath within the volume to mount.
@@ -95,21 +208,54 @@ class DaytonaSandboxSpec:
     snapshot: str
     python_version: str = PYTHON_VERSION
     base_image: str = BASE_IMAGE
-    cpu: int = 2
-    memory_gib: int = 4
-    disk_gib: int = 8
+    cpu: int = SESSION_RESOURCES[0]
+    memory_gib: int = SESSION_RESOURCES[1]
+    disk_gib: int = SESSION_RESOURCES[2]
+    profile: DaytonaEnvironmentProfile = DaytonaEnvironmentProfile.SESSION
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "snapshot", validate_snapshot_name(self.snapshot))
-        if (self.cpu, self.memory_gib, self.disk_gib) != (2, 4, 8):
-            raise ValueError("Fleet Daytona snapshot resources must be 2 CPU, 4 GiB memory, and 8 GiB disk")
+        profile = self.profile
+        if not isinstance(profile, DaytonaEnvironmentProfile):
+            try:
+                profile = DaytonaEnvironmentProfile(str(profile))
+            except ValueError as exc:
+                raise ValueError("unknown Daytona environment profile") from exc
+            object.__setattr__(self, "profile", profile)
+        expected = (
+            SEMANTIC_CHILD_RESOURCES if profile is DaytonaEnvironmentProfile.SEMANTIC_CHILD else SESSION_RESOURCES
+        )
+        if (self.cpu, self.memory_gib, self.disk_gib) != expected:
+            raise ValueError(
+                "Fleet Daytona snapshot resources must be "
+                f"{expected[0]} CPU, {expected[1]} GiB memory, and {expected[2]} GiB disk for {profile.value}"
+            )
 
     @classmethod
-    def from_settings(cls, settings: Any) -> DaytonaSandboxSpec:
-        value = getattr(settings, "daytona_snapshot", None)
+    def from_settings(
+        cls,
+        settings: Any,
+        profile: DaytonaEnvironmentProfile = DaytonaEnvironmentProfile.SESSION,
+    ) -> DaytonaSandboxSpec:
+        field = "daytona_child_snapshot" if profile is DaytonaEnvironmentProfile.SEMANTIC_CHILD else "daytona_snapshot"
+        value = getattr(settings, field, None)
         if not isinstance(value, str) or not value.strip():
-            raise ValueError("FLEET_DAYTONA_SNAPSHOT is required")
-        return cls(snapshot=value.strip())
+            env_name = (
+                "FLEET_DAYTONA_CHILD_SNAPSHOT"
+                if profile is DaytonaEnvironmentProfile.SEMANTIC_CHILD
+                else "FLEET_DAYTONA_SNAPSHOT"
+            )
+            raise ValueError(f"{env_name} is required")
+        resources = (
+            SEMANTIC_CHILD_RESOURCES if profile is DaytonaEnvironmentProfile.SEMANTIC_CHILD else SESSION_RESOURCES
+        )
+        return cls(
+            snapshot=value.strip(),
+            cpu=resources[0],
+            memory_gib=resources[1],
+            disk_gib=resources[2],
+            profile=profile,
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -147,16 +293,23 @@ class ExpectedWorkspaceMount:
         object.__setattr__(self, "mount_path", str(self.mount_path))
 
 
-def sandbox_spec_from_settings(settings: Any) -> DaytonaSandboxSpec:
-    return DaytonaSandboxSpec.from_settings(settings)
+def sandbox_spec_from_settings(
+    settings: Any,
+    profile: DaytonaEnvironmentProfile = DaytonaEnvironmentProfile.SESSION,
+) -> DaytonaSandboxSpec:
+    return DaytonaSandboxSpec.from_settings(settings, profile)
 
 
 def volume_config_from_settings(settings: Any) -> VolumeConfig:
     return VolumeConfig.from_settings(settings)
 
 
-def snapshot_execution_dependencies() -> tuple[str, ...]:
+def snapshot_execution_dependencies(
+    profile: DaytonaEnvironmentProfile = DaytonaEnvironmentProfile.SESSION,
+) -> tuple[str, ...]:
     """Load the exact generated-code packages baked into the Snapshot."""
+    if profile is DaytonaEnvironmentProfile.SEMANTIC_CHILD:
+        return ()
     content = files("fleet_rlm.daytona").joinpath(_SNAPSHOT_REQUIREMENTS).read_text(encoding="utf-8")
     dependencies = tuple(
         line.strip() for line in content.splitlines() if line.strip() and not line.lstrip().startswith("#")
@@ -169,7 +322,9 @@ def snapshot_execution_dependencies() -> tuple[str, ...]:
 _IMPORT_NAME_OVERRIDES: dict[str, str] = {"beautifulsoup4": "bs4"}
 
 
-def snapshot_dependency_import_names() -> tuple[tuple[str, str, str], ...]:
+def snapshot_dependency_import_names(
+    profile: DaytonaEnvironmentProfile = DaytonaEnvironmentProfile.SESSION,
+) -> tuple[tuple[str, str, str], ...]:
     """Return dependency distributions, import module names, and pinned versions included in the snapshot.
 
     Returns:
@@ -177,15 +332,17 @@ def snapshot_dependency_import_names() -> tuple[tuple[str, str, str], ...]:
         its import module name, and its pinned version.
     """
     triples = []
-    for dependency in snapshot_execution_dependencies():
+    for dependency in snapshot_execution_dependencies(profile):
         package, version = dependency.split("==", 1)
         triples.append((package, _IMPORT_NAME_OVERRIDES.get(package, package.replace("-", "_")), version))
     return tuple(triples)
 
 
-def snapshot_dependency_sha256() -> str:
+def snapshot_dependency_sha256(
+    profile: DaytonaEnvironmentProfile = DaytonaEnvironmentProfile.SESSION,
+) -> str:
     """Return the stable digest of the canonical Snapshot dependency contract."""
-    canonical = "".join(f"{dependency}\n" for dependency in snapshot_execution_dependencies())
+    canonical = "".join(f"{dependency}\n" for dependency in snapshot_execution_dependencies(profile))
     return hashlib.sha256(canonical.encode()).hexdigest()
 
 
@@ -202,7 +359,17 @@ def build_snapshot_image(spec: DaytonaSandboxSpec) -> Any:
     """
     from daytona import Image
 
-    return (
+    # Session and WorkspaceChild share one immutable analysis image. Bake its
+    # canonical Session manifest regardless of the execution profile selected
+    # by the caller; profile-specific mounts and labels remain runtime policy.
+    manifest_profile = (
+        DaytonaEnvironmentProfile.SEMANTIC_CHILD
+        if spec.profile is DaytonaEnvironmentProfile.SEMANTIC_CHILD
+        else DaytonaEnvironmentProfile.SESSION
+    )
+    manifest = environment_manifest(spec, manifest_profile)
+    image_profile = manifest.profile
+    image = (
         Image.base(spec.base_image)
         .run_commands(
             "apt-get update && apt-get install -y --no-install-recommends "
@@ -211,16 +378,29 @@ def build_snapshot_image(spec: DaytonaSandboxSpec) -> Any:
             "useradd --uid 1000 --gid daytona --create-home --home-dir /home/daytona --shell /bin/bash daytona",
             "chown -R daytona:daytona /home/daytona",
         )
-        .pip_install(list(snapshot_execution_dependencies()))
+        .pip_install(list(snapshot_execution_dependencies(image_profile)))
         .env(
             {
                 "PYTHONUNBUFFERED": "1",
-                "FLEET_SNAPSHOT_DEPENDENCIES_SHA256": snapshot_dependency_sha256(),
+                "FLEET_SNAPSHOT_DEPENDENCIES_SHA256": snapshot_dependency_sha256(image_profile),
             }
         )
         .workdir("/home/daytona")
-        .dockerfile_commands(["USER daytona"])
     )
+    # v5 is retained as a rollback image whose existing provider definition
+    # predates the runtime manifest. New immutable images carry the manifest
+    # and its digest so runtime probes can validate the actual profile.
+    if not (spec.snapshot == "fleet-rlm-python313-v5" and image_profile is DaytonaEnvironmentProfile.SESSION):
+        encoded = json.dumps(manifest.as_dict(), sort_keys=True, separators=(",", ":"))
+        image = image.run_commands(
+            "mkdir -p /opt/fleet && "
+            f"printf '%s' {shlex.quote(encoded)} > /opt/fleet/runtime-manifest.json && "
+            "chmod 0444 /opt/fleet/runtime-manifest.json"
+        ).env({"FLEET_SNAPSHOT_MANIFEST_SHA256": manifest.digest})
+    # Keep the manifest build step root-owned, then drop to the non-root
+    # runtime user for all generated code and interpreter execution.
+    image = image.dockerfile_commands(["USER daytona"])
+    return image
 
 
 def verify_sandbox_spec(sandbox: Any, spec: DaytonaSandboxSpec) -> None:
@@ -599,8 +779,20 @@ class SandboxProvisioner:
 
 
 __all__ = [
+    "BASE_IMAGE",
+    "DEFAULT_CHILD_SNAPSHOT_NAME",
+    "DEFAULT_SNAPSHOT_NAME",
+    "SEMANTIC_CHILD_RESOURCES",
+    "SESSION_RESOURCES",
+    "DaytonaEnvironmentManifest",
+    "DaytonaEnvironmentProfile",
     "DaytonaSandboxSpec",
     "ExpectedWorkspaceMount",
     "SandboxProvisioner",
     "VolumeConfig",
+    "build_snapshot_image",
+    "environment_manifest",
+    "snapshot_dependency_import_names",
+    "snapshot_dependency_sha256",
+    "snapshot_execution_dependencies",
 ]

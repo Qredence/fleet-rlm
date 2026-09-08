@@ -312,6 +312,26 @@ async def test_live_platform_start_and_stop_use_async_client_methods() -> None:
 
 
 @pytest.mark.asyncio
+async def test_live_platform_create_start_and_stop_normalize_provider_failures(monkeypatch: pytest.MonkeyPatch) -> None:
+    class _Params:
+        def __init__(self, **_kwargs: object) -> None:
+            pass
+
+    monkeypatch.setattr("daytona.CreateSandboxFromSnapshotParams", _Params)
+    client = MagicMock()
+    client.create = AsyncMock(side_effect=_AuthError())
+    client.get = AsyncMock(side_effect=_AuthError())
+    platform = LiveDaytonaPlatform(client, _SPEC)
+
+    with pytest.raises(ProviderRequestError):
+        await platform.create(with_volume=False)
+    with pytest.raises(ProviderRequestError):
+        await platform.start("sb-1")
+    with pytest.raises(ProviderRequestError):
+        await platform.stop("sb-1")
+
+
+@pytest.mark.asyncio
 async def test_live_platform_force_stop_deletes_sandbox_when_stop_fails() -> None:
     client = MagicMock()
     sandbox = MagicMock()

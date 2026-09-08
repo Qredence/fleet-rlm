@@ -58,7 +58,7 @@ recursion_max_prompt_chars = 50000
 recursion_child_max_iters = 8
 recursion_child_max_llm_calls = 12
 recursion_child_max_output_chars = 4000
-recursion_max_parallel_children = 5
+recursion_max_parallel_children = 4
 autonomous_memory_categories = []
 verbose = true
 
@@ -71,7 +71,8 @@ database_url_env = "FLEET_DATABASE_URL"
 
 [defaults.daytona]
 api_key_env = "FLEET_DAYTONA_API_KEY"
-snapshot = "fleet-rlm-python313-v5"
+snapshot_env = "FLEET_DAYTONA_SNAPSHOT"
+child_snapshot_env = "FLEET_DAYTONA_CHILD_SNAPSHOT"
 volume_name = "fleet-volume"
 volume_mount_path = "/home/daytona/fleet"
 
@@ -86,6 +87,12 @@ expose_trace_id = true
 async_logging = true
 trace_sampling_ratio = 1.0
 trace_content_max_chars = 10000
+trace_content_enabled = false
+trace_export_queue_size = 128
+trace_export_workers = 2
+trace_export_retry_seconds = 10
+http_request_timeout_seconds = 10
+trace_shutdown_seconds = 5.0
 
 [defaults.posthog]
 enabled = true

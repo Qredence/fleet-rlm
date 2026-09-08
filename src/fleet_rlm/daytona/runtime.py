@@ -20,6 +20,7 @@ from typing import Any
 from uuid import UUID, uuid4
 
 from fleet_rlm.daytona._lease import LeaseState, RootSessionLease
+from fleet_rlm.daytona.provisioning import DaytonaEnvironmentProfile
 
 
 class DaytonaRuntimeState(StrEnum):
@@ -90,6 +91,7 @@ class _UnpublishedResourceOwner:
 class ChildEnvironmentSpec:
     """Immutable selectors and bounds for one disposable child."""
 
+    profile: DaytonaEnvironmentProfile = DaytonaEnvironmentProfile.WORKSPACE_CHILD
     workspace_id: UUID | str | None = None
     session_id: UUID | str | None = None
     run_id: UUID | str | None = None
@@ -103,6 +105,17 @@ class ChildEnvironmentSpec:
     is_authorized: Callable[[], bool] | None = None
 
     def __post_init__(self) -> None:
+        profile = self.profile
+        if not isinstance(profile, DaytonaEnvironmentProfile):
+            try:
+                profile = DaytonaEnvironmentProfile(str(profile))
+            except ValueError as exc:
+                raise ValueError("unknown Daytona child environment profile") from exc
+            object.__setattr__(self, "profile", profile)
+        if profile is DaytonaEnvironmentProfile.SEMANTIC_CHILD and (
+            self.volume_id or self.mount_path or self.volume_subpath
+        ):
+            raise ValueError("SemanticChild cannot carry a Workspace Volume binding")
         if not isinstance(self.call_index, int) or isinstance(self.call_index, bool) or self.call_index < 0:
             raise ValueError("call_index must be a non-negative integer")
         if self.deadline is not None and not isinstance(self.deadline, (int, float)):
@@ -1267,10 +1280,12 @@ class DaytonaRuntime:
         resources = self._resources
         platform = getattr(resources, "platform", None)
         admission = getattr(resources, "daytona_admission", None)
-        if platform is None or admission is None or not spec.volume_id or not spec.mount_path:
+        if platform is None or admission is None:
             raise RuntimeError("Daytona child specification is incomplete")
         if spec.workspace_id is None or spec.run_id is None:
             raise RuntimeError("Daytona child specification is incomplete")
+        if spec.profile is not DaytonaEnvironmentProfile.SEMANTIC_CHILD and (not spec.volume_id or not spec.mount_path):
+            raise RuntimeError("WorkspaceChild specification requires a Volume binding")
         loop = asyncio.get_running_loop()
         settings = getattr(resources, "settings", None)
         factory = build_child_runtime_factory(
@@ -1287,6 +1302,7 @@ class DaytonaRuntime:
             execution_output_cap=spec.execution_output_cap
             or int(getattr(settings, "rlm_max_execution_output_chars", 10_000)),
             is_authorized=spec.is_authorized,
+            profile=spec.profile,
         )
         # ``build_child_runtime_factory`` is intentionally synchronous because
         # native recursive RLM calls originate on a DSPy worker thread.  The

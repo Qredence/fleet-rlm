@@ -814,6 +814,8 @@ class DaytonaHttpToolBroker:
         self._fulfilled_count = 0
         self._callback_executor: ThreadPoolExecutor | None = None
         self._callback_executor_lock = Lock()
+        self._execution_threads: set[Thread] = set()
+        self._execution_threads_lock = Lock()
         self._metrics_lock = Lock()
         self._active_execution_stats: dict[str, int] | None = None
         self.last_execution_stats: dict[str, int] = {}
@@ -1271,6 +1273,7 @@ class DaytonaHttpToolBroker:
         *,
         run_code: Callable[[], str | BackendExecutionResult],
         tool_executor: Callable[[str, list[Any], dict[str, Any]], Any],
+        check_authority: Callable[[], Any] | None = None,
     ) -> BackendExecutionResult:
         """
         Execute sandbox code while servicing its tool callbacks.
@@ -1278,6 +1281,10 @@ class DaytonaHttpToolBroker:
         Parameters:
             run_code (Callable[[], str | BackendExecutionResult]): Code execution callable.
             tool_executor (Callable[[str, list[Any], dict[str, Any]], Any]): Callback that executes a requested tool.
+            check_authority: Optional caller-owned deadline/authority fence, checked
+                even when the remote interpreter produces no output. Transport
+                polling retains its own bounded HTTP timeout; failure here does
+                not certify remote containment.
 
         Returns:
             BackendExecutionResult: The execution result, including captured output and any extracted final payload.
@@ -1288,6 +1295,8 @@ class DaytonaHttpToolBroker:
         from fleet_rlm.daytona.interpreter import BackendExecutionResult
 
         self.ensure_started()
+        if check_authority is not None:
+            check_authority()
         if self._stopped:
             msg = "broker already stopped"
             raise DaytonaAdapterError(message=msg, cause_type="InterpreterLifecycleError")
@@ -1295,6 +1304,7 @@ class DaytonaHttpToolBroker:
         stats, stats_owner = self._begin_execution_stats()
         wall_started_ns = time.perf_counter_ns()
         fulfilled_start = self._fulfilled_count
+        run_duration_ms: list[int] = []
         try:
             bucket: list[str | BackendExecutionResult | BaseException] = []
 
@@ -1305,12 +1315,21 @@ class DaytonaHttpToolBroker:
                 except Exception as exc:
                     bucket.append(exc)
                 finally:
-                    self._record_duration("run_code_ms", run_started_ns)
+                    # A fenced caller may already have settled its statistics.
+                    # Never mutate broker state from a late SDK worker.
+                    run_duration_ms.append((time.perf_counter_ns() - run_started_ns) // 1_000_000)
 
             thread = Thread(target=_runner, daemon=True)
-            thread.start()
+            with self._execution_threads_lock:
+                if self._stopped:
+                    raise DaytonaAdapterError(message="broker already stopped", cause_type="InterpreterLifecycleError")
+                self._execution_threads = {worker for worker in self._execution_threads if worker.is_alive()}
+                self._execution_threads.add(thread)
+                thread.start()
             empty_polls = 0
             while thread.is_alive():
+                if check_authority is not None:
+                    check_authority()
                 if self._stopped:
                     break
                 wait_s = 0.0 if empty_polls == 0 else self._poll_backoff_delay(empty_polls)
@@ -1325,6 +1344,8 @@ class DaytonaHttpToolBroker:
                 self._sleep_remaining_poll_delay(wait_s, poll_started_ns)
             thread.join(timeout=1.0)
             for _ in range(5):
+                if check_authority is not None:
+                    check_authority()
                 if self._stopped:
                     break
                 self._record_metric("drain_poll_count")
@@ -1335,6 +1356,8 @@ class DaytonaHttpToolBroker:
                 msg = "sandbox execution produced no result"
                 raise DaytonaAdapterError(message=msg, cause_type="BrokerExecutionError")
             outcome = bucket[0]
+            if check_authority is not None:
+                check_authority()
             if isinstance(outcome, BaseException):
                 if isinstance(outcome, DaytonaAdapterError):
                     raise outcome
@@ -1347,6 +1370,8 @@ class DaytonaHttpToolBroker:
             final = extract_final_payload(str(outcome))
             return BackendExecutionResult(stdout=str(outcome), final=final)
         finally:
+            if run_duration_ms:
+                self._record_metric("run_code_ms", run_duration_ms[0])
             if stats_owner:
                 self._record_metric("tool_call_count", self._fulfilled_count - fulfilled_start)
                 self._record_duration("execution_wall_ms", wall_started_ns)
@@ -1362,7 +1387,17 @@ class DaytonaHttpToolBroker:
         Returns:
             bool: True if cleanup is settled, or False if a resource remains for a later cleanup attempt.
         """
-        self._stopped = True
+        with self._execution_threads_lock:
+            self._stopped = True
+            self._execution_threads = {worker for worker in self._execution_threads if worker.is_alive()}
+            if self._execution_threads:
+                # Caller-owned remote containment must unblock the SDK first.
+                # Retain all cleanup ownership without joining indefinitely.
+                if strict:
+                    raise DaytonaAdapterError(
+                        message="broker execution cleanup remains pending", cause_type="InterpreterLifecycleError"
+                    )
+                return False
         session_id = self._broker_session_id
         self._broker_session_id = None
         # Strict mode records the first cleanup failure and re-raises it after

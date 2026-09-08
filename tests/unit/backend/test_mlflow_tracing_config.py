@@ -18,6 +18,7 @@ from fleet_rlm.config.settings import Settings
 def _reset_trace_content_bound(monkeypatch: pytest.MonkeyPatch) -> None:
     """Reset the shared readable content bound for a test."""
     monkeypatch.setattr(tracing, "_TRACE_CONTENT_MAX_CHARS", 10_000)
+    monkeypatch.setattr(tracing, "_TRACE_CONTENT_ENABLED", True)
     tracing.set_tracing_active_for_tests(False)
 
 
@@ -201,6 +202,32 @@ def test_unavailable_local_tracking_uri_does_not_activate_turn_spans(
     assert tracing.is_tracing_active() is False
 
 
+def test_missing_export_distribution_is_handled_fail_soft(monkeypatch: pytest.MonkeyPatch) -> None:
+    def missing(_distribution: str) -> str:
+        raise tracing.PackageNotFoundError
+
+    monkeypatch.setattr(tracing, "package_version", missing)
+
+    assert tracing._mlflow_export_versions_are_certified() is False
+
+
+def test_missing_certified_mlflow_distribution_disables_tracing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _install_fake_mlflow(monkeypatch)
+    fake_mlflow = sys.modules["mlflow"]
+    fake_mlflow.__file__ = str(Path(__file__).resolve())  # type: ignore[attr-defined]
+
+    def missing_distribution(name: str) -> str:
+        from importlib.metadata import PackageNotFoundError
+
+        raise PackageNotFoundError(name)
+
+    monkeypatch.setattr(tracing, "package_version", missing_distribution)
+    assert tracing.configure_tracing(_enabled_settings()) is False
+    assert tracing.is_tracing_active() is False
+
+
 def test_configure_tracing_enabled_sets_uri_experiment_and_autolog(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -217,7 +244,16 @@ def test_configure_tracing_enabled_sets_uri_experiment_and_autolog(
     assert location.table_prefix == "fleet_app"
     assert os.environ["MLFLOW_TRACING_SQL_WAREHOUSE_ID"] == "warehouse-123"
     assert calls.autolog_calls == 1
-    assert calls.autolog_kwargs == [{"log_traces": True, "log_traces_from_eval": False, "silent": True}]
+    assert calls.autolog_kwargs == [
+        {
+            "log_traces": True,
+            "log_traces_from_eval": False,
+            "log_traces_from_compile": False,
+            "log_compiles": False,
+            "log_evals": False,
+            "silent": True,
+        }
+    ]
     assert calls.async_logging_args == [True]
     assert len(calls.processor_args) == 1
     assert calls.processor_args[0][0] is tracing._sanitize_mlflow_span
@@ -270,6 +306,27 @@ def test_mlflow_315_span_processor_bounds_and_protects_secrets() -> None:
     assert span.inputs["body"] == "x" * 2_000
     assert span.outputs["answer"] == "y" * 2_000
     assert span.attributes["api_key"] == "[redacted]"
+
+
+def test_trace_export_policy_overrides_ambient_queue_settings(monkeypatch):
+    _install_fake_mlflow(monkeypatch)
+    monkeypatch.setenv("MLFLOW_ASYNC_TRACE_LOGGING_MAX_QUEUE_SIZE", "999999")
+    settings = Settings(
+        mlflow_tracing_enabled=True,
+        mlflow_experiment_name="test",
+        mlflow_tracking_uri="http://localhost:5001",
+        mlflow_trace_export_queue_size=17,
+        mlflow_trace_export_workers=1,
+        mlflow_trace_export_retry_seconds=3,
+        mlflow_http_request_timeout_seconds=7,
+    )
+    assert tracing.configure_tracing(settings)
+    assert os.environ["MLFLOW_ENABLE_ASYNC_TRACE_LOGGING"] == "true"
+    assert os.environ["MLFLOW_ASYNC_TRACE_LOGGING_MAX_QUEUE_SIZE"] == "17"
+    assert os.environ["MLFLOW_ASYNC_TRACE_LOGGING_MAX_WORKERS"] == "1"
+    assert os.environ["MLFLOW_ASYNC_TRACE_LOGGING_RETRY_TIMEOUT"] == "3"
+    assert os.environ["MLFLOW_HTTP_REQUEST_TIMEOUT"] == "7"
+    assert tracing.trace_content_preview("private content") == "[content suppressed]"
 
 
 def test_mlflow_span_processor_preserves_autolog_content_fields() -> None:

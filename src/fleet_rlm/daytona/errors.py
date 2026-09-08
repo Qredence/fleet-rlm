@@ -22,6 +22,7 @@ DEFAULT_SANITIZED_FAILURE_MAX_CHARS = 200
 
 _SECRET_PATTERNS = (
     re.compile(r"(?i)(api[_-]?key|token|secret|password|authorization)\s*[:=]\s*\S+"),
+    re.compile(r"(?i)([\"'])(api[_-]?key|token|secret|password|authorization)\1\s*:\s*(?:[\"'])?[^,}\]\s]+"),
     re.compile(r"(?i)bearer\s+\S+"),
     re.compile(r"/[^\s]*secret[^\s]*", re.IGNORECASE),
     re.compile(r"/tmp/[^\s]+"),
@@ -78,6 +79,7 @@ class DaytonaAdapterError(Exception):
     message: str
     cause_type: str | None = None
     status_code: int | None = None
+    source: Literal["DAYTONA_API", "DAYTONA_DAEMON", "DAYTONA_PROXY"] | None = None
 
     def __str__(self) -> str:
         return self.message
@@ -168,10 +170,20 @@ def is_transient_provider_failure(exc: object) -> bool:
 
 def is_sandbox_not_found(exc: BaseException) -> bool:
     """True only for explicit provider not-found (404 / DaytonaNotFoundError)."""
+    from daytona.common.errors import DaytonaFileNotFoundError, DaytonaProcessNotFoundError
+
+    # Typed Toolbox absence is local to the requested operation. It must not
+    # retire or recreate the enclosing sandbox, even though it carries 404.
+    if isinstance(exc, (DaytonaFileNotFoundError, DaytonaProcessNotFoundError)):
+        return False
+    if getattr(exc, "source", None) == "DAYTONA_DAEMON":
+        return False
     names = {type(exc).__name__}
     cause_type = getattr(exc, "cause_type", None)
     if isinstance(cause_type, str):
         names.add(cause_type)
+    if names & {"DaytonaFileNotFoundError", "DaytonaProcessNotFoundError"}:
+        return False
     if names & {"DaytonaNotFoundError", "NotFoundError", "NotFound"}:
         return True
     status = getattr(exc, "status_code", None)
@@ -189,6 +201,14 @@ def map_provider_error(exc: BaseException) -> DaytonaAdapterError:
     message = sanitize_provider_message(str(exc))
     cause = type(exc).__name__
     status = provider_status_code(exc)
+    raw_source = getattr(exc, "source", None)
+    source: Literal["DAYTONA_API", "DAYTONA_DAEMON", "DAYTONA_PROXY"] | None = None
+    if raw_source == "DAYTONA_API":
+        source = "DAYTONA_API"
+    elif raw_source == "DAYTONA_DAEMON":
+        source = "DAYTONA_DAEMON"
+    elif raw_source == "DAYTONA_PROXY":
+        source = "DAYTONA_PROXY"
     if is_sandbox_not_found(exc):
-        return DaytonaAdapterError(message=message, cause_type=cause, status_code=status)
-    return ProviderRequestError(message=message, cause_type=cause, status_code=status)
+        return DaytonaAdapterError(message=message, cause_type=cause, status_code=status, source=source)
+    return ProviderRequestError(message=message, cause_type=cause, status_code=status, source=source)

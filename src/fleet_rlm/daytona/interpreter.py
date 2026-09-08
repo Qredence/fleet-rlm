@@ -570,7 +570,9 @@ class DaytonaCodeInterpreter:
         in-process test backend can retain a dspy.History object directly, while
         the Daytona HTTP broker must receive the typed transport form.
         """
-        return isinstance(self._backend, _SandboxProcessBackend)
+        return isinstance(self._backend, _SandboxProcessBackend) or bool(
+            getattr(self._backend, "supports_sandbox_serializable_inputs", False)
+        )
 
     @property
     def broker(self) -> DaytonaHttpToolBroker | None:
@@ -1181,14 +1183,16 @@ class DaytonaCodeInterpreter:
             return
         tools = self._execution_tools()
         self._bound_tools = tools
-        if isinstance(backend, InProcessInterpreterBackend):
+        bind_tools = getattr(backend, "bind_host_tools", None)
+        ensure_submit = getattr(backend, "ensure_submit", None)
+        if callable(bind_tools) and callable(ensure_submit):
             if not needs_binding_refresh(
                 desired_generation=self._binding_generation,
                 installed_generation=self._installed_binding_generation,
                 broker_ready=True,
             ):
                 return
-            backend.bind_host_tools(
+            bind_tools(
                 {
                     name: (
                         lambda *_args, _name=name, **kwargs: self._invoke_tool_with_args(
@@ -1200,7 +1204,7 @@ class DaytonaCodeInterpreter:
                     for name in tools
                 }
             )
-            backend.ensure_submit(self.output_fields)
+            ensure_submit(self.output_fields)
             self._installed_binding_generation = self._binding_generation
             return
         if not isinstance(backend, _SandboxProcessBackend):

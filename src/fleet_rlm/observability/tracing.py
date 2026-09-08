@@ -11,6 +11,7 @@ Fleet TOML policy (resolved through ``Settings``):
     mlflow.tracking_uri     - tracking target
     mlflow.expose_trace_id  - surface trace ids on Turn SSE metadata
     mlflow.trace_content_max_chars - per-field bound for readable content
+    mlflow.http_request_timeout_seconds - bounded MLflow HTTP request timeout
 
 Databricks auth remains outside FLEET secrets (SDK/CLI conventions):
     DATABRICKS_HOST  - Workspace URL (e.g. https://...gcp.databricks.com)
@@ -19,6 +20,7 @@ Databricks auth remains outside FLEET secrets (SDK/CLI conventions):
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import re
@@ -40,13 +42,41 @@ from fleet_rlm.config.settings import FleetConfigurationError
 
 logger = logging.getLogger(__name__)
 
+
+def _mlflow_export_versions_are_certified() -> bool:
+    """Return whether all installed export distributions match the certified pair."""
+    try:
+        versions = (package_version("mlflow"), package_version("opentelemetry-sdk"))
+    except PackageNotFoundError:
+        logger.warning("MLflow export compatibility dependencies are unavailable; continuing without traces")
+        return False
+    if versions != ("3.15.2", "1.44.0"):
+        logger.warning("MLflow export compatibility is uncertified; continuing without traces")
+        return False
+    return True
+
+
 _DEFAULT_TRACKING_URI = "databricks"
 _TRACE_DESTINATION_TAG = "mlflow.experiment.databricksTraceDestinationPath"
 _TRACE_CONTENT_MAX_CHARS = 10_000
+_TRACE_CONTENT_ENABLED = False
 # Set only after configure_tracing succeeds. Policy may request tracing while the
 # tracking backend is absent; Turn spans must not enter MLflow's HTTP retry loop
 # and starve claim heartbeats.
 _TRACING_ACTIVE = False
+
+
+def _mlflow_export_versions_are_certified() -> bool:
+    """Return whether all installed export distributions match the certified pair."""
+    try:
+        versions = (package_version("mlflow"), package_version("opentelemetry-sdk"))
+    except PackageNotFoundError:
+        logger.warning("MLflow export compatibility dependencies are unavailable; continuing without traces")
+        return False
+    if versions != ("3.15.2", "1.44.0"):
+        logger.warning("MLflow export compatibility is uncertified; continuing without traces")
+        return False
+    return True
 
 
 def is_tracing_active() -> bool:
@@ -93,6 +123,13 @@ _OPERATIONAL_TEXT_KEYS = frozenset(
         "type",
         "trust",
         "version",
+        "mlflow_trace_request_id",
+        "mlflow_experiment_id",
+        "mlflow_llm_model",
+        "mlflow_llm_provider",
+        "run_id",
+        "session_id",
+        "child_call_id",
     }
 )
 
@@ -123,6 +160,8 @@ def trace_content_preview(value: object) -> str:
     """Return a readable, bounded preview for MLflow trace-level metadata."""
     from fleet_rlm.rlm.result import sanitize_public_text
 
+    if not _TRACE_CONTENT_ENABLED:
+        return "[content suppressed]"
     return sanitize_public_text(str(value or ""), max_len=_TRACE_CONTENT_MAX_CHARS)
 
 
@@ -136,6 +175,8 @@ def _sanitize_mlflow_value(
     if depth >= 8:
         return "[redacted depth]"
     normalized_key = _normalize_trace_key(key)
+    if normalized_key in {"reasoning", "reasoning_content", "chain_of_thought", "thinking", "system_prompt"}:
+        return "[redacted]"
     if normalized_key in _CREDENTIAL_KEYS or normalized_key.endswith(
         tuple(f"_{credential_key}" for credential_key in _CREDENTIAL_KEYS)
     ):
@@ -162,6 +203,8 @@ def _sanitize_mlflow_value(
 
         if normalized_key in _OPERATIONAL_TEXT_KEYS:
             return sanitize_public_text(value, max_len=256)
+        if not _TRACE_CONTENT_ENABLED:
+            return "[content suppressed]"
         return sanitize_public_text(value, max_len=_TRACE_CONTENT_MAX_CHARS)
     if value is None or isinstance(value, (bool, int, float)):
         return value
@@ -172,11 +215,15 @@ def _sanitize_mlflow_span(span: object) -> None:
     """
     Protect secrets and bound an MLflow span's inputs, outputs, and attributes before export.
 
-    Sanitization failures are suppressed so tracing does not affect the Turn outcome.
+    Real SDK spans are cleared before sanitization, so failure cannot export
+    the original content. Lightweight test doubles retain the public setter seam.
 
     Parameters:
         span (object): MLflow span to sanitize.
     """
+    if getattr(span, "_span", None) is not None:
+        _sanitize_live_mlflow_span(span)
+        return
     try:
         inputs = getattr(span, "inputs", None)
         if inputs is not None:
@@ -198,8 +245,75 @@ def _sanitize_mlflow_span(span: object) -> None:
                 if isinstance(sanitized, dict):
                     setter(sanitized)
     except Exception:
-        # A processor must never change the Turn outcome or break trace export.
-        logger.debug("MLflow span sanitization failed; continuing", exc_info=True)
+        # This branch supports non-exporting test doubles only. Real SDK spans
+        # use the clear-before-restore boundary above.
+        logger.debug("MLflow test span sanitization failed")
+
+
+def _sanitize_live_mlflow_span(span: Any) -> None:
+    """MLflow 3.15.2 export compatibility, certified against actual SDK spans.
+
+    Public setters merge attributes and cannot remove exception events or
+    attachments. Keep the necessary private access here, at the existing export
+    owner. Snapshot serialized values, detach ALL content, then restore only
+    sanitized values. A sanitizer or setter failure leaves a content-free span.
+    Parent IDs and timing stay intact. No process-global state changes here.
+    """
+    from opentelemetry.attributes import BoundedAttributes
+    from opentelemetry.sdk.util import BoundedList
+    from opentelemetry.trace import Status
+
+    otel = span._span
+    raw_attributes = otel._attributes
+    raw_name = otel._name
+    # This executes synchronously before OTel end/export. Never rely on MLflow
+    # propagating processor errors: its processor runner suppresses them.
+    otel._attributes = BoundedAttributes(maxlen=128, immutable=False)
+    otel._events = BoundedList(0)
+    otel._name = "Fleet.operation"
+    otel._status = Status(otel._status.status_code)
+    span._attachments.clear()
+    try:
+
+        def decode(value: object) -> object:
+            if isinstance(value, str):
+                try:
+                    return json.loads(value)
+                except json.JSONDecodeError:
+                    pass  # OTel-native attributes need not be JSON encoded.
+            return value
+
+        # Decode after detaching raw attributes. Preserve routing identities
+        # even when ordinary fields exceed the bounded content allowance.
+        routing_keys = {
+            "mlflow.traceRequestId",
+            "mlflow.spanType",
+            "mlflow.experimentId",
+            "mlflow.chat.tokenUsage",
+            "mlflow.llm.model",
+            "mlflow.llm.provider",
+        }
+        decoded = {}
+        for key, value in raw_attributes.items():
+            if key in routing_keys:
+                decoded[key] = decode(value)
+        for key, value in raw_attributes.items():
+            if key not in routing_keys and len(decoded) < 50:
+                if not _TRACE_CONTENT_ENABLED and _normalize_trace_key(key) not in _OPERATIONAL_TEXT_KEYS:
+                    continue
+                decoded[key] = decode(value)
+        sanitized = _sanitize_mlflow_value(decoded)
+        if not isinstance(sanitized, dict):
+            raise ValueError("invalid sanitized attributes")
+        # Setters are additive, but now operate on an empty backing store.
+        span.set_attributes(sanitized)
+        otel._name = str(_sanitize_mlflow_value(raw_name, key="name"))
+    except Exception:
+        # A setter may have partially restored fields before failing. Discard
+        # those too; do not log the exception, which may contain raw content.
+        otel._attributes = BoundedAttributes(maxlen=128, immutable=False)
+        otel._name = "Fleet.redaction_failed"
+        logger.debug("MLflow span content suppressed after redaction failure")
 
 
 def _local_tracking_server_available(tracking_uri: str) -> bool:
@@ -286,8 +400,9 @@ def configure_tracing(settings: Settings) -> bool:
     setup fails. `FleetConfigurationError` still reports an intentional Unity
     Catalog trace-location conflict; other failures are logged and suppressed.
     """
-    global _TRACING_ACTIVE
+    global _TRACING_ACTIVE, _TRACE_CONTENT_ENABLED
     _TRACING_ACTIVE = False
+    _TRACE_CONTENT_ENABLED = settings.mlflow_trace_content_enabled
     _set_trace_content_max_chars(getattr(settings, "mlflow_trace_content_max_chars", _TRACE_CONTENT_MAX_CHARS))
 
     if not settings.mlflow_tracing_enabled:
@@ -326,6 +441,12 @@ def configure_tracing(settings: Settings) -> bool:
         import mlflow
         import mlflow.dspy
 
+        # The export fence uses private fields because public setters cannot
+        # delete events/attachments. Certify a new lock resolution before
+        # enabling export with it; execution continues without tracing.
+        if getattr(mlflow, "__file__", None) and not _mlflow_export_versions_are_certified():
+            return False
+
         # A local MLflow server is optional engineering observability. Probe
         # before set_tracking_uri so a dead HTTP endpoint never becomes the
         # process-global tracking target for later Turn spans. Skip the probe
@@ -344,6 +465,13 @@ def configure_tracing(settings: Settings) -> bool:
         # Fleet policy so an ambient environment variable cannot change the
         # effective trace volume.
         os.environ["MLFLOW_TRACE_SAMPLING_RATIO"] = str(settings.mlflow_trace_sampling_ratio)
+        # Trace-export controls are separate from regular metric/parameter
+        # async logging. Resolve them once, before activating autologging.
+        os.environ["MLFLOW_ENABLE_ASYNC_TRACE_LOGGING"] = "true"
+        os.environ["MLFLOW_ASYNC_TRACE_LOGGING_MAX_QUEUE_SIZE"] = str(settings.mlflow_trace_export_queue_size)
+        os.environ["MLFLOW_ASYNC_TRACE_LOGGING_MAX_WORKERS"] = str(settings.mlflow_trace_export_workers)
+        os.environ["MLFLOW_ASYNC_TRACE_LOGGING_RETRY_TIMEOUT"] = str(settings.mlflow_trace_export_retry_seconds)
+        os.environ["MLFLOW_HTTP_REQUEST_TIMEOUT"] = str(settings.mlflow_http_request_timeout_seconds)
 
         # Preflight: catch trace-location mismatch before set_experiment.
         # FleetConfigurationError propagates — all other failures are soft.
@@ -372,14 +500,23 @@ def configure_tracing(settings: Settings) -> bool:
 
         tracing_api = getattr(mlflow, "tracing", None)
         configure_processors = getattr(tracing_api, "configure", None)
-        if callable(configure_processors):
-            configure_processors(span_processors=[_sanitize_mlflow_span])
+        if not callable(configure_processors):
+            logger.warning("MLflow export processor unavailable; continuing without traces")
+            return False
+        configure_processors(span_processors=[_sanitize_mlflow_span])
 
         # Enable MLflow's DSPy inference callback. The 3.15 span processor
         # above is the export boundary that bounds readable trace content and
         # protects credentials, paths, and system-prompt dumps. Keep
         # compile and evaluator traces out of the live Turn experiment.
-        mlflow.dspy.autolog(log_traces=True, log_traces_from_eval=False, silent=True)
+        mlflow.dspy.autolog(
+            log_traces=True,
+            log_traces_from_eval=False,
+            log_traces_from_compile=False,
+            log_compiles=False,
+            log_evals=False,
+            silent=True,
+        )
         logger.info(
             "MLflow DSPy autolog enabled (inference=true tracking_uri=%s experiment=%s async=%s sampling=%s "
             "content_max_chars=%s)",

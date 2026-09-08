@@ -16,8 +16,9 @@ import sys
 import tempfile
 import time
 import unicodedata
+from importlib.metadata import version
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(_REPO_ROOT) not in sys.path:
@@ -27,6 +28,8 @@ SCHEMA = "fleet.runtime-benchmark/v2"
 DATASET = Path(__file__).with_name("runtime_v2_scenarios.json")
 SCORERS = ("stream-terminal/v1", "echo-answer/v1", "durable-turn-pair/v1")
 SEMANTIC_SCORERS = ("semantic-keywords/v1",)
+ComparisonAxis = Literal["none", "runtime", "daytona-sdk", "snapshot"]
+COMPARISON_AXES = ("none", "runtime", "daytona-sdk", "snapshot")
 
 
 def digest(value: Any) -> str:
@@ -228,7 +231,14 @@ def run(*, repetitions: int = 5) -> dict[str, Any]:
             ),
             "scorer_ids": list(SCORERS),
             "semantic_scorer_ids": list(SEMANTIC_SCORERS),
-            "identities": {"profile": "private-testing", "snapshots": [], "provider": "scripted"},
+            "identities": {
+                "profile": "private-testing",
+                "snapshots": [],
+                "provider": "scripted",
+                "daytona_sdk": version("daytona"),
+                "dspy": version("dspy"),
+                "mlflow": version("mlflow"),
+            },
             "samples": samples,
             "event_fixtures": fixtures,
             "latency_seconds": {"p50": percentile(durations, 50), "p95": percentile(durations, 95)},
@@ -242,7 +252,13 @@ def run(*, repetitions: int = 5) -> dict[str, Any]:
     return receipt
 
 
-def compare(baseline: dict[str, Any], candidate: dict[str, Any], *, max_p95_ratio: float = 2.0) -> dict[str, Any]:
+def compare(
+    baseline: dict[str, Any],
+    candidate: dict[str, Any],
+    *,
+    max_p95_ratio: float = 2.0,
+    axis: ComparisonAxis = "none",
+) -> dict[str, Any]:
     """
     Compare baseline and candidate benchmark receipts against compatibility, integrity, parity, and latency gates.
 
@@ -261,6 +277,22 @@ def compare(baseline: dict[str, Any], candidate: dict[str, Any], *, max_p95_rati
     validate(candidate)
     if not math.isfinite(max_p95_ratio) or max_p95_ratio <= 0:
         raise ValueError("p95 ratio must be finite and positive")
+    if axis not in COMPARISON_AXES:
+        raise ValueError("unsupported comparison axis")
+    baseline_ids = dict(baseline["identities"])
+    candidate_ids = dict(candidate["identities"])
+    identity_key = {"daytona-sdk": "daytona_sdk", "snapshot": "snapshots"}.get(axis)
+    axis_evidence = True
+    if identity_key is not None:
+        axis_evidence = (
+            identity_key in baseline_ids
+            and identity_key in candidate_ids
+            and baseline_ids[identity_key] != candidate_ids[identity_key]
+        )
+        baseline_ids.pop(identity_key, None)
+        candidate_ids.pop(identity_key, None)
+    elif axis == "runtime":
+        axis_evidence = baseline["runtime_variant"] != candidate["runtime_variant"]
     compatible = all(
         baseline[key] == candidate[key]
         for key in (
@@ -268,11 +300,12 @@ def compare(baseline: dict[str, Any], candidate: dict[str, Any], *, max_p95_rati
             "scorer_digest",
             "execution_mode",
             "repetitions",
-            "identities",
-            "runtime_variant",
             "semantic_scorer_ids",
         )
     )
+    compatible = compatible and baseline_ids == candidate_ids and axis_evidence
+    if axis != "runtime":
+        compatible = compatible and baseline["runtime_variant"] == candidate["runtime_variant"]
     gates = {
         "comparable": compatible,
         "source_clean": not baseline["source_dirty"] and not candidate["source_dirty"],
@@ -281,7 +314,7 @@ def compare(baseline: dict[str, Any], candidate: dict[str, Any], *, max_p95_rati
         "event_parity": baseline["event_fixtures"] == candidate["event_fixtures"],
         "p95": candidate["latency_seconds"]["p95"] <= baseline["latency_seconds"]["p95"] * max_p95_ratio,
     }
-    return {"passed": all(gates.values()), "gates": gates, "scope": "scripted-lifecycle-only"}
+    return {"passed": all(gates.values()), "gates": gates, "scope": "scripted-lifecycle-only", "axis": axis}
 
 
 def main() -> int:
@@ -303,6 +336,7 @@ def main() -> int:
     comparison.add_argument("baseline", type=Path)
     comparison.add_argument("candidate", type=Path)
     comparison.add_argument("--max-p95-ratio", type=float, default=2.0)
+    comparison.add_argument("--axis", choices=COMPARISON_AXES, default="none")
     args = parser.parse_args()
     if args.command in {"run", "compare-adapters"}:
         if args.command == "compare-adapters":
@@ -317,7 +351,10 @@ def main() -> int:
             stream.write("\n")
         return 0 if receipt["passed"] else 1
     result = compare(
-        json.loads(args.baseline.read_text()), json.loads(args.candidate.read_text()), max_p95_ratio=args.max_p95_ratio
+        json.loads(args.baseline.read_text()),
+        json.loads(args.candidate.read_text()),
+        max_p95_ratio=args.max_p95_ratio,
+        axis=args.axis,
     )
     print(json.dumps(result, sort_keys=True))
     return 0 if result["passed"] else 1

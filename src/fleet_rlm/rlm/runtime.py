@@ -11,6 +11,7 @@ import asyncio
 import contextlib
 import contextvars
 import hashlib
+import inspect
 import logging
 import math
 import re
@@ -102,7 +103,6 @@ from fleet_rlm.rlm.session_runtime import (
     SessionKey,
     SessionRLMRegistry,
     SessionRLMState,
-    SessionRuntimeLease,
     SessionToolRegistry,
 )
 from fleet_rlm.runtime.owned_effect import OwnedEffect
@@ -286,6 +286,10 @@ class ExecutionRuntime:
     # Directly constructed test/in-process contexts opt into the reserve via
     # preparation; the public TOML default is applied by the live composition.
     wrap_up_seconds: float = 0.0
+    # The migration selector is deliberately part of the immutable prepared
+    # execution context.  It is not inferred from provider capabilities at
+    # worker start, so one Run cannot change architecture halfway through.
+    runtime_variant: Literal["legacy", "native-turn-scoped"] = "legacy"
 
 
 @dataclass(frozen=True, slots=True)
@@ -553,6 +557,86 @@ class WorkerOwnership:
                 waiter_errors.append(exc)
         if waiter_errors:
             raise waiter_errors[0]
+
+
+@dataclass(slots=True)
+class TurnScopedRuntimeLease:
+    """Per-Run runtime token used by the native Turn-scoped selector.
+
+    Unlike :class:`SessionRuntimeLease`, this token never enters the resident
+    Session registry.  It owns only the current binding, observer cleanup, and
+    worker executor; provider interpreter/context cleanup remains in the
+    prepared Turn resources and therefore follows the normal settlement order.
+    """
+
+    worker_executor: ThreadPoolExecutor
+    _binding: object | None = field(default=None, init=False, repr=False)
+    _observer_cleanup: Callable[[], object] | None = field(default=None, init=False, repr=False)
+    _released: bool = field(default=False, init=False, repr=False)
+    _settled: bool = field(default=False, init=False, repr=False)
+    _committed: bool = field(default=False, init=False, repr=False)
+
+    @property
+    def released(self) -> bool:
+        return self._released
+
+    @property
+    def committed(self) -> bool:
+        return self._committed
+
+    @property
+    def settled(self) -> bool:
+        return self._settled
+
+    def bind_turn_cleanup(self, binding: object, observer_cleanup: Callable[[], object] | None = None) -> None:
+        if self._released:
+            raise RuntimeError("Turn-scoped runtime lease is already released")
+        self._binding = binding
+        self._observer_cleanup = observer_cleanup
+
+    def mark_committed(self) -> None:
+        if self._released:
+            raise RuntimeError("Turn-scoped runtime lease is already released")
+        self._settled = True
+        self._committed = True
+
+    def mark_tainted(self) -> None:
+        if self._released:
+            return
+        self._settled = True
+        self._committed = False
+
+    async def release(self) -> None:
+        """Remove current-Turn bindings and stop the worker executor once."""
+        if self._released:
+            return
+        if not self._settled:
+            self.mark_tainted()
+        errors: list[Exception] = []
+        observer_cleanup = self._observer_cleanup
+        self._observer_cleanup = None
+        if observer_cleanup is not None:
+            try:
+                result = observer_cleanup()
+                if inspect.isawaitable(result):
+                    await result
+            except Exception as exc:
+                errors.append(exc)
+        binding = self._binding
+        self._binding = None
+        remove = getattr(binding, "remove", None) if binding is not None else None
+        if callable(remove):
+            try:
+                remove()
+            except Exception as exc:
+                errors.append(exc)
+        try:
+            await asyncio.to_thread(self.worker_executor.shutdown, wait=True, cancel_futures=True)
+        except Exception as exc:
+            errors.append(exc)
+        self._released = True
+        if errors:
+            raise errors[0]
 
 
 class RLMWorkerHandle(Generic[T]):
@@ -1080,7 +1164,7 @@ class RunEventStream:
         agen: AsyncIterator[RuntimeEvent],
         outcome_factory: Callable[[], RLMOutcome],
         ownership: WorkerOwnership,
-        runtime_lease: list[SessionRuntimeLease] | None = None,
+        runtime_lease: list[Any] | None = None,
     ) -> None:
         """Initialize an event stream with its event iterator and owned Session lane."""
         self._agen = agen.__aiter__()
@@ -1144,7 +1228,7 @@ class RunEventStream:
         """Wait for a detached non-cancellable worker under process ownership."""
         await self._ownership.wait_owned()
 
-    def _runtime_lease(self) -> SessionRuntimeLease | None:
+    def _runtime_lease(self) -> Any | None:
         return self._runtime_lease_holder[0] if self._runtime_lease_holder else None
 
     def _finish(self) -> None:
@@ -1279,7 +1363,7 @@ class RLMRunner:
         """
         outcome: list[RLMOutcome] = []
         ownership = WorkerOwnership()
-        runtime_lease: list[SessionRuntimeLease] = []
+        runtime_lease: list[Any] = []
         events = self._generate(context, outcome, ownership, runtime_lease)
         return RunEventStream(
             events,
@@ -1305,7 +1389,7 @@ class RLMRunner:
         context: RLMExecutionContext,
         outcome: list[RLMOutcome],
         ownership: WorkerOwnership,
-        runtime_lease: list[SessionRuntimeLease],
+        runtime_lease: list[Any],
     ) -> AsyncIterator[RuntimeEvent]:
         """
         Stream runtime events for an RLM execution and record its terminal outcome.
@@ -1367,7 +1451,7 @@ class RLMRunner:
         ownership: WorkerOwnership,
         prediction: list[Any],
         started: float,
-        runtime_lease: list[SessionRuntimeLease],
+        runtime_lease: list[Any],
     ) -> AsyncIterator[RuntimeEvent]:
         """
         Execute the successful run path and publish its runtime events.
@@ -1388,10 +1472,8 @@ class RLMRunner:
         observations = ObservationSession(context.identity.run_id, context.identity.session_id)
         async for event in self._initial_events(context, observations):
             yield event
-        spec, guards, worker, recursive_executor, lease = await self._start_worker(context, ownership, observations)
+        spec, guards, worker, _recursive_executor, lease = await self._start_worker(context, ownership, observations)
         runtime_lease.append(lease)
-        if recursive_executor is not None:
-            ownership.add_blocking_waiter(recursive_executor.wait_owned)
         async for event in self._worker_events(context, observations, worker):
             yield event
         prediction.append(worker.result())
@@ -1456,7 +1538,7 @@ class RLMRunner:
         RunToolGuards,
         RLMWorkerHandle[Any],
         RecursiveRLMExecutor | None,
-        SessionRuntimeLease,
+        Any,
     ]:
         """
         Acquire and prepare the session runtime, bind turn-specific tools and context, and start the RLM worker.
@@ -1500,6 +1582,10 @@ class RLMRunner:
                     workspace_memory_digest=context.session.workspace_memory_digest,
                 ),
             )
+            # Register the executor's owned scheduler before any remaining
+            # worker startup step can fail. Externally supplied schedulers are
+            # preserved by RecursiveRLMExecutor.wait_owned().
+            ownership.add_blocking_waiter(recursive_executor.wait_owned)
         spec = replace(
             spec,
             signature=root_signature_for_recursion(
@@ -1526,10 +1612,27 @@ class RLMRunner:
             )
             for tool in spec.tools
         )
-        recursive_tools = (
-            (recursive_executor.tool, recursive_executor.batched_tool) if recursive_executor is not None else ()
-        )
+        if recursive_executor is None:
+            recursive_tools = ()
+        elif context.execution.runtime_variant == "native-turn-scoped":
+            recursive_tools = (recursive_executor.capsule_tool, recursive_executor.capsule_batch_tool)
+        else:
+            recursive_tools = (
+                recursive_executor.tool,
+                recursive_executor.batched_tool,
+                recursive_executor.capsule_tool,
+            )
         all_tools = (*observed_tools, *recursive_tools)
+        if context.execution.runtime_variant == "native-turn-scoped":
+            return await self._start_turn_scoped_worker(
+                context,
+                ownership,
+                observations,
+                spec,
+                guards,
+                recursive_executor,
+                all_tools,
+            )
         fingerprint = program_fingerprint_for_context(context, spec=spec, tools=all_tools)
         key = SessionKey(
             workspace_id=str(context.identity.access.workspace_id),
@@ -1711,6 +1814,100 @@ class RLMRunner:
                         remove()
             lease.mark_tainted()
             await lease.release()
+            raise
+
+    async def _start_turn_scoped_worker(
+        self,
+        context: RLMExecutionContext,
+        ownership: WorkerOwnership,
+        observations: ObservationSession,
+        spec: RLMExecutionSpec,
+        guards: RunToolGuards,
+        recursive_executor: RecursiveRLMExecutor | None,
+        all_tools: Sequence[dspy.Tool],
+    ) -> tuple[RLMExecutionSpec, RunToolGuards, RLMWorkerHandle[Any], RecursiveRLMExecutor | None, Any]:
+        """Start a fresh RLM/binding bundle without touching the resident registry."""
+        manager = SessionToolRegistry()
+
+        def claim_valid() -> bool:
+            return not context.identity.authority.revoked
+
+        binding = manager.bind_turn(
+            all_tools,
+            run_id=context.identity.run_id,
+            claim_valid=claim_valid,
+            authorized_names={str(tool.name) for tool in all_tools},
+            revocation=context.identity.authority,
+        )
+        worker_executor = ThreadPoolExecutor(
+            max_workers=1,
+            thread_name_prefix=f"fleet-turn-rlm-{str(context.identity.run_id)[:8]}",
+        )
+        lease = TurnScopedRuntimeLease(worker_executor)
+        binding_attached = False
+
+        def clear_observers() -> None:
+            """Drop all run-local callbacks before binding removal."""
+            for target in (context.execution.interpreter, rlm):
+                with suppress(BaseException):
+                    self._clear_observer(target)
+
+        try:
+            rlm = self._factory.create(
+                models=context.execution.models,
+                options=context.execution.options,
+                tools=binding.tools or None,
+                signature=spec.signature,
+            )
+            lease.bind_turn_cleanup(binding, clear_observers)
+            binding_attached = True
+            bind_budget = getattr(context.execution.interpreter, "bind_turn_budget", None)
+            if callable(bind_budget):
+                bind_budget(getattr(context.execution.models, "budget", None))
+            self._bind_observer(
+                context.execution.interpreter,
+                observations.publish,
+                context.execution.options.max_output_chars,
+                deadline=context.execution.deadline,
+            )
+            self._bind_context_capsule(context)
+            bind_output_contract(context.execution.interpreter, getattr(rlm, "signature", None))
+            self._bind_observer(
+                rlm,
+                observations.publish,
+                context.execution.options.max_output_chars,
+                emit_reasoning=True,
+                deadline=context.execution.deadline,
+            )
+            kwargs = build_rlm_input_kwargs(
+                request=context.session.request,
+                session_context=context.session.session_context,
+                skill_cards=spec.skill_cards,
+                attachments=context.session.attachments,
+                attachment_context=context.session.attachment_context,
+                workspace=spec.workspace,
+                workspace_memory_digest=context.session.workspace_memory_digest,
+                history=context.session.history,
+            )
+            trace = ExecutionTraceAssembler(recursive_executor)
+            worker = start_rlm_worker(
+                rlm=rlm,
+                context=context,
+                kwargs=kwargs,
+                ownership=ownership,
+                execute=trace.execute,
+                executor=worker_executor,
+            )
+            return spec, guards, worker, recursive_executor, lease
+        except BaseException:
+            if binding_attached:
+                with suppress(BaseException):
+                    clear_observers()
+            else:
+                with suppress(BaseException):
+                    binding.remove()
+            with suppress(BaseException):
+                await asyncio.to_thread(worker_executor.shutdown, wait=True, cancel_futures=True)
             raise
 
     async def _worker_events(
@@ -1975,6 +2172,7 @@ __all__ = [
     "RunToolGuards",
     "SessionView",
     "ToolProgressGuard",
+    "TurnScopedRuntimeLease",
     "WorkerOwnership",
     "probe_configured_root_lm",
     "probe_root_lm",
