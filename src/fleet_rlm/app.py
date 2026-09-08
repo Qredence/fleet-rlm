@@ -234,9 +234,11 @@ def create_app(
     app.state.settings = resolved
     app.state.composition_ready = False
     app.state.runtime_inventory = None
+    from fleet_rlm.observability.feedback import TraceFeedbackService
     from fleet_rlm.observability.mlflow import MLflowRuntime
 
     app.state.mlflow_runtime = MLflowRuntime(resolved)
+    app.state.trace_feedback_service = TraceFeedbackService()
 
     from fleet_rlm.api.errors import install_error_handlers
     from fleet_rlm.api.openapi import install_openapi_contract
@@ -251,11 +253,13 @@ def create_app(
     from fleet_rlm.api.routes.sessions import router as sessions_router
     from fleet_rlm.api.routes.settings import router as settings_router
     from fleet_rlm.api.routes.skills import router as skills_router
+    from fleet_rlm.api.routes.traces import router as traces_router
     from fleet_rlm.api.routes.turns import router as turns_router
     from fleet_rlm.api.routes.volume import router as volume_router
     from fleet_rlm.api.routes.workspace_files import router as workspace_files_router
 
     app.include_router(turns_router)
+    app.include_router(traces_router)
     app.include_router(sessions_router)
     app.include_router(attachments_router)
     app.include_router(artifacts_router)

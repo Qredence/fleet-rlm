@@ -919,6 +919,95 @@ describe("redo / reload / trace", () => {
     expect(last).toMatchObject({ kind: "text", role: "system" });
     if (last?.kind === "text") expect(last.text).toContain("trace:abc123");
   });
+
+  it("/feedback submits the latest durable execution trace and identifies it", async () => {
+    const { ctx } = makeContext();
+    ctx.store.dispatch({
+      type: "session/hydrate",
+      session: { id: "session-1", title: "T", status: "active", resumed: true },
+      events: [],
+      latestTraceId: "trace:durable-latest",
+    });
+    ctx.client.submitTraceFeedback = vi.fn().mockResolvedValue({
+      trace_id: "trace:durable-latest",
+      name: "user_feedback",
+      value: true,
+      assessment_id: "assessment-1",
+    });
+
+    const feedback = listCommands().find((command) => command.name === "feedback");
+    expect(feedback).toBeDefined();
+    if (feedback) await feedback.handler(["up", "useful", "answer"], ctx);
+
+    expect(ctx.client.submitTraceFeedback).toHaveBeenCalledWith("session-1", {
+      trace_id: "trace:durable-latest",
+      value: true,
+      comment: "useful answer",
+    });
+    const last = ctx.store.getState().messages.at(-1);
+    expect(last).toMatchObject({ kind: "text", role: "system" });
+    if (last?.kind === "text") {
+      expect(last.text).toContain("trace:durable-latest");
+      expect(last.text).toContain("up");
+    }
+  });
+
+  it("/feedback refuses active Runs and does not write an assessment", async () => {
+    const { ctx } = makeContext();
+    ctx.store.dispatch({
+      type: "session/init",
+      session: { id: "session-1", title: "T", status: "active", resumed: false },
+    });
+    ctx.store.dispatch({
+      type: "run/start",
+      runId: "run-1",
+      delivery: "live",
+      traceId: "trace:active",
+    });
+    ctx.client.submitTraceFeedback = vi.fn();
+
+    const feedback = listCommands().find((command) => command.name === "feedback");
+    if (feedback) await feedback.handler(["down"], ctx);
+
+    expect(ctx.client.submitTraceFeedback).not.toHaveBeenCalled();
+    const last = ctx.store.getState().messages.at(-1);
+    if (last?.kind === "text") expect(last.text).toContain("settle");
+  });
+
+  it("/feedback reports a failed request without changing the target", async () => {
+    const { ctx } = makeContext();
+    ctx.store.dispatch({
+      type: "session/hydrate",
+      session: { id: "session-1", title: "T", status: "active", resumed: true },
+      events: [],
+      latestTraceId: "trace:retryable",
+    });
+    ctx.client.submitTraceFeedback = vi.fn().mockRejectedValue(new Error("request failed"));
+
+    const feedback = listCommands().find((command) => command.name === "feedback");
+    if (feedback) await feedback.handler(["down"], ctx);
+
+    expect(ctx.store.getState().lastTraceId).toBe("trace:retryable");
+    const last = ctx.store.getState().messages.at(-1);
+    if (last?.kind === "text") expect(last.text).toContain("request failed");
+  });
+
+  it("clears the durable feedback target when hydration switches Sessions", () => {
+    const { ctx } = makeContext();
+    ctx.store.dispatch({
+      type: "session/hydrate",
+      session: { id: "session-1", title: "T", status: "active", resumed: true },
+      events: [],
+      latestTraceId: "trace:old",
+    });
+    ctx.store.dispatch({
+      type: "session/hydrate",
+      session: { id: "session-2", title: "Other", status: "active", resumed: true },
+      events: [],
+      latestTraceId: null,
+    });
+    expect(ctx.store.getState().lastTraceId).toBeNull();
+  });
 });
 
 describe("theme command", () => {

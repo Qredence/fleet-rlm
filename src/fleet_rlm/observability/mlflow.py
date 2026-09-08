@@ -15,10 +15,12 @@ from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, field
 from enum import StrEnum
 from threading import Thread
+from typing import TypeVar
 
 from fleet_rlm.config.settings import FleetConfigurationError, Settings
 
 logger = logging.getLogger(__name__)
+_OperationResult = TypeVar("_OperationResult")
 
 
 class MLflowRuntimeState(StrEnum):
@@ -42,6 +44,7 @@ class MLflowRuntime:
     _state: MLflowRuntimeState = MLflowRuntimeState.INACTIVE
     _flush_future: Future[None] | None = field(default=None, init=False, repr=False)
     _owner_executor: ThreadPoolExecutor | None = field(default=None, init=False, repr=False)
+    _operation_lock: asyncio.Lock = field(default_factory=asyncio.Lock, init=False, repr=False)
     _reset_required: bool = field(default=False, init=False, repr=False)
     _reset_scheduled: bool = field(default=False, init=False, repr=False)
 
@@ -58,11 +61,16 @@ class MLflowRuntime:
     def active(self) -> bool:
         return self._state == MLflowRuntimeState.ACTIVE
 
-    async def _run_on_owner(self, function: Callable[..., object], *args: object) -> object:
+    async def _run_on_owner(
+        self,
+        function: Callable[..., _OperationResult],
+        *args: object,
+        **kwargs: object,
+    ) -> _OperationResult:
         """Run MLflow/DSPy global-state operations on one stable owner thread."""
         if self._owner_executor is None:
             self._owner_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="fleet-mlflow-owner")
-        future = self._owner_executor.submit(function, *args)
+        future = self._owner_executor.submit(function, *args, **kwargs)
         return await asyncio.wrap_future(future)
 
     def _shutdown_owner_executor(self) -> None:
@@ -95,6 +103,24 @@ class MLflowRuntime:
     async def _reset_after_flush(self) -> None:
         """Run process-global reset on the same owner as configuration."""
         await self._run_on_owner(self._reset_after_flush_on_owner)
+
+    async def run_operation(
+        self,
+        function: Callable[..., _OperationResult],
+        *args: object,
+        **kwargs: object,
+    ) -> _OperationResult:
+        """Run one synchronous MLflow operation under this lifespan's owner.
+
+        The operation lock is shared with :meth:`close`, so teardown cannot
+        flush or reset Fleet-owned MLflow state while an assessment or other
+        synchronous SDK call is still in flight. The owner executor also keeps
+        the blocking SDK work off the FastAPI event loop.
+        """
+        async with self._operation_lock:
+            if self._state != MLflowRuntimeState.ACTIVE:
+                raise RuntimeError("MLflow tracing is not active")
+            return await self._run_on_owner(function, *args, **kwargs)
 
     def _reset_completed(self, future: Future[None]) -> None:
         """Consume deferred reset errors and release the owner when cleanup finishes."""
@@ -158,6 +184,11 @@ class MLflowRuntime:
 
     async def close(self) -> None:
         """Flush tracing only after a successful startup, then release the lifespan."""
+        async with self._operation_lock:
+            await self._close_locked()
+
+    async def _close_locked(self) -> None:
+        """Close the runtime while no synchronous SDK operation can be active."""
         try:
             if self._state == MLflowRuntimeState.ACTIVE and self._flush_future is None:
                 if self._flush is None:

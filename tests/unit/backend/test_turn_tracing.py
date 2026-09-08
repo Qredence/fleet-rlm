@@ -506,6 +506,40 @@ def test_turn_trace_preserves_explicit_failed_annotation(monkeypatch: pytest.Mon
     assert calls.update_kwargs[-1] == {"state": "ERROR"}
 
 
+def test_successful_model_execution_followed_by_commit_failure_marks_root_failed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = _install_fake_mlflow(monkeypatch)
+    from fleet_rlm.chat.run_lifecycle import FailedRunReceipt
+    from fleet_rlm.chat.turn_runtime import TurnRuntime
+    from fleet_rlm.rlm.result import PredictionResult, RLMOutcome, empty_rlm_usage
+
+    outcome = RLMOutcome(
+        terminal_status="completed",
+        prediction=PredictionResult(
+            display_text="model answer",
+            outputs={"answer": "model answer"},
+            schema_id="fleet.test",
+            schema_version="1",
+        ),
+        usage=empty_rlm_usage(),
+    )
+    commit_failure = FailedRunReceipt(
+        run_id=uuid4(),
+        terminal_status="failed",
+        failure_code="commit_failed",
+        public_message="Turn could not be committed",
+        durable=True,
+    )
+
+    with turn_trace(uuid4(), uuid4(), enabled=True):
+        TurnRuntime._annotate_receipt("model request", outcome, commit_failure)
+
+    assert calls.span_outputs[-1] == {"answer": "Turn could not be committed"}
+    assert calls.span_statuses[-1] == "ERROR"
+    assert calls.update_kwargs[-1] == {"state": "ERROR"}
+
+
 def test_turn_trace_teardown_failure_does_not_change_success(monkeypatch: pytest.MonkeyPatch) -> None:
     _install_fake_mlflow(monkeypatch, teardown_explode=True)
 

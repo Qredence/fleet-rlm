@@ -246,6 +246,7 @@ def test_configure_tracing_enabled_sets_uri_experiment_and_autolog(
     assert location.schema_name == "traces"
     assert location.table_prefix == "fleet_app"
     assert os.environ["MLFLOW_TRACING_SQL_WAREHOUSE_ID"] == "warehouse-123"
+    assert os.environ["MLFLOW_DISABLE_AGENT_HINT"] == "1"
     assert calls.autolog_calls == 1
     assert calls.autolog_kwargs == [
         {
@@ -275,7 +276,7 @@ def test_configure_tracing_applies_sampling_policy(monkeypatch: pytest.MonkeyPat
     assert calls.async_logging_args == [False]
 
 
-def test_mlflow_315_span_processor_bounds_and_protects_secrets() -> None:
+def test_mlflow_316_span_processor_bounds_and_protects_secrets() -> None:
     class Span:
         def __init__(self) -> None:
             self.inputs: dict[str, object] = {"token": "real-secret", "body": "x" * 2_000}
@@ -672,6 +673,7 @@ def test_tracing_cleanup_restores_policy_environment_after_autolog_failure(
         "MLFLOW_ASYNC_TRACE_LOGGING_RETRY_TIMEOUT",
         "MLFLOW_HTTP_REQUEST_TIMEOUT",
         "MLFLOW_TRACING_SQL_WAREHOUSE_ID",
+        "MLFLOW_DISABLE_AGENT_HINT",
     )
     before = {name: os.environ.get(name) for name in owned_environment}
 

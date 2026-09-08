@@ -210,13 +210,18 @@ class OpenedTurnStream:
             await self._opened_owner.wait_owned()
 
 
-def _attach_preparation_trace_id(prepared: PreparedTurn, trace_id: str | None) -> PreparedTurn:
+def _attach_preparation_trace_id(
+    prepared: PreparedTurn,
+    trace_id: str | None,
+    span_id: str | None = None,
+) -> PreparedTurn:
     """
     Attach a preparation trace identifier for internal phase correlation.
 
     Parameters:
         prepared (PreparedTurn): Prepared run to annotate.
         trace_id (str | None): Preparation trace identifier, if available.
+        span_id (str | None): Internal preparation span identifier, if available.
 
     Returns:
         PreparedTurn: The annotated run, or the original run when no identifier is
@@ -225,7 +230,11 @@ def _attach_preparation_trace_id(prepared: PreparedTurn, trace_id: str | None) -
     if not trace_id:
         return prepared
     try:
-        return replace(prepared, preparation_trace_id=trace_id)  # type: ignore[type-var]
+        return replace(
+            prepared,
+            preparation_trace_id=trace_id,
+            preparation_span_id=span_id,
+        )  # type: ignore[type-var]
     except (TypeError, AttributeError, ValueError):
         return prepared
 
@@ -457,7 +466,7 @@ class TurnRuntime:
                 )
                 raise
             annotate_trace_io(request=start.input.text, response_text="Turn prepared")
-            return _attach_preparation_trace_id(prepared, handle.trace_id)
+            return _attach_preparation_trace_id(prepared, handle.trace_id, handle._span_id)
 
     async def _prepare_claimed(
         self,
@@ -736,6 +745,7 @@ class TurnRuntime:
             expose_trace_id=self._mlflow_expose_trace_id,
             trace_phase="execution",
             preparation_trace_id=getattr(prepared, "preparation_trace_id", None),
+            preparation_span_id=getattr(prepared, "preparation_span_id", None),
         ) as handle:
             async for event in self._execute_claimed(run, prepared, heartbeat, trace_id=handle.trace_id):
                 yield event

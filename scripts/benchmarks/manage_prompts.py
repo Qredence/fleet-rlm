@@ -261,6 +261,9 @@ def link_traces(args: argparse.Namespace) -> dict[str, Any]:
     from mlflow.tracking.client import MlflowClient
 
     mlflow.set_tracking_uri(args.mlflow_url)
+    flush = getattr(mlflow, "flush_trace_async_logging", None)
+    if callable(flush):
+        flush(terminate=False)
     filter_string = f"tag.{args.tag} = 'true'" if args.tag else None
     traces = mlflow.search_traces(
         locations=[experiment_id],

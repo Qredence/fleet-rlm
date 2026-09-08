@@ -120,7 +120,7 @@ implementation and evidence requirements are satisfied.
   absence, including after Fleet error normalization. Volume creation conflicts
   reconcile by lookup, and Volume failures cross the normalized error boundary.
   Benchmark comparison accepts one explicit runtime, SDK or
-  snapshot axis while rejecting unrelated identity drift. MLflow 3.15.2 / OTel
+  snapshot axis while rejecting unrelated identity drift. MLflow 3.16.0 / OTel
   1.44.0 span export now clears content before restoring sanitized values;
   actual SDK exporter tests cover redaction failures, excess attributes,
   exception events and attachments. Async bridge tests retain parentage across

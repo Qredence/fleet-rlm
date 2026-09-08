@@ -61,6 +61,7 @@ _TRACE_ENVIRONMENT_KEYS = frozenset(
     {
         "DATABRICKS_HOST",
         "DATABRICKS_TOKEN",
+        "MLFLOW_DISABLE_AGENT_HINT",
         "MLFLOW_TRACE_SAMPLING_RATIO",
         "MLFLOW_ENABLE_ASYNC_TRACE_LOGGING",
         "MLFLOW_ASYNC_TRACE_LOGGING_MAX_QUEUE_SIZE",
@@ -77,16 +78,23 @@ _TRACKING_URI_BEFORE: object = _UNKNOWN_TRACKING_URI
 _TRACKING_URI_APPLIED: str | None = None
 _TRACE_CONFIG_CONTEXT: Any | None = None
 _DSPY_AUTOLOG_ENABLED = False
+_MLFLOW_EXPORT_DISTRIBUTIONS = (
+    ("mlflow", "3.16.0"),
+    ("mlflow-skinny", "3.16.0"),
+    ("mlflow-tracing", "3.16.0"),
+    ("opentelemetry-sdk", "1.44.0"),
+)
 
 
 def _mlflow_export_versions_are_certified() -> bool:
-    """Return whether all installed export distributions match the certified pair."""
+    """Return whether the installed MLflow/OTel export distributions are certified."""
     try:
-        versions = (package_version("mlflow"), package_version("opentelemetry-sdk"))
+        versions = tuple(package_version(name) for name, _expected in _MLFLOW_EXPORT_DISTRIBUTIONS)
     except PackageNotFoundError:
         logger.warning("MLflow export compatibility dependencies are unavailable; continuing without traces")
         return False
-    if versions != ("3.15.2", "1.44.0"):
+    expected = tuple(expected for _name, expected in _MLFLOW_EXPORT_DISTRIBUTIONS)
+    if versions != expected:
         logger.warning("MLflow export compatibility is uncertified; continuing without traces")
         return False
     return True
@@ -440,7 +448,7 @@ def _sanitize_mlflow_span(span: object) -> None:
 
 
 def _sanitize_live_mlflow_span(span: Any) -> None:
-    """MLflow 3.15.2 export compatibility, certified against actual SDK spans.
+    """MLflow 3.16.0 export compatibility, certified against actual SDK spans.
 
     Public setters merge attributes and cannot remove exception events or
     attachments. Keep the necessary private access here, at the existing export
@@ -455,12 +463,15 @@ def _sanitize_live_mlflow_span(span: Any) -> None:
     otel = span._span
     raw_attributes = otel._attributes
     raw_name = otel._name
+    raw_links = list(getattr(span, "_links", ()))
     # This executes synchronously before OTel end/export. Never rely on MLflow
     # propagating processor errors: its processor runner suppresses them.
     otel._attributes = BoundedAttributes(maxlen=128, immutable=False)
     otel._events = BoundedList(0)
+    otel._links = BoundedList(0)
     otel._name = "Fleet.operation"
     otel._status = Status(otel._status.status_code)
+    span._links = []
     span._attachments.clear()
     try:
 
@@ -496,11 +507,44 @@ def _sanitize_live_mlflow_span(span: Any) -> None:
             raise ValueError("invalid sanitized attributes")
         # Setters are additive, but now operate on an empty backing store.
         span.set_attributes(sanitized)
+        # MLflow 3.16 stores links in both the MLflow LiveSpan and its backing
+        # OpenTelemetry span. Keep the OTel collection bounded but appendable
+        # while restoring the one validated Fleet relationship link; a zero-
+        # capacity collection would make ``LiveSpan.add_link`` silently omit
+        # the restored link from the exported OTel representation.
+        otel._links = BoundedList(128)
+        # Restore only the one Fleet relationship link, with validated IDs and
+        # a fixed attribute set. Any SDK/autolog link with an unknown shape is
+        # dropped at this privacy boundary.
+        for link in raw_links:
+            attributes = getattr(link, "attributes", None)
+            if not isinstance(attributes, Mapping) or attributes.get("fleet.relationship") != "preparation":
+                continue
+            trace_id = getattr(link, "trace_id", None)
+            span_id = getattr(link, "span_id", None)
+            if not isinstance(trace_id, str) or not isinstance(span_id, str):
+                continue
+            try:
+                from mlflow.entities import Link
+
+                span.add_link(
+                    Link(
+                        trace_id=trace_id[:_PREPARATION_TRACE_ID_MAX_CHARS],
+                        span_id=span_id[:32],
+                        attributes={"fleet.relationship": "preparation"},
+                    )
+                )
+            except Exception:
+                # A malformed optional link is observability-only and must not
+                # make the span exporter or Turn fail.
+                continue
         otel._name = str(_sanitize_mlflow_value(raw_name, key="name"))
     except Exception:
         # A setter may have partially restored fields before failing. Discard
         # those too; do not log the exception, which may contain raw content.
         otel._attributes = BoundedAttributes(maxlen=128, immutable=False)
+        otel._links = BoundedList(0)
+        span._links = []
         otel._name = "Fleet.redaction_failed"
         logger.debug("MLflow span content suppressed after redaction failure")
 
@@ -641,6 +685,7 @@ def configure_tracing(settings: Settings) -> bool:
 
         # Set policy-owned SDK controls before importing MLflow. In particular,
         # the sampling provider reads its ratio during initialization.
+        _apply_trace_environment("MLFLOW_DISABLE_AGENT_HINT", "1")
         _apply_trace_environment("MLFLOW_TRACE_SAMPLING_RATIO", str(settings.mlflow_trace_sampling_ratio))
         _apply_trace_environment(
             "MLFLOW_ENABLE_ASYNC_TRACE_LOGGING",
@@ -720,7 +765,7 @@ def configure_tracing(settings: Settings) -> bool:
             return _abort_tracing_setup("MLflow export processor unavailable; continuing without traces")
         _TRACE_CONFIG_CONTEXT = configure_processors(span_processors=[_sanitize_mlflow_span])
 
-        # Enable MLflow's DSPy inference callback. The 3.15 span processor
+        # Enable MLflow's DSPy inference callback. The 3.16 span processor
         # above is the export boundary that bounds readable trace content and
         # protects credentials, paths, and system-prompt dumps. Keep
         # compile and evaluator traces out of the live Turn experiment.
@@ -843,6 +888,7 @@ def _trace_attributes(values: Mapping[str, object]) -> dict[str, object]:
 # and standard DSPy autolog spans (module/LM/tool calls).
 
 _LOCAL_BYOK_USER = "fleet-local"
+_LOCAL_SUPERVISED_TRACKING_URI = "http://127.0.0.1:5001"
 _SPAN_NAME = "fleet_turn"
 # Closed phase set so one Fleet Run (preparation + execution fleet_turn roots)
 # remains searchable by exactly these values, never by ad-hoc strings.
@@ -869,6 +915,31 @@ class TraceHandle:
     """Public-safe handle for an optional active Turn trace."""
 
     trace_id: str | None
+    # Internal-only span identity used for cross-trace links. This field must
+    # never be copied into product events, durable turns, or public API data.
+    _span_id: str | None = field(default=None, repr=False)
+
+
+def _is_local_supervised_tracking_uri(uri: str | None) -> bool:
+    """Return whether ``uri`` identifies Fleet's supervised local MLflow server."""
+    if not isinstance(uri, str):
+        return False
+    try:
+        parsed = urlparse(uri.rstrip("/"))
+        port = parsed.port
+    except ValueError:
+        return False
+    return (
+        parsed.scheme == "http"
+        and parsed.hostname == "127.0.0.1"
+        and port == 5001
+        and not parsed.path
+        and not parsed.params
+        and not parsed.query
+        and not parsed.fragment
+        and parsed.username is None
+        and parsed.password is None
+    )
 
 
 def _set_current_trace_state(state: str) -> None:
@@ -1109,6 +1180,7 @@ def turn_trace(
     expose_trace_id: bool = True,
     trace_phase: TracePhase | None = None,
     preparation_trace_id: str | None = None,
+    preparation_span_id: str | None = None,
 ) -> Iterator[TraceHandle]:
     """
     Open a root ``fleet_turn`` span for a Fleet turn when tracing is available.
@@ -1122,6 +1194,8 @@ def turn_trace(
             ``"execution"``, recorded on the trace.
         preparation_trace_id (str | None): Optional preparation trace identifier to associate
             with an execution trace.
+        preparation_span_id (str | None): Optional preparation span identifier used for a local
+            cross-trace Span Link. This is internal-only and is never exposed by the handle.
 
     Yields:
         TraceHandle: The root trace identifier when tracing succeeds and exposure is enabled;
@@ -1161,6 +1235,29 @@ def turn_trace(
             yield TraceHandle(trace_id=None)
             return
 
+        if (
+            trace_phase == "execution"
+            and preparation_trace_id
+            and preparation_span_id
+            and _is_local_supervised_tracking_uri(_TRACKING_URI_APPLIED)
+        ):
+            try:
+                from mlflow.entities import Link
+
+                add_link = getattr(span, "add_link", None)
+                if callable(add_link):
+                    add_link(
+                        Link(
+                            trace_id=str(preparation_trace_id)[:_PREPARATION_TRACE_ID_MAX_CHARS],
+                            span_id=str(preparation_span_id)[:32],
+                            attributes={"fleet.relationship": "preparation"},
+                        )
+                    )
+            except Exception:
+                # Cross-trace navigation is optional observability. A malformed
+                # or unsupported link must never prevent the Turn trace itself.
+                logger.warning("MLflow preparation Span Link setup failed; continuing without link")
+
         active_token = _fleet_trace_active.set(True)
         tags: dict[str, str] = {
             "fleet.run_id": str(run_id),
@@ -1182,6 +1279,7 @@ def turn_trace(
             bounded_id = str(preparation_trace_id)[:_PREPARATION_TRACE_ID_MAX_CHARS]
             tags[_PREPARATION_TRACE_ID_TAG] = bounded_id
             metadata[_PREPARATION_TRACE_ID_TAG] = bounded_id
+        span_id: str | None = None
         try:
             mlflow.update_current_trace(
                 session_id=str(session_id),
@@ -1206,11 +1304,14 @@ def turn_trace(
                 trace_id = str(raw)
                 if expose_trace_id:
                     _current_trace_id.set(trace_id)
+            raw_span_id = getattr(span, "span_id", None)
+            if raw_span_id is not None:
+                span_id = str(raw_span_id)
         except Exception:
             logger.warning("MLflow active trace ID lookup failed; continuing")
 
         try:
-            yield TraceHandle(trace_id=trace_id if expose_trace_id else None)
+            yield TraceHandle(trace_id=trace_id if expose_trace_id else None, _span_id=span_id)
         except BaseException as exc:
             from fleet_rlm.observability.diagnostics import trace_failure_category
 

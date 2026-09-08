@@ -126,9 +126,10 @@ class PreparedTurn:
     post_commit_memory_promotion: OwnedPostCommitMemoryPromotion | None = None
     memory_intent_builder: MemoryIntentBuilder | None = None
     # Internal engineering-observability correlation only: the preparation
-    # fleet_turn root's MLflow trace id, attached by TurnRuntime after
+    # fleet_turn root's MLflow trace and span ids, attached by TurnRuntime after
     # preparation. Never persisted, never projected into SSE/product events.
     preparation_trace_id: str | None = None
+    preparation_span_id: str | None = None
 
     @property
     def resources(self) -> _PreparedTurnResources:

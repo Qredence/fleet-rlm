@@ -14,6 +14,17 @@ function metadataString(turn: FleetTurn, key: string): string | undefined {
   return typeof value === "string" ? value : undefined;
 }
 
+/** Return the latest assistant execution trace in durable chronological order. */
+export function latestDurableTraceId(turns: FleetTurn[]): string | null {
+  for (let index = turns.length - 1; index >= 0; index -= 1) {
+    const turn = turns[index];
+    if (turn?.role !== "assistant") continue;
+    const traceId = metadataString(turn, "traceId");
+    if (traceId) return traceId;
+  }
+  return null;
+}
+
 export function adaptDurableTurns(turns: FleetTurn[]): CanonicalEvent[] {
   const events: CanonicalEvent[] = [];
   for (const turn of turns) {
