@@ -1312,7 +1312,9 @@ class DaytonaHttpToolBroker:
                 run_started_ns = time.perf_counter_ns()
                 try:
                     bucket.append(run_code())
-                except Exception as exc:
+                except BaseException as exc:
+                    # Transfer cancellation and other control-flow exceptions
+                    # to the owning caller rather than losing them in a thread.
                     bucket.append(exc)
                 finally:
                     # A fenced caller may already have settled its statistics.
@@ -1343,6 +1345,11 @@ class DaytonaHttpToolBroker:
                 empty_polls += 1
                 self._sleep_remaining_poll_delay(wait_s, poll_started_ns)
             thread.join(timeout=1.0)
+            if bucket and isinstance(bucket[0], BaseException):
+                interrupted = bucket[0]
+                if not isinstance(interrupted, Exception):
+                    # Do not drain additional host work after cancellation.
+                    raise interrupted
             for _ in range(5):
                 if check_authority is not None:
                     check_authority()
@@ -1359,6 +1366,8 @@ class DaytonaHttpToolBroker:
             if check_authority is not None:
                 check_authority()
             if isinstance(outcome, BaseException):
+                if not isinstance(outcome, Exception):
+                    raise outcome
                 if isinstance(outcome, DaytonaAdapterError):
                     raise outcome
                 raise DaytonaAdapterError(

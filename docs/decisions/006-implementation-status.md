@@ -6,6 +6,36 @@ The starting checkout was `0603e15a1d7ad5a10c8ed30e3fb9f2773569551d`.
 
 ## Current work
 
+### Phase 1–6 continuation (2026-09-08)
+
+The continuation starts at `a1957d2ac`. Existing mechanics through Phase 6
+do not mean that every local implementation task is complete. The unchecked
+tasks in the consolidated implementation plan remain open until their specific
+implementation and evidence requirements are satisfied.
+
+- Phase 3 output admission now checks completed SDK stdout, stderr and error
+  bytes independently of streamed callbacks, before final-output parsing.
+  Replay regressions cover omitted callbacks, UTF-8 byte limits, retained
+  containment ownership and avoiding duplicate streamed/result accounting.
+- Phase 3 broker workers now transfer cancellation and process-control
+  exceptions to their owning caller without converting them into ordinary
+  execution failures. Interrupted workers skip the post-execution callback
+  drain. Regression tests verify exception identity, completed worker ownership,
+  no drain after interruption and isolation from the next invocation. This is
+  local cancellation propagation evidence, not remote termination proof.
+- Phase 6 evaluation rejects malformed or blank evidence requirements, matches
+  complete evidence identifiers and uses tool outputs rather than trace
+  attributes. This is evidence-presence validation; it does not establish
+  answer correctness or semantic support.
+- These changes do not complete database certification, native settlement
+  integration, warm-pool reconciliation, matched recursive campaigns or cutover.
+- Continuation validation: 28 focused tests passed; `make check` passed with
+  78.47% backend coverage and 538 TUI tests, including generated contracts,
+  type/lint/format, dependency boundaries and documentation checks. No live
+  certification lane was run.
+
+### Previously retained implementation
+
 - Phase 0: ADR vocabulary and the three evidence lanes already exist. The runtime
   benchmark now captures installed Daytona, DSPy and MLflow identities.
 - Phase 1: additive migration `019fe0010001` adds Sandbox Binding Workspace and

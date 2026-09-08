@@ -129,6 +129,17 @@ class NativeInterpreterBackend:
                 on_error=observe_error,
             )
             self._admit()
+            # Validate the completed payload independently of callbacks. A
+            # transport may return output it did not deliver incrementally;
+            # do not admit that payload into final-output parsing unchecked.
+            result_bytes = len(result.stdout.encode("utf-8")) + len(result.stderr.encode("utf-8"))
+            if result.error is not None:
+                result_bytes += sum(
+                    len(str(getattr(result.error, field, "")).encode("utf-8"))
+                    for field in ("name", "value", "traceback")
+                )
+            if result_bytes > self._max_output_bytes:
+                raise DaytonaAdapterError("native output limit exceeded", cause_type="InterpreterOutputLimitError")
             final = extract_final_payload(result.stdout)
             error = result.error
             if error is not None and not (error.name == "FleetFinalOutputError" and final is not None):

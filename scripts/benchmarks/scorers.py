@@ -9,6 +9,7 @@ model URI. Scorers accept the standard subset of ``inputs`` / ``outputs`` /
 
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping
 from typing import Any
 
@@ -30,13 +31,9 @@ def response_present_impl(*, outputs: Any = None) -> bool:
 
 
 def _span_text(span: Any) -> str:
-    """Collect bounded text from a span's outputs and attributes for matching."""
-    parts: list[str] = []
-    for attribute in ("outputs", "attributes"):
-        value = getattr(span, attribute, None)
-        if isinstance(value, Mapping) or value is not None:
-            parts.append(str(value))
-    return " ".join(parts)
+    """Read tool outputs only; request metadata does not demonstrate evidence."""
+    value = getattr(span, "outputs", None)
+    return str(value) if value is not None else ""
 
 
 def tool_evidence_used_impl(*, trace: Any = None, expectations: Any = None) -> bool:
@@ -54,9 +51,12 @@ def tool_evidence_used_impl(*, trace: Any = None, expectations: Any = None) -> b
             identifier appears in their output text. `False` when the trace is
             absent or evidence cannot be confirmed.
     """
-    expectations = expectations or {}
+    if not isinstance(expectations, Mapping):
+        return False
     required = expectations.get("required_evidence")
     if not isinstance(required, list) or not required:
+        return False
+    if any(not isinstance(item, str) or not item.strip() for item in required):
         return False
     data = getattr(trace, "data", None)
     spans = list(getattr(data, "spans", None) or []) if data is not None else []
@@ -65,7 +65,7 @@ def tool_evidence_used_impl(*, trace: Any = None, expectations: Any = None) -> b
     ).lower()
     if not tool_text:
         return False
-    return all(str(item).strip().lower() in tool_text for item in required if str(item).strip())
+    return all(re.search(r"(?<!\w)" + re.escape(item.strip().lower()) + r"(?!\w)", tool_text) for item in required)
 
 
 def build_scorer(name: str, *, judge_model: str | None = None, guidelines: str | None = None) -> Any:

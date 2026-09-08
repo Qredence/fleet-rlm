@@ -176,6 +176,32 @@ async def test_authority_revocation_prevents_host_callback_and_execution():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("channel", ["stdout", "stderr", "error"])
+async def test_completed_output_is_bounded_when_transport_omits_callbacks(monkeypatch, channel):
+    backend, service, _, contained = await _backend(cap=8)
+    result = SimpleNamespace(stdout="", stderr="", error=None)
+    if channel == "error":
+        result.error = SimpleNamespace(name="Error", value="", traceback="é" * 5)
+    else:
+        setattr(result, channel, "é" * 5)
+    monkeypatch.setattr(service, "run_code", lambda *_args, **_kwargs: result)
+    with pytest.raises(DaytonaAdapterError, match="output limit"):
+        backend.run("pass")
+    with pytest.raises(DaytonaAdapterError, match="authority unavailable"):
+        backend.run("pass")
+    assert backend.containment_required and not contained
+    backend.close()
+    assert contained == [True]
+
+
+@pytest.mark.asyncio
+async def test_completed_output_check_does_not_double_count_streamed_bytes():
+    backend, _, _, _ = await _backend(cap=8)
+    assert backend.run("print('1234567')").stdout == "1234567\n"
+    backend.close()
+
+
+@pytest.mark.asyncio
 async def test_failed_containment_stays_owned_and_retryable():
     attempts = []
 

@@ -53,6 +53,25 @@ def test_tool_evidence_used_is_strict_without_evidence() -> None:
     assert not tool_evidence_used_impl(trace=llm_only, expectations={"required_evidence": ["A1"]})
 
 
+@pytest.mark.parametrize("required", [[""], [" "], ["A1", ""], [None], [1]])
+def test_tool_evidence_rejects_malformed_requirements(required: list[Any]) -> None:
+    trace = _FakeTrace([_FakeSpan("TOOL", "A1")])
+    assert not tool_evidence_used_impl(trace=trace, expectations={"required_evidence": required})
+
+
+@pytest.mark.parametrize("expectations", [None, [], "A1", 1])
+def test_tool_evidence_rejects_non_mapping_expectations(expectations: Any) -> None:
+    assert not tool_evidence_used_impl(expectations=expectations)
+
+
+def test_tool_evidence_does_not_accept_identifier_prefixes_or_attributes() -> None:
+    span = SimpleNamespace(span_type="TOOL", outputs="A10", attributes={"requested": "A1"})
+    trace = SimpleNamespace(data=SimpleNamespace(spans=[span]))
+    assert not tool_evidence_used_impl(trace=trace, expectations={"required_evidence": ["A1"]})
+    span.outputs = "Verified (A1), source A.2+"
+    assert tool_evidence_used_impl(trace=trace, expectations={"required_evidence": ["a1", "A.2+"]})
+
+
 def _install_fake_mlflow_scorers(monkeypatch: pytest.MonkeyPatch) -> None:
     scorers_mod = ModuleType("mlflow.genai.scorers")
 
