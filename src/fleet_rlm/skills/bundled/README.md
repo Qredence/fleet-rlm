@@ -8,7 +8,7 @@ Fleet ships five runtime Skills:
 | `dspy-rlm` | 1.0.0 | Use when analyzing, explaining, or implementing dspy.RLM (Recursive Language Model / REPL code agent). Not for RAG or dspy.Retrieve. |
 | `long-context` | 2.0.0 | Use bounded retrieval to analyze large documents, transcripts, code, or datasets. |
 | `report-builder` | 1.1.0 | Create, save, read back, and verify reports from trusted source data. |
-| `workspace-files` | 1.1.0 | Use durable Session Workspace, Project, Attachment, and Artifact tools correctly. |
+| `workspace-files` | 1.2.0 | Use durable Session Workspace, Project, Attachment, and Artifact tools correctly. |
 
 The catalog follows three disclosure levels:
 

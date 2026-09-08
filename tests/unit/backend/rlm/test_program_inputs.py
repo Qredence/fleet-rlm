@@ -173,7 +173,7 @@ def test_model_visible_skill_discovery_snapshot_matches_the_bundled_catalog() ->
             "name": "workspace-files",
             "description": "Use durable Session Workspace, Project, Attachment, and Artifact tools correctly.",
             "scope": "system",
-            "version": "1.1.0",
+            "version": "1.2.0",
             "trust": "system",
             "affordances": ["workspace.files", "artifacts.publish"],
             "resources_available": True,
