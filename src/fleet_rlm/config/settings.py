@@ -770,6 +770,19 @@ class Settings(BaseModel):
         default=None,
         description="MLflow experiment name when tracing is enabled",
     )
+    mlflow_experiment_purpose: Annotated[
+        str | None,
+        FleetFieldPolicy(
+            toml_path="mlflow.experiment_purpose", group="MLflow", label="Experiment purpose", editor="text", rank=117
+        ),
+    ] = Field(
+        default=None,
+        description=(
+            "Optional purpose recorded as the fleet.experiment.purpose tag on the "
+            "configured MLflow experiment (e.g. runtime, evaluation, optimization). "
+            "A conflicting recorded purpose fails configuration."
+        ),
+    )
     mlflow_tracking_uri: Annotated[
         str,
         FleetFieldPolicy(toml_path="mlflow.tracking_uri", group="MLflow", label="Tracking URI", editor="text", rank=56),

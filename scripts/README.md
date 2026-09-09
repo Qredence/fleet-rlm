@@ -23,18 +23,21 @@
 | `benchmarks/run_native_long_context.py` | Measure native whole-value URL context at 1/5/10 MiB and emit the paging decision receipt |
 | `benchmarks/run_rlm_latency.py` | Compare live Fleet RLM configuration variants and run the MLflow-native five-task quality gate |
 | `benchmarks/attach_phase3_receipt.py` | Attach a validated, bounded Daytona native-feasibility receipt and capability metrics to an existing MLflow campaign run |
+| `benchmarks/record_mlflow_campaign.py` | Record one sealed runtime/adapter benchmark receipt as an explicit MLflow tracking run with identity params, full-run metrics, and evidence-lane tags |
 | `benchmarks/run_routing_eval.py` | Run the deterministic or opt-in live delegation-ladder benchmark, including bounded recursive batches |
 | `benchmarks/judges.py` | Shared Fleet evaluation judge definitions and registration |
 | `benchmarks/scorers.py` | MLflow 3 GenAI custom scorers and evaluation metric definitions |
 | `benchmarks/manage_prompts.py` | Manage and version Fleet signature prompts in MLflow Prompt Registry |
 | `benchmarks/annotate_traces.py` | Annotate persisted `fleet_turn` traces with derived aggregate attributes |
 | `daytona_snapshot.py` | Explicitly create or check the immutable Fleet Daytona Snapshot |
+| `inventory_db_heads.py` | Retain a read-only, content-free Alembic-head inventory for one named database target |
 | `codex_feedback_loop.py` | Run the local Codex feedback-loop probes |
 | `deployment_observability.py` | Inspect deployment observability inputs |
 | `circleci_trigger_release.py` | Trigger and await the GitHub Actions PyPI release from CircleCI |
 | `validate_mlflow_tracing.py` | Emit and validate a local or Managed Databricks trace using the selected Fleet TOML policy |
 | `benchmarks/certify_mlflow.py` | Run the bounded MLflow 3.16 certification lane with explicit local/configured backend selection and a write-once receipt |
 | `benchmarks/certify_postgres.py` | Certify contention and optional query plans against an explicitly designated exclusive test database |
+| `benchmarks/certify_daytona_sdk.py` | Retain Daytona 0.210.0 unit compatibility evidence while explicitly preserving unrun live surfaces |
 | `benchmarks/rlm_eval_dataset.py` | Manage the UC-backed v2 evaluation dataset (static records + tagged production traces with expectations) |
 | `benchmarks/enable_monitoring.py` | Start, inspect, and stop server-side production monitoring scorers over UC-ingested traces |
 | `benchmarks/align_judges.py` | Align Fleet judges with SME feedback via labeling sessions and MemAlign, then re-evaluate the baseline |
@@ -184,6 +187,38 @@ uv run python scripts/benchmarks/certify_postgres.py \
   --receipt .fleet-evidence/receipts/adr006/postgres-contention-new.json \
   --query-plans --query-plan-samples 64 --timeout 600
 ```
+
+### Daytona SDK compatibility receipt
+
+`benchmarks/certify_daytona_sdk.py` runs the bounded unit compatibility suite and
+writes a content-free receipt once. It never loads dotenv or contacts Daytona.
+Volume, sandbox, broker, upload, lifecycle, and public-event live surfaces are
+recorded individually as `not_exercised`; they require a separately authorized
+operator campaign and cannot be inferred from the unit receipt.
+
+```bash
+uv run python scripts/benchmarks/certify_daytona_sdk.py \
+  --receipt .fleet-evidence/receipts/adr006/daytona-sdk-compatibility-unit.json
+```
+
+### Deployed database-head inventory
+
+`inventory_db_heads.py` is the separate P1A.01 operator tool for deployed or
+continuation targets. It performs read-only connectivity, `alembic_version`, and
+server-version checks, compares the observed heads with the repository graph,
+and writes a content-free receipt exactly once. It never migrates, records the
+database URL, or substitutes for the exclusive contention campaign.
+
+```bash
+FLEET_DATABASE_URL="$DEPLOYED_DATABASE_URL" \
+  uv run python scripts/inventory_db_heads.py \
+  --target production-primary \
+  --receipt .fleet-evidence/receipts/adr006/db-head-production-primary.json
+```
+
+Run once per supported deployed target and any deployment of the earlier
+migration branch before deciding whether an additive or merge migration is
+needed. Do not run the contention command above against a deployed target.
 
 The optional query-plan lane captures the actual Session-list, history, replay,
 recovery and outbox SELECTs through repository calls. Receipts retain statement

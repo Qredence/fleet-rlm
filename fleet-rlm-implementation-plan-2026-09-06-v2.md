@@ -165,8 +165,16 @@ See [ADR 006 implementation status](docs/decisions/006-implementation-status.md)
 
   Repository inventory is complete: one linear head `019fe0010001`, following
   `019fdb010001`, `019fa2e4b7c1`, `019f8c1d2e3f`, `019f7950a1b2` and baseline
-  `019f5b3c96bd`. Deployed heads remain unverified; no merge migration is
-  justified by the repository graph alone.
+  `019f5b3c96bd`. `scripts/inventory_db_heads.py` now supplies the required
+  read-only, write-once, content-free per-target receipt (`fleet.db-head-inventory/v1`):
+  non-secret target label, current heads, database version, repository comparison,
+  and an explicit no-rewrite strategy. It never migrates or retains a database URL.
+  The retained local `local-daytona-baseline` receipt observed the earlier
+  `019f5b3c96bd` revision and correctly classified it as `additive_required`;
+  it is local SQLite reconnaissance, not deployed-head evidence. Deployed heads
+  remain unverified; no merge migration is justified by the repository graph alone.
+  An operator must run it for every supported deployed target and any earlier-branch
+  deployment before this item is closed.
 - [x] **P1A.02** Keep the existing `fk_fleet_turns_run_session` migration and dirty-data preflight unchanged unless a reproduced issue requires a fix.
 - [x] **P1A.03** Add the missing Sandbox Binding-to-Workspace and Binding-to-Session/Workspace lineage constraints in a new additive migration. Add the matching unique parent key only as necessary.
 - [x] **P1A.04** Add a Session status CHECK and validate existing rows first. Define any binding-state CHECK around Fleet's normalized closed state model, not an assumed exhaustive list of provider wire values.
@@ -228,10 +236,29 @@ PostgreSQL plan receipt is retained separately.
 - [x] **P1.1A.06** Cover Volume get/create races, typed not-found, authentication, authorization, rate-limit, conflict, transport failure, and 5xx outcomes. Creation must occur only for explicit missing Volume, not for arbitrary errors.
 - [x] **P1.1A.07** Re-test API-key organization routing. The installed 0.210.0 behavior still uses one narrow, tested compatibility function because the public path does not preserve scope on its own.
 - [x] **P1.1A.08** Normalize create/start/stop/delete and Volume errors consistently. Preserve readiness verification and cleanup confirmation until SDK behavior replaces them demonstrably.
-- [ ] **P1.1A.09** Exercise SDK snapshot build-context upload behavior without adding a second retry loop around the SDK's S3 uploader. Keep this distinct from `sandbox.fs.upload_file` and ordinary artifact I/O.
+- [x] **P1.1A.09** Exercise SDK snapshot build-context upload behavior without adding a second retry loop around the SDK's S3 uploader. Keep this distinct from `sandbox.fs.upload_file` and ordinary artifact I/O.
+
+  `tests/unit/scripts/test_daytona_snapshot.py` now verifies the installed SDK's
+  empty-context path for Fleet's declarative image (no object-storage credential
+  request) and its non-empty local-context path with a fake object-storage API
+  (one SDK upload per context and forwarded context hash). The test does not
+  exercise `sandbox.fs.upload_file` and does not add a Fleet retry loop. A
+  credentialed provider upload remains separately reportable in P1.1A.12 rather
+  than being inferred from this local SDK contract.
 - [x] **P1.1A.10** Keep the current snapshot for this PR. A host SDK upgrade alone does not change the installed sandbox packages or require a new image. This historical sequencing constraint is satisfied; subsequent Phase 4 image work has its own receipts.
 - [x] **P1.1A.11** Record MI355X support as reviewed but out of scope. Do not introduce GPU configuration for CPU-only workloads.
 - [ ] **P1.1A.12** Record a compatibility receipt covering unit tests and, separately when run, live Volume, sandbox, broker, upload, lifecycle, and public-event smoke tests.
+
+  `scripts/benchmarks/certify_daytona_sdk.py` now provides the write-once,
+  content-free local receipt harness. It runs the bounded SDK unit-contract
+  suite and marks each live surface individually `not_exercised`; it neither
+  contacts Daytona nor implies live evidence. The local receipt
+  `.fleet-evidence/receipts/adr006/daytona-sdk-compatibility-local-20260909T033119Z.json`
+  passed its unit lane and retains every live surface as `not_exercised`. The
+  configured live snapshot lookup succeeded on 2026-09-09, but its immutable
+  image metadata did not match the current Fleet image contract, so no live
+  compatibility receipt was attached. Reconcile the immutable snapshot through
+  the Phase 4 operator path before extending this item with live campaigns.
 
 ### 1.1B. Reproducible benchmark evidence
 
@@ -245,10 +272,23 @@ PostgreSQL plan receipt is retained separately.
 - [ ] **P1.1B.10** Review current `max_provider_attempts=2048` as a safety ceiling, not a tuned efficiency policy. Calibrate from measured tasks; do not invent a tighter number before evidence exists.
 - [x] **P1.1B.11** Consolidate the checked-in scratch roadmap and ADR status into one maintained implementation plan with links to evidence. Keep implemented and certified statuses separate.
 
-- [ ] **P1.1B-M.01** Record each benchmark campaign as an MLflow tracking run, with explicit purpose and configuration identity. Log sealed receipts and bounded non-content sample summaries; content-bearing evaluation datasets stay in the approved restricted store.
-- [ ] **P1.1B-M.02** Keep exact source/config/model/image/dataset/scorer identities as parameters/tags and measured numeric outcomes as metrics. Preserve missing values as unknown rather than zero.
-- [ ] **P1.1B-M.03** Capture full-run measurements independently of trace sampling. An unavailable or sampled-out trace is not a zero-cost task and must not disappear from failure denominators.
-- [ ] **P1.1B-M.04** Mark campaigns with evidence lane, exercised gates, and promotion eligibility. Scripted echo/keyword receipts and development GEPA smoke cannot satisfy a live semantic-quality gate.
+- [x] **P1.1B-M.01** Record each benchmark campaign as an MLflow tracking run, with explicit purpose and configuration identity. Log sealed receipts and bounded non-content sample summaries; content-bearing evaluation datasets stay in the approved restricted store.
+- [x] **P1.1B-M.02** Keep exact source/config/model/image/dataset/scorer identities as parameters/tags and measured numeric outcomes as metrics. Preserve missing values as unknown rather than zero.
+- [x] **P1.1B-M.03** Capture full-run measurements independently of trace sampling. An unavailable or sampled-out trace is not a zero-cost task and must not disappear from failure denominators.
+- [x] **P1.1B-M.04** Mark campaigns with evidence lane, exercised gates, and promotion eligibility. Scripted echo/keyword receipts and development GEPA smoke cannot satisfy a live semantic-quality gate.
+
+  `scripts/benchmarks/record_mlflow_campaign.py` (2026-09-09) is the explicit
+  operator bridge: it verifies a sealed `fleet.runtime-benchmark/v2` or
+  `fleet.runtime-adapter-comparison/v2` receipt digest, requires
+  `FLEET_LIVE=1`, creates one tracking run in an explicit experiment with a
+  required bounded `--purpose`, and records identity params/tags, full-run
+  metrics (sample and failed-sample denominators, per-scorer pass counts,
+  latency, per-variant/gate outcomes) with absent values tagged
+  `metrics_unknown` instead of zero, the sealed receipt as one artifact, and
+  fail-closed `promotion_eligible=false` for scripted receipts. Local unit
+  tests cover tamper rejection, unknown-not-zero behavior, denominators and
+  the live gate; executing the bridge against a configured backend remains an
+  explicit operator action and no campaign evidence is claimed here.
 
 ### 1.1C. Certify the existing MLflow integration
 
@@ -264,10 +304,62 @@ The existing implementation already handles lifecycle startup/shutdown, DSPy aut
 - [x] **P1.1C.06** Test redaction failures as well as successful redaction. If safe export cannot be established, disable content capture/export or emit a safe replacement using verified supported mechanisms; do not assume throwing from a processor prevents export. Keep execution unaffected.
 - [x] **P1.1C.07** Audit exporter-visible surfaces covered by the installed SDK, including automatically captured inputs/outputs, exception events, attributes, tags, trace previews, logs, and serialized model artifacts. Test known secret/path sentinels on exported payloads, not just in-memory helper output.
 - [x] **P1.1C.08** Apply explicit, bounded asynchronous trace export, worker/queue limits, retry lifetime, and shutdown flush. Verify the trace-export controls independently from ordinary metric/parameter async logging; do not rely on shifting SDK defaults.
-- [ ] **P1.1C.09** Inject exporter outage, expired credentials, queue saturation, sampler changes, slow backend, and shutdown flush stalls. Verify claim heartbeats, cancellation and Turn latency remain within their budgets; record dropped/export-failed evidence rather than blocking useful work.
-- [ ] **P1.1C.10** Test repeated application lifespans, process-global configuration, and context cleanup. Prevent one Session or separate evaluation job from contaminating another trace. Run evaluation/optimization in separate worker processes when global SDK settings require isolation.
-- [ ] **P1.1C.11** Define experiment purpose separation for runtime, evaluation, and optimization. Use existing names plus purpose tags where sufficient; do not recreate managed experiments or migrate Unity Catalog trace locations without explicit operator action.
-- [ ] **P1.1C.12** Validate that authenticated trace lookup remains separate from public SSE/TUI access. A trace ID is correlation, not authorization; clients must remain functional when tracing is disabled or a trace is unavailable.
+- [x] **P1.1C.09** Inject exporter outage, expired credentials, queue saturation, sampler changes, slow backend, and shutdown flush stalls. Verify claim heartbeats, cancellation and Turn latency remain within their budgets; record dropped/export-failed evidence rather than blocking useful work.
+
+  `tests/unit/backend/test_mlflow_export_outage.py` (2026-09-09) certifies the
+  real MLflow 3.16 export machinery with the tracking backend replaced by
+  deterministic fault injection: backend outage and 20 sequential trace cycles
+  keep `span.end()` non-blocking inside a per-Turn budget, expired credentials
+  (401) are recorded as ERROR drop evidence through the production
+  classification path, a saturated async queue drops overflow without blocking
+  the caller, a stalled flush remains observable beyond Fleet's 5-second
+  shutdown budget, and no span content leaks into failure logs. Sampling-ratio
+  application at configuration time was already covered by
+  `test_configure_tracing_applies_sampling_policy`; claim heartbeats and
+  cancellation remain independent of MLflow by the P1B.04 settlement boundary
+  and their dedicated suites. Managed-backend lanes remain operator actions.
+- [x] **P1.1C.10** Test repeated application lifespans, process-global configuration, and context cleanup. Prevent one Session or separate evaluation job from contaminating another trace. Run evaluation/optimization in separate worker processes when global SDK settings require isolation.
+
+  Repeated lifespans: `scripts/benchmarks/certify_mlflow.py::_run_repeated_lifespans`
+  configures/flushes/resets twice in one process, and
+  `tests/unit/backend/test_mlflow_runtime.py` proves retry after close without
+  sticky failure, reset on the same owner, and concurrent close with exactly
+  one flush. Process-global configuration is snapshotted and restored
+  (`test_tracing_cleanup_restores_policy_environment_after_autolog_failure`,
+  `test_configure_tracing_is_idempotent_until_explicit_reset`,
+  `test_set_tracing_active_for_tests_resets_content_policy`). Cross-Session
+  contamination is covered by
+  `test_consecutive_sessions_do_not_contaminate_trace_tags`,
+  `test_turn_trace_uses_current_span_when_last_active_trace_is_stale`, and the
+  concurrent-session certification scenario. Evaluation/optimization jobs run
+  as separate operator processes with explicit experiment selection
+  (`scripts/benchmarks/record_mlflow_campaign.py` requires `--experiment-id`
+  and `--purpose`), and serving keeps compile/eval autolog disabled (P1.1C.03).
+- [x] **P1.1C.11** Define experiment purpose separation for runtime, evaluation, and optimization. Use existing names plus purpose tags where sufficient; do not recreate managed experiments or migrate Unity Catalog trace locations without explicit operator action.
+
+  `mlflow_experiment_purpose` (2026-09-09) is an optional policy setting
+  (`[defaults.mlflow].experiment_purpose = "runtime"`) recorded at configure
+  time as the `fleet.experiment.purpose` experiment tag. A conflicting
+  recorded purpose raises `FleetConfigurationError` (reset, no tracing); tag
+  write failures stay soft. Evaluation/optimization campaigns keep their
+  existing names and are recorded into explicitly selected experiments with
+  purpose tags by the campaign bridge. No managed experiment is recreated and
+  no Unity Catalog trace location moves. Unit tests cover tag application,
+  conflict propagation, idempotent re-set, soft failure, the frozen policy
+  inventory, and the committed TOML surface.
+- [x] **P1.1C.12** Validate that authenticated trace lookup remains separate from public SSE/TUI access. A trace ID is correlation, not authorization; clients must remain functional when tracing is disabled or a trace is unavailable.
+
+  `tests/contracts/backend/test_mlflow_feedback_api.py` (2026-09-09) proves the
+  session-scoped feedback route maps cross-session trace mismatches to the
+  closed `feedback_trace_not_found` 404, backend failures to a generic 503
+  without leaking lifecycle details, and rejects invalid bodies and unknown
+  sessions; the route obtains its session through the ownership-enforcing
+  repository, and `src/fleet_rlm/observability/feedback.py` re-verifies the
+  `fleet.session_id` tag and execution trace phase before answering.
+  `tests/unit/backend/test_sse_trace_id.py` keeps the public trace ID
+  correlation-only, omitting it from SSE events when not captured, and no
+  public route exposes trace lookup by ID. Clients remain functional with
+  tracing disabled through the closed-lifecycle 503 path.
 
 **Exit:** Daytona 0.210.0 is independently certified; a real legacy baseline is retained before promotion; MLflow failures do not change execution and unsafe data cannot be exported silently.
 
@@ -336,7 +428,22 @@ bounded receipt under `fleet.phase3-daytona-native-feasibility/v1`.
 - [x] **P3B.02** Choose transport consistent with Fleet's deployed topology. Do not assume a sandbox can directly reach a local Fleet host; retain a small polling/proxy bridge if necessary. The live receipt records the Daytona preview HTTP polling route and `loopback_host_assumption=false`; the composition bridge remains the transport seam.
 - [x] **P3B.03** Restrict the gateway to invocation ID, Run-scoped authorization, bound tool name, arguments, and bounded results. Keep provider credentials and database credentials out of sandboxes.
 - [x] **P3B.04** Validate authority and schema on every call and before publishing results. Prevent replay across Runs and reject late calls after revocation.
-- [ ] **P3B.05** Deduplicate retryable tool requests where safe. Do not describe arbitrary external writes as exactly-once merely because a request ID exists. Default registration now opts out; explicit retry policy is limited to the broker's read-only catalog and excludes `fetch_url`. Complete identity/metadata-backed retry admission and its regression proof before closing this gate.
+- [x] **P3B.05** Deduplicate retryable tool requests where safe. Do not describe arbitrary external writes as exactly-once merely because a request ID exists. Default registration now opts out; explicit retry policy is limited to the broker's read-only catalog and excludes `fetch_url`. Complete identity/metadata-backed retry admission and its regression proof before closing this gate.
+
+  Identity/metadata-backed admission is enforced twice (2026-09-09): the
+  in-sandbox wrapper computes the SHA-256 request key over canonical
+  tool/args/kwargs JSON only for the explicitly allow-listed read-only
+  catalog, and the host `DaytonaHttpToolBroker._request_key` re-derives and
+  HMAC-compares it before any dedupe claim, so a forged or stale key is
+  treated as non-retryable. `tests/unit/backend/test_host_tool_submit_broker.py`
+  proves the regression surface: valid-key deduplication executes once and
+  serves the duplicate, concurrent duplicates wait for one execution, forged
+  keys are rejected, writes emit `if False:` retry gates, registration
+  defaults to an empty retryable set, `fetch_url` and other non-read-only
+  names cannot be opted in (`InvalidToolPolicyError`), unbound retryable names
+  are rejected, and a valid read-only subset is accepted. The per-execution
+  cache never crosses executions, and no external-write exactly-once claim is
+  made.
 - [x] **P3B.06** Preserve native built-in tool identity while supporting host transport. Reserved-name validation applies to Fleet custom tools, not to the bound native callbacks required by the interpreter.
 - [x] **P3B.07** Ensure ordinary stdout cannot be confused with a final-output control message. Validate schema and keep final output distinct from durable settlement authority.
 
