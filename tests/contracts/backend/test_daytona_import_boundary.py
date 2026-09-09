@@ -25,6 +25,7 @@ EXPECTED_DAYTONA_MODULES = {
     "runtime.py",
     "sandbox_lease.py",
     "session_manager.py",
+    "warm_pool.py",
     "_cleanup.py",
     "_lease.py",
 }

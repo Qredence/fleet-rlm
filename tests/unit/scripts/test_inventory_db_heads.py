@@ -25,8 +25,8 @@ def test_target_label_rejects_secrets_and_paths(inventory) -> None:
 
 
 def test_compare_heads_match_additive_and_diverged(inventory) -> None:
-    repo = ["019fe0010001"]
-    ancestors = {"019fdb010001", "019fe0010001"}
+    repo = ["01a087800001"]
+    ancestors = {"019fdb010001", "019fe0010001", "01a087800001"}
     matched = inventory.compare_heads(repo, list(repo), ancestors=ancestors)
     assert matched["matches_repo_heads"] is True
     assert matched["migration_strategy"] == "none_required"
@@ -34,7 +34,7 @@ def test_compare_heads_match_additive_and_diverged(inventory) -> None:
 
     behind = inventory.compare_heads(repo, ["019fdb010001"], ancestors=ancestors)
     assert behind["matches_repo_heads"] is False
-    assert behind["missing_heads"] == ["019fe0010001"]
+    assert behind["missing_heads"] == ["01a087800001"]
     assert behind["migration_strategy"] == "additive_required"
 
     diverged = inventory.compare_heads(repo, ["deadbeef1234"], ancestors=ancestors)
@@ -46,22 +46,22 @@ def test_compare_heads_match_additive_and_diverged(inventory) -> None:
 def test_repo_heads_are_linear_single_head(inventory, tmp_path: Path) -> None:
     del tmp_path
     heads = inventory.repo_heads(Path(__file__).parents[3])
-    assert heads == ["019fe0010001"]
+    assert heads == ["01a087800001"]
 
 
 def test_receipt_is_content_free(inventory) -> None:
     receipt = inventory.build_receipt(
         target="deployed-pg-01",
-        repo=["019fe0010001"],
+        repo=["01a087800001"],
         observed={
             "backend": "postgresql",
             "server_version_num": "170011",
             "server_version": None,
-            "alembic_heads": ["019fe0010001"],
+            "alembic_heads": ["01a087800001"],
         },
         git_sha="abc123",
         dirty=False,
-        ancestors={"019fe0010001"},
+        ancestors={"019fe0010001", "01a087800001"},
     )
     assert receipt["schema"] == "fleet.db-head-inventory/v1"
     assert receipt["comparison"]["migration_strategy"] == "none_required"
@@ -75,6 +75,6 @@ def test_main_refuses_to_replace_receipt(inventory, tmp_path: Path, monkeypatch)
     monkeypatch.setenv("FLEET_TEST_INV_URL", "sqlite:///:memory:")
     receipt = tmp_path / "inventory.json"
     receipt.write_text("{}", encoding="utf-8")
-    monkeypatch.setattr(inventory, "repo_heads", lambda _root: ["019fe0010001"])
+    monkeypatch.setattr(inventory, "repo_heads", lambda _root: ["01a087800001"])
     code = inventory.main(["--receipt", str(receipt), "--target", "local", "--database-url-env", "FLEET_TEST_INV_URL"])
     assert code == 2
