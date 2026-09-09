@@ -127,6 +127,28 @@ uv run python scripts/db_init.py
 uv run alembic check
 ```
 
+## One-time SQLite import
+
+For a maintenance-window cutover, stop Fleet writes first, then use the
+operator-only import command with environment-variable names rather than URLs.
+It creates an exclusive SQLite backup, applies the Alembic chain to an empty
+Lakebase target, copies canonical Fleet rows in foreign-key-safe order, and
+retains only counts and deterministic digests in the receipt.
+
+```bash
+FLEET_LIVE=1 uv run python scripts/migrate_sqlite_to_postgres.py \
+  --maintenance-window \
+  --source-url-env FLEET_SQLITE_SOURCE_URL \
+  --target-url-env FLEET_DATABASE_URL \
+  --backup .scratch/fleet-pre-cutover.sqlite3 \
+  --receipt .scratch/fleet-sqlite-to-postgres.json
+```
+
+The target URL must use the durable `fleet_app` role and TLS. The command
+rejects populated targets, missing canonical source tables, existing receipts,
+and failed verification. Keep the verified backup and previous deployment
+artifact for the rollback window; there is no bidirectional synchronization.
+
 ## Notes and troubleshooting
 
 - **Always `sslmode=require`** — Lakebase rejects non-TLS connections.

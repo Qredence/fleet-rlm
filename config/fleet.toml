@@ -75,6 +75,10 @@ snapshot_env = "FLEET_DAYTONA_SNAPSHOT"
 child_snapshot_env = "FLEET_DAYTONA_CHILD_SNAPSHOT"
 volume_name = "fleet-volume"
 volume_mount_path = "/home/daytona/fleet"
+warm_pool_enabled = false
+warm_pool_size = 0
+# Set only when an operator has chosen the provider target for an explicit capacity campaign.
+warm_pool_region = ""
 
 [defaults.logging]
 level = "INFO"

@@ -238,6 +238,16 @@ _EXPECTED_INVENTORY: tuple[tuple[str, str, str, str, tuple[str, ...], str | None
     ),
     ("daytona.child_snapshot_env", "Daytona", "SemanticChild snapshot environment variable", "text", (), None),
     ("mlflow.experiment_purpose", "MLflow", "Experiment purpose", "text", (), "mlflow_experiment_purpose"),
+    (
+        "daytona.warm_pool_enabled",
+        "Daytona",
+        "SemanticChild warm pool enabled",
+        "boolean",
+        (),
+        "daytona_warm_pool_enabled",
+    ),
+    ("daytona.warm_pool_size", "Daytona", "SemanticChild warm pool size", "number", (), "daytona_warm_pool_size"),
+    ("daytona.warm_pool_region", "Daytona", "SemanticChild warm pool region", "text", (), "daytona_warm_pool_region"),
 )
 
 

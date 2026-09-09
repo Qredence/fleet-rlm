@@ -213,6 +213,44 @@ class Settings(BaseModel):
         str | None,
         FleetFieldPolicy(toml_path="daytona.org_id", group="Daytona", label="Organization ID", editor="text", rank=46),
     ] = Field(default=None)
+    daytona_warm_pool_enabled: Annotated[
+        bool,
+        FleetFieldPolicy(
+            toml_path="daytona.warm_pool_enabled",
+            group="Daytona",
+            label="SemanticChild warm pool enabled",
+            editor="boolean",
+            rank=118,
+        ),
+    ] = Field(
+        default=False,
+        description="Allow an explicit operator warm-pool reconciliation for clean SemanticChild sandboxes",
+    )
+    daytona_warm_pool_size: Annotated[
+        int,
+        FleetFieldPolicy(
+            toml_path="daytona.warm_pool_size",
+            group="Daytona",
+            label="SemanticChild warm pool size",
+            editor="number",
+            rank=119,
+        ),
+    ] = Field(
+        default=0,
+        ge=0,
+        le=32,
+        description="Desired clean SemanticChild warm-pool capacity; zero keeps capacity drained",
+    )
+    daytona_warm_pool_region: Annotated[
+        str | None,
+        FleetFieldPolicy(
+            toml_path="daytona.warm_pool_region",
+            group="Daytona",
+            label="SemanticChild warm pool region",
+            editor="text",
+            rank=120,
+        ),
+    ] = Field(default=None, description="Optional Daytona target region for the owned SemanticChild warm pool")
     llm_api_key: Annotated[
         SecretStr | None,
         FleetFieldPolicy(

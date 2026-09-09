@@ -4,6 +4,7 @@
 | --- | --- |
 | `benchmarks/runtime_v2.py` | Execute repeated scripted Turns and compare sealed lifecycle migration receipts; no live semantic or Daytona guarantee |
 | `db_init.py` | Apply the Alembic chain to `FLEET_DATABASE_URL`; keep it aligned with the runtime policy target |
+| `migrate_sqlite_to_postgres.py` | Operator-gated one-time SQLite-to-managed-PostgreSQL import with verified backup and content-free receipt |
 | `openapi_tools.py` | Generate or check backend-only `openapi.yaml` |
 | `generate_stream_fixture.py` | Generate or check the deterministic TUI turn-stream golden fixture |
 | `generate_tui_chunk_validation.py` | Generate or check the TUI runtime chunk-validation tables from `openapi.yaml` |
@@ -30,6 +31,7 @@
 | `benchmarks/manage_prompts.py` | Manage and version Fleet signature prompts in MLflow Prompt Registry |
 | `benchmarks/annotate_traces.py` | Annotate persisted `fleet_turn` traces with derived aggregate attributes |
 | `daytona_snapshot.py` | Explicitly create or check the immutable Fleet Daytona Snapshot |
+| `daytona_warm_pool.py` | Plan, inspect, or explicitly reconcile the clean SemanticChild Daytona warm pool |
 | `inventory_db_heads.py` | Retain a read-only, content-free Alembic-head inventory for one named database target |
 | `codex_feedback_loop.py` | Run the local Codex feedback-loop probes |
 | `deployment_observability.py` | Inspect deployment observability inputs |
@@ -200,6 +202,27 @@ operator campaign and cannot be inferred from the unit receipt.
 uv run python scripts/benchmarks/certify_daytona_sdk.py \
   --receipt .fleet-evidence/receipts/adr006/daytona-sdk-compatibility-unit.json
 ```
+
+### SemanticChild warm-pool operator path
+
+`daytona_warm_pool.py` is the only reconciliation path for the clean,
+Volume-less SemanticChild image. The committed policy keeps it disabled and at
+zero capacity. `plan` needs no provider contact; `check` reads the configured
+pool; `reconcile` changes capacity only when `runtime.live_enabled` and the
+explicit warm-pool policy permit it. It refuses ambiguous matching pools and
+never runs from a Fleet Turn.
+
+```bash
+uv run python scripts/daytona_warm_pool.py plan
+uv run python scripts/daytona_warm_pool.py check
+uv run python scripts/daytona_warm_pool.py reconcile \
+  --campaign semantic-child-rollout --spend-cap 10 --elapsed-seconds 1800 \
+  --admission-limit 1 --sandbox-concurrency 1
+```
+
+Ownership is recorded durably in `fleet_warm_pool_ownership`; reconciliation
+never accepts a caller-supplied pool id. Use `--adopt` on an explicit reconcile
+only when taking ownership of an existing, uniquely matching provider pool.
 
 ### Deployed database-head inventory
 

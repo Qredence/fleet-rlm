@@ -104,6 +104,10 @@ class DatabaseConnectionError(RuntimeError):
     """Raised when database connectivity cannot be validated safely."""
 
 
+class ManagedDatabasePolicyError(ValueError):
+    """Raised when a managed deployment points at an unsafe database URL."""
+
+
 # Single remediation path surfaced wherever migrations drift.
 REMEDIATION = "run `uv run python scripts/db_init.py`"
 
@@ -115,6 +119,24 @@ def is_sqlite_url(url: str) -> bool:
         return False
     normalized = normalize_database_url(cleaned)
     return normalized.startswith("sqlite")
+
+
+def validate_managed_postgres_url(url: str) -> None:
+    """Require the durable, TLS PostgreSQL shape used by Fleet's managed profile.
+
+    This intentionally validates only transport and role policy.  Endpoint
+    ownership and schema state require a live preflight and must not be
+    inferred from a hostname.
+    """
+    normalized = normalize_database_url(url)
+    if not normalized.startswith("postgresql+asyncpg://"):
+        raise ManagedDatabasePolicyError("managed Fleet deployments require a PostgreSQL database URL")
+    parsed = make_url(normalized)
+    if parsed.username != "fleet_app":
+        raise ManagedDatabasePolicyError("managed Fleet deployments require the durable fleet_app role")
+    ssl = str(parsed.query.get("ssl", "")).lower()
+    if ssl not in {"require", "verify-ca", "verify-full"}:
+        raise ManagedDatabasePolicyError("managed Fleet deployments require TLS")
 
 
 def normalize_database_url(url: str) -> str:

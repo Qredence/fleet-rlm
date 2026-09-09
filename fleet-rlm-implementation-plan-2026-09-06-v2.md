@@ -121,6 +121,13 @@ The old A-G plan is fully incorporated: A -> Phases 1/1.1/2; B -> 3; C and F1 ->
 
 ### Current todo state
 
+| Phase | Local implementation / validation | Retained evidence | Remaining external gate |
+| --- | --- | --- | --- |
+| P1 / P1.1 | Schema, contention harnesses, SDK/MLflow receipt tools, campaign recorder | Disposable PostgreSQL and local MLflow receipts | Deployed heads and managed MLflow are intentionally outside this milestone; live legacy baseline remains operator-run |
+| P2 | Program, budget, adapter, trace-attribution and event-parity contracts | Focused execution-core suite | Provider-backed semantic baseline only |
+| P3 | Native adapter, authority fencing, whole-sandbox cleanup, versioned attachment schema | Historical native no-go receipt | Disposable remote containment, matched broker/native timing, concurrent trace parentage and campaign attachment |
+| P4 | Immutable profiles, manifests, snapshot checks, Session prewarm, child warm-pool operator reconciler | Snapshot and local unit receipts | Organization capability/capacity canary, child cold-fallback consumption and measured capacity value |
+
 - [ ] Complete every local implementation task through Recursive RLM v2 (Phase 6). Foundational surfaces exist, but their presence does not close the unchecked tasks below.
 - [x] The Session and SemanticChild immutable snapshots are resolved from `.env`, checked against the Daytona contract, and have retained disposable runtime-probe receipts.
 - [x] The final local repository gate passed (`make check`, including generated contracts, boundaries, docs, and 543 TUI tests; 78.37% backend coverage against the 75% threshold).
@@ -511,7 +518,7 @@ Two images are sufficient initially: Session analysis and lean child analysis. T
 - [x] **P4B.02** Use Daytona's public Image/Snapshot SDK surfaces for creation and inspection. Keep SDK/API version assumptions explicit; rolling documentation is not proof a feature is available in the deployed backend.
 - [x] **P4B.03** Make checks fail on definition drift rather than overwriting existing snapshot identities. Treat activation, retirement, and warm-pool changes as explicit operator actions.
 - [ ] **P4B.04** Extend `fleet doctor daytona` with actual snapshot, region, runtime-manifest, interpreter, mount, and optional capacity readiness. Report unavailable features without pretending they were exercised.
-- [ ] **P4B.05** Implement and test warm-pool plan/check/reconcile behavior in this phase, with an explicitly authorized canary where available. Keep routine paid capacity disabled until eligibility, containment and actual Phase 6 demand/value are certified. Image correctness must not depend on warm capacity.
+- [ ] **P4B.05** Implement and test warm-pool plan/check/reconcile behavior in this phase, with an explicitly authorized canary where available. `scripts/daytona_warm_pool.py` now provides the policy-owned plan/check/reconcile seam for the clean SemanticChild snapshot, rejects ambiguous matches, and defaults to disabled/zero capacity. The live canary remains required before this item closes. Keep routine paid capacity disabled until eligibility, containment and actual Phase 6 demand/value are certified. Image correctness must not depend on warm capacity.
 - [x] **P4B.06** Document the official Daytona Skill as implementation assistance and optional MCP as developer/operator tooling. Runtime/provisioning source of truth remains committed definitions plus SDK/API calls, not an interactive MCP transcript.
 - [x] **P4B.07** Test packaging so installed Fleet distributions contain every dependency manifest and required helper asset. The wheel/sdist artifact matrix covers required manifests, helper assets, isolated profile loading, and forbidden payloads.
 
@@ -524,7 +531,7 @@ Daytona documents warm-pool matching on snapshot, region, default resources and 
 - [x] **P4C.03** Keep Volume-backed Session sandboxes on prewarm/start/reuse, not provider warm pools. Default to idle stop when no runtime-memory persistence is required.
 - [ ] **P4C.04** Implement the child warm-pool policy and its eligibility/cold-fallback path now. Run an explicitly authorized capacity canary only after confirming organization support; routine activation waits for measured Phase 6 recursive demand.
 - [ ] **P4C.05** Validate the actual SDK creation request for eligibility. Avoid accidentally passing disqualifying volumes, custom envs, secrets, users, or resource overrides.
-- [ ] **P4C.06** Reconcile desired capacity through the operator path. Never resize/create global warm pools from an individual user Turn.
+- [x] **P4C.06** Reconcile desired capacity through the operator path. `scripts/daytona_warm_pool.py` uses the pinned SDK's `AsyncDaytona.warm_pool` client, has an explicit apply mode, and remains outside Fleet Turn composition.
 - [ ] **P4C.07** Delete used child sandboxes; do not return tenant-used contexts/files to a shared warm pool. Record cleanup separately from pool replenishment.
 - [ ] **P4C.08** Record observable claim/readiness metadata accurately. Since claimed warm identifiers may be cleared, do not infer a warm hit solely from a fast create time.
 - [ ] **P4C.09** Specify lifecycle units explicitly. Idle auto-delete and wall-clock TTL are not interchangeable; use only parameters supported by 0.210.0 and the deployed backend, and verify expiry behavior.

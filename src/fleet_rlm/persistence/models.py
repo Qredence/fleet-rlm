@@ -199,6 +199,27 @@ class SandboxBindingRow(Base):
     )
 
 
+class WarmPoolOwnershipRow(Base):
+    """Fleet-owned identity for one operator-managed Daytona warm pool."""
+
+    __tablename__ = "fleet_warm_pool_ownership"
+    __table_args__ = (UniqueConstraint("pool_id", name="uq_fleet_warm_pool_ownership_pool"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=_uuid)
+    pool_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    campaign: Mapped[str] = mapped_column(String(128), nullable=False)
+    snapshot: Mapped[str] = mapped_column(String(255), nullable=False)
+    target: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    manifest_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    candidate_sha: Mapped[str] = mapped_column(String(64), nullable=False)
+    generation: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="owned")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
 class AttachmentRow(Base):
     """Authorized durable Attachment metadata; storage references stay private."""
 

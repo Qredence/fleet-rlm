@@ -541,6 +541,16 @@ def _require_managed_profile_environment_values(
         raise FleetConfigurationError(
             f"selected profile {profile!r} is missing required environment value(s): {', '.join(sorted(missing))}"
         )
+    database_env = flattened.environment_references.get("database_url")
+    database_url = (
+        _resolve_environment_value(database_env, dotenv, dotenv_only=False) if isinstance(database_env, str) else None
+    )
+    try:
+        from fleet_rlm.persistence.database import ManagedDatabasePolicyError, validate_managed_postgres_url
+
+        validate_managed_postgres_url(database_url or "")
+    except ManagedDatabasePolicyError as exc:
+        raise FleetConfigurationError("selected managed profile has an invalid database policy") from exc
 
 
 def load_runtime_settings() -> Settings:
