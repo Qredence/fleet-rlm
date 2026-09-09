@@ -11,7 +11,7 @@ from typing import Any
 import pytest
 
 import fleet_rlm.observability.tracing as tracing
-from fleet_rlm.config.settings import Settings
+from fleet_rlm.config.settings import FleetConfigurationError, Settings
 
 
 @pytest.fixture(autouse=True)
@@ -27,8 +27,10 @@ def _install_fake_mlflow(
     *,
     set_tracking_uri: Any | None = None,
     set_experiment: Any | None = None,
+    set_experiment_tag: Any | None = None,
     autolog: Any | None = None,
     raise_on_import: BaseException | None = None,
+    experiment: Any | None = None,
 ) -> SimpleNamespace:
     """
     Install fake MLflow modules for tracing tests and record their interactions.
@@ -38,6 +40,8 @@ def _install_fake_mlflow(
         set_experiment: Optional replacement for the fake experiment setter.
         autolog: Optional replacement for the fake DSPy autologging function.
         raise_on_import: Exception raised when attributes are accessed on the fake MLflow modules.
+        experiment: Optional experiment returned by the fake ``get_experiment_by_name``;
+            ``None`` (the default) keeps experiment lookups returning nothing.
 
     Returns:
         A namespace containing recorded MLflow calls and configurable fake functions.
@@ -59,6 +63,8 @@ def _install_fake_mlflow(
         tracking_uri_args=[],
         experiment_args=[],
         experiment_kwargs=[],
+        experiment_tag_args=[],
+        experiment_lookups=[],
         autolog_calls=0,
         autolog_kwargs=[],
         async_logging_args=[],
@@ -74,6 +80,16 @@ def _install_fake_mlflow(
     def _set_exp(*args: Any, **kwargs: Any) -> None:
         calls.experiment_args.append(args)
         calls.experiment_kwargs.append(kwargs)
+
+    def _get_experiment_by_name(name: str) -> Any:
+        calls.experiment_lookups.append(name)
+        return experiment
+
+    def _set_experiment_tag(key: str, value: str) -> None:
+        calls.experiment_tag_args.append((key, value))
+
+    if set_experiment_tag is not None:
+        _set_experiment_tag = set_experiment_tag
 
     def _autolog(**kwargs: Any) -> None:
         """
@@ -93,6 +109,8 @@ def _install_fake_mlflow(
     mlflow.set_tracking_uri = calls.set_tracking_uri  # type: ignore[attr-defined]
     mlflow.get_tracking_uri = lambda: current_tracking_uri["value"]  # type: ignore[attr-defined]
     mlflow.set_experiment = calls.set_experiment  # type: ignore[attr-defined]
+    mlflow.get_experiment_by_name = _get_experiment_by_name  # type: ignore[attr-defined]
+    mlflow.set_experiment_tag = _set_experiment_tag  # type: ignore[attr-defined]
     dspy_mod = ModuleType("mlflow.dspy")
     dspy_mod.autolog = calls.autolog  # type: ignore[attr-defined]
     mlflow.dspy = dspy_mod  # type: ignore[attr-defined]
@@ -154,6 +172,60 @@ def _enabled_settings(**overrides: Any) -> Settings:
     }
     values.update(overrides)
     return Settings(**values)
+
+
+def _install_fake_mlflow_exceptions(monkeypatch: pytest.MonkeyPatch) -> type[Exception]:
+    """Make ``from mlflow.exceptions import MlflowException`` work against the fake."""
+
+    class MlflowException(Exception):  # noqa: N818 - mirrors the real SDK name
+        ...
+
+    exceptions_mod = ModuleType("mlflow.exceptions")
+    exceptions_mod.MlflowException = MlflowException  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "mlflow.exceptions", exceptions_mod)
+    return MlflowException
+
+
+def test_configure_tracing_records_experiment_purpose_tag(monkeypatch: pytest.MonkeyPatch) -> None:
+    experiment = SimpleNamespace(experiment_id="42", tags={})
+    calls = _install_fake_mlflow(monkeypatch, experiment=experiment)
+    _install_fake_mlflow_exceptions(monkeypatch)
+    assert tracing.configure_tracing(_enabled_settings(mlflow_experiment_purpose="runtime")) is True
+    assert calls.experiment_tag_args == [("fleet.experiment.purpose", "runtime")]
+
+
+def test_configure_tracing_purpose_conflict_propagates_configuration_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    experiment = SimpleNamespace(experiment_id="42", tags={tracing._EXPERIMENT_PURPOSE_TAG: "evaluation"})
+    _install_fake_mlflow(monkeypatch, experiment=experiment)
+    _install_fake_mlflow_exceptions(monkeypatch)
+
+    with pytest.raises(FleetConfigurationError, match="already marked with purpose") as exc_info:
+        tracing.configure_tracing(_enabled_settings(mlflow_experiment_purpose="runtime"))
+    assert "mlflow.experiment_purpose" in str(exc_info.value)
+    assert "FLEET_MLFLOW_EXPERIMENT_PURPOSE" not in str(exc_info.value)
+    assert tracing.is_tracing_active() is False
+
+
+def test_configure_tracing_matching_purpose_does_not_rewrite_the_tag(monkeypatch: pytest.MonkeyPatch) -> None:
+    experiment = SimpleNamespace(experiment_id="42", tags={tracing._EXPERIMENT_PURPOSE_TAG: "runtime"})
+    calls = _install_fake_mlflow(monkeypatch, experiment=experiment)
+    _install_fake_mlflow_exceptions(monkeypatch)
+    assert tracing.configure_tracing(_enabled_settings(mlflow_experiment_purpose="runtime")) is True
+    assert calls.experiment_tag_args == []
+
+
+def test_configure_tracing_purpose_tag_failure_is_soft(monkeypatch: pytest.MonkeyPatch) -> None:
+    experiment = SimpleNamespace(experiment_id="42", tags={})
+
+    def _failing_tag(*_a: Any, **_k: Any) -> None:
+        raise AttributeError("simulated MLflow tag-write failure")
+
+    _install_fake_mlflow(monkeypatch, experiment=experiment, set_experiment_tag=_failing_tag)
+    _install_fake_mlflow_exceptions(monkeypatch)
+    assert tracing.configure_tracing(_enabled_settings(mlflow_experiment_purpose="runtime")) is True
+    assert tracing.is_tracing_active() is True
 
 
 def test_configure_tracing_disabled_skips_mlflow(monkeypatch: pytest.MonkeyPatch) -> None:

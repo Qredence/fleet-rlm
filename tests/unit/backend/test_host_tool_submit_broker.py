@@ -441,6 +441,73 @@ def test_http_broker_does_not_emit_retry_key_for_writes() -> None:
     assert "if False:" in source
 
 
+def _registration_broker() -> Any:
+    from fleet_rlm.daytona.broker import DaytonaHttpToolBroker
+
+    broker = DaytonaHttpToolBroker(sandbox=object())
+    # Pre-set URL keeps ensure_started() offline for policy-boundary tests.
+    broker._broker_url = "http://example.test"
+    return broker
+
+
+def test_http_broker_registration_defaults_to_no_retryable_tools() -> None:
+    broker = _registration_broker()
+
+    def read_workspace_text(_path: str) -> dict[str, object]:
+        return {}
+
+    broker.register_tools({"read_workspace_text": read_workspace_text})
+    assert broker._retryable_tool_names == frozenset()
+    assert "if False:" in broker.drain_wrapper_sources()
+
+
+def test_http_broker_registration_accepts_only_read_only_retryable_subset() -> None:
+    broker = _registration_broker()
+
+    def read_workspace_text(_path: str) -> dict[str, object]:
+        return {}
+
+    def fetch_url(_url: str) -> dict[str, object]:
+        return {}
+
+    broker.register_tools(
+        {"read_workspace_text": read_workspace_text, "fetch_url": fetch_url},
+        retryable_tool_names={"read_workspace_text"},
+    )
+    assert broker._retryable_tool_names == frozenset({"read_workspace_text"})
+    sources = broker.drain_wrapper_sources()
+    assert "if True:" in sources
+    assert "if False:" in sources
+
+
+def test_http_broker_registration_rejects_fetch_url_opt_in() -> None:
+    from fleet_rlm.daytona.broker import DaytonaAdapterError
+
+    broker = _registration_broker()
+
+    def fetch_url(_url: str) -> dict[str, object]:
+        return {}
+
+    with pytest.raises(DaytonaAdapterError, match="read-only broker contract") as exc_info:
+        broker.register_tools({"fetch_url": fetch_url}, retryable_tool_names={"fetch_url"})
+    assert exc_info.value.cause_type == "InvalidToolPolicyError"
+    assert broker._retryable_tool_names == frozenset()
+
+
+def test_http_broker_registration_rejects_unbound_retryable_name() -> None:
+    from fleet_rlm.daytona.broker import DaytonaAdapterError
+
+    broker = _registration_broker()
+
+    def read_workspace_text(_path: str) -> dict[str, object]:
+        return {}
+
+    with pytest.raises(DaytonaAdapterError, match="unbound tool") as exc_info:
+        broker.register_tools({"read_workspace_text": read_workspace_text}, retryable_tool_names={"read_attachment"})
+    assert exc_info.value.cause_type == "InvalidToolPolicyError"
+    assert broker._retryable_tool_names == frozenset()
+
+
 def test_http_broker_uses_isolated_port_for_server_and_wrappers() -> None:
     import hashlib
 

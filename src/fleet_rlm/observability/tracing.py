@@ -46,6 +46,7 @@ logger = logging.getLogger(__name__)
 
 _DEFAULT_TRACKING_URI = "databricks"
 _TRACE_DESTINATION_TAG = "mlflow.experiment.databricksTraceDestinationPath"
+_EXPERIMENT_PURPOSE_TAG = "fleet.experiment.purpose"
 _TRACE_CONTENT_MAX_CHARS = 10_000
 _TRACE_CONTENT_ENABLED = False
 # Set only after configure_tracing succeeds. Policy may request tracing while the
@@ -625,6 +626,54 @@ def _validate_experiment_trace_location(settings: Settings) -> None:
         )
 
 
+def _apply_experiment_purpose(settings: Settings) -> None:
+    """Record the configured purpose on the active MLflow experiment.
+
+    Purpose tags separate runtime, evaluation, and optimization experiments
+    without recreating managed experiments or moving trace locations. An
+    experiment already carrying a different recorded purpose is an
+    intentional configuration error; an unavailable backend or a fresh
+    experiment stays best-effort.
+    """
+    import mlflow
+
+    purpose = settings.mlflow_experiment_purpose
+    experiment_name = settings.mlflow_experiment_name
+    if not purpose or experiment_name is None:
+        return
+
+    try:
+        from mlflow.exceptions import MlflowException
+    except ImportError:
+        return
+
+    try:
+        experiment = mlflow.get_experiment_by_name(experiment_name)
+    except (MlflowException, AttributeError):
+        return  # Unavailable — the experiment tag is best-effort metadata
+
+    if experiment is None:
+        return
+
+    existing_purpose = experiment.tags.get(_EXPERIMENT_PURPOSE_TAG)
+    if existing_purpose is not None and existing_purpose != purpose:
+        raise FleetConfigurationError(
+            f"MLflow experiment {experiment_name!r} is already marked with purpose "
+            f"{existing_purpose!r}, but Fleet config specifies {purpose!r}. "
+            "Keep one purpose per experiment: update mlflow.experiment_purpose in the selected "
+            "Fleet TOML policy to the recorded purpose or choose a different experiment name."
+        )
+
+    if existing_purpose == purpose:
+        return
+
+    try:
+        # The fluent setter tags the experiment just selected by set_experiment.
+        mlflow.set_experiment_tag(_EXPERIMENT_PURPOSE_TAG, purpose)
+    except (MlflowException, AttributeError):
+        logger.warning("Could not record experiment purpose tag on %r; continuing", experiment_name)
+
+
 def configure_tracing(settings: Settings) -> bool:
     """Configure fail-soft MLflow tracing and return whether tracing is active.
 
@@ -632,8 +681,8 @@ def configure_tracing(settings: Settings) -> bool:
     missing, or setup fails. A successful configuration is idempotent until
     :func:`reset_tracing` runs, because MLflow and DSPy both retain process-wide
     configuration. `FleetConfigurationError` still reports an intentional
-    Unity Catalog trace-location conflict; other failures are logged and
-    suppressed.
+    Unity Catalog trace-location or experiment-purpose conflict; other failures
+    are logged and suppressed.
     """
     global _DSPY_AUTOLOG_ENABLED, _TRACE_CONFIG_CONTEXT, _TRACKING_URI_APPLIED
     global _TRACING_ACTIVE, _TRACE_CONTENT_ENABLED
@@ -753,6 +802,8 @@ def configure_tracing(settings: Settings) -> bool:
             )
         else:
             mlflow.set_experiment(experiment_name=settings.mlflow_experiment_name)
+
+        _apply_experiment_purpose(settings)
 
         config = getattr(mlflow, "config", None)
         enable_async_logging = getattr(config, "enable_async_logging", None)

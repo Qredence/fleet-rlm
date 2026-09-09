@@ -133,6 +133,7 @@ def test_default_mlflow_policy_uses_bounded_operational_trace_delivery() -> None
         "tracing_enabled": True,
         "tracking_uri": "http://127.0.0.1:5001",
         "experiment_name": "fleet-rlm",
+        "experiment_purpose": "runtime",
         "expose_trace_id": True,
         "async_logging": True,
         "trace_sampling_ratio": 1.0,

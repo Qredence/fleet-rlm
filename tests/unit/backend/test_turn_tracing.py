@@ -185,6 +185,23 @@ def test_turn_trace_enabled_sets_tags_and_trace_id(monkeypatch: pytest.MonkeyPat
     assert current_turn_trace_id() is None
 
 
+def test_consecutive_sessions_do_not_contaminate_trace_tags(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A second Session in the same process must never inherit the first's identity."""
+    calls = _install_fake_mlflow(monkeypatch)
+    first_session, second_session = uuid4(), uuid4()
+    for session_id in (first_session, second_session):
+        with turn_trace(session_id, uuid4(), enabled=True):
+            assert current_turn_trace_id() is not None
+
+    root_updates = [kwargs for kwargs in calls.update_kwargs if "session_id" in kwargs]
+    assert [kwargs["session_id"] for kwargs in root_updates] == [str(first_session), str(second_session)]
+    for kwargs, session_id in zip(root_updates, (first_session, second_session), strict=True):
+        assert kwargs["tags"]["fleet.session_id"] == str(session_id)
+        assert kwargs["tags"]["fleet.run_id"] == kwargs["metadata"]["fleet.run_id"]
+    # Each root starts from a clean context: no stale cross-Session trace id survives.
+    assert current_turn_trace_id() is None
+
+
 def test_turn_trace_preparation_phase_records_phase_tag_without_link(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

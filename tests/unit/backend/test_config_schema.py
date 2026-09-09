@@ -237,6 +237,7 @@ _EXPECTED_INVENTORY: tuple[tuple[str, str, str, str, tuple[str, ...], str | None
         "mlflow_http_request_timeout_seconds",
     ),
     ("daytona.child_snapshot_env", "Daytona", "SemanticChild snapshot environment variable", "text", (), None),
+    ("mlflow.experiment_purpose", "MLflow", "Experiment purpose", "text", (), "mlflow_experiment_purpose"),
 )
 
 

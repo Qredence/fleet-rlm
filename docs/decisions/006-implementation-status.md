@@ -135,6 +135,54 @@ implementation and evidence requirements are satisfied.
   type/lint/format, dependency boundaries and documentation checks. No live
   certification lane was run.
 
+### Benchmark campaign recording (2026-09-09)
+
+- P1.1B-M.01–04: `scripts/benchmarks/record_mlflow_campaign.py` now turns one
+  sealed `fleet.runtime-benchmark/v2` or `fleet.runtime-adapter-comparison/v2`
+  receipt into an explicit MLflow tracking run. It requires `FLEET_LIVE=1` and
+  an explicit experiment/`--purpose`, verifies the receipt digest before
+  recording, logs identity parameters/tags, records full-run metrics with
+  sample and failed-sample denominators (absent values become
+  `fleet.campaign.metrics_unknown`, never zero), uploads the sealed receipt as
+  one artifact, and fail-closes `fleet.campaign.promotion_eligible=false` for
+  scripted receipts. Unit tests cover tamper rejection, unknown-not-zero,
+  denominators, per-variant/gate projection and the live gate; running the
+  bridge against a configured backend remains an operator action and no
+  campaign evidence is claimed.
+
+### MLflow export, isolation, and purpose continuation (2026-09-09)
+
+- P1.1C.09: `tests/unit/backend/test_mlflow_export_outage.py` certifies the
+  real MLflow 3.16 export machinery under deterministic fault injection:
+  outage and sequential cycles stay non-blocking within the per-Turn budget,
+  expired credentials record ERROR drop evidence, queue saturation drops
+  without blocking, stalled shutdown flushes stay observable, and no span
+  content reaches failure logs. Managed-backend lanes remain operator actions.
+- P1.1C.10: repeated-lifespan, config-restore, and cross-Session isolation
+  behavior is certified by the existing runtime suites plus a new
+  consecutive-Session tag-contamination test; evaluation/optimization jobs stay
+  in separate operator processes with explicit experiment selection. No live
+  MLflow backend was exercised.
+- P1.1C.11: `mlflow_experiment_purpose` records a `fleet.experiment.purpose`
+  tag on the configured experiment at configure time; a conflicting recorded
+  purpose fails configuration and tag-write failures stay soft. The runtime
+  default is `runtime` in `config/fleet.toml`; campaigns keep explicit
+  experiment/purpose selection. No managed experiment was recreated and no
+  Unity Catalog trace location moved.
+- P1.1C.12: existing suites certify the separation. The session-scoped
+  feedback route maps cross-session trace mismatches to the closed 404, and
+  `observability/feedback.py` re-verifies the `fleet.session_id` tag; SSE
+  emits the trace ID only as correlation and omits it when not captured. No
+  public route offers trace lookup by ID, and clients stay functional through
+  the closed-lifecycle 503 when tracing is disabled.
+- P3B.05: the broker's identity-backed retry admission now has its regression
+  proof. `register_tools` defaults to an empty retryable set, rejects
+  `fetch_url`/non-read-only opt-ins and unbound names with
+  `InvalidToolPolicyError`, and accepts only explicit read-only subsets; the
+  host re-derives and compares the content-derived request key before any
+  dedupe claim. Four new unit tests join the existing dedupe, concurrent-wait,
+  forged-key, and write-exclusion suites.
+
 ### Root reserve continuation after `4f81687f`
 
 - Phase 2 late-response reclassification now respects the call-local LM's
