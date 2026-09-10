@@ -112,9 +112,10 @@ classification must be completed before claiming a Phase 6 quality campaign.
   Shutdown cannot report success while an unscheduled foreign-loop acquisition
   remains owned. Active Session claims are now owned by each
   `DaytonaSessionManager`, rather than a process-global registry; release,
-  pre-warm, idle-stop, and late-cleanup checks use that same owner. The
-  provider adapter's root-replacement index still overlaps `DaytonaRuntime`
-  root ownership and remains open.
+  pre-warm, idle-stop, and late-cleanup checks use that same owner. Production
+  root acquisition now delegates directly to `DaytonaRuntime`, which solely
+  owns root replacement and cleanup; the adapter's remaining local index is
+  compatibility-only and is not used by composed Daytona runtime.
 - P2.3: complete. Production RLM execution builds a fresh DSPy program,
   direct Tool bindings, callbacks, and worker executor for each Run.
   Sequential-Run coverage proves durable committed history, not Python state,

@@ -146,15 +146,14 @@ async def test_tainted_root_forces_new_sandbox_and_preserves_volume(monkeypatch:
     session_id = uuid4()
     workspace_id = uuid4()
     first = await provider.acquire(_turn(session_id=session_id, workspace_id=workspace_id), deadline=float("inf"))
-    key = (workspace_id, session_id)
-    old_owner = provider._resident_root_leases[key]
+    old_owner = provider.resources.runtime.roots[0]
     old_sandbox = manager.acquired[0].sandbox_id
     old_volume = manager.acquired[0].volume_id
     await first.release()
 
     assert first.mark_tainted is not None
     first.mark_tainted()
-    assert key in provider._tainted_root_keys
+    assert provider._resident_root_leases == {}
     assert first.resident_release is None
     await provider.resources.runtime.close_root_session(workspace_id, session_id)
     assert old_owner.closed
@@ -166,10 +165,12 @@ async def test_tainted_root_forces_new_sandbox_and_preserves_volume(monkeypatch:
     assert manager.acquired[1].sandbox_id != old_sandbox
     assert manager.acquired[1].volume_id == old_volume
     assert manager.released == [manager.acquired[0]]
-    assert key not in provider._tainted_root_keys
+    assert provider._resident_root_leases == {}
 
     await second.release()
     await provider.aclose()
+    assert manager.released == [manager.acquired[0]]
+    await provider.resources.runtime.aclose()
     assert manager.released == [manager.acquired[0], manager.acquired[1]]
 
 
