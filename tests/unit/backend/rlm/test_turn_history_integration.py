@@ -509,10 +509,9 @@ async def test_turn_two_answer_derives_from_committed_history_content() -> None:
     await stream_two.aclose()
     await prepared_two.aclose()
 
-    # One resident program served both Turns (same prepared shape), and the
-    # second native call received Turn 1's record as the exact prepared
-    # ``dspy.History`` instance.
-    assert len(factory.programs) == 1
+    # Each Turn creates a fresh program; durable history remains the only
+    # cross-Turn input.
+    assert len(factory.programs) == 2
     assert len(factory.calls) == 2
     assert not factory.tools
     second_history = factory.calls[1]["history"]

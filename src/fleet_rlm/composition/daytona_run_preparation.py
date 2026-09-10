@@ -1368,7 +1368,14 @@ class _DaytonaEnvironmentProvider:
                 workspace_memory_store=memory_store,
                 post_commit_memory_promotion=memory_promotion,
                 memory_intent_builder=memory_intent_builder,
-                resident_release=release_root if created_root else None,
+                # DaytonaRuntime retains the broker root independently of a
+                # Run's DSPy program. Compatibility resources retain the old
+                # callback ownership until their tests migrate.
+                resident_release=(
+                    None
+                    if isinstance(getattr(self.resources, "runtime", None), DaytonaRuntime)
+                    else (release_root if created_root else None)
+                ),
                 release_is_resident=False,
                 history_transport=build_committed_session_history_for_claim(run),
                 mark_tainted=lambda key=key: self._mark_provider_root_tainted(key),

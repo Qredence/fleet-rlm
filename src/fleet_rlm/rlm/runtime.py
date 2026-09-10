@@ -97,14 +97,6 @@ from fleet_rlm.rlm.result import (
     rlm_termination_mode,
     truncate_public_text,
 )
-from fleet_rlm.rlm.session_runtime import (
-    ProgramFingerprint,
-    ProgramFingerprintComponents,
-    SessionKey,
-    SessionRLMRegistry,
-    SessionRLMState,
-    SessionToolRegistry,
-)
 from fleet_rlm.runtime.owned_effect import OwnedEffect
 from fleet_rlm.sessions.history_transport import CommittedSessionHistory
 from fleet_rlm.sessions.models import TurnAccess
@@ -1007,76 +999,6 @@ def _context_binding(context: RLMExecutionContext) -> str:
     return hashlib.sha256(capsule.to_sandbox()).hexdigest()
 
 
-def _program_fingerprint(
-    context: RLMExecutionContext,
-    spec: RLMExecutionSpec,
-    tools: Sequence[dspy.Tool],
-) -> ProgramFingerprint:
-    """Compute the resident compatibility identity from explicit program shape."""
-    options = context.execution.options
-    recursive = context.delegation.recursive_options
-    interpreter = context.execution.interpreter
-    if interpreter is None:
-        interpreter_type = "none"
-    else:
-        interpreter_type = _type_shape(type(interpreter))
-        protocol_version = getattr(interpreter, "protocol_version", None)
-        if isinstance(protocol_version, str) and protocol_version:
-            interpreter_type += f"@{protocol_version}"
-    return ProgramFingerprint.from_components(
-        ProgramFingerprintComponents(
-            dspy_version=str(dspy.__version__),
-            signature_fields=_signature_shape(spec.signature),
-            signature_instructions=_fingerprint_text(getattr(spec.signature, "instructions", "")),
-            root_lm_config=_lm_shape(context.execution.models.root_lm),
-            sub_lm_config=_lm_shape(context.execution.models.sub_lm),
-            tools=tuple(_tool_shape(tool) for tool in tools),
-            recursion_policy={
-                "enabled": recursive.enabled,
-                "max_calls": recursive.max_calls,
-                "max_prompt_chars": recursive.max_prompt_chars,
-                "child_max_iters": recursive.child_max_iters,
-                "child_max_llm_calls": recursive.child_max_llm_calls,
-                "child_max_output_chars": recursive.child_max_output_chars,
-                "max_parallel_children": recursive.max_parallel_children,
-            },
-            limits={
-                "max_iters": options.max_iters,
-                "max_llm_calls": options.max_llm_calls,
-                "max_output_chars": options.max_output_chars,
-            },
-            output_contract={
-                "schema_id": spec.output_schema_id,
-                "schema_version": spec.output_schema_version,
-                "fields": _field_shapes(spec.signature.output_fields),
-            },
-            skill_signature={
-                "cards": tuple((card.name, card.version) for card in spec.skill_cards),
-                "signature": _type_shape(spec.signature),
-            },
-            skill_instructions=tuple(_fingerprint_text(item) for item in spec.skill_instructions),
-            interpreter_protocol_version=interpreter_type,
-        )
-    )
-
-
-def program_fingerprint_for_context(
-    context: RLMExecutionContext,
-    *,
-    spec: RLMExecutionSpec | None = None,
-    tools: Sequence[dspy.Tool] | None = None,
-) -> ProgramFingerprint:
-    """Compute the canonical resident-program identity for a prepared context.
-
-    The runner passes its fully observed Tool set (including recursive Tools).
-    Preparation may pass the composed base Tools before wrappers are attached;
-    both paths use this one description helper and exclude per-Turn values.
-    """
-    resolved_spec = spec or context.capabilities.spec
-    resolved_tools = tuple(context.capabilities.spec.tools if tools is None else tools)
-    return _program_fingerprint(context, resolved_spec, resolved_tools)
-
-
 class RunEventStream:
     """Async observation iterator with its measured outcome after completion."""
 
@@ -1200,6 +1122,25 @@ def _public_failure_message(exc: BaseException) -> str:
     return "Turn failed"
 
 
+class _RunRuntimeLease:
+    """Release Run-local program callbacks and worker resources exactly once."""
+
+    def __init__(self, release: Callable[[], Awaitable[None]]) -> None:
+        self._release = release
+        self._released = False
+
+    def mark_committed(self) -> None:
+        pass
+
+    def mark_tainted(self) -> None:
+        pass
+
+    async def release(self) -> None:
+        if not self._released:
+            self._released = True
+            await self._release()
+
+
 class RLMRunner:
     """Consume only an immutable prepared context and emit no terminal detail."""
 
@@ -1207,15 +1148,8 @@ class RLMRunner:
         self,
         *,
         factory: RLMFactoryLike | None = None,
-        runtime_registry: SessionRLMRegistry | None = None,
     ) -> None:
         self._factory = factory or RLMFactory()
-        self._owns_runtime_registry = runtime_registry is None
-        self._runtime_registry = runtime_registry if runtime_registry is not None else SessionRLMRegistry()
-        self._session_tool_registries: dict[SessionKey, SessionToolRegistry] = {}
-        self._remove_runtime_close_observer: Callable[[], None] | None = self._runtime_registry.add_close_observer(
-            self._on_runtime_closed
-        )
         self._close_lock = asyncio.Lock()
         self._close_task: asyncio.Task[None] | None = None
         self._closed = False
@@ -1245,32 +1179,9 @@ class RLMRunner:
             raise
 
     async def _aclose_impl(self, *, drain_seconds: float) -> None:
-        """Own observer detachment and optional private-registry shutdown."""
-        errors: list[BaseException] = []
-        remove_observer = self._remove_runtime_close_observer
-        if remove_observer is not None:
-            try:
-                remove_observer()
-            except BaseException as exc:
-                errors.append(exc)
-            else:
-                self._remove_runtime_close_observer = None
-        # No new callbacks should be retained even when registry shutdown
-        # reports a deferred-close failure. The registry itself remains the
-        # owner of resident state and can be retried by its composition owner.
-        self._session_tool_registries.clear()
-        if self._owns_runtime_registry:
-            try:
-                await self._runtime_registry.shutdown(drain_seconds=drain_seconds)
-            except BaseException as exc:
-                errors.append(exc)
-        if errors:
-            raise errors[0]
+        """Mark this run-scoped runner closed."""
+        del drain_seconds
         self._closed = True
-
-    def _on_runtime_closed(self, state: SessionRLMState) -> None:
-        """Drop per-Session Tool proxies when their resident state is retired."""
-        self._session_tool_registries.pop(state.session_key, None)
 
     def stream(self, context: RLMExecutionContext) -> RunEventStream:
         """
@@ -1544,130 +1455,33 @@ class RLMRunner:
                 recursive_executor.readonly_partial_capsule_batch_tool,
             )
         all_tools = (*observed_tools, *recursive_tools)
-        fingerprint = program_fingerprint_for_context(context, spec=spec, tools=all_tools)
-        key = SessionKey(
-            workspace_id=str(context.identity.access.workspace_id),
-            session_id=str(context.identity.session_id),
+        # A Run receives a fresh DSPy program and direct tool bindings. The broker
+        # root remains provider-owned, while no Python program, callbacks, or
+        # deadline-bound LM instance survives the Run.
+        state_context = context
+        worker_executor = ThreadPoolExecutor(
+            max_workers=1,
+            thread_name_prefix=f"fleet-run-rlm-{str(context.identity.run_id)[:8]}",
         )
+        rlm: Any | None = None
 
-        def claim_valid() -> bool:
-            return not context.identity.authority.revoked
-
-        created_binding: list[object] = []
-        observer_cleanup: Callable[[], object] | None = None
-        binding: Any | None = None
-        binding_attached = False
-
-        async def create_runtime(session_key: SessionKey, program_fingerprint: str) -> SessionRLMState:
-            manager = self._session_tool_registries.get(session_key)
-            if manager is None:
-                manager = SessionToolRegistry()
-                self._session_tool_registries[session_key] = manager
-            binding = manager.bind_turn(
-                all_tools,
-                run_id=context.identity.run_id,
-                claim_valid=claim_valid,
-                authorized_names={str(tool.name) for tool in all_tools},
-                revocation=context.identity.authority,
-            )
-            created_binding.append(binding)
-            worker_executor = ThreadPoolExecutor(
-                max_workers=1,
-                thread_name_prefix=f"fleet-session-rlm-{session_key.session_id[:8]}",
-            )
-            environment_release = context.execution.environment_release
-            try:
-                rlm = self._factory.create(
-                    models=context.execution.models,
-                    options=context.execution.options,
-                    tools=binding.tools or None,
-                    signature=spec.signature,
-                )
-                if environment_release is not None:
-                    environment_release.retain()
-                return SessionRLMState(
-                    session_key=session_key,
-                    program_fingerprint=program_fingerprint,
-                    rlm=rlm,
-                    interpreter=context.execution.interpreter,
-                    root_lease=environment_release,
-                    cleanup_handle=binding,
-                    tool_registry=manager,
-                    worker_executor=worker_executor,
-                    interpreter_owned_by_root=environment_release is not None,
-                )
-            except BaseException:
-                worker_executor.shutdown(wait=True, cancel_futures=True)
-                binding.remove()
-                if environment_release is not None:
-                    with suppress(BaseException):
-                        await environment_release.aclose()
-                raise
-
-        lease = await self._runtime_registry.acquire_execution(
-            key,
-            fingerprint,
-            create_runtime,
-            context_binding=_context_binding(context),
-            # If only the program fingerprint changes, the Daytona provider
-            # may intentionally hand the same root-owned interpreter to this
-            # Turn.  The registry transfers its root lease before closing the
-            # previous generation instead of shutting that interpreter down.
-            preserve_interpreter=context.execution.interpreter,
-        )
-        manager = self._session_tool_registries.get(key)
-        if manager is None:
-            # Tool registries are resident-program state.  A second Runner
-            # sharing the injected Session registry must recover the exact
-            # registry attached by the original factory, rather than creating
-            # proxies that the resident RLM never references.
-            resident_manager = lease.state.tool_registry
-            if isinstance(resident_manager, SessionToolRegistry):
-                manager = resident_manager
-                self._session_tool_registries[key] = manager
-        if manager is None:
-            # A factory always installs the first binding.  This guard keeps
-            # custom registries/factories fail-closed if they violate that
-            # resident-state contract.
-            await lease.release()
-            raise RLMConfigError("Session Tool registry is unavailable")
-        try:
-            environment_release = context.execution.environment_release
-            if environment_release is not None:
-                # Each preparation may hand us a fresh per-Turn wrapper around the
-                # same provider root. Retain it before prepared cleanup; the
-                # provider callback is idempotent and the first resident owner
-                # remains responsible for final root release.
-                environment_release.retain()
-            binding = (
-                created_binding.pop()
-                if created_binding
-                else manager.bind_turn(
-                    all_tools,
-                    run_id=context.identity.run_id,
-                    claim_valid=claim_valid,
-                    authorized_names={str(tool.name) for tool in all_tools},
-                    revocation=context.identity.authority,
-                )
-            )
-            state_context = replace(
-                context,
-                execution=replace(context.execution, interpreter=lease.state.interpreter),
-            )
-
-            def clear_observers() -> None:
-                """Drop run-local callbacks before the resident state goes idle."""
-                for target in (state_context.execution.interpreter, lease.state.rlm):
+        def clear_observers() -> None:
+            for target in (state_context.execution.interpreter, rlm):
+                if target is not None:
                     with suppress(BaseException):
                         self._clear_observer(target)
 
-            # Register cleanup before the first bind. Context-capsule setup or
-            # native callback installation can fail independently; a partial
-            # start must not leave a resident interpreter pointing at this
-            # Turn's ObservationSession.
-            observer_cleanup = clear_observers
-            lease.bind_turn_cleanup(binding, observer_cleanup)
-            binding_attached = True
+        async def release_run_runtime() -> None:
+            clear_observers()
+            await asyncio.to_thread(worker_executor.shutdown, True, cancel_futures=True)
+
+        try:
+            rlm = self._factory.create(
+                models=state_context.execution.models,
+                options=state_context.execution.options,
+                tools=all_tools or None,
+                signature=spec.signature,
+            )
             bind_budget = getattr(state_context.execution.interpreter, "bind_turn_budget", None)
             if callable(bind_budget):
                 bind_budget(getattr(state_context.execution.models, "budget", None))
@@ -1677,18 +1491,13 @@ class RLMRunner:
                 state_context.execution.options.max_output_chars,
                 deadline=state_context.execution.deadline,
             )
-            # The resident native RLM owns its sub-LM reference for the
-            # duration of ``_make_llm_tools``. Refresh it for every Turn so a
-            # reused Session never retains a prior Turn's deadline-bound copy.
-            if hasattr(lease.state.rlm, "sub_lm"):
-                lease.state.rlm.sub_lm = state_context.execution.models.sub_lm
             self._bind_context_capsule(state_context)
             bind_output_contract(
                 state_context.execution.interpreter,
-                getattr(lease.state.rlm, "signature", None),
+                getattr(rlm, "signature", None),
             )
             self._bind_observer(
-                lease.state.rlm,
+                rlm,
                 observations.publish,
                 state_context.execution.options.max_output_chars,
                 emit_reasoning=True,
@@ -1707,25 +1516,16 @@ class RLMRunner:
             )
             trace = ExecutionTraceAssembler(recursive_executor)
             worker = start_rlm_worker(
-                rlm=lease.state.rlm,
+                rlm=rlm,
                 context=state_context,
                 kwargs=kwargs,
                 ownership=ownership,
                 execute=trace.execute,
-                executor=lease.state.worker_executor,
+                executor=worker_executor,
             )
-            return spec, guards, worker, recursive_executor, lease
+            return spec, guards, worker, recursive_executor, _RunRuntimeLease(release_run_runtime)
         except BaseException:
-            if observer_cleanup is not None:
-                with suppress(BaseException):
-                    observer_cleanup()
-            if binding is not None and not binding_attached:
-                remove = getattr(binding, "remove", None)
-                if callable(remove):
-                    with suppress(BaseException):
-                        remove()
-            lease.mark_tainted()
-            await lease.release()
+            await release_run_runtime()
             raise
 
     async def _worker_events(
