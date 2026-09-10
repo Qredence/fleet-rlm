@@ -101,7 +101,7 @@ def test_data_analysis_signature_keeps_outputs_and_receives_fleet_operating_poli
     assert "Python standard library" in signature.instructions
     assert "llm_query(prompt)" in signature.instructions
     assert "llm_query_batched(prompts)" in signature.instructions
-    assert "rlm_query(prompt=prompt)" in signature.instructions
+    assert "rlm_query(capsule=capsule)" in signature.instructions
     assert "exactly one typed ``SUBMIT``" in signature.instructions
     assert "Compute only the requested metrics" in signature.instructions
     assert signature.instructions.count("Compute only the requested metrics") == 1
@@ -118,7 +118,7 @@ def test_custom_skill_signature_omits_recursive_guidance_when_the_tool_is_unavai
     signature = resolved_signature(resolved, recursion_enabled=False)
 
     assert set(signature.output_fields) == {"answer", "findings", "metrics", "anomalies"}
-    assert "rlm_query(prompt=prompt)" not in signature.instructions
+    assert "rlm_query(capsule=capsule)" not in signature.instructions
     assert "llm_query(prompt)" in signature.instructions
     assert "llm_query_batched(prompts)" in signature.instructions
     assert "5. Verify within the same action" in signature.instructions
@@ -141,6 +141,6 @@ def test_runner_signature_recomposition_uses_actual_policy_without_duplicate_bod
         skill_instructions=resolved.instructions,
     )
 
-    assert "rlm_query(prompt=prompt)" not in recomposed.instructions
+    assert "rlm_query(capsule=capsule)" not in recomposed.instructions
     assert recomposed.instructions.count("Compute only the requested metrics") == 1
     assert recomposed.output_fields.keys() == DataAnalysisSignature.output_fields.keys()

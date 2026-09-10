@@ -12,6 +12,7 @@ import dspy
 import pytest
 from dspy.predict.rlm import RLM
 
+import fleet_rlm.rlm.recursion as recursion_module
 from fleet_rlm.chat.run_authority import RunAuthority
 from fleet_rlm.daytona.broker import DaytonaHttpToolBroker
 from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
@@ -40,7 +41,7 @@ def _executor(
     factory_calls: list[DaytonaCodeInterpreter] | None = None,
     observer=None,
     is_authorized: Callable[[], bool] | None = None,
-    selected_input_reader: Callable[[str], str] | None = None,
+    selected_input_reader: Callable[[str, int], str] | None = None,
 ) -> RecursiveRLMExecutor:
     """
     Construct a recursive executor backed by dummy root and sub-models for tests.
@@ -95,7 +96,7 @@ def test_subproblem_capsule_is_selected_bounded_input_not_session_copy() -> None
     capsule = SubproblemCapsule(
         task="compare selected findings",
         fragments=("finding-a", "finding-b"),
-        authorized_references=("artifact://one",),
+        authorized_references=("artifact://00000000-0000-0000-0000-000000000001",),
         expected_result_shape="verdict with citations",
         evidence_requirements=("cite each finding",),
         allocation_bytes=512,
@@ -150,7 +151,7 @@ def test_selected_access_reports_only_read_reference_and_separates_inline_delive
     reads: list[str] = []
     access = SelectedInputAccess(
         SubproblemCapsule(task="inspect", fragments=("inline",), authorized_references=("a.txt", "b.txt")),
-        reader=lambda path: reads.append(path) or "selected content",
+        reader=lambda path, _remaining: reads.append(path) or "selected content",
         check_authority=lambda: None,
     )
     assert access.accessed_references == ()
@@ -162,6 +163,25 @@ def test_selected_access_reports_only_read_reference_and_separates_inline_delive
     with pytest.raises(ChildRuntimeAuthorizationError):
         access.read("../secret")
     assert reads == ["b.txt"]
+
+
+def test_selected_access_passes_remaining_bytes_and_counts_only_delivered_content() -> None:
+    limits: list[int] = []
+    capsule = SubproblemCapsule(task="read", authorized_references=("a.txt", "b.txt"))
+    access = SelectedInputAccess(
+        capsule,
+        reader=lambda _path, remaining: limits.append(remaining) or "é",
+        check_authority=lambda: None,
+    )
+    assert access.selected_input_bytes == capsule.serialized_bytes
+    access.read("reference-1")
+    access.read("reference-1")
+    access.read("reference-2")
+    assert limits == [
+        capsule.allocation_bytes - capsule.serialized_bytes,
+        capsule.allocation_bytes - capsule.serialized_bytes - 2,
+    ]
+    assert access.selected_input_bytes == capsule.serialized_bytes + 4
 
 
 @pytest.mark.parametrize("failure", ["checksum", "allocation", "authority"])
@@ -176,7 +196,7 @@ def test_selected_access_never_records_failed_delivery(failure: str) -> None:
             authorized_references=("a.txt",),
             selected_file_checksums=(("a.txt", "0" * 64),) if failure == "checksum" else (),
         ),
-        reader=lambda _path: "x" * (5_000 if failure == "allocation" else 1),
+        reader=lambda _path, _remaining: "x" * (5_000 if failure == "allocation" else 1),
         check_authority=authority,
     )
     with pytest.raises((ValueError, ChildRuntimeAuthorizationError)):
@@ -190,7 +210,7 @@ def test_subproblem_capsule_is_strict_deterministic_and_path_scoped() -> None:
         {
             "task": " inspect selected file ",
             "fragments": ["row-1"],
-            "authorized_references": ["artifact://report/1"],
+            "authorized_references": ["artifact://00000000-0000-0000-0000-000000000002"],
             "expected_result_shape": "verdict",
             "evidence_requirements": ["cite row-1"],
             "allocation_bytes": 1_024,
@@ -200,7 +220,7 @@ def test_subproblem_capsule_is_strict_deterministic_and_path_scoped() -> None:
     second = SubproblemCapsule(
         task="inspect selected file",
         fragments=("row-1",),
-        authorized_references=("artifact://report/1",),
+        authorized_references=("artifact://00000000-0000-0000-0000-000000000002",),
         expected_result_shape="verdict",
         evidence_requirements=("cite row-1",),
         allocation_bytes=1_024,
@@ -216,7 +236,7 @@ def test_subproblem_capsule_is_strict_deterministic_and_path_scoped() -> None:
     with pytest.raises(ValueError, match=r"outside|escapes"):
         SubproblemCapsule(task="x", authorized_references=("../secret",))
     for reference in ("artifact://../secret", "artifact://report/%2e%2e/secret", "https://example.test/x"):
-        with pytest.raises(ValueError, match=r"outside|escapes"):
+        with pytest.raises(ValueError, match=r"UUID|outside|escapes"):
             SubproblemCapsule(task="x", authorized_references=(reference,))
     with pytest.raises(ValueError, match=r"outside|escapes"):
         SubproblemCapsule(task="x", selected_file_checksums=(("/etc/passwd", digest),))
@@ -230,45 +250,125 @@ def test_execute_capsule_outcome_classifies_ordinary_child_failure(
     executor = _executor([{"reasoning": "unused", "code": "SUBMIT(answer='unused')"}])
     capsule = SubproblemCapsule(
         task="selected analysis",
-        authorized_references=("artifact://selected",),
+        authorized_references=("artifact://00000000-0000-0000-0000-000000000003",),
         allocation_bytes=1_024,
     )
 
-    def fail(_capsule: SubproblemCapsule) -> object:
+    def fail(_prompt: str, *, child_profile: str) -> str:
+        assert child_profile == "semantic-child"
+        metrics = recursion_module._child_metrics.get()
+        assert metrics is not None
+        metrics.record_lm_call("root", 1, usage={"input_tokens": 12, "output_tokens": 3, "total_tokens": 15})
         raise ValueError("provider details stay inside the typed outcome")
 
-    monkeypatch.setattr(executor, "execute_capsule", fail)
+    monkeypatch.setattr(executor, "_call_with_profile", fail)
     outcome = executor.execute_capsule_outcome(capsule)
     assert outcome.status == "failed"
     assert outcome.error_category == "child_failed"
     assert outcome.answer == ""
     assert outcome.source_references == ()
     assert outcome.selected_input_bytes == capsule.serialized_bytes
+    assert outcome.usage.llm_calls == 1
+    assert outcome.usage.input_tokens == 12
+    assert outcome.usage.output_tokens == 3
+    assert outcome.usage.total_tokens == 15
 
 
-def test_execute_capsule_outcome_classifies_ownership_cancellation(
+def test_execute_capsule_outcome_propagates_ownership_cancellation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     executor = _executor([{"reasoning": "unused", "code": "SUBMIT(answer='unused')"}])
     capsule = SubproblemCapsule(task="selected analysis", allocation_bytes=1_024)
 
-    def cancel(_capsule: SubproblemCapsule) -> object:
+    def cancel(_prompt: str, *, child_profile: str) -> str:
+        assert child_profile == "semantic-child"
         raise FutureCancelledError()
 
-    monkeypatch.setattr(executor, "execute_capsule", cancel)
+    monkeypatch.setattr(executor, "_call_with_profile", cancel)
+    with pytest.raises(FutureCancelledError):
+        executor.execute_capsule_outcome(capsule)
+    assert recursion_module._child_metrics.get() is None
+    assert recursion_module._selected_access.get() is None
+
+
+def test_selected_tool_accepts_one_capsule_and_returns_typed_outcome() -> None:
+    executor = _executor([{"reasoning": "selected calculation", "code": "SUBMIT(answer='42')"}])
+    outcome = executor.tool(capsule={"task": "calculate selected input", "fragments": ["6 * 7"]})
+    assert executor.tool.name == "rlm_query"
+    assert set(executor.tool.args) == {"capsule"}
+    assert outcome["status"] == "completed"
+    assert outcome["answer"] == "42"
+    assert outcome["delivered_fragments"] == ["fragment-1"]
+    with pytest.raises(ValueError):
+        executor.tool(prompt="old prompt argument")
+
+
+def test_selected_batch_tool_returns_ordered_partial_outcomes(monkeypatch: pytest.MonkeyPatch) -> None:
+    executor = _executor([])
+
+    def execute(reservation, _batch_cancelled, *, child_profile):
+        assert child_profile == "semantic-child"
+        if json.loads(reservation.prompt)["task"] == "fails":
+            raise ValueError("private failure")
+        return "42"
+
+    monkeypatch.setattr(executor, "_run_reserved_call", execute)
+    outcomes = executor.batched_tool(capsules=[{"task": "fails"}, {"task": "succeeds"}])
+    assert executor.batched_tool.name == "rlm_query_batched"
+    assert set(executor.batched_tool.args) == {"capsules"}
+    assert [item["status"] for item in outcomes] == ["failed", "completed"]
+    assert [item["answer"] for item in outcomes] == ["", "42"]
+
+
+def test_failed_capsule_preserves_access_without_claiming_answer(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    executor = _executor([], selected_input_reader=lambda _path, _remaining: "selected content")
+    capsule = SubproblemCapsule(task="inspect", fragments=("inline",), authorized_references=("a.txt", "b.txt"))
+
+    def fail_after_read(_prompt: str, *, child_profile: str) -> str:
+        assert child_profile == "semantic-child"
+        access = recursion_module._selected_access.get()
+        assert access is not None
+        access.read("reference-2")
+        raise ValueError("private provider failure")
+
+    monkeypatch.setattr(executor, "_call_with_profile", fail_after_read)
     outcome = executor.execute_capsule_outcome(capsule)
-    assert outcome.status == "cancelled"
-    assert outcome.error_category == "cancelled"
-    assert outcome.selected_input_bytes == capsule.serialized_bytes
+    assert outcome.status == "failed"
+    assert outcome.answer == ""
+    assert outcome.source_references == ("reference-2",)
+    assert outcome.delivered_fragments == ("fragment-1",)
+    assert outcome.usage.total_tokens is None
+    assert "private provider" not in json.dumps(outcome.as_dict())
 
 
-def test_capsule_batch_returns_ordered_typed_outcomes_and_preserves_atomic_failure(
+def test_capsule_timeout_with_unsettled_worker_is_fatal(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    executor = _executor([])
+    pending: Future[str] = Future()
+
+    def timeout(_prompt: str, *, child_profile: str) -> str:
+        assert child_profile == "semantic-child"
+        executor._retain_pending_batch_futures((pending,))
+        raise TimeoutError("worker remains owned")
+
+    monkeypatch.setattr(executor, "_call_with_profile", timeout)
+    try:
+        with pytest.raises(ChildRuntimeCleanupError, match="pending"):
+            executor.execute_capsule_outcome(SubproblemCapsule(task="inspect"))
+    finally:
+        pending.set_result("settled")
+
+
+def test_capsule_batch_returns_ordered_typed_outcomes_including_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     executor = _executor([{"reasoning": "unused", "code": "SUBMIT(answer='unused')"}])
     capsules = [
-        {"task": "first", "authorized_references": ["artifact://first"]},
-        {"task": "second", "authorized_references": ["artifact://second"]},
+        {"task": "first", "authorized_references": ["artifact://00000000-0000-0000-0000-000000000004"]},
+        {"task": "second", "authorized_references": ["artifact://00000000-0000-0000-0000-000000000005"]},
     ]
 
     def answer(reservation, _batch_cancelled, *, child_profile):
@@ -290,11 +390,11 @@ def test_capsule_batch_returns_ordered_typed_outcomes_and_preserves_atomic_failu
 
     monkeypatch.setattr(executor, "_run_reserved_call", fail_second)
     # The shared monotonic ledger charges the first batch, so a fresh executor
-    # proves the second batch's all-or-nothing failure policy independently.
+    # proves the second batch's partial-result policy independently.
     failing = _executor([{"reasoning": "unused", "code": "SUBMIT(answer='unused')"}])
     monkeypatch.setattr(failing, "_run_reserved_call", fail_second)
-    with pytest.raises(RecursiveBatchError):
-        failing._call_capsules_batched(capsules)
+    results = failing.batched_tool(capsules=capsules)
+    assert [item["status"] for item in results] == ["completed", "failed"]
     assert [outcome.status for outcome in failing.last_capsule_outcomes] == ["completed", "failed"]
 
 
@@ -303,8 +403,8 @@ def test_readonly_capsule_batch_returns_completed_siblings_after_ordinary_failur
 ) -> None:
     executor = _executor([{"reasoning": "unused", "code": "SUBMIT(answer='unused')"}])
     capsules = [
-        {"task": "first", "authorized_references": ["artifact://first"]},
-        {"task": "second", "authorized_references": ["artifact://second"]},
+        {"task": "first", "authorized_references": ["artifact://00000000-0000-0000-0000-000000000004"]},
+        {"task": "second", "authorized_references": ["artifact://00000000-0000-0000-0000-000000000005"]},
     ]
 
     def fail_second(reservation, _batch_cancelled, *, child_profile):
@@ -315,7 +415,7 @@ def test_readonly_capsule_batch_returns_completed_siblings_after_ordinary_failur
 
     monkeypatch.setattr(executor, "_run_reserved_call", fail_second)
 
-    result = executor.readonly_partial_capsule_batch_tool(capsules=capsules)
+    result = executor.batched_tool(capsules=capsules)
 
     assert [item["status"] for item in result] == ["completed", "failed"]
     assert result[0]["answer"] == "first-answer"
@@ -329,7 +429,7 @@ def test_readonly_capsule_batch_keeps_authority_and_cleanup_failures_fatal(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     executor = _executor([{"reasoning": "unused", "code": "SUBMIT(answer='unused')"}])
-    capsules = [{"task": "only", "authorized_references": ["artifact://only"]}]
+    capsules = [{"task": "only", "authorized_references": ["artifact://00000000-0000-0000-0000-000000000006"]}]
 
     monkeypatch.setattr(
         executor,
@@ -338,20 +438,23 @@ def test_readonly_capsule_batch_keeps_authority_and_cleanup_failures_fatal(
     )
 
     with pytest.raises(RecursiveBatchError) as raised:
-        executor.readonly_partial_capsule_batch_tool(capsules=capsules)
+        executor.batched_tool(capsules=capsules)
     assert isinstance(raised.value.__cause__, ChildRuntimeAuthorizationError)
 
 
 def test_capsule_tool_returns_structured_evidence() -> None:
-    executor = _executor([{"reasoning": "submit", "code": "SUBMIT(answer='capsule-ok')"}])
-    result = executor.capsule_tool(
-        task="classify selected row",
-        fragments=["row-a"],
-        authorized_references=["artifact://row-a"],
-        evidence_requirements=["cite source"],
+    executor = _executor([{"reasoning": "submit", "code": "SUBMIT(answer='capsule-ok [fragment-1]')"}])
+    result = executor.tool(
+        capsule={
+            "task": "classify selected row",
+            "fragments": ["row-a"],
+            "authorized_references": ["artifact://00000000-0000-0000-0000-000000000007"],
+            "evidence_requirements": ["cite source"],
+        }
     )
     assert result["status"] == "completed"
-    assert result["answer"] == "capsule-ok"
+    assert result["answer"] == "capsule-ok [fragment-1]"
+    assert result["cited_evidence"] == ["fragment-1"]
     assert result["source_references"] == []
     assert result["usage"]["child_calls"] == 1
 
@@ -363,13 +466,15 @@ def test_native_capsule_child_reads_only_selected_reference() -> None:
             {"reasoning": "read selected evidence", "code": "text = read_selected_input(evidence_id='reference-2')"},
             {"reasoning": "submit", "code": "SUBMIT(answer=text)"},
         ],
-        selected_input_reader=lambda reference: reads.append(reference) or "verified input bytes",
+        selected_input_reader=lambda reference, _remaining: reads.append(reference) or "verified input bytes",
     )
     try:
-        result = executor.capsule_tool(
-            task="Read reference-2 and return its text",
-            fragments=["inline instruction"],
-            authorized_references=["unused.txt", "selected.txt"],
+        result = executor.tool(
+            capsule={
+                "task": "Read reference-2 and return its text",
+                "fragments": ["inline instruction"],
+                "authorized_references": ["unused.txt", "selected.txt"],
+            }
         )
         assert result["answer"] == "verified input bytes"
         assert result["source_references"] == ["reference-2"]
@@ -378,6 +483,50 @@ def test_native_capsule_child_reads_only_selected_reference() -> None:
         assert result["usage"]["llm_calls"] == 2
     finally:
         executor.wait_owned()
+
+
+@pytest.mark.parametrize("claim", ["reference-1", "reference-99", "fragment-2", "reference-01"])
+def test_child_cannot_cite_unread_or_undeclared_input(claim: str) -> None:
+    executor = _executor(
+        [
+            {"reasoning": "read", "code": "text = read_selected_input(evidence_id='reference-2')"},
+            {"reasoning": "unsupported citation", "code": f"SUBMIT(answer='claim [{claim}]')"},
+        ],
+        selected_input_reader=lambda _path, _remaining: "selected evidence",
+    )
+    result = executor.tool(
+        capsule={
+            "task": "inspect",
+            "fragments": ["inline"],
+            "authorized_references": ["a.txt", "b.txt"],
+        }
+    )
+    assert result["status"] == "failed"
+    assert result["answer"] == ""
+    assert result["source_references"] == ["reference-2"]
+    assert result["cited_evidence"] == []
+
+
+def test_child_citations_are_distinct_from_access_and_deduplicated() -> None:
+    access = SelectedInputAccess(
+        SubproblemCapsule(task="inspect", fragments=("inline",), authorized_references=("a.txt", "b.txt")),
+        reader=lambda _path, _remaining: "evidence",
+        check_authority=lambda: None,
+    )
+    access.read("reference-1")
+    access.read("reference-2")
+    assert access.validate_citations("claim [reference-2] [fragment-1] [reference-2]") == (
+        "reference-2",
+        "fragment-1",
+    )
+    assert access.accessed_references == ("reference-1", "reference-2")
+
+
+def test_required_evidence_cannot_be_silently_omitted() -> None:
+    executor = _executor([{"reasoning": "unsupported answer", "code": "SUBMIT(answer='claim')"}])
+    result = executor.tool(capsule={"task": "inspect", "fragments": ["input"], "evidence_requirements": ["cite input"]})
+    assert result["status"] == "failed"
+    assert result["answer"] == ""
 
 
 def test_native_child_depth_is_a_fixed_invariant_not_an_options_surface() -> None:
@@ -397,7 +546,7 @@ def test_native_child_depth_is_a_fixed_invariant_not_an_options_surface() -> Non
     events: list[object] = []
     executor = _executor(
         [
-            {"reasoning": "delegate deeper", "code": "inner = rlm_query(prompt='inner slice')"},
+            {"reasoning": "semantic judgment", "code": "inner = llm_query('inner slice')"},
             {"reasoning": "submit child", "code": "SUBMIT(answer=inner)"},
         ],
         sub_actions=[{"answer": "fallback-answer"}],
@@ -405,15 +554,16 @@ def test_native_child_depth_is_a_fixed_invariant_not_an_options_surface() -> Non
         observer=events.append,
     )
 
-    assert executor.tool(prompt="outer slice") == "fallback-answer"
-    # One native child at depth 1; the deeper request completes at depth 2
-    # without a grandchild runtime.
+    outcome = executor.tool(capsule={"task": "outer slice"})
+    assert outcome["status"] == "completed"
+    assert "fallback-answer" in outcome["answer"]
+    # Native semantic work never allocates another Fleet child.
     assert len(created) == 1
     completed = [event for event in events if isinstance(event, ToolCompleted)]
     depths = [event.output["recursive_depth"] for event in completed]
-    assert 2 in depths
-    assert executor.summary().call_count == 2
-    assert executor.summary().depth_fallback_count == 1
+    assert depths == [1]
+    assert executor.summary().call_count == 1
+    assert executor.summary().depth_fallback_count == 0
 
 
 def test_recursive_tool_runs_fresh_native_child_and_redacts_observation() -> None:
@@ -425,16 +575,16 @@ def test_recursive_tool_runs_fresh_native_child_and_redacts_observation() -> Non
         observer=events.append,
     )
 
-    result = executor.tool(prompt="classify selected row")
+    result = executor.tool(capsule={"task": "classify selected row"})
 
-    assert result == "child-ok"
+    assert result["answer"] == "child-ok"
     assert len(created) == 1
     assert created[0]._shutdown
     assert executor.summary().call_count == 1
     assert executor.summary().child_iterations == 1
     started = next(event for event in events if isinstance(event, ToolStarted))
     completed = next(event for event in events if isinstance(event, ToolCompleted))
-    assert started.input == {"prompt_count": 1, "prompt_chars": len("classify selected row")}
+    assert started.input == {"selected_input_bytes": SubproblemCapsule(task="classify selected row").serialized_bytes}
     assert completed.output == {
         "status": "completed",
         "call_index": 1,
@@ -458,30 +608,32 @@ async def test_recursive_tool_awaits_native_child_from_an_active_event_loop() ->
         [{"reasoning": "submit", "code": "SUBMIT(answer='child-ok')"}],
     )
 
-    assert executor.tool(prompt="classify selected row") == "child-ok"
+    assert executor.tool(capsule={"task": "classify selected row"})["answer"] == "child-ok"
 
 
-def test_recursive_tool_uses_sub_lm_at_depth_cap_without_new_interpreter() -> None:
+def test_capsule_child_uses_native_semantic_calls_without_new_interpreter() -> None:
     created: list[DaytonaCodeInterpreter] = []
     executor = _executor(
         [
-            {"reasoning": "delegate deeper", "code": "inner = rlm_query(prompt='inner slice')"},
+            {"reasoning": "semantic judgment", "code": "inner = llm_query('inner slice')"},
             {"reasoning": "submit child", "code": "SUBMIT(answer=inner)"},
         ],
         sub_actions=[{"answer": "fallback-answer"}],
         factory_calls=created,
     )
 
-    assert executor.tool(prompt="outer slice") == "fallback-answer"
+    outcome = executor.tool(capsule={"task": "outer slice"})
+    assert outcome["status"] == "completed"
+    assert "fallback-answer" in outcome["answer"]
     assert len(created) == 1
-    assert executor.summary().call_count == 2
-    assert executor.summary().depth_fallback_count == 1
-    assert "depth_fallback" in executor.summary().termination_modes
+    assert executor.summary().call_count == 1
+    assert executor.summary().depth_fallback_count == 0
+    assert "depth_fallback" not in executor.summary().termination_modes
 
 
 @pytest.mark.parametrize(
     ("prompt", "message"),
-    [("", "must not be empty"), ("x" * 11, "character bound")],
+    [("", "at least 1 character"), ("x" * 11, "prompt bound")],
 )
 def test_recursive_tool_rejects_invalid_prompt_before_child_creation(prompt: str, message: str) -> None:
     created: list[DaytonaCodeInterpreter] = []
@@ -492,7 +644,7 @@ def test_recursive_tool_rejects_invalid_prompt_before_child_creation(prompt: str
     )
 
     with pytest.raises(ValueError, match=message):
-        executor.tool(prompt=prompt)
+        executor.tool(capsule={"task": prompt})
     assert created == []
 
 
@@ -502,9 +654,9 @@ def test_recursive_tool_enforces_shared_call_budget() -> None:
         options=RecursiveRLMOptions(max_calls=1),
     )
 
-    assert executor.tool(prompt="first") == "ok"
-    with pytest.raises(RuntimeError, match="budget exhausted"):
-        executor.tool(prompt="second")
+    assert executor.tool(capsule={"task": "first"})["answer"] == "ok"
+    assert executor.tool(capsule={"task": "second"})["status"] == "failed"
+    assert executor.summary().call_count == 1
 
 
 def test_recursive_batched_tool_preserves_order_and_bounds_child_concurrency() -> None:
@@ -540,7 +692,8 @@ def test_recursive_batched_tool_preserves_order_and_bounds_child_concurrency() -
         observer=events.append,
     )
 
-    assert executor.batched_tool(prompts=["FANOUT-A", "FANOUT-B", "FANOUT-C"]) == ["A", "B", "C"]
+    outcomes = executor.batched_tool(capsules=[{"task": task} for task in ["FANOUT-A", "FANOUT-B", "FANOUT-C"]])
+    assert [item["answer"] for item in outcomes] == ["A", "B", "C"]
     summary = executor.summary()
     assert summary.recursive_batch_calls == 1
     assert summary.recursive_children_started == 3
@@ -579,7 +732,8 @@ def test_recursive_batch_starts_each_trace_span_in_its_worker(monkeypatch: pytes
         options=RecursiveRLMOptions(max_calls=2, max_parallel_children=2),
     )
 
-    assert executor.batched_tool(prompts=["first", "second"]) == ["first", "second"]
+    outcomes = executor.batched_tool(capsules=[{"task": task} for task in ["first", "second"]])
+    assert [item["answer"] for item in outcomes] == ["first", "second"]
     assert len(span_threads) == 2
     assert all(thread_id != parent_thread for thread_id in span_threads)
 
@@ -597,6 +751,7 @@ def test_recursive_batch_join_stops_at_turn_deadline_and_worker_retains_lease(
 
     class Child:
         def __call__(self, _interpreter: object, *, prompt: str) -> dspy.Prediction:
+            prompt = json.loads(prompt)["task"]
             del prompt
             started.set()
             release.wait(1)
@@ -635,7 +790,7 @@ def test_recursive_batch_join_stops_at_turn_deadline_and_worker_retains_lease(
     began = time.monotonic()
     try:
         with pytest.raises(TimeoutError, match="batch deadline exceeded"):
-            executor.batched_tool(prompts=["blocked"])
+            executor.batched_tool(capsules=[{"task": task} for task in ["blocked"]])
         assert time.monotonic() - began < 1.0
         assert started.is_set()
         assert not closed.is_set()
@@ -658,7 +813,7 @@ def test_recursive_batched_tool_reserves_the_shared_budget_atomically() -> None:
     )
 
     with pytest.raises(RuntimeError, match="budget exhausted"):
-        executor.batched_tool(prompts=["first", "second", "third"])
+        executor.batched_tool(capsules=[{"task": task} for task in ["first", "second", "third"]])
     assert created == []
     assert executor.summary().call_count == 0
 
@@ -676,7 +831,7 @@ def test_recursive_tool_rejects_revoked_authority_before_child_creation() -> Non
     authority.revoke()
 
     with pytest.raises(RuntimeError, match="no longer authorized"):
-        executor.tool(prompt="late child request")
+        executor.tool(capsule={"task": "late child request"})
 
     assert created == []
     assert [type(event) for event in events] == [ToolStarted, ToolFailed]
@@ -706,27 +861,19 @@ def test_recursive_tool_rechecks_authority_before_child_allocation() -> None:
     )
 
     with pytest.raises(RuntimeError, match="no longer authorized"):
-        executor.tool(prompt="revoked before allocation")
+        executor.tool(capsule={"task": "revoked before allocation"})
 
     assert created == []
     assert [event.status for event in events if isinstance(event, Status)] == []
 
 
 def test_recursive_tool_closes_lease_when_authority_is_revoked_after_acquisition() -> None:
-    checks = 0
     created: list[DaytonaCodeInterpreter] = []
     events: list[object] = []
 
     def is_authorized() -> bool:
-        """
-        Determine whether authorization remains available for the current check.
-
-        Returns:
-            bool: `True` for the first four checks, and `False` thereafter.
-        """
-        nonlocal checks
-        checks += 1
-        return checks < 5
+        """Revoke on actual allocation, independently of check count."""
+        return not created
 
     executor = _executor(
         [{"reasoning": "unused", "code": "SUBMIT(answer='unused')"}],
@@ -736,7 +883,7 @@ def test_recursive_tool_closes_lease_when_authority_is_revoked_after_acquisition
     )
 
     with pytest.raises(RuntimeError, match="no longer authorized"):
-        executor.tool(prompt="revoked after acquisition")
+        executor.tool(capsule={"task": "revoked after acquisition"})
 
     assert len(created) == 1
     assert created[0]._shutdown
@@ -771,7 +918,7 @@ def test_recursive_tool_discards_result_when_authority_is_revoked_after_executio
     )
 
     with pytest.raises(RuntimeError, match="no longer authorized"):
-        executor.tool(prompt="revoked after execution")
+        executor.tool(capsule={"task": "revoked after execution"})
 
     assert len(created) == 1
     assert created[0]._shutdown
@@ -818,16 +965,16 @@ def test_rlm_query_wrapper_forwards_kwargs_only(monkeypatch: pytest.MonkeyPatch)
     monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
 
     # Sandbox-side ergonomics stay positional, exactly as model code writes them.
-    assert wrapper("delegate this slice") == "child-ok"
+    assert wrapper({"task": "delegate this slice"}) == "child-ok"
 
     assert len(captured) == 1
     payload = captured[0]
     assert payload["tool_name"] == "rlm_query"
     assert payload["args"] == []
-    assert payload["kwargs"] == {"prompt": "delegate this slice"}
+    assert payload["kwargs"] == {"capsule": {"task": "delegate this slice"}}
 
 
-def test_recursive_child_receives_only_rlm_query_again(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_capsule_child_receives_only_selected_input_reader(monkeypatch: pytest.MonkeyPatch) -> None:
     import fleet_rlm.rlm.recursion as recursive_calls
 
     captured: list[dict[str, object]] = []
@@ -844,10 +991,10 @@ def test_recursive_child_receives_only_rlm_query_again(monkeypatch: pytest.Monke
     monkeypatch.setattr(recursive_calls, "build_native_rlm", capture_build)
     executor = _executor([{"reasoning": "unused", "code": "SUBMIT(answer='unused')"}])
 
-    assert executor.tool(prompt="memory tools stay in the root") == "child-ok"
+    assert executor.tool(capsule={"task": "memory tools stay in the root"})["answer"] == "child-ok"
     assert len(captured) == 1
     tools = tuple(str(tool.name) for tool in captured[0]["tools"])
-    assert tools == ("rlm_query",)
+    assert tools == ("read_selected_input",)
 
 
 def test_recursive_batch_preserves_order_when_workers_finish_out_of_order(
@@ -866,6 +1013,7 @@ def test_recursive_batch_preserves_order_when_workers_finish_out_of_order(
 
     class Child:
         def __call__(self, _interpreter: object, *, prompt: str) -> dspy.Prediction:
+            prompt = json.loads(prompt)["task"]
             time.sleep(delays[prompt])
             finish_order.append(prompt)
             return dspy.Prediction(answer=prompt, trajectory=[])
@@ -891,7 +1039,8 @@ def test_recursive_batch_preserves_order_when_workers_finish_out_of_order(
         deadline=time.monotonic() + 5,
     )
 
-    assert executor.batched_tool(prompts=["A", "B", "C"]) == ["A", "B", "C"]
+    outcomes = executor.batched_tool(capsules=[{"task": task} for task in ["A", "B", "C"]])
+    assert [item["answer"] for item in outcomes] == ["A", "B", "C"]
     assert finish_order == ["B", "C", "A"]
     assert all(lease.interpreter._shutdown for lease in created)
     assert executor.summary().recursive_children_completed == 3
@@ -910,6 +1059,7 @@ def test_recursive_batch_wraps_failure_when_all_children_are_done(
 
     class Child:
         def __call__(self, _interpreter: object, *, prompt: str) -> dspy.Prediction:
+            prompt = json.loads(prompt)["task"]
             if prompt == "fail":
                 raise ValueError("provider failure")
             return dspy.Prediction(answer="ok", trajectory=[])
@@ -941,15 +1091,14 @@ def test_recursive_batch_wraps_failure_when_all_children_are_done(
         deadline=time.monotonic() + 5,
     )
 
-    with pytest.raises(RecursiveBatchError) as raised:
-        executor.batched_tool(prompts=["fail", "ok"])
-    assert isinstance(raised.value.__cause__, ValueError)
+    outcomes = executor.batched_tool(capsules=[{"task": task} for task in ["fail", "ok"]])
+    assert [item["status"] for item in outcomes] == ["failed", "completed"]
     executor.wait_owned()
     assert all(lease.interpreter._shutdown for lease in created)
     assert executor.summary().recursive_children_completed == 2
 
 
-def test_recursive_batch_failure_returns_before_running_sibling_and_cleanup_waits(
+def test_recursive_batch_ordinary_failure_waits_for_successful_sibling_cleanup(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     import fleet_rlm.rlm.recursion as recursive_calls
@@ -964,6 +1113,7 @@ def test_recursive_batch_failure_returns_before_running_sibling_and_cleanup_wait
 
     class Child:
         def __call__(self, _interpreter: object, *, prompt: str) -> dspy.Prediction:
+            prompt = json.loads(prompt)["task"]
             if prompt == "A":
                 a_started.set()
                 assert b_started.wait(1)
@@ -992,26 +1142,29 @@ def test_recursive_batch_failure_returns_before_running_sibling_and_cleanup_wait
         child_runtime_factory=factory,
         deadline=time.monotonic() + 5,
     )
-    result: dict[str, BaseException] = {}
+    result: dict[str, object] = {}
 
     def run_batch() -> None:
         try:
-            executor.batched_tool(prompts=["A", "B"])
+            result["outcomes"] = executor.batched_tool(capsules=[{"task": task} for task in ["A", "B"]])
         except BaseException as exc:
             result["error"] = exc
 
     worker = threading.Thread(target=run_batch)
     worker.start()
-    assert a_started.wait(1)
-    assert b_started.wait(1)
-    worker.join(1)
+    try:
+        assert a_started.wait(1)
+        assert b_started.wait(1)
+        worker.join(0.1)
+        assert worker.is_alive()
+        assert "outcomes" not in result
+        assert any(not lease.interpreter._shutdown for lease in created)
+    finally:
+        release_b.set()
+        worker.join(2)
     assert not worker.is_alive()
-    assert isinstance(result.get("error"), RecursiveBatchError)
-    assert any(not lease.interpreter._shutdown for lease in created)
-    with pytest.raises(RuntimeError, match="cleanup is still pending"):
-        executor.raise_if_cleanup_failed()
-
-    release_b.set()
+    assert "error" not in result
+    assert [item["status"] for item in result["outcomes"]] == ["failed", "completed"]
     executor.wait_owned()
     assert all(lease.interpreter._shutdown for lease in created)
     executor.raise_if_cleanup_failed()
@@ -1042,6 +1195,7 @@ def test_recursive_batch_submit_failure_retains_already_submitted_worker(
 
     class BlockingChild:
         def __call__(self, _interpreter: object, *, prompt: str) -> dspy.Prediction:
+            prompt = json.loads(prompt)["task"]
             del prompt
             started.set()
             release.wait(2)
@@ -1077,7 +1231,7 @@ def test_recursive_batch_submit_failure_retains_already_submitted_worker(
 
     try:
         with pytest.raises(RuntimeError, match="submit failed"):
-            executor.batched_tool(prompts=["first", "second"])
+            executor.batched_tool(capsules=[{"task": task} for task in ["first", "second"]])
         assert started.wait(1)
         assert not closed.is_set()
     finally:
@@ -1134,6 +1288,7 @@ def test_recursive_batch_cancels_queued_children_before_they_acquire_a_lease(
 
     class BlockingChild:
         def __call__(self, _interpreter: object, *, prompt: str) -> dspy.Prediction:
+            prompt = json.loads(prompt)["task"]
             del prompt
             started.set()
             release.wait(2)
@@ -1172,14 +1327,14 @@ def test_recursive_batch_cancels_queued_children_before_they_acquire_a_lease(
 
     try:
         with pytest.raises(TimeoutError, match="batch deadline exceeded"):
-            executor.batched_tool(prompts=["A", "B", "C"])
+            executor.batched_tool(capsules=[{"task": task} for task in ["A", "B", "C"]])
         assert started.wait(1)
         assert call_indexes == [1]
         assert len(created) == 1
         with pytest.raises(RuntimeError, match="cleanup is still pending"):
             executor.raise_if_cleanup_failed()
         with pytest.raises(ChildRuntimeCleanupError, match="cleanup is still pending"):
-            executor.tool(prompt="retry")
+            executor.tool(capsule={"task": "retry"})
     finally:
         release.set()
         executor.wait_owned()

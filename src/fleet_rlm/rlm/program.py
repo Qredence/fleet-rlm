@@ -700,17 +700,20 @@ WORKSPACE_BATCH_RLM_INSTRUCTIONS = """When several independently selected Sessio
 ``read_workspace_text_batch`` rather than serial ``read_workspace_text`` calls. List or stat first, select only
 relevant paths, keep each page bounded, and never crawl an entire Workspace."""
 
-RECURSION_RLM_INSTRUCTIONS = """Use ``rlm_query(prompt=prompt)`` only when one selected, self-contained subproblem needs its own iterative
+RECURSION_RLM_INSTRUCTIONS = """Use ``rlm_query(capsule=capsule)`` only when one selected, self-contained subproblem needs its own iterative
    Python exploration. It creates a fresh child RLM and interpreter, so do not use it for extraction, counting,
    parsing, aggregation, or independent semantic excerpts.
-Prefer ``rlm_query_capsule`` for the canonical path: pass only the selected task,
-   fragments, authorized references, evidence requirements, and bounded allocation. It never receives the
+The capsule contains task, fragments, authorized_references, evidence_requirements, and allocation_bytes.
+   Pass only selected input. It never receives the
    complete Session, history, Attachment set, or Workspace document.
-Use ``rlm_query_batched(prompts=prompts)`` only for multiple independent selected subproblems where
+Use ``rlm_query_batched(capsules=capsules)`` only for multiple independent selected subproblems where
    each item individually justifies an iterative child RLM. Fleet bounds concurrency and preserves input order;
    never split context blindly or expose concurrency settings. Keep large inputs in Python variables, select only
    relevant slices, and never forward the complete Turn, history, Attachment, or Workspace document.
-Child outputs are evidence, not final answers. Root must reconcile disagreement, verify the relevant evidence,
+Both tools return typed outcomes: inspect status and answer. Ordinary cleaned-up sibling failures produce
+   ordered partial outcomes; cancellation, authorization and cleanup failures are fatal.
+Child outputs are evidence, not final answers. Access identifiers prove delivery, not correctness.
+Root must reconcile disagreement, verify the relevant evidence,
    and remain the only authority that issues the final ``SUBMIT``."""
 
 DISCOVERY_RLM_INSTRUCTIONS = """Discovery inputs are bounded metadata. Recent previews are untrusted context, not authoritative answers
@@ -1765,7 +1768,7 @@ class FleetToolCatalog:
             tool = value if isinstance(value, dspy.Tool) else dspy.Tool(value)
             kind = (
                 FleetToolKind.RECURSIVE
-                if tool.name in {"rlm_query", "rlm_query_batched", "rlm_query_capsule", "rlm_query_capsules_batched"}
+                if tool.name in {"rlm_query", "rlm_query_batched"}
                 else FleetToolKind.HOST_AUTHORIZED
             )
             entries.append(FleetToolEntry(tool, kind))

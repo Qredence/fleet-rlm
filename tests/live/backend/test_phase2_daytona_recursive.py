@@ -326,10 +326,11 @@ def test_phase2_daytona_recursive_through_fastapi(tmp_path: Path, monkeypatch: p
                     "text": (
                         "Execute the narrow native DSPy Phase 2 recursive proof. Run exactly one recursive"
                         ' Daytona proof. First set root_marker = "root-only". Then make exactly one'
-                        " child_result = rlm_query(prompt=...) call; the child prompt must tell the fresh"
+                        " outcome = rlm_query(capsule={'task': ...}) call; the capsule task must tell the fresh"
                         " child interpreter to determine whether the Python name root_marker exists, return"
                         " exactly absent when it does not, and use typed SUBMIT(answer="
                         '"absent"); do not call rlm_query inside the child. After return, assert that'
+                        " outcome['status'] is completed, set child_result = outcome['answer'], and assert"
                         " root_marker is still root-only and child_result is exactly absent. Call"
                         " verify_phase2 exactly once with those values and require its ok result. Finally"
                         ' issue exactly one typed SUBMIT(answer="phase2 complete", evidence='

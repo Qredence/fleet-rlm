@@ -106,16 +106,16 @@ def test_val_rec_002_two_sequential_children_are_distinct_fresh_native_runtimes(
     executor = _executor(root, sub, recorder, options=RecursiveRLMOptions(max_calls=2))
 
     # Call 1: a fresh native child produces the sentinel answer.
-    first = executor.tool(prompt="first slice")
-    assert first == "child-a-global"
+    first = executor.tool(capsule={"task": "first slice"})
+    assert first["answer"] == "child-a-global"
     # The first child was closed exactly once BEFORE its answer returned.
     assert recorder.close_calls == {1: 1}
     assert recorder.interpreters[1]._shutdown
     assert built_rlms and type(built_rlms[0]).__name__ == "RLM"
 
     # Call 2: a second fresh native child starts from an empty namespace.
-    second = executor.tool(prompt="second slice")
-    assert second == "fresh"
+    second = executor.tool(capsule={"task": "second slice"})
+    assert second["answer"] == "fresh"
 
     # Distinct native RLM instances, one per call.
     assert len(built_rlms) == 2
@@ -167,7 +167,7 @@ def test_val_rec_002_sequential_children_report_independent_completion_evidence(
     sub = _lm([{"answer": "unused"}])
     executor = _executor(root, sub, recorder, options=RecursiveRLMOptions(max_calls=2), observer=events.append)
 
-    assert executor.tool(prompt="first slice") == "a-answer"
+    assert executor.tool(capsule={"task": "first slice"})["answer"] == "a-answer"
     from fleet_rlm.rlm.events import ToolCompleted
 
     first_completed = [event for event in events if isinstance(event, ToolCompleted)]
@@ -180,7 +180,7 @@ def test_val_rec_002_sequential_children_report_independent_completion_evidence(
         "termination_mode": "typed_submit",
     }
 
-    assert executor.tool(prompt="second slice") == "b-answer"
+    assert executor.tool(capsule={"task": "second slice"})["answer"] == "b-answer"
     second_completed = [event for event in events if isinstance(event, ToolCompleted)]
     assert len(second_completed) == 2
     # The second completion evidence is its own: fresh index, same depth,
@@ -206,6 +206,8 @@ class RecordingLM(dspy.utils.DummyLM):
 
     def forward(self, prompt: Any = None, messages: Any = None, **kwargs: Any) -> Any:
         parts: list[str] = []
+        if isinstance(prompt, str):
+            parts.append(prompt)
         for message in messages or []:
             content = message.get("content")
             if isinstance(content, str):
@@ -225,9 +227,9 @@ async def test_val_rec_025_roles_depths_histories_and_trajectory_are_preserved_t
     root = RecordingLM(
         [
             # Root action 1: delegate to child 1.
-            {"reasoning": "delegate", "code": "a = rlm_query(prompt='child slice')"},
+            {"reasoning": "delegate", "code": "a = rlm_query(capsule={'task': 'child slice'})['answer']"},
             # Child 1 action 1: deeper delegation -> depth-2 fallback.
-            {"reasoning": "child delegate", "code": "inner = rlm_query(prompt='fallback slice')"},
+            {"reasoning": "child semantic", "code": "inner = llm_query('fallback slice')"},
             # Child 1 action 2: submit the fallback answer.
             {"reasoning": "child submit", "code": "SUBMIT(answer=inner)"},
             # Root action 2: integrate and submit.
@@ -273,7 +275,7 @@ async def test_val_rec_025_roles_depths_histories_and_trajectory_are_preserved_t
 
     assert stream.outcome is not None and stream.outcome.succeeded
     assert stream.outcome.prediction is not None
-    assert stream.outcome.prediction.display_text == "sub-fallback-answer"
+    assert "sub-fallback-answer" in stream.outcome.prediction.display_text
 
     snapshot = metrics_context.metrics.snapshot()
     # Role/depth annotations: Root actions at depth 0, the child's
@@ -281,12 +283,12 @@ async def test_val_rec_025_roles_depths_histories_and_trajectory_are_preserved_t
     counts = dict(((role, depth), count) for role, depth, count in snapshot.lm_call_counts)
     assert counts[("root", 0)] == 2
     assert counts[("root", 1)] == 2
-    assert counts[("sub", 2)] == 1
+    assert counts[("sub", 1)] == 1
     # The Sub LM never serves a Root-level action at depth 0.
     assert counts.get(("sub", 0), 0) == 0
     assert snapshot.root_lm_calls_depth_0 == 2
     assert snapshot.child_root_lm_calls_depth_1 == 2
-    assert snapshot.depth_fallback_calls == 1
+    assert snapshot.depth_fallback_calls == 0
 
     # Invocation attribution: the fallback prompt reached only the Sub LM;
     # no Root action prompt reached the Sub LM, and the Sub LM's answer
@@ -303,7 +305,7 @@ async def test_val_rec_025_roles_depths_histories_and_trajectory_are_preserved_t
     # Usage accounting stayed truthful: the Root prediction's trajectory
     # carries exactly the two Root actions.
     assert stream.outcome.usage["iterations"] == 2
-    assert stream.outcome.prediction.outputs["answer"] == "sub-fallback-answer"
+    assert "sub-fallback-answer" in stream.outcome.prediction.outputs["answer"]
 
     # One native child, settled exactly once.
     assert recorder.call_indexes == [1]
@@ -330,7 +332,7 @@ def test_val_rec_025_child_lm_copies_preserve_callback_ancestry_and_usage_shape(
         deadline=time.monotonic() + 30,
     )
 
-    assert executor.tool(prompt="role slice") == "role-ok"
+    assert executor.tool(capsule={"task": "role slice"})["answer"] == "role-ok"
     summary = executor.summary()
     # The child's two Root-LM-driven actions were recorded at depth 1.
     counts = dict(((role, depth), count) for role, depth, count in summary.delegation_metrics.lm_call_counts)
@@ -360,7 +362,7 @@ def test_val_rec_022_root_child_and_sibling_interpreter_namespaces_are_isolated(
             # Root action 1: install a Root-only sentinel.
             {"reasoning": "root sentinel", "code": "root_sentinel = 'root-only'"},
             # Root action 2: delegate to child A.
-            {"reasoning": "delegate a", "code": "child_a = rlm_query(prompt='a slice')"},
+            {"reasoning": "delegate a", "code": "child_a = rlm_query(capsule={'task': 'a slice'})['answer']"},
             # Child A action: Root sentinel must be absent; install A's own.
             {
                 "reasoning": "probe root",
@@ -375,7 +377,7 @@ def test_val_rec_022_root_child_and_sibling_interpreter_namespaces_are_isolated(
                 ),
             },
             # Root action 3: delegate to child B.
-            {"reasoning": "delegate b", "code": "child_b = rlm_query(prompt='b slice')"},
+            {"reasoning": "delegate b", "code": "child_b = rlm_query(capsule={'task': 'b slice'})['answer']"},
             # Child B action: Root AND sibling A sentinels must be absent.
             {
                 "reasoning": "probe root and sibling",
@@ -515,8 +517,9 @@ def test_val_rec_024_child_oversized_submit_fails_at_the_child_boundary() -> Non
     sub = _lm([{"answer": "unused"}])
     executor = _executor(root, sub, recorder, options=RecursiveRLMOptions(child_max_output_chars=100))
 
-    with pytest.raises(PredictionOutputTooLargeError, match="Turn output is too large"):
-        executor.tool(prompt="oversized child submit")
+    outcome = executor.tool(capsule={"task": "oversized child submit"})
+    assert outcome["status"] == "failed"
+    assert outcome["answer"] == ""
 
     summary = executor.summary()
     assert summary.termination_modes == ("child_error",)
@@ -591,7 +594,7 @@ def test_val_rec_024_extraction_fallback_termination_parity_between_root_and_chi
         options=RecursiveRLMOptions(child_max_iters=1, child_max_llm_calls=3),
     )
 
-    assert executor.tool(prompt="extraction parity") == "extracted-child"
+    assert executor.tool(capsule={"task": "extraction parity"})["answer"] == "extracted-child"
     assert executor.summary().termination_modes == ("native_extraction_fallback",)
 
     # Root scope: the same never-submitting behavior yields the same mode.

@@ -85,7 +85,6 @@ def facts_from_public_chunks(chunks: Sequence[Mapping[str, Any]]) -> RoutingFact
     recursive_prompt_chars = 0
     child_iterations = 0
     native_child_completions = 0
-    depth_fallback_count = 0
     cleanup_completed = 0
     latency_ms = 0
     peak_child_concurrency = 0
@@ -118,9 +117,7 @@ def facts_from_public_chunks(chunks: Sequence[Mapping[str, Any]]) -> RoutingFact
                 if isinstance(raw_peak, int) and not isinstance(raw_peak, bool):
                     peak_child_concurrency = max(peak_child_concurrency, raw_peak)
                 mode = output.get("termination_mode")
-                if mode == "depth_fallback":
-                    depth_fallback_count += 1
-                elif depth == 1 and mode in {"typed_submit", "native_extraction_fallback"}:
+                if depth == 1 and mode in {"typed_submit", "native_extraction_fallback"}:
                     native_child_completions += 1
         elif chunk_type == "data-status":
             data = chunk.get("data")
@@ -144,7 +141,6 @@ def facts_from_public_chunks(chunks: Sequence[Mapping[str, Any]]) -> RoutingFact
         tool_counts=counts,
         native_child_count=native_child_completions,
         max_native_child_depth=max_recursive_depth,
-        depth_fallback_count=depth_fallback_count,
         child_iterations=child_iterations,
         recursive_prompt_chars=recursive_prompt_chars,
         latency_ms=latency_ms,
@@ -207,7 +203,6 @@ def _run_live_turn(
             tool_counts=facts.tool_counts,
             native_child_count=facts.native_child_count,
             max_native_child_depth=facts.max_native_child_depth,
-            depth_fallback_count=facts.depth_fallback_count,
             child_iterations=facts.child_iterations,
             recursive_prompt_chars=facts.recursive_prompt_chars,
             latency_ms=int((time.perf_counter() - started) * 1000),
@@ -239,7 +234,6 @@ def validate_receipt(payload: Mapping[str, Any]) -> Mapping[str, Any]:
             tool_counts={str(k): int(v) for k, v in dict(run.get("tool_counts", {})).items()},
             native_child_count=int(run.get("native_child_count", 0)),
             max_native_child_depth=int(run.get("max_native_child_depth", 0)),
-            depth_fallback_count=int(run.get("depth_fallback_count", 0)),
             child_iterations=int(run.get("child_iterations", 0)),
             recursive_prompt_chars=int(run.get("recursive_prompt_chars", 0)),
             latency_ms=int(run.get("latency_ms", 0)),
@@ -343,7 +337,6 @@ def _run_live(args: argparse.Namespace, scenarios: tuple[RoutingScenario, ...]) 
                             "tool_counts": dict(facts.tool_counts),
                             "native_child_count": facts.native_child_count,
                             "max_native_child_depth": facts.max_native_child_depth,
-                            "depth_fallback_count": facts.depth_fallback_count,
                             "child_iterations": facts.child_iterations,
                             "recursive_prompt_chars": facts.recursive_prompt_chars,
                             "latency_ms": facts.latency_ms,

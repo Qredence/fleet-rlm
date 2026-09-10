@@ -41,6 +41,7 @@ def test_metrics_track_recursive_batch_lifecycle_and_peak_width() -> None:
     metrics.child_started()
     metrics.child_completed()
     metrics.child_completed()
+    metrics.record_delegated_input_bytes(123)
 
     snapshot = metrics.snapshot()
     assert snapshot.recursive_batch_calls == 1
@@ -48,6 +49,8 @@ def test_metrics_track_recursive_batch_lifecycle_and_peak_width() -> None:
     assert snapshot.recursive_children_started == 2
     assert snapshot.recursive_children_completed == 2
     assert snapshot.peak_child_concurrency == 2
+    assert snapshot.delegated_input_bytes == 123
+    assert snapshot.as_dict()["delegated_input_bytes"] == 123
     assert snapshot.as_dict()["peak_child_concurrency"] == 2
 
 

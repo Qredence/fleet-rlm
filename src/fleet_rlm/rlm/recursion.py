@@ -12,6 +12,7 @@ import asyncio
 import contextlib
 import inspect
 import json
+import re
 import time
 from collections.abc import Callable, Mapping, Sequence
 from concurrent.futures import FIRST_EXCEPTION, Future, wait
@@ -21,13 +22,13 @@ from dataclasses import dataclass, field
 from hashlib import sha256
 from pathlib import PurePosixPath
 from threading import Event, Lock, RLock
-from typing import Any, Literal, NoReturn, Protocol, Self, TypeAlias
+from typing import Any, Literal, Protocol, TypeAlias
 from urllib.parse import unquote, urlsplit
+from uuid import UUID
 
 import dspy
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from fleet_rlm.chat.session_context import SessionContextManifest
 from fleet_rlm.config.settings import Settings
 from fleet_rlm.observability.diagnostics import trace_failure_category
 from fleet_rlm.observability.tracing import start_turn_span
@@ -40,11 +41,8 @@ from fleet_rlm.rlm.program import (
     RLMModelBundle,
     RLMOptions,
     build_native_rlm,
-    build_session_context_payload,
 )
 from fleet_rlm.rlm.result import RLMConfigError, prediction_result, rlm_termination_mode
-from fleet_rlm.sessions.history_transport import CommittedSessionHistory
-from fleet_rlm.workspace.models import WORKSPACE_MEMORY_INJECTION_TAIL_BYTES, WorkspaceCapabilityMetadata
 
 # ---------------------------------------------------------------------------
 # Provider-neutral child-runtime protocol
@@ -77,187 +75,6 @@ class ChildRuntimeLease(Protocol):
 
 
 ChildRuntimeFactory = Callable[..., ChildRuntimeLease]
-
-
-# ---------------------------------------------------------------------------
-# Immutable Session snapshot for delegated children (P47.4)
-# ---------------------------------------------------------------------------
-
-
-class _ImmutableMessageDict(dict[str, Any]):
-    """Dictionary-shaped history record that rejects in-place mutation."""
-
-    def __setitem__(self, _key: str, _value: Any) -> NoReturn:
-        raise TypeError("recursive Session snapshot history is immutable")
-
-    def __delitem__(self, _key: str) -> NoReturn:
-        raise TypeError("recursive Session snapshot history is immutable")
-
-    def __ior__(self, _value: Mapping[str, Any]) -> Self:  # ty: ignore[invalid-method-override]
-        raise TypeError("recursive Session snapshot history is immutable")
-
-    def clear(self) -> NoReturn:
-        raise TypeError("recursive Session snapshot history is immutable")
-
-    def pop(self, _key: str, _default: Any = None) -> NoReturn:  # ty: ignore[invalid-method-override]
-        raise TypeError("recursive Session snapshot history is immutable")
-
-    def popitem(self) -> NoReturn:
-        raise TypeError("recursive Session snapshot history is immutable")
-
-    def setdefault(self, _key: str, _default: Any = None) -> NoReturn:
-        raise TypeError("recursive Session snapshot history is immutable")
-
-    def update(self, *_args: Any, **_kwargs: Any) -> NoReturn:
-        raise TypeError("recursive Session snapshot history is immutable")
-
-
-class _ImmutableMessageList(list[Any]):
-    """List-shaped history container that rejects in-place mutation."""
-
-    def __setitem__(self, _index: int | slice, _value: Any) -> NoReturn:  # ty: ignore[invalid-method-override]
-        raise TypeError("recursive Session snapshot history is immutable")
-
-    def __delitem__(self, _index: int | slice) -> NoReturn:  # ty: ignore[invalid-method-override]
-        raise TypeError("recursive Session snapshot history is immutable")
-
-    def __iadd__(self, _value: Any) -> Self:
-        raise TypeError("recursive Session snapshot history is immutable")
-
-    def __imul__(self, _value: int) -> Self:  # ty: ignore[invalid-method-override]
-        raise TypeError("recursive Session snapshot history is immutable")
-
-    def append(self, _value: Any) -> NoReturn:
-        raise TypeError("recursive Session snapshot history is immutable")
-
-    def clear(self) -> NoReturn:
-        raise TypeError("recursive Session snapshot history is immutable")
-
-    def extend(self, _value: Any) -> NoReturn:
-        raise TypeError("recursive Session snapshot history is immutable")
-
-    def insert(self, _index: int, _value: Any) -> NoReturn:  # ty: ignore[invalid-method-override]
-        raise TypeError("recursive Session snapshot history is immutable")
-
-    def pop(self, _index: int = -1) -> NoReturn:  # ty: ignore[invalid-method-override]
-        raise TypeError("recursive Session snapshot history is immutable")
-
-    def remove(self, _value: Any) -> NoReturn:
-        raise TypeError("recursive Session snapshot history is immutable")
-
-    def reverse(self) -> NoReturn:
-        raise TypeError("recursive Session snapshot history is immutable")
-
-    def sort(self, **_kwargs: Any) -> NoReturn:
-        raise TypeError("recursive Session snapshot history is immutable")
-
-
-def _freeze_history_value(value: Any) -> Any:
-    """Recursively copy JSON-shaped history values into immutable containers."""
-    if isinstance(value, Mapping):
-        return _ImmutableMessageDict({key: _freeze_history_value(item) for key, item in value.items()})
-    if isinstance(value, list):
-        return _ImmutableMessageList(_freeze_history_value(item) for item in value)
-    if isinstance(value, tuple):
-        return tuple(_freeze_history_value(item) for item in value)
-    if isinstance(value, set):
-        return frozenset(_freeze_history_value(item) for item in value)
-    return value
-
-
-def _immutable_history(records: Sequence[Mapping[str, Any]]) -> dspy.History:
-    """Create a dspy-compatible history whose nested records cannot be changed."""
-    frozen_records = _ImmutableMessageList(_freeze_history_value(dict(record)) for record in records)
-    materialized = dspy.History(messages=list(frozen_records))
-    # DSPy freezes field assignment but intentionally keeps ``messages`` a list.
-    # The child-visible snapshot has a stronger contract: neither the list nor a
-    # nested record may be mutated by one child and observed by another.
-    object.__setattr__(materialized, "messages", frozen_records)
-    return materialized
-
-
-@dataclass(frozen=True, slots=True)
-class RecursiveSessionSnapshot:
-    """Immutable Session material one delegated child may read (P47.4).
-
-    Children never receive the live Root interpreter, mutable Root Python
-    state, or the Session runtime. The snapshot is materialized and copied at
-    Turn preparation time; later mutation of the source conversation cannot
-    change what a delegated child observes. ``history_transport`` retains the
-    typed DSPy ``SandboxSerializable`` form for remote interpreters; the
-    regular ``history`` remains the preferred in-process dspy value.
-    """
-
-    request: str
-    history: dspy.History
-    session_context: SessionContextManifest
-    workspace: WorkspaceCapabilityMetadata
-    models: RLMModelBundle
-    history_transport: CommittedSessionHistory | None = None
-    workspace_memory_digest: str = ""
-
-
-def build_recursive_session_snapshot(
-    *,
-    request: str,
-    history: dspy.History | CommittedSessionHistory | None,
-    session_context: SessionContextManifest,
-    workspace: WorkspaceCapabilityMetadata,
-    models: RLMModelBundle,
-    workspace_memory_digest: str = "",
-) -> RecursiveSessionSnapshot:
-    """Materialize the immutable child-visible Session snapshot.
-
-    Parameters:
-        request (str): Current committed user request the subproblems are delegated from.
-        history (dspy.History | CommittedSessionHistory | None): Committed conversation;
-            transport History is materialized and every message record is copied so the
-            snapshot can never observe later mutations. A typed transport copy is retained
-            when the source is ``CommittedSessionHistory``.
-        session_context (SessionContextManifest): Bounded Session navigation metadata.
-        workspace (WorkspaceCapabilityMetadata): Authorized read/write capability view.
-        models (RLMModelBundle): Root/Sub model policy; each child forks its own copy.
-        workspace_memory_digest (str): Bounded memory tail included in the child context payload.
-
-    Returns:
-        RecursiveSessionSnapshot: The immutable Session material handed to every delegated child.
-
-    Raises:
-        RLMConfigError: If the committed History type or memory digest is invalid.
-    """
-    if (
-        not isinstance(workspace_memory_digest, str)
-        or len(workspace_memory_digest.encode("utf-8")) > WORKSPACE_MEMORY_INJECTION_TAIL_BYTES
-    ):
-        raise RLMConfigError("recursive Session snapshot memory context is invalid")
-    transport: CommittedSessionHistory | None = None
-    if isinstance(history, CommittedSessionHistory):
-        records = history.messages
-        transport = CommittedSessionHistory([dict(record) for record in records])
-    elif isinstance(history, dspy.History):
-        records = history.messages
-        # Production Turn preparation starts with dspy.History, but the remote
-        # Daytona interpreter needs DSPy's explicit SandboxSerializable form.
-        # Keep the native value above for in-process children and retain a
-        # transport copy when the canonical committed record shape is present.
-        try:
-            transport = CommittedSessionHistory([dict(record) for record in records])
-        except (TypeError, ValueError):
-            transport = None
-    elif history is None:
-        records = ()
-    else:
-        raise RLMConfigError("recursive Session snapshot history type is invalid")
-    materialized = _immutable_history(records)
-    return RecursiveSessionSnapshot(
-        request=request,
-        history=materialized,
-        session_context=session_context,
-        workspace=workspace,
-        models=models,
-        history_transport=transport,
-        workspace_memory_digest=workspace_memory_digest,
-    )
 
 
 # ---------------------------------------------------------------------------
@@ -295,6 +112,11 @@ class DelegationMetricsSnapshot:
     recursive_children_completed: int = 0
     depth_fallback_calls: int = 0
     peak_child_concurrency: int = 0
+    # UTF-8 bytes delivered to child invocations, including the serialized
+    # capsule and any selected Artifact/Project/Session reads.  This is kept
+    # separate from ``recursive_prompt_chars`` because character counts are
+    # not a safe proxy for provider input bytes.
+    delegated_input_bytes: int = 0
     lm_call_counts: tuple[tuple[str, int, int], ...] = ()
     lm_latency_ms: tuple[tuple[str, int, float], ...] = ()
     # Entries are (role, recursive_depth, input_tokens, output_tokens, total_tokens);
@@ -324,6 +146,7 @@ class DelegationMetricsSnapshot:
             "recursive_children_completed": self.recursive_children_completed,
             "depth_fallback_calls": self.depth_fallback_calls,
             "peak_child_concurrency": self.peak_child_concurrency,
+            "delegated_input_bytes": self.delegated_input_bytes,
             "lm_call_counts": [
                 {"role": role, "recursive_depth": depth, "count": count} for role, depth, count in self.lm_call_counts
             ],
@@ -366,6 +189,7 @@ class DelegationMetrics:
         self._depth_fallback_calls = 0
         self._active_children = 0
         self._peak_child_concurrency = 0
+        self._delegated_input_bytes = 0
 
     def record_lm_call(
         self,
@@ -422,6 +246,15 @@ class DelegationMetrics:
         with self._lock:
             self._depth_fallback_calls += 1
 
+    def record_delegated_input_bytes(self, value: int) -> None:
+        """Record bytes actually delivered to a child invocation."""
+        if type(value) is not int or value < 0:
+            raise ValueError("delegated input bytes must be a nonnegative integer")
+        if self._parent is not None:
+            self._parent.record_delegated_input_bytes(value)
+        with self._lock:
+            self._delegated_input_bytes += value
+
     def child_started(self) -> None:
         with self._lock:
             self._recursive_children_started += 1
@@ -467,6 +300,7 @@ class DelegationMetrics:
                 recursive_children_completed=self._recursive_children_completed,
                 depth_fallback_calls=self._depth_fallback_calls,
                 peak_child_concurrency=self._peak_child_concurrency,
+                delegated_input_bytes=self._delegated_input_bytes,
                 lm_call_counts=calls,
                 lm_latency_ms=latency,
                 lm_token_totals=tokens,
@@ -615,8 +449,8 @@ def _future_failures(futures: set[Future[Any]]) -> list[BaseException]:
 # Bounded native DSPy child-RLM calls
 # ---------------------------------------------------------------------------
 
-# bounded Sub fallback. This is a product invariant owned here, not an
-# operator-facing policy knob.
+# Native child depth is a fixed execution invariant, not an operator-facing
+# policy knob.
 RLM_NATIVE_CHILD_DEPTH = 1
 _MAX_CAPSULE_BYTES = 50_000
 _MAX_CAPSULE_FRAGMENTS = 16
@@ -739,10 +573,12 @@ def _validate_capsule_reference(value: object) -> None:
             raise ValueError("capsule reference is outside its authorized scope")
         authority = unquote(parsed.netloc)
         path = unquote(parsed.path)
-        if authority in {".", ".."} or "/" in authority or "\\" in authority:
+        try:
+            artifact_id = UUID(authority)
+        except ValueError:
+            raise ValueError("capsule Artifact reference must contain a UUID") from None
+        if authority != str(artifact_id) or path:
             raise ValueError("capsule reference is outside its authorized scope")
-        if path:
-            _validate_capsule_path(path.lstrip("/"))
         return
     _validate_capsule_path(value)
 
@@ -774,7 +610,7 @@ class SelectedInputAccess:
         self,
         capsule: SubproblemCapsule,
         *,
-        reader: Callable[[str], str] | None,
+        reader: Callable[[str, int], str] | None,
         check_authority: Callable[[], None],
     ) -> None:
         self._capsule = capsule
@@ -783,6 +619,11 @@ class SelectedInputAccess:
         self._lock = Lock()
         self._content: dict[str, str] = {}
         self._read_bytes = 0
+
+    @property
+    def selected_input_bytes(self) -> int:
+        with self._lock:
+            return self._capsule.serialized_bytes + self._read_bytes
 
     @property
     def delivered_fragments(self) -> tuple[str, ...]:
@@ -809,7 +650,10 @@ class SelectedInputAccess:
         with self._lock:
             if reference in self._content:
                 return self._content[reference]
-            content = self._reader(reference)
+            remaining = self._capsule.allocation_bytes - self._capsule.serialized_bytes - self._read_bytes
+            if remaining < 1:
+                raise ValueError("selected input exceeds its byte allocation")
+            content = self._reader(reference, remaining)
             self._check_authority()
             if not isinstance(content, str):
                 raise ValueError("selected input must be UTF-8 text")
@@ -829,6 +673,16 @@ class SelectedInputAccess:
             name="read_selected_input",
             desc="Read a selected reference by reference-N identifier. Access does not prove the answer is correct.",
         )
+
+    def validate_citations(self, answer: str) -> tuple[str, ...]:
+        """Validate declared citation IDs, without claiming semantic entailment."""
+        cited = tuple(dict.fromkeys(re.findall(r"\[((?:reference|fragment)-[^\]\s]*)\]", answer)))
+        available = set(self.accessed_references) | set(self.delivered_fragments)
+        if any(identifier not in available for identifier in cited):
+            raise ValueError("child cited evidence that was not delivered or accessed")
+        if self._capsule.evidence_requirements and not cited:
+            raise ValueError("child omitted required evidence citations")
+        return cited
 
 
 _selected_access: ContextVar[SelectedInputAccess | None] = ContextVar("fleet_selected_access", default=None)
@@ -860,12 +714,23 @@ class ChildOutcome(BaseModel):
     answer: str = Field(default="", max_length=_MAX_CAPSULE_BYTES)
     source_references: tuple[str, ...] = Field(default=(), max_length=_MAX_CAPSULE_REFERENCES)
     delivered_fragments: tuple[str, ...] = Field(default=(), max_length=_MAX_CAPSULE_FRAGMENTS)
-    verified_observations: tuple[str, ...] = Field(default=(), max_length=16)
+    cited_evidence: tuple[str, ...] = Field(default=(), max_length=_MAX_CAPSULE_REFERENCES + _MAX_CAPSULE_FRAGMENTS)
     uncertainty: str = Field(default="", max_length=2_000)
     usage: ChildUsage = Field(default_factory=ChildUsage)
     error_category: str | None = Field(default=None, max_length=64)
     selected_input_bytes: int = Field(default=0, ge=0, le=_MAX_CAPSULE_BYTES)
     result_bytes: int = Field(default=0, ge=0)
+
+    @field_validator("source_references", "delivered_fragments", "cited_evidence")
+    @classmethod
+    def _validate_evidence_ids(cls, values: tuple[str, ...]) -> tuple[str, ...]:
+        """Keep result evidence identifiers canonical and independently bounded."""
+        if len(values) != len(set(values)):
+            raise ValueError("child evidence identifiers must be unique")
+        for value in values:
+            if not isinstance(value, str) or not re.fullmatch(r"(?:reference|fragment)-[1-9][0-9]*", value):
+                raise ValueError("child evidence identifier is invalid")
+        return values
 
     def as_dict(self) -> dict[str, object]:
         """Return the public JSON-shaped representation of this outcome."""
@@ -874,7 +739,7 @@ class ChildOutcome(BaseModel):
             "answer": self.answer,
             "source_references": list(self.source_references),
             "delivered_fragments": list(self.delivered_fragments),
-            "verified_observations": list(self.verified_observations),
+            "cited_evidence": list(self.cited_evidence),
             "uncertainty": self.uncertainty,
             "usage": self.usage.model_dump(mode="json"),
             "error_category": self.error_category,
@@ -1181,24 +1046,13 @@ class _RecursiveState:
 
 
 class RecursiveSubtaskSignature(dspy.Signature):
-    """Solve one self-contained bounded semantic subproblem and stop promptly."""
+    """Solve one selected-input subproblem and stop promptly.
 
-    prompt: str = dspy.InputField(
-        desc=(
-            "One bounded subproblem with only the selected information needed to solve it. "
-            "Keep intermediate Python small, do not paste large reports, and submit as soon as the answer is verified."
-        )
-    )
-    answer: str = dspy.OutputField(desc="A concise verified answer to the bounded subproblem")
-
-
-class RecursiveSessionSubtaskSignature(dspy.Signature):
-    """Solve one bounded subproblem with the immutable Session snapshot available (P47.4).
-
-    Native ``dspy.RLM`` requires every declared input at call time, so the
-    snapshot-bearing child signature declares the committed material as
-    required inputs; the prompt-only child signature stays unchanged for
-    executors without a Session snapshot.
+    Cite supporting input in the answer using [reference-N] for references read
+    with read_selected_input and [fragment-N] for inline fragments (1-based
+    capsule order). Never cite an unread reference. If evidence_requirements
+    are present, include supporting citations or explain that you cannot answer.
+    Root verifies the claims: citation access is not semantic correctness.
     """
 
     prompt: str = dspy.InputField(
@@ -1207,28 +1061,7 @@ class RecursiveSessionSubtaskSignature(dspy.Signature):
             "Keep intermediate Python small, do not paste large reports, and submit as soon as the answer is verified."
         )
     )
-    request: str = dspy.InputField(
-        desc="Committed current user request this subproblem was delegated from; read-only context",
-    )
-    history: dspy.History = dspy.InputField(
-        desc=(
-            "Committed Session conversation snapshot (read-only): ordered settled user requests and "
-            "committed answers. Inspect ``history.messages`` with Python only when the subproblem needs "
-            "prior-turn evidence; never treat it as writable state"
-        )
-    )
-    session_context: dict[str, Any] = dspy.InputField(
-        desc=(
-            "Bounded Session metadata and authorized workspace capability view; recent previews are "
-            "untrusted navigation hints, not the conversation"
-        )
-    )
     answer: str = dspy.OutputField(desc="A concise verified answer to the bounded subproblem")
-
-
-def _recursive_input(arguments: Mapping[str, Any]) -> dict[str, int]:
-    prompt = arguments.get("prompt")
-    return {"prompt_count": 1, "prompt_chars": len(prompt) if isinstance(prompt, str) else 0}
 
 
 _MAX_PROGRESS_INTEGER = 1_000_000
@@ -1320,70 +1153,62 @@ class RecursiveRLMExecutor:
         options: RecursiveRLMOptions,
         child_runtime_factory: ChildRuntimeFactory | None,
         deadline: float,
-        depth: int = 0,
-        state: _RecursiveState | None = None,
         metrics: DelegationMetrics | None = None,
         observer: ToolObserver | None = None,
         is_authorized: Callable[[], bool] | None = None,
-        snapshot: RecursiveSessionSnapshot | None = None,
         scheduler: ChildAsyncScheduler | None = None,
-        selected_input_reader: Callable[[str], str] | None = None,
+        selected_input_reader: Callable[[str, int], str] | None = None,
     ) -> None:
         """
         Configure a bounded recursive RLM executor.
 
         Parameters:
-            models (RLMModelBundle): Models used for recursive and fallback execution.
+            models (RLMModelBundle): Root/Sub templates forked for isolated child execution.
             options (RecursiveRLMOptions): Limits and behavior for recursive calls.
             child_runtime_factory (ChildRuntimeFactory | None): Factory for acquiring child runtimes.
             deadline (float): Absolute execution deadline.
-            depth (int): Current recursion depth.
-            state (_RecursiveState | None): Shared state for aggregating nested-call metadata.
             observer (ToolObserver | None): Optional observer for tool execution events.
             is_authorized (Callable[[], bool] | None): Optional authorization check for recursive execution.
-            snapshot (RecursiveSessionSnapshot | None): Immutable Session material delegated to
-                every native child (P47.4). When absent, children receive only the delegated prompt.
             scheduler (ChildAsyncScheduler | None): Application-owned scheduler for async child RLM calls.
         """
         self._models = models
         self._options = options
         self._child_runtime_factory = child_runtime_factory
         self._deadline = deadline
-        self._depth = depth
-        self._state = state or _RecursiveState()
+        self._state = _RecursiveState()
         if metrics is not None:
             self._state.metrics = metrics
         self._metrics = self._state.metrics
         self._observer = observer
         self._is_authorized = is_authorized
-        self._snapshot = snapshot
         self._selected_input_reader = selected_input_reader
         self._owns_scheduler = scheduler is None
         self._last_completion: dict[str, object] | None = None
         self._last_capsule_outcomes: tuple[ChildOutcome, ...] = ()
         raw_tool = dspy.Tool(
-            self._call,
+            self._call_selected,
             name="rlm_query",
             desc=(
-                "Solve one self-contained bounded semantic subproblem. Pass only selected data, "
-                "not the complete Turn, history, Attachment, or Workspace. Store the concise answer."
+                "Solve one bounded iterative subproblem from a capsule containing task, selected fragments, "
+                "authorized references and allocation_bytes. Returns a typed outcome for Root verification."
             ),
         )
         if observer is not None or is_authorized is not None:
             self._tool = observe_tool(
                 raw_tool,
                 observer or (lambda _detail: None),
-                ToolEventView(input_projection=_recursive_input, output_projection=self._recursive_output),
+                ToolEventView(input_projection=self._selected_input, output_projection=self._recursive_output),
                 is_authorized=is_authorized,
             )
         else:
             self._tool = raw_tool
         raw_batch_tool = dspy.Tool(
-            self._call_batched,
+            self._call_capsules_batched,
             name="rlm_query_batched",
             desc=(
                 "Solve multiple independent bounded subproblems with isolated child RLMs. "
-                "Inputs and outputs preserve order; use only when every item needs iterative exploration."
+                "Pass capsules; ordered typed outcomes include ordinary cleaned-up failures. "
+                "Use only when every item needs iterative exploration. Root only."
             ),
         )
         if observer is not None or is_authorized is not None:
@@ -1391,71 +1216,13 @@ class RecursiveRLMExecutor:
                 raw_batch_tool,
                 observer or (lambda _detail: None),
                 ToolEventView(
-                    input_projection=self._recursive_batch_input,
+                    input_projection=self._capsule_batch_input,
                     output_projection=self._recursive_batch_output,
                 ),
                 is_authorized=is_authorized,
             )
         else:
             self._batched_tool = raw_batch_tool
-        raw_capsule_tool = dspy.Tool(
-            self._call_capsule,
-            name="rlm_query_capsule",
-            desc=(
-                "Solve one selected-input subproblem. Provide task, selected fragments, authorized references, "
-                "expected result shape, evidence requirements and a bounded allocation. Do not pass Session history."
-            ),
-        )
-        if observer is not None or is_authorized is not None:
-            self._capsule_tool = observe_tool(
-                raw_capsule_tool,
-                observer or (lambda _detail: None),
-                ToolEventView(input_projection=self._capsule_input, output_projection=self._recursive_output),
-                is_authorized=is_authorized,
-            )
-        else:
-            self._capsule_tool = raw_capsule_tool
-        raw_capsule_batch_tool = dspy.Tool(
-            self._call_capsules_batched,
-            name="rlm_query_capsules_batched",
-            desc=(
-                "Solve multiple independent selected-input capsules with isolated child RLMs. "
-                "Inputs and outputs preserve order; the initial contract is all-or-nothing."
-            ),
-        )
-        if observer is not None or is_authorized is not None:
-            self._capsule_batch_tool = observe_tool(
-                raw_capsule_batch_tool,
-                observer or (lambda _detail: None),
-                ToolEventView(
-                    input_projection=self._capsule_batch_input,
-                    output_projection=self._recursive_batch_output,
-                ),
-                is_authorized=is_authorized,
-            )
-        else:
-            self._capsule_batch_tool = raw_capsule_batch_tool
-        raw_readonly_partial_capsule_batch_tool = dspy.Tool(
-            self._call_capsules_readonly_batched,
-            name="rlm_query_capsules_readonly_batched",
-            desc=(
-                "Read bounded evidence from multiple independent selected-input capsules. "
-                "Completed siblings are returned when an ordinary child fails; verify every result "
-                "and do not publish it."
-            ),
-        )
-        if observer is not None or is_authorized is not None:
-            self._readonly_partial_capsule_batch_tool = observe_tool(
-                raw_readonly_partial_capsule_batch_tool,
-                observer or (lambda _detail: None),
-                ToolEventView(
-                    input_projection=self._capsule_batch_input,
-                    output_projection=self._recursive_batch_output,
-                ),
-                is_authorized=is_authorized,
-            )
-        else:
-            self._readonly_partial_capsule_batch_tool = raw_readonly_partial_capsule_batch_tool
         # Delay creation until all Tool bindings have succeeded. If startup
         # fails while assembling the executor, no owned scheduler thread is
         # left behind; externally supplied schedulers remain untouched.
@@ -1470,21 +1237,6 @@ class RecursiveRLMExecutor:
     def batched_tool(self) -> dspy.Tool:
         """Return the Root-only batched recursive Tool."""
         return self._batched_tool
-
-    @property
-    def capsule_tool(self) -> dspy.Tool:
-        """Return the strict selected-input recursive tool for Root programs."""
-        return self._capsule_tool
-
-    @property
-    def capsule_batch_tool(self) -> dspy.Tool:
-        """Return the ordered strict selected-input batch Tool."""
-        return self._capsule_batch_tool
-
-    @property
-    def readonly_partial_capsule_batch_tool(self) -> dspy.Tool:
-        """Return the explicit read-only partial-result capsule batch Tool."""
-        return self._readonly_partial_capsule_batch_tool
 
     @property
     def last_capsule_outcomes(self) -> tuple[ChildOutcome, ...]:
@@ -1510,52 +1262,63 @@ class RecursiveRLMExecutor:
             )
 
     def execute_capsule(self, capsule: SubproblemCapsule) -> ChildOutcome:
-        """Run selected child input and return bounded evidence to the Root.
+        """Run selected input, propagating execution failures to the caller."""
+        return self._execute_capsule(capsule, classify_failures=False)
 
-        The compatibility ``rlm_query`` API can still use a prepared Session
-        snapshot. A capsule must not: construct a narrow view that shares the
-        run-scoped reservation/budget/cleanup owners but has no snapshot to
-        inject into the child signature.
-        """
+    def _execute_capsule(self, capsule: SubproblemCapsule, *, classify_failures: bool) -> ChildOutcome:
+        """Keep execution, measurements, and selected access in one owned scope."""
         if not isinstance(capsule, SubproblemCapsule):
             raise TypeError("capsule must be a SubproblemCapsule")
         rendered = capsule.render()
         if capsule.serialized_bytes > self._options.max_prompt_chars:
             raise ValueError("capsule exceeds recursive prompt bound")
+        # Admission failures belong to the parent, not to a child that never
+        # ran. In particular an expired Turn cannot receive a partial result.
+        self._ensure_authorized()
+        self._ensure_no_pending_batch_workers()
         local_metrics = DelegationMetrics(parent=self._metrics)
         access = SelectedInputAccess(
             capsule, reader=self._selected_input_reader, check_authority=self._ensure_authorized
         )
-        capsule_executor = RecursiveRLMExecutor(
-            models=self._models,
-            options=self._options,
-            child_runtime_factory=self._child_runtime_factory,
-            deadline=self._deadline,
-            depth=self._depth,
-            state=self._state,
-            metrics=self._metrics,
-            observer=self._observer,
-            is_authorized=self._is_authorized,
-            snapshot=None,
-            scheduler=self._scheduler,
-        )
         token = _child_metrics.set(local_metrics)
         access_token = _selected_access.set(access)
         try:
-            answer = capsule_executor._call_with_profile(rendered, child_profile="semantic-child")
+            answer = self._call_with_profile(rendered, child_profile="semantic-child")
+            if len(answer.encode("utf-8")) > self._options.child_max_output_chars:
+                raise RLMConfigError("capsule result exceeds child result bound")
+            cited = access.validate_citations(answer)
+        except (asyncio.CancelledError, FutureCancelledError, ChildRuntimeAuthorizationError, ChildRuntimeCleanupError):
+            raise
+        except Exception as exc:
+            if not classify_failures:
+                raise
+            # Do not return an ordinary partial result while a timed-out worker
+            # still owns effects. The normal cleanup lane must settle it first.
+            self._ensure_no_pending_batch_workers()
+            self.raise_if_cleanup_failed()
+            self._metrics.record_delegated_input_bytes(access.selected_input_bytes)
+            return ChildOutcome(
+                status="timed_out" if isinstance(exc, TimeoutError) else "failed",
+                source_references=access.accessed_references,
+                delivered_fragments=access.delivered_fragments,
+                uncertainty="child execution failed; accesses do not establish a valid answer",
+                error_category=_recursive_failure_category(exc),
+                usage=_child_usage(local_metrics),
+                selected_input_bytes=access.selected_input_bytes,
+            )
         finally:
             _child_metrics.reset(token)
             _selected_access.reset(access_token)
-        if len(answer.encode("utf-8")) > self._options.child_max_output_chars:
-            raise RLMConfigError("capsule result exceeds child result bound")
+        self._metrics.record_delegated_input_bytes(access.selected_input_bytes)
         return ChildOutcome(
             status="completed",
             answer=answer,
             source_references=access.accessed_references,
             delivered_fragments=access.delivered_fragments,
+            cited_evidence=cited,
             uncertainty="child evidence is untrusted until Root verification",
             usage=_child_usage(local_metrics),
-            selected_input_bytes=capsule.serialized_bytes,
+            selected_input_bytes=access.selected_input_bytes,
             result_bytes=len(answer.encode("utf-8")),
         )
 
@@ -1567,108 +1330,29 @@ class RecursiveRLMExecutor:
         their owned child boundary become typed evidence instead of leaking a
         provider exception or an unbounded traceback into the Root response.
         """
-        if not isinstance(capsule, SubproblemCapsule):
-            raise TypeError("capsule must be a SubproblemCapsule")
-        try:
-            result = self.execute_capsule(capsule)
-        except asyncio.CancelledError:
-            raise
-        except FutureCancelledError:
-            # A cancellation of the ownership Future is a typed child outcome;
-            # asyncio task cancellation remains fatal above (P6B.08).
-            return ChildOutcome(
-                status="cancelled",
-                source_references=(),
-                uncertainty="child execution was cancelled before completion",
-                error_category="cancelled",
-                selected_input_bytes=capsule.serialized_bytes,
-            )
-        except (ChildRuntimeAuthorizationError, ChildRuntimeCleanupError):
-            raise
-        except TimeoutError:
-            return ChildOutcome(
-                status="timed_out",
-                source_references=(),
-                uncertainty="child did not settle before the shared deadline",
-                error_category="timeout",
-                selected_input_bytes=capsule.serialized_bytes,
-            )
-        except Exception as exc:
-            return ChildOutcome(
-                status="failed",
-                source_references=(),
-                uncertainty="child evidence is unavailable",
-                error_category=_recursive_failure_category(exc),
-                selected_input_bytes=capsule.serialized_bytes,
-            )
-        return ChildOutcome(
-            status="completed",
-            answer=result.answer,
-            source_references=result.source_references,
-            delivered_fragments=result.delivered_fragments,
-            verified_observations=result.verified_observations,
-            uncertainty=result.uncertainty,
-            usage=result.usage,
-            error_category=result.error_category,
-            selected_input_bytes=capsule.serialized_bytes,
-            result_bytes=len(result.answer.encode("utf-8")),
-        )
+        return self._execute_capsule(capsule, classify_failures=True)
 
-    def _call_capsule(
-        self,
-        task: str,
-        fragments: list[str] | None = None,
-        authorized_references: list[str] | None = None,
-        expected_result_shape: str = "concise answer",
-        evidence_requirements: list[str] | None = None,
-        allocation_bytes: int = 4_000,
-        selected_file_checksums: list[list[str]] | None = None,
-    ) -> dict[str, object]:
-        """Tool-shaped adapter that rejects undeclared child input fields."""
-        capsule = SubproblemCapsule(
-            task=task,
-            fragments=tuple(fragments or ()),
-            authorized_references=tuple(authorized_references or ()),
-            expected_result_shape=expected_result_shape,
-            evidence_requirements=tuple(evidence_requirements or ()),
-            allocation_bytes=allocation_bytes,
-            selected_file_checksums=tuple(tuple(item) for item in (selected_file_checksums or ())),
-        )
-        outcome = self.execute_capsule_outcome(capsule)
-        return outcome.as_dict()
+    def _call_selected(self, capsule: dict[str, Any]) -> dict[str, object]:
+        """The single model-facing capsule request/result contract."""
+        return self.execute_capsule_outcome(SubproblemCapsule.from_mapping(capsule)).as_dict()
+
+    @staticmethod
+    def _selected_input(arguments: Mapping[str, Any]) -> dict[str, int]:
+        capsule = arguments.get("capsule")
+        if not isinstance(capsule, Mapping):
+            return {"selected_input_bytes": 0}
+        try:
+            size = SubproblemCapsule.from_mapping(capsule).serialized_bytes
+        except ValueError:
+            size = 0
+        return {"selected_input_bytes": size}
 
     def _call_capsules_batched(self, capsules: list[Mapping[str, object]]) -> list[dict[str, object]]:
-        """Run selected-input capsules in order with atomic admission.
-
-        The scheduler replacement intentionally keeps the legacy all-or-nothing
-        result policy: every capsule is admitted up front, and no sibling
-        evidence is returned when one ordinary child fails.  The typed outcome
-        records remain available through :attr:`last_capsule_outcomes` for a
-        later explicitly read-only partial-result policy.
-        """
-        return self._run_capsule_batch(capsules, allow_partial_results=False)
-
-    def _call_capsules_readonly_batched(self, capsules: list[Mapping[str, object]]) -> list[dict[str, object]]:
-        """Return read-only sibling outcomes after ordinary child failures.
-
-        This is deliberately a separate Tool from ``rlm_query_capsules_batched``.
-        It never changes batch admission, isolation, cancellation, authority, or
-        cleanup behavior.  Only children that settled normally contribute an
-        answer; failed siblings remain bounded metadata for Root verification.
-        """
-        return self._run_capsule_batch(capsules, allow_partial_results=True)
-
-    def _run_capsule_batch(
-        self,
-        capsules: list[Mapping[str, object]],
-        *,
-        allow_partial_results: bool,
-    ) -> list[dict[str, object]]:
-        """Run one capsule batch under either the atomic or read-only policy."""
+        """Atomically admit capsules and return ordered, fully settled outcomes."""
         if not isinstance(capsules, list):
-            raise ValueError("rlm_query_capsules_batched capsules must be a list")
+            raise ValueError("rlm_query_batched capsules must be a list")
         if not capsules:
-            raise ValueError("rlm_query_capsules_batched capsules must not be empty")
+            raise ValueError("rlm_query_batched capsules must not be empty")
         normalized = tuple(SubproblemCapsule.from_mapping(item) for item in capsules)
         if time.monotonic() >= self._deadline:
             raise TimeoutError("recursive call deadline exceeded")
@@ -1676,7 +1360,6 @@ class RecursiveRLMExecutor:
         self._ensure_no_pending_batch_workers()
         self._metrics.record_recursive_batch()
         reservations = self._begin_batch(tuple(capsule.render() for capsule in normalized))
-        errors: dict[int, BaseException] = {}
 
         def execute(
             reservation: RecursiveCallReservation,
@@ -1695,41 +1378,46 @@ class RecursiveRLMExecutor:
                     batch_cancelled,
                     child_profile="semantic-child",
                 )
-            except asyncio.CancelledError:
+                cited = access.validate_citations(answer)
+            except (asyncio.CancelledError, FutureCancelledError):
                 raise
             except (ChildRuntimeAuthorizationError, ChildRuntimeCleanupError):
                 raise
-            except TimeoutError as exc:
-                errors[reservation.call_index] = exc
+            except TimeoutError:
+                self._metrics.record_delegated_input_bytes(access.selected_input_bytes)
                 return ChildOutcome(
                     status="timed_out",
-                    source_references=(),
+                    source_references=access.accessed_references,
+                    delivered_fragments=access.delivered_fragments,
                     uncertainty="child did not settle before the shared deadline",
                     error_category="timeout",
-                    selected_input_bytes=capsule.serialized_bytes,
+                    selected_input_bytes=access.selected_input_bytes,
                     usage=_child_usage(local_metrics),
                 )
             except Exception as exc:
-                errors[reservation.call_index] = exc
+                self._metrics.record_delegated_input_bytes(access.selected_input_bytes)
                 return ChildOutcome(
                     status="failed",
-                    source_references=(),
+                    source_references=access.accessed_references,
+                    delivered_fragments=access.delivered_fragments,
                     uncertainty="child evidence is unavailable",
                     error_category=_recursive_failure_category(exc),
-                    selected_input_bytes=capsule.serialized_bytes,
+                    selected_input_bytes=access.selected_input_bytes,
                     usage=_child_usage(local_metrics),
                 )
             finally:
                 _child_metrics.reset(token)
                 _selected_access.reset(access_token)
+            self._metrics.record_delegated_input_bytes(access.selected_input_bytes)
             return ChildOutcome(
                 status="completed",
                 answer=answer,
                 source_references=access.accessed_references,
                 delivered_fragments=access.delivered_fragments,
+                cited_evidence=cited,
                 uncertainty="child evidence is untrusted until Root verification",
                 usage=_child_usage(local_metrics),
-                selected_input_bytes=capsule.serialized_bytes,
+                selected_input_bytes=access.selected_input_bytes,
                 result_bytes=len(answer.encode("utf-8")),
             )
 
@@ -1741,21 +1429,9 @@ class RecursiveRLMExecutor:
             on_retain_running=self._retain_pending_batch_futures,
             scheduler=self._scheduler,
         )
+        self._ensure_authorized()
         self._last_capsule_outcomes = tuple(outcomes)
         self.raise_if_cleanup_failed()
-        if allow_partial_results:
-            return [outcome.as_dict() for outcome in outcomes]
-        failed_index, failed = next(
-            ((index, outcome) for index, outcome in enumerate(outcomes) if outcome.status != "completed"),
-            (None, None),
-        )
-        if failed is not None:
-            assert failed_index is not None
-            cause = errors.get(reservations[failed_index].call_index)
-            error = RecursiveBatchError("recursive capsule batch did not complete")
-            if cause is not None:
-                raise error from cause
-            raise error
         return [outcome.as_dict() for outcome in outcomes]
 
     def raise_if_cleanup_failed(self) -> None:
@@ -1824,21 +1500,13 @@ class RecursiveRLMExecutor:
         for future in pending:
             future.add_done_callback(settled)
 
-    def _recursive_output(self, _result: Any) -> dict[str, object]:
+    def _recursive_output(self, result: Any) -> dict[str, object]:
         """Return metadata for the most recent recursive completion."""
+        if isinstance(result, dict) and result.get("status") in {"failed", "timed_out", "cancelled"}:
+            return {"status": result["status"], "error_category": result.get("error_category")}
         if self._last_completion is None:
             return {"status": "completed"}
         return dict(self._last_completion)
-
-    @staticmethod
-    def _recursive_batch_input(arguments: Mapping[str, Any]) -> dict[str, int]:
-        prompts = arguments.get("prompts")
-        if not isinstance(prompts, list):
-            return {"prompt_count": 0, "prompt_chars": 0}
-        return {
-            "prompt_count": len(prompts),
-            "prompt_chars": sum(len(item) for item in prompts if isinstance(item, str)),
-        }
 
     @staticmethod
     def _capsule_batch_input(arguments: Mapping[str, Any]) -> dict[str, int]:
@@ -1853,19 +1521,6 @@ class RecursiveRLMExecutor:
                 except ValueError:
                     continue
         return {"capsule_count": len(capsules), "selected_input_bytes": selected_bytes}
-
-    @staticmethod
-    def _capsule_input(arguments: Mapping[str, Any]) -> dict[str, int]:
-        """Project capsule metadata without exporting selected content."""
-        return {
-            "fragment_count": len(arguments.get("fragments", ()))
-            if isinstance(arguments.get("fragments", ()), list)
-            else 0,
-            "reference_count": len(arguments.get("authorized_references", ()))
-            if isinstance(arguments.get("authorized_references", ()), list)
-            else 0,
-            "task_chars": len(arguments.get("task", "")) if isinstance(arguments.get("task"), str) else 0,
-        }
 
     def _recursive_batch_output(self, result: Any) -> dict[str, object]:
         if isinstance(result, list):
@@ -1991,7 +1646,7 @@ class RecursiveRLMExecutor:
         return tuple(range(start, start + len(prompts)))
 
     def _make_reservation(self, prompt: str, call_index: int) -> RecursiveCallReservation:
-        return RecursiveCallReservation(prompt=prompt, call_index=call_index, child_depth=self._depth + 1)
+        return RecursiveCallReservation(prompt=prompt, call_index=call_index, child_depth=RLM_NATIVE_CHILD_DEPTH)
 
     @staticmethod
     def _start_call(reservation: RecursiveCallReservation) -> _RecursiveCall:
@@ -2005,22 +1660,6 @@ class RecursiveRLMExecutor:
             },
         )
         return _RecursiveCall(reservation.call_index, reservation.child_depth, started_at, span)
-
-    def _run_depth_fallback(self, prompt: str, call: _RecursiveCall) -> tuple[str, dict[str, object]]:
-        if time.monotonic() >= self._deadline:
-            raise TimeoutError("recursive child deadline exceeded")
-        with self._state.lock:
-            self._state.depth_fallback_count += 1
-        self._metrics.record_depth_fallback()
-        answer = self._plain_sub_lm(prompt)
-        self._ensure_authorized()
-        completion_outputs = self._record_completion(
-            call,
-            mode="depth_fallback",
-            child_iterations=0,
-            include_child_iterations=False,
-        )
-        return answer, completion_outputs
 
     def _acquire_child_lease(self, call_index: int, *, profile: str) -> ChildRuntimeLease:
         if self._child_runtime_factory is None:
@@ -2064,50 +1703,9 @@ class RecursiveRLMExecutor:
         if callable(bind_budget):
             bind_budget(child_models.budget)
         selected_access = _selected_access.get()
-        snapshot = self._snapshot if selected_access is None else None
-        child_executor = RecursiveRLMExecutor(
-            models=child_models,
-            options=self._options,
-            child_runtime_factory=self._child_runtime_factory,
-            deadline=self._deadline,
-            depth=call.child_depth,
-            state=self._state,
-            metrics=self._metrics,
-            observer=self._observer,
-            is_authorized=lambda: (
-                (batch_cancelled is None or not batch_cancelled.is_set())
-                and (self._is_authorized is None or self._is_authorized())
-            ),
-            snapshot=snapshot,
-            scheduler=self._scheduler,
-        )
-        child_signature: type[dspy.Signature] = RecursiveSubtaskSignature
-        child_inputs: dict[str, Any] = {}
-        if snapshot is not None:
-            child_signature = RecursiveSessionSubtaskSignature
-            # A remote Daytona interpreter cannot carry a raw dspy.History as
-            # a per-iteration variable.  Keep that preferred value for the
-            # in-process seam, but use the complete SandboxSerializable copy
-            # when the interpreter advertises remote variable injection.
-            child_history: dspy.History | CommittedSessionHistory = snapshot.history
-            if snapshot.history_transport is not None and bool(
-                getattr(lease.interpreter, "supports_sandbox_serializable_inputs", False)
-            ):
-                child_history = snapshot.history_transport
-            child_inputs = {
-                "request": snapshot.request,
-                "history": child_history,
-                "session_context": build_session_context_payload(
-                    session_context=snapshot.session_context,
-                    workspace=snapshot.workspace,
-                    workspace_memory_digest=snapshot.workspace_memory_digest,
-                ),
-            }
-        child_tools = [child_executor.tool]
-        if selected_access is not None:
-            child_tools.append(selected_access.tool())
+        child_tools = [selected_access.tool()] if selected_access is not None else []
         child = build_native_rlm(
-            signature=child_signature,
+            signature=RecursiveSubtaskSignature,
             options=RLMOptions(
                 max_iters=self._options.child_max_iters,
                 max_llm_calls=self._options.child_max_llm_calls,
@@ -2145,7 +1743,7 @@ class RecursiveRLMExecutor:
                 # DSPy's async RLM still executes the interpreter synchronously.
                 # Native forward runs on the scheduler's owned blocking worker,
                 # keeping the application loop free to service provider bridges.
-                prediction = child(lease.interpreter, prompt=prompt, **child_inputs)
+                prediction = child(lease.interpreter, prompt=prompt)
             elif callable(child_acall):
                 # Native production children use the same caller-owned async
                 # seam as Root.  Narrow deterministic doubles may expose only
@@ -2157,7 +1755,6 @@ class RecursiveRLMExecutor:
                     native=is_native_rlm(child),
                     deadline=self._deadline,
                     retain_pending=lambda pending: self._retain_pending_batch_futures({pending}),
-                    extra_inputs=child_inputs,
                     scheduler=self._scheduler,
                 )
             else:
@@ -2255,16 +1852,6 @@ class RecursiveRLMExecutor:
         if cleanup_error is not None and not primary_failed:
             raise cleanup_error
 
-    def _call(self, prompt: str) -> str:
-        """Execute the public prompt-only recursive Tool.
-
-        ``child_profile`` is intentionally not part of this callable's
-        signature: DSPy reflects Tool signatures into the sandbox namespace,
-        and exposing an internal profile selector would let model code bypass
-        the capsule admission contract.
-        """
-        return self._call_with_profile(prompt, child_profile="workspace-child")
-
     def _call_with_profile(self, prompt: str, *, child_profile: str) -> str:
         """
         Execute a bounded recursive query for the given prompt.
@@ -2286,10 +1873,6 @@ class RecursiveRLMExecutor:
         self._ensure_authorized()
         self._ensure_no_pending_batch_workers()
         reservation = self._begin_call(prompt)
-        if self._depth >= RLM_NATIVE_CHILD_DEPTH:
-            # A native child may use the bounded semantic fallback but cannot
-            # reserve another worker while holding its parent's semaphore slot.
-            return self._run_reserved_call(reservation, child_profile=child_profile)
         future = self._scheduler.submit_blocking(
             lambda: self._run_reserved_call(reservation, child_profile=child_profile)
         )
@@ -2336,16 +1919,13 @@ class RecursiveRLMExecutor:
         child_started = False
         try:
             self._ensure_call_authorized(batch_cancelled)
-            if call.child_depth > RLM_NATIVE_CHILD_DEPTH:
-                answer, completion_outputs = self._run_depth_fallback(prompt, call)
-            else:
-                cleanup_status = "not_acquired"
-                lease = self._acquire_child_lease(call.call_index, profile=child_profile)
-                cleanup_status = "acquired"
-                self._metrics.child_started()
-                child_started = True
-                self._ensure_call_authorized(batch_cancelled)
-                answer, completion_outputs = self._run_native_child(prompt, call, lease, batch_cancelled)
+            cleanup_status = "not_acquired"
+            lease = self._acquire_child_lease(call.call_index, profile=child_profile)
+            cleanup_status = "acquired"
+            self._metrics.child_started()
+            child_started = True
+            self._ensure_call_authorized(batch_cancelled)
+            answer, completion_outputs = self._run_native_child(prompt, call, lease, batch_cancelled)
             return answer
         except BaseException as exc:
             failed = True
@@ -2367,67 +1947,6 @@ class RecursiveRLMExecutor:
                 if child_started:
                     self._metrics.child_completed()
 
-    def _plain_sub_lm(self, prompt: str) -> str:
-        """
-        Generate a concise answer for a child subproblem using the configured sub-language model.
-
-        Parameters:
-                prompt (str): The bounded child subproblem to answer.
-
-        Returns:
-                str: The validated, bounded answer.
-        """
-        predictor = dspy.Predict(RecursiveSubtaskSignature)
-        with dspy.context(
-            lm=self._models.sub_lm,
-            adapter=FleetJSONAdapter(deadline=self._deadline, budget=self._models.budget),
-            callbacks=[
-                _RLMTraceCallback(
-                    root_lm=self._models.root_lm,
-                    sub_lm=self._models.sub_lm,
-                    recursive_depth=self._depth + 1,
-                    metrics=_child_metrics.get() or self._metrics,
-                    deadline=self._deadline,
-                )
-            ],
-            track_usage=True,
-        ):
-            prediction = predictor(prompt=prompt)
-        result = prediction_result(
-            prediction,
-            RecursiveSubtaskSignature,
-            schema_id="fleet.recursive-subtask",
-            schema_version="1",
-            max_output_chars=self._options.child_max_output_chars,
-        )
-        return result.display_text
-
-    def _call_batched(self, prompts: list[str]) -> list[str]:
-        """Execute independent recursive child calls with bounded fan-out."""
-        if not isinstance(prompts, list):
-            raise ValueError("rlm_query_batched prompts must be a list")
-        normalized = tuple(
-            _validate_recursive_prompt(prompt, max_chars=self._options.max_prompt_chars) for prompt in prompts
-        )
-        if not normalized:
-            raise ValueError("rlm_query_batched prompts must not be empty")
-        if time.monotonic() >= self._deadline:
-            raise TimeoutError("recursive call deadline exceeded")
-        self._ensure_authorized()
-        self._ensure_no_pending_batch_workers()
-        self._metrics.record_recursive_batch()
-        reservations = self._begin_batch(normalized)
-        results = run_reserved_batch(
-            reservations,
-            execute=self._run_reserved_call,
-            deadline_monotonic=self._deadline,
-            max_parallel=self._options.max_parallel_children,
-            on_retain_running=self._retain_pending_batch_futures,
-            scheduler=self._scheduler,
-        )
-        self.raise_if_cleanup_failed()
-        return results
-
 
 __all__ = [
     "RLM_NATIVE_CHILD_DEPTH",
@@ -2445,12 +1964,9 @@ __all__ = [
     "RecursiveCallSummary",
     "RecursiveRLMExecutor",
     "RecursiveRLMOptions",
-    "RecursiveSessionSnapshot",
-    "RecursiveSessionSubtaskSignature",
     "RecursiveSubtaskSignature",
     "SubproblemCapsule",
     "TokenUsageStatus",
-    "build_recursive_session_snapshot",
     "normalize_lm_token_usage",
     "run_reserved_batch",
 ]
