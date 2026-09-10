@@ -393,12 +393,12 @@ fresh-program migration with the same settlement guarantees; P2.3 is not done.
 
 ## P2.4 - Keep only one code-execution implementation
 
-**Status: in progress (2026-09-10).** Removed native Turn preparation and the
-runner's native branch, `TurnScopedRuntimeLease`, and duplicate worker builder.
-Prepared execution rejects all variants except `legacy`. Provider-native
-adapter/context factories and their cancellation cleanup still exist as
-feasibility machinery; moving useful probes out of production composition and
-deleting the remaining adapter path is still required before P2.4 is done.
+**Status: complete (2026-09-10).** Removed native Turn preparation and the
+runner's native branch, `TurnScopedRuntimeLease`, duplicate worker builder, and
+production-composition native context factory/cancellation owner. Prepared
+execution rejects all variants except `legacy`. `NativeInterpreterBackend`
+remains an unreferenced feasibility probe covered only by its direct tests; it
+is not part of production composition or a selectable runtime.
 
 **Rationale:** The branch currently carries broker execution plus a native interpreter path. Keeping both permanently defeats the migration.
 
