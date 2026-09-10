@@ -52,6 +52,11 @@ error reporting. The proof must identify the SDK version, snapshot, candidate,
 and provider behavior. Until then, use the Workspace Agent for semantics and
 reserve SDK filesystem calls for its current source installation transport.
 
-This is an inventory, not evidence that Daytona's remote filesystem has passed
-those contracts. Phase 5D.02–P5D.06 remain open until their operation-specific
-tests and measured transfer/round-trip comparisons are retained.
+The pinned Daytona SDK `0.210.0` capability gate in
+`tests/unit/backend/daytona/test_workspace_sdk_parity.py` establishes that
+`download_file` has no byte/cursor arguments, `list_files` has no cursor, and
+upload/delete offer no append, patch, checksum/CAS, or atomic-publication
+contract. That is sufficient negative evidence for the current substitution
+candidates: no Workspace Agent operation is retained merely for history.
+Provider-backed comparison remains necessary only if a future SDK adds the
+missing contract surface.
