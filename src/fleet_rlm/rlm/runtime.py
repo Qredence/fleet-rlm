@@ -75,6 +75,7 @@ from fleet_rlm.rlm.program import (
     sanitize_base_url,
 )
 from fleet_rlm.rlm.recursion import (
+    ChildRuntimeAuthorizationError,
     ChildRuntimeFactory,
     DelegationMetrics,
     RecursiveRLMExecutor,
@@ -1397,6 +1398,33 @@ class RLMRunner:
         if context.delegation.recursive_options.enabled:
             if context.delegation.child_runtime_factory is None:
                 raise RLMConfigError("recursive child runtime is unavailable")
+
+            def read_selected_input(reference: str) -> str:
+                """Reuse prepared read capabilities, never interpret a locator as authority."""
+                if context.identity.authority.revoked:
+                    raise ChildRuntimeAuthorizationError("Turn is no longer authorized")
+                if time.monotonic() >= context.execution.deadline:
+                    raise TimeoutError("recursive child deadline exceeded")
+                if ":" in reference:
+                    raise ChildRuntimeAuthorizationError("select referenced content into a fragment before delegation")
+                tools = {str(tool.name): tool for tool in spec.tools}
+                if reference.startswith("projects/"):
+                    parts = reference.split("/", 2)
+                    if len(parts) != 3 or "read_project_text" not in tools:
+                        raise ChildRuntimeAuthorizationError("selected input is unavailable or unauthorized")
+                    page = tools["read_project_text"](path=reference, max_chars=10_000)
+                else:
+                    reader = tools.get("read_workspace_text")
+                    if reader is None:
+                        raise ChildRuntimeAuthorizationError("selected input is unavailable or unauthorized")
+                    page = reader(path=reference, max_chars=10_000)
+                if not isinstance(page, Mapping) or page.get("ok") is not True or page.get("eof") is not True:
+                    raise ValueError("select a bounded complete text input before delegation")
+                content = page.get("content")
+                if not isinstance(content, str):
+                    raise ValueError("selected input must be UTF-8 text")
+                return content
+
             recursive_executor = RecursiveRLMExecutor(
                 models=context.execution.models,
                 options=context.delegation.recursive_options,
@@ -1405,6 +1433,7 @@ class RLMRunner:
                 metrics=context.delegation.metrics,
                 observer=observations.publish,
                 is_authorized=lambda: not context.identity.authority.revoked,
+                selected_input_reader=read_selected_input,
                 snapshot=build_recursive_session_snapshot(
                     request=context.session.request,
                     history=context.session.history,
@@ -1724,21 +1753,31 @@ async def probe_root_lm(
     )
     try:
         with dspy.context(lm=root_lm, adapter=dspy.JSONAdapter(), track_usage=False):
-            prediction = await rlm.acall(
-                interpreter,
-                probe=(
-                    "Set marker = 'probe-slice'. On a later REPL iteration call "
-                    "child = rlm_query(prompt='Classify this selected value: ' + marker), "
-                    "then submit the child answer with typed SUBMIT(answer=child). "
-                    "Use at least three REPL iterations and keep the prompt bounded."
-                ),
+            effect = OwnedEffect.start(
+                asyncio.to_thread(
+                    rlm,
+                    interpreter,
+                    probe=(
+                        "Set marker = 'probe-slice'. On a later REPL iteration call "
+                        "child = rlm_query(prompt='Classify this selected value: ' + marker), "
+                        "then submit the child answer with typed SUBMIT(answer=child). "
+                        "Use at least three REPL iterations and keep the prompt bounded."
+                    ),
+                )
             )
+            settled = await effect.settle()
+            if settled.caller_cancelled:
+                raise asyncio.CancelledError
+            prediction = settled.result()
     except AdapterParseError as exc:
         raise RLMProviderContractError("Root LM returned an unparseable RLM action") from exc
     except Exception as exc:
         raise RLMProviderContractError("Root LM RLM compatibility probe failed") from exc
     finally:
-        interpreter.shutdown()
+        try:
+            await OwnedEffect.start(asyncio.to_thread(recursive.wait_owned)).settle()
+        finally:
+            await OwnedEffect.start(asyncio.to_thread(interpreter.shutdown)).settle()
 
     trajectory = getattr(prediction, "trajectory", ())
     answer = getattr(prediction, "answer", None)

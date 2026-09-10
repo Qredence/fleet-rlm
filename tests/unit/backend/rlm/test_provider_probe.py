@@ -74,8 +74,11 @@ async def test_provider_probe_reports_native_extraction_fallback_for_forced_fina
         def summary(self) -> SimpleNamespace:
             return SimpleNamespace(call_count=1)
 
+        def wait_owned(self) -> None:
+            pass
+
     class FakeRLM:
-        async def acall(self, interpreter, **kwargs):
+        def __call__(self, interpreter, **kwargs):
             del interpreter
             assert "probe" in kwargs
             return SimpleNamespace(

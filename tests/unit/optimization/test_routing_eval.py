@@ -24,9 +24,9 @@ from fleet_rlm.optimization.routing import (
 from fleet_rlm.rlm.events import ToolCompleted, ToolStarted
 from fleet_rlm.rlm.program import RLMModelBundle
 from fleet_rlm.rlm.recursion import (
-    RecursiveRLMExecutor,
     RecursiveRLMOptions,
 )
+from tests.support.recursion_scheduler import RecursiveRLMExecutor
 
 
 def test_curated_scenarios_cover_the_six_owned_routes() -> None:

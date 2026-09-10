@@ -121,13 +121,13 @@ def _source_tools() -> dict[str, dspy.Tool]:
     from fleet_rlm.optimization.types import OptimizationRecord
     from fleet_rlm.rlm.program import RLMModelBundle
     from fleet_rlm.rlm.recursion import (
-        RecursiveRLMExecutor,
         RecursiveRLMOptions,
     )
     from fleet_rlm.sessions.history_tools import SessionHistoryToolHost
     from fleet_rlm.sessions.models import SessionHistory
     from fleet_rlm.skills.catalog import SkillCatalog
     from fleet_rlm.skills.tools import SkillToolHost
+    from tests.support.recursion_scheduler import RecursiveRLMExecutor
 
     class _Record:
         def optimizer_example(self) -> dict[str, object]:

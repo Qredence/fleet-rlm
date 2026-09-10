@@ -11,6 +11,16 @@ import pytest
 
 logger = logging.getLogger(__name__)
 
+
+@pytest.fixture(scope="session", autouse=True)
+def recursive_application_service():
+    """Close the lazily created test application loop after owned child work."""
+    yield
+    from tests.support.recursion_scheduler import close_application_loop
+
+    close_application_loop()
+
+
 # Prevent remote model-cost fetch during test collection.
 os.environ.setdefault("LITELLM_LOCAL_MODEL_COST_MAP", "true")
 

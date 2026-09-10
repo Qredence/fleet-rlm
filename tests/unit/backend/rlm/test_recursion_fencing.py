@@ -18,7 +18,6 @@ from fleet_rlm.rlm.events import RunCompleted, Status
 from fleet_rlm.rlm.program import RLMModelBundle, RLMOptions
 from fleet_rlm.rlm.recursion import (
     ChildRuntimeCleanupError,
-    RecursiveRLMExecutor,
     RecursiveRLMOptions,
 )
 from fleet_rlm.rlm.runtime import (
@@ -30,6 +29,7 @@ from fleet_rlm.rlm.runtime import (
     SessionView,
 )
 from fleet_rlm.sessions.models import TurnAccess
+from tests.support.recursion_scheduler import RecursiveRLMExecutor
 from tests.unit.backend.rlm.fakes import ChildLeaseRecorder, EmptyCapabilities
 
 

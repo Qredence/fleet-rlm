@@ -33,9 +33,9 @@ import pytest
 from fleet_rlm.rlm.program import RLMModelBundle
 from fleet_rlm.rlm.recursion import (
     RecursiveBatchError,
-    RecursiveRLMExecutor,
     RecursiveRLMOptions,
 )
+from tests.support.recursion_scheduler import RecursiveRLMExecutor
 from tests.unit.backend.rlm.fakes import ChildLeaseRecorder
 
 

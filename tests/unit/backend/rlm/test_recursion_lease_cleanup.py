@@ -53,7 +53,6 @@ from fleet_rlm.rlm.recursion import (
     ChildRuntimeAuthorizationError,
     ChildRuntimeCleanupError,
     RecursiveBatchError,
-    RecursiveRLMExecutor,
     RecursiveRLMOptions,
 )
 from fleet_rlm.rlm.runtime import (
@@ -65,6 +64,7 @@ from fleet_rlm.rlm.runtime import (
     SessionView,
 )
 from fleet_rlm.sessions.models import TurnAccess
+from tests.support.recursion_scheduler import RecursiveRLMExecutor
 from tests.unit.backend.rlm.fakes import EmptyCapabilities
 
 
@@ -183,6 +183,7 @@ def test_val_rec_012_first_failure_cancels_queued_acquisition_before_any_lease(
         deadline_monotonic,
         max_parallel,
         on_retain_running,
+        scheduler,
     ):
         """Keep a queued worker behind the first-failure cancellation fence.
 
@@ -205,6 +206,7 @@ def test_val_rec_012_first_failure_cancels_queued_acquisition_before_any_lease(
             deadline_monotonic=deadline_monotonic,
             max_parallel=max_parallel,
             on_retain_running=on_retain_running,
+            scheduler=scheduler,
         )
 
     monkeypatch.setattr(recursive_calls, "run_reserved_batch", gated_run_reserved_batch)
