@@ -559,9 +559,15 @@ def _require_managed_profile_environment_values(
         raise FleetConfigurationError("selected managed profile has an invalid database policy") from exc
 
 
-def load_runtime_settings() -> Settings:
+def load_runtime_settings(*, profile: str | None = None) -> Settings:
     """
-    Load and validate the runtime settings for the active Fleet profile.
+    Load and validate the runtime settings for the selected Fleet profile.
+
+    Parameters:
+        profile: Optional explicit profile name. When omitted, the committed
+            ``config.default_profile`` is used. Explicit selection is intended
+            for an operator launcher or an isolated campaign process; ambient
+            environment variables never select a profile.
 
     Returns:
         Settings: Resolved runtime settings, including environment-backed values.
@@ -574,18 +580,24 @@ def load_runtime_settings() -> Settings:
     document = _read_policy_document(_CONFIG_PATH)
     defaults = document.defaults
     profiles = document.profiles
-    profile = document.default_profile
-    if profile is None:
+    selected_profile = profile.strip() if isinstance(profile, str) else None
+    if profile is not None and not selected_profile:
+        raise FleetConfigurationError("selected profile must be a non-blank string")
+    if selected_profile is None:
+        selected_profile = document.default_profile
+    if selected_profile is None:
         if len(profiles) == 1:
-            profile = next(iter(profiles))
+            selected_profile = next(iter(profiles))
         else:
             raise FleetConfigurationError("config.default_profile is required when multiple profiles exist")
-    selected = _require_mapping(profiles[profile], f"profiles.{profile}")
-    _validate_policy_table(selected, f"profiles.{profile}", allow_partial_llm=True)
+    if selected_profile not in profiles:
+        raise FleetConfigurationError(f"selected profile does not exist: {selected_profile}")
+    selected = _require_mapping(profiles[selected_profile], f"profiles.{selected_profile}")
+    _validate_policy_table(selected, f"profiles.{selected_profile}", allow_partial_llm=True)
     merged = _deep_merge(defaults, selected)
-    _validate_policy_table(merged, f"profiles.{profile}")
+    _validate_policy_table(merged, f"profiles.{selected_profile}")
     flattened = _flatten_policy(merged)
-    _require_managed_profile_environment_values(profile, flattened, dotenv)
+    _require_managed_profile_environment_values(selected_profile, flattened, dotenv)
 
     values: dict[str, Any] = dict(flattened.settings)
     for field_name, environment_name in flattened.environment_references.items():
@@ -600,18 +612,18 @@ def load_runtime_settings() -> Settings:
             values[field_name] = resolved
     settings = Settings(**values)
     settings._dotenv_values = {key: value for key, value in dotenv.items() if value is not None}
-    settings._active_profile = profile
+    settings._active_profile = selected_profile
     return settings
 
 
-def require_live_execution() -> Settings:
+def require_live_execution(*, profile: str | None = None) -> Settings:
     """Resolve the selected policy and require its live execution switch.
 
     This is deliberately separate from command invocation: callers still need
     to invoke a live script explicitly, while this single policy check provides
     the repository-wide fail-closed switch for credentialed commands.
     """
-    settings = load_runtime_settings()
+    settings = load_runtime_settings(profile=profile)
     if not settings.live_enabled:
         raise FleetConfigurationError("live execution is disabled by runtime.live_enabled=false")
     return settings

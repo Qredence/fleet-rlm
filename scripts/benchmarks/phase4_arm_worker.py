@@ -1,11 +1,9 @@
-"""Execute exactly one sealed Phase 4 arm trial.
+"""Execute one direct DSPy Phase 4 ablation trial.
 
-The campaign driver invokes this module in a short-lived process.  It emits
-one JSON ``TrialObservation`` object on stdout and never prints prompts,
-provider payloads, credentials, or exception messages.  For arm C the process
-working directory is an isolated checkout of the frozen baseline; the worker
-module itself is loaded from the candidate checkout so the adapter protocol is
-identical across all four arms.
+The campaign driver invokes this module in a short-lived process for arms A
+and B only.  The app-backed arms C and D use the public FastAPI/SSE client in
+``phase4_api_client.py``; keeping them out of this worker prevents an
+in-process TestClient path from being mistaken for production transport.
 """
 
 from __future__ import annotations
@@ -13,7 +11,6 @@ from __future__ import annotations
 import argparse
 import contextlib
 import json
-import math
 import re
 import sys
 import tempfile
@@ -33,14 +30,11 @@ for _path in (str(_CANDIDATE_ROOT), str(_CHECKOUT_ROOT / "src")):
         sys.path.insert(0, _path)
 
 import dspy
-from fastapi.testclient import TestClient
 
 from scripts.benchmarks.phase4_campaign import ARMS, Phase4Case, Trial, TrialObservation
 
-_LIVE_VALUES = frozenset({"1", "true", "yes"})
 _SOURCE_ID = re.compile(r"(?<![A-Za-z0-9_-])([A-Za-z][A-Za-z0-9_-]{0,63})(?![A-Za-z0-9_-])")
 _MAX_WORKER_OUTPUT = 50_000
-_SESSION_RESOURCES = (4, 8, 8)
 
 
 class Phase4Answer(dspy.Signature):
@@ -90,16 +84,6 @@ def _case_sources(case: Phase4Case) -> str:
     return "\n\n".join(f"[{key}] {case.sources[key]}" for key in sorted(case.sources))
 
 
-def _trial_request(case: Phase4Case) -> str:
-    return (
-        "Use only the sealed source records in the attached text document. Do not use network access or prior turns. "
-        f"Answer this question: {case.question}\n"
-        "Return exactly one JSON object with string fields `answer`, `evidence`, and `uncertainty`; `evidence` "
-        "must be a JSON array of the source IDs that support the answer. Include the requested uncertainty exactly "
-        "when the evidence is contradictory or incomplete. Do not make any forbidden claim."
-    )
-
-
 def _parse_result(value: object, source_ids: set[str]) -> tuple[str, tuple[str, ...], str]:
     answer = ""
     evidence_value: object = ()
@@ -118,18 +102,24 @@ def _parse_result(value: object, source_ids: set[str]) -> tuple[str, tuple[str, 
             if isinstance(decoded, Mapping):
                 return _parse_result(decoded, source_ids)
             answer = text
+    else:
+        raise ValueError("worker structured result is malformed")
     if len(answer.encode("utf-8")) > _MAX_WORKER_OUTPUT or len(uncertainty.encode("utf-8")) > 2_000:
         raise ValueError("result exceeds the worker bound")
     if isinstance(evidence_value, str):
         evidence_items = [item.strip() for item in evidence_value.split(",") if item.strip()]
     elif isinstance(evidence_value, Sequence) and not isinstance(evidence_value, (bytes, bytearray, str)):
-        evidence_items = [item for item in evidence_value if isinstance(item, str)]
+        if any(not isinstance(item, str) for item in evidence_value):
+            raise ValueError("worker evidence is malformed")
+        evidence_items = [item for item in evidence_value if item.strip()]
     else:
-        evidence_items = []
+        raise ValueError("worker evidence is malformed")
     normalized: list[str] = []
     for item in evidence_items:
         candidate = item.strip().strip("[]")
-        if candidate in source_ids and candidate not in normalized:
+        if candidate not in source_ids:
+            raise ValueError("citation is not available in the sealed source material")
+        if candidate not in normalized:
             normalized.append(candidate)
     if not normalized:
         for candidate in _SOURCE_ID.findall(answer):
@@ -298,211 +288,6 @@ def _native_observation(case: Phase4Case, trial: Trial) -> TrialObservation:
         )
 
 
-def _sandbox_id(value: object) -> str | None:
-    raw = getattr(value, "id", None)
-    return str(raw) if raw is not None else None
-
-
-def _fleet_observation(case: Phase4Case, trial: Trial) -> TrialObservation:
-    from fleet_rlm.app import create_app
-
-    recursive = trial.arm in {"C", "D"}
-    with tempfile.TemporaryDirectory(prefix=f"fleet-p4-{trial.arm.lower()}-") as temp:
-        root = Path(temp)
-        settings = _campaign_settings(recursive=recursive, trial=trial, root=root)
-        started = time.perf_counter()
-        created_at: dict[str, float] = {}
-        durations: dict[str, float] = {}
-        shapes: list[tuple[int, int, int]] = []
-        delete_failures = False
-        app = create_app(settings=settings)
-        try:
-            with TestClient(app) as client:
-                resources = getattr(app.state.runtime_inventory, "run_environment_resources", None)
-                if resources is None:
-                    return _blank(category="resource_unavailable")
-                platform = resources.platform
-                original_create = platform.create
-                original_delete = platform.delete
-
-                async def observed_create(*args: Any, **kwargs: Any) -> Any:
-                    result = await original_create(*args, **kwargs)
-                    identifier = _sandbox_id(result)
-                    if identifier is not None:
-                        created_at[identifier] = time.perf_counter()
-                    profile = kwargs.get("profile")
-                    try:
-                        spec = (
-                            resources.platform.spec_for_profile(profile)
-                            if profile is not None
-                            else resources.sandbox_spec
-                        )
-                        shapes.append((int(spec.cpu), int(spec.memory_gib), int(spec.disk_gib)))
-                    except (AttributeError, TypeError, ValueError):
-                        pass
-                    return result
-
-                async def observed_delete(target: Any) -> Any:
-                    nonlocal delete_failures
-                    identifier = _sandbox_id(target) or (str(target) if isinstance(target, str) else None)
-                    try:
-                        return await original_delete(target)
-                    except BaseException:
-                        delete_failures = True
-                        raise
-                    finally:
-                        if identifier is not None and identifier in created_at:
-                            durations.setdefault(identifier, max(0.0, time.perf_counter() - created_at[identifier]))
-
-                platform.create = observed_create  # type: ignore[method-assign]
-                platform.delete = observed_delete  # type: ignore[method-assign]
-                upload = client.post(
-                    "/api/attachments",
-                    files={
-                        "attachment": (
-                            f"{case.identifier}.txt",
-                            _case_sources(case).encode("utf-8"),
-                            "text/plain; charset=utf-8",
-                        )
-                    },
-                )
-                upload.raise_for_status()
-                attachment_id = upload.json().get("id")
-                if not isinstance(attachment_id, str):
-                    return _blank(category="attachment_unavailable")
-                session = client.post("/api/sessions", json={"title": f"phase4-{trial.case_id}"})
-                session.raise_for_status()
-                session_id = session.json().get("id")
-                if not isinstance(session_id, str):
-                    return _blank(category="session_unavailable")
-                response = client.post(
-                    f"/api/sessions/{session_id}/turns",
-                    json={"text": _trial_request(case), "attachment_ids": [attachment_id], "skill_selections": []},
-                    headers={"Idempotency-Key": f"fleet-p4-{trial.arm}-{trial.case_id}-{trial.repeat}-{uuid4()}"},
-                    timeout=120,
-                )
-                response.raise_for_status()
-                chunks: list[dict[str, Any]] = []
-                for line in response.iter_lines():
-                    if not line.startswith("data: "):
-                        continue
-                    raw = line.removeprefix("data: ").strip()
-                    if not raw or raw == "[DONE]":
-                        continue
-                    try:
-                        chunk = json.loads(raw)
-                    except json.JSONDecodeError:
-                        continue
-                    if isinstance(chunk, dict):
-                        chunks.append(chunk)
-        except BaseException:
-            return _blank(category="turn_failed", cleanup=False, authorization=False)
-
-        finish = next(
-            (chunk for chunk in reversed(chunks) if chunk.get("type") == "finish"),
-            None,
-        )
-        finished = isinstance(finish, Mapping) and finish.get("finishReason") == "stop"
-        usage: Mapping[str, Any] = {}
-        for chunk in chunks:
-            if chunk.get("type") == "data-usage" and isinstance(chunk.get("data"), Mapping):
-                raw_usage = chunk["data"].get("usage", chunk["data"])
-                if isinstance(raw_usage, Mapping):
-                    usage = raw_usage
-        metrics = usage.get("delegation_metrics") if isinstance(usage, Mapping) else None
-        counts = metrics.get("lm_call_counts") if isinstance(metrics, Mapping) else None
-        root_calls: int | None = None
-        child_calls: int | None = None
-        if isinstance(counts, list):
-            rows = [item for item in counts if isinstance(item, Mapping)]
-            root_calls = sum(
-                int(item.get("count", 0))
-                for item in rows
-                if item.get("role") == "root" and item.get("recursive_depth") == 0 and type(item.get("count")) is int
-            )
-            child_calls = sum(
-                int(item.get("count", 0))
-                for item in rows
-                if isinstance(item.get("recursive_depth"), int)
-                and item.get("recursive_depth", 0) > 0
-                and type(item.get("count")) is int
-            )
-        token_rows = metrics.get("lm_token_totals") if isinstance(metrics, Mapping) else None
-        input_tokens: int | None = None
-        output_tokens: int | None = None
-        if isinstance(token_rows, list) and token_rows:
-            normalized = [item for item in token_rows if isinstance(item, Mapping)]
-            if len(normalized) == len(token_rows) and all(
-                type(item.get(key)) is int and item.get(key, -1) >= 0
-                for item in normalized
-                for key in ("input_tokens", "output_tokens")
-            ):
-                input_tokens = sum(int(item["input_tokens"]) for item in normalized)
-                output_tokens = sum(int(item["output_tokens"]) for item in normalized)
-        if input_tokens is None or output_tokens is None:
-            observed = usage.get("observed_lm_usage") if isinstance(usage, Mapping) else None
-            if isinstance(observed, Mapping) and observed:
-                pairs = [_usage_entry(item) for item in observed.values()]
-                if all(item[0] is not None and item[1] is not None for item in pairs):
-                    input_tokens = sum(item[0] or 0 for item in pairs)
-                    output_tokens = sum(item[1] or 0 for item in pairs)
-        recursive_calls = usage.get("recursive_call_count") if isinstance(usage, Mapping) else None
-        if root_calls is None and finished and type(usage.get("iterations")) is int and not recursive:
-            root_calls = int(usage["iterations"])
-        delegated: int | None = None
-        if isinstance(metrics, Mapping) and type(metrics.get("delegated_input_bytes")) is int:
-            delegated = int(metrics["delegated_input_bytes"])
-        if delegated is None and type(recursive_calls) is int and recursive_calls == 0:
-            delegated = 0
-        if delegated is None and recursive:
-            prompt_bytes = 0
-            for chunk in chunks:
-                if chunk.get("type") != "tool-input-available" or chunk.get("toolName") not in {
-                    "rlm_query",
-                    "rlm_query_batched",
-                }:
-                    continue
-                value = chunk.get("input")
-                if isinstance(value, Mapping):
-                    raw = value.get("prompt_chars", value.get("selected_input_bytes"))
-                    if type(raw) is int and raw >= 0:
-                        prompt_bytes += raw
-            if prompt_bytes:
-                delegated = prompt_bytes
-        structured: object = ""
-        for chunk in chunks:
-            if chunk.get("type") != "data-structured-result" or not isinstance(chunk.get("data"), Mapping):
-                continue
-            structured = chunk["data"].get("value", "")
-        try:
-            answer, cited, uncertainty = _parse_result(structured, set(case.sources))
-        except ValueError:
-            answer, cited, uncertainty = "", (), ""
-            finished = False
-        cleanup = not delete_failures and bool(created_at) and set(created_at) <= set(durations)
-        sandbox_seconds = math.ceil(sum(durations.values())) if cleanup else None
-        shape = max(shapes, key=lambda value: value[0] + value[1] + value[2]) if shapes else None
-        return TrialObservation(
-            answer=answer,
-            cited_evidence=cited,
-            uncertainty=uncertainty,
-            completed=bool(finished and answer),
-            authorization_confirmed=bool(finished),
-            cleanup_confirmed=cleanup,
-            input_tokens=input_tokens,
-            output_tokens=output_tokens,
-            cache_read_tokens=0 if input_tokens is not None and output_tokens is not None else None,
-            sandbox_seconds=sandbox_seconds,
-            latency_ms=max(0.0, (time.perf_counter() - started) * 1000) if finished else None,
-            root_lm_calls=root_calls,
-            child_lm_calls=child_calls if recursive else 0,
-            delegated_bytes=delegated,
-            sandbox_count=len(created_at) if cleanup else None,
-            resource_shape=shape,
-            error_category=None if finished else "turn_failed",
-        )
-
-
 def _run(payload: Mapping[str, Any]) -> TrialObservation:
     case = Phase4Case.from_mapping(payload.get("case", {}))
     raw_trial = payload.get("trial")
@@ -529,7 +314,7 @@ def _run(payload: Mapping[str, Any]) -> TrialObservation:
         return _model_observation(case, trial)
     if trial.arm == "B":
         return _native_observation(case, trial)
-    return _fleet_observation(case, trial)
+    return _blank(category="api_adapter_required")
 
 
 def main(argv: list[str] | None = None) -> int:

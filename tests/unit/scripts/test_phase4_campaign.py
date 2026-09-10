@@ -176,6 +176,38 @@ def test_campaign_halts_on_unknown_cost_or_missing_cleanup() -> None:
     assert rows[-1].observed_cost_usd is None
 
 
+def test_campaign_halts_when_non_cost_observation_is_unknown() -> None:
+    cases = load_cases(_CASES)
+    policy = CampaignPreflight("p4", "daytona", 14_400, 144, 5, 50.0)
+
+    def runner(trial, case):
+        observation = _observation(case)
+        if trial.arm == "B":
+            return replace(observation, delegated_bytes=None)
+        return observation
+
+    rows = execute_campaign(cases=cases, preflight=policy, envelope=_envelope(), runner=runner, started_at=0)
+    assert len(rows) == 2
+    assert rows[-1].observation.delegated_bytes is None
+
+
+def test_campaign_budget_includes_prior_observed_spend() -> None:
+    cases = load_cases(_CASES)
+    policy = CampaignPreflight("p4", "daytona", 14_400, 144, 5, 0.003)
+    rows = execute_campaign(
+        cases=cases,
+        preflight=policy,
+        envelope=_envelope(),
+        runner=lambda _trial, case: _observation(case),
+        started_at=0,
+        initial_spent_usd=0.001,
+    )
+
+    assert rows
+    assert rows[0].observed_cost_usd is not None
+    assert 0 < len(rows) < 144
+
+
 def test_bootstrap_and_decision_require_complete_nonregressing_evidence() -> None:
     cases = load_cases(_CASES)
     rows = []

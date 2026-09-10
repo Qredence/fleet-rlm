@@ -21,7 +21,7 @@ def _compatible_daytona_database(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         supervisor,
         "_selected_runtime_policy",
-        lambda run_environment: SimpleNamespace(
+        lambda run_environment, **_kwargs: SimpleNamespace(
             run_environment=run_environment,
             mlflow_tracing_enabled=False,
             mlflow_tracking_uri="",
@@ -367,6 +367,46 @@ def test_selected_runtime_policy_reports_removed_profile(
         match="configured profile does not exist: databricks-daytona",
     ):
         _SELECTED_RUNTIME_POLICY("daytona")
+
+
+def test_selected_runtime_policy_forwards_explicit_profile(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = SimpleNamespace(run_environment="daytona", _active_profile="phase4-campaign")
+    calls: list[str | None] = []
+
+    def load_settings(*, profile: str | None = None) -> SimpleNamespace:
+        calls.append(profile)
+        return settings
+
+    monkeypatch.setattr(supervisor, "load_runtime_settings", load_settings)
+    monkeypatch.setattr(supervisor, "active_profile", lambda _settings: "phase4-campaign")
+
+    assert _SELECTED_RUNTIME_POLICY("daytona", profile="phase4-campaign") is settings
+    assert calls == ["phase4-campaign"]
+
+
+def test_supervisor_rejects_profile_reload_combination(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _tui_workspace(tmp_path)
+    monkeypatch.setattr(supervisor.shutil, "which", lambda command: f"/usr/bin/{command}")
+    monkeypatch.setattr(
+        supervisor.subprocess,
+        "run",
+        lambda *_args, **_kwargs: SimpleNamespace(returncode=0, stdout="v22.19.0", stderr=""),
+    )
+
+    with pytest.raises(supervisor.SupervisorError, match="--reload"):
+        supervisor.supervise(
+            host="127.0.0.1",
+            port=8123,
+            reload=True,
+            run_environment="daytona",
+            profile="phase4-campaign",
+            repo_root=tmp_path,
+        )
 
 
 def test_supervisor_reuses_one_daytona_settings_object_and_stops_mlflow_last(
