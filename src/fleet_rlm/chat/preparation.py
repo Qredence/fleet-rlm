@@ -276,11 +276,6 @@ class RunEnvironment:
     # Composition-owned loop bridge for async host Tools invoked through
     # DSPy's synchronous interpreter seam.
     async_bridge: AsyncToolBridge | None = None
-    # Optional fresh native context factory.  The provider owns context
-    # acquisition and returns both the interpreter and its cleanup callback;
-    # legacy environments leave this unset and retain their existing resident
-    # interpreter path.
-    native_interpreter_factory: Callable[..., Any] | None = None
     image_identity: str | None = None
 
 

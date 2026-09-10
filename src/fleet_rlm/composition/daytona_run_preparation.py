@@ -36,11 +36,9 @@ from fleet_rlm.chat.preparation import (
 )
 from fleet_rlm.chat.run_lifecycle import ClaimedRun
 from fleet_rlm.config.settings import Settings
-from fleet_rlm.daytona._lease import LeaseState, RootSessionLease
-from fleet_rlm.daytona.broker import DaytonaHttpToolBroker, SyncBridgeDispatcher, sync_sandbox
+from fleet_rlm.daytona._lease import RootSessionLease
+from fleet_rlm.daytona.broker import SyncBridgeDispatcher, sync_sandbox
 from fleet_rlm.daytona.errors import is_sandbox_not_found
-from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter
-from fleet_rlm.daytona.native_interpreter import NativeInterpreterBackend
 from fleet_rlm.daytona.platform import (
     LiveDaytonaPlatform,
     LiveDaytonaVolumeClient,
@@ -252,21 +250,6 @@ class _CompatibilityQuarantine:
 
 
 @dataclass(slots=True)
-class _LateNativeContext:
-    """Own a native context request after its Turn was cancelled."""
-
-    task: asyncio.Task[Any]
-    sandbox: Any
-    owner: RootSessionLease
-    preparation_gate: asyncio.Lock
-    key: tuple[UUID, UUID]
-    run: ClaimedRun
-    request_timeout: float
-    on_settled: Callable[[], None] | None = None
-    delete_task: asyncio.Task[Any] | None = None
-
-
-@dataclass(slots=True)
 class _DaytonaEnvironmentProvider:
     resources: DaytonaRuntimeResources
     settings: Settings
@@ -303,10 +286,6 @@ class _DaytonaEnvironmentProvider:
     # acquisition.  A shielded create request can outlive a cancelled Turn;
     # retain it until the exact context is deleted (or the root is quarantined
     # when the provider cannot identify the late result).
-    _late_native_contexts: dict[int, _LateNativeContext] = field(default_factory=dict, init=False, repr=False)
-    _late_native_context_cleanup_tasks: dict[int, asyncio.Task[Any]] = field(
-        default_factory=dict, init=False, repr=False
-    )
     _compatibility_quarantines: dict[int, _CompatibilityQuarantine] = field(
         default_factory=dict, init=False, repr=False
     )
@@ -325,8 +304,6 @@ class _DaytonaEnvironmentProvider:
             or self._retained_root_owners
             or self._suppressed_root_release_callbacks
             or self._late_lookup_finalizers
-            or self._late_native_contexts
-            or self._late_native_context_cleanup_tasks
             or self._compatibility_quarantines
         )
 
@@ -349,8 +326,6 @@ class _DaytonaEnvironmentProvider:
             or self._retained_root_owners
             or self._suppressed_root_release_callbacks
             or self._late_lookup_finalizers
-            or self._late_native_contexts
-            or self._late_native_context_cleanup_tasks
             or self._compatibility_quarantines
         ):
             return
@@ -998,136 +973,6 @@ class _DaytonaEnvironmentProvider:
             return
         self._retain_late_lookup(cleanup)
 
-    def _defer_late_native_context_cleanup(
-        self,
-        context_task: asyncio.Task[Any],
-        sandbox: Any,
-        owner: RootSessionLease,
-        preparation_gate: asyncio.Lock,
-        key: tuple[UUID, UUID],
-        run: ClaimedRun,
-        *,
-        request_timeout: float,
-        on_settled: Callable[[], None] | None = None,
-    ) -> None:
-        """Transfer a cancelled native-context request to provider ownership.
-
-        ``create_context`` is an SDK operation independent from the caller's
-        cancellation token.  Shielding it keeps a late-created context
-        discoverable; this method then deletes that exact context before
-        fencing the root Session.  If the provider never returns a context,
-        the root is still quarantined because the remote side is ambiguous.
-        """
-        context_id = id(context_task)
-        existing = self._late_native_contexts.get(context_id)
-        if existing is not None:
-            return
-        request_timeout = max(1.0, float(request_timeout))
-        record = _LateNativeContext(
-            task=context_task,
-            sandbox=sandbox,
-            owner=owner,
-            preparation_gate=preparation_gate,
-            key=key,
-            run=run,
-            request_timeout=request_timeout,
-            on_settled=on_settled,
-        )
-        self._late_native_contexts[context_id] = record
-        self._late_root_gate_owners.setdefault(id(owner), (preparation_gate, key))
-        self._retained_root_owners[id(owner)] = owner
-        self._retain_environment_owner()
-        self._schedule_late_native_context_finalizer(record)
-
-    def _schedule_late_native_context_finalizer(self, record: _LateNativeContext) -> None:
-        """Schedule (or retain) one finalizer for a late native context."""
-        context_id = id(record.task)
-        existing = self._late_native_context_cleanup_tasks.get(context_id)
-        if existing is not None and not existing.done():
-            return
-        finalizer_awaitable = self._finish_late_native_context(record)
-        try:
-            finalizer = asyncio.create_task(
-                finalizer_awaitable,
-                name="fleet-daytona-late-native-context-cleanup",
-            )
-        except BaseException:
-            finalizer_awaitable.close()
-            return
-        self._late_native_context_cleanup_tasks[context_id] = finalizer
-
-        def settled(done: asyncio.Task[Any]) -> None:
-            if self._late_native_context_cleanup_tasks.get(context_id) is done:
-                self._late_native_context_cleanup_tasks.pop(context_id, None)
-            # A cancelled/failed finalizer remains in ``_late_native_contexts``
-            # and is retried by provider shutdown; never drop ownership merely
-            # because the event loop cancelled this bookkeeping task.
-            if not done.cancelled():
-                with contextlib.suppress(BaseException):
-                    done.exception()
-            self._maybe_release_environment_owner()
-
-        finalizer.add_done_callback(settled)
-
-    async def _finish_late_native_context(self, record: _LateNativeContext) -> None:
-        """Delete a late context, then complete the ordered root quarantine."""
-        context: Any | None = None
-        try:
-            context = await asyncio.shield(record.task)
-        except asyncio.CancelledError:
-            if not record.task.cancelled():
-                # This finalizer itself was cancelled while the provider
-                # request is still alive. Leave the record retained for a
-                # later shutdown retry; no root may be released here.
-                self._maybe_release_environment_owner()
-                return
-        except BaseException:
-            _consume_task_result(record.task)
-
-        if context is not None:
-            try:
-                if record.delete_task is None:
-                    delete = record.sandbox.code_interpreter.delete_context(
-                        context,
-                        request_timeout=record.request_timeout,
-                    )
-                    if inspect.isawaitable(delete):
-                        record.delete_task = asyncio.ensure_future(delete)
-                if record.delete_task is not None:
-                    await asyncio.shield(record.delete_task)
-            except asyncio.CancelledError:
-                # Keep the record, root, and preparation gate owned until the
-                # exact provider delete has settled.  A later provider
-                # shutdown retries the retained finalizer; never close a root
-                # while its native context deletion is still in flight.
-                self._maybe_release_environment_owner()
-                return
-            except BaseException as exc:
-                # A context-delete failure makes the root more, not less,
-                # uncertain. Continue into quarantine and retain the
-                # sanitized failure only in logs.
-                logger.warning(
-                    "late Daytona native context deletion remains uncertain",
-                    extra={"session_id": str(record.key[1]), "error_type": type(exc).__name__},
-                )
-
-        # If the finalizer was cancelled before the context task settled,
-        # preserve the record and all root/gate ownership for a retry.
-        if context is None and not record.task.done():
-            self._maybe_release_environment_owner()
-            return
-        self._late_native_contexts.pop(id(record.task), None)
-        await self._complete_late_root_cleanup(
-            record.owner,
-            record.preparation_gate,
-            record.key,
-            record.run,
-        )
-        if record.on_settled is not None:
-            with contextlib.suppress(BaseException):
-                record.on_settled()
-        self._maybe_release_environment_owner()
-
     async def _acquire_root_lease(
         self,
         run: ClaimedRun,
@@ -1272,7 +1117,6 @@ class _DaytonaEnvironmentProvider:
                 *self._acquisition_tasks,
                 *self._late_lookup_tasks,
                 *self._late_root_cleanup_tasks,
-                *self._late_native_context_cleanup_tasks.values(),
                 *self._root_quarantine_tasks.values(),
             )
             if task is not current
@@ -1285,24 +1129,6 @@ class _DaytonaEnvironmentProvider:
                     len(pending),
                 )
                 return False
-        # A native context request may have been retained after a cancelled
-        # factory call before its finalizer task was scheduled.  Retry those
-        # finalizers during shutdown while the provider owner is still alive.
-        for record in tuple(self._late_native_contexts.values()):
-            self._schedule_late_native_context_finalizer(record)
-        native_context_cleanup = tuple(
-            task for task in self._late_native_context_cleanup_tasks.values() if not task.done()
-        )
-        if native_context_cleanup:
-            _, pending = await asyncio.wait(native_context_cleanup, timeout=drain_seconds)
-            if pending:
-                logger.warning(
-                    "Daytona native context cleanup drain expired with %d owned job(s)",
-                    len(pending),
-                )
-                return False
-        if self._late_native_contexts:
-            raise RuntimeError("Daytona native context cleanup remains unresolved")
         # A bounded registry shutdown can leave a state-owned worker active.
         # Its deferred state close still owns the RetainableEnvironmentRelease
         # that ultimately closes this root; closing it here would terminate an
@@ -1356,8 +1182,6 @@ class _DaytonaEnvironmentProvider:
             or self._compatibility_quarantines
             or self._late_root_cleanup_owners
             or self._late_lookup_finalizers
-            or self._late_native_contexts
-            or self._late_native_context_cleanup_tasks
             or self._acquisition_tasks
             or self._late_lookup_tasks
         )
@@ -1497,28 +1321,9 @@ class _DaytonaEnvironmentProvider:
                 )
 
             main_loop = asyncio.get_running_loop()
-            native_context_pending = False
-
-            def _clear_native_context_pending() -> None:
-                nonlocal native_context_pending
-                native_context_pending = False
-
-            def _late_native_context_settled() -> None:
-                nonlocal native_context_pending, gate_held
-                # The provider finalizer has already closed/quarantined the
-                # root and released this exact gate.  Make later environment
-                # release callbacks inert instead of releasing it twice.
-                native_context_pending = False
-                gate_held = False
 
             async def release_preparation() -> None:
                 nonlocal gate_held
-                # A cancelled native context factory transfers the exact
-                # context request, root and gate to the provider finalizer.
-                # Releasing either boundary here would let a replacement Turn
-                # reuse an ambiguous remote context.
-                if native_context_pending:
-                    return
                 if gate_held:
                     gate_held = False
                     preparation_gate.release()
@@ -1527,10 +1332,7 @@ class _DaytonaEnvironmentProvider:
             async def release_root() -> None:
                 # Only the first Turn owns the provider lease directly. Later
                 # Turns reuse the resident root and release only their
-                # preparation reservation. A late native-context finalizer
-                # owns both boundaries after cancellation.
-                if native_context_pending:
-                    return
+                # preparation reservation.
                 await root_owner.close()
 
             child_runtime_factory = build_child_runtime_factory(
@@ -1549,185 +1351,6 @@ class _DaytonaEnvironmentProvider:
                 semantic_child_available=bool(getattr(self.settings, "daytona_child_snapshot", None)),
                 semantic_child_fallback=True,
             )
-
-            async def native_interpreter_factory(*, deadline: float) -> tuple[Any, Callable[[], Awaitable[Any]]]:
-                """Create one isolated Daytona interpreter context for feasibility verification.
-
-                This is deliberately not a policy-selectable production path.
-                A native context has no certified remote subprocess stop
-                contract, so cleanup taints and closes the exact root owner
-                before the preparation gate can be released.
-                """
-                remaining = deadline - asyncio.get_running_loop().time()
-                if remaining <= 0:
-                    raise TimeoutError("native interpreter context acquisition timed out")
-                nonlocal native_context_pending, sandbox_lookup_failed
-                native_binding_generation = getattr(lease, "binding_generation", 1)
-                session_manager = getattr(self.resources, "session_manager", None)
-                refresh_binding = getattr(session_manager, "refresh_binding_authority", None)
-                binding_authority = getattr(session_manager, "is_binding_current", None)
-                revoke_binding = getattr(session_manager, "revoke_binding", None)
-                start_binding_watch = getattr(session_manager, "start_binding_watch", None)
-
-                async def refresh_native_admission() -> None:
-                    """Fail closed before and after the remote context is created."""
-                    if not callable(refresh_binding):
-                        return
-                    refresh_kwargs: dict[str, Any] = {
-                        "session_id": run.session_id,
-                        "workspace_id": run.access.workspace_id,
-                        "sandbox_id": lease.sandbox_id,
-                        "generation": native_binding_generation,
-                    }
-                    try:
-                        parameters = inspect.signature(refresh_binding).parameters
-                    except (TypeError, ValueError):
-                        parameters = {}
-                    if "deadline" in parameters or any(
-                        parameter.kind is inspect.Parameter.VAR_KEYWORD for parameter in parameters.values()
-                    ):
-                        refresh_kwargs["deadline"] = deadline
-                    result = refresh_binding(**refresh_kwargs)
-                    current = await result if inspect.isawaitable(result) else result
-                    if current is False:
-                        raise RuntimeError("native binding authority unavailable")
-
-                # A reused Session root is just as capable of retaining native
-                # subprocesses as a newly created root. Retire this exact lease
-                # before admission is released, including acquisition failures.
-                lease.requires_sandbox_deletion = True
-                # The watch is intentionally supplemented by an immediate
-                # durable read. Its first scheduled poll cannot be relied on
-                # to run before context creation or the first native callback.
-                await refresh_native_admission()
-                context_task = asyncio.create_task(
-                    sandbox.code_interpreter.create_context(
-                        cwd="/home/daytona",
-                        request_timeout=remaining,
-                    ),
-                    name="fleet-daytona-native-context-acquisition",
-                )
-
-                def defer_context() -> None:
-                    nonlocal native_context_pending
-                    if native_context_pending:
-                        return
-                    native_context_pending = True
-                    self._defer_late_native_context_cleanup(
-                        context_task,
-                        sandbox,
-                        root_owner,
-                        preparation_gate,
-                        key,
-                        run,
-                        request_timeout=max(1.0, min(30.0, remaining)),
-                        on_settled=_late_native_context_settled,
-                    )
-
-                try:
-                    async with asyncio.timeout_at(deadline):
-                        context = await asyncio.shield(context_task)
-                except TimeoutError:
-                    defer_context()
-                    raise TimeoutError("native interpreter context acquisition timed out") from None
-                except asyncio.CancelledError:
-                    defer_context()
-                    raise
-                except BaseException:
-                    # The task is complete for a provider error; consume its
-                    # exception before mapping the failure at the preparation
-                    # boundary. No remote context was returned to this owner.
-                    if context_task.done():
-                        _consume_task_result(context_task)
-                    sandbox_lookup_failed = True
-                    raise
-                sync_view = sync_sandbox(sandbox, main_loop, getattr(self.resources, "dispatcher", None))
-                gateway = DaytonaHttpToolBroker(sandbox=sync_view)
-                stop_binding_watch: Callable[[], Awaitable[Any]] | None = None
-                if callable(start_binding_watch):
-                    stop_binding_watch = start_binding_watch(
-                        session_id=run.session_id,
-                        workspace_id=run.access.workspace_id,
-                        sandbox_id=lease.sandbox_id,
-                        generation=native_binding_generation,
-                    )
-                try:
-                    # Replacement may have committed while the provider was
-                    # creating the context. Delete this context rather than
-                    # admitting callbacks for an already retired generation.
-                    await refresh_native_admission()
-                    backend = NativeInterpreterBackend(
-                        service=sync_view.code_interpreter,
-                        context=context,
-                        gateway=gateway,
-                        deadline=deadline,
-                        max_output_bytes=self.settings.rlm_max_execution_output_chars,
-                        # The synchronous adapter can only fence reuse. The
-                        # async owner below performs the actual root close and
-                        # confirms the provider lifecycle boundary.
-                        contain=lambda key=key: self._mark_provider_root_tainted(key),
-                        is_authorized=lambda: not run.authority.revoked,
-                        # The backend is synchronous, so it cannot perform a
-                        # store read at every callback boundary. The owning
-                        # session lease is the binding boundary: once this
-                        # exact generation starts closing (including after a
-                        # replacement is installed), the old backend loses
-                        # authority before it can publish or call a tool.
-                        is_binding_current=lambda lease=lease, expected_generation=native_binding_generation: (
-                            lease.state is LeaseState.OPEN
-                            and lease.binding_generation == expected_generation
-                            and (
-                                not callable(binding_authority)
-                                or binding_authority(
-                                    session_id=run.session_id,
-                                    workspace_id=run.access.workspace_id,
-                                    sandbox_id=lease.sandbox_id,
-                                    generation=expected_generation,
-                                )
-                            )
-                        ),
-                        cleanup_timeout_seconds=max(1.0, min(30.0, remaining)),
-                    )
-                    interpreter = DaytonaCodeInterpreter(
-                        backend=backend,
-                        execution_output_cap=self.settings.rlm_max_execution_output_chars,
-                    )
-                except BaseException:
-                    if callable(revoke_binding):
-                        revoke_binding(
-                            session_id=run.session_id,
-                            workspace_id=run.access.workspace_id,
-                            sandbox_id=lease.sandbox_id,
-                            generation=native_binding_generation,
-                        )
-                    if stop_binding_watch is not None:
-                        with contextlib.suppress(BaseException):
-                            await stop_binding_watch()
-                    with contextlib.suppress(BaseException):
-                        await sandbox.code_interpreter.delete_context(context, request_timeout=remaining)
-                    raise
-
-                async def close_native_interpreter() -> None:
-                    try:
-                        if callable(revoke_binding):
-                            revoke_binding(
-                                session_id=run.session_id,
-                                workspace_id=run.access.workspace_id,
-                                sandbox_id=lease.sandbox_id,
-                                generation=native_binding_generation,
-                            )
-                        if stop_binding_watch is not None:
-                            await stop_binding_watch()
-                        await asyncio.to_thread(interpreter.shutdown, strict_broker_cleanup=True)
-                    finally:
-                        # Context deletion and gateway shutdown cannot certify
-                        # remote subprocess termination. Keep one owner: mark
-                        # this exact root generation unavailable and let its
-                        # existing Session lease close/quarantine it.
-                        self._mark_provider_root_tainted(key)
-                        await root_owner.close()
-
-                return interpreter, close_native_interpreter
 
             sandbox_spec = getattr(self.resources, "sandbox_spec", None)
             image_identity = environment_manifest(sandbox_spec).digest if sandbox_spec is not None else None
@@ -1750,7 +1373,6 @@ class _DaytonaEnvironmentProvider:
                 history_transport=build_committed_session_history_for_claim(run),
                 mark_tainted=lambda key=key: self._mark_provider_root_tainted(key),
                 async_bridge=getattr(self.resources, "dispatcher", None),
-                native_interpreter_factory=native_interpreter_factory,
                 image_identity=image_identity,
             )
         except BaseException:

@@ -115,10 +115,11 @@ classification must be completed before claiming a Phase 6 quality campaign.
 - P2.3: audited resident reuse, history preservation and failed-Turn rotation
   contracts. The registry/tool/fingerprint graph remains; existing mechanics
   are not evidence that cross-Turn Python state is a required product feature.
-- P2.4: deleted the native Turn preparation branch and duplicate runner worker
-  and lease implementation. Execution contexts reject unselected variants.
-  Provider adapter/context factory and cancellation ownership remain for
-  feasibility tests and still require subtraction from production composition.
+- P2.4: deleted the native Turn preparation branch, duplicate runner worker
+  and lease implementation, plus the production-composition native context
+  factory and cancellation owner. Execution contexts reject unselected
+  variants. `NativeInterpreterBackend` remains an unreferenced direct-test
+  feasibility probe and is not part of production composition.
 - P2.5: Fleet's JSON repair/finalization adapter moved to `rlm/program.py`;
   sync and async drivers retain one shared policy. Field insertion is shared,
   budget accounting stays in `budget.py`, and pinned DSPy marker/type/callback
