@@ -81,7 +81,7 @@ class Gateway:
         return True
 
 
-async def _backend(*, cap=4096, authority=lambda: True, contain=None):
+async def _backend(*, cap=4096, authority=lambda: True, binding_current=lambda: True, contain=None):
     service = Service()
     context = await service.create_context()
     gateway = Gateway(service.contexts[context.id])
@@ -94,6 +94,7 @@ async def _backend(*, cap=4096, authority=lambda: True, contain=None):
         max_output_bytes=cap,
         contain=contain or (lambda: contained.append(True)),
         is_authorized=authority,
+        is_binding_current=binding_current,
         cleanup_timeout_seconds=1,
     )
     return backend, service, gateway, contained
@@ -118,6 +119,39 @@ async def test_fresh_context_preserves_iterations_and_typed_submit_with_host_too
     assert not backend.containment_required
     interpreter.shutdown()
     assert contained == [True]
+
+
+@pytest.mark.asyncio
+async def test_replacement_context_does_not_retain_python_globals_but_keeps_volume_data():
+    """A replacement generation starts fresh while durable Volume state survives."""
+    volume: dict[str, str] = {}
+
+    first, service, _, contained = await _backend()
+    first_interpreter = DaytonaCodeInterpreter(
+        backend=first,
+        tools={"write_volume": lambda key, value: volume.__setitem__(key, value)},
+    )
+    first_interpreter.execute("ephemeral_only = 'must-not-survive'\nwrite_volume('checkpoint', 'durable-value')")
+    first_interpreter.shutdown()
+    assert contained == [True]
+
+    second_context = await service.create_context()
+    second_gateway = Gateway(service.contexts[second_context.id])
+    second, _, _, second_contained = await _backend()
+    # Reuse the service's newly-created context with a fresh backend; the
+    # in-memory dictionary represents the durable Volume mounted by both
+    # provider generations, not interpreter state.
+    second._service = service
+    second._context = second_context
+    second._gateway = second_gateway
+    second_interpreter = DaytonaCodeInterpreter(
+        backend=second,
+        tools={"read_volume": lambda key: volume[key]},
+    )
+    assert second_interpreter.execute("print('ephemeral_only' in globals())") == "False\n"
+    assert second_interpreter.execute("print(read_volume('checkpoint'))") == "durable-value\n"
+    second_interpreter.shutdown()
+    assert second_contained == [True]
 
 
 @pytest.mark.asyncio
@@ -244,6 +278,65 @@ async def test_output_overflow_fences_further_execution_and_requires_containment
     assert backend.containment_required and not contained
     backend.close()
     assert contained == [True]
+
+
+@pytest.mark.asyncio
+async def test_binding_generation_revocation_blocks_result_publication_and_future_callbacks():
+    """A replacement generation fences the old native action at its result boundary."""
+    current = True
+    backend, service, gateway, contained = await _backend(binding_current=lambda: current)
+
+    original_run_code = service.run_code
+
+    def revoke_after_execution(*args, **kwargs):
+        nonlocal current
+        result = original_run_code(*args, **kwargs)
+        current = False
+        return result
+
+    service.run_code = revoke_after_execution  # type: ignore[method-assign]
+    interpreter = DaytonaCodeInterpreter(
+        backend=backend,
+        tools={"double": lambda value: value * 2},
+        output_fields=[{"name": "answer", "type": "str", "required": True}],
+    )
+    with pytest.raises(DaytonaAdapterError, match="authority unavailable"):
+        interpreter.execute("SUBMIT(answer='must-not-publish')")
+    with pytest.raises(DaytonaAdapterError, match="authority unavailable"):
+        interpreter.execute("double(1)")
+    assert not contained
+    interpreter.shutdown()
+    assert service.deleted == ["0"]
+    assert gateway.stopped
+
+
+@pytest.mark.asyncio
+async def test_binding_revocation_during_native_sub_lm_callback_fences_and_contains():
+    """A callback that loses its generation cannot resume or publish output."""
+    current = True
+
+    def revoke_during_sub_lm(_prompt: str) -> str:
+        nonlocal current
+        current = False
+        return "late-sub-lm-result"
+
+    backend, service, gateway, contained = await _backend(binding_current=lambda: current)
+    interpreter = DaytonaCodeInterpreter(
+        backend=backend,
+        tools={"llm_query": revoke_during_sub_lm},
+        output_fields=[{"name": "answer", "type": "str", "required": True}],
+    )
+    with pytest.raises(DaytonaAdapterError, match="authority unavailable"):
+        interpreter.execute("answer = llm_query('prompt')\nSUBMIT(answer=answer)")
+
+    # The failed callback cannot be reused, and the regular owner cleanup
+    # still contains the complete native sandbox.
+    with pytest.raises(DaytonaAdapterError, match="authority unavailable"):
+        interpreter.execute("llm_query('again')")
+    interpreter.shutdown()
+    assert contained == [True]
+    assert service.deleted == ["0"]
+    assert gateway.stopped
 
 
 @pytest.mark.asyncio

@@ -178,6 +178,11 @@ _OPERATIONAL_TEXT_KEYS = frozenset(
         "mlflow_experiment_id",
         "mlflow_llm_model",
         "mlflow_llm_provider",
+        "runtime_variant",
+        "program_fingerprint",
+        "image_identity",
+        "settlement_status",
+        "settlement_durable",
         "run_id",
         "session_id",
         "child_call_id",
@@ -1081,6 +1086,13 @@ def annotate_turn_attributes(attributes: Mapping[str, object]) -> None:
         logger.debug("annotate_turn_attributes failed; continuing")
 
 
+def record_settlement_status(status: str, *, durable: bool) -> None:
+    """Record Fleet's durable settlement separately from MLflow span state."""
+    if status not in {"completed", "failed", "cancelled", "timeout"}:
+        return
+    annotate_turn_attributes({"settlement_status": status, "settlement_durable": durable})
+
+
 def current_turn_trace_id() -> str | None:
     """Return the active Turn trace id for this context, if any."""
     return _current_trace_id.get()
@@ -1232,6 +1244,9 @@ def turn_trace(
     trace_phase: TracePhase | None = None,
     preparation_trace_id: str | None = None,
     preparation_span_id: str | None = None,
+    runtime_variant: str | None = None,
+    program_fingerprint: str | None = None,
+    image_identity: str | None = None,
 ) -> Iterator[TraceHandle]:
     """
     Open a root ``fleet_turn`` span for a Fleet turn when tracing is available.
@@ -1247,6 +1262,9 @@ def turn_trace(
             with an execution trace.
         preparation_span_id (str | None): Optional preparation span identifier used for a local
             cross-trace Span Link. This is internal-only and is never exposed by the handle.
+        runtime_variant: Optional bounded runtime identity for an execution trace.
+        program_fingerprint: Optional opaque program digest for an execution trace.
+        image_identity: Optional opaque immutable image identity for an execution trace.
 
     Yields:
         TraceHandle: The root trace identifier when tracing succeeds and exposure is enabled;
@@ -1330,6 +1348,15 @@ def turn_trace(
             bounded_id = str(preparation_trace_id)[:_PREPARATION_TRACE_ID_MAX_CHARS]
             tags[_PREPARATION_TRACE_ID_TAG] = bounded_id
             metadata[_PREPARATION_TRACE_ID_TAG] = bounded_id
+        if trace_phase == "execution":
+            for key, value in (
+                ("fleet.runtime_variant", runtime_variant),
+                ("fleet.program_fingerprint", program_fingerprint),
+                ("fleet.image_identity", image_identity),
+            ):
+                if isinstance(value, str) and value and len(value) <= 256:
+                    tags[key] = value
+                    metadata[key] = value
         span_id: str | None = None
         try:
             mlflow.update_current_trace(

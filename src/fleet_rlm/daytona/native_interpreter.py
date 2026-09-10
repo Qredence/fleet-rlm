@@ -36,6 +36,7 @@ class NativeInterpreterBackend:
         max_output_bytes: int,
         contain: Callable[[], None],
         is_authorized: Callable[[], bool],
+        is_binding_current: Callable[[], bool] | None = None,
         cleanup_timeout_seconds: float,
     ) -> None:
         if not isinstance(getattr(context, "id", None), str) or not context.id:
@@ -51,6 +52,7 @@ class NativeInterpreterBackend:
         self._max_output_bytes = max_output_bytes
         self._contain = contain
         self._is_authorized = is_authorized
+        self._is_binding_current = is_binding_current or (lambda: True)
         self._tools: dict[str, Callable[..., Any]] = {}
         self._closed = False
         self._uncertain = False
@@ -63,7 +65,7 @@ class NativeInterpreterBackend:
         return not self._closed
 
     def _admit(self) -> int:
-        if self._closed or self._uncertain or not self._is_authorized():
+        if self._closed or self._uncertain or not self._is_authorized() or not self._is_binding_current():
             raise DaytonaAdapterError(
                 "native interpreter authority unavailable", cause_type="InterpreterLifecycleError"
             )

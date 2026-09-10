@@ -260,6 +260,48 @@ def test_turn_trace_execution_phase_records_one_way_preparation_link(
     assert calls.update_kwargs[-1] == {"state": "OK"}
 
 
+def test_execution_trace_records_bounded_runtime_identity(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = _install_fake_mlflow(monkeypatch)
+    with turn_trace(
+        uuid4(),
+        uuid4(),
+        enabled=True,
+        trace_phase="execution",
+        runtime_variant="native-turn-scoped",
+        program_fingerprint="program-digest",
+        image_identity="image-digest",
+    ):
+        pass
+    tagged = [kwargs for kwargs in calls.update_kwargs if "tags" in kwargs]
+    assert (
+        tagged[0]["tags"].items()
+        >= {
+            "fleet.runtime_variant": "native-turn-scoped",
+            "fleet.program_fingerprint": "program-digest",
+            "fleet.image_identity": "image-digest",
+        }.items()
+    )
+    assert tagged[0]["metadata"]["fleet.runtime_variant"] == "native-turn-scoped"
+
+
+def test_execution_trace_rejects_unbounded_runtime_identity(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = _install_fake_mlflow(monkeypatch)
+    with turn_trace(uuid4(), uuid4(), enabled=True, trace_phase="execution", image_identity="x" * 257):
+        pass
+    tagged = [kwargs for kwargs in calls.update_kwargs if "tags" in kwargs]
+    assert "fleet.image_identity" not in tagged[0]["tags"]
+
+
+def test_settlement_status_is_recorded_separately_from_span_state(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = _install_fake_mlflow(monkeypatch)
+    from fleet_rlm.observability.tracing import record_settlement_status
+
+    with turn_trace(uuid4(), uuid4(), enabled=True, trace_phase="execution"):
+        record_settlement_status("completed", durable=True)
+    assert calls.span_attributes[-1] == {"settlement_status": "completed", "settlement_durable": True}
+    assert calls.update_kwargs[-1] == {"state": "OK"}
+
+
 def test_turn_trace_disabled_never_records_phase_or_link(monkeypatch: pytest.MonkeyPatch) -> None:
     def _boom(*_a: Any, **_k: Any) -> Any:
         raise AssertionError("mlflow must not be used when disabled")

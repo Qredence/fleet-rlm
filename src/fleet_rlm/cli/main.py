@@ -131,6 +131,7 @@ _DOCTOR_ACTIONS = {
     "provider_5xx": "retry after the Daytona service recovers.",
     "request_validation": "update the Fleet Daytona adapter to the pinned SDK contract.",
     "mount_mismatch": "correct the Fleet scoped Volume mount contract.",
+    "snapshot_mismatch": "reconcile the configured immutable Daytona snapshot with the provider Sandbox.",
     "rlm_provider": "verify the configured Root LM follows the pinned DSPy RLM JSON action contract.",
     "database": "verify FLEET_DATABASE_URL and upgrade the database to Alembic head.",
     "settings": "configure the required FLEET_DAYTONA_API_KEY and FLEET_DATABASE_URL settings.",
@@ -158,6 +159,8 @@ def _run_doctor(parser: argparse.ArgumentParser, provider: str) -> None:
     for step in result.steps:
         state = "ok" if step.ok else "failed"
         _emit(f"[{state}] {step.name}: {step.message}")
+    for step in result.readiness:
+        _emit(f"[{step.status}] {step.name}: {step.message}")
     if not result.ok:
         categories = [step.category for step in result.steps if not step.ok and step.category]
         if not categories:

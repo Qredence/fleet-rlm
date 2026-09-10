@@ -36,7 +36,7 @@ from fleet_rlm.chat.preparation import (
 )
 from fleet_rlm.chat.run_lifecycle import ClaimedRun
 from fleet_rlm.config.settings import Settings
-from fleet_rlm.daytona._lease import RootSessionLease
+from fleet_rlm.daytona._lease import LeaseState, RootSessionLease
 from fleet_rlm.daytona.broker import DaytonaHttpToolBroker, SyncBridgeDispatcher, sync_sandbox
 from fleet_rlm.daytona.errors import is_sandbox_not_found
 from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter
@@ -49,6 +49,7 @@ from fleet_rlm.daytona.platform import (
 from fleet_rlm.daytona.provisioning import (
     DaytonaEnvironmentProfile,
     DaytonaSandboxSpec,
+    environment_manifest,
     sandbox_spec_from_settings,
     volume_config_from_settings,
 )
@@ -1581,6 +1582,7 @@ class _DaytonaEnvironmentProvider:
                 execution_output_cap=self.settings.rlm_max_execution_output_chars,
                 is_authorized=lambda: not run.authority.revoked,
                 semantic_child_available=bool(getattr(self.settings, "daytona_child_snapshot", None)),
+                semantic_child_fallback=True,
             )
 
             async def native_interpreter_factory(*, deadline: float) -> tuple[Any, Callable[[], Awaitable[Any]]]:
@@ -1595,10 +1597,44 @@ class _DaytonaEnvironmentProvider:
                 if remaining <= 0:
                     raise TimeoutError("native interpreter context acquisition timed out")
                 nonlocal native_context_pending, sandbox_lookup_failed
+                native_binding_generation = getattr(lease, "binding_generation", 1)
+                session_manager = getattr(self.resources, "session_manager", None)
+                refresh_binding = getattr(session_manager, "refresh_binding_authority", None)
+                binding_authority = getattr(session_manager, "is_binding_current", None)
+                revoke_binding = getattr(session_manager, "revoke_binding", None)
+                start_binding_watch = getattr(session_manager, "start_binding_watch", None)
+
+                async def refresh_native_admission() -> None:
+                    """Fail closed before and after the remote context is created."""
+                    if not callable(refresh_binding):
+                        return
+                    refresh_kwargs: dict[str, Any] = {
+                        "session_id": run.session_id,
+                        "workspace_id": run.access.workspace_id,
+                        "sandbox_id": lease.sandbox_id,
+                        "generation": native_binding_generation,
+                    }
+                    try:
+                        parameters = inspect.signature(refresh_binding).parameters
+                    except (TypeError, ValueError):
+                        parameters = {}
+                    if "deadline" in parameters or any(
+                        parameter.kind is inspect.Parameter.VAR_KEYWORD for parameter in parameters.values()
+                    ):
+                        refresh_kwargs["deadline"] = deadline
+                    result = refresh_binding(**refresh_kwargs)
+                    current = await result if inspect.isawaitable(result) else result
+                    if current is False:
+                        raise RuntimeError("native binding authority unavailable")
+
                 # A reused Session root is just as capable of retaining native
                 # subprocesses as a newly created root. Retire this exact lease
                 # before admission is released, including acquisition failures.
                 lease.requires_sandbox_deletion = True
+                # The watch is intentionally supplemented by an immediate
+                # durable read. Its first scheduled poll cannot be relied on
+                # to run before context creation or the first native callback.
+                await refresh_native_admission()
                 context_task = asyncio.create_task(
                     sandbox.code_interpreter.create_context(
                         cwd="/home/daytona",
@@ -1642,7 +1678,19 @@ class _DaytonaEnvironmentProvider:
                     raise
                 sync_view = sync_sandbox(sandbox, main_loop, getattr(self.resources, "dispatcher", None))
                 gateway = DaytonaHttpToolBroker(sandbox=sync_view)
+                stop_binding_watch: Callable[[], Awaitable[Any]] | None = None
+                if callable(start_binding_watch):
+                    stop_binding_watch = start_binding_watch(
+                        session_id=run.session_id,
+                        workspace_id=run.access.workspace_id,
+                        sandbox_id=lease.sandbox_id,
+                        generation=native_binding_generation,
+                    )
                 try:
+                    # Replacement may have committed while the provider was
+                    # creating the context. Delete this context rather than
+                    # admitting callbacks for an already retired generation.
+                    await refresh_native_admission()
                     backend = NativeInterpreterBackend(
                         service=sync_view.code_interpreter,
                         context=context,
@@ -1654,6 +1702,25 @@ class _DaytonaEnvironmentProvider:
                         # confirms the provider lifecycle boundary.
                         contain=lambda key=key: self._mark_provider_root_tainted(key),
                         is_authorized=lambda: not run.authority.revoked,
+                        # The backend is synchronous, so it cannot perform a
+                        # store read at every callback boundary. The owning
+                        # session lease is the binding boundary: once this
+                        # exact generation starts closing (including after a
+                        # replacement is installed), the old backend loses
+                        # authority before it can publish or call a tool.
+                        is_binding_current=lambda lease=lease, expected_generation=native_binding_generation: (
+                            lease.state is LeaseState.OPEN
+                            and lease.binding_generation == expected_generation
+                            and (
+                                not callable(binding_authority)
+                                or binding_authority(
+                                    session_id=run.session_id,
+                                    workspace_id=run.access.workspace_id,
+                                    sandbox_id=lease.sandbox_id,
+                                    generation=expected_generation,
+                                )
+                            )
+                        ),
                         cleanup_timeout_seconds=max(1.0, min(30.0, remaining)),
                     )
                     interpreter = DaytonaCodeInterpreter(
@@ -1661,12 +1728,31 @@ class _DaytonaEnvironmentProvider:
                         execution_output_cap=self.settings.rlm_max_execution_output_chars,
                     )
                 except BaseException:
+                    if callable(revoke_binding):
+                        revoke_binding(
+                            session_id=run.session_id,
+                            workspace_id=run.access.workspace_id,
+                            sandbox_id=lease.sandbox_id,
+                            generation=native_binding_generation,
+                        )
+                    if stop_binding_watch is not None:
+                        with contextlib.suppress(BaseException):
+                            await stop_binding_watch()
                     with contextlib.suppress(BaseException):
                         await sandbox.code_interpreter.delete_context(context, request_timeout=remaining)
                     raise
 
                 async def close_native_interpreter() -> None:
                     try:
+                        if callable(revoke_binding):
+                            revoke_binding(
+                                session_id=run.session_id,
+                                workspace_id=run.access.workspace_id,
+                                sandbox_id=lease.sandbox_id,
+                                generation=native_binding_generation,
+                            )
+                        if stop_binding_watch is not None:
+                            await stop_binding_watch()
                         await asyncio.to_thread(interpreter.shutdown, strict_broker_cleanup=True)
                     finally:
                         # Context deletion and gateway shutdown cannot certify
@@ -1678,6 +1764,8 @@ class _DaytonaEnvironmentProvider:
 
                 return interpreter, close_native_interpreter
 
+            sandbox_spec = getattr(self.resources, "sandbox_spec", None)
+            image_identity = environment_manifest(sandbox_spec).digest if sandbox_spec is not None else None
             return RunEnvironment(
                 interpreter=lease.interpreter,
                 attachment_sink=sink,
@@ -1698,6 +1786,7 @@ class _DaytonaEnvironmentProvider:
                 mark_tainted=lambda key=key: self._mark_provider_root_tainted(key),
                 async_bridge=getattr(self.resources, "dispatcher", None),
                 native_interpreter_factory=native_interpreter_factory,
+                image_identity=image_identity,
             )
         except BaseException:
             # The preparation gate proves that no earlier same-Session Turn

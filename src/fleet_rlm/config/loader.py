@@ -48,6 +48,7 @@ class ProfileEnvironmentContract:
     daytona_api_key_env: str
     daytona_snapshot_env: str | None
     daytona_child_snapshot_env: str | None
+    daytona_org_id_env: str
     database_url_env: str | None
     mlflow_tracing_enabled: bool
     mlflow_tracking_uri: str | None
@@ -59,6 +60,7 @@ class ProfileEnvironmentContract:
         """Return environment names needed for provider-backed execution."""
         return _unique_environment_names(
             self.daytona_api_key_env,
+            self.daytona_org_id_env,
             self.root_api_key_env,
             self.sub_api_key_env,
             self.root_base_url_env,
@@ -70,11 +72,12 @@ class ProfileEnvironmentContract:
         """Return provider plus explicitly required managed-policy environment names."""
         if self.name != "daytona-managed":
             return self.provider_environment_names
-        return _unique_environment_names(
-            *self.provider_environment_names,
-            self.database_url_env,
-            *self.mlflow_environment_names,
-        )
+        # The managed production profile uses Lakebase for Fleet state while
+        # the selected observability topology remains local MLflow.  Managed
+        # Databricks MLflow fields are required only when that profile
+        # explicitly selects the logical ``databricks`` backend.
+        mlflow_names = self.mlflow_environment_names if self.mlflow_tracking_uri == "databricks" else ()
+        return _unique_environment_names(*self.provider_environment_names, self.database_url_env, *mlflow_names)
 
     @property
     def daytona_snapshot_environment_names(self) -> tuple[str, ...]:
@@ -416,6 +419,9 @@ def _profile_contract(
     daytona_child_snapshot_env = _validate_optional_environment_reference(
         daytona.get("child_snapshot_env"), f"profiles.{name}.daytona.child_snapshot_env"
     )
+    daytona_org_id_env = _validate_environment_reference(
+        daytona.get("org_id_env"), f"profiles.{name}.daytona.org_id_env"
+    )
     database_url_env = _validate_optional_environment_reference(
         storage.get("database_url_env"), f"profiles.{name}.storage.database_url_env"
     )
@@ -447,6 +453,7 @@ def _profile_contract(
         daytona_api_key_env=daytona_api_key_env,
         daytona_snapshot_env=daytona_snapshot_env,
         daytona_child_snapshot_env=daytona_child_snapshot_env,
+        daytona_org_id_env=daytona_org_id_env,
         database_url_env=database_url_env,
         mlflow_tracing_enabled=bool(mlflow.get("tracing_enabled", False)),
         mlflow_tracking_uri=mlflow.get("tracking_uri"),
@@ -501,7 +508,7 @@ def _resolve_environment_value(
 # Snapshot identities are non-secret operator policy. Prefer the repository
 # .env, allow an explicitly TOML-declared process variable when .env is absent,
 # and reject disagreement so promotion or rollback cannot select a stale image.
-_DOTENV_ONLY_FIELDS: frozenset[str] = frozenset({"daytona_snapshot", "daytona_child_snapshot"})
+_DOTENV_ONLY_FIELDS: frozenset[str] = frozenset({"daytona_snapshot", "daytona_child_snapshot", "daytona_org_id"})
 
 
 def _require_managed_profile_environment_values(
@@ -512,25 +519,24 @@ def _require_managed_profile_environment_values(
     """Fail early when the explicit managed Lakebase/MLflow policy is incomplete."""
     if profile != "daytona-managed":
         return
-    # Settings field name -> diagnostic label used when no reference is declared.
-    references: tuple[tuple[str, str], ...] = (
-        ("database_url", "database_url_env"),
-        ("daytona_api_key", "daytona_api_key_env"),
-        ("root_llm_api_key_env", "root_llm_api_key_env"),
-        ("root_llm_base_url", "root_llm_base_url_env"),
-        ("mlflow_experiment_name", "mlflow_experiment_name_env"),
-        ("mlflow_trace_catalog", "mlflow_trace_catalog_env"),
-        ("mlflow_trace_schema", "mlflow_trace_schema_env"),
-        ("mlflow_trace_table_prefix", "mlflow_trace_table_prefix_env"),
-        ("mlflow_tracing_sql_warehouse_id", "mlflow_tracing_sql_warehouse_id_env"),
-    )
+    # Managed identity and provider values are checked by the provider
+    # composition seam.  This loader gate owns the production persistence
+    # contract, plus the optional environment-backed fields required by a
+    # managed Databricks MLflow topology.
+    references: list[tuple[str, str]] = [("database_url", "database_url_env")]
+    if flattened.settings.get("mlflow_tracking_uri") == "databricks":
+        references.extend(
+            (
+                ("mlflow_experiment_name", "mlflow_experiment_name_env"),
+                ("mlflow_trace_catalog", "mlflow_trace_catalog_env"),
+                ("mlflow_trace_schema", "mlflow_trace_schema_env"),
+                ("mlflow_trace_table_prefix", "mlflow_trace_table_prefix_env"),
+                ("mlflow_tracing_sql_warehouse_id", "mlflow_tracing_sql_warehouse_id_env"),
+            )
+        )
     missing: set[str] = set()
     for field_name, label in references:
-        if field_name == "root_llm_api_key_env":
-            # The role field stores the environment name directly.
-            environment_name: Any = flattened.settings.get(field_name)
-        else:
-            environment_name = flattened.environment_references.get(field_name)
+        environment_name = flattened.environment_references.get(field_name)
         if not isinstance(environment_name, str) or not _resolve_environment_value(
             environment_name,
             dotenv,

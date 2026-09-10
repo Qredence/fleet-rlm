@@ -18,10 +18,15 @@ from scripts.benchmarks.run_rlm_latency import (
     JUDGE_INFERENCE_PARAMS,
     QUALITY_RECORDS,
     BenchmarkError,
+    CampaignLimitError,
     _aggregate,
     _attach_trace_identity,
+    _campaign_preflight,
+    _enforce_campaign_observations,
     _execution_trace_diagnostics,
+    _execution_trace_id,
     _judge_ab_receipt,
+    _observed_spend,
     _termination_mode_from_chunk,
     _upload_corpus,
     _usage_totals,
@@ -157,6 +162,54 @@ def test_run_turn_propagates_attachment_ids_and_captures_bounded_trajectory() ->
         "outputs": ["FINAL submitted"],
     }
     assert row["termination_mode"] == "typed_submit"
+
+
+def test_run_turn_fails_closed_when_stream_consumption_crosses_campaign_deadline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    now = 100.0
+    deadline = 101.0
+
+    class _ExpiringResponse(_Response):
+        def iter_lines(self) -> object:
+            nonlocal now
+            yield "data: " + json_module.dumps({"type": "messageMetadata", "messageMetadata": {"traceId": "tr-1"}})
+            now = deadline + 1
+            yield "data: " + json_module.dumps({"type": "finish", "finishReason": "stop"})
+
+    class _ExpiringTurnClient(_TurnClient):
+        def stream(self, _method: str, _path: str, **_kwargs: object) -> _Stream:
+            return _Stream(_ExpiringResponse())
+
+    monkeypatch.setattr("scripts.benchmarks.run_rlm_latency.time.monotonic", lambda: now)
+
+    with pytest.raises(CampaignLimitError, match="elapsed-time"):
+        run_turn(_ExpiringTurnClient(), "deadline", nonce="test", deadline=deadline)
+
+
+def test_run_turn_preserves_partial_spend_and_concurrency_on_failure() -> None:
+    class _PartialFailureClient(_TurnClient):
+        def stream(self, _method: str, _path: str, **_kwargs: object) -> _Stream:
+            lines = [
+                "data: "
+                + json_module.dumps(
+                    {
+                        "type": "data-usage",
+                        "data": {"usage": {"observed_lm_usage": {"root": {"input_cost": 0.2, "output_cost": 0.1}}}},
+                    }
+                ),
+                "data: "
+                + json_module.dumps({"type": "tool-output-available", "output": {"peak_child_concurrency": 1}}),
+                "data: " + json_module.dumps({"type": "error", "errorText": "provider failed"}),
+            ]
+            return _Stream(_Response(lines=lines))
+
+    with pytest.raises(BenchmarkError) as failure:
+        run_turn(_PartialFailureClient(), "partial", nonce="test")
+
+    assert failure.value.usage["observed_lm_usage"]["root"] == {"input_cost": 0.2, "output_cost": 0.1}
+    assert failure.value.peak_child_concurrency == 1
+    assert failure.value.concurrency_observed is True
 
 
 def test_upload_corpus_uses_the_attachment_route_and_preserves_host_fixture(tmp_path) -> None:
@@ -429,6 +482,96 @@ def test_aggregate_excludes_failed_durations_from_latency_metrics() -> None:
     assert aggregate["error_rate"] == 0.5
 
 
+def test_observed_spend_uses_nested_cost_precedence_without_double_counting() -> None:
+    usage = {
+        "iterations": 2,
+        "observed_lm_usage": {
+            "root": {"prompt_tokens": 10, "cost": 0.25, "input_cost": 0.2, "output_cost": 0.05},
+            "sub": {"prompt_tokens": 4, "input_cost": 0.1, "output_cost": 0.03},
+        },
+    }
+    cost, observed = _observed_spend(usage)
+    assert cost == pytest.approx(0.38)
+    assert observed is True
+
+
+def test_observed_spend_marks_missing_provider_cost_as_unknown() -> None:
+    usage = {"iterations": 1, "observed_lm_usage": {"root": {"prompt_tokens": 10}}}
+    assert _observed_spend(usage) == (0.0, False)
+
+
+def test_observed_spend_marks_missing_cost_component_as_unknown() -> None:
+    usage = {
+        "iterations": 1,
+        "observed_lm_usage": {"root": {"input_cost": 0.1}},
+    }
+    assert _observed_spend(usage) == (0.0, False)
+
+
+def test_campaign_observations_fail_closed_for_missing_failed_turn_evidence() -> None:
+    campaign = SimpleNamespace(total_spend_cap=10.0, max_sandbox_concurrency=1)
+    with pytest.raises(CampaignLimitError, match="spend observation"):
+        _enforce_campaign_observations(
+            {
+                "error_category": "BenchmarkError",
+                "usage": {},
+                "peak_child_concurrency": 0,
+                "concurrency_observed": False,
+            },
+            campaign,
+            0.0,
+        )
+
+
+def test_campaign_observations_fail_closed_for_unknown_failed_turn_concurrency() -> None:
+    campaign = SimpleNamespace(total_spend_cap=10.0, max_sandbox_concurrency=1)
+    with pytest.raises(CampaignLimitError, match="concurrency observation"):
+        _enforce_campaign_observations(
+            {
+                "error_category": "BenchmarkError",
+                "usage": {
+                    "observed_lm_usage": {
+                        "root": {"input_cost": 0.1, "output_cost": 0.1},
+                    }
+                },
+                "peak_child_concurrency": 0,
+                "concurrency_observed": False,
+            },
+            campaign,
+            0.0,
+        )
+
+
+def test_execution_trace_lookup_fails_closed_when_mlflow_call_crosses_deadline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    now = 100.0
+    deadline = 101.0
+
+    def monotonic() -> float:
+        return now
+
+    def search_traces(**_kwargs: object) -> list[object]:
+        nonlocal now
+        now = deadline + 1
+        return [
+            SimpleNamespace(
+                data=SimpleNamespace(spans=[SimpleNamespace(name="RLM.execute")]),
+                info=SimpleNamespace(trace_id="trace-1"),
+            )
+        ]
+
+    fake_mlflow = SimpleNamespace(
+        set_tracking_uri=lambda _url: None,
+        search_traces=search_traces,
+    )
+    monkeypatch.setitem(sys.modules, "mlflow", fake_mlflow)
+    monkeypatch.setattr("scripts.benchmarks.run_rlm_latency.time.monotonic", monotonic)
+
+    with pytest.raises(CampaignLimitError, match="elapsed-time"):
+        _execution_trace_id("http://localhost:5001", "1", "run-1", deadline=deadline)
+
+
 def test_trace_identity_must_match_public_and_execution_roots() -> None:
     row = {"trace_id": "tr-current"}
 
@@ -457,6 +600,12 @@ def test_parser_supports_seeded_corpus_workloads() -> None:
 
     assert args.workload == "corpus-chain-v1"
     assert args.corpus_seed == 1
+
+
+def test_live_benchmark_preflight_rejects_missing_operator_limits() -> None:
+    args = build_parser().parse_args(["benchmark", "--output", "receipt.json"])
+    with pytest.raises(BenchmarkError, match="campaign, target, elapsed"):
+        _campaign_preflight(args)
 
 
 def test_cli_writes_bounded_failure_receipt(tmp_path) -> None:
@@ -507,6 +656,20 @@ def test_failed_stream_retains_adapter_parse_error_count_via_diagnostics(monkeyp
                         "messageMetadata": {"traceId": "tr-1", "runId": "run-1"},
                     }
                 ),
+                "data: "
+                + json_module.dumps(
+                    {
+                        "type": "data-usage",
+                        "data": {
+                            "usage": {
+                                "iterations": 1,
+                                "observed_lm_usage": {"root": {"input_cost": 0.1, "output_cost": 0.1}},
+                            }
+                        },
+                    }
+                ),
+                "data: "
+                + json_module.dumps({"type": "tool-output-available", "output": {"peak_child_concurrency": 0}}),
                 "data: " + json_module.dumps({"type": "error", "errorText": "Adapter parse failure"}),
             ]
             return _Stream(_Response(lines=lines))
@@ -534,6 +697,18 @@ def test_failed_stream_retains_adapter_parse_error_count_via_diagnostics(monkeyp
     args = build_parser().parse_args(
         [
             "benchmark",
+            "--campaign",
+            "test-campaign",
+            "--target",
+            "local-daytona",
+            "--max-elapsed-seconds",
+            "60",
+            "--max-admissions",
+            "1",
+            "--max-sandbox-concurrency",
+            "1",
+            "--spend-cap",
+            "10",
             "--warmups",
             "0",
             "--runs",

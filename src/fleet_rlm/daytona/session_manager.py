@@ -55,6 +55,7 @@ from fleet_rlm.daytona.sandbox_lease import (
     schedule_owned_close,
 )
 from fleet_rlm.runtime.bindings import (
+    BindingGenerationAuthority,
     SandboxBinding,
     require_non_zero_workspace_id,
     require_scoped_volume_subpath,
@@ -221,6 +222,9 @@ class InterpreterLease:
     # Native context deletion does not contain detached subprocesses. This
     # obligation belongs to the exact acquired sandbox, including reused roots.
     requires_sandbox_deletion: bool = False
+    # Durable SandboxBinding generation captured at acquisition time. Cleanup
+    # must only mutate the exact provider identity and generation it owns.
+    binding_generation: int = 1
     _released: bool = field(default=False, init=False, repr=False)
     _state: LeaseState = field(default=LeaseState.OPEN, init=False, repr=False)
     _on_release: Callable[[], None] | None = field(default=None, init=False, repr=False)
@@ -370,10 +374,15 @@ class LeaseRequest:
     run_id: UUID | None = None
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(slots=True)
 class _AcquisitionContext:
     expected: ExpectedWorkspaceMount
     binding: SandboxBinding | None
+    # Set immediately after a successful binding commit, before lease
+    # construction can fail.  This is deliberately separate from ``binding``
+    # (the pre-acquisition read) so cleanup never falls back to a stale
+    # identity when the durable re-read is unavailable.
+    persisted_binding: SandboxBinding | None = None
 
 
 class BindingStoreLike(Protocol):
@@ -449,6 +458,7 @@ class DaytonaSessionManager:
         self._volume_client = volume_client
         self._volume_config = volume_config
         self._bindings = bindings
+        self._binding_authority = BindingGenerationAuthority()
         self._admission = admission or DaytonaAdmission()
         self._dispatcher = dispatcher
         self._sandbox_spec = sandbox_spec
@@ -478,6 +488,168 @@ class DaytonaSessionManager:
             platform=platform,
             volume_config=volume_config,
             sandbox_spec=sandbox_spec,
+        )
+
+    def _observe_binding(self, binding: SandboxBinding | None) -> None:
+        """Publish the latest durable generation to synchronous native guards."""
+        if binding is None:
+            return
+        authority = getattr(self, "_binding_authority", None)
+        if authority is not None:
+            authority.observe(binding)
+
+    def is_binding_current(
+        self,
+        *,
+        session_id: UUID,
+        workspace_id: UUID,
+        sandbox_id: str,
+        generation: int,
+    ) -> bool:
+        """Return whether a native callback still owns the observed binding."""
+        authority = getattr(self, "_binding_authority", None)
+        if authority is None:
+            # Minimal test doubles constructed without ``__init__`` retain the
+            # historical callback seam; real managers always install the
+            # durable-generation authority above.
+            return True
+        return authority.is_current(
+            session_id=session_id,
+            workspace_id=workspace_id,
+            sandbox_id=sandbox_id,
+            generation=generation,
+        )
+
+    def revoke_binding(
+        self,
+        *,
+        session_id: UUID,
+        workspace_id: UUID,
+        sandbox_id: str,
+        generation: int,
+    ) -> None:
+        """Synchronously revoke one native generation before asynchronous cleanup."""
+        authority = getattr(self, "_binding_authority", None)
+        if authority is not None:
+            authority.revoke(
+                session_id=session_id,
+                workspace_id=workspace_id,
+                sandbox_id=sandbox_id,
+                generation=generation,
+            )
+
+    def start_binding_watch(
+        self,
+        *,
+        session_id: UUID,
+        workspace_id: UUID,
+        sandbox_id: str,
+        generation: int,
+        interval_seconds: float = 0.5,
+    ) -> Callable[[], Awaitable[None]]:
+        """Poll the durable binding while a synchronous native context runs.
+
+        Native callbacks cannot await PostgreSQL. A short-lived owner task
+        bridges that boundary and fails closed on a lookup error or any
+        generation/identity/state change. The returned async stop callback is
+        owned by the native context's close path.
+        """
+        if interval_seconds <= 0:
+            raise ValueError("binding watch interval must be positive")
+        stop_event = asyncio.Event()
+
+        async def watch() -> None:
+            while not stop_event.is_set():
+                try:
+                    binding = await self._get_binding_for_workspace(session_id, workspace_id)
+                except BaseException:
+                    self.revoke_binding(
+                        session_id=session_id,
+                        workspace_id=workspace_id,
+                        sandbox_id=sandbox_id,
+                        generation=generation,
+                    )
+                    return
+                if (
+                    binding is None
+                    or binding.sandbox_id != sandbox_id
+                    or binding.generation != generation
+                    or binding.provider_state != "running"
+                ):
+                    self.revoke_binding(
+                        session_id=session_id,
+                        workspace_id=workspace_id,
+                        sandbox_id=sandbox_id,
+                        generation=generation,
+                    )
+                    return
+                try:
+                    await asyncio.wait_for(stop_event.wait(), timeout=interval_seconds)
+                except TimeoutError:
+                    continue
+
+        task = asyncio.create_task(watch(), name="fleet-daytona-binding-generation-watch")
+
+        async def stop() -> None:
+            stop_event.set()
+            if not task.done():
+                task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+
+        return stop
+
+    async def refresh_binding_authority(
+        self,
+        *,
+        session_id: UUID,
+        workspace_id: UUID,
+        sandbox_id: str,
+        generation: int,
+        deadline: float | None = None,
+    ) -> bool:
+        """Synchronously refresh one native admission from durable state.
+
+        The background watch closes the gap between synchronous native
+        callbacks, but context creation can begin before its first polling
+        tick. This read is the explicit admission boundary: an unavailable,
+        replaced, or non-running durable binding is revoked immediately and
+        no native context may be admitted for it.
+        """
+        try:
+            binding = await self._get_binding_for_workspace(
+                session_id,
+                workspace_id,
+                deadline=deadline,
+            )
+        except asyncio.CancelledError:
+            raise
+        except BaseException:
+            self.revoke_binding(
+                session_id=session_id,
+                workspace_id=workspace_id,
+                sandbox_id=sandbox_id,
+                generation=generation,
+            )
+            return False
+        if (
+            binding is None
+            or binding.sandbox_id != sandbox_id
+            or binding.generation != generation
+            or binding.provider_state != "running"
+        ):
+            self.revoke_binding(
+                session_id=session_id,
+                workspace_id=workspace_id,
+                sandbox_id=sandbox_id,
+                generation=generation,
+            )
+            return False
+        return self.is_binding_current(
+            session_id=session_id,
+            workspace_id=workspace_id,
+            sandbox_id=sandbox_id,
+            generation=generation,
         )
 
     def _mark_sandbox_owned(self, sandbox_id: str) -> None:
@@ -933,6 +1105,7 @@ class DaytonaSessionManager:
                 volume_subpath=lease.volume_subpath or workspace_volume_subpath(request.workspace_id),
                 mount_path=lease.mount_path,
                 provider_state="running",
+                generation=lease.binding_generation,
             ),
             deadline=deadline,
         )
@@ -984,16 +1157,17 @@ class DaytonaSessionManager:
             request.workspace_id,
             deadline=deadline,
         )
-        if binding is None or binding.sandbox_id != lease.sandbox_id:
+        if binding is None or binding.sandbox_id != lease.sandbox_id or binding.generation != lease.binding_generation:
             # Recovery or another owner may already have installed a newer
             # binding. Never let retirement of the old native root overwrite it.
             return
-        await _provider_call(
+        persisted = await _provider_call(
             self._bindings.upsert(replace(binding, provider_state=provider_state, last_verified_at=datetime.now(UTC))),
             deadline=deadline,
             operation=f"Native Sandbox {provider_state} persistence",
             owner=self._provider_tasks,
         )
+        self._observe_binding(persisted)
 
     async def _get_binding_for_workspace(
         self,
@@ -1016,6 +1190,7 @@ class DaytonaSessionManager:
         if callable(scoped_get):
             binding = await read(scoped_get(session_id, workspace_id=workspace_id))
             if binding is not None:
+                self._observe_binding(binding)
                 return binding
             # Distinguish an absent binding from a Session binding in another
             # Workspace so a cross-tenant request cannot overwrite it.
@@ -1032,6 +1207,7 @@ class DaytonaSessionManager:
                 message="sandbox binding does not match workspace scope",
                 cause_type="WorkspaceMountMismatch",
             )
+        self._observe_binding(binding)
         return binding
 
     async def fence_session(
@@ -1057,12 +1233,13 @@ class DaytonaSessionManager:
 
     async def _fence_binding(self, binding: SandboxBinding, *, deadline: float | None = None) -> None:
         """Persist fencing around one bounded, owned provider stop."""
-        await _provider_call(
+        fenced = await _provider_call(
             self._bindings.upsert(replace(binding, provider_state="fencing", last_verified_at=datetime.now(UTC))),
             deadline=deadline,
             operation="Sandbox fence persistence",
             owner=self._provider_tasks,
         )
+        self._observe_binding(fenced)
         if binding.sandbox_id is None:
             return
         # Lease-backed (QRE-156/AC4): recovery fencing rides the shared
@@ -1097,12 +1274,13 @@ class DaytonaSessionManager:
             operation="Sandbox fencing",
             owner=self._provider_tasks,
         )
-        await _provider_call(
+        quarantined = await _provider_call(
             self._bindings.upsert(replace(binding, provider_state="quarantined", last_verified_at=datetime.now(UTC))),
             deadline=deadline,
             operation="Sandbox quarantine persistence",
             owner=self._provider_tasks,
         )
+        self._observe_binding(quarantined)
 
     def _bind_lease_ownership(
         self,
@@ -1146,7 +1324,13 @@ class DaytonaSessionManager:
                 sandbox, context.expected, request.session_id, run_id, created_sandbox, deadline=deadline
             )
             return await self._persist_binding_and_build_lease(
-                request, run_id, context.expected, sandbox, created_sandbox, deadline=deadline
+                request,
+                run_id,
+                context.expected,
+                sandbox,
+                created_sandbox,
+                deadline=deadline,
+                context=context,
             )
         except _ProviderCallDeadlineError as exc:
             # Keep this owned acquisition task alive until the provider call
@@ -1161,7 +1345,7 @@ class DaytonaSessionManager:
                     sandbox,
                     created_sandbox=created_sandbox,
                     deadline=deadline,
-                    binding=context.binding,
+                    binding=context.persisted_binding,
                 )
             raise DaytonaLeaseAcquisitionTimeoutError(f"Daytona {exc.operation} timed out") from None
         except BaseException:
@@ -1176,7 +1360,7 @@ class DaytonaSessionManager:
                     sandbox,
                     created_sandbox=created_sandbox,
                     deadline=deadline,
-                    binding=context.binding,
+                    binding=context.persisted_binding,
                 )
             raise
 
@@ -1357,22 +1541,44 @@ class DaytonaSessionManager:
         # prevents a reused Sandbox from remaining durably ``running`` while an
         # interpreter shutdown or provider fence is still owned out of band.
         candidate = binding
-        if candidate is None:
-            with contextlib.suppress(BaseException):
-                candidate = await self._get_binding_for_workspace(
-                    request.session_id,
-                    request.workspace_id,
-                    deadline=deadline,
-                )
+        # A binding can commit successfully and then lease construction can
+        # fail (most commonly while creating the interpreter).  Re-read after
+        # every failure so cleanup fences the exact durable identity that was
+        # published, rather than the pre-acquisition binding.  If the read
+        # itself fails, the carried identity is the only safe fallback; never
+        # let an unrelated/newer generation be fenced by this cleanup owner.
+        durable_binding: SandboxBinding | None = None
+        durable_read_failed = False
+        try:
+            durable_binding = await self._get_binding_for_workspace(
+                request.session_id,
+                request.workspace_id,
+                deadline=deadline,
+            )
+        except BaseException:
+            durable_read_failed = True
+        if not durable_read_failed:
+            if durable_binding is None or durable_binding.sandbox_id != sandbox_id:
+                candidate = None
+            elif candidate is not None and (
+                candidate.sandbox_id != durable_binding.sandbox_id or candidate.generation != durable_binding.generation
+            ):
+                # A replacement won after this acquisition published its
+                # binding.  Retire this provider object but preserve the
+                # replacement row untouched.
+                candidate = None
+            else:
+                candidate = durable_binding
         if candidate is not None and candidate.sandbox_id == sandbox_id:
             state = "quarantined" if created_sandbox else "fencing"
             with contextlib.suppress(BaseException):
-                await _provider_call(
+                fenced = await _provider_call(
                     self._bindings.upsert(replace(candidate, provider_state=state, last_verified_at=None)),
                     deadline=deadline,
                     operation="Failed Sandbox fencing persistence",
                     owner=self._provider_tasks,
                 )
+                self._observe_binding(fenced)
 
         # Keep interpreter shutdown and provider retirement in one ordered lease
         # owner. If shutdown fails, SandboxLease retains the interpreter and does
@@ -1443,27 +1649,69 @@ class DaytonaSessionManager:
         sandbox: Any,
         created_sandbox: bool,
         deadline: float | None = None,
+        context: _AcquisitionContext | None = None,
     ) -> InterpreterLease:
         """Persist the verified provider binding and construct the caller-owned interpreter lease."""
         session_id = request.session_id
         sid = _sandbox_id(sandbox)
-        await _provider_call(
-            self._bindings.upsert(
-                SandboxBinding(
-                    session_id=session_id,
-                    sandbox_id=sid,
-                    workspace_id=request.workspace_id,
-                    volume_id=expected.volume_id,
-                    volume_subpath=expected.volume_subpath,
-                    mount_path=expected.mount_path,
-                    provider_state="running",
-                    last_verified_at=datetime.now(UTC),
-                )
-            ),
+        prior_binding = await self._get_binding_for_workspace(session_id, request.workspace_id, deadline=deadline)
+        if prior_binding is None:
+            binding_generation = 1
+        elif (
+            prior_binding.sandbox_id == sid
+            and prior_binding.provider_state == "running"
+            and self.is_binding_current(
+                session_id=session_id,
+                workspace_id=request.workspace_id,
+                sandbox_id=sid,
+                generation=prior_binding.generation,
+            )
+        ):
+            binding_generation = prior_binding.generation
+        else:
+            # A stopped/fenced identity must not be reactivated in place: an
+            # older native process may still hold the same generation and can
+            # otherwise be re-armed by a delayed ``running`` read. Legitimate
+            # restart/reuse therefore receives a fresh generation.
+            binding_generation = prior_binding.generation + 1
+        candidate = SandboxBinding(
+            session_id=session_id,
+            sandbox_id=sid,
+            workspace_id=request.workspace_id,
+            volume_id=expected.volume_id,
+            volume_subpath=expected.volume_subpath,
+            mount_path=expected.mount_path,
+            provider_state="running",
+            last_verified_at=datetime.now(UTC),
+            # The atomic store operation below replaces this with the locked
+            # next generation when another provider identity won the race.
+            generation=binding_generation,
+        )
+        atomic_replace = getattr(self._bindings, "replace_with_next_generation", None)
+        # First publication uses the normal insert/upsert path so a failed
+        # binding commit remains observable to the acquisition cleanup owner.
+        # Replacements allocate under the store's row lock, avoiding the
+        # unlocked ``prior.generation + 1`` race.
+        is_replacement = prior_binding is not None and prior_binding.sandbox_id != sid
+        persist = (
+            atomic_replace(candidate)
+            if is_replacement and callable(atomic_replace)
+            else self._bindings.upsert(candidate)
+        )
+        persisted = await _provider_call(
+            persist,
             deadline=deadline,
             operation="Sandbox binding persistence",
             owner=self._provider_tasks,
         )
+        self._observe_binding(persisted)
+        # Carry the committed identity to the acquisition failure handler.  A
+        # pre-acquisition binding may name a different Sandbox/generation
+        # after replacement, and must never be used to clean up this provider
+        # object.
+        if context is not None:
+            context.persisted_binding = persisted
+        binding_generation = persisted.generation
         interpreter = _build_interpreter(
             sandbox,
             loop=asyncio.get_running_loop(),
@@ -1484,6 +1732,7 @@ class DaytonaSessionManager:
             run_id=str(run_id),
             workspace_id=str(request.workspace_id),
             created_sandbox=created_sandbox,
+            binding_generation=binding_generation,
         )
 
     def _start_release_task(self, lease: InterpreterLease) -> asyncio.Task[None]:
@@ -1777,12 +2026,29 @@ class DaytonaSessionManager:
             )
         if latest is None or latest.sandbox_id != sandbox_id or latest.provider_state != "running":
             return
+        # Stopping is a lifecycle fence. Advance the generation before
+        # publishing the stopped state so an old native process cannot be
+        # re-armed if a delayed durable read reports ``running`` later.
+        self.revoke_binding(
+            session_id=session_id,
+            workspace_id=workspace_scope or latest.workspace_id,
+            sandbox_id=sandbox_id,
+            generation=latest.generation,
+        )
         update = asyncio.ensure_future(
-            self._bindings.upsert(replace(latest, provider_state="stopped", last_verified_at=datetime.now(UTC)))
+            self._bindings.upsert(
+                replace(
+                    latest,
+                    provider_state="stopped",
+                    last_verified_at=datetime.now(UTC),
+                    generation=latest.generation + 1,
+                )
+            )
         )
         _retain_provider_task(update, self._provider_tasks)
         try:
-            await asyncio.shield(update)
+            persisted = await asyncio.shield(update)
+            self._observe_binding(persisted)
         except asyncio.CancelledError:
             # A canceled idle task must not let a late persistence write race
             # a new acquisition for this Session.
@@ -2000,8 +2266,13 @@ class DaytonaSessionManager:
                 mount_path=expected.mount_path,
                 provider_state="running",
                 last_verified_at=datetime.now(UTC),
+                generation=binding.generation + 1,
             )
-            return await self._bindings.upsert(new_binding)
+            atomic_replace = getattr(self._bindings, "replace_with_next_generation", None)
+            persist = atomic_replace(new_binding) if callable(atomic_replace) else self._bindings.upsert(new_binding)
+            persisted = await persist
+            self._observe_binding(persisted)
+            return persisted
         except BaseException:
             if sandbox is not None:
                 with contextlib.suppress(BaseException):

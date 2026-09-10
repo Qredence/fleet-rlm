@@ -295,16 +295,16 @@ def test_policy_inventory_covers_flattened_non_secret_settings(tmp_path: Path) -
         assert reference_paths[field_name] in editable_paths
 
 
-def test_set_default_profile_surfaces_the_single_committed_profile(tmp_path: Path) -> None:
+def test_set_default_profile_surfaces_all_committed_profiles(tmp_path: Path) -> None:
     service, policy = _service(tmp_path)
     before = service.read()
 
     assert before.default_profile == "daytona-recursive"
-    assert set(before.available_profiles) == {"daytona-recursive"}
+    assert set(before.available_profiles) == {"daytona-recursive", "daytona-managed"}
 
-    # Re-selecting the only committed profile is accepted and keeps the
-    # persisted default_profile line canonical. The revision is a content
-    # hash, so a same-value write legitimately keeps it unchanged.
+    # Re-selecting a committed profile is accepted and keeps the persisted
+    # default_profile line canonical. The revision is a content hash, so a
+    # same-value write legitimately keeps it unchanged.
     after = service.set_default_profile("daytona-recursive", revision=before.revision)
 
     assert after.default_profile == "daytona-recursive"

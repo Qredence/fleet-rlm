@@ -56,6 +56,7 @@ async def test_sql_sandbox_binding_store_round_trips_and_updates_scope() -> None
                 volume_subpath=f"workspaces/{workspace_id}",
                 mount_path="/home/daytona/fleet",
                 provider_state="quarantined",
+                generation=2,
             )
         )
         assert second.sandbox_id == "sb-2"
@@ -64,6 +65,52 @@ async def test_sql_sandbox_binding_store_round_trips_and_updates_scope() -> None
         assert loaded_second is not None
         assert loaded_second.sandbox_id == second.sandbox_id
         assert loaded_second.provider_state == second.provider_state
+        assert loaded_second.generation == 2
+        with pytest.raises(ValueError, match="stale sandbox binding generation"):
+            await store.upsert(
+                SandboxBinding(
+                    session_id=session_id,
+                    sandbox_id="sb-stale",
+                    workspace_id=workspace_id,
+                    volume_id="vol-1",
+                    volume_subpath=f"workspaces/{workspace_id}",
+                    generation=1,
+                )
+            )
+        with pytest.raises(ValueError, match="conflicting sandbox binding identity"):
+            await store.upsert(
+                SandboxBinding(
+                    session_id=session_id,
+                    sandbox_id="sb-conflict",
+                    workspace_id=workspace_id,
+                    volume_id="vol-1",
+                    volume_subpath=f"workspaces/{workspace_id}",
+                    generation=2,
+                )
+            )
+        with pytest.raises(ValueError, match="stale running sandbox binding generation"):
+            await store.upsert(
+                SandboxBinding(
+                    session_id=session_id,
+                    sandbox_id="sb-2",
+                    workspace_id=workspace_id,
+                    volume_id="vol-1",
+                    volume_subpath=f"workspaces/{workspace_id}",
+                    provider_state="running",
+                    generation=2,
+                )
+            )
+        replacement = await store.replace_with_next_generation(
+            SandboxBinding(
+                session_id=session_id,
+                sandbox_id="sb-3",
+                workspace_id=workspace_id,
+                volume_id="vol-1",
+                volume_subpath=f"workspaces/{workspace_id}",
+                generation=2,
+            )
+        )
+        assert replacement.generation == 3
     finally:
         await engine.dispose()
 

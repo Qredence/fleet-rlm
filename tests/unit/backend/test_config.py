@@ -19,6 +19,13 @@ from fleet_rlm.config.loader import (
 from fleet_rlm.config.settings import FleetConfigurationError, Settings
 
 
+@pytest.fixture(autouse=True)
+def _clear_process_snapshot_overrides(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep dotenv-only snapshot tests isolated from credentialed live-module imports."""
+    monkeypatch.delenv("FLEET_DAYTONA_SNAPSHOT", raising=False)
+    monkeypatch.delenv("FLEET_DAYTONA_CHILD_SNAPSHOT", raising=False)
+
+
 def test_profile_environment_matrix_follows_selected_toml_policy() -> None:
     contracts = {contract.name: contract for contract in load_profile_environment_contracts()}
 
@@ -26,8 +33,16 @@ def test_profile_environment_matrix_follows_selected_toml_policy() -> None:
     assert contracts["daytona-recursive"].provider == "OpenAI Chat Completion"
     assert contracts["daytona-recursive"].provider_environment_names == (
         "FLEET_DAYTONA_API_KEY",
+        "FLEET_DAYTONA_ORG_ID",
         "DATABRICKS_TOKEN",
         "FLEET_LLM_BASE_URL",
+    )
+    assert contracts["daytona-managed"].managed_policy_environment_names == (
+        "FLEET_DAYTONA_API_KEY",
+        "FLEET_DAYTONA_ORG_ID",
+        "DATABRICKS_TOKEN",
+        "FLEET_LLM_BASE_URL",
+        "FLEET_DATABASE_URL",
     )
 
 
@@ -47,9 +62,10 @@ def test_committed_policy_declares_databricks_model_roles() -> None:
     policy_path = Path(__file__).resolve().parents[3] / "config" / "fleet.toml"
     document = tomllib.loads(policy_path.read_text(encoding="utf-8"))
 
-    assert set(document["profiles"]) == {"daytona-recursive"}
+    assert set(document["profiles"]) == {"daytona-recursive", "daytona-managed"}
     assert document["defaults"]["daytona"]["snapshot_env"] == "FLEET_DAYTONA_SNAPSHOT"
     assert document["defaults"]["daytona"]["child_snapshot_env"] == "FLEET_DAYTONA_CHILD_SNAPSHOT"
+    assert document["defaults"]["daytona"]["org_id_env"] == "FLEET_DAYTONA_ORG_ID"
     assert document["defaults"]["runtime"]["environment"] == "daytona"
     assert document["defaults"]["llm"] == {
         "root": {
@@ -323,6 +339,7 @@ volume_name = "fleet-volume"
 volume_mount_path = "/fleet"
 snapshot_env = "FLEET_DAYTONA_SNAPSHOT"
 child_snapshot_env = "FLEET_DAYTONA_CHILD_SNAPSHOT"
+org_id_env = "FLEET_DAYTONA_ORG_ID"
 [defaults.logging]
 level = "DEBUG"
 [profiles.daytona.runtime]
@@ -330,10 +347,10 @@ environment = "daytona"
         """.strip(),
         encoding="utf-8",
     )
-    # Snapshot identities are deliberately dotenv-only; provide the isolated
-    # policy with deterministic non-secret values for tests that load settings.
+    # Snapshot and organization identities are deliberately dotenv-only;
+    # provide deterministic non-secret values for tests that load settings.
     path.with_name(".env").write_text(
-        "FLEET_DAYTONA_SNAPSHOT=fleet-test-v1\nFLEET_DAYTONA_CHILD_SNAPSHOT=fleet-child-v1\n",
+        "FLEET_DAYTONA_SNAPSHOT=fleet-test-v1\nFLEET_DAYTONA_CHILD_SNAPSHOT=fleet-child-v1\nFLEET_DAYTONA_ORG_ID=fleet-test-org\n",
         encoding="utf-8",
     )
 
@@ -360,6 +377,65 @@ def test_runtime_settings_deep_merge_profile_and_keep_role_policy(
     assert settings.sub_lm.temperature == 0.2
     assert settings.lm_roles.root.model == "openai/root"
     assert settings.lm_roles.sub.api_key_env == "SUB_KEY"
+
+
+@pytest.mark.parametrize(
+    "database_url",
+    (
+        "sqlite+aiosqlite:///fleet.sqlite3",
+        "postgresql://other:password@lakebase.example/fleet?sslmode=require",
+        "postgresql://fleet_app:password@lakebase.example/fleet",
+    ),
+)
+def test_managed_profile_rejects_non_lakebase_database_urls(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    database_url: str,
+) -> None:
+    import fleet_rlm.config.loader as config
+
+    policy = tmp_path / "fleet.toml"
+    _policy(policy)
+    policy.write_text(
+        policy.read_text(encoding="utf-8").replace('default_profile = "daytona"', 'default_profile = "daytona-managed"')
+        + '\n[profiles.daytona-managed.runtime]\nenvironment = "daytona"\n'
+        '[profiles.daytona-managed.storage]\ndatabase_url_env = "DATABASE_URL"\n',
+        encoding="utf-8",
+    )
+    (tmp_path / ".env").write_text(
+        (tmp_path / ".env").read_text(encoding="utf-8") + f"DATABASE_URL={database_url}\n",
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(config, "_CONFIG_PATH", policy)
+
+    with pytest.raises(FleetConfigurationError, match="invalid database policy"):
+        config.load_runtime_settings()
+
+
+def test_managed_profile_accepts_tls_fleet_app_database_url(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    import fleet_rlm.config.loader as config
+
+    policy = tmp_path / "fleet.toml"
+    _policy(policy)
+    policy.write_text(
+        policy.read_text(encoding="utf-8").replace('default_profile = "daytona"', 'default_profile = "daytona-managed"')
+        + '\n[profiles.daytona-managed.runtime]\nenvironment = "daytona"\n'
+        '[profiles.daytona-managed.storage]\ndatabase_url_env = "DATABASE_URL"\n',
+        encoding="utf-8",
+    )
+    (tmp_path / ".env").write_text(
+        (tmp_path / ".env").read_text(encoding="utf-8")
+        + "DATABASE_URL=postgresql://fleet_app:password@lakebase.example/fleet?sslmode=require\n",
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(config, "_CONFIG_PATH", policy)
+
+    settings = config.load_runtime_settings()
+
+    assert settings.database_url is not None
+    assert settings.database_url.startswith("postgresql://fleet_app:")
 
 
 def test_omitted_role_cache_and_retry_defaults_resolve_to_settings_defaults(
@@ -433,6 +509,22 @@ def test_snapshot_resolution_falls_back_to_process_environment_and_rejects_drift
         )
 
 
+def test_daytona_org_id_resolution_is_dotenv_only_and_rejects_drift(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import fleet_rlm.config.loader as config
+
+    monkeypatch.setenv("FLEET_DAYTONA_ORG_ID", "fleet-process-org")
+    assert config._resolve_environment_value("FLEET_DAYTONA_ORG_ID", {}, dotenv_only=True) == "fleet-process-org"
+
+    with pytest.raises(FleetConfigurationError, match="FLEET_DAYTONA_ORG_ID"):
+        config._resolve_environment_value(
+            "FLEET_DAYTONA_ORG_ID",
+            {"FLEET_DAYTONA_ORG_ID": "fleet-dotenv-org"},
+            dotenv_only=True,
+        )
+
+
 def test_runtime_settings_resolves_only_toml_declared_environment_values(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -470,7 +562,7 @@ tracing_sql_warehouse_id_env = "TRACE_WAREHOUSE"
         encoding="utf-8",
     )
     (tmp_path / ".env").write_text(
-        "ROOT_KEY=dotenv-root\nDATABASE_URL=sqlite+aiosqlite:///dotenv.sqlite3\nDAYTONA_KEY=dotenv-daytona\nAI_GATEWAY_URL=https://dotenv.example/ai-gateway/openai/v1\nEXPERIMENT_NAME=/Users/example/fleet\nTRACE_CATALOG=dotenv_catalog\nTRACE_SCHEMA=dotenv_schema\nTRACE_TABLE_PREFIX=dotenv_prefix\nTRACE_WAREHOUSE=dotenv-warehouse\n",
+        "ROOT_KEY=dotenv-root\nDATABASE_URL=sqlite+aiosqlite:///dotenv.sqlite3\nDAYTONA_KEY=dotenv-daytona\nFLEET_DAYTONA_ORG_ID=dotenv-daytona-org\nAI_GATEWAY_URL=https://dotenv.example/ai-gateway/openai/v1\nEXPERIMENT_NAME=/Users/example/fleet\nTRACE_CATALOG=dotenv_catalog\nTRACE_SCHEMA=dotenv_schema\nTRACE_TABLE_PREFIX=dotenv_prefix\nTRACE_WAREHOUSE=dotenv-warehouse\n",
         encoding="utf-8",
     )
     monkeypatch.chdir(tmp_path)

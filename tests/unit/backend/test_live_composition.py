@@ -278,6 +278,7 @@ def test_require_daytona_settings_accepts_databricks_mlflow_gateway_base(monkeyp
         run_environment="daytona",
         database_url="sqlite+aiosqlite:///:memory:",
         daytona_api_key=SecretStr("daytona-key"),
+        daytona_org_id="test-daytona-org",
         daytona_snapshot="fleet-test-v1",
         root_model="databricks-deepseek-v4-flash-0731",
         sub_model="databricks-deepseek-v4-flash-0731",
@@ -289,6 +290,19 @@ def test_require_daytona_settings_accepts_databricks_mlflow_gateway_base(monkeyp
     )
 
     require_daytona_settings(settings)
+
+
+def test_require_daytona_settings_requires_daytona_org_id() -> None:
+    with pytest.raises(CompositionError, match="FLEET_DAYTONA_ORG_ID"):
+        require_daytona_settings(
+            Settings(
+                run_environment="daytona",
+                database_url="sqlite+aiosqlite:///:memory:",
+                daytona_api_key=SecretStr("daytona-key"),
+                daytona_snapshot="fleet-test-v1",
+                llm_api_key=SecretStr("llm-key"),
+            )
+        )
 
 
 def test_require_daytona_settings_requires_semantic_snapshot_when_recursion_is_enabled() -> None:

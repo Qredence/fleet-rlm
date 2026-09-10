@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -15,19 +17,24 @@ class SqlAlchemyWarmPoolOwnershipStore:
     def __init__(self, sessions: async_sessionmaker[AsyncSession]) -> None:
         self._sessions = sessions
 
-    async def find(self, *, snapshot: str, target: str | None) -> WarmPoolOwnership | None:
+    async def find(self, *, pool_id: str) -> WarmPoolOwnership | None:
         async with self._sessions() as session:
             row = await session.scalar(
                 select(WarmPoolOwnershipRow).where(
-                    WarmPoolOwnershipRow.snapshot == snapshot,
-                    WarmPoolOwnershipRow.target == target,
-                    WarmPoolOwnershipRow.status == "owned",
+                    WarmPoolOwnershipRow.pool_id == pool_id,
                 )
             )
             if row is None:
                 return None
             return WarmPoolOwnership(
-                row.pool_id, row.campaign, row.snapshot, row.target, row.manifest_sha256, row.candidate_sha
+                row.pool_id,
+                row.campaign,
+                row.snapshot,
+                row.target,
+                row.manifest_sha256,
+                row.candidate_sha,
+                row.generation,
+                row.status,
             )
 
     async def save(self, ownership: WarmPoolOwnership) -> WarmPoolOwnership:
@@ -43,15 +50,18 @@ class SqlAlchemyWarmPoolOwnershipStore:
                     target=ownership.target,
                     manifest_sha256=ownership.manifest_sha256,
                     candidate_sha=ownership.candidate_sha,
-                    status="owned",
+                    generation=ownership.reconciliation_generation,
+                    status=ownership.status,
                 )
                 session.add(row)
+                generation = ownership.reconciliation_generation
             else:
                 row.campaign = ownership.campaign
                 row.snapshot = ownership.snapshot
                 row.target = ownership.target
                 row.manifest_sha256 = ownership.manifest_sha256
                 row.candidate_sha = ownership.candidate_sha
-                row.generation += 1
-                row.status = "owned"
-        return ownership
+                generation = row.generation + 1
+                row.generation = generation
+                row.status = ownership.status
+        return replace(ownership, reconciliation_generation=generation)
