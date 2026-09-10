@@ -175,11 +175,13 @@ async def test_worker_startup_failure_releases_the_runner_owned_child_scheduler(
         with pytest.raises(RuntimeError, match="worker startup failed"):
             await RLMRunner()._start_worker(context, ownership, observations)
         assert created
-        assert any(thread.is_alive() for thread in created[0]._scheduler._threads)
+        assert created[0]._scheduler._loop is asyncio.get_running_loop()
+        assert not created[0]._scheduler._closed
     finally:
         await ownership.wait_owned()
 
-    assert all(not thread.is_alive() for thread in created[0]._scheduler._threads)
+    assert created[0]._scheduler._closed
+    assert asyncio.get_running_loop().is_running()
 
 
 @pytest.mark.asyncio

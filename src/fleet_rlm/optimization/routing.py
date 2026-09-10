@@ -7,6 +7,7 @@ answer output. It never requires private model prompts or chain-of-thought.
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import inspect
 import time
@@ -24,6 +25,7 @@ from fleet_rlm.rlm.recursion import (
     RecursiveRLMExecutor,
     RecursiveRLMOptions,
 )
+from fleet_rlm.runtime.owned_effect import OwnedEffect
 
 RoutingClass = Literal[
     "python_native",
@@ -406,11 +408,18 @@ async def run_routing_scenario(
                 callbacks=[_RLMTraceCallback(root_lm=root_lm, sub_lm=sub_lm, metrics=recursive.metrics)],
                 track_usage=True,
             ):
-                prediction = await rlm.acall(root_interpreter, prompt=scenario.prompt)
+                effect = OwnedEffect.start(asyncio.to_thread(rlm, root_interpreter, prompt=scenario.prompt))
+                settled = await effect.settle()
+                if settled.caller_cancelled:
+                    raise asyncio.CancelledError
+                prediction = settled.result()
         finally:
-            shutdown = getattr(root_interpreter, "shutdown", None)
-            if callable(shutdown):
-                shutdown()
+            try:
+                await OwnedEffect.start(asyncio.to_thread(recursive.wait_owned)).settle()
+            finally:
+                shutdown = getattr(root_interpreter, "shutdown", None)
+                if callable(shutdown):
+                    await OwnedEffect.start(asyncio.to_thread(shutdown)).settle()
         details = tuple(cast(ObservationDetail, detail) for detail in captured if isinstance(detail, ObservationDetail))
         details_facts = facts_from_execution_details(details, latency_ms=int((time.perf_counter() - started) * 1000))
         counts = dict(details_facts.tool_counts)

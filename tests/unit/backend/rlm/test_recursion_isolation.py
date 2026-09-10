@@ -19,7 +19,6 @@ from fleet_rlm.rlm.program import (
     build_native_rlm,
 )
 from fleet_rlm.rlm.recursion import (
-    RecursiveRLMExecutor,
     RecursiveRLMOptions,
     RecursiveSubtaskSignature,
 )
@@ -38,6 +37,7 @@ from fleet_rlm.rlm.runtime import (
     SessionView,
 )
 from fleet_rlm.sessions.models import TurnAccess
+from tests.support.recursion_scheduler import RecursiveRLMExecutor
 from tests.unit.backend.rlm.fakes import ChildLeaseRecorder, EmptyCapabilities
 
 

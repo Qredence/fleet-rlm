@@ -851,9 +851,9 @@ def test_recursive_child_span_records_bounded_metadata(monkeypatch: pytest.Monke
 
     from fleet_rlm.rlm.program import RLMModelBundle
     from fleet_rlm.rlm.recursion import (
-        RecursiveRLMExecutor,
         RecursiveRLMOptions,
     )
+    from tests.support.recursion_scheduler import RecursiveRLMExecutor
 
     calls = _install_fake_mlflow(monkeypatch)
     adapter = dspy.JSONAdapter()
@@ -902,9 +902,9 @@ def test_recursive_batch_spans_finish_with_active_mlflow(
     import fleet_rlm.rlm.recursion as recursive_calls
     from fleet_rlm.rlm.program import RLMModelBundle
     from fleet_rlm.rlm.recursion import (
-        RecursiveRLMExecutor,
         RecursiveRLMOptions,
     )
+    from tests.support.recursion_scheduler import RecursiveRLMExecutor
 
     class Child:
         def __call__(self, _interpreter: object, *, prompt: str) -> dspy.Prediction:
@@ -944,9 +944,9 @@ def test_recursive_child_span_marks_shutdown_failure(monkeypatch: pytest.MonkeyP
     from fleet_rlm.rlm.program import RLMModelBundle
     from fleet_rlm.rlm.recursion import (
         ChildRuntimeCleanupError,
-        RecursiveRLMExecutor,
         RecursiveRLMOptions,
     )
+    from tests.support.recursion_scheduler import RecursiveRLMExecutor
 
     calls = _install_fake_mlflow(monkeypatch)
     adapter = dspy.JSONAdapter()
@@ -986,9 +986,9 @@ def test_recursive_child_span_marks_native_setup_failure(monkeypatch: pytest.Mon
 
     from fleet_rlm.rlm.program import RLMModelBundle
     from fleet_rlm.rlm.recursion import (
-        RecursiveRLMExecutor,
         RecursiveRLMOptions,
     )
+    from tests.support.recursion_scheduler import RecursiveRLMExecutor
 
     calls = _install_fake_mlflow(monkeypatch)
     adapter = dspy.JSONAdapter()
@@ -1023,9 +1023,9 @@ def test_recursive_depth_fallback_span_records_mode(monkeypatch: pytest.MonkeyPa
     from fleet_rlm.rlm.program import RLMModelBundle
     from fleet_rlm.rlm.recursion import (
         RLM_NATIVE_CHILD_DEPTH,
-        RecursiveRLMExecutor,
         RecursiveRLMOptions,
     )
+    from tests.support.recursion_scheduler import RecursiveRLMExecutor
 
     calls = _install_fake_mlflow(monkeypatch)
     adapter = dspy.JSONAdapter()
@@ -1054,9 +1054,9 @@ def test_recursive_call_span_marks_failure_with_bounded_category(monkeypatch: py
     from fleet_rlm.rlm.program import RLMModelBundle
     from fleet_rlm.rlm.recursion import (
         RLM_NATIVE_CHILD_DEPTH,
-        RecursiveRLMExecutor,
         RecursiveRLMOptions,
     )
+    from tests.support.recursion_scheduler import RecursiveRLMExecutor
 
     calls = _install_fake_mlflow(monkeypatch)
     adapter = dspy.JSONAdapter()

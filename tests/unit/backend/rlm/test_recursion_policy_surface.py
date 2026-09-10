@@ -31,7 +31,6 @@ from fleet_rlm.daytona.recursive_child_runtime import ChildRuntimeLease
 from fleet_rlm.rlm.events import Status, ToolCompleted
 from fleet_rlm.rlm.program import RLMFactory, RLMModelBundle, RLMOptions
 from fleet_rlm.rlm.recursion import (
-    RecursiveRLMExecutor,
     RecursiveRLMOptions,
 )
 from fleet_rlm.rlm.runtime import (
@@ -43,6 +42,7 @@ from fleet_rlm.rlm.runtime import (
     SessionView,
 )
 from fleet_rlm.sessions.models import TurnAccess
+from tests.support.recursion_scheduler import RecursiveRLMExecutor
 from tests.unit.backend.rlm.fakes import EmptyCapabilities
 
 
@@ -324,13 +324,13 @@ async def test_val_rec_023_root_and_child_are_exact_native_rlm_with_positional_i
 
     def recording_build(**kwargs: object) -> object:
         rlm = real_build(**kwargs)
-        original_acall = rlm.acall
+        original_forward = rlm.forward
 
-        async def acall(interpreter: object, /, **input_args: object) -> object:
+        def forward(interpreter: object, /, **input_args: object) -> object:
             child_invocations.append((type(rlm), interpreter, dict(input_args)))
-            return await original_acall(interpreter, **input_args)
+            return original_forward(interpreter, **input_args)
 
-        rlm.acall = acall
+        rlm.forward = forward
         return rlm
 
     class RootFactory:

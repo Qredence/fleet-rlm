@@ -663,6 +663,40 @@ Also keep coverage as a coarse floor, not a reason to test every internal branch
 
 Recursive child RLMs are an optimization, not a required architectural feature. DSPy's native `llm_query` and `llm_query_batched` remain the default semantic delegation mechanisms.
 
+**Status (2026-09-10): partially implemented; not complete.** The comparison
+baseline is `9b526f50f0aeec37ca399bc8ef19ec8a95d3bead`. The current local slice
+renames capsule allocation to bytes, replaces the duplicate capsule result type
+with typed `ChildOutcome`/`ChildUsage`, records child-local LM usage, and stops
+echoing unread authorization references as evidence. Selected Session/Project
+text reads have a bounded access ledger; inline delivery is separate from reads.
+Artifact URI resolution and validated child citation claims remain unfinished.
+
+The recursive scheduler now uses the application loop, one semaphore, and owned
+blocking native child execution, without private child loops or a recursive
+batch thread pool. Root worker execution remains unchanged. The local slice
+passed `make check` (79.0% coverage; 543 TUI tests); subsequent ownership
+refinements passed the focused RLM/routing/campaign tests. Live scheduler parity
+has not been exercised: the existing recursive verifier requires a clean,
+committed candidate. Local checkpoint commits are now operator-authorized;
+publication and deployment remain outside the approved scope.
+
+P4.4 tool-surface collapse, the P4.5 four-arm runner/corpus/statistical gate,
+and P4.6 legacy deletion/default decision remain open. Campaign admission
+reservations are implemented and tested, but are not yet wired to that runner.
+No Phase 4 paid runs have been launched and no recursion default has changed.
+
+The agreed pilot is 12 tasks (six multi-document/data, three conflicting or
+incomplete-evidence, three simple controls), three repeats, four arms: at most
+144 runs, US$50 total model/Daytona spend, four hours including a 15-minute
+cleanup reserve, standard public pricing, one root trial and at most five
+Sandboxes concurrently. Retention requires at least +10 percentage points
+verified success on suitable tasks over the better non-recursive arm, a positive
+paired task-clustered 95% confidence-interval lower bound, and at most 2x cost per
+success and 2x p95 latency. Controls must not regress; safety failures are fatal.
+Ordinary cleaned-up sibling failures will become ordered typed partial results.
+An inconclusive outcome disables recursion by default; an incomplete campaign
+must remain explicitly incomplete rather than being called value proof.
+
 ## P4.1 - Normalize the capsule/result contract
 
 **Rationale:** Small naming/schema inconsistencies multiply across tools, tests, traces, and budgets.

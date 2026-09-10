@@ -19,13 +19,17 @@ from fleet_rlm.daytona.recursive_child_runtime import ChildRuntimeLease
 from fleet_rlm.rlm.events import Status, ToolCompleted, ToolFailed, ToolStarted
 from fleet_rlm.rlm.program import RLMModelBundle
 from fleet_rlm.rlm.recursion import (
+    ChildOutcome,
     ChildRuntimeAuthorizationError,
     ChildRuntimeCleanupError,
+    ChildUsage,
+    DelegationMetrics,
     RecursiveBatchError,
-    RecursiveRLMExecutor,
     RecursiveRLMOptions,
+    SelectedInputAccess,
     SubproblemCapsule,
 )
+from tests.support.recursion_scheduler import RecursiveRLMExecutor
 
 
 def _executor(
@@ -36,6 +40,7 @@ def _executor(
     factory_calls: list[DaytonaCodeInterpreter] | None = None,
     observer=None,
     is_authorized: Callable[[], bool] | None = None,
+    selected_input_reader: Callable[[str], str] | None = None,
 ) -> RecursiveRLMExecutor:
     """
     Construct a recursive executor backed by dummy root and sub-models for tests.
@@ -82,6 +87,7 @@ def _executor(
         deadline=time.monotonic() + 30,
         observer=observer,
         is_authorized=is_authorized,
+        selected_input_reader=selected_input_reader,
     )
 
 
@@ -92,14 +98,90 @@ def test_subproblem_capsule_is_selected_bounded_input_not_session_copy() -> None
         authorized_references=("artifact://one",),
         expected_result_shape="verdict with citations",
         evidence_requirements=("cite each finding",),
-        allocation_chars=512,
+        allocation_bytes=512,
     )
     payload = json.loads(capsule.render())
     assert payload["task"] == "compare selected findings"
     assert payload["selected_fragments"] == ["finding-a", "finding-b"]
     assert "history" not in payload and "workspace" not in payload
     with pytest.raises(ValueError, match="serialized bytes"):
-        SubproblemCapsule(task="x", fragments=("x" * 100,), allocation_chars=10)
+        SubproblemCapsule(task="x", fragments=("x" * 100,), allocation_bytes=10)
+
+
+def test_capsule_rejects_old_allocation_alias_and_counts_serialized_unicode_bytes() -> None:
+    with pytest.raises(ValueError, match="extra"):
+        SubproblemCapsule.model_validate({"task": "x", "allocation_chars": 512})
+    capsule = SubproblemCapsule(task="inspect café and λ", fragments=("🔎",))
+    exact = capsule.serialized_bytes
+    assert SubproblemCapsule(task=capsule.task, fragments=capsule.fragments, allocation_bytes=exact)
+    with pytest.raises(ValueError, match="serialized bytes"):
+        SubproblemCapsule(task=capsule.task, fragments=capsule.fragments, allocation_bytes=exact - 1)
+
+
+@pytest.mark.parametrize("status", ["complete", "timeout", "unknown"])
+def test_child_result_rejects_noncanonical_status(status: str) -> None:
+    with pytest.raises(ValueError):
+        ChildOutcome(status=status)
+
+
+def test_child_usage_is_closed_and_unknown_tokens_are_not_zero() -> None:
+    usage = ChildUsage(llm_calls=1)
+    assert usage.model_dump()["total_tokens"] is None
+    assert usage.token_usage_status == "unavailable"
+    with pytest.raises(ValueError):
+        ChildUsage(llm_calls=-1)
+    with pytest.raises(ValueError):
+        ChildUsage.model_validate({"private_provider_field": "secret"})
+
+
+def test_child_metrics_are_local_while_parent_retains_aggregate() -> None:
+    parent = DelegationMetrics()
+    first, second = DelegationMetrics(parent=parent), DelegationMetrics(parent=parent)
+    first.record_lm_call("root", 1, usage={"total_tokens": 7})
+    second.record_lm_call("root", 1, usage={"total_tokens": 11})
+    assert first.snapshot().child_root_lm_calls_depth_1 == 1
+    assert second.snapshot().child_root_lm_calls_depth_1 == 1
+    assert parent.snapshot().child_root_lm_calls_depth_1 == 2
+    assert first.snapshot().lm_token_totals[0][4] == 7
+    assert second.snapshot().lm_token_totals[0][4] == 11
+
+
+def test_selected_access_reports_only_read_reference_and_separates_inline_delivery() -> None:
+    reads: list[str] = []
+    access = SelectedInputAccess(
+        SubproblemCapsule(task="inspect", fragments=("inline",), authorized_references=("a.txt", "b.txt")),
+        reader=lambda path: reads.append(path) or "selected content",
+        check_authority=lambda: None,
+    )
+    assert access.accessed_references == ()
+    assert access.delivered_fragments == ("fragment-1",)
+    assert access.read("reference-2") == "selected content"
+    assert access.read("reference-2") == "selected content"
+    assert reads == ["b.txt"]
+    assert access.accessed_references == ("reference-2",)
+    with pytest.raises(ChildRuntimeAuthorizationError):
+        access.read("../secret")
+    assert reads == ["b.txt"]
+
+
+@pytest.mark.parametrize("failure", ["checksum", "allocation", "authority"])
+def test_selected_access_never_records_failed_delivery(failure: str) -> None:
+    def authority() -> None:
+        if failure == "authority":
+            raise ChildRuntimeAuthorizationError("revoked")
+
+    access = SelectedInputAccess(
+        SubproblemCapsule(
+            task="inspect",
+            authorized_references=("a.txt",),
+            selected_file_checksums=(("a.txt", "0" * 64),) if failure == "checksum" else (),
+        ),
+        reader=lambda _path: "x" * (5_000 if failure == "allocation" else 1),
+        check_authority=authority,
+    )
+    with pytest.raises((ValueError, ChildRuntimeAuthorizationError)):
+        access.read("reference-1")
+    assert access.accessed_references == ()
 
 
 def test_subproblem_capsule_is_strict_deterministic_and_path_scoped() -> None:
@@ -111,7 +193,7 @@ def test_subproblem_capsule_is_strict_deterministic_and_path_scoped() -> None:
             "authorized_references": ["artifact://report/1"],
             "expected_result_shape": "verdict",
             "evidence_requirements": ["cite row-1"],
-            "allocation_chars": 1_024,
+            "allocation_bytes": 1_024,
             "selected_file_checksums": [["reports/findings.json", digest]],
         }
     )
@@ -121,7 +203,7 @@ def test_subproblem_capsule_is_strict_deterministic_and_path_scoped() -> None:
         authorized_references=("artifact://report/1",),
         expected_result_shape="verdict",
         evidence_requirements=("cite row-1",),
-        allocation_chars=1_024,
+        allocation_bytes=1_024,
         selected_file_checksums=(("reports/findings.json", digest.lower()),),
     )
     assert first.render() == second.render()
@@ -149,7 +231,7 @@ def test_execute_capsule_outcome_classifies_ordinary_child_failure(
     capsule = SubproblemCapsule(
         task="selected analysis",
         authorized_references=("artifact://selected",),
-        allocation_chars=1_024,
+        allocation_bytes=1_024,
     )
 
     def fail(_capsule: SubproblemCapsule) -> object:
@@ -160,7 +242,7 @@ def test_execute_capsule_outcome_classifies_ordinary_child_failure(
     assert outcome.status == "failed"
     assert outcome.error_category == "child_failed"
     assert outcome.answer == ""
-    assert outcome.source_references == ("artifact://selected",)
+    assert outcome.source_references == ()
     assert outcome.selected_input_bytes == capsule.serialized_bytes
 
 
@@ -168,7 +250,7 @@ def test_execute_capsule_outcome_classifies_ownership_cancellation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     executor = _executor([{"reasoning": "unused", "code": "SUBMIT(answer='unused')"}])
-    capsule = SubproblemCapsule(task="selected analysis", allocation_chars=1_024)
+    capsule = SubproblemCapsule(task="selected analysis", allocation_bytes=1_024)
 
     def cancel(_capsule: SubproblemCapsule) -> object:
         raise FutureCancelledError()
@@ -198,10 +280,7 @@ def test_capsule_batch_returns_ordered_typed_outcomes_and_preserves_atomic_failu
     assert [item["answer"] for item in result] == ["answer-1", "answer-2"]
     assert [item["status"] for item in result] == ["completed", "completed"]
     assert [outcome.status for outcome in executor.last_capsule_outcomes] == ["completed", "completed"]
-    assert [item["source_references"] for item in result] == [
-        ["artifact://first"],
-        ["artifact://second"],
-    ]
+    assert [item["source_references"] for item in result] == [[], []]
 
     def fail_second(reservation, _batch_cancelled, *, child_profile):
         del child_profile
@@ -271,10 +350,34 @@ def test_capsule_tool_returns_structured_evidence() -> None:
         authorized_references=["artifact://row-a"],
         evidence_requirements=["cite source"],
     )
-    assert result["status"] == "complete"
+    assert result["status"] == "completed"
     assert result["answer"] == "capsule-ok"
-    assert result["source_references"] == ["artifact://row-a"]
+    assert result["source_references"] == []
     assert result["usage"]["child_calls"] == 1
+
+
+def test_native_capsule_child_reads_only_selected_reference() -> None:
+    reads: list[str] = []
+    executor = _executor(
+        [
+            {"reasoning": "read selected evidence", "code": "text = read_selected_input(evidence_id='reference-2')"},
+            {"reasoning": "submit", "code": "SUBMIT(answer=text)"},
+        ],
+        selected_input_reader=lambda reference: reads.append(reference) or "verified input bytes",
+    )
+    try:
+        result = executor.capsule_tool(
+            task="Read reference-2 and return its text",
+            fragments=["inline instruction"],
+            authorized_references=["unused.txt", "selected.txt"],
+        )
+        assert result["answer"] == "verified input bytes"
+        assert result["source_references"] == ["reference-2"]
+        assert result["delivered_fragments"] == ["fragment-1"]
+        assert reads == ["selected.txt"]
+        assert result["usage"]["llm_calls"] == 2
+    finally:
+        executor.wait_owned()
 
 
 def test_native_child_depth_is_a_fixed_invariant_not_an_options_surface() -> None:
@@ -542,6 +645,7 @@ def test_recursive_batch_join_stops_at_turn_deadline_and_worker_retains_lease(
         release.set()
 
     assert closed.wait(1)
+    executor.wait_owned()
     executor.raise_if_cleanup_failed()
 
 
@@ -922,23 +1026,19 @@ def test_recursive_batch_submit_failure_retains_already_submitted_worker(
     release = threading.Event()
     started = threading.Event()
     closed = threading.Event()
-    real_pool = recursive_batch.ThreadPoolExecutor(max_workers=1)
+    real_submit = recursive_batch.ChildAsyncScheduler.submit_blocking
+    submits = 0
 
-    class FailingPool:
-        submits = 0
+    def fail_second_submit(scheduler, call):
+        nonlocal submits
+        submits += 1
+        if submits == 1:
+            future = real_submit(scheduler, call)
+            assert started.wait(1)
+            return future
+        raise RuntimeError("child worker submit failed")
 
-        def submit(self, *args: object, **kwargs: object):
-            self.submits += 1
-            if self.submits == 1:
-                future = real_pool.submit(*args, **kwargs)
-                assert started.wait(1)
-                return future
-            raise RuntimeError("child worker submit failed")
-
-        def shutdown(self, *, wait: bool, cancel_futures: bool) -> None:
-            real_pool.shutdown(wait=wait, cancel_futures=cancel_futures)
-
-    monkeypatch.setattr(recursive_batch, "ThreadPoolExecutor", lambda **_kwargs: FailingPool())
+    monkeypatch.setattr(recursive_batch.ChildAsyncScheduler, "submit_blocking", fail_second_submit)
 
     class BlockingChild:
         def __call__(self, _interpreter: object, *, prompt: str) -> dspy.Prediction:

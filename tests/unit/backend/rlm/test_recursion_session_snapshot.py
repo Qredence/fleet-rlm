@@ -25,7 +25,6 @@ from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInter
 from fleet_rlm.daytona.recursive_child_runtime import ChildRuntimeLease
 from fleet_rlm.rlm.program import RLMModelBundle, build_rlm_input_kwargs, build_session_context_payload
 from fleet_rlm.rlm.recursion import (
-    RecursiveRLMExecutor,
     RecursiveRLMOptions,
     RecursiveSessionSnapshot,
     RecursiveSessionSubtaskSignature,
@@ -34,6 +33,7 @@ from fleet_rlm.rlm.recursion import (
 )
 from fleet_rlm.sessions.history_transport import CommittedSessionHistory
 from fleet_rlm.workspace.models import WorkspaceCapabilityMetadata
+from tests.support.recursion_scheduler import RecursiveRLMExecutor
 
 
 def _manifest() -> SessionContextManifest:
@@ -84,15 +84,15 @@ def _snapshot(**overrides: Any) -> RecursiveSessionSnapshot:
 
 
 def _native_child_recorder(captured: list[dict[str, Any]]) -> Any:
-    """A real native RLM whose async call records every invocation."""
+    """A real native RLM whose forward call records every invocation."""
 
     child = dspy.RLM("prompt -> answer")
 
-    async def acall(_interpreter: Any, prompt: str, **kwargs: Any) -> dspy.Prediction:
+    def forward(_interpreter: Any, prompt: str, **kwargs: Any) -> dspy.Prediction:
         captured.append({"prompt": prompt, **kwargs})
         return dspy.Prediction(answer="child-ok", trajectory=[])
 
-    child.acall = acall
+    child.forward = forward
     return child
 
 
@@ -330,3 +330,25 @@ def test_p47_4_batched_children_receive_the_same_snapshot(
         assert call["history"] is snapshot.history
         assert call["request"] == snapshot.request
         assert "session_context" in call
+
+
+def test_capsule_batch_never_inherits_legacy_session_snapshot(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: list[dict[str, Any]] = []
+    snapshot = _snapshot()
+    constructed, built = _install_child(monkeypatch, _native_child_recorder(captured))
+    executor = RecursiveRLMExecutor(
+        models=snapshot.models,
+        options=RecursiveRLMOptions(enabled=True, max_calls=2),
+        child_runtime_factory=_lease_factory(),
+        deadline=time.monotonic() + 30,
+        snapshot=snapshot,
+    )
+    try:
+        results = executor._call_capsules_batched([{"task": "first"}, {"task": "second"}])
+        assert [result["status"] for result in results] == ["completed", "completed"]
+        assert len(captured) == 2
+        assert all(set(call) == {"prompt"} for call in captured)
+        assert all(item["snapshot"] is None for item in constructed)
+        assert all(item["signature"] is RecursiveSubtaskSignature for item in built)
+    finally:
+        executor.wait_owned()
